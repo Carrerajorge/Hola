@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest"; import { __resetChannelIngestLedgersForTests } from "../../channels/channelIngestService";
+
+beforeEach(() => {
+  __resetChannelIngestLedgersForTests();
+});
 
 const {
   createChatMessageMock,
@@ -169,7 +173,15 @@ describe("channel ingest runtime controls (whatsapp cloud)", () => {
     updateChatRunLastSeqMock.mockResolvedValue(null);
     updateChatRunStatusMock.mockResolvedValue(null);
     createChatMessageMock.mockImplementation(async (input: any) => ({ id: `${input.role}-id`, ...input }));
-    getOrCreateChannelConversationMock.mockResolvedValue({ chatId: "chat-1", userId: "user-1" });
+    getOrCreateChannelConversationMock.mockResolvedValue({
+      id: "conv-1",
+      chatId: "chat-1",
+      userId: "user-1",
+      channel: "whatsapp_cloud",
+      channelAccountId: "12345",
+      threadId: "51999999999",
+      metadata: {},
+    });
   });
 
   it("disabled responder => no auto reply", async () => {

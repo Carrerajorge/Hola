@@ -167,6 +167,12 @@ const conversationRateBuckets = new Map<string, { startedAt: number; count: numb
 const outboundCircuitState = new Map<ExternalChannel, { failures: number; openedUntil?: number; lastFailureAt: number }>();
 const conversationRunReservations = new Map<string, ConversationRunReservation>();
 
+// Test-only: clear global ledgers so unit tests don't leak state between cases.
+export function __resetChannelIngestLedgersForTests(): void {
+  seenProviderMessageIdsByConversation.clear();
+  conversationRunReservations.clear();
+}
+
 const ENFORCED_INBOUND_MESSAGE_ID_TTL_MS = parsePositiveInt(
   process.env.CHANNEL_INBOUND_MESSAGE_ID_TTL_MS,
   INBOUND_MESSAGE_ID_TTL_MS,
@@ -1407,59 +1413,67 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
     });
 
     if (consumed?.userId) {
-      await setConversationOwnerIdentity(conversation.id, {
-        ownerExternalId: safeEnvelope.senderId,
-        owners: [safeEnvelope.senderId],
-        linkedAt: nowIso(),
-      });
+  await setConversationOwnerIdentity(conversation.id, {
+    ownerExternalId: safeEnvelope.senderId,
+    owners: [safeEnvelope.senderId],
+    linkedAt: nowIso(),
+  });
 
-      const ackText = `✅ Handshake confirmado. Tu cuenta está vinculada para este chat (${jobChannel}).`;
-      await runOutboundDecision(
-        {
-          ...context,
-          envelope: safeEnvelope,
-        },
-        ackText,
-        "",
-        "",
-        safeScopedRequestId,
-        {
-          traceId: eventTraceId,
-          skipRunStatusUpdate: true,
-          abortSignal: runAbort.signal,
-        },
-      ).catch((error) => {
-        Logger.warn("[Channels] pairing confirmation response failed", {
-          conversation: safeEnvelope.conversationKey,
-          channel: jobChannel,
-          reason: String((error as Error)?.message || error),
-        });
-      });
-      return;
-    }
+  const ackText = `✅ Handshake confirmado. Tu cuenta está vinculada para este chat (${jobChannel}).`;
 
-      await runOutboundDecision(
-        {
-          ...context,
-          envelope: safeEnvelope,
-        },
-        "❌ Código no válido o caducado. Solicita un nuevo QR/código de vinculación.",
-        "",
-        "",
-        safeScopedRequestId,
-        {
-          traceId: eventTraceId,
-          skipRunStatusUpdate: true,
-          abortSignal: runAbort.signal,
-        },
-      ).catch((error) => {
-      Logger.warn("[Channels] pairing error response failed", {
-        conversation: safeEnvelope.conversationKey,
-        channel: jobChannel,
-        reason: String((error as Error)?.message || error),
-      });
+  try {
+    await runOutboundDecision(
+      {
+        ...context,
+        envelope: safeEnvelope,
+      },
+      ackText,
+      "",
+      "",
+      safeScopedRequestId,
+      {
+        traceId: eventTraceId,
+        skipRunStatusUpdate: true,
+        abortSignal: runAbort.signal,
+      },
+    );
+  } catch (error) {
+    Logger.warn("[Channels] pairing confirmation response failed", {
+      conversation: safeEnvelope.conversationKey,
+      channel: jobChannel,
+      reason: String((error as Error)?.message || error),
     });
-    return;
+  }
+
+  return;
+}
+
+try {
+  await runOutboundDecision(
+    {
+      ...context,
+      envelope: safeEnvelope,
+    },
+    "❌ Código no válido o caducado. Solicita un nuevo QR/código de vinculación.",
+    "",
+    "",
+    safeScopedRequestId,
+    {
+      traceId: eventTraceId,
+      skipRunStatusUpdate: true,
+      abortSignal: runAbort.signal,
+    },
+  );
+} catch (error) {
+  Logger.warn("[Channels] pairing error response failed", {
+    conversation: safeEnvelope.conversationKey,
+    channel: jobChannel,
+    reason: String((error as Error)?.message || error),
+  });
+}
+
+return;  
+
   }
 
   const policyConfig = getConversationPolicy(conversation);
@@ -1774,24 +1788,21 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
       await storage.updateChatMessageContent(assistantMessageId, aborted ? "[Flujo cancelado por mensaje nuevo]" : fallback, {
         status: "failed",
         metadata: {
-          runId,
-          requestId: safeScopedRequestId,
-          error: reason,
-          sourceChannel: jobChannel,
-          aborted,
-          policyCode: policy.code,
-          policyTraceId: policy.policyTraceId,
-          traceId: eventTraceId,
+          runId, requestId: safeScopedRequestId, error: reason, sourceChannel: jobChannel, aborted, policyCode: policy.code, policyTraceId: policy.policyTraceId, traceId: eventTraceId,
         },
       }).catch(() => null);
     }
 
     await storage.updateChatRunStatus(safeRunId, "failed", reason).catch(() => null);
-    await patchConversationMetadata(conversation.id, {
-      lastError: reason,
-      lastErrorAt: nowIso(),
-      lastRunId: safeRunId,
-    }).catch(() => null);
+    try {
+      await patchConversationMetadata(conversation.id, {
+        lastError: reason,
+        lastErrorAt: nowIso(),
+        lastRunId: safeRunId,
+      });
+    } catch {
+      // ignore
+    }
 
     if (!aborted) {
       try {
@@ -1821,14 +1832,8 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
       }
     }
 
-    Logger[aborted ? "warn" : "error"]("[Channels] failed to process inbound message", {
-      messageId: safeScopedRequestId,
-      runId: safeRunId,
-      conversation: safeEnvelope.conversationKey,
-      channel: jobChannel,
-      error: reason,
-      aborted,
-      traceId: eventTraceId,
+    Logger[aborted ? "warn" : "error"]("[Channels] failed to process inbound message", { messageId: safeScopedRequestId, runId: safeRunId, conversation: safeEnvelope.conversationKey, channel: 
+      jobChannel, error: reason, aborted, traceId: eventTraceId,
     });
   } finally {
     releaseConversationRunReservation(conversationKey, safeScopedRequestId);
@@ -1836,7 +1841,13 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
       requestId: safeScopedRequestId,
       runId: safeRunId,
     });
-    await touchChannelConversationHeartbeat(conversation.id, { lastInboundAt: safeEnvelope.receivedAt || nowIso() }).catch(() => null);
+    try {
+      await touchChannelConversationHeartbeat(conversation.id, {
+        lastInboundAt: safeEnvelope.receivedAt || nowIso(),
+      });
+    } catch {
+      // ignore
+    }
   }
 }
 
