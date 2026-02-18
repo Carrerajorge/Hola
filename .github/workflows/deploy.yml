@@ -33,7 +33,6 @@ env:
   VPS_PORT: "8022"
   DEPLOY_PATH: /opt/hola
   REGISTRY: ghcr.io/carrerajorge
-  CI_TRIGGER_SHA: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
 
 jobs:
   # ── CI Gate ──────────────────────────────────────────────
@@ -51,7 +50,7 @@ jobs:
           (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') }}
     uses: ./.github/workflows/build-images.yml
     with:
-      sha: ${{ env.CI_TRIGGER_SHA }}
+      sha: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
     permissions:
       contents: read
       packages: write
@@ -86,7 +85,7 @@ jobs:
             echo "image_tag=${{ github.event.inputs.image_tag }}" >> "$GITHUB_OUTPUT"
             echo "app_version=$(echo '${{ github.event.inputs.image_tag }}' | sed 's/sha-//')" >> "$GITHUB_OUTPUT"
           else
-            SHORT_SHA="${{ env.CI_TRIGGER_SHA }}"
+            SHORT_SHA="${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}"
             SHORT_SHA="${SHORT_SHA:0:8}"
             echo "image_tag=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
             echo "app_version=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
@@ -381,13 +380,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.CI_TRIGGER_SHA }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
 
       - name: Compute image tag
         id: tag
         run: |
           set -euo pipefail
-          SHORT_SHA="${{ env.CI_TRIGGER_SHA }}"
+          SHORT_SHA="${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}"
           SHORT_SHA="${SHORT_SHA:0:8}"
           echo "image_tag=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "app_version=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
