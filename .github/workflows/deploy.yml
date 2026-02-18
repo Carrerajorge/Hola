@@ -71,25 +71,12 @@ jobs:
               continue
             fi
 
-            ci_line="$(echo "${runs_json}" | python3 - <<'PY'
-          import json, os, sys
-
-          sha = os.environ.get("SHA", "")
-          runs = json.load(sys.stdin)
-          for r in runs:
-              if r.get("headSha") == sha:
-                  status = r.get("status") or ""
-                  conclusion = r.get("conclusion") or ""
-                  print(f"{status} {conclusion}".strip())
-                  sys.exit(0)
-          print("__notfound__")
-PY
-            )"
+            ci_line="$(echo "${runs_json}" | python3 -c 'import json,os,sys; sha=os.environ.get(\"SHA\",\"\"); runs=json.load(sys.stdin); r=next((x for x in runs if x.get(\"headSha\")==sha), None); print(\"__notfound__\" if r is None else ((r.get(\"status\") or \"\") + \" \" + (r.get(\"conclusion\") or \"\")).strip())' 2>/dev/null || echo '__parsefail__')"
 
             status="$(echo "${ci_line}" | awk '{print $1}')"
             conclusion="$(echo "${ci_line}" | awk '{print $2}')"
 
-            if [ "${status}" = "__notfound__" ] || [ -z "${status}" ]; then
+            if [ "${status}" = "__notfound__" ] || [ "${status}" = "__parsefail__" ] || [ -z "${status}" ]; then
               echo "CI run for SHA ${SHA} not yet reported. Retry ${attempt}/360..."
               sleep 10
               continue
