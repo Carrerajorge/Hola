@@ -7,10 +7,13 @@
  */
 
 import { Router, type Request, type Response } from "express";
-import { randomBytes, randomUUID } from "crypto";
+import { randomBytes } from "crypto";
 import { connectorRegistry } from "../integrations/kernel/connectorRegistry";
 import { credentialVault } from "../integrations/kernel/credentialVault";
 import type { OAuthConfig } from "../integrations/kernel/types";
+import { getUserId } from "../types/express";
+import { storage } from "../storage";
+import { invalidateIntegrationPolicyCache } from "../services/integrationPolicyCache";
 
 const STATE_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -21,6 +24,28 @@ function getBaseUrl(): string {
   return `http://localhost:${process.env.PORT || 5000}`;
 }
 
+function sanitizeReturnUrl(input: unknown): string {
+  const value = typeof input === "string" ? input.trim() : "";
+  if (!value) return "/";
+  // Only allow same-origin relative paths to avoid open redirects.
+  if (!value.startsWith("/")) return "/";
+  if (value.startsWith("//")) return "/";
+  return value;
+}
+
+function buildReturnRedirect(
+  returnUrl: string,
+  query: Record<string, string | undefined>
+): string {
+  const safe = sanitizeReturnUrl(returnUrl);
+  const url = new URL(safe, getBaseUrl());
+  for (const [k, v] of Object.entries(query)) {
+    if (!v) continue;
+    url.searchParams.set(k, v);
+  }
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
 /** Create an OAuth2 router for a specific connector */
 export function createConnectorOAuthRouter(connectorId: string): Router {
   const router = Router();
@@ -28,7 +53,7 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
   // GET /start — Initiate OAuth flow
   router.get("/start", async (req: Request, res: Response) => {
     try {
-      const userId = (req as any).user?.id || (req as any).userId;
+      const userId = getUserId(req);
       if (!userId) {
         return res.status(401).json({ error: "Authentication required" });
       }
@@ -44,6 +69,14 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
 
       const oauthConfig = manifest.authConfig as OAuthConfig;
       const providerId = manifest.providerId || connectorId;
+      const returnUrl = sanitizeReturnUrl(req.query.returnUrl as string | undefined);
+
+      const clientId = getClientId(connectorId, providerId);
+      const clientSecret = getClientSecret(connectorId, providerId);
+      if (!clientId || !clientSecret) {
+        return res.redirect(buildReturnRedirect(returnUrl, { error: "not_configured", connector: connectorId }));
+      }
+
       const state = randomBytes(32).toString("hex");
       const redirectUri = `${getBaseUrl()}/api/connectors/oauth/${connectorId}/callback`;
 
@@ -54,7 +87,7 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
 
         await db.insert(oauthStates).values({
           state,
-          returnUrl: (req.query.returnUrl as string) || "/settings",
+          returnUrl,
           provider: connectorId,
           expiresAt: new Date(Date.now() + STATE_EXPIRY_MS),
           // Store userId in metadata
@@ -63,14 +96,14 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
       } catch {
         // Fallback: If oauthStates table doesn't exist, use session
         if ((req as any).session) {
-          (req as any).session.oauthState = { state, userId, connectorId };
+          (req as any).session.oauthState = { state, userId, connectorId, returnUrl };
         }
       }
 
       // Build authorization URL
       const params = new URLSearchParams({
         response_type: "code",
-        client_id: getClientId(connectorId, providerId),
+        client_id: clientId,
         redirect_uri: redirectUri,
         scope: oauthConfig.scopes.join(" "),
         state,
@@ -88,19 +121,17 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
 
   // GET /callback — Handle OAuth callback
   router.get("/callback", async (req: Request, res: Response) => {
+    let returnUrl: string = "/";
     try {
       const { code, state, error: oauthError } = req.query;
 
-      if (oauthError) {
-        return res.redirect(`/settings?error=${encodeURIComponent(String(oauthError))}&connector=${connectorId}`);
-      }
+      let userId: string | undefined;
 
       if (!code || !state) {
-        return res.redirect(`/settings?error=missing_params&connector=${connectorId}`);
+        return res.redirect(buildReturnRedirect(returnUrl, { error: "missing_params", connector: connectorId }));
       }
 
-      // Validate state
-      let userId: string | undefined;
+      // Validate state (and recover returnUrl)
       try {
         const { db } = await import("../db");
         const { oauthStates } = await import("../../shared/schema/auth");
@@ -113,7 +144,7 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
           .limit(1);
 
         if (!stateRecord || new Date() > new Date(stateRecord.expiresAt)) {
-          return res.redirect(`/settings?error=invalid_state&connector=${connectorId}`);
+          return res.redirect(buildReturnRedirect(returnUrl, { error: "invalid_state", connector: connectorId }));
         }
 
         // Extract userId from metadata
@@ -121,6 +152,7 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
           ? JSON.parse(stateRecord.metadata)
           : stateRecord.metadata;
         userId = metadata?.userId;
+        returnUrl = sanitizeReturnUrl((stateRecord as any).returnUrl);
 
         // Delete used state
         await db.delete(oauthStates).where(eq(oauthStates.state, String(state)));
@@ -129,33 +161,44 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
         const sessionState = (req as any).session?.oauthState;
         if (sessionState?.state === String(state)) {
           userId = sessionState.userId;
+          returnUrl = sanitizeReturnUrl(sessionState.returnUrl);
           delete (req as any).session.oauthState;
         }
       }
 
+      if (oauthError) {
+        return res.redirect(buildReturnRedirect(returnUrl, { error: String(oauthError), connector: connectorId }));
+      }
+
       if (!userId) {
-        userId = (req as any).user?.id || (req as any).userId;
+        userId = getUserId(req) || undefined;
       }
       if (!userId) {
-        return res.redirect(`/settings?error=auth_required&connector=${connectorId}`);
+        return res.redirect(buildReturnRedirect(returnUrl, { error: "auth_required", connector: connectorId }));
       }
 
       const manifest = connectorRegistry.get(connectorId);
       if (!manifest || !("tokenUrl" in (manifest.authConfig || {}))) {
-        return res.redirect(`/settings?error=connector_not_found&connector=${connectorId}`);
+        return res.redirect(buildReturnRedirect(returnUrl, { error: "connector_not_found", connector: connectorId }));
       }
 
       const oauthConfig = manifest.authConfig as OAuthConfig;
       const providerId = manifest.providerId || connectorId;
       const redirectUri = `${getBaseUrl()}/api/connectors/oauth/${connectorId}/callback`;
 
+      const clientId = getClientId(connectorId, providerId);
+      const clientSecret = getClientSecret(connectorId, providerId);
+      if (!clientId || !clientSecret) {
+        return res.redirect(buildReturnRedirect(returnUrl, { error: "not_configured", connector: connectorId }));
+      }
+
       // Exchange code for tokens
       const tokenBody = new URLSearchParams({
         grant_type: "authorization_code",
         code: String(code),
         redirect_uri: redirectUri,
-        client_id: getClientId(connectorId, providerId),
-        client_secret: getClientSecret(connectorId, providerId),
+        client_id: clientId,
+        client_secret: clientSecret,
       });
 
       const tokenResponse = await fetch(oauthConfig.tokenUrl, {
@@ -171,7 +214,7 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
       if (!tokenResponse.ok) {
         const errorText = await tokenResponse.text().catch(() => "");
         console.error(`[ConnectorOAuth] Token exchange failed for ${connectorId}: ${tokenResponse.status} ${errorText}`);
-        return res.redirect(`/settings?error=token_exchange_failed&connector=${connectorId}`);
+        return res.redirect(buildReturnRedirect(returnUrl, { error: "token_exchange_failed", connector: connectorId }));
       }
 
       const tokenData = (await tokenResponse.json()) as Record<string, unknown>;
@@ -184,7 +227,7 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
         : oauthConfig.scopes;
 
       if (!accessToken) {
-        return res.redirect(`/settings?error=no_access_token&connector=${connectorId}`);
+        return res.redirect(buildReturnRedirect(returnUrl, { error: "no_access_token", connector: connectorId }));
       }
 
       // Store credential
@@ -215,17 +258,26 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
         // Provider may already exist — that's OK
       }
 
-      return res.redirect(`/settings?connected=${connectorId}`);
+      // Auto-enable the connector/provider in user policy so the agent can use its tools.
+      try {
+        const policy = await storage.getIntegrationPolicy(userId);
+        const enabledApps = Array.from(new Set([...(policy?.enabledApps || []), connectorId, providerId]));
+        await storage.upsertIntegrationPolicy(userId, { enabledApps });
+        invalidateIntegrationPolicyCache(userId);
+      } catch {
+        // ignore
+      }
+
+      return res.redirect(buildReturnRedirect(returnUrl, { connected: connectorId }));
     } catch (err: any) {
       console.error(`[ConnectorOAuth] Callback error for ${connectorId}:`, err?.message);
-      return res.redirect(`/settings?error=callback_failed&connector=${connectorId}`);
+      return res.redirect(buildReturnRedirect(returnUrl, { error: "callback_failed", connector: connectorId }));
     }
   });
 
-  // DELETE /disconnect — Revoke credentials
-  router.delete("/disconnect", async (req: Request, res: Response) => {
+  async function handleDisconnect(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.id || (req as any).userId;
+      const userId = getUserId(req);
       if (!userId) {
         return res.status(401).json({ error: "Authentication required" });
       }
@@ -234,16 +286,31 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
       const providerId = manifest?.providerId || connectorId;
       await credentialVault.revoke(userId, providerId);
 
+      try {
+        const policy = await storage.getIntegrationPolicy(userId);
+        if (policy?.enabledApps?.length) {
+          const enabledApps = (policy.enabledApps || []).filter((id) => id !== connectorId && id !== providerId);
+          await storage.upsertIntegrationPolicy(userId, { enabledApps });
+          invalidateIntegrationPolicyCache(userId);
+        }
+      } catch {
+        // ignore
+      }
+
       return res.json({ success: true, disconnected: connectorId });
     } catch (err: any) {
       return res.status(500).json({ error: err?.message || "Failed to disconnect" });
     }
-  });
+  }
+
+  // DELETE/POST /disconnect — Revoke credentials
+  router.delete("/disconnect", handleDisconnect);
+  router.post("/disconnect", handleDisconnect);
 
   // GET /status — Check connection status
   router.get("/status", async (req: Request, res: Response) => {
     try {
-      const userId = (req as any).user?.id || (req as any).userId;
+      const userId = getUserId(req);
       if (!userId) {
         return res.status(401).json({ connected: false });
       }

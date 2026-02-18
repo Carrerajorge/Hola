@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
+import { apiFetch } from "@/lib/apiClient";
 
 // ─── Types ───────────────────────────────────────────────────────────
 export type ServiceProvider =
@@ -204,7 +205,7 @@ export function useServiceConnections() {
   } = useQuery<IntegrationsResponse>({
     queryKey: ["/api/users", userId, "integrations"],
     queryFn: async () => {
-      const res = await fetch(`/api/users/${userId}/integrations`, {
+      const res = await apiFetch(`/api/users/${userId}/integrations`, {
         credentials: "include",
       });
       if (!res.ok) throw new Error("Failed to fetch integrations");
@@ -218,7 +219,7 @@ export function useServiceConnections() {
   const { data: gmailStatus } = useQuery<{ connected: boolean; email?: string }>({
     queryKey: ["gmail-status"],
     queryFn: async () => {
-      const res = await fetch("/api/oauth/google/gmail/status", {
+      const res = await apiFetch("/api/oauth/google/gmail/status", {
         credentials: "include",
       });
       if (!res.ok) return { connected: false };
@@ -231,7 +232,7 @@ export function useServiceConnections() {
   // Connect mutation
   const connectMutation = useMutation({
     mutationFn: async (providerId: string) => {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/users/${userId}/integrations/${providerId}/connect`,
         {
           method: "POST",
@@ -267,7 +268,7 @@ export function useServiceConnections() {
   // Disconnect mutation
   const disconnectMutation = useMutation({
     mutationFn: async (providerId: string) => {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/users/${userId}/integrations/${providerId}/disconnect`,
         {
           method: "POST",
@@ -375,7 +376,7 @@ export function useServiceConnections() {
     (providerId: string) => {
       // For Gmail, use the dedicated disconnect endpoint
       if (providerId === "gmail") {
-        fetch("/api/oauth/google/gmail/disconnect", {
+        apiFetch("/api/oauth/google/gmail/disconnect", {
           method: "POST",
           credentials: "include",
         })
