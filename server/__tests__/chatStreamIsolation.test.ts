@@ -203,27 +203,22 @@ describe("chat stream isolation", () => {
     const { client, close } = await createHttpTestClient(app);
 
     try {
-      let markFirstCallStarted!: () => void;
-      const firstCallStarted = new Promise<void>((resolve) => {
-        markFirstCallStarted = resolve;
+      let markFirstLockHeld!: () => void;
+      const firstLockHeld = new Promise<void>((resolve) => {
+        markFirstLockHeld = resolve;
       });
 
-      let releaseFirstCall!: () => void;
-      const firstCallRelease = new Promise<void>((resolve) => {
-        releaseFirstCall = resolve;
+      let releaseFirstLock!: () => void;
+      const releaseFirstLockGate = new Promise<void>((resolve) => {
+        releaseFirstLock = resolve;
       });
 
-      // Ensure the request that acquires the per-conversation lock stays in-flight long enough for
-      // the other request to observe the lock and be rejected deterministically.
-      llmChatMock.mockImplementationOnce(async (messages: any[]) => {
-        markFirstCallStarted();
-        await firstCallRelease;
-        const last = messages[messages.length - 1];
-        return {
-          content: `stream:${String(last?.content || "")}`,
-          provider: "xai",
-          model: "grok-3-fast",
-        };
+      // The router acquires the per-conversation lock before resolving skill context. Hold the
+      // first request at that await point so the second request deterministically observes the lock.
+      resolveSkillContextMock.mockImplementationOnce(async () => {
+        markFirstLockHeld();
+        await releaseFirstLockGate;
+        return null;
       });
 
       const payload = {
@@ -238,13 +233,18 @@ describe("chat stream isolation", () => {
       const safeRelease = () => {
         if (released) return;
         released = true;
-        releaseFirstCall();
+        releaseFirstLock();
       };
 
-      const firstPromise = client.post("/api/chat/stream").set("x-request-id", "req_lock_a").send(payload);
+      const firstPromise = client
+        .post("/api/chat/stream")
+        .set("x-request-id", "req_lock_a")
+        .send(payload)
+        // supertest requests start when the thenable is consumed; ensure we start it immediately.
+        .then((res) => res);
 
       await Promise.race([
-        firstCallStarted,
+        firstLockHeld,
         new Promise((_, reject) =>
           setTimeout(() => {
             safeRelease();
