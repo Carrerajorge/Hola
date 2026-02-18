@@ -353,16 +353,18 @@ jobs:
       - name: Sync deploy scripts to VPS
         run: |
           set -euo pipefail
+          sync_ok=false
           for attempt in 1 2 3; do
             if scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12               docker-compose.infra.yml               docker-compose.slot.yml               nginx.conf               scripts/deploy-bluegreen.sh               scripts/rollback-bluegreen.sh               scripts/health-dashboard.sh               scripts/vps-bootstrap-bluegreen.sh               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/; then
+              sync_ok=true
               break
-            fi
-            if [ "$attempt" -eq 3 ]; then
-              echo "::error::Failed to sync deploy scripts after 3 attempts"
-              exit 1
             fi
             sleep 3
           done
+
+          if [ "${sync_ok}" != "true" ]; then
+            echo "::warning::Failed to sync deploy scripts after 3 attempts; continuing with scripts already present on VPS"
+          fi
 
           ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts ${{ env.DEPLOY_PATH }}/nginx &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
 
@@ -710,16 +712,18 @@ jobs:
       - name: Sync deploy scripts to VPS
         run: |
           set -euo pipefail
+          sync_ok=false
           for attempt in 1 2 3; do
             if scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12               docker-compose.infra.yml               docker-compose.slot.yml               nginx.conf               scripts/deploy-bluegreen.sh               scripts/rollback-bluegreen.sh               scripts/health-dashboard.sh               scripts/vps-bootstrap-bluegreen.sh               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/; then
+              sync_ok=true
               break
-            fi
-            if [ "$attempt" -eq 3 ]; then
-              echo "::error::Failed to sync deploy scripts after 3 attempts"
-              exit 1
             fi
             sleep 3
           done
+
+          if [ "${sync_ok}" != "true" ]; then
+            echo "::warning::Failed to sync deploy scripts after 3 attempts; continuing with scripts already present on VPS"
+          fi
 
           ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts ${{ env.DEPLOY_PATH }}/nginx &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
 
