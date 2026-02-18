@@ -9,6 +9,7 @@ import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import { formatZonedTime, normalizeTimeZone } from "@/lib/platformDateTime";
+import { apiFetch } from "@/lib/apiClient";
 import "@/components/ui/glass-effects.css";
 
 interface AgentStep {
@@ -310,7 +311,7 @@ export function AgentPanel({ runId, chatId, onClose, isOpen }: AgentPanelProps) 
     queryKey: ["agent-run", runId],
     queryFn: async () => {
       if (!runId) throw new Error("No run ID");
-      const response = await fetch(`/api/agent/runs/${runId}`);
+      const response = await apiFetch(`/api/agent/runs/${runId}`);
       if (!response.ok) throw new Error("Failed to fetch run data");
       return response.json();
     },
@@ -327,7 +328,7 @@ export function AgentPanel({ runId, chatId, onClose, isOpen }: AgentPanelProps) 
   const handleCancel = async () => {
     if (!runId) return;
     try {
-      await fetch(`/api/agent/runs/${runId}/cancel`, { method: "POST" });
+      await apiFetch(`/api/agent/runs/${runId}/cancel`, { method: "POST" });
       refetch();
     } catch (error) {
       console.error("Error cancelling run:", error);
@@ -337,7 +338,7 @@ export function AgentPanel({ runId, chatId, onClose, isOpen }: AgentPanelProps) 
   const handleRetry = async () => {
     if (!runId) return;
     try {
-      await fetch(`/api/agent/runs/${runId}/retry`, { method: "POST" });
+      await apiFetch(`/api/agent/runs/${runId}/retry`, { method: "POST" });
       refetch();
     } catch (error) {
       console.error("Error retrying run:", error);

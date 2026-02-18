@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
+import { apiFetch } from "@/lib/apiClient";
 
 export interface BrowserAction {
   type: string;
@@ -133,7 +134,7 @@ export function useBrowserSession() {
 
   const fetchScreenshot = useCallback(async (sessionId: string) => {
     try {
-      const response = await fetch(`/api/browser/session/${sessionId}/screenshot`);
+      const response = await apiFetch(`/api/browser/session/${sessionId}/screenshot`);
       if (response.ok) {
         const data = await response.json();
         if (data.screenshot) {
@@ -152,7 +153,7 @@ export function useBrowserSession() {
 
   const fetchSessionState = useCallback(async (sessionId: string) => {
     try {
-      const response = await fetch(`/api/browser/session/${sessionId}`);
+      const response = await apiFetch(`/api/browser/session/${sessionId}`);
       if (response.ok) {
         const session = await response.json();
         setGlobalState(prev => {
@@ -303,7 +304,7 @@ export function useBrowserSession() {
     try {
       setGlobalState(prev => ({ ...prev, status: "connecting", objective }));
 
-      const response = await fetch("/api/browser/session", {
+      const response = await apiFetch("/api/browser/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ objective, config }),
@@ -328,7 +329,7 @@ export function useBrowserSession() {
     if (!state.sessionId) return null;
 
     try {
-      const response = await fetch(`/api/browser/session/${state.sessionId}/navigate`, {
+      const response = await apiFetch(`/api/browser/session/${state.sessionId}/navigate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
@@ -344,7 +345,7 @@ export function useBrowserSession() {
     if (!state.sessionId) return null;
 
     try {
-      const response = await fetch(`/api/browser/session/${state.sessionId}/click`, {
+      const response = await apiFetch(`/api/browser/session/${state.sessionId}/click`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ selector }),
@@ -360,7 +361,7 @@ export function useBrowserSession() {
     if (!state.sessionId) return null;
 
     try {
-      const response = await fetch(`/api/browser/session/${state.sessionId}/type`, {
+      const response = await apiFetch(`/api/browser/session/${state.sessionId}/type`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ selector, text }),
@@ -376,7 +377,7 @@ export function useBrowserSession() {
     if (!state.sessionId) return null;
 
     try {
-      const response = await fetch(`/api/browser/session/${state.sessionId}/scroll`, {
+      const response = await apiFetch(`/api/browser/session/${state.sessionId}/scroll`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ direction, amount }),
@@ -392,7 +393,7 @@ export function useBrowserSession() {
     if (!state.sessionId) return null;
 
     try {
-      const response = await fetch(`/api/browser/session/${state.sessionId}/state`);
+      const response = await apiFetch(`/api/browser/session/${state.sessionId}/state`);
       return await response.json();
     } catch (error) {
       console.error("Get state error:", error);
@@ -404,7 +405,7 @@ export function useBrowserSession() {
     if (!state.sessionId) return;
 
     try {
-      await fetch(`/api/browser/session/${state.sessionId}/cancel`, { method: "POST" });
+      await apiFetch(`/api/browser/session/${state.sessionId}/cancel`, { method: "POST" });
       stopPolling();
       setGlobalState(prev => ({ ...prev, status: "cancelled" }));
     } catch (error) {
@@ -416,7 +417,7 @@ export function useBrowserSession() {
     if (!state.sessionId) return;
 
     try {
-      await fetch(`/api/browser/session/${state.sessionId}`, { method: "DELETE" });
+      await apiFetch(`/api/browser/session/${state.sessionId}`, { method: "DELETE" });
       stopPolling();
       if (wsRef.current) {
         wsRef.current.close();

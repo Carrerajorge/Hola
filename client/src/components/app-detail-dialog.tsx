@@ -309,8 +309,59 @@ export function AppDetailDialog({
 
     toast.loading(`Conectando con ${app.name}...`, { id: 'connect-toast' });
 
-    // FRONTEND FIX #7: Validate connection endpoint URL before redirect
     const endpoint = app.connectionEndpoint.trim();
+
+    // Internal stub connectors: connect via API (POST) instead of browser redirect.
+    try {
+      const relative = resolveRelativeEndpoint(endpoint);
+      const parsed = new URL(relative, window.location.origin);
+
+      if (parsed.pathname.startsWith("/api/apps/") && parsed.pathname.endsWith("/connect")) {
+        try {
+          const resolvedConnectEndpoint = resolveSameOriginAppEndpoint(relative);
+          const controller = createTimeoutController(CONNECTION_REQUEST_TIMEOUT_MS);
+          const res = await apiFetch(resolvedConnectEndpoint, {
+            method: "POST",
+            signal: controller.signal,
+            headers: {
+              "X-Request-Id": requestId,
+              "X-Idempotency-Key": requestId,
+            },
+          });
+          const data = await res.json().catch(() => ({}));
+
+          if (!res.ok) {
+            const error = parseErrorResponse(new Error(`HTTP ${res.status}`), data);
+            setConnectionError(error);
+            toast.dismiss("connect-toast");
+            toast.error("Error al conectar", { description: error.message });
+            return;
+          }
+
+          toast.dismiss("connect-toast");
+          setIsConnected(true);
+          onConnectionChange?.(app.id, true);
+          await checkConnectionStatus();
+          toast.success(`${app.name} conectado`, {
+            description: "Conexión establecida correctamente",
+          });
+        } catch (error: any) {
+          console.error("Error connecting:", error);
+          const parsedError = parseErrorResponse(error);
+          setConnectionError(parsedError);
+          toast.dismiss("connect-toast");
+          toast.error("Error al conectar", { description: parsedError.message });
+        } finally {
+          setIsConnecting(false);
+        }
+        return;
+      }
+    } catch {
+      // Not a relative safe URL; fall through to redirect flow below.
+    }
+
+    // Redirect-based connection (OAuth, etc.)
+    // FRONTEND FIX #7: Validate connection endpoint URL before redirect
     try {
       const safeEndpoint = resolveSafeAppEndpoint(endpoint);
       window.location.href = safeEndpoint;
