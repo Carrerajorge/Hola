@@ -59,7 +59,14 @@ export async function loadAllConnectorManifests(): Promise<ConnectorManifest[]> 
 
       if (!manifestModule) continue;
 
-      const manifest = manifestModule.manifest || manifestModule.default;
+      const manifest =
+        manifestModule.manifest ||
+        manifestModule.default ||
+        Object.values(manifestModule).find((value) => {
+          if (!value || typeof value !== "object") return false;
+          const candidate = value as Partial<ConnectorManifest>;
+          return typeof candidate.connectorId === "string" && candidate.connectorId.trim().length > 0;
+        });
       if (!manifest || !manifest.connectorId) {
         console.warn(`[ManifestLoader] Skipping ${entry} — no valid manifest export`);
         continue;
@@ -109,9 +116,38 @@ export async function initializeConnectorManifests(): Promise<void> {
 
         if (tsExists || jsExists) {
           const handlerModule = await import(tsExists ? handlerPath : handlerJsPath);
-          const handler = handlerModule.handler || handlerModule.default;
-          if (handler && typeof handler.execute === "function") {
-            connectorRegistry.registerHandler(manifest.connectorId, handler);
+          const handlerCandidates = [
+            handlerModule.handler,
+            handlerModule.default,
+            ...Object.values(handlerModule),
+          ];
+
+          let resolvedHandler: any = null;
+          for (const candidate of handlerCandidates) {
+            if (!candidate) continue;
+
+            if (typeof candidate === "function") {
+              // Support createXHandler-style exports that return a handler object.
+              try {
+                const maybe = candidate();
+                if (maybe && typeof maybe.execute === "function") {
+                  resolvedHandler = maybe;
+                  break;
+                }
+              } catch {
+                // ignore
+              }
+              continue;
+            }
+
+            if (typeof candidate === "object" && typeof (candidate as any).execute === "function") {
+              resolvedHandler = candidate;
+              break;
+            }
+          }
+
+          if (resolvedHandler) {
+            connectorRegistry.registerHandler(manifest.connectorId, resolvedHandler);
             console.log(`[ManifestLoader] Handler registered: ${manifest.connectorId}`);
           }
         }

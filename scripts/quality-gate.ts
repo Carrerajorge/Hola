@@ -482,6 +482,10 @@ function prepareCoverageEnvironment(): void {
 }
 
 async function runCoverageWithRetry(env: NodeJS.ProcessEnv): Promise<GateCheckResult> {
+  const shouldClearVitestCache = !["0", "false"].includes(
+    String(env.QUALITY_GATE_CLEAR_VITEST_CACHE ?? "").toLowerCase(),
+  );
+
   const coverageCommands: Array<{
     name: string;
     command: string;
@@ -553,6 +557,22 @@ async function runCoverageWithRetry(env: NodeJS.ProcessEnv): Promise<GateCheckRe
   );
   if (lastResult.status === "failed") {
     return lastResult;
+  }
+
+  if (shouldClearVitestCache) {
+    const clearCache = runCommand(
+      "vitest-clear-cache",
+      "npx",
+      ["vitest", "--clearCache"],
+      false,
+      env,
+      60_000,
+    );
+    if (clearCache.status !== "passed") {
+      console.warn(
+        `${logPrefix()} vitest cache clear skipped/failed (${clearCache.status}): ${clearCache.details ?? "unknown"}`,
+      );
+    }
   }
 
   for (let attempt = 0; attempt < attemptLimit; attempt += 1) {
