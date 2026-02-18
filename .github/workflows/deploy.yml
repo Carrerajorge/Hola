@@ -55,9 +55,11 @@ jobs:
         env:
           SHA: ${{ github.sha }}
           BRANCH: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          export GH_TOKEN="${GITHUB_TOKEN}"
+          # gh CLI uses GH_TOKEN in Actions
+          export GH_TOKEN="${GH_TOKEN}"
 
           for attempt in $(seq 1 72); do
             runs_json="$(gh run list --workflow "CI" --branch "${BRANCH}" --json headSha,status,conclusion --limit 20 || true)"
