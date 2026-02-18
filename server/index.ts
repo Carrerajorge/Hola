@@ -1,3 +1,4 @@
+import "./otel";
 import "./config/load-env"; import { env } from "./config/env"; // Validates env vars immediately on import
 
 import compression from "compression";
