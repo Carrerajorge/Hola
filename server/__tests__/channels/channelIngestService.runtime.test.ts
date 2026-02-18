@@ -71,12 +71,12 @@ vi.mock("../../channels/channelStore", () => ({
   getOrCreateChannelConversation: getOrCreateChannelConversationMock,
   getChannelConversation: vi.fn(),
   consumeChannelPairingCode: vi.fn(),
-  patchConversationMetadata: vi.fn(),
+  patchConversationMetadata: vi.fn(async () => {}),
   findWhatsAppCloudAccountByPhoneNumberId: findWhatsAppCloudAccountByPhoneNumberIdMock,
   findMessengerAccountByPageId: vi.fn(),
   findWeChatAccountByAppId: vi.fn(),
   findTelegramAccountByUserId: vi.fn(),
-  touchChannelConversationHeartbeat: vi.fn(),
+  touchChannelConversationHeartbeat: vi.fn(async () => {}),
 }));
 
 vi.mock("../../channels/whatsappCloud/whatsappCloudApi", () => ({
@@ -134,12 +134,12 @@ import { evaluateChannelPolicy } from "../../channels/channelPolicyEngine";
 
 const evaluateChannelPolicyMocked = evaluateChannelPolicy as ReturnType<typeof vi.fn>;
 
-function makeWhatsAppPayload(sender = "51999999999", messageId = "wamid.1", body = "hola") {
+function makeWhatsAppPayload(sender = "51999999999", messageId = "wamid.1", body = "hola", phoneNumberId = "12345") {
   return {
     entry: [{
       changes: [{
         value: {
-          metadata: { phone_number_id: "12345" },
+          metadata: { phone_number_id: phoneNumberId },
           contacts: [{ profile: { name: "Cliente" } }],
           messages: [{ id: messageId, from: sender, type: "text", text: { body } }],
         },
@@ -169,7 +169,7 @@ describe("channel ingest runtime controls (whatsapp cloud)", () => {
     updateChatRunLastSeqMock.mockResolvedValue(null);
     updateChatRunStatusMock.mockResolvedValue(null);
     createChatMessageMock.mockImplementation(async (input: any) => ({ id: `${input.role}-id`, ...input }));
-    getOrCreateChannelConversationMock.mockResolvedValue({ chatId: "chat-1", userId: "user-1" });
+    getOrCreateChannelConversationMock.mockResolvedValue({ id: "conv-1", chatId: "chat-1", userId: "user-1", channelKey: "10000" });
   });
 
   it("disabled responder => no auto reply", async () => {
@@ -180,12 +180,12 @@ describe("channel ingest runtime controls (whatsapp cloud)", () => {
     findWhatsAppCloudAccountByPhoneNumberIdMock.mockResolvedValue({
       userId: "user-1",
       accessToken: "token",
-      metadata: { phoneNumberId: "12345", runtime: { responder_enabled: false } },
+      metadata: { phoneNumberId: "10001", runtime: { responder_enabled: false } },
     });
 
     await processChannelIngestJob({
       channel: "whatsapp_cloud",
-      payload: makeWhatsAppPayload("51999999999", "wamid.disabled"),
+      payload: makeWhatsAppPayload("51000000001", "wamid.disabled", "hola", "10001"),
       receivedAt: new Date().toISOString(),
     } as any);
 
@@ -202,14 +202,14 @@ describe("channel ingest runtime controls (whatsapp cloud)", () => {
       userId: "user-1",
       accessToken: "token",
       metadata: {
-        phoneNumberId: "12345",
+        phoneNumberId: "10002",
         runtime: { responder_enabled: true, owner_only: true, owner_external_ids: ["51111111111"] },
       },
     });
 
     await processChannelIngestJob({
       channel: "whatsapp_cloud",
-      payload: makeWhatsAppPayload("52222222222", "wamid.non-owner"),
+      payload: makeWhatsAppPayload("52222222222", "wamid.non-owner", "hola", "10002"),
       receivedAt: new Date().toISOString(),
     } as any);
 
@@ -221,14 +221,14 @@ describe("channel ingest runtime controls (whatsapp cloud)", () => {
       userId: "user-1",
       accessToken: "token",
       metadata: {
-        phoneNumberId: "12345",
+        phoneNumberId: "10003",
         runtime: { responder_enabled: true, allowlist: ["51999999999"] },
       },
     });
 
     await processChannelIngestJob({
       channel: "whatsapp_cloud",
-      payload: makeWhatsAppPayload("51999999999", "wamid.allowed"),
+      payload: makeWhatsAppPayload("51999999999", "wamid.allowed", "hola", "10003"),
       receivedAt: new Date().toISOString(),
     } as any);
 
@@ -249,12 +249,12 @@ describe("channel ingest runtime controls (whatsapp cloud)", () => {
     findWhatsAppCloudAccountByPhoneNumberIdMock.mockResolvedValue({
       userId: "user-1",
       accessToken: "token",
-      metadata: { phoneNumberId: "12345", runtime: { responder_enabled: true } },
+      metadata: { phoneNumberId: "10004", runtime: { responder_enabled: true } },
     });
 
     await processChannelIngestJob({
       channel: "whatsapp_cloud",
-      payload: makeWhatsAppPayload("51999999999", "wamid.persist"),
+      payload: makeWhatsAppPayload("51999999999", "wamid.persist", "hola", "10004"),
       receivedAt: new Date().toISOString(),
     } as any);
 

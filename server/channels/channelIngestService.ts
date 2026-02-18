@@ -920,7 +920,7 @@ async function sendTextWithRetries(
   }
   const normalizedText = enforceSafeLimit(payload.text, MAX_OUTBOUND_TEXT_LENGTH);
   const safeRecipient = normalizeIdentifier(envelope.threadId, MAX_ID_LENGTH);
-  const safeChannelAccount = normalizeIdentifier(conversation.channelAccountId, MAX_ID_LENGTH);
+  const safeChannelAccount = normalizeIdentifier((conversation as any).channelAccountId || conversation.channelKey, MAX_ID_LENGTH);
   if (!safeRecipient || !safeChannelAccount || !normalizedText) {
     throw new Error("Invalid outbound envelope metadata");
   }

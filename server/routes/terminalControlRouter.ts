@@ -26,6 +26,7 @@ import { encryptSecret, decryptSecret, isRemoteSecretConfigured } from "../lib/c
 import { storage } from "../storage";
 import { type AuthenticatedRequest } from "../types/express";
 import { WebSocket } from "ws";
+import { safeErrorMessage } from "../lib/safeError";
 
 const terminalController = new TerminalController();
 const remoteShellController = new RemoteShellController();
@@ -153,12 +154,12 @@ function handleTerminalSessionError(error: unknown, res: Response): boolean {
   }
 
   if (error.message.startsWith("Session expired")) {
-    res.status(410).json({ error: error.message });
+    res.status(410).json({ error: safeErrorMessage(error) });
     return true;
   }
 
   if (error.message.startsWith("Session not found")) {
-    res.status(404).json({ error: error.message });
+    res.status(404).json({ error: safeErrorMessage(error) });
     return true;
   }
 
@@ -188,7 +189,7 @@ export function createTerminalControlRouter(): Router {
         cwd: terminalController.getCwd(sessionId),
       });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -199,7 +200,7 @@ export function createTerminalControlRouter(): Router {
       terminalClients.delete(req.params.sessionId);
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -221,7 +222,7 @@ export function createTerminalControlRouter(): Router {
       });
     } catch (error: any) {
       if (handleTerminalSessionError(error, res)) return;
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -292,7 +293,7 @@ export function createTerminalControlRouter(): Router {
       res.json(result);
     } catch (error: any) {
       if (handleTerminalSessionError(error, res)) return;
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -306,7 +307,7 @@ export function createTerminalControlRouter(): Router {
       const result = terminalController.isCommandSafe(command);
       res.json(result);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -337,7 +338,7 @@ export function createTerminalControlRouter(): Router {
       res.json(result);
     } catch (error: any) {
       if (handleTerminalSessionError(error, res)) return;
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -351,7 +352,7 @@ export function createTerminalControlRouter(): Router {
       const info = await terminalController.getSystemInfo();
       res.json(info);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -366,7 +367,7 @@ export function createTerminalControlRouter(): Router {
       const processes = await terminalController.listProcesses(filter);
       res.json({ processes });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -378,7 +379,7 @@ export function createTerminalControlRouter(): Router {
       const success = await terminalController.killProcess(pid, signal);
       res.json({ success });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -392,7 +393,7 @@ export function createTerminalControlRouter(): Router {
       const ports = await terminalController.listPorts();
       res.json({ ports });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -415,7 +416,7 @@ export function createTerminalControlRouter(): Router {
       res.json(result);
     } catch (error: any) {
       if (handleTerminalSessionError(error, res)) return;
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -437,7 +438,7 @@ export function createTerminalControlRouter(): Router {
       res.json(result);
     } catch (error: any) {
       if (handleTerminalSessionError(error, res)) return;
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -453,7 +454,7 @@ export function createTerminalControlRouter(): Router {
       res.json({ history });
     } catch (error: any) {
       if (handleTerminalSessionError(error, res)) return;
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -468,9 +469,9 @@ export function createTerminalControlRouter(): Router {
     } catch (error: any) {
       if (handleTerminalSessionError(error, res)) return;
       if (error instanceof Error && error.message.startsWith("Command not found")) {
-        return res.status(404).json({ error: error.message });
+        return res.status(404).json({ error: safeErrorMessage(error) });
       }
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -488,7 +489,7 @@ export function createTerminalControlRouter(): Router {
       res.json({ env: envVars, count: Object.keys(envVars).length });
     } catch (error: any) {
       if (handleTerminalSessionError(error, res)) return;
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -505,9 +506,9 @@ export function createTerminalControlRouter(): Router {
     } catch (error: any) {
       if (handleTerminalSessionError(error, res)) return;
       if (error instanceof Error && error.message.includes("Session not found")) {
-        return res.status(404).json({ error: error.message });
+        return res.status(404).json({ error: safeErrorMessage(error) });
       }
-      return res.status(400).json({ error: error.message });
+      return res.status(400).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -543,7 +544,7 @@ export function createTerminalControlRouter(): Router {
       });
     } catch (error: any) {
       if (handleTerminalSessionError(error, res)) return;
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -570,7 +571,7 @@ export function createTerminalControlRouter(): Router {
       res.json({ aliases, count: Object.keys(aliases).length });
     } catch (error: any) {
       if (handleTerminalSessionError(error, res)) return;
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -596,7 +597,7 @@ export function createTerminalControlRouter(): Router {
       res.json({ set: Object.keys(aliases).length, success: result.success });
     } catch (error: any) {
       if (handleTerminalSessionError(error, res)) return;
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -625,7 +626,7 @@ export function createTerminalControlRouter(): Router {
       });
     } catch (error: any) {
       if (handleTerminalSessionError(error, res)) return;
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -671,7 +672,7 @@ export function createTerminalControlRouter(): Router {
       res.json({ path: dirPath, entries, count: entries.length });
     } catch (error: any) {
       if (handleTerminalSessionError(error, res)) return;
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -707,7 +708,7 @@ export function createTerminalControlRouter(): Router {
 
       res.json({ sessionId, cwd });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -719,7 +720,7 @@ export function createTerminalControlRouter(): Router {
       await auditAdminAction(req, "remote_shell.session_end", "remote_session", req.params.sessionId);
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -738,7 +739,7 @@ export function createTerminalControlRouter(): Router {
         username: session.connection.username,
       });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -748,7 +749,7 @@ export function createTerminalControlRouter(): Router {
       const history = remoteShellController.getHistory(req.params.sessionId, limit);
       res.json({ history });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -793,7 +794,7 @@ export function createTerminalControlRouter(): Router {
 
       res.json(result);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -810,7 +811,7 @@ export function createTerminalControlRouter(): Router {
       const targets = await remoteShellRepository.listTargetsForAdmin(userId);
       res.json({ targets });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -860,7 +861,7 @@ export function createTerminalControlRouter(): Router {
       res.status(201).json({ target });
     } catch (error: any) {
       const status = error.message?.includes("REMOTE_SHELL_SECRET") ? 503 : 500;
-      res.status(status).json({ error: error.message });
+      res.status(status).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -913,7 +914,7 @@ export function createTerminalControlRouter(): Router {
       res.json({ target: updated });
     } catch (error: any) {
       const status = error.message?.includes("REMOTE_SHELL_SECRET") ? 503 : 500;
-      res.status(status).json({ error: error.message });
+      res.status(status).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -936,7 +937,7 @@ export function createTerminalControlRouter(): Router {
       await auditAdminAction(req, "remote_target.delete", "remote_target", req.params.targetId);
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -967,7 +968,7 @@ export function createTerminalControlRouter(): Router {
       res.json({ success: true });
     } catch (error: any) {
       const status = error.message?.includes("REMOTE_SHELL_SECRET") ? 503 : 500;
-      res.status(status).json({ error: error.message });
+      res.status(status).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -1007,7 +1008,7 @@ export function createTerminalControlRouter(): Router {
       res.json({ sessionId, cwd, targetId: target.id });
     } catch (error: any) {
       const status = error.message?.includes("REMOTE_SHELL_SECRET") ? 503 : 500;
-      res.status(status).json({ error: error.message });
+      res.status(status).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -1043,7 +1044,7 @@ export function createTerminalControlRouter(): Router {
 
       res.json({ disks });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -1075,7 +1076,7 @@ export function createTerminalControlRouter(): Router {
 
       res.json({ topProcesses: processes });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 

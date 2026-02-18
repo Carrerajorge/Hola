@@ -3,6 +3,7 @@ import { z } from "zod";
 import { LangGraphAgent, getDefaultAgent, createAgent, type AgentConfig } from "../agent/langgraph";
 import { ALL_TOOLS, SAFE_TOOLS, SYSTEM_TOOLS, getToolsByCategory } from "../agent/langgraph/tools";
 import { memoryStore, checkpointer } from "../agent/langgraph/memory";
+import { safeErrorMessage } from "../lib/safeError";
 
 const RunAgentSchema = z.object({
   message: z.string().min(1),
@@ -67,7 +68,7 @@ export function createLangGraphRouter() {
       console.error("[LangGraph] Run error:", error);
       res.status(500).json({
         success: false,
-        error: error.message || "LangGraph execution failed",
+        error: safeErrorMessage(error, "LangGraph execution failed"),
       });
     }
   });
@@ -113,7 +114,7 @@ export function createLangGraphRouter() {
       res.end();
     } catch (error: any) {
       console.error("[LangGraph] Stream error:", error);
-      res.write(`data: ${JSON.stringify({ type: "error", error: error.message })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: "error", error: safeErrorMessage(error) })}\n\n`);
       res.end();
     }
   });
@@ -148,7 +149,7 @@ export function createLangGraphRouter() {
       console.error("[LangGraph] Approval error:", error);
       res.status(500).json({
         success: false,
-        error: error.message || "Failed to process approval",
+        error: safeErrorMessage(error, "Failed to process approval"),
       });
     }
   });
@@ -185,7 +186,7 @@ export function createLangGraphRouter() {
       console.error("[LangGraph] History error:", error);
       res.status(500).json({
         success: false,
-        error: error.message,
+        error: safeErrorMessage(error),
       });
     }
   });
@@ -209,7 +210,7 @@ export function createLangGraphRouter() {
       console.error("[LangGraph] Clear history error:", error);
       res.status(500).json({
         success: false,
-        error: error.message,
+        error: safeErrorMessage(error),
       });
     }
   });
@@ -239,7 +240,7 @@ export function createLangGraphRouter() {
       console.error("[LangGraph] Tools error:", error);
       res.status(500).json({
         success: false,
-        error: error.message,
+        error: safeErrorMessage(error),
       });
     }
   });
@@ -263,7 +264,7 @@ export function createLangGraphRouter() {
       console.error("[LangGraph] Status error:", error);
       res.status(500).json({
         success: false,
-        error: error.message,
+        error: safeErrorMessage(error),
       });
     }
   });

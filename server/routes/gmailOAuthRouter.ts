@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { google } from 'googleapis';
 import { storage } from '../storage';
 import crypto from 'crypto';
+import { safeErrorMessage } from '../lib/safeError';
 
 const router = Router();
 
@@ -148,7 +149,7 @@ router.get('/callback', async (req: Request, res: Response) => {
     res.redirect('/?gmail_connected=true');
   } catch (error: any) {
     console.error('[Gmail OAuth] Callback error:', error);
-    res.redirect('/?gmail_error=' + encodeURIComponent(error.message));
+    res.redirect('/?gmail_error=' + encodeURIComponent(safeErrorMessage(error)));
   }
 });
 
@@ -219,10 +220,10 @@ router.get('/status', async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('[Gmail OAuth] Status check error:', error);
-    res.json({ 
-      connected: false, 
-      error: error.message,
-      useCustomOAuth: true 
+    res.json({
+      connected: false,
+      error: safeErrorMessage(error),
+      useCustomOAuth: true
     });
   }
 });
@@ -254,7 +255,7 @@ router.post('/disconnect', async (req: Request, res: Response) => {
     res.json({ success: true });
   } catch (error: any) {
     console.error('[Gmail OAuth] Disconnect error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: safeErrorMessage(error) });
   }
 });
 

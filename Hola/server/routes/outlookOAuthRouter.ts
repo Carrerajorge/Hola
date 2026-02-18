@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { storage } from '../storage';
 import crypto from 'crypto';
+import { safeErrorMessage } from '../lib/safeError';
 
 const router = Router();
 
@@ -280,7 +281,7 @@ router.get('/outlook/callback', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('[Outlook OAuth] Callback error:', error);
     res.redirect(
-      '/?outlook_error=' + encodeURIComponent(error.message)
+      '/?outlook_error=' + encodeURIComponent(safeErrorMessage(error))
     );
   }
 });
@@ -313,7 +314,7 @@ router.get('/outlook/status', async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('[Outlook OAuth] Status check error:', error);
-    res.json({ connected: false, error: error.message });
+    res.json({ connected: false, error: safeErrorMessage(error) });
   }
 });
 
@@ -350,7 +351,7 @@ router.post('/outlook/disconnect', async (req: Request, res: Response) => {
     res.json({ success: true });
   } catch (error: any) {
     console.error('[Outlook OAuth] Disconnect error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: safeErrorMessage(error) });
   }
 });
 
@@ -500,7 +501,7 @@ router.get('/calendar/callback', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('[Outlook Calendar OAuth] Callback error:', error);
     res.redirect(
-      '/?outlook_calendar_error=' + encodeURIComponent(error.message)
+      '/?outlook_calendar_error=' + encodeURIComponent(safeErrorMessage(error))
     );
   }
 });
@@ -536,7 +537,7 @@ router.get('/calendar/status', async (req: Request, res: Response) => {
       '[Outlook Calendar OAuth] Status check error:',
       error
     );
-    res.json({ connected: false, error: error.message });
+    res.json({ connected: false, error: safeErrorMessage(error) });
   }
 });
 
@@ -576,7 +577,7 @@ router.post('/calendar/disconnect', async (req: Request, res: Response) => {
       '[Outlook Calendar OAuth] Disconnect error:',
       error
     );
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: safeErrorMessage(error) });
   }
 });
 
