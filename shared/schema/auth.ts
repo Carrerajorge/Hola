@@ -146,30 +146,6 @@ export const insertUserSchema = createInsertSchema(users).pick({
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 
-// Provider identity linking (IAM hardening)
-export const userIdentities = pgTable(
-    "user_identities",
-    {
-        id: varchar("id", { length: 255 }).primaryKey().default(sql`gen_random_uuid()`),
-        userId: varchar("user_id", { length: 255 }).notNull().references(() => users.id, { onDelete: "cascade" }),
-        provider: text("provider").notNull(),
-        providerSubject: text("provider_subject").notNull(),
-        providerEmail: text("provider_email"),
-        emailVerified: boolean("email_verified").default(false),
-        metadata: jsonb("metadata"),
-        linkedAt: timestamp("linked_at").defaultNow().notNull(),
-        lastUsedAt: timestamp("last_used_at"),
-    },
-    (table: any) => [
-        uniqueIndex("user_identities_provider_subject_idx").on(table.provider, table.providerSubject),
-        index("user_identities_user_idx").on(table.userId),
-        index("user_identities_provider_idx").on(table.provider),
-    ]
-);
-
-export type UserIdentity = typeof userIdentities.$inferSelect;
-export type InsertUserIdentity = typeof userIdentities.$inferInsert;
-
 // User Settings table - one settings record per user
 export const responsePreferencesSchema = z.object({
     responseStyle: z.enum(['default', 'formal', 'casual', 'concise']).default('default'),
