@@ -98,3 +98,22 @@ MAX_STDERR_BYTES
 
 # Local agent/tooling folders
 .claude/
+
+
+
+# VPS deploy artifacts (do not commit)
+
+deploy-state*.json*
+
+deploy.log
+
+*.rollback-bak
+
+health-dashboard.sh
+
+deploy-bluegreen.sh
+
+rollback-bluegreen.sh
+
+vps-bootstrap-bluegreen.sh
+
