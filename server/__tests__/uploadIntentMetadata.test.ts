@@ -77,6 +77,30 @@ describe("validateUploadIntentMetadata", () => {
     }
   });
 
+  it("accepts legacy browser docx mime fallback from application/octet-stream", () => {
+    const result = validateUploadIntentMetadata({
+      fileName: "reporte.docx",
+      mimeType: "application/octet-stream",
+      fileSize: 2048,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.mimeType).toBe("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    }
+  });
+
+  it("accepts alias MIME values from image/web safe variants", () => {
+    const result = validateUploadIntentMetadata({
+      fileName: "foto.jpg",
+      mimeType: "image/pjpeg",
+      fileSize: 2048,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.mimeType).toBe("image/jpeg");
+    }
+  });
+
   it("normalizes unicode file names before validation", () => {
     const result = validateUploadIntentMetadata({
       fileName: "Ｒｅｐｏｒｔ.pdf",

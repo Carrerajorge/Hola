@@ -2927,6 +2927,9 @@ export function ChatInterface({
             headers: uploadHeaders,
             body: JSON.stringify({
               uploadId,
+              fileName: file.name,
+              mimeType: file.type,
+              fileSize: file.size,
               ...(stableConversationId ? { conversationId: stableConversationId } : {}),
             }),
           }), 2);

@@ -642,6 +642,37 @@ function inferMimeTypeFromFileName(fileName: string): string | null {
   return map[ext] || null;
 }
 
+const UPLOAD_MIME_TYPE_ALIASES: Record<string, string> = {
+  "application/x-pdf": "application/pdf",
+  "application/acrobat": "application/pdf",
+  "application/vnd.pdf": "application/pdf",
+  "image/pjpeg": "image/jpeg",
+  "image/x-png": "image/png",
+};
+
+const KNOWN_NONSTRICT_MIME_TYPES = new Set([
+  "application/octet-stream",
+  "application/zip",
+  "application/x-zip-compressed",
+  "binary/octet-stream",
+]);
+
+function normalizeUploadIntentMimeType(rawMimeType: unknown, fileName: string = ""): string {
+  if (typeof rawMimeType !== "string") return "";
+
+  const base = stripContentType(rawMimeType) || rawMimeType.trim().toLowerCase();
+  const normalized = base.trim().toLowerCase();
+  if (!normalized) return "";
+
+  if (UPLOAD_MIME_TYPE_ALIASES[normalized]) {
+    return UPLOAD_MIME_TYPE_ALIASES[normalized];
+  }
+  if (KNOWN_NONSTRICT_MIME_TYPES.has(normalized)) {
+    return inferMimeTypeFromFileName(fileName) || normalized;
+  }
+  return normalized;
+}
+
 type UploadIntentMetadataValidation =
   | {
     ok: true;
@@ -686,9 +717,7 @@ export function validateUploadIntentMetadata(input: {
   const fileName = typeof input.fileName === "string"
     ? sanitizeFilename(input.fileName.trim().normalize("NFKC"))
     : "";
-  const mimeType = typeof input.mimeType === "string"
-    ? (stripContentType(input.mimeType) || input.mimeType.trim().toLowerCase())
-    : "";
+  const mimeType = normalizeUploadIntentMimeType(input.mimeType, fileName);
   const fileSize = Number(input.fileSize);
 
   if (!fileName || !mimeType || !Number.isFinite(fileSize) || fileSize <= 0) {
@@ -1250,7 +1279,7 @@ export function createFilesRouter() {
       };
 
       const fileName = sanitizeFilename(typeof rawFileName === "string" ? rawFileName : "");
-      const safeMimeType = typeof mimeType === "string" ? stripContentType(mimeType) || mimeType : "";
+      const safeMimeType = normalizeUploadIntentMimeType(mimeType, fileName);
       const fileSize = Number(rawFileSize);
       const totalChunks = Number(rawTotalChunks);
       const actorId = getUploadActorId(req);
@@ -1272,6 +1301,11 @@ export function createFilesRouter() {
       }
       if (fileSize <= 0 || totalChunks <= 0 || totalChunks > MAX_MULTIPART_CHUNKS) {
         return res.status(400).json({ error: "Missing or invalid required fields: fileName, mimeType, fileSize, totalChunks" });
+      }
+
+      const inferredTypeFromName = inferMimeTypeFromFileName(fileName);
+      if (inferredTypeFromName && inferredTypeFromName !== safeMimeType) {
+        return res.status(400).json({ error: "File extension does not match mimeType" });
       }
 
       if (!ALLOWED_MIME_TYPES.includes(safeMimeType as any)) {
@@ -1968,7 +2002,7 @@ export function createFilesRouter() {
       }
 
       const name = sanitizeFilename(rawName.trim());
-      const type = stripContentType(rawType) || rawType.trim().toLowerCase();
+      const type = normalizeUploadIntentMimeType(rawType, name);
       const size = typeof rawSize === "number" ? rawSize : Number(rawSize);
       const storagePath = sanitizeStoragePath(rawStoragePath.trim());
 
@@ -1981,6 +2015,10 @@ export function createFilesRouter() {
         return res.status(400).json({ error: "Invalid storagePath" });
       }
 
+      const inferredTypeFromName = inferMimeTypeFromFileName(name);
+      if (inferredTypeFromName && inferredTypeFromName !== type) {
+        return res.status(400).json({ error: "File extension does not match mimeType" });
+      }
       if (!ALLOWED_MIME_TYPES.includes(type as any)) {
         return res.status(400).json({ error: `Unsupported file type: ${type}` });
       }
@@ -2092,7 +2130,7 @@ export function createFilesRouter() {
       }
 
       const name = sanitizeFilename(rawName.trim());
-      const type = stripContentType(rawType) || rawType.trim().toLowerCase();
+      const type = normalizeUploadIntentMimeType(rawType, name);
       const size = typeof rawSize === "number" ? rawSize : Number(rawSize);
       const storagePath = sanitizeStoragePath(rawStoragePath.trim()) || "";
 
@@ -2101,6 +2139,11 @@ export function createFilesRouter() {
       if (!Number.isFinite(size) || size <= 0) return res.status(400).json({ error: "Invalid file size" });
       if (!storagePath) return res.status(400).json({ error: "Invalid storagePath" });
       if (size > LIMITS.MAX_FILE_SIZE_BYTES) return res.status(413).json({ error: "File too large" });
+
+      const inferredTypeFromName = inferMimeTypeFromFileName(name);
+      if (inferredTypeFromName && inferredTypeFromName !== type) {
+        return res.status(400).json({ error: "File extension does not match mimeType" });
+      }
 
       if (!ALLOWED_MIME_TYPES.includes(type as any)) {
         return res.status(400).json({ error: `Unsupported file type: ${type}` });

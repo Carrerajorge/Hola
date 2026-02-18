@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import type { UppyFile } from "@uppy/core";
 import { apiFetch } from "@/lib/apiClient";
+import { normalizeFileForUpload } from "@/lib/attachmentIngest";
 import { ensureCsrfToken, uploadBlobWithProgress } from "@/lib/uploadTransport";
 import type { UploadResponse } from "@shared/uploadContracts";
 
@@ -89,7 +90,8 @@ export function useUpload(options: UseUploadOptions = {}) {
    */
   const requestUploadUrl = useCallback(
     async (file: File): Promise<UploadResponse> => {
-      const uploadId = buildUploadId(file.name);
+      const normalizedFile = normalizeFileForUpload(file);
+      const uploadId = buildUploadId(normalizedFile.name);
       await ensureCsrfToken();
       const response = await apiFetch("/api/objects/upload", {
         method: "POST",
@@ -100,9 +102,9 @@ export function useUpload(options: UseUploadOptions = {}) {
         },
         body: JSON.stringify({
           uploadId,
-          fileName: file.name,
-          mimeType: file.type,
-          fileSize: file.size,
+          fileName: normalizedFile.name,
+          mimeType: normalizedFile.type,
+          fileSize: normalizedFile.size,
           ...(options.conversationId ? { conversationId: options.conversationId } : {}),
         }),
       });
@@ -145,17 +147,18 @@ export function useUpload(options: UseUploadOptions = {}) {
       setProgress(0);
 
       try {
-        if (!file || !file.name || file.size <= 0) {
+        const normalizedFile = normalizeFileForUpload(file);
+        if (!normalizedFile || !normalizedFile.name || normalizedFile.size <= 0) {
           throw new Error("Invalid file selected for upload");
         }
 
         // Step 1: Request presigned URL (send metadata as JSON)
         setProgress(10);
-        const uploadResponse = await retryAsync(() => requestUploadUrl(file), 2, 300);
+        const uploadResponse = await retryAsync(() => requestUploadUrl(normalizedFile), 2, 300);
 
         // Step 2: Upload file directly to presigned URL
         setProgress(30);
-        await retryAsync(() => uploadToPresignedUrl(file, uploadResponse.uploadURL), 2, 350);
+        await retryAsync(() => uploadToPresignedUrl(normalizedFile, uploadResponse.uploadURL), 2, 350);
 
         setProgress(100);
         options.onSuccess?.(uploadResponse);
@@ -194,7 +197,8 @@ export function useUpload(options: UseUploadOptions = {}) {
       headers?: Record<string, string>;
     }> => {
       // Use the actual file properties to request a per-file presigned URL
-      const uploadId = buildUploadId(file.name);
+      const normalizedFile = normalizeFileForUpload(file as unknown as File);
+      const uploadId = buildUploadId(normalizedFile.name);
       await ensureCsrfToken();
       const response = await apiFetch("/api/objects/upload", {
         method: "POST",
@@ -205,9 +209,9 @@ export function useUpload(options: UseUploadOptions = {}) {
         },
         body: JSON.stringify({
           uploadId,
-          fileName: file.name,
-          mimeType: file.type,
-          fileSize: file.size,
+          fileName: normalizedFile.name,
+          mimeType: normalizedFile.type,
+          fileSize: normalizedFile.size,
           ...(options.conversationId ? { conversationId: options.conversationId } : {}),
         }),
       });

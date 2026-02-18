@@ -371,6 +371,9 @@ export class ChunkedFileUploader {
         ...(this.abortController?.signal ? { signal: this.abortController.signal } : {}),
         body: JSON.stringify({
           ...(options.uploadId ? { uploadId: options.uploadId } : {}),
+          fileName: file.name,
+          mimeType: file.type,
+          fileSize: file.size,
           ...(options.conversationId ? { conversationId: options.conversationId } : {}),
         }),
       });
