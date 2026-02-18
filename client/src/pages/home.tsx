@@ -898,7 +898,7 @@ export default function Home() {
             onSelectGpt={async (gpt) => {
               setAboutGptId(null);
               try {
-                const res = await fetch(`/api/gpts/${gpt.id}`);
+                const res = await apiFetch(`/api/gpts/${gpt.id}`);
                 if (res.ok) {
                   const fullGpt = await res.json();
                   handleSelectGpt(fullGpt);

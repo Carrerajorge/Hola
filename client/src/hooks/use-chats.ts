@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
-import { getAnonUserIdHeader } from "@/lib/apiClient";
+import { apiFetch, getAnonUserIdHeader } from "@/lib/apiClient";
 import { trackWorkspaceEvent } from "@/lib/analytics";
 
 import { type AgentRunStatus } from "@/stores/agent-store";
@@ -624,7 +624,7 @@ function parseServerTimingHeader(value: string | null): Record<string, number> {
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
   if (typeof AbortController === "undefined") {
-    return fetch(url, init);
+    return apiFetch(url, init);
   }
 
   const controller = new AbortController();
@@ -640,7 +640,7 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
   }
 
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await apiFetch(url, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timeoutId);
   }
@@ -1001,7 +1001,7 @@ export function useChats() {
     if (isPendingChat(chatId)) return;
 
     try {
-      const res = await fetch(`/api/chats/${chatId}`, {
+      const res = await apiFetch(`/api/chats/${chatId}`, {
         headers: { ...getAnonUserIdHeader() },
         credentials: "include"
       });
@@ -1130,7 +1130,7 @@ export function useChats() {
   }, []);
   const loadChatsFromServer = useCallback(async () => {
     try {
-      const res = await fetch("/api/chats", {
+      const res = await apiFetch("/api/chats", {
         headers: { ...getAnonUserIdHeader() },
         credentials: "include"
       });
@@ -1438,7 +1438,7 @@ export function useChats() {
 
       setTimeout(async () => {
         try {
-          const res = await fetch(`/api/chats/${chatId}`, {
+          const res = await apiFetch(`/api/chats/${chatId}`, {
             headers: { ...getAnonUserIdHeader() },
             credentials: "include",
           });
@@ -1827,7 +1827,7 @@ export function useChats() {
     });
 
     try {
-      await fetch(`/api/chats/${chatId}`, { 
+      await apiFetch(`/api/chats/${chatId}`, { 
         method: "DELETE",
         headers: { ...getAnonUserIdHeader() },
         credentials: "include"
@@ -1843,7 +1843,7 @@ export function useChats() {
     ));
 
     try {
-      await fetch(`/api/chats/${chatId}`, {
+      await apiFetch(`/api/chats/${chatId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
         credentials: "include",
@@ -1869,7 +1869,7 @@ export function useChats() {
     });
 
     try {
-      await fetch(`/api/chats/${chatId}`, {
+      await apiFetch(`/api/chats/${chatId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
         credentials: "include",
@@ -1892,7 +1892,7 @@ export function useChats() {
     ));
 
     try {
-      await fetch(`/api/chats/${chatId}`, {
+      await apiFetch(`/api/chats/${chatId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
         credentials: "include",
@@ -1915,7 +1915,7 @@ export function useChats() {
     ));
 
     try {
-      await fetch(`/api/chats/${chatId}`, {
+      await apiFetch(`/api/chats/${chatId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
         credentials: "include",

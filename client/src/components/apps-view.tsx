@@ -907,37 +907,39 @@ export function AppsView({ onClose, onOpenGoogleForms, onOpenGmail }: AppsViewPr
   const [connectedApps, setConnectedApps] = useState<Record<string, boolean>>({});
   const [isCheckingConnections, setIsCheckingConnections] = useState(true);
 
+  const integratedApps = useMemo(() => apps.map(withIntegrationEndpoints), []);
+
   const checkAllConnectionStatus = useCallback(async () => {
     setIsCheckingConnections(true);
     const statuses: Record<string, boolean> = {};
-    
-    const connectableApps = apps.filter(app => app.statusEndpoint);
-    
+    const connectableApps = integratedApps.filter((app) => app.statusEndpoint);
+
     await Promise.all(
       connectableApps.map(async (app) => {
         try {
-          const res = await fetch(app.statusEndpoint!, { credentials: "include" });
-          if (res.ok) {
-            const data = await res.json();
-            statuses[app.id] = data.connected === true;
-          } else {
+          const res = await apiFetch(app.statusEndpoint!);
+          if (!res.ok) {
             statuses[app.id] = false;
+            return;
           }
+
+          const data = await res.json().catch(() => ({} as any));
+          statuses[app.id] = (data as any)?.connected === true;
         } catch {
           statuses[app.id] = false;
         }
-      })
+      }),
     );
-    
+
     setConnectedApps(statuses);
     setIsCheckingConnections(false);
-  }, []);
+  }, [integratedApps]);
 
   useEffect(() => {
     checkAllConnectionStatus();
   }, [checkAllConnectionStatus]);
 
-  const filteredApps = apps.filter((app) => {
+  const filteredApps = integratedApps.filter((app) => {
     const matchesSearch =
       app.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       app.description.toLowerCase().includes(searchQuery.toLowerCase());
@@ -950,16 +952,21 @@ export function AppsView({ onClose, onOpenGoogleForms, onOpenGmail }: AppsViewPr
 
   const handleAppClick = (app: App) => {
     if (connectedApps[app.id]) {
-      onClose();
       if (app.id === "gmail" && onOpenGmail) {
+        onClose();
         onOpenGmail();
-      } else if (app.id === "google-forms" && onOpenGoogleForms) {
-        onOpenGoogleForms();
+        return;
       }
-    } else if (app.statusEndpoint) {
-      setSelectedApp(app);
-      setIsDetailDialogOpen(true);
+      if (app.id === "google-forms" && onOpenGoogleForms) {
+        onClose();
+        onOpenGoogleForms();
+        return;
+      }
     }
+
+    // Default: open the detail dialog (connect/disconnect/status).
+    setSelectedApp(app);
+    setIsDetailDialogOpen(true);
   };
 
   const handleAppSettings = (app: App) => {
@@ -990,7 +997,7 @@ export function AppsView({ onClose, onOpenGoogleForms, onOpenGmail }: AppsViewPr
     disconnectEndpoint: app.disconnectEndpoint,
   });
 
-  const connectedAppsList = apps.filter(app => connectedApps[app.id]);
+  const connectedAppsList = integratedApps.filter(app => connectedApps[app.id]);
 
   return (
     <div className="flex flex-col h-full bg-background" data-testid="apps-view">

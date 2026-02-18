@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { PhaseNarrator } from "../lib/phaseNarrator";
+import { apiFetch } from "@/lib/apiClient";
 
 export type SSEEventType =
   | "contract"
@@ -364,7 +365,7 @@ export function useSuperAgentStream(): UseSuperAgentReturn {
       abortControllerRef.current = abortController;
 
       try {
-        const response = await fetch("/api/super/stream", {
+        const response = await apiFetch("/api/super/stream", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
