@@ -1,21 +1,9 @@
-import { useState, useRef, useEffect } from "react";
-import { useLocation } from "wouter";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Switch } from "@/components/ui/switch";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
-import { Progress } from "@/components/ui/progress";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton, TableSkeleton } from "@/components/ui/skeleton";
-import {
+import { useState, useRef, useEffect } from "react"; import { useLocation } from "wouter"; import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"; import { Button } from 
+"@/components/ui/button"; import { Input } from "@/components/ui/input"; import { Badge } from "@/components/ui/badge"; import { Switch } from "@/components/ui/switch"; import { ScrollArea } from 
+"@/components/ui/scroll-area"; import { Separator } from "@/components/ui/separator"; import { Progress } from "@/components/ui/progress"; import { Dialog, DialogContent, DialogHeader, DialogTitle, 
+DialogTrigger } from "@/components/ui/dialog"; import { Label } from "@/components/ui/label"; import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"; 
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"; import { Checkbox } from "@/components/ui/checkbox"; import { Card, CardContent, CardDescription, CardFooter, 
+CardHeader, CardTitle } from "@/components/ui/card"; import { Skeleton, TableSkeleton } from "@/components/ui/skeleton"; import {
   ArrowLeft,
   LayoutDashboard,
   Users,
@@ -92,10 +80,11 @@ import { SecurityAlertsPanel } from "@/components/admin/SecurityAlerts";
 import { AdminNotificationsPopover } from "@/components/admin/NotificationsPopover";
 import { TerminalPanel } from "@/components/terminal-panel";
 
-type AdminSection = "dashboard" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings" | "agentic" | "excel" | "terminal";
+type AdminSection = "dashboard" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings" | "agentic" | "excel" | "terminal" | "monitoring";
 
 const navItems: { id: AdminSection; label: string; icon: React.ElementType }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "monitoring", label: "Monitoring", icon: Server },
   { id: "users", label: "Users", icon: Users },
   { id: "conversations", label: "Conversations", icon: MessageSquare },
   { id: "ai-models", label: "AI Models", icon: Bot },
@@ -327,6 +316,61 @@ function DashboardSection() {
         <div className="rounded-lg border p-4">
           <ActivityFeed limit={15} />
         </div>
+      </div>
+    </div>
+  );
+}
+
+function MonitoringSection() {
+  const [_location, setLocation] = useLocation();
+
+  const grafanaUrl =
+    "/grafana/d/cfdji8sx4vqioc/req-003-system-metrics?orgId=1";
+  const grafanaKioskUrl = `${grafanaUrl}&kiosk`;
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-medium">Monitoring (REQ-003)</h2>
+          <p className="text-sm text-muted-foreground">
+            CPU/RAM/Disk en tiempo real (Influx) + Prometheus/node_exporter + Alertmanager
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setLocation("/admin/health")}>
+            System Health
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => window.open(grafanaUrl, "_blank", "noopener,noreferrer")}
+          >
+            Abrir Grafana
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => window.open("http://69.62.98.126:9095", "_blank", "noopener,noreferrer")}
+          >
+            Prometheus
+          </Button>
+        </div>
+      </div>
+
+      <div className="rounded-lg border p-3">
+        <div className="rounded-md overflow-hidden border" style={{ height: 720 }}>
+          <iframe
+            title="REQ-003 System Metrics (Grafana)"
+            src={grafanaKioskUrl}
+            style={{ width: "100%", height: "100%", border: 0 }}
+          />
+        </div>
+        <p className="text-xs text-muted-foreground mt-2">
+          Si el iframe no carga, usa “Abrir Grafana”. (Grafana ya tiene allow embedding habilitado).
+        </p>
       </div>
     </div>
   );
@@ -6236,6 +6280,8 @@ export default function AdminPage() {
             <TerminalPanel />
           </div>
         );
+      case "monitoring":
+        return <MonitoringSection />;
       default:
         return <DashboardSection />;
     }
