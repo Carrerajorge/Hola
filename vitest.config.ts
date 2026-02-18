@@ -13,6 +13,15 @@ export default defineConfig({
       // Keep coverage output stable; scripts/quality-gate.ts controls cleanup + thresholds.
       clean: false,
       reporter: ["text", "json", "json-summary", "html"],
+      all: true,
+      include: ["server/core/**/*.ts"],
+      exclude: ["**/*.test.ts", "**/__tests__/**", "**/node_modules/**", "**/dist/**"],
+      thresholds: {
+        lines: 90,
+        functions: 90,
+        branches: 90,
+        statements: 90,
+      },
     },
     alias: {
       "@": path.resolve(__dirname, "./client/src"),

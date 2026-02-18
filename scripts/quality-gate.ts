@@ -965,6 +965,15 @@ async function run() {
   const runEnv = { ...CI_DEFAULT_ENV, ...process.env };
 
   checks.push(runCommand(
+    "Architecture boundaries (server/core)",
+    "node",
+    ["--import", "tsx", "scripts/layer-check.ts"],
+    true,
+    runEnv,
+    60_000,
+  ));
+
+  checks.push(runCommand(
     "Type-check (application/runtime)",
     "npm",
     ["run", "type-check:app"],

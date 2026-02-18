@@ -203,16 +203,22 @@ describe("chat stream isolation", () => {
     const { client, close } = await createHttpTestClient(app);
 
     try {
-      // Ensure the first stream holds the per-conversation lock long enough for the second request
-      // to observe it. Otherwise, the fast-path can complete before the race is exercised.
-      llmChatMock.mockImplementationOnce(async (messages: any[]) => {
-        await new Promise((resolve) => setTimeout(resolve, 200));
-        const last = messages[messages.length - 1];
-        return {
-          content: `stream:${String(last?.content || "")}`,
-          provider: "xai",
-          model: "grok-3-fast",
-        };
+      let markFirstLockHeld!: () => void;
+      const firstLockHeld = new Promise<void>((resolve) => {
+        markFirstLockHeld = resolve;
+      });
+
+      let releaseFirstLock!: () => void;
+      const releaseFirstLockGate = new Promise<void>((resolve) => {
+        releaseFirstLock = resolve;
+      });
+
+      // The router acquires the per-conversation lock before resolving skill context. Hold the
+      // first request at that await point so the second request deterministically observes the lock.
+      resolveSkillContextMock.mockImplementationOnce(async () => {
+        markFirstLockHeld();
+        await releaseFirstLockGate;
+        return null;
       });
 
       const payload = {
@@ -223,10 +229,34 @@ describe("chat stream isolation", () => {
         queueMode: "reject",
       };
 
-      const [first, second] = await Promise.all([
-        client.post("/api/chat/stream").set("x-request-id", "req_lock_a").send(payload),
-        client.post("/api/chat/stream").set("x-request-id", "req_lock_b").send(payload),
+      let released = false;
+      const safeRelease = () => {
+        if (released) return;
+        released = true;
+        releaseFirstLock();
+      };
+
+      const firstPromise = client
+        .post("/api/chat/stream")
+        .set("x-request-id", "req_lock_a")
+        .send(payload)
+        // supertest requests start when the thenable is consumed; ensure we start it immediately.
+        .then((res) => res);
+
+      await Promise.race([
+        firstLockHeld,
+        new Promise((_, reject) =>
+          setTimeout(() => {
+            safeRelease();
+            reject(new Error("first stream did not start in time"));
+          }, 2000)
+        ),
       ]);
+
+      const second = await client.post("/api/chat/stream").set("x-request-id", "req_lock_b").send(payload);
+
+      safeRelease();
+      const first = await firstPromise;
 
       const statuses = [first.status, second.status];
       expect(statuses.includes(200)).toBe(true);
