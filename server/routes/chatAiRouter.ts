@@ -47,6 +47,8 @@ import { usageQuotaService, type UsageCheckResult } from "../services/usageQuota
 import { conversationMemoryManager } from "../services/conversationMemory";
 import { conversationStateService } from "../services/conversationStateService";
 import { generateAndPersistChatTitle } from "../lib/chatTitleGenerator";
+import { validate } from "../lib/requestValidator";
+import { streamChatRequestSchema } from "../schemas/chatSchemas";
 
 type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
 const isDebugLogEnabled = process.env.DEBUG === "true";
@@ -906,7 +908,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
     }
   });
 
-  router.post("/chat/stream", async (req, res) => {
+  router.post("/chat/stream", validate({ body: streamChatRequestSchema }), async (req, res) => {
     const requestId = sanitizeStreamIdentifier(req.headers["x-request-id"], `stream_${Date.now()}`);
     const streamStartMs = performance.now();
     const stageTimings: Record<string, number> = {};

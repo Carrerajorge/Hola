@@ -1,4 +1,6 @@
-import "./config/load-env"; import { env } from "./config/env"; // Validates env vars immediately on import
+import "./config/load-env";
+import "./lib/expressAsyncPatch";
+import { env } from "./config/env"; // Validates env vars immediately on import
 
 import compression from "compression";
 import express, { type NextFunction, type Request, type Response } from "express";
@@ -45,6 +47,7 @@ import { registerAuthRoutes, setupAuth } from "./replit_integrations/auth";
 import { getUserId } from "./types/express";
 import { updateContext } from "./middleware/correlationContext";
 import { validateApiKey } from "./routes/apiKeysRouter";
+import { AppError } from "./utils/errors";
 initTracing();
 
 const app = express();
@@ -273,6 +276,19 @@ export function log(message: string, source = "express") {
   app.use("/api", idempotency);
 
   await registerRoutes(httpServer, app);
+
+  // Ensure unmatched API routes return consistent JSON (instead of Express' default HTML 404).
+  // This MUST be registered after all routes, but before the API error handler.
+  app.use("/api", (req, _res, next) => {
+    next(
+      new AppError(
+        `Route ${req.method} ${req.originalUrl || req.path} not found`,
+        404,
+        "NOT_FOUND",
+        true,
+      ),
+    );
+  });
 
   // API Error Handler (Centralized)
   app.use("/api", apiErrorHandler);

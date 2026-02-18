@@ -130,7 +130,6 @@ import path from "path";
 import fs from "fs";
 
 import { createRunRouter } from "./routes/runRouter";
-import { errorHandler } from "./middleware/error";
 import { createBrowserControlRouter } from "./routes/browserControlRouter";
 import { createTerminalControlRouter, terminalClients } from "./routes/terminalControlRouter";
 import { createWorkflowRouter } from "./routes/workflowRouter";
@@ -1859,9 +1858,6 @@ export async function registerRoutes(
       }
     });
   });
-
-  // Global Error Handling Middleware
-  app.use(errorHandler);
 
   return httpServer;
 }

@@ -1000,7 +1000,10 @@ export function ChatInterface({
     const currentChatId = chatId || null;
 
     // Start run when streaming begins
-    if (prevState === "idle" && (aiState === "thinking" || aiState === "responding")) {
+    if (
+      prevState === "idle" &&
+      (aiState === "thinking" || aiState === "responding" || aiState === "sending" || aiState === "streaming")
+    ) {
       streamingChatIdRef.current = currentChatId;
       if (currentChatId) {
         startRun(currentChatId, undefined, undefined, chatTitle || undefined);
@@ -1008,22 +1011,32 @@ export function ChatInterface({
     }
 
     // Update to streaming status
-    if (prevState === "thinking" && aiState === "responding") {
+    if (
+      (prevState === "thinking" || prevState === "sending") &&
+      (aiState === "responding" || aiState === "streaming")
+    ) {
       if (streamingChatIdRef.current) {
         updateStatus(streamingChatIdRef.current, 'streaming');
       }
     }
 
     // Complete run when streaming ends
-    if ((prevState === "thinking" || prevState === "responding") && aiState === "idle") {
+    if (
+      (prevState === "thinking" || prevState === "responding" || prevState === "sending" || prevState === "streaming") &&
+      (aiState === "idle" || aiState === "done" || aiState === "error")
+    ) {
       const completedChatId = streamingChatIdRef.current;
       if (completedChatId) {
         // Get the active chat ID from the current prop (may have changed if user switched chats)
-        completeRun(completedChatId, currentChatId);
+        if (aiState === "error") {
+          failRun(completedChatId, "Stream error", currentChatId);
+        } else {
+          completeRun(completedChatId, currentChatId);
+        }
         streamingChatIdRef.current = null;
       }
     }
-  }, [aiState, chatId, chatTitle, startRun, updateStatus, completeRun]);
+  }, [aiState, chatId, chatTitle, startRun, updateStatus, completeRun, failRun]);
 
   // Reset streaming state when chatId changes (switching chats)
   // This ensures the new chat starts clean without interference from previous chat
