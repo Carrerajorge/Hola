@@ -58,18 +58,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # gh CLI uses GH_TOKEN in Actions
-          export GH_TOKEN="${GH_TOKEN}"
-
           for attempt in $(seq 1 360); do
-            runs_json="$(timeout 20s gh run list --repo "${GITHUB_REPOSITORY}" --workflow "ci.yml" --branch "${BRANCH}" --json headSha,status,conclusion --limit 50 2>/dev/null || true)"
+            runs_json="$(curl -fsSL \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?branch=${BRANCH}&per_page=50" \
+              2>/dev/null || true)"
             if [ -z "${runs_json}" ] || [ "${runs_json}" = "null" ]; then
               echo "Unable to read workflow runs yet; retrying..."
               sleep 10
               continue
             fi
 
-            ci_line="$(echo "${runs_json}" | python3 -c 'import json,os,sys; sha=os.environ.get(\"SHA\",\"\"); runs=json.load(sys.stdin); r=next((x for x in runs if x.get(\"headSha\")==sha), None); print(\"__notfound__\" if r is None else ((r.get(\"status\") or \"\") + \" \" + (r.get(\"conclusion\") or \"\")).strip())' 2>/dev/null || echo '__parsefail__')"
+            ci_line="$(echo "${runs_json}" | python3 -c 'import json,os,sys; sha=os.environ.get(\"SHA\",\"\"); payload=json.load(sys.stdin); runs=payload.get(\"workflow_runs\",[]) if isinstance(payload,dict) else []; r=next((x for x in runs if x.get(\"head_sha\")==sha), None); print(\"__notfound__\" if r is None else ((r.get(\"status\") or \"\") + \" \" + (r.get(\"conclusion\") or \"\")).strip())' 2>/dev/null || echo '__parsefail__')"
 
             status="$(echo "${ci_line}" | awk '{print $1}')"
             conclusion="$(echo "${ci_line}" | awk '{print $2}')"
