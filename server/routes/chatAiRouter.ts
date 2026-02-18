@@ -1464,11 +1464,18 @@ const cleanSkipRunStreamDedup = (): void => {
             emitTrace: emitSkillTrace,
             now: new Date(),
           });
+          let skillTimeoutId: NodeJS.Timeout | null = null;
           const timeoutPromise = new Promise<never>((_, reject) => {
-            setTimeout(() => reject(new Error(`Skill execution timeout after ${skillTimeoutMs}ms`)), skillTimeoutMs);
+            skillTimeoutId = setTimeout(() => reject(new Error(`Skill execution timeout after ${skillTimeoutMs}ms`)), skillTimeoutMs);
           });
 
-          skillExecutionResult = await Promise.race([executeSkillPromise, timeoutPromise]);
+          try {
+            skillExecutionResult = await Promise.race([executeSkillPromise, timeoutPromise]);
+          } finally {
+            if (skillTimeoutId) {
+              clearTimeout(skillTimeoutId);
+            }
+          }
           emitSkillTrace({ stage: 'planner', status: 'ok', message: 'skill_router_finished', details: { status: skillExecutionResult.status, continueWithModel: skillExecutionResult.continueWithModel } });
 
           const seed = typeof skillExecutionResult.outputText === "string" ? skillExecutionResult.outputText.trim() : "";

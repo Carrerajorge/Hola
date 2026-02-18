@@ -13,8 +13,20 @@ import { createUnifiedRun, executeUnifiedChat } from '../agent/unifiedChatHandle
 // Auto-reply timeout: 120 seconds max (document generation needs extra time)
 const AUTO_REPLY_TIMEOUT_MS = 120_000;
 
+const MAX_AUTO_REPLY_PROMPT_LENGTH = 800;
+
 function requireUserId(req: AuthenticatedRequest): string {
   return getSecureUserId(req as any) || '';
+}
+
+function safePromptText(value: unknown): string {
+  return String(value ?? '')
+    .normalize('NFKC')
+    .replace(/\u0000/g, '')
+    .replace(/[\x00-\x1f\x7f-\x9f]/g, '')
+    .replace(/[\u202A-\u202E\u2066-\u2069]/g, '')
+    .trim()
+    .slice(0, MAX_AUTO_REPLY_PROMPT_LENGTH);
 }
 
 function safeChatId(userId: string, remoteJid: string): string {
@@ -129,6 +141,41 @@ export function createWhatsAppWebRouter(): Router {
     res.json({ success: true, autoReply: enabled });
   });
 
+  // Optional: customize how the bot should respond in WhatsApp auto-replies.
+  router.get('/settings', async (req, res) => {
+    const userId = requireUserId(req as any);
+    if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+
+    return res.json({
+      success: true,
+      settings: {
+        autoReply: whatsappWebManager.isAutoReplyEnabled(userId),
+        customPrompt: whatsappWebManager.getAutoReplyPrompt(userId),
+      },
+    });
+  });
+
+  router.put('/settings', async (req, res) => {
+    const userId = requireUserId(req as any);
+    if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+
+    const raw = (req.body || {}) as { customPrompt?: unknown };
+    if (raw.customPrompt === undefined) {
+      return res.status(400).json({ success: false, error: 'customPrompt is required' });
+    }
+
+    const customPrompt = safePromptText(raw.customPrompt);
+    whatsappWebManager.setAutoReplyPrompt(userId, customPrompt);
+
+    return res.json({
+      success: true,
+      settings: {
+        autoReply: whatsappWebManager.isAutoReplyEnabled(userId),
+        customPrompt,
+      },
+    });
+  });
+
   // Send a test message to the user's own WhatsApp number
   router.post('/test', async (req, res) => {
     const userId = requireUserId(req as any);
@@ -204,6 +251,12 @@ async function autoReplyFromWhatsApp(opts: {
   const messages: Array<{ role: string; content: string }> = history
     .filter((m: any) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
     .map((m: any) => ({ role: m.role, content: m.content }));
+
+  const customPrompt = whatsappWebManager.getAutoReplyPrompt(userId).trim();
+  if (customPrompt) {
+    // Keep the default unified system prompt, but add a per-user style hint with high priority.
+    messages.unshift({ role: 'system', content: customPrompt });
+  }
 
   // If the message has an image, inject a system hint about the image being available
   // and encode the image as base64 data URL in the last user message for vision models

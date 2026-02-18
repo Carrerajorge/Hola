@@ -118,6 +118,7 @@ async function makeApp() {
 describe("chat stream isolation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.resetModules();
     resolveSkillContextMock.mockResolvedValue(null);
     buildSkillSectionMock.mockReturnValue("");
     chatMock.mockResolvedValue({ content: "ok", role: "assistant", usage: { totalTokens: 10 } });
@@ -195,5 +196,31 @@ describe("chat stream isolation", () => {
     } finally {
       await close();
     }
-  }, 20000);
+  }, 60000);
+
+  it("rejects a second stream for the same conversation when queueMode=reject", async () => {
+    const app = await makeApp();
+    const { client, close } = await createHttpTestClient(app);
+
+    try {
+      const payload = {
+        messages: [{ role: "user", content: "A" }],
+        conversationId: "chat_lock_a",
+        chatId: "chat_lock_a",
+        latencyMode: "fast",
+        queueMode: "reject",
+      };
+
+      const [first, second] = await Promise.all([
+        client.post("/api/chat/stream").set("x-request-id", "req_lock_a").send(payload),
+        client.post("/api/chat/stream").set("x-request-id", "req_lock_b").send(payload),
+      ]);
+
+      const statuses = [first.status, second.status];
+      expect(statuses.includes(200)).toBe(true);
+      expect(statuses.includes(409)).toBe(true);
+    } finally {
+      await close();
+    }
+  }, 60000);
 });
