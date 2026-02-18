@@ -16,7 +16,8 @@
     "db:migrate:prod": "node dist/migrate.cjs",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage --maxWorkers=1 --no-file-parallelism --coverage.reportsDirectory=coverage --coverage.provider=v8",
+    "test:coverage": "vitest run --coverage --maxWorkers=1 --no-file-parallelism --coverage.reportsDirectory=coverage --coverage.provider=v8 --coverage.reporter=text --coverage.reporter=json --coverage.reporter=json-summary --coverage.reporter=html",
+    "test:coverage:istanbul": "vitest run --coverage --maxWorkers=1 --no-file-parallelism --coverage.reportsDirectory=coverage --coverage.provider=istanbul --coverage.reporter=text --coverage.reporter=json --coverage.reporter=json-summary --coverage.reporter=html",
     "test:agentic": "vitest run tests/agentic",
     "test:agentic:integration": "bash ./scripts/test-agentic-integration.sh",
     "test:client": "vitest run --config vitest.client.config.ts",
@@ -59,7 +60,7 @@
     "@types/cookie-signature": "^1.1.2", "@types/d3": "^7.4.3", "@types/dockerode": "^4.0.1", "@types/dompurify": "^3.2.0", "@types/file-saver": "^2.0.7", "@types/ioredis": "^5.0.0", "@types/jsdom": 
     "^27.0.0", "@types/katex": "^0.16.8", "@types/memoizee": "^0.4.12", "@types/multer": "^2.0.0", "@types/prismjs": "^1.26.6", "@types/react-pdf": "^6.2.0", "@types/react-syntax-highlighter": 
     "^15.5.13", "@types/react-window": "^2.0.0", "@types/supertest": "^6.0.3", "@types/swagger-jsdoc": "^6.0.4", "@types/swagger-ui-express": "^4.1.8", "@types/three": "^0.182.0", "@types/unist": 
-    "^3.0.3", "@uppy/aws-s3": "^5.1.0", "@uppy/core": "^5.2.0", "@uppy/dashboard": "^5.1.1", "@uppy/react": "^5.2.0", "@upstash/redis": "^1.36.2", "@vitest/coverage-v8": "^4.0.16", 
+    "^3.0.3", "@uppy/aws-s3": "^5.1.0", "@uppy/core": "^5.2.0", "@uppy/dashboard": "^5.1.1", "@uppy/react": "^5.2.0", "@upstash/redis": "^1.36.2", "@vitest/coverage-v8": "^4.0.16", "@vitest/coverage-istanbul": "^4.0.16", 
     "@whiskeysockets/baileys": "^7.0.0-rc.9", "asciimath2tex": "^1.5.0", "axios": "^1.13.5", "bcrypt": "^6.0.0", "bullmq": "^5.67.3", "class-variance-authority": "^0.7.1", "clsx": "^2.1.1", "cmdk": 
     "^1.1.1", "comlink": "^4.4.2", "compression": "^1.8.1", "connect-pg-simple": "^10.0.0", "cookie": "^1.1.1", "cookie-signature": "^1.2.2", "cors": "^2.8.5", "d3": "^7.9.0", "date-fns": "^3.6.0", 
     "dockerode": "^4.0.9", "docx": "^9.5.1", "dompurify": "^3.3.1", "dotenv": "^17.2.4", "drizzle-orm": "^0.45.1", "drizzle-zod": "^0.8.3", "duck-duck-scrape": "^2.2.7", "echarts": "^6.0.0", 

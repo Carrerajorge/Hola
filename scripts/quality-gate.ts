@@ -42,6 +42,8 @@ const COVERAGE_FINAL_PATH = path.join(COVERAGE_BASE_DIR, "coverage-final.json");
 const COVERAGE_TEMP_DIR = path.join(COVERAGE_BASE_DIR, ".tmp");
 const COVERAGE_MAX_RETRIES = 4;
 const COVERAGE_ERROR_OUTPUT_LIMIT = 20_000;
+const COVERAGE_ARTIFACT_STABILIZATION_MS = 1_200;
+const COVERAGE_ARTIFACT_STABILIZATION_POLL_MS = 100;
 
 const DEFAULT_THRESHOLDS: ThresholdConfig = {
   lines: 90,
@@ -224,6 +226,116 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function waitForStableCoverageSummary(): Promise<boolean> {
+  const deadline = Date.now() + COVERAGE_ARTIFACT_STABILIZATION_MS;
+  let lastSize = -1;
+
+  while (Date.now() < deadline) {
+    try {
+      if (!fs.existsSync(COVERAGE_SUMMARY_PATH)) {
+        await sleep(COVERAGE_ARTIFACT_STABILIZATION_POLL_MS);
+        continue;
+      }
+
+      const currentSize = fs.statSync(COVERAGE_SUMMARY_PATH).size;
+      if (currentSize > 0 && currentSize === lastSize) {
+        return true;
+      }
+      lastSize = currentSize;
+    } catch {
+      // best effort; retry until timeout
+    }
+
+    await sleep(COVERAGE_ARTIFACT_STABILIZATION_POLL_MS);
+  }
+
+  return false;
+}
+
+function parseCoverageFromObject(candidate: unknown): CoverageSummary | null {
+  const total = (candidate as { total?: unknown })?.total;
+  if (!total || typeof total !== "object") {
+    return null;
+  }
+
+  const metricNames: CoverageMetricName[] = ["lines", "statements", "functions", "branches"];
+  for (const metric of metricNames) {
+    const metricData = (total as Record<string, unknown>)[metric];
+    if (!metricData || typeof metricData !== "object") {
+      return null;
+    }
+    if (parseCoveragePercent((metricData as Record<string, unknown>)?.pct) === null) {
+      return null;
+    }
+  }
+
+  return { total: total as CoverageSummary["total"] } as CoverageSummary;
+}
+
+function parseCoverageSummaryFromFinal(): CoverageSummary | null {
+  if (!fs.existsSync(COVERAGE_FINAL_PATH)) {
+    return null;
+  }
+
+  try {
+    const raw = fs.readFileSync(COVERAGE_FINAL_PATH, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+
+    const totals = {
+      lines: { covered: 0, total: 0 },
+      statements: { covered: 0, total: 0 },
+      functions: { covered: 0, total: 0 },
+      branches: { covered: 0, total: 0 },
+    } as Record<CoverageMetricName, { covered: number; total: number }>;
+
+    for (const entry of Object.values(parsed) as Array<unknown>) {
+      if (!entry || typeof entry !== "object") {
+        continue;
+      }
+      const record = entry as Record<string, { covered?: unknown; total?: unknown }>;
+      (Object.keys(totals) as CoverageMetricName[]).forEach((metric) => {
+        const metricData = record[metric];
+        if (!metricData || typeof metricData !== "object") {
+          return;
+        }
+        const covered = parseCoveragePercent(metricData.covered);
+        const total = parseCoveragePercent(metricData.total);
+        if (covered === null || total === null) {
+          return;
+        }
+        totals[metric].covered += covered;
+        totals[metric].total += total;
+      });
+    }
+
+    const metricTotals: CoverageSummary = {
+      total: {
+        lines: { pct: 0, covered: 0, total: 0 },
+        statements: { pct: 0, covered: 0, total: 0 },
+        functions: { pct: 0, covered: 0, total: 0 },
+        branches: { pct: 0, covered: 0, total: 0 },
+      },
+    };
+
+    (Object.keys(totals) as CoverageMetricName[]).forEach((metric) => {
+      const totalCovered = totals[metric].covered;
+      const totalLines = totals[metric].total;
+      metricTotals.total[metric] = {
+        pct: totalLines > 0 ? (totalCovered / totalLines) * 100 : 0,
+        covered: totalCovered,
+        total: totalLines,
+      };
+    });
+
+    return metricTotals;
+  } catch {
+    return null;
+  }
+}
+
 function cleanupCoverageArtifacts(): void {
   try {
     fs.rmSync(COVERAGE_BASE_DIR, { recursive: true, force: true });
@@ -253,6 +365,11 @@ async function runCoverageWithRetry(env: NodeJS.ProcessEnv): Promise<GateCheckRe
       args: ["run", "test:coverage"],
     },
     {
+      name: "Unit tests + coverage (istanbul npm script)",
+      command: "npm",
+      args: ["run", "test:coverage:istanbul"],
+    },
+    {
       name: "Unit tests + coverage (vitest direct fallback)",
       command: "npx",
       args: [
@@ -267,6 +384,23 @@ async function runCoverageWithRetry(env: NodeJS.ProcessEnv): Promise<GateCheckRe
         "--coverage.reporter=json",
         "--coverage.reporter=json-summary",
         "--coverage.reporter=html",
+      ],
+    },
+    {
+      name: "Unit tests + coverage (vitest direct fallback + istanbul provider)",
+      command: "npx",
+      args: [
+        "vitest",
+        "run",
+        "--coverage",
+        "--no-file-parallelism",
+        "--maxWorkers=1",
+        "--coverage.provider=istanbul",
+        "--coverage.reportsDirectory=coverage",
+        "--coverage.include=tests/**/*.test.ts,server/**/*.test.ts",
+        "--coverage.exclude=**/dist/**",
+        "--coverage.reporter=json-summary",
+        "--coverage.reporter=json",
       ],
     },
     {
@@ -321,7 +455,22 @@ async function runCoverageWithRetry(env: NodeJS.ProcessEnv): Promise<GateCheckRe
     lastResult = result;
 
     if (result.status === "passed") {
-      break;
+      const stable = await waitForStableCoverageSummary();
+      if (stable) {
+        break;
+      }
+
+      console.warn(
+        `[quality-gate] coverage output is not yet stable for ${candidate.name}; retrying with next strategy`,
+      );
+      if (attempt + 1 >= attemptLimit) {
+        return {
+          ...result,
+          status: "failed",
+          details: "coverage summary file did not stabilize after test run",
+        };
+      }
+      continue;
     }
 
     if (!result.details || !isRecoverableCoverageError(result.rawOutput || result.details)) {
@@ -358,31 +507,17 @@ async function runCoverageWithRetry(env: NodeJS.ProcessEnv): Promise<GateCheckRe
 }
 
 function parseCoverageSummary(): CoverageSummary | null {
-  if (!fs.existsSync(COVERAGE_SUMMARY_PATH)) {
-    return null;
+  if (fs.existsSync(COVERAGE_SUMMARY_PATH)) {
+    try {
+      const raw = fs.readFileSync(COVERAGE_SUMMARY_PATH, "utf8");
+      const parsed = JSON.parse(raw);
+      return parseCoverageFromObject(parsed);
+    } catch (error) {
+      console.error("[quality-gate] failed parsing coverage summary:", error);
+    }
   }
 
-  try {
-    const raw = fs.readFileSync(COVERAGE_SUMMARY_PATH, "utf8");
-    const parsed = JSON.parse(raw);
-    const total = parsed?.total;
-    if (!total) {
-      return null;
-    }
-
-    const metricNames: CoverageMetricName[] = ["lines", "statements", "functions", "branches"];
-    for (const metric of metricNames) {
-      const pct = parseCoveragePercent(total[metric]?.pct);
-      if (pct === null) {
-        return null;
-      }
-    }
-
-    return parsed as CoverageSummary;
-  } catch (error) {
-    console.error("[quality-gate] failed parsing coverage summary:", error);
-    return null;
-  }
+  return parseCoverageSummaryFromFinal();
 }
 
 function getLowestCoverageFiles(metric: CoverageMetricName, limit: number): string[] {
