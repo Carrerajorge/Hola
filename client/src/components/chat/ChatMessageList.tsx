@@ -4,6 +4,7 @@ import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import { motion, AnimatePresence } from "framer-motion";
 import { Message } from "@/hooks/use-chats";
 import { MessageItem } from "./MessageItem";
+import { type AIState, isAiBusyState } from "@/components/chat-interface/types";
 import { SuggestedReplies, generateSuggestions } from "@/components/suggested-replies";
 import { PhaseNarrator } from "@/components/thinking-indicator";
 import { LiveExecutionConsole } from "@/components/live-execution-console";
@@ -32,7 +33,7 @@ export interface ChatMessageListProps {
     pendingGeneratedImage: { messageId: string; imageData: string } | null;
     latestGeneratedImageRef: React.RefObject<{ messageId: string; imageData: string } | null>;
     streamingContent: string;
-    aiState: "idle" | "thinking" | "responding" | "agent_working";
+    aiState: AIState;
     regeneratingMsgIndex: number | null;
     handleCopyMessage: (content: string, id: string) => void;
     handleStartEdit: (msg: Message) => void;
@@ -182,7 +183,8 @@ export function ChatMessageList({
     }, [messages, streamingContent, variant, effectiveStreamingId]);
 
     const isLastMessageAssistant = mergedMessages.length > 0 && mergedMessages[mergedMessages.length - 1].role === "assistant";
-    const showSuggestedReplies = variant === "default" && aiState === "idle" && isLastMessageAssistant && lastAssistantMessage && !streamingContent;
+    const isIdleLike = aiState === "idle" || aiState === "done";
+    const showSuggestedReplies = variant === "default" && isIdleLike && isLastMessageAssistant && lastAssistantMessage && !streamingContent;
 
     const suggestions = useMemo(() => {
         return showSuggestedReplies && lastAssistantMessage ? generateSuggestions(lastAssistantMessage.content) : [];
@@ -222,7 +224,7 @@ export function ChatMessageList({
                     </motion.div>
                 )}
 
-                {aiState !== "idle" && !streamingContent && variant === "default" && uiPhase !== 'console' && (
+                {isAiBusyState(aiState) && !streamingContent && variant === "default" && uiPhase !== 'console' && (
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}

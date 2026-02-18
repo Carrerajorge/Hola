@@ -3607,10 +3607,9 @@ export function ChatInterface({
     }
     const submitConversationId = chatId || latestChatIdRef.current;
 
-    // EMERGENCY BYPASS (DEV-ONLY): Allows quick debugging by bypassing run persistence/idempotency.
-    // Keep disabled in production.
-    const ENABLE_EMERGENCY_BYPASS =
-      import.meta.env.DEV && import.meta.env.VITE_ENABLE_EMERGENCY_BYPASS === "true";
+    // EMERGENCY BYPASS intentionally disabled in this branch to preserve chat run persistence/idempotency.
+    // Re-enable only in an explicit temporary local debug profile if required.
+    const ENABLE_EMERGENCY_BYPASS = false;
 
     // If input is present and starts with "!", do direct API call (dev only).
     if (ENABLE_EMERGENCY_BYPASS && input.trim().startsWith("!")) {

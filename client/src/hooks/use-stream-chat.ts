@@ -39,6 +39,8 @@ export interface StreamOptions {
   firstTokenTimeoutMs?: number;
   doneTimeoutMs?: number;
   maxRetries?: number;
+  retryBackoffMs?: number;
+  retryJitterMs?: number;
 }
 
 export interface StreamResult {
@@ -80,6 +82,9 @@ function createSession(): ConversationSession {
 const DEFAULT_STREAM_TIMEOUT_MS = 120_000;
 const DEFAULT_FIRST_TOKEN_TIMEOUT_MS = 8_000;
 const DEFAULT_DONE_TIMEOUT_MS = 45_000;
+const DEFAULT_MAX_RETRIES = 1;
+const DEFAULT_RETRY_BACKOFF_MS = 800;
+const DEFAULT_RETRY_JITTER_MS = 250;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -266,11 +271,20 @@ export function useStreamChat(deps: StreamChatDeps) {
   );
 
   const finalize = useCallback(
-    (message: Message, conversationId?: string | null) => {
+    (message: Message, conversationId?: string | null, finalState: AIState = "idle") => {
       const targetConversationId =
         (conversationId && conversationId.trim()) ||
         getActiveConversationId?.() ||
         lastStartedConversationRef.current;
+
+      const applyFinalState = (state: AIState, targetId: string | null) => {
+        setAiState(state, targetId);
+        if (state !== "idle") {
+          queueMicrotask(() => {
+            setAiState((prev) => (prev === state ? "idle" : prev), targetId);
+          });
+        }
+      };
 
       if (!targetConversationId) {
         setOptimisticMessages((prev) => [...prev, message]);
@@ -279,7 +293,7 @@ export function useStreamChat(deps: StreamChatDeps) {
         });
         streamingContentRef.current = "";
         setStreamingContent("");
-        setAiState("idle", targetConversationId);
+        applyFinalState(finalState, targetConversationId);
         setAiProcessSteps?.([], targetConversationId);
         return;
       }
@@ -304,7 +318,7 @@ export function useStreamChat(deps: StreamChatDeps) {
         setStreamingContent("");
       }
 
-      setAiState("idle", targetConversationId);
+      applyFinalState(finalState, targetConversationId);
       setAiProcessSteps?.([], targetConversationId);
 
       queueMicrotask(() => {

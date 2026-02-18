@@ -53,6 +53,7 @@ import { VirtualComputer } from "@/components/virtual-computer";
 import { getFileTheme } from "@/lib/fileTypeTheme";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import "@/components/ui/glass-effects.css";
+import { type AIState, isAiBusyState } from "@/components/chat-interface/types";
 
 interface UploadedFile {
   id?: string;
@@ -100,7 +101,7 @@ export interface ComposerProps {
   setSelectedDocTool: (tool: "word" | "excel" | "ppt" | "figma" | null) => void;
   closeDocEditor: () => void;
   openBlankDocEditor: (type: "word" | "excel" | "ppt", options?: { showInstructions?: boolean }) => void;
-  aiState: "idle" | "thinking" | "responding" | "agent_working";
+  aiState: AIState;
   isRecording: boolean;
   isPaused: boolean;
   recordingTime: number;
@@ -1015,7 +1016,7 @@ export function Composer({
                   sandbox="allow-scripts allow-same-origin allow-forms"
                   title="Virtual Browser"
                 />
-                {aiState !== "idle" && (
+                {isAiBusyState(aiState) && (
                   <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
                     <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
                   </div>
@@ -1054,7 +1055,7 @@ export function Composer({
                   sandbox="allow-scripts allow-same-origin allow-forms"
                   title="Virtual Browser"
                 />
-                {aiState !== "idle" && (
+                {isAiBusyState(aiState) && (
                   <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
                     <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
                   </div>

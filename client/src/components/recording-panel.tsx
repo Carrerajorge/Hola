@@ -10,6 +10,7 @@ import {
   SILVER_ICON_BUTTON_TONE,
 } from "@/lib/silver-ui";
 import { useSettingsContext } from "@/contexts/SettingsContext";
+import { type AIState, isAiBusyState } from "@/components/chat-interface/types";
 
 interface RecordingPanelProps {
   isRecording: boolean;
@@ -24,7 +25,7 @@ interface RecordingPanelProps {
   onOpenVoiceChat: () => void;
   onStopChat: () => void;
   onSubmit: () => void;
-  aiState: "idle" | "thinking" | "responding" | "agent_working";
+  aiState: AIState;
   hasContent: boolean;
   isAgentRunning?: boolean;
   onAgentStop?: () => void;
@@ -60,7 +61,7 @@ export function RecordingPanel({
   const voiceEnabled = !!settings.voiceMode;
 
   // Show stop button if either AI is processing OR agent is running
-  const showStopButton = aiState !== "idle" || isAgentRunning;
+  const showStopButton = isAiBusyState(aiState) || isAgentRunning;
 
   const handleStop = () => {
     if (isAgentRunning && onAgentStop) {

@@ -21,6 +21,8 @@ interface GptActionMenuProps {
     modelsByProvider: Record<string, AvailableModel[]>;
     selectedModelId: string | null;
     setSelectedModelId: (id: string) => void;
+    onModelChange?: (id: string) => void;
+    modelChangeDisabled?: boolean;
     onNewChat?: () => void;
     onAboutGpt?: (gpt: ActiveGpt) => void;
     onEditGpt?: (gpt: ActiveGpt) => void;
@@ -34,6 +36,8 @@ export function GptActionMenu({
     modelsByProvider,
     selectedModelId,
     setSelectedModelId,
+    onModelChange,
+    modelChangeDisabled = false,
     onNewChat,
     onAboutGpt,
     onEditGpt,
@@ -77,15 +81,28 @@ export function GptActionMenu({
                                     <div className="text-xs font-medium text-muted-foreground px-2 py-1.5">
                                         {provider === "xai" ? "xAI" : provider === "gemini" ? "Google Gemini" : provider}
                                     </div>
-                                    {models.map((model) => (
-                                        <DropdownMenuItem
-                                            key={model.id}
-                                            className={cn("flex items-center gap-2", selectedModelId === model.id ? "bg-muted" : "")}
-                                            onClick={() => {
-                                                setSelectedModelId(model.id);
+                                        {models.map((model) => (
+                                            <DropdownMenuItem
+                                                key={model.id}
+                                                className={cn(
+                                                    "flex items-center gap-2",
+                                                    selectedModelId === model.id ? "bg-muted" : "",
+                                                    modelChangeDisabled && "opacity-50 cursor-not-allowed"
+                                                )}
+                                                onClick={() => {
+                                                if (modelChangeDisabled) {
+                                                    toast({
+                                                        title: "Respuesta en curso",
+                                                        description: "Espera a que termine para cambiar el modelo.",
+                                                    });
+                                                    setOpen(false);
+                                                    return;
+                                                }
+                                                const handler = onModelChange ?? setSelectedModelId;
+                                                handler(model.id);
                                                 setOpen(false);
-                                            }}
-                                        >
+                                                }}
+                                            >
                                             {selectedModelId === model.id && <Check className="h-4 w-4" />}
                                             <span className={cn(selectedModelId !== model.id ? "pl-6" : "")}>{model.name}</span>
                                         </DropdownMenuItem>

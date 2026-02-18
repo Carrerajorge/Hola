@@ -50,6 +50,7 @@ import {
 } from "./MessageParts";
 import { AgentRunContent } from "./AgentRunContent";
 import { AgentStateIndicator } from "./AgentStateIndicator";
+import { type AIState } from "@/components/chat-interface/types";
 
 export interface AssistantMessageProps {
     message: Message;
@@ -59,7 +60,7 @@ export interface AssistantMessageProps {
     copiedMessageId: string | null;
     messageFeedback: Record<string, "up" | "down" | null>;
     speakingMessageId: string | null;
-    aiState: "idle" | "thinking" | "responding" | "agent_working";
+    aiState: AIState;
     isRegenerating: boolean;
     isGeneratingImage: boolean;
     pendingGeneratedImage: { messageId: string; imageData: string } | null;
