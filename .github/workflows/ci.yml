@@ -155,18 +155,18 @@ jobs:
     timeout-minutes: 25
     services:
       postgres:
-        image: pgvector/pgvector:pg15
+        image: pgvector/pgvector:pg16
         env:
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: testdb
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: iliagpt
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -321,10 +321,27 @@ jobs:
           QUALITY_GATE_STATEMENTS: "90"
           QUALITY_GATE_FUNCTIONS: "90"
           QUALITY_GATE_BRANCHES: "90"
-        run: |
+       run: |
           set -euo pipefail
+
+          node - <<'NODE'
+          import pg from "pg";
+          const { Client } = pg;
+
+          const url = process.env.DATABASE_URL;
+          if (!url) throw new Error("DATABASE_URL missing");
+
+          const client = new Client({ connectionString: url });
+          await client.connect();
+          await client.query('CREATE EXTENSION IF NOT EXISTS vector;');
+          await client.end();
+
+          console.log("[ci] ensured pgvector extension");
+          NODE
+
           npm run db:push
           npm run quality:gate
+
 
       - name: Upload quality gate report
         if: always()

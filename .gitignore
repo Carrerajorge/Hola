@@ -117,3 +117,4 @@ rollback-bluegreen.sh
 
 vps-bootstrap-bluegreen.sh
 
+audit.json
