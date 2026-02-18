@@ -10,6 +10,7 @@
 
 import { Request, Response } from "express";
 import { EventEmitter } from "events";
+import { randomUUID } from "crypto";
 
 // Streaming configuration
 export interface StreamConfig {
@@ -47,7 +48,7 @@ export function initSSEStream(
     options: Partial<StreamConfig> = {}
 ): StreamController {
     const config = { ...DEFAULT_CONFIG, ...options };
-    const streamId = `stream_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const streamId = `stream_${typeof randomUUID === "function" ? randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`}`;
 
     // Set SSE headers
     res.setHeader("Content-Type", "text/event-stream");

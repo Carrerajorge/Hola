@@ -123,6 +123,7 @@
     "fast-xml-parser": "5.3.6",
     "xlsx": "npm:@e965/xlsx@^0.20.3",
     "pdfjs-dist": "4.10.38",
+    "fast-xml-parser": "5.3.6",
     "esbuild": "^0.25.0",
     "mermaid": "^11.12.3",
     "markdown-it": "^14.1.1",

@@ -276,10 +276,40 @@ export function logError(error: AppError, context?: Record<string, unknown>): vo
     console.info('[INFO]', logData);
   }
 
-  // TODO: Send to error tracking service (e.g., Sentry)
-  // if (process.env.NODE_ENV === 'production') {
-  //   sendToErrorTracking(logData);
-  // }
+  sendToErrorTracking(error, context);
+}
+
+function sendToErrorTracking(error: AppError, context?: Record<string, unknown>): void {
+  const env = typeof import.meta !== "undefined" ? (import.meta as { env?: Record<string, any> }).env : undefined;
+  const endpoint = (env?.VITE_ERROR_TRACKING_ENDPOINT as string | undefined) || (env?.PROD ? "/api/errors/log" : "");
+
+  if (!endpoint || typeof window === "undefined" || typeof navigator === "undefined") {
+    return;
+  }
+
+  const componentName = typeof (context as any)?.component === "string" ? String((context as any).component) : undefined;
+  const componentStack = typeof (context as any)?.componentStack === "string" ? String((context as any).componentStack) : undefined;
+
+  // Match server/routes/errorRouter.ts expected payload (unknown keys are ignored server-side)
+  const payload = {
+    errorId: String(error.code || error.type || "client_error"),
+    message: String(error.message || ""),
+    stack: error.originalError?.stack,
+    componentStack,
+    componentName,
+    url: window.location.href,
+    userAgent: navigator.userAgent,
+    timestamp: new Date().toISOString(),
+  } as const;
+
+  void fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+    keepalive: true,
+  }).catch(() => {});
 }
 
 /**
