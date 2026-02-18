@@ -95,7 +95,10 @@ export function ChatHeader({
     const { toast } = useToast();
     const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
     const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
-    const currentInput = useChatStore((s) => s.input);
+    const currentInput = useChatStore((s) => {
+        if (!chatId) return s.input;
+        return s.conversations[chatId]?.input ?? s.input;
+    });
     const { availableModels, isAnyModelAvailable, selectedModelId, setSelectedModelId } = useModelAvailability();
     const isChatProcessing = useChatIsProcessing(chatId);
 

@@ -71,18 +71,39 @@ function WorkspaceContent() {
 
   type WorkspaceAiState = "idle" | "thinking" | "responding" | "agent_working";
   type WorkspaceAiStep = { step: string; status: "pending" | "active" | "done" };
+  type WorkspaceDocGenState = {
+    status: 'idle' | 'generating' | 'ready' | 'error';
+    progress: number;
+    stage: string;
+    downloadUrl: string | null;
+    fileName: string | null;
+    fileSize: number | null;
+    error?: string;
+  };
   type WorkspaceConversationUiState = {
     aiState: WorkspaceAiState;
     aiProcessSteps: WorkspaceAiStep[];
     pendingRequestId: string | null;
     streamBuffer: string;
+    // Per-conversation Super Agent state
+    uiPhase: 'idle' | 'thinking' | 'console' | 'done';
+    activeRunId: string | null;
+    // Per-conversation document generation state
+    selectedDocTool: "word" | "excel" | "ppt" | "figma" | null;
+    docGenerationState: WorkspaceDocGenState;
   };
+
+  const DEFAULT_WS_DOC_GEN_STATE: WorkspaceDocGenState = { status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null };
 
   const createWorkspaceConversationUiState = (): WorkspaceConversationUiState => ({
     aiState: "idle",
     aiProcessSteps: [],
     pendingRequestId: null,
     streamBuffer: "",
+    uiPhase: "idle",
+    activeRunId: null,
+    selectedDocTool: null,
+    docGenerationState: DEFAULT_WS_DOC_GEN_STATE,
   });
 
   const [conversationUiStateMap, setConversationUiStateMap] = useState<Record<string, WorkspaceConversationUiState>>({});
@@ -131,6 +152,12 @@ function WorkspaceContent() {
   const aiState: WorkspaceAiState = activeConversationState?.aiState || "idle";
   const aiProcessSteps: WorkspaceAiStep[] = activeConversationState?.aiProcessSteps || [];
 
+  // ── Per-conversation Super Agent & Doc state (derived from map) ───
+  const uiPhase = activeConversationState?.uiPhase || "idle";
+  const activeRunId = activeConversationState?.activeRunId || null;
+  const selectedDocTool = activeConversationState?.selectedDocTool || null;
+  const docGenerationState = activeConversationState?.docGenerationState || DEFAULT_WS_DOC_GEN_STATE;
+
   const setAiState = useCallback((nextState: WorkspaceAiState | ((prev: WorkspaceAiState) => WorkspaceAiState)) => {
     const targetConversationId = activeConversationId || pendingChatIdRef.current || newChatStableKey;
     if (!targetConversationId) return;
@@ -165,6 +192,46 @@ function WorkspaceContent() {
           aiProcessSteps: resolvedSteps,
         },
       };
+    });
+  }, [activeConversationId, newChatStableKey]);
+
+  // ── Per-conversation setters for Super Agent & Doc state ──────────
+  const setUiPhase = useCallback((phase: 'idle' | 'thinking' | 'console' | 'done') => {
+    const targetConversationId = activeConversationId || pendingChatIdRef.current || newChatStableKey;
+    if (!targetConversationId) return;
+    setConversationUiStateMap((prev) => {
+      const current = prev[targetConversationId] || createWorkspaceConversationUiState();
+      return { ...prev, [targetConversationId]: { ...current, uiPhase: phase } };
+    });
+  }, [activeConversationId, newChatStableKey]);
+
+  const setActiveRunId = useCallback((id: string | null) => {
+    const targetConversationId = activeConversationId || pendingChatIdRef.current || newChatStableKey;
+    if (!targetConversationId) return;
+    setConversationUiStateMap((prev) => {
+      const current = prev[targetConversationId] || createWorkspaceConversationUiState();
+      return { ...prev, [targetConversationId]: { ...current, activeRunId: id } };
+    });
+  }, [activeConversationId, newChatStableKey]);
+
+  const setSelectedDocTool = useCallback((tool: "word" | "excel" | "ppt" | "figma" | null) => {
+    const targetConversationId = activeConversationId || pendingChatIdRef.current || newChatStableKey;
+    if (!targetConversationId) return;
+    setConversationUiStateMap((prev) => {
+      const current = prev[targetConversationId] || createWorkspaceConversationUiState();
+      return { ...prev, [targetConversationId]: { ...current, selectedDocTool: tool } };
+    });
+  }, [activeConversationId, newChatStableKey]);
+
+  const setDocGenerationState = useCallback((stateOrFn: WorkspaceDocGenState | ((prev: WorkspaceDocGenState) => WorkspaceDocGenState)) => {
+    const targetConversationId = activeConversationId || pendingChatIdRef.current || newChatStableKey;
+    if (!targetConversationId) return;
+    setConversationUiStateMap((prev) => {
+      const current = prev[targetConversationId] || createWorkspaceConversationUiState();
+      const resolved = typeof stateOrFn === "function"
+        ? (stateOrFn as (prev: WorkspaceDocGenState) => WorkspaceDocGenState)(current.docGenerationState)
+        : stateOrFn;
+      return { ...prev, [targetConversationId]: { ...current, docGenerationState: resolved } };
     });
   }, [activeConversationId, newChatStableKey]);
 

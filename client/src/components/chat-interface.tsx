@@ -458,7 +458,7 @@ export function ChatInterface({
   const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
 
   // Sync with chat store for future full migration
-  const { setInput: setStoreInput } = useChatStore();
+  const { setInputLegacy: setStoreInput } = useChatStore();
 
   const {
     state: conversationState,

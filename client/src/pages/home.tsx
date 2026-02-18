@@ -25,9 +25,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { useStreamingStore, useProcessingChatIds, usePendingBadges } from "@/stores/streamingStore";
 import { useAgentStore } from "@/stores/agent-store";
-import { useSuperAgentStore } from "@/stores/super-agent-store";
-import { pollingManager } from "@/lib/polling-manager";
-import { queryClient } from "@/lib/queryClient";
+// pollingManager, useSuperAgentStore, and queryClient removed from handleNewChat:
+// new chat no longer cancels background runs to preserve parallel chat isolation.
 import { apiFetch } from "@/lib/apiClient";
 
 const AppsViewLazy = lazy(() => import("@/components/apps-view").then((m) => ({ default: m.AppsView })));
@@ -154,29 +153,7 @@ export default function Home() {
 
   type HomeAiState = "idle" | "thinking" | "responding" | "agent_working";
   type HomeAiStep = { step: string; status: "pending" | "active" | "done" };
-  type HomeConversationUiState = {
-    aiState: HomeAiState;
-    aiProcessSteps: HomeAiStep[];
-    pendingRequestId: string | null;
-    streamBuffer: string;
-  };
-
-  const createHomeConversationUiState = (): HomeConversationUiState => ({
-    aiState: "idle",
-    aiProcessSteps: [],
-    pendingRequestId: null,
-    streamBuffer: "",
-  });
-
-  const [conversationUiStateMap, setConversationUiStateMap] = useState<Record<string, HomeConversationUiState>>({});
-
-  // Super Agent UI state - kept in parent to survive ChatInterface key changes
-  const [uiPhase, setUiPhase] = useState<'idle' | 'thinking' | 'console' | 'done'>('idle');
-  const [activeRunId, setActiveRunId] = useState<string | null>(null);
-
-  // Document generation state - kept in parent to survive ChatInterface key changes during new chat creation
-  const [selectedDocTool, setSelectedDocTool] = useState<"word" | "excel" | "ppt" | "figma" | null>(null);
-  const [docGenerationState, setDocGenerationState] = useState<{
+  type HomeDocGenState = {
     status: 'idle' | 'generating' | 'ready' | 'error';
     progress: number;
     stage: string;
@@ -184,38 +161,34 @@ export default function Home() {
     fileName: string | null;
     fileSize: number | null;
     error?: string;
-  }>({ status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null });
+  };
+  type HomeConversationUiState = {
+    aiState: HomeAiState;
+    aiProcessSteps: HomeAiStep[];
+    pendingRequestId: string | null;
+    streamBuffer: string;
+    // Per-conversation Super Agent state (prevents bleed across chats)
+    uiPhase: 'idle' | 'thinking' | 'console' | 'done';
+    activeRunId: string | null;
+    // Per-conversation document generation state
+    selectedDocTool: "word" | "excel" | "ppt" | "figma" | null;
+    docGenerationState: HomeDocGenState;
+  };
 
-  // URL Persistence for Simulator/Plan (B4)
-  const search = useSearch();
-  useEffect(() => {
-    const params = new URLSearchParams(search);
-    const planId = params.get("planId");
+  const DEFAULT_DOC_GEN_STATE: HomeDocGenState = { status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null };
 
-    if (planId && planId !== activeRunId) {
-      // Restore Simulator view
-      setUiPhase('console');
-      setActiveRunId(planId);
-    } else if (!planId && activeRunId && uiPhase === 'console') {
-      // Clear if removed from URL? Optional.
-    }
-  }, [search, activeRunId, uiPhase]);
+  const createHomeConversationUiState = (): HomeConversationUiState => ({
+    aiState: "idle",
+    aiProcessSteps: [],
+    pendingRequestId: null,
+    streamBuffer: "",
+    uiPhase: "idle",
+    activeRunId: null,
+    selectedDocTool: null,
+    docGenerationState: DEFAULT_DOC_GEN_STATE,
+  });
 
-  // Update URL when activeRunId changes
-  useEffect(() => {
-    // Only manage URL if we are in console mode or have an active run
-    if (activeRunId && uiPhase === 'console') {
-      const url = new URL(window.location.href);
-      url.searchParams.set("planId", activeRunId);
-      window.history.replaceState({}, "", url.toString());
-    } else {
-      const url = new URL(window.location.href);
-      if (url.searchParams.has("planId")) {
-        url.searchParams.delete("planId");
-        window.history.replaceState({}, "", url.toString());
-      }
-    }
-  }, [activeRunId, uiPhase]);
+  const [conversationUiStateMap, setConversationUiStateMap] = useState<Record<string, HomeConversationUiState>>({});
 
   // Use global streaming store for tracking processing chats and pending badges
   const processingChatIds = useProcessingChatIds();
@@ -278,6 +251,12 @@ export default function Home() {
   const aiProcessSteps: HomeAiStep[] = activeConversationState?.aiProcessSteps || [];
   const aiStateChatId = aiState === "idle" ? null : activeConversationId;
 
+  // ── Per-conversation Super Agent & Doc state (derived from map) ───
+  const uiPhase = activeConversationState?.uiPhase || "idle";
+  const activeRunId = activeConversationState?.activeRunId || null;
+  const selectedDocTool = activeConversationState?.selectedDocTool || null;
+  const docGenerationState = activeConversationState?.docGenerationState || DEFAULT_DOC_GEN_STATE;
+
   const setAiState = useCallback((newState: HomeAiState | ((prev: HomeAiState) => HomeAiState)) => {
     const targetConversationId = activeConversationId || pendingChatIdRef.current || newChatStableKey;
     if (!targetConversationId) return;
@@ -314,6 +293,77 @@ export default function Home() {
       };
     });
   }, [activeConversationId, newChatStableKey]);
+
+  // ── Per-conversation setters for Super Agent & Doc state ──────────
+  const setUiPhase = useCallback((phase: 'idle' | 'thinking' | 'console' | 'done') => {
+    const targetConversationId = activeConversationId || pendingChatIdRef.current || newChatStableKey;
+    if (!targetConversationId) return;
+    setConversationUiStateMap((prev) => {
+      const current = prev[targetConversationId] || createHomeConversationUiState();
+      return { ...prev, [targetConversationId]: { ...current, uiPhase: phase } };
+    });
+  }, [activeConversationId, newChatStableKey]);
+
+  const setActiveRunId = useCallback((id: string | null) => {
+    const targetConversationId = activeConversationId || pendingChatIdRef.current || newChatStableKey;
+    if (!targetConversationId) return;
+    setConversationUiStateMap((prev) => {
+      const current = prev[targetConversationId] || createHomeConversationUiState();
+      return { ...prev, [targetConversationId]: { ...current, activeRunId: id } };
+    });
+  }, [activeConversationId, newChatStableKey]);
+
+  const setSelectedDocTool = useCallback((tool: "word" | "excel" | "ppt" | "figma" | null) => {
+    const targetConversationId = activeConversationId || pendingChatIdRef.current || newChatStableKey;
+    if (!targetConversationId) return;
+    setConversationUiStateMap((prev) => {
+      const current = prev[targetConversationId] || createHomeConversationUiState();
+      return { ...prev, [targetConversationId]: { ...current, selectedDocTool: tool } };
+    });
+  }, [activeConversationId, newChatStableKey]);
+
+  const setDocGenerationState = useCallback((stateOrFn: HomeDocGenState | ((prev: HomeDocGenState) => HomeDocGenState)) => {
+    const targetConversationId = activeConversationId || pendingChatIdRef.current || newChatStableKey;
+    if (!targetConversationId) return;
+    setConversationUiStateMap((prev) => {
+      const current = prev[targetConversationId] || createHomeConversationUiState();
+      const resolved = typeof stateOrFn === "function"
+        ? (stateOrFn as (prev: HomeDocGenState) => HomeDocGenState)(current.docGenerationState)
+        : stateOrFn;
+      return { ...prev, [targetConversationId]: { ...current, docGenerationState: resolved } };
+    });
+  }, [activeConversationId, newChatStableKey]);
+
+  // URL Persistence for Simulator/Plan (B4)
+  const search = useSearch();
+  useEffect(() => {
+    const params = new URLSearchParams(search);
+    const planId = params.get("planId");
+
+    if (planId && planId !== activeRunId) {
+      // Restore Simulator view
+      setUiPhase('console');
+      setActiveRunId(planId);
+    } else if (!planId && activeRunId && uiPhase === 'console') {
+      // Clear if removed from URL? Optional.
+    }
+  }, [search, activeRunId, uiPhase, setUiPhase, setActiveRunId]);
+
+  // Update URL when activeRunId changes
+  useEffect(() => {
+    // Only manage URL if we are in console mode or have an active run
+    if (activeRunId && uiPhase === 'console') {
+      const url = new URL(window.location.href);
+      url.searchParams.set("planId", activeRunId);
+      window.history.replaceState({}, "", url.toString());
+    } else {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has("planId")) {
+        url.searchParams.delete("planId");
+        window.history.replaceState({}, "", url.toString());
+      }
+    }
+  }, [activeRunId, uiPhase]);
 
 
   // Sync URL to active chat state (direct navigation to /chat/:id)
@@ -392,32 +442,18 @@ export default function Home() {
   }, [handleClearPendingCount, setActiveChatId]);
 
   const handleNewChat = (options?: { preserveGpt?: boolean }) => {
-    // TRANSACTIONAL RESET: Block all re-hydration for 5 seconds
-    // This prevents stale state from coming back after navigation
+    // ── Scoped reset: only affect the NEW conversation ──
+    // Other conversations keep their agent/streaming runs untouched so
+    // parallel chats are never disrupted by a "New Chat" action.
+
+    // Block re-hydration briefly to prevent stale state from re-appearing
     useAgentStore.getState().blockRehydration();
 
-    // Clear all streaming badges and pending response indicators
-    useStreamingStore.getState().clearAllBadges();
+    // DO NOT cancel all agent/super-agent runs or clear all badges.
+    // Background chats must continue processing undisturbed.
+    // The new conversation starts with empty state from createHomeConversationUiState().
 
-    // Clear all Super Agent runs
-    useSuperAgentStore.getState().clearAllRuns();
-
-    // Cancel all active agent runs and clear agent state
-    pollingManager.cancelAll();
-    useAgentStore.getState().clearAllRuns();
-
-    // Clear conversation state query cache to prevent stale data
-    queryClient.removeQueries({ queryKey: ['conversationState'] });
-
-    // Reset Super Agent UI state
-    setUiPhase('idle');
-    setActiveRunId(null);
-
-    // Reset document generation state
-    setSelectedDocTool(null);
-    setDocGenerationState({ status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null });
-
-    // Clear chat references - this triggers new chat mode
+    // Create a fresh conversation — its per-conversation state is empty by default
     const newConversationId = `new-chat-${Date.now()}`;
     setActiveChatId(null);
     setSelectedProjectId(null);
