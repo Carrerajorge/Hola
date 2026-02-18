@@ -194,6 +194,12 @@ jobs:
       - name: Run tests
         run: |
           set -euo pipefail
+
+          # Ensure pgvector is available in the CI database before migrations.
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client
+          PGPASSWORD=postgres psql -h localhost -U postgres -d iliagpt -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
           npm run db:push
           for attempt in 1 2; do
             npm run test:run -- --silent --passWithNoTests && break
@@ -206,7 +212,7 @@ jobs:
         env:
           CI: "true"
           NODE_ENV: test
-          DATABASE_URL: postgresql://test:test@localhost:5432/testdb
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/iliagpt
           SESSION_SECRET: ci-session-secret-min-32-chars
           OPENAI_API_KEY: ci_dummy_key
           GEMINI_API_KEY: ci_dummy_key
@@ -324,20 +330,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          node - <<'NODE'
-          import pg from "pg";
-          const { Client } = pg;
-
-          const url = process.env.DATABASE_URL;
-          if (!url) throw new Error("DATABASE_URL missing");
-
-          const client = new Client({ connectionString: url });
-          await client.connect();
-          await client.query('CREATE EXTENSION IF NOT EXISTS vector;');
-          await client.end();
-
-          console.log("[ci] ensured pgvector extension");
-          NODE
+          # Ensure pgvector is available in the quality-gate database before migrations.
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client
+          PGPASSWORD=test psql -h localhost -U test -d testdb -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
           npm run db:push
           npm run quality:gate
