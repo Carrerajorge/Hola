@@ -19,6 +19,12 @@ import { getCircuitBreaker, CircuitBreakerOpenError, CircuitState } from "./circ
 import type { ZodSchema } from "zod";
 import { type AgentEvent } from "./typedStreaming";
 
+// === New resilience imports ===
+import { RequestStateMachine, RequestState, requestTracker, type RequestStateMachineConfig } from "./requestStateMachine";
+import { gatewayBulkhead, BulkheadFullError, BulkheadTimeoutError } from "./gatewayBulkhead";
+import { validateLLMRequest, assertValidLLMRequest, LLMValidationError } from "./llmRequestValidator";
+import { gatewayTelemetry } from "./gatewayTelemetry";
+
 interface RateLimitState {
   tokens: number;
   lastRefill: number;
@@ -39,6 +45,14 @@ interface LLMRequestOptions {
   enableFallback?: boolean;
   skipCache?: boolean;
   disableImageGeneration?: boolean;
+  /** AbortSignal from client disconnect — propagated to cancel in-flight provider calls. */
+  abortSignal?: AbortSignal;
+  /** Override first-token timeout (ms). Default: 30_000. */
+  firstTokenTimeoutMs?: number;
+  /** Override stream idle timeout (ms). Default: 60_000. */
+  streamIdleTimeoutMs?: number;
+  /** Workspace ID for concurrency quota. */
+  workspaceId?: string;
 }
 
 interface LLMResponse {
@@ -708,62 +722,139 @@ class LLMGateway {
     const userId = options.userId || "anonymous";
     const enableFallback = options.enableFallback !== false;
     const timeout = options.timeout || DEFAULT_TIMEOUT_MS;
+    const provider = this.selectProvider(options);
+    const model = options.model || "unknown";
+
+    // --- State machine: track request lifecycle ---
+    const sm = requestTracker.create({
+      requestId,
+      overallTimeoutMs: timeout + 30_000, // safety net beyond the request timeout
+      firstTokenTimeoutMs: options.firstTokenTimeoutMs,
+      streamIdleTimeoutMs: options.streamIdleTimeoutMs,
+      metadata: { provider, model, userId },
+    });
+
+    // Propagate client abort to state machine
+    if (options.abortSignal) {
+      const onAbort = () => sm.cancel("Client disconnected");
+      if (options.abortSignal.aborted) {
+        sm.cancel("Client already disconnected");
+        throw new Error("Request aborted: client disconnected");
+      }
+      options.abortSignal.addEventListener("abort", onAbort, { once: true });
+      sm.on("terminal", () => options.abortSignal?.removeEventListener("abort", onAbort));
+    }
+
+    // Telemetry span
+    const { span, end: endSpan } = gatewayTelemetry.startGatewaySpan(requestId, provider, model, userId);
 
     this.metrics.totalRequests++;
-
-    // Check cache first
-    const cacheKey = this.getCacheKey(messages, options);
-    if (cacheKey) {
-      const cached = this.requestCache.get(cacheKey);
-      if (cached && cached.expiresAt > Date.now()) {
-        this.metrics.cacheHits++;
-        console.log(`[LLMGateway] ${requestId} cache hit`);
-        return { ...cached.response, cached: true, requestId };
-      }
-    }
-
-    // Check for duplicate in-flight request
-    const contentHash = this.generateContentHash(messages, options);
-    const inFlight = this.getInFlightRequest(contentHash);
-    if (inFlight) {
-      this.metrics.deduplicatedRequests++;
-      console.log(`[LLMGateway] ${requestId} deduplicated (waiting for existing request)`);
-      return inFlight.promise;
-    }
-
-    // Rate limit check
-    if (!this.checkRateLimit(userId)) {
-      throw new Error(`Rate limit exceeded for user ${userId}`);
-    }
-
-    // Truncate context (budget is independent from max output tokens; we keep a safe floor for small outputs).
-    const truncatedMessages = this.truncateContext(messages, this.getTruncationBudget(options.maxTokens));
-
-    // Create the request promise
-    const requestPromise = this.executeWithFallback(
-      truncatedMessages,
-      { ...options, requestId, timeout },
-      startTime,
-      enableFallback
-    );
-
-    // Register as in-flight
-    this.inFlightRequests.set(contentHash, { promise: requestPromise, startTime });
+    gatewayTelemetry.recordRequestStart(provider, model);
 
     try {
-      const result = await requestPromise;
-
-      // Cache successful response
-      if (cacheKey) {
-        this.requestCache.set(cacheKey, {
-          response: result,
-          expiresAt: Date.now() + CACHE_TTL_MS,
-        });
+      // --- Pre-flight validation ---
+      const validation = validateLLMRequest(messages, { model: options.model, temperature: options.temperature, topP: options.topP, maxTokens: options.maxTokens });
+      if (!validation.valid) {
+        const firstErr = validation.errors[0];
+        gatewayTelemetry.recordValidationError(firstErr.code);
+        sm.fail(`Validation error: ${firstErr.message}`);
+        throw new LLMValidationError(firstErr.message, firstErr.code, { allErrors: validation.errors });
       }
 
-      return result;
-    } finally {
-      this.inFlightRequests.delete(contentHash);
+      // Check cache first
+      const cacheKey = this.getCacheKey(messages, options);
+      if (cacheKey) {
+        const cached = this.requestCache.get(cacheKey);
+        if (cached && cached.expiresAt > Date.now()) {
+          this.metrics.cacheHits++;
+          console.log(`[LLMGateway] ${requestId} cache hit`);
+          sm.complete("cache hit");
+          endSpan("ok");
+          gatewayTelemetry.recordRequestComplete(provider, model, Date.now() - startTime, false);
+          return { ...cached.response, cached: true, requestId };
+        }
+      }
+
+      // Check for duplicate in-flight request
+      const contentHash = this.generateContentHash(messages, options);
+      const inFlight = this.getInFlightRequest(contentHash);
+      if (inFlight) {
+        this.metrics.deduplicatedRequests++;
+        console.log(`[LLMGateway] ${requestId} deduplicated (waiting for existing request)`);
+        const result = await inFlight.promise;
+        sm.complete("deduplicated");
+        endSpan("ok");
+        return result;
+      }
+
+      // Rate limit check
+      if (!this.checkRateLimit(userId)) {
+        sm.fail("Rate limit exceeded");
+        throw new Error(`Rate limit exceeded for user ${userId}`);
+      }
+
+      // --- Bulkhead: acquire concurrency slot ---
+      sm.queue("waiting for bulkhead slot");
+      gatewayTelemetry.recordStateTransition("created", "queued");
+
+      let bulkheadRelease: (() => void) | null = null;
+      try {
+        bulkheadRelease = await gatewayBulkhead.acquire(provider, userId, model);
+      } catch (err: any) {
+        if (err instanceof BulkheadFullError || err instanceof BulkheadTimeoutError) {
+          gatewayTelemetry.recordBulkheadRejection(provider, err.name);
+          sm.fail(`Bulkhead rejected: ${err.message}`);
+          throw err;
+        }
+        throw err;
+      }
+
+      try {
+        sm.start("executing provider call");
+        gatewayTelemetry.recordStateTransition("queued", "started");
+
+        // Truncate context
+        const truncatedMessages = this.truncateContext(messages, this.getTruncationBudget(options.maxTokens));
+
+        // Create the request promise
+        const requestPromise = this.executeWithFallback(
+          truncatedMessages,
+          { ...options, requestId, timeout },
+          startTime,
+          enableFallback
+        );
+
+        // Register as in-flight
+        this.inFlightRequests.set(contentHash, { promise: requestPromise, startTime });
+
+        try {
+          const result = await requestPromise;
+
+          // Cache successful response
+          if (cacheKey) {
+            this.requestCache.set(cacheKey, {
+              response: result,
+              expiresAt: Date.now() + CACHE_TTL_MS,
+            });
+          }
+
+          sm.complete("success");
+          endSpan("ok");
+          gatewayTelemetry.recordRequestComplete(provider, model, Date.now() - startTime, result.fromFallback ?? false);
+          return result;
+        } finally {
+          this.inFlightRequests.delete(contentHash);
+        }
+      } finally {
+        if (bulkheadRelease) bulkheadRelease();
+      }
+    } catch (error: any) {
+      if (!sm.isTerminal()) {
+        sm.fail(error.message?.slice(0, 200));
+      }
+      endSpan("error", error);
+      gatewayTelemetry.recordRequestFailed(provider, model, Date.now() - startTime, error.name || "Error");
+      throw error;
     }
   }
 
@@ -1378,7 +1469,7 @@ class LLMGateway {
     };
   }
 
-  // ===== Streaming with Checkpoints =====
+  // ===== Streaming with Checkpoints + State Machine + Guaranteed Closure =====
   async * streamChat(
     messages: ChatCompletionMessageParam[],
     options: LLMRequestOptions = {}
@@ -1386,27 +1477,93 @@ class LLMGateway {
     const requestId = options.requestId || this.generateRequestId();
     const userId = options.userId || "anonymous";
     const enableFallback = options.enableFallback !== false;
+    const model = options.model || "unknown";
     let sequenceId = 0;
     let accumulatedContent = "";
+    let streamStartTime = Date.now();
+
+    // --- State machine for this stream request ---
+    const sm = requestTracker.create({
+      requestId,
+      overallTimeoutMs: (options.timeout ?? DEFAULT_STREAM_TIMEOUT_MS) + 30_000,
+      firstTokenTimeoutMs: options.firstTokenTimeoutMs ?? 30_000,
+      streamIdleTimeoutMs: options.streamIdleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS,
+      metadata: { model, userId, type: "stream" },
+    });
+
+    // Propagate client abort
+    if (options.abortSignal) {
+      const onAbort = () => sm.cancel("Client disconnected during stream");
+      if (options.abortSignal.aborted) {
+        sm.cancel("Client already disconnected");
+        yield { content: "", sequenceId: 0, done: true, requestId, provider: undefined };
+        return;
+      }
+      options.abortSignal.addEventListener("abort", onAbort, { once: true });
+      sm.on("terminal", () => options.abortSignal?.removeEventListener("abort", onAbort));
+    }
+
+    // Auto-fail on state machine timeout (produces terminal event)
+    sm.on("timeout", () => {
+      gatewayTelemetry.recordTimeout(model, "overall");
+    });
+
+    const { span, end: endSpan } = gatewayTelemetry.startGatewaySpan(requestId, "auto", model, userId);
+
     const configuredProviders = this.getConfiguredProvidersInOrder();
     if (configuredProviders.length === 0) {
-      throw new Error(
-        "No LLM providers configured. Set at least one of: XAI_API_KEY (or GROK_API_KEY/ILIAGPT_API_KEY), GEMINI_API_KEY (or GOOGLE_API_KEY), OPENAI_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY."
-      );
+      sm.fail("No LLM providers configured");
+      endSpan("error", new Error("No providers configured"));
+      // GUARANTEED: always yield terminal done event
+      yield { content: "", sequenceId: sequenceId++, done: true, requestId };
+      return;
     }
 
     if (options.provider && options.provider !== "auto" && !this.isProviderConfigured(options.provider)) {
-      throw new Error(`Provider '${options.provider}' requested but not configured (missing API key).`);
+      const err = new Error(`Provider '${options.provider}' requested but not configured (missing API key).`);
+      sm.fail(err.message);
+      endSpan("error", err);
+      throw err;
     }
 
     const selected = this.selectProvider(options);
     let currentProvider: LLMProvider = this.isProviderConfigured(selected) ? selected : configuredProviders[0];
 
     this.metrics.totalRequests++;
+    gatewayTelemetry.recordRequestStart(currentProvider, model);
+
+    // Pre-flight validation
+    const validation = validateLLMRequest(messages, { model: options.model, temperature: options.temperature, topP: options.topP, maxTokens: options.maxTokens });
+    if (!validation.valid) {
+      const firstErr = validation.errors[0];
+      gatewayTelemetry.recordValidationError(firstErr.code);
+      sm.fail(`Validation: ${firstErr.message}`);
+      endSpan("error", new Error(firstErr.message));
+      // GUARANTEED: yield terminal done event
+      yield { content: "", sequenceId: sequenceId++, done: true, requestId };
+      return;
+    }
 
     if (!this.checkRateLimit(userId)) {
+      sm.fail("Rate limit exceeded");
+      endSpan("error", new Error("Rate limit exceeded"));
       throw new Error(`Rate limit exceeded for user ${userId}`);
     }
+
+    // Bulkhead
+    sm.queue("waiting for stream bulkhead slot");
+    let bulkheadRelease: (() => void) | null = null;
+    try {
+      bulkheadRelease = await gatewayBulkhead.acquire(currentProvider, userId, model);
+    } catch (err: any) {
+      gatewayTelemetry.recordBulkheadRejection(currentProvider, err.name);
+      sm.fail(`Bulkhead: ${err.message}`);
+      endSpan("error", err);
+      throw err;
+    }
+
+    sm.start("stream provider call started");
+    streamStartTime = Date.now();
 
     const truncatedMessages = this.truncateContext(messages, this.getTruncationBudget(options.maxTokens));
 
@@ -1423,77 +1580,156 @@ class LLMGateway {
       ? [currentProvider, ...configuredProviders.filter((p) => p !== currentProvider)]
       : [currentProvider];
 
-    for (const provider of providers) {
-      const breaker = getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG);
-      if (breaker.getState() === CircuitState.OPEN) {
-        continue;
-      }
+    let terminalEmitted = false;
+    let lastProvider: LLMProvider | undefined;
 
-      try {
-        const stream = provider === "gemini"
-          ? this.streamGemini(truncatedMessages, options, requestId)
-          : provider === "anthropic"
-            ? this.streamAnthropic(truncatedMessages, options, requestId)
-            : this.streamOpenAICompatible(provider, truncatedMessages, options, requestId);
+    try {
+      for (const provider of providers) {
+        lastProvider = provider;
 
-        for await (const chunk of this.withIdleTimeout(stream, STREAM_IDLE_TIMEOUT_MS, requestId)) {
-          accumulatedContent += chunk.content;
+        // Check client abort between providers
+        if (options.abortSignal?.aborted || sm.isTerminal()) {
+          break;
+        }
 
-          // Some providers can return a "done" marker without any visible text (e.g. if the output
-          // budget is too low or the response is otherwise suppressed). Treat that as a failure so
-          // fallback providers can attempt recovery.
-          if (chunk.done && accumulatedContent.trim().length === 0) {
-            throw new Error(`Empty streamed response from provider ${provider}`);
-          }
+        const breaker = getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG);
+        if (breaker.getState() === CircuitState.OPEN) {
+          gatewayTelemetry.recordCircuitBreakerEvent(provider, "opened");
+          continue;
+        }
 
-          const streamChunk: StreamChunk = {
-            content: chunk.content,
-            sequenceId: sequenceId++,
-            done: chunk.done,
-            requestId,
-            provider,
-            checkpoint: {
+        try {
+          const stream = provider === "gemini"
+            ? this.streamGemini(truncatedMessages, options, requestId)
+            : provider === "anthropic"
+              ? this.streamAnthropic(truncatedMessages, options, requestId)
+              : this.streamOpenAICompatible(provider, truncatedMessages, options, requestId);
+
+          let isFirstChunk = true;
+
+          for await (const chunk of this.withIdleTimeout(stream, options.streamIdleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS, requestId)) {
+            // Check client abort on every chunk
+            if (options.abortSignal?.aborted) {
+              sm.cancel("Client disconnected mid-stream");
+              break;
+            }
+
+            if (isFirstChunk && chunk.content.length > 0) {
+              isFirstChunk = false;
+              sm.firstToken("first token from " + provider);
+              const ttft = Date.now() - streamStartTime;
+              gatewayTelemetry.recordFirstToken(provider, model, ttft);
+              span.addEvent("first_token", { "ttft_ms": ttft, provider });
+            }
+
+            accumulatedContent += chunk.content;
+
+            if (chunk.done && accumulatedContent.trim().length === 0) {
+              throw new Error(`Empty streamed response from provider ${provider}`);
+            }
+
+            // Transition to streaming if we have content
+            if (!isFirstChunk && !chunk.done) {
+              sm.streaming();
+              sm.recordToken();
+            }
+
+            const streamChunk: StreamChunk = {
+              content: chunk.content,
+              sequenceId: sequenceId++,
+              done: chunk.done,
               requestId,
-              sequenceId,
-              accumulatedContent,
-              timestamp: Date.now(),
-            },
-          };
+              provider,
+              checkpoint: {
+                requestId,
+                sequenceId,
+                accumulatedContent,
+                timestamp: Date.now(),
+              },
+            };
 
-          // Save checkpoint periodically
-          if (sequenceId % 10 === 0) {
-            this.streamCheckpoints.set(requestId, streamChunk.checkpoint!);
+            if (sequenceId % 10 === 0) {
+              this.streamCheckpoints.set(requestId, streamChunk.checkpoint!);
+            }
+
+            yield streamChunk;
+
+            if (chunk.done) {
+              terminalEmitted = true;
+              this.streamCheckpoints.delete(requestId);
+              getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG).recordSuccess();
+              sm.complete("stream completed on " + provider);
+              endSpan("ok");
+              gatewayTelemetry.recordStreamComplete(provider, model, Date.now() - streamStartTime, "completed");
+              gatewayTelemetry.recordRequestComplete(provider, model, Date.now() - streamStartTime, providers.indexOf(provider) > 0);
+              return;
+            }
+          }
+        } catch (error: any) {
+          this.streamCheckpoints.set(requestId, {
+            requestId,
+            sequenceId,
+            accumulatedContent,
+            timestamp: Date.now(),
+          });
+
+          getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG).recordFailure();
+          console.warn(`[LLMGateway] ${requestId} stream failed on ${provider}: ${error.message}`);
+
+          if (error.message?.includes("idle timeout")) {
+            gatewayTelemetry.recordTimeout(provider, "idle");
+          } else if (error.message?.includes("timeout")) {
+            gatewayTelemetry.recordTimeout(provider, "overall");
           }
 
-          yield streamChunk;
-
-          if (chunk.done) {
-            this.streamCheckpoints.delete(requestId);
-            getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG).recordSuccess();
-            return;
+          if (!enableFallback || providers.indexOf(provider) === providers.length - 1) {
+            sm.fail(error.message?.slice(0, 200));
+            endSpan("error", error);
+            gatewayTelemetry.recordRequestFailed(provider, model, Date.now() - streamStartTime, error.name || "Error");
+            throw error;
           }
+
+          // Fallback to next provider
+          const nextIdx = providers.indexOf(provider) + 1;
+          if (nextIdx < providers.length) {
+            gatewayTelemetry.recordFallback(provider, providers[nextIdx]);
+          }
+          console.log(`[LLMGateway] ${requestId} attempting stream fallback to next provider`);
         }
-      } catch (error: any) {
-        // Save checkpoint before failing
-        this.streamCheckpoints.set(requestId, {
-          requestId,
-          sequenceId,
-          accumulatedContent,
-          timestamp: Date.now(),
-        });
-
-        getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG).recordFailure();
-        console.warn(`[LLMGateway] ${requestId} stream failed on ${provider}: ${error.message}`);
-
-        if (!enableFallback || providers.indexOf(provider) === providers.length - 1) {
-          throw error;
-        }
-
-        console.log(`[LLMGateway] ${requestId} attempting stream fallback to next provider`);
       }
-    }
 
-    throw new Error("All providers failed during streaming");
+      // If we get here without returning, all providers were skipped or aborted
+      if (!sm.isTerminal()) {
+        sm.fail("All providers failed or client disconnected");
+      }
+      endSpan("error", new Error("All providers failed during streaming"));
+      throw new Error("All providers failed during streaming");
+    } finally {
+      // === GUARANTEED TERMINAL EVENT ===
+      // If no terminal done chunk was yielded, emit one now.
+      // This ensures the frontend NEVER sees an infinite spinner.
+      if (!terminalEmitted) {
+        try {
+          yield { content: "", sequenceId: sequenceId++, done: true, requestId, provider: lastProvider };
+        } catch {
+          // Generator may already be closed — that's fine.
+        }
+      }
+
+      if (!sm.isTerminal()) {
+        sm.fail("Stream ended without explicit terminal state");
+      }
+
+      // Release bulkhead
+      if (bulkheadRelease) bulkheadRelease();
+
+      gatewayTelemetry.recordStreamComplete(
+        lastProvider || "unknown",
+        model,
+        Date.now() - streamStartTime,
+        sm.state
+      );
+    }
   }
 
   // ===== Typed Streaming (Schema Validation) =====
@@ -1908,6 +2144,15 @@ class LLMGateway {
     return getQualityStats(since);
   }
 
+  // ===== Request Tracker Access =====
+  getRequestTracker() {
+    return requestTracker;
+  }
+
+  getBulkheadSnapshot() {
+    return gatewayBulkhead.snapshot();
+  }
+
   // ===== Health Check =====
   async healthCheck(): Promise<Record<LLMProvider, { available: boolean; latencyMs?: number; error?: string }>> {
     const results: Record<LLMProvider, { available: boolean; latencyMs?: number; error?: string }> = {
@@ -2031,3 +2276,6 @@ class LLMGateway {
 
 export const llmGateway = new LLMGateway();
 export type { LLMRequestOptions, LLMResponse, StreamChunk, StreamCheckpoint, TokenUsageRecord };
+export { RequestState, requestTracker } from "./requestStateMachine";
+export { BulkheadFullError, BulkheadTimeoutError } from "./gatewayBulkhead";
+export { LLMValidationError } from "./llmRequestValidator";
