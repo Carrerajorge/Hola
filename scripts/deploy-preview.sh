@@ -38,8 +38,20 @@ fi
 
 echo "[preview] Deploying ${PREVIEW_SLUG} -> 127.0.0.1:${HOST_PORT} (${FQDN})"
 
-# 1) Ensure images are present (best-effort)
-docker pull "ghcr.io/carrerajorge/iliagpt-app:${IMAGE_TAG}" >/dev/null || true
+# 1) Authenticate to GHCR when credentials are provided by CI.
+GHCR_REGISTRY="${GHCR_REGISTRY:-ghcr.io}"
+if [[ -n "${GHCR_TOKEN:-}" ]]; then
+  if [[ -z "${GHCR_USERNAME:-}" ]]; then
+    echo "GHCR_USERNAME is required when GHCR_TOKEN is set" >&2
+    exit 1
+  fi
+  echo "${GHCR_TOKEN}" | docker login "${GHCR_REGISTRY}" -u "${GHCR_USERNAME}" --password-stdin >/dev/null
+fi
+
+# 2) Ensure all slot images exist before compose tries to start containers.
+for image in app sandbox ocr; do
+  docker pull "ghcr.io/carrerajorge/iliagpt-${image}:${IMAGE_TAG}" >/dev/null
+done
 
 echo "[preview] Starting docker compose project: ${PROJECT}"
 SLOT="${SLOT}" HOST_PORT="${HOST_PORT}" IMAGE_TAG="${IMAGE_TAG}" APP_VERSION="${APP_VERSION}" \
