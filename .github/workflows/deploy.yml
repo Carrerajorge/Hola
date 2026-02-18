@@ -133,6 +133,48 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate deployment prerequisites
+        env:
+          VPS_HOST: ${{ env.VPS_HOST }}
+          VPS_PORT: ${{ env.VPS_PORT }}
+          VPS_USER: ${{ env.VPS_USER }}
+          DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_DEFAULT_HOST: "69.62.98.126"
+        run: |
+          set -euo pipefail
+          if [ -z "${VPS_SSH_KEY}" ]; then
+            echo "::error::VPS_SSH_KEY secret is required for deployment."
+            exit 1
+          fi
+
+          if ! printf '%s' "${VPS_PORT}" | grep -Eq '^[0-9]{1,5}$'; then
+            echo "::error::VPS_PORT is invalid: ${VPS_PORT}"
+            exit 1
+          fi
+          if [ "${VPS_PORT}" -lt 1 ] || [ "${VPS_PORT}" -gt 65535 ]; then
+            echo "::error::VPS_PORT out of range: ${VPS_PORT}"
+            exit 1
+          fi
+
+          if [ -z "${VPS_HOST}" ]; then
+            echo "::warning::VPS_HOST not set. Fallback to ${VPS_DEFAULT_HOST}."
+          fi
+          if ! printf '%s' "${VPS_HOST}" | grep -Eq '^[A-Za-z0-9._-]+$'; then
+            echo "::error::VPS_HOST contains invalid characters: ${VPS_HOST}"
+            exit 1
+          fi
+          if [ -z "${VPS_USER}" ]; then
+            echo "::error::VPS_USER is required."
+            exit 1
+          fi
+          if [ -z "${DEPLOY_PATH}" ]; then
+            echo "::error::DEPLOY_PATH is required."
+            exit 1
+          fi
 
       - name: Compute image tag
         id: tag
@@ -435,6 +477,45 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate deployment prerequisites
+        env:
+          VPS_HOST: ${{ env.VPS_HOST }}
+          VPS_PORT: ${{ env.VPS_PORT }}
+          VPS_USER: ${{ env.VPS_USER }}
+          DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${VPS_SSH_KEY}" ]; then
+            echo "::error::VPS_SSH_KEY secret is required for deployment."
+            exit 1
+          fi
+          if ! printf '%s' "${VPS_PORT}" | grep -Eq '^[0-9]{1,5}$'; then
+            echo "::error::VPS_PORT is invalid: ${VPS_PORT}"
+            exit 1
+          fi
+          if [ "${VPS_PORT}" -lt 1 ] || [ "${VPS_PORT}" -gt 65535 ]; then
+            echo "::error::VPS_PORT out of range: ${VPS_PORT}"
+            exit 1
+          fi
+          if [ -z "${VPS_HOST}" ]; then
+            echo "::error::VPS_HOST is required."
+            exit 1
+          fi
+          if ! printf '%s' "${VPS_HOST}" | grep -Eq '^[A-Za-z0-9._-]+$'; then
+            echo "::error::VPS_HOST contains invalid characters: ${VPS_HOST}"
+            exit 1
+          fi
+          if [ -z "${VPS_USER}" ]; then
+            echo "::error::VPS_USER is required."
+            exit 1
+          fi
+          if [ -z "${DEPLOY_PATH}" ]; then
+            echo "::error::DEPLOY_PATH is required."
+            exit 1
+          fi
 
       - name: Compute image tag
         id: tag

@@ -11,7 +11,7 @@
 import { useCallback, useRef, useEffect } from "react";
 import { getAnonUserIdHeader } from "@/lib/apiClient";
 import type { Message } from "@/hooks/use-chats";
-import { type AIState } from "@/components/chat-interface/types";
+import { type AIState, type AiProcessStep } from "@/components/chat-interface/types";
 
 type StreamRetryState = "idle" | "running" | "retry";
 
@@ -20,8 +20,8 @@ export interface StreamChatDeps {
   onSendMessage: (message: Message) => Promise<any>;
   setStreamingContent: (content: string) => void;
   streamingContentRef: React.MutableRefObject<string>;
-  setAiState: React.Dispatch<React.SetStateAction<AiState>>;
-  setAiProcessSteps?: React.Dispatch<React.SetStateAction<any[]>>;
+  setAiState: (value: React.SetStateAction<AIState>, conversationId?: string | null) => void;
+  setAiProcessSteps?: (value: React.SetStateAction<AiProcessStep[]>, conversationId?: string | null) => void;
   getActiveConversationId?: () => string | null;
 }
 
@@ -31,7 +31,7 @@ export interface StreamOptions {
   conversationId?: string | null;
   signal?: AbortSignal;
   onEvent?: (eventType: string, data: any) => void;
-  onAiStateChange?: (state: AiState) => void;
+  onAiStateChange?: (state: AIState) => void;
   buildFinalMessage?: (fullContent: string, lastEventData?: any, messageId?: string) => Message;
   buildErrorMessage?: (error: Error, messageId?: string) => Message;
   queueMode?: "replace" | "reject";
@@ -188,6 +188,14 @@ export function useStreamChat(deps: StreamChatDeps) {
       clearTimeout(session.timeoutId);
       session.timeoutId = null;
     }
+    if (session.firstTokenTimeoutId) {
+      clearTimeout(session.firstTokenTimeoutId);
+      session.firstTokenTimeoutId = null;
+    }
+    if (session.doneTimeoutId) {
+      clearTimeout(session.doneTimeoutId);
+      session.doneTimeoutId = null;
+    }
 
     if (session.rafId !== null) {
       cancelAnimationFrame(session.rafId);
@@ -271,8 +279,8 @@ export function useStreamChat(deps: StreamChatDeps) {
         });
         streamingContentRef.current = "";
         setStreamingContent("");
-        setAiState("idle");
-        setAiProcessSteps?.([]);
+        setAiState("idle", targetConversationId);
+        setAiProcessSteps?.([], targetConversationId);
         return;
       }
 
@@ -296,8 +304,8 @@ export function useStreamChat(deps: StreamChatDeps) {
         setStreamingContent("");
       }
 
-      setAiState("idle");
-      setAiProcessSteps?.([]);
+      setAiState("idle", targetConversationId);
+      setAiProcessSteps?.([], targetConversationId);
 
       queueMicrotask(() => {
         const latestSession = getSession(targetConversationId);
@@ -322,6 +330,7 @@ export function useStreamChat(deps: StreamChatDeps) {
     async (url: string, options: StreamOptions): Promise<StreamResult> => {
       const {
         body,
+        chatId: rawChatId,
         signal,
         onEvent,
         onAiStateChange,
@@ -329,6 +338,8 @@ export function useStreamChat(deps: StreamChatDeps) {
         buildErrorMessage,
         queueMode = "replace",
         timeoutMs = 120_000,
+        firstTokenTimeoutMs = DEFAULT_FIRST_TOKEN_TIMEOUT_MS,
+        doneTimeoutMs = DEFAULT_DONE_TIMEOUT_MS,
       } = options;
 
       const conversationId = normalizeConversationId(options);
@@ -336,6 +347,9 @@ export function useStreamChat(deps: StreamChatDeps) {
         const error = new Error("conversationId is required for isolated streaming");
         return { ok: false, content: "", error };
       }
+
+      const scopedChatId = typeof rawChatId === "string" ? rawChatId.trim() : "";
+      const bodyChatId = typeof body?.chatId === "string" ? body.chatId.trim() : "";
 
       const session = getSession(conversationId);
 
@@ -362,7 +376,7 @@ export function useStreamChat(deps: StreamChatDeps) {
         ...body,
         requestId: streamRequestId,
         conversationId,
-        chatId: body.chatId || conversationId,
+        chatId: bodyChatId || scopedChatId || conversationId,
       };
 
       const combinedSignal = signal
@@ -380,22 +394,62 @@ export function useStreamChat(deps: StreamChatDeps) {
         setStreamingContent("");
       }
 
-      setAiState("thinking");
+      setAiState("thinking", conversationId);
       onAiStateChange?.("thinking");
-      setAiProcessSteps?.([]);
+      setAiProcessSteps?.([], conversationId);
 
       let response: Response | undefined;
       let fullContent = "";
       let lastEventData: any = null;
-      let streamTimedOut = false;
+      let timeoutCause: "overall" | "first-token" | "done" | null = null;
+      let hasReceivedToken = false;
 
       if (session.timeoutId) {
         clearTimeout(session.timeoutId);
       }
       session.timeoutId = setTimeout(() => {
-        streamTimedOut = true;
+        timeoutCause = "overall";
         controller.abort();
       }, timeoutMs);
+
+      if (session.firstTokenTimeoutId) {
+        clearTimeout(session.firstTokenTimeoutId);
+      }
+      if (firstTokenTimeoutMs > 0) {
+        session.firstTokenTimeoutId = setTimeout(() => {
+          if (!hasReceivedToken && !session.finalizing && session.pendingRequestId === streamRequestId) {
+            timeoutCause = "first-token";
+            controller.abort();
+          }
+        }, firstTokenTimeoutMs);
+      }
+
+      if (session.doneTimeoutId) {
+        clearTimeout(session.doneTimeoutId);
+      }
+      const armDoneTimeout = () => {
+        if (doneTimeoutMs <= 0) return;
+        if (session.doneTimeoutId) {
+          clearTimeout(session.doneTimeoutId);
+          session.doneTimeoutId = null;
+        }
+        session.doneTimeoutId = setTimeout(() => {
+          if (!session.finalizing && session.pendingRequestId === streamRequestId && hasReceivedToken) {
+            timeoutCause = "done";
+            controller.abort();
+          }
+        }, doneTimeoutMs);
+      };
+      const clearTokenTimeouts = () => {
+        if (session.firstTokenTimeoutId) {
+          clearTimeout(session.firstTokenTimeoutId);
+          session.firstTokenTimeoutId = null;
+        }
+        if (session.doneTimeoutId) {
+          clearTimeout(session.doneTimeoutId);
+          session.doneTimeoutId = null;
+        }
+      };
 
       try {
         response = await fetch(url, {
@@ -437,8 +491,8 @@ export function useStreamChat(deps: StreamChatDeps) {
               streamingContentRef.current = "";
               setStreamingContent("");
             }
-            setAiState("idle");
-            setAiProcessSteps?.([]);
+            setAiState("idle", conversationId);
+            setAiProcessSteps?.([], conversationId);
             return { ok: true, content: "", response };
           }
 
@@ -471,7 +525,7 @@ export function useStreamChat(deps: StreamChatDeps) {
           return { ok: false, content: "", message: errorMsg, response, error };
         }
 
-        setAiState("responding");
+        setAiState("responding", conversationId);
         onAiStateChange?.("responding");
 
         const decoder = new TextDecoder();
@@ -539,6 +593,14 @@ export function useStreamChat(deps: StreamChatDeps) {
             if (currentEventType === "chunk" || currentEventType === "text") {
               const content = typeof data.content === "string" ? data.content : "";
               if (content) {
+                if (!hasReceivedToken) {
+                  hasReceivedToken = true;
+                  if (session.firstTokenTimeoutId) {
+                    clearTimeout(session.firstTokenTimeoutId);
+                    session.firstTokenTimeoutId = null;
+                  }
+                  armDoneTimeout();
+                }
                 fullContent += content;
                 session.fullContent = fullContent;
                 if (isConversationActive(conversationId)) {
@@ -550,40 +612,45 @@ export function useStreamChat(deps: StreamChatDeps) {
 
             const isStaleConversation = session.pendingRequestId !== streamRequestId;
             if (!isStaleConversation && currentEventType === "thinking") {
-              setAiState("thinking");
+              setAiState("thinking", conversationId);
               onAiStateChange?.("thinking");
 
               if (data.step && data.message) {
-                setAiProcessSteps?.((prev: any[]) => {
-                  const existing = prev.find((s: any) => s.id === data.step);
-                  if (existing) return prev;
-                  return [
-                    ...prev,
-                    {
-                      id: data.step,
-                      step: data.step,
-                      title: data.message,
-                      status: "pending",
-                    },
-                  ];
-                });
+                setAiProcessSteps?.(
+                  (prev: any[]) => {
+                    const existing = prev.find((s: any) => s.id === data.step);
+                    if (existing) return prev;
+                    return [
+                      ...prev,
+                      {
+                        id: data.step,
+                        step: data.step,
+                        title: data.message,
+                        status: "pending",
+                      },
+                    ];
+                  },
+                  conversationId
+                );
               }
             }
 
             if (!isStaleConversation && currentEventType === "context") {
-              setAiState("responding");
+              setAiState("responding", conversationId);
               onAiStateChange?.("responding");
-              setAiProcessSteps?.((prev: any[]) =>
-                prev.map((s: any) => ({ ...s, status: "done" }))
+              setAiProcessSteps?.(
+                (prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })),
+                conversationId
               );
             }
 
             if (!isStaleConversation && currentEventType === "production_start") {
-              setAiState("agent_working");
+              setAiState("agent_working", conversationId);
               onAiStateChange?.("agent_working");
             }
 
             if (currentEventType === "done" || currentEventType === "finish") {
+              clearTokenTimeouts();
               streamDone = true;
               flushNow(conversationId);
 
@@ -609,6 +676,7 @@ export function useStreamChat(deps: StreamChatDeps) {
         }
 
         if (!session.finalizing && fullContent) {
+          clearTokenTimeouts();
           flushNow(conversationId);
           const msg = buildFinalMessage?.(fullContent, lastEventData, messageId) ?? {
             id: messageId,
@@ -623,6 +691,7 @@ export function useStreamChat(deps: StreamChatDeps) {
         }
 
         if (!session.finalizing) {
+          clearTokenTimeouts();
           const msg: Message = {
             id: messageId,
             role: "assistant" as const,
@@ -637,10 +706,35 @@ export function useStreamChat(deps: StreamChatDeps) {
         return { ok: true, content: fullContent, response };
       } catch (err: any) {
         if (err?.name === "AbortError") {
-          const abortError =
-            streamTimedOut
-              ? new Error(`Stream timeout after ${timeoutMs}ms`)
-              : err;
+          clearTokenTimeouts();
+
+          if (!timeoutCause) {
+            if (isConversationActive(conversationId)) {
+              streamingContentRef.current = "";
+              setStreamingContent("");
+            }
+            setAiState("idle", conversationId);
+            setAiProcessSteps?.([], conversationId);
+            return { ok: false, content: fullContent, response, error: err };
+          }
+
+          const abortMessage =
+            timeoutCause === "first-token"
+              ? `No se recibió ningún token en ${firstTokenTimeoutMs}ms.`
+              : timeoutCause === "done"
+                ? `La respuesta demoró demasiado (>${doneTimeoutMs}ms).`
+                : `Stream timeout after ${timeoutMs}ms.`;
+
+          const abortError = new Error(abortMessage);
+          const timeoutErrorMsg = buildErrorMessage?.(abortError, messageId) ?? {
+            id: messageId,
+            role: "assistant" as const,
+            content: abortMessage,
+            timestamp: new Date(),
+            requestId: streamRequestId,
+          };
+          finalize(timeoutErrorMsg, conversationId);
+
           return { ok: false, content: fullContent, response, error: abortError };
         }
 
@@ -672,6 +766,14 @@ export function useStreamChat(deps: StreamChatDeps) {
           clearTimeout(session.timeoutId);
           session.timeoutId = null;
         }
+        if (session.firstTokenTimeoutId) {
+          clearTimeout(session.firstTokenTimeoutId);
+          session.firstTokenTimeoutId = null;
+        }
+        if (session.doneTimeoutId) {
+          clearTimeout(session.doneTimeoutId);
+          session.doneTimeoutId = null;
+        }
 
         if (abortControllerRef.current === controller) {
           abortControllerRef.current = null;
@@ -700,6 +802,14 @@ export function useStreamChat(deps: StreamChatDeps) {
         if (session.timeoutId) {
           clearTimeout(session.timeoutId);
           session.timeoutId = null;
+        }
+        if (session.firstTokenTimeoutId) {
+          clearTimeout(session.firstTokenTimeoutId);
+          session.firstTokenTimeoutId = null;
+        }
+        if (session.doneTimeoutId) {
+          clearTimeout(session.doneTimeoutId);
+          session.doneTimeoutId = null;
         }
         if (session.rafId !== null) {
           cancelAnimationFrame(session.rafId);

@@ -163,7 +163,7 @@ import { PricingModal } from "./pricing-modal";
 
 import { SyncStatusIndicator } from "./sync-status-indicator";
 import { ProductionProgress } from "@/components/production-progress";
-import { AiProcessStep } from "./chat-interface/types";
+import { AiProcessStep, AIState } from "./chat-interface/types";
 import { GranularErrorBoundary } from "@/components/ui/granular-error-boundary";
 import { EditorErrorBoundary } from "@/components/error-boundaries";
 import { DataTableWrapper, CleanDataTableComponents, downloadTableAsExcel, copyTableToClipboard } from "./chat-interface/DataTableWrapper";
@@ -251,7 +251,7 @@ function detectUncertainty(content: string): { confidence: 'high' | 'medium' | '
 
 
 
-type AiState = "idle" | "thinking" | "responding" | "agent_working";
+type AiState = AIState;
 
 
 interface ChatInterfaceProps {
@@ -1486,6 +1486,28 @@ export function ChatInterface({
   const composerRef = useRef<HTMLDivElement>(null);
   const handleStopChatRef = useRef<(() => void) | null>(null);
 
+  const isScopedConversation = useCallback((conversationId?: string | null) => {
+    const activeConversationId = latestChatIdRef.current;
+    if (!conversationId || !activeConversationId) return true;
+    return resolveRealChatId(activeConversationId) === resolveRealChatId(conversationId);
+  }, []);
+
+  const setAiStateForChat = useCallback((
+    value: React.SetStateAction<AiState>,
+    conversationId?: string | null
+  ) => {
+    if (!isScopedConversation(conversationId)) return;
+    setAiState(value);
+  }, [isScopedConversation, setAiState]);
+
+  const setAiProcessStepsForChat = useCallback((
+    value: React.SetStateAction<AiProcessStep[]>,
+    conversationId?: string | null
+  ) => {
+    if (!isScopedConversation(conversationId)) return;
+    setAiProcessSteps(value);
+  }, [isScopedConversation, setAiProcessSteps]);
+
   // Centralized streaming→message transition manager.
   // Guarantees the message is visible in the DOM before streaming is cleared.
   const streamTransition = useStreamingTransition({
@@ -1493,8 +1515,9 @@ export function ChatInterface({
     onSendMessage,
     setStreamingContent,
     streamingContentRef,
-    setAiState,
-    setAiProcessSteps,
+    setAiState: setAiStateForChat,
+    setAiProcessSteps: setAiProcessStepsForChat,
+    conversationId: chatId,
   });
 
   // All-in-one streaming hook: fetch + SSE parse + RAF throttle + atomic finalize
@@ -1503,8 +1526,8 @@ export function ChatInterface({
     onSendMessage,
     setStreamingContent,
     streamingContentRef,
-    setAiState,
-    setAiProcessSteps,
+    setAiState: setAiStateForChat,
+    setAiProcessSteps: setAiProcessStepsForChat,
     getActiveConversationId: () => latestChatIdRef.current,
   });
 
@@ -1614,6 +1637,7 @@ export function ChatInterface({
     const normalizedConversationId = (opts.conversationId && !opts.conversationId.startsWith("pending-"))
       ? opts.conversationId
       : `temp_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+    const analysisConversationId = opts.conversationId || chatId || latestChatIdRef.current;
 
     const analysisAttachmentPayload = opts.attachments
       .map(toAnalyzePayloadAttachment)
@@ -1712,8 +1736,8 @@ export function ChatInterface({
           : m
       ));
       if (aiStateRef.current === "thinking") {
-        setAiState("idle");
-        setAiProcessSteps([]);
+        setAiStateForChat("idle", analysisConversationId);
+        setAiProcessStepsForChat([], analysisConversationId);
       }
     } catch (analysisError: any) {
       if (analysisError?.name === "AbortError") {
@@ -1731,8 +1755,8 @@ export function ChatInterface({
         };
       }));
       if (aiStateRef.current === "thinking") {
-        setAiState("idle");
-        setAiProcessSteps([]);
+        setAiStateForChat("idle", analysisConversationId);
+        setAiProcessStepsForChat([], analysisConversationId);
       }
       console.error(`[Document Analysis] (${userFriendlySource}) failed for userMessage ${opts.userMessageId}:`, analysisError);
       throw analysisError;
@@ -1744,9 +1768,10 @@ export function ChatInterface({
   }, [
     markMessageDeliveryError,
     onSendMessage,
-    setAiProcessSteps,
-    setAiState,
+    setAiProcessStepsForChat,
+    setAiStateForChat,
     setOptimisticMessages,
+    chatId,
   ]);
 
   // Measure composer height and set CSS variable for proper layout
@@ -2408,27 +2433,33 @@ export function ChatInterface({
       chatHistory = [...chatHistory, { role: "user" as const, content: `[Instrucción de regeneración: ${instruction}]` }];
     }
 
+    const regenerateChatId = chatId;
+    const setAiStateForRegenerate = (value: React.SetStateAction<AiState>) =>
+      setAiStateForChat(value, regenerateChatId);
+    const setAiProcessStepsForRegenerate = (value: React.SetStateAction<AiProcessStep[]>) =>
+      setAiProcessStepsForChat(value, regenerateChatId);
+
     await streamChat.stream("/api/chat/stream", {
-      chatId,
+      chatId: regenerateChatId,
       body: {
         messages: chatHistory,
-        chatId,
-        conversationId: chatId,
+        chatId: regenerateChatId,
+        conversationId: regenerateChatId,
         provider: selectedProvider,
         model: selectedModel,
         latencyMode,
       },
       onEvent: (eventType, data) => {
         if (eventType === "production_start") {
-          setAiState("agent_working");
-          setAiProcessSteps([{
+          setAiStateForRegenerate("agent_working");
+          setAiProcessStepsForRegenerate([{
             id: "init", step: "init",
             title: `Iniciando producción: ${data.topic || "Documento"}`,
             status: "pending",
             description: `Generando ${data.deliverables?.join(", ") || "archivos"}`,
           }]);
         } else if (eventType === "production_event") {
-          setAiProcessSteps((prev: any[]) => {
+          setAiProcessStepsForRegenerate((prev: any[]) => {
             const newSteps = [...prev];
             const lastStep = newSteps[newSteps.length - 1];
             if (lastStep?.status === "pending" && data.message) {
@@ -2439,16 +2470,16 @@ export function ChatInterface({
             return newSteps;
           });
         } else if (eventType === "production_complete") {
-          setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
+          setAiProcessStepsForRegenerate((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
         } else if (eventType === "tool_start" && data.toolName === "browse_and_act") {
           // Browser automation starting — open the virtual computer panel
-          setAiState("agent_working");
+          setAiStateForRegenerate("agent_working");
           globalStartSseSession(data.args?.goal || "Automatización web");
           setIsBrowserOpen(true);
         } else if (eventType === "browser_step") {
           // Real-time browser step with screenshot — update the virtual computer
           globalUpdateFromSseStep(data);
-          setAiState("agent_working");
+          setAiStateForRegenerate("agent_working");
           if (!isBrowserOpen) setIsBrowserOpen(true);
         } else if (eventType === "tool_result" && data.toolName === "browse_and_act") {
           // Browser automation completed
@@ -2609,6 +2640,7 @@ export function ChatInterface({
 
     const msgIndex = messages.findIndex(m => m.id === msgId);
     if (msgIndex === -1) return;
+    const editConversationId = chatId || latestChatIdRef.current;
 
     const editedContent = editContent.trim();
     setEditingMessageId(null);
@@ -2618,7 +2650,7 @@ export function ChatInterface({
       onEditMessageAndTruncate(chatId, msgId, editedContent, msgIndex);
     }
 
-    setAiState("thinking");
+    setAiStateForChat("thinking", editConversationId);
     streamingContentRef.current = "";
     setStreamingContent("");
 
@@ -2661,12 +2693,12 @@ export function ChatInterface({
         onSendMessage(aiMsg);
       }
 
-      setAiState("idle");
+      setAiStateForChat("idle", editConversationId);
       abortControllerRef.current = null;
 
     } catch (error: any) {
       if (error.name === "AbortError") {
-        setAiState("idle");
+        setAiStateForChat("idle", editConversationId);
         return;
       }
       console.error("Edit regenerate error:", error);
@@ -2678,10 +2710,10 @@ export function ChatInterface({
         timestamp: new Date(),
       };
       onSendMessage(errorMsg);
-      setAiState("idle");
+      setAiStateForChat("idle", editConversationId);
       abortControllerRef.current = null;
     }
-  }, [editContent, messages, chatId, onEditMessageAndTruncate, selectedProvider, selectedModel, onSendMessage]);
+  }, [editContent, messages, chatId, latestChatIdRef, onEditMessageAndTruncate, selectedProvider, selectedModel, onSendMessage, setAiStateForChat]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -3573,6 +3605,7 @@ export function ChatInterface({
       console.log("[handleSubmit] Blocked: aiState is", aiState, "for chatId", aiStateChatId);
       return;
     }
+    const submitConversationId = chatId || latestChatIdRef.current;
 
     // EMERGENCY BYPASS (DEV-ONLY): Allows quick debugging by bypassing run persistence/idempotency.
     // Keep disabled in production.
@@ -3600,12 +3633,12 @@ export function ChatInterface({
         },
         onEvent: (eventType, data) => {
           if (eventType === "tool_start" && data.toolName === "browse_and_act") {
-            setAiState("agent_working");
+            setAiStateForChat("agent_working", effectiveChatIdForStream);
             globalStartSseSession(data.args?.goal || "Automatización web");
             setIsBrowserOpen(true);
           } else if (eventType === "browser_step") {
             globalUpdateFromSseStep(data);
-            setAiState("agent_working");
+            setAiStateForChat("agent_working", effectiveChatIdForStream);
             if (!isBrowserOpen) setIsBrowserOpen(true);
           }
         },
@@ -3734,12 +3767,12 @@ export function ChatInterface({
         onEvent: (eventType, data) => {
           // Handle browser automation events from agent loop
           if (eventType === "tool_start" && data.toolName === "browse_and_act") {
-            setAiState("agent_working");
+            setAiStateForChat("agent_working", effectiveChatIdForStream);
             globalStartSseSession(data.args?.goal || "Automatización web");
             setIsBrowserOpen(true);
           } else if (eventType === "browser_step") {
             globalUpdateFromSseStep(data);
-            setAiState("agent_working");
+            setAiStateForChat("agent_working", effectiveChatIdForStream);
             if (!isBrowserOpen) setIsBrowserOpen(true);
           } else if (eventType === "tool_result" && data.toolName === "browse_and_act") {
             if (data.result?.success) {
@@ -3894,7 +3927,7 @@ export function ChatInterface({
       if (chatId) {
         clearDraft(chatId);
       }
-      setAiState("thinking");
+      setAiStateForChat("thinking", submitConversationId);
 
       try {
         abortControllerRef.current = new AbortController();
@@ -3920,14 +3953,14 @@ export function ChatInterface({
 
         setSelectedDocText("");
         applyRewriteRef.current = null;
-        setAiState("idle");
+        setAiStateForChat("idle", submitConversationId);
         abortControllerRef.current = null;
         return;
       } catch (error: any) {
         if (error.name !== "AbortError") {
           console.error("Rewrite error:", error);
         }
-        setAiState("idle");
+        setAiStateForChat("idle", submitConversationId);
         abortControllerRef.current = null;
         return;
       }
@@ -3992,8 +4025,8 @@ export function ChatInterface({
       console.log("[handleSubmit] Generation/Edit pattern detected - checking image context...");
 
       // Set thinking state
-      setAiState("thinking");
-      setAiProcessSteps([
+      setAiStateForChat("thinking", submitConversationId);
+      setAiProcessStepsForChat([
         { step: "Procesando tu solicitud", status: "active" },
         { step: "Generando contenido", status: "pending" }
       ]);
@@ -4104,7 +4137,7 @@ export function ChatInterface({
         if (isImageEditRequest) {
           console.log("[handleSubmit] Image edit request confirmed with image context");
           // Update UI to reflect edit mode
-          setAiProcessSteps([
+          setAiProcessStepsForChat([
             { step: "Procesando edición de imagen", status: "active" },
             { step: "Editando imagen", status: "pending" }
           ]);
@@ -4112,7 +4145,7 @@ export function ChatInterface({
 
         // Direct call to /api/chat/stream for generation - REAL-TIME SSE
         console.log("[handleSubmit] ⚡ Starting standard chat stream...");
-        setAiProcessSteps((prev: any[]) => prev.map((s: any, i: number) =>
+        setAiProcessStepsForChat((prev: any[]) => prev.map((s: any, i: number) =>
           i === 0 ? { ...s, status: "done" as const } : { ...s, status: "active" as const }
         ));
 
@@ -4131,8 +4164,8 @@ export function ChatInterface({
               variant: "destructive",
               duration: 5000,
             });
-            setAiState("idle");
-            setAiProcessSteps([]);
+            setAiStateForChat("idle", submitConversationId);
+            setAiProcessStepsForChat([], submitConversationId);
             abortControllerRef.current = null;
             return;
           }
@@ -4155,25 +4188,25 @@ export function ChatInterface({
             },
             onEvent: (eventType, data) => {
               if (eventType === "tool_start" && data.toolName === "browse_and_act") {
-                setAiState("agent_working");
-                setAiProcessSteps([{
+                setAiStateForChat("agent_working", effectiveChatIdForStream);
+                setAiProcessStepsForChat([{
                   id: "init",
                   step: "init",
                   title: `Iniciando producción: ${data.topic || "Documento"}`,
                   status: "pending",
                   description: `Generando ${data.deliverables?.join(", ") || "archivos"}`,
-                }]);
+                }], effectiveChatIdForStream);
               } else if (eventType === "production_start") {
-                setAiState("agent_working");
-                setAiProcessSteps([{
+                setAiStateForChat("agent_working", effectiveChatIdForStream);
+                setAiProcessStepsForChat([{
                   id: "init",
                   step: "init",
                   title: `Iniciando producción: ${data.topic || "Documento"}`,
                   status: "pending",
                   description: `Generando ${data.deliverables?.join(", ") || "archivos"}`
-                }]);
+                }], effectiveChatIdForStream);
               } else if (eventType === "production_event") {
-                setAiProcessSteps((prev: any[]) => {
+                setAiProcessStepsForChat((prev: any[]) => {
                   const newSteps = [...prev];
                   const lastStep = newSteps[newSteps.length - 1];
                   if (lastStep && lastStep.status === "pending" && data.message) {
@@ -4188,18 +4221,18 @@ export function ChatInterface({
                     });
                   }
                   return newSteps;
-                });
+                }, effectiveChatIdForStream);
               } else if (eventType === "production_complete") {
-                setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
+                setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })), effectiveChatIdForStream);
               } else if (eventType === "tool_start") {
                 // keep compatibility with older backend tool events
                 if (data.toolName === "browse_and_act") {
-                  setAiState("agent_working");
+                  setAiStateForChat("agent_working", effectiveChatIdForStream);
                 }
               }
             },
             onAiStateChange: (nextState) => {
-              setAiState(nextState);
+              setAiStateForChat(nextState, effectiveChatIdForStream);
             },
             buildFinalMessage: (fullContent, data, messageId) => ({
               id: messageId || `assistant-${Date.now()}`,
@@ -4221,21 +4254,21 @@ export function ChatInterface({
             }),
           });
 
-          if (!generationResult.ok) {
-            const quotaCode = (generationResult.error as any)?.payload?.code;
-            if (generationResult.response?.status === 402 && quotaCode === "QUOTA_EXCEEDED") {
-              const quota = (generationResult.error as any)?.payload?.quota;
-              if (quota) {
-                setQuotaInfo(quota);
-                setShowPricingModal(true);
-                setAiState("idle");
-                setAiProcessSteps([]);
-                abortControllerRef.current = null;
-                return;
+            if (!generationResult.ok) {
+              const quotaCode = (generationResult.error as any)?.payload?.code;
+              if (generationResult.response?.status === 402 && quotaCode === "QUOTA_EXCEEDED") {
+                const quota = (generationResult.error as any)?.payload?.quota;
+                if (quota) {
+                  setQuotaInfo(quota);
+                  setShowPricingModal(true);
+                  setAiStateForChat("idle", effectiveChatIdForStream);
+                  setAiProcessStepsForChat([], effectiveChatIdForStream);
+                  abortControllerRef.current = null;
+                  return;
+                }
               }
-            }
-          } else {
-            requestTitleRefresh(effectiveChatIdForStream);
+            } else {
+              requestTitleRefresh(effectiveChatIdForStream);
           }
         } catch (error: any) {
           if (error.name === "AbortError") return;
@@ -4253,7 +4286,7 @@ export function ChatInterface({
         }
       } catch (error) {
         console.error("[handleSubmit] Top-level error:", error);
-        setAiState("idle");
+        setAiStateForChat("idle", submitConversationId);
       }
         return;
 	    } // Close if ((isGenerationRequest ...
@@ -4319,7 +4352,7 @@ export function ChatInterface({
       setActiveRunId(frontendRunId);
 
       // Set up SSE stream by making POST request
-      setAiState("thinking");
+      setAiStateForChat("thinking", submitConversationId);
 
       try {
         const response = await fetch("/api/super/stream", {
@@ -4612,8 +4645,8 @@ export function ChatInterface({
         setActiveRunId(null);
       }
 
-      setAiState("idle");
-      setAiProcessSteps([]);
+      setAiStateForChat("idle", submitConversationId);
+      setAiProcessStepsForChat([], submitConversationId);
       return;
     }
 
@@ -4690,7 +4723,7 @@ export function ChatInterface({
     }
 
     // Set initial AI state
-    setAiState("thinking");
+    setAiStateForChat("thinking", submitConversationId);
     streamingContentRef.current = "";
     setStreamingContent("");
 
@@ -4859,7 +4892,7 @@ export function ChatInterface({
     initialSteps.push({ step: "Procesando tu mensaje", status: hasAttachedFiles ? "pending" : "active" });
     initialSteps.push({ step: "Buscando información relevante", status: "pending" });
     initialSteps.push({ step: "Generando respuesta", status: "pending" });
-    setAiProcessSteps(initialSteps);
+    setAiProcessStepsForChat(initialSteps, submitConversationId);
 
     // NOTE: Input/Files already reset and UserMessage already constructed above.
 
@@ -4942,8 +4975,8 @@ export function ChatInterface({
           setOptimisticMessages((prev: Message[]) => [...prev, formPreviewMsg]);
           onSendMessage(formPreviewMsg);
           // Note: markRequestComplete is called inside addMessage after persistence
-          setAiState("idle");
-          setAiProcessSteps([]);
+          setAiStateForChat("idle", submitConversationId);
+          setAiProcessStepsForChat([], submitConversationId);
           return;
         }
       }
@@ -4952,9 +4985,9 @@ export function ChatInterface({
       const hasGmailMention = userInput.toLowerCase().includes('@gmail');
       const gmailIntent = detectGmailIntent(cleanPrompt, isGmailActive, hasGmailMention);
 
-          if (gmailIntent.hasGmailIntent && gmailIntent.confidence !== 'low') {
-        setAiState("thinking");
-        setAiProcessSteps([
+      if (gmailIntent.hasGmailIntent && gmailIntent.confidence !== 'low') {
+        setAiStateForChat("thinking", submitConversationId);
+        setAiProcessStepsForChat([
           { step: "Buscando en tu correo electrónico", status: "active" },
           { step: "Analizando correos encontrados", status: "pending" },
           { step: "Generando respuesta inteligente", status: "pending" }
@@ -4983,7 +5016,7 @@ export function ChatInterface({
 	            })
 	          });
 
-          setAiProcessSteps((prev: any[]) => prev.map((s: any, i: number) =>
+          setAiProcessStepsForChat((prev: any[]) => prev.map((s: any, i: number) =>
             i === 0 ? { ...s, status: "done" as const } :
               i === 1 ? { ...s, status: "active" as const } : s
           ));
@@ -4991,7 +5024,7 @@ export function ChatInterface({
           if (chatResponse.ok) {
             const data = await chatResponse.json();
 
-            setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })));
+            setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })));
 
             const gmailResponseMsg: Message = {
               id: (Date.now() + 1).toString(),
@@ -5030,16 +5063,16 @@ export function ChatInterface({
           onSendMessage(gmailErrorMsg);
         }
 
-        setAiState("idle");
-        setAiProcessSteps([]);
+        setAiStateForChat("idle", submitConversationId);
+        setAiProcessStepsForChat([], submitConversationId);
         return;
       }
 
       // Check if Excel is open and prompt is complex - route through orchestrator
       const isExcelEditorOpen = (activeDocEditorRef.current?.type === "excel") || (previewDocumentRef.current?.type === "excel");
       if (isExcelEditorOpen && isComplexExcelPrompt(cleanPrompt) && orchestratorRef.current) {
-        setAiState("thinking");
-        setAiProcessSteps([
+        setAiStateForChat("thinking", submitConversationId);
+        setAiProcessStepsForChat([
           { step: "Analizando estructura del workbook", status: "active" },
           { step: "Creando hojas y datos", status: "pending" },
           { step: "Aplicando fórmulas y gráficos", status: "pending" }
@@ -5048,7 +5081,7 @@ export function ChatInterface({
         try {
           await orchestratorRef.current.runOrchestrator(cleanPrompt);
 
-          setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })));
+          setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })));
 
           const orchestratorMsg: Message = {
             id: (Date.now() + 1).toString(),
@@ -5074,8 +5107,8 @@ export function ChatInterface({
           onSendMessage(errorMsg);
         }
 
-        setAiState("idle");
-        setAiProcessSteps([]);
+        setAiStateForChat("idle", submitConversationId);
+        setAiProcessStepsForChat([], submitConversationId);
         return;
       }
 
@@ -5104,7 +5137,7 @@ export function ChatInterface({
         // Generate image if needed
         if (shouldGenerateImage) {
           setIsGeneratingImage(true);
-          setAiProcessSteps([
+          setAiProcessStepsForChat([
             { step: "Analizando tu petición", status: "done" },
             { step: "Generando imagen con IA", status: "active" },
             { step: "Procesando resultado", status: "pending" }
@@ -5121,7 +5154,7 @@ export function ChatInterface({
             const imageData = await imageRes.json();
 
             if (imageRes.ok && imageData.success) {
-              setAiProcessSteps((prev: AiProcessStep[]) => prev.map((s: AiProcessStep) => ({ ...s, status: "done" as const })));
+              setAiProcessStepsForChat((prev: AiProcessStep[]) => prev.map((s: AiProcessStep) => ({ ...s, status: "done" as const })));
 
               const msgId = (Date.now() + 1).toString();
 
@@ -5172,8 +5205,8 @@ export function ChatInterface({
               onSendMessage(aiMsg);
 
               setIsGeneratingImage(false);
-              setAiState("idle");
-              setAiProcessSteps([]);
+              setAiStateForChat("idle", submitConversationId);
+              setAiProcessStepsForChat([], submitConversationId);
               setSelectedTool(null);
               abortControllerRef.current = null;
               return;
@@ -5183,8 +5216,8 @@ export function ChatInterface({
           } catch (imgError: any) {
             setIsGeneratingImage(false);
             if (imgError.name === "AbortError") {
-              setAiState("idle");
-              setAiProcessSteps([]);
+              setAiStateForChat("idle", submitConversationId);
+              setAiProcessStepsForChat([], submitConversationId);
               abortControllerRef.current = null;
               return;
             }
@@ -5311,17 +5344,17 @@ IMPORTANTE:
 	              variant: "destructive",
               duration: 5000,
             });
-            setAiState("idle");
-            setAiProcessSteps([]);
+            setAiStateForChat("idle", submitConversationId);
+            setAiProcessStepsForChat([], submitConversationId);
 	            abortControllerRef.current = null;
 	            return;
 	          }
 	          if (effectiveStreamChatId) {
-	            // SSE streaming mode - real-time streaming from server
-	            setAiState("responding");
+            // SSE streaming mode - real-time streaming from server
+            setAiStateForChat("responding", effectiveStreamChatId);
 
             // Update steps: mark processing done, searching active
-            setAiProcessSteps((prev: any[]) => prev.map((s: any, i: number) => {
+            setAiProcessStepsForChat((prev: any[]) => prev.map((s: any, i: number) =>
               // Guard against undefined step or s
               if (!s || !s.step) return s;
 
@@ -5398,6 +5431,11 @@ IMPORTANTE:
             let streamWebSources: any[] | undefined;
             let isProductionStream = false;
 
+            const setAiStateForStream = (value: React.SetStateAction<AiState>) =>
+              setAiStateForChat(value, effectiveStreamChatId);
+            const setAiProcessStepsForStream = (value: React.SetStateAction<AiProcessStep[]>) =>
+              setAiProcessStepsForChat(value, effectiveStreamChatId);
+
             const streamResult = await streamChat.stream("/api/chat/stream", {
               chatId: effectiveStreamChatId,
               signal: abortControllerRef.current?.signal,
@@ -5416,11 +5454,11 @@ IMPORTANTE:
                 model: selectedModel,
                 latencyMode,
               },
-              onAiStateChange: (nextState) => setAiState(nextState),
+              onAiStateChange: (nextState) => setAiStateForStream(nextState),
               onEvent: (eventType, data) => {
                 if (eventType === "production_start") {
                   isProductionStream = true;
-                  setAiState("agent_working");
+                  setAiStateForStream("agent_working");
                   if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)) {
                     setDocGenerationState({
                       status: 'generating',
@@ -5500,14 +5538,14 @@ IMPORTANTE:
                 }
 
                 if (eventType === "tool_start" && data?.toolName === "browse_and_act") {
-                  setAiState("agent_working");
+                  setAiStateForStream("agent_working");
                   setIsBrowserOpen(true);
                   globalStartSseSession(data?.args?.goal || "Automatización web");
                   return;
                 }
 
                 if (eventType === "browser_step") {
-                  setAiState("agent_working");
+                  setAiStateForStream("agent_working");
                   if (!isBrowserOpen) setIsBrowserOpen(true);
                   globalUpdateFromSseStep(data);
                   return;
@@ -5534,9 +5572,9 @@ IMPORTANTE:
                 }
 
                 if (eventType === "context") {
-                  setAiState("responding");
+                  setAiStateForStream("responding");
                   if (data?.isAgenticMode === true) {
-                    setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
+                    setAiProcessStepsForStream((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
                   }
                   if (Array.isArray(data?.webSources)) {
                     streamWebSources = data.webSources;
@@ -5546,7 +5584,7 @@ IMPORTANTE:
 
                 if (eventType === "thinking") {
                   if (data?.step && data?.message) {
-                    setAiProcessSteps((prev: any[]) => {
+                    setAiProcessStepsForStream((prev: any[]) => {
                       const exists = prev.find((s: any) => s.id === data.step);
                       if (exists) return prev;
                       return [...prev, {
@@ -5742,7 +5780,7 @@ IMPORTANTE:
             });
 
             // Update steps: mark processing done, searching active
-            setAiProcessSteps((prev: any[]) => prev.map((s: any, i: number) => {
+            setAiProcessStepsForChat((prev: any[]) => prev.map((s: any, i: number) =>
               if (!s || !s.step) return s;
               if (s.step.includes("Analizando")) return { ...s, status: "done" };
               if (s.step.includes("Procesando")) return { ...s, status: "done" };
@@ -5768,7 +5806,7 @@ IMPORTANTE:
             }
 
             // Update steps: mark searching done, generating active
-            setAiProcessSteps((prev: any[]) => prev.map((s: any) => {
+            setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => {
               if (!s || !s.step) return s;
               if (s.step.includes("Buscando")) return { ...s, status: "done" };
               if (s.step.includes("Generando")) return { ...s, status: "active" };
@@ -5783,7 +5821,7 @@ IMPORTANTE:
 
             // If Figma diagram was generated, add it to chat with simulated streaming
             if (figmaDiagram) {
-              setAiState("responding");
+              setAiStateForChat("responding", effectiveStreamChatId);
 
               let currentIndex = 0;
               streamIntervalRef.current = setInterval(() => {
@@ -5823,7 +5861,7 @@ IMPORTANTE:
             }
 
             // Legacy simulated streaming for other cases
-            setAiState("responding");
+            setAiStateForChat("responding", effectiveStreamChatId);
 
             // Check document modes
             const isExcelModeLegacy = (activeDocEditorRef.current?.type === "excel") || (previewDocumentRef.current?.type === "excel");
@@ -5955,8 +5993,8 @@ IMPORTANTE:
             duration: 5000,
           });
         }
-        setAiState("idle");
-        setAiProcessSteps([]);
+        setAiStateForChat("idle", submitConversationId);
+        setAiProcessStepsForChat([], submitConversationId);
         abortControllerRef.current = null;
       }
     } catch (outerError: any) {
@@ -5970,8 +6008,8 @@ IMPORTANTE:
         variant: "destructive",
         duration: 5000,
       });
-      setAiState("idle");
-      setAiProcessSteps([]);
+      setAiStateForChat("idle", submitConversationId);
+      setAiProcessStepsForChat([], submitConversationId);
       abortControllerRef.current = null;
     }
   };
