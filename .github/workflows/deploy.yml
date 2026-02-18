@@ -62,7 +62,7 @@ jobs:
           export GH_TOKEN="${GH_TOKEN}"
 
           for attempt in $(seq 1 360); do
-            runs_json="$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow "CI" --branch "${BRANCH}" --json headSha,status,conclusion --limit 20 || true)"
+            runs_json="$(timeout 20s gh run list --repo "${GITHUB_REPOSITORY}" --workflow "ci.yml" --branch "${BRANCH}" --json headSha,status,conclusion --limit 50 2>/dev/null || true)"
             if [ -z "${runs_json}" ] || [ "${runs_json}" = "null" ]; then
               echo "Unable to read workflow runs yet; retrying..."
               sleep 10
