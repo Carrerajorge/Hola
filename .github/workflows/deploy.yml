@@ -378,7 +378,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2; do
-            if ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ConnectionAttempts=3               -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}               "echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null &&                cd ${{ env.DEPLOY_PATH }} &&                IMAGE_TAG='${{ steps.tag.outputs.image_tag }}'                APP_VERSION='${{ steps.tag.outputs.app_version }}'                BUILD_IMAGE_TAG='${{ needs.build_images.outputs.image_tag }}'                EXPECTED_APP_DIGEST='${{ needs.build_images.outputs.app_digest }}'                EXPECTED_SANDBOX_DIGEST='${{ needs.build_images.outputs.sandbox_digest }}'                EXPECTED_OCR_DIGEST='${{ needs.build_images.outputs.ocr_digest }}'                bash scripts/deploy-bluegreen.sh"; then
+            if ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ConnectionAttempts=3               -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}               "echo '${{ github.token }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null &&                cd ${{ env.DEPLOY_PATH }} &&                IMAGE_TAG='${{ steps.tag.outputs.image_tag }}'                APP_VERSION='${{ steps.tag.outputs.app_version }}'                BUILD_IMAGE_TAG='${{ needs.build_images.outputs.image_tag }}'                EXPECTED_APP_DIGEST='${{ needs.build_images.outputs.app_digest }}'                EXPECTED_SANDBOX_DIGEST='${{ needs.build_images.outputs.sandbox_digest }}'                EXPECTED_OCR_DIGEST='${{ needs.build_images.outputs.ocr_digest }}'                bash scripts/deploy-bluegreen.sh"; then
               break
             fi
             if [ "$attempt" -eq 2 ]; then
@@ -620,7 +620,7 @@ jobs:
 
       - name: Deploy circuit breaker
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           failures=$(gh run list --repo ${{ github.repository }} --workflow "Deploy to Production (Blue-Green)" --branch main --limit 8 --json conclusion --jq '[.[] | select(.conclusion=="failure")] | length')
@@ -737,7 +737,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2; do
-            if ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ConnectionAttempts=3               -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}               "echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null &&                cd ${{ env.DEPLOY_PATH }} &&                IMAGE_TAG='${{ steps.tag.outputs.image_tag }}'                APP_VERSION='${{ steps.tag.outputs.app_version }}'                BUILD_IMAGE_TAG='${{ needs.build_images.outputs.image_tag }}'                EXPECTED_APP_DIGEST='${{ needs.build_images.outputs.app_digest }}'                EXPECTED_SANDBOX_DIGEST='${{ needs.build_images.outputs.sandbox_digest }}'                EXPECTED_OCR_DIGEST='${{ needs.build_images.outputs.ocr_digest }}'                bash scripts/deploy-bluegreen.sh"; then
+            if ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ConnectionAttempts=3               -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}               "echo '${{ github.token }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null &&                cd ${{ env.DEPLOY_PATH }} &&                IMAGE_TAG='${{ steps.tag.outputs.image_tag }}'                APP_VERSION='${{ steps.tag.outputs.app_version }}'                BUILD_IMAGE_TAG='${{ needs.build_images.outputs.image_tag }}'                EXPECTED_APP_DIGEST='${{ needs.build_images.outputs.app_digest }}'                EXPECTED_SANDBOX_DIGEST='${{ needs.build_images.outputs.sandbox_digest }}'                EXPECTED_OCR_DIGEST='${{ needs.build_images.outputs.ocr_digest }}'                bash scripts/deploy-bluegreen.sh"; then
               break
             fi
             if [ "$attempt" -eq 2 ]; then
