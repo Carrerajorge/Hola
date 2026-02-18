@@ -962,7 +962,7 @@ let streamHardTimeout: NodeJS.Timeout | null = null;
 let streamIdleTimeout: NodeJS.Timeout | null = null;
 
 const STREAM_HARD_TIMEOUT_MS = 180_000;
-const STREAM_IDLE_TIMEOUT_MS = 45_000;
+const STREAM_IDLE_TIMEOUT_MS = 90_000; // must exceed llmGateway idle timeout (60s)
 
 const clearStreamTimeouts = (): void => {
   if (streamHardTimeout) {
