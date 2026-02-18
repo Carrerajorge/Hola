@@ -11,12 +11,10 @@ on:
         default: ''
         type: string
 
-concurrency:
-  group: deploy-production
-  # CRITICAL: false prevents new pushes from cancelling in-progress deploys.
-  # With true, rapid pushes meant no deploy ever completed — production was stuck
-  # on a broken version for hours.
-  cancel-in-progress: false
+# Concurrency is managed at the job level (deploy_auto job) rather than
+# workflow level. This allows CI gate and build jobs to run in parallel
+# for multiple SHAs, while only the deploy step itself serializes.
+# See deploy_auto.concurrency below.
 
 permissions:
   actions: read
@@ -474,6 +472,12 @@ jobs:
       && github.ref == 'refs/heads/main'
       && success()
     timeout-minutes: 25
+    # Job-level concurrency: if a newer deploy is queued, cancel this one.
+    # This ensures the most recent commit always ships, without blocking the queue.
+    # The VPS-level deploy script itself is idempotent and rolls back on failure.
+    concurrency:
+      group: deploy-auto-vps
+      cancel-in-progress: true
     env:
       VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
       VPS_USER: ${{ secrets.VPS_USER || 'root' }}
