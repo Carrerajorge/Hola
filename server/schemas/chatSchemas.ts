@@ -7,35 +7,48 @@ import { z } from 'zod';
 // Chat message schema
 export const chatMessageSchema = z.object({
     role: z.enum(['user', 'assistant', 'system']),
-    content: z.string().min(1, 'Message content cannot be empty'),
+    content: z.string().min(1, 'Message content cannot be empty').max(32_000, 'Message too long'),
 });
 
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
 
+// Attachment schema — validates file metadata without blocking legitimate files
+const attachmentSchema = z.object({
+    id: z.string().max(200).optional(),
+    fileId: z.string().max(200).optional(),
+    name: z.string().max(255).optional(),
+    type: z.string().max(160).optional(),
+    mimeType: z.string().max(180).optional(),
+    size: z.number().int().min(0).max(500_000_000).optional(),
+    storagePath: z.string().max(512).optional(),
+    content: z.string().max(2_000_000).optional(),
+    url: z.string().max(2048).optional(),
+}).passthrough(); // allow extra fields from legacy clients
+
 // Chat request body schema
 export const chatRequestSchema = z.object({
-    messages: z.array(chatMessageSchema).min(1, 'At least one message is required'),
+    messages: z.array(chatMessageSchema).min(1, 'At least one message is required').max(100, 'Too many messages'),
     useRag: z.boolean().optional().default(true),
-    conversationId: z.string().optional(),
-    images: z.array(z.string()).optional(),
+    conversationId: z.string().max(200).optional(),
+    images: z.array(z.string()).max(10).optional(),
     gptConfig: z.any().optional(), // Legacy GPT config
-    gptId: z.string().optional(),
+    gptId: z.string().max(120).optional(),
     documentMode: z.boolean().optional(),
     figmaMode: z.boolean().optional(),
-    provider: z.string().optional().default('gemini'),
-    model: z.string().optional().default('gemini-2.5-flash'),
-    attachments: z.array(z.any()).optional(),
-    lastImageBase64: z.string().optional(),
-    lastImageId: z.string().optional(),
-    session_id: z.string().optional(),
+    provider: z.string().max(40).optional().default('gemini'),
+    model: z.string().max(160).trim().optional().default('gemini-2.5-flash'),
+    attachments: z.array(attachmentSchema).max(20).optional(),
+    lastImageBase64: z.string().max(500_000).optional(),
+    lastImageId: z.string().max(200).optional(),
+    session_id: z.string().max(120).optional(),
 });
 
 export type ChatRequest = z.infer<typeof chatRequestSchema>;
 
 // Streaming chat request schema
 export const streamChatRequestSchema = chatRequestSchema.extend({
-    runId: z.string().optional(),
-    chatId: z.string().optional(),
+    runId: z.string().max(200).optional(),
+    chatId: z.string().max(200).optional(),
     // Client may send docTool="figma" even when server ignores it; accept to avoid hard-failing validation.
     docTool: z.enum(['word', 'excel', 'ppt', 'figma']).optional(),
 
@@ -46,13 +59,13 @@ export const streamChatRequestSchema = chatRequestSchema.extend({
     webSearchAuto: z.boolean().optional(),
 
     // Idempotency/correlation
-    clientRequestId: z.string().optional(),
-    userRequestId: z.string().optional(),
+    clientRequestId: z.string().max(200).optional(),
+    userRequestId: z.string().max(200).optional(),
 
     // Skill routing
-    skillId: z.string().optional(),
+    skillId: z.string().max(120).optional(),
     skill: z.any().optional(),
-    skillScopes: z.array(z.string()).optional(),
+    skillScopes: z.array(z.string().max(120)).max(30).optional(),
 });
 
 export type StreamChatRequest = z.infer<typeof streamChatRequestSchema>;

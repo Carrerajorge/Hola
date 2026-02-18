@@ -138,6 +138,10 @@ const SERVER_CHAT_ID_PREFIX = "chat_";
 const FAILED_QUEUE_KEY = "ilia_failed_message_queue";
 const MAX_FAILED_QUEUE_ITEMS = 20;
 const MAX_FAILED_QUEUE_AGE_MS = 24 * 60 * 60 * 1000;
+const MAX_SAFE_CHAT_ID_LENGTH = 128;
+const CHAT_ID_SAFE_PATTERN = /^(?:chat_[A-Za-z0-9._-]{6,120}|pending-[A-Za-z0-9._-]{6,120}|[A-Za-z0-9._-]{6,120})$/;
+const MAX_MESSAGE_CONTENT_LENGTH = 12_000;
+const MAX_REQUEST_ID_LENGTH = 120;
 const pendingToRealIdMap = new Map<string, string>();
 
 // Idempotency: Track messages being processed to prevent duplicates
@@ -159,6 +163,46 @@ function rememberSavedRequestId(requestId: string): void {
       if (oldest) savedRequestIds.delete(oldest);
     }
   }
+}
+
+function sanitizeChatId(candidateChatId: string): string {
+  if (typeof candidateChatId !== "string") {
+    throw new Error("Invalid chat ID");
+  }
+
+  const chatId = candidateChatId.trim();
+  if (!chatId || chatId.length > MAX_SAFE_CHAT_ID_LENGTH) {
+    throw new Error("Invalid chat ID");
+  }
+  if (!CHAT_ID_SAFE_PATTERN.test(chatId)) {
+    throw new Error("Invalid chat ID");
+  }
+  return chatId;
+}
+
+function sanitizeRequestId(requestId?: string): string | undefined {
+  if (!requestId || typeof requestId !== "string") return undefined;
+  const normalized = requestId.trim();
+  if (!normalized || normalized.length > MAX_REQUEST_ID_LENGTH) return undefined;
+  return normalized;
+}
+
+function sanitizeSendMessage(message: Message): Message {
+  const role = message.role;
+  if (role !== "user" && role !== "assistant" && role !== "system") {
+    throw new Error("Invalid message role");
+  }
+
+  const sanitizedContent = typeof message.content === "string" ? message.content.trimEnd() : "";
+  if (role === "user" && sanitizedContent.length > MAX_MESSAGE_CONTENT_LENGTH) {
+    throw new Error("Message content too long");
+  }
+
+  return {
+    ...message,
+    content: sanitizedContent,
+    requestId: sanitizeRequestId(message.requestId),
+  };
 }
 
 function safeReadLocalChatsFromStorage(storageKey: string): Chat[] {
@@ -266,6 +310,33 @@ export interface ChatRun {
   lastSeq?: number;
   error?: string;
 }
+
+/**
+ * Acknowledgement returned by addMessage / onSendMessage.
+ * Contains the resolved chat run and optional resolved chatId.
+ */
+export interface SendMessageAck {
+  run?: ChatRun;
+  deduplicated?: boolean;
+  /** Resolved real chat ID (may differ from pending ID used locally). */
+  chatId?: string;
+}
+
+/**
+ * Generates a unique run ID for tracking a streaming response.
+ */
+export function generateRunId(): string {
+  try {
+    const c: any = (globalThis as any).crypto;
+    if (c && typeof c.randomUUID === "function") {
+      return `run_${c.randomUUID()}`;
+    }
+  } catch {
+    // ignore
+  }
+  return `run_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+}
+
 const activeRuns = new Map<string, ChatRun>(); // chatId -> active run
 
 // ============================================================================
@@ -1426,27 +1497,32 @@ export function useChats() {
     return { pendingId, stableKey };
   }, []);
 
-  const addMessage = useCallback(async (chatId: string, message: Message): Promise<{ run?: ChatRun; deduplicated?: boolean } | undefined> => {
-    let resolvedChatId = pendingToRealIdMap.get(chatId) || chatId;
-    const isPending = chatId.startsWith(PENDING_CHAT_PREFIX);
+  const addMessage = useCallback(async (chatId: string, message: Message): Promise<SendMessageAck | undefined> => {
+    const safeChatId = sanitizeChatId(chatId);
+    let resolvedChatId = pendingToRealIdMap.get(safeChatId) || safeChatId;
+    const isPending = safeChatId.startsWith(PENDING_CHAT_PREFIX);
+    const sanitizedInput = sanitizeSendMessage(message);
+    const safeRequestId = sanitizeRequestId(sanitizedInput.requestId);
+    const safeClientRequestId = sanitizedInput.role === "user" && !(sanitizedInput as any).skipRun
+      ? (sanitizedInput.clientRequestId || generateClientRequestId())
+      : sanitizedInput.clientRequestId;
 
     const normalizedMessage: Message = {
-      ...message,
-      clientTempId: message.clientTempId || message.id,
+      ...sanitizedInput,
+      requestId: safeRequestId,
+      clientTempId: sanitizedInput.clientTempId || sanitizedInput.id,
       // Ensure we keep the same clientRequestId on retry to preserve idempotency.
-      clientRequestId: message.role === "user" && !(message as any).skipRun
-        ? (message.clientRequestId || generateClientRequestId())
-        : message.clientRequestId,
+      clientRequestId: safeClientRequestId,
       // Default optimistic delivery state for user messages.
-      deliveryStatus: message.deliveryStatus || (message.role === "user" ? "sending" : message.deliveryStatus),
-      deliveryError: message.deliveryStatus === "error" ? message.deliveryError : undefined,
+      deliveryStatus: sanitizedInput.deliveryStatus || (sanitizedInput.role === "user" ? "sending" : sanitizedInput.deliveryStatus),
+      deliveryError: sanitizedInput.deliveryStatus === "error" ? sanitizedInput.deliveryError : undefined,
     };
 
     const tempId = normalizedMessage.clientTempId || normalizedMessage.id;
 
     const setDeliveryPatch = (patch: Partial<Message>) => {
       setChats(prev => prev.map(chat => {
-        if (chat.id !== resolvedChatId && chat.id !== chatId) return chat;
+        if (chat.id !== resolvedChatId && chat.id !== safeChatId) return chat;
         return {
           ...chat,
           messages: chat.messages.map(m => {
@@ -1464,7 +1540,7 @@ export function useChats() {
 
     const reconcileMessageId = (serverId: string) => {
       setChats(prev => prev.map(chat => {
-        if (chat.id !== resolvedChatId && chat.id !== chatId) return chat;
+        if (chat.id !== resolvedChatId && chat.id !== safeChatId) return chat;
 
         let changed = false;
         let updated = chat.messages.map(m => {
@@ -1515,13 +1591,13 @@ export function useChats() {
     };
 
     // Idempotency guard: claim the requestId for this send attempt.
-    if (normalizedMessage.requestId && !markRequestProcessing(normalizedMessage.requestId)) {
-      console.log(`[Dedup] Skipping already processed/processing requestId: ${normalizedMessage.requestId}`);
+    if (safeRequestId && !markRequestProcessing(safeRequestId)) {
+      console.log(`[Dedup] Skipping already processed/processing requestId: ${safeRequestId}`);
       const existingRun = getActiveRun(resolvedChatId);
       if (existingRun) {
-        return { run: existingRun, deduplicated: true };
+        return { run: existingRun, deduplicated: true, chatId: resolvedChatId };
       }
-      return undefined;
+      return { chatId: resolvedChatId };
     }
 
     const title = normalizedMessage.role === "user" && normalizedMessage.content
@@ -1530,11 +1606,11 @@ export function useChats() {
 
     if (isPending && resolvedChatId.startsWith(PENDING_CHAT_PREFIX)) {
       const fallbackChatId = generateStableServerChatId();
-      pendingToRealIdMap.set(chatId, fallbackChatId);
+      pendingToRealIdMap.set(safeChatId, fallbackChatId);
       setChats(prev => prev.map(chat =>
-        chat.id === chatId ? { ...chat, id: fallbackChatId } : chat
+        chat.id === safeChatId ? { ...chat, id: fallbackChatId } : chat
       ));
-      if (activeChatId === chatId) {
+      if (activeChatId === safeChatId) {
         setActiveChatId(fallbackChatId);
       }
       resolvedChatId = fallbackChatId;
@@ -1542,20 +1618,20 @@ export function useChats() {
 
     // Insert into local state (optimistic) if not present.
     setChats(prev => {
-      const chatExists = prev.some(chat => chat.id === chatId || chat.id === resolvedChatId);
+      const chatExists = prev.some(chat => chat.id === safeChatId || chat.id === resolvedChatId);
 
-      if (!chatExists && isPending) {
-        return [...prev, {
-          id: chatId,
-          title,
-          messages: [normalizedMessage],
-          timestamp: Date.now(),
-          stableKey: `stable-${chatId}`,
-        }];
-      }
+        if (!chatExists && isPending) {
+          return [...prev, {
+            id: safeChatId,
+            title,
+            messages: [normalizedMessage],
+            timestamp: Date.now(),
+            stableKey: `stable-${safeChatId}`,
+          }];
+        }
 
-      return prev.map(chat => {
-        const matchId = chat.id === chatId || chat.id === resolvedChatId;
+        return prev.map(chat => {
+          const matchId = chat.id === safeChatId || chat.id === resolvedChatId;
         if (!matchId) return chat;
 
         const maybeMarkDelivered = (msgs: Message[]): Message[] => {
