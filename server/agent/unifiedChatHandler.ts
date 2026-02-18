@@ -91,12 +91,28 @@ export class SseBufferedWriter {
     if (this.buffer.length === 0 || !this.isWritable) return;
 
     this.seq++;
+
+    const streamMeta = (this.res as any)?.locals?.streamMeta;
+    const requestId = typeof streamMeta?.requestId === "string" ? streamMeta.requestId : undefined;
+    const conversationId = typeof streamMeta?.conversationId === "string" ? streamMeta.conversationId : undefined;
+
     writeSse(this.res, 'chunk', {
       content: this.buffer,
       sequence: this.seq,
       runId: this.runId,
       timestamp: Date.now(),
+      ...(requestId ? { requestId } : {}),
+      ...(conversationId ? { conversationId } : {}),
     });
+
+    if (typeof streamMeta?.onWrite === "function") {
+      try {
+        streamMeta.onWrite();
+      } catch (observerError) {
+        console.warn("[UnifiedChat] streamMeta.onWrite failed:", observerError);
+      }
+    }
+
     this.buffer = '';
   }
 
