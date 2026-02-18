@@ -13,8 +13,8 @@ docker-compose up -d
 echo "Waiting for database to be ready..."
 sleep 5
 
-echo "Pushing database schema..."
-npm run db:push
+echo "Bootstrapping database (extensions + migrations)..."
+npm run db:bootstrap
 
 # Optional: Seed data if needed
 # npm run db:seed
