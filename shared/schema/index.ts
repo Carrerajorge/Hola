@@ -3,4 +3,5 @@ export * from "./common"; export * from "./auth"; export * from "./admin"; expor
 "./workspaceRoles"; export * from "./workspaceMembers"; export * from "./workspaceGroups"; export * from "./workspaceGroupMembers"; export * from "./knowledge"; export * from "./schedules"; export * 
 from "./billingCredits"; export * from "./rag"; export * from "./packageManager"; export * from "./telemetry";
 export * from "./iam";
+export * from "./gptProduct";
 

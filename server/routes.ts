@@ -18,6 +18,7 @@ import { swaggerSpec } from "./lib/swagger";
 import { createChatsRouter } from "./routes/chatsRouter";
 import { createFilesRouter } from "./routes/filesRouter";
 import { createGptRouter } from "./routes/gptRouter";
+import { createGptProductRouter } from "./routes/gptProductRouter";
 import { createDocumentsRouter } from "./routes/documentsRouter";
 import { createAdminRouter } from "./routes/admin";
 import { createRetrievalAdminRouter } from "./routes/retrievalAdminRouter";
@@ -586,6 +587,7 @@ export async function registerRoutes(
   app.use("/api", createChatsRouter());
   app.use(createFilesRouter());
   app.use("/api", createGptRouter());
+  app.use("/api/gpt-product", createGptProductRouter());
   app.use("/api/documents", createDocumentsRouter());
   app.use("/api/admin", createAdminRouter());
   app.use("/api/admin", createRetrievalAdminRouter());
