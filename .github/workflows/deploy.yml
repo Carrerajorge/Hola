@@ -105,8 +105,13 @@ jobs:
     name: Build Docker Images
     needs: [ci, ci_gate]
     if: >-
-      ${{ (github.event_name == 'workflow_dispatch' && needs.ci.result == 'success') ||
-          (github.event_name == 'push' && needs.ci_gate.outputs.ci_ok == 'true') }}
+      ${{
+        always() &&
+        (
+          (github.event_name == 'workflow_dispatch' && needs.ci.result == 'success') ||
+          (github.event_name == 'push' && needs.ci_gate.result == 'success' && needs.ci_gate.outputs.ci_ok == 'true')
+        )
+      }}
     uses: ./.github/workflows/build-images.yml
     with:
       sha: ${{ github.sha }}
@@ -120,8 +125,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: [ci, build_images]
     if: >-
-      github.event_name == 'workflow_dispatch'
-      && success()
+      ${{
+        always() &&
+        github.event_name == 'workflow_dispatch' &&
+        needs.ci.result == 'success' &&
+        needs.build_images.result == 'success'
+      }}
     timeout-minutes: 20
     env:
       VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
@@ -469,9 +478,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build_images]
     if: >-
-      github.event_name == 'push'
-      && github.ref == 'refs/heads/main'
-      && success()
+      ${{
+        always() &&
+        github.event_name == 'push' &&
+        github.ref == 'refs/heads/main' &&
+        needs.build_images.result == 'success'
+      }}
     timeout-minutes: 25
     # Job-level concurrency: if a newer deploy is queued, cancel this one.
     # This ensures the most recent commit always ships, without blocking the queue.
