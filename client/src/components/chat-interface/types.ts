@@ -88,7 +88,26 @@ export interface ChatMetadata {
 // UI STATE TYPES
 // ============================================
 
-export type AIState = 'idle' | 'sending' | 'streaming' | 'done' | 'error' | 'agent_working';
+// Canonical streaming states: idle -> sending -> streaming -> done/error
+// Legacy aliases (thinking/responding) are still accepted for compatibility.
+export type AIState =
+    | 'idle'
+    | 'sending'
+    | 'streaming'
+    | 'done'
+    | 'error'
+    | 'agent_working'
+    | 'thinking'
+    | 'responding';
+
+export const isAiSendingState = (state: AIState): boolean =>
+    state === 'sending' || state === 'thinking';
+
+export const isAiStreamingState = (state: AIState): boolean =>
+    state === 'streaming' || state === 'responding';
+
+export const isAiBusyState = (state: AIState): boolean =>
+    !['idle', 'done', 'error'].includes(state);
 
 export interface AiProcessStep {
     id?: string;

@@ -116,7 +116,7 @@ const DEFAULT_TIMEOUT_MS = 60000;
 // - total timeout: cap overall request time
 // - idle timeout: cap time with no tokens (covers TTFT and stalled streams)
 const DEFAULT_STREAM_TIMEOUT_MS = 300000; // 5 minutes
-const STREAM_IDLE_TIMEOUT_MS = 30000; // 30 seconds
+const STREAM_IDLE_TIMEOUT_MS = 60000; // 60 seconds – covers slow TTFT from Gemini/reasoning models
 const MAX_CONTEXT_TOKENS = 8000;
 const CACHE_TTL_MS = 300000; // 5 minutes
 const IN_FLIGHT_TIMEOUT_MS = 120000; // 2 minutes

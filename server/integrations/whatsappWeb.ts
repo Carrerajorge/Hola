@@ -63,6 +63,10 @@ interface SocketRecord {
 
 export class WhatsAppWebManager extends EventEmitter {
   private sockets = new Map<string, SocketRecord>();
+  // Persist lightweight per-user preferences even when the socket is not connected.
+  private autoReplyPrefs = new Map<string, boolean>();
+  private autoReplyPrompts = new Map<string, string>();
+  private autoReplySettingsLoaded = new Set<string>();
   private reconnectAttempts = new Map<string, number>();
   // Track processed message IDs to prevent duplicate auto-replies
   private processedMessages = new Map<string, number>();
@@ -106,6 +110,49 @@ export class WhatsAppWebManager extends EventEmitter {
     throw new Error('No se pudo crear el directorio de sesión WhatsApp (permiso denegado)');
   }
 
+  private autoReplySettingsPath(userId: string): string {
+    return path.join(this.sessionDirForUser(userId), 'auto-reply-settings.json');
+  }
+
+  private loadAutoReplySettingsOnce(userId: string): void {
+    if (this.autoReplySettingsLoaded.has(userId)) return;
+    this.autoReplySettingsLoaded.add(userId);
+
+    try {
+      const settingsPath = this.autoReplySettingsPath(userId);
+      if (!fs.existsSync(settingsPath)) return;
+
+      const raw = fs.readFileSync(settingsPath, 'utf8');
+      const parsed = JSON.parse(raw) as any;
+
+      if (typeof parsed?.autoReplyEnabled === 'boolean') {
+        this.autoReplyPrefs.set(userId, parsed.autoReplyEnabled);
+      }
+      if (typeof parsed?.customPrompt === 'string') {
+        this.autoReplyPrompts.set(userId, parsed.customPrompt);
+      }
+    } catch (e: any) {
+      console.warn('[WhatsApp] Failed to load auto-reply settings:', e?.message || e);
+    }
+  }
+
+  private persistAutoReplySettings(userId: string): void {
+    try {
+      const settingsPath = this.autoReplySettingsPath(userId);
+      const tmp = `${settingsPath}.tmp`;
+      const payload = {
+        autoReplyEnabled: this.autoReplyPrefs.get(userId) ?? false,
+        customPrompt: this.autoReplyPrompts.get(userId) ?? '',
+        updatedAt: new Date().toISOString(),
+      };
+
+      fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), 'utf8');
+      fs.renameSync(tmp, settingsPath);
+    } catch (e: any) {
+      console.warn('[WhatsApp] Failed to persist auto-reply settings:', e?.message || e);
+    }
+  }
+
   private cleanSessionDir(userId: string): void {
     try {
       const dir = this.sessionDirForUser(userId);
@@ -122,12 +169,30 @@ export class WhatsAppWebManager extends EventEmitter {
   }
 
   isAutoReplyEnabled(userId: string): boolean {
-    return this.sockets.get(userId)?.autoReplyEnabled ?? true;
+    this.loadAutoReplySettingsOnce(userId);
+    const socketVal = this.sockets.get(userId)?.autoReplyEnabled;
+    if (typeof socketVal === 'boolean') return socketVal;
+    // Default to OFF for safety; auto-replies should be explicitly enabled by the user.
+    return this.autoReplyPrefs.get(userId) ?? false;
   }
 
   setAutoReply(userId: string, enabled: boolean): void {
+    this.loadAutoReplySettingsOnce(userId);
+    this.autoReplyPrefs.set(userId, enabled);
     const rec = this.sockets.get(userId);
     if (rec) rec.autoReplyEnabled = enabled;
+    this.persistAutoReplySettings(userId);
+  }
+
+  getAutoReplyPrompt(userId: string): string {
+    this.loadAutoReplySettingsOnce(userId);
+    return this.autoReplyPrompts.get(userId) ?? '';
+  }
+
+  setAutoReplyPrompt(userId: string, prompt: string): void {
+    this.loadAutoReplySettingsOnce(userId);
+    this.autoReplyPrompts.set(userId, prompt);
+    this.persistAutoReplySettings(userId);
   }
 
   /**
@@ -162,6 +227,7 @@ export class WhatsAppWebManager extends EventEmitter {
    * Returns a Promise that resolves once QR/pairing_code is ready (or timeout).
    */
   async startWithOptions(userId: string, opts?: { phone?: string }): Promise<WhatsAppWebStatus> {
+    this.loadAutoReplySettingsOnce(userId);
     const existing = this.sockets.get(userId);
     if (existing) {
       if (existing.status.state === 'connected' ||
@@ -220,7 +286,7 @@ export class WhatsAppWebManager extends EventEmitter {
       auth: state,
       status: { state: 'connecting' },
       qrCount: 0,
-      autoReplyEnabled: true,
+      autoReplyEnabled: this.autoReplyPrefs.get(userId) ?? false,
     };
     this.sockets.set(userId, record);
     this.reconnectAttempts.set(userId, 0);

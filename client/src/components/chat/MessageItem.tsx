@@ -6,6 +6,7 @@ import { UserMessage } from "./UserMessage";
 import { AssistantMessage } from "./AssistantMessage";
 import { AttachmentList, DocumentBlock } from "./MessageParts";
 import { AgentArtifact } from "@/components/agent-steps-display";
+import { type AIState } from "@/components/chat-interface/types";
 
 export interface MessageItemProps {
     message: Message;
@@ -20,7 +21,7 @@ export interface MessageItemProps {
     isGeneratingImage: boolean;
     pendingGeneratedImage: { messageId: string; imageData: string } | null;
     latestGeneratedImageRef: React.RefObject<{ messageId: string; imageData: string } | null>;
-    aiState: "idle" | "thinking" | "responding" | "agent_working";
+    aiState: AIState;
     regeneratingMsgIndex: number | null;
     handleCopyMessage: (content: string, id: string) => void;
     handleStartEdit: (msg: Message) => void;

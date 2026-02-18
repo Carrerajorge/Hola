@@ -40,6 +40,7 @@ import {
   ExternalLink
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/apiClient";
 import { useToast } from "@/hooks/use-toast";
 import { useModelAvailability } from "@/contexts/ModelAvailabilityContext";
 import type { Gpt } from "./gpt-explorer";
@@ -183,8 +184,8 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
   const loadKnowledgeAndActions = async (gptId: string) => {
     try {
       const [knowledgeRes, actionsRes] = await Promise.all([
-        fetch(`/api/gpts/${gptId}/knowledge`),
-        fetch(`/api/gpts/${gptId}/actions`)
+        apiFetch(`/api/gpts/${gptId}/knowledge`),
+        apiFetch(`/api/gpts/${gptId}/actions`)
       ]);
       if (knowledgeRes.ok) setKnowledgeFiles(await knowledgeRes.json());
       if (actionsRes.ok) setActions(await actionsRes.json());
@@ -244,7 +245,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
       const url = editingGpt ? `/api/gpts/${editingGpt.id}` : "/api/gpts";
       const method = editingGpt ? "PATCH" : "POST";
 
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -292,7 +293,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
     setUploading(true);
     for (const file of Array.from(files)) {
       try {
-        const response = await fetch(`/api/gpts/${editingGpt.id}/knowledge`, {
+        const response = await apiFetch(`/api/gpts/${editingGpt.id}/knowledge`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -318,7 +319,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
   const handleDeleteKnowledge = async (id: string) => {
     if (!editingGpt) return;
     try {
-      await fetch(`/api/gpts/${editingGpt.id}/knowledge/${id}`, { method: "DELETE" });
+      await apiFetch(`/api/gpts/${editingGpt.id}/knowledge/${id}`, { method: "DELETE" });
       setKnowledgeFiles(prev => prev.filter(k => k.id !== id));
     } catch (error) {
       console.error("Error deleting knowledge:", error);
@@ -330,7 +331,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
     if (!confirm("¿Estás seguro de que quieres eliminar este GPT?")) return;
 
     try {
-      const response = await fetch(`/api/gpts/${editingGpt.id}`, { method: "DELETE" });
+      const response = await apiFetch(`/api/gpts/${editingGpt.id}`, { method: "DELETE" });
       if (response.ok) {
         toast({ title: "GPT eliminado" });
         onOpenChange(false);
@@ -347,7 +348,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
   const handleDuplicateGpt = async () => {
     if (!editingGpt) return;
     try {
-      const response = await fetch("/api/gpts", {
+      const response = await apiFetch("/api/gpts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -428,7 +429,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
 
     try {
       if (editingAction) {
-        const response = await fetch(`/api/gpts/${editingGpt.id}/actions/${editingAction.id}`, {
+        const response = await apiFetch(`/api/gpts/${editingGpt.id}/actions/${editingAction.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(actionForm)
@@ -439,7 +440,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
           toast({ title: "Acción actualizada" });
         }
       } else {
-        const response = await fetch(`/api/gpts/${editingGpt.id}/actions`, {
+        const response = await apiFetch(`/api/gpts/${editingGpt.id}/actions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(actionForm)
@@ -470,7 +471,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
     setSavedGptData(prev => prev ? { ...prev, visibility: typedVisibility } : null);
 
     try {
-      const response = await fetch(`/api/gpts/${savedGptData.id}`, {
+      const response = await apiFetch(`/api/gpts/${savedGptData.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ visibility: newVisibility })

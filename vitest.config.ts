@@ -1,26 +1,22 @@
-import { defineConfig } from 'vitest/config'; import path from 'path';
+import path from "node:path";
+import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
     globals: true,
-    environment: 'node',
+    environment: "node",
     testTimeout: 15000,
-    include: ['tests/**/*.test.ts', 'server/**/*.test.ts'],
-    setupFiles: ['./tests/setup.ts'],
+    include: ["tests/**/*.test.ts", "server/**/*.test.ts"],
+    setupFiles: ["./tests/setup.ts"],
     coverage: {
-      provider: 'v8',
-      reporter: ['text', 'json', 'json-summary', 'html'],
-      thresholds: {
-        lines: 30,
-        functions: 30,
-        branches: 20,
-        statements: 30,
-
-      },
+      provider: "v8",
+      // Keep coverage output stable; scripts/quality-gate.ts controls cleanup + thresholds.
+      clean: false,
+      reporter: ["text", "json", "json-summary", "html"],
     },
     alias: {
-      '@': path.resolve(__dirname, './client/src'),
-      '@shared': path.resolve(__dirname, './shared'),
+      "@": path.resolve(__dirname, "./client/src"),
+      "@shared": path.resolve(__dirname, "./shared"),
     },
   },
 });

@@ -34,9 +34,12 @@ test-results/
 playwright-report/
 e2e-reports/
 coverage/
+coverage-*/
+coverage-*
 .coverage
 **/.hypothesis/
 test_fixtures/large-10k-rows.xlsx
+test_fixtures/sandbox_tests/
 test_output.docx
 test_excel_output.xlsx
 

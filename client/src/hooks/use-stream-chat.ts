@@ -11,17 +11,15 @@
 import { useCallback, useRef, useEffect } from "react";
 import { getAnonUserIdHeader } from "@/lib/apiClient";
 import type { Message } from "@/hooks/use-chats";
-import { type AIState } from "@/components/chat-interface/types";
-
-type StreamRetryState = "idle" | "running" | "retry";
+import { type AIState, type AiProcessStep } from "@/components/chat-interface/types";
 
 export interface StreamChatDeps {
   setOptimisticMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   onSendMessage: (message: Message) => Promise<any>;
   setStreamingContent: (content: string) => void;
   streamingContentRef: React.MutableRefObject<string>;
-  setAiState: React.Dispatch<React.SetStateAction<AiState>>;
-  setAiProcessSteps?: React.Dispatch<React.SetStateAction<any[]>>;
+  setAiState: (value: React.SetStateAction<AIState>, conversationId?: string | null) => void;
+  setAiProcessSteps?: (value: React.SetStateAction<AiProcessStep[]>, conversationId?: string | null) => void;
   getActiveConversationId?: () => string | null;
 }
 
@@ -31,7 +29,7 @@ export interface StreamOptions {
   conversationId?: string | null;
   signal?: AbortSignal;
   onEvent?: (eventType: string, data: any) => void;
-  onAiStateChange?: (state: AiState) => void;
+  onAiStateChange?: (state: AIState) => void;
   buildFinalMessage?: (fullContent: string, lastEventData?: any, messageId?: string) => Message;
   buildErrorMessage?: (error: Error, messageId?: string) => Message;
   queueMode?: "replace" | "reject";
@@ -39,6 +37,8 @@ export interface StreamOptions {
   firstTokenTimeoutMs?: number;
   doneTimeoutMs?: number;
   maxRetries?: number;
+  retryBackoffMs?: number;
+  retryJitterMs?: number;
 }
 
 export interface StreamResult {
@@ -80,6 +80,9 @@ function createSession(): ConversationSession {
 const DEFAULT_STREAM_TIMEOUT_MS = 120_000;
 const DEFAULT_FIRST_TOKEN_TIMEOUT_MS = 8_000;
 const DEFAULT_DONE_TIMEOUT_MS = 45_000;
+const DEFAULT_MAX_RETRIES = 1;
+const DEFAULT_RETRY_BACKOFF_MS = 800;
+const DEFAULT_RETRY_JITTER_MS = 250;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -188,6 +191,14 @@ export function useStreamChat(deps: StreamChatDeps) {
       clearTimeout(session.timeoutId);
       session.timeoutId = null;
     }
+    if (session.firstTokenTimeoutId) {
+      clearTimeout(session.firstTokenTimeoutId);
+      session.firstTokenTimeoutId = null;
+    }
+    if (session.doneTimeoutId) {
+      clearTimeout(session.doneTimeoutId);
+      session.doneTimeoutId = null;
+    }
 
     if (session.rafId !== null) {
       cancelAnimationFrame(session.rafId);
@@ -258,11 +269,20 @@ export function useStreamChat(deps: StreamChatDeps) {
   );
 
   const finalize = useCallback(
-    (message: Message, conversationId?: string | null) => {
+    (message: Message, conversationId?: string | null, finalState: AIState = "idle") => {
       const targetConversationId =
         (conversationId && conversationId.trim()) ||
         getActiveConversationId?.() ||
         lastStartedConversationRef.current;
+
+      const applyFinalState = (state: AIState, targetId: string | null) => {
+        setAiState(state, targetId);
+        if (state !== "idle") {
+          queueMicrotask(() => {
+            setAiState((prev) => (prev === state ? "idle" : prev), targetId);
+          });
+        }
+      };
 
       if (!targetConversationId) {
         setOptimisticMessages((prev) => [...prev, message]);
@@ -271,8 +291,8 @@ export function useStreamChat(deps: StreamChatDeps) {
         });
         streamingContentRef.current = "";
         setStreamingContent("");
-        setAiState("idle");
-        setAiProcessSteps?.([]);
+        applyFinalState(finalState, targetConversationId);
+        setAiProcessSteps?.([], targetConversationId);
         return;
       }
 
@@ -296,8 +316,8 @@ export function useStreamChat(deps: StreamChatDeps) {
         setStreamingContent("");
       }
 
-      setAiState("idle");
-      setAiProcessSteps?.([]);
+      applyFinalState(finalState, targetConversationId);
+      setAiProcessSteps?.([], targetConversationId);
 
       queueMicrotask(() => {
         const latestSession = getSession(targetConversationId);
@@ -322,13 +342,19 @@ export function useStreamChat(deps: StreamChatDeps) {
     async (url: string, options: StreamOptions): Promise<StreamResult> => {
       const {
         body,
+        chatId: rawChatId,
         signal,
         onEvent,
         onAiStateChange,
         buildFinalMessage,
         buildErrorMessage,
         queueMode = "replace",
-        timeoutMs = 120_000,
+        timeoutMs = DEFAULT_STREAM_TIMEOUT_MS,
+        firstTokenTimeoutMs = DEFAULT_FIRST_TOKEN_TIMEOUT_MS,
+        doneTimeoutMs = DEFAULT_DONE_TIMEOUT_MS,
+        maxRetries = DEFAULT_MAX_RETRIES,
+        retryBackoffMs = DEFAULT_RETRY_BACKOFF_MS,
+        retryJitterMs = DEFAULT_RETRY_JITTER_MS,
       } = options;
 
       const conversationId = normalizeConversationId(options);
@@ -336,6 +362,9 @@ export function useStreamChat(deps: StreamChatDeps) {
         const error = new Error("conversationId is required for isolated streaming");
         return { ok: false, content: "", error };
       }
+
+      const scopedChatId = typeof rawChatId === "string" ? rawChatId.trim() : "";
+      const bodyChatId = typeof body?.chatId === "string" ? body.chatId.trim() : "";
 
       const session = getSession(conversationId);
 
@@ -348,335 +377,477 @@ export function useStreamChat(deps: StreamChatDeps) {
         abortConversation(conversationId);
       }
 
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
-      session.abortController = controller;
-      lastStartedConversationRef.current = conversationId;
-
-      const streamRequestId =
+      const messageId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      session.nextMessageId = messageId;
+      const baseRequestId =
         typeof body?.requestId === "string" && body.requestId.trim()
           ? body.requestId.trim()
           : generateRequestId();
 
-      const requestBody: Record<string, any> = {
-        ...body,
-        requestId: streamRequestId,
-        conversationId,
-        chatId: body.chatId || conversationId,
+      const buildAttemptRequestId = (attempt: number) => {
+        if (attempt === 0) return baseRequestId;
+        const withSuffix = `${baseRequestId}_retry${attempt}`;
+        return withSuffix.length > 120 ? withSuffix.slice(0, 120) : withSuffix;
       };
 
-      const combinedSignal = signal
-        ? AbortSignal.any?.([controller.signal, signal]) ?? controller.signal
-        : controller.signal;
+      const normalizedMaxRetries =
+        Number.isFinite(maxRetries) && Number(maxRetries) >= 0
+          ? Math.floor(Number(maxRetries))
+          : DEFAULT_MAX_RETRIES;
 
-      const messageId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      session.nextMessageId = messageId;
-      session.pendingRequestId = streamRequestId;
-      session.fullContent = "";
-      session.pendingContent = null;
-      if (isConversationActive(conversationId)) {
-        nextMessageIdRef.current = messageId;
-        streamingContentRef.current = "";
-        setStreamingContent("");
-      }
+      const computeBackoff = (attemptIndex: number) => {
+        const base = retryBackoffMs * Math.pow(2, attemptIndex);
+        const jitter = retryJitterMs ? Math.floor(Math.random() * retryJitterMs) : 0;
+        return Math.max(0, base + jitter);
+      };
 
-      setAiState("thinking");
-      onAiStateChange?.("thinking");
-      setAiProcessSteps?.([]);
-
-      let response: Response | undefined;
-      let fullContent = "";
-      let lastEventData: any = null;
-      let streamTimedOut = false;
-
-      if (session.timeoutId) {
-        clearTimeout(session.timeoutId);
-      }
-      session.timeoutId = setTimeout(() => {
-        streamTimedOut = true;
-        controller.abort();
-      }, timeoutMs);
-
-      try {
-        response = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-request-id": streamRequestId,
-            ...getAnonUserIdHeader(),
-          },
-          credentials: "include",
-          body: JSON.stringify(requestBody),
-          signal: combinedSignal,
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          const error = new Error(errorData.error || `HTTP ${response.status}`);
-          const errorMsg = buildErrorMessage?.(error, messageId) ?? {
-            id: messageId,
-            role: "assistant" as const,
-            content: error.message || "Error de conexión. Por favor, intenta de nuevo.",
-            timestamp: new Date(),
-            requestId: streamRequestId,
-          };
-
-          finalize(errorMsg, conversationId);
-          return { ok: false, content: "", message: errorMsg, response, error };
+      const shouldRetry = (
+        error: any,
+        response?: Response,
+        timeoutCause?: "overall" | "first-token" | "done" | null
+      ) => {
+        if (timeoutCause) return true;
+        const status = (error as any)?.status ?? response?.status;
+        if (typeof status === "number") {
+          if (status >= 500 || status === 429 || status === 408 || status === 504) return true;
+          return false;
         }
+        const msg = String(error?.message || "").toLowerCase();
+        if (msg.includes("failed to fetch") || msg.includes("network") || msg.includes("timeout")) return true;
+        return false;
+      };
 
-        const contentType = response.headers.get("Content-Type") || "";
-        if (contentType.includes("application/json")) {
-          const jsonData = await response.json().catch(() => null);
-          const status = jsonData?.status;
+      let lastError: Error | undefined;
+      let lastResponse: Response | undefined;
+      let lastContent = "";
 
-          if (status === "already_done" || status === "already_processing" || status === "claim_failed") {
-            session.fullContent = "";
-            session.pendingContent = null;
-            if (isConversationActive(conversationId)) {
-              streamingContentRef.current = "";
-              setStreamingContent("");
-            }
-            setAiState("idle");
-            setAiProcessSteps?.([]);
-            return { ok: true, content: "", response };
-          }
+      for (let attempt = 0; attempt <= normalizedMaxRetries; attempt++) {
+        const streamRequestId = buildAttemptRequestId(attempt);
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
+        session.abortController = controller;
+        lastStartedConversationRef.current = conversationId;
 
-          const error = new Error(
-            jsonData?.error || jsonData?.message || `Unexpected JSON response (${status || "json"})`
-          );
-          const errorMsg = buildErrorMessage?.(error, messageId) ?? {
-            id: messageId,
-            role: "assistant" as const,
-            content: error.message || "Error de conexión. Por favor, intenta de nuevo.",
-            timestamp: new Date(),
-            requestId: streamRequestId,
-          };
-
-          finalize(errorMsg, conversationId);
-          return { ok: false, content: "", message: errorMsg, response, error };
-        }
-
-        const reader = response.body?.getReader();
-        if (!reader) {
-          const error = new Error("No response body");
-          const errorMsg = buildErrorMessage?.(error, messageId) ?? {
-            id: messageId,
-            role: "assistant" as const,
-            content: "No se recibió respuesta del servidor.",
-            timestamp: new Date(),
-            requestId: streamRequestId,
-          };
-          finalize(errorMsg, conversationId);
-          return { ok: false, content: "", message: errorMsg, response, error };
-        }
-
-        setAiState("responding");
-        onAiStateChange?.("responding");
-
-        const decoder = new TextDecoder();
-        let sseBuffer = "";
-        let currentEventType = "chunk";
-        let streamDone = false;
-
-        while (!streamDone) {
-          if (combinedSignal.aborted) break;
-
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          sseBuffer += decoder.decode(value, { stream: true });
-          const lines = sseBuffer.split("\n");
-          sseBuffer = lines.pop() || "";
-
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-
-            if (trimmed.startsWith("event: ")) {
-              currentEventType = trimmed.slice(7).trim();
-              continue;
-            }
-
-            if (!trimmed.startsWith("data: ")) continue;
-
-            const dataStr = trimmed.slice(6);
-            if (dataStr === "[DONE]") {
-              streamDone = true;
-              break;
-            }
-
-            let data: any;
-            try {
-              data = JSON.parse(dataStr);
-            } catch {
-              continue;
-            }
-
-            if (!data || typeof data !== "object") continue;
-
-            const eventConversationId =
-              typeof data.conversationId === "string" ? data.conversationId.trim() : "";
-            if (!eventConversationId || eventConversationId !== conversationId) {
-              continue;
-            }
-
-            const eventRequestId = typeof data.requestId === "string" ? data.requestId.trim() : "";
-            const eventAssistantMessageId =
-              typeof data.assistantMessageId === "string" ? data.assistantMessageId.trim() : "";
-
-            if (!eventRequestId && !eventAssistantMessageId) {
-              continue;
-            }
-
-            if (eventRequestId && eventRequestId !== streamRequestId) {
-              continue;
-            }
-
-            lastEventData = data;
-            onEvent?.(currentEventType, data);
-
-            if (currentEventType === "chunk" || currentEventType === "text") {
-              const content = typeof data.content === "string" ? data.content : "";
-              if (content) {
-                fullContent += content;
-                session.fullContent = fullContent;
-                if (isConversationActive(conversationId)) {
-                  session.pendingContent = fullContent;
-                  scheduleFlush(conversationId);
-                }
-              }
-            }
-
-            const isStaleConversation = session.pendingRequestId !== streamRequestId;
-            if (!isStaleConversation && currentEventType === "thinking") {
-              setAiState("thinking");
-              onAiStateChange?.("thinking");
-
-              if (data.step && data.message) {
-                setAiProcessSteps?.((prev: any[]) => {
-                  const existing = prev.find((s: any) => s.id === data.step);
-                  if (existing) return prev;
-                  return [
-                    ...prev,
-                    {
-                      id: data.step,
-                      step: data.step,
-                      title: data.message,
-                      status: "pending",
-                    },
-                  ];
-                });
-              }
-            }
-
-            if (!isStaleConversation && currentEventType === "context") {
-              setAiState("responding");
-              onAiStateChange?.("responding");
-              setAiProcessSteps?.((prev: any[]) =>
-                prev.map((s: any) => ({ ...s, status: "done" }))
-              );
-            }
-
-            if (!isStaleConversation && currentEventType === "production_start") {
-              setAiState("agent_working");
-              onAiStateChange?.("agent_working");
-            }
-
-            if (currentEventType === "done" || currentEventType === "finish") {
-              streamDone = true;
-              flushNow(conversationId);
-
-              const msg = buildFinalMessage?.(fullContent, data, messageId) ?? {
-                id: messageId,
-                role: "assistant" as const,
-                content: fullContent,
-                timestamp: new Date(),
-                requestId: data.requestId || streamRequestId,
-                artifact: data.artifact,
-                webSources: data.webSources,
-              };
-
-              finalize(msg, conversationId);
-              return { ok: true, content: fullContent, message: msg, response };
-            }
-
-            if (currentEventType === "error" || currentEventType === "production_error") {
-              const errorMsg = data.message || data.error || "Stream error";
-              throw new Error(errorMsg);
-            }
-          }
-        }
-
-        if (!session.finalizing && fullContent) {
-          flushNow(conversationId);
-          const msg = buildFinalMessage?.(fullContent, lastEventData, messageId) ?? {
-            id: messageId,
-            role: "assistant" as const,
-            content: fullContent,
-            timestamp: new Date(),
-            requestId: streamRequestId,
-          };
-
-          finalize(msg, conversationId);
-          return { ok: true, content: fullContent, message: msg, response };
-        }
-
-        if (!session.finalizing) {
-          const msg: Message = {
-            id: messageId,
-            role: "assistant" as const,
-            content: "No se recibió respuesta del servidor.",
-            timestamp: new Date(),
-            requestId: streamRequestId,
-          };
-          finalize(msg, conversationId);
-          return { ok: false, content: "", message: msg, response };
-        }
-
-        return { ok: true, content: fullContent, response };
-      } catch (err: any) {
-        if (err?.name === "AbortError") {
-          const abortError =
-            streamTimedOut
-              ? new Error(`Stream timeout after ${timeoutMs}ms`)
-              : err;
-          return { ok: false, content: fullContent, response, error: abortError };
-        }
-
-        console.error("[useStreamChat] Stream error:", err);
-
-        const errorMsg = buildErrorMessage?.(err, messageId) ?? {
-          id: messageId,
-          role: "assistant" as const,
-          content: err?.message || "Error de conexión. Por favor, intenta de nuevo.",
-          timestamp: new Date(),
+        const requestBody: Record<string, any> = {
+          ...body,
           requestId: streamRequestId,
+          conversationId,
+          chatId: bodyChatId || scopedChatId || conversationId,
         };
 
-        if (!session.finalizing) {
-          finalize(errorMsg, conversationId);
+        const combinedSignal = signal
+          ? AbortSignal.any?.([controller.signal, signal]) ?? controller.signal
+          : controller.signal;
+
+        session.pendingRequestId = streamRequestId;
+        session.fullContent = "";
+        session.pendingContent = null;
+        session.finalizing = false;
+
+        if (isConversationActive(conversationId)) {
+          nextMessageIdRef.current = messageId;
+          streamingContentRef.current = "";
+          setStreamingContent("");
         }
 
-        return { ok: false, content: fullContent, message: errorMsg, response, error: err };
-      } finally {
-        if (session.abortController === controller) {
-          session.abortController = null;
-        }
+        setAiState("thinking", conversationId);
+        onAiStateChange?.("thinking");
+        setAiProcessSteps?.([], conversationId);
 
-        if (session.pendingRequestId === streamRequestId) {
-          session.pendingRequestId = null;
-        }
+        let response: Response | undefined;
+        let fullContent = "";
+        let lastEventData: any = null;
+        let timeoutCause: "overall" | "first-token" | "done" | null = null;
+        let hasReceivedEvent = false;
+        let hasReceivedToken = false;
 
         if (session.timeoutId) {
           clearTimeout(session.timeoutId);
-          session.timeoutId = null;
+        }
+        session.timeoutId = setTimeout(() => {
+          timeoutCause = "overall";
+          controller.abort();
+        }, timeoutMs);
+
+        if (session.firstTokenTimeoutId) {
+          clearTimeout(session.firstTokenTimeoutId);
+        }
+        if (firstTokenTimeoutMs > 0) {
+          session.firstTokenTimeoutId = setTimeout(() => {
+            if (!hasReceivedEvent && !session.finalizing && session.pendingRequestId === streamRequestId) {
+              timeoutCause = "first-token";
+              controller.abort();
+            }
+          }, firstTokenTimeoutMs);
         }
 
-        if (abortControllerRef.current === controller) {
-          abortControllerRef.current = null;
+        if (session.doneTimeoutId) {
+          clearTimeout(session.doneTimeoutId);
+        }
+        const armDoneTimeout = () => {
+          if (doneTimeoutMs <= 0) return;
+          if (session.doneTimeoutId) {
+            clearTimeout(session.doneTimeoutId);
+            session.doneTimeoutId = null;
+          }
+          session.doneTimeoutId = setTimeout(() => {
+            if (!session.finalizing && session.pendingRequestId === streamRequestId && hasReceivedToken) {
+              timeoutCause = "done";
+              controller.abort();
+            }
+          }, doneTimeoutMs);
+        };
+        const clearTokenTimeouts = () => {
+          if (session.firstTokenTimeoutId) {
+            clearTimeout(session.firstTokenTimeoutId);
+            session.firstTokenTimeoutId = null;
+          }
+          if (session.doneTimeoutId) {
+            clearTimeout(session.doneTimeoutId);
+            session.doneTimeoutId = null;
+          }
+        };
+
+        try {
+          response = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-request-id": streamRequestId,
+              ...getAnonUserIdHeader(),
+            },
+            credentials: "include",
+            body: JSON.stringify(requestBody),
+            signal: combinedSignal,
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            const error = new Error(errorData.error || `HTTP ${response.status}`);
+            (error as any).status = response.status;
+            throw error;
+          }
+
+          const contentType = response.headers.get("Content-Type") || "";
+          if (contentType.includes("application/json")) {
+            const jsonData = await response.json().catch(() => null);
+            const status = jsonData?.status;
+
+            if (status === "already_done" || status === "already_processing" || status === "claim_failed") {
+              session.fullContent = "";
+              session.pendingContent = null;
+              if (isConversationActive(conversationId)) {
+                streamingContentRef.current = "";
+                setStreamingContent("");
+              }
+              setAiState("idle", conversationId);
+              setAiProcessSteps?.([], conversationId);
+              return { ok: true, content: "", response };
+            }
+
+            const error = new Error(
+              jsonData?.error || jsonData?.message || `Unexpected JSON response (${status || "json"})`
+            );
+            (error as any).status = response.status;
+            throw error;
+          }
+
+          const reader = response.body?.getReader();
+          if (!reader) {
+            throw new Error("No response body");
+          }
+
+          setAiState("responding", conversationId);
+          onAiStateChange?.("responding");
+
+          const decoder = new TextDecoder();
+          let sseBuffer = "";
+          let currentEventType = "chunk";
+          let streamDone = false;
+
+          while (!streamDone) {
+            if (combinedSignal.aborted) break;
+
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            sseBuffer += decoder.decode(value, { stream: true });
+            const lines = sseBuffer.split("\n");
+            sseBuffer = lines.pop() || "";
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed) continue;
+
+              if (trimmed.startsWith("event: ")) {
+                currentEventType = trimmed.slice(7).trim();
+                continue;
+              }
+
+              if (!trimmed.startsWith("data: ")) continue;
+
+              const dataStr = trimmed.slice(6);
+              if (dataStr === "[DONE]") {
+                streamDone = true;
+                break;
+              }
+
+              let data: any;
+              try {
+                data = JSON.parse(dataStr);
+              } catch {
+                continue;
+              }
+
+              if (!data || typeof data !== "object") continue;
+
+              const eventConversationId =
+                typeof data.conversationId === "string" ? data.conversationId.trim() : "";
+              if (!eventConversationId || eventConversationId !== conversationId) {
+                continue;
+              }
+
+              const eventRequestId = typeof data.requestId === "string" ? data.requestId.trim() : "";
+              const eventAssistantMessageId =
+                typeof data.assistantMessageId === "string" ? data.assistantMessageId.trim() : "";
+
+              if (!eventRequestId && !eventAssistantMessageId) {
+                continue;
+              }
+
+              if (eventRequestId && eventRequestId !== streamRequestId) {
+                continue;
+              }
+
+              lastEventData = data;
+
+              if (!hasReceivedEvent) {
+                hasReceivedEvent = true;
+                if (session.firstTokenTimeoutId) {
+                  clearTimeout(session.firstTokenTimeoutId);
+                  session.firstTokenTimeoutId = null;
+                }
+              }
+
+              onEvent?.(currentEventType, data);
+
+              if (currentEventType === "chunk" || currentEventType === "text") {
+                const content = typeof data.content === "string" ? data.content : "";
+                if (content) {
+                  if (!hasReceivedToken) {
+                    hasReceivedToken = true;
+                    if (session.firstTokenTimeoutId) {
+                      clearTimeout(session.firstTokenTimeoutId);
+                      session.firstTokenTimeoutId = null;
+                    }
+                    armDoneTimeout();
+                  }
+                  fullContent += content;
+                  session.fullContent = fullContent;
+                  if (isConversationActive(conversationId)) {
+                    session.pendingContent = fullContent;
+                    scheduleFlush(conversationId);
+                  }
+                }
+              }
+
+              const isStaleConversation = session.pendingRequestId !== streamRequestId;
+              if (!isStaleConversation && currentEventType === "thinking") {
+                setAiState("thinking", conversationId);
+                onAiStateChange?.("thinking");
+
+                if (data.step && data.message) {
+                  setAiProcessSteps?.(
+                    (prev: any[]) => {
+                      const existing = prev.find((s: any) => s.id === data.step);
+                      if (existing) return prev;
+                      return [
+                        ...prev,
+                        {
+                          id: data.step,
+                          step: data.step,
+                          title: data.message,
+                          status: "pending",
+                        },
+                      ];
+                    },
+                    conversationId
+                  );
+                }
+              }
+
+              if (!isStaleConversation && currentEventType === "context") {
+                setAiState("responding", conversationId);
+                onAiStateChange?.("responding");
+                setAiProcessSteps?.(
+                  (prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })),
+                  conversationId
+                );
+              }
+
+              if (!isStaleConversation && currentEventType === "production_start") {
+                setAiState("agent_working", conversationId);
+                onAiStateChange?.("agent_working");
+              }
+
+              if (currentEventType === "done" || currentEventType === "finish") {
+                clearTokenTimeouts();
+                streamDone = true;
+                flushNow(conversationId);
+
+                const msg = buildFinalMessage?.(fullContent, data, messageId) ?? {
+                  id: messageId,
+                  role: "assistant" as const,
+                  content: fullContent,
+                  timestamp: new Date(),
+                  requestId: data.requestId || streamRequestId,
+                  artifact: data.artifact,
+                  webSources: data.webSources,
+                };
+
+                finalize(msg, conversationId, "done");
+                return { ok: true, content: fullContent, message: msg, response };
+              }
+
+              if (currentEventType === "error" || currentEventType === "production_error") {
+                const errorMsg = data.message || data.error || "Stream error";
+                throw new Error(errorMsg);
+              }
+            }
+          }
+
+          if (!session.finalizing && fullContent) {
+            clearTokenTimeouts();
+            flushNow(conversationId);
+            const msg = buildFinalMessage?.(fullContent, lastEventData, messageId) ?? {
+              id: messageId,
+              role: "assistant" as const,
+              content: fullContent,
+              timestamp: new Date(),
+              requestId: streamRequestId,
+            };
+
+            finalize(msg, conversationId, "done");
+            return { ok: true, content: fullContent, message: msg, response };
+          }
+
+          if (!session.finalizing) {
+            clearTokenTimeouts();
+            throw new Error("No se recibió respuesta del servidor.");
+          }
+
+          return { ok: true, content: fullContent, response };
+        } catch (err: any) {
+          if (err?.name === "AbortError") {
+            clearTokenTimeouts();
+
+            if (!timeoutCause) {
+              if (isConversationActive(conversationId)) {
+                streamingContentRef.current = "";
+                setStreamingContent("");
+              }
+              setAiState("idle", conversationId);
+              setAiProcessSteps?.([], conversationId);
+              return { ok: false, content: fullContent, response, error: err };
+            }
+
+            const abortMessage =
+              timeoutCause === "first-token"
+                ? `No se recibió ningún evento del servidor en ${firstTokenTimeoutMs}ms.`
+                : timeoutCause === "done"
+                  ? `La respuesta demoró demasiado (>${doneTimeoutMs}ms).`
+                  : `Stream timeout after ${timeoutMs}ms.`;
+
+            const abortError = new Error(abortMessage);
+            lastError = abortError;
+            lastResponse = response;
+            lastContent = fullContent;
+
+            if (attempt < normalizedMaxRetries) {
+              await sleep(computeBackoff(attempt));
+              continue;
+            }
+
+            const timeoutErrorMsg = buildErrorMessage?.(abortError, messageId) ?? {
+              id: messageId,
+              role: "assistant" as const,
+              content: abortMessage,
+              timestamp: new Date(),
+              requestId: streamRequestId,
+            };
+            finalize(timeoutErrorMsg, conversationId, "error");
+
+            return { ok: false, content: fullContent, response, error: abortError };
+          }
+
+          const normalizedError = err instanceof Error ? err : new Error(String(err));
+          console.error("[useStreamChat] Stream error:", normalizedError);
+
+          const retryable = shouldRetry(normalizedError, response, timeoutCause);
+          lastError = normalizedError;
+          lastResponse = response;
+          lastContent = fullContent;
+
+          if (retryable && attempt < normalizedMaxRetries) {
+            await sleep(computeBackoff(attempt));
+            continue;
+          }
+
+          const errorMsg = buildErrorMessage?.(normalizedError, messageId) ?? {
+            id: messageId,
+            role: "assistant" as const,
+            content: normalizedError?.message || "Error de conexión. Por favor, intenta de nuevo.",
+            timestamp: new Date(),
+            requestId: streamRequestId,
+          };
+
+          if (!session.finalizing) {
+            finalize(errorMsg, conversationId, "error");
+          }
+
+          return { ok: false, content: fullContent, message: errorMsg, response, error: normalizedError };
+        } finally {
+          if (session.abortController === controller) {
+            session.abortController = null;
+          }
+
+          if (session.pendingRequestId === streamRequestId) {
+            session.pendingRequestId = null;
+          }
+
+          if (session.timeoutId) {
+            clearTimeout(session.timeoutId);
+            session.timeoutId = null;
+          }
+          if (session.firstTokenTimeoutId) {
+            clearTimeout(session.firstTokenTimeoutId);
+            session.firstTokenTimeoutId = null;
+          }
+          if (session.doneTimeoutId) {
+            clearTimeout(session.doneTimeoutId);
+            session.doneTimeoutId = null;
+          }
+
+          if (abortControllerRef.current === controller) {
+            abortControllerRef.current = null;
+          }
         }
       }
+
+      if (lastError) {
+        const errorMsg = buildErrorMessage?.(lastError, messageId) ?? {
+          id: messageId,
+          role: "assistant" as const,
+          content: lastError.message || "Error de conexión. Por favor, intenta de nuevo.",
+          timestamp: new Date(),
+          requestId: baseRequestId,
+        };
+        finalize(errorMsg, conversationId, "error");
+        return { ok: false, content: lastContent, message: errorMsg, response: lastResponse, error: lastError };
+      }
+
+      const fallbackError = new Error("Stream failed");
+      return { ok: false, content: "", error: fallbackError };
     },
     [
       abortConversation,
@@ -700,6 +871,14 @@ export function useStreamChat(deps: StreamChatDeps) {
         if (session.timeoutId) {
           clearTimeout(session.timeoutId);
           session.timeoutId = null;
+        }
+        if (session.firstTokenTimeoutId) {
+          clearTimeout(session.firstTokenTimeoutId);
+          session.firstTokenTimeoutId = null;
+        }
+        if (session.doneTimeoutId) {
+          clearTimeout(session.doneTimeoutId);
+          session.doneTimeoutId = null;
         }
         if (session.rafId !== null) {
           cancelAnimationFrame(session.rafId);

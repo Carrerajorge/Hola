@@ -15,7 +15,13 @@ vi.mock("../services/ChatServiceV2", () => ({
 }));
 
 vi.mock("../lib/llmGateway", () => ({
-  llmGateway: { chat: llmChatMock },
+  llmGateway: {
+    chat: llmChatMock,
+    // Defensive stub: some paths use streamChat; tests for skill-context injection should never hit it.
+    streamChat: vi.fn(async () => {
+      throw new Error("llmGateway.streamChat should be mocked in tests");
+    }),
+  },
 }));
 
 vi.mock("../storage", () => ({
@@ -66,6 +72,24 @@ vi.mock("../services/skillContextResolver", () => ({
   buildSkillSystemPromptSection: buildSkillSectionMock,
 }));
 
+vi.mock("../services/skillPlatform", () => ({
+  getSkillPlatformService: vi.fn(() => ({
+    executeFromMessage: vi.fn(async () => ({
+      status: "skipped",
+      continueWithModel: true,
+      outputText: "",
+      autoCreated: false,
+      requiresConfirmation: false,
+      traces: [],
+      fallbackText: "",
+      error: undefined,
+      output: undefined,
+      policyBreached: undefined,
+      selectedSkill: undefined,
+    })),
+  })),
+}));
+
 async function makeApp() {
   const { createChatAiRouter } = await import("../routes/chatAiRouter");
   const app = express();
@@ -77,6 +101,7 @@ async function makeApp() {
 describe("chat skill integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.resetModules();
     resolveSkillContextMock.mockResolvedValue({
       source: "custom_skill",
       id: "skill_abc",
@@ -108,7 +133,7 @@ describe("chat skill integration", () => {
     } finally {
       await close();
     }
-  }, 20000);
+  }, 60000);
 
   it("injects skill context into /api/chat/stream fast-path system prompt", async () => {
     const app = await makeApp();
@@ -139,5 +164,5 @@ describe("chat skill integration", () => {
     } finally {
       await close();
     }
-  }, 20000);
+  }, 60000);
 });

@@ -5,10 +5,10 @@
 
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Loader2, X, Brain, Sparkles } from 'lucide-react';
+import { X, Brain, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { StreamingIndicatorProps } from './types';
+import { StreamingIndicatorProps, isAiBusyState, isAiSendingState, isAiStreamingState } from './types';
 
 export function StreamingIndicator({
     aiState,
@@ -16,10 +16,12 @@ export function StreamingIndicator({
     onCancel,
     uiPhase
 }: StreamingIndicatorProps) {
-    if (aiState === 'idle') return null;
+    const isBusy = isAiBusyState(aiState) || uiPhase === 'thinking';
+    if (!isBusy) return null;
 
-    const isThinking = aiState === 'thinking' || uiPhase === 'thinking';
-    const isResponding = aiState === 'responding';
+    const isSending = isAiSendingState(aiState) || uiPhase === 'thinking';
+    const isResponding = isAiStreamingState(aiState);
+    const isAgentWorking = aiState === 'agent_working';
 
     return (
         <motion.div
@@ -31,9 +33,9 @@ export function StreamingIndicator({
             {/* Status Icon */}
             <div className={cn(
                 "flex items-center justify-center w-8 h-8 rounded-full",
-                isThinking ? "bg-blue-500/20" : "bg-green-500/20"
+                isSending || isAgentWorking ? "bg-blue-500/20" : "bg-green-500/20"
             )}>
-                {isThinking ? (
+                {isSending || isAgentWorking ? (
                     <Brain className="w-4 h-4 text-blue-500 animate-pulse" />
                 ) : (
                     <Sparkles className="w-4 h-4 text-green-500" />
@@ -43,7 +45,11 @@ export function StreamingIndicator({
             {/* Status Text */}
             <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium">
-                    {isThinking ? 'Pensando...' : 'Respondiendo...'}
+                    {isAgentWorking
+                        ? 'Trabajando...'
+                        : isSending
+                            ? 'Enviando...'
+                            : 'Respondiendo...'}
                 </p>
                 {isResponding && streamingContent && (
                     <p className="text-xs text-muted-foreground truncate">

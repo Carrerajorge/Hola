@@ -29,6 +29,8 @@ services:
       SHELL_COMMAND_RUNNER_URL: http://hola-${SLOT:-blue}-sandbox:8080
       SHELL_COMMAND_RUNNER_TOKEN: ${SANDBOX_RUNNER_TOKEN}
       OCR_SERVICE_URL: http://hola-ocr:8000
+      # Cap Node heap so it GC-s before Docker OOM-kills the container
+      NODE_OPTIONS: "--max-old-space-size=1536"
     ports:
       - "127.0.0.1:${HOST_PORT:-5000}:5000"
     volumes:
@@ -42,11 +44,11 @@ services:
     networks:
       - hola-net
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "--timeout=3", "http://127.0.0.1:5000/api/health/ready"]
+      test: ["CMD", "wget", "-qO-", "--timeout=5", "http://127.0.0.1:5000/api/health/ready"]
       interval: 5s
-      timeout: 5s
-      start_period: 30s
-      retries: 12
+      timeout: 6s
+      start_period: 60s
+      retries: 18
     # ── Security hardening ────────────────────────────
     security_opt:
       - no-new-privileges:true

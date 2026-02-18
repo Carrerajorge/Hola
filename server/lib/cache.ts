@@ -16,6 +16,15 @@ export class CacheService {
     }
 
     private initialize() {
+        const isTestEnv = process.env.NODE_ENV === "test";
+        const allowRedisInTests = process.env.REDIS_ENABLE_IN_TESTS === "1" || process.env.REDIS_ENABLE_IN_TESTS === "true";
+        if (isTestEnv && !allowRedisInTests) {
+            Logger.info("[Cache] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)");
+            this.isConnected = false;
+            this.redis = null;
+            return;
+        }
+
         if (process.env.REDIS_URL) {
             try {
                 this.redis = new Redis(process.env.REDIS_URL, {

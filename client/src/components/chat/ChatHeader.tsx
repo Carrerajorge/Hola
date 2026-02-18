@@ -36,6 +36,7 @@ import { useMemo, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { StandardModelSelector } from './StandardModelSelector';
 import { GptActionMenu } from './GptActionMenu';
+import { useChatIsProcessing } from "@/stores/streamingStore";
 
 interface ChatHeaderProps {
     chatId: string | null;
@@ -96,6 +97,18 @@ export function ChatHeader({
     const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
     const currentInput = useChatStore((s) => s.input);
     const { availableModels, isAnyModelAvailable, selectedModelId, setSelectedModelId } = useModelAvailability();
+    const isChatProcessing = useChatIsProcessing(chatId);
+
+    const handleModelChange = (id: string) => {
+        if (isChatProcessing) {
+            toast({
+                title: "Respuesta en curso",
+                description: "Espera a que termine antes de cambiar el modelo.",
+            });
+            return;
+        }
+        setSelectedModelId(id);
+    };
 
     // Model grouping logic
     const modelsByProvider = useMemo(() => {
@@ -149,6 +162,8 @@ export function ChatHeader({
                         modelsByProvider={modelsByProvider}
                         selectedModelId={selectedModelId}
                         setSelectedModelId={setSelectedModelId}
+                        onModelChange={handleModelChange}
+                        modelChangeDisabled={isChatProcessing}
                         onNewChat={onNewChat}
                         onAboutGpt={onAboutGpt}
                         onEditGpt={onEditGpt}
@@ -161,6 +176,8 @@ export function ChatHeader({
                         availableModels={availableModels}
                         selectedModelId={selectedModelId}
                         setSelectedModelId={setSelectedModelId}
+                        onModelChange={handleModelChange}
+                        modelChangeDisabled={isChatProcessing}
                         modelsByProvider={modelsByProvider}
                         activeGptName={activeGpt?.name === 'ILIAGPT' ? undefined : activeGpt?.name}
                     />

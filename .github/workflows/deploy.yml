@@ -43,7 +43,9 @@ jobs:
     name: CI Completion Gate
     if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # CI can take 20-45+ minutes; if this gate times out, the deploy run is marked "cancelled"
+    # and nothing ships. Keep this comfortably above CI duration.
+    timeout-minutes: 70
     permissions:
       contents: read
       actions: read
@@ -55,27 +57,30 @@ jobs:
         env:
           SHA: ${{ github.sha }}
           BRANCH: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          export GH_TOKEN="${GITHUB_TOKEN}"
+          # gh CLI uses GH_TOKEN in Actions
+          export GH_TOKEN="${GH_TOKEN}"
 
-          for attempt in $(seq 1 72); do
-            runs_json="$(gh run list --workflow "CI" --branch "${BRANCH}" --json headSha,status,conclusion --limit 20 || true)"
+          for attempt in $(seq 1 360); do
+            runs_json="$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow "CI" --branch "${BRANCH}" --json headSha,status,conclusion --limit 20 || true)"
             if [ -z "${runs_json}" ] || [ "${runs_json}" = "null" ]; then
               echo "Unable to read workflow runs yet; retrying..."
               sleep 10
               continue
             fi
 
-            ci_run="$(echo "${runs_json}" | jq -r --arg sha "${SHA}" '[.[] | select(.headSha == $sha)][0]')"
-            if [ "${ci_run}" = "null" ] || [ -z "${ci_run}" ]; then
-              echo "CI run for SHA ${SHA} not yet reported. Retry ${attempt}/30..."
+            ci_line="$(echo "${runs_json}" | python3 -c 'import json,os,sys; sha=os.environ.get(\"SHA\",\"\"); runs=json.load(sys.stdin); r=next((x for x in runs if x.get(\"headSha\")==sha), None); print(\"__notfound__\" if r is None else ((r.get(\"status\") or \"\") + \" \" + (r.get(\"conclusion\") or \"\")).strip())' 2>/dev/null || echo '__parsefail__')"
+
+            status="$(echo "${ci_line}" | awk '{print $1}')"
+            conclusion="$(echo "${ci_line}" | awk '{print $2}')"
+
+            if [ "${status}" = "__notfound__" ] || [ "${status}" = "__parsefail__" ] || [ -z "${status}" ]; then
+              echo "CI run for SHA ${SHA} not yet reported. Retry ${attempt}/360..."
               sleep 10
               continue
             fi
-
-            status="$(echo "${ci_run}" | jq -r '.status')"
-            conclusion="$(echo "${ci_run}" | jq -r '.conclusion // empty')"
 
             if [ "${status}" = "completed" ]; then
               if [ "${conclusion}" = "success" ]; then
@@ -131,6 +136,50 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate deployment prerequisites
+        env:
+          VPS_HOST: ${{ env.VPS_HOST }}
+          VPS_PORT: ${{ env.VPS_PORT }}
+          VPS_USER: ${{ env.VPS_USER }}
+          DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_DEFAULT_HOST: "69.62.98.126"
+        run: |
+          set -euo pipefail
+          if [ -z "${VPS_SSH_KEY}" ]; then
+            echo "::error::VPS_SSH_KEY secret is required for deployment."
+            exit 1
+          fi
+
+          if ! printf '%s' "${VPS_PORT}" | grep -Eq '^[0-9]{1,5}$'; then
+            echo "::error::VPS_PORT is invalid: ${VPS_PORT}"
+            exit 1
+          fi
+          if [ "${VPS_PORT}" -lt 1 ] || [ "${VPS_PORT}" -gt 65535 ]; then
+            echo "::error::VPS_PORT out of range: ${VPS_PORT}"
+            exit 1
+          fi
+
+          VPS_HOST="${VPS_HOST:-${VPS_DEFAULT_HOST}}"
+          if [ -z "${VPS_HOST}" ]; then
+            echo "::error::VPS_HOST is required."
+            exit 1
+          fi
+          if ! printf '%s' "${VPS_HOST}" | grep -Eq '^[A-Za-z0-9._-]+$'; then
+            echo "::error::VPS_HOST contains invalid characters: ${VPS_HOST}"
+            exit 1
+          fi
+          if [ -z "${VPS_USER}" ]; then
+            echo "::error::VPS_USER is required."
+            exit 1
+          fi
+          if [ -z "${DEPLOY_PATH}" ]; then
+            echo "::error::DEPLOY_PATH is required."
+            exit 1
+          fi
 
       - name: Compute image tag
         id: tag
@@ -307,7 +356,13 @@ jobs:
             sleep 3
           done
 
-          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts ${{ env.DEPLOY_PATH }}/nginx &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
+
+          # Copy nginx static assets (maintenance page, custom error pages)
+          scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }} \
+            -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12 \
+            nginx/maintenance.html \
+            ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/nginx/ 2>/dev/null || true
 
       - name: Run blue-green deploy
         run: |
@@ -433,6 +488,47 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate deployment prerequisites
+        env:
+          VPS_HOST: ${{ env.VPS_HOST }}
+          VPS_PORT: ${{ env.VPS_PORT }}
+          VPS_USER: ${{ env.VPS_USER }}
+          DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_DEFAULT_HOST: "69.62.98.126"
+        run: |
+          set -euo pipefail
+          if [ -z "${VPS_SSH_KEY}" ]; then
+            echo "::error::VPS_SSH_KEY secret is required for deployment."
+            exit 1
+          fi
+          if ! printf '%s' "${VPS_PORT}" | grep -Eq '^[0-9]{1,5}$'; then
+            echo "::error::VPS_PORT is invalid: ${VPS_PORT}"
+            exit 1
+          fi
+          if [ "${VPS_PORT}" -lt 1 ] || [ "${VPS_PORT}" -gt 65535 ]; then
+            echo "::error::VPS_PORT out of range: ${VPS_PORT}"
+            exit 1
+          fi
+          VPS_HOST="${VPS_HOST:-${VPS_DEFAULT_HOST}}"
+          if [ -z "${VPS_HOST}" ]; then
+            echo "::error::VPS_HOST is required."
+            exit 1
+          fi
+          if ! printf '%s' "${VPS_HOST}" | grep -Eq '^[A-Za-z0-9._-]+$'; then
+            echo "::error::VPS_HOST contains invalid characters: ${VPS_HOST}"
+            exit 1
+          fi
+          if [ -z "${VPS_USER}" ]; then
+            echo "::error::VPS_USER is required."
+            exit 1
+          fi
+          if [ -z "${DEPLOY_PATH}" ]; then
+            echo "::error::DEPLOY_PATH is required."
+            exit 1
+          fi
 
       - name: Compute image tag
         id: tag
@@ -608,7 +704,13 @@ jobs:
             sleep 3
           done
 
-          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts ${{ env.DEPLOY_PATH }}/nginx &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
+
+          # Copy nginx static assets (maintenance page, custom error pages)
+          scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }} \
+            -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12 \
+            nginx/maintenance.html \
+            ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/nginx/ 2>/dev/null || true
 
       - name: Run blue-green deploy
         run: |

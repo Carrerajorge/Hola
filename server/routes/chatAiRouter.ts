@@ -47,6 +47,8 @@ import { usageQuotaService, type UsageCheckResult } from "../services/usageQuota
 import { conversationMemoryManager } from "../services/conversationMemory";
 import { conversationStateService } from "../services/conversationStateService";
 import { generateAndPersistChatTitle } from "../lib/chatTitleGenerator";
+import { validate } from "../lib/requestValidator";
+import { streamChatRequestSchema } from "../schemas/chatSchemas";
 
 type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
 const isDebugLogEnabled = process.env.DEBUG === "true";
@@ -120,15 +122,18 @@ function releaseSseSlot(userId: string, requestId: string): void {
  */
 function sanitizeWebSearchContent(text: string, maxLen = 50_000): string {
   if (!text) return "";
+  const repeatedPromptPattern = /<script\b[^>]*>[\s\S]*?<\/script>/gi;
   return text
     .replace(/\b(?:ignore\s+(?:all\s+)?(?:previous|above|prior)\s+instructions?)/gi, "[filtered]")
     .replace(/\b(?:you\s+are\s+now|act\s+as\s+if|pretend\s+(?:you|that)|system\s*:\s*)/gi, "[filtered]")
     .replace(/\b(?:disregard|forget|override)\s+(?:all\s+)?(?:previous|above|prior|your)\s+(?:instructions?|rules?|guidelines?|prompt)/gi, "[filtered]")
     .replace(/\b(?:new\s+instructions?|updated?\s+instructions?|real\s+instructions?):/gi, "[filtered]")
+    .replace(repeatedPromptPattern, "[filtered]")
     .replace(/\[(?:system|SYSTEM)\]/g, "[filtered]")
     .replace(/<\/?(?:system|prompt|instruction|rules?|override)>/gi, "[filtered]")
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/\[\/\/\]:\s*#\s*\([\s\S]*?\)/g, "")
+    .replace(/\b(?:javascript|vbscript|data)\s*:/gi, "[filtered]:")
     .slice(0, maxLen);
 }
 
@@ -906,7 +911,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
     }
   });
 
-  router.post("/chat/stream", async (req, res) => {
+  router.post("/chat/stream", validate({ body: streamChatRequestSchema }), async (req, res) => {
     const requestId = sanitizeStreamIdentifier(req.headers["x-request-id"], `stream_${Date.now()}`);
     const streamStartMs = performance.now();
     const stageTimings: Record<string, number> = {};
@@ -962,7 +967,7 @@ let streamHardTimeout: NodeJS.Timeout | null = null;
 let streamIdleTimeout: NodeJS.Timeout | null = null;
 
 const STREAM_HARD_TIMEOUT_MS = 180_000;
-const STREAM_IDLE_TIMEOUT_MS = 45_000;
+const STREAM_IDLE_TIMEOUT_MS = 90_000; // must exceed llmGateway idle timeout (60s)
 
 const clearStreamTimeouts = (): void => {
   if (streamHardTimeout) {
@@ -1462,11 +1467,18 @@ const cleanSkipRunStreamDedup = (): void => {
             emitTrace: emitSkillTrace,
             now: new Date(),
           });
+          let skillTimeoutId: NodeJS.Timeout | null = null;
           const timeoutPromise = new Promise<never>((_, reject) => {
-            setTimeout(() => reject(new Error(`Skill execution timeout after ${skillTimeoutMs}ms`)), skillTimeoutMs);
+            skillTimeoutId = setTimeout(() => reject(new Error(`Skill execution timeout after ${skillTimeoutMs}ms`)), skillTimeoutMs);
           });
 
-          skillExecutionResult = await Promise.race([executeSkillPromise, timeoutPromise]);
+          try {
+            skillExecutionResult = await Promise.race([executeSkillPromise, timeoutPromise]);
+          } finally {
+            if (skillTimeoutId) {
+              clearTimeout(skillTimeoutId);
+            }
+          }
           emitSkillTrace({ stage: 'planner', status: 'ok', message: 'skill_router_finished', details: { status: skillExecutionResult.status, continueWithModel: skillExecutionResult.continueWithModel } });
 
           const seed = typeof skillExecutionResult.outputText === "string" ? skillExecutionResult.outputText.trim() : "";
@@ -2126,6 +2138,14 @@ const cleanSkipRunStreamDedup = (): void => {
         if (!isConnectionClosed && !r.writableEnded && !r.destroyed) {
           try {
             res.write(`:heartbeat\n\n`);
+            if (typeof (res as unknown as { flush?: Function }).flush === "function") {
+              (res as unknown as { flush: Function }).flush();
+            } else if (res.socket && typeof res.socket.write === "function") {
+              res.socket.write("");
+            }
+
+            // Heartbeats count as stream activity; keep the server-side idle timer from firing.
+            resetIdleTimeout();
           } catch {
             // Connection gone — stop heartbeat
             isConnectionClosed = true;

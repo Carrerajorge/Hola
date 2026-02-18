@@ -1776,9 +1776,6 @@ export class TerminalController extends EventEmitter {
     }
 
     const timeout = options?.timeout ? resolveExecutionTimeout(options.timeout, 60_000) : 60_000;
-    const tempDir = path.join(os.tmpdir(), "iliagpt-scripts");
-    await fs.mkdir(tempDir, { recursive: true });
-
     const extensions: Record<string, string> = {
       python: "py", javascript: "js", typescript: "ts", bash: "sh",
       ruby: "rb", go: "go", rust: "rs", php: "php",
@@ -1812,13 +1809,17 @@ export class TerminalController extends EventEmitter {
     }
 
     const ext = extension;
-    const scriptFile = path.join(tempDir, `script-${randomUUID().slice(0, 8)}.${ext}`);
     const scriptArgs = validateScriptArgs(options?.args);
 
-    await fs.writeFile(scriptFile, safeCode);
-
+    let createdTempDir: string | null = null;
     try {
-      const args = [scriptFile, ...scriptArgs];
+      const secureTempDir = await fs.mkdtemp(path.join(os.tmpdir(), "iliagpt-script-"));
+      await fs.chmod(secureTempDir, 0o700);
+      const secureScriptFile = path.join(secureTempDir, `script-${randomUUID().slice(0, 8)}.${ext}`);
+      await fs.writeFile(secureScriptFile, safeCode, { mode: 0o600 });
+
+      createdTempDir = secureTempDir;
+      const args = [secureScriptFile, ...scriptArgs];
       return await this.executeCommand(sessionId, {
         command: interpreter.command,
         args: interpreter.args ? [...interpreter.args, ...args] : args,
@@ -1829,7 +1830,9 @@ export class TerminalController extends EventEmitter {
         ),
       });
     } finally {
-      await fs.unlink(scriptFile).catch(() => {});
+      if (createdTempDir) {
+        await fs.rm(createdTempDir, { recursive: true, force: true }).catch(() => {});
+      }
     }
   }
 

@@ -3,15 +3,27 @@ import { NextFunction, Request, Response } from "express";
 import { Logger } from "../lib/logger";
 
 const DEFAULT_WINDOW_MS = 60_000;
-const DEFAULT_MAX_REQUESTS_PER_WINDOW = 90;
-const DEFAULT_MAX_SCORE = 7;
+const DEFAULT_MAX_REQUESTS_PER_WINDOW = 200;
+const DEFAULT_MAX_SCORE = 15;
 const WINDOW_MS = clampWindow(Number(process.env.ABUSE_DETECTION_WINDOW_MS || DEFAULT_WINDOW_MS));
 const MAX_REQUESTS_PER_WINDOW = clampThreshold(
   Number(process.env.ABUSE_DETECTION_MAX_REQUESTS || DEFAULT_MAX_REQUESTS_PER_WINDOW),
 );
 const MAX_ABUSE_SCORE = clampThreshold(Number(process.env.ABUSE_DETECTION_MAX_SCORE || DEFAULT_MAX_SCORE), 1, 1000);
 
-const EXEMPT_PATH_PREFIX = new Set(["/api/health", "/health", "/ready", "/metrics"]);
+const EXEMPT_PATH_PREFIX = new Set([
+  "/api/health", "/health", "/ready", "/metrics",
+  // SPA page-load endpoints (GET-only status/list calls)
+  "/api/chats",
+  "/api/models",
+  "/api/settings",
+  "/api/user/usage",
+  "/api/memory",
+  "/api/integrations",
+  "/api/oauth",
+  "/api/figma/status",
+  "/api/agent/runs",
+]);
 
 interface AbuseRecord {
   count: number;
@@ -50,11 +62,21 @@ function getIdentity(req: Request): string {
   return String(raw).replace(/[\r\n]/g, "").slice(0, 96);
 }
 
+const ALWAYS_EXEMPT = new Set(["/api/health", "/health", "/ready", "/metrics"]);
+
 function isExempt(req: Request): boolean {
   const path = req.path || "";
-  for (const prefix of EXEMPT_PATH_PREFIX) {
+  for (const prefix of ALWAYS_EXEMPT) {
     if (path === prefix || path.startsWith(`${prefix}/`)) {
       return true;
+    }
+  }
+  // SPA status/list endpoints are exempt only for read requests
+  if (req.method === "GET" || req.method === "HEAD") {
+    for (const prefix of EXEMPT_PATH_PREFIX) {
+      if (path === prefix || path.startsWith(`${prefix}/`)) {
+        return true;
+      }
     }
   }
   return false;
@@ -131,7 +153,7 @@ export function abuseDetection() {
 
     const requestRate = existing.count / Math.max(1, ageMs) * 1000;
     if (existing.count > MAX_REQUESTS_PER_WINDOW || requestRate > MAX_REQUESTS_PER_WINDOW / (WINDOW_MS / 1000)) {
-      existing.score = Math.min(existing.score + 3, MAX_ABUSE_SCORE);
+      existing.score = Math.min(existing.score + 2, MAX_ABUSE_SCORE);
     } else {
       existing.score = Math.max(existing.score - 1, 0);
     }

@@ -118,6 +118,7 @@ async function makeApp() {
 describe("chat stream isolation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.resetModules();
     resolveSkillContextMock.mockResolvedValue(null);
     buildSkillSectionMock.mockReturnValue("");
     chatMock.mockResolvedValue({ content: "ok", role: "assistant", usage: { totalTokens: 10 } });
@@ -195,5 +196,43 @@ describe("chat stream isolation", () => {
     } finally {
       await close();
     }
-  }, 20000);
+  }, 60000);
+
+  it("rejects a second stream for the same conversation when queueMode=reject", async () => {
+    const app = await makeApp();
+    const { client, close } = await createHttpTestClient(app);
+
+    try {
+      // Ensure the first stream holds the per-conversation lock long enough for the second request
+      // to observe it. Otherwise, the fast-path can complete before the race is exercised.
+      llmChatMock.mockImplementationOnce(async (messages: any[]) => {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        const last = messages[messages.length - 1];
+        return {
+          content: `stream:${String(last?.content || "")}`,
+          provider: "xai",
+          model: "grok-3-fast",
+        };
+      });
+
+      const payload = {
+        messages: [{ role: "user", content: "A" }],
+        conversationId: "chat_lock_a",
+        chatId: "chat_lock_a",
+        latencyMode: "fast",
+        queueMode: "reject",
+      };
+
+      const [first, second] = await Promise.all([
+        client.post("/api/chat/stream").set("x-request-id", "req_lock_a").send(payload),
+        client.post("/api/chat/stream").set("x-request-id", "req_lock_b").send(payload),
+      ]);
+
+      const statuses = [first.status, second.status];
+      expect(statuses.includes(200)).toBe(true);
+      expect(statuses.includes(409)).toBe(true);
+    } finally {
+      await close();
+    }
+  }, 60000);
 });

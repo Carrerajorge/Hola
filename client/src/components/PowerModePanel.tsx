@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiFetch } from "@/lib/apiClient";
 
 interface PowerStatus {
   status: string;
@@ -73,7 +74,7 @@ export function PowerModePanel() {
 
   async function fetchPowerStatus() {
     try {
-      const res = await fetch('/api/power/status');
+      const res = await apiFetch('/api/power/status');
       const data = await res.json();
       setStatus(data);
     } catch (error) {
@@ -85,7 +86,7 @@ export function PowerModePanel() {
 
   async function fetchPresets() {
     try {
-      const res = await fetch('/api/power/presets');
+      const res = await apiFetch('/api/power/presets');
       const data = await res.json();
       setPresets(data.presets || []);
     } catch (error) {
@@ -95,7 +96,7 @@ export function PowerModePanel() {
 
   async function applyPreset(name: string) {
     try {
-      const res = await fetch(`/api/power/preset/${name}`, { method: 'POST' });
+      const res = await apiFetch(`/api/power/preset/${name}`, { method: 'POST' });
       const data = await res.json();
       if (data.success) {
         fetchPowerStatus();
@@ -108,7 +109,7 @@ export function PowerModePanel() {
   async function activateBoost() {
     setBoosting(true);
     try {
-      const res = await fetch('/api/power/boost', {
+      const res = await apiFetch('/api/power/boost', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ duration: 300000 })

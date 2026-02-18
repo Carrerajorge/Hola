@@ -9,6 +9,8 @@ interface StandardModelSelectorProps {
     setSelectedModelId: (id: string) => void;
     modelsByProvider: Record<string, AvailableModel[]>;
     activeGptName?: string;
+    onModelChange?: (id: string) => void;
+    modelChangeDisabled?: boolean;
 }
 
 export function StandardModelSelector({
@@ -16,9 +18,12 @@ export function StandardModelSelector({
     selectedModelId,
     setSelectedModelId,
     modelsByProvider,
-    activeGptName
+    activeGptName,
+    onModelChange,
+    modelChangeDisabled = false
 }: StandardModelSelectorProps) {
     const isAnyModelAvailable = availableModels.length > 0;
+    const isDisabled = !!activeGptName || modelChangeDisabled;
 
     // Derived selected model data
     const selectedModelData = React.useMemo(() => {
@@ -56,18 +61,23 @@ export function StandardModelSelector({
         <div
             className={cn(
                 "relative flex items-center gap-1 sm:gap-2 rounded-md transition-colors mt-[-5px] mb-[-5px] pt-[8px] pb-[8px] pl-[7px] pr-[7px]",
-                activeGptName ? "cursor-not-allowed opacity-60" : "hover:bg-muted/50"
+                isDisabled ? "cursor-not-allowed opacity-60" : "hover:bg-muted/50"
             )}
             data-testid="button-model-selector"
-            title={activeGptName ? `Modelo fijado por GPT: ${activeGptName}` : "Seleccionar modelo"}
+            title={activeGptName ? `Modelo fijado por GPT: ${activeGptName}` : modelChangeDisabled ? "Respuesta en curso" : "Seleccionar modelo"}
         >
             <select
                 className={cn(
                     "appearance-none bg-transparent pr-6 font-semibold text-xs sm:text-sm truncate max-w-[160px] sm:max-w-none outline-none",
-                    activeGptName && "pointer-events-none"
+                    isDisabled && "pointer-events-none"
                 )}
                 value={selectedModelData?.id || ""}
-                onChange={(e) => setSelectedModelId(e.target.value)}
+                onChange={(e) => {
+                    if (isDisabled) return;
+                    const handler = onModelChange ?? setSelectedModelId;
+                    handler(e.target.value);
+                }}
+                disabled={isDisabled}
                 aria-label="Selector de modelo"
             >
                 {Object.entries(modelsByProvider).map(([provider, models]) => (

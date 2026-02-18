@@ -135,7 +135,10 @@ echo ""
 log "[4/6] Creating deploy directories..."
 mkdir -p "${DEPLOY_PATH}/scripts"
 mkdir -p "${DEPLOY_PATH}/backups"
-logok "Directories ready: scripts/, backups/"
+mkdir -p "${DEPLOY_PATH}/nginx"
+# Nginx html dir for custom error pages (502/503/504 maintenance page)
+mkdir -p "/etc/nginx/html"
+logok "Directories ready: scripts/, backups/, nginx/, /etc/nginx/html"
 echo ""
 
 # ── 5. Create initial state file ─────────────────────────

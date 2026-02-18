@@ -245,7 +245,7 @@ const SECRET_PATTERNS: SecretPattern[] = [
   {
     id: 'slack_webhook',
     name: 'Slack Webhook URL',
-    pattern: /https:\/\/hooks\.slack\.com\/services\/T[A-Z0-9]{8,}\/B[A-Z0-9]{8,}\/[A-Za-z0-9]{24}/,
+    pattern: /^https:\/\/hooks\.slack\.com\/services\/T[A-Z0-9]{8,}\/B[A-Z0-9]{8,}\/[A-Za-z0-9]{24}$/i,
     severity: 'medium',
     description: 'Slack incoming webhook URL',
     category: 'api_key',

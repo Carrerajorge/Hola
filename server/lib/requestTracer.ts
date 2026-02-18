@@ -32,6 +32,9 @@ const activeRequests: Map<string, RequestInfo> = new Map();
 const requestHistory: { duration: number; timestamp: number; error: boolean }[] = [];
 const REQUEST_HISTORY_MAX = 1000;
 const STATS_WINDOW_MS = 60000; // 1 minuto
+const MAX_QUERY_NESTED_DEPTH = 6;
+const MAX_QUERY_ARRAY_ITEMS = 25;
+const MAX_QUERY_OBJECT_KEYS = 80;
 
 let totalRequests = 0;
 let totalDuration = 0;
@@ -39,13 +42,31 @@ let maxDuration = 0;
 let minDuration = Infinity;
 const methodCounts: Record<string, number> = {};
 const pathCounts: Record<string, number> = {};
+const FORBIDDEN_RECORD_KEYS = new Set(["__proto__", "prototype", "constructor"]);
+
+function isSafeRecordKey(key: string): boolean {
+  return !FORBIDDEN_RECORD_KEYS.has(key) && !key.startsWith("__");
+}
 
 export function requestTracerMiddleware(req: Request, res: Response, next: NextFunction): void {
-  const requestId = nanoid(16);
+  // IMPORTANT: Do not override upstream correlation/request IDs.
+  // `correlationIdMiddleware` + `requestLoggerMiddleware` already establish canonical IDs and headers.
+  // This tracer is for stats only and must preserve end-to-end traceability.
+  const upstreamFromLocals =
+    typeof (res.locals as any)?.requestId === "string" ? String((res.locals as any).requestId).trim() : "";
+  const upstreamFromCorrelation =
+    typeof (req as any)?.correlationId === "string" ? String((req as any).correlationId).trim() : "";
+  const upstreamFromReq =
+    typeof (req as any)?.requestId === "string" ? String((req as any).requestId).trim() : "";
+  const upstream = upstreamFromLocals || upstreamFromCorrelation || upstreamFromReq;
+
+  const requestId = upstream || nanoid(16);
   const startTime = Date.now();
   
   // Almacenar requestId en res.locals para acceso en otras partes
-  res.locals.requestId = requestId;
+  if (!res.locals.requestId) {
+    res.locals.requestId = requestId;
+  }
   
   const userId = (req as any).user?.id;
   
@@ -61,15 +82,20 @@ export function requestTracerMiddleware(req: Request, res: Response, next: NextF
   totalRequests++;
 
   try {
-    res.setHeader("X-Request-ID", requestId);
+    // Preserve the canonical request id header if already set upstream.
+    if (!res.getHeader("X-Request-Id")) {
+      res.setHeader("X-Request-Id", requestId);
+    }
   } catch {
     // Ignore if headers cannot be mutated at this point.
   }
   
   // Contadores por método y path
-  methodCounts[req.method] = (methodCounts[req.method] || 0) + 1;
+  const method = isSafeRecordKey(req.method) ? req.method : "INVALID";
+  methodCounts[method] = (methodCounts[method] || 0) + 1;
   const normalizedPath = normalizePath(req.path);
-  pathCounts[normalizedPath] = (pathCounts[normalizedPath] || 0) + 1;
+  const safePath = isSafeRecordKey(normalizedPath) ? normalizedPath : "INVALID";
+  pathCounts[safePath] = (pathCounts[safePath] || 0) + 1;
   
   logger.withRequest(requestId, userId).info(`→ ${req.method} ${req.path}`, {
     query: sanitizeQueryForLogging(req.query as Record<string, unknown>),
@@ -128,13 +154,52 @@ function normalizePath(path: string): string {
     .replace(/\/[a-zA-Z0-9_-]{16,}/g, "/:id");
 }
 
+function sanitizeQueryValue(
+  value: unknown,
+  seen: WeakSet<object> = new WeakSet(),
+  depth = 0,
+): unknown {
+  if (depth > MAX_QUERY_NESTED_DEPTH) {
+    return "[truncated]";
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, MAX_QUERY_ARRAY_ITEMS)
+      .map((item) => sanitizeQueryValue(item, seen, depth + 1));
+  }
+
+  if (value && typeof value === "object") {
+    if (seen.has(value)) {
+      return "[redacted-cyclic]";
+    }
+
+    seen.add(value);
+    const output: Record<string, unknown> = Object.create(null);
+    for (const [rawKey, nested] of Object.entries(value as Record<string, unknown>).slice(0, MAX_QUERY_OBJECT_KEYS)) {
+      const key = String(rawKey);
+      if (!isSafeRecordKey(key)) {
+        continue;
+      }
+      output[key] = sanitizeQueryValue(nested, seen, depth + 1);
+    }
+    return output;
+  }
+
+  return value;
+}
+
 function sanitizeQueryForLogging(query: Record<string, unknown>): Record<string, unknown> | undefined {
   if (!query || Object.keys(query).length === 0) {
     return undefined;
   }
 
-  const sanitized: Record<string, unknown> = {};
+  const sanitized: Record<string, unknown> = Object.create(null);
   for (const [key, value] of Object.entries(query)) {
+    if (!isSafeRecordKey(key)) {
+      continue;
+    }
+
     if (SENSITIVE_QUERY_PARAMS.some((fragment) => key.toLowerCase().includes(fragment.toLowerCase()))) {
       sanitized[key] = "[REDACTED]";
       continue;
@@ -145,15 +210,22 @@ function sanitizeQueryForLogging(query: Record<string, unknown>): Record<string,
       continue;
     }
 
-    if (Array.isArray(value)) {
-      sanitized[key] = value.slice(0, 5).map((item) => {
-        if (typeof item === "string") return truncateSafe(item, MAX_QUERY_ITEM_LENGTH);
-        return item;
-      });
+    if (value == null) {
+      sanitized[key] = value;
       continue;
     }
 
-    sanitized[key] = value;
+    if (Array.isArray(value)) {
+      const items = sanitizeQueryValue(value, new WeakSet(), 1);
+      if (Array.isArray(items)) {
+        sanitized[key] = items.map((item) => (typeof item === "string" ? truncateSafe(item, MAX_QUERY_ITEM_LENGTH) : item));
+      } else {
+        sanitized[key] = items;
+      }
+      continue;
+    }
+
+    sanitized[key] = sanitizeQueryValue(value, new WeakSet(), 1);
   }
 
   return sanitized;

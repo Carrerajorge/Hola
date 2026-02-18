@@ -15,6 +15,9 @@ const MAX_OBJECT_KEYS = 320;
 const MAX_TIMESTAMP_FUTURE_MS = 15 * 60_000;
 const MAX_BIDI_CHARS = /[\u202A-\u202E\u2066-\u2069]/g;
 const MAX_CONTROL_CHARS = /[\u0000-\u001F\u007F-\u009F]/g;
+const HTML_TAG_RE = /<[^>]*?>/g;
+const SCRIPT_TAG_RE = /<\s*script\b[^>]*>[\s\S]*?<\s*\/\s*script\s*>/gi;
+const HTML_ENTITY_RE = /&(?:nbsp|amp|lt|gt|quot|apos);/gi;
 
 const ALLOWED_MIME_TYPES: Record<MessageEnvelope["messageType"], ReadonlySet<string>> = {
   text: new Set([]),
@@ -96,7 +99,9 @@ function normalizeText(value: unknown): string {
 
 function sanitizeTextForStorage(value: unknown): string {
   return normalizeText(value)
-    .replace(/<[^>]*>/g, "")
+    .replace(SCRIPT_TAG_RE, "")
+    .replace(HTML_TAG_RE, "")
+    .replace(HTML_ENTITY_RE, "")
     .replace(/[`*_~#>[\]{}]/g, "")
     .slice(0, MAX_IDENTIFIER_TEXT_LENGTH);
 }

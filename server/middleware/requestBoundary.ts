@@ -8,6 +8,8 @@ const MAX_QUERY_KEY_LENGTH = 128;
 const MAX_QUERY_PARAMS_COUNT = 100;
 const MAX_PATH_SEGMENT_COUNT = 64;
 const MAX_REQUEST_PATH_BYTES = Number(process.env.MAX_REQUEST_PATH_BYTES || 0);
+const MAX_OBJECT_KEYS = 200;
+const MAX_ARRAY_ITEMS = 200;
 
 const DEFAULT_MAX_BODY_BYTES = 1 * 1024 * 1024;
 const CHAT_STREAM_MAX_BODY_BYTES = 10 * 1024 * 1024;
@@ -33,6 +35,11 @@ const DISALLOWED_PATH_SEGMENTS = /(^|\/)(?:\.\.)(?=\/|$|%2e%2e|%2E%2E|..|%2e|%2E
 const MALFORMED_PERCENT_ENCODING = /%(?![0-9a-fA-F]{2})/;
 const DISALLOWED_CONTROL_CHARS = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
 const ALLOWED_QUERY_KEY_PATTERN = /^[A-Za-z0-9._~!$&'()*+,;=:@\-\/[\]]+$/;
+const FORBIDDEN_RECORD_KEYS = new Set(["__proto__", "prototype", "constructor"]);
+
+function isForbiddenRecordKey(key: string): boolean {
+  return FORBIDDEN_RECORD_KEYS.has(key) || key.includes("__proto__");
+}
 
 function getMaxBodyBytes(pathname: string): number {
   const configured = Number(process.env.MAX_API_BODY_BYTES || DEFAULT_MAX_BODY_BYTES);
@@ -132,7 +139,12 @@ function normalizeText(value: string): string {
     });
 }
 
-function normalizeInput(value: unknown, depth = 0, maxDepth = 8): unknown {
+function normalizeInput(
+  value: unknown,
+  depth = 0,
+  maxDepth = 8,
+  seen: WeakSet<object> = new WeakSet()
+): unknown {
   if (depth > maxDepth) {
     return value;
   }
@@ -142,13 +154,28 @@ function normalizeInput(value: unknown, depth = 0, maxDepth = 8): unknown {
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => normalizeInput(item, depth + 1, maxDepth));
+    if (value.length > MAX_ARRAY_ITEMS) {
+      return value
+        .slice(0, MAX_ARRAY_ITEMS)
+        .map((item) => normalizeInput(item, depth + 1, maxDepth, seen));
+    }
+
+    return value.map((item) => normalizeInput(item, depth + 1, maxDepth, seen));
   }
 
   if (value && typeof value === "object") {
-    const normalized: Record<string, unknown> = {};
-    for (const [key, nested] of Object.entries(value)) {
-      normalized[key] = normalizeInput(nested, depth + 1, maxDepth);
+    if (seen.has(value)) {
+      return "[redacted-cyclic]";
+    }
+
+    seen.add(value);
+    const normalized: Record<string, unknown> = Object.create(null);
+    const entries = Object.entries(value).slice(0, MAX_OBJECT_KEYS);
+    for (const [key, nested] of entries) {
+      if (isForbiddenRecordKey(key)) {
+        continue;
+      }
+      normalized[key] = normalizeInput(nested, depth + 1, maxDepth, seen);
     }
     return normalized;
   }

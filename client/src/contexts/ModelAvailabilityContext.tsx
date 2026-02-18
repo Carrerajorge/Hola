@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { apiFetch } from "@/lib/apiClient";
 
 export interface AvailableModel {
   id: string;
@@ -44,7 +45,7 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
   const { data: modelsData, isLoading, refetch } = useQuery<{ models: AvailableModel[] }>({
     queryKey: ["/api/models/available"],
     queryFn: async () => {
-      const res = await fetch("/api/models/available", {
+      const res = await apiFetch("/api/models/available", {
         cache: "no-store",
         headers: { "Cache-Control": "no-cache" }
       });
@@ -154,7 +155,7 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
 
   const toggleMutation = useMutation({
     mutationFn: async ({ id, enabled }: { id: string; enabled: boolean }) => {
-      const res = await fetch(`/api/admin/models/${id}/toggle`, {
+      const res = await apiFetch(`/api/admin/models/${id}/toggle`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isEnabled: enabled }),

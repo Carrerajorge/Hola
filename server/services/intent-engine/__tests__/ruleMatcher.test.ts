@@ -1,7 +1,17 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// NOTE: In ESM, Node core module namespace exports are not configurable, so vi.spyOn(fs, ...)
+// will throw. Mock the module instead.
+vi.mock('fs', async () => {
+    const actual = await vi.importActual<typeof import('fs')>('fs');
+    return {
+        ...actual,
+        existsSync: vi.fn(() => true),
+    };
+});
+
 import * as fs from 'fs';
-import * as path from 'path';
 
 // Mock pathSecurity before importing the module under test
 // intent-engine/__tests__ -> intent-engine -> services -> server -> utils
@@ -11,8 +21,6 @@ vi.mock('../../../utils/pathSecurity', () => ({
         return `/safe/${p}`;
     }),
 }));
-
-vi.mock('fs');
 
 // Import the real functions
 import { extractSlots, ruleBasedMatch } from '../ruleMatcher';

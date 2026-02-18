@@ -22,7 +22,8 @@
 
 import { useCallback, useRef } from "react";
 import type { Message } from "@/hooks/use-chats";
-import { type AIState } from "@/components/chat-interface/types";
+
+import { type AIState, type AiProcessStep } from "@/components/chat-interface/types";
 
 export interface StreamingTransitionDeps {
   /** Adds message to optimistic list for immediate display */
@@ -34,16 +35,18 @@ export interface StreamingTransitionDeps {
   /** Ref to the streaming content string */
   streamingContentRef: React.MutableRefObject<string>;
   /** Sets the AI state indicator */
-  setAiState: React.Dispatch<React.SetStateAction<AiState>>;
+  setAiState: (value: React.SetStateAction<AIState>, conversationId?: string | null) => void;
   /** Optional: clear AI process steps */
-  setAiProcessSteps?: React.Dispatch<React.SetStateAction<any[]>>;
+  setAiProcessSteps?: (value: React.SetStateAction<AiProcessStep[]>, conversationId?: string | null) => void;
+  /** Optional: scope updates to a specific conversation */
+  conversationId?: string | null;
 }
 
 export interface FinalizeOptions {
   /** Keep aiState as-is (don't reset to idle). Useful for agent flows. */
   keepAiState?: boolean;
   /** Custom AI state to transition to (default: "idle") */
-  targetAiState?: AiState;
+  targetAiState?: AIState;
   /** Clear AI process steps (default: true) */
   clearProcessSteps?: boolean;
 }
@@ -56,6 +59,7 @@ export function useStreamingTransition(deps: StreamingTransitionDeps) {
     streamingContentRef,
     setAiState,
     setAiProcessSteps,
+    conversationId,
   } = deps;
 
   // Guard against double-finalize in the same tick
@@ -87,12 +91,12 @@ export function useStreamingTransition(deps: StreamingTransitionDeps) {
 
       // STEP 4: Reset AI state
       if (!options?.keepAiState) {
-        setAiState(options?.targetAiState ?? "done");
+        setAiState(options?.targetAiState ?? "idle", conversationId);
       }
 
       // STEP 5: Clear process steps if applicable
       if (options?.clearProcessSteps !== false && setAiProcessSteps) {
-        setAiProcessSteps([]);
+        setAiProcessSteps([], conversationId);
       }
 
       // Release guard after microtask to prevent same-tick double calls
@@ -114,13 +118,13 @@ export function useStreamingTransition(deps: StreamingTransitionDeps) {
    * Start a new streaming session — clears previous state.
    */
   const startStreaming = useCallback(
-    (aiState: AiState = "sending") => {
+    (aiState: AIState = "sending") => {
       streamingContentRef.current = "";
       setStreamingContent("");
-      setAiState(aiState);
-      setAiProcessSteps?.([]);
+      setAiState(aiState, conversationId);
+      setAiProcessSteps?.([], conversationId);
     },
-    [setStreamingContent, streamingContentRef, setAiState, setAiProcessSteps]
+    [setStreamingContent, streamingContentRef, setAiState, setAiProcessSteps, conversationId]
   );
 
   /**

@@ -143,7 +143,7 @@ function detectLanguage(text: string): { language: string; confidence: number } 
 const DOCUMENT_TYPE_PATTERNS: Record<DocumentType, RegExp[]> = {
     invoice: [/factura/i, /invoice/i, /total\s*:/i, /subtotal/i, /iva|tax/i, /n[úu]mero de factura/i],
     contract: [/contrato/i, /contract/i, /agreement/i, /partes|parties/i, /términos|terms/i, /firma|signature/i],
-    email: [/^(from|de):/im, /^(to|para):/im, /^subject|asunto:/im, /@\w+\.\w+/i],
+  email: [/^(?:from|de):/im, /^(?:to|para):/im, /^(?:subject|asunto):/im, /@\w+\.\w+/i],
     letter: [/estimado|dear/i, /atentamente|sincerely/i, /cordialmente|regards/i],
     report: [/informe|report/i, /conclusi[oó]n|conclusion/i, /resumen ejecutivo|executive summary/i],
     presentation: [/slide|diapositiva/i, /presentaci[oó]n/i],

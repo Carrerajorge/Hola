@@ -15,6 +15,7 @@ import type { GeminiFunctionDeclaration } from "./types";
  *  Call this once at startup after initializeConnectorManifests(). */
 export async function mountConnectorTools(): Promise<number> {
   const { toolRegistry } = await import("../../agent/toolRegistry");
+  const { policyEngine } = await import("../../agent/policyEngine");
 
   let count = 0;
 
@@ -26,6 +27,28 @@ export async function mountConnectorTools(): Promise<number> {
     );
 
     for (const toolDef of toolDefs) {
+      // Ensure every connector tool has a policy entry; ToolRegistry will deny tools with no policy.
+      // Only register if missing to avoid clobbering any custom/admin policies.
+      if (!policyEngine.getPolicy(toolDef.name)) {
+        const cap = manifest.capabilities.find((c) => c.operationId === toolDef.name);
+        const requiresConfirmation = Boolean(
+          cap?.confirmationRequired ||
+            cap?.dataAccessLevel === "write" ||
+            cap?.dataAccessLevel === "admin"
+        );
+
+        // Connector tools touch external systems: keep them Pro+ by default.
+        policyEngine.registerPolicy({
+          toolName: toolDef.name,
+          capabilities: (toolDef.capabilities as any) || [],
+          allowedPlans: ["pro", "admin"],
+          requiresConfirmation,
+          maxExecutionTimeMs: 60_000,
+          maxRetries: 2,
+          deniedByDefault: false,
+        });
+      }
+
       // Only register if not already present (idempotent)
       if (!toolRegistry.get(toolDef.name)) {
         try {

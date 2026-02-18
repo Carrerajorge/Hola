@@ -8,6 +8,7 @@ VPS_USER="${VPS_USER:-root}"
 VPS_PORT="${VPS_PORT:-22}"
 VPS_SSH_KEY="${VPS_SSH_KEY:-$HOME/.ssh/iliagpt_deploy}"
 SSH_CONNECT_TIMEOUT="${SSH_CONNECT_TIMEOUT:-10}"
+HTTP_TIMEOUT="${HTTP_TIMEOUT:-10}"
 EXPECTED_APP_VERSION="${EXPECTED_APP_VERSION:-}"
 EXPECTED_APP_SHA="${EXPECTED_APP_SHA:-}"
 DEPLOY_STATE_PATH="${DEPLOY_STATE_PATH:-/opt/hola/deploy-state.json}"
@@ -29,6 +30,16 @@ done
 
 if [ ! -r "$VPS_SSH_KEY" ]; then
   echo "VPS_SSH_KEY not readable: $VPS_SSH_KEY"
+  exit 1
+fi
+
+if ! printf '%s' "$BASE_URL" | grep -Eq '^https?://'; then
+  echo "Invalid BASE_URL: $BASE_URL"
+  exit 1
+fi
+
+if [ ! "$HTTP_TIMEOUT" -ge 1 ] 2>/dev/null; then
+  echo "HTTP_TIMEOUT must be an integer >= 1"
   exit 1
 fi
 
@@ -76,7 +87,7 @@ check_http_code() {
   local body_file="$TMP_DIR/${id}.out"
 
   local code
-  code="$(curl -sS --max-time 10 -o "$body_file" -w '%{http_code}' "$url" || echo "000")"
+  code="$(curl -sS --max-time "${HTTP_TIMEOUT}" -o "$body_file" -w '%{http_code}' "$url" || echo "000")"
   if [ "$code" = "$expected" ]; then
     pass "$id" "$url -> HTTP $code"
     return 0
@@ -92,7 +103,7 @@ check_http_code_set() {
   local body_file="$TMP_DIR/${id}.out"
   local expected=("$@")
   local code
-  code="$(curl -sS --max-time 10 -o "$body_file" -w '%{http_code}' "$url" || echo "000")"
+  code="$(curl -sS --max-time "${HTTP_TIMEOUT}" -o "$body_file" -w '%{http_code}' "$url" || echo "000")"
   for e in "${expected[@]}"; do
     if [ "$code" = "$e" ]; then
       pass "$id" "$url -> HTTP $code"
@@ -305,7 +316,7 @@ check_container_status "23" "${REDIS_CONTAINER}" "running" "Redis container is r
 check_psql_query "24" "${PG_CONTAINER}" "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='users';" "users table exists"
 
 health_local="$(
-  run_ssh "curl -fsS --max-time 8 http://127.0.0.1:${ACTIVE_PORT}/api/health 2>/dev/null || true"
+  run_ssh "curl -fsS --max-time ${HTTP_TIMEOUT} http://127.0.0.1:${ACTIVE_PORT}/api/health 2>/dev/null || true"
 )"
 if [ -n "$health_local" ]; then
   if echo "$health_local" | grep -Fq '"status":"ok"'; then

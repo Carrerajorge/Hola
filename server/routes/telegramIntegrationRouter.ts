@@ -26,6 +26,26 @@ const configSchema = z
 export function createTelegramIntegrationRouter(): Router {
   const router = Router();
 
+  router.get("/status", async (req: Request, res: Response) => {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const accounts = await db
+      .select({
+        id: integrationAccounts.id,
+        providerId: integrationAccounts.providerId,
+        displayName: integrationAccounts.displayName,
+        status: integrationAccounts.status,
+        metadata: integrationAccounts.metadata,
+        createdAt: integrationAccounts.createdAt,
+        updatedAt: integrationAccounts.updatedAt,
+      })
+      .from(integrationAccounts)
+      .where(and(eq(integrationAccounts.userId, userId), eq(integrationAccounts.providerId, "telegram")));
+
+    return res.json({ success: true, accounts });
+  });
+
   router.post("/pairing-code", async (req: Request, res: Response) => {
     const userId = getUserId(req);
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
