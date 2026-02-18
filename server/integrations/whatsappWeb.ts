@@ -65,6 +65,7 @@ export class WhatsAppWebManager extends EventEmitter {
   private sockets = new Map<string, SocketRecord>();
   // Persist lightweight per-user preferences even when the socket is not connected.
   private autoReplyPrefs = new Map<string, boolean>();
+  private autoReplyContactsPrefs = new Map<string, boolean>();
   private autoReplyPrompts = new Map<string, string>();
   private autoReplySettingsLoaded = new Set<string>();
   private reconnectAttempts = new Map<string, number>();
@@ -128,6 +129,9 @@ export class WhatsAppWebManager extends EventEmitter {
       if (typeof parsed?.autoReplyEnabled === 'boolean') {
         this.autoReplyPrefs.set(userId, parsed.autoReplyEnabled);
       }
+      if (typeof parsed?.replyToContactsEnabled === 'boolean') {
+        this.autoReplyContactsPrefs.set(userId, parsed.replyToContactsEnabled);
+      }
       if (typeof parsed?.customPrompt === 'string') {
         this.autoReplyPrompts.set(userId, parsed.customPrompt);
       }
@@ -142,6 +146,7 @@ export class WhatsAppWebManager extends EventEmitter {
       const tmp = `${settingsPath}.tmp`;
       const payload = {
         autoReplyEnabled: this.autoReplyPrefs.get(userId) ?? false,
+        replyToContactsEnabled: this.autoReplyContactsPrefs.get(userId) ?? false,
         customPrompt: this.autoReplyPrompts.get(userId) ?? '',
         updatedAt: new Date().toISOString(),
       };
@@ -193,6 +198,28 @@ export class WhatsAppWebManager extends EventEmitter {
     this.loadAutoReplySettingsOnce(userId);
     this.autoReplyPrompts.set(userId, prompt);
     this.persistAutoReplySettings(userId);
+  }
+
+  isReplyToContactsEnabled(userId: string): boolean {
+    this.loadAutoReplySettingsOnce(userId);
+    return this.autoReplyContactsPrefs.get(userId) ?? false;
+  }
+
+  setReplyToContacts(userId: string, enabled: boolean): void {
+    this.loadAutoReplySettingsOnce(userId);
+    this.autoReplyContactsPrefs.set(userId, enabled);
+    this.persistAutoReplySettings(userId);
+  }
+
+  /**
+   * Get the owner JID (connected WhatsApp number) for a user.
+   */
+  getOwnerJid(userId: string): string | null {
+    const status = this.getStatus(userId);
+    if (status.state !== 'connected' || !status.me?.id) return null;
+    // Baileys JID format: "1234567890:42@s.whatsapp.net" → normalize to "1234567890@s.whatsapp.net"
+    const meId = status.me.id;
+    return meId.includes(':') ? meId.split(':')[0] + '@s.whatsapp.net' : meId;
   }
 
   /**

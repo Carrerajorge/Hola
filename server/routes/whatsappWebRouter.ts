@@ -69,7 +69,8 @@ export function createWhatsAppWebRouter(): Router {
 
     const status = whatsappWebManager.getStatus(userId);
     const autoReply = whatsappWebManager.isAutoReplyEnabled(userId);
-    res.json({ success: true, status, autoReply });
+    const replyToContacts = whatsappWebManager.isReplyToContactsEnabled(userId);
+    res.json({ success: true, status, autoReply, replyToContacts });
   });
 
   // Start connection — waits for QR to be ready before responding
@@ -141,6 +142,20 @@ export function createWhatsAppWebRouter(): Router {
     res.json({ success: true, autoReply: enabled });
   });
 
+  // Toggle reply-to-contacts on/off (secondary feature)
+  router.post('/reply-to-contacts', async (req, res) => {
+    const userId = requireUserId(req as any);
+    if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+
+    const { enabled } = (req.body || {}) as { enabled?: boolean };
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({ success: false, error: 'enabled (boolean) is required' });
+    }
+
+    whatsappWebManager.setReplyToContacts(userId, enabled);
+    res.json({ success: true, replyToContacts: enabled });
+  });
+
   // Optional: customize how the bot should respond in WhatsApp auto-replies.
   router.get('/settings', async (req, res) => {
     const userId = requireUserId(req as any);
@@ -150,6 +165,7 @@ export function createWhatsAppWebRouter(): Router {
       success: true,
       settings: {
         autoReply: whatsappWebManager.isAutoReplyEnabled(userId),
+        replyToContacts: whatsappWebManager.isReplyToContactsEnabled(userId),
         customPrompt: whatsappWebManager.getAutoReplyPrompt(userId),
       },
     });
@@ -159,19 +175,28 @@ export function createWhatsAppWebRouter(): Router {
     const userId = requireUserId(req as any);
     if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
 
-    const raw = (req.body || {}) as { customPrompt?: unknown };
-    if (raw.customPrompt === undefined) {
-      return res.status(400).json({ success: false, error: 'customPrompt is required' });
+    const raw = (req.body || {}) as { customPrompt?: unknown; replyToContacts?: unknown };
+
+    // Allow updating customPrompt and/or replyToContacts
+    if (raw.customPrompt === undefined && raw.replyToContacts === undefined) {
+      return res.status(400).json({ success: false, error: 'customPrompt or replyToContacts is required' });
     }
 
-    const customPrompt = safePromptText(raw.customPrompt);
-    whatsappWebManager.setAutoReplyPrompt(userId, customPrompt);
+    if (raw.customPrompt !== undefined) {
+      const customPrompt = safePromptText(raw.customPrompt);
+      whatsappWebManager.setAutoReplyPrompt(userId, customPrompt);
+    }
+
+    if (typeof raw.replyToContacts === 'boolean') {
+      whatsappWebManager.setReplyToContacts(userId, raw.replyToContacts);
+    }
 
     return res.json({
       success: true,
       settings: {
         autoReply: whatsappWebManager.isAutoReplyEnabled(userId),
-        customPrompt,
+        replyToContacts: whatsappWebManager.isReplyToContactsEnabled(userId),
+        customPrompt: whatsappWebManager.getAutoReplyPrompt(userId),
       },
     });
   });
@@ -244,7 +269,17 @@ async function autoReplyFromWhatsApp(opts: {
     return;
   }
 
-  console.log('[WhatsApp AutoReply] Auto-reply enabled, building context...');
+  // Determine if the sender is the owner (the connected WhatsApp number)
+  const ownerJid = whatsappWebManager.getOwnerJid(userId);
+  const senderIsOwner = ownerJid ? fromJid === ownerJid : false;
+
+  // By default only reply to the owner. Reply to contacts only if explicitly enabled.
+  if (!senderIsOwner && !whatsappWebManager.isReplyToContactsEnabled(userId)) {
+    console.log(`[WhatsApp AutoReply] Skipping non-owner message from ${fromJid} (reply to contacts disabled)`);
+    return;
+  }
+
+  console.log(`[WhatsApp AutoReply] Auto-reply enabled, sender ${senderIsOwner ? 'is owner' : 'is contact (reply to contacts ON)'}, building context...`);
 
   // Build message history from mirrored chat.
   const history = await storage.getChatMessages(chatId).then((msgs) => msgs.slice(-20));

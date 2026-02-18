@@ -518,12 +518,14 @@ export function ChannelsHubDialog({
   const [autoResponderEnabled, setAutoResponderEnabled] = useState(false);
   const [autoResponderMode, setAutoResponderMode] = useState<AiSettingsMode>("none");
   const [autoResponderTargets, setAutoResponderTargets] = useState(0);
+  const [replyToContactsEnabled, setReplyToContactsEnabled] = useState(false);
   const [responseInstructions, setResponseInstructions] = useState("");
   const [responseInstructionsMixed, setResponseInstructionsMixed] = useState(false);
   const [aiSettingsBusy, setAiSettingsBusy] = useState(false);
   const [aiSettingsError, setAiSettingsError] = useState<string | null>(null);
   const [aiSettingsSaved, setAiSettingsSaved] = useState(false);
   const [confirmEnableAutoResponderOpen, setConfirmEnableAutoResponderOpen] = useState(false);
+  const [confirmEnableReplyToContactsOpen, setConfirmEnableReplyToContactsOpen] = useState(false);
 
   const loadAiSettings = useCallback(async () => {
     if (!open) return;
@@ -548,17 +550,20 @@ export function ChannelsHubDialog({
         label: string;
         configured: boolean;
         enabled: boolean;
+        replyToContacts: boolean;
         prompt: string;
       };
       const units: Unit[] = [];
 
       // WhatsApp Web
       let waEnabled = false;
+      let waReplyToContacts = false;
       let waPrompt = "";
       let waConfigured = false;
       if (waStatusRes.ok) {
         const waJson = await waStatusRes.json().catch(() => null);
         waEnabled = typeof waJson?.autoReply === "boolean" ? waJson.autoReply : false;
+        waReplyToContacts = typeof waJson?.replyToContacts === "boolean" ? waJson.replyToContacts : false;
         const state = waJson?.status?.state;
         if (typeof state === "string") {
           waConfigured = state !== "disconnected";
@@ -567,24 +572,30 @@ export function ChannelsHubDialog({
       if (waSettingsRes.ok) {
         const waSettingsJson = await waSettingsRes.json().catch(() => null);
         waPrompt = normalizePrompt(waSettingsJson?.settings?.customPrompt);
+        if (typeof waSettingsJson?.settings?.replyToContacts === "boolean") {
+          waReplyToContacts = waSettingsJson.settings.replyToContacts;
+        }
       }
       // Even when disconnected, treat WhatsApp as "configured" if the user already enabled auto-reply or set a custom prompt.
       waConfigured = waConfigured || waEnabled || Boolean(waPrompt);
-      units.push({ id: "whatsapp", label: "WhatsApp", configured: waConfigured, enabled: waEnabled, prompt: waPrompt });
+      units.push({ id: "whatsapp", label: "WhatsApp", configured: waConfigured, enabled: waEnabled, replyToContacts: waReplyToContacts, prompt: waPrompt });
 
       // Telegram (requires auth)
       const tgStatusJson = tgStatusRes.ok ? await tgStatusRes.json().catch(() => null) : null;
       const tgAccounts: any[] = Array.isArray(tgStatusJson?.accounts) ? tgStatusJson.accounts : [];
       const tgConfigured = tgAccounts.length > 0;
       let tgEnabled = false;
+      let tgReplyToContacts = false;
       let tgPrompt = "";
       if (tgSettingsRes.ok) {
         const tgJson = await tgSettingsRes.json().catch(() => null);
         const s = tgJson?.settings;
         tgEnabled = typeof s?.responder_enabled === "boolean" ? s.responder_enabled : false;
+        // owner_only=true means reply to contacts is OFF; owner_only=false means ON
+        tgReplyToContacts = typeof s?.owner_only === "boolean" ? !s.owner_only : false;
         tgPrompt = normalizePrompt(s?.custom_prompt);
       }
-      units.push({ id: "telegram", label: "Telegram", configured: tgConfigured, enabled: tgEnabled, prompt: tgPrompt });
+      units.push({ id: "telegram", label: "Telegram", configured: tgConfigured, enabled: tgEnabled, replyToContacts: tgReplyToContacts, prompt: tgPrompt });
 
       // Messenger (can have multiple pages)
       const msgJson = msgStatusRes.ok ? await msgStatusRes.json().catch(() => null) : null;
@@ -605,6 +616,7 @@ export function ChannelsHubDialog({
           return {
             pageId,
             enabled: typeof s?.responder_enabled === "boolean" ? s.responder_enabled : false,
+            replyToContacts: typeof s?.owner_only === "boolean" ? !s.owner_only : false,
             prompt: normalizePrompt(s?.custom_prompt),
           };
         })
@@ -616,6 +628,7 @@ export function ChannelsHubDialog({
           label: "Messenger",
           configured: true,
           enabled: s.enabled,
+          replyToContacts: s.replyToContacts,
           prompt: s.prompt,
         });
       }
@@ -639,6 +652,7 @@ export function ChannelsHubDialog({
           return {
             appId,
             enabled: typeof s?.responder_enabled === "boolean" ? s.responder_enabled : false,
+            replyToContacts: typeof s?.owner_only === "boolean" ? !s.owner_only : false,
             prompt: normalizePrompt(s?.custom_prompt),
           };
         })
@@ -650,6 +664,7 @@ export function ChannelsHubDialog({
           label: "WeChat",
           configured: true,
           enabled: s.enabled,
+          replyToContacts: s.replyToContacts,
           prompt: s.prompt,
         });
       }
@@ -665,6 +680,10 @@ export function ChannelsHubDialog({
       setAutoResponderTargets(configuredUnits.length);
       setAutoResponderMode(mode);
       setAutoResponderEnabled(anyEnabled);
+
+      // Derive replyToContacts state from configured units
+      const anyReplyToContacts = configuredUnits.some((u) => u.replyToContacts);
+      setReplyToContactsEnabled(anyReplyToContacts);
 
       const prompts = configuredUnits.map((u) => u.prompt);
       const promptSet = new Set(prompts.map((p) => p.trim()));
@@ -795,6 +814,112 @@ export function ChannelsHubDialog({
       void wcStatus.refresh();
     }
   }, [loadAiSettings, tgStatus, msgStatus, wcStatus]);
+
+  const applyReplyToContacts = useCallback(async (enabled: boolean) => {
+    setAiSettingsBusy(true);
+    setAiSettingsError(null);
+    setAiSettingsSaved(false);
+
+    const headers = { "Content-Type": "application/json" };
+
+    try {
+      // WhatsApp Web: toggle replyToContacts directly
+      const waReq = apiFetch("/api/integrations/whatsapp/web/reply-to-contacts", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ enabled }),
+      });
+
+      // Other channels: set owner_only (inverted: replyToContacts=true means owner_only=false)
+      const tgReq = apiFetch("/api/integrations/telegram/settings", {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ owner_only: !enabled }),
+      });
+
+      const [msgStatusRes, wcStatusRes] = await Promise.all([
+        apiFetch("/api/integrations/messenger/status", { headers }),
+        apiFetch("/api/integrations/wechat/status", { headers }),
+      ]);
+
+      const msgJson = msgStatusRes.ok ? await msgStatusRes.json().catch(() => null) : null;
+      const wcJson = wcStatusRes.ok ? await wcStatusRes.json().catch(() => null) : null;
+
+      const msgAccounts: any[] = Array.isArray(msgJson?.accounts) ? msgJson.accounts : [];
+      const wcAccounts: any[] = Array.isArray(wcJson?.accounts) ? wcJson.accounts : [];
+
+      const msgPageIds = Array.from(
+        new Set(
+          msgAccounts
+            .map((a) => a?.metadata?.pageId)
+            .filter((v) => typeof v === "string" && v)
+        )
+      );
+      const wcAppIds = Array.from(
+        new Set(
+          wcAccounts
+            .map((a) => a?.metadata?.appId)
+            .filter((v) => typeof v === "string" && v)
+        )
+      );
+
+      type Op = { label: string; required: boolean; promise: Promise<Response> };
+      const ops: Op[] = [
+        { label: "WhatsApp", required: true, promise: waReq },
+        { label: "Telegram", required: false, promise: tgReq },
+        ...msgPageIds.map((pageId) => ({
+          label: "Messenger",
+          required: false,
+          promise: apiFetch("/api/integrations/messenger/settings", {
+            method: "PUT",
+            headers,
+            body: JSON.stringify({ pageId, owner_only: !enabled }),
+          }),
+        })),
+        ...wcAppIds.map((appId) => ({
+          label: "WeChat",
+          required: false,
+          promise: apiFetch("/api/integrations/wechat/settings", {
+            method: "PUT",
+            headers,
+            body: JSON.stringify({ appId, owner_only: !enabled }),
+          }),
+        })),
+      ];
+
+      const results = await Promise.allSettled(ops.map((o) => o.promise));
+      let requiredFailed = false;
+      const optionalFailures = new Set<string>();
+
+      for (let i = 0; i < results.length; i++) {
+        const op = ops[i];
+        const r = results[i];
+        if (r.status !== "fulfilled") {
+          if (op.required) requiredFailed = true;
+          else optionalFailures.add(op.label);
+          continue;
+        }
+
+        const res = r.value;
+        if (res.ok) continue;
+        if (!op.required && (res.status === 404 || res.status === 401)) continue;
+        if (op.required) requiredFailed = true;
+        else optionalFailures.add(op.label);
+      }
+
+      if (requiredFailed) {
+        setAiSettingsError("No se pudo aplicar. Intenta de nuevo.");
+      } else if (optionalFailures.size > 0) {
+        const labels = Array.from(optionalFailures);
+        setAiSettingsError(`Se aplicó parcialmente, pero no se pudo actualizar: ${labels.join(", ")}.`);
+      } else {
+        setAiSettingsSaved(true);
+      }
+    } finally {
+      setAiSettingsBusy(false);
+      void loadAiSettings();
+    }
+  }, [loadAiSettings]);
 
   const applyResponseInstructions = useCallback(async () => {
     setAiSettingsBusy(true);
@@ -1064,6 +1189,7 @@ export function ChannelsHubDialog({
         </div>
 
         <div className="mt-3 rounded-xl border bg-muted/20 p-4 space-y-3">
+          {/* Main toggle: auto-reply to owner */}
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1">
               <div className="flex items-center gap-2">
@@ -1075,8 +1201,8 @@ export function ChannelsHubDialog({
                 )}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                Con tu permiso, ILIAGPT puede responder automáticamente a tus contactos en los canales conectados.
-                Para responder adecuadamente, usará el historial reciente de cada conversación.
+                ILIAGPT responde a los mensajes de tu propio número vinculado.
+                Escríbete a ti mismo en los canales conectados y la IA te responderá.
               </p>
               <div className="text-[11px] text-muted-foreground mt-2">
                 Se aplica a todos los canales conectados. En WhatsApp no se responde automáticamente a grupos.
@@ -1123,6 +1249,32 @@ export function ChannelsHubDialog({
               disabled={aiSettingsBusy}
             />
           </div>
+
+          {/* Secondary toggle: reply to contacts */}
+          {autoResponderEnabled && (
+            <div className="ml-2 pl-3 border-l-2 border-muted-foreground/20">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1">
+                  <div className="text-sm font-medium">Responder también a contactos</div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Si lo activas, ILIAGPT también responderá automáticamente a tus contactos que te escriban.
+                  </p>
+                </div>
+                <Switch
+                  checked={replyToContactsEnabled}
+                  onCheckedChange={(checked) => {
+                    if (checked && !replyToContactsEnabled) {
+                      setConfirmEnableReplyToContactsOpen(true);
+                      return;
+                    }
+                    setReplyToContactsEnabled(checked);
+                    void applyReplyToContacts(checked);
+                  }}
+                  disabled={aiSettingsBusy}
+                />
+              </div>
+            </div>
+          )}
 
           <div className="space-y-1">
             <div className="flex items-center gap-2">
@@ -1174,17 +1326,18 @@ export function ChannelsHubDialog({
 
           {aiSettingsSaved && !aiSettingsError && (
             <div className="text-xs text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950/20 rounded-md p-2">
-              ✓ Ajustes guardados
+              Ajustes guardados
             </div>
           )}
         </div>
 
+        {/* Confirmation dialog for enabling auto-reply */}
         <AlertDialog open={confirmEnableAutoResponderOpen} onOpenChange={setConfirmEnableAutoResponderOpen}>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>¿Permitir respuestas automáticas?</AlertDialogTitle>
               <AlertDialogDescription>
-                Si lo activas, ILIAGPT podrá responder a tus contactos en los canales conectados.
+                Si lo activas, ILIAGPT podrá responder a los mensajes que envíes a tu propio número en los canales conectados.
                 Para responder con contexto, usará el historial reciente de cada conversación.
                 Puedes desactivarlo en cualquier momento.
               </AlertDialogDescription>
@@ -1200,6 +1353,33 @@ export function ChannelsHubDialog({
                 }}
               >
                 Permitir y activar
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Confirmation dialog for enabling reply to contacts */}
+        <AlertDialog open={confirmEnableReplyToContactsOpen} onOpenChange={setConfirmEnableReplyToContactsOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>¿Responder a contactos automáticamente?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Si lo activas, ILIAGPT responderá automáticamente a tus contactos que te escriban en los canales conectados.
+                Esto significa que tus contactos recibirán respuestas generadas por IA.
+                Puedes desactivarlo en cualquier momento.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={aiSettingsBusy}>No activar</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={aiSettingsBusy}
+                onClick={() => {
+                  setReplyToContactsEnabled(true);
+                  setConfirmEnableReplyToContactsOpen(false);
+                  void applyReplyToContacts(true);
+                }}
+              >
+                Activar respuestas a contactos
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
