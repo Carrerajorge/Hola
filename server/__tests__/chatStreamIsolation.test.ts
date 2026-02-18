@@ -203,6 +203,18 @@ describe("chat stream isolation", () => {
     const { client, close } = await createHttpTestClient(app);
 
     try {
+      // Ensure the first request holds the conversation lock long enough for the
+      // second request to observe it (macrotask yield, not just a resolved Promise).
+      llmChatMock.mockImplementation(async (messages: any[]) => {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        const last = messages[messages.length - 1];
+        return {
+          content: `stream:${String(last?.content || "")}`,
+          provider: "xai",
+          model: "grok-3-fast",
+        };
+      });
+
       const payload = {
         messages: [{ role: "user", content: "A" }],
         conversationId: "chat_lock_a",
