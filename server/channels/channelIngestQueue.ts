@@ -2,6 +2,7 @@ import { env } from "../config/env";
 import crypto from "crypto";
 import { Logger } from "../lib/logger";
 import { createQueue, QUEUE_NAMES } from "../lib/queueFactory";
+import { emitQueueEvent } from "../telemetry/emit";
 import { processChannelIngestJob } from "./channelIngestService";
 import type { ChannelIngestJob } from "./types";
 import { INGEST_RUN_ID_RE, MAX_INGEST_RUN_ID_LENGTH, validateChannelIngestJob } from "./types";
@@ -10,26 +11,81 @@ const DEFAULT_MAX_INGEST_JOB_BYTES = 32 * 1024;
 const MAX_JOB_BYTES_FLOOR = 4 * 1024;
 const MAX_JOB_BYTES_CEILING = 256 * 1024;
 const HASH_PAYLOAD_MAX_BYTES = 64 * 1024;
-const INGEST_IDEMPOTENCY_TTL_MS = parsePositiveInt(process.env.CHANNEL_INGEST_IDEMPOTENCY_TTL_MS, 12 * 60 * 1000, 5_000, 6 * 60 * 60_000);
-const MAX_INGEST_IDEMPOTENCY_ENTRIES = parsePositiveInt(process.env.CHANNEL_INGEST_IDEMPOTENCY_MAX_ENTRIES, 60_000, 1_000, 500_000);
+const INGEST_IDEMPOTENCY_TTL_MS = parsePositiveInt(
+  env.CHANNEL_INGEST_IDEMPOTENCY_TTL_MS,
+  12 * 60 * 1000,
+  5_000,
+  6 * 60 * 60_000,
+);
+const MAX_INGEST_IDEMPOTENCY_ENTRIES = parsePositiveInt(
+  env.CHANNEL_INGEST_IDEMPOTENCY_MAX_ENTRIES,
+  60_000,
+  1_000,
+  500_000,
+);
 const INGEST_QUEUE_ATTEMPTS = 4;
 const INGEST_QUEUE_BACKOFF_MS = 750;
 const INGEST_QUEUE_MAX_ATTEMPTS = 8;
 const INGEST_QUEUE_MAX_BACKOFF_MS = 20_000;
-const INGEST_QUEUE_FAILURE_THRESHOLD = parsePositiveInt(process.env.CHANNEL_INGEST_QUEUE_FAILURE_THRESHOLD, 4, 1, 20);
-const INGEST_QUEUE_CIRCUIT_OPEN_MS = parsePositiveInt(process.env.CHANNEL_INGEST_QUEUE_CIRCUIT_OPEN_MS, 45_000, 5_000, 10 * 60_000);
+const INGEST_QUEUE_FAILURE_THRESHOLD = parsePositiveInt(
+  env.CHANNEL_INGEST_QUEUE_FAILURE_THRESHOLD,
+  4,
+  1,
+  20,
+);
+const INGEST_QUEUE_CIRCUIT_OPEN_MS = parsePositiveInt(
+  env.CHANNEL_INGEST_QUEUE_CIRCUIT_OPEN_MS,
+  45_000,
+  5_000,
+  10 * 60_000,
+);
 const INGEST_DEAD_LETTER_TTL_MS = 12 * 60 * 60 * 1000;
 const INGEST_DEAD_LETTER_MAX_ENTRIES = 2_000;
 const INGEST_DEAD_LETTER_SAMPLE_LENGTH = 1200;
-const INGEST_QUEUE_BACKPRESSURE_LIMIT = 1_200;
-const INGEST_QUEUE_OPERATION_TIMEOUT_MS = parsePositiveInt(process.env.CHANNEL_INGEST_QUEUE_OPERATION_TIMEOUT_MS, 4_000, 250, 30_000);
+const INGEST_QUEUE_BACKPRESSURE_LIMIT = parsePositiveInt(
+  env.CHANNEL_INGEST_QUEUE_BACKPRESSURE_LIMIT,
+  1_200,
+  200,
+  5_000,
+);
+const INGEST_QUEUE_OPERATION_TIMEOUT_MS = parsePositiveInt(
+  env.CHANNEL_INGEST_QUEUE_OPERATION_TIMEOUT_MS,
+  4_000,
+  250,
+  30_000,
+);
 const INGEST_RECEIVED_AT_MAX_FUTURE_MS = 5 * 60 * 1000;
 const INGEST_RECEIVED_AT_MAX_PAST_MS = 7 * 24 * 60 * 60 * 1000;
-const INPROCESS_MAX_CONCURRENCY = parsePositiveInt(process.env.CHANNEL_INGEST_INPROCESS_CONCURRENCY, 4, 1, 128);
-const INPROCESS_TASK_TIMEOUT_MS = parsePositiveInt(process.env.CHANNEL_INGEST_INPROCESS_TIMEOUT_MS, 120_000, 2_000, 300_000);
-const INPROCESS_TASK_QUEUE_MAX = parsePositiveInt(process.env.CHANNEL_INGEST_INPROCESS_QUEUE_MAX, 400, 32, 20_000);
-const INPROCESS_DEDUPE_TTL_MS = parsePositiveInt(process.env.CHANNEL_INGEST_INPROCESS_DEDUPE_TTL_MS, 10 * 60 * 1000, 1_000, 30 * 60 * 1000);
-const INPROCESS_RESERVATION_TTL_MS = parsePositiveInt(process.env.CHANNEL_INGEST_INPROCESS_RESERVATION_TTL_MS, 8 * 60_000, 30_000, 45 * 60_000);
+const INPROCESS_MAX_CONCURRENCY = parsePositiveInt(
+  env.CHANNEL_INGEST_INPROCESS_CONCURRENCY,
+  4,
+  1,
+  128,
+);
+const INPROCESS_TASK_TIMEOUT_MS = parsePositiveInt(
+  env.CHANNEL_INGEST_INPROCESS_TIMEOUT_MS,
+  120_000,
+  2_000,
+  300_000,
+);
+const INPROCESS_TASK_QUEUE_MAX = parsePositiveInt(
+  env.CHANNEL_INGEST_INPROCESS_QUEUE_MAX,
+  400,
+  32,
+  20_000,
+);
+const INPROCESS_DEDUPE_TTL_MS = parsePositiveInt(
+  env.CHANNEL_INGEST_INPROCESS_DEDUPE_TTL_MS,
+  10 * 60 * 1000,
+  1_000,
+  30 * 60 * 1000,
+);
+const INPROCESS_RESERVATION_TTL_MS = parsePositiveInt(
+  env.CHANNEL_INGEST_INPROCESS_RESERVATION_TTL_MS,
+  8 * 60_000,
+  30_000,
+  45 * 60_000,
+);
 const RUN_SCOPE_KEY_HASH_LEN = 20;
 
 const MAX_INGEST_INPROCESS_RUNS = 10_000;
@@ -164,15 +220,15 @@ function resolveReceivedAt(raw: string | undefined): string | null {
   return new Date(parsed).toISOString();
 }
 
-const MAX_INGEST_JOB_BYTES = parseIngestMaxBytes(process.env.MAX_CHANNEL_INGEST_JOB_BYTES, DEFAULT_MAX_INGEST_JOB_BYTES);
+const MAX_INGEST_JOB_BYTES = parseIngestMaxBytes(env.MAX_CHANNEL_INGEST_JOB_BYTES, DEFAULT_MAX_INGEST_JOB_BYTES);
 const INGEST_QUEUE_ATTEMPTS_SAFE = parseQueueBackoff(
-  process.env.CHANNEL_INGEST_ATTEMPTS,
+  env.CHANNEL_INGEST_ATTEMPTS,
   INGEST_QUEUE_ATTEMPTS,
   1,
   INGEST_QUEUE_MAX_ATTEMPTS,
 );
 const INGEST_QUEUE_BACKOFF_SAFE = parseQueueBackoff(
-  process.env.CHANNEL_INGEST_BACKOFF_MS,
+  env.CHANNEL_INGEST_BACKOFF_MS,
   INGEST_QUEUE_BACKOFF_MS,
   200,
   INGEST_QUEUE_MAX_BACKOFF_MS,
@@ -446,6 +502,42 @@ function pruneInProcessState(nowMs = Date.now()): void {
   for (const key of keys) {
     inProcessDedupWindow.delete(key);
   }
+}
+
+export function resetChannelIngestQueueRuntimeForTests(clearStats = true): void {
+  if (env.NODE_ENV !== "test") return;
+
+  if (clearStats) {
+    INGEST_STATS.submitted = 0;
+    INGEST_STATS.queueAccepted = 0;
+    INGEST_STATS.queueDuplicate = 0;
+    INGEST_STATS.queueRejected = 0;
+    INGEST_STATS.queueCircuitOpen = 0;
+    INGEST_STATS.queueCircuitRecovered = 0;
+    INGEST_STATS.queueFailure = 0;
+    INGEST_STATS.queueBackpressured = 0;
+    INGEST_STATS.queueFallback = 0;
+    INGEST_STATS.inprocessQueued = 0;
+    INGEST_STATS.inprocessDuplicate = 0;
+    INGEST_STATS.inprocessRejected = 0;
+    INGEST_STATS.inprocessCompleted = 0;
+    INGEST_STATS.inprocessTimeout = 0;
+    INGEST_STATS.inprocessFailed = 0;
+    INGEST_STATS.deadLettered = 0;
+    INGEST_STATS.idempotencyDuplicate = 0;
+  }
+
+  ingestIdempotencyLedger.clear();
+  inProcessDedupWindow.clear();
+  inProcessTaskReservations.clear();
+  queueFailureRecoveryWindow.clear();
+  inProcessQueue.length = 0;
+
+  queueCircuitOpenUntil = 0;
+  queueFailureSequence = 0;
+  inProcessRunning = 0;
+  inProcessPumpScheduled = false;
+  pruneDeadLetters(0);
 }
 
 function reserveInprocessRun(runScopeKey: string): boolean {
@@ -785,12 +877,14 @@ export async function submitChannelIngest(job: unknown): Promise<void> {
       );
       INGEST_STATS.queueAccepted += 1;
       markQueueSuccess();
+      emitQueueEvent({ queueName: "channel-ingest", action: "accepted", channel: sanitizedJob.channel });
       return;
     } catch (err) {
       const message = normalizeErrorMessage(err);
       INGEST_STATS.queueRejected += 1;
       addDeadLetter("queue_add_failed", sanitizedJob, traceKey, jobId, runId, message);
       markQueueFailure(message);
+      emitQueueEvent({ queueName: "channel-ingest", action: "failed", channel: sanitizedJob.channel, errorMessage: message });
 
       if (/already exists|duplicate/i.test(message)) {
         Logger.warn("[Channels] Duplicate ingest event ignored (queue dedupe)", {

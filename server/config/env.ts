@@ -107,6 +107,20 @@ const envSchema = z.object({
   // - queue: always enqueue to BullMQ (requires Redis + worker)
   // - inprocess: process inside web server (best for local dev)
   CHANNEL_INGEST_MODE: z.enum(["auto", "queue", "inprocess"]).default("auto"),
+  MAX_CHANNEL_INGEST_JOB_BYTES: z.string().optional(),
+  CHANNEL_INGEST_ATTEMPTS: z.string().optional(),
+  CHANNEL_INGEST_BACKOFF_MS: z.string().optional(),
+  CHANNEL_INGEST_IDEMPOTENCY_TTL_MS: z.string().optional(),
+  CHANNEL_INGEST_IDEMPOTENCY_MAX_ENTRIES: z.string().optional(),
+  CHANNEL_INGEST_QUEUE_FAILURE_THRESHOLD: z.string().optional(),
+  CHANNEL_INGEST_QUEUE_CIRCUIT_OPEN_MS: z.string().optional(),
+  CHANNEL_INGEST_QUEUE_BACKPRESSURE_LIMIT: z.string().optional(),
+  CHANNEL_INGEST_QUEUE_OPERATION_TIMEOUT_MS: z.string().optional(),
+  CHANNEL_INGEST_INPROCESS_CONCURRENCY: z.string().optional(),
+  CHANNEL_INGEST_INPROCESS_TIMEOUT_MS: z.string().optional(),
+  CHANNEL_INGEST_INPROCESS_QUEUE_MAX: z.string().optional(),
+  CHANNEL_INGEST_INPROCESS_DEDUPE_TTL_MS: z.string().optional(),
+  CHANNEL_INGEST_INPROCESS_RESERVATION_TTL_MS: z.string().optional(),
 });
 
 function validateEnv() {
