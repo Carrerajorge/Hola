@@ -59,11 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in $(seq 1 360); do
-            runs_json="$(curl -fsSL \
-              -H "Authorization: Bearer ${GH_TOKEN}" \
-              -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?branch=${BRANCH}&per_page=50" \
-              2>/dev/null || true)"
+            runs_json="$(gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" -f branch="${BRANCH}" -f per_page=50 2>/dev/null || true)"
             if [ -z "${runs_json}" ] || [ "${runs_json}" = "null" ]; then
               echo "Unable to read workflow runs yet; retrying..."
               sleep 10
