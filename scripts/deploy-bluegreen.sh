@@ -895,6 +895,19 @@ if [ -f "${NGINX_SITE_SRC}" ]; then
   fi
 fi
 
+# ── Step 9a-extra: Install maintenance page (shown on 502/503/504) ──────────
+MAINTENANCE_SRC="${DEPLOY_PATH}/nginx/maintenance.html"
+MAINTENANCE_DIR="/etc/nginx/html"
+MAINTENANCE_DST="${MAINTENANCE_DIR}/maintenance.html"
+if [ -f "${MAINTENANCE_SRC}" ]; then
+  mkdir -p "${MAINTENANCE_DIR}"
+  if ! diff -q "${MAINTENANCE_SRC}" "${MAINTENANCE_DST}" > /dev/null 2>&1; then
+    log "  Installing maintenance page → ${MAINTENANCE_DST}"
+    cp "${MAINTENANCE_SRC}" "${MAINTENANCE_DST}"
+    chmod 644 "${MAINTENANCE_DST}"
+  fi
+fi
+
 # ── Step 9b: Swap Nginx upstream ────────────────────────────
 log "[10/15] Swapping Nginx upstream to ${NEW_SLOT} (port ${NEW_PORT})..."
 
