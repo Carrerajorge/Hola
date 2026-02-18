@@ -9,6 +9,8 @@ import { whatsappWebEventStream, type WhatsAppWebStatus } from '@/lib/whatsapp-w
 // Max time to wait before resetting busy state (safety net)
 const BUSY_TIMEOUT_MS = 20_000;
 
+type AutoReplyScope = 'OWNER_ONLY' | 'ALLOWLIST' | 'ALL_CONTACTS';
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await apiFetch(path, {
     headers: { 'Content-Type': 'application/json' },
@@ -45,6 +47,8 @@ export function WhatsAppConnectDialog({
   const [countryCode, setCountryCode] = useState('+51');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [autoReply, setAutoReply] = useState(true);
+  const [autoReplyScope, setAutoReplyScope] = useState<AutoReplyScope>('OWNER_ONLY');
+  const [showScopeWarning, setShowScopeWarning] = useState(false);
   const lastQrRef = useRef<string | null>(null);
   const busyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -110,9 +114,16 @@ export function WhatsAppConnectDialog({
 
   const refreshStatus = useCallback(async () => {
     try {
-      const res = await api<{ success: true; status: WhatsAppWebStatus; autoReply?: boolean }>('/api/integrations/whatsapp/web/status');
+      const res = await api<{
+        success: true;
+        status: WhatsAppWebStatus;
+        autoReply?: boolean;
+        autoReplyScope?: AutoReplyScope;
+        ownerAssistEnabled?: boolean;
+      }>('/api/integrations/whatsapp/web/status');
       setStatus(res.status);
       if (typeof res.autoReply === 'boolean') setAutoReply(res.autoReply);
+      if (res.autoReplyScope) setAutoReplyScope(res.autoReplyScope);
     } catch {
       // ignore - SSE will provide updates
     }
@@ -252,14 +263,43 @@ export function WhatsAppConnectDialog({
     }
   };
 
-  const toggleAutoReply = async () => {
-    const newVal = !autoReply;
+  /** Update the auto-reply scope via the new persistent endpoint */
+  const updateAutoReplyScope = async (newScope: AutoReplyScope) => {
+    // Show warning when enabling ALL_CONTACTS
+    if (newScope === 'ALL_CONTACTS' && autoReplyScope !== 'ALL_CONTACTS') {
+      setShowScopeWarning(true);
+      return;
+    }
+
     try {
-      await api<{ success: true; autoReply: boolean }>('/api/integrations/whatsapp/web/auto-reply', {
+      const res = await api<{
+        success: true;
+        autoReplyScope: AutoReplyScope;
+      }>('/api/integrations/whatsapp/web/auto-reply-scope', {
         method: 'POST',
-        body: JSON.stringify({ enabled: newVal }),
+        body: JSON.stringify({ scope: newScope }),
       });
-      setAutoReply(newVal);
+      setAutoReplyScope(res.autoReplyScope);
+      setAutoReply(newScope !== 'OWNER_ONLY');
+      setShowScopeWarning(false);
+    } catch {
+      // ignore
+    }
+  };
+
+  /** Confirm enabling ALL_CONTACTS after warning */
+  const confirmAllContacts = async () => {
+    try {
+      const res = await api<{
+        success: true;
+        autoReplyScope: AutoReplyScope;
+      }>('/api/integrations/whatsapp/web/auto-reply-scope', {
+        method: 'POST',
+        body: JSON.stringify({ scope: 'ALL_CONTACTS' }),
+      });
+      setAutoReplyScope(res.autoReplyScope);
+      setAutoReply(true);
+      setShowScopeWarning(false);
     } catch {
       // ignore
     }
@@ -282,6 +322,12 @@ export function WhatsAppConnectDialog({
     connected: 'Conectado',
   };
   const statusLabel = statusLabelMap[status.state] || status.state;
+
+  const scopeLabelMap: Record<AutoReplyScope, string> = {
+    OWNER_ONLY: 'Solo yo (propietario)',
+    ALLOWLIST: 'Lista permitida',
+    ALL_CONTACTS: 'Cualquier usuario',
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -312,7 +358,7 @@ export function WhatsAppConnectDialog({
             )}
           </div>
 
-          {/* Connected success */}
+          {/* Connected success + Reply Mode Controls */}
           {status.state === 'connected' && (
             <div className="rounded-lg border border-green-200 bg-green-50 dark:bg-green-950/20 dark:border-green-800 p-4 space-y-3">
               <div className="text-green-700 dark:text-green-400 font-medium text-center">
@@ -326,23 +372,90 @@ export function WhatsAppConnectDialog({
                   Mensaje de prueba enviado a tu WhatsApp. Responde desde tu celular para chatear con ILIAGPT.
                 </div>
               )}
-              {/* Auto-reply toggle */}
-              <div className="flex items-center justify-between pt-1 border-t">
-                <span className="text-sm">Respuesta automática (IA)</span>
-                <button
-                  onClick={toggleAutoReply}
-                  className={cn(
-                    'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
-                    autoReply ? 'bg-green-600' : 'bg-gray-300 dark:bg-gray-600',
-                  )}
-                >
-                  <span
-                    className={cn(
-                      'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
-                      autoReply ? 'translate-x-6' : 'translate-x-1',
-                    )}
-                  />
-                </button>
+
+              {/* ── (A) Owner Assist — always ON ── */}
+              <div className="border-t pt-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-sm font-medium">Responderme siempre (propietario)</span>
+                    <div className="text-xs text-muted-foreground">
+                      La IA siempre responde a tus mensajes propios
+                    </div>
+                  </div>
+                  <span className="inline-flex h-6 w-11 items-center rounded-full bg-green-600 cursor-not-allowed opacity-80">
+                    <span className="inline-block h-4 w-4 transform rounded-full bg-white translate-x-6" />
+                  </span>
+                </div>
+              </div>
+
+              {/* ── (B) Auto-Reply scope for others ── */}
+              <div className="border-t pt-3 space-y-2">
+                <div className="text-sm font-medium">Respuesta automática a otros</div>
+                <div className="text-xs text-muted-foreground">
+                  Controla a quién responde la IA automáticamente (excluyendo grupos de WhatsApp)
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  {(['OWNER_ONLY', 'ALLOWLIST', 'ALL_CONTACTS'] as const).map((scope) => (
+                    <button
+                      key={scope}
+                      onClick={() => updateAutoReplyScope(scope)}
+                      className={cn(
+                        'flex items-center gap-2 rounded-md border px-3 py-2 text-left text-sm transition-colors',
+                        autoReplyScope === scope
+                          ? 'border-green-500 bg-green-50 dark:bg-green-950/30 dark:border-green-700'
+                          : 'border-transparent hover:bg-muted/40',
+                      )}
+                    >
+                      <span className={cn(
+                        'h-3 w-3 rounded-full border-2 shrink-0',
+                        autoReplyScope === scope
+                          ? 'border-green-600 bg-green-600'
+                          : 'border-gray-400',
+                      )} />
+                      <span>{scopeLabelMap[scope]}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Warning dialog for ALL_CONTACTS */}
+                {showScopeWarning && (
+                  <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-700 p-3 space-y-2">
+                    <div className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                      Advertencia
+                    </div>
+                    <div className="text-xs text-amber-700 dark:text-amber-400">
+                      Esto permitirá que la IA responda automáticamente a CUALQUIER persona que le escriba por WhatsApp.
+                      Los grupos quedan excluidos por seguridad.
+                      Los historiales de cada conversación se mantienen aislados.
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-xs border-amber-400"
+                        onClick={confirmAllContacts}
+                      >
+                        Confirmar
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-xs"
+                        onClick={() => setShowScopeWarning(false)}
+                      >
+                        Cancelar
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Current mode summary */}
+                <div className="text-xs text-muted-foreground mt-1">
+                  {autoReplyScope === 'OWNER_ONLY' && 'Solo tus mensajes reciben respuesta automática.'}
+                  {autoReplyScope === 'ALLOWLIST' && 'Solo contactos en la lista permitida reciben respuesta.'}
+                  {autoReplyScope === 'ALL_CONTACTS' && 'Cualquier contacto recibe respuesta (grupos excluidos).'}
+                </div>
               </div>
             </div>
           )}

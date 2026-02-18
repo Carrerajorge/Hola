@@ -85,7 +85,9 @@ import {
   responseQualityMetrics, connectorUsageHourly, offlineMessageQueue,
   providerMetrics, costBudgets, apiLogs, kpiSnapshots, analyticsEvents, securityPolicies,
   reportTemplates, generatedReports, settingsConfig, agentGapLogs,
-  libraryFolders, libraryFiles, libraryCollections, libraryFileCollections, libraryActivity, libraryStorage
+  libraryFolders, libraryFiles, libraryCollections, libraryFileCollections, libraryActivity, libraryStorage,
+  type AutoReplyConfig, type InsertAutoReplyConfig, autoReplyConfigs,
+  type ThreadAutoReplyOverride, type InsertThreadAutoReplyOverride, threadAutoReplyOverrides,
 } from "../shared/schema";
 import * as crypto from "crypto";
 import { randomUUID } from "crypto";
@@ -162,6 +164,12 @@ export interface IStorage {
   updateChatShare(id: string, updates: Partial<InsertChatShare>): Promise<ChatShare | undefined>;
   deleteChatShare(id: string): Promise<void>;
   getUserByEmail(email: string): Promise<User | undefined>;
+  // Auto-reply config operations
+  getAutoReplyConfig(userId: string, channel: string): Promise<AutoReplyConfig | undefined>;
+  upsertAutoReplyConfig(config: InsertAutoReplyConfig): Promise<AutoReplyConfig>;
+  getThreadAutoReplyOverride(userId: string, channel: string, threadId: string): Promise<ThreadAutoReplyOverride | undefined>;
+  upsertThreadAutoReplyOverride(override: InsertThreadAutoReplyOverride): Promise<ThreadAutoReplyOverride>;
+  deleteThreadAutoReplyOverride(userId: string, channel: string, threadId: string): Promise<void>;
   // GPT CRUD operations
   createGpt(gpt: InsertGpt): Promise<Gpt>;
   getGpt(id: string): Promise<Gpt | undefined>;
@@ -1019,6 +1027,60 @@ export class MemStorage implements IStorage {
 
   async deleteChatShare(id: string): Promise<void> {
     await db.delete(chatShares).where(eq(chatShares.id, id));
+  }
+
+  // ── Auto-reply config operations ──
+  async getAutoReplyConfig(userId: string, channel: string): Promise<AutoReplyConfig | undefined> {
+    const [result] = await dbRead.select().from(autoReplyConfigs)
+      .where(and(eq(autoReplyConfigs.userId, userId), eq(autoReplyConfigs.channel, channel)));
+    return result;
+  }
+
+  async upsertAutoReplyConfig(config: InsertAutoReplyConfig): Promise<AutoReplyConfig> {
+    const [result] = await db.insert(autoReplyConfigs).values(config)
+      .onConflictDoUpdate({
+        target: [autoReplyConfigs.userId, autoReplyConfigs.channel],
+        set: {
+          autoReplyScope: config.autoReplyScope,
+          allowlist: config.allowlist,
+          allowGroups: config.allowGroups,
+          channelAccountId: config.channelAccountId,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return result;
+  }
+
+  async getThreadAutoReplyOverride(userId: string, channel: string, threadId: string): Promise<ThreadAutoReplyOverride | undefined> {
+    const [result] = await dbRead.select().from(threadAutoReplyOverrides)
+      .where(and(
+        eq(threadAutoReplyOverrides.userId, userId),
+        eq(threadAutoReplyOverrides.channel, channel),
+        eq(threadAutoReplyOverrides.threadId, threadId),
+      ));
+    return result;
+  }
+
+  async upsertThreadAutoReplyOverride(override: InsertThreadAutoReplyOverride): Promise<ThreadAutoReplyOverride> {
+    const [result] = await db.insert(threadAutoReplyOverrides).values(override)
+      .onConflictDoUpdate({
+        target: [threadAutoReplyOverrides.userId, threadAutoReplyOverrides.channel, threadAutoReplyOverrides.threadId],
+        set: {
+          autoReplyEnabled: override.autoReplyEnabled,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return result;
+  }
+
+  async deleteThreadAutoReplyOverride(userId: string, channel: string, threadId: string): Promise<void> {
+    await db.delete(threadAutoReplyOverrides).where(and(
+      eq(threadAutoReplyOverrides.userId, userId),
+      eq(threadAutoReplyOverrides.channel, channel),
+      eq(threadAutoReplyOverrides.threadId, threadId),
+    ));
   }
 
   // GPT operations

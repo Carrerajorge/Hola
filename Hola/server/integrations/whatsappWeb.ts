@@ -45,6 +45,10 @@ export interface WhatsAppInboundMessage {
   messageId?: string;
   timestamp?: number;
   media?: WhatsAppMediaAttachment;
+  /** Whether the Baileys SDK flagged this message as sent by the authenticated device */
+  fromMe?: boolean;
+  /** The JID of the owner (authenticated WhatsApp account) for isOwner detection */
+  ownerJid?: string;
 }
 
 export interface WhatsAppWebEvents {
@@ -123,6 +127,15 @@ export class WhatsAppWebManager extends EventEmitter {
 
   isAutoReplyEnabled(userId: string): boolean {
     return this.sockets.get(userId)?.autoReplyEnabled ?? true;
+  }
+
+  /** Get the owner's base JID (normalized, without device suffix) for isOwner detection */
+  getOwnerJid(userId: string): string | undefined {
+    const rec = this.sockets.get(userId);
+    if (!rec || rec.status.state !== 'connected') return undefined;
+    const me = rec.status.state === 'connected' ? rec.status.me : undefined;
+    if (!me?.id) return undefined;
+    return me.id.includes(':') ? me.id.split(':')[0] + '@s.whatsapp.net' : me.id;
   }
 
   setAutoReply(userId: string, enabled: boolean): void {
@@ -410,7 +423,7 @@ export class WhatsAppWebManager extends EventEmitter {
           // Fire-and-forget media download + emit
           void this.processInboundMessage(userId, msg, from, text, hasMedia, {
             hasImage, hasDocument, hasAudio, hasVideo, hasSticker,
-          }).catch(e => {
+          }, { fromMe: !!msg.key.fromMe, ownerJid: myBaseJid || undefined }).catch(e => {
             console.error('[WhatsApp] processInboundMessage error:', e);
           });
         }
@@ -503,6 +516,7 @@ export class WhatsAppWebManager extends EventEmitter {
     text: string,
     hasMedia: boolean,
     mediaFlags: { hasImage: boolean; hasDocument: boolean; hasAudio: boolean; hasVideo: boolean; hasSticker: boolean },
+    ownerInfo?: { fromMe: boolean; ownerJid: string | undefined },
   ): Promise<void> {
     let media: WhatsAppMediaAttachment | undefined;
 
@@ -583,6 +597,8 @@ export class WhatsAppWebManager extends EventEmitter {
       messageId: msg.key.id || undefined,
       timestamp: msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : undefined,
       media,
+      fromMe: ownerInfo?.fromMe,
+      ownerJid: ownerInfo?.ownerJid,
     } as WhatsAppInboundMessage);
   }
 
