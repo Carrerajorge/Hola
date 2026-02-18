@@ -352,7 +352,7 @@ async function triggerDocumentAnalysis(
   if (!isAnalyzableFile(filename)) return;
 
   try {
-    const response = await fetch(`/api/chat/uploads/${uploadId}/analyze`, {
+    const response = await apiFetch(`/api/chat/uploads/${uploadId}/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ scope: 'all' })
@@ -622,7 +622,7 @@ export function ChatInterface({
   useEffect(() => {
     const fetchUserPlanInfo = async () => {
       try {
-        const response = await fetch("/api/user/usage", { credentials: "include" });
+        const response = await apiFetch("/api/user/usage", { credentials: "include" });
         if (response.ok) {
           const data = await response.json();
           setUserPlanState({
@@ -1279,7 +1279,7 @@ export function ChatInterface({
   useEffect(() => {
     const checkFigmaStatus = async () => {
       try {
-        const response = await fetch("/api/figma/status");
+        const response = await apiFetch("/api/figma/status");
         const data = await response.json();
         setIsFigmaConnected(data.connected);
       } catch (error) {
@@ -1288,14 +1288,14 @@ export function ChatInterface({
     };
 
     const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('figma_connected') === 'true') {
+    if (urlParams.get("figma_connected") === "true") {
       setIsFigmaConnected(true);
       setIsFigmaConnecting(false);
-      window.history.replaceState({}, '', window.location.pathname);
+      window.history.replaceState({}, "", window.location.pathname);
     }
-    if (urlParams.get('figma_error')) {
+    if (urlParams.get("figma_error")) {
       setIsFigmaConnecting(false);
-      window.history.replaceState({}, '', window.location.pathname);
+      window.history.replaceState({}, "", window.location.pathname);
     }
 
     checkFigmaStatus();
@@ -1309,7 +1309,7 @@ export function ChatInterface({
 
   const handleFigmaDisconnect = async () => {
     try {
-      await fetch("/api/figma/disconnect", { method: "POST" });
+      await apiFetch("/api/figma/disconnect", { method: "POST" });
       setIsFigmaConnected(false);
     } catch (error) {
       console.error("Error disconnecting from Figma:", error);
@@ -1386,7 +1386,7 @@ export function ChatInterface({
 
       if (!isPendingChat(chatId) && !realChatId.startsWith("pending-")) {
         try {
-          const response = await fetch(`/api/chats/${realChatId}/documents`, {
+          const response = await apiFetch(`/api/chats/${realChatId}/documents`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -1690,7 +1690,7 @@ export function ChatInterface({
 
     analysisAbortControllerRef.current = new AbortController();
     try {
-      const response = await fetch("/api/analyze", {
+      const response = await apiFetch("/api/analyze", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -2228,7 +2228,7 @@ export function ChatInterface({
         ...doc,
         content: editedDocumentContent || doc.content
       };
-      const response = await fetch("/api/documents/generate", {
+      const response = await apiFetch("/api/documents/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(documentToDownload),
@@ -2266,7 +2266,7 @@ export function ChatInterface({
     if (!docToSave) return;
 
     try {
-      const response = await fetch("/api/library/save-from-editor", {
+      const response = await apiFetch("/api/library/save-from-editor", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -2377,7 +2377,7 @@ export function ChatInterface({
   const handleDownloadFileAttachment = async () => {
     if (!previewFileAttachment?.storagePath) return;
     try {
-      const response = await fetch(previewFileAttachment.storagePath);
+      const response = await apiFetch(previewFileAttachment.storagePath);
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -2676,7 +2676,7 @@ export function ChatInterface({
       }));
       historyUpToEdit.push({ role: "user", content: editedContent });
 
-      const response = await fetch("/api/chat", {
+      const response = await apiFetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
         credentials: "include",
@@ -3318,7 +3318,7 @@ export function ChatInterface({
 
   const fetchUrlAsDataUrl = async (url: string, maxBytes: number): Promise<string | null> => {
     try {
-      const res = await fetch(url);
+      const res = await apiFetch(url);
       if (!res.ok) return null;
       const blob = await res.blob();
       if (blob.size > maxBytes) return null;
@@ -3954,7 +3954,7 @@ export function ChatInterface({
 
       try {
         abortControllerRef.current = new AbortController();
-        const response = await fetch("/api/chat", {
+        const response = await apiFetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
           credentials: "include",
@@ -4380,7 +4380,7 @@ export function ChatInterface({
       setAiStateForChat("thinking", submitConversationId);
 
       try {
-        const response = await fetch("/api/super/stream", {
+        const response = await apiFetch("/api/super/stream", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -4954,7 +4954,7 @@ export function ChatInterface({
 	      const imageDetectPromise: Promise<boolean> = (
 	        shouldAutoDetectImage
 	      )
-	        ? fetch("/api/image/detect", {
+	        ? apiFetch("/api/image/detect", {
 	            method: "POST",
 	            headers: { "Content-Type": "application/json" },
 	            body: JSON.stringify({ message: userInput }),
@@ -5028,7 +5028,7 @@ export function ChatInterface({
 	            throw new Error("No se pudo confirmar la sesión del chat.");
 	          }
 
-	          const chatResponse = await fetch("/api/chat", {
+	          const chatResponse = await apiFetch("/api/chat", {
 	            method: "POST",
 	            headers: {
 	              "Content-Type": "application/json",
@@ -5171,7 +5171,7 @@ export function ChatInterface({
           ], submitConversationId);
 
           try {
-            const imageRes = await fetch("/api/image/generate", {
+            const imageRes = await apiFetch("/api/image/generate", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ prompt: userInput }),
@@ -5198,7 +5198,7 @@ export function ChatInterface({
 
               // Save generated image to user's library (fire and forget)
               if (user) {
-                fetch("/api/library", {
+                apiFetch("/api/library", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   credentials: "include",
@@ -5426,7 +5426,7 @@ IMPORTANTE:
               chatLogger.debug("handleSubmit docTool", { selectedDocTool, isWordMode });
             }
 
-            // NOTE: Previously there was a redundant raw `fetch("/api/chat/stream")` here
+            // NOTE: Previously there was a redundant raw `apiFetch("/api/chat/stream")` here
             // that sent a duplicate request before `streamChat.stream()`. This caused:
             //   1. Two concurrent LLM requests per message (double cost, double rate-limit usage)
             //   2. The first response body was never consumed (SSE stream abandoned)
@@ -5789,7 +5789,7 @@ IMPORTANTE:
             }
 
 
-            const response = await fetch("/api/chat", {
+            const response = await apiFetch("/api/chat", {
               method: "POST",
               headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
               credentials: "include",
