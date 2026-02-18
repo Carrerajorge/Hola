@@ -70,10 +70,21 @@ jobs:
               continue
             fi
 
-            ci_line="$(echo "${runs_json}" | python3 -c 'import json,os,sys; sha=os.environ.get(\"SHA\",\"\"); payload=json.load(sys.stdin); runs=payload.get(\"workflow_runs\",[]) if isinstance(payload,dict) else []; r=next((x for x in runs if x.get(\"head_sha\")==sha), None); print(\"__notfound__\" if r is None else ((r.get(\"status\") or \"\") + \" \" + (r.get(\"conclusion\") or \"\")).strip())' 2>/dev/null || echo '__parsefail__')"
+            ci_line="$(python3 -c 'import json,os,sys; sha=os.environ.get(\"SHA\",\"\"); payload=json.load(sys.stdin); runs=payload.get(\"workflow_runs\",[]) if isinstance(payload,dict) else []; r=next((x for x in runs if x.get(\"head_sha\")==sha), None); print(\"__notfound__\" if r is None else ((r.get(\"status\") or \"\") + \" \" + (r.get(\"conclusion\") or \"\")).strip())' <<<"${runs_json}" 2>/dev/null || echo '__parsefail__')"
 
             status="$(echo "${ci_line}" | awk '{print $1}')"
             conclusion="$(echo "${ci_line}" | awk '{print $2}')"
+
+            if [ "${status}" = "__parsefail__" ]; then
+              if [ "${attempt}" -ge 6 ]; then
+                echo "::error::CI run API response could not be parsed after ${attempt} attempts."
+                echo "ci_ok=false" >> "$GITHUB_OUTPUT"
+                exit 1
+              fi
+              echo "CI run API response parse failed. Retry ${attempt}/360..."
+              sleep 10
+              continue
+            fi
 
             if [ "${status}" = "__notfound__" ] || [ "${status}" = "__parsefail__" ] || [ -z "${status}" ]; then
               echo "CI run for SHA ${SHA} not yet reported. Retry ${attempt}/360..."
