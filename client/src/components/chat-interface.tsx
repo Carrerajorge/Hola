@@ -4029,7 +4029,7 @@ export function ChatInterface({
       setAiProcessStepsForChat([
         { step: "Procesando tu solicitud", status: "active" },
         { step: "Generando contenido", status: "pending" }
-      ]);
+      ], submitConversationId);
 
       const generationInput = input;
       setInput("");
@@ -4140,14 +4140,14 @@ export function ChatInterface({
           setAiProcessStepsForChat([
             { step: "Procesando edición de imagen", status: "active" },
             { step: "Editando imagen", status: "pending" }
-          ]);
+          ], submitConversationId);
         }
 
         // Direct call to /api/chat/stream for generation - REAL-TIME SSE
         console.log("[handleSubmit] ⚡ Starting standard chat stream...");
         setAiProcessStepsForChat((prev: any[]) => prev.map((s: any, i: number) =>
           i === 0 ? { ...s, status: "done" as const } : { ...s, status: "active" as const }
-        ));
+        ), submitConversationId);
 
         // Ensure abort controller is active
         if (!abortControllerRef.current) {
@@ -4991,7 +4991,7 @@ export function ChatInterface({
           { step: "Buscando en tu correo electrónico", status: "active" },
           { step: "Analizando correos encontrados", status: "pending" },
           { step: "Generando respuesta inteligente", status: "pending" }
-        ]);
+        ], submitConversationId);
 
 	          try {
 	          const fullMessages = messages.map(m => ({ role: m.role, content: m.content }));
@@ -5016,15 +5016,15 @@ export function ChatInterface({
 	            })
 	          });
 
-          setAiProcessStepsForChat((prev: any[]) => prev.map((s: any, i: number) =>
-            i === 0 ? { ...s, status: "done" as const } :
-              i === 1 ? { ...s, status: "active" as const } : s
-          ));
+            setAiProcessStepsForChat((prev: any[]) => prev.map((s: any, i: number) =>
+              i === 0 ? { ...s, status: "done" as const } :
+                i === 1 ? { ...s, status: "active" as const } : s
+            ), gmailConversationId || submitConversationId);
 
           if (chatResponse.ok) {
             const data = await chatResponse.json();
 
-            setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })));
+            setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })), gmailConversationId || submitConversationId);
 
             const gmailResponseMsg: Message = {
               id: (Date.now() + 1).toString(),
@@ -5076,12 +5076,12 @@ export function ChatInterface({
           { step: "Analizando estructura del workbook", status: "active" },
           { step: "Creando hojas y datos", status: "pending" },
           { step: "Aplicando fórmulas y gráficos", status: "pending" }
-        ]);
+        ], submitConversationId);
 
         try {
           await orchestratorRef.current.runOrchestrator(cleanPrompt);
 
-          setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })));
+          setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })), submitConversationId);
 
           const orchestratorMsg: Message = {
             id: (Date.now() + 1).toString(),
@@ -5141,7 +5141,7 @@ export function ChatInterface({
             { step: "Analizando tu petición", status: "done" },
             { step: "Generando imagen con IA", status: "active" },
             { step: "Procesando resultado", status: "pending" }
-          ]);
+          ], submitConversationId);
 
           try {
             const imageRes = await fetch("/api/image/generate", {
@@ -5154,7 +5154,7 @@ export function ChatInterface({
             const imageData = await imageRes.json();
 
             if (imageRes.ok && imageData.success) {
-              setAiProcessStepsForChat((prev: AiProcessStep[]) => prev.map((s: AiProcessStep) => ({ ...s, status: "done" as const })));
+              setAiProcessStepsForChat((prev: AiProcessStep[]) => prev.map((s: AiProcessStep) => ({ ...s, status: "done" as const })), submitConversationId);
 
               const msgId = (Date.now() + 1).toString();
 
@@ -5362,7 +5362,7 @@ IMPORTANTE:
               if (s.step.includes("Procesando")) return { ...s, status: "done" };
               if (s.step.includes("Buscando")) return { ...s, status: "active" };
               return s;
-            }));
+            ), effectiveStreamChatId);
 
             let fullContent = "";
             let sseError: Error | null = null;
@@ -5786,7 +5786,7 @@ IMPORTANTE:
               if (s.step.includes("Procesando")) return { ...s, status: "done" };
               if (s.step.includes("Buscando")) return { ...s, status: "active" };
               return s;
-            }));
+            }), effectiveStreamChatId);
 
             const data = await response.json();
 
@@ -5811,7 +5811,7 @@ IMPORTANTE:
               if (s.step.includes("Buscando")) return { ...s, status: "done" };
               if (s.step.includes("Generando")) return { ...s, status: "active" };
               return { ...s, status: s.status === "pending" ? "pending" : "done" };
-            }));
+            }), effectiveStreamChatId);
 
             const fullContent = data.content;
             const responseSources = data.sources || [];
