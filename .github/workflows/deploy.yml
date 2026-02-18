@@ -1,8 +1,11 @@
 name: Deploy to Production (Blue-Green)
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
     branches: [main]
+    types:
+      - completed
   workflow_dispatch:
     inputs:
       image_tag:
@@ -30,22 +33,25 @@ env:
   VPS_PORT: "8022"
   DEPLOY_PATH: /opt/hola
   REGISTRY: ghcr.io/carrerajorge
+  CI_TRIGGER_SHA: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
 
 jobs:
   # ── CI Gate ──────────────────────────────────────────────
   ci:
     name: CI Checks
-    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     uses: ./.github/workflows/ci.yml
 
   # ── Build & Push Docker Images to GHCR ─────────────────
   build_images:
     name: Build Docker Images
     needs: [ci]
-    if: ${{ needs.ci.result == 'success' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') }}
+    if: >-
+      ${{ (github.event_name == 'workflow_dispatch' && needs.ci.result == 'success') ||
+          (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') }}
     uses: ./.github/workflows/build-images.yml
     with:
-      sha: ${{ github.sha }}
+      sha: ${{ env.CI_TRIGGER_SHA }}
     permissions:
       contents: read
       packages: write
@@ -80,7 +86,7 @@ jobs:
             echo "image_tag=${{ github.event.inputs.image_tag }}" >> "$GITHUB_OUTPUT"
             echo "app_version=$(echo '${{ github.event.inputs.image_tag }}' | sed 's/sha-//')" >> "$GITHUB_OUTPUT"
           else
-            SHORT_SHA="${{ github.sha }}"
+            SHORT_SHA="${{ env.CI_TRIGGER_SHA }}"
             SHORT_SHA="${SHORT_SHA:0:8}"
             echo "image_tag=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
             echo "app_version=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
@@ -353,8 +359,14 @@ jobs:
   deploy_auto:
     name: Blue-Green Deploy (Auto)
     runs-on: ubuntu-latest
-    needs: [ci, build_images]
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && success() }}
+    needs: [build_images]
+    if: >-
+      ${{
+        github.event_name == 'workflow_run'
+        && github.event.workflow_run.conclusion == 'success'
+        && github.event.workflow_run.head_branch == 'main'
+        && needs.build_images.result == 'success'
+      }}
     timeout-minutes: 25
     env:
       VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
@@ -369,13 +381,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ env.CI_TRIGGER_SHA }}
 
       - name: Compute image tag
         id: tag
         run: |
           set -euo pipefail
-          SHORT_SHA="${{ github.sha }}"
+          SHORT_SHA="${{ env.CI_TRIGGER_SHA }}"
           SHORT_SHA="${SHORT_SHA:0:8}"
           echo "image_tag=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "app_version=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
