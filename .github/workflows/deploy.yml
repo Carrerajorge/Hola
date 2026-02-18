@@ -59,34 +59,23 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in $(seq 1 360); do
-            runs_json="$(gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" -f branch="${BRANCH}" -f per_page=50 2>/dev/null || true)"
-            if [ -z "${runs_json}" ] || [ "${runs_json}" = "null" ]; then
-              echo "Unable to read workflow runs yet; retrying..."
-              sleep 10
-              continue
-            fi
-
-            ci_line="$(python3 -c 'import json,os,sys; sha=os.environ.get(\"SHA\",\"\"); payload=json.load(sys.stdin); runs=payload.get(\"workflow_runs\",[]) if isinstance(payload,dict) else []; r=next((x for x in runs if x.get(\"head_sha\")==sha), None); print(\"__notfound__\" if r is None else ((r.get(\"status\") or \"\") + \" \" + (r.get(\"conclusion\") or \"\")).strip())' <<<"${runs_json}" 2>/dev/null || echo '__parsefail__')"
+            ci_line="$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow "CI" --branch "${BRANCH}" --json headSha,status,conclusion --limit 50 --jq "([ .[] | select(.headSha==\"${SHA}\") ][0]) as \$r | if \$r==null then \"__notfound__\" else \"\($r.status) \($r.conclusion // \"\")\" end" 2>/dev/null || echo '__queryfail__')"
 
             status="$(echo "${ci_line}" | awk '{print $1}')"
             conclusion="$(echo "${ci_line}" | awk '{print $2}')"
 
-            if [ "${status}" = "__parsefail__" ]; then
-              sample="${runs_json//$'\r'/ }"
-              sample="${sample//$'\n'/ }"
-              sample="${sample:0:240}"
-              echo "CI parse sample: ${sample}"
+            if [ "${status}" = "__queryfail__" ]; then
               if [ "${attempt}" -ge 6 ]; then
-                echo "::error::CI run API response could not be parsed after ${attempt} attempts."
+                echo "::error::Unable to query CI runs after ${attempt} attempts."
                 echo "ci_ok=false" >> "$GITHUB_OUTPUT"
                 exit 1
               fi
-              echo "CI run API response parse failed. Retry ${attempt}/360..."
+              echo "Unable to query CI runs. Retry ${attempt}/360..."
               sleep 10
               continue
             fi
 
-            if [ "${status}" = "__notfound__" ] || [ "${status}" = "__parsefail__" ] || [ -z "${status}" ]; then
+            if [ "${status}" = "__notfound__" ] || [ -z "${status}" ]; then
               echo "CI run for SHA ${SHA} not yet reported. Retry ${attempt}/360..."
               sleep 10
               continue
