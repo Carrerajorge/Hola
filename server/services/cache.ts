@@ -7,10 +7,11 @@ export class RedisCacheService implements ICacheService {
 
     constructor() {
         const isTestEnv = process.env.NODE_ENV === "test";
-        // In tests, default to no-op mode unless an explicit Redis URL is provided.
-        // This prevents noisy connection errors when a local Redis is not running.
-        if (isTestEnv && !process.env.REDIS_URL) {
-            Logger.info("[RedisCacheService] Redis disabled in test env (set REDIS_URL to enable)");
+        const allowRedisInTests = process.env.REDIS_ENABLE_IN_TESTS === "1" || process.env.REDIS_ENABLE_IN_TESTS === "true";
+        // In tests, default to no-op mode unless explicitly enabled.
+        // This prevents noisy connection errors when a local Redis is not running but REDIS_URL/HOST are present in .env.
+        if (isTestEnv && !allowRedisInTests) {
+            Logger.info("[RedisCacheService] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)");
             return;
         }
 

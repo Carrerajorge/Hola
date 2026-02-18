@@ -860,6 +860,18 @@ else
 fi
 echo ""
 
+# ── Step 8b: JIT warm-up — hit key endpoints to prime Node.js JIT ─────────────
+# This avoids cold-start slowness immediately after traffic cutover.
+if [ "${SKIP_CANARY:-false}" != "true" ]; then
+  log "[9/15] Warming up ${NEW_SLOT} JIT (3 rapid health hits)..."
+  for _warm in 1 2 3; do
+    curl -sf --max-time 5 "http://127.0.0.1:${NEW_PORT}/api/health" > /dev/null 2>&1 || true
+    sleep 0.5
+  done
+  logok "Warm-up done."
+  echo ""
+fi
+
 # ── Step 9a: Install Nginx server config if present ────────
 NGINX_SITE_CONF="/etc/nginx/sites-enabled/iliagpt.conf"
 NGINX_SITE_SRC="${DEPLOY_PATH}/nginx.conf"
@@ -892,6 +904,19 @@ if [ -f "${NGINX_SITE_SRC}" ]; then
   if ! diff -q "${NGINX_SITE_SRC}" "${NGINX_SITE_CONF}" > /dev/null 2>&1; then
     log "  Installing updated nginx.conf → ${NGINX_SITE_CONF}"
     cp "${NGINX_SITE_SRC}" "${NGINX_SITE_CONF}"
+  fi
+fi
+
+# ── Step 9a-extra: Install maintenance page (shown on 502/503/504) ──────────
+MAINTENANCE_SRC="${DEPLOY_PATH}/nginx/maintenance.html"
+MAINTENANCE_DIR="/etc/nginx/html"
+MAINTENANCE_DST="${MAINTENANCE_DIR}/maintenance.html"
+if [ -f "${MAINTENANCE_SRC}" ]; then
+  mkdir -p "${MAINTENANCE_DIR}"
+  if ! diff -q "${MAINTENANCE_SRC}" "${MAINTENANCE_DST}" > /dev/null 2>&1; then
+    log "  Installing maintenance page → ${MAINTENANCE_DST}"
+    cp "${MAINTENANCE_SRC}" "${MAINTENANCE_DST}"
+    chmod 644 "${MAINTENANCE_DST}"
   fi
 fi
 

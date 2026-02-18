@@ -28,6 +28,7 @@ import { useAgentStore } from "@/stores/agent-store";
 import { useSuperAgentStore } from "@/stores/super-agent-store";
 import { pollingManager } from "@/lib/polling-manager";
 import { queryClient } from "@/lib/queryClient";
+import { apiFetch } from "@/lib/apiClient";
 
 const AppsViewLazy = lazy(() => import("@/components/apps-view").then((m) => ({ default: m.AppsView })));
 const ChannelsHubDialogLazy = lazy(() =>
@@ -499,7 +500,7 @@ export default function Home() {
       try {
         // Add a temporary "thinking" step or message? 
         // For now just fetch.
-        const res = await fetch('/api/planning/preview', {
+        const res = await apiFetch('/api/planning/preview', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ goal })
@@ -897,7 +898,7 @@ export default function Home() {
             onSelectGpt={async (gpt) => {
               setAboutGptId(null);
               try {
-                const res = await fetch(`/api/gpts/${gpt.id}`);
+                const res = await apiFetch(`/api/gpts/${gpt.id}`);
                 if (res.ok) {
                   const fullGpt = await res.json();
                   handleSelectGpt(fullGpt);

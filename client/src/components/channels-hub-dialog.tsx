@@ -6,6 +6,16 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
@@ -69,7 +79,7 @@ const CHANNELS: ChannelDef[] = [
   {
     id: "whatsapp",
     name: "WhatsApp",
-    description: "Conecta tu WhatsApp personal o Business escaneando un QR",
+    description: "Conecta tu WhatsApp personal o Business escaneando un código QR.",
     color: "text-green-600",
     bgHover: "hover:bg-green-50 dark:hover:bg-green-950/20",
     borderColor: "border-green-200 dark:border-green-800",
@@ -79,7 +89,7 @@ const CHANNELS: ChannelDef[] = [
   {
     id: "telegram",
     name: "Telegram",
-    description: "Vincula un bot de Telegram con tu token de BotFather",
+    description: "Vincula un bot de Telegram usando el token de BotFather.",
     color: "text-blue-500",
     bgHover: "hover:bg-blue-50 dark:hover:bg-blue-950/20",
     borderColor: "border-blue-200 dark:border-blue-800",
@@ -89,7 +99,7 @@ const CHANNELS: ChannelDef[] = [
   {
     id: "messenger",
     name: "Messenger",
-    description: "Conecta tu página de Facebook para recibir mensajes",
+    description: "Conecta tu página de Facebook para recibir mensajes.",
     color: "text-purple-600",
     bgHover: "hover:bg-purple-50 dark:hover:bg-purple-950/20",
     borderColor: "border-purple-200 dark:border-purple-800",
@@ -99,7 +109,7 @@ const CHANNELS: ChannelDef[] = [
   {
     id: "wechat",
     name: "WeChat",
-    description: "Integra tu cuenta oficial de WeChat para el mercado chino",
+    description: "Integra tu cuenta oficial de WeChat para el mercado chino.",
     color: "text-emerald-600",
     bgHover: "hover:bg-emerald-50 dark:hover:bg-emerald-950/20",
     borderColor: "border-emerald-200 dark:border-emerald-800",
@@ -496,6 +506,8 @@ export function ChannelsHubDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  type AiSettingsMode = "none" | "on" | "off" | "mixed";
+
   const [activeChannel, setActiveChannel] = useState<ChannelId | null>(null);
   const [showWhatsAppDialog, setShowWhatsAppDialog] = useState(false);
   const { status: waStatus } = useWhatsAppWebStatus(open);
@@ -504,10 +516,14 @@ export function ChannelsHubDialog({
   const wcStatus = useChannelStatus("wechat", open);
 
   const [autoResponderEnabled, setAutoResponderEnabled] = useState(false);
+  const [autoResponderMode, setAutoResponderMode] = useState<AiSettingsMode>("none");
+  const [autoResponderTargets, setAutoResponderTargets] = useState(0);
   const [responseInstructions, setResponseInstructions] = useState("");
+  const [responseInstructionsMixed, setResponseInstructionsMixed] = useState(false);
   const [aiSettingsBusy, setAiSettingsBusy] = useState(false);
   const [aiSettingsError, setAiSettingsError] = useState<string | null>(null);
   const [aiSettingsSaved, setAiSettingsSaved] = useState(false);
+  const [confirmEnableAutoResponderOpen, setConfirmEnableAutoResponderOpen] = useState(false);
 
   const loadAiSettings = useCallback(async () => {
     if (!open) return;
@@ -516,71 +532,152 @@ export function ChannelsHubDialog({
     const headers = { "Content-Type": "application/json" };
 
     try {
-      const [waStatusRes, waSettingsRes, tgSettingsRes, msgStatusRes, wcStatusRes] = await Promise.all([
+      const [waStatusRes, waSettingsRes, tgStatusRes, tgSettingsRes, msgStatusRes, wcStatusRes] = await Promise.all([
         apiFetch("/api/integrations/whatsapp/web/status", { headers }),
         apiFetch("/api/integrations/whatsapp/web/settings", { headers }),
+        apiFetch("/api/integrations/telegram/status", { headers }),
         apiFetch("/api/integrations/telegram/settings", { headers }),
         apiFetch("/api/integrations/messenger/status", { headers }),
         apiFetch("/api/integrations/wechat/status", { headers }),
       ]);
 
-      let enabled = false;
-      let prompt = "";
+      const normalizePrompt = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
 
+      type Unit = {
+        id: string;
+        label: string;
+        configured: boolean;
+        enabled: boolean;
+        prompt: string;
+      };
+      const units: Unit[] = [];
+
+      // WhatsApp Web
+      let waEnabled = false;
+      let waPrompt = "";
+      let waConfigured = false;
       if (waStatusRes.ok) {
         const waJson = await waStatusRes.json().catch(() => null);
-        if (typeof waJson?.autoReply === "boolean") enabled = enabled || waJson.autoReply;
+        waEnabled = typeof waJson?.autoReply === "boolean" ? waJson.autoReply : false;
+        const state = waJson?.status?.state;
+        if (typeof state === "string") {
+          waConfigured = state !== "disconnected";
+        }
       }
-
       if (waSettingsRes.ok) {
         const waSettingsJson = await waSettingsRes.json().catch(() => null);
-        const p = waSettingsJson?.settings?.customPrompt;
-        if (typeof p === "string") prompt = p;
+        waPrompt = normalizePrompt(waSettingsJson?.settings?.customPrompt);
       }
+      // Even when disconnected, treat WhatsApp as "configured" if the user already enabled auto-reply or set a custom prompt.
+      waConfigured = waConfigured || waEnabled || Boolean(waPrompt);
+      units.push({ id: "whatsapp", label: "WhatsApp", configured: waConfigured, enabled: waEnabled, prompt: waPrompt });
 
+      // Telegram (requires auth)
+      const tgStatusJson = tgStatusRes.ok ? await tgStatusRes.json().catch(() => null) : null;
+      const tgAccounts: any[] = Array.isArray(tgStatusJson?.accounts) ? tgStatusJson.accounts : [];
+      const tgConfigured = tgAccounts.length > 0;
+      let tgEnabled = false;
+      let tgPrompt = "";
       if (tgSettingsRes.ok) {
         const tgJson = await tgSettingsRes.json().catch(() => null);
         const s = tgJson?.settings;
-        if (typeof s?.responder_enabled === "boolean") enabled = enabled || s.responder_enabled;
-        if (!prompt && typeof s?.custom_prompt === "string") prompt = s.custom_prompt;
+        tgEnabled = typeof s?.responder_enabled === "boolean" ? s.responder_enabled : false;
+        tgPrompt = normalizePrompt(s?.custom_prompt);
       }
+      units.push({ id: "telegram", label: "Telegram", configured: tgConfigured, enabled: tgEnabled, prompt: tgPrompt });
 
+      // Messenger (can have multiple pages)
       const msgJson = msgStatusRes.ok ? await msgStatusRes.json().catch(() => null) : null;
       const msgAccounts: any[] = Array.isArray(msgJson?.accounts) ? msgJson.accounts : [];
-      const msgPageId =
-        msgAccounts.find((a) => a?.status === "active")?.metadata?.pageId ||
-        msgAccounts.find((a) => a?.status === "inactive")?.metadata?.pageId ||
-        msgAccounts[0]?.metadata?.pageId;
-
-      if (typeof msgPageId === "string" && msgPageId) {
-        const sRes = await apiFetch(`/api/integrations/messenger/settings?pageId=${encodeURIComponent(msgPageId)}`, { headers });
-        if (sRes.ok) {
+      const msgPageIds = Array.from(
+        new Set(
+          msgAccounts
+            .map((a) => a?.metadata?.pageId)
+            .filter((v) => typeof v === "string" && v)
+        )
+      );
+      const msgSettings = await Promise.all(
+        msgPageIds.map(async (pageId) => {
+          const sRes = await apiFetch(`/api/integrations/messenger/settings?pageId=${encodeURIComponent(pageId)}`, { headers });
+          if (!sRes.ok) return null;
           const sJson = await sRes.json().catch(() => null);
           const s = sJson?.settings;
-          if (typeof s?.responder_enabled === "boolean") enabled = enabled || s.responder_enabled;
-          if (!prompt && typeof s?.custom_prompt === "string") prompt = s.custom_prompt;
-        }
+          return {
+            pageId,
+            enabled: typeof s?.responder_enabled === "boolean" ? s.responder_enabled : false,
+            prompt: normalizePrompt(s?.custom_prompt),
+          };
+        })
+      );
+      for (const s of msgSettings) {
+        if (!s) continue;
+        units.push({
+          id: `messenger:${s.pageId}`,
+          label: "Messenger",
+          configured: true,
+          enabled: s.enabled,
+          prompt: s.prompt,
+        });
       }
 
+      // WeChat (can have multiple apps)
       const wcJson = wcStatusRes.ok ? await wcStatusRes.json().catch(() => null) : null;
       const wcAccounts: any[] = Array.isArray(wcJson?.accounts) ? wcJson.accounts : [];
-      const wcAppId =
-        wcAccounts.find((a) => a?.status === "active")?.metadata?.appId ||
-        wcAccounts.find((a) => a?.status === "inactive")?.metadata?.appId ||
-        wcAccounts[0]?.metadata?.appId;
-
-      if (typeof wcAppId === "string" && wcAppId) {
-        const sRes = await apiFetch(`/api/integrations/wechat/settings?appId=${encodeURIComponent(wcAppId)}`, { headers });
-        if (sRes.ok) {
+      const wcAppIds = Array.from(
+        new Set(
+          wcAccounts
+            .map((a) => a?.metadata?.appId)
+            .filter((v) => typeof v === "string" && v)
+        )
+      );
+      const wcSettings = await Promise.all(
+        wcAppIds.map(async (appId) => {
+          const sRes = await apiFetch(`/api/integrations/wechat/settings?appId=${encodeURIComponent(appId)}`, { headers });
+          if (!sRes.ok) return null;
           const sJson = await sRes.json().catch(() => null);
           const s = sJson?.settings;
-          if (typeof s?.responder_enabled === "boolean") enabled = enabled || s.responder_enabled;
-          if (!prompt && typeof s?.custom_prompt === "string") prompt = s.custom_prompt;
-        }
+          return {
+            appId,
+            enabled: typeof s?.responder_enabled === "boolean" ? s.responder_enabled : false,
+            prompt: normalizePrompt(s?.custom_prompt),
+          };
+        })
+      );
+      for (const s of wcSettings) {
+        if (!s) continue;
+        units.push({
+          id: `wechat:${s.appId}`,
+          label: "WeChat",
+          configured: true,
+          enabled: s.enabled,
+          prompt: s.prompt,
+        });
       }
 
-      setAutoResponderEnabled(enabled);
-      setResponseInstructions(prompt);
+      const configuredUnits = units.filter((u) => u.configured);
+      const enabledValues = configuredUnits.map((u) => u.enabled);
+      const anyEnabled = enabledValues.some(Boolean);
+      const allEnabled = enabledValues.length > 0 && enabledValues.every(Boolean);
+      const allDisabled = enabledValues.length > 0 && enabledValues.every((v) => !v);
+      const mode: AiSettingsMode =
+        configuredUnits.length === 0 ? "none" : allEnabled ? "on" : allDisabled ? "off" : "mixed";
+
+      setAutoResponderTargets(configuredUnits.length);
+      setAutoResponderMode(mode);
+      setAutoResponderEnabled(anyEnabled);
+
+      const prompts = configuredUnits.map((u) => u.prompt);
+      const promptSet = new Set(prompts.map((p) => p.trim()));
+      const mixedPrompts = promptSet.size > 1;
+      setResponseInstructionsMixed(mixedPrompts);
+
+      if (!mixedPrompts) {
+        setResponseInstructions(prompts[0] ?? "");
+      } else {
+        // Show a representative prompt (prefer WhatsApp), but warn the user that it's mixed.
+        const waPromptCandidate = units.find((u) => u.id === "whatsapp")?.prompt?.trim();
+        setResponseInstructions(waPromptCandidate || prompts.find((p) => p.trim()) || "");
+      }
     } catch (e: any) {
       setAiSettingsError(e?.message || "No se pudieron cargar los ajustes de IA");
     }
@@ -638,39 +735,55 @@ export function ChannelsHubDialog({
         )
       );
 
-      const optionalReqs: Promise<Response>[] = [
-        tgReq,
-        ...msgPageIds.map((pageId) =>
-          apiFetch("/api/integrations/messenger/settings", {
+      type Op = { label: string; required: boolean; promise: Promise<Response> };
+      const ops: Op[] = [
+        { label: "WhatsApp", required: true, promise: waReq },
+        { label: "Telegram", required: false, promise: tgReq },
+        ...msgPageIds.map((pageId) => ({
+          label: "Messenger",
+          required: false,
+          promise: apiFetch("/api/integrations/messenger/settings", {
             method: "PUT",
             headers,
             body: JSON.stringify({ pageId, responder_enabled: enabled }),
-          })
-        ),
-        ...wcAppIds.map((appId) =>
-          apiFetch("/api/integrations/wechat/settings", {
+          }),
+        })),
+        ...wcAppIds.map((appId) => ({
+          label: "WeChat",
+          required: false,
+          promise: apiFetch("/api/integrations/wechat/settings", {
             method: "PUT",
             headers,
             body: JSON.stringify({ appId, responder_enabled: enabled }),
-          })
-        ),
+          }),
+        })),
       ];
 
-      const results = await Promise.allSettled([waReq, ...optionalReqs]);
-      const waResult = results[0];
-      const optionalResults = results.slice(1);
-      const waBad = waResult.status !== "fulfilled" || !(waResult.value as Response).ok;
-      const optionalBad = optionalResults.some((r) => r.status === "rejected") ||
-        optionalResults.some((r) => {
-          if (r.status !== "fulfilled") return false;
-          const res = r.value as Response;
-          // Optional channels can be missing (404) or unauthenticated (401) without blocking WhatsApp.
-          return !res.ok && res.status !== 404 && res.status !== 401;
-        });
-      const bad = waBad || optionalBad;
+      const results = await Promise.allSettled(ops.map((o) => o.promise));
+      let requiredFailed = false;
+      const optionalFailures = new Set<string>();
 
-      if (bad) {
-        setAiSettingsError("No se pudieron aplicar algunos cambios. Intenta de nuevo.");
+      for (let i = 0; i < results.length; i++) {
+        const op = ops[i];
+        const r = results[i];
+        if (r.status !== "fulfilled") {
+          if (op.required) requiredFailed = true;
+          else optionalFailures.add(op.label);
+          continue;
+        }
+
+        const res = r.value;
+        if (res.ok) continue;
+        if (!op.required && (res.status === 404 || res.status === 401)) continue;
+        if (op.required) requiredFailed = true;
+        else optionalFailures.add(op.label);
+      }
+
+      if (requiredFailed) {
+        setAiSettingsError("No se pudo aplicar en WhatsApp. Intenta de nuevo.");
+      } else if (optionalFailures.size > 0) {
+        const labels = Array.from(optionalFailures);
+        setAiSettingsError(`Se aplicó en WhatsApp, pero no se pudo actualizar: ${labels.join(", ")}.`);
       } else {
         setAiSettingsSaved(true);
       }
@@ -733,38 +846,55 @@ export function ChannelsHubDialog({
         )
       );
 
-      const optionalReqs: Promise<Response>[] = [
-        tgReq,
-        ...msgPageIds.map((pageId) =>
-          apiFetch("/api/integrations/messenger/settings", {
+      type Op = { label: string; required: boolean; promise: Promise<Response> };
+      const ops: Op[] = [
+        { label: "WhatsApp", required: true, promise: waReq },
+        { label: "Telegram", required: false, promise: tgReq },
+        ...msgPageIds.map((pageId) => ({
+          label: "Messenger",
+          required: false,
+          promise: apiFetch("/api/integrations/messenger/settings", {
             method: "PUT",
             headers,
             body: JSON.stringify({ pageId, ...runtimePatch }),
-          })
-        ),
-        ...wcAppIds.map((appId) =>
-          apiFetch("/api/integrations/wechat/settings", {
+          }),
+        })),
+        ...wcAppIds.map((appId) => ({
+          label: "WeChat",
+          required: false,
+          promise: apiFetch("/api/integrations/wechat/settings", {
             method: "PUT",
             headers,
             body: JSON.stringify({ appId, ...runtimePatch }),
-          })
-        ),
+          }),
+        })),
       ];
 
-      const results = await Promise.allSettled([waReq, ...optionalReqs]);
-      const waResult = results[0];
-      const optionalResults = results.slice(1);
-      const waBad = waResult.status !== "fulfilled" || !(waResult.value as Response).ok;
-      const optionalBad = optionalResults.some((r) => r.status === "rejected") ||
-        optionalResults.some((r) => {
-          if (r.status !== "fulfilled") return false;
-          const res = r.value as Response;
-          return !res.ok && res.status !== 404 && res.status !== 401;
-        });
-      const bad = waBad || optionalBad;
+      const results = await Promise.allSettled(ops.map((o) => o.promise));
+      let requiredFailed = false;
+      const optionalFailures = new Set<string>();
 
-      if (bad) {
-        setAiSettingsError("No se pudieron guardar algunos cambios. Intenta de nuevo.");
+      for (let i = 0; i < results.length; i++) {
+        const op = ops[i];
+        const r = results[i];
+        if (r.status !== "fulfilled") {
+          if (op.required) requiredFailed = true;
+          else optionalFailures.add(op.label);
+          continue;
+        }
+
+        const res = r.value;
+        if (res.ok) continue;
+        if (!op.required && (res.status === 404 || res.status === 401)) continue;
+        if (op.required) requiredFailed = true;
+        else optionalFailures.add(op.label);
+      }
+
+      if (requiredFailed) {
+        setAiSettingsError("No se pudo guardar en WhatsApp. Intenta de nuevo.");
+      } else if (optionalFailures.size > 0) {
+        const labels = Array.from(optionalFailures);
+        setAiSettingsError(`Se guardó en WhatsApp, pero no se pudo actualizar: ${labels.join(", ")}.`);
       } else {
         setAiSettingsSaved(true);
       }
@@ -886,14 +1016,14 @@ export function ChannelsHubDialog({
             AppsWebChat
           </DialogTitle>
           <DialogDescription>
-            Conecta tus canales de mensajería para enviar y recibir mensajes con IA
+            Conecta tus canales de mensajería para enviar y recibir mensajes con IA, todo en un solo lugar.
           </DialogDescription>
         </DialogHeader>
 
-	        <div className="grid grid-cols-2 gap-3 mt-1">
-	          {CHANNELS.map((ch) => (
-	            <button
-	              key={ch.id}
+        <div className="grid grid-cols-2 gap-3 mt-1">
+          {CHANNELS.map((ch) => (
+            <button
+              key={ch.id}
               onClick={() => handleChannelClick(ch.id)}
               className={cn(
                 "relative rounded-xl border p-4 text-left transition-all duration-200",
@@ -930,69 +1060,155 @@ export function ChannelsHubDialog({
                   : "Configurar →"}
               </div>
             </button>
-	          ))}
-	        </div>
+          ))}
+        </div>
 
-	        <div className="mt-3 rounded-xl border bg-muted/20 p-4 space-y-3">
-	          <div className="flex items-start justify-between gap-3">
-	            <div className="flex-1">
-	              <div className="text-sm font-medium">Respuestas automáticas (IA)</div>
-	              <p className="text-xs text-muted-foreground mt-1">
-	                Permite que ILIAGPT responda automáticamente a tus contactos en los canales conectados.
-	                Si lo activas, usará el contexto reciente de tus conversaciones para responder adecuadamente.
-	              </p>
-	            </div>
-	            <Switch
-	              checked={autoResponderEnabled}
-	              onCheckedChange={(checked) => {
-	                setAutoResponderEnabled(checked);
-	                void applyAutoResponderEnabled(checked);
-	              }}
-	              disabled={aiSettingsBusy}
-	            />
-	          </div>
+        <div className="mt-3 rounded-xl border bg-muted/20 p-4 space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <div className="text-sm font-medium">Respuestas automáticas (IA)</div>
+                {autoResponderMode === "mixed" && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+                    Mixto
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Con tu permiso, ILIAGPT puede responder automáticamente a tus contactos en los canales conectados.
+                Para responder adecuadamente, usará el historial reciente de cada conversación.
+              </p>
+              <div className="text-[11px] text-muted-foreground mt-2">
+                Se aplica a todos los canales conectados. En WhatsApp no se responde automáticamente a grupos.
+              </div>
+              {autoResponderTargets === 0 && (
+                <div className="text-[11px] text-muted-foreground mt-2">
+                  Conecta al menos un canal para que esta opción tenga efecto.
+                </div>
+              )}
+              {autoResponderMode === "mixed" && (
+                <div className="flex items-center gap-2 mt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setConfirmEnableAutoResponderOpen(true)}
+                    disabled={aiSettingsBusy}
+                  >
+                    Activar en todos
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setAutoResponderEnabled(false);
+                      void applyAutoResponderEnabled(false);
+                    }}
+                    disabled={aiSettingsBusy}
+                  >
+                    Desactivar en todos
+                  </Button>
+                </div>
+              )}
+            </div>
+            <Switch
+              checked={autoResponderEnabled}
+              onCheckedChange={(checked) => {
+                if (checked && !autoResponderEnabled) {
+                  setConfirmEnableAutoResponderOpen(true);
+                  return;
+                }
+                setAutoResponderEnabled(checked);
+                void applyAutoResponderEnabled(checked);
+              }}
+              disabled={aiSettingsBusy}
+            />
+          </div>
 
-	          <div className="space-y-1">
-	            <div className="text-xs font-medium">Cómo quieres que responda (opcional)</div>
-	            <div className="flex items-center gap-2">
-	              <Input
-	                value={responseInstructions}
-	                onChange={(e) => setResponseInstructions(e.target.value)}
-	                placeholder='Ej: "Responde breve, amable y siempre pide confirmación antes de agendar."'
-	                className="text-sm"
-	                disabled={aiSettingsBusy}
-	              />
-	              <Button
-	                variant="outline"
-	                size="sm"
-	                onClick={() => void applyResponseInstructions()}
-	                disabled={aiSettingsBusy}
-	              >
-	                Guardar
-	              </Button>
-	            </div>
-	            <div className="text-[11px] text-muted-foreground">
-	              Para responder con calidad, la IA necesita acceder al contexto (historial reciente) de cada conversación.
-	            </div>
-	          </div>
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <div className="text-xs font-medium">¿Cómo quieres que responda? (opcional)</div>
+              {responseInstructionsMixed && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+                  Mixto
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Input
+                value={responseInstructions}
+                onChange={(e) => setResponseInstructions(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void applyResponseInstructions();
+                  }
+                }}
+                placeholder='Ej: "Responde breve, amable y pide confirmación antes de agendar."'
+                className="text-sm"
+                disabled={aiSettingsBusy}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void applyResponseInstructions()}
+                disabled={aiSettingsBusy}
+              >
+                Guardar
+              </Button>
+            </div>
+            {responseInstructionsMixed && (
+              <div className="text-[11px] text-muted-foreground">
+                Hay instrucciones diferentes entre canales. Guardar sobrescribirá todas.
+              </div>
+            )}
+            <div className="text-[11px] text-muted-foreground">
+              Tip: escribe el tono, el formato y reglas (por ejemplo: "si no estás seguro, pregunta").
+            </div>
+          </div>
 
-	          {aiSettingsError && (
-	            <div className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/20 rounded-md p-2">
-	              {aiSettingsError}
-	            </div>
-	          )}
+          {aiSettingsError && (
+            <div className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/20 rounded-md p-2">
+              {aiSettingsError}
+            </div>
+          )}
 
-	          {aiSettingsSaved && !aiSettingsError && (
-	            <div className="text-xs text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950/20 rounded-md p-2">
-	              ✓ Ajustes guardados
-	            </div>
-	          )}
-	        </div>
+          {aiSettingsSaved && !aiSettingsError && (
+            <div className="text-xs text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950/20 rounded-md p-2">
+              ✓ Ajustes guardados
+            </div>
+          )}
+        </div>
 
-	        <div className="text-xs text-muted-foreground text-center mt-2">
-	          Los mensajes entrantes siempre aparecen en tu bandeja, incluso si desactivas las respuestas automáticas.
-	        </div>
-	      </DialogContent>
-	    </Dialog>
-	  );
-	}
+        <AlertDialog open={confirmEnableAutoResponderOpen} onOpenChange={setConfirmEnableAutoResponderOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>¿Permitir respuestas automáticas?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Si lo activas, ILIAGPT podrá responder a tus contactos en los canales conectados.
+                Para responder con contexto, usará el historial reciente de cada conversación.
+                Puedes desactivarlo en cualquier momento.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={aiSettingsBusy}>No permitir</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={aiSettingsBusy}
+                onClick={() => {
+                  setAutoResponderEnabled(true);
+                  setConfirmEnableAutoResponderOpen(false);
+                  void applyAutoResponderEnabled(true);
+                }}
+              >
+                Permitir y activar
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <div className="text-xs text-muted-foreground text-center mt-2">
+          Los mensajes entrantes se procesan con IA y aparecen en tu bandeja, incluso si desactivas las respuestas automáticas.
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

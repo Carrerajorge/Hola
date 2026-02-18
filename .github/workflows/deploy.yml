@@ -11,12 +11,10 @@ on:
         default: ''
         type: string
 
-concurrency:
-  group: deploy-production
-  # CRITICAL: false prevents new pushes from cancelling in-progress deploys.
-  # With true, rapid pushes meant no deploy ever completed — production was stuck
-  # on a broken version for hours.
-  cancel-in-progress: false
+# Concurrency is managed at the job level (deploy_auto job) rather than
+# workflow level. This allows CI gate and build jobs to run in parallel
+# for multiple SHAs, while only the deploy step itself serializes.
+# See deploy_auto.concurrency below.
 
 permissions:
   actions: read
@@ -43,7 +41,9 @@ jobs:
     name: CI Completion Gate
     if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # CI can take 20-45+ minutes; if this gate times out, the deploy run is marked "cancelled"
+    # and nothing ships. Keep this comfortably above CI duration.
+    timeout-minutes: 70
     permissions:
       contents: read
       actions: read
@@ -61,23 +61,24 @@ jobs:
           # gh CLI uses GH_TOKEN in Actions
           export GH_TOKEN="${GH_TOKEN}"
 
-          for attempt in $(seq 1 72); do
-            runs_json="$(gh run list --workflow "CI" --branch "${BRANCH}" --json headSha,status,conclusion --limit 20 || true)"
+          for attempt in $(seq 1 360); do
+            runs_json="$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow "CI" --branch "${BRANCH}" --json headSha,status,conclusion --limit 20 || true)"
             if [ -z "${runs_json}" ] || [ "${runs_json}" = "null" ]; then
               echo "Unable to read workflow runs yet; retrying..."
               sleep 10
               continue
             fi
 
-            ci_run="$(echo "${runs_json}" | jq -r --arg sha "${SHA}" '[.[] | select(.headSha == $sha)][0]')"
-            if [ "${ci_run}" = "null" ] || [ -z "${ci_run}" ]; then
-              echo "CI run for SHA ${SHA} not yet reported. Retry ${attempt}/30..."
+            ci_line="$(echo "${runs_json}" | python3 -c 'import json,os,sys; sha=os.environ.get(\"SHA\",\"\"); runs=json.load(sys.stdin); r=next((x for x in runs if x.get(\"headSha\")==sha), None); print(\"__notfound__\" if r is None else ((r.get(\"status\") or \"\") + \" \" + (r.get(\"conclusion\") or \"\")).strip())' 2>/dev/null || echo '__parsefail__')"
+
+            status="$(echo "${ci_line}" | awk '{print $1}')"
+            conclusion="$(echo "${ci_line}" | awk '{print $2}')"
+
+            if [ "${status}" = "__notfound__" ] || [ "${status}" = "__parsefail__" ] || [ -z "${status}" ]; then
+              echo "CI run for SHA ${SHA} not yet reported. Retry ${attempt}/360..."
               sleep 10
               continue
             fi
-
-            status="$(echo "${ci_run}" | jq -r '.status')"
-            conclusion="$(echo "${ci_run}" | jq -r '.conclusion // empty')"
 
             if [ "${status}" = "completed" ]; then
               if [ "${conclusion}" = "success" ]; then
@@ -353,7 +354,13 @@ jobs:
             sleep 3
           done
 
-          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts ${{ env.DEPLOY_PATH }}/nginx &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
+
+          # Copy nginx static assets (maintenance page, custom error pages)
+          scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }} \
+            -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12 \
+            nginx/maintenance.html \
+            ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/nginx/ 2>/dev/null || true
 
       - name: Run blue-green deploy
         run: |
@@ -465,6 +472,12 @@ jobs:
       && github.ref == 'refs/heads/main'
       && success()
     timeout-minutes: 25
+    # Job-level concurrency: if a newer deploy is queued, cancel this one.
+    # This ensures the most recent commit always ships, without blocking the queue.
+    # The VPS-level deploy script itself is idempotent and rolls back on failure.
+    concurrency:
+      group: deploy-auto-vps
+      cancel-in-progress: true
     env:
       VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
       VPS_USER: ${{ secrets.VPS_USER || 'root' }}
@@ -695,7 +708,13 @@ jobs:
             sleep 3
           done
 
-          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts ${{ env.DEPLOY_PATH }}/nginx &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
+
+          # Copy nginx static assets (maintenance page, custom error pages)
+          scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }} \
+            -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12 \
+            nginx/maintenance.html \
+            ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/nginx/ 2>/dev/null || true
 
       - name: Run blue-green deploy
         run: |

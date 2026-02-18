@@ -1,5 +1,5 @@
-import { defineConfig } from "vitest/config";
 import path from "node:path";
+import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
@@ -10,7 +10,7 @@ export default defineConfig({
     setupFiles: ["./tests/setup.ts"],
     coverage: {
       provider: "v8",
-      // Keep coverage output stable; CI/quality gate controls cleanup between retries.
+      // Keep coverage output stable; scripts/quality-gate.ts controls cleanup + thresholds.
       clean: false,
       reporter: ["text", "json", "json-summary", "html"],
       all: true,
@@ -29,4 +29,3 @@ export default defineConfig({
     },
   },
 });
-

@@ -354,13 +354,19 @@ function jsonSchemaToZodLazy(schema: JSONSchema7): import("zod").ZodSchema {
 }
 
 function buildToolCapabilities(cap: ConnectorCapability): string[] {
-  const caps: string[] = ["accesses_external_api", "requires_network"];
-  if (cap.dataAccessLevel === "write" || cap.dataAccessLevel === "admin") {
-    caps.push("writes_external_data");
+  // IMPORTANT: These values must match server/agent/contracts ToolCapabilitySchema.
+  // Keep this list minimal and map connector semantics into existing agent capabilities.
+  const caps: string[] = ["requires_network", "accesses_external_api"];
+
+  // Treat write/admin access (or explicit confirmation requirement) as high-risk.
+  if (
+    cap.dataAccessLevel === "write" ||
+    cap.dataAccessLevel === "admin" ||
+    cap.confirmationRequired
+  ) {
+    caps.push("high_risk");
   }
-  if (cap.confirmationRequired) {
-    caps.push("requires_confirmation");
-  }
+
   return caps;
 }
 

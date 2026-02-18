@@ -7,17 +7,62 @@ const logger = createLogger("http");
 
 // SECURITY FIX #19: Sensitive query parameters to redact from logs
 const SENSITIVE_QUERY_PARAMS = ['token', 'key', 'secret', 'password', 'apiKey', 'api_key', 'access_token', 'refresh_token', 'code', 'state'];
+const FORBIDDEN_QUERY_KEYS = new Set(["__proto__", "prototype", "constructor"]);
+const MAX_QUERY_NESTED_DEPTH = 8;
+const MAX_QUERY_ARRAY_ITEMS = 25;
+const MAX_QUERY_OBJECT_KEYS = 80;
+
+function sanitizeQueryKey(key: string): boolean {
+  return !FORBIDDEN_QUERY_KEYS.has(key) && !key.startsWith("__");
+}
+
+function sanitizeQueryValue(
+  value: unknown,
+  seen: WeakSet<object> = new WeakSet(),
+  depth = 0,
+): unknown {
+  if (depth >= MAX_QUERY_NESTED_DEPTH) {
+    return "[truncated]";
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, MAX_QUERY_ARRAY_ITEMS)
+      .map((item) => sanitizeQueryValue(item, seen, depth + 1));
+  }
+
+  if (value && typeof value === "object") {
+    if (seen.has(value)) {
+      return "[redacted-cyclic]";
+    }
+
+    seen.add(value);
+    const output: Record<string, unknown> = Object.create(null);
+    for (const [rawKey, nested] of Object.entries(value as Record<string, unknown>).slice(0, MAX_QUERY_OBJECT_KEYS)) {
+      const key = String(rawKey);
+      if (!sanitizeQueryKey(key)) {
+        continue;
+      }
+      output[key] = sanitizeQueryValue(nested, seen, depth + 1);
+    }
+    return output;
+  }
+
+  return value;
+}
 
 // SECURITY FIX #20: Sanitize query params for logging
 function sanitizeQueryForLogging(query: Record<string, any>): Record<string, any> | undefined {
   if (!query || Object.keys(query).length === 0) return undefined;
 
-  const sanitized: Record<string, any> = {};
+  const sanitized: Record<string, unknown> = Object.create(null);
   for (const [key, value] of Object.entries(query)) {
     if (SENSITIVE_QUERY_PARAMS.some(param => key.toLowerCase().includes(param.toLowerCase()))) {
       sanitized[key] = '[REDACTED]';
+    } else if (!sanitizeQueryKey(key)) {
+      continue;
     } else {
-      sanitized[key] = value;
+      sanitized[key] = sanitizeQueryValue(value, new WeakSet(), 1);
     }
   }
   return sanitized;

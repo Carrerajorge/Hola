@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { apiFetch } from "@/lib/apiClient";
 
 export interface CommandResult {
   id: string;
@@ -160,7 +161,7 @@ export function useTerminalSession() {
     try {
       setState((prev) => ({ ...prev, status: "connecting" }));
 
-      const response = await fetch("/api/terminal/sessions", {
+      const response = await apiFetch("/api/terminal/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cwd, env }),
@@ -208,7 +209,7 @@ export function useTerminalSession() {
     try {
       setState((prev) => ({ ...prev, status: "connecting" }));
 
-      const response = await fetch("/api/terminal/remote/sessions", {
+      const response = await apiFetch("/api/terminal/remote/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(options),
@@ -252,7 +253,7 @@ export function useTerminalSession() {
     try {
       setState((prev) => ({ ...prev, status: "connecting" }));
 
-      const response = await fetch(`/api/terminal/remote/targets/${targetId}/sessions`, {
+      const response = await apiFetch(`/api/terminal/remote/targets/${targetId}/sessions`, {
         method: "POST",
       });
 
@@ -297,7 +298,7 @@ export function useTerminalSession() {
   /** Remote targets */
   const fetchRemoteTargets = useCallback(async () => {
     try {
-      const response = await fetch("/api/terminal/remote/targets");
+      const response = await apiFetch("/api/terminal/remote/targets");
       if (!response.ok) {
         throw new Error("Failed to load remote targets");
       }
@@ -320,7 +321,7 @@ export function useTerminalSession() {
     allowedAdminIds?: string[];
     notes?: string;
   }) => {
-    const response = await fetch("/api/terminal/remote/targets", {
+    const response = await apiFetch("/api/terminal/remote/targets", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -335,7 +336,7 @@ export function useTerminalSession() {
   }, []);
 
   const deleteRemoteTarget = useCallback(async (targetId: string) => {
-    const response = await fetch(`/api/terminal/remote/targets/${targetId}`, {
+    const response = await apiFetch(`/api/terminal/remote/targets/${targetId}`, {
       method: "DELETE",
     });
     if (!response.ok) {
@@ -368,7 +369,7 @@ export function useTerminalSession() {
     }));
 
     try {
-      const response = await fetch(endpoint, {
+      const response = await apiFetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -413,7 +414,7 @@ export function useTerminalSession() {
       try {
         const sessionInfoEndpoint = getSessionEndpoint(state.sessionId, "");
         if (sessionInfoEndpoint) {
-          const sessionRes = await fetch(sessionInfoEndpoint);
+          const sessionRes = await apiFetch(sessionInfoEndpoint);
           if (sessionRes.ok) {
             const sessionData = await sessionRes.json();
             setState((prev) => ({
@@ -460,7 +461,7 @@ export function useTerminalSession() {
     }));
 
     try {
-      const response = await fetch(endpoint, {
+      const response = await apiFetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ language, code, ...options }),
@@ -503,7 +504,7 @@ export function useTerminalSession() {
     if (!endpoint) return null;
 
     try {
-      const response = await fetch(endpoint, {
+      const response = await apiFetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(operation),
@@ -519,7 +520,7 @@ export function useTerminalSession() {
   /** Get system info */
   const getSystemInfo = useCallback(async () => {
     try {
-      const response = await fetch("/api/terminal/system-info");
+      const response = await apiFetch("/api/terminal/system-info");
       return await response.json();
     } catch (error: any) {
       return null;
@@ -530,7 +531,7 @@ export function useTerminalSession() {
   const listProcesses = useCallback(async (filter?: string) => {
     try {
       const url = filter ? `/api/terminal/processes?filter=${encodeURIComponent(filter)}` : "/api/terminal/processes";
-      const response = await fetch(url);
+      const response = await apiFetch(url);
       return await response.json();
     } catch (error: any) {
       return null;
@@ -540,7 +541,7 @@ export function useTerminalSession() {
   /** Kill a process */
   const killProcess = useCallback(async (pid: number, signal?: string) => {
     try {
-      const response = await fetch(`/api/terminal/processes/${pid}/kill`, {
+      const response = await apiFetch(`/api/terminal/processes/${pid}/kill`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ signal }),
@@ -560,7 +561,7 @@ export function useTerminalSession() {
     if (!endpoint) return null;
 
     try {
-      const response = await fetch(endpoint);
+      const response = await apiFetch(endpoint);
       return await response.json();
     } catch (error: any) {
       return null;
@@ -574,7 +575,7 @@ export function useTerminalSession() {
     try {
       const endpoint = getSessionEndpoint(state.sessionId, "");
       if (endpoint) {
-        await fetch(endpoint, { method: "DELETE" });
+        await apiFetch(endpoint, { method: "DELETE" });
       }
     } catch (error) {
       console.error("Error closing terminal session:", error);

@@ -203,10 +203,21 @@ describe("chat stream isolation", () => {
     const { client, close } = await createHttpTestClient(app);
 
     try {
-      // Ensure the first request holds the conversation lock long enough for the
-      // second request to observe it (macrotask yield, not just a resolved Promise).
-      llmChatMock.mockImplementation(async (messages: any[]) => {
-        await new Promise((resolve) => setTimeout(resolve, 25));
+      let markFirstCallStarted!: () => void;
+      const firstCallStarted = new Promise<void>((resolve) => {
+        markFirstCallStarted = resolve;
+      });
+
+      let releaseFirstCall!: () => void;
+      const firstCallRelease = new Promise<void>((resolve) => {
+        releaseFirstCall = resolve;
+      });
+
+      // Ensure the request that acquires the per-conversation lock stays in-flight long enough for
+      // the other request to observe the lock and be rejected deterministically.
+      llmChatMock.mockImplementationOnce(async (messages: any[]) => {
+        markFirstCallStarted();
+        await firstCallRelease;
         const last = messages[messages.length - 1];
         return {
           content: `stream:${String(last?.content || "")}`,
@@ -223,10 +234,29 @@ describe("chat stream isolation", () => {
         queueMode: "reject",
       };
 
-      const [first, second] = await Promise.all([
-        client.post("/api/chat/stream").set("x-request-id", "req_lock_a").send(payload),
-        client.post("/api/chat/stream").set("x-request-id", "req_lock_b").send(payload),
+      let released = false;
+      const safeRelease = () => {
+        if (released) return;
+        released = true;
+        releaseFirstCall();
+      };
+
+      const firstPromise = client.post("/api/chat/stream").set("x-request-id", "req_lock_a").send(payload);
+
+      await Promise.race([
+        firstCallStarted,
+        new Promise((_, reject) =>
+          setTimeout(() => {
+            safeRelease();
+            reject(new Error("first stream did not start in time"));
+          }, 2000)
+        ),
       ]);
+
+      const second = await client.post("/api/chat/stream").set("x-request-id", "req_lock_b").send(payload);
+
+      safeRelease();
+      const first = await firstPromise;
 
       const statuses = [first.status, second.status];
       expect(statuses.includes(200)).toBe(true);

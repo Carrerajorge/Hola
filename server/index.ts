@@ -206,6 +206,17 @@ export function log(message: string, source = "express") {
     log("[WARNING] Database connection failed - some features may not work");
   }
 
+  // Initialize connector manifests + mount connector tools/policies.
+  // This enables "Apps" (Slack/Notion/GitHub/etc) tool wiring via the Integration Kernel.
+  try {
+    const { initializeConnectorManifests, mountConnectorTools } = await import("./integrations/kernel");
+    await initializeConnectorManifests();
+    await mountConnectorTools();
+    log("Connector manifests initialized and tools mounted", "integrations");
+  } catch (err: any) {
+    log(`[WARNING] Connector initialization failed: ${err?.message || err}`, "integrations");
+  }
+
   // Verify LLM connectivity in production
   if (isProduction) {
     try {

@@ -30,6 +30,8 @@ import { createUserRouter } from "./routes/userRouter";
 import { createChatAiRouter } from "./routes/chatAiRouter";
 import { createGoogleFormsRouter } from "./routes/googleFormsRouter";
 import { createGmailRouter } from "./routes/gmailRouter";
+import { createAppsIntegrationRouter } from "./routes/appsIntegrationRouter";
+import { createConnectorOAuthRouter } from "./routes/connectorOAuthRouter";
 import gmailOAuthRouter from "./routes/gmailOAuthRouter";
 import calendarOAuthRouter from "./routes/calendarOAuthRouter";
 import outlookOAuthRouter from "./routes/outlookOAuthRouter";
@@ -594,6 +596,19 @@ export async function registerRoutes(
   app.use(createCodeRouter());
   app.use(createUserRouter());
   app.use("/api", createChatAiRouter(broadcastAgentUpdate));
+  app.use("/api/apps", createAppsIntegrationRouter());
+
+  // Integration Kernel OAuth routes (generic connector flow).
+  // Mount one router per connectorId loaded into the ConnectorRegistry.
+  try {
+    const { connectorRegistry } = await import("./integrations/kernel/connectorRegistry");
+    for (const connectorId of connectorRegistry.listIds()) {
+      app.use(`/api/connectors/oauth/${connectorId}`, createConnectorOAuthRouter(connectorId));
+    }
+  } catch (err: any) {
+    console.warn("[Routes] Failed to mount connector OAuth routers:", err?.message || err);
+  }
+
   app.use("/api/integrations/google/forms", createGoogleFormsRouter());
   app.use("/api/integrations/google/gmail", createGmailRouter());
   const { createWhatsAppWebRouter } = await import('./routes/whatsappWebRouter');

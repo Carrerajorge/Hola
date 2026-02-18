@@ -135,9 +135,22 @@ const TRANSFORM_REGISTRY: Record<TransformFunction, (value: unknown) => unknown>
     const matches = str.match(/https?:\/\/[^\s<>"{}|\\^`[\]]+/g);
     return matches || [];
   },
-  stripHtml: (v) => {
-    return String(v ?? "").replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim();
-  },
+  stripHtml: (() => {
+    const htmlTagPattern = /<\s*(?:script|style)\b[^>]*>[\s\S]*?<\s*\/\s*(?:script|style)\s*>/gi;
+    const markupPattern = /<[^>]*?>/g;
+    const entityPattern = /&(?:nbsp|amp|lt|gt|quot|apos);/gi;
+
+    return (v) =>
+      String(v ?? "")
+        .normalize("NFKC")
+        .replace(htmlTagPattern, "")
+        .replace(markupPattern, "")
+        .replace(entityPattern, "")
+        .replace(/[`*_~#>{}[\]]/g, "")
+        .replace(/<[^>]*>/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+  })(),
   truncate100: (v) => {
     const s = String(v ?? "");
     return s.length > 100 ? s.slice(0, 97) + "..." : s;

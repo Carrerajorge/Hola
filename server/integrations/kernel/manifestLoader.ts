@@ -11,6 +11,7 @@ import path from "path";
 import fs from "fs/promises";
 
 const CONNECTORS_DIR = path.resolve(import.meta.dirname || __dirname, "../connectors");
+let initPromise: Promise<void> | null = null;
 
 /** Load all connector manifests from the connectors directory */
 export async function loadAllConnectorManifests(): Promise<ConnectorManifest[]> {
@@ -58,7 +59,14 @@ export async function loadAllConnectorManifests(): Promise<ConnectorManifest[]> 
 
       if (!manifestModule) continue;
 
-      const manifest = manifestModule.manifest || manifestModule.default;
+      const manifest =
+        manifestModule.manifest ||
+        manifestModule.default ||
+        Object.values(manifestModule).find((value) => {
+          if (!value || typeof value !== "object") return false;
+          const candidate = value as Partial<ConnectorManifest>;
+          return typeof candidate.connectorId === "string" && candidate.connectorId.trim().length > 0;
+        });
       if (!manifest || !manifest.connectorId) {
         console.warn(`[ManifestLoader] Skipping ${entry} — no valid manifest export`);
         continue;
@@ -86,41 +94,82 @@ export async function loadAllConnectorManifests(): Promise<ConnectorManifest[]> 
 
 /** Initialize: load manifests → register in ConnectorRegistry → seed DB */
 export async function initializeConnectorManifests(): Promise<void> {
-  const manifests = await loadAllConnectorManifests();
-
-  for (const manifest of manifests) {
-    connectorRegistry.register(manifest);
+  if (initPromise) {
+    return initPromise;
   }
 
-  // Also register any connector handlers alongside manifests
-  for (const manifest of manifests) {
-    try {
-      const handlerPath = path.join(CONNECTORS_DIR, manifest.connectorId, "handler.ts");
-      const handlerJsPath = path.join(CONNECTORS_DIR, manifest.connectorId, "handler.js");
+  initPromise = (async () => {
+    const manifests = await loadAllConnectorManifests();
 
-      const tsExists = await fs.access(handlerPath).then(() => true).catch(() => false);
-      const jsExists = await fs.access(handlerJsPath).then(() => true).catch(() => false);
-
-      if (tsExists || jsExists) {
-        const handlerModule = await import(tsExists ? handlerPath : handlerJsPath);
-        const handler = handlerModule.handler || handlerModule.default;
-        if (handler && typeof handler.execute === "function") {
-          connectorRegistry.registerHandler(manifest.connectorId, handler);
-          console.log(`[ManifestLoader] Handler registered: ${manifest.connectorId}`);
-        }
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`[ManifestLoader] Failed to load handler for "${manifest.connectorId}": ${msg}`);
+    for (const manifest of manifests) {
+      connectorRegistry.register(manifest);
     }
-  }
 
-  // Seed DB (best-effort — doesn't block startup)
-  seedManifestsToDB(manifests).catch((err) => {
-    console.warn(`[ManifestLoader] DB seed failed: ${err?.message || err}`);
+    // Also register any connector handlers alongside manifests
+    for (const manifest of manifests) {
+      try {
+        const handlerPath = path.join(CONNECTORS_DIR, manifest.connectorId, "handler.ts");
+        const handlerJsPath = path.join(CONNECTORS_DIR, manifest.connectorId, "handler.js");
+
+        const tsExists = await fs.access(handlerPath).then(() => true).catch(() => false);
+        const jsExists = await fs.access(handlerJsPath).then(() => true).catch(() => false);
+
+        if (tsExists || jsExists) {
+          const handlerModule = await import(tsExists ? handlerPath : handlerJsPath);
+          const handlerCandidates = [
+            handlerModule.handler,
+            handlerModule.default,
+            ...Object.values(handlerModule),
+          ];
+
+          let resolvedHandler: any = null;
+          for (const candidate of handlerCandidates) {
+            if (!candidate) continue;
+
+            if (typeof candidate === "function") {
+              // Support createXHandler-style exports that return a handler object.
+              try {
+                const maybe = candidate();
+                if (maybe && typeof maybe.execute === "function") {
+                  resolvedHandler = maybe;
+                  break;
+                }
+              } catch {
+                // ignore
+              }
+              continue;
+            }
+
+            if (typeof candidate === "object" && typeof (candidate as any).execute === "function") {
+              resolvedHandler = candidate;
+              break;
+            }
+          }
+
+          if (resolvedHandler) {
+            connectorRegistry.registerHandler(manifest.connectorId, resolvedHandler);
+            console.log(`[ManifestLoader] Handler registered: ${manifest.connectorId}`);
+          }
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[ManifestLoader] Failed to load handler for "${manifest.connectorId}": ${msg}`);
+      }
+    }
+
+    // Seed DB (best-effort — doesn't block startup)
+    seedManifestsToDB(manifests).catch((err) => {
+      console.warn(`[ManifestLoader] DB seed failed: ${err?.message || err}`);
+    });
+
+    console.log(`[ManifestLoader] Initialized ${manifests.length} connectors`);
+  })().catch((err) => {
+    // Allow retry if init fails (e.g. transient FS/DB issues in dev).
+    initPromise = null;
+    throw err;
   });
 
-  console.log(`[ManifestLoader] Initialized ${manifests.length} connectors`);
+  return initPromise;
 }
 
 /** Best-effort: upsert manifests into the connector_manifests table */

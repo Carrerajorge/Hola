@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { apiFetch } from "@/lib/apiClient";
 
 interface BrowserTab {
   id: string;
@@ -60,7 +61,7 @@ export function BrowserControlPanel() {
 
   const fetchScreenshot = useCallback(async (sessionId: string) => {
     try {
-      const res = await fetch(`/api/browser-control/sessions/${sessionId}/screenshot`);
+      const res = await apiFetch(`/api/browser-control/sessions/${sessionId}/screenshot`);
       if (res.ok) {
         const { screenshot } = await res.json();
         setState((prev) => prev.sessionId === sessionId ? { ...prev, screenshot } : prev);
@@ -72,7 +73,7 @@ export function BrowserControlPanel() {
 
   const fetchTabs = useCallback(async (sessionId: string) => {
     try {
-      const res = await fetch(`/api/browser-control/sessions/${sessionId}/tabs`);
+      const res = await apiFetch(`/api/browser-control/sessions/${sessionId}/tabs`);
       if (res.ok) {
         const { tabs } = await res.json();
         setState((prev) => prev.sessionId === sessionId ? { ...prev, tabs } : prev);
@@ -107,7 +108,7 @@ export function BrowserControlPanel() {
     try {
       setState((prev) => ({ ...prev, status: "connecting", isLoading: true }));
 
-      const res = await fetch("/api/browser-control/sessions", {
+      const res = await apiFetch("/api/browser-control/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profileId: state.profileId }),
@@ -141,7 +142,7 @@ export function BrowserControlPanel() {
     if (!state.sessionId) return;
     stopPolling();
     try {
-      await fetch(`/api/browser-control/sessions/${state.sessionId}`, { method: "DELETE" });
+      await apiFetch(`/api/browser-control/sessions/${state.sessionId}`, { method: "DELETE" });
     } catch {
       // Ignore
     }
@@ -155,7 +156,7 @@ export function BrowserControlPanel() {
     addLog(`Navigating to: ${urlInput}`);
 
     try {
-      const res = await fetch(`/api/browser-control/sessions/${state.sessionId}/navigate`, {
+      const res = await apiFetch(`/api/browser-control/sessions/${state.sessionId}/navigate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: urlInput }),
@@ -181,7 +182,7 @@ export function BrowserControlPanel() {
     addLog(`Clicking: ${selectorInput}`);
 
     try {
-      const res = await fetch(`/api/browser-control/sessions/${state.sessionId}/click`, {
+      const res = await apiFetch(`/api/browser-control/sessions/${state.sessionId}/click`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ selector: selectorInput }),
@@ -200,7 +201,7 @@ export function BrowserControlPanel() {
     addLog(`Typing in: ${selectorInput}`);
 
     try {
-      const res = await fetch(`/api/browser-control/sessions/${state.sessionId}/type`, {
+      const res = await apiFetch(`/api/browser-control/sessions/${state.sessionId}/type`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ selector: selectorInput, text: typeText, clear: true }),
@@ -217,7 +218,7 @@ export function BrowserControlPanel() {
   const scrollPage = useCallback(async (direction: "up" | "down") => {
     if (!state.sessionId) return;
     try {
-      await fetch(`/api/browser-control/sessions/${state.sessionId}/scroll`, {
+      await apiFetch(`/api/browser-control/sessions/${state.sessionId}/scroll`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ direction, amount: 500 }),
@@ -233,7 +234,7 @@ export function BrowserControlPanel() {
   const goBack = useCallback(async () => {
     if (!state.sessionId) return;
     try {
-      await fetch(`/api/browser-control/sessions/${state.sessionId}/back`, { method: "POST" });
+      await apiFetch(`/api/browser-control/sessions/${state.sessionId}/back`, { method: "POST" });
       addLog("Navigated back");
       fetchScreenshot(state.sessionId!);
     } catch (error: any) {
@@ -244,7 +245,7 @@ export function BrowserControlPanel() {
   const goForward = useCallback(async () => {
     if (!state.sessionId) return;
     try {
-      await fetch(`/api/browser-control/sessions/${state.sessionId}/forward`, { method: "POST" });
+      await apiFetch(`/api/browser-control/sessions/${state.sessionId}/forward`, { method: "POST" });
       addLog("Navigated forward");
       fetchScreenshot(state.sessionId!);
     } catch (error: any) {
@@ -255,7 +256,7 @@ export function BrowserControlPanel() {
   const reload = useCallback(async () => {
     if (!state.sessionId) return;
     try {
-      await fetch(`/api/browser-control/sessions/${state.sessionId}/reload`, { method: "POST" });
+      await apiFetch(`/api/browser-control/sessions/${state.sessionId}/reload`, { method: "POST" });
       addLog("Page reloaded");
       fetchScreenshot(state.sessionId!);
     } catch (error: any) {
@@ -267,7 +268,7 @@ export function BrowserControlPanel() {
   const newTab = useCallback(async (url?: string) => {
     if (!state.sessionId) return;
     try {
-      await fetch(`/api/browser-control/sessions/${state.sessionId}/tabs`, {
+      await apiFetch(`/api/browser-control/sessions/${state.sessionId}/tabs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
@@ -283,7 +284,7 @@ export function BrowserControlPanel() {
   const fetchNetworkLogs = useCallback(async () => {
     if (!state.sessionId) return;
     try {
-      const res = await fetch(`/api/browser-control/sessions/${state.sessionId}/network`);
+      const res = await apiFetch(`/api/browser-control/sessions/${state.sessionId}/network`);
       const { logs } = await res.json();
       setState((prev) => ({ ...prev, networkLogs: logs || [] }));
     } catch {
@@ -298,7 +299,7 @@ export function BrowserControlPanel() {
     addLog(`Starting autonomous navigation: "${goalInput}"`);
 
     try {
-      const res = await fetch(`/api/browser-control/sessions/${state.sessionId}/auto-navigate`, {
+      const res = await apiFetch(`/api/browser-control/sessions/${state.sessionId}/auto-navigate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ goal: goalInput, maxSteps: 15 }),
@@ -325,7 +326,7 @@ export function BrowserControlPanel() {
     addLog(`Extracting data: "${extractDesc}"`);
 
     try {
-      const res = await fetch(`/api/browser-control/sessions/${state.sessionId}/extract-structured`, {
+      const res = await apiFetch(`/api/browser-control/sessions/${state.sessionId}/extract-structured`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ description: extractDesc }),
@@ -442,7 +443,7 @@ export function BrowserControlPanel() {
               }`}
               onClick={async () => {
                 if (!state.sessionId) return;
-                await fetch(`/api/browser-control/sessions/${state.sessionId}/tabs/${tab.id}/activate`, { method: "POST" });
+                await apiFetch(`/api/browser-control/sessions/${state.sessionId}/tabs/${tab.id}/activate`, { method: "POST" });
                 fetchTabs(state.sessionId);
                 fetchScreenshot(state.sessionId);
               }}
