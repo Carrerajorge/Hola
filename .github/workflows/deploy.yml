@@ -59,7 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in $(seq 1 360); do
-            ci_line="$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow "CI" --branch "${BRANCH}" --json headSha,status,conclusion --limit 50 --jq "([ .[] | select(.headSha==\"${SHA}\") ][0]) as \$r | if \$r==null then \"__notfound__\" else \"\($r.status) \($r.conclusion // \"\")\" end" 2>/dev/null || echo '__queryfail__')"
+            ci_line="$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow "CI" --branch "${BRANCH}" --json headSha,status,conclusion --limit 50 --jq "[ .[] | select(.headSha==\"${SHA}\") | ((.status // \"\") + \" \" + (.conclusion // \"\")) ][0] // \"__notfound__\"" 2>/dev/null || echo '__queryfail__')"
 
             status="$(echo "${ci_line}" | awk '{print $1}')"
             conclusion="$(echo "${ci_line}" | awk '{print $2}')"
