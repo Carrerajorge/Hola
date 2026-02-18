@@ -118,3 +118,6 @@ rollback-bluegreen.sh
 vps-bootstrap-bluegreen.sh
 
 audit.json
+
+# local secrets
+monitoring/alertmanager/secrets/

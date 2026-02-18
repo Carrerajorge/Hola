@@ -1,0 +1,19 @@
+
+{
+
+  "name": "whatsapp-bridge",
+
+  "private": true,
+
+  "type": "module",
+
+  "dependencies": {
+
+    "@whiskeysockets/baileys": "^7.0.0-rc.9",
+
+    "express": "^4.21.2"
+
+  }
+
+}
+

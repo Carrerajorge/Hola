@@ -245,6 +245,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./monitoring/alertmanager/secrets/alertmanager_webhook_token:/etc/alertmanager/secrets/alertmanager_webhook_token:ro
       - alertmanager_data:/alertmanager
     networks:
       - hola-net
@@ -267,6 +268,25 @@ services:
     depends_on:
       - node-exporter
       - alertmanager
+
+  whatsapp-bridge:
+    build:
+      context: ./hola-infra/whatsapp-bridge
+    container_name: hola-whatsapp-bridge
+    environment:
+      PORT: "9106"
+      WHATSAPP_TO: "51981996436@s.whatsapp.net"
+      ALERTMANAGER_WEBHOOK_TOKEN: ${ALERTMANAGER_WEBHOOK_TOKEN}
+      WHATSAPP_PAIRING_PHONE: "51981996436"
+    ports:
+      - "127.0.0.1:9106:9106"
+    env_file:
+      - .env.production
+    volumes:
+      - hola-whatsapp-bridge-auth:/app/auth
+    networks:
+      - hola-net
+    restart: unless-stopped
 
   grafana:
       image: grafana/grafana:11.2.0
@@ -341,3 +361,5 @@ volumes:
     name: hola_grafana_data
   influxdb_data:
     name: hola_influxdb_data
+  hola-whatsapp-bridge-auth:
+    name: hola_whatsapp_bridge_auth
