@@ -203,6 +203,18 @@ describe("chat stream isolation", () => {
     const { client, close } = await createHttpTestClient(app);
 
     try {
+      // Ensure the first stream holds the per-conversation lock long enough for the second request
+      // to observe it. Otherwise, the fast-path can complete before the race is exercised.
+      llmChatMock.mockImplementationOnce(async (messages: any[]) => {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        const last = messages[messages.length - 1];
+        return {
+          content: `stream:${String(last?.content || "")}`,
+          provider: "xai",
+          model: "grok-3-fast",
+        };
+      });
+
       const payload = {
         messages: [{ role: "user", content: "A" }],
         conversationId: "chat_lock_a",

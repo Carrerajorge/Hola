@@ -496,6 +496,7 @@ async function runCoverageWithRetry(env: NodeJS.ProcessEnv): Promise<GateCheckRe
       args: [
         "vitest",
         "run",
+        "--pool=forks",
         "--coverage",
         "--no-file-parallelism",
         "--maxWorkers=1",
@@ -514,6 +515,7 @@ async function runCoverageWithRetry(env: NodeJS.ProcessEnv): Promise<GateCheckRe
       args: [
         "vitest",
         "run",
+        "--pool=forks",
         "--coverage",
         "--no-file-parallelism",
         "--maxWorkers=1",

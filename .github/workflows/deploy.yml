@@ -72,17 +72,17 @@ jobs:
             fi
 
             ci_line="$(echo "${runs_json}" | python3 - <<'PY'
-import json, os, sys
+          import json, os, sys
 
-sha = os.environ.get("SHA", "")
-runs = json.load(sys.stdin)
-for r in runs:
-    if r.get("headSha") == sha:
-        status = r.get("status") or ""
-        conclusion = r.get("conclusion") or ""
-        print(f"{status} {conclusion}".strip())
-        sys.exit(0)
-print("__notfound__")
+          sha = os.environ.get("SHA", "")
+          runs = json.load(sys.stdin)
+          for r in runs:
+              if r.get("headSha") == sha:
+                  status = r.get("status") or ""
+                  conclusion = r.get("conclusion") or ""
+                  print(f"{status} {conclusion}".strip())
+                  sys.exit(0)
+          print("__notfound__")
 PY
             )"
 
