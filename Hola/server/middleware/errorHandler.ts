@@ -1,30 +1,40 @@
 import type { Request, Response, NextFunction, ErrorRequestHandler } from 'express';
 import { AppError, isOperationalError } from '../utils/errors';
 import { CircuitBreakerError } from '../utils/circuitBreaker';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('error-handler');
 
 interface ErrorResponse {
   error: {
     message: string;
     code: string;
+    traceId?: string;
     details?: Record<string, unknown>;
   };
 }
 
-function sanitizeErrorForProduction(error: AppError): ErrorResponse {
+function getTraceId(req: Request, res: Response): string | undefined {
+  return res.locals?.traceId || req.headers['x-trace-id'] as string | undefined;
+}
+
+function sanitizeErrorForProduction(error: AppError, traceId?: string): ErrorResponse {
   return {
     error: {
       message: error.message,
       code: error.code,
+      traceId,
       details: error.details,
     },
   };
 }
 
-function sanitizeUnknownErrorForProduction(): ErrorResponse {
+function sanitizeUnknownErrorForProduction(traceId?: string): ErrorResponse {
   return {
     error: {
       message: 'An unexpected error occurred',
       code: 'INTERNAL_ERROR',
+      traceId,
     },
   };
 }
@@ -46,21 +56,22 @@ function getFullErrorDetails(error: Error, req: Request): Record<string, unknown
   };
 }
 
-function logError(error: Error, req: Request, statusCode: number): void {
+function logError(error: Error, req: Request, res: Response, statusCode: number): void {
+  const traceId = getTraceId(req, res);
   const logContext = {
     statusCode,
     path: req.path,
     method: req.method,
     userId: (req as any).user?.id,
-    requestId: (req as any).requestId,
+    traceId,
     errorName: error.name,
     errorMessage: error.message,
   };
 
   if (statusCode >= 500) {
-    console.error('[ErrorHandler] Server error:', logContext, '\nStack:', error.stack);
+    logger.error('Server error', { ...logContext, stack: error.stack });
   } else if (statusCode >= 400) {
-    console.warn('[ErrorHandler] Client error:', logContext);
+    logger.warn('Client error', logContext);
   }
 }
 
@@ -71,15 +82,17 @@ export const errorHandler: ErrorRequestHandler = (
   _next: NextFunction
 ): void => {
   const isProduction = process.env.NODE_ENV === 'production';
+  const traceId = getTraceId(req, res);
 
   if (err instanceof CircuitBreakerError) {
     const statusCode = 503;
-    logError(err, req, statusCode);
-    
+    logError(err, req, res, statusCode);
+
     res.status(statusCode).json({
       error: {
         message: 'Service temporarily unavailable',
         code: 'SERVICE_UNAVAILABLE',
+        traceId,
         details: isProduction ? undefined : {
           state: err.state,
           nextAttemptAt: err.nextAttemptAt.toISOString(),
@@ -90,15 +103,16 @@ export const errorHandler: ErrorRequestHandler = (
   }
 
   if (err instanceof AppError) {
-    logError(err, req, err.statusCode);
-    
+    logError(err, req, res, err.statusCode);
+
     if (isProduction) {
-      res.status(err.statusCode).json(sanitizeErrorForProduction(err));
+      res.status(err.statusCode).json(sanitizeErrorForProduction(err, traceId));
     } else {
       res.status(err.statusCode).json({
         error: {
           message: err.message,
           code: err.code,
+          traceId,
           details: err.details,
           stack: err.stack,
         },
@@ -108,19 +122,20 @@ export const errorHandler: ErrorRequestHandler = (
   }
 
   const statusCode = (err as any).status || (err as any).statusCode || 500;
-  logError(err, req, statusCode);
+  logError(err, req, res, statusCode);
 
   if (!isOperationalError(err)) {
-    console.error('[ErrorHandler] Unhandled error:', getFullErrorDetails(err, req));
+    logger.error('Unhandled non-operational error', getFullErrorDetails(err, req));
   }
 
   if (isProduction) {
-    res.status(statusCode).json(sanitizeUnknownErrorForProduction());
+    res.status(statusCode).json(sanitizeUnknownErrorForProduction(traceId));
   } else {
     res.status(statusCode).json({
       error: {
         message: err.message || 'Internal Server Error',
         code: 'INTERNAL_ERROR',
+        traceId,
         stack: err.stack,
       },
     });
@@ -128,10 +143,12 @@ export const errorHandler: ErrorRequestHandler = (
 };
 
 export const notFoundHandler = (req: Request, res: Response): void => {
+  const traceId = getTraceId(req, res);
   res.status(404).json({
     error: {
       message: `Route ${req.method} ${req.path} not found`,
       code: 'NOT_FOUND',
+      traceId,
     },
   });
 };

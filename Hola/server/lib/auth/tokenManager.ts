@@ -17,9 +17,20 @@ export class TokenManager {
     private encryptionKey: Buffer;
 
     constructor() {
-        // Ensure key is 32 bytes for AES-256
-        const keyString = process.env.TOKEN_ENCRYPTION_KEY || 'default-secret-key-must-be-32-bytes-long!';
-        this.encryptionKey = crypto.scryptSync(keyString, 'salt', 32);
+        const keyString = process.env.TOKEN_ENCRYPTION_KEY;
+        if (!keyString || keyString.length < 32) {
+            const isProduction = process.env.NODE_ENV === 'production';
+            if (isProduction) {
+                throw new Error(
+                    'TOKEN_ENCRYPTION_KEY must be set (min 32 chars) in production. ' +
+                    'OAuth tokens cannot be encrypted without a proper key.'
+                );
+            }
+            Logger.warn('[TokenMgr] TOKEN_ENCRYPTION_KEY is missing or too short. Using dev-only fallback key. DO NOT use in production.');
+        }
+        // Derive a 32-byte AES-256 key. In production this MUST come from an explicit env var.
+        const effectiveKey = (keyString && keyString.length >= 32) ? keyString : 'dev-only-insecure-fallback-key!!';
+        this.encryptionKey = crypto.scryptSync(effectiveKey, 'salt', 32);
     }
 
     /**

@@ -129,7 +129,9 @@ import { createBrowserControlRouter } from "./routes/browserControlRouter";
 import { createTerminalControlRouter, terminalClients } from "./routes/terminalControlRouter";
 import { createWorkflowRouter } from "./routes/workflowRouter";
 import openClawRouter from "./routes/openClawRouter";
+import { createLogger } from "./utils/logger";
 
+const routesLogger = createLogger("routes");
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
 const fileStatusClients: Map<string, Set<WebSocket>> = new Map();
@@ -237,14 +239,14 @@ export async function registerRoutes(
                 });
                 return res.redirect("/login?mfa=1");
               } catch (e: any) {
-                console.warn("[Auth] Google callback MFA failed:", e?.message || e);
+                routesLogger.warn("Google callback MFA failed", { error: e?.message || e });
                 return res.redirect("/login?error=login_failed");
               }
             }
 
 	            return (req as any).logIn(user, (loginErr: any) => {
 	              if (loginErr) {
-	                console.error("[Auth] Google login error:", loginErr);
+	                routesLogger.error("Google login error", { error: loginErr?.message || loginErr });
 	                return res.redirect("/login?error=login_failed");
 	              }
 	
@@ -263,7 +265,7 @@ export async function registerRoutes(
 	              if (sess?.save) {
 	                sess.save((saveErr: any) => {
 	                  if (saveErr) {
-	                    console.error("[Auth] Google session save error:", saveErr);
+	                    routesLogger.error("Google session save error", { error: saveErr?.message || saveErr });
 	                    return res.redirect("/login?error=session_error");
 	                  }
 	                  res.redirect("/?auth=success");
@@ -315,14 +317,14 @@ export async function registerRoutes(
                 });
                 return res.redirect("/login?mfa=1");
               } catch (e: any) {
-                console.warn("[Auth] Microsoft callback MFA failed:", e?.message || e);
+                routesLogger.warn("Microsoft callback MFA failed", { error: e?.message || e });
                 return res.redirect("/login?error=login_failed");
               }
             }
 
 	            return (req as any).logIn(user, (loginErr: any) => {
 	              if (loginErr) {
-	                console.error("[Auth] Microsoft login error:", loginErr);
+	                routesLogger.error("Microsoft login error", { error: loginErr?.message || loginErr });
 	                return res.redirect("/login?error=login_failed");
 	              }
 	
@@ -341,7 +343,7 @@ export async function registerRoutes(
 	              if (sess?.save) {
 	                sess.save((saveErr: any) => {
 	                  if (saveErr) {
-	                    console.error("[Auth] Microsoft session save error:", saveErr);
+	                    routesLogger.error("Microsoft session save error", { error: saveErr?.message || saveErr });
 	                    return res.redirect("/login?error=session_error");
 	                  }
 	                  res.redirect("/?auth=success");
@@ -392,14 +394,14 @@ export async function registerRoutes(
                 });
                 return res.redirect("/login?mfa=1");
               } catch (e: any) {
-                console.warn("[Auth] Auth0 callback MFA failed:", e?.message || e);
+                routesLogger.warn("Auth0 callback MFA failed", { error: e?.message || e });
                 return res.redirect("/login?error=login_failed");
               }
             }
 
 	            return (req as any).logIn(user, (loginErr: any) => {
 	              if (loginErr) {
-	                console.error("[Auth] Auth0 login error:", loginErr);
+	                routesLogger.error("Auth0 login error", { error: loginErr?.message || loginErr });
 	                return res.redirect("/login?error=login_failed");
 	              }
 	
@@ -418,7 +420,7 @@ export async function registerRoutes(
 	              if (sess?.save) {
 	                sess.save((saveErr: any) => {
 	                  if (saveErr) {
-	                    console.error("[Auth] Auth0 session save error:", saveErr);
+	                    routesLogger.error("Auth0 session save error", { error: saveErr?.message || saveErr });
 	                    return res.redirect("/login?error=session_error");
 	                  }
 	                  res.redirect("/?auth=success");
@@ -733,27 +735,27 @@ export async function registerRoutes(
   initializeEventStore().catch(console.error);
 
   initializeRedisSSE().then(() => {
-    console.log("[RedisSSE] Initialized");
+    routesLogger.info("RedisSSE initialized");
   }).catch(err => {
-    console.warn("[RedisSSE] Not available (Redis may not be configured):", err.message);
+    routesLogger.warn("RedisSSE not available", { error: err.message });
   });
 
   initializeAgentSystem({ runSmokeTest: false }).then(result => {
-    console.log(`[AgentSystem] Initialized: ${result.toolCount} tools, ${result.agentCount} agents`);
+    routesLogger.info("Agent system initialized", { toolCount: result.toolCount, agentCount: result.agentCount });
   }).catch(err => {
-    console.error("[AgentSystem] Initialization failed:", err.message);
+    routesLogger.error("Agent system initialization failed", { error: err.message });
   });
 
   // Initialize SuperIntelligence System (includes all phases)
   initializeSuperIntelligence().then((status) => {
-    console.log(`[SuperIntelligence] System initialized - Health: ${status.stats.healthScore.toFixed(1)}%`);
+    routesLogger.info("SuperIntelligence system initialized", { healthScore: status.stats.healthScore.toFixed(1) });
   }).catch(err => {
-    console.error("[SuperIntelligence] System initialization failed:", err.message);
+    routesLogger.error("SuperIntelligence system initialization failed", { error: err.message });
     // Fall back to just audit system
     initializeAuditSystem().then(() => {
-      console.log("[SuperIntelligence] Audit System initialized (fallback)");
+      routesLogger.info("Audit system initialized (fallback)");
     }).catch(e => {
-      console.error("[SuperIntelligence] Audit System fallback failed:", e.message);
+      routesLogger.error("Audit system fallback failed", { error: e.message });
     });
   });
 
@@ -777,7 +779,7 @@ export async function registerRoutes(
         },
       });
     } catch (error: any) {
-      console.error("[Tools] Error:", error);
+      routesLogger.error("Tools error", { error: error?.message || error });
       res.status(500).json({
         success: false,
         error: error.message || "Failed to load tools",
@@ -801,7 +803,7 @@ export async function registerRoutes(
         agents,
       });
     } catch (error: any) {
-      console.error("[Agents] Error:", error);
+      routesLogger.error("Agents error", { error: error?.message || error });
       res.status(500).json({
         success: false,
         error: error.message || "Failed to load agents",
@@ -851,7 +853,7 @@ export async function registerRoutes(
         capabilities,
       });
     } catch (error: any) {
-      console.error("[SuperAgentCapabilities] Error:", error);
+      routesLogger.error("SuperAgentCapabilities error", { error: error?.message || error });
       res.status(500).json({
         success: false,
         error: error.message || "Failed to compute super agent coverage",
@@ -911,7 +913,7 @@ export async function registerRoutes(
         capabilities: capabilities.slice(0, limit),
       });
     } catch (error: any) {
-      console.error("[SuperAgentCapabilities1000] Error:", error);
+      routesLogger.error("SuperAgentCapabilities1000 error", { error: error?.message || error });
       res.status(500).json({
         success: false,
         error: error.message || "Failed to load OpenClaw1000 capabilities",
@@ -1032,7 +1034,7 @@ export async function registerRoutes(
       const result = await runAgent(input, { verbose, timeout });
       res.json(result);
     } catch (error: any) {
-      console.error("[PythonAgent] Run error:", error);
+      routesLogger.error("PythonAgent run error", { error: error?.message || error });
 
       if (error instanceof PythonAgentClientError) {
         const statusCode = error.statusCode || 500;
@@ -1059,7 +1061,7 @@ export async function registerRoutes(
         data: tools,
       });
     } catch (error: any) {
-      console.error("[PythonAgent] Tools error:", error);
+      routesLogger.error("PythonAgent tools error", { error: error?.message || error });
 
       if (error instanceof PythonAgentClientError) {
         const statusCode = error.statusCode || 500;
@@ -1085,7 +1087,7 @@ export async function registerRoutes(
         data: health,
       });
     } catch (error: any) {
-      console.error("[PythonAgent] Health check error:", error);
+      routesLogger.error("PythonAgent health check error", { error: error?.message || error });
 
       res.status(503).json({
         success: false,
@@ -1198,7 +1200,7 @@ export async function registerRoutes(
         .map((m: any) => toPublicModelSummary(m));
       res.json({ models });
     } catch (error: any) {
-      console.error("[Models] Error fetching available models:", error);
+      routesLogger.error("Error fetching available models", { error: error?.message || error });
       // Defensive fallback for production when DB schema is temporarily behind code.
       // Keep app shell functional (especially after logout) instead of surfacing 500.
       res.json({ models: PUBLIC_MODEL_FALLBACKS });
@@ -1224,7 +1226,7 @@ export async function registerRoutes(
         },
       });
     } catch (error: any) {
-      console.error("[QualityStats] Error getting stats:", error);
+      routesLogger.error("Error getting quality stats", { error: error?.message || error });
       res.status(500).json({
         success: false,
         error: error.message || "Failed to get quality stats"
@@ -1243,7 +1245,7 @@ export async function registerRoutes(
         data: config,
       });
     } catch (error: any) {
-      console.error("[ContentFilter] Error getting config:", error);
+      routesLogger.error("Error getting content filter config", { error: error?.message || error });
       res.status(500).json({
         success: false,
         error: error.message || "Failed to get filter config"
@@ -1287,7 +1289,7 @@ export async function registerRoutes(
         data: newConfig,
       });
     } catch (error: any) {
-      console.error("[ContentFilter] Error updating config:", error);
+      routesLogger.error("Error updating content filter config", { error: error?.message || error });
       res.status(500).json({
         success: false,
         error: error.message || "Failed to update filter config"
@@ -1353,7 +1355,7 @@ export async function registerRoutes(
         },
       });
     } catch (error: any) {
-      console.error("[Observability] Error getting logs:", error);
+      routesLogger.error("Error getting observability logs", { error: error?.message || error });
       res.status(500).json({
         success: false,
         error: error.message || "Failed to get logs",
@@ -1375,7 +1377,7 @@ export async function registerRoutes(
         },
       });
     } catch (error: any) {
-      console.error("[Observability] Error getting health:", error);
+      routesLogger.error("Error getting observability health", { error: error?.message || error });
       res.status(500).json({
         success: false,
         error: error.message || "Failed to get health status",
@@ -1407,7 +1409,7 @@ export async function registerRoutes(
 
       res.json(response);
     } catch (error: any) {
-      console.error("[Observability] Error getting alerts:", error);
+      routesLogger.error("Error getting observability alerts", { error: error?.message || error });
       res.status(500).json({
         success: false,
         error: error.message || "Failed to get alerts",
@@ -1433,7 +1435,7 @@ export async function registerRoutes(
         data: alert,
       });
     } catch (error: any) {
-      console.error("[Observability] Error resolving alert:", error);
+      routesLogger.error("Error resolving observability alert", { error: error?.message || error });
       res.status(500).json({
         success: false,
         error: error.message || "Failed to resolve alert",
@@ -1459,7 +1461,7 @@ export async function registerRoutes(
         },
       });
     } catch (error: any) {
-      console.error("[Observability] Error getting stats:", error);
+      routesLogger.error("Error getting observability stats", { error: error?.message || error });
       res.status(500).json({
         success: false,
         error: error.message || "Failed to get stats",
@@ -1483,7 +1485,7 @@ export async function registerRoutes(
         },
       });
     } catch (error: any) {
-      console.error("[Connectors] Error getting stats:", error);
+      routesLogger.error("Error getting connector stats", { error: error?.message || error });
       res.status(500).json({
         success: false,
         error: error.message || "Failed to get connector stats",
@@ -1514,7 +1516,7 @@ export async function registerRoutes(
         },
       });
     } catch (error: any) {
-      console.error("[Connectors] Error getting connector stats:", error);
+      routesLogger.error("Error getting individual connector stats", { error: error?.message || error });
       res.status(500).json({
         success: false,
         error: error.message || "Failed to get connector stats",
@@ -1550,7 +1552,7 @@ export async function registerRoutes(
         message: `Stats reset for connector: ${name}`,
       });
     } catch (error: any) {
-      console.error("[Connectors] Error resetting stats:", error);
+      routesLogger.error("Error resetting connector stats", { error: error?.message || error });
       res.status(500).json({
         success: false,
         error: error.message || "Failed to reset connector stats",
@@ -1580,7 +1582,7 @@ export async function registerRoutes(
           agentClients.get(data.runId)!.add(ws);
         }
       } catch (e) {
-        console.error("WS message parse error:", e);
+        routesLogger.error("WebSocket message parse error", { error: e?.message || e });
       }
     });
 
@@ -1637,7 +1639,7 @@ export async function registerRoutes(
           }
         }
       } catch (e) {
-        console.error("File status WS message parse error:", e);
+        routesLogger.error("File status WebSocket message parse error", { error: e?.message || e });
       }
     });
 
@@ -1699,9 +1701,9 @@ export async function registerRoutes(
       await storage.updateFileCompleted(job.fileId);
       await storage.updateFileJobStatus(job.fileId, "completed");
 
-      console.log(`[FileQueue] File ${job.fileId} processed: ${chunks.length} chunks created`);
+      routesLogger.info("File processed", { fileId: job.fileId, chunksCreated: chunks.length });
     } catch (error: any) {
-      console.error(`[FileQueue] Error processing file ${job.fileId}:`, error);
+      routesLogger.error("Error processing file", { fileId: job.fileId, error: error?.message || error });
       await storage.updateFileError(job.fileId, error.message || "Unknown error");
       await storage.updateFileJobStatus(job.fileId, "failed", error.message);
       throw error;
@@ -1738,7 +1740,7 @@ export async function registerRoutes(
           }
         }
       } catch (e) {
-        console.error("Browser WS message parse error:", e);
+        routesLogger.error("Browser WebSocket message parse error", { error: e?.message || e });
       }
     });
 
@@ -1781,7 +1783,7 @@ export async function registerRoutes(
           }));
         }
       } catch (e) {
-        console.error("Terminal WS message parse error:", e);
+        routesLogger.error("Terminal WebSocket message parse error", { error: e?.message || e });
       }
     });
 
