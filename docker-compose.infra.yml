@@ -1,6 +1,4 @@
-# ═══════════════════════════════════════════════════════════
-#  Shared Infrastructure (hardened v2) — always running,
-#  independent of blue/green application slots.
+# ═══════════════════════════════════════════════════════════ Shared Infrastructure (hardened v2) — always running, independent of blue/green application slots.
 #
 #  Usage: docker compose -p hola-infra -f docker-compose.infra.yml up -d
 # ═══════════════════════════════════════════════════════════
@@ -221,6 +219,108 @@ services:
       com.iliagpt.component: "ocr"
       com.iliagpt.tier: "infrastructure"
 
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: hola-node-exporter
+    hostname: hola-node-exporter
+    restart: unless-stopped
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks:
+      - hola-net
+    ports:
+      - "9100:9100"
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: hola-alertmanager
+    hostname: hola-alertmanager
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    networks:
+      - hola-net
+    ports:
+      - "9093:9093"
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: hola-prometheus
+    hostname: hola-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - hola-net
+    ports:
+      - "9095:9090"
+    depends_on:
+      - node-exporter
+      - alertmanager
+
+  grafana:
+      image: grafana/grafana:11.2.0
+      container_name: hola-grafana
+      hostname: hola-grafana
+      restart: unless-stopped
+      environment:
+        GF_SECURITY_ADMIN_USER: admin
+        GF_SECURITY_ADMIN_PASSWORD: admin
+        GF_USERS_ALLOW_SIGN_UP: "false"
+        GF_SECURITY_ALLOW_EMBEDDING: "true"
+        GF_SERVER_ROOT_URL: "https://iliagpt.com/grafana/"
+        GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      volumes:
+        - grafana_data:/var/lib/grafana
+      networks:
+        - hola-net
+      ports:
+        - "3001:3000"
+      depends_on:
+        - prometheus
+
+
+  influxdb:
+    image: influxdb:2.7
+    container_name: hola-influxdb
+    hostname: hola-influxdb
+    restart: unless-stopped
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    networks:
+      - hola-net
+    ports:
+      - "8087:8086"
+
+  metrics-agent:
+    build:
+      context: ./monitoring/metrics-agent
+    container_name: hola-metrics-agent
+    hostname: hola-metrics-agent
+    restart: unless-stopped
+    environment:
+      POLL_SECONDS: "5"
+      INFLUX_URL: http://influxdb:8086
+      INFLUX_ORG: iliagpt
+      INFLUX_BUCKET: system_metrics
+      INFLUX_TOKEN: ${INFLUX_TOKEN:-}
+    networks:
+      - hola-net
+    ports:
+      - "9105:9105"
+    depends_on:
+      - influxdb
+
 networks:
   hola-net:
     name: hola-net
@@ -233,3 +333,11 @@ volumes:
     name: hola_redis_data
   ocr_models:
     name: hola_ocr_models
+  prometheus_data:
+    name: hola_prometheus_data
+  alertmanager_data:
+    name: hola_alertmanager_data
+  grafana_data:
+    name: hola_grafana_data
+  influxdb_data:
+    name: hola_influxdb_data
