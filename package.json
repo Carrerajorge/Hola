@@ -16,7 +16,7 @@
     "db:migrate:prod": "node dist/migrate.cjs",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage --maxWorkers=1 --coverage.reportsDirectory=coverage --coverage.provider=v8",
+    "test:coverage": "vitest run --coverage --maxWorkers=1 --no-file-parallelism --coverage.reportsDirectory=coverage --coverage.provider=v8",
     "test:agentic": "vitest run tests/agentic",
     "test:agentic:integration": "bash ./scripts/test-agentic-integration.sh",
     "test:client": "vitest run --config vitest.client.config.ts",

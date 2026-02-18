@@ -40,7 +40,7 @@ const COVERAGE_BASE_DIR = path.join(process.cwd(), "coverage");
 const COVERAGE_SUMMARY_PATH = path.join(COVERAGE_BASE_DIR, "coverage-summary.json");
 const COVERAGE_FINAL_PATH = path.join(COVERAGE_BASE_DIR, "coverage-final.json");
 const COVERAGE_TEMP_DIR = path.join(COVERAGE_BASE_DIR, ".tmp");
-const COVERAGE_MAX_RETRIES = 3;
+const COVERAGE_MAX_RETRIES = 4;
 const COVERAGE_ERROR_OUTPUT_LIMIT = 20_000;
 
 const DEFAULT_THRESHOLDS: ThresholdConfig = {
@@ -232,6 +232,15 @@ function cleanupCoverageArtifacts(): void {
   }
 }
 
+function prepareCoverageEnvironment(): void {
+  try {
+    fs.mkdirSync(COVERAGE_BASE_DIR, { recursive: true });
+    fs.mkdirSync(COVERAGE_TEMP_DIR, { recursive: true });
+  } catch (error) {
+    console.warn("[quality-gate] failed to pre-create coverage directories:", error);
+  }
+}
+
 async function runCoverageWithRetry(env: NodeJS.ProcessEnv): Promise<GateCheckResult> {
   const coverageCommands: Array<{
     name: string;
@@ -242,11 +251,6 @@ async function runCoverageWithRetry(env: NodeJS.ProcessEnv): Promise<GateCheckRe
       name: "Unit tests + coverage (npm script)",
       command: "npm",
       args: ["run", "test:coverage"],
-    },
-    {
-      name: "Unit tests + coverage (npm script, serialized files)",
-      command: "npm",
-      args: ["run", "test:coverage", "--", "--no-file-parallelism"],
     },
     {
       name: "Unit tests + coverage (vitest direct fallback)",
@@ -284,7 +288,9 @@ async function runCoverageWithRetry(env: NodeJS.ProcessEnv): Promise<GateCheckRe
     },
   ];
 
+  const attemptLimit = Math.min(COVERAGE_MAX_RETRIES, coverageCommands.length);
   cleanupCoverageArtifacts();
+  prepareCoverageEnvironment();
 
   let lastResult: GateCheckResult = runCommand(
     "coverage-initialization",
@@ -297,15 +303,16 @@ async function runCoverageWithRetry(env: NodeJS.ProcessEnv): Promise<GateCheckRe
     return lastResult;
   }
 
-  for (let attempt = 0; attempt < coverageCommands.length; attempt += 1) {
+  for (let attempt = 0; attempt < attemptLimit; attempt += 1) {
     const candidate = coverageCommands[attempt];
     if (attempt > 0) {
       cleanupCoverageArtifacts();
+      prepareCoverageEnvironment();
       await sleep(COVERAGE_HEURISTIC_POLL_MS * attempt);
     }
 
     const result = runCommand(
-      `${candidate.name} (attempt ${attempt + 1}/${coverageCommands.length})`,
+      `${candidate.name} (attempt ${attempt + 1}/${attemptLimit})`,
       candidate.command,
       candidate.args,
       true,
@@ -321,10 +328,10 @@ async function runCoverageWithRetry(env: NodeJS.ProcessEnv): Promise<GateCheckRe
       break;
     }
 
-    if (attempt + 1 < coverageCommands.length) {
+    if (attempt + 1 < attemptLimit) {
       console.warn(
         `[quality-gate] recoverable coverage failure detected on ${candidate.name}; ` +
-          `switching strategy and retrying (${attempt + 1}/${COVERAGE_MAX_RETRIES})`,
+          `switching strategy and retrying (${attempt + 1}/${attemptLimit})`,
       );
     }
   }

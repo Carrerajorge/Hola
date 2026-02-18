@@ -160,8 +160,10 @@ jobs:
             exit 1
           fi
 
+          VPS_HOST="${VPS_HOST:-${VPS_DEFAULT_HOST}}"
           if [ -z "${VPS_HOST}" ]; then
-            echo "::warning::VPS_HOST not set. Fallback to ${VPS_DEFAULT_HOST}."
+            echo "::error::VPS_HOST is required."
+            exit 1
           fi
           if ! printf '%s' "${VPS_HOST}" | grep -Eq '^[A-Za-z0-9._-]+$'; then
             echo "::error::VPS_HOST contains invalid characters: ${VPS_HOST}"
@@ -486,6 +488,7 @@ jobs:
           VPS_USER: ${{ env.VPS_USER }}
           DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_DEFAULT_HOST: "69.62.98.126"
         run: |
           set -euo pipefail
           if [ -z "${VPS_SSH_KEY}" ]; then
@@ -500,6 +503,7 @@ jobs:
             echo "::error::VPS_PORT out of range: ${VPS_PORT}"
             exit 1
           fi
+          VPS_HOST="${VPS_HOST:-${VPS_DEFAULT_HOST}}"
           if [ -z "${VPS_HOST}" ]; then
             echo "::error::VPS_HOST is required."
             exit 1
