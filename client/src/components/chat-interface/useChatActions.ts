@@ -42,6 +42,13 @@ export function useChatActions({
     const { toast } = useToast();
     const abortControllerRef = useRef<AbortController | null>(null);
     const isProcessingRef = useRef(false);
+    const setAiStateForChat = useCallback(
+      (value: React.SetStateAction<'idle' | 'thinking' | 'responding' | 'error'>, conversationId?: string | null) => {
+        if (conversationId && conversationId !== chatId) return;
+        setAiState(value);
+      },
+      [chatId, setAiState]
+    );
 
     const sendMessage = useCallback(async (content: string, attachments?: File[]) => {
         if (!content.trim() && (!attachments || attachments.length === 0)) return;
@@ -60,7 +67,7 @@ export function useChatActions({
         };
 
         setMessages(prev => [...prev, userMessage]);
-        setAiState('thinking');
+        setAiStateForChat('thinking', chatId);
         setUiPhase('thinking');
         setStreamingContent('');
 
@@ -94,7 +101,7 @@ export function useChatActions({
             const decoder = new TextDecoder();
             let fullContent = '';
 
-            setAiState('responding');
+            setAiStateForChat('responding', chatId);
             setUiPhase('console');
 
             while (true) {
@@ -128,7 +135,7 @@ export function useChatActions({
             };
 
             setMessages(prev => [...prev, assistantMessage]);
-            setAiState('idle');
+            setAiStateForChat('idle', chatId);
             setUiPhase('done');
             setStreamingContent('');
 
@@ -137,14 +144,14 @@ export function useChatActions({
                 toast({ title: 'Cancelled', description: 'Request was cancelled' });
             } else {
                 toast({ title: 'Error', description: error.message, variant: 'destructive' });
-                setAiState('error');
+                setAiStateForChat('error', chatId);
             }
         } finally {
             isProcessingRef.current = false;
             abortControllerRef.current = null;
             setUiPhase('idle');
         }
-    }, [chatId, messages, setMessages, setAiState, setStreamingContent, setUiPhase, selectedDocTool, projectId, gptConfig, toast]);
+    }, [chatId, messages, setMessages, setAiStateForChat, setStreamingContent, setUiPhase, selectedDocTool, projectId, gptConfig, toast]);
 
     const editMessage = useCallback(async (messageId: string, newContent: string) => {
         setMessages(prev =>
@@ -175,9 +182,9 @@ export function useChatActions({
     const cancelRequest = useCallback(() => {
         abortControllerRef.current?.abort();
         isProcessingRef.current = false;
-        setAiState('idle');
+        setAiStateForChat('idle', chatId);
         setUiPhase('idle');
-    }, [setAiState, setUiPhase]);
+    }, [chatId, setAiStateForChat, setUiPhase]);
 
     return {
         sendMessage,
