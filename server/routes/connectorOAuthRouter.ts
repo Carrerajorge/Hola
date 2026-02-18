@@ -80,6 +80,11 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
       const state = randomBytes(32).toString("hex");
       const redirectUri = `${getBaseUrl()}/api/connectors/oauth/${connectorId}/callback`;
 
+      // Always store state in the session as a fallback (sessions are persisted in DB in this app).
+      if ((req as any).session) {
+        (req as any).session.oauthState = { state, userId, connectorId, returnUrl };
+      }
+
       // Store state in DB (oauthStates table)
       try {
         const { db } = await import("../db");
@@ -90,14 +95,9 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
           returnUrl,
           provider: connectorId,
           expiresAt: new Date(Date.now() + STATE_EXPIRY_MS),
-          // Store userId in metadata
-          metadata: JSON.stringify({ userId }),
         } as any);
       } catch {
-        // Fallback: If oauthStates table doesn't exist, use session
-        if ((req as any).session) {
-          (req as any).session.oauthState = { state, userId, connectorId, returnUrl };
-        }
+        // oauth_states table might not exist yet — session fallback above is enough.
       }
 
       // Build authorization URL
@@ -132,6 +132,7 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
       }
 
       // Validate state (and recover returnUrl)
+      let stateValid = false;
       try {
         const { db } = await import("../db");
         const { oauthStates } = await import("../../shared/schema/auth");
@@ -143,27 +144,35 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
           .where(eq(oauthStates.state, String(state)))
           .limit(1);
 
-        if (!stateRecord || new Date() > new Date(stateRecord.expiresAt)) {
-          return res.redirect(buildReturnRedirect(returnUrl, { error: "invalid_state", connector: connectorId }));
+        if (stateRecord && new Date() <= new Date(stateRecord.expiresAt)) {
+          stateValid = true;
+          returnUrl = sanitizeReturnUrl((stateRecord as any).returnUrl);
+          // Delete used state
+          await db.delete(oauthStates).where(eq(oauthStates.state, String(state)));
         }
-
-        // Extract userId from metadata
-        const metadata = typeof stateRecord.metadata === "string"
-          ? JSON.parse(stateRecord.metadata)
-          : stateRecord.metadata;
-        userId = metadata?.userId;
-        returnUrl = sanitizeReturnUrl((stateRecord as any).returnUrl);
-
-        // Delete used state
-        await db.delete(oauthStates).where(eq(oauthStates.state, String(state)));
       } catch {
-        // Fallback: check session
+        // ignore and fall back to session below
+      }
+
+      // Fallback: check session if DB state is missing/expired or table doesn't exist.
+      if (!stateValid) {
         const sessionState = (req as any).session?.oauthState;
         if (sessionState?.state === String(state)) {
+          stateValid = true;
           userId = sessionState.userId;
           returnUrl = sanitizeReturnUrl(sessionState.returnUrl);
           delete (req as any).session.oauthState;
         }
+      } else {
+        // Best-effort: clear matching session state to avoid stale replays.
+        const sessionState = (req as any).session?.oauthState;
+        if (sessionState?.state === String(state)) {
+          delete (req as any).session.oauthState;
+        }
+      }
+
+      if (!stateValid) {
+        return res.redirect(buildReturnRedirect(returnUrl, { error: "invalid_state", connector: connectorId }));
       }
 
       if (oauthError) {
