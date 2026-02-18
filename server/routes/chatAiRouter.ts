@@ -3127,8 +3127,22 @@ ${attachmentContext}`;
       const errorRunId = claimedRun?.id || requestId;
       const errorTimings = reportTimings("error");
       if (!isConnectionClosed) {
+        // Sanitize error messages for the client — avoid leaking raw API error codes
+        // that confuse users (e.g., "HTTP 400", "RESOURCE_EXHAUSTED").
+        const rawMsg = String(error.message || "Unknown error");
+        const userFriendlyError = /api key|auth|401|403/i.test(rawMsg)
+          ? "El servicio de IA no está disponible temporalmente. Por favor intenta de nuevo."
+          : /rate limit|429|resource_exhausted|quota/i.test(rawMsg)
+            ? "Demasiadas solicitudes. Por favor espera unos segundos e intenta de nuevo."
+            : /timeout|timed out|idle/i.test(rawMsg)
+              ? "La respuesta tardó demasiado. Por favor intenta de nuevo."
+              : /400|bad request|invalid|content filter|safety/i.test(rawMsg)
+                ? "No se pudo generar una respuesta. Intenta reformular tu mensaje."
+                : /circuit breaker|all providers failed/i.test(rawMsg)
+                  ? "Todos los modelos de IA están temporalmente no disponibles. Intenta de nuevo en unos segundos."
+                  : rawMsg;
         writeSse(res, 'error', {
-          error: error.message,
+          error: userFriendlyError,
           requestId,
           runId: errorRunId,
           traceId: requestId,

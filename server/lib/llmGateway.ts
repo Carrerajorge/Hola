@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import type { ChatCompletionMessageParam, ChatCompletionChunk } from "openai/resources/chat/completions";
 import Anthropic from "@anthropic-ai/sdk";
 import { MODELS } from "./openai";
-import { geminiChat, geminiStreamChat, GEMINI_MODELS, type GeminiChatMessage } from "./gemini";
+import { geminiChat, geminiStreamChat, GEMINI_MODELS, type GeminiChatMessage, classifyGeminiError } from "./gemini";
 import {
   KNOWN_XAI_MODEL_IDS,
   KNOWN_GEMINI_MODEL_IDS,
@@ -241,6 +241,43 @@ class LLMGateway {
       setInterval(() => this.cleanupInFlightRequests(), 30000),
       setInterval(() => this.cleanupStreamCheckpoints(), 60000),
     );
+
+    // Proactive health check: run every 5 minutes to detect provider issues early.
+    // If a provider goes down, the circuit breaker opens BEFORE users hit errors.
+    this.cleanupIntervals.push(
+      setInterval(() => this.proactiveHealthCheck(), 300_000),
+    );
+
+    // Run initial health check after a short delay (let the app finish booting).
+    setTimeout(() => this.proactiveHealthCheck(), 15_000);
+  }
+
+  /**
+   * Lightweight proactive health check that pings each configured provider
+   * and opens/closes circuit breakers based on results.
+   * This runs in the background so users don't hit cold-start errors.
+   */
+  private async proactiveHealthCheck(): Promise<void> {
+    const configured = this.getConfiguredProvidersInOrder();
+    if (configured.length === 0) return;
+
+    console.log(`[LLMGateway] Proactive health check: testing ${configured.length} providers...`);
+
+    const results = await this.healthCheck();
+    for (const provider of configured) {
+      const result = results[provider];
+      const breaker = getCircuitBreaker("system", provider);
+
+      if (result.available) {
+        // If the provider is healthy but the circuit was OPEN, reset it.
+        if (breaker.getState() === CircuitState.OPEN) {
+          console.log(`[LLMGateway] Provider ${provider} recovered — resetting circuit breaker.`);
+          breaker.reset();
+        }
+      } else {
+        console.warn(`[LLMGateway] Proactive health check: ${provider} unavailable — ${result.error || "unknown"}`);
+      }
+    }
   }
 
   /**
@@ -651,19 +688,39 @@ class LLMGateway {
     // Auto-detect provider based on model name.
     const detectedProvider = detectProviderFromModel(options.model);
     if (detectedProvider && this.isProviderConfigured(detectedProvider)) {
-      return detectedProvider;
-    }
-
-    // Pick the first configured provider whose circuit is not OPEN.
-    for (const provider of this.getConfiguredProvidersInOrder()) {
-      const breaker = getCircuitBreaker("system", provider);
+      // Even if the model maps to a specific provider, if that provider's circuit
+      // is OPEN, prefer a healthy fallback provider for better UX.
+      const breaker = getCircuitBreaker("system", detectedProvider);
       if (breaker.getState() !== CircuitState.OPEN) {
-        return provider;
+        return detectedProvider;
       }
+      console.warn(`[LLMGateway] Detected provider ${detectedProvider} has OPEN circuit; trying healthy alternative.`);
     }
 
-    // If all circuits are OPEN, fall back to the first configured provider (if any).
-    return this.getConfiguredProvidersInOrder()[0] || "gemini";
+    // Pick the first configured provider whose circuit is not OPEN and has the
+    // lowest recent failure rate for better resilience.
+    const configured = this.getConfiguredProvidersInOrder();
+    const healthyProviders = configured.filter(p => {
+      const breaker = getCircuitBreaker("system", p);
+      return breaker.getState() !== CircuitState.OPEN;
+    });
+
+    if (healthyProviders.length > 0) {
+      // Sort by failure count (ascending) — prefer providers with fewer recent failures
+      healthyProviders.sort((a, b) => {
+        return (this.metrics.byProvider[a]?.failures || 0) - (this.metrics.byProvider[b]?.failures || 0);
+      });
+      return healthyProviders[0];
+    }
+
+    // If all circuits are OPEN, reset them and try the first one (self-healing).
+    // This prevents a situation where all providers are permanently blocked.
+    console.warn("[LLMGateway] All provider circuits are OPEN — resetting circuits for self-healing.");
+    for (const provider of configured) {
+      getCircuitBreaker("system", provider).reset();
+    }
+
+    return configured[0] || "gemini";
   }
 
   // ===== Token Usage Tracking =====
@@ -871,20 +928,32 @@ class LLMGateway {
         // xai / openai / deepseek
         return await this.executeOpenAICompatible(provider, messages, options, model, startTime);
       } catch (error: any) {
-        const isRetryable =
-          error.status === 429 ||
-          error.status === 500 ||
-          error.status === 502 ||
-          error.status === 503 ||
-          error.code === "ECONNRESET" ||
-          error.code === "ETIMEDOUT";
+        // For Gemini, use the specialized error classifier which understands
+        // Gemini-specific 400 errors (rate limits disguised as 400, content filtering, etc.)
+        const isRetryable = (() => {
+          if (provider === "gemini") {
+            const classified = classifyGeminiError(error);
+            return classified.retryable || classified.switchModel;
+          }
+          // For other providers, 400 is also retryable once (APIs sometimes return transient 400s)
+          return error.status === 400 ||
+            error.status === 429 ||
+            error.status === 500 ||
+            error.status === 502 ||
+            error.status === 503 ||
+            error.code === "ECONNRESET" ||
+            error.code === "ETIMEDOUT" ||
+            error.code === "ENOTFOUND" ||
+            error.code === "ECONNREFUSED" ||
+            /fetch failed|network|socket/i.test(String(error.message || ""));
+        })();
 
         if (!isRetryable || attempt >= RETRY_CONFIG.maxRetries) {
           throw error;
         }
 
         const delay = this.calculateRetryDelay(attempt);
-        console.warn(`[LLMGateway] ${options.requestId} ${provider} attempt ${attempt + 1} failed, retrying in ${delay}ms`);
+        console.warn(`[LLMGateway] ${options.requestId} ${provider} attempt ${attempt + 1} failed (status=${error.status || "?"}), retrying in ${delay}ms`);
         await this.sleep(delay);
       }
     }
