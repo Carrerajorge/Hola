@@ -5366,7 +5366,7 @@ IMPORTANTE:
             setAiStateForChat("responding", effectiveStreamChatId);
 
             // Update steps: mark processing done, searching active
-            setAiProcessStepsForChat((prev: any[]) => prev.map((s: any, i: number) =>
+            setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => {
               // Guard against undefined step or s
               if (!s || !s.step) return s;
 
@@ -5374,7 +5374,7 @@ IMPORTANTE:
               if (s.step.includes("Procesando")) return { ...s, status: "done" };
               if (s.step.includes("Buscando")) return { ...s, status: "active" };
               return s;
-            ), effectiveStreamChatId);
+            }), effectiveStreamChatId);
 
             let fullContent = "";
             let sseError: Error | null = null;
@@ -5792,7 +5792,7 @@ IMPORTANTE:
             });
 
             // Update steps: mark processing done, searching active
-            setAiProcessStepsForChat((prev: any[]) => prev.map((s: any, i: number) =>
+            setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => {
               if (!s || !s.step) return s;
               if (s.step.includes("Analizando")) return { ...s, status: "done" };
               if (s.step.includes("Procesando")) return { ...s, status: "done" };

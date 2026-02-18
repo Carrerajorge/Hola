@@ -366,6 +366,7 @@ jobs:
           - "Hola_wt_download_ui"
           - "Hola_wt_github"
           - "Hola_wt_pr"
+          - "hola-infra/whatsapp-bridge"
           - "iliagpt_skills_push"
           - "iliagpt_skills_push/apps/mobile"
           - "Hola_wt_github/apps/mobile"
@@ -387,6 +388,10 @@ jobs:
           target="${{ matrix.workspace }}"
           if [ ! -f "${target}/package.json" ]; then
             echo "Skip: ${target}/package.json not present."
+            exit 0
+          fi
+          if [ ! -f "${target}/package-lock.json" ] && [ ! -f "${target}/npm-shrinkwrap.json" ] && [ ! -f "${target}/pnpm-lock.yaml" ] && [ ! -f "${target}/bun.lockb" ]; then
+            echo "Skip: ${target} has no lockfile (package-lock.json/pnpm-lock.yaml/npm-shrinkwrap.json/bun.lockb)."
             exit 0
           fi
 
@@ -416,7 +421,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          python -m pip install --disable-pip-version-check bandit pip-audit
+          python -m pip install --disable-pip-version-check --progress-bar off bandit pip-audit
 
       - name: Bandit scan (medium+ findings)
         run: |
@@ -427,7 +432,13 @@ jobs:
             --format json \
             --output reports/security/bandit-report.json \
             --exit-zero
-          if jq -e '.results | length > 0' reports/security/bandit-report.json >/dev/null; then
+          bandit_findings=0
+          if command -v jq >/dev/null 2>&1; then
+            bandit_findings="$(jq '.results | length' reports/security/bandit-report.json)"
+          else
+            bandit_findings="$(python3 -c 'import json; data = json.load(open("reports/security/bandit-report.json", "r", encoding="utf-8")); print(len(data.get("results", []) or []))')"
+          fi
+          if [ "$bandit_findings" -gt 0 ]; then
             echo "::error::Bandit found medium/high Python security findings."
             cat reports/security/bandit-report.json
             exit 1
@@ -445,10 +456,34 @@ jobs:
             ocr_service/dev-requirements.txt \
             ocr_service/requirements-dev.txt \
             fastapi_sse/requirements.txt \
-            python_agent_tools/requirements.txt; do
+            python_agent_tools/requirements.txt \
+            monitoring/metrics-agent/requirements.txt \
+            Hola/fastapi_sse/requirements.txt \
+            Hola_wt_ci_fix/fastapi_sse/requirements.txt \
+            Hola_wt_download_ui/fastapi_sse/requirements.txt \
+            Hola_wt_github/fastapi_sse/requirements.txt \
+            Hola_wt_pr/fastapi_sse/requirements.txt \
+            Hola_wt_super_agent_100/fastapi_sse/requirements.txt \
+            iliagpt_skills_push/fastapi_sse/requirements.txt; do
             if [ -f "$req" ]; then
               safe_name="$(printf '%s' "$req" | tr '/' '_')"
-              if ! python -m pip_audit -r "$req" --format json > "reports/security/pip-audit-${safe_name}.json"; then
+              report_path="reports/security/pip-audit-${safe_name}.json"
+              if ! python -m pip_audit -r "$req" --format json > "$report_path"; then
+                echo "::warning::pip-audit execution failed for ${req}. Continuing to collect remaining manifests."
+                echo "See ${report_path} for diagnostics if generated."
+                scan_failed=1
+                continue
+              fi
+
+              if command -v jq >/dev/null 2>&1; then
+                finding_count="$(jq '.vulnerabilities | length // 0' "$report_path")"
+              else
+                finding_count="$(python3 -c 'import json,sys; data = json.load(open(sys.argv[1], "r", encoding="utf-8")); findings = data["vulnerabilities"] if isinstance(data, dict) else data if isinstance(data, list) else []; print(len(findings or []))' "$report_path")"
+              fi
+
+              if [ "$finding_count" -gt 0 ]; then
+                echo "::error::pip-audit found ${finding_count} vulnerability findings in ${req}"
+                cat "$report_path"
                 scan_failed=1
               fi
             fi

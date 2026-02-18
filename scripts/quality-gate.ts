@@ -1,7 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
+
+const require = createRequire(import.meta.url);
 
 interface GateCheckResult {
   name: string;
@@ -497,6 +500,7 @@ async function runCoverageWithRetry(env: NodeJS.ProcessEnv): Promise<GateCheckRe
         "--no-file-parallelism",
         "--maxWorkers=1",
         "--coverage.provider=v8",
+        "--coverage.clean=false",
         "--coverage.reportsDirectory=coverage",
         "--coverage.reporter=text",
         "--coverage.reporter=json",
@@ -514,9 +518,8 @@ async function runCoverageWithRetry(env: NodeJS.ProcessEnv): Promise<GateCheckRe
         "--no-file-parallelism",
         "--maxWorkers=1",
         "--coverage.provider=istanbul",
+        "--coverage.clean=false",
         "--coverage.reportsDirectory=coverage",
-        "--coverage.include=tests/**/*.test.ts,server/**/*.test.ts",
-        "--coverage.exclude=**/dist/**",
         "--coverage.reporter=json-summary",
         "--coverage.reporter=json",
       ],
@@ -634,14 +637,135 @@ function parseCoverageSummary(): CoverageSummary | null {
     }
 
     console.error(`${logPrefix()} coverage summary does not match expected schema`);
-    return null;
+    return parseCoverageSummaryFromFinal() ?? parseCoverageSummaryFromTemp();
   }
 
   if (!summaryResult.ok) {
     console.error(`${logPrefix()} failed reading coverage-summary.json: ${summaryResult.error}`);
   }
 
-  return parseCoverageSummaryFromFinal();
+  return parseCoverageSummaryFromFinal() ?? parseCoverageSummaryFromTemp();
+}
+
+type IstanbulCoverageSummaryJson = Record<
+  CoverageMetricName,
+  { pct: number; covered?: number; total?: number; skipped?: number }
+>;
+
+function getTempCoverageFiles(): string[] {
+  if (!fs.existsSync(COVERAGE_TEMP_DIR)) {
+    return [];
+  }
+  try {
+    const entries = fs.readdirSync(COVERAGE_TEMP_DIR, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isFile() && /^coverage-\\d+\\.json$/i.test(entry.name))
+      .map((entry) => path.join(COVERAGE_TEMP_DIR, entry.name));
+  } catch {
+    return [];
+  }
+}
+
+function extractCoverageMetric(metric: CoverageMetricName, summary: IstanbulCoverageSummaryJson): CoverageMetric {
+  const data = summary[metric] ?? ({} as any);
+  return {
+    pct: Number.isFinite(data.pct) ? Number(data.pct) : 0,
+    covered: Number.isFinite(data.covered) ? Number(data.covered) : undefined,
+    total: Number.isFinite(data.total) ? Number(data.total) : undefined,
+  };
+}
+
+function writeCoverageArtifactsFromTemp(summary: CoverageSummary, final: Record<string, unknown>): void {
+  try {
+    fs.mkdirSync(COVERAGE_BASE_DIR, { recursive: true });
+    fs.writeFileSync(COVERAGE_SUMMARY_PATH, JSON.stringify(summary, null, 2), "utf8");
+    fs.writeFileSync(COVERAGE_FINAL_PATH, JSON.stringify(final, null, 2), "utf8");
+  } catch (error) {
+    console.warn(`${logPrefix()} failed to write synthesized coverage artifacts:`, error);
+  }
+}
+
+function parseCoverageSummaryFromTemp(): CoverageSummary | null {
+  const tempFiles = getTempCoverageFiles();
+  if (tempFiles.length === 0) {
+    return null;
+  }
+
+  let createCoverageMap: ((input: any) => any) | null = null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    ({ createCoverageMap } = require("istanbul-lib-coverage"));
+  } catch (error) {
+    console.error(`${logPrefix()} missing istanbul-lib-coverage for temp coverage fallback:`, error);
+    return null;
+  }
+
+  const coverageMap = createCoverageMap({});
+  for (const filePath of tempFiles) {
+    const fileResult = readJsonFile<any>(filePath);
+    if (!fileResult.ok) {
+      console.warn(`${logPrefix()} failed reading temp coverage file ${filePath}: ${fileResult.error}`);
+      continue;
+    }
+    try {
+      coverageMap.merge(fileResult.value);
+    } catch (error) {
+      console.warn(`${logPrefix()} failed merging temp coverage file ${filePath}:`, error);
+    }
+  }
+
+  let summaryJson: IstanbulCoverageSummaryJson | null = null;
+  try {
+    const summary = coverageMap.getCoverageSummary();
+    // istanbul-lib-coverage returns a CoverageSummary class; prefer JSON view.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    summaryJson = typeof (summary as any).toJSON === "function" ? (summary as any).toJSON() : (summary as any);
+  } catch (error) {
+    console.error(`${logPrefix()} failed computing synthesized coverage summary from temp:`, error);
+    return null;
+  }
+
+  if (!summaryJson) {
+    return null;
+  }
+
+  const synthesized: CoverageSummary = {
+    total: {
+      lines: extractCoverageMetric("lines", summaryJson),
+      statements: extractCoverageMetric("statements", summaryJson),
+      functions: extractCoverageMetric("functions", summaryJson),
+      branches: extractCoverageMetric("branches", summaryJson),
+    },
+  };
+
+  const validation = validateCoverageSummary(synthesized);
+  if (!validation.valid) {
+    console.error(`${logPrefix()} synthesized coverage summary failed schema validation: ${validation.details}`);
+    return null;
+  }
+
+  // Also synthesize a "coverage-final.json" compatible with our weakest-files heuristic.
+  const final: Record<string, unknown> = {};
+  try {
+    for (const fileName of coverageMap.files()) {
+      const fileSummary = coverageMap.fileCoverageFor(fileName).toSummary();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const json = typeof (fileSummary as any).toJSON === "function" ? (fileSummary as any).toJSON() : (fileSummary as any);
+      final[fileName] = {
+        lines: json.lines,
+        statements: json.statements,
+        functions: json.functions,
+        branches: json.branches,
+      };
+    }
+  } catch (error) {
+    console.warn(`${logPrefix()} failed computing synthesized coverage-final.json:`, error);
+  }
+
+  // Persist artifacts so subsequent tools can inspect them deterministically.
+  writeCoverageArtifactsFromTemp(synthesized, final);
+
+  return synthesized;
 }
 
 function getLowestCoverageFiles(metric: CoverageMetricName, limit: number): string[] {

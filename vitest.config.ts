@@ -10,6 +10,8 @@ export default defineConfig({
     setupFiles: ["./tests/setup.ts"],
     coverage: {
       provider: "v8",
+      // Keep coverage output stable; CI/quality gate controls cleanup between retries.
+      clean: false,
       reporter: ["text", "json", "json-summary", "html"],
       all: true,
       include: ["server/core/**/*.ts"],

@@ -36,7 +36,23 @@ export type ChatRequest = z.infer<typeof chatRequestSchema>;
 export const streamChatRequestSchema = chatRequestSchema.extend({
     runId: z.string().optional(),
     chatId: z.string().optional(),
-    docTool: z.enum(['word', 'excel', 'ppt']).optional(),
+    // Client may send docTool="figma" even when server ignores it; accept to avoid hard-failing validation.
+    docTool: z.enum(['word', 'excel', 'ppt', 'figma']).optional(),
+
+    // Streaming/runtime controls (used by /api/chat/stream)
+    latencyMode: z.enum(['fast', 'deep', 'auto']).optional(),
+    queueMode: z.enum(['replace', 'reject']).optional(),
+    forceWebSearch: z.boolean().optional(),
+    webSearchAuto: z.boolean().optional(),
+
+    // Idempotency/correlation
+    clientRequestId: z.string().optional(),
+    userRequestId: z.string().optional(),
+
+    // Skill routing
+    skillId: z.string().optional(),
+    skill: z.any().optional(),
+    skillScopes: z.array(z.string()).optional(),
 });
 
 export type StreamChatRequest = z.infer<typeof streamChatRequestSchema>;

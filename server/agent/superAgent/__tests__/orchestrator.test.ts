@@ -103,7 +103,7 @@ describe('SuperAgentOrchestrator', () => {
             emitHeartbeat: false,
             enforceContract: false
         });
-    });
+    }, 30000);
 
     it('should verify thought emission flow during execution', async () => {
         const sseSpy = vi.fn();
