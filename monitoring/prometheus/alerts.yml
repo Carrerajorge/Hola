@@ -1,0 +1,49 @@
+groups:
+
+  - name: system-alerts
+
+    rules:
+
+      - alert: HighCPUUsage
+
+        expr: avg by (instance) (rate(node_cpu_seconds_total{mode!="idle"}[5m])) > 0.90
+
+        for: 5m
+
+        labels:
+
+          severity: warning
+
+        annotations:
+
+          summary: "CPU > 90% por 5 min ({{ $labels.instance }})"
+
+
+      - alert: HighMemoryUsage
+
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 0.90
+
+        for: 5m
+
+        labels:
+
+          severity: warning
+
+        annotations:
+
+          summary: "Memoria > 90% por 5 min ({{ $labels.instance }})"
+
+
+      - alert: LowDiskSpace
+
+        expr: (1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"})) > 0.85
+
+        for: 5m
+
+        labels:
+
+          severity: warning
+
+        annotations:
+
+          summary: "Disco > 85% por 5 min ({{ $labels.instance }})"
