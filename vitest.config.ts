@@ -10,12 +10,15 @@ export default defineConfig({
     setupFiles: ['./tests/setup.ts'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html'],
+      reporter: ['text', 'json', 'json-summary', 'html'],
+      all: true,
+      include: ['server/core/**/*.ts'],
+      exclude: ['**/*.test.ts', '**/__tests__/**', '**/node_modules/**', '**/dist/**'],
       thresholds: {
-        lines: 40,
-        functions: 40,
-        branches: 30,
-        statements: 40,
+        lines: 90,
+        functions: 90,
+        branches: 90,
+        statements: 90,
       },
     },
     alias: {

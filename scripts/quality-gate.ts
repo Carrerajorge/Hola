@@ -193,6 +193,15 @@ async function run() {
   const checks: GateCheckResult[] = [];
   const runEnv = { ...process.env, ...CI_DEFAULT_ENV };
 
+  checks.push(
+    runCommand(
+      "Architecture boundaries (server/core)",
+      "node",
+      ["--import", "tsx", "scripts/layer-check.ts"],
+      true,
+      runEnv,
+    ),
+  );
   checks.push(runCommand("Type-check (application/runtime)", "npm", ["run", "type-check:app"], true, runEnv));
   checks.push(runCommand("Unit tests + coverage", "npm", ["run", "test:coverage"], true, runEnv));
   checks.push(runCommand("Security baseline (npm audit)", "npm", ["audit", "--omit=dev", "--audit-level=high"], true, runEnv));
