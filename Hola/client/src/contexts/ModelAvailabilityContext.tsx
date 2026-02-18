@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef, ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useSettingsContext } from "@/contexts/SettingsContext";
@@ -52,24 +52,26 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
       return res.json();
     },
     refetchInterval: 30000,
-    staleTime: 0,
-    gcTime: 0,
+    staleTime: 10_000,
+    gcTime: 300_000,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
   });
 
-  const allModels = modelsData?.models || [];
-  const enabledModels = allModels
-    .filter((m) => m.isEnabled === "true")
-    .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
+  const allModels = useMemo(() => modelsData?.models ?? [], [modelsData]);
+  const enabledModels = useMemo(
+    () =>
+      allModels
+        .filter((m) => m.isEnabled === "true")
+        .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)),
+    [allModels],
+  );
 
-  const recommendedModels = enabledModels.slice(0, 3);
-
-  const availableModels = (() => {
+  const availableModels = useMemo(() => {
     if (settings.showAdditionalModels) return enabledModels;
 
     // Keep the currently selected model visible even when "additional models" are hidden.
-    const visible = [...recommendedModels];
+    const visible = enabledModels.slice(0, 3);
     if (selectedModelId) {
       const selected = enabledModels.find((m) => m.id === selectedModelId || m.modelId === selectedModelId);
       if (selected && !visible.some((m) => m.id === selected.id)) {
@@ -77,7 +79,7 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
       }
     }
     return visible;
-  })();
+  }, [enabledModels, settings.showAdditionalModels, selectedModelId]);
 
   const isAnyModelAvailable = availableModels.length > 0;
 
@@ -95,6 +97,8 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
   }, [enabledModels, toast]);
 
   useEffect(() => {
+    // Don't clear selection while models are still loading / list is empty.
+    if (!enabledModels.length) return;
     if (selectedModelId && !enabledModels.find(m => m.id === selectedModelId || m.modelId === selectedModelId)) {
       toast({
         title: "Modelo desactivado",
@@ -133,18 +137,25 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
     }
   }, [enabledModels, selectedModelId, settings.defaultModel, platformSettings.default_model]);
 
+  // Guard ref to prevent the bidirectional sync from bouncing.
+  const isSyncingToSettingsRef = useRef(false);
+
   // Keep Settings -> Default Model in sync with the selector.
   useEffect(() => {
     if (!selectedModelId) return;
     const model = enabledModels.find((m) => m.id === selectedModelId || m.modelId === selectedModelId);
     if (!model?.modelId) return;
     if (model.modelId !== settings.defaultModel) {
+      isSyncingToSettingsRef.current = true;
       updateSetting("defaultModel", model.modelId);
+      // Clear guard after the current React commit phase.
+      queueMicrotask(() => { isSyncingToSettingsRef.current = false; });
     }
   }, [enabledModels, selectedModelId, settings.defaultModel, updateSetting]);
 
   // If the user changes Default Model from Settings, reflect it in the selector.
   useEffect(() => {
+    if (isSyncingToSettingsRef.current) return;
     if (!settings.defaultModel) return;
     const target = enabledModels.find((m) => m.modelId === settings.defaultModel || m.id === settings.defaultModel);
     if (!target) return;
