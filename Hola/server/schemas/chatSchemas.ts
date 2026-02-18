@@ -49,6 +49,9 @@ export type ChatRequest = z.infer<typeof chatRequestSchema>;
 export const streamChatRequestSchema = chatRequestSchema.extend({
     runId: z.string().max(200).optional(),
     chatId: z.string().max(200).optional(),
+    // conversationId is strongly recommended — when absent the server generates
+    // a fallback id, but tokens may mis-route if the client doesn't track it.
+    conversationId: z.string().min(1).max(200).optional(),
     // Client may send docTool="figma" even when server ignores it; accept to avoid hard-failing validation.
     docTool: z.enum(['word', 'excel', 'ppt', 'figma']).optional(),
 

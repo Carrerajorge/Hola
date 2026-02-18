@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import React, { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { useLocation } from "wouter";
 import { Sidebar } from "@/components/sidebar";
@@ -17,6 +17,7 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Menu, FileText, X, GripVertical } from "lucide-react";
 import { toast } from "sonner";
 import { useStreamingStore, useProcessingChatIds, usePendingBadges } from "@/stores/streamingStore";
+import { useChatSessionStore, useChatAiState, useChatAiProcessSteps } from "@/stores/chatSessionStore";
 
 const PANEL_SIZES_KEY = "workspace-panel-sizes";
 
@@ -69,9 +70,11 @@ function WorkspaceContent() {
   const [isNewChatMode, setIsNewChatMode] = useState(false);
   const [newChatStableKey, setNewChatStableKey] = useState<string | null>(null);
 
-  const [aiState, setAiState] = useState<"idle" | "thinking" | "responding">("idle");
-  const [aiProcessSteps, setAiProcessSteps] = useState<{step: string; status: "pending" | "active" | "done"}[]>([]);
-  
+  // ── Per-conversation AI state (from chatSessionStore) ────────
+  // The active chatId used to scope aiState and aiProcessSteps.
+  // Derived below from activeChat / pendingChatIdRef.
+  const { setAiState: setSessionAiState, setAiProcessSteps: setSessionAiProcessSteps } = useChatSessionStore();
+
   // Use global streaming store for tracking processing chats and pending badges
   const processingChatIds = useProcessingChatIds();
   const pendingResponseCounts = usePendingBadges();
@@ -145,11 +148,9 @@ function WorkspaceContent() {
     setIsNewChatMode(false);
     setNewChatStableKey(null);
     setActiveChatId(id);
-    // DON'T clear processingChatIdRef or call setAiState("idle") here
-    // Let the background streaming complete naturally and trigger badge notification
-    // Only reset the process steps for UI
-    setAiProcessSteps([]);
-  }, [handleClearPendingCount, setActiveChatId, setAiProcessSteps]);
+    // DON'T touch other chats' sessions — each chat's aiState lives in chatSessionStore
+    // keyed by its own chatId, so switching chats is just changing which chatId is active.
+  }, [handleClearPendingCount, setActiveChatId]);
 
   const handleNewChat = () => {
     // Keep processing state for background chats - don't clear processingChatIds
@@ -159,10 +160,8 @@ function WorkspaceContent() {
     setIsNewChatMode(true);
     setNewChatStableKey(newKey);
     pendingChatIdRef.current = null;
-    // DON'T clear processingChatIdRef or call setAiState("idle") here
-    // Let the background streaming complete naturally and trigger badge notification
-    // Only reset the process steps for UI
-    setAiProcessSteps([]);
+    // New chat gets a fresh session automatically via chatSessionStore
+    // (lazy creation on first getSession(newChatId) call)
   };
 
   const handleSendNewChatMessage = useCallback(async (message: Message) => {
@@ -187,6 +186,36 @@ function WorkspaceContent() {
     if (activeChat) return activeChat.stableKey;
     return "default-chat";
   }, [activeChat?.stableKey, newChatStableKey]);
+
+  // ── Derive the current chatId for per-conversation state ─────
+  const currentChatId = activeChat?.id || pendingChatIdRef.current || null;
+
+  // Per-conversation aiState: each chat has its own aiState in chatSessionStore
+  const currentAiState = useChatAiState(currentChatId);
+  const currentAiProcessSteps = useChatAiProcessSteps(currentChatId);
+
+  // Stable setters scoped to the current chatId (captured at call time)
+  const setAiStateForCurrentChat = useCallback(
+    (stateOrFn: React.SetStateAction<"idle" | "thinking" | "responding" | "agent_working">) => {
+      const chatId = currentChatId;
+      if (!chatId) return;
+      const newState =
+        typeof stateOrFn === "function"
+          ? stateOrFn(useChatSessionStore.getState().sessions.get(chatId)?.aiState ?? "idle")
+          : stateOrFn;
+      setSessionAiState(chatId, newState);
+    },
+    [currentChatId, setSessionAiState]
+  );
+
+  const setAiProcessStepsForCurrentChat = useCallback(
+    (updater: React.SetStateAction<{step: string; status: "pending" | "active" | "done"}[]>) => {
+      const chatId = currentChatId;
+      if (!chatId) return;
+      setSessionAiProcessSteps(chatId, updater as any);
+    },
+    [currentChatId, setSessionAiProcessSteps]
+  );
 
   const currentMessages = useMemo(() => {
     if (activeChat?.messages) return activeChat.messages;
@@ -298,11 +327,12 @@ function WorkspaceContent() {
               messages={displayMessages}
               setMessages={setDisplayMessages}
               onSendMessage={handleSendMessage}
-              chatId={activeChat?.id || pendingChatIdRef.current}
-              aiState={aiState}
-              setAiState={setAiState}
-              aiProcessSteps={aiProcessSteps}
-              setAiProcessSteps={setAiProcessSteps}
+              chatId={currentChatId}
+              aiState={currentAiState}
+              setAiState={setAiStateForCurrentChat}
+              aiStateChatId={currentChatId}
+              aiProcessSteps={currentAiProcessSteps as any}
+              setAiProcessSteps={setAiProcessStepsForCurrentChat as any}
             />
           </div>
         </>
@@ -371,11 +401,12 @@ function WorkspaceContent() {
                     messages={displayMessages}
                     setMessages={setDisplayMessages}
                     onSendMessage={handleSendMessage}
-                    chatId={activeChat?.id || pendingChatIdRef.current}
-                    aiState={aiState}
-                    setAiState={setAiState}
-                    aiProcessSteps={aiProcessSteps}
-                    setAiProcessSteps={setAiProcessSteps}
+                    chatId={currentChatId}
+                    aiState={currentAiState}
+                    setAiState={setAiStateForCurrentChat}
+                    aiStateChatId={currentChatId}
+                    aiProcessSteps={currentAiProcessSteps as any}
+                    setAiProcessSteps={setAiProcessStepsForCurrentChat as any}
                   />
                 </div>
               </Panel>

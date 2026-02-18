@@ -6,7 +6,7 @@ import { ChatErrorBoundary } from "@/components/error-boundaries";
 import type { Gpt } from "@/components/gpt-explorer";
 import { OfflineIndicator, OfflineBanner } from "@/components/offline-indicator";
 import { useMediaLibrary } from "@/hooks/use-media-library";
-import { lazy, Suspense, useState, useCallback, useMemo, useEffect, useRef } from "react";
+import React, { lazy, Suspense, useState, useCallback, useMemo, useEffect, useRef } from "react";
 
 import { useFavorites } from "@/hooks/use-favorites";
 import { usePromptTemplates } from "@/hooks/use-prompt-templates";
@@ -28,6 +28,7 @@ import { useAgentStore } from "@/stores/agent-store";
 import { useSuperAgentStore } from "@/stores/super-agent-store";
 import { pollingManager } from "@/lib/polling-manager";
 import { queryClient } from "@/lib/queryClient";
+import { useChatSessionStore, useChatAiState, useChatAiProcessSteps } from "@/stores/chatSessionStore";
 
 const AppsViewLazy = lazy(() => import("@/components/apps-view").then((m) => ({ default: m.AppsView })));
 const WhatsAppConnectDialogLazy = lazy(() =>
@@ -151,10 +152,8 @@ export default function Home() {
     }
   }, [moveChatToFolder, removeChatFromFolder]);
 
-  // AI processing state - kept in parent to survive ChatInterface key changes
-  const [aiState, setAiStateRaw] = useState<"idle" | "thinking" | "responding">("idle");
-  const [aiStateChatId, setAiStateChatId] = useState<string | null>(null);
-  const [aiProcessSteps, setAiProcessSteps] = useState<{ step: string; status: "pending" | "active" | "done" }[]>([]);
+  // ── Per-conversation AI state (from chatSessionStore) ────────
+  const { setAiState: setSessionAiState, setAiProcessSteps: setSessionAiProcessSteps } = useChatSessionStore();
 
   // Super Agent UI state - kept in parent to survive ChatInterface key changes
   const [uiPhase, setUiPhase] = useState<'idle' | 'thinking' | 'console' | 'done'>('idle');
@@ -172,20 +171,8 @@ export default function Home() {
     error?: string;
   }>({ status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null });
 
-  // Wrapper for setAiState that tracks which chat the state belongs to
-  const setAiState = useCallback((newState: "idle" | "thinking" | "responding" | ((prev: "idle" | "thinking" | "responding") => "idle" | "thinking" | "responding")) => {
-    const resolvedState = typeof newState === 'function' ? newState(aiState) : newState;
-    setAiStateRaw(resolvedState);
-    if (resolvedState === 'idle') {
-      setAiStateChatId(null);
-    } else {
-      // Capture the current chat ID when entering non-idle state
-      const currentChatId = activeChat?.id || pendingChatIdRef.current;
-      if (currentChatId) {
-        setAiStateChatId(currentChatId);
-      }
-    }
-  }, [aiState, activeChat?.id]);
+  // NOTE: currentChatId, aiState, aiProcessSteps, and their setters are defined
+  // below after pendingChatIdRef is declared (line ordering constraint).
 
   // URL Persistence for Simulator/Plan (B4)
   const search = useSearch();
@@ -241,6 +228,36 @@ export default function Home() {
   // Store the pending chat ID during new chat creation
   const pendingChatIdRef = useRef<string | null>(null);
 
+  // ── Derive the current chatId for per-conversation state ─────
+  const currentChatId = activeChat?.id || pendingChatIdRef.current || null;
+
+  // Per-conversation aiState: each chat has its own state in chatSessionStore
+  const aiState = useChatAiState(currentChatId);
+  const aiStateChatId = currentChatId;
+  const aiProcessSteps = useChatAiProcessSteps(currentChatId);
+
+  // Stable setters scoped to the current chatId (captured at call time)
+  const setAiState = useCallback(
+    (stateOrFn: React.SetStateAction<"idle" | "thinking" | "responding" | "agent_working">) => {
+      const chatId = currentChatId;
+      if (!chatId) return;
+      const newState =
+        typeof stateOrFn === "function"
+          ? stateOrFn(useChatSessionStore.getState().sessions.get(chatId)?.aiState ?? "idle")
+          : stateOrFn;
+      setSessionAiState(chatId, newState);
+    },
+    [currentChatId, setSessionAiState]
+  );
+
+  const setAiProcessSteps = useCallback(
+    (updater: React.SetStateAction<{ step: string; status: "pending" | "active" | "done" }[]>) => {
+      const chatId = currentChatId;
+      if (!chatId) return;
+      setSessionAiProcessSteps(chatId, updater as any);
+    },
+    [currentChatId, setSessionAiProcessSteps]
+  );
 
   // Sync URL to active chat state (direct navigation to /chat/:id)
 
@@ -284,19 +301,15 @@ export default function Home() {
     // This allows multiple chats to process simultaneously
     handleClearPendingCount(id);
 
-    // Reset aiState for the NEW chat's UI so the submit button is unblocked.
-    // Background streams from the OLD chat continue independently — their
-    // setAiState calls target the parent but aiStateChatId won't match the new chat.
-    setAiStateRaw('idle');
-    setAiStateChatId(null);
-    setAiProcessSteps([]);
+    // No need to reset aiState — each chat has its own state in chatSessionStore.
+    // Switching chats just changes which chatId is active.
 
     setIsNewChatMode(false);
     setNewChatStableKey(null);
     setActiveChatId(id);
     setLocation(`/chat/${id}`);
     setSelectedProjectId(null); // Clear project selection when selecting a chat
-  }, [handleClearPendingCount, setActiveChatId, setAiProcessSteps, setAiStateRaw, setAiStateChatId]);
+  }, [handleClearPendingCount, setActiveChatId]);
 
   // Listen for select-chat custom event (used by Agent Mode navigation)
   // This event is used when agent creates a new chat - we need to preserve the stable key
@@ -343,10 +356,8 @@ export default function Home() {
     // Clear conversation state query cache to prevent stale data
     queryClient.removeQueries({ queryKey: ['conversationState'] });
 
-    // Reset AI processing state for UI display
-    setAiProcessSteps([]);
-    setAiStateRaw('idle');
-    setAiStateChatId(null);
+    // No need to reset AI state globally — new chat gets a fresh session
+    // automatically in chatSessionStore on first access.
 
     // Reset Super Agent UI state
     setUiPhase('idle');
@@ -386,7 +397,7 @@ export default function Home() {
 
     // Clear other UI states
     setActiveGpt(null);
-    setAiStateRaw('idle');
+    // AI state is per-conversation — no global reset needed
   }, [setActiveChatId]);
 
   const handleSendNewChatMessage = useCallback(async (message: Message) => {
@@ -778,7 +789,7 @@ export default function Home() {
             aiStateChatId={aiStateChatId}
             aiProcessSteps={aiProcessSteps}
             setAiProcessSteps={setAiProcessSteps}
-            chatId={activeChat?.id || pendingChatIdRef.current || null}
+            chatId={currentChatId}
             onOpenApps={handleOpenApps}
             onUpdateMessageAttachments={updateMessageAttachments}
             onEditMessageAndTruncate={editMessageAndTruncate}

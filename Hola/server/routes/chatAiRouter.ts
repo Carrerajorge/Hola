@@ -1059,10 +1059,25 @@ const cleanSkipRunStreamDedup = (): void => {
       } = req.body;
       let latencyMode: LatencyMode = ['fast', 'deep', 'auto'].includes(rawLatencyMode) ? rawLatencyMode : 'auto';
       const effectiveUserId = getOrCreateSecureUserId(req);
+
+      // Resolve conversationId — required for proper per-chat isolation.
+      // If client omits it, fall back to chatId or generate one, but log a warning.
+      const hasExplicitConversationId =
+        typeof conversationId === "string" && conversationId.trim().length > 0;
+      const hasExplicitChatId =
+        typeof chatId === "string" && chatId.trim().length > 0;
+
+      if (!hasExplicitConversationId) {
+        console.warn(
+          "[Stream] Missing conversationId in request body — tokens may mis-route.",
+          { requestId, chatId, hasExplicitChatId }
+        );
+      }
+
       const streamConversationId = sanitizeStreamIdentifier(
-        typeof conversationId === "string" && conversationId.trim().length > 0
+        hasExplicitConversationId
           ? conversationId
-          : (typeof chatId === "string" && chatId.trim().length > 0
+          : (hasExplicitChatId
             ? chatId
             : `chat_${requestId}`),
         "chat_stream"
