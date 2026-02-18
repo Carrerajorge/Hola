@@ -122,15 +122,18 @@ function releaseSseSlot(userId: string, requestId: string): void {
  */
 function sanitizeWebSearchContent(text: string, maxLen = 50_000): string {
   if (!text) return "";
+  const repeatedPromptPattern = /<script\b[^>]*>[\s\S]*?<\/script>/gi;
   return text
     .replace(/\b(?:ignore\s+(?:all\s+)?(?:previous|above|prior)\s+instructions?)/gi, "[filtered]")
     .replace(/\b(?:you\s+are\s+now|act\s+as\s+if|pretend\s+(?:you|that)|system\s*:\s*)/gi, "[filtered]")
     .replace(/\b(?:disregard|forget|override)\s+(?:all\s+)?(?:previous|above|prior|your)\s+(?:instructions?|rules?|guidelines?|prompt)/gi, "[filtered]")
     .replace(/\b(?:new\s+instructions?|updated?\s+instructions?|real\s+instructions?):/gi, "[filtered]")
+    .replace(repeatedPromptPattern, "[filtered]")
     .replace(/\[(?:system|SYSTEM)\]/g, "[filtered]")
     .replace(/<\/?(?:system|prompt|instruction|rules?|override)>/gi, "[filtered]")
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/\[\/\/\]:\s*#\s*\([\s\S]*?\)/g, "")
+    .replace(/\b(?:javascript|vbscript|data)\s*:/gi, "[filtered]:")
     .slice(0, maxLen);
 }
 

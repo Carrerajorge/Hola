@@ -119,7 +119,10 @@ const MAX_INBOUND_MESSAGE_TYPE_LENGTH = 24;
 const MAX_INBOUND_METADATA_KEYS = 140;
 const MAX_INBOUND_METADATA_BYTES = 24_000;
 const INBOUND_TEXT_SANITIZE_RE = /<[^>]*>|[`*_~#>\[\]{}]/g;
-const INBOUND_JS_SCHEME_RE = /javascript:/gi;
+const INBOUND_MALFORMED_MARKUP_RE = /<\s*script\b[^>]*>[\s\S]*?<\s*\/\s*script\s*>/gi;
+const INBOUND_JS_SCHEME_RE = /\b(?:javascript|vbscript|data|file)\s*:/gi;
+const INBOUND_HTML_ENTITIES_RE = /&(?:nbsp|amp|lt|gt|quot|apos);/gi;
+const MAX_URI_DECODE_ITERATIONS = 3;
 const POLICY_CONTROLLED_RESPONSE_LENGTH = 420;
 const MAX_DEDUPE_KEY_PART_LENGTH = 128;
 const MAX_DEDUPE_MESSAGE_ID_LENGTH = MAX_ID_LENGTH;
@@ -359,11 +362,29 @@ function isInboundMediaUrlSafe(rawUrl: string): boolean {
 
 function sanitizeInboundText(value: unknown): string {
   if (typeof value !== "string") return "";
-  const normalized = toCleanText(value)
+  let normalized = toCleanText(value)
+    .replace(INBOUND_MALFORMED_MARKUP_RE, "")
+    .replace(INBOUND_HTML_ENTITIES_RE, "")
     .replace(INBOUND_TEXT_SANITIZE_RE, "")
-    .replace(INBOUND_JS_SCHEME_RE, "")
+    .replace(INBOUND_JS_SCHEME_RE, "[filtered]");
+  for (let i = 0; i < MAX_URI_DECODE_ITERATIONS; i += 1) {
+    try {
+      const decoded = decodeURIComponent(normalized);
+      if (decoded === normalized) {
+        break;
+      }
+      normalized = decoded
+        .replace(INBOUND_MALFORMED_MARKUP_RE, "")
+        .replace(INBOUND_HTML_ENTITIES_RE, "")
+        .replace(INBOUND_TEXT_SANITIZE_RE, "")
+        .replace(INBOUND_JS_SCHEME_RE, "[filtered]");
+    } catch {
+      break;
+    }
+  }
+
+  return normalized
     .slice(0, MAX_INBOUND_ENVELOPE_TEXT_LENGTH);
-  return normalized;
 }
 
 function isInboundMetadataSafe(metadata: unknown): boolean {

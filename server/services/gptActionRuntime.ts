@@ -70,6 +70,10 @@ const MAX_URL_DECODE_ITERATIONS = 4;
 const MAX_QUERY_SEGMENT_BYTES = 4_096;
 const MAX_LOG_VALUE_DEPTH = 64;
 const MAX_LOG_VALUE_BYTES = 8_192;
+const MAX_LOG_ARRAY_ITEMS = 120;
+const FORBIDDEN_LOG_KEYS = new Set(["__proto__", "prototype", "constructor"]);
+const LOG_TAG_SANITIZER = /<\s*\/?\s*(?:script|iframe|object|embed|img|svg|math)\b[^>]*>/gi;
+const LOG_URL_SCHEME_SANITIZER = /\b(?:javascript|vbscript|data)\s*:/gi;
 const ALLOWED_HTTP_METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]);
 const FORBIDDEN_HEADER_NAMES = new Set([
   "host",
@@ -745,16 +749,33 @@ function sanitizeLogValue(raw: unknown, seen: WeakSet<object> = new WeakSet(), d
   }
 
   if (typeof raw === "string") {
-    const sanitized = raw
+    let sanitized = raw
       .normalize("NFKC")
       .replace(/[\u0000-\u001f\u007f-\u009f]/g, "")
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "[redacted]")
-      .replace(/javascript:/gi, "[redacted]");
+      .replace(LOG_TAG_SANITIZER, "[redacted]")
+      .replace(LOG_URL_SCHEME_SANITIZER, "[redacted]");
+
+    for (let i = 0; i < MAX_URL_DECODE_ITERATIONS; i += 1) {
+      try {
+        const decoded = decodeURIComponent(sanitized);
+        if (decoded === sanitized) {
+          break;
+        }
+        sanitized = decoded
+          .replace(LOG_TAG_SANITIZER, "[redacted]")
+          .replace(LOG_URL_SCHEME_SANITIZER, "[redacted]");
+      } catch {
+        break;
+      }
+    }
+
     return truncateToUtf8ByteLimit(sanitized, MAX_LOG_VALUE_BYTES);
   }
 
   if (Array.isArray(raw)) {
-    return raw.map((item) => sanitizeLogValue(item, seen, depth + 1));
+    return raw
+      .slice(0, MAX_LOG_ARRAY_ITEMS)
+      .map((item) => sanitizeLogValue(item, seen, depth + 1));
   }
 
   if (raw && typeof raw === "object") {
@@ -766,6 +787,9 @@ function sanitizeLogValue(raw: unknown, seen: WeakSet<object> = new WeakSet(), d
     const output: Record<string, unknown> = Object.create(null);
     for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
       if (isForbiddenMappingKey(key)) {
+        continue;
+      }
+      if (FORBIDDEN_LOG_KEYS.has(key) || key.includes("__")) {
         continue;
       }
       output[key] = sanitizeLogValue(value, seen, depth + 1);
