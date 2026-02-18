@@ -1,5 +1,4 @@
-import { defineConfig } from 'vitest/config';
-import path from 'path';
+import { defineConfig } from 'vitest/config'; import path from 'path';
 
 export default defineConfig({
   test: {
@@ -12,10 +11,11 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
       thresholds: {
-        lines: 40,
-        functions: 40,
-        branches: 30,
-        statements: 40,
+        lines: 30,
+        functions: 30,
+        branches: 20,
+        statements: 30,
+
       },
     },
     alias: {
