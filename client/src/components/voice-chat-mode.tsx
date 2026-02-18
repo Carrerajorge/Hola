@@ -329,7 +329,12 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
           "Content-Type": "application/json",
           "X-Upload-Id": uploadId,
         },
-        body: JSON.stringify({ uploadId }),
+        body: JSON.stringify({
+          uploadId,
+          fileName: normalizedFile.name,
+          mimeType: normalizedType,
+          fileSize: normalizedFile.size,
+        }),
       });
 
       if (!uploadRes.ok) {
