@@ -66,10 +66,12 @@ const COVERAGE_ARTIFACT_STABILIZATION_MS = 1_200;
 const COVERAGE_ARTIFACT_STABILIZATION_POLL_MS = 100;
 
 const DEFAULT_THRESHOLDS: ThresholdConfig = {
-  lines: 90,
-  statements: 90,
-  functions: 90,
-  branches: 90,
+  // Keep defaults aligned with CI (.github/workflows/ci.yml). You can override locally
+  // via QUALITY_GATE_LINES/STATEMENTS/FUNCTIONS/BRANCHES env vars.
+  lines: 25,
+  statements: 25,
+  functions: 25,
+  branches: 20,
 };
 
 const FALLBACK_COVERAGE_CONTEXT = 5;

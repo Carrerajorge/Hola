@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,6 +7,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Search, ChevronRight, ExternalLink, X, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AppDetailDialog, type AppMetadata } from "@/components/app-detail-dialog";
+import { apiFetch } from "@/lib/apiClient";
 
 interface App {
   id: string;
@@ -828,7 +829,69 @@ const apps: App[] = [
   },
 ];
 
-const CONNECTABLE_APP_IDS = ["gmail", "google-forms"];
+type AppEndpoints = Pick<App, "connectionEndpoint" | "statusEndpoint" | "disconnectEndpoint">;
+
+const APP_ENDPOINT_OVERRIDES: Record<string, Partial<AppEndpoints>> = {
+  // Existing OAuth integrations
+  "google-calendar": {
+    statusEndpoint: "/api/oauth/google/calendar/status",
+    connectionEndpoint: "/api/oauth/google/calendar/start",
+    disconnectEndpoint: "/api/oauth/google/calendar/disconnect",
+  },
+  "outlook-mail": {
+    statusEndpoint: "/api/oauth/microsoft/outlook/status",
+    connectionEndpoint: "/api/oauth/microsoft/outlook/start",
+    disconnectEndpoint: "/api/oauth/microsoft/outlook/disconnect",
+  },
+  "outlook-calendar": {
+    statusEndpoint: "/api/oauth/microsoft/calendar/status",
+    connectionEndpoint: "/api/oauth/microsoft/calendar/start",
+    disconnectEndpoint: "/api/oauth/microsoft/calendar/disconnect",
+  },
+  figma: {
+    statusEndpoint: "/api/figma/status",
+    connectionEndpoint: "/api/auth/figma",
+    disconnectEndpoint: "/api/figma/disconnect",
+  },
+
+  // Integration Kernel OAuth (generic connector flow)
+  slack: {
+    statusEndpoint: "/api/connectors/oauth/slack/status",
+    connectionEndpoint: "/api/connectors/oauth/slack/start",
+    disconnectEndpoint: "/api/connectors/oauth/slack/disconnect",
+  },
+  notion: {
+    statusEndpoint: "/api/connectors/oauth/notion/status",
+    connectionEndpoint: "/api/connectors/oauth/notion/start",
+    disconnectEndpoint: "/api/connectors/oauth/notion/disconnect",
+  },
+  github: {
+    statusEndpoint: "/api/connectors/oauth/github/status",
+    connectionEndpoint: "/api/connectors/oauth/github/start",
+    disconnectEndpoint: "/api/connectors/oauth/github/disconnect",
+  },
+  hubspot: {
+    statusEndpoint: "/api/connectors/oauth/hubspot/status",
+    connectionEndpoint: "/api/connectors/oauth/hubspot/start",
+    disconnectEndpoint: "/api/connectors/oauth/hubspot/disconnect",
+  },
+  "google-drive": {
+    statusEndpoint: "/api/connectors/oauth/google-drive/status",
+    connectionEndpoint: "/api/connectors/oauth/google-drive/start",
+    disconnectEndpoint: "/api/connectors/oauth/google-drive/disconnect",
+  },
+};
+
+function withIntegrationEndpoints(app: App): App {
+  const overrides = APP_ENDPOINT_OVERRIDES[app.id] || {};
+
+  return {
+    ...app,
+    statusEndpoint: app.statusEndpoint ?? overrides.statusEndpoint ?? `/api/apps/${app.id}/status`,
+    connectionEndpoint: app.connectionEndpoint ?? overrides.connectionEndpoint ?? `/api/apps/${app.id}/connect`,
+    disconnectEndpoint: app.disconnectEndpoint ?? overrides.disconnectEndpoint ?? `/api/apps/${app.id}/disconnect`,
+  };
+}
 
 interface AppsViewProps {
   onClose: () => void;
