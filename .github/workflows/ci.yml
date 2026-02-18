@@ -200,7 +200,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends postgresql-client
           PGPASSWORD=postgres psql -h localhost -U postgres -d iliagpt -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
-          npm run db:push
+          npm run db:bootstrap
           for attempt in 1 2; do
             npm run test:run -- --silent --passWithNoTests && break
             if [ "$attempt" -eq 2 ]; then
@@ -335,7 +335,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends postgresql-client
           PGPASSWORD=test psql -h localhost -U test -d testdb -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
-          npm run db:push
+          npm run db:bootstrap
           npm run quality:gate
 
 
