@@ -67,7 +67,7 @@ jobs:
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/deploy_key -p "${VPS_PORT}" -o StrictHostKeyChecking=accept-new "${VPS_USER}@${VPS_HOST}" \
-            "cd '${DEPLOY_PATH}' && PREVIEW_SLUG='${PREVIEW_SLUG}' HOST_PORT='${HOST_PORT}' IMAGE_TAG='${IMAGE_TAG}' APP_VERSION='${APP_VERSION}' GHCR_USERNAME='${GHCR_USERNAME}' GHCR_TOKEN='${GHCR_TOKEN}' bash scripts/deploy-preview.sh"
+            "cd '${DEPLOY_PATH}' && PREVIEW_SLUG='${PREVIEW_SLUG}' HOST_PORT='${HOST_PORT}' IMAGE_TAG='${IMAGE_TAG}' APP_VERSION='${APP_VERSION}' GHCR_USERNAME='${GHCR_USERNAME}' GHCR_TOKEN='${GHCR_TOKEN}' bash -s" < scripts/deploy-preview.sh
 
       - name: Summary
         run: |
