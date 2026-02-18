@@ -3619,6 +3619,17 @@ export function ChatInterface({
       return;
     }
     const submitConversationId = chatId || latestChatIdRef.current;
+    // When sending the very first message, the parent may create a pending chatId asynchronously.
+    // We may need to wait briefly for `chatId` (and `latestChatIdRef`) to update before starting SSE.
+    const waitForActiveChatId = async (timeoutMs = 1200): Promise<string | null> => {
+      const started = Date.now();
+      while (Date.now() - started < timeoutMs) {
+        const id = latestChatIdRef.current;
+        if (id) return id;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      return latestChatIdRef.current || null;
+    };
 
     // EMERGENCY BYPASS intentionally disabled in this branch to preserve chat run persistence/idempotency.
     // Re-enable only in an explicit temporary local debug profile if required.
@@ -4168,7 +4179,9 @@ export function ChatInterface({
 
         try {
           const streamRunContext = buildStreamRunContext(userMsg);
-          const effectiveChatIdForStream = resolveStreamChatId(undefined, chatId);
+          const fallbackChatId: string | null =
+            latestChatIdRef.current || chatId || (await waitForActiveChatId());
+          const effectiveChatIdForStream = resolveStreamChatId(undefined, fallbackChatId);
           if (!effectiveChatIdForStream) {
             toast({
               title: "Error",
@@ -5008,7 +5021,9 @@ export function ChatInterface({
 	          try {
 	          const fullMessages = messages.map(m => ({ role: m.role, content: m.content }));
 	          fullMessages.push({ role: "user", content: cleanPrompt });
-          const gmailConversationId = resolveStreamChatId(undefined, chatId);
+          const fallbackChatId: string | null =
+            latestChatIdRef.current || chatId || (await waitForActiveChatId());
+          const gmailConversationId = resolveStreamChatId(undefined, fallbackChatId);
 	          if (!gmailConversationId) {
 	            throw new Error("No se pudo confirmar la sesión del chat.");
 	          }
@@ -5348,7 +5363,9 @@ IMPORTANTE:
 
           // Use latest available chatId for stream routing; fallback to resolved persistent id when available.
           const streamRunContext = buildStreamRunContext(userMsg);
-          const effectiveStreamChatId = resolveStreamChatId(undefined, chatId);
+          const fallbackChatId: string | null =
+            latestChatIdRef.current || chatId || (await waitForActiveChatId());
+          const effectiveStreamChatId = resolveStreamChatId(undefined, fallbackChatId);
 	          if (!effectiveStreamChatId) {
 	            toast({
 	              title: "Error",

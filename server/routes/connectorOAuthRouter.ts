@@ -43,6 +43,7 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
       }
 
       const oauthConfig = manifest.authConfig as OAuthConfig;
+      const providerId = manifest.providerId || connectorId;
       const state = randomBytes(32).toString("hex");
       const redirectUri = `${getBaseUrl()}/api/connectors/oauth/${connectorId}/callback`;
 
@@ -69,7 +70,7 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
       // Build authorization URL
       const params = new URLSearchParams({
         response_type: "code",
-        client_id: getClientId(connectorId),
+        client_id: getClientId(connectorId, providerId),
         redirect_uri: redirectUri,
         scope: oauthConfig.scopes.join(" "),
         state,
@@ -145,6 +146,7 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
       }
 
       const oauthConfig = manifest.authConfig as OAuthConfig;
+      const providerId = manifest.providerId || connectorId;
       const redirectUri = `${getBaseUrl()}/api/connectors/oauth/${connectorId}/callback`;
 
       // Exchange code for tokens
@@ -152,8 +154,8 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
         grant_type: "authorization_code",
         code: String(code),
         redirect_uri: redirectUri,
-        client_id: getClientId(connectorId),
-        client_secret: getClientSecret(connectorId),
+        client_id: getClientId(connectorId, providerId),
+        client_secret: getClientSecret(connectorId, providerId),
       });
 
       const tokenResponse = await fetch(oauthConfig.tokenUrl, {
@@ -186,7 +188,6 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
       }
 
       // Store credential
-      const providerId = manifest.providerId || connectorId;
       await credentialVault.store(userId, providerId, {
         accessToken,
         refreshToken,
@@ -268,21 +269,36 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
 
 // ─── Env var helpers ────────────────────────────────────────────────
 
-function getClientId(connectorId: string): string {
-  const prefix = connectorId.toUpperCase().replace(/-/g, "_");
-  // Try connector-specific first, then provider-level
+function normalizeEnvPrefix(value: string): string {
+  return String(value || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function getClientId(connectorId: string): string;
+function getClientId(connectorId: string, providerId?: string): string {
+  const connectorPrefix = normalizeEnvPrefix(connectorId);
+  const providerPrefix = providerId ? normalizeEnvPrefix(providerId) : "";
+
   return (
-    process.env[`${prefix}_CLIENT_ID`] ||
-    process.env.GOOGLE_CLIENT_ID || // fallback for Google family
+    process.env[`${connectorPrefix}_CLIENT_ID`] ||
+    (providerPrefix ? process.env[`${providerPrefix}_CLIENT_ID`] : "") ||
+    // Allow the legacy GOOGLE_CLIENT_ID/SECRET env vars for Google-family connectors.
+    (providerId === "google" ? process.env.GOOGLE_CLIENT_ID : "") ||
     ""
   );
 }
 
-function getClientSecret(connectorId: string): string {
-  const prefix = connectorId.toUpperCase().replace(/-/g, "_");
+function getClientSecret(connectorId: string): string;
+function getClientSecret(connectorId: string, providerId?: string): string {
+  const connectorPrefix = normalizeEnvPrefix(connectorId);
+  const providerPrefix = providerId ? normalizeEnvPrefix(providerId) : "";
+
   return (
-    process.env[`${prefix}_CLIENT_SECRET`] ||
-    process.env.GOOGLE_CLIENT_SECRET ||
+    process.env[`${connectorPrefix}_CLIENT_SECRET`] ||
+    (providerPrefix ? process.env[`${providerPrefix}_CLIENT_SECRET`] : "") ||
+    (providerId === "google" ? process.env.GOOGLE_CLIENT_SECRET : "") ||
     ""
   );
 }
