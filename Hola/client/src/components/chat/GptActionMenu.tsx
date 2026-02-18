@@ -29,7 +29,7 @@ interface GptActionMenuProps {
     isGptPinned?: (id: string) => boolean;
 }
 
-export function GptActionMenu({
+export const GptActionMenu = React.memo(function GptActionMenu({
     activeGpt,
     modelsByProvider,
     selectedModelId,
@@ -44,17 +44,11 @@ export function GptActionMenu({
     const { toast } = useToast();
     const [open, setOpen] = useState(false);
 
-    console.log("[GptActionMenu] Rendering");
-
-    // Helper to find selected model data to facilitate UI logic
-    // We infer the selected model object from available lists if needed, 
-    // but primarily we just need the ID to check equality.
-
     return (
         <DropdownMenu open={open} onOpenChange={setOpen}>
             <DropdownMenuTrigger asChild>
                 <div
-                    className="flex items-center gap-1 sm:gap-2 cursor-pointer hover:bg-muted/50 px-1.5 sm:px-2 py-1 rounded-md transition-colors mt-[-5px] mb-[-5px] pt-[8px] pb-[8px] pl-[7px] pr-[7px]"
+                    className="flex items-center gap-1 sm:gap-2 cursor-pointer hover:bg-muted/50 px-1.5 sm:px-2 py-1 rounded-md transition-colors mt-[-5px] mb-[-5px] pt-[8px] pb-[8px] pl-[7px] pr-[7px] min-w-[140px] min-h-[36px]"
                     data-testid="button-gpt-context-menu"
                 >
                     <span className="font-semibold text-xs sm:text-sm truncate max-w-[120px] sm:max-w-none">
@@ -148,6 +142,6 @@ export function GptActionMenu({
             </DropdownMenuContent>
         </DropdownMenu>
     );
-}
+});
 
 export default GptActionMenu;

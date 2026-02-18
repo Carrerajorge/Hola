@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef, ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useSettingsContext } from "@/contexts/SettingsContext";
@@ -34,6 +34,15 @@ interface ModelAvailabilityContextType {
 
 const ModelAvailabilityContext = createContext<ModelAvailabilityContextType | null>(null);
 
+/**
+ * Produce a stable fingerprint of model IDs so we can use it in dependency
+ * arrays without triggering spurious effects when the server returns the same
+ * list with a new object reference.
+ */
+function modelListFingerprint(models: AvailableModel[]): string {
+  return models.map((m) => m.id).join(",");
+}
+
 export function ModelAvailabilityProvider({ children }: { children: ReactNode }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -41,7 +50,11 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
   const { settings, updateSetting } = useSettingsContext();
   const { settings: platformSettings } = usePlatformSettings();
 
-  const { data: modelsData, isLoading, refetch } = useQuery<{ models: AvailableModel[] }>({
+  // ──────────────────────────────────────────────────────────────
+  // 1. Fetch with stale-while-revalidate: keep cached data while
+  //    background refetch happens → no isLoading flicker.
+  // ──────────────────────────────────────────────────────────────
+  const { data: modelsData, isLoading: isQueryLoading, refetch } = useQuery<{ models: AvailableModel[] }>({
     queryKey: ["/api/models/available"],
     queryFn: async () => {
       const res = await fetch("/api/models/available", {
@@ -52,20 +65,39 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
       return res.json();
     },
     refetchInterval: 30000,
-    staleTime: 0,
-    gcTime: 0,
-    refetchOnMount: "always",
+    // Keep data fresh for 30s – background refetches won't toggle isLoading.
+    staleTime: 30000,
+    gcTime: 60000,
+    refetchOnMount: true,
     refetchOnWindowFocus: true,
+    // Keep previous data during refetches to avoid UI flickers.
+    placeholderData: (prev) => prev,
   });
 
-  const allModels = modelsData?.models || [];
-  const enabledModels = allModels
-    .filter((m) => m.isEnabled === "true")
-    .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
+  // Only report loading on the very first fetch (no cached data yet).
+  const isLoading = isQueryLoading && !modelsData;
 
-  const recommendedModels = enabledModels.slice(0, 3);
+  // ──────────────────────────────────────────────────────────────
+  // 2. Memoize derived model lists with stable references.
+  // ──────────────────────────────────────────────────────────────
+  const rawModels = modelsData?.models;
 
-  const availableModels = (() => {
+  const allModels = useMemo(() => rawModels ?? [], [rawModels]);
+
+  const enabledModels = useMemo(
+    () =>
+      allModels
+        .filter((m) => m.isEnabled === "true")
+        .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0)),
+    [allModels],
+  );
+
+  // Stable fingerprint – only changes when the *actual* set of enabled models changes.
+  const enabledFingerprint = modelListFingerprint(enabledModels);
+
+  const availableModels = useMemo(() => {
+    const recommendedModels = enabledModels.slice(0, 3);
+
     if (settings.showAdditionalModels) return enabledModels;
 
     // Keep the currently selected model visible even when "additional models" are hidden.
@@ -77,12 +109,19 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
       }
     }
     return visible;
-  })();
+  }, [enabledModels, settings.showAdditionalModels, selectedModelId]);
 
   const isAnyModelAvailable = availableModels.length > 0;
 
+  // ──────────────────────────────────────────────────────────────
+  // 3. Stable setter – use a ref for enabledModels to avoid
+  //    recreating the callback on every model-list change.
+  // ──────────────────────────────────────────────────────────────
+  const enabledModelsRef = useRef(enabledModels);
+  enabledModelsRef.current = enabledModels;
+
   const setSelectedModelId = useCallback((id: string | null) => {
-    if (id && !enabledModels.find(m => m.id === id || m.modelId === id)) {
+    if (id && !enabledModelsRef.current.find(m => m.id === id || m.modelId === id)) {
       toast({
         title: "Modelo no disponible",
         description: "El modelo seleccionado ya no está disponible",
@@ -92,10 +131,16 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
       return;
     }
     setSelectedModelIdState(id);
-  }, [enabledModels, toast]);
+  }, [toast]);
 
+  // ──────────────────────────────────────────────────────────────
+  // 4. Effects – use enabledFingerprint to avoid re-running when
+  //    the server returns an identical list with a new reference.
+  // ──────────────────────────────────────────────────────────────
+
+  // Reset selection when the previously-selected model disappears.
   useEffect(() => {
-    if (selectedModelId && !enabledModels.find(m => m.id === selectedModelId || m.modelId === selectedModelId)) {
+    if (selectedModelId && !enabledModelsRef.current.find(m => m.id === selectedModelId || m.modelId === selectedModelId)) {
       toast({
         title: "Modelo desactivado",
         description: "El modelo seleccionado ya no está disponible",
@@ -103,16 +148,18 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
       });
       setSelectedModelIdState(null);
     }
-  }, [enabledModels, selectedModelId, toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabledFingerprint, selectedModelId, toast]);
 
   // Initialize selected model from Settings -> Default Model.
   useEffect(() => {
     if (selectedModelId) return;
 
+    const models = enabledModelsRef.current;
     const legacyDefaultModelIds = new Set(["gemini-2.5-flash"]);
 
     const findEnabled = (id: string) =>
-      enabledModels.find((m) => m.modelId === id || m.id === id);
+      models.find((m) => m.modelId === id || m.id === id);
 
     const userDefault = settings.defaultModel;
     const platformDefault = platformSettings.default_model;
@@ -127,31 +174,36 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
       setSelectedModelIdState(target.id);
       return;
     }
-    if (enabledModels[0]) {
-      // Fall back to the first enabled model so the rest of the app has a stable selection.
-      setSelectedModelIdState(enabledModels[0].id);
+    if (models[0]) {
+      setSelectedModelIdState(models[0].id);
     }
-  }, [enabledModels, selectedModelId, settings.defaultModel, platformSettings.default_model]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabledFingerprint, selectedModelId, settings.defaultModel, platformSettings.default_model]);
 
   // Keep Settings -> Default Model in sync with the selector.
   useEffect(() => {
     if (!selectedModelId) return;
-    const model = enabledModels.find((m) => m.id === selectedModelId || m.modelId === selectedModelId);
+    const model = enabledModelsRef.current.find((m) => m.id === selectedModelId || m.modelId === selectedModelId);
     if (!model?.modelId) return;
     if (model.modelId !== settings.defaultModel) {
       updateSetting("defaultModel", model.modelId);
     }
-  }, [enabledModels, selectedModelId, settings.defaultModel, updateSetting]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedModelId, settings.defaultModel, updateSetting]);
 
   // If the user changes Default Model from Settings, reflect it in the selector.
   useEffect(() => {
     if (!settings.defaultModel) return;
-    const target = enabledModels.find((m) => m.modelId === settings.defaultModel || m.id === settings.defaultModel);
+    const target = enabledModelsRef.current.find((m) => m.modelId === settings.defaultModel || m.id === settings.defaultModel);
     if (!target) return;
     if (selectedModelId === target.id || selectedModelId === target.modelId) return;
     setSelectedModelIdState(target.id);
-  }, [enabledModels, selectedModelId, settings.defaultModel]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedModelId, settings.defaultModel]);
 
+  // ──────────────────────────────────────────────────────────────
+  // 5. Mutations (unchanged logic, stable callbacks).
+  // ──────────────────────────────────────────────────────────────
   const toggleMutation = useMutation({
     mutationFn: async ({ id, enabled }: { id: string; enabled: boolean }) => {
       const res = await fetch(`/api/admin/models/${id}/toggle`, {
@@ -169,33 +221,51 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
     },
   });
 
-  const enableModel = async (id: string) => {
+  const enableModel = useCallback(async (id: string) => {
     await toggleMutation.mutateAsync({ id, enabled: true });
-  };
+  }, [toggleMutation]);
 
-  const disableModel = async (id: string) => {
+  const disableModel = useCallback(async (id: string) => {
     await toggleMutation.mutateAsync({ id, enabled: false });
-  };
+  }, [toggleMutation]);
 
-  const toggleModel = async (id: string, enabled: boolean) => {
+  const toggleModel = useCallback(async (id: string, enabled: boolean) => {
     await toggleMutation.mutateAsync({ id, enabled });
-  };
+  }, [toggleMutation]);
+
+  // ──────────────────────────────────────────────────────────────
+  // 6. Memoize Provider value so consumers only re-render when
+  //    something actually changed.
+  // ──────────────────────────────────────────────────────────────
+  const contextValue = useMemo<ModelAvailabilityContextType>(
+    () => ({
+      availableModels,
+      allModels,
+      isLoading,
+      isAnyModelAvailable,
+      enableModel,
+      disableModel,
+      toggleModel,
+      refetch,
+      selectedModelId,
+      setSelectedModelId,
+    }),
+    [
+      availableModels,
+      allModels,
+      isLoading,
+      isAnyModelAvailable,
+      enableModel,
+      disableModel,
+      toggleModel,
+      refetch,
+      selectedModelId,
+      setSelectedModelId,
+    ],
+  );
 
   return (
-    <ModelAvailabilityContext.Provider
-      value={{
-        availableModels,
-        allModels,
-        isLoading,
-        isAnyModelAvailable,
-        enableModel,
-        disableModel,
-        toggleModel,
-        refetch,
-        selectedModelId,
-        setSelectedModelId,
-      }}
-    >
+    <ModelAvailabilityContext.Provider value={contextValue}>
       {children}
     </ModelAvailabilityContext.Provider>
   );

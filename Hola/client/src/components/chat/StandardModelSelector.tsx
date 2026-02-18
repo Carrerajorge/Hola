@@ -11,7 +11,7 @@ interface StandardModelSelectorProps {
     activeGptName?: string;
 }
 
-export function StandardModelSelector({
+export const StandardModelSelector = React.memo(function StandardModelSelector({
     availableModels,
     selectedModelId,
     setSelectedModelId,
@@ -35,7 +35,7 @@ export function StandardModelSelector({
     if (!isAnyModelAvailable) {
         return (
             <div
-                className="relative flex items-center gap-1 sm:gap-2 bg-gray-200 dark:bg-gray-700 px-1.5 sm:px-2 py-1 rounded-md cursor-not-allowed opacity-60"
+                className="relative flex items-center gap-1 sm:gap-2 bg-gray-200 dark:bg-gray-700 px-1.5 sm:px-2 py-1 rounded-md cursor-not-allowed opacity-60 min-w-[140px] min-h-[36px]"
                 data-testid="button-model-selector-disabled"
                 title="No hay modelos disponibles. Un administrador debe activar al menos un modelo."
             >
@@ -55,7 +55,7 @@ export function StandardModelSelector({
     return (
         <div
             className={cn(
-                "relative flex items-center gap-1 sm:gap-2 rounded-md transition-colors mt-[-5px] mb-[-5px] pt-[8px] pb-[8px] pl-[7px] pr-[7px]",
+                "relative flex items-center gap-1 sm:gap-2 rounded-md transition-colors mt-[-5px] mb-[-5px] pt-[8px] pb-[8px] pl-[7px] pr-[7px] min-w-[140px] min-h-[36px]",
                 activeGptName ? "cursor-not-allowed opacity-60" : "hover:bg-muted/50"
             )}
             data-testid="button-model-selector"
@@ -83,7 +83,7 @@ export function StandardModelSelector({
             <ChevronDown className="pointer-events-none absolute right-2 h-3 w-3 text-muted-foreground flex-shrink-0" />
         </div>
     );
-}
+});
 
 // Ensure default export compatibility if needed, but named is preferred
 export default StandardModelSelector;

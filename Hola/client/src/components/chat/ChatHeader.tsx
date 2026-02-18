@@ -122,6 +122,12 @@ export function ChatHeader({
         return isCustom;
     }, [activeGpt]);
 
+    // Stable prop for StandardModelSelector to avoid re-renders
+    const activeGptNameForSelector = useMemo(
+        () => (activeGpt?.name === 'ILIAGPT' ? undefined : activeGpt?.name),
+        [activeGpt?.name],
+    );
+
 
     return (
         <>
@@ -162,7 +168,7 @@ export function ChatHeader({
                         selectedModelId={selectedModelId}
                         setSelectedModelId={setSelectedModelId}
                         modelsByProvider={modelsByProvider}
-                        activeGptName={activeGpt?.name === 'ILIAGPT' ? undefined : activeGpt?.name}
+                        activeGptName={activeGptNameForSelector}
                     />
                 )}
             </div>
