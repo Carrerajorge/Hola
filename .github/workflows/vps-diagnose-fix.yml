@@ -1,0 +1,276 @@
+name: VPS Diagnose & Fix
+
+on:
+  push:
+    branches:
+      - 'claude/deploy-production-*'
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
+  VPS_USER: ${{ secrets.VPS_USER || 'root' }}
+  VPS_PORT: ${{ secrets.VPS_PORT || '8022' }}
+  DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/hola' }}
+
+jobs:
+  diagnose-and-fix:
+    name: Diagnose & Fix Production 404
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: https://iliagpt.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup SSH key
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          if [ -z "${{ secrets.VPS_SSH_KEY }}" ]; then
+            echo "::error::VPS_SSH_KEY secret is required."
+            exit 1
+          fi
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      - name: Resolve reachable SSH endpoint
+        id: target
+        run: |
+          set -euo pipefail
+          HOSTS=("${VPS_HOST}" "69.62.98.126")
+          PORTS=("${VPS_PORT}" "8022" "2222" "22")
+
+          for host in "${HOSTS[@]}"; do
+            for port in "${PORTS[@]}"; do
+              echo "Trying ${VPS_USER}@${host}:${port}..."
+              ssh-keyscan -p "$port" -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
+              if ssh -i ~/.ssh/deploy_key -4 -p "$port" \
+                -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=8 \
+                "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1; then
+                echo "host=${host}" >> "$GITHUB_OUTPUT"
+                echo "port=${port}" >> "$GITHUB_OUTPUT"
+                echo "✓ Connected via ${host}:${port}"
+                exit 0
+              fi
+            done
+          done
+
+          echo "::error::No reachable VPS endpoint found"
+          exit 1
+
+      - name: Diagnose VPS state
+        id: diagnose
+        run: |
+          set -euo pipefail
+          HOST="${{ steps.target.outputs.host }}"
+          PORT="${{ steps.target.outputs.port }}"
+
+          echo "═══════════════════════════════════════════"
+          echo "  VPS Diagnostic Report"
+          echo "═══════════════════════════════════════════"
+
+          ssh -i ~/.ssh/deploy_key -p "${PORT}" \
+            -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
+            "${VPS_USER}@${HOST}" << 'ENDSSH'
+          set -euo pipefail
+          DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
+
+          echo ""
+          echo "=== 1. Docker Containers ==="
+          docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>&1 || echo "Docker not available"
+
+          echo ""
+          echo "=== 2. Deploy State ==="
+          cat "${DEPLOY_PATH}/deploy-state.json" 2>/dev/null || echo "No deploy-state.json found"
+
+          echo ""
+          echo "=== 3. Nginx Upstream Config ==="
+          cat /etc/nginx/conf.d/iliagpt-upstream.conf 2>/dev/null || echo "No upstream config found"
+
+          echo ""
+          echo "=== 4. Nginx Test ==="
+          nginx -t 2>&1 || echo "Nginx config INVALID"
+
+          echo ""
+          echo "=== 5. Health Checks (direct ports) ==="
+          echo -n "Port 5000: "
+          curl -sf --max-time 5 http://127.0.0.1:5000/api/health 2>/dev/null || echo "FAIL"
+          echo ""
+          echo -n "Port 5001: "
+          curl -sf --max-time 5 http://127.0.0.1:5001/api/health 2>/dev/null || echo "FAIL"
+
+          echo ""
+          echo "=== 6. App Container Logs (last 30 lines) ==="
+          for slot in blue green; do
+            CNAME="hola-${slot}-app"
+            if docker inspect "${CNAME}" > /dev/null 2>&1; then
+              echo "--- ${CNAME} ---"
+              docker logs --tail=30 "${CNAME}" 2>&1 || true
+              echo "Status: $(docker inspect --format='{{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}}' "${CNAME}" 2>/dev/null || echo unknown)"
+            fi
+          done
+
+          echo ""
+          echo "=== 7. Disk Space ==="
+          df -h "${DEPLOY_PATH}" 2>/dev/null || df -h /
+
+          echo ""
+          echo "=== 8. Memory ==="
+          free -h
+
+          echo ""
+          echo "=== 9. Deploy Log (last 10) ==="
+          tail -10 "${DEPLOY_PATH}/deploy.log" 2>/dev/null || echo "No deploy log"
+
+          echo ""
+          echo "=== 10. Nginx Error Log (last 20) ==="
+          tail -20 /var/log/nginx/error.log 2>/dev/null || echo "No nginx error log"
+          ENDSSH
+
+      - name: Fix - Restart containers and nginx
+        run: |
+          set -euo pipefail
+          HOST="${{ steps.target.outputs.host }}"
+          PORT="${{ steps.target.outputs.port }}"
+
+          echo "═══════════════════════════════════════════"
+          echo "  Attempting Fix"
+          echo "═══════════════════════════════════════════"
+
+          ssh -i ~/.ssh/deploy_key -p "${PORT}" \
+            -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
+            "${VPS_USER}@${HOST}" << 'ENDSSH'
+          set -euo pipefail
+          DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
+          cd "${DEPLOY_PATH}"
+
+          echo "--- Loading deploy state ---"
+          if [ -f deploy-state.json ]; then
+            ACTIVE_SLOT="$(python3 -c "import json; print(json.load(open('deploy-state.json'))['active_slot'])" 2>/dev/null || echo "blue")"
+            ACTIVE_PORT="$(python3 -c "import json; print(json.load(open('deploy-state.json'))['active_port'])" 2>/dev/null || echo "5000")"
+            IMAGE_TAG="$(python3 -c "import json; print(json.load(open('deploy-state.json')).get('image_tag','latest'))" 2>/dev/null || echo "latest")"
+            APP_VERSION="$(python3 -c "import json; print(json.load(open('deploy-state.json')).get('app_version',''))" 2>/dev/null || echo "")"
+          else
+            ACTIVE_SLOT="blue"
+            ACTIVE_PORT="5000"
+            IMAGE_TAG="latest"
+            APP_VERSION=""
+          fi
+
+          echo "Active slot: ${ACTIVE_SLOT} (port ${ACTIVE_PORT})"
+          echo "Image tag: ${IMAGE_TAG}"
+
+          # Load secrets for compose
+          if [ -f .env.production ]; then
+            export SANDBOX_RUNNER_TOKEN="$(grep -m1 'SANDBOX_RUNNER_TOKEN=' .env.production | cut -d= -f2- | tr -d \"\')"
+            export REDIS_PASSWORD="$(grep -m1 'REDIS_PASSWORD=' .env.production | cut -d= -f2- | tr -d \"\')"
+          fi
+
+          echo ""
+          echo "--- Ensuring infrastructure is running ---"
+          docker compose -p hola-infra -f docker-compose.infra.yml up -d 2>&1 || echo "Infra start warning (non-fatal)"
+
+          # Wait for postgres
+          for i in $(seq 1 15); do
+            if docker exec hola-postgres pg_isready -U postgres > /dev/null 2>&1; then
+              echo "Postgres ready"
+              break
+            fi
+            sleep 2
+          done
+
+          # Wait for redis
+          for i in $(seq 1 10); do
+            if docker exec hola-redis redis-cli -a "${REDIS_PASSWORD}" ping 2>/dev/null | grep -q PONG; then
+              echo "Redis ready"
+              break
+            fi
+            sleep 2
+          done
+
+          echo ""
+          echo "--- Restarting active slot (${ACTIVE_SLOT}) ---"
+          SLOT="${ACTIVE_SLOT}" HOST_PORT="${ACTIVE_PORT}" \
+            IMAGE_TAG="${IMAGE_TAG}" APP_VERSION="${APP_VERSION}" \
+            SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN}" \
+            REDIS_PASSWORD="${REDIS_PASSWORD}" \
+            docker compose -p "hola-${ACTIVE_SLOT}" -f docker-compose.slot.yml up -d --force-recreate 2>&1 || echo "Slot restart warning"
+
+          echo ""
+          echo "--- Waiting for health check ---"
+          HEALTHY=false
+          for i in $(seq 1 40); do
+            HTTP_CODE="$(curl -sf -o /dev/null -w '%{http_code}' "http://127.0.0.1:${ACTIVE_PORT}/api/health/ready" 2>/dev/null || echo "000")"
+            if [ "${HTTP_CODE}" = "200" ]; then
+              echo "✓ App healthy on port ${ACTIVE_PORT} (attempt ${i})"
+              HEALTHY=true
+              break
+            fi
+            if [ $(( i % 5 )) -eq 0 ]; then
+              echo "  Attempt ${i}/40 (HTTP ${HTTP_CODE})..."
+            fi
+            sleep 3
+          done
+
+          if [ "${HEALTHY}" != "true" ]; then
+            echo "✗ App not healthy after retries"
+            echo "Container status:"
+            docker inspect --format='Status={{.State.Status}} Exit={{.State.ExitCode}} OOM={{.State.OOMKilled}}' "hola-${ACTIVE_SLOT}-app" 2>/dev/null || true
+            echo "Last 50 lines of app log:"
+            docker logs --tail=50 "hola-${ACTIVE_SLOT}-app" 2>&1 || true
+            exit 1
+          fi
+
+          echo ""
+          echo "--- Ensuring nginx upstream points to port ${ACTIVE_PORT} ---"
+          printf 'upstream iliagpt {\n    server 127.0.0.1:%s;\n    keepalive 32;\n    keepalive_timeout 60s;\n    keepalive_requests 1000;\n}\n' "${ACTIVE_PORT}" > /etc/nginx/conf.d/iliagpt-upstream.conf
+
+          nginx -t 2>&1 && nginx -s reload && echo "✓ Nginx reloaded" || echo "✗ Nginx reload failed"
+
+          echo ""
+          echo "--- Final verification ---"
+          sleep 3
+          FINAL_CODE="$(curl -sf -o /dev/null -w '%{http_code}' "http://127.0.0.1:${ACTIVE_PORT}/api/health" 2>/dev/null || echo "000")"
+          FINAL_HEALTH="$(curl -sf --max-time 5 "http://127.0.0.1:${ACTIVE_PORT}/api/health" 2>/dev/null || echo "{}")"
+          echo "Health check: HTTP ${FINAL_CODE}"
+          echo "Response: ${FINAL_HEALTH}"
+
+          SPA_CODE="$(curl -sf -o /dev/null -w '%{http_code}' "http://127.0.0.1:${ACTIVE_PORT}/" 2>/dev/null || echo "000")"
+          echo "SPA root: HTTP ${SPA_CODE}"
+          ENDSSH
+
+      - name: Verify production externally
+        run: |
+          set -euo pipefail
+          echo "Waiting 10s for changes to propagate..."
+          sleep 10
+
+          echo "Checking https://iliagpt.com..."
+          for i in $(seq 1 20); do
+            HTTP_CODE="$(curl -sf -o /dev/null -w '%{http_code}' --max-time 10 https://iliagpt.com/api/health 2>/dev/null || echo "000")"
+            if [ "${HTTP_CODE}" = "200" ]; then
+              echo "✓ Production is healthy! (HTTP ${HTTP_CODE})"
+              HEALTH="$(curl -sf --max-time 10 https://iliagpt.com/api/health 2>/dev/null || echo "{}")"
+              echo "Response: ${HEALTH}"
+              exit 0
+            fi
+            echo "  Attempt ${i}/20 (HTTP ${HTTP_CODE})..."
+            sleep 3
+          done
+
+          echo "::warning::Production still not healthy after all retries"
+          exit 1
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
