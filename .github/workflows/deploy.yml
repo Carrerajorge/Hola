@@ -313,7 +313,18 @@ jobs:
             echo "::error::Production returned 5xx on root endpoint: ${STATUS_CODE}"
             exit 1
           fi
-
+      - name: Run rigorous production acceptance checks
+        env:
+          VPS_HOST: ${{ steps.target.outputs.host }}
+          VPS_PORT: ${{ steps.target.outputs.port }}
+          VPS_USER: ${{ env.VPS_USER }}
+          VPS_SSH_KEY: /Users/runner/.ssh/deploy_key
+          EXPECTED_APP_VERSION: ${{ steps.tag.outputs.app_version }}
+          DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
+          DEPLOY_STATE_PATH: /opt/hola/deploy-state.json
+          NGINX_UPSTREAM_CONF: /etc/nginx/conf.d/iliagpt-upstream.conf
+        run: |
+          bash scripts/prod-rigorous-checks.sh
 
       - name: Deploy summary
         if: always()
@@ -593,7 +604,18 @@ jobs:
             echo "::error::Production returned 5xx on root endpoint: ${STATUS_CODE}"
             exit 1
           fi
-
+      - name: Run rigorous production acceptance checks
+        env:
+          VPS_HOST: ${{ steps.target.outputs.host }}
+          VPS_PORT: ${{ steps.target.outputs.port }}
+          VPS_USER: ${{ env.VPS_USER }}
+          VPS_SSH_KEY: /Users/runner/.ssh/deploy_key
+          EXPECTED_APP_VERSION: ${{ steps.tag.outputs.app_version }}
+          DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
+          DEPLOY_STATE_PATH: /opt/hola/deploy-state.json
+          NGINX_UPSTREAM_CONF: /etc/nginx/conf.d/iliagpt-upstream.conf
+        run: |
+          bash scripts/prod-rigorous-checks.sh
 
       - name: Deploy summary
         if: always()
