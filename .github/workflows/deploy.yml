@@ -43,7 +43,9 @@ jobs:
     name: CI Completion Gate
     if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # CI can take 20-45+ minutes; if this gate times out, the deploy run is marked "cancelled"
+    # and nothing ships. Keep this comfortably above CI duration.
+    timeout-minutes: 70
     permissions:
       contents: read
       actions: read
@@ -61,7 +63,7 @@ jobs:
           # gh CLI uses GH_TOKEN in Actions
           export GH_TOKEN="${GH_TOKEN}"
 
-          for attempt in $(seq 1 72); do
+          for attempt in $(seq 1 360); do
             runs_json="$(gh run list --workflow "CI" --branch "${BRANCH}" --json headSha,status,conclusion --limit 20 || true)"
             if [ -z "${runs_json}" ] || [ "${runs_json}" = "null" ]; then
               echo "Unable to read workflow runs yet; retrying..."
@@ -69,15 +71,29 @@ jobs:
               continue
             fi
 
-            ci_run="$(echo "${runs_json}" | jq -r --arg sha "${SHA}" '[.[] | select(.headSha == $sha)][0]')"
-            if [ "${ci_run}" = "null" ] || [ -z "${ci_run}" ]; then
-              echo "CI run for SHA ${SHA} not yet reported. Retry ${attempt}/30..."
+            ci_line="$(echo "${runs_json}" | python3 - <<'PY'
+import json, os, sys
+
+sha = os.environ.get("SHA", "")
+runs = json.load(sys.stdin)
+for r in runs:
+    if r.get("headSha") == sha:
+        status = r.get("status") or ""
+        conclusion = r.get("conclusion") or ""
+        print(f"{status} {conclusion}".strip())
+        sys.exit(0)
+print("__notfound__")
+PY
+            )"
+
+            status="$(echo "${ci_line}" | awk '{print $1}')"
+            conclusion="$(echo "${ci_line}" | awk '{print $2}')"
+
+            if [ "${status}" = "__notfound__" ] || [ -z "${status}" ]; then
+              echo "CI run for SHA ${SHA} not yet reported. Retry ${attempt}/360..."
               sleep 10
               continue
             fi
-
-            status="$(echo "${ci_run}" | jq -r '.status')"
-            conclusion="$(echo "${ci_run}" | jq -r '.conclusion // empty')"
 
             if [ "${status}" = "completed" ]; then
               if [ "${conclusion}" = "success" ]; then
