@@ -77,6 +77,24 @@ const STREAM_MIME_RE = /^[a-zA-Z0-9][a-zA-Z0-9.+-\/]*/;
 const MAX_SSE_CONNECTIONS_PER_USER = 5;
 const SSE_CONNECTION_TRACKER = new Map<string, Set<string>>();
 
+type ConversationStreamLock = {
+  requestId: string;
+  startedAt: number;
+  cancel: (reason?: string) => void;
+};
+
+const CONVERSATION_STREAM_LOCK_TTL_MS = 15 * 60 * 1000;
+const CONVERSATION_STREAM_LOCKS = new Map<string, ConversationStreamLock>();
+
+function cleanConversationStreamLocks(): void {
+  const now = Date.now();
+  for (const [key, value] of CONVERSATION_STREAM_LOCKS.entries()) {
+    if (now - value.startedAt > CONVERSATION_STREAM_LOCK_TTL_MS) {
+      CONVERSATION_STREAM_LOCKS.delete(key);
+    }
+  }
+}
+
 function acquireSseSlot(userId: string, requestId: string): boolean {
   let connections = SSE_CONNECTION_TRACKER.get(userId);
   if (!connections) {
@@ -1045,6 +1063,21 @@ const cleanSkipRunStreamDedup = (): void => {
         "chat_stream"
       );
 
+      cleanConversationStreamLocks();
+      const queueMode = (req.body as any)?.queueMode === "reject" ? "reject" : "replace";
+      const existingConversationLock = CONVERSATION_STREAM_LOCKS.get(streamConversationId);
+      if (existingConversationLock && existingConversationLock.requestId !== requestId) {
+        if (queueMode === "reject") {
+          return res.status(409).json({
+            status: "already_processing",
+            conversationId: streamConversationId,
+            requestId: existingConversationLock.requestId,
+          });
+        }
+        existingConversationLock.cancel("stream_replaced");
+        CONVERSATION_STREAM_LOCKS.delete(streamConversationId);
+      }
+
       (res as any).locals = (res as any).locals || {};
       (res as any).locals.streamMeta = {
         conversationId: streamConversationId,
@@ -1052,6 +1085,27 @@ const cleanSkipRunStreamDedup = (): void => {
         getAssistantMessageId: () => assistantMessageId,
         onWrite: () => resetIdleTimeout(),
       };
+
+      let conversationLockReleased = false;
+      const releaseConversationLock = () => {
+        if (conversationLockReleased) return;
+        conversationLockReleased = true;
+        const current = CONVERSATION_STREAM_LOCKS.get(streamConversationId);
+        if (current?.requestId === requestId) {
+          CONVERSATION_STREAM_LOCKS.delete(streamConversationId);
+        }
+      };
+      res.on("close", releaseConversationLock);
+      res.on("finish", releaseConversationLock);
+
+      const cancelThisStream = (reason: string = "stream_replaced") => {
+        endStreamByTimeout("stream_replaced", `Stream replaced (${reason})`);
+      };
+      CONVERSATION_STREAM_LOCKS.set(streamConversationId, {
+        requestId,
+        startedAt: Date.now(),
+        cancel: cancelThisStream,
+      });
 
       if (!streamHardTimeout) {
         streamHardTimeout = setTimeout(() => {

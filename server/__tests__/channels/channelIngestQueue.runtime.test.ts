@@ -1,9 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const queueAddMock = vi.fn();
-const getWaitingCountMock = vi.fn();
-const getActiveCountMock = vi.fn();
-const getDelayedCountMock = vi.fn();
+const {
+  queueAddMock,
+  getWaitingCountMock,
+  getActiveCountMock,
+  getDelayedCountMock,
+} = vi.hoisted(() => ({
+  queueAddMock: vi.fn(),
+  getWaitingCountMock: vi.fn(),
+  getActiveCountMock: vi.fn(),
+  getDelayedCountMock: vi.fn(),
+}));
 
 vi.mock("../../config/env", () => ({
   env: {
@@ -57,8 +64,15 @@ import {
 
 const FIXED_TIMESTAMP = "1700000000";
 
-const makeWhatsappPayload = (messageId: string, timestamp = FIXED_TIMESTAMP) => ({
+const makeWhatsappPayload = (
+  messageId: string,
+  timestamp = FIXED_TIMESTAMP,
+  accountPhoneNumberId = "phone-1",
+) => ({
   channel: "whatsapp_cloud",
+  whatsappMeta: {
+    accountPhoneNumberId,
+  },
   payload: {
     entry: [{
       changes: [{
@@ -90,10 +104,10 @@ describe("channelIngestQueue runtime idempotency hardening", () => {
 
     await submitChannelIngest(payload);
     await submitChannelIngest(payload);
-    await submitChannelIngest(makeWhatsappPayload("wamid-a", "1700000010"));
+    await submitChannelIngest(makeWhatsappPayload("wamid-a", "1700000010", "phone-2"));
 
     const stats = getChannelIngestQueueStats();
-    expect(queueAddMock).toHaveBeenCalledTimes(1);
+    expect(queueAddMock).toHaveBeenCalledTimes(2);
     expect(stats.idempotencyDuplicate).toBe(1);
     expect(stats.ingestIdempotencyWindowSize).toBe(2);
   });

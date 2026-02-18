@@ -30,9 +30,12 @@ import { isProductionIntent, handleProductionRequest, getDeliverables } from "..
 import type { z } from "zod";
 import { getUserId } from "../types/express";
 import { semanticMemoryStore } from "../memory/SemanticMemoryStore";
+import { type SkillScope } from "@shared/schema/skillPlatform";
 import { handleEmailChatRequest } from "../services/gmailChatIntegration";
 import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { ensureUserRowExists } from "../lib/ensureUserRowExists";
+import { buildSkillSystemPromptSection, drizzleSkillStore, resolveSkillContextFromRequest } from "../services/skillContextResolver";
+import { getSkillPlatformService, type SkillExecutionResult } from "../services/skillPlatform";
 
 type AttachmentSpec = z.infer<typeof AttachmentSpecSchema>;
 
@@ -46,6 +49,170 @@ import { conversationStateService } from "../services/conversationStateService";
 import { generateAndPersistChatTitle } from "../lib/chatTitleGenerator";
 
 type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
+const isDebugLogEnabled = process.env.DEBUG === "true";
+const MAX_STREAM_REQUEST_ID_LEN = 140;
+const MAX_STREAM_EVENT_PAYLOAD_BYTES = 4600;
+const MAX_STREAM_ATTACHMENT_NAME_LEN = 220;
+const MAX_STREAM_ATTACHMENT_MIME_LEN = 120;
+const MAX_STREAM_ATTACHMENT_SIZE = 200_000_000;
+const MAX_STREAM_SKILL_SCOPES = 12;
+const MAX_STREAM_SKILL_ATTACHMENTS = 12;
+const DEFAULT_STREAM_SKILL_SCOPES: SkillScope[] = ["storage.read", "files", "code_interpreter"];
+const VALID_STREAM_SCOPE_SET = new Set<SkillScope>([
+  "storage.read",
+  "storage.write",
+  "browser",
+  "email",
+  "database",
+  "external_network",
+  "code_interpreter",
+  "files",
+  "system",
+]);
+const STREAM_IDENTIFIER_RE = /^[a-zA-Z0-9._-]{1,140}$/;
+const STREAM_ATTACHMENT_NAME_RE = /^[^<>:\"/\\|?*\u0000-\u001f]{1,220}$/;
+const STREAM_MIME_RE = /^[a-zA-Z0-9][a-zA-Z0-9.+-\/]*/;
+
+// ── PER-USER SSE CONNECTION LIMITER ────────────────────────────
+const MAX_SSE_CONNECTIONS_PER_USER = 5;
+const SSE_CONNECTION_TRACKER = new Map<string, Set<string>>();
+
+type ConversationStreamLock = {
+  requestId: string;
+  startedAt: number;
+  cancel: (reason?: string) => void;
+};
+
+const CONVERSATION_STREAM_LOCK_TTL_MS = 15 * 60 * 1000;
+const CONVERSATION_STREAM_LOCKS = new Map<string, ConversationStreamLock>();
+
+function cleanConversationStreamLocks(): void {
+  const now = Date.now();
+  for (const [key, value] of CONVERSATION_STREAM_LOCKS.entries()) {
+    if (now - value.startedAt > CONVERSATION_STREAM_LOCK_TTL_MS) {
+      CONVERSATION_STREAM_LOCKS.delete(key);
+    }
+  }
+}
+
+function acquireSseSlot(userId: string, requestId: string): boolean {
+  let connections = SSE_CONNECTION_TRACKER.get(userId);
+  if (!connections) {
+    connections = new Set();
+    SSE_CONNECTION_TRACKER.set(userId, connections);
+  }
+  if (connections.size >= MAX_SSE_CONNECTIONS_PER_USER) return false;
+  connections.add(requestId);
+  return true;
+}
+
+function releaseSseSlot(userId: string, requestId: string): void {
+  const connections = SSE_CONNECTION_TRACKER.get(userId);
+  if (connections) {
+    connections.delete(requestId);
+    if (connections.size === 0) SSE_CONNECTION_TRACKER.delete(userId);
+  }
+}
+
+/**
+ * Sanitize external web content before injecting into system prompt.
+ * Strips patterns that could be interpreted as LLM instructions/prompt injection.
+ */
+function sanitizeWebSearchContent(text: string, maxLen = 50_000): string {
+  if (!text) return "";
+  return text
+    .replace(/\b(?:ignore\s+(?:all\s+)?(?:previous|above|prior)\s+instructions?)/gi, "[filtered]")
+    .replace(/\b(?:you\s+are\s+now|act\s+as\s+if|pretend\s+(?:you|that)|system\s*:\s*)/gi, "[filtered]")
+    .replace(/\b(?:disregard|forget|override)\s+(?:all\s+)?(?:previous|above|prior|your)\s+(?:instructions?|rules?|guidelines?|prompt)/gi, "[filtered]")
+    .replace(/\b(?:new\s+instructions?|updated?\s+instructions?|real\s+instructions?):/gi, "[filtered]")
+    .replace(/\[(?:system|SYSTEM)\]/g, "[filtered]")
+    .replace(/<\/?(?:system|prompt|instruction|rules?|override)>/gi, "[filtered]")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/\[\/\/\]:\s*#\s*\([\s\S]*?\)/g, "")
+    .slice(0, maxLen);
+}
+
+function sanitizeStreamIdentifier(raw: unknown, fallbackPrefix = "stream_req"): string {
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (trimmed && STREAM_IDENTIFIER_RE.test(trimmed)) return trimmed;
+  }
+  return `${fallbackPrefix}_${uuidv4().replace(/-/g, "").slice(0, 16)}`;
+}
+
+function sanitizeStreamText(value: unknown, maxLen: number): string {
+  if (typeof value !== "string") return "";
+  const safe = value.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim();
+  return safe.length > maxLen ? safe.slice(0, maxLen) : safe;
+}
+
+function sanitizeStreamAttachment(raw: unknown): {
+  id?: string;
+  name?: string;
+  mimeType?: string;
+  size?: number;
+  storagePath?: string;
+  fileId?: string;
+  type?: string;
+} | null {
+  if (!raw || typeof raw !== "object") return null;
+  const source = raw as Record<string, unknown>;
+  const name = sanitizeStreamText(source.name, MAX_STREAM_ATTACHMENT_NAME_LEN);
+  if (!name || !STREAM_ATTACHMENT_NAME_RE.test(name)) return null;
+  const mimeType = sanitizeStreamText(
+    source.mimeType || source.type,
+    MAX_STREAM_ATTACHMENT_MIME_LEN
+  );
+  if (mimeType && !STREAM_MIME_RE.test(mimeType)) return null;
+  const sizeValue = Number(source.size);
+  const size = Number.isFinite(sizeValue) && sizeValue >= 0 && sizeValue <= MAX_STREAM_ATTACHMENT_SIZE
+    ? Math.floor(sizeValue)
+    : undefined;
+  const type = sanitizeStreamText(source.type, MAX_STREAM_ATTACHMENT_MIME_LEN);
+  const id = sanitizeStreamText(source.id || source.fileId, 160);
+  const storagePath = sanitizeStreamText(source.storagePath, 255);
+  const fileId = sanitizeStreamText(source.fileId, 160);
+  return {
+    id: id || fileId || undefined,
+    name,
+    mimeType: mimeType || type || undefined,
+    size,
+    storagePath: storagePath || undefined,
+    fileId: fileId || undefined,
+    type: type || undefined,
+  };
+}
+
+function clampSsePayload<T>(payload: T, maxBytes: number = MAX_STREAM_EVENT_PAYLOAD_BYTES): T {
+  const text = JSON.stringify(payload);
+  if (text.length <= maxBytes) return payload;
+  const candidate: Record<string, unknown> = { ...(payload as Record<string, unknown>), truncated: true };
+  if (candidate.content && typeof candidate.content === "string") {
+    candidate.content = sanitizeStreamText(candidate.content, Math.max(256, maxBytes - 120));
+  }
+  if (candidate.message && typeof candidate.message === "string") {
+    candidate.message = sanitizeStreamText(candidate.message, 512);
+  }
+  if (candidate.details && typeof candidate.details === "string") {
+    candidate.details = sanitizeStreamText(candidate.details, 512);
+  }
+  if (candidate.error && typeof candidate.error === "string") {
+    candidate.error = sanitizeStreamText(candidate.error, 512);
+  }
+  return candidate as T;
+}
+
+function normalizeStreamSkillScopes(rawScopes: unknown): SkillScope[] {
+  if (!Array.isArray(rawScopes)) return [...DEFAULT_STREAM_SKILL_SCOPES];
+  const seen = new Set<SkillScope>();
+  for (const scope of rawScopes) {
+    if (typeof scope !== "string") continue;
+    if (!VALID_STREAM_SCOPE_SET.has(scope as SkillScope)) continue;
+    seen.add(scope as SkillScope);
+    if (seen.size >= MAX_STREAM_SKILL_SCOPES) break;
+  }
+  return seen.size ? Array.from(seen) : [...DEFAULT_STREAM_SKILL_SCOPES];
+}
 
 function writeSse(res: Response, event: string, data: object): boolean {
   try {
@@ -53,12 +220,55 @@ function writeSse(res: Response, event: string, data: object): boolean {
     const r = res as any;
     if (r.writableEnded || r.destroyed) return false;
 
-    const chunk = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    const streamMeta = r?.locals?.streamMeta;
+    const assistantMessageId =
+      streamMeta?.assistantMessageId ||
+      (typeof streamMeta?.getAssistantMessageId === "function"
+        ? streamMeta.getAssistantMessageId()
+        : undefined);
+
+    const enrichedPayload: Record<string, unknown> = {
+      ...(data as Record<string, unknown>),
+    };
+
+    if (!enrichedPayload.conversationId && streamMeta?.conversationId) {
+      enrichedPayload.conversationId = streamMeta.conversationId;
+    }
+    if (!enrichedPayload.requestId && streamMeta?.requestId) {
+      enrichedPayload.requestId = streamMeta.requestId;
+    }
+    if (!enrichedPayload.assistantMessageId && assistantMessageId) {
+      enrichedPayload.assistantMessageId = assistantMessageId;
+    }
+
+    const payload = clampSsePayload(enrichedPayload);
+    let serialized: string;
+    try {
+      serialized = JSON.stringify(payload);
+    } catch (serializationError) {
+      serialized = JSON.stringify(
+        clampSsePayload({
+          ...(payload as Record<string, unknown>),
+          serializationError: sanitizeStreamText(String(serializationError), 120),
+          truncated: true,
+        }, MAX_STREAM_EVENT_PAYLOAD_BYTES)
+      );
+    }
+    const chunk = `event: ${sanitizeStreamText(event, 120)}\ndata: ${serialized.length > MAX_STREAM_EVENT_PAYLOAD_BYTES
+      ? JSON.stringify(clampSsePayload(payload, MAX_STREAM_EVENT_PAYLOAD_BYTES))
+      : serialized}\n\n`;
     res.write(chunk);
     if (typeof (res as unknown as { flush: Function }).flush === 'function') {
       (res as unknown as { flush: Function }).flush();
     } else if (res.socket && typeof res.socket.write === 'function') {
       res.socket.write('');
+    }
+    if (typeof streamMeta?.onWrite === "function") {
+      try {
+        streamMeta.onWrite();
+      } catch (observerError) {
+        console.warn("[SSE] streamMeta.onWrite failed:", observerError);
+      }
     }
     return true;
   } catch (err) {
@@ -204,7 +414,7 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
 
   router.post("/chat", async (req, res) => {
     try {
-      const { messages: clientMessages, useRag = true, conversationId, images, gptConfig, gptId, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachments, lastImageBase64, lastImageId, session_id } = req.body;
+      const { messages: clientMessages, useRag = true, conversationId, images, gptConfig, gptId, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachments, lastImageBase64, lastImageId, session_id, skillId, skill } = req.body;
 
       if (!clientMessages || !Array.isArray(clientMessages)) {
         return res.status(400).json({ error: "Messages array is required" });
@@ -307,8 +517,15 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
       }
 
       // DATA_MODE ENFORCEMENT: Reject document attachments - must use /analyze endpoint
-      const hasDocumentAttachments = attachments && Array.isArray(attachments) &&
-        attachments.some((a: any) => isDocumentAttachment(a.mimeType || a.type, a.name, a.type));
+      const normalizedChatAttachments = Array.isArray(attachments)
+        ? attachments
+          .slice(0, MAX_STREAM_SKILL_ATTACHMENTS)
+          .map(sanitizeStreamAttachment)
+          .filter((att): att is NonNullable<ReturnType<typeof sanitizeStreamAttachment>> => !!att)
+        : [];
+      const hasDocumentAttachments = normalizedChatAttachments.length > 0
+        ? normalizedChatAttachments.some((a) => isDocumentAttachment(a.mimeType || a.type || "", a.name || "", a.type || a.mimeType || ""))
+        : false;
 
       if (hasDocumentAttachments) {
         console.log(`[Chat API] DATA_MODE: Rejecting document attachments - must use /analyze endpoint`);
@@ -319,13 +536,13 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
       }
 
       let attachmentContext = "";
-      const hasAttachments = attachments && Array.isArray(attachments) && attachments.length > 0;
+      const hasAttachments = normalizedChatAttachments.length > 0;
 
       if (hasAttachments) {
-        console.log(`[Chat API] Processing ${attachments.length} attachment(s)`);
+        console.log(`[Chat API] Processing ${normalizedChatAttachments.length} attachment(s)`);
         try {
           const extractedContents: { extracted: Awaited<ReturnType<typeof extractAttachmentContent>>; attachment: Attachment }[] = [];
-          for (const attachment of attachments as Attachment[]) {
+          for (const attachment of normalizedChatAttachments as Attachment[]) {
             const extracted = await extractAttachmentContent(attachment);
             extractedContents.push({ extracted, attachment });
           }
@@ -366,10 +583,29 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         }
       }
 
+      const resolvedSkillContext = await resolveSkillContextFromRequest(drizzleSkillStore, {
+        userId,
+        skillId,
+        skill,
+      });
+      const skillSystemSection = buildSkillSystemPromptSection(resolvedSkillContext);
+      if (skillSystemSection) {
+        console.info("[SkillContext] Applied to /api/chat", {
+          userId,
+          source: resolvedSkillContext?.source,
+          skillId: resolvedSkillContext?.id || null,
+          skillName: resolvedSkillContext?.name,
+        });
+      }
+
       const formattedMessages = messages.map((msg: { role: string; content: string }) => ({
         role: msg.role as "user" | "assistant" | "system",
         content: msg.content
       }));
+
+      const messagesWithSkill = skillSystemSection
+        ? [{ role: "system" as const, content: skillSystemSection }, ...formattedMessages]
+        : formattedMessages;
 
       // Build gptSession info - prefer contract-based session over legacy gptConfig
       const gptSession = gptSessionContract ? {
@@ -379,7 +615,7 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         legacyConfig: gptConfig
       } : undefined;
 
-      const response = await chatService.chat(formattedMessages, {
+      const response = await chatService.chat(messagesWithSkill, {
         useRag,
         conversationId,
         userId,
@@ -671,10 +907,127 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
   });
 
   router.post("/chat/stream", async (req, res) => {
-    const requestId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    let heartbeatInterval: NodeJS.Timeout | null = null;
-    let isConnectionClosed = false;
-    let claimedRun: any = null;
+    const requestId = sanitizeStreamIdentifier(req.headers["x-request-id"], `stream_${Date.now()}`);
+    const streamStartMs = performance.now();
+    const stageTimings: Record<string, number> = {};
+    let firstTokenAtMs: number | null = null;
+    let timingReported = false;
+    const roundMs = (value: number): number => Number(Math.max(0, value).toFixed(1));
+    const recordStage = (stage: string, stageStartMs: number): void => {
+      stageTimings[stage] = roundMs(performance.now() - stageStartMs);
+    };
+    const markFirstToken = (): void => {
+      if (firstTokenAtMs === null) {
+        firstTokenAtMs = performance.now();
+      }
+    };
+    const buildTimingPayload = (): Record<string, number | null> => {
+      const now = performance.now();
+      const totalMs = roundMs(now - streamStartMs);
+      const processingMs =
+        firstTokenAtMs === null
+          ? totalMs
+          : roundMs(firstTokenAtMs - streamStartMs);
+      const streamingMs =
+        firstTokenAtMs === null
+          ? 0
+          : roundMs(now - firstTokenAtMs);
+
+      return {
+        ...stageTimings,
+        totalMs,
+        processingMs,
+        firstTokenMs: firstTokenAtMs === null ? null : roundMs(firstTokenAtMs - streamStartMs),
+        streamingMs,
+      };
+    };
+    const reportTimings = (status: string): Record<string, number | null> => {
+      const timings = buildTimingPayload();
+      if (!timingReported) {
+        timingReported = true;
+        console.log("[Perf][chat_stream]", {
+          traceId: requestId,
+          status,
+          ...timings,
+        });
+      }
+      return timings;
+    };
+
+let heartbeatInterval: NodeJS.Timeout | null = null;
+let isConnectionClosed = false;
+let claimedRun: any = null;
+let assistantMessageId: string | null = null;
+let streamHardTimeout: NodeJS.Timeout | null = null;
+let streamIdleTimeout: NodeJS.Timeout | null = null;
+
+const STREAM_HARD_TIMEOUT_MS = 180_000;
+const STREAM_IDLE_TIMEOUT_MS = 45_000;
+
+const clearStreamTimeouts = (): void => {
+  if (streamHardTimeout) {
+    clearTimeout(streamHardTimeout);
+    streamHardTimeout = null;
+  }
+  if (streamIdleTimeout) {
+    clearTimeout(streamIdleTimeout);
+    streamIdleTimeout = null;
+  }
+};
+
+const endStreamByTimeout = (code: string, message: string): void => {
+  if (isConnectionClosed) return;
+  isConnectionClosed = true;
+  clearStreamTimeouts();
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+  }
+  const streamMeta = (res as any)?.locals?.streamMeta;
+  if (streamMeta) {
+    streamMeta.onWrite = undefined;
+  }
+  writeSse(res, "error", {
+    code,
+    error: message,
+    timeout: true,
+    timestamp: Date.now(),
+  });
+  if (!(res as any).writableEnded) {
+    res.end();
+  }
+};
+
+const resetIdleTimeout = (): void => {
+  if (isConnectionClosed) return;
+  if (streamIdleTimeout) {
+    clearTimeout(streamIdleTimeout);
+  }
+  streamIdleTimeout = setTimeout(() => {
+    endStreamByTimeout(
+      "stream_inactivity_timeout",
+      `Stream closed after ${STREAM_IDLE_TIMEOUT_MS}ms without SSE activity`
+    );
+  }, STREAM_IDLE_TIMEOUT_MS);
+};
+
+const skipRunStreamDedup = new Map<string, { requestId: string; startedAt: number }>();
+const SKIPRUN_STREAM_DEDUP_TTL_MS = 20_000;
+
+const buildSkipRunStreamKey = (chatId: string | undefined, clientRequestId?: string, userRequestId?: string): string | null => {
+  if (!chatId || !clientRequestId) {
+    return null;
+  }
+  return `skipRunStream:${chatId}:${clientRequestId}:${userRequestId || ""}`;
+};
+
+const cleanSkipRunStreamDedup = (): void => {
+  const now = Date.now();
+  for (const [key, value] of skipRunStreamDedup.entries()) {
+    if (now - value.startedAt > SKIPRUN_STREAM_DEDUP_TTL_MS) {
+      skipRunStreamDedup.delete(key);
+    }
+  }
+};
 
     try {
       const {
@@ -682,6 +1035,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         conversationId,
         runId,
         chatId,
+        clientRequestId: rawClientRequestId,
+        userRequestId: rawUserRequestId,
         attachments,
         gptId,
         model,
@@ -692,18 +1047,291 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         webSearchAuto,
         latencyMode: rawLatencyMode,
         lastImageBase64,
-        lastImageId
+        lastImageId,
+        skillId,
+        skill,
+        skillScopes
       } = req.body;
       let latencyMode: LatencyMode = ['fast', 'deep', 'auto'].includes(rawLatencyMode) ? rawLatencyMode : 'auto';
       const effectiveUserId = getOrCreateSecureUserId(req);
+      const streamConversationId = sanitizeStreamIdentifier(
+        typeof conversationId === "string" && conversationId.trim().length > 0
+          ? conversationId
+          : (typeof chatId === "string" && chatId.trim().length > 0
+            ? chatId
+            : `chat_${requestId}`),
+        "chat_stream"
+      );
 
-      // DEBUG: Log all incoming request parameters for docTool verification
-      // Avoid externally-controlled format strings: don't interpolate user-controlled values into
-      // the first console argument (console uses util.format semantics).
-      console.log("[Stream] REQUEST RECEIVED", { docTool, chatId, runId, forceWebSearch });
+      cleanConversationStreamLocks();
+      const queueMode = (req.body as any)?.queueMode === "reject" ? "reject" : "replace";
+      const existingConversationLock = CONVERSATION_STREAM_LOCKS.get(streamConversationId);
+      if (existingConversationLock && existingConversationLock.requestId !== requestId) {
+        if (queueMode === "reject") {
+          return res.status(409).json({
+            status: "already_processing",
+            conversationId: streamConversationId,
+            requestId: existingConversationLock.requestId,
+          });
+        }
+        existingConversationLock.cancel("stream_replaced");
+        CONVERSATION_STREAM_LOCKS.delete(streamConversationId);
+      }
+
+      (res as any).locals = (res as any).locals || {};
+      (res as any).locals.streamMeta = {
+        conversationId: streamConversationId,
+        requestId,
+        getAssistantMessageId: () => assistantMessageId,
+        onWrite: () => resetIdleTimeout(),
+      };
+
+      let conversationLockReleased = false;
+      const releaseConversationLock = () => {
+        if (conversationLockReleased) return;
+        conversationLockReleased = true;
+        const current = CONVERSATION_STREAM_LOCKS.get(streamConversationId);
+        if (current?.requestId === requestId) {
+          CONVERSATION_STREAM_LOCKS.delete(streamConversationId);
+        }
+      };
+      res.on("close", releaseConversationLock);
+      res.on("finish", releaseConversationLock);
+
+      const cancelThisStream = (reason: string = "stream_replaced") => {
+        endStreamByTimeout("stream_replaced", `Stream replaced (${reason})`);
+      };
+      CONVERSATION_STREAM_LOCKS.set(streamConversationId, {
+        requestId,
+        startedAt: Date.now(),
+        cancel: cancelThisStream,
+      });
+
+      if (!streamHardTimeout) {
+        streamHardTimeout = setTimeout(() => {
+          endStreamByTimeout(
+            "stream_hard_timeout",
+            `Stream exceeded maximum duration of ${STREAM_HARD_TIMEOUT_MS}ms`
+          );
+        }, STREAM_HARD_TIMEOUT_MS);
+      }
+      resetIdleTimeout();
+
+      const parsedSkillScopes = normalizeStreamSkillScopes(skillScopes);
+
+      if (isDebugLogEnabled) {
+        // DEBUG: Log attachments received from frontend
+        if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+          console.log(`[Stream] INCOMING ATTACHMENTS (${attachments.length}):`, JSON.stringify(attachments.map((a: any) => ({
+            type: a.type, name: a.name, mimeType: a.mimeType, storagePath: a.storagePath,
+            fileId: a.fileId, hasContent: !!a.content,
+          }))));
+        } else {
+          console.log(`[Stream] NO ATTACHMENTS in request body. Keys: ${Object.keys(req.body).join(', ')}`);
+        }
+        if (lastImageBase64) {
+          console.log(`[Stream] lastImageBase64 present: ${typeof lastImageBase64 === 'string' ? `${lastImageBase64.substring(0, 50)}... (${lastImageBase64.length} chars)` : typeof lastImageBase64}`);
+        }
+
+        // DEBUG: Log all incoming request parameters for docTool verification
+        // Avoid externally-controlled format strings: don't interpolate user-controlled values into
+        // the first console argument (console uses util.format semantics).
+        console.log("[Stream] REQUEST RECEIVED", { docTool, chatId, runId, forceWebSearch });
+      }
 
       if (!clientMessages || !Array.isArray(clientMessages)) {
         return res.status(400).json({ error: "Messages array is required" });
+      }
+
+      const resolvedSkillContext = await resolveSkillContextFromRequest(drizzleSkillStore, {
+        userId: effectiveUserId,
+        skillId,
+        skill,
+      });
+      const skillSystemSection = buildSkillSystemPromptSection(resolvedSkillContext);
+      if (skillSystemSection) {
+        console.info("[SkillContext] Applied to /api/chat/stream", {
+          requestId,
+          userId: effectiveUserId,
+          source: resolvedSkillContext?.source,
+          skillId: resolvedSkillContext?.id || null,
+          skillName: resolvedSkillContext?.name,
+        });
+      }
+
+      const clientRequestId =
+        typeof rawClientRequestId === "string" && rawClientRequestId.trim().length > 0
+          ? sanitizeStreamText(rawClientRequestId, MAX_STREAM_REQUEST_ID_LEN)
+          : undefined;
+      const userRequestId =
+        typeof rawUserRequestId === "string" && rawUserRequestId.trim().length > 0
+          ? sanitizeStreamText(rawUserRequestId, MAX_STREAM_REQUEST_ID_LEN)
+          : undefined;
+      const latestUserForRun = [...clientMessages].reverse().find((m: any) => m?.role === "user");
+      const latestUserTextForRun =
+        typeof latestUserForRun?.content === "string"
+          ? latestUserForRun.content
+          : String(latestUserForRun?.content || "");
+      const sanitizedRunAttachments =
+        attachments && Array.isArray(attachments)
+          ? attachments
+              .slice(0, MAX_STREAM_SKILL_ATTACHMENTS)
+              .map(sanitizeStreamAttachment)
+              .filter((att) => !!att?.name)
+          : null;
+
+      // Claim run as early as possible (before any expensive routing/search work).
+      // This avoids duplicate processing and ensures idempotency responses are true JSON
+      // (before SSE headers are sent).
+      if (chatId && !claimedRun && (runId || clientRequestId)) {
+        const claimStageStart = performance.now();
+
+        let existingRun =
+          runId
+            ? await storage.getChatRun(runId)
+            : await storage.getChatRunByClientRequestId(chatId, clientRequestId!);
+
+        // If caller did not provide runId but did provide clientRequestId,
+        // create a lightweight run here so streaming can start.
+        if (!existingRun && !runId && clientRequestId && latestUserTextForRun) {
+          const runPrepStart = performance.now();
+          try {
+            // 1) Prefer linking the run to an already-persisted user message
+            // when /chats/:id/messages used skipRun mode.
+            let runMessageIdStart = performance.now();
+            let runMessageId = userRequestId
+              ? await storage.findMessageByRequestId(userRequestId)
+              : null;
+            recordStage("user_message_lookup_ms", runMessageIdStart);
+            if (runMessageId && runMessageId.chatId === chatId) {
+              const createRunStart = performance.now();
+              const createdRun = await storage.createChatRun({
+                chatId,
+                clientRequestId,
+                userMessageId: runMessageId.id,
+                status: "pending",
+              });
+              existingRun = createdRun;
+              recordStage("run_from_existing_message_ms", createRunStart);
+            }
+
+            // 2) Fallback: create user message + run atomically (legacy first-write path).
+            if (!existingRun && latestUserTextForRun) {
+              // If stream starts before /api/chats finishes, make sure the chat row exists
+              // so createUserMessageAndRun won't fail with FK violations.
+              const existingChat = await storage.getChat(chatId);
+              if (!existingChat) {
+                try {
+                  await storage.createChat({
+                    id: chatId,
+                    title: "New Chat",
+                    userId: effectiveUserId || undefined,
+                  });
+                } catch (chatCreateError: any) {
+                  if (chatCreateError?.code !== "23505") {
+                    throw chatCreateError;
+                  }
+                }
+              }
+
+              const createdRunStart = performance.now();
+              const created = await storage.createUserMessageAndRun(
+                chatId,
+                {
+                  chatId,
+                  role: "user",
+                  content: latestUserTextForRun,
+                  status: "done",
+                  requestId: userRequestId || `${requestId}:user`,
+                  userMessageId: null,
+                  attachments: sanitizedRunAttachments,
+                } as any,
+                clientRequestId
+              );
+              existingRun = created.run;
+              recordStage("create_message_run_ms", createdRunStart);
+            }
+            recordStage("run_prep_ms", runPrepStart);
+          } catch (createRunError: any) {
+            // Unique violation means another concurrent request created it first.
+            if (createRunError?.code !== "23505") {
+              throw createRunError;
+            }
+            existingRun = await storage.getChatRunByClientRequestId(chatId, clientRequestId);
+            recordStage("run_prep_ms", runPrepStart);
+          }
+        }
+
+        if (!existingRun) {
+          recordStage("run_claim_ms", claimStageStart);
+          if (runId) {
+            return res.status(404).json({
+              error: "Run not found",
+              traceId: requestId,
+              timings: reportTimings("run_not_found"),
+            });
+          }
+          // No run found for clientRequestId yet: continue in legacy mode
+          // (best-effort), /chat/stream will still function.
+        } else {
+          if (existingRun.status === "processing") {
+            recordStage("run_claim_ms", claimStageStart);
+            console.log(`[Run] Run ${existingRun.id} is already being processed, returning status`);
+            return res.json({
+              status: "already_processing",
+              run: existingRun,
+              traceId: requestId,
+              timings: reportTimings("already_processing"),
+            });
+          }
+          if (existingRun.status === "done") {
+            recordStage("run_claim_ms", claimStageStart);
+            console.log(`[Run] Run ${existingRun.id} already completed`);
+            return res.json({
+              status: "already_done",
+              run: existingRun,
+              traceId: requestId,
+              timings: reportTimings("already_done"),
+            });
+          }
+          if (existingRun.status === "failed") {
+            console.log(`[Run] Run ${existingRun.id} previously failed`);
+          }
+
+          const claimKey = existingRun.clientRequestId || clientRequestId;
+          claimedRun = await storage.claimPendingRun(chatId, claimKey || undefined);
+          recordStage("run_claim_ms", claimStageStart);
+          if (!claimedRun) {
+            const refreshedRun =
+              runId
+                ? await storage.getChatRun(runId)
+                : (claimKey ? await storage.getChatRunByClientRequestId(chatId, claimKey) : null);
+            if (refreshedRun?.status === "processing") {
+              return res.json({
+                status: "already_processing",
+                run: refreshedRun,
+                traceId: requestId,
+                timings: reportTimings("already_processing"),
+              });
+            }
+            if (refreshedRun?.status === "done") {
+              return res.json({
+                status: "already_done",
+                run: refreshedRun,
+                traceId: requestId,
+                timings: reportTimings("already_done"),
+              });
+            }
+            console.log(`[Run] Failed to claim run ${existingRun.id} - may have been claimed by another request`);
+            return res.json({
+              status: "claim_failed",
+              message: "Run already claimed or not pending",
+              traceId: requestId,
+              timings: reportTimings("claim_failed"),
+            });
+          }
+          console.log(`[Run] Successfully claimed run ${claimedRun.id}`);
+        }
       }
 
       const provider = (
@@ -712,7 +1340,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           : undefined
       ) as any;
 
-      const hasAnyAttachments = attachments && Array.isArray(attachments) && attachments.length > 0;
+      const hasAnyAttachments = sanitizedRunAttachments && sanitizedRunAttachments.length > 0;
       const lastUserMsg = [...clientMessages].reverse().find((m: any) => m.role === 'user');
       const userQuery = typeof lastUserMsg?.content === 'string' ? lastUserMsg.content : String(lastUserMsg?.content || '');
       const earlyQuestionClassification = questionClassifier.classifyQuestion(userQuery || "");
@@ -748,6 +1376,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         res.setHeader("X-Accel-Buffering", "no");
         res.setHeader("X-Content-Type-Options", "nosniff");
         res.setHeader("X-Request-Id", requestId);
+        res.setHeader("X-Trace-Id", requestId);
         res.setHeader("X-Latency-Mode", latencyMode);
         res.flushHeaders();
 
@@ -765,9 +1394,159 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           if (heartbeatInterval) {
             clearInterval(heartbeatInterval);
           }
+          clearStreamTimeouts();
           console.log("[SSE] Connection closed (early handler)", { requestId });
         });
       }
+
+      let fullContent = "";
+      let lastAckSequence = -1;
+      let agentLoopHandled = false;
+      let shouldRunModel = true;
+      let skillSeedForModel = "";
+      let skillExecutionResult: SkillExecutionResult | null = null;
+
+      const effectiveSkillRunId = claimedRun?.id || sanitizeStreamText(runId, MAX_STREAM_REQUEST_ID_LEN) || requestId;
+      const emitSkillTrace = (trace: { stage: string; status: string; message: string; details?: Record<string, unknown> }) => {
+        if (isConnectionClosed) {
+          return;
+        }
+        writeSse(res, 'skill_trace', {
+          requestId,
+          runId: effectiveSkillRunId,
+          ...trace,
+          timestamp: new Date().toISOString(),
+        });
+      };
+
+      const emitSkillChunk = (payload: {
+        stage: string;
+        status: string;
+        source: string;
+        skill?: string | null;
+        content: string;
+        isFallback?: boolean;
+      }) => {
+        if (isConnectionClosed) {
+          return;
+        }
+        const safePayload = {
+          ...payload,
+          content: sanitizeStreamText(payload.content, MAX_STREAM_EVENT_PAYLOAD_BYTES - 1200),
+        };
+        lastAckSequence += 1;
+        writeSse(res, 'skill_chunk', {
+          requestId,
+          runId: effectiveSkillRunId,
+          sequenceId: lastAckSequence,
+          timestamp: Date.now(),
+          ...safePayload,
+        });
+      };
+
+      const skillTimeoutMs = 12000;
+      const normalizedUserQuery = typeof userQuery === "string" ? userQuery.trim() : "";
+      if (normalizedUserQuery && !isConnectionClosed) {
+        emitSkillTrace({ stage: 'planner', status: 'ok', message: 'skill_router_started', details: { hasAttachments: hasAnyAttachments } });
+        try {
+          const executeSkillPromise = getSkillPlatformService().executeFromMessage({
+            requestId,
+            conversationId: streamConversationId,
+            runId: effectiveSkillRunId,
+            userId: effectiveUserId,
+            userMessage: normalizedUserQuery,
+            attachments: Array.isArray(sanitizedRunAttachments) ? sanitizedRunAttachments : [],
+            allowedScopes: parsedSkillScopes,
+            autoCreate: true,
+            maxRetries: 1,
+            emitTrace: emitSkillTrace,
+            now: new Date(),
+          });
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error(`Skill execution timeout after ${skillTimeoutMs}ms`)), skillTimeoutMs);
+          });
+
+          skillExecutionResult = await Promise.race([executeSkillPromise, timeoutPromise]);
+          emitSkillTrace({ stage: 'planner', status: 'ok', message: 'skill_router_finished', details: { status: skillExecutionResult.status, continueWithModel: skillExecutionResult.continueWithModel } });
+
+          const seed = typeof skillExecutionResult.outputText === "string" ? skillExecutionResult.outputText.trim() : "";
+          if (seed) {
+            fullContent = seed;
+            markFirstToken();
+            emitSkillChunk({
+              stage: 'execution',
+              status: skillExecutionResult.status,
+              source: skillExecutionResult.autoCreated ? 'auto' : 'catalog',
+              skill: skillExecutionResult.selectedSkill?.slug || null,
+              content: seed,
+            });
+          }
+
+          if (skillExecutionResult.status === "partial" && skillExecutionResult.continueWithModel) {
+            shouldRunModel = true;
+            skillSeedForModel = seed;
+          } else {
+            shouldRunModel = skillExecutionResult.continueWithModel !== false;
+          }
+
+          if (skillExecutionResult.status === 'blocked' || skillExecutionResult.status === 'failed') {
+            writeSse(res, 'skill_blocked', {
+              requestId,
+              runId: effectiveSkillRunId,
+              status: skillExecutionResult.status,
+              code: skillExecutionResult.error?.code || 'SKILL_BLOCKED',
+              message: skillExecutionResult.error?.message || skillExecutionResult.fallbackText || 'Skill no disponible en este momento',
+              requiresConfirmation: skillExecutionResult.requiresConfirmation,
+              blockedScopes: skillExecutionResult.policyBreached?.blockedScopes || [],
+              timestamp: Date.now(),
+            });
+          }
+
+          if (!seed && skillExecutionResult.fallbackText) {
+            fullContent = skillExecutionResult.fallbackText;
+            emitSkillChunk({
+              stage: 'fallback',
+              status: skillExecutionResult.status,
+              source: 'fallback',
+              content: skillExecutionResult.fallbackText,
+              isFallback: true,
+            });
+            if (skillExecutionResult.continueWithModel) {
+              skillSeedForModel = skillExecutionResult.fallbackText;
+            }
+            markFirstToken();
+          }
+        } catch (skillError: any) {
+          emitSkillTrace({ stage: 'factory', status: 'error', message: 'skill_router_error', details: { error: skillError?.message || String(skillError) } });
+          writeSse(res, 'skill_blocked', {
+            requestId,
+            runId: effectiveSkillRunId,
+            status: 'failed',
+            code: 'SKILL_ROUTER_ERROR',
+            message: 'No fue posible usar el enrutador de Skills, se usa fallback al modelo.',
+            timestamp: Date.now(),
+          });
+          skillExecutionResult = {
+            status: 'failed',
+            continueWithModel: true,
+            outputText: '',
+            autoCreated: false,
+            requiresConfirmation: false,
+            traces: [],
+            fallbackText: 'No fue posible usar el enrutador de Skills, se usa fallback al modelo.',
+            error: {
+              code: 'SKILL_ROUTER_ERROR',
+              message: skillError?.message || 'No se pudo ejecutar el router de Skills',
+              retryable: true,
+            },
+            output: undefined,
+            policyBreached: undefined,
+            selectedSkill: undefined,
+          };
+        }
+      }
+
+      const skipSkillShortcuts = !!skillExecutionResult && skillExecutionResult.status !== 'skipped';
 
       // Ultra-fast path for greetings: avoid expensive intent routing, context hydration,
       // and LLM calls entirely.
@@ -777,13 +1556,15 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         !docTool &&
         !forceWebSearch &&
         !webSearchAuto &&
-        !isConnectionClosed
+        !isConnectionClosed &&
+        !skipSkillShortcuts
       ) {
         const isThanks = /\b(gracias|muchas\s+gracias|te\s+agradezco)\b/i.test(userQuery);
         const content = isThanks
           ? "De nada. ¿Necesitas algo más?"
           : "Hola. ¿En qué puedo ayudarte?";
 
+        markFirstToken();
         writeSse(res, 'chunk', {
           content,
           sequence: 1,
@@ -795,6 +1576,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           requestId,
           runId: runId || requestId,
           latencyMode,
+          traceId: requestId,
+          timings: reportTimings("greeting_fast_path"),
           timestamp: Date.now(),
         });
         return res.end();
@@ -814,12 +1597,14 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         !gptId &&
         !session_id &&
         clientMessages.length <= 2 &&
-        !isConnectionClosed
+        !isConnectionClosed &&
+        !skipSkillShortcuts
       ) {
         try {
           const answerFirstPrompt = answerFirstEnforcer.generateAnswerFirstSystemPrompt(userQuery, false);
+          const fastPathSystemPrompt = `${answerFirstPrompt.fullPrompt}${skillSystemSection}`;
           const llmMessages = [
-            { role: "system" as const, content: answerFirstPrompt.fullPrompt },
+            { role: "system" as const, content: fastPathSystemPrompt },
             ...clientMessages.map((m: any) => ({
               role: m.role as "user" | "assistant" | "system",
               content: String(m.content ?? "")
@@ -827,7 +1612,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           ];
 
           const quick = await llmGateway.chat(llmMessages as any, {
-            userId: effectiveUserId || conversationId || "anonymous",
+          userId: effectiveUserId || streamConversationId || "anonymous",
             requestId,
             model: model || DEFAULT_MODEL,
             provider,
@@ -837,6 +1622,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
             enableFallback: true,
           });
 
+          markFirstToken();
           writeSse(res, 'chunk', {
             content: quick.content || "",
             sequence: 1,
@@ -849,6 +1635,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
             requestId,
             runId: runId || requestId,
             latencyMode,
+            traceId: requestId,
+            timings: reportTimings("simple_fast_path"),
             timestamp: Date.now(),
             provider: quick.provider,
             model: quick.model,
@@ -861,10 +1649,13 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
       // Load user settings after the stream is already open to reduce perceived latency.
       let userSettings: Awaited<ReturnType<typeof storage.getUserSettings>> = null;
+      const userSettingsStageStart = performance.now();
       try {
         userSettings = await storage.getUserSettings(effectiveUserId);
       } catch (e) {
         console.warn("[Stream] Failed to load user settings:", (e as any)?.message || e);
+      } finally {
+        recordStage("user_settings_ms", userSettingsStageStart);
       }
 
       const featureFlags = {
@@ -1006,7 +1797,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       }
 
       // CONTEXT FIX: Augment client messages with server-side history
-      const effectiveChatId = chatId || conversationId;
+      const effectiveChatId = chatId || conversationId || streamConversationId;
       const messages = await conversationMemoryManager.augmentWithHistory(
         effectiveChatId,
         clientMessages,
@@ -1022,8 +1813,9 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       }
 
       // DATA_MODE ENFORCEMENT: Reject document attachments - must use /analyze endpoint
-      const hasDocumentAttachments = attachments && Array.isArray(attachments) &&
-        attachments.some((a: any) => isDocumentAttachment(a.mimeType || a.type, a.name, a.type));
+      const hasDocumentAttachments = sanitizedRunAttachments && sanitizedRunAttachments.length > 0
+        ? sanitizedRunAttachments.some((a) => isDocumentAttachment(a.mimeType || a.type || "", a.name || "", a.type || a.mimeType || ""))
+        : false;
 
       if (hasDocumentAttachments) {
         console.log(`[Stream API] DATA_MODE: Rejecting document attachments - must use /analyze endpoint`);
@@ -1040,6 +1832,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       let gptSessionContract: GptSessionContract | null = null;
       let effectiveModel = model || DEFAULT_MODEL;
       let serverSessionId: string | null = null;
+      const effectiveProvider = provider || DEFAULT_PROVIDER;
 
       const isValidConversationIdForStream = (id?: string): boolean => {
         if (!id) return false;
@@ -1067,7 +1860,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       // If no session from session_id, try to create/get one via gptId
       if (!gptSessionContract && gptId) {
         try {
-          const effectiveChatIdForSession = chatId || conversationId;
+          const effectiveChatIdForSession = chatId || conversationId || streamConversationId;
           if (isValidConversationIdForStream(effectiveChatIdForSession)) {
             gptSessionContract = await getOrCreateSession(effectiveChatIdForSession, gptId);
             console.log(`[Stream] GPT Session created/retrieved: gptId=${gptId}, configVersion=${gptSessionContract.configVersion}`);
@@ -1107,13 +1900,16 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
             console.log(`[Stream] 🚀 PRODUCTION MODE ACTIVATED: intent=${intentResult.intent}, topic=${intentResult.slots.topic}`);
 
             try {
-              const effectiveChatId = chatId || conversationId || `chat_${Date.now()}`;
+              const effectiveChatId = chatId || conversationId || streamConversationId;
 
               await handleProductionRequest(
                 {
                   message: userMessageText,
                   userId: userId,
                   chatId: effectiveChatId,
+                  conversationId: streamConversationId,
+                  requestId,
+                  assistantMessageId,
                   intentResult,
                   locale: intentResult.language_detected || 'es',
                 },
@@ -1136,14 +1932,28 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       // Resolve storagePaths for all attachments first (before PARE routing)
       // This ensures PARE has valid paths for routing decisions
       const resolvedAttachments: any[] = [];
-      if (attachments && Array.isArray(attachments)) {
-        for (const att of attachments) {
-          const resolved = { ...att };
+      if (sanitizedRunAttachments && sanitizedRunAttachments.length > 0) {
+        for (const att of sanitizedRunAttachments) {
+          const resolved = { ...att } as Record<string, unknown>;
           if (!resolved.storagePath && resolved.fileId) {
-            const fileRecord = await storage.getFile(resolved.fileId);
+            const fileRecord = await storage.getFile(String(resolved.fileId));
             if (fileRecord && fileRecord.storagePath) {
               resolved.storagePath = fileRecord.storagePath;
-              console.log(`[Stream] Pre-resolved storagePath for ${resolved.name}: ${resolved.storagePath}`);
+              console.log(`[Stream] Pre-resolved storagePath for ${String(resolved.name || "unknown")}: ${resolved.storagePath}`);
+            }
+          }
+          resolvedAttachments.push(resolved);
+        }
+      } else if (attachments && Array.isArray(attachments)) {
+        for (const att of attachments.slice(0, MAX_STREAM_SKILL_ATTACHMENTS)) {
+          const normalized = sanitizeStreamAttachment(att);
+          if (!normalized || !normalized.name) continue;
+          const resolved = { ...normalized } as Record<string, unknown>;
+          if (!resolved.storagePath && resolved.fileId) {
+            const fileRecord = await storage.getFile(String(resolved.fileId));
+            if (fileRecord && fileRecord.storagePath) {
+              resolved.storagePath = fileRecord.storagePath;
+              console.log(`[Stream] Pre-resolved storagePath for ${String(resolved.name || "unknown")}: ${resolved.storagePath}`);
             }
           }
           resolvedAttachments.push(resolved);
@@ -1179,7 +1989,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
       let unifiedContext: UnifiedChatContext | null = null;
       try {
-        const effectiveChatId = chatId || conversationId || `chat_${Date.now()}`;
+        const effectiveChatId = chatId || conversationId || streamConversationId;
         unifiedContext = await createUnifiedRun({
           messages: messages as Array<{ role: string; content: string }>,
           chatId: effectiveChatId,
@@ -1195,7 +2005,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       }
 
       // If runId provided, claim the pending run (idempotent processing)
-      if (runId && chatId) {
+      if (runId && chatId && !claimedRun) {
         const existingRun = await storage.getChatRun(runId);
         if (!existingRun) {
           return res.status(404).json({ error: "Run not found" });
@@ -1236,6 +2046,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         res.setHeader("X-Accel-Buffering", "no");
         res.setHeader("X-Content-Type-Options", "nosniff");
         res.setHeader("X-Request-Id", requestId);
+        res.setHeader("X-Trace-Id", requestId);
         res.setHeader("X-Latency-Mode", latencyMode);
         res.flushHeaders();
       }
@@ -1267,7 +2078,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
         // Pass userMessageText to detect if user wants to search for articles first
         if (featureFlags.canvasEnabled && isProductionIntent(intentResult, userMessageText) && intentResult.confidence >= 0.5) {
-          const effectiveChatId = chatId || conversationId || `chat_${Date.now()}`;
+          const effectiveChatId = chatId || conversationId || streamConversationId;
 
           console.log(`[Stream] 🚀 PRODUCTION MODE ACTIVATED: intent=${intentResult.intent}, topic=${intentResult.slots.topic}`);
 
@@ -1277,6 +2088,9 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
                 message: userMessageText,
                 userId: userId,
                 chatId: effectiveChatId,
+                conversationId: streamConversationId,
+                requestId,
+                assistantMessageId,
                 intentResult,
                 locale: intentResult.language_detected || 'es',
               },
@@ -1302,6 +2116,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           if (heartbeatInterval) {
             clearInterval(heartbeatInterval);
           }
+          clearStreamTimeouts();
           console.log(`[SSE] Connection closed (late handler): ${requestId}`);
         });
       }
@@ -1361,7 +2176,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
           // Skip batch processing if all attachments were images (handled by Vision pipeline)
           if (batchAttachments.length === 0) {
-            console.log(`[Stream] 🖼️ All attachments are images — skipping DocumentBatchProcessor`);
+            console.log(`[Stream] All attachments are images — skipping DocumentBatchProcessor`);
           } else {
             batchResult = await batchProcessor.processBatch(batchAttachments);
           }
@@ -1394,7 +2209,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
               const errorMsg = `Coverage check failed: processed ${batchResult.processedFiles}/${batchResult.attachmentsCount} files. Failed: ${failedList}`;
               console.error(`[Stream] ${errorMsg}`);
 
-              res.write(`event: error\ndata: ${JSON.stringify({
+              writeSse(res, "error", {
                 type: 'coverage_failure',
                 message: 'No se pudieron procesar todos los archivos solicitados',
                 details: {
@@ -1404,9 +2219,10 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
                 },
                 requestId,
                 timestamp: Date.now()
-              })}\n\n`);
+              });
 
               clearInterval(heartbeatInterval);
+              clearStreamTimeouts();
               return res.end();
             }
 
@@ -1420,15 +2236,16 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         } catch (batchError: any) {
           console.error("[Stream] Batch processing error:", batchError);
 
-          res.write(`event: error\ndata: ${JSON.stringify({
+          writeSse(res, "error", {
             type: 'batch_processing_error',
             message: 'Error al procesar los archivos adjuntos',
             details: batchError.message,
             requestId,
             timestamp: Date.now()
-          })}\n\n`);
+          });
 
           clearInterval(heartbeatInterval);
+          clearStreamTimeouts();
           return res.end();
         }
       }
@@ -1532,7 +2349,6 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
       // If we have images, convert the last user message to multimodal format
       if (imagePartsForVision.length > 0) {
-        // Find the last user message and make it multimodal
         for (let i = formattedMessages.length - 1; i >= 0; i--) {
           if (formattedMessages[i].role === "user") {
             const textContent = typeof formattedMessages[i].content === "string"
@@ -1555,6 +2371,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           latencyMode = 'deep' as LatencyMode;
           console.log(`[Stream] Vision: upgraded latency mode to 'deep' for image analysis`);
         }
+      } else {
+        console.log(`[Stream] Vision: NO images found — proceeding with text-only`);
       }
 
       // GUARD: Block image generation when attachments are present
@@ -1585,6 +2403,11 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       );
 
       let systemContent = answerFirstPrompt.fullPrompt;
+
+      if (shouldRunModel && skillSeedForModel) {
+        systemContent += `\n\n[CONTEXTO SKILL] Ya existe una respuesta parcial: "${skillSeedForModel.slice(0, 2200)}".\n` +
+          "Continúa desde ese punto, evitando repetir contenido ya emitido por la Skill, y completa sólo lo faltante con precisión.";
+      }
 
       if (hasAttachments && attachmentContext && batchResult) {
         // Build citation format instructions based on document types
@@ -1678,7 +2501,7 @@ ${attachmentContext}`;
       const now = new Date();
       const currentDateTimeContext = `\n\nFECHA Y HORA ACTUAL:\n- ISO: ${now.toISOString()}`;
 
-      systemContent += `${currentDateTimeContext}${userProfileContext}${customInstructionsSection}${responseStyleModifier}${semanticMemoryContext ? `\n\n${semanticMemoryContext}` : ''}${codeInterpreterPrompt}${webSearchContextForLLM}`;
+      systemContent += `${currentDateTimeContext}${userProfileContext}${customInstructionsSection}${responseStyleModifier}${semanticMemoryContext ? `\n\n${semanticMemoryContext}` : ''}${codeInterpreterPrompt}${webSearchContextForLLM}${skillSystemSection}`;
 
       // DOC TOOL: Add format-specific system prompt so the LLM outputs structured content
       // that the client-side editors can render (markdown for Word, CSV for Excel, JSON for PPT)
@@ -1701,7 +2524,8 @@ ${attachmentContext}`;
       };
 
       // Ensure chat exists so we can persist messages (critical for memory)
-      const effectiveChatIdForPersistence = chatId || conversationId || `chat_${Date.now()}`;
+      const effectiveChatIdForPersistence = chatId || conversationId || streamConversationId;
+      const ensureChatStageStart = performance.now();
       try {
         const existingChat = await storage.getChat(effectiveChatIdForPersistence);
         if (!existingChat) {
@@ -1714,12 +2538,15 @@ ${attachmentContext}`;
       } catch (e) {
         // Best-effort: if chat creation fails, streaming can still proceed, but memory will degrade.
         console.warn('[Stream] Failed to ensure chat exists for persistence:', e);
+      } finally {
+        recordStage("ensure_chat_ms", ensureChatStageStart);
       }
 
       // Persist the latest user message (best-effort). Without this, server-side memory is empty.
       // Skip if a run was claimed - the user message was already created atomically with the run
       // via createUserMessageAndRun in the /chats/:id/messages endpoint.
       let persistedUserMessageId: string | null = claimedRun?.userMessageId || null;
+      const persistUserStageStart = performance.now();
       if (!claimedRun) {
         try {
           if (userMessageText && effectiveChatIdForPersistence) {
@@ -1824,6 +2651,7 @@ ${attachmentContext}`;
           console.warn('[Stream] Failed to persist user message (best-effort):', e);
         }
       }
+      recordStage("persist_user_ms", persistUserStageStart);
 
       // For claimed runs (run-based flow), the user message was already persisted
       // via createUserMessageAndRun, but conversationDocuments were not created.
@@ -1886,7 +2714,7 @@ ${attachmentContext}`;
       }
 
       // Create an assistant message placeholder at the start (so we can stream-update and persist)
-      let assistantMessageId: string | null = null;
+      const assistantPlaceholderStageStart = performance.now();
       try {
         const assistantMessage = await storage.createChatMessage({
           chatId: effectiveChatIdForPersistence,
@@ -1906,6 +2734,8 @@ ${attachmentContext}`;
         }
       } catch (e) {
         console.warn('[Stream] Failed to create assistant placeholder message (best-effort):', e);
+      } finally {
+        recordStage("assistant_placeholder_ms", assistantPlaceholderStageStart);
       }
 
       const effectiveRunId = claimedRun?.id || unifiedContext?.runId || requestId;
@@ -2003,14 +2833,10 @@ ${attachmentContext}`;
         });
       }
 
-      let fullContent = "";
-      let lastAckSequence = -1;
-      let agentLoopHandled = false;
-
       // ── AGENT LOOP INTERCEPT ──────────────────────────────────
       // For web_automation intent, route through the agent executor which has
       // tools like browse_and_act (Playwright), web_search, fetch_url
-      if (unifiedContext?.isAgenticMode && unifiedContext.requestSpec.intent === "web_automation") {
+      if (shouldRunModel && unifiedContext?.isAgenticMode && unifiedContext.requestSpec.intent === "web_automation") {
         console.log(`[Stream] 🤖 WEB AUTOMATION: routing through executeAgentLoop with browse_and_act tool`);
         try {
           const agentMessages = [
@@ -2020,7 +2846,7 @@ ${attachmentContext}`;
 
           const agentResponse = await executeAgentLoop(agentMessages, res, {
             runId: effectiveRunId,
-            userId: userId || conversationId || "anonymous",
+            userId: userId || streamConversationId || "anonymous",
             chatId: effectiveChatIdForPersistence,
             requestSpec: unifiedContext.requestSpec,
             maxIterations: 10
@@ -2029,6 +2855,9 @@ ${attachmentContext}`;
           // Use the real response from the agent loop (not a placeholder)
           // The agent loop already wrote chunk SSE events — fullContent is used for DB persistence
           fullContent = agentResponse || "He procesado tu solicitud de automatización web.";
+          if (fullContent.trim()) {
+            markFirstToken();
+          }
           agentLoopHandled = true;
           console.log(`[Stream] Agent loop completed, fullContent length: ${fullContent.length}`);
         } catch (agentError: any) {
@@ -2058,16 +2887,21 @@ ${attachmentContext}`;
         }
       }
 
-      if (!agentLoopHandled) {
+      if (shouldRunModel && !agentLoopHandled) {
+      const modelStreamStageStart = performance.now();
+      const modelMessages = [systemMessage, ...formattedMessages] as any[];
+      if (skillSeedForModel) {
+        modelMessages.push({ role: "assistant", content: skillSeedForModel });
+      }
       const streamGenerator = llmGateway.streamChat(
-        [systemMessage, ...formattedMessages],
+        modelMessages,
         {
-          userId: userId || conversationId || "anonymous",
+          userId: userId || streamConversationId || "anonymous",
           requestId,
+          model: effectiveModel,
+          provider: effectiveProvider,
           disableImageGeneration: hasAttachments,
           maxTokens: laneMaxTokens,
-          model: effectiveModel,
-          provider,
         }
       );
 
@@ -2084,8 +2918,11 @@ ${attachmentContext}`;
       for await (const chunk of streamGenerator) {
         if (isConnectionClosed) break;
 
+        if (chunk.content) {
+          markFirstToken();
+        }
         fullContent += chunk.content;
-        lastAckSequence = chunk.sequenceId;
+        lastAckSequence = Math.max(lastAckSequence, chunk.sequenceId);
 
         // Update run's lastSeq for deduplication on reconnect
         if (claimedRun && chunk.sequenceId > (claimedRun.lastSeq || 0)) {
@@ -2104,6 +2941,8 @@ ${attachmentContext}`;
             intent: unifiedContext?.requestSpec.intent,
             latencyLane: resolvedLane,
             webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
+            traceId: requestId,
+            timings: buildTimingPayload(),
             timestamp: Date.now(),
             ...sessionMetadata
           });
@@ -2116,15 +2955,19 @@ ${attachmentContext}`;
       // Ensure buffer is fully flushed after loop and clean up listener
       writer.finalize();
       req.removeListener("close", onClose);
+      recordStage("model_stream_ms", modelStreamStageStart);
       } // end if (!agentLoopHandled)
 
       // If upstream agentic pipeline produced no content, don't leave the UI hanging.
       // Emit a fallback chunk so clients can render something, and persist it.
       if (!fullContent.trim()) {
-        const fallbackContent = "Lo siento, el modo agente no pudo generar una respuesta esta vez. Intenta de nuevo o desactiva el modo agente para esta pregunta.";
+        const fallbackContent = shouldRunModel
+          ? "Lo siento, el modo agente no pudo generar una respuesta esta vez. Intenta de nuevo o desactiva el modo agente para esta pregunta."
+          : "No se pudo completar la respuesta con skills. Reintenta o reformula la consulta.";
         fullContent = fallbackContent;
 
         if (!isConnectionClosed) {
+          markFirstToken();
           const nextSeq = lastAckSequence + 1;
           lastAckSequence = nextSeq;
           writeSse(res, 'chunk', {
@@ -2139,6 +2982,7 @@ ${attachmentContext}`;
       }
 
       // Update assistant message with full content + webSources
+      const finalizePersistenceStageStart = performance.now();
       if (assistantMessageId) {
         try {
           const metadata = detectedWebSources.length > 0 ? { webSources: detectedWebSources } : undefined;
@@ -2160,6 +3004,7 @@ ${attachmentContext}`;
           console.warn('[Stream] Failed to finalize assistant message (best-effort):', e);
         }
       }
+      recordStage("finalize_persistence_ms", finalizePersistenceStageStart);
 
       // Mark run as done if we claimed one
       if (claimedRun) {
@@ -2177,6 +3022,8 @@ ${attachmentContext}`;
       }
 
       const durationMs = unifiedContext ? Date.now() - unifiedContext.startTime : 0;
+      const finalTimings = reportTimings("completed");
+      const finalSequenceCount = fullContent.trim() && lastAckSequence < 0 ? 1 : Math.max(0, lastAckSequence + 1);
 
       if (!isConnectionClosed) {
         if (unifiedContext?.isAgenticMode) {
@@ -2197,6 +3044,8 @@ ${attachmentContext}`;
           assistantMessageId,
           latencyLane: resolvedLane,
           webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
+          traceId: requestId,
+          timings: finalTimings,
           timestamp: Date.now()
         });
 
@@ -2206,11 +3055,13 @@ ${attachmentContext}`;
           assistantMessageId,
           latencyMode,
           latencyLane: resolvedLane,
-          totalSequences: lastAckSequence + 1,
+          totalSequences: finalSequenceCount,
           contentLength: fullContent.length,
           intent: unifiedContext?.requestSpec.intent,
           deliverableType: unifiedContext?.requestSpec.deliverableType,
           durationMs,
+          traceId: requestId,
+          timings: finalTimings,
           timestamp: Date.now(),
           ...sessionMetadata
         });
@@ -2219,7 +3070,7 @@ ${attachmentContext}`;
           summary: fullContent.slice(0, 200),
           durationMs,
           phase: 'completed',
-          metadata: { contentLength: fullContent.length, sequences: lastAckSequence + 1 }
+          metadata: { contentLength: fullContent.length, sequences: finalSequenceCount }
         }).catch(() => { });
       }
 
@@ -2227,7 +3078,7 @@ ${attachmentContext}`;
         await auditLog(req, {
           action: "chat_stream",
           resource: "chats",
-          resourceId: conversationId || undefined,
+          resourceId: streamConversationId || undefined,
           details: {
             messageCount: messages.length,
             requestId,
@@ -2254,11 +3105,14 @@ ${attachmentContext}`;
       }
 
       const errorRunId = claimedRun?.id || requestId;
+      const errorTimings = reportTimings("error");
       if (!isConnectionClosed) {
         writeSse(res, 'error', {
           error: error.message,
           requestId,
           runId: errorRunId,
+          traceId: requestId,
+          timings: errorTimings,
           timestamp: Date.now()
         });
 
@@ -2270,7 +3124,11 @@ ${attachmentContext}`;
       if (heartbeatInterval) {
         clearInterval(heartbeatInterval);
       }
-      if (!isConnectionClosed) {
+      clearStreamTimeouts();
+      if (!timingReported) {
+        reportTimings(isConnectionClosed ? "connection_closed" : "ended");
+      }
+      if (!isConnectionClosed && !(res as any).writableEnded) {
         res.end();
       }
     }
