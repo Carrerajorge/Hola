@@ -356,7 +356,13 @@ jobs:
             sleep 3
           done
 
-          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts ${{ env.DEPLOY_PATH }}/nginx &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
+
+          # Copy nginx static assets (maintenance page, custom error pages)
+          scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }} \
+            -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12 \
+            nginx/maintenance.html \
+            ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/nginx/ 2>/dev/null || true
 
       - name: Run blue-green deploy
         run: |
@@ -698,7 +704,13 @@ jobs:
             sleep 3
           done
 
-          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts ${{ env.DEPLOY_PATH }}/nginx &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
+
+          # Copy nginx static assets (maintenance page, custom error pages)
+          scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }} \
+            -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12 \
+            nginx/maintenance.html \
+            ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/nginx/ 2>/dev/null || true
 
       - name: Run blue-green deploy
         run: |
