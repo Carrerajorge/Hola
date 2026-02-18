@@ -43,6 +43,19 @@ interface AppDetailDialogProps {
   onConnectionChange?: (appId: string, connected: boolean) => void;
 }
 
+const CONNECTION_REQUEST_TIMEOUT_MS = 8_000;
+const SAFE_APP_ORIGINS = [
+  typeof window === "undefined" ? "" : window.location.origin,
+  "https://accounts.google.com",
+  "https://login.microsoftonline.com",
+  "https://github.com",
+  "https://www.figma.com",
+  "https://api.notion.com",
+  "https://slack.com",
+].filter((origin): origin is string => Boolean(origin));
+
+const ALLOWED_APP_ID_PREFIX = "app-";
+
 function parseErrorResponse(error: any, responseData?: any): ConnectionError {
   const errorMessage = error?.message || responseData?.message || responseData?.error || 'Error desconocido';
   const errorDetails = responseData?.details || error?.details;
@@ -144,6 +157,56 @@ function getErrorIcon(errorType: ConnectionError['type']) {
   }
 }
 
+function createTimeoutController(timeoutMs: number): AbortController {
+  const controller = new AbortController();
+  window.setTimeout(() => {
+    controller.abort(new DOMException("Request timeout", "TimeoutError"));
+  }, timeoutMs);
+  return controller;
+}
+
+function resolveSafeAppEndpoint(endpoint: string): string {
+  if (typeof window === "undefined") {
+    throw new Error("invalid endpoint");
+  }
+  const parsedUrl = new URL(endpoint, window.location.origin);
+  if (!SAFE_APP_ORIGINS.includes(parsedUrl.origin)) {
+    throw new Error("invalid endpoint");
+  }
+  return parsedUrl.toString();
+}
+
+function resolveSameOriginAppEndpoint(endpoint: string): string {
+  if (typeof window === "undefined") {
+    throw new Error("invalid endpoint");
+  }
+  const parsedUrl = new URL(endpoint, window.location.origin);
+  if (parsedUrl.origin !== window.location.origin) {
+    throw new Error("invalid endpoint");
+  }
+  return parsedUrl.toString();
+}
+
+function resolveRelativeEndpoint(endpoint: string): string {
+  if (typeof window === "undefined") {
+    throw new Error("invalid endpoint");
+  }
+  const parsedUrl = new URL(endpoint, window.location.origin);
+  if (parsedUrl.origin !== window.location.origin) {
+    throw new Error("invalid endpoint");
+  }
+  if (!parsedUrl.pathname.startsWith("/")) {
+    throw new Error("invalid endpoint");
+  }
+  return `${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}`;
+}
+
+function buildRequestId(): string {
+  const random = Math.random().toString(36).slice(2, 12);
+  const now = Date.now().toString(36);
+  return `${ALLOWED_APP_ID_PREFIX}${now}-${random}`;
+}
+
 export function AppDetailDialog({ 
   app, 
   open, 
@@ -165,12 +228,9 @@ export function AppDetailDialog({
     setConnectionError(null);
     
     try {
-      const resolvedStatusEndpoint = new URL(app.statusEndpoint, window.location.origin);
-      if (resolvedStatusEndpoint.origin !== window.location.origin) {
-        throw new Error("invalid endpoint");
-      }
-
-      const res = await apiFetch(resolvedStatusEndpoint.toString());
+      const resolvedStatusEndpoint = resolveSameOriginAppEndpoint(app.statusEndpoint);
+      const controller = createTimeoutController(CONNECTION_REQUEST_TIMEOUT_MS);
+      const res = await apiFetch(resolvedStatusEndpoint, { signal: controller.signal });
       
       if (res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -220,9 +280,18 @@ export function AppDetailDialog({
     setIsConnecting(true);
     setConnectionError(null);
     
+    const requestId = buildRequestId();
+
     // First check if user is authenticated
     try {
-      const authRes = await fetch('/api/auth/user');
+      const controller = createTimeoutController(CONNECTION_REQUEST_TIMEOUT_MS);
+      const authRes = await apiFetch('/api/auth/user', {
+        headers: {
+          "X-Request-Id": requestId,
+          "X-Idempotency-Key": requestId,
+        },
+        signal: controller.signal,
+      });
       if (!authRes.ok) {
         setIsConnecting(false);
         toast.dismiss('connect-toast');
@@ -237,46 +306,24 @@ export function AppDetailDialog({
     } catch (e) {
       // Network error, try to connect anyway
     }
-    
+
     toast.loading(`Conectando con ${app.name}...`, { id: 'connect-toast' });
 
     // FRONTEND FIX #7: Validate connection endpoint URL before redirect
-    const endpoint = app.connectionEndpoint;
+    const endpoint = app.connectionEndpoint.trim();
     try {
-      const url = new URL(endpoint, window.location.origin);
-      // Only allow same-origin or explicitly allowed OAuth providers
-      const allowedOrigins = [
-        window.location.origin,
-        'https://accounts.google.com',
-        'https://login.microsoftonline.com',
-        'https://github.com',
-        'https://www.figma.com',
-        'https://api.notion.com',
-        'https://slack.com',
-      ];
-      const isAllowed = allowedOrigins.some(origin =>
-        url.origin === origin || url.href.startsWith('/api/')
-      );
-      if (!isAllowed) {
-        console.warn('[Security] Blocked redirect to untrusted origin:', url.origin);
-        toast.dismiss('connect-toast');
-        setConnectionError({
-          type: 'invalid_endpoint',
-          message: 'Endpoint no válido',
-          details: 'El endpoint de conexión no es de un origen de confianza.',
-          retryable: false
-        });
-        setIsConnecting(false);
-        return;
-      }
-      window.location.href = endpoint;
+      const safeEndpoint = resolveSafeAppEndpoint(endpoint);
+      window.location.href = safeEndpoint;
     } catch (e) {
-      // If it's a relative URL, allow it
-      if (endpoint.startsWith('/')) {
-        window.location.href = endpoint;
-      } else {
+      // If it's a safe relative URL, allow it
+      try {
+        const safeEndpoint = resolveRelativeEndpoint(endpoint);
+        window.location.href = safeEndpoint;
+      } catch {
+        const parsedError = parseErrorResponse(new Error("invalid endpoint"));
         console.error('[Security] Invalid connection endpoint:', endpoint);
         toast.dismiss('connect-toast');
+        setConnectionError(parsedError);
         setIsConnecting(false);
       }
     }
@@ -294,9 +341,16 @@ export function AppDetailDialog({
     setConnectionError(null);
     
     try {
-      const res = await fetch(app.disconnectEndpoint, {
+      const requestId = buildRequestId();
+      const resolvedDisconnectEndpoint = resolveSafeAppEndpoint(app.disconnectEndpoint);
+      const controller = createTimeoutController(CONNECTION_REQUEST_TIMEOUT_MS);
+      const res = await apiFetch(resolvedDisconnectEndpoint, {
         method: "POST",
-        credentials: "include"
+        signal: controller.signal,
+        headers: {
+          "X-Request-Id": requestId,
+          "X-Idempotency-Key": requestId,
+        },
       });
       
       if (res.ok) {
