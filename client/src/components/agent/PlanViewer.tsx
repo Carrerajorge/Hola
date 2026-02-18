@@ -8,6 +8,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Button } from "@/components/ui/button";
 import { Loader2, Play, CheckCircle2, Circle, AlertCircle, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/apiClient";
 import { SimulatorErrorBoundary } from "./SimulatorErrorBoundary";
 
 interface Task {
@@ -69,7 +70,7 @@ export function PlanViewer({ planId, className, autoRefresh = true }: PlanViewer
         if (!planId) return;
         // Optimistic update locally? For now, simple await
         try {
-            const res = await fetch(`/api/planning/plans/${planId}/step`, {
+            const res = await apiFetch(`/api/planning/plans/${planId}/step`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -90,7 +91,7 @@ export function PlanViewer({ planId, className, autoRefresh = true }: PlanViewer
 
         try {
             setLoading(true);
-            const res = await fetch(`/api/planning/plans/${planId}`);
+            const res = await apiFetch(`/api/planning/plans/${planId}`);
             if (!res.ok) throw new Error("Failed to fetch plan");
 
             const data = await res.json();
@@ -243,7 +244,7 @@ export function PlanViewer({ planId, className, autoRefresh = true }: PlanViewer
                             onClick={async () => {
                                 if (!plan) return;
                                 try {
-                                    const res = await fetch(`/api/planning/plans/${plan.id}/execute`, { method: 'POST' });
+                                    const res = await apiFetch(`/api/planning/plans/${plan.id}/execute`, { method: 'POST' });
                                     if (res.ok) {
                                         fetchPlan();
                                     }

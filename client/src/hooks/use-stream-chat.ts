@@ -458,6 +458,7 @@ export function useStreamChat(deps: StreamChatDeps) {
         let fullContent = "";
         let lastEventData: any = null;
         let timeoutCause: "overall" | "first-token" | "done" | null = null;
+        let hasReceivedEvent = false;
         let hasReceivedToken = false;
 
         if (session.timeoutId) {
@@ -473,7 +474,7 @@ export function useStreamChat(deps: StreamChatDeps) {
         }
         if (firstTokenTimeoutMs > 0) {
           session.firstTokenTimeoutId = setTimeout(() => {
-            if (!hasReceivedToken && !session.finalizing && session.pendingRequestId === streamRequestId) {
+            if (!hasReceivedEvent && !session.finalizing && session.pendingRequestId === streamRequestId) {
               timeoutCause = "first-token";
               controller.abort();
             }
@@ -619,6 +620,15 @@ export function useStreamChat(deps: StreamChatDeps) {
               }
 
               lastEventData = data;
+
+              if (!hasReceivedEvent) {
+                hasReceivedEvent = true;
+                if (session.firstTokenTimeoutId) {
+                  clearTimeout(session.firstTokenTimeoutId);
+                  session.firstTokenTimeoutId = null;
+                }
+              }
+
               onEvent?.(currentEventType, data);
 
               if (currentEventType === "chunk" || currentEventType === "text") {
@@ -743,7 +753,7 @@ export function useStreamChat(deps: StreamChatDeps) {
 
             const abortMessage =
               timeoutCause === "first-token"
-                ? `No se recibió ningún token en ${firstTokenTimeoutMs}ms.`
+                ? `No se recibió ningún evento del servidor en ${firstTokenTimeoutMs}ms.`
                 : timeoutCause === "done"
                   ? `La respuesta demoró demasiado (>${doneTimeoutMs}ms).`
                   : `Stream timeout after ${timeoutMs}ms.`;

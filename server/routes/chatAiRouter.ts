@@ -2138,6 +2138,14 @@ const cleanSkipRunStreamDedup = (): void => {
         if (!isConnectionClosed && !r.writableEnded && !r.destroyed) {
           try {
             res.write(`:heartbeat\n\n`);
+            if (typeof (res as unknown as { flush?: Function }).flush === "function") {
+              (res as unknown as { flush: Function }).flush();
+            } else if (res.socket && typeof res.socket.write === "function") {
+              res.socket.write("");
+            }
+
+            // Heartbeats count as stream activity; keep the server-side idle timer from firing.
+            resetIdleTimeout();
           } catch {
             // Connection gone — stop heartbeat
             isConnectionClosed = true;
