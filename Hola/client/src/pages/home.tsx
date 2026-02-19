@@ -28,10 +28,11 @@ import { useAgentStore } from "@/stores/agent-store";
 import { useSuperAgentStore } from "@/stores/super-agent-store";
 import { pollingManager } from "@/lib/polling-manager";
 import { queryClient } from "@/lib/queryClient";
+import { apiFetch } from "@/lib/apiClient";
 
 const AppsViewLazy = lazy(() => import("@/components/apps-view").then((m) => ({ default: m.AppsView })));
-const WhatsAppConnectDialogLazy = lazy(() =>
-  import("@/components/whatsapp-connect-dialog").then((m) => ({ default: m.WhatsAppConnectDialog }))
+const ChannelsHubDialogLazy = lazy(() =>
+  import("@/components/channels-hub-dialog").then((m) => ({ default: m.ChannelsHubDialog }))
 );
 import { whatsappWebEventStream } from "@/lib/whatsapp-web-events";
 const GptExplorerLazy = lazy(() => import("@/components/gpt-explorer").then((m) => ({ default: m.GptExplorer })));
@@ -151,10 +152,23 @@ export default function Home() {
     }
   }, [moveChatToFolder, removeChatFromFolder]);
 
-  // AI processing state - kept in parent to survive ChatInterface key changes
-  const [aiState, setAiStateRaw] = useState<"idle" | "thinking" | "responding">("idle");
-  const [aiStateChatId, setAiStateChatId] = useState<string | null>(null);
-  const [aiProcessSteps, setAiProcessSteps] = useState<{ step: string; status: "pending" | "active" | "done" }[]>([]);
+  type HomeAiState = "idle" | "thinking" | "responding" | "agent_working";
+  type HomeAiStep = { step: string; status: "pending" | "active" | "done" };
+  type HomeConversationUiState = {
+    aiState: HomeAiState;
+    aiProcessSteps: HomeAiStep[];
+    pendingRequestId: string | null;
+    streamBuffer: string;
+  };
+
+  const createHomeConversationUiState = (): HomeConversationUiState => ({
+    aiState: "idle",
+    aiProcessSteps: [],
+    pendingRequestId: null,
+    streamBuffer: "",
+  });
+
+  const [conversationUiStateMap, setConversationUiStateMap] = useState<Record<string, HomeConversationUiState>>({});
 
   // Super Agent UI state - kept in parent to survive ChatInterface key changes
   const [uiPhase, setUiPhase] = useState<'idle' | 'thinking' | 'console' | 'done'>('idle');
@@ -171,21 +185,6 @@ export default function Home() {
     fileSize: number | null;
     error?: string;
   }>({ status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null });
-
-  // Wrapper for setAiState that tracks which chat the state belongs to
-  const setAiState = useCallback((newState: "idle" | "thinking" | "responding" | ((prev: "idle" | "thinking" | "responding") => "idle" | "thinking" | "responding")) => {
-    const resolvedState = typeof newState === 'function' ? newState(aiState) : newState;
-    setAiStateRaw(resolvedState);
-    if (resolvedState === 'idle') {
-      setAiStateChatId(null);
-    } else {
-      // Capture the current chat ID when entering non-idle state
-      const currentChatId = activeChat?.id || pendingChatIdRef.current;
-      if (currentChatId) {
-        setAiStateChatId(currentChatId);
-      }
-    }
-  }, [aiState, activeChat?.id]);
 
   // URL Persistence for Simulator/Plan (B4)
   const search = useSearch();
@@ -241,6 +240,81 @@ export default function Home() {
   // Store the pending chat ID during new chat creation
   const pendingChatIdRef = useRef<string | null>(null);
 
+  const ensureConversationUiState = useCallback((conversationId: string | null | undefined) => {
+    if (!conversationId) return;
+    setConversationUiStateMap((prev) => {
+      if (prev[conversationId]) return prev;
+      return { ...prev, [conversationId]: createHomeConversationUiState() };
+    });
+  }, []);
+
+  const moveConversationUiState = useCallback((fromConversationId?: string | null, toConversationId?: string | null) => {
+    if (!fromConversationId || !toConversationId || fromConversationId === toConversationId) return;
+    setConversationUiStateMap((prev) => {
+      const sourceState = prev[fromConversationId];
+      if (!sourceState) return prev;
+      const { [fromConversationId]: _, ...rest } = prev;
+      if (rest[toConversationId]) return rest;
+      return { ...rest, [toConversationId]: sourceState };
+    });
+  }, []);
+
+  const activeConversationId = useMemo(() => {
+    if (activeChat?.id) return activeChat.id;
+    if (pendingChatIdRef.current) return pendingChatIdRef.current;
+    if (isNewChatMode && newChatStableKey) return newChatStableKey;
+    return null;
+  }, [activeChat?.id, isNewChatMode, newChatStableKey]);
+
+  useEffect(() => {
+    ensureConversationUiState(activeConversationId);
+  }, [activeConversationId, ensureConversationUiState]);
+
+  const activeConversationState = activeConversationId
+    ? conversationUiStateMap[activeConversationId]
+    : undefined;
+
+  const aiState: HomeAiState = activeConversationState?.aiState || "idle";
+  const aiProcessSteps: HomeAiStep[] = activeConversationState?.aiProcessSteps || [];
+  const aiStateChatId = aiState === "idle" ? null : activeConversationId;
+
+  const setAiState = useCallback((newState: HomeAiState | ((prev: HomeAiState) => HomeAiState)) => {
+    const targetConversationId = activeConversationId || pendingChatIdRef.current || newChatStableKey;
+    if (!targetConversationId) return;
+    setConversationUiStateMap((prev) => {
+      const current = prev[targetConversationId] || createHomeConversationUiState();
+      const resolvedState = typeof newState === "function"
+        ? (newState as (prev: HomeAiState) => HomeAiState)(current.aiState)
+        : newState;
+      return {
+        ...prev,
+        [targetConversationId]: {
+          ...current,
+          aiState: resolvedState,
+          aiProcessSteps: resolvedState === "idle" ? [] : current.aiProcessSteps,
+        },
+      };
+    });
+  }, [activeConversationId, newChatStableKey]);
+
+  const setAiProcessSteps = useCallback((nextSteps: HomeAiStep[] | ((prev: HomeAiStep[]) => HomeAiStep[])) => {
+    const targetConversationId = activeConversationId || pendingChatIdRef.current || newChatStableKey;
+    if (!targetConversationId) return;
+    setConversationUiStateMap((prev) => {
+      const current = prev[targetConversationId] || createHomeConversationUiState();
+      const resolvedSteps = typeof nextSteps === "function"
+        ? (nextSteps as (prev: HomeAiStep[]) => HomeAiStep[])(current.aiProcessSteps)
+        : nextSteps;
+      return {
+        ...prev,
+        [targetConversationId]: {
+          ...current,
+          aiProcessSteps: resolvedSteps,
+        },
+      };
+    });
+  }, [activeConversationId, newChatStableKey]);
+
 
   // Sync URL to active chat state (direct navigation to /chat/:id)
 
@@ -284,19 +358,12 @@ export default function Home() {
     // This allows multiple chats to process simultaneously
     handleClearPendingCount(id);
 
-    // Reset aiState for the NEW chat's UI so the submit button is unblocked.
-    // Background streams from the OLD chat continue independently — their
-    // setAiState calls target the parent but aiStateChatId won't match the new chat.
-    setAiStateRaw('idle');
-    setAiStateChatId(null);
-    setAiProcessSteps([]);
-
     setIsNewChatMode(false);
     setNewChatStableKey(null);
     setActiveChatId(id);
     setLocation(`/chat/${id}`);
     setSelectedProjectId(null); // Clear project selection when selecting a chat
-  }, [handleClearPendingCount, setActiveChatId, setAiProcessSteps, setAiStateRaw, setAiStateChatId]);
+  }, [handleClearPendingCount, setActiveChatId]);
 
   // Listen for select-chat custom event (used by Agent Mode navigation)
   // This event is used when agent creates a new chat - we need to preserve the stable key
@@ -315,7 +382,6 @@ export default function Home() {
         }
         setActiveChatId(chatId);
         setLocation(`/chat/${chatId}`, { replace: !!preserveKey });
-        setAiProcessSteps([]);
       }
     };
 
@@ -323,7 +389,7 @@ export default function Home() {
     return () => {
       window.removeEventListener("select-chat", handleSelectChatEvent as EventListener);
     };
-  }, [handleClearPendingCount, setActiveChatId, setAiProcessSteps]);
+  }, [handleClearPendingCount, setActiveChatId]);
 
   const handleNewChat = (options?: { preserveGpt?: boolean }) => {
     // TRANSACTIONAL RESET: Block all re-hydration for 5 seconds
@@ -343,11 +409,6 @@ export default function Home() {
     // Clear conversation state query cache to prevent stale data
     queryClient.removeQueries({ queryKey: ['conversationState'] });
 
-    // Reset AI processing state for UI display
-    setAiProcessSteps([]);
-    setAiStateRaw('idle');
-    setAiStateChatId(null);
-
     // Reset Super Agent UI state
     setUiPhase('idle');
     setActiveRunId(null);
@@ -357,10 +418,12 @@ export default function Home() {
     setDocGenerationState({ status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null });
 
     // Clear chat references - this triggers new chat mode
+    const newConversationId = `new-chat-${Date.now()}`;
     setActiveChatId(null);
     setSelectedProjectId(null);
     setIsNewChatMode(true);
-    setNewChatStableKey(null);
+    setNewChatStableKey(newConversationId);
+    ensureConversationUiState(newConversationId);
     pendingChatIdRef.current = null;
 
     // AGGRESSIVE RESET: Clear active GPT to return to LLM models view
@@ -386,29 +449,40 @@ export default function Home() {
 
     // Clear other UI states
     setActiveGpt(null);
-    setAiStateRaw('idle');
   }, [setActiveChatId]);
 
   const handleSendNewChatMessage = useCallback(async (message: Message) => {
     const { pendingId, stableKey } = createChat();
+    moveConversationUiState(newChatStableKey, pendingId);
+    ensureConversationUiState(pendingId);
     pendingChatIdRef.current = pendingId;
-    // CRITICAL: Use the stableKey from createChat to ensure chatInterfaceKey
-    // matches activeChat.stableKey after backend confirms. This prevents
-    // component remount when newChatStableKey is cleared during navigation.
     setNewChatStableKey(stableKey);
     setIsNewChatMode(false);
     const result = await addMessage(pendingId, message);
-    const realId = resolveRealChatId(pendingId);
+    const realId = result?.run?.chatId || (result ? resolveRealChatId(pendingId) : null);
     if (realId && !realId.startsWith("pending-")) {
-      setLocation(`/chat/${realId}`, { replace: true });
+      moveConversationUiState(pendingId, realId);
+      // CRITICAL: Defer URL navigation so ChatInterface's handleSubmit receives
+      // the sendMessageAck FIRST and starts streaming before the route change
+      // triggers a component remount cascade. Without this delay, setLocation
+      // fires synchronously, React re-renders Home with a new chatId prop for
+      // ChatInterface, and the streaming SSE connection is lost mid-flight.
+      setTimeout(() => {
+        setLocation(`/chat/${realId}`, { replace: true });
+      }, 100);
     }
     return result;
-  }, [createChat, addMessage, setLocation]);
+  }, [addMessage, createChat, ensureConversationUiState, moveConversationUiState, newChatStableKey, setLocation]);
 
   // Stable message sender that uses the correct chat ID
   const handleSendMessage = useCallback(async (message: Message) => {
-    // EMERGENCY DEBUG
-    console.error("[CRITICAL] handleSendMessage in home.tsx called:", { messageContent: message.content?.substring(0, 50), activeChat: activeChat?.id, pendingChatId: pendingChatIdRef.current });
+    if (import.meta.env.DEV) {
+      console.debug("[home] handleSendMessage", {
+        messageContent: message.content?.substring(0, 50),
+        activeChat: activeChat?.id,
+        pendingChatId: pendingChatIdRef.current,
+      });
+    }
     
     // Check for Simulator / Dry-Run command (B4)
     if (message.content.trim().startsWith('/plan ') || message.content.trim().startsWith('/preview ')) {
@@ -433,7 +507,7 @@ export default function Home() {
       try {
         // Add a temporary "thinking" step or message? 
         // For now just fetch.
-        const res = await fetch('/api/planning/preview', {
+        const res = await apiFetch('/api/planning/preview', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ goal })
@@ -487,14 +561,6 @@ export default function Home() {
       return await handleSendNewChatMessage(message);
     }
   }, [activeChat?.id, addMessage, handleSendNewChatMessage, createChat, addMessage]);
-
-
-  const chatInterfaceKey = useMemo(() => {
-    // Prioritize newChatStableKey to prevent component remount during new chat creation
-    if (newChatStableKey) return newChatStableKey;
-    if (activeChat) return activeChat.stableKey;
-    return "default-chat";
-  }, [activeChat?.stableKey, newChatStableKey]);
 
   // Get messages from either activeChat or pending chat
   const currentMessages = useMemo(() => {
@@ -744,7 +810,7 @@ export default function Home() {
 
       <Suspense fallback={null}>
         {isWhatsAppConnectOpen ? (
-          <WhatsAppConnectDialogLazy
+          <ChannelsHubDialogLazy
             open={isWhatsAppConnectOpen}
             onOpenChange={setIsWhatsAppConnectOpen}
           />
@@ -765,7 +831,6 @@ export default function Home() {
         ) : (
           <ChatErrorBoundary>
             <ChatInterface
-              key={chatInterfaceKey}
               messages={currentMessages}
               setMessages={noopSetMessages}
               onSendMessage={handleSendMessage}
@@ -840,7 +905,7 @@ export default function Home() {
             onSelectGpt={async (gpt) => {
               setAboutGptId(null);
               try {
-                const res = await fetch(`/api/gpts/${gpt.id}`);
+                const res = await apiFetch(`/api/gpts/${gpt.id}`);
                 if (res.ok) {
                   const fullGpt = await res.json();
                   handleSelectGpt(fullGpt);

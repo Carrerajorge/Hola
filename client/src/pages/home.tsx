@@ -462,7 +462,14 @@ export default function Home() {
     const realId = result?.run?.chatId || (result ? resolveRealChatId(pendingId) : null);
     if (realId && !realId.startsWith("pending-")) {
       moveConversationUiState(pendingId, realId);
-      setLocation(`/chat/${realId}`, { replace: true });
+      // CRITICAL: Defer URL navigation so ChatInterface's handleSubmit receives
+      // the sendMessageAck FIRST and starts streaming before the route change
+      // triggers a component remount cascade. Without this delay, setLocation
+      // fires synchronously, React re-renders Home with a new chatId prop for
+      // ChatInterface, and the streaming SSE connection is lost mid-flight.
+      setTimeout(() => {
+        setLocation(`/chat/${realId}`, { replace: true });
+      }, 100);
     }
     return result;
   }, [addMessage, createChat, ensureConversationUiState, moveConversationUiState, newChatStableKey, setLocation]);
