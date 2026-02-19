@@ -7,9 +7,11 @@ import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
 
 import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 
-import { Resource } from "@opentelemetry/resources";
+import otelResources from "@opentelemetry/resources";
+const { Resource } = otelResources;
 
-import { SemanticResourceAttributes } from "@opentelemetry/semantic-conventions";
+import otelSemConv from "@opentelemetry/semantic-conventions";
+const { SemanticResourceAttributes } = otelSemConv as any;
 
 
 
