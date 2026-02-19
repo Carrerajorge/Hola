@@ -369,16 +369,24 @@ async function triggerDocumentAnalysis(
   }
 }
 
-// ── Global mutex ────────────────────────────────────────────────────────
-// Must live on `window` because ChatInterface remounts (unmount + mount)
-// every time chatId changes, which resets useRef().  Module-level `let`
-// can also be duplicated by Vite code-splitting.  `window.__` is the only
-// truly singleton state that survives both remounts AND chunk boundaries.
-declare global {
-  interface Window {
-    __siraSubmitLock?: boolean;
-    __siraSubmitTimer?: ReturnType<typeof setTimeout> | null;
-  }
+// ── Submit mutex ─────────────────────────────────────────────────────────
+// Uses sessionStorage because both `useRef` (reset on remount), module-level
+// `let` (duplicated by Vite code-splitting) and `window.__` properties
+// (cleared when wouter navigation triggers a full React tree unmount/remount)
+// fail to persist across the ChatInterface remount cascade.
+// sessionStorage survives within the same browser tab session.
+function isSubmitLocked(): boolean {
+  try {
+    const ts = sessionStorage.getItem("__sira_submit_lock");
+    if (!ts) return false;
+    return Date.now() - Number(ts) < 10_000;
+  } catch { return false; }
+}
+function setSubmitLock(): void {
+  try { sessionStorage.setItem("__sira_submit_lock", String(Date.now())); } catch {}
+}
+function clearSubmitLock(): void {
+  try { sessionStorage.removeItem("__sira_submit_lock"); } catch {}
 }
 
 export function ChatInterface({
@@ -560,14 +568,6 @@ export function ChatInterface({
   }>({ status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null });
   const docGenerationState = docGenerationStateProp !== undefined ? docGenerationStateProp : docGenerationStateLocal;
   const setDocGenerationState = setDocGenerationStateProp || setDocGenerationStateLocal;
-
-  // DEBUG: Track component mount/unmount to detect remounts
-  useEffect(() => {
-    console.error('[ChatInterface] *** MOUNTED ***', { chatId });
-    return () => {
-      console.error('[ChatInterface] *** UNMOUNTED ***', { chatId: chatIdRef.current });
-    };
-  }, []);
 
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -1510,9 +1510,9 @@ export function ChatInterface({
   const aiStateRef = useRef<AiState>("idle");
   const composerRef = useRef<HTMLDivElement>(null);
   const handleStopChatRef = useRef<(() => void) | null>(null);
-  // Mutex: see window.__siraSubmitLock above (global, survives remounts + chunk boundaries).
+  // Mutex: see isSubmitLocked() above (sessionStorage, survives all remount/reload types).
   const isSubmittingRef = useRef(false);
-  isSubmittingRef.current = !!window.__siraSubmitLock;
+  isSubmittingRef.current = isSubmitLocked();
 
   const isScopedConversation = useCallback((conversationId?: string | null) => {
     const activeConversationId = latestChatIdRef.current;
@@ -3630,9 +3630,8 @@ export function ChatInterface({
     // React re-renders (from chatId prop change after new-chat creation)
     // can cause handleSubmit to be called again before the first async
     // invocation completes. This ref-based lock prevents that entirely.
-    console.log("[handleSubmit] GUARD CHECK: window.__siraSubmitLock =", window.__siraSubmitLock, "typeof =", typeof window.__siraSubmitLock);
-    if (window.__siraSubmitLock) {
-      console.log("[handleSubmit] Blocked: already submitting (re-entrant guard)");
+    if (isSubmitLocked()) {
+      console.log("[handleSubmit] Blocked: already submitting (sessionStorage lock active)");
       return;
     }
     // Prevent double-submit while THIS chat has a request in flight.
@@ -3642,14 +3641,9 @@ export function ChatInterface({
       console.log("[handleSubmit] Blocked: aiState is", aiState, "for chatId", aiStateChatId);
       return;
     }
-    window.__siraSubmitLock = true;
-    console.log("[handleSubmit] LOCK SET: window.__siraSubmitLock =", window.__siraSubmitLock);
+    setSubmitLock();
     isSubmittingRef.current = true;
-    // Safety net: auto-release the lock after 10s in case of unexpected early return
-    // without explicit cleanup. The lock is explicitly released below once the stream
-    // starts (aiState = "thinking") or on any error/early return path.
-    if (window.__siraSubmitTimer) clearTimeout(window.__siraSubmitTimer);
-    window.__siraSubmitTimer = setTimeout(() => { window.__siraSubmitLock = false; isSubmittingRef.current = false; }, 10000);
+    try {
     const submitConversationId = chatId || latestChatIdRef.current;
     // When sending the very first message, the parent may create a pending chatId asynchronously.
     // We may need to wait briefly for `chatId` (and `latestChatIdRef`) to update before starting SSE.
@@ -6085,6 +6079,11 @@ IMPORTANTE:
       setAiStateForChat("idle", submitConversationId);
       setAiProcessStepsForChat([], submitConversationId);
       abortControllerRef.current = null;
+    }
+    } finally {
+      // Always release the submit lock so the user can send again.
+      clearSubmitLock();
+      isSubmittingRef.current = false;
     }
   };
 
