@@ -3630,6 +3630,7 @@ export function ChatInterface({
     // React re-renders (from chatId prop change after new-chat creation)
     // can cause handleSubmit to be called again before the first async
     // invocation completes. This ref-based lock prevents that entirely.
+    console.log("[handleSubmit] GUARD CHECK: window.__siraSubmitLock =", window.__siraSubmitLock, "typeof =", typeof window.__siraSubmitLock);
     if (window.__siraSubmitLock) {
       console.log("[handleSubmit] Blocked: already submitting (re-entrant guard)");
       return;
@@ -3642,6 +3643,7 @@ export function ChatInterface({
       return;
     }
     window.__siraSubmitLock = true;
+    console.log("[handleSubmit] LOCK SET: window.__siraSubmitLock =", window.__siraSubmitLock);
     isSubmittingRef.current = true;
     // Safety net: auto-release the lock after 10s in case of unexpected early return
     // without explicit cleanup. The lock is explicitly released below once the stream
