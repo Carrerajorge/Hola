@@ -266,10 +266,44 @@ async function saveArtifact(
 
 function writeSse(res: Response, event: string, data: object): void {
     try {
-        const chunk = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+        const streamMeta = (res as any)?.locals?.streamMeta;
+        const payload: Record<string, unknown> = {
+            ...(data as Record<string, unknown>),
+        };
+
+        if (!payload.conversationId && typeof streamMeta?.conversationId === 'string') {
+            payload.conversationId = streamMeta.conversationId;
+        }
+        if (!payload.requestId && typeof streamMeta?.requestId === 'string') {
+            payload.requestId = streamMeta.requestId;
+        }
+
+        if (!payload.assistantMessageId) {
+            const assistantMessageId =
+                streamMeta?.assistantMessageId ||
+                (typeof streamMeta?.getAssistantMessageId === 'function'
+                    ? streamMeta.getAssistantMessageId()
+                    : undefined);
+            if (assistantMessageId) {
+                payload.assistantMessageId = assistantMessageId;
+            }
+        }
+
+        const chunk = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
         res.write(chunk);
+
         if (typeof (res as any).flush === 'function') {
             (res as any).flush();
+        } else if (res.socket && typeof res.socket.write === 'function') {
+            res.socket.write('');
+        }
+
+        if (typeof streamMeta?.onWrite === 'function') {
+            try {
+                streamMeta.onWrite();
+            } catch (observerError) {
+                console.warn('[ProductionHandler] streamMeta.onWrite failed:', observerError);
+            }
         }
     } catch (err) {
         console.error('[ProductionHandler] SSE write failed:', err);

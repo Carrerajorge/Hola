@@ -1,3 +1,7 @@
+
+import "./otel";
+import "./config/load-env"; import { env } from "./config/env"; // Validates env vars immediately on import
+
 import "./config/load-env";
 import "./lib/expressAsyncPatch";
 import { env } from "./config/env"; // Validates env vars immediately on import
