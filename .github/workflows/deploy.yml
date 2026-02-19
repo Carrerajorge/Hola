@@ -132,6 +132,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+    secrets: inherit
 
   # ── Manual Deploy ───────────────────────────────────────
   deploy_manual:
