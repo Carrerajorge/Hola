@@ -1,75 +1,120 @@
 /**
- * useStreamChat - All-in-one streaming chat hook.
+ * useStreamChat - conversation-isolated streaming chat hook.
  *
- * Replaces the pattern of:
- *   1. setAiState("thinking")
- *   2. fetch("/api/chat/stream", ...)
- *   3. reader = response.body.getReader()
- *   4. while (!done) { decode → parse SSE → accumulate → setStreamingContent }
- *   5. setOptimisticMessages + onSendMessage + setStreamingContent("") + setAiState("idle")
- *
- * With:
- *   const result = await streamChat.stream("/api/chat/stream", { body, chatId });
- *   // Done. Message is already finalized and visible.
- *
- * Features:
- *  - Proper SSE line buffering across TCP chunk boundaries
- *  - requestAnimationFrame-throttled state updates (~60fps)
- *  - Atomic finalize (optimistic message → clear streaming → in one tick)
- *  - Chat-scoped abort: switching chats auto-aborts stale streams
- *  - AbortController integration
- *  - Production event forwarding (for progress steps)
- *  - Handles [DONE], done/finish events, errors gracefully
+ * Guarantees:
+ * - One in-flight stream per conversationId (replace/reject policy)
+ * - SSE events are routed strictly by conversationId + request correlation
+ * - Background streams do not write into the active chat buffer
+ * - Stream buffers and abort controllers are scoped per conversation
  */
 
 import { useCallback, useRef, useEffect } from "react";
 import { getAnonUserIdHeader } from "@/lib/apiClient";
 import type { Message } from "@/hooks/use-chats";
-
-type AiState = "idle" | "thinking" | "responding" | "agent_working";
+import { type AIState, type AiProcessStep } from "@/components/chat-interface/types";
 
 export interface StreamChatDeps {
   setOptimisticMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   onSendMessage: (message: Message) => Promise<any>;
   setStreamingContent: (content: string) => void;
   streamingContentRef: React.MutableRefObject<string>;
-  setAiState: React.Dispatch<React.SetStateAction<AiState>>;
-  setAiProcessSteps?: React.Dispatch<React.SetStateAction<any[]>>;
+  setAiState: (value: React.SetStateAction<AIState>, conversationId?: string | null) => void;
+  setAiProcessSteps?: (value: React.SetStateAction<AiProcessStep[]>, conversationId?: string | null) => void;
+  getActiveConversationId?: () => string | null;
 }
 
 export interface StreamOptions {
-  /** Request body (will be JSON.stringified) */
   body: Record<string, any>;
-  /** Current chat ID — used for stale-stream detection */
   chatId?: string | null;
-  /** AbortSignal for external cancellation */
+  conversationId?: string | null;
   signal?: AbortSignal;
-  /** Called on each SSE event (for production_start, production_event, etc.) */
   onEvent?: (eventType: string, data: any) => void;
-  /** Called when the AI state should change (e.g. "responding", "agent_working") */
-  onAiStateChange?: (state: AiState) => void;
-  /** Called with the full content when streaming completes normally. Return a Message to customize the final message.
-   *  `messageId` is pre-generated to match the streaming message key for zero-flicker Virtuoso transition. */
+  onAiStateChange?: (state: AIState) => void;
   buildFinalMessage?: (fullContent: string, lastEventData?: any, messageId?: string) => Message;
-  /** Called with the error when streaming fails. Return a Message to customize the error message. */
   buildErrorMessage?: (error: Error, messageId?: string) => Message;
+  queueMode?: "replace" | "reject";
+  timeoutMs?: number;
+  firstTokenTimeoutMs?: number;
+  doneTimeoutMs?: number;
+  maxRetries?: number;
+  retryBackoffMs?: number;
+  retryJitterMs?: number;
 }
 
 export interface StreamResult {
-  /** Whether the stream completed successfully */
   ok: boolean;
-  /** The accumulated full content */
   content: string;
-  /** The final message that was sent */
   message?: Message;
-  /** HTTP response (for status code checks) */
   response?: Response;
-  /** Error if stream failed */
   error?: Error;
 }
 
+interface ConversationSession {
+  abortController: AbortController | null;
+  pendingRequestId: string | null;
+  nextMessageId: string | null;
+  fullContent: string;
+  pendingContent: string | null;
+  rafId: number | null;
+  finalizing: boolean;
+  timeoutId: ReturnType<typeof setTimeout> | null;
+  firstTokenTimeoutId: ReturnType<typeof setTimeout> | null;
+  doneTimeoutId: ReturnType<typeof setTimeout> | null;
+}
+
+function createSession(): ConversationSession {
+  return {
+    abortController: null,
+    pendingRequestId: null,
+    nextMessageId: null,
+    fullContent: "",
+    pendingContent: null,
+    rafId: null,
+    finalizing: false,
+    timeoutId: null,
+    firstTokenTimeoutId: null,
+    doneTimeoutId: null,
+  };
+}
+
+const DEFAULT_STREAM_TIMEOUT_MS = 300_000;
+const DEFAULT_FIRST_TOKEN_TIMEOUT_MS = 30_000;
+const DEFAULT_DONE_TIMEOUT_MS = 45_000;
+const DEFAULT_MAX_RETRIES = 1;
+const DEFAULT_RETRY_BACKOFF_MS = 800;
+const DEFAULT_RETRY_JITTER_MS = 250;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function generateRequestId(): string {
+  try {
+    const c: any = (globalThis as any).crypto;
+    if (c && typeof c.randomUUID === "function") {
+      return `req_${c.randomUUID()}`;
+    }
+  } catch {
+    // ignore
+  }
   return `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function normalizeConversationId(options: StreamOptions): string | null {
+  const fromOptions = typeof options.conversationId === "string" ? options.conversationId.trim() : "";
+  if (fromOptions) return fromOptions;
+
+  const fromChat = typeof options.chatId === "string" ? options.chatId.trim() : "";
+  if (fromChat) return fromChat;
+
+  const fromBodyConversationId =
+    typeof options.body?.conversationId === "string" ? options.body.conversationId.trim() : "";
+  if (fromBodyConversationId) return fromBodyConversationId;
+
+  const fromBodyChatId = typeof options.body?.chatId === "string" ? options.body.chatId.trim() : "";
+  if (fromBodyChatId) return fromBodyChatId;
+
+  return null;
 }
 
 export function useStreamChat(deps: StreamChatDeps) {
@@ -80,379 +125,798 @@ export function useStreamChat(deps: StreamChatDeps) {
     streamingContentRef,
     setAiState,
     setAiProcessSteps,
+    getActiveConversationId,
   } = deps;
 
-  // Active stream tracking
+  const sessionsRef = useRef<Map<string, ConversationSession>>(new Map());
+  const lastStartedConversationRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const activeChatIdRef = useRef<string | null>(null);
-  const finalizingRef = useRef(false);
-  // Pre-generated message ID for the next stream — allows ChatMessageList
-  // to use the same key for the streaming message and the final message,
-  // so Virtuoso keeps the same DOM node (zero-flicker transition).
   const nextMessageIdRef = useRef<string | null>(null);
 
-  // RAF throttling state
-  const rafIdRef = useRef<number | null>(null);
-  const pendingContentRef = useRef<string | null>(null);
+  const getSession = useCallback((conversationId: string): ConversationSession => {
+    const existing = sessionsRef.current.get(conversationId);
+    if (existing) return existing;
+    const created = createSession();
+    sessionsRef.current.set(conversationId, created);
+    return created;
+  }, []);
 
-  // Flush pending content to React state via RAF
-  const scheduleFlush = useCallback(() => {
-    if (pendingContentRef.current !== null && rafIdRef.current === null) {
-      rafIdRef.current = requestAnimationFrame(() => {
-        rafIdRef.current = null;
-        if (pendingContentRef.current !== null) {
-          setStreamingContent(pendingContentRef.current);
-          pendingContentRef.current = null;
+  const isConversationActive = useCallback(
+    (conversationId: string): boolean => {
+      const activeConversationId = getActiveConversationId?.();
+      if (!activeConversationId) return true;
+      return activeConversationId === conversationId;
+    },
+    [getActiveConversationId]
+  );
+
+  const flushNow = useCallback(
+    (conversationId: string) => {
+      const session = getSession(conversationId);
+      if (session.rafId !== null) {
+        cancelAnimationFrame(session.rafId);
+        session.rafId = null;
+      }
+      if (session.pendingContent !== null && isConversationActive(conversationId)) {
+        streamingContentRef.current = session.pendingContent;
+        setStreamingContent(session.pendingContent);
+        session.pendingContent = null;
+      }
+    },
+    [getSession, isConversationActive, setStreamingContent, streamingContentRef]
+  );
+
+  const scheduleFlush = useCallback(
+    (conversationId: string) => {
+      const session = getSession(conversationId);
+      if (session.pendingContent === null || session.rafId !== null) return;
+      if (!isConversationActive(conversationId)) return;
+
+      session.rafId = requestAnimationFrame(() => {
+        session.rafId = null;
+        if (session.pendingContent !== null && isConversationActive(conversationId)) {
+          streamingContentRef.current = session.pendingContent;
+          setStreamingContent(session.pendingContent);
+          session.pendingContent = null;
         }
       });
-    }
-  }, [setStreamingContent]);
+    },
+    [getSession, isConversationActive, setStreamingContent, streamingContentRef]
+  );
 
-  // Immediate flush (for finalize)
-  const flushNow = useCallback(() => {
-    if (rafIdRef.current !== null) {
-      cancelAnimationFrame(rafIdRef.current);
-      rafIdRef.current = null;
-    }
-    if (pendingContentRef.current !== null) {
-      setStreamingContent(pendingContentRef.current);
-      pendingContentRef.current = null;
-    }
-  }, [setStreamingContent]);
+  const clearSessionRuntime = useCallback((conversationId: string) => {
+    const session = getSession(conversationId);
 
-  // Atomic finalize — same logic as useStreamingTransition but self-contained
+    if (session.timeoutId) {
+      clearTimeout(session.timeoutId);
+      session.timeoutId = null;
+    }
+    if (session.firstTokenTimeoutId) {
+      clearTimeout(session.firstTokenTimeoutId);
+      session.firstTokenTimeoutId = null;
+    }
+    if (session.doneTimeoutId) {
+      clearTimeout(session.doneTimeoutId);
+      session.doneTimeoutId = null;
+    }
+
+    if (session.rafId !== null) {
+      cancelAnimationFrame(session.rafId);
+      session.rafId = null;
+    }
+
+    session.pendingRequestId = null;
+  }, [getSession]);
+
+  const abortConversation = useCallback(
+    (conversationId: string) => {
+      const session = getSession(conversationId);
+      if (session.abortController) {
+        session.abortController.abort();
+      }
+      session.abortController = null;
+      clearSessionRuntime(conversationId);
+    },
+    [clearSessionRuntime, getSession]
+  );
+
+  const abort = useCallback(
+    (conversationId?: string | null) => {
+      const resolvedConversationId =
+        (conversationId && conversationId.trim()) ||
+        getActiveConversationId?.() ||
+        lastStartedConversationRef.current;
+
+      if (!resolvedConversationId) {
+        abortControllerRef.current?.abort();
+        abortControllerRef.current = null;
+        return;
+      }
+
+      abortConversation(resolvedConversationId);
+
+      if (
+        abortControllerRef.current &&
+        getSession(resolvedConversationId).abortController !== abortControllerRef.current
+      ) {
+        abortControllerRef.current.abort();
+      }
+      abortControllerRef.current = null;
+    },
+    [abortConversation, getActiveConversationId, getSession]
+  );
+
+  const synchronizeConversation = useCallback(
+    (conversationId?: string | null) => {
+      const targetConversationId =
+        (conversationId && conversationId.trim()) || getActiveConversationId?.() || null;
+
+      if (!targetConversationId) {
+        nextMessageIdRef.current = null;
+        streamingContentRef.current = "";
+        setStreamingContent("");
+        return;
+      }
+
+      const session = sessionsRef.current.get(targetConversationId);
+      const content = session?.fullContent || "";
+
+      nextMessageIdRef.current = session?.nextMessageId || null;
+      streamingContentRef.current = content;
+      setStreamingContent(content);
+    },
+    [getActiveConversationId, setStreamingContent, streamingContentRef]
+  );
+
   const finalize = useCallback(
-    (message: Message) => {
-      if (finalizingRef.current) return;
-      finalizingRef.current = true;
+    (message: Message, conversationId?: string | null, finalState: AIState = "idle") => {
+      const targetConversationId =
+        (conversationId && conversationId.trim()) ||
+        getActiveConversationId?.() ||
+        lastStartedConversationRef.current;
 
-      // Cancel any pending RAF
-      flushNow();
+      const applyFinalState = (state: AIState, targetId: string | null) => {
+        setAiState(state, targetId);
+        if (state !== "idle") {
+          queueMicrotask(() => {
+            setAiState((prev) => (prev === state ? "idle" : prev), targetId);
+          });
+        }
+      };
 
-      // 1. Optimistic insert — instant DOM presence
+      if (!targetConversationId) {
+        setOptimisticMessages((prev) => [...prev, message]);
+        onSendMessage(message).catch((err) => {
+          console.error("[useStreamChat] onSendMessage failed:", err);
+        });
+        streamingContentRef.current = "";
+        setStreamingContent("");
+        applyFinalState(finalState, targetConversationId);
+        setAiProcessSteps?.([], targetConversationId);
+        return;
+      }
+
+      const session = getSession(targetConversationId);
+      if (session.finalizing) return;
+      session.finalizing = true;
+
+      flushNow(targetConversationId);
+
       setOptimisticMessages((prev) => [...prev, message]);
-
-      // 2. Persist to backend
       onSendMessage(message).catch((err) => {
         console.error("[useStreamChat] onSendMessage failed:", err);
       });
 
-      // 3. Clear streaming
-      streamingContentRef.current = "";
-      setStreamingContent("");
-      pendingContentRef.current = null;
+      session.fullContent = "";
+      session.pendingContent = null;
+      session.pendingRequestId = null;
 
-      // 4. Reset AI state
-      setAiState("idle");
-      setAiProcessSteps?.([]);
+      if (isConversationActive(targetConversationId)) {
+        streamingContentRef.current = "";
+        setStreamingContent("");
+      }
+
+      applyFinalState(finalState, targetConversationId);
+      setAiProcessSteps?.([], targetConversationId);
 
       queueMicrotask(() => {
-        finalizingRef.current = false;
+        const latestSession = getSession(targetConversationId);
+        latestSession.finalizing = false;
       });
     },
-    [setOptimisticMessages, onSendMessage, setStreamingContent, streamingContentRef, setAiState, setAiProcessSteps, flushNow]
+    [
+      flushNow,
+      getActiveConversationId,
+      getSession,
+      isConversationActive,
+      onSendMessage,
+      setAiProcessSteps,
+      setAiState,
+      setOptimisticMessages,
+      setStreamingContent,
+      streamingContentRef,
+    ]
   );
 
-  /**
-   * Abort the current stream.
-   */
-  const abort = useCallback(() => {
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = null;
-    if (rafIdRef.current !== null) {
-      cancelAnimationFrame(rafIdRef.current);
-      rafIdRef.current = null;
-    }
-  }, []);
-
-  /**
-   * Stream a chat request. Returns when the stream is complete and the
-   * message has been finalized.
-   */
   const stream = useCallback(
     async (url: string, options: StreamOptions): Promise<StreamResult> => {
-      const { body, chatId, signal, onEvent, onAiStateChange, buildFinalMessage, buildErrorMessage } = options;
+      const {
+        body,
+        chatId: rawChatId,
+        signal,
+        onEvent,
+        onAiStateChange,
+        buildFinalMessage,
+        buildErrorMessage,
+        queueMode = "replace",
+        timeoutMs = DEFAULT_STREAM_TIMEOUT_MS,
+        firstTokenTimeoutMs = DEFAULT_FIRST_TOKEN_TIMEOUT_MS,
+        doneTimeoutMs = DEFAULT_DONE_TIMEOUT_MS,
+        maxRetries = DEFAULT_MAX_RETRIES,
+        retryBackoffMs = DEFAULT_RETRY_BACKOFF_MS,
+        retryJitterMs = DEFAULT_RETRY_JITTER_MS,
+      } = options;
 
-      // Abort any previous stream
-      abort();
+      const conversationId = normalizeConversationId(options);
+      if (!conversationId) {
+        const error = new Error("conversationId is required for isolated streaming");
+        return { ok: false, content: "", error };
+      }
 
-      // Set up new abort controller
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
-      activeChatIdRef.current = chatId ?? null;
+      const scopedChatId = typeof rawChatId === "string" ? rawChatId.trim() : "";
+      const bodyChatId = typeof body?.chatId === "string" ? body.chatId.trim() : "";
 
-      // Combine signals if caller provides one
-      const combinedSignal = signal
-        ? AbortSignal.any?.([controller.signal, signal]) ?? controller.signal
-        : controller.signal;
+      const session = getSession(conversationId);
 
-      // Pre-generate message ID so streaming and final message share the same key
-      const messageId = `assistant-${Date.now()}`;
-      nextMessageIdRef.current = messageId;
+      if (session.abortController && queueMode === "reject") {
+        const error = new Error("Conversation already has a pending response");
+        return { ok: false, content: session.fullContent, error };
+      }
 
-      // Initialize streaming state
-      streamingContentRef.current = "";
-      pendingContentRef.current = null;
-      setStreamingContent("");
-      setAiState("thinking");
-      setAiProcessSteps?.([]);
+      if (session.abortController && queueMode === "replace") {
+        abortConversation(conversationId);
+      }
 
-      let fullContent = "";
-      let response: Response | undefined;
+      const messageId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      session.nextMessageId = messageId;
+      const baseRequestId =
+        typeof body?.requestId === "string" && body.requestId.trim()
+          ? body.requestId.trim()
+          : generateRequestId();
 
-      try {
-        response = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-          credentials: "include",
-          body: JSON.stringify(body),
-          signal: combinedSignal,
-        });
+      const buildAttemptRequestId = (attempt: number) => {
+        if (attempt === 0) return baseRequestId;
+        const withSuffix = `${baseRequestId}_retry${attempt}`;
+        return withSuffix.length > 120 ? withSuffix.slice(0, 120) : withSuffix;
+      };
 
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          const error = new Error(errorData.error || `HTTP ${response.status}`);
+      const normalizedMaxRetries =
+        Number.isFinite(maxRetries) && Number(maxRetries) >= 0
+          ? Math.floor(Number(maxRetries))
+          : DEFAULT_MAX_RETRIES;
 
-          const errorMsg = buildErrorMessage?.(error, messageId) ?? {
-            id: messageId,
-            role: "assistant" as const,
-            content: error.message || "Error de conexión. Por favor, intenta de nuevo.",
-            timestamp: new Date(),
-            requestId: generateRequestId(),
+      const computeBackoff = (attemptIndex: number) => {
+        const base = retryBackoffMs * Math.pow(2, attemptIndex);
+        const jitter = retryJitterMs ? Math.floor(Math.random() * retryJitterMs) : 0;
+        return Math.max(0, base + jitter);
+      };
+
+      const shouldRetry = (
+        error: any,
+        response?: Response,
+        timeoutCause?: "overall" | "first-token" | "done" | null
+      ) => {
+        if (timeoutCause) return true;
+        const status = (error as any)?.status ?? response?.status;
+        if (typeof status === "number") {
+          if (status >= 500 || status === 429 || status === 408 || status === 504) return true;
+          return false;
+        }
+        const msg = String(error?.message || "").toLowerCase();
+        if (msg.includes("failed to fetch") || msg.includes("network") || msg.includes("timeout")) return true;
+        return false;
+      };
+
+      let lastError: Error | undefined;
+      let lastResponse: Response | undefined;
+      let lastContent = "";
+
+      for (let attempt = 0; attempt <= normalizedMaxRetries; attempt++) {
+        const streamRequestId = buildAttemptRequestId(attempt);
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
+        session.abortController = controller;
+        lastStartedConversationRef.current = conversationId;
+
+        const requestBody: Record<string, any> = {
+          ...body,
+          requestId: streamRequestId,
+          conversationId,
+          chatId: bodyChatId || scopedChatId || conversationId,
+        };
+
+        const combinedSignal = signal
+          ? AbortSignal.any?.([controller.signal, signal]) ?? controller.signal
+          : controller.signal;
+
+        session.pendingRequestId = streamRequestId;
+        session.fullContent = "";
+        session.pendingContent = null;
+        session.finalizing = false;
+
+        if (isConversationActive(conversationId)) {
+          nextMessageIdRef.current = messageId;
+          streamingContentRef.current = "";
+          setStreamingContent("");
+        }
+
+        setAiState("thinking", conversationId);
+        onAiStateChange?.("thinking");
+        setAiProcessSteps?.([], conversationId);
+
+        let response: Response | undefined;
+        let fullContent = "";
+        let lastEventData: any = null;
+        let timeoutCause: "overall" | "first-token" | "done" | null = null;
+        let hasReceivedEvent = false;
+        let hasReceivedToken = false;
+
+        if (session.timeoutId) {
+          clearTimeout(session.timeoutId);
+        }
+        session.timeoutId = setTimeout(() => {
+          timeoutCause = "overall";
+          controller.abort();
+        }, timeoutMs);
+
+        if (session.firstTokenTimeoutId) {
+          clearTimeout(session.firstTokenTimeoutId);
+        }
+        if (firstTokenTimeoutMs > 0) {
+          session.firstTokenTimeoutId = setTimeout(() => {
+            if (!hasReceivedEvent && !session.finalizing && session.pendingRequestId === streamRequestId) {
+              timeoutCause = "first-token";
+              controller.abort();
+            }
+          }, firstTokenTimeoutMs);
+        }
+
+        if (session.doneTimeoutId) {
+          clearTimeout(session.doneTimeoutId);
+        }
+        const armDoneTimeout = () => {
+          if (doneTimeoutMs <= 0) return;
+          if (session.doneTimeoutId) {
+            clearTimeout(session.doneTimeoutId);
+            session.doneTimeoutId = null;
+          }
+          session.doneTimeoutId = setTimeout(() => {
+            if (!session.finalizing && session.pendingRequestId === streamRequestId && hasReceivedToken) {
+              timeoutCause = "done";
+              controller.abort();
+            }
+          }, doneTimeoutMs);
+        };
+        const clearTokenTimeouts = () => {
+          if (session.firstTokenTimeoutId) {
+            clearTimeout(session.firstTokenTimeoutId);
+            session.firstTokenTimeoutId = null;
+          }
+          if (session.doneTimeoutId) {
+            clearTimeout(session.doneTimeoutId);
+            session.doneTimeoutId = null;
+          }
+        };
+
+        try {
+          // Normalize optional array fields — never send null (breaks PARE schema validation)
+          const cleanedBody = {
+            ...requestBody,
+            attachments: Array.isArray((requestBody as any).attachments) ? (requestBody as any).attachments : undefined,
+            images: Array.isArray((requestBody as any).images) ? (requestBody as any).images : undefined,
           };
 
-          finalize(errorMsg);
-          return { ok: false, content: "", message: errorMsg, response, error };
-        }
-
-        const reader = response.body?.getReader();
-        if (!reader) {
-          const error = new Error("No response body");
-          finalize(buildErrorMessage?.(error, messageId) ?? {
-            id: messageId,
-            role: "assistant" as const,
-            content: "No se recibió respuesta del servidor.",
-            timestamp: new Date(),
-            requestId: generateRequestId(),
+          response = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-request-id": streamRequestId,
+              ...getAnonUserIdHeader(),
+            },
+            credentials: "include",
+            body: JSON.stringify(cleanedBody),
+            signal: combinedSignal, 
           });
-          return { ok: false, content: "", response, error };
-        }
 
-        // Start responding
-        setAiState("responding");
-        onAiStateChange?.("responding");
-
-        const decoder = new TextDecoder();
-        let sseBuffer = "";
-        let currentEventType = "chunk";
-        let lastEventData: any = null;
-        let streamDone = false;
-
-        while (!streamDone) {
-          if (combinedSignal.aborted) break;
-
-          // Stale chat guard: if chatId changed, abort this stream
-          if (chatId && activeChatIdRef.current !== chatId) {
-            controller.abort();
-            break;
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            const error = new Error(errorData.error || `HTTP ${response.status}`);
+            (error as any).status = response.status;
+            throw error;
           }
 
-          const { done, value } = await reader.read();
-          if (done) break;
+          const contentType = response.headers.get("Content-Type") || "";
+          if (contentType.includes("application/json")) {
+            const jsonData = await response.json().catch(() => null);
+            const status = jsonData?.status;
 
-          sseBuffer += decoder.decode(value, { stream: true });
-          const lines = sseBuffer.split("\n");
-          sseBuffer = lines.pop() || "";
-
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-
-            if (trimmed.startsWith("event: ")) {
-              currentEventType = trimmed.slice(7).trim();
-              continue;
+            if (status === "already_done" || status === "already_processing" || status === "claim_failed") {
+              session.fullContent = "";
+              session.pendingContent = null;
+              if (isConversationActive(conversationId)) {
+                streamingContentRef.current = "";
+                setStreamingContent("");
+              }
+              setAiState("idle", conversationId);
+              setAiProcessSteps?.([], conversationId);
+              return { ok: true, content: "", response };
             }
 
-            if (!trimmed.startsWith("data: ")) continue;
+            const error = new Error(
+              jsonData?.error || jsonData?.message || `Unexpected JSON response (${status || "json"})`
+            );
+            (error as any).status = response.status;
+            throw error;
+          }
 
-            const dataStr = trimmed.slice(6);
-            if (dataStr === "[DONE]") {
-              streamDone = true;
-              break;
-            }
+          const reader = response.body?.getReader();
+          if (!reader) {
+            throw new Error("No response body");
+          }
 
-            try {
-              const data = JSON.parse(dataStr);
+          setAiState("responding", conversationId);
+          onAiStateChange?.("responding");
+
+          const decoder = new TextDecoder();
+          let sseBuffer = "";
+          let currentEventType = "chunk";
+          let streamDone = false;
+
+          while (!streamDone) {
+            if (combinedSignal.aborted) break;
+
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            sseBuffer += decoder.decode(value, { stream: true });
+            const lines = sseBuffer.split("\n");
+            sseBuffer = lines.pop() || "";
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed) continue;
+
+              if (trimmed.startsWith("event: ")) {
+                currentEventType = trimmed.slice(7).trim();
+                continue;
+              }
+
+              if (!trimmed.startsWith("data: ")) continue;
+
+              const dataStr = trimmed.slice(6);
+              if (dataStr === "[DONE]") {
+                streamDone = true;
+                break;
+              }
+
+              let data: any;
+              try {
+                data = JSON.parse(dataStr);
+              } catch {
+                continue;
+              }
+
+              if (!data || typeof data !== "object") continue;
+
+              const eventConversationId =
+                typeof data.conversationId === "string" ? data.conversationId.trim() : "";
+              if (!eventConversationId || eventConversationId !== conversationId) {
+                continue;
+              }
+
+              const eventRequestId = typeof data.requestId === "string" ? data.requestId.trim() : "";
+              const eventAssistantMessageId =
+                typeof data.assistantMessageId === "string" ? data.assistantMessageId.trim() : "";
+
+              if (!eventRequestId && !eventAssistantMessageId) {
+                continue;
+              }
+
+              if (eventRequestId && eventRequestId !== streamRequestId) {
+                continue;
+              }
+
               lastEventData = data;
 
-              // Forward all events to caller
+              if (!hasReceivedEvent) {
+                hasReceivedEvent = true;
+                if (session.firstTokenTimeoutId) {
+                  clearTimeout(session.firstTokenTimeoutId);
+                  session.firstTokenTimeoutId = null;
+                }
+              }
+
               onEvent?.(currentEventType, data);
 
-              // Accumulate text content
               if (currentEventType === "chunk" || currentEventType === "text") {
-                const content = data.content || "";
+                const content = typeof data.content === "string" ? data.content : "";
                 if (content) {
+                  if (!hasReceivedToken) {
+                    hasReceivedToken = true;
+                    if (session.firstTokenTimeoutId) {
+                      clearTimeout(session.firstTokenTimeoutId);
+                      session.firstTokenTimeoutId = null;
+                    }
+                    armDoneTimeout();
+                  }
                   fullContent += content;
-                  streamingContentRef.current = fullContent;
-                  // RAF-throttled update
-                  pendingContentRef.current = fullContent;
-                  scheduleFlush();
+                  session.fullContent = fullContent;
+                  if (isConversationActive(conversationId)) {
+                    session.pendingContent = fullContent;
+                    scheduleFlush(conversationId);
+                  }
                 }
               }
 
-              // Handle AI state changes from events.
-              // Guard: skip state updates if the stream was aborted or chat switched
-              // to avoid setting stale states on a dead stream.
-              const isStale = combinedSignal.aborted ||
-                (chatId && activeChatIdRef.current !== chatId);
-
-              if (!isStale && currentEventType === "thinking") {
-                // Server is doing heavy I/O (search, context load) — keep thinking state
-                setAiState("thinking");
+              const isStaleConversation = session.pendingRequestId !== streamRequestId;
+              if (!isStaleConversation && currentEventType === "thinking") {
+                setAiState("thinking", conversationId);
                 onAiStateChange?.("thinking");
 
-                // Surface thinking step details (e.g. "Buscando fuentes…") so the
-                // UI can show progress instead of a generic spinner.
                 if (data.step && data.message) {
-                  setAiProcessSteps?.((prev: any[]) => {
-                    const existing = prev.find((s: any) => s.id === data.step);
-                    if (existing) return prev;
-                    return [...prev, {
-                      id: data.step,
-                      step: data.step,
-                      title: data.message,
-                      status: "pending",
-                    }];
-                  });
+                  setAiProcessSteps?.(
+                    (prev: any[]) => {
+                      const existing = prev.find((s: any) => s.id === data.step);
+                      if (existing) return prev;
+                      return [
+                        ...prev,
+                        {
+                          id: data.step,
+                          step: data.step,
+                          title: data.message,
+                          status: "pending",
+                        },
+                      ];
+                    },
+                    conversationId
+                  );
                 }
               }
 
-              if (!isStale && currentEventType === "context") {
-                // Enriched metadata arrived — switch to responding.
-                // Mark any pending thinking steps as done.
-                setAiState("responding");
+              if (!isStaleConversation && currentEventType === "context") {
+                setAiState("responding", conversationId);
                 onAiStateChange?.("responding");
-                setAiProcessSteps?.((prev: any[]) =>
-                  prev.map((s: any) => ({ ...s, status: "done" }))
+                setAiProcessSteps?.(
+                  (prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })),
+                  conversationId
                 );
               }
 
-              if (!isStale && currentEventType === "production_start") {
-                setAiState("agent_working");
+              if (!isStaleConversation && currentEventType === "production_start") {
+                setAiState("agent_working", conversationId);
                 onAiStateChange?.("agent_working");
               }
 
-              // Terminal: done/finish
               if (currentEventType === "done" || currentEventType === "finish") {
+                clearTokenTimeouts();
                 streamDone = true;
+                flushNow(conversationId);
 
                 const msg = buildFinalMessage?.(fullContent, data, messageId) ?? {
                   id: messageId,
                   role: "assistant" as const,
                   content: fullContent,
                   timestamp: new Date(),
-                  requestId: data.requestId || generateRequestId(),
+                  requestId: data.requestId || streamRequestId,
                   artifact: data.artifact,
                   webSources: data.webSources,
                 };
 
-                finalize(msg);
+                finalize(msg, conversationId, "done");
                 return { ok: true, content: fullContent, message: msg, response };
               }
 
-              // Terminal: error
               if (currentEventType === "error" || currentEventType === "production_error") {
                 const errorMsg = data.message || data.error || "Stream error";
                 throw new Error(errorMsg);
               }
-            } catch (parseErr: any) {
-              // If this is a re-thrown error from above, propagate it
-              if (parseErr?.message && (currentEventType === "error" || currentEventType === "production_error")) {
-                throw parseErr;
-              }
-              // Otherwise ignore JSON parse errors for partial data
             }
           }
-        }
 
-        // Stream ended without explicit done event — finalize with accumulated content
-        if (!finalizingRef.current && fullContent) {
-          const msg = buildFinalMessage?.(fullContent, lastEventData, messageId) ?? {
+          if (!session.finalizing && fullContent) {
+            clearTokenTimeouts();
+            flushNow(conversationId);
+            const msg = buildFinalMessage?.(fullContent, lastEventData, messageId) ?? {
+              id: messageId,
+              role: "assistant" as const,
+              content: fullContent,
+              timestamp: new Date(),
+              requestId: streamRequestId,
+            };
+
+            finalize(msg, conversationId, "done");
+            return { ok: true, content: fullContent, message: msg, response };
+          }
+
+          if (!session.finalizing) {
+            clearTokenTimeouts();
+            throw new Error("No se recibió respuesta del servidor.");
+          }
+
+          return { ok: true, content: fullContent, response };
+        } catch (err: any) {
+          if (err?.name === "AbortError") {
+            clearTokenTimeouts();
+
+            if (!timeoutCause) {
+              if (isConversationActive(conversationId)) {
+                streamingContentRef.current = "";
+                setStreamingContent("");
+              }
+              setAiState("idle", conversationId);
+              setAiProcessSteps?.([], conversationId);
+              return { ok: false, content: fullContent, response, error: err };
+            }
+
+            const abortMessage =
+              timeoutCause === "first-token"
+                ? `No se recibió ningún evento del servidor en ${firstTokenTimeoutMs}ms.`
+                : timeoutCause === "done"
+                  ? `La respuesta demoró demasiado (>${doneTimeoutMs}ms).`
+                  : `Stream timeout after ${timeoutMs}ms.`;
+
+            const abortError = new Error(abortMessage);
+            lastError = abortError;
+            lastResponse = response;
+            lastContent = fullContent;
+
+            if (attempt < normalizedMaxRetries) {
+              await sleep(computeBackoff(attempt));
+              continue;
+            }
+
+            const timeoutErrorMsg = buildErrorMessage?.(abortError, messageId) ?? {
+              id: messageId,
+              role: "assistant" as const,
+              content: abortMessage,
+              timestamp: new Date(),
+              requestId: streamRequestId,
+            };
+            finalize(timeoutErrorMsg, conversationId, "error");
+
+            return { ok: false, content: fullContent, response, error: abortError };
+          }
+
+          const normalizedError = err instanceof Error ? err : new Error(String(err));
+          console.error("[useStreamChat] Stream error:", normalizedError);
+
+          const retryable = shouldRetry(normalizedError, response, timeoutCause);
+          lastError = normalizedError;
+          lastResponse = response;
+          lastContent = fullContent;
+
+          if (retryable && attempt < normalizedMaxRetries) {
+            await sleep(computeBackoff(attempt));
+            continue;
+          }
+
+          const errorMsg = buildErrorMessage?.(normalizedError, messageId) ?? {
             id: messageId,
             role: "assistant" as const,
-            content: fullContent || "No se recibió respuesta del servidor.",
+            content: normalizedError?.message || "Error de conexión. Por favor, intenta de nuevo.",
             timestamp: new Date(),
-            requestId: generateRequestId(),
+            requestId: streamRequestId,
           };
 
-          finalize(msg);
-          return { ok: true, content: fullContent, message: msg, response };
-        }
+          if (!session.finalizing) {
+            finalize(errorMsg, conversationId, "error");
+          }
 
-        // No content received
-        if (!finalizingRef.current) {
-          const msg: Message = {
-            id: messageId,
-            role: "assistant" as const,
-            content: "No se recibió respuesta del servidor.",
-            timestamp: new Date(),
-            requestId: generateRequestId(),
-          };
-          finalize(msg);
-          return { ok: false, content: "", message: msg, response };
-        }
+          return { ok: false, content: fullContent, message: errorMsg, response, error: normalizedError };
+        } finally {
+          if (session.abortController === controller) {
+            session.abortController = null;
+          }
 
-        return { ok: true, content: fullContent, response };
+          if (session.pendingRequestId === streamRequestId) {
+            session.pendingRequestId = null;
+          }
 
-      } catch (err: any) {
-        if (err.name === "AbortError") {
-          return { ok: false, content: fullContent, response, error: err };
-        }
+          if (session.timeoutId) {
+            clearTimeout(session.timeoutId);
+            session.timeoutId = null;
+          }
+          if (session.firstTokenTimeoutId) {
+            clearTimeout(session.firstTokenTimeoutId);
+            session.firstTokenTimeoutId = null;
+          }
+          if (session.doneTimeoutId) {
+            clearTimeout(session.doneTimeoutId);
+            session.doneTimeoutId = null;
+          }
 
-        console.error("[useStreamChat] Stream error:", err);
-
-        const errorMsg = buildErrorMessage?.(err, messageId) ?? {
-          id: messageId,
-          role: "assistant" as const,
-          content: err.message || "Error de conexión. Por favor, intenta de nuevo.",
-          timestamp: new Date(),
-          requestId: generateRequestId(),
-        };
-
-        if (!finalizingRef.current) {
-          finalize(errorMsg);
-        }
-
-        return { ok: false, content: fullContent, message: errorMsg, response, error: err };
-      } finally {
-        if (abortControllerRef.current === controller) {
-          abortControllerRef.current = null;
+          if (abortControllerRef.current === controller) {
+            abortControllerRef.current = null;
+          }
         }
       }
+
+      if (lastError) {
+        const errorMsg = buildErrorMessage?.(lastError, messageId) ?? {
+          id: messageId,
+          role: "assistant" as const,
+          content: lastError.message || "Error de conexión. Por favor, intenta de nuevo.",
+          timestamp: new Date(),
+          requestId: baseRequestId,
+        };
+        finalize(errorMsg, conversationId, "error");
+        return { ok: false, content: lastContent, message: errorMsg, response: lastResponse, error: lastError };
+      }
+
+      const fallbackError = new Error("Stream failed");
+      return { ok: false, content: "", error: fallbackError };
     },
-    [abort, finalize, scheduleFlush, setAiState, setAiProcessSteps, streamingContentRef, setStreamingContent]
+    [
+      abortConversation,
+      finalize,
+      flushNow,
+      getSession,
+      isConversationActive,
+      scheduleFlush,
+      setAiProcessSteps,
+      setAiState,
+    ]
   );
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      abort();
+      for (const [conversationId, session] of sessionsRef.current.entries()) {
+        if (session.abortController) {
+          session.abortController.abort();
+          session.abortController = null;
+        }
+        if (session.timeoutId) {
+          clearTimeout(session.timeoutId);
+          session.timeoutId = null;
+        }
+        if (session.firstTokenTimeoutId) {
+          clearTimeout(session.firstTokenTimeoutId);
+          session.firstTokenTimeoutId = null;
+        }
+        if (session.doneTimeoutId) {
+          clearTimeout(session.doneTimeoutId);
+          session.doneTimeoutId = null;
+        }
+        if (session.rafId !== null) {
+          cancelAnimationFrame(session.rafId);
+          session.rafId = null;
+        }
+        session.pendingRequestId = null;
+        session.pendingContent = null;
+        session.fullContent = "";
+        session.finalizing = false;
+        session.nextMessageId = null;
+      }
+      sessionsRef.current.clear();
+      abortControllerRef.current = null;
+      nextMessageIdRef.current = null;
+      streamingContentRef.current = "";
     };
-  }, [abort]);
+  }, [streamingContentRef]);
+
+  const getPendingRequestId = useCallback((conversationId: string): string | null => {
+    return sessionsRef.current.get(conversationId)?.pendingRequestId || null;
+  }, []);
 
   return {
-    /** Stream a chat request — handles everything from fetch to finalize */
     stream,
-    /** Abort the current stream */
     abort,
-    /** Atomically finalize a message (for paths that handle their own streaming) */
+    abortConversation,
     finalize,
-    /** Ref to the current abort controller */
+    synchronizeConversation,
+    getPendingRequestId,
     abortControllerRef,
-    /** Current accumulated content ref */
     contentRef: streamingContentRef,
-    /** Pre-generated message ID for the current/next stream.
-     *  Pass to ChatMessageList as streamingMsgId for zero-flicker Virtuoso transition. */
     nextMessageIdRef,
   };
 }
