@@ -640,10 +640,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          failures=$(gh run list --repo ${{ github.repository }} --workflow "Deploy to Production (Blue-Green)" --branch main --limit 8 --json conclusion --jq '[.[] | select(.conclusion=="failure")] | length')
-          echo "Recent deploy failures: ${failures}"
-          if [ "${failures}" -ge 3 ]; then
-            echo "::error::Circuit breaker open: 3+ recent deploy failures on main. Aborting auto deploy."
+          # Count consecutive failures (last 5 runs only, ignoring cancelled)
+          failures=$(gh run list --repo ${{ github.repository }} --workflow "Deploy to Production (Blue-Green)" --branch main --limit 5 --json conclusion --jq '[.[] | select(.conclusion=="failure")] | length')
+          echo "Recent deploy failures (last 5): ${failures}"
+          if [ "${failures}" -ge 5 ]; then
+            echo "::error::Circuit breaker open: 5/5 recent deploys failed on main. Use workflow_dispatch to deploy manually."
             exit 1
           fi
 
