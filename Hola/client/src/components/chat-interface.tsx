@@ -369,6 +369,13 @@ async function triggerDocumentAnalysis(
   }
 }
 
+// ── Module-level mutex ──────────────────────────────────────────────────
+// Must live OUTSIDE the component because ChatInterface remounts (unmount + mount)
+// every time chatId changes, which resets useRef().  A module-level flag survives
+// those remounts and reliably blocks duplicate handleSubmit invocations.
+let _isSubmitting = false;
+let _submitLockTimer: ReturnType<typeof setTimeout> | null = null;
+
 export function ChatInterface({
   messages,
   setMessages,
@@ -1498,10 +1505,12 @@ export function ChatInterface({
   const aiStateRef = useRef<AiState>("idle");
   const composerRef = useRef<HTMLDivElement>(null);
   const handleStopChatRef = useRef<(() => void) | null>(null);
-  // Mutex: prevents re-entrant handleSubmit calls during async message send + stream setup.
-  // Without this, React re-renders (from chatId prop change) can re-trigger handleSubmit
-  // before the first invocation has finished, causing duplicate chats and split messages.
+  // Mutex: see module-level _isSubmitting above.
+  // We keep isSubmittingRef as a thin wrapper so existing code can use `.current` unchanged.
   const isSubmittingRef = useRef(false);
+  // Sync the ref with the module-level flag on every render so reads inside
+  // this instance always reflect the latest value.
+  isSubmittingRef.current = _isSubmitting;
 
   const isScopedConversation = useCallback((conversationId?: string | null) => {
     const activeConversationId = latestChatIdRef.current;
@@ -3619,7 +3628,7 @@ export function ChatInterface({
     // React re-renders (from chatId prop change after new-chat creation)
     // can cause handleSubmit to be called again before the first async
     // invocation completes. This ref-based lock prevents that entirely.
-    if (isSubmittingRef.current) {
+    if (_isSubmitting) {
       console.log("[handleSubmit] Blocked: already submitting (re-entrant guard)");
       return;
     }
@@ -3630,11 +3639,13 @@ export function ChatInterface({
       console.log("[handleSubmit] Blocked: aiState is", aiState, "for chatId", aiStateChatId);
       return;
     }
+    _isSubmitting = true;
     isSubmittingRef.current = true;
     // Safety net: auto-release the lock after 3s in case of unexpected early return
     // without explicit cleanup. The lock is explicitly released below once the stream
     // starts (aiState = "thinking") or on any error/early return path.
-    const submitLockTimer = setTimeout(() => { isSubmittingRef.current = false; }, 3000);
+    if (_submitLockTimer) clearTimeout(_submitLockTimer);
+    _submitLockTimer = setTimeout(() => { _isSubmitting = false; isSubmittingRef.current = false; }, 10000);
     const submitConversationId = chatId || latestChatIdRef.current;
     // When sending the very first message, the parent may create a pending chatId asynchronously.
     // We may need to wait briefly for `chatId` (and `latestChatIdRef`) to update before starting SSE.
