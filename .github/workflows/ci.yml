@@ -363,15 +363,9 @@ jobs:
           - "."
           - "apps/mobile"
           - "Hola"
-          - "Hola_wt_super_agent_100"
-          - "Hola_wt_ci_fix"
-          - "Hola_wt_download_ui"
-          - "Hola_wt_github"
-          - "Hola_wt_pr"
           - "hola-infra/whatsapp-bridge"
           - "iliagpt_skills_push"
           - "iliagpt_skills_push/apps/mobile"
-          - "Hola_wt_github/apps/mobile"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -461,12 +455,8 @@ jobs:
             python_agent_tools/requirements.txt \
             monitoring/metrics-agent/requirements.txt \
             Hola/fastapi_sse/requirements.txt \
-            Hola_wt_ci_fix/fastapi_sse/requirements.txt \
-            Hola_wt_download_ui/fastapi_sse/requirements.txt \
-            Hola_wt_github/fastapi_sse/requirements.txt \
-            Hola_wt_pr/fastapi_sse/requirements.txt \
-            Hola_wt_super_agent_100/fastapi_sse/requirements.txt \
             iliagpt_skills_push/fastapi_sse/requirements.txt; do
+
             if [ -f "$req" ]; then
               safe_name="$(printf '%s' "$req" | tr '/' '_')"
               report_path="reports/security/pip-audit-${safe_name}.json"
