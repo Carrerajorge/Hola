@@ -354,6 +354,7 @@ jobs:
   audit:
     name: Security Audit (npm)
     runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'pull_request' }}
     needs: typecheck
     timeout-minutes: 20
     strategy:
