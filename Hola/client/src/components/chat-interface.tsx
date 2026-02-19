@@ -369,12 +369,17 @@ async function triggerDocumentAnalysis(
   }
 }
 
-// ── Module-level mutex ──────────────────────────────────────────────────
-// Must live OUTSIDE the component because ChatInterface remounts (unmount + mount)
-// every time chatId changes, which resets useRef().  A module-level flag survives
-// those remounts and reliably blocks duplicate handleSubmit invocations.
-let _isSubmitting = false;
-let _submitLockTimer: ReturnType<typeof setTimeout> | null = null;
+// ── Global mutex ────────────────────────────────────────────────────────
+// Must live on `window` because ChatInterface remounts (unmount + mount)
+// every time chatId changes, which resets useRef().  Module-level `let`
+// can also be duplicated by Vite code-splitting.  `window.__` is the only
+// truly singleton state that survives both remounts AND chunk boundaries.
+declare global {
+  interface Window {
+    __siraSubmitLock?: boolean;
+    __siraSubmitTimer?: ReturnType<typeof setTimeout> | null;
+  }
+}
 
 export function ChatInterface({
   messages,
@@ -1505,12 +1510,9 @@ export function ChatInterface({
   const aiStateRef = useRef<AiState>("idle");
   const composerRef = useRef<HTMLDivElement>(null);
   const handleStopChatRef = useRef<(() => void) | null>(null);
-  // Mutex: see module-level _isSubmitting above.
-  // We keep isSubmittingRef as a thin wrapper so existing code can use `.current` unchanged.
+  // Mutex: see window.__siraSubmitLock above (global, survives remounts + chunk boundaries).
   const isSubmittingRef = useRef(false);
-  // Sync the ref with the module-level flag on every render so reads inside
-  // this instance always reflect the latest value.
-  isSubmittingRef.current = _isSubmitting;
+  isSubmittingRef.current = !!window.__siraSubmitLock;
 
   const isScopedConversation = useCallback((conversationId?: string | null) => {
     const activeConversationId = latestChatIdRef.current;
@@ -3628,7 +3630,7 @@ export function ChatInterface({
     // React re-renders (from chatId prop change after new-chat creation)
     // can cause handleSubmit to be called again before the first async
     // invocation completes. This ref-based lock prevents that entirely.
-    if (_isSubmitting) {
+    if (window.__siraSubmitLock) {
       console.log("[handleSubmit] Blocked: already submitting (re-entrant guard)");
       return;
     }
@@ -3639,13 +3641,13 @@ export function ChatInterface({
       console.log("[handleSubmit] Blocked: aiState is", aiState, "for chatId", aiStateChatId);
       return;
     }
-    _isSubmitting = true;
+    window.__siraSubmitLock = true;
     isSubmittingRef.current = true;
-    // Safety net: auto-release the lock after 3s in case of unexpected early return
+    // Safety net: auto-release the lock after 10s in case of unexpected early return
     // without explicit cleanup. The lock is explicitly released below once the stream
     // starts (aiState = "thinking") or on any error/early return path.
-    if (_submitLockTimer) clearTimeout(_submitLockTimer);
-    _submitLockTimer = setTimeout(() => { _isSubmitting = false; isSubmittingRef.current = false; }, 10000);
+    if (window.__siraSubmitTimer) clearTimeout(window.__siraSubmitTimer);
+    window.__siraSubmitTimer = setTimeout(() => { window.__siraSubmitLock = false; isSubmittingRef.current = false; }, 10000);
     const submitConversationId = chatId || latestChatIdRef.current;
     // When sending the very first message, the parent may create a pending chatId asynchronously.
     // We may need to wait briefly for `chatId` (and `latestChatIdRef`) to update before starting SSE.
