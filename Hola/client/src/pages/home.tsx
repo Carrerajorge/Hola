@@ -241,6 +241,15 @@ export default function Home() {
   // Store the pending chat ID during new chat creation
   const pendingChatIdRef = useRef<string | null>(null);
 
+  // Always-up-to-date ref for the effective chat ID.
+  // Unlike pendingChatIdRef (which gets cleared by the URL sync effect),
+  // this ref persists through the full streaming lifecycle so that stale
+  // closures inside handleSendMessage can still find the correct chat.
+  const currentChatIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    currentChatIdRef.current = activeChat?.id ?? null;
+  }, [activeChat?.id]);
+
 
   // Sync URL to active chat state (direct navigation to /chat/:id)
 
@@ -362,6 +371,7 @@ export default function Home() {
     setIsNewChatMode(true);
     setNewChatStableKey(null);
     pendingChatIdRef.current = null;
+    currentChatIdRef.current = null;
 
     // AGGRESSIVE RESET: Clear active GPT to return to LLM models view
     // Only clear GPT if not explicitly preserving it (e.g., when selecting a new GPT)
@@ -380,6 +390,7 @@ export default function Home() {
     setIsNewChatMode(false);
     setNewChatStableKey(null);
     pendingChatIdRef.current = null;
+    currentChatIdRef.current = null;
 
     // Set selected project
     setSelectedProjectId(projectId);
@@ -392,6 +403,8 @@ export default function Home() {
   const handleSendNewChatMessage = useCallback(async (message: Message) => {
     const { pendingId, stableKey } = createChat();
     pendingChatIdRef.current = pendingId;
+    // Keep currentChatIdRef in sync so stale closures can resolve the chat ID
+    currentChatIdRef.current = pendingId;
     // CRITICAL: Use the stableKey from createChat to ensure chatInterfaceKey
     // matches activeChat.stableKey after backend confirms. This prevents
     // component remount when newChatStableKey is cleared during navigation.
@@ -400,27 +413,35 @@ export default function Home() {
     const result = await addMessage(pendingId, message);
     const realId = resolveRealChatId(pendingId);
     if (realId && !realId.startsWith("pending-")) {
+      // Update ref to the real ID so assistant messages route correctly
+      currentChatIdRef.current = realId;
       setLocation(`/chat/${realId}`, { replace: true });
     }
     return result;
   }, [createChat, addMessage, setLocation]);
 
-  // Stable message sender that uses the correct chat ID
+  // Stable message sender that uses the correct chat ID.
+  // IMPORTANT: This callback is captured by stale closures inside ChatInterface
+  // (e.g. streamTransition.finalize). We read from refs (currentChatIdRef,
+  // pendingChatIdRef) so that even a stale closure resolves the correct chat ID
+  // at call-time instead of relying on the (possibly outdated) activeChat?.id
+  // from the useCallback closure.
   const handleSendMessage = useCallback(async (message: Message) => {
-    // EMERGENCY DEBUG
-    console.error("[CRITICAL] handleSendMessage in home.tsx called:", { messageContent: message.content?.substring(0, 50), activeChat: activeChat?.id, pendingChatId: pendingChatIdRef.current });
-    
+    // Read the effective chat ID from refs first (always current), then
+    // fall back to the closure-captured activeChat?.id.
+    const effectiveChatId = currentChatIdRef.current || activeChat?.id || pendingChatIdRef.current;
+
     // Check for Simulator / Dry-Run command (B4)
     if (message.content.trim().startsWith('/plan ') || message.content.trim().startsWith('/preview ')) {
       const goal = message.content.replace(/^\/(plan|preview)\s+/, '').trim();
 
       // 1. Send user message first
-      const targetChatId = activeChat?.id || pendingChatIdRef.current;
-      let chatId = targetChatId;
+      let chatId = effectiveChatId;
 
       if (!chatId) {
         const { pendingId, stableKey } = createChat();
         pendingChatIdRef.current = pendingId;
+        currentChatIdRef.current = pendingId;
         setNewChatStableKey(stableKey);
         setIsNewChatMode(false);
         chatId = pendingId;
@@ -431,8 +452,6 @@ export default function Home() {
 
       // 2. Call Preview API
       try {
-        // Add a temporary "thinking" step or message? 
-        // For now just fetch.
         const res = await fetch('/api/planning/preview', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -450,7 +469,7 @@ export default function Home() {
               timestamp: new Date(),
               agentRun: {
                 runId: data.preview.plan.id,
-                status: 'planning', // Supported status
+                status: 'planning',
                 steps: [],
                 eventStream: [],
                 summary: null,
@@ -462,7 +481,6 @@ export default function Home() {
 
             // Also initialize run in AgentStore so PlanViewer works correctly
             useAgentStore.getState().setRunId(planMsg.id, data.preview.plan.id, chatId!);
-            // Manually force status to planning in store
             useAgentStore.getState().updateRun(planMsg.id, {
               status: 'planning',
               runId: data.preview.plan.id,
@@ -473,20 +491,18 @@ export default function Home() {
         }
       } catch (e) {
         console.error("Preview failed", e);
-        // Add error message?
       }
 
       return;
     }
 
-    const targetChatId = activeChat?.id || pendingChatIdRef.current;
-    if (targetChatId) {
-      return await addMessage(targetChatId, message);
+    if (effectiveChatId) {
+      return await addMessage(effectiveChatId, message);
     } else {
-      // Fallback: create new chat
+      // Fallback: create new chat (only for the very first user message)
       return await handleSendNewChatMessage(message);
     }
-  }, [activeChat?.id, addMessage, handleSendNewChatMessage, createChat, addMessage]);
+  }, [activeChat?.id, addMessage, handleSendNewChatMessage, createChat]);
 
 
   const chatInterfaceKey = useMemo(() => {
