@@ -36,11 +36,10 @@ const metricExporter = new OTLPMetricExporter({
 const sdk = new NodeSDK({
 
   resource: resourceFromAttributes({
-    [SemanticResourceAttributes.SERVICE_NAME]: ...,
-    [SemanticResourceAttributes.SERVICE_VERSION]: ...,
-    [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: ...,
+    [SemanticResourceAttributes.SERVICE_NAME]: process.env.OTEL_SERVICE_NAME || "iliagpt-app",
+    [SemanticResourceAttributes.SERVICE_VERSION]: process.env.APP_VERSION || "dev",
+    [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: process.env.NODE_ENV || "production",  
   }),
-
   metricReader: new PeriodicExportingMetricReader({ exporter: metricExporter, exportIntervalMillis: 10000 }),
 
   instrumentations: [
