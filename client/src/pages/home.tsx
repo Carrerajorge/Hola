@@ -462,17 +462,16 @@ export default function Home() {
     const realId = result?.run?.chatId || (result ? resolveRealChatId(pendingId) : null);
     if (realId && !realId.startsWith("pending-")) {
       moveConversationUiState(pendingId, realId);
-      // CRITICAL: Defer URL navigation so ChatInterface's handleSubmit receives
-      // the sendMessageAck FIRST and starts streaming before the route change
-      // triggers a component remount cascade. Without this delay, setLocation
-      // fires synchronously, React re-renders Home with a new chatId prop for
-      // ChatInterface, and the streaming SSE connection is lost mid-flight.
-      setTimeout(() => {
-        setLocation(`/chat/${realId}`, { replace: true });
-      }, 100);
+      // CRITICAL: Update internal state WITHOUT triggering wouter's router.
+      // setLocation() causes a full component remount cascade that kills the
+      // SSE stream before ChatInterface can start it. Instead:
+      // 1. Update activeChatId directly (re-renders ChatInterface with correct chatId prop)
+      // 2. Silently update the URL bar via replaceState (no routing, no remount)
+      setActiveChatId(realId);
+      window.history.replaceState(null, "", `/chat/${realId}`);
     }
     return result;
-  }, [addMessage, createChat, ensureConversationUiState, moveConversationUiState, newChatStableKey, setLocation]);
+  }, [addMessage, createChat, ensureConversationUiState, moveConversationUiState, newChatStableKey, setActiveChatId]);
 
   // Stable message sender that uses the correct chat ID
   const handleSendMessage = useCallback(async (message: Message) => {
