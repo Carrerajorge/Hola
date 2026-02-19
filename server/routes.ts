@@ -36,7 +36,6 @@ import gmailOAuthRouter from "./routes/gmailOAuthRouter";
 import calendarOAuthRouter from "./routes/calendarOAuthRouter";
 import outlookOAuthRouter from "./routes/outlookOAuthRouter";
 import { createGmailMcpRouter } from "./mcp/gmailMcpServer";
-import { createAppsMcpRouter } from "./mcp/appsMcpServer";
 import healthRouter from "./routes/healthRouter";
 import aiExcelRouter from "./routes/aiExcelRouter";
 import powerRouter from "./routes/powerRouter";
@@ -623,8 +622,6 @@ export async function registerRoutes(
   app.use("/api/oauth/microsoft", outlookOAuthRouter);
   app.use("/api/mcp/gmail", createGmailMcpRouter());
   app.use("/mcp/gmail", createGmailMcpRouter()); // Backward compatibility
-  app.use("/api/mcp/apps", createAppsMcpRouter());
-  app.use("/mcp/apps", createAppsMcpRouter()); // Backward compatibility / CSRF bypass
 
   // External inbound webhooks must live outside /api to bypass CSRF middleware.
   app.use("/webhooks", createChannelWebhooksRouter());
