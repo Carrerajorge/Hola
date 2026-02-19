@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
 import { apiFetch, getAnonUserIdHeader } from "@/lib/apiClient";
 import { trackWorkspaceEvent } from "@/lib/analytics";
@@ -2018,7 +2018,21 @@ export function useChats() {
     }));
   }, []);
 
-  const activeChat = chats.find(c => c.id === activeChatId) || null;
+  // Look up the active chat by id. If the activeChatId is a resolved real id (e.g. "chat_uuid")
+  // but the chat still has a pending id, also check the pendingToRealIdMap reverse mapping.
+  const activeChat = useMemo(() => {
+    if (!activeChatId) return null;
+    const direct = chats.find(c => c.id === activeChatId);
+    if (direct) return direct;
+    // Reverse lookup: find pending chat whose resolved id matches activeChatId
+    for (const [pendingId, realId] of pendingToRealIdMap.entries()) {
+      if (realId === activeChatId) {
+        const pending = chats.find(c => c.id === pendingId);
+        if (pending) return pending;
+      }
+    }
+    return null;
+  }, [activeChatId, chats]);
   const sortedChats = [...chats].sort((a, b) => b.timestamp - a.timestamp);
   const visibleChats = sortedChats.filter(c => !c.hidden);
   const archivedChats = sortedChats.filter(c => c.archived && !c.hidden);

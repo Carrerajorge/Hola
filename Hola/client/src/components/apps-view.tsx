@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,6 +7,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Search, ChevronRight, ExternalLink, X, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AppDetailDialog, type AppMetadata } from "@/components/app-detail-dialog";
+import { apiFetch } from "@/lib/apiClient";
 
 interface App {
   id: string;
@@ -810,9 +811,87 @@ const apps: App[] = [
     ),
     category: "lifestyle",
   },
+  {
+    id: "codex",
+    name: "Codex",
+    description: "Agente de código para investigación, análisis y ejecución avanzada",
+    longDescription: "Codex es un agente inteligente de código que combina investigación, análisis y ejecución avanzada para resolver tareas complejas de desarrollo. Integra planificación, verificación y herramientas especializadas para acelerar flujos de trabajo técnicos con calidad profesional.",
+    icon: (
+      <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-[#0F172A] via-[#1E293B] to-[#0B1324] flex items-center justify-center">
+        <span className="text-white font-semibold text-sm tracking-wide">CX</span>
+      </div>
+    ),
+    category: "featured",
+    verified: true,
+    developer: "ILIA Lab",
+    websiteUrl: "https://codex.openai.com",
+    privacyUrl: "https://openai.com/policies/privacy-policy"
+  },
 ];
 
-const CONNECTABLE_APP_IDS = ["gmail", "google-forms"];
+type AppEndpoints = Pick<App, "connectionEndpoint" | "statusEndpoint" | "disconnectEndpoint">;
+
+const APP_ENDPOINT_OVERRIDES: Record<string, Partial<AppEndpoints>> = {
+  // Existing OAuth integrations
+  "google-calendar": {
+    statusEndpoint: "/api/oauth/google/calendar/status",
+    connectionEndpoint: "/api/oauth/google/calendar/start",
+    disconnectEndpoint: "/api/oauth/google/calendar/disconnect",
+  },
+  "outlook-mail": {
+    statusEndpoint: "/api/oauth/microsoft/outlook/status",
+    connectionEndpoint: "/api/oauth/microsoft/outlook/start",
+    disconnectEndpoint: "/api/oauth/microsoft/outlook/disconnect",
+  },
+  "outlook-calendar": {
+    statusEndpoint: "/api/oauth/microsoft/calendar/status",
+    connectionEndpoint: "/api/oauth/microsoft/calendar/start",
+    disconnectEndpoint: "/api/oauth/microsoft/calendar/disconnect",
+  },
+  figma: {
+    statusEndpoint: "/api/figma/status",
+    connectionEndpoint: "/api/auth/figma",
+    disconnectEndpoint: "/api/figma/disconnect",
+  },
+
+  // Integration Kernel OAuth (generic connector flow)
+  slack: {
+    statusEndpoint: "/api/connectors/oauth/slack/status",
+    connectionEndpoint: "/api/connectors/oauth/slack/start",
+    disconnectEndpoint: "/api/connectors/oauth/slack/disconnect",
+  },
+  notion: {
+    statusEndpoint: "/api/connectors/oauth/notion/status",
+    connectionEndpoint: "/api/connectors/oauth/notion/start",
+    disconnectEndpoint: "/api/connectors/oauth/notion/disconnect",
+  },
+  github: {
+    statusEndpoint: "/api/connectors/oauth/github/status",
+    connectionEndpoint: "/api/connectors/oauth/github/start",
+    disconnectEndpoint: "/api/connectors/oauth/github/disconnect",
+  },
+  hubspot: {
+    statusEndpoint: "/api/connectors/oauth/hubspot/status",
+    connectionEndpoint: "/api/connectors/oauth/hubspot/start",
+    disconnectEndpoint: "/api/connectors/oauth/hubspot/disconnect",
+  },
+  "google-drive": {
+    statusEndpoint: "/api/connectors/oauth/google-drive/status",
+    connectionEndpoint: "/api/connectors/oauth/google-drive/start",
+    disconnectEndpoint: "/api/connectors/oauth/google-drive/disconnect",
+  },
+};
+
+function withIntegrationEndpoints(app: App): App {
+  const overrides = APP_ENDPOINT_OVERRIDES[app.id] || {};
+
+  return {
+    ...app,
+    statusEndpoint: app.statusEndpoint ?? overrides.statusEndpoint ?? `/api/apps/${app.id}/status`,
+    connectionEndpoint: app.connectionEndpoint ?? overrides.connectionEndpoint ?? `/api/apps/${app.id}/connect`,
+    disconnectEndpoint: app.disconnectEndpoint ?? overrides.disconnectEndpoint ?? `/api/apps/${app.id}/disconnect`,
+  };
+}
 
 interface AppsViewProps {
   onClose: () => void;
@@ -828,37 +907,62 @@ export function AppsView({ onClose, onOpenGoogleForms, onOpenGmail }: AppsViewPr
   const [connectedApps, setConnectedApps] = useState<Record<string, boolean>>({});
   const [isCheckingConnections, setIsCheckingConnections] = useState(true);
 
+  const integratedApps = useMemo(() => apps.map(withIntegrationEndpoints), []);
+
   const checkAllConnectionStatus = useCallback(async () => {
     setIsCheckingConnections(true);
-    const statuses: Record<string, boolean> = {};
-    
-    const connectableApps = apps.filter(app => app.statusEndpoint);
-    
-    await Promise.all(
-      connectableApps.map(async (app) => {
-        try {
-          const res = await fetch(app.statusEndpoint!, { credentials: "include" });
-          if (res.ok) {
-            const data = await res.json();
-            statuses[app.id] = data.connected === true;
-          } else {
+    try {
+      // Prefer the batch endpoint to avoid N requests on open.
+      try {
+        const res = await apiFetch("/api/apps/status");
+        if (res.ok) {
+          const data = await res.json().catch(() => ({} as any));
+          const serverStatuses = ((data as any)?.statuses || {}) as Record<string, { connected?: boolean }>;
+
+          const statuses: Record<string, boolean> = {};
+          for (const app of integratedApps) {
+            statuses[app.id] = serverStatuses?.[app.id]?.connected === true;
+          }
+
+          setConnectedApps(statuses);
+          return;
+        }
+      } catch {
+        // fall through to per-app fallback
+      }
+
+      // Fallback: per-app status checks (older servers or transient errors).
+      const statuses: Record<string, boolean> = {};
+      const connectableApps = integratedApps.filter((app) => app.statusEndpoint);
+
+      await Promise.all(
+        connectableApps.map(async (app) => {
+          try {
+            const res = await apiFetch(app.statusEndpoint!);
+            if (!res.ok) {
+              statuses[app.id] = false;
+              return;
+            }
+
+            const data = await res.json().catch(() => ({} as any));
+            statuses[app.id] = (data as any)?.connected === true;
+          } catch {
             statuses[app.id] = false;
           }
-        } catch {
-          statuses[app.id] = false;
-        }
-      })
-    );
-    
-    setConnectedApps(statuses);
-    setIsCheckingConnections(false);
-  }, []);
+        }),
+      );
+
+      setConnectedApps(statuses);
+    } finally {
+      setIsCheckingConnections(false);
+    }
+  }, [integratedApps]);
 
   useEffect(() => {
     checkAllConnectionStatus();
   }, [checkAllConnectionStatus]);
 
-  const filteredApps = apps.filter((app) => {
+  const filteredApps = integratedApps.filter((app) => {
     const matchesSearch =
       app.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       app.description.toLowerCase().includes(searchQuery.toLowerCase());
@@ -871,16 +975,21 @@ export function AppsView({ onClose, onOpenGoogleForms, onOpenGmail }: AppsViewPr
 
   const handleAppClick = (app: App) => {
     if (connectedApps[app.id]) {
-      onClose();
       if (app.id === "gmail" && onOpenGmail) {
+        onClose();
         onOpenGmail();
-      } else if (app.id === "google-forms" && onOpenGoogleForms) {
-        onOpenGoogleForms();
+        return;
       }
-    } else if (app.statusEndpoint) {
-      setSelectedApp(app);
-      setIsDetailDialogOpen(true);
+      if (app.id === "google-forms" && onOpenGoogleForms) {
+        onClose();
+        onOpenGoogleForms();
+        return;
+      }
     }
+
+    // Default: open the detail dialog (connect/disconnect/status).
+    setSelectedApp(app);
+    setIsDetailDialogOpen(true);
   };
 
   const handleAppSettings = (app: App) => {
@@ -898,7 +1007,11 @@ export function AppsView({ onClose, onOpenGoogleForms, onOpenGmail }: AppsViewPr
     shortDescription: app.description,
     longDescription: app.longDescription,
     icon: app.icon,
-    category: app.category === "productivity" ? "Productividad" : "Estilo de vida",
+    category: app.category === "productivity"
+      ? "Productividad"
+      : app.category === "featured"
+        ? "Destacado"
+        : "Estilo de vida",
     developer: app.developer,
     websiteUrl: app.websiteUrl,
     privacyUrl: app.privacyUrl,
@@ -907,7 +1020,7 @@ export function AppsView({ onClose, onOpenGoogleForms, onOpenGmail }: AppsViewPr
     disconnectEndpoint: app.disconnectEndpoint,
   });
 
-  const connectedAppsList = apps.filter(app => connectedApps[app.id]);
+  const connectedAppsList = integratedApps.filter(app => connectedApps[app.id]);
 
   return (
     <div className="flex flex-col h-full bg-background" data-testid="apps-view">

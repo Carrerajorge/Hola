@@ -911,28 +911,51 @@ export function AppsView({ onClose, onOpenGoogleForms, onOpenGmail }: AppsViewPr
 
   const checkAllConnectionStatus = useCallback(async () => {
     setIsCheckingConnections(true);
-    const statuses: Record<string, boolean> = {};
-    const connectableApps = integratedApps.filter((app) => app.statusEndpoint);
+    try {
+      // Prefer the batch endpoint to avoid N requests on open.
+      try {
+        const res = await apiFetch("/api/apps/status");
+        if (res.ok) {
+          const data = await res.json().catch(() => ({} as any));
+          const serverStatuses = ((data as any)?.statuses || {}) as Record<string, { connected?: boolean }>;
 
-    await Promise.all(
-      connectableApps.map(async (app) => {
-        try {
-          const res = await apiFetch(app.statusEndpoint!);
-          if (!res.ok) {
-            statuses[app.id] = false;
-            return;
+          const statuses: Record<string, boolean> = {};
+          for (const app of integratedApps) {
+            statuses[app.id] = serverStatuses?.[app.id]?.connected === true;
           }
 
-          const data = await res.json().catch(() => ({} as any));
-          statuses[app.id] = (data as any)?.connected === true;
-        } catch {
-          statuses[app.id] = false;
+          setConnectedApps(statuses);
+          return;
         }
-      }),
-    );
+      } catch {
+        // fall through to per-app fallback
+      }
 
-    setConnectedApps(statuses);
-    setIsCheckingConnections(false);
+      // Fallback: per-app status checks (older servers or transient errors).
+      const statuses: Record<string, boolean> = {};
+      const connectableApps = integratedApps.filter((app) => app.statusEndpoint);
+
+      await Promise.all(
+        connectableApps.map(async (app) => {
+          try {
+            const res = await apiFetch(app.statusEndpoint!);
+            if (!res.ok) {
+              statuses[app.id] = false;
+              return;
+            }
+
+            const data = await res.json().catch(() => ({} as any));
+            statuses[app.id] = (data as any)?.connected === true;
+          } catch {
+            statuses[app.id] = false;
+          }
+        }),
+      );
+
+      setConnectedApps(statuses);
+    } finally {
+      setIsCheckingConnections(false);
+    }
   }, [integratedApps]);
 
   useEffect(() => {

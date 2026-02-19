@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
-import { getAnonUserIdHeader } from "@/lib/apiClient";
+import { apiFetch, getAnonUserIdHeader } from "@/lib/apiClient";
 import { trackWorkspaceEvent } from "@/lib/analytics";
 
 import { type AgentRunStatus } from "@/stores/agent-store";
@@ -83,6 +83,8 @@ export interface MessageArtifact {
 
 export interface Message {
   id: string;
+  // Optimistic UI reconciliation: client-generated temp ID that can be replaced with the real server ID.
+  clientTempId?: string;
   role: "user" | "assistant" | "system";
   content: string;
   timestamp: Date;
@@ -92,6 +94,9 @@ export interface Message {
   userMessageId?: string; // For assistant messages: links to the user message it responds to
   runId?: string; // ID of the run this message belongs to
   status?: 'pending' | 'processing' | 'done' | 'failed'; // Processing status for idempotency
+  // Message delivery state for optimistic UI.
+  deliveryStatus?: 'sending' | 'sent' | 'delivered' | 'error';
+  deliveryError?: string;
   isThinking?: boolean;
   steps?: { title: string; status: "pending" | "loading" | "complete" }[];
   attachments?: { type: "word" | "excel" | "ppt" | "image" | "pdf" | "text" | "code" | "archive" | "document" | "unknown"; name: string; mimeType?: string; imageUrl?: string; storagePath?: string; fileId?: string; documentType?: "word" | "excel" | "ppt" | "pdf"; content?: string; title?: string; savedAt?: string; spreadsheetData?: { uploadId: string; sheets: Array<{ name: string; rowCount: number; columnCount: number }>; previewData?: { headers: string[]; data: any[][] }; analysisId?: string; sessionId?: string } }[];
@@ -129,15 +134,170 @@ export interface Chat {
 
 const STORAGE_KEY = "sira-gpt-chats";
 const PENDING_CHAT_PREFIX = "pending-";
+const SERVER_CHAT_ID_PREFIX = "chat_";
+const FAILED_QUEUE_KEY = "ilia_failed_message_queue";
+const MAX_FAILED_QUEUE_ITEMS = 20;
+const MAX_FAILED_QUEUE_AGE_MS = 24 * 60 * 60 * 1000;
+const MAX_SAFE_CHAT_ID_LENGTH = 128;
+const CHAT_ID_SAFE_PATTERN = /^(?:chat_[A-Za-z0-9._-]{6,120}|pending-[A-Za-z0-9._-]{6,120}|[A-Za-z0-9._-]{6,120})$/;
+const MAX_MESSAGE_CONTENT_LENGTH = 12_000;
+const MAX_REQUEST_ID_LENGTH = 120;
 const pendingToRealIdMap = new Map<string, string>();
-const pendingMessageQueue = new Map<string, Message[]>();
-const chatCreationInProgress = new Set<string>();
-// Promise resolvers for queued messages - resolved when flush completes
-const pendingFlushResolvers = new Map<string, Array<(result: { run?: ChatRun; deduplicated?: boolean } | undefined) => void>>();
 
 // Idempotency: Track messages being processed to prevent duplicates
 const processingRequestIds = new Set<string>();
 const savedRequestIds = new Set<string>();
+const savedRequestIdOrder: string[] = [];
+const MAX_SAVED_REQUEST_IDS = 5000;
+
+function rememberSavedRequestId(requestId: string): void {
+  if (savedRequestIds.has(requestId)) return;
+  savedRequestIds.add(requestId);
+  savedRequestIdOrder.push(requestId);
+
+  // Prevent unbounded growth in long-lived sessions.
+  if (savedRequestIdOrder.length > MAX_SAVED_REQUEST_IDS) {
+    const excess = savedRequestIdOrder.length - MAX_SAVED_REQUEST_IDS;
+    for (let i = 0; i < excess; i++) {
+      const oldest = savedRequestIdOrder.shift();
+      if (oldest) savedRequestIds.delete(oldest);
+    }
+  }
+}
+
+function sanitizeChatId(candidateChatId: string): string {
+  if (typeof candidateChatId !== "string") {
+    throw new Error("Invalid chat ID");
+  }
+
+  const chatId = candidateChatId.trim();
+  if (!chatId || chatId.length > MAX_SAFE_CHAT_ID_LENGTH) {
+    throw new Error("Invalid chat ID");
+  }
+  if (!CHAT_ID_SAFE_PATTERN.test(chatId)) {
+    throw new Error("Invalid chat ID");
+  }
+  return chatId;
+}
+
+function sanitizeRequestId(requestId?: string): string | undefined {
+  if (!requestId || typeof requestId !== "string") return undefined;
+  const normalized = requestId.trim();
+  if (!normalized || normalized.length > MAX_REQUEST_ID_LENGTH) return undefined;
+  return normalized;
+}
+
+function sanitizeSendMessage(message: Message): Message {
+  const role = message.role;
+  if (role !== "user" && role !== "assistant" && role !== "system") {
+    throw new Error("Invalid message role");
+  }
+
+  const sanitizedContent = typeof message.content === "string" ? message.content.trimEnd() : "";
+  if (role === "user" && sanitizedContent.length > MAX_MESSAGE_CONTENT_LENGTH) {
+    throw new Error("Message content too long");
+  }
+
+  return {
+    ...message,
+    content: sanitizedContent,
+    requestId: sanitizeRequestId(message.requestId),
+  };
+}
+
+function safeReadLocalChatsFromStorage(storageKey: string): Chat[] {
+  try {
+    if (typeof localStorage === "undefined") return [];
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    const restored: Chat[] = parsed.map((chat: any) => ({
+      ...chat,
+      stableKey: chat?.stableKey || `stable-${chat?.id}`,
+      messages: Array.isArray(chat?.messages)
+        ? chat.messages.map((msg: any) => {
+            // Hydrate savedRequestIds from localStorage data (best-effort).
+            // IMPORTANT: localStorage may include optimistic/failed messages that were never persisted,
+            // so only treat requestIds as "persisted" when we have evidence it reached the server.
+            if (msg?.requestId) {
+              const id = typeof msg.id === "string" ? msg.id : "";
+              const deliveryStatus = typeof msg.deliveryStatus === "string" ? msg.deliveryStatus : undefined;
+              const isUuid =
+                /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+
+              const isLikelyPersisted =
+                deliveryStatus === "sent" ||
+                deliveryStatus === "delivered" ||
+                (deliveryStatus !== "error" && deliveryStatus !== "sending" && isUuid) ||
+                // Back-compat: older messages won't have deliveryStatus, but server IDs are UUIDs.
+                (!deliveryStatus && isUuid);
+
+              if (isLikelyPersisted) {
+                markRequestPersisted(msg.requestId);
+              }
+            }
+
+            const hydrated: Message = {
+              ...msg,
+              timestamp: new Date(msg.timestamp),
+            };
+
+            // A "sending" message can't actually be in-flight across a reload.
+            // Treat it as retryable and queue it for recovery so it won't stay stuck forever.
+            if (
+              hydrated.role === "user" &&
+              hydrated.requestId &&
+              hydrated.deliveryStatus === "sending" &&
+              typeof chat?.id === "string" &&
+              !chat.id.startsWith(PENDING_CHAT_PREFIX)
+            ) {
+              enqueueFailedMessageForRecovery(chat.id, hydrated);
+              hydrated.deliveryStatus = "error";
+              hydrated.deliveryError = hydrated.deliveryError || "No se pudo confirmar el envío. Reintenta.";
+            }
+
+            return hydrated;
+          })
+        : [],
+    }));
+
+    return restored;
+  } catch (e) {
+    console.warn("[localStorage] Failed to parse chats cache:", e);
+    return [];
+  }
+}
+
+function mergeServerChatsWithLocal(serverChats: Chat[], localChats: Chat[]): Chat[] {
+  const localById = new Map<string, Chat>();
+  for (const c of localChats) {
+    if (c?.id) localById.set(c.id, c);
+  }
+
+  const pendingChats = localChats.filter(
+    (c) => typeof c?.id === "string" && c.id.startsWith(PENDING_CHAT_PREFIX)
+  );
+
+  const mergedServerChats = serverChats.map((serverChat) => {
+    const local = localById.get(serverChat.id);
+    return {
+      ...serverChat,
+      stableKey: local?.stableKey || serverChat.stableKey || `stable-${serverChat.id}`,
+      messages: local?.messages?.length ? local.messages : serverChat.messages,
+    };
+  });
+
+  const byId = new Map<string, Chat>();
+  for (const chat of [...pendingChats, ...mergedServerChats]) {
+    if (!chat?.id) continue;
+    const existing = byId.get(chat.id);
+    byId.set(chat.id, existing ? { ...existing, ...chat } : chat);
+  }
+
+  return Array.from(byId.values()).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+}
 
 // Run-based idempotency: Track active runs to prevent duplicate AI calls
 export interface ChatRun {
@@ -150,6 +310,33 @@ export interface ChatRun {
   lastSeq?: number;
   error?: string;
 }
+
+/**
+ * Acknowledgement returned by addMessage / onSendMessage.
+ * Contains the resolved chat run and optional resolved chatId.
+ */
+export interface SendMessageAck {
+  run?: ChatRun;
+  deduplicated?: boolean;
+  /** Resolved real chat ID (may differ from pending ID used locally). */
+  chatId?: string;
+}
+
+/**
+ * Generates a unique run ID for tracking a streaming response.
+ */
+export function generateRunId(): string {
+  try {
+    const c: any = (globalThis as any).crypto;
+    if (c && typeof c.randomUUID === "function") {
+      return `run_${c.randomUUID()}`;
+    }
+  } catch {
+    // ignore
+  }
+  return `run_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+}
+
 const activeRuns = new Map<string, ChatRun>(); // chatId -> active run
 
 // ============================================================================
@@ -167,6 +354,66 @@ const retryQueue: RetryItem[] = [];
 const MAX_RETRY_ATTEMPTS = 5;
 const BASE_RETRY_DELAY_MS = 1000; // 1 second
 const MAX_RETRY_DELAY_MS = 16000; // 16 seconds
+const MESSAGE_SAVE_TIMEOUT_MS = 20000;
+
+interface FailedMessageQueueItem {
+  chatId: string;
+  role: "user";
+  content: string;
+  requestId: string;
+  clientRequestId?: string;
+  attachments?: Message["attachments"];
+  localId?: string;
+  timestamp: number;
+}
+
+function safeReadFailedQueue(): FailedMessageQueueItem[] {
+  try {
+    if (typeof localStorage === "undefined") return [];
+    const raw = localStorage.getItem(FAILED_QUEUE_KEY) || "[]";
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function safeWriteFailedQueue(items: FailedMessageQueueItem[]): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(FAILED_QUEUE_KEY, JSON.stringify(items.slice(-MAX_FAILED_QUEUE_ITEMS)));
+  } catch {
+    // ignore
+  }
+}
+
+function enqueueFailedMessageForRecovery(chatId: string, message: Message): void {
+  if (!message.requestId) return;
+  if (chatId.startsWith(PENDING_CHAT_PREFIX)) return; // Can't recover a message for a chat that doesn't exist on server.
+  const existing = safeReadFailedQueue();
+  if (existing.some((q) => q?.requestId === message.requestId)) return;
+
+  existing.push({
+    chatId,
+    role: message.role,
+    content: message.content,
+    requestId: message.requestId,
+    clientRequestId: message.clientRequestId,
+    attachments: sanitizeAttachmentsForServer(message.attachments),
+    localId: message.clientTempId || message.id,
+    timestamp: Date.now(),
+  });
+  safeWriteFailedQueue(existing);
+}
+
+function removeFailedMessageFromRecoveryQueue(requestId?: string): void {
+  if (!requestId) return;
+  const existing = safeReadFailedQueue();
+  if (existing.length === 0) return;
+  const filtered = existing.filter((q) => q?.requestId !== requestId);
+  if (filtered.length === existing.length) return;
+  safeWriteFailedQueue(filtered);
+}
 
 // Sync status for UI feedback
 export type SyncStatus = 'idle' | 'saving' | 'saved' | 'error' | 'retrying';
@@ -349,6 +596,56 @@ function sanitizeAttachmentsForServer(attachments: Message['attachments']): Mess
   });
 }
 
+function parseServerTimingHeader(value: string | null): Record<string, number> {
+  if (!value) return {};
+
+  const timings: Record<string, number> = {};
+  const entries = value.split(",");
+
+  for (const entry of entries) {
+    const parts = entry.split(";");
+    const name = parts[0]?.trim();
+    if (!name) continue;
+
+    const normalizedName = name.toLowerCase();
+    for (const part of parts.slice(1)) {
+      const [rawKey, rawValue] = part.split("=");
+      if (!rawKey || !rawValue) continue;
+      if (rawKey.trim() !== "dur") continue;
+      const numericValue = Number.parseFloat(rawValue);
+      if (Number.isFinite(numericValue)) {
+        timings[normalizedName] = numericValue;
+      }
+    }
+  }
+
+  return timings;
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  if (typeof AbortController === "undefined") {
+    return apiFetch(url, init);
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  const externalSignal = init.signal;
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort();
+    } else {
+      externalSignal.addEventListener("abort", () => controller.abort(), { once: true });
+    }
+  }
+
+  try {
+    return await apiFetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 // Retry an async operation with exponential backoff and jitter.
 // Used for critical operations like message saves that must not silently fail.
 async function withRetry<T>(
@@ -373,7 +670,15 @@ async function withRetry<T>(
 
 // Generate a unique request ID for idempotency
 export function generateRequestId(): string {
-  return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  try {
+    const c: any = (globalThis as any).crypto;
+    if (c && typeof c.randomUUID === "function") {
+      return `req_${c.randomUUID()}`;
+    }
+  } catch {
+    // ignore
+  }
+  return `req_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
 }
 
 // ============================================================================
@@ -501,7 +806,15 @@ export function useRateLimiter() {
 
 // Generate a unique client request ID for run-based idempotency
 export function generateClientRequestId(): string {
-  return `cri_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  try {
+    const c: any = (globalThis as any).crypto;
+    if (c && typeof c.randomUUID === "function") {
+      return `cri_${c.randomUUID()}`;
+    }
+  } catch {
+    // ignore
+  }
+  return `cri_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
 }
 
 // Resolve pending chat ID to real ID if available
@@ -511,8 +824,21 @@ export function resolveRealChatId(chatId: string): string {
 
 // Check if a chat ID is pending (not yet created on server)
 export function isPendingChat(chatId: string): boolean {
+  if (chatId.startsWith(PENDING_CHAT_PREFIX)) return true;
   const resolved = resolveRealChatId(chatId);
   return resolved.startsWith(PENDING_CHAT_PREFIX);
+}
+
+function generateStableServerChatId(): string {
+  try {
+    const c: any = (globalThis as any).crypto;
+    if (c && typeof c.randomUUID === "function") {
+      return `${SERVER_CHAT_ID_PREFIX}${c.randomUUID()}`;
+    }
+  } catch {
+    // ignore
+  }
+  return `${SERVER_CHAT_ID_PREFIX}${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 // Check if a chat has an active run (pending or processing)
@@ -567,14 +893,14 @@ export function markRequestProcessing(requestId: string): boolean {
 // Mark a request as completed (persisted - no TTL for long-lived idempotency)
 export function markRequestComplete(requestId: string): void {
   processingRequestIds.delete(requestId);
-  savedRequestIds.add(requestId);
+  rememberSavedRequestId(requestId);
   // No TTL - requestIds stay in savedRequestIds for the session to ensure idempotency
   // Memory is managed by page reload which clears and re-hydrates from server
 }
 
 // Mark a request as persisted (hydrated from server/localStorage - no TTL)
 export function markRequestPersisted(requestId: string): void {
-  savedRequestIds.add(requestId);
+  rememberSavedRequestId(requestId);
   // No TTL - persisted requestIds stay in memory for the session
 }
 
@@ -647,6 +973,7 @@ export function useChats() {
   const [isLoading, setIsLoading] = useState(true);
   // Track if user has manually set activeChatId to prevent auto-selection
   const userHasSelectedRef = useRef(false);
+  const recoveringFailedQueueRef = useRef(false);
 
   // Wrapper that tracks user selection intent
   const setActiveChatIdWithTracking = useCallback((id: string | null) => {
@@ -674,7 +1001,7 @@ export function useChats() {
     if (isPendingChat(chatId)) return;
 
     try {
-      const res = await fetch(`/api/chats/${chatId}`, {
+      const res = await apiFetch(`/api/chats/${chatId}`, {
         headers: { ...getAnonUserIdHeader() },
         credentials: "include"
       });
@@ -700,7 +1027,7 @@ export function useChats() {
         }
       }
 
-      const messages = (fullChat.messages || []).map((msg: any) => {
+      let messages: Message[] = (fullChat.messages || []).map((msg: any) => {
         if (msg.requestId) markRequestPersisted(msg.requestId);
 
         let hydratedAttachments = msg.attachments;
@@ -753,6 +1080,46 @@ export function useChats() {
         };
       });
 
+      // Merge any locally queued/unsent user messages (persistent outbox) so reloads don't "lose" them
+      // even when the server is reachable and localStorage chat cache is replaced.
+      const persistedRequestIds = new Set<string>();
+      for (const msg of messages) {
+        if (msg.requestId) persistedRequestIds.add(msg.requestId);
+      }
+
+      const failedQueue = safeReadFailedQueue().filter((q) => q?.chatId === chatId);
+      if (failedQueue.length > 0) {
+        for (const queued of failedQueue) {
+          if (!queued?.requestId) continue;
+          if (queued.timestamp && Date.now() - queued.timestamp > MAX_FAILED_QUEUE_AGE_MS) {
+            removeFailedMessageFromRecoveryQueue(queued.requestId);
+            continue;
+          }
+          // If it already exists on the server, the queue entry is stale.
+          if (persistedRequestIds.has(queued.requestId)) {
+            removeFailedMessageFromRecoveryQueue(queued.requestId);
+            continue;
+          }
+          const alreadyInList = messages.some((m) => m.role === "user" && m.requestId === queued.requestId);
+          if (alreadyInList) continue;
+
+          const localId = queued.localId || `local_${queued.requestId}`;
+          messages.push({
+            id: localId,
+            clientTempId: localId,
+            role: "user",
+            content: queued.content,
+            timestamp: new Date(queued.timestamp || Date.now()),
+            requestId: queued.requestId,
+            clientRequestId: queued.clientRequestId,
+            attachments: queued.attachments,
+            deliveryStatus: isRequestProcessing(queued.requestId) ? "sending" : "error",
+            deliveryError: undefined,
+          });
+        }
+        messages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+      }
+
       setChats(prev => prev.map(c => 
         c.id === chatId ? { ...c, messages } : c
       ));
@@ -761,10 +1128,9 @@ export function useChats() {
       console.warn(`Failed to fetch details for chat ${chatId}:`, error);
     }
   }, []);
-
   const loadChatsFromServer = useCallback(async () => {
     try {
-      const res = await fetch("/api/chats", {
+      const res = await apiFetch("/api/chats", {
         headers: { ...getAnonUserIdHeader() },
         credentials: "include"
       });
@@ -792,6 +1158,168 @@ export function useChats() {
     }
   }, []);
 
+  const recoverFailedMessageQueue = useCallback(async () => {
+    if (recoveringFailedQueueRef.current) return;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+
+    const failedQueue = safeReadFailedQueue();
+    if (failedQueue.length === 0) return;
+
+    recoveringFailedQueueRef.current = true;
+    try {
+      console.log(`[FailedQueue] Recovering ${failedQueue.length} failed message save(s)`);
+
+      const setDeliveryByRequestId = (chatId: string, requestId: string, patch: Partial<Message>) => {
+        setChats(prev => prev.map(chat => {
+          if (chat.id !== chatId) return chat;
+          return {
+            ...chat,
+            messages: chat.messages.map(m => {
+              if (m.role !== "user") return m;
+              if (m.requestId !== requestId) return m;
+              if (patch.deliveryStatus === "sent" && m.deliveryStatus === "delivered") {
+                return { ...m, ...patch, deliveryStatus: "delivered" };
+              }
+              return { ...m, ...patch };
+            })
+          };
+        }));
+      };
+
+      const reconcileMessageIdByRequestId = (chatId: string, requestId: string, serverId: string) => {
+        setChats(prev => prev.map(chat => {
+          if (chat.id !== chatId) return chat;
+
+          let changed = false;
+          let tempId: string | null = null;
+
+          let updated = chat.messages.map(m => {
+            if (m.role === "user" && m.requestId === requestId) {
+              changed = true;
+              tempId = m.clientTempId || m.id;
+              return {
+                ...m,
+                id: serverId,
+                clientTempId: tempId || m.clientTempId,
+                deliveryStatus: m.deliveryStatus === "delivered" ? "delivered" : "sent",
+                deliveryError: undefined,
+              };
+            }
+            return m;
+          });
+
+          if (!changed || !tempId) return chat;
+
+          updated = updated.map(m => {
+            if (m.userMessageId === tempId) {
+              return { ...m, userMessageId: serverId };
+            }
+            return m;
+          });
+
+          const hasAssistantReply = updated.some(
+            (m) => m.role === "assistant" && m.userMessageId === serverId
+          );
+          if (hasAssistantReply) {
+            updated = updated.map((m) => {
+              if (m.role !== "user") return m;
+              if (m.requestId !== requestId) return m;
+              if (m.deliveryStatus === "error") return m;
+              return { ...m, deliveryStatus: "delivered", deliveryError: undefined };
+            });
+          }
+
+          const byId = new Map<string, Message>();
+          for (const msg of updated) {
+            const existing = byId.get(msg.id);
+            if (!existing) {
+              byId.set(msg.id, msg);
+              continue;
+            }
+            byId.set(msg.id, { ...existing, ...msg });
+          }
+
+          return { ...chat, messages: Array.from(byId.values()) };
+        }));
+      };
+
+      const remaining: FailedMessageQueueItem[] = [];
+      for (const queued of failedQueue) {
+        if (!queued?.chatId || !queued?.requestId) continue;
+        if (queued.chatId.startsWith(PENDING_CHAT_PREFIX)) continue;
+        if (queued.timestamp && Date.now() - queued.timestamp > MAX_FAILED_QUEUE_AGE_MS) continue;
+
+        // If present in local UI, reflect that we're retrying.
+        setDeliveryByRequestId(queued.chatId, queued.requestId, {
+          deliveryStatus: "sending",
+          deliveryError: undefined,
+        });
+
+        try {
+          const res = await fetchWithTimeout(`/api/chats/${queued.chatId}/messages`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+            credentials: "include",
+            body: JSON.stringify({
+              role: queued.role,
+              content: queued.content,
+              requestId: queued.requestId,
+              clientRequestId: queued.clientRequestId,
+              attachments: queued.attachments,
+            }),
+          }, MESSAGE_SAVE_TIMEOUT_MS);
+
+          if (res.ok) {
+            const data = await res.json().catch(() => null);
+            const serverMessage = (data as any)?.message ?? data;
+            if (serverMessage?.id && typeof serverMessage.id === "string") {
+              reconcileMessageIdByRequestId(queued.chatId, queued.requestId, serverMessage.id);
+            } else {
+              setDeliveryByRequestId(queued.chatId, queued.requestId, {
+                deliveryStatus: "sent",
+                deliveryError: undefined,
+              });
+            }
+
+            markRequestComplete(queued.requestId);
+            removeFailedMessageFromRecoveryQueue(queued.requestId);
+            continue;
+          }
+
+          const errText = await res.text().catch(() => "");
+          setDeliveryByRequestId(queued.chatId, queued.requestId, {
+            deliveryStatus: "error",
+            deliveryError: errText || `HTTP ${res.status}`,
+          });
+
+          const retryable =
+            res.status >= 500 ||
+            res.status === 408 ||
+            res.status === 429 ||
+            res.status === 401;
+
+          if (retryable) {
+            remaining.push(queued); // Retry next time / when network recovers.
+          } else {
+            console.warn(`[FailedQueue] Skipping message (${res.status}):`, queued.requestId);
+          }
+        } catch (err) {
+          setDeliveryByRequestId(queued.chatId, queued.requestId, {
+            deliveryStatus: "error",
+            deliveryError: err instanceof Error ? err.message : String(err),
+          });
+          remaining.push(queued); // Network error, retry next time.
+        }
+      }
+
+      safeWriteFailedQueue(remaining);
+    } catch (e) {
+      console.warn("[FailedQueue] Error processing recovery queue:", e);
+    } finally {
+      recoveringFailedQueueRef.current = false;
+    }
+  }, []);
+
   // Fetch details for active chat when selected
   useEffect(() => {
     if (activeChatId && !isPendingChat(activeChatId)) {
@@ -804,173 +1332,73 @@ export function useChats() {
   }, [activeChatId, fetchChatDetails, chats]);
 
   useEffect(() => {
+    let cancelled = false;
     const initChats = async () => {
       setIsLoading(true);
 
+      // 1) Hydrate from localStorage immediately for instant UI (no blank/skeleton if we have cache).
+      const restored = safeReadLocalChatsFromStorage(STORAGE_KEY);
+      if (!cancelled && restored.length > 0) {
+        setChats(restored);
+        if (!userHasSelectedRef.current) {
+          setActiveChatId((prev) => prev || restored[0]?.id || null);
+        }
+        setIsLoading(false);
+      }
+
+      // 2) Fetch authoritative server list in background and merge (preserve pending chats + cached messages).
       const serverChats = await loadChatsFromServer();
+      if (cancelled) return;
 
-      // IMPORTANT: an empty array is still a valid server response (authoritative).
-      // Only fall back to localStorage when the server request failed (null).
       if (serverChats) {
-        setChats(serverChats);
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(serverChats));
-        } catch (e) {
-          console.warn("Failed to cache chats to localStorage:", e);
-          localStorage.removeItem(STORAGE_KEY);
-        }
-        // Only auto-select first chat if user hasn't manually selected/deselected
-        if (!userHasSelectedRef.current && !activeChatId && serverChats.length > 0) {
-          setActiveChatId(serverChats[0]?.id || null);
-        }
-      } else {
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) {
-          try {
-            const parsed = JSON.parse(saved);
-            const restored = parsed.map((chat: any) => ({
-              ...chat,
-              stableKey: chat.stableKey || `stable-${chat.id}`, // Ensure stableKey exists
-              messages: chat.messages.map((msg: any) => {
-                // Hydrate savedRequestIds from localStorage data
-                if (msg.requestId) {
-                  markRequestPersisted(msg.requestId);
-                }
-                return {
-                  ...msg,
-                  timestamp: new Date(msg.timestamp)
-                };
-              })
-            }));
-
-            // CRITICAL FIX: Reconcile pending chats that were never synced to server
-            // This happens when user creates a chat, sends a message, but the server sync fails
-            const pendingChats = restored.filter((c: Chat) => c.id.startsWith(PENDING_CHAT_PREFIX) && c.messages.length > 0);
-            if (pendingChats.length > 0) {
-              console.log(`[Reconcile] Found ${pendingChats.length} pending chats to sync`);
-
-              // Reconcile each pending chat asynchronously but sequentially to avoid session conflicts
-              (async () => {
-                for (const pendingChat of pendingChats) {
-                  try {
-                    // Get first user message for title
-                    const firstUserMsg = pendingChat.messages.find((m: Message) => m.role === 'user');
-                    const title = firstUserMsg?.content?.slice(0, 50) + (firstUserMsg?.content && firstUserMsg.content.length > 50 ? '...' : '') || 'Nuevo Chat';
-
-                    // Create chat with all messages in a single atomic request
-                    const messagesToSync = pendingChat.messages.map((msg: Message) => ({
-                      role: msg.role,
-                      content: msg.content,
-                      requestId: msg.requestId,
-                      userMessageId: msg.userMessageId,
-                      attachments: sanitizeAttachmentsForServer(msg.attachments)
-                    }));
-
-                    const res = await fetch("/api/chats", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-                      credentials: "include",
-                      body: JSON.stringify({ title, messages: messagesToSync })
-                    });
-
-                    if (res.ok) {
-                      const serverChat = await res.json();
-                      const realChatId = serverChat.id;
-                      const wasAlreadyExisting = serverChat.alreadyExists;
-
-                      console.log(`[Reconcile] ${wasAlreadyExisting ? 'Found existing' : 'Created'} server chat ${realChatId} for pending ${pendingChat.id} with ${messagesToSync.length} messages`);
-
-                      // Map pending ID to real ID
-                      pendingToRealIdMap.set(pendingChat.id, realChatId);
-
-                      // Update chat ID in state
-                      setChats(prev => prev.map(c =>
-                        c.id === pendingChat.id ? { ...c, id: realChatId } : c
-                      ));
-
-                      // Update active chat ID if it was the pending one
-                      setActiveChatId(prev => prev === pendingChat.id ? realChatId : prev);
-
-                      // Remove pending chat from localStorage after successful sync
-                      const stored = localStorage.getItem(STORAGE_KEY);
-                      if (stored) {
-                        try {
-                          const storedChats = JSON.parse(stored);
-                          const updatedStoredChats = storedChats.filter((c: Chat) => c.id !== pendingChat.id);
-                          localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedStoredChats));
-                        } catch (e) {
-                          // Ignore localStorage errors
-                        }
-                      }
-
-                      console.log(`[Reconcile] Successfully synced pending chat to ${realChatId}`);
-                    } else {
-                      console.warn(`[Reconcile] Failed to create chat on server:`, await res.text());
-                    }
-                  } catch (err) {
-                    console.error(`[Reconcile] Error reconciling pending chat ${pendingChat.id}:`, err);
-                  }
-                }
-              })();
-            }
-
-            setChats(restored);
-            // Only auto-select first chat if user hasn't manually selected/deselected
-            if (!userHasSelectedRef.current && !activeChatId && restored.length > 0) {
-              setActiveChatId(restored[0]?.id || null);
-            }
-          } catch (e) {
-            console.error("Failed to parse local chats", e);
-          }
+        const merged = mergeServerChatsWithLocal(serverChats, restored);
+        setChats(merged);
+        // Only auto-select if user hasn't manually selected/deselected.
+        if (!userHasSelectedRef.current) {
+          setActiveChatId((prev) => {
+            if (prev && merged.some((c) => c.id === prev)) return prev;
+            return merged[0]?.id || null;
+          });
         }
       }
 
-      setIsLoading(false);
+      // If we had no cache, finish loading once server attempt completes (success or fail).
+      if (restored.length === 0) {
+        setIsLoading(false);
+      }
 
-      // Recover failed message saves from previous session
-      const FAILED_QUEUE_KEY = 'ilia_failed_message_queue';
-      try {
-        const failedQueue = JSON.parse(localStorage.getItem(FAILED_QUEUE_KEY) || '[]');
-        if (failedQueue.length > 0) {
-          console.log(`[FailedQueue] Recovering ${failedQueue.length} failed message save(s)`);
-          const remaining: any[] = [];
-          for (const queued of failedQueue) {
-            // Skip entries older than 24 hours
-            if (Date.now() - queued.timestamp > 24 * 60 * 60 * 1000) continue;
-            try {
-              const res = await fetch(`/api/chats/${queued.chatId}/messages`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-                credentials: "include",
-                body: JSON.stringify({
-                  role: queued.role,
-                  content: queued.content,
-                  requestId: queued.requestId,
-                  clientRequestId: queued.clientRequestId,
-                  attachments: queued.attachments,
-                })
-              });
-              if (res.ok) {
-                console.log(`[FailedQueue] Recovered message for chat ${queued.chatId}`);
-              } else if (res.status < 500) {
-                // Client error (4xx) — skip, don't retry
-                console.warn(`[FailedQueue] Skipping message (${res.status}):`, queued.requestId);
-              } else {
-                remaining.push(queued); // Retry next time
-              }
-            } catch {
-              remaining.push(queued); // Network error, retry next time
-            }
-          }
-          localStorage.setItem(FAILED_QUEUE_KEY, JSON.stringify(remaining));
-        }
-      } catch (e) {
-        console.warn('[FailedQueue] Error processing recovery queue:', e);
+      void recoverFailedMessageQueue();
+    };
+
+    void initChats();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Retry failed (queued) message saves when connectivity is restored or the tab becomes active.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const handleOnline = () => {
+      if (!isLoading) {
+        void recoverFailedMessageQueue();
       }
     };
 
-    initChats();
-  }, []);
+    const handleVisibilityChange = () => {
+      if (!isLoading && document.visibilityState === "visible") {
+        void recoverFailedMessageQueue();
+      }
+    };
+
+    window.addEventListener("online", handleOnline);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [isLoading, recoverFailedMessageQueue]);
 
   // Allows other parts of the app (settings/privacy) to request a full server refresh.
   useEffect(() => {
@@ -981,21 +1409,15 @@ export function useChats() {
           const serverChats = await loadChatsFromServer();
           if (!serverChats) return;
 
-          setChats(serverChats);
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(serverChats));
-          } catch (e) {
-            console.warn("Failed to cache chats to localStorage:", e);
-            localStorage.removeItem(STORAGE_KEY);
-          }
+          setChats((prev) => mergeServerChatsWithLocal(serverChats, prev));
 
           // If the active chat disappeared (archived/deleted), pick a sane fallback.
-          if (activeChatId && !serverChats.some((c) => c.id === activeChatId)) {
-            setActiveChatId(serverChats[0]?.id || null);
-          }
-          if (!activeChatId && !userHasSelectedRef.current) {
-            setActiveChatId(serverChats[0]?.id || null);
-          }
+          setActiveChatId((prev) => {
+            if (prev?.startsWith(PENDING_CHAT_PREFIX)) return prev;
+            if (prev && serverChats.some((c) => c.id === prev)) return prev;
+            if (!userHasSelectedRef.current) return serverChats[0]?.id || null;
+            return prev || null;
+          });
         } finally {
           setIsLoading(false);
         }
@@ -1016,7 +1438,7 @@ export function useChats() {
 
       setTimeout(async () => {
         try {
-          const res = await fetch(`/api/chats/${chatId}`, {
+          const res = await apiFetch(`/api/chats/${chatId}`, {
             headers: { ...getAnonUserIdHeader() },
             credentials: "include",
           });
@@ -1058,7 +1480,10 @@ export function useChats() {
   }, []);
 
   const createChat = useCallback((): { pendingId: string; stableKey: string } => {
-    const pendingId = `${PENDING_CHAT_PREFIX}${Date.now()}`;
+    const pendingId = `${PENDING_CHAT_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const provisionalRealId = generateStableServerChatId();
+    // Pre-assign a stable server chatId so first-message stream can start immediately.
+    pendingToRealIdMap.set(pendingId, provisionalRealId);
     const stableKey = `stable-${Date.now()}`; // Stable key that won't change
     const pendingChat: Chat = {
       id: pendingId,
@@ -1072,357 +1497,322 @@ export function useChats() {
     return { pendingId, stableKey };
   }, []);
 
-  const flushPendingMessages = async (pendingId: string, realChatId: string): Promise<{ run?: ChatRun; deduplicated?: boolean } | undefined> => {
-    let lastResult: { run?: ChatRun; deduplicated?: boolean } | undefined = undefined;
-    
-    while (pendingMessageQueue.has(pendingId) && pendingMessageQueue.get(pendingId)!.length > 0) {
-      const queuedMessages = [...(pendingMessageQueue.get(pendingId) || [])];
-      pendingMessageQueue.set(pendingId, []);
+  const addMessage = useCallback(async (chatId: string, message: Message): Promise<SendMessageAck | undefined> => {
+    const safeChatId = sanitizeChatId(chatId);
+    let resolvedChatId = pendingToRealIdMap.get(safeChatId) || safeChatId;
+    const isPending = safeChatId.startsWith(PENDING_CHAT_PREFIX);
+    const sanitizedInput = sanitizeSendMessage(message);
+    const safeRequestId = sanitizeRequestId(sanitizedInput.requestId);
+    const safeClientRequestId = sanitizedInput.role === "user" && !(sanitizedInput as any).skipRun
+      ? (sanitizedInput.clientRequestId || generateClientRequestId())
+      : sanitizedInput.clientRequestId;
 
-      for (const msg of queuedMessages) {
-        try {
-          const clientRequestId = msg.role === 'user' && !(msg as any).skipRun
-            ? (msg as any).clientRequestId || generateClientRequestId()
-            : undefined;
-          
-          const res = await fetch(`/api/chats/${realChatId}/messages`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-            credentials: "include",
-            body: JSON.stringify({
-              role: msg.role,
-              content: msg.content,
-              requestId: msg.requestId,
-              clientRequestId,
-              userMessageId: msg.userMessageId,
-              attachments: sanitizeAttachmentsForServer(msg.attachments),
-              sources: msg.sources,
-              figmaDiagram: msg.figmaDiagram,
-              googleFormPreview: msg.googleFormPreview,
-              gmailPreview: msg.gmailPreview,
-              generatedImage: msg.generatedImage,
-              webSources: msg.webSources,
-              confidence: msg.confidence,
-              uncertaintyReason: msg.uncertaintyReason,
-              retrievalSteps: msg.retrievalSteps
-            })
-          });
+    const normalizedMessage: Message = {
+      ...sanitizedInput,
+      requestId: safeRequestId,
+      clientTempId: sanitizedInput.clientTempId || sanitizedInput.id,
+      // Ensure we keep the same clientRequestId on retry to preserve idempotency.
+      clientRequestId: safeClientRequestId,
+      // Default optimistic delivery state for user messages.
+      deliveryStatus: sanitizedInput.deliveryStatus || (sanitizedInput.role === "user" ? "sending" : sanitizedInput.deliveryStatus),
+      deliveryError: sanitizedInput.deliveryStatus === "error" ? sanitizedInput.deliveryError : undefined,
+    };
 
-          // Mark request as complete on successful save or 409 conflict (already exists)
-          if (msg.requestId) {
-            if (res.ok || res.status === 409) {
-              markRequestComplete(msg.requestId);
-            } else {
-              processingRequestIds.delete(msg.requestId);
-            }
-          }
-          
-          // If response includes a run, track it for AI streaming
-          if (res.ok) {
-            const data = await res.json();
-            trackChatMessageSent(realChatId, msg, data?.deduplicated);
-            if (data.run) {
-              const run: ChatRun = {
-                id: data.run.id,
-                chatId: realChatId,
-                clientRequestId: data.run.clientRequestId,
-                userMessageId: data.run.userMessageId,
-                status: data.run.status,
-                assistantMessageId: data.run.assistantMessageId,
-                lastSeq: data.run.lastSeq
-              };
-              setActiveRun(realChatId, run);
-              console.log(`[Run] Created run ${run.id} for new chat ${realChatId}`);
-              lastResult = { run, deduplicated: !!data.deduplicated };
-            }
-          }
-        } catch (error) {
-          console.error("Error flushing queued message:", error);
-          // Remove from processing on error so retry is possible
-          if (msg.requestId) {
-            processingRequestIds.delete(msg.requestId);
-          }
-        }
-      }
-    }
-    pendingMessageQueue.delete(pendingId);
-    
-    // Resolve any pending promises waiting for this flush
-    const resolvers = pendingFlushResolvers.get(pendingId) || [];
-    for (const resolve of resolvers) {
-      resolve(lastResult);
-    }
-    pendingFlushResolvers.delete(pendingId);
-    
-    return lastResult;
-  };
+    const tempId = normalizedMessage.clientTempId || normalizedMessage.id;
 
-  const addMessage = useCallback(async (chatId: string, message: Message): Promise<{ run?: ChatRun; deduplicated?: boolean } | undefined> => {
-    // EMERGENCY DEBUG
-    console.error("[CRITICAL] addMessage called:", { chatId, messageRole: message.role, messageContent: message.content?.substring(0, 50) });
-    
-    const resolvedChatId = pendingToRealIdMap.get(chatId) || chatId;
-    const isPending = resolvedChatId.startsWith(PENDING_CHAT_PREFIX);
-    const isCreatingChat = chatCreationInProgress.has(chatId) || chatCreationInProgress.has(resolvedChatId);
-
-    console.error("[CRITICAL] addMessage state:", { resolvedChatId, isPending, isCreatingChat, messageRole: message.role });
-
-    // Idempotency guard: Use markRequestProcessing to claim the requestId
-    // Returns false if already processing or saved - skip duplicate calls
-    if (message.requestId && !markRequestProcessing(message.requestId)) {
-      console.log(`[Dedup] Skipping already processed/processing requestId: ${message.requestId}`);
-      // Check if there's an existing active run for this chat that can be returned
-      const existingRun = getActiveRun(resolvedChatId);
-      if (existingRun) {
-        return { run: existingRun, deduplicated: true };
-      }
-      return undefined;
-    }
-
-    const title = message.role === "user" && message.content
-      ? message.content.slice(0, 50) + (message.content.length > 50 ? "..." : "")
-      : "Nuevo Chat";
-
-    // If first message comes in while the chat is still pending, force-create the chat
-    // so we get a real chatId and can flush the queued messages.
-    if (isPending && message.role === "user" && !isCreatingChat) {
-      chatCreationInProgress.add(chatId);
-
-      // Optimistically add the message to the pending chat so the UI doesn't look stuck
+    const setDeliveryPatch = (patch: Partial<Message>) => {
       setChats(prev => prev.map(chat => {
-        if (chat.id !== chatId) return chat;
-        const messageExists = chat.messages.some(m => m.id === message.id);
-        if (messageExists) return chat;
-        const isFirstMessage = chat.messages.length === 0;
+        if (chat.id !== resolvedChatId && chat.id !== safeChatId) return chat;
         return {
           ...chat,
-          messages: [...chat.messages, message],
-          title: isFirstMessage && message.role === "user" ? title : chat.title,
-          timestamp: Date.now()
+          messages: chat.messages.map(m => {
+            if (m.id !== tempId && m.clientTempId !== tempId) return m;
+            const nextStatus =
+              patch.deliveryStatus === "sent" && m.deliveryStatus === "delivered"
+                ? "delivered"
+                : patch.deliveryStatus;
+            const patchWithStatus = nextStatus ? { ...patch, deliveryStatus: nextStatus } : patch;
+            return { ...m, ...patchWithStatus };
+          }),
         };
       }));
+    };
 
-      const queue = pendingMessageQueue.get(chatId) || [];
-      queue.push(message);
-      pendingMessageQueue.set(chatId, queue);
+    const reconcileMessageId = (serverId: string) => {
+      setChats(prev => prev.map(chat => {
+        if (chat.id !== resolvedChatId && chat.id !== safeChatId) return chat;
 
-      // Debounce the creation to prevent race conditions if multiple messages are sent quickly
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      try {
-        console.error("[CRITICAL] About to POST /api/chats - forced pending creation");
-        const res = await fetch("/api/chats", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-          credentials: "include",
-          body: JSON.stringify({ title })
+        let changed = false;
+        let updated = chat.messages.map(m => {
+          if (m.id === tempId || m.clientTempId === tempId) {
+            changed = true;
+            return {
+              ...m,
+              id: serverId,
+              clientTempId: tempId,
+              deliveryStatus: m.deliveryStatus === "delivered" ? "delivered" : "sent",
+              deliveryError: undefined,
+            };
+          }
+          if (m.userMessageId === tempId) {
+            changed = true;
+            return { ...m, userMessageId: serverId };
+          }
+          return m;
         });
-        console.error("[CRITICAL] POST /api/chats response received:", res.status, res.ok);
 
-        if (!res.ok) return undefined;
+        if (!changed) return chat;
 
-        const newChat = await res.json();
-        const realChatId = newChat.id;
+        // If an assistant reply already exists for this user message, mark it as delivered.
+        const hasAssistantReply = updated.some(
+          (m) => m.role === "assistant" && m.userMessageId === serverId
+        );
+        if (hasAssistantReply) {
+          updated = updated.map((m) => {
+            if (m.role !== "user") return m;
+            if (m.id !== serverId && m.clientTempId !== tempId) return m;
+            if (m.deliveryStatus === "error") return m;
+            return { ...m, deliveryStatus: "delivered", deliveryError: undefined };
+          });
+        }
 
-        pendingToRealIdMap.set(chatId, realChatId);
+        const byId = new Map<string, Message>();
+        for (const msg of updated) {
+          const existing = byId.get(msg.id);
+          if (!existing) {
+            byId.set(msg.id, msg);
+            continue;
+          }
+          byId.set(msg.id, { ...existing, ...msg });
+        }
 
-        setChats(prev => prev.map(chat => (chat.id === chatId ? { ...chat, id: realChatId } : chat)));
-        setActiveChatId(realChatId);
+        return { ...chat, messages: Array.from(byId.values()) };
+      }));
+    };
 
-        return await flushPendingMessages(chatId, realChatId);
-      } catch (error) {
-        console.error("Error creating chat on first message (forced):", error);
-        return undefined;
-      } finally {
-        chatCreationInProgress.delete(chatId);
+    // Idempotency guard: claim the requestId for this send attempt.
+    if (safeRequestId && !markRequestProcessing(safeRequestId)) {
+      console.log(`[Dedup] Skipping already processed/processing requestId: ${safeRequestId}`);
+      const existingRun = getActiveRun(resolvedChatId);
+      if (existingRun) {
+        return { run: existingRun, deduplicated: true, chatId: resolvedChatId };
       }
+      return { chatId: resolvedChatId };
     }
 
-    // Check if message already exists in chat (by ID) and add if not
-    setChats(prev => {
-      // First check if chat exists
-      const chatExists = prev.some(chat => chat.id === chatId || chat.id === resolvedChatId);
-      
-      if (!chatExists && isPending) {
-        // Chat doesn't exist yet - create it with this message
-        console.error("[CRITICAL] Chat doesn't exist, creating new pending chat");
-        
-        return [...prev, {
-          id: chatId,
-          title: title,
-          messages: [message],
-          timestamp: Date.now(),
-          stableKey: `stable-${chatId}`
-        }];
-      }
-      
-      // Chat exists - try to add message to it
-      return prev.map(chat => {
-        const matchId = chat.id === chatId || chat.id === resolvedChatId;
-        if (matchId) {
-          // Prevent duplicate message by checking if same ID exists
-          const messageExists = chat.messages.some(m => m.id === message.id);
-          if (messageExists) {
-            console.log(`[Dedup] Message with same ID already exists: ${message.id}`);
-            // Mark as complete (not just delete from processing) to prevent future re-claims
-            if (message.requestId) {
-              markRequestComplete(message.requestId);
-            }
-            return chat;
-          }
+    const title = normalizedMessage.role === "user" && normalizedMessage.content
+      ? normalizedMessage.content.slice(0, 50) + (normalizedMessage.content.length > 50 ? "..." : "")
+      : "Nuevo Chat";
 
-          
-          const isFirstMessage = chat.messages.length === 0;
+    if (isPending && resolvedChatId.startsWith(PENDING_CHAT_PREFIX)) {
+      const fallbackChatId = generateStableServerChatId();
+      pendingToRealIdMap.set(safeChatId, fallbackChatId);
+      setChats(prev => prev.map(chat =>
+        chat.id === safeChatId ? { ...chat, id: fallbackChatId } : chat
+      ));
+      if (activeChatId === safeChatId) {
+        setActiveChatId(fallbackChatId);
+      }
+      resolvedChatId = fallbackChatId;
+    }
+
+    // Insert into local state (optimistic) if not present.
+    setChats(prev => {
+      const chatExists = prev.some(chat => chat.id === safeChatId || chat.id === resolvedChatId);
+
+        if (!chatExists && isPending) {
+          return [...prev, {
+            id: safeChatId,
+            title,
+            messages: [normalizedMessage],
+            timestamp: Date.now(),
+            stableKey: `stable-${safeChatId}`,
+          }];
+        }
+
+        return prev.map(chat => {
+          const matchId = chat.id === safeChatId || chat.id === resolvedChatId;
+        if (!matchId) return chat;
+
+        const maybeMarkDelivered = (msgs: Message[]): Message[] => {
+          if (normalizedMessage.role !== "assistant" || !normalizedMessage.userMessageId) return msgs;
+          const linkId = normalizedMessage.userMessageId;
+          let changed = false;
+          const patched = msgs.map((m) => {
+            if (m.role !== "user") return m;
+            if (m.id !== linkId && m.clientTempId !== linkId) return m;
+            if (m.deliveryStatus === "error") return m;
+            if (m.deliveryStatus === "delivered") return m;
+            changed = true;
+            return { ...m, deliveryStatus: "delivered", deliveryError: undefined };
+          });
+          return changed ? patched : msgs;
+        };
+
+        const messageExists = chat.messages.some(m => m.id === tempId || m.clientTempId === tempId);
+        if (messageExists) {
+          // Retry path: do not mark as complete here. The server ACK is the source of truth.
+          const nextMessages = maybeMarkDelivered(
+            chat.messages.map(m => (m.id === tempId || m.clientTempId === tempId)
+              ? {
+                  ...m,
+                  deliveryStatus: normalizedMessage.deliveryStatus,
+                  deliveryError: normalizedMessage.deliveryError,
+                }
+              : m
+            )
+          );
           return {
             ...chat,
-            messages: [...chat.messages, message],
-            title: isFirstMessage && message.role === "user" ? title : chat.title,
-            timestamp: Date.now()
+            messages: nextMessages,
           };
         }
-        return chat;
+
+        const isFirstMessage = chat.messages.length === 0;
+        const nextMessages = maybeMarkDelivered([...chat.messages, normalizedMessage]);
+        return {
+          ...chat,
+          messages: nextMessages,
+          title: isFirstMessage && normalizedMessage.role === "user" ? title : chat.title,
+          timestamp: Date.now(),
+        };
       });
     });
 
-    // If message wasn't added (duplicate), don't proceed with persistence
-
-    if (isPending || isCreatingChat) {
-      const queueKey = chatCreationInProgress.has(chatId) ? chatId : resolvedChatId;
-      const queue = pendingMessageQueue.get(queueKey) || [];
-      queue.push(message);
-      pendingMessageQueue.set(queueKey, queue);
-      
-      // Return a promise that will be resolved when flush completes
-      return new Promise<{ run?: ChatRun; deduplicated?: boolean } | undefined>((resolve) => {
-        const resolvers = pendingFlushResolvers.get(queueKey) || [];
-        resolvers.push(resolve);
-        pendingFlushResolvers.set(queueKey, resolvers);
-      });
-    } else {
-      try {
-        // For user messages, use run-based idempotency with clientRequestId
-        const clientRequestId = message.role === 'user' && !(message as any).skipRun
-          ? (message as any).clientRequestId || generateClientRequestId()
-          : undefined;
-
-        // Retry message saves with exponential backoff for reliability.
-        // Uses idempotent clientRequestId to prevent duplicates on retry.
-        const res = await withRetry(async () => {
-          const response = await fetch(`/api/chats/${resolvedChatId}/messages`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-            credentials: "include",
-            body: JSON.stringify({
-              role: message.role,
-              content: message.content,
-              requestId: message.requestId,
-              clientRequestId, // For run-based idempotency
-              userMessageId: message.userMessageId,
-              attachments: sanitizeAttachmentsForServer(message.attachments),
-              sources: message.sources,
-              figmaDiagram: message.figmaDiagram,
-              googleFormPreview: message.googleFormPreview,
-              gmailPreview: message.gmailPreview,
-              generatedImage: message.generatedImage,
-              webSources: message.webSources,
-              confidence: message.confidence,
-              uncertaintyReason: message.uncertaintyReason,
-              retrievalSteps: message.retrievalSteps
-            })
-          });
-          // Retry on network failures and 5xx server errors; don't retry 4xx client errors
-          if (!response.ok && response.status >= 500) {
-            throw new Error(`Server error ${response.status}`);
-          }
-          return response;
-        }, { maxRetries: 2 });
-
-        // Handle run-based response for user messages
-        if (res.ok) {
-          const data = await res.json();
-          trackChatMessageSent(resolvedChatId, message, data?.deduplicated);
-
-          // If response includes a run, track it for AI streaming
-          if (data.run) {
-            const run: ChatRun = {
-              id: data.run.id,
-              chatId: resolvedChatId,
-              clientRequestId: data.run.clientRequestId,
-              userMessageId: data.run.userMessageId,
-              status: data.run.status,
-              assistantMessageId: data.run.assistantMessageId,
-              lastSeq: data.run.lastSeq
-            };
-            setActiveRun(resolvedChatId, run);
-            console.log(`[Run] ${data.deduplicated ? 'Resumed' : 'Created'} run ${run.id} for chat ${resolvedChatId}`);
-
-            if (message.requestId) {
-              markRequestComplete(message.requestId);
-            }
-
-            return { run, deduplicated: !!data.deduplicated };
-          }
-
-          if (message.requestId) {
-            markRequestComplete(message.requestId);
-          }
-          return undefined;
-        } else if (res.status === 409) {
-          // Already exists - mark as complete
-          if (message.requestId) {
-            markRequestComplete(message.requestId);
-          }
-          // Check for existing run
-          const existingRun = getActiveRun(resolvedChatId);
-          if (existingRun) {
-            return { run: existingRun, deduplicated: true };
-          }
-          return undefined;
-        } else {
-          // Other non-OK responses: Remove from processing so retry is possible
-          console.error(`Server returned ${res.status} for message save`);
-          if (message.requestId) {
-            processingRequestIds.delete(message.requestId);
-          }
-          return undefined;
-        }
-      } catch (error) {
-        console.error("Error saving message to server:", error);
-        // Remove from processing on error so retry is possible
-        if (message.requestId) {
-          processingRequestIds.delete(message.requestId);
-        }
-
-        // Queue failed message save for later recovery
-        if (message.role === 'user' && message.attachments?.length) {
-          try {
-            const FAILED_QUEUE_KEY = 'ilia_failed_message_queue';
-            const existing = JSON.parse(localStorage.getItem(FAILED_QUEUE_KEY) || '[]');
-            // Only queue if not already queued (by requestId)
-            if (!existing.some((q: any) => q.requestId === message.requestId)) {
-              existing.push({
-                chatId: resolvedChatId,
-                role: message.role,
-                content: message.content,
-                requestId: message.requestId,
-                clientRequestId: (message as any).clientRequestId,
-                attachments: sanitizeAttachmentsForServer(message.attachments),
-                timestamp: Date.now(),
-              });
-              // Keep only last 20 entries to prevent bloat
-              const trimmed = existing.slice(-20);
-              localStorage.setItem(FAILED_QUEUE_KEY, JSON.stringify(trimmed));
-              console.log(`[FailedQueue] Queued message with ${message.attachments.length} attachment(s) for retry`);
-            }
-          } catch (queueError) {
-            console.warn('[FailedQueue] Failed to queue message for retry:', queueError);
-          }
-        }
-
-        return undefined;
+    try {
+      if (normalizedMessage.role === "user") {
+        setDeliveryPatch({ deliveryStatus: "sending", deliveryError: undefined });
       }
+
+      const clientRequestId = normalizedMessage.role === "user" && !(normalizedMessage as any).skipRun
+        ? normalizedMessage.clientRequestId
+        : undefined;
+
+      const t0 = typeof performance !== "undefined" ? performance.now() : Date.now();
+
+      const res = await withRetry(async () => {
+        const response = await fetchWithTimeout(`/api/chats/${resolvedChatId}/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+          credentials: "include",
+          body: JSON.stringify({
+            role: normalizedMessage.role,
+            content: normalizedMessage.content,
+            requestId: normalizedMessage.requestId,
+            clientRequestId,
+            userMessageId: normalizedMessage.userMessageId,
+            attachments: sanitizeAttachmentsForServer(normalizedMessage.attachments),
+            sources: normalizedMessage.sources,
+            figmaDiagram: normalizedMessage.figmaDiagram,
+            googleFormPreview: normalizedMessage.googleFormPreview,
+            gmailPreview: normalizedMessage.gmailPreview,
+            generatedImage: normalizedMessage.generatedImage,
+            webSources: normalizedMessage.webSources,
+            confidence: normalizedMessage.confidence,
+            uncertaintyReason: normalizedMessage.uncertaintyReason,
+            retrievalSteps: normalizedMessage.retrievalSteps,
+          }),
+        }, MESSAGE_SAVE_TIMEOUT_MS);
+        // Retry on network failures and 5xx server errors; don't retry 4xx client errors.
+        if (!response.ok && response.status >= 500) {
+          throw new Error(`Server error ${response.status}`);
+        }
+        return response;
+      }, { maxRetries: 2 });
+
+      const t1 = typeof performance !== "undefined" ? performance.now() : Date.now();
+      const totalMs = Math.max(0, t1 - t0);
+      if (import.meta.env.DEV) {
+        const serverTiming = res.headers.get("server-timing");
+        const traceId = res.headers.get("x-trace-id");
+        console.debug("[Perf] send_message", {
+          chatId: resolvedChatId,
+          tempId,
+          role: normalizedMessage.role,
+          totalMs: Number(totalMs.toFixed(1)),
+          serverTiming,
+          traceId,
+        });
+      }
+
+      if (res.ok) {
+        const data = await res.json();
+        trackChatMessageSent(resolvedChatId, normalizedMessage, data?.deduplicated);
+
+        const serverMessage = data?.message ?? data;
+        if (serverMessage?.id && typeof serverMessage.id === "string") {
+          reconcileMessageId(serverMessage.id);
+        } else if (normalizedMessage.role === "user") {
+          setDeliveryPatch({ deliveryStatus: "sent", deliveryError: undefined });
+        }
+
+        if (normalizedMessage.requestId) {
+          markRequestComplete(normalizedMessage.requestId);
+          removeFailedMessageFromRecoveryQueue(normalizedMessage.requestId);
+        }
+
+        if (data.run) {
+          const run: ChatRun = {
+            id: data.run.id,
+            chatId: resolvedChatId,
+            clientRequestId: data.run.clientRequestId,
+            userMessageId: data.run.userMessageId,
+            status: data.run.status,
+            assistantMessageId: data.run.assistantMessageId,
+            lastSeq: data.run.lastSeq,
+          };
+          setActiveRun(resolvedChatId, run);
+          console.log(`[Run] ${data.deduplicated ? "Resumed" : "Created"} run ${run.id} for chat ${resolvedChatId}`);
+          return { run, deduplicated: !!data.deduplicated, chatId: resolvedChatId };
+        }
+
+        return { chatId: resolvedChatId };
+      }
+
+      const errText = await res.text().catch(() => "");
+      console.error(`Server returned ${res.status} for message save`, errText);
+
+      if (normalizedMessage.role === "user") {
+        setDeliveryPatch({
+          deliveryStatus: "error",
+          deliveryError: errText || `HTTP ${res.status}`,
+        });
+      }
+
+      if (normalizedMessage.requestId) {
+        processingRequestIds.delete(normalizedMessage.requestId);
+      }
+
+      const retryable =
+        res.status === 408 ||
+        res.status === 429 ||
+        res.status === 401;
+      if (retryable && normalizedMessage.role === "user") {
+        enqueueFailedMessageForRecovery(resolvedChatId, normalizedMessage);
+      }
+      return { chatId: resolvedChatId };
+    } catch (error) {
+      console.error("Error saving message to server:", error);
+
+      if (normalizedMessage.role === "user") {
+        setDeliveryPatch({
+          deliveryStatus: "error",
+          deliveryError: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      // Remove from processing on error so retry is possible.
+      if (normalizedMessage.requestId) {
+        processingRequestIds.delete(normalizedMessage.requestId);
+      }
+
+      // Queue failed message save for later recovery.
+      if (normalizedMessage.role === "user") {
+        enqueueFailedMessageForRecovery(resolvedChatId, normalizedMessage);
+      }
+
+      return { chatId: resolvedChatId };
     }
-    return undefined;
   }, []);
 
   const deleteChat = useCallback(async (chatId: string, e?: React.MouseEvent) => {
@@ -1437,7 +1827,7 @@ export function useChats() {
     });
 
     try {
-      await fetch(`/api/chats/${chatId}`, { 
+      await apiFetch(`/api/chats/${chatId}`, { 
         method: "DELETE",
         headers: { ...getAnonUserIdHeader() },
         credentials: "include"
@@ -1453,7 +1843,7 @@ export function useChats() {
     ));
 
     try {
-      await fetch(`/api/chats/${chatId}`, {
+      await apiFetch(`/api/chats/${chatId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
         credentials: "include",
@@ -1479,7 +1869,7 @@ export function useChats() {
     });
 
     try {
-      await fetch(`/api/chats/${chatId}`, {
+      await apiFetch(`/api/chats/${chatId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
         credentials: "include",
@@ -1502,7 +1892,7 @@ export function useChats() {
     ));
 
     try {
-      await fetch(`/api/chats/${chatId}`, {
+      await apiFetch(`/api/chats/${chatId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
         credentials: "include",
@@ -1525,7 +1915,7 @@ export function useChats() {
     ));
 
     try {
-      await fetch(`/api/chats/${chatId}`, {
+      await apiFetch(`/api/chats/${chatId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
         credentials: "include",
@@ -1628,7 +2018,21 @@ export function useChats() {
     }));
   }, []);
 
-  const activeChat = chats.find(c => c.id === activeChatId) || null;
+  // Look up the active chat by id. If the activeChatId is a resolved real id (e.g. "chat_uuid")
+  // but the chat still has a pending id, also check the pendingToRealIdMap reverse mapping.
+  const activeChat = useMemo(() => {
+    if (!activeChatId) return null;
+    const direct = chats.find(c => c.id === activeChatId);
+    if (direct) return direct;
+    // Reverse lookup: find pending chat whose resolved id matches activeChatId
+    for (const [pendingId, realId] of pendingToRealIdMap.entries()) {
+      if (realId === activeChatId) {
+        const pending = chats.find(c => c.id === pendingId);
+        if (pending) return pending;
+      }
+    }
+    return null;
+  }, [activeChatId, chats]);
   const sortedChats = [...chats].sort((a, b) => b.timestamp - a.timestamp);
   const visibleChats = sortedChats.filter(c => !c.hidden);
   const archivedChats = sortedChats.filter(c => c.archived && !c.hidden);
