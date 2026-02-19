@@ -343,13 +343,17 @@ export function createAgentModeRouter() {
           : {};
       }
 
-      const validatedResponse = validateOrThrow(RunResponseSchema, response, `GET /runs/chat/${chatId} response`);
-      res.json(validatedResponse);
-    } catch (error: any) {
-      if (error instanceof ValidationError) {
-        console.error(`[AgentRoutes] Response validation failed:`, error.zodError.errors);
-        return res.status(500).json({ error: "Internal response validation failed" });
+      try {
+        const validatedResponse = validateOrThrow(RunResponseSchema, response, `GET /runs/chat/${chatId} response`);
+        res.json(validatedResponse);
+      } catch (validationErr: any) {
+        // Schema validation failed — return the raw response with a warning header
+        // instead of a 500 that breaks the frontend polling loop.
+        console.warn(`[AgentRoutes] Response validation soft-fail for chat/${chatId}:`, validationErr?.zodError?.errors || validationErr.message);
+        res.setHeader("x-validation-warning", "schema_mismatch");
+        res.json(response);
       }
+    } catch (error: any) {
       console.error("[AgentRoutes] Error getting chat run:", error);
       res.status(500).json({ error: "Failed to get agent run for chat" });
     }

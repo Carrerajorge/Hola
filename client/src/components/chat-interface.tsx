@@ -4931,16 +4931,28 @@ export function ChatInterface({
       isDocumentFile(a.mimeType || a.type, a.name, a.type)
     );
 
-    // Send user message — fire-and-forget (don't block stream start)
+    // Send user message — await for NEW chats (need chatId), fire-and-forget for existing ones
+    let sendMessageAck: SendMessageAck | undefined;
     try {
-	      console.log("[handleSubmit] ABOUT TO CALL onSendMessage (fire-and-forget)");
+	      const isNewChat = !chatId || chatId.startsWith("pending-");
+	      console.log("[handleSubmit] ABOUT TO CALL onSendMessage", isNewChat ? "(await — new chat, need chatId)" : "(fire-and-forget)");
 
-	      // Fire-and-forget: persist user message in background.
-	      // Previously this was `await`ed, adding 500ms-2s of latency before streaming started.
-	      onSendMessage(userMsg).catch((err) => {
-	        console.warn("[handleSubmit] Failed to persist user message (will still attempt streaming):", err);
-	        return undefined;
-	      });
+	      if (isNewChat) {
+	        // NEW CHAT: We MUST await to get the real chatId from the server.
+	        // Without this, the stream has no chatId and silently fails.
+	        try {
+	          sendMessageAck = await onSendMessage(userMsg);
+	          console.log("[handleSubmit] onSendMessage resolved for new chat:", sendMessageAck?.chatId);
+	        } catch (err) {
+	          console.warn("[handleSubmit] Failed to persist new chat message:", err);
+	        }
+	      } else {
+	        // EXISTING CHAT: Fire-and-forget for speed (chatId already known).
+	        onSendMessage(userMsg).catch((err) => {
+	          console.warn("[handleSubmit] Failed to persist user message (will still attempt streaming):", err);
+	          return undefined;
+	        });
+	      }
 
 	      // Start image detection early (runs in parallel with intent checks below).
 	      // Previously this was sequential AFTER onSendMessage, adding another 200-500ms.
@@ -5362,10 +5374,11 @@ IMPORTANTE:
           const separatorHTML = existingDocHTML ? '<hr class="my-4" />' : "";
 
           // Use latest available chatId for stream routing; fallback to resolved persistent id when available.
-          const streamRunContext = buildStreamRunContext(userMsg);
+          const streamRunContext = buildStreamRunContext(userMsg, sendMessageAck);
+          const ackChatId = sendMessageAck?.chatId || sendMessageAck?.run?.chatId;
           const fallbackChatId: string | null =
-            latestChatIdRef.current || chatId || (await waitForActiveChatId());
-          const effectiveStreamChatId = resolveStreamChatId(undefined, fallbackChatId);
+            ackChatId || latestChatIdRef.current || chatId || (await waitForActiveChatId());
+          const effectiveStreamChatId = resolveStreamChatId(sendMessageAck, fallbackChatId);
 	          if (!effectiveStreamChatId) {
 	            toast({
 	              title: "Error",

@@ -5,7 +5,7 @@ import { agentModeRuns, agentModeSteps, agentModeEvents } from "@shared/schema";
 import { agentManager, AgentPlan } from "../agent/agentOrchestrator";
 import { agentEventBus } from "../agent/eventBus";
 import { activityStreamPublisher, agentLoopFacade } from "../agent/orchestration";
-import { eq, desc, asc } from "drizzle-orm";
+import { eq, desc, asc, and, gte, lt, count } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { CreateRunRequestSchema, RunResponseSchema, StepsArrayResponseSchema } from "../agent/contracts";
 import { validateOrThrow, ValidationError } from "../agent/validation";
@@ -21,6 +21,59 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
     return res.status(401).json({ error: "Authentication required" });
   }
   next();
+}
+
+const AGENT_ROBUSTNESS_POLICY = {
+  failureWarningPercent: 15,
+  failureCriticalPercent: 30,
+  alertFailureWarningPercent: 20,
+  alertFailureCriticalPercent: 40,
+  staleWarningCount: 1,
+  staleCriticalCount: 3,
+  minimumRunsForThroughputAlert: 10,
+  minimumRunsForRunningCheck: 3,
+  stepFailureSensitivityPercent: 15,
+  maxHoursWindow: 168,
+  minHoursWindow: 1,
+  defaultHoursWindow: 24,
+};
+
+function clampNumber(value: number, min: number, max: number, fallback: number): number {
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.min(Math.max(value, min), max);
+}
+
+function getIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = parseFloat(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function getRobustnessPolicy() {
+  return {
+    failureWarningPercent: clampNumber(getIntEnv("AGENT_FAILURE_WARNING_PERCENT", AGENT_ROBUSTNESS_POLICY.failureWarningPercent), 0, 100, AGENT_ROBUSTNESS_POLICY.failureWarningPercent),
+    failureCriticalPercent: clampNumber(getIntEnv("AGENT_FAILURE_CRITICAL_PERCENT", AGENT_ROBUSTNESS_POLICY.failureCriticalPercent), 0, 100, AGENT_ROBUSTNESS_POLICY.failureCriticalPercent),
+    alertFailureWarningPercent: clampNumber(getIntEnv("AGENT_ALERT_FAILURE_WARNING_PERCENT", AGENT_ROBUSTNESS_POLICY.alertFailureWarningPercent), 0, 100, AGENT_ROBUSTNESS_POLICY.alertFailureWarningPercent),
+    alertFailureCriticalPercent: clampNumber(getIntEnv("AGENT_ALERT_FAILURE_CRITICAL_PERCENT", AGENT_ROBUSTNESS_POLICY.alertFailureCriticalPercent), 0, 100, AGENT_ROBUSTNESS_POLICY.alertFailureCriticalPercent),
+    staleWarningCount: Math.max(1, Math.floor(getIntEnv("AGENT_STALE_WARNING_COUNT", AGENT_ROBUSTNESS_POLICY.staleWarningCount))),
+    staleCriticalCount: Math.max(1, Math.floor(getIntEnv("AGENT_STALE_CRITICAL_COUNT", AGENT_ROBUSTNESS_POLICY.staleCriticalCount))),
+    minimumRunsForThroughputAlert: Math.max(1, Math.floor(getIntEnv("AGENT_THROUGHPUT_MIN_RUNS", AGENT_ROBUSTNESS_POLICY.minimumRunsForThroughputAlert))),
+    minimumRunsForRunningCheck: Math.max(1, Math.floor(getIntEnv("AGENT_RUNNING_MIN_RUNS", AGENT_ROBUSTNESS_POLICY.minimumRunsForRunningCheck))),
+    stepFailureSensitivityPercent: clampNumber(getIntEnv("AGENT_STEP_FAILURE_PERCENT", AGENT_ROBUSTNESS_POLICY.stepFailureSensitivityPercent), 0, 100, AGENT_ROBUSTNESS_POLICY.stepFailureSensitivityPercent),
+    maxHoursWindow: Math.max(1, Math.floor(getIntEnv("AGENT_ROBUSTNESS_MAX_HOURS", AGENT_ROBUSTNESS_POLICY.maxHoursWindow))),
+    minHoursWindow: Math.max(1, Math.floor(getIntEnv("AGENT_ROBUSTNESS_MIN_HOURS", AGENT_ROBUSTNESS_POLICY.minHoursWindow))),
+    defaultHoursWindow: Math.max(1, Math.floor(getIntEnv("AGENT_ROBUSTNESS_DEFAULT_HOURS", AGENT_ROBUSTNESS_POLICY.defaultHoursWindow))),
+  };
+}
+
+
+
+function toPercent(value: number, total: number): number {
+  if (total <= 0) return 0;
+  return Math.round((value / total) * 10000) / 100;
 }
 
 export function createAgentModeRouter() {
@@ -290,13 +343,17 @@ export function createAgentModeRouter() {
           : {};
       }
 
-      const validatedResponse = validateOrThrow(RunResponseSchema, response, `GET /runs/chat/${chatId} response`);
-      res.json(validatedResponse);
-    } catch (error: any) {
-      if (error instanceof ValidationError) {
-        console.error(`[AgentRoutes] Response validation failed:`, error.zodError.errors);
-        return res.status(500).json({ error: "Internal response validation failed" });
+      try {
+        const validatedResponse = validateOrThrow(RunResponseSchema, response, `GET /runs/chat/${chatId} response`);
+        res.json(validatedResponse);
+      } catch (validationErr: any) {
+        // Schema validation failed — return the raw response with a warning header
+        // instead of a 500 that breaks the frontend polling loop.
+        console.warn(`[AgentRoutes] Response validation soft-fail for chat/${chatId}:`, validationErr?.zodError?.errors || validationErr.message);
+        res.setHeader("x-validation-warning", "schema_mismatch");
+        res.json(response);
       }
+    } catch (error: any) {
       console.error("[AgentRoutes] Error getting chat run:", error);
       res.status(500).json({ error: "Failed to get agent run for chat" });
     }
@@ -467,6 +524,99 @@ export function createAgentModeRouter() {
     } catch (error: any) {
       console.error("[AgentRoutes] Error getting events:", error);
       res.status(500).json({ error: "Failed to get agent run events" });
+    }
+  });
+
+  router.get("/runs/:id/metrics", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+
+      const [run] = await db.select()
+        .from(agentModeRuns)
+        .where(eq(agentModeRuns.id, id));
+
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+
+      const steps = await db.select()
+        .from(agentModeSteps)
+        .where(eq(agentModeSteps.runId, id))
+        .orderBy(agentModeSteps.stepIndex);
+
+      const events = await db.select()
+        .from(agentModeEvents)
+        .where(eq(agentModeEvents.runId, id))
+        .orderBy(asc(agentModeEvents.timestamp));
+
+      const completedSteps = steps.filter(step => step.status === "succeeded" || step.status === "failed");
+      const succeededSteps = steps.filter(step => step.status === "succeeded");
+      const failedSteps = steps.filter(step => step.status === "failed");
+
+      const toolUsage = steps.reduce<Record<string, {
+        toolName: string;
+        totalRuns: number;
+        successCount: number;
+        failureCount: number;
+        avgDurationMs: number | null;
+      }>>((acc, step) => {
+        const toolName = step.toolName || "unknown";
+        if (!acc[toolName]) {
+          acc[toolName] = {
+            toolName,
+            totalRuns: 0,
+            successCount: 0,
+            failureCount: 0,
+            avgDurationMs: null,
+          };
+        }
+        acc[toolName].totalRuns += 1;
+        if (step.status === "succeeded") acc[toolName].successCount += 1;
+        if (step.status === "failed") acc[toolName].failureCount += 1;
+
+        if (step.startedAt && step.completedAt) {
+          const durationMs = step.completedAt.getTime() - step.startedAt.getTime();
+          const currentAverage = acc[toolName].avgDurationMs ?? 0;
+          const previousCount = acc[toolName].totalRuns - 1;
+          acc[toolName].avgDurationMs = ((currentAverage * previousCount) + durationMs) / acc[toolName].totalRuns;
+        }
+        return acc;
+      }, {});
+
+      const eventCounts = events.reduce<Record<string, number>>((acc, event) => {
+        acc[event.eventType] = (acc[event.eventType] || 0) + 1;
+        return acc;
+      }, {});
+
+      const lastFailedStep = failedSteps[failedSteps.length - 1];
+      const lastError = lastFailedStep?.error || run.error || null;
+
+      const runStart = run.startedAt?.getTime();
+      const runEnd = run.completedAt?.getTime();
+      const totalDurationMs = runStart ? ((runEnd || Date.now()) - runStart) : null;
+
+      res.json({
+        runId: run.id,
+        status: run.status,
+        totalDurationMs,
+        stepCount: steps.length,
+        completedSteps: completedSteps.length,
+        successRate: steps.length ? succeededSteps.length / steps.length : 0,
+        failures: failedSteps.map(step => ({
+          stepIndex: step.stepIndex,
+          toolName: step.toolName,
+          error: step.error,
+          completedAt: step.completedAt,
+        })),
+        toolUsage: Object.values(toolUsage),
+        eventCounts,
+        lastError,
+        startedAt: run.startedAt?.toISOString() || null,
+        completedAt: run.completedAt?.toISOString() || null,
+      });
+    } catch (error: any) {
+      console.error("[AgentRoutes] Error getting run metrics:", error);
+      res.status(500).json({ error: "Failed to get agent run metrics" });
     }
   });
 
@@ -987,6 +1137,303 @@ export function createAgentModeRouter() {
       });
     }
   });
+
+  router.get("/robustness/report", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const requestedHours = parseInt((req.query.hours as string) || "24", 10);
+      const policy = getRobustnessPolicy();
+      const windowHours = Number.isFinite(requestedHours) ? clampNumber(requestedHours, policy.minHoursWindow, policy.maxHoursWindow, policy.defaultHoursWindow) : policy.defaultHoursWindow;
+      const since = new Date(Date.now() - (windowHours * 60 * 60 * 1000));
+
+      const runRows = await db
+        .select({
+          status: agentModeRuns.status,
+          total: count(),
+        })
+        .from(agentModeRuns)
+        .where(gte(agentModeRuns.createdAt, since))
+        .groupBy(agentModeRuns.status);
+
+      const stepRows = await db
+        .select({
+          status: agentModeSteps.status,
+          total: count(),
+        })
+        .from(agentModeSteps)
+        .innerJoin(agentModeRuns, eq(agentModeSteps.runId, agentModeRuns.id))
+        .where(gte(agentModeRuns.createdAt, since))
+        .groupBy(agentModeSteps.status);
+
+      const runningRows = await db
+        .select({ total: count() })
+        .from(agentModeRuns)
+        .where(and(gte(agentModeRuns.createdAt, since), eq(agentModeRuns.status, "running")));
+
+      const failedRows = await db
+        .select({ total: count() })
+        .from(agentModeRuns)
+        .where(and(gte(agentModeRuns.createdAt, since), eq(agentModeRuns.status, "failed")));
+
+      const totalRuns = runRows.reduce((sum, row) => sum + Number(row.total || 0), 0);
+      const totalSteps = stepRows.reduce((sum, row) => sum + Number(row.total || 0), 0);
+      const failedRuns = Number(failedRows?.[0]?.total || 0);
+      const completedRuns = runRows
+        .filter(r => r.status === "completed" || r.status === "succeeded")
+        .reduce((sum, row) => sum + Number(row.total || 0), 0);
+      const runningRuns = Number(runningRows?.[0]?.total || 0);
+
+      const byRunStatus = runRows.map(row => ({
+        status: row.status,
+        total: Number(row.total || 0),
+      }));
+
+      const failedStatuses = byRunStatus.reduce((acc, item) => acc + (item.status === "failed" ? item.total : 0), 0);
+
+      const byStepStatus = stepRows.map(row => ({
+        status: row.status,
+        total: Number(row.total || 0),
+      }));
+
+      const recentSuccess = toPercent(completedRuns, totalRuns);
+      const recentFailures = toPercent(failedRuns, totalRuns);
+
+      const resilience = toolRegistry.getResilienceMetrics();
+      const recommendations: string[] = [];
+
+      if (recentFailures > policy.failureWarningPercent) {
+        recommendations.push("Aumentar límites de reintento y revisar herramientas con mayor tasa de falla.");
+      }
+
+      const fragileTools = (Object.entries(resilience.byCategory) as Array<[string, { state: string; failureCount: number; successCount: number }]> )
+        .filter(([, metrics]) => metrics.failureCount > metrics.successCount)
+        .map(([name]) => name);
+
+      if (fragileTools.length > 0) {
+        recommendations.push(`Herramientas con mayor degradación: ${fragileTools.join(", ")}.`);
+      }
+
+      if (runningRuns > 0 && totalRuns >= policy.minimumRunsForRunningCheck) {
+        recommendations.push("Hay runs activos recientes; revisar timeout y estados pendientes de confirmación.");
+      }
+
+      if (failedStatuses > 0 && totalRuns > 0) {
+        recommendations.push(`Hay ${failedStatuses} runs en estado failed en esta ventana; revisar errores recurrentes.`);
+      }
+
+      const healthLevel = recentFailures >= policy.failureCriticalPercent
+        ? "degraded"
+        : recentFailures >= policy.failureWarningPercent
+          ? "warning"
+          : "healthy";
+
+      res.json({
+        healthLevel,
+        windowHours,
+        successRatePercent: recentSuccess,
+        failureRatePercent: recentFailures,
+        runs: {
+          total: totalRuns,
+          byStatus: byRunStatus,
+          running: runningRuns,
+          failed: failedRuns,
+          completed: completedRuns,
+        },
+        steps: {
+          total: totalSteps,
+          byStatus: byStepStatus,
+        },
+        resilience,
+        recommendations,
+      });
+    } catch (error: any) {
+      console.error("[AgentRoutes] Error generating robustness report:", error);
+      res.status(500).json({
+        error: "Failed to generate robustness report",
+      });
+    }
+  });
+
+
+  router.get("/robustness/alerts", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const requestedHours = parseInt((req.query.hours as string) || "24", 10);
+      const policy = getRobustnessPolicy();
+      const windowHours = Number.isFinite(requestedHours) ? clampNumber(requestedHours, policy.minHoursWindow, policy.maxHoursWindow, policy.defaultHoursWindow) : policy.defaultHoursWindow;
+      const staleMinutes = parseInt((req.query.staleMinutes as string) || "15", 10);
+      const since = new Date(Date.now() - (windowHours * 60 * 60 * 1000));
+      const staleCutoff = new Date(Date.now() - (Math.max(staleMinutes, 1) * 60 * 1000));
+
+      const runRows = await db
+        .select({
+          status: agentModeRuns.status,
+          total: count(),
+        })
+        .from(agentModeRuns)
+        .where(gte(agentModeRuns.createdAt, since))
+        .groupBy(agentModeRuns.status);
+
+      const stepRows = await db
+        .select({
+          status: agentModeSteps.status,
+          total: count(),
+        })
+        .from(agentModeSteps)
+        .innerJoin(agentModeRuns, eq(agentModeSteps.runId, agentModeRuns.id))
+        .where(gte(agentModeRuns.createdAt, since))
+        .groupBy(agentModeSteps.status);
+
+      const staleRows = await db
+        .select({ total: count(), runId: agentModeRuns.id })
+        .from(agentModeRuns)
+        .where(
+          and(
+            gte(agentModeRuns.createdAt, since),
+            eq(agentModeRuns.status, "running"),
+            lt(agentModeRuns.startedAt, staleCutoff)
+          )
+        );
+
+      const totalRuns = runRows.reduce((sum, row) => sum + Number(row.total || 0), 0);
+      const totalSteps = stepRows.reduce((sum, row) => sum + Number(row.total || 0), 0);
+      const failedRuns = runRows
+        .filter(row => row.status === "failed")
+        .reduce((sum, row) => sum + Number(row.total || 0), 0);
+      const runningRows = runRows
+        .filter(row => row.status === "running")
+        .reduce((sum, row) => sum + Number(row.total || 0), 0);
+
+      const recentSuccess = toPercent(
+        runRows
+          .filter(row => row.status === "completed" || row.status === "succeeded")
+          .reduce((sum, row) => sum + Number(row.total || 0), 0),
+        totalRuns
+      );
+
+      const recentFailures = toPercent(failedRuns, totalRuns);
+      const staleRuns = Number(staleRows?.[0]?.total || 0);
+      const stepFailed = stepRows
+        .filter(row => row.status === "failed")
+        .reduce((sum, row) => sum + Number(row.total || 0), 0);
+
+      const alerts = [] as Array<{
+        severity: "critical" | "warning" | "info";
+        code: string;
+        title: string;
+        detail: string;
+      }>;
+
+      if (recentFailures >= policy.alertFailureCriticalPercent) {
+        alerts.push({
+          severity: "critical",
+          code: "agent.failure.rate",
+          title: "Falla crítica de runs",
+          detail: `Falla reciente ${recentFailures.toFixed(2)}% en ${totalRuns} runs` ,
+        });
+      } else if (recentFailures >= policy.alertFailureWarningPercent) {
+        alerts.push({
+          severity: "warning",
+          code: "agent.failure.rate",
+          title: "Aumento de fallas",
+          detail: `Falla reciente ${recentFailures.toFixed(2)}% en ${totalRuns} runs`,
+        });
+      }
+
+      if (staleRuns >= policy.staleWarningCount) {
+        alerts.push({
+          severity: staleRuns >= policy.staleCriticalCount ? "critical" : "warning",
+          code: "agent.run.stale",
+          title: "Runs bloqueados",
+          detail: `Hay ${staleRuns} run(s) en ejecución por más de ${Math.max(staleMinutes, 1)} min`,
+        });
+      }
+
+      if (recentFailures >= policy.stepFailureSensitivityPercent && stepFailed > 0 && stepRows.length > 0) {
+        alerts.push({
+          severity: "warning",
+          code: "agent.steps.failed",
+          title: "Alta tasa de pasos fallidos",
+          detail: `Hay ${stepFailed} pasos fallidos en ${totalSteps} totales`,
+        });
+      }
+
+      if (runningRows > 0 && totalRuns >= policy.minimumRunsForThroughputAlert) {
+        alerts.push({
+          severity: "info",
+          code: "agent.throughput",
+          title: "Actividad agente elevada",
+          detail: `${runningRows} runs activos con ${totalRuns} runs analizados en ${windowHours}h`,
+        });
+      }
+
+      const recommendations = alerts.length
+        ? alerts.map(a => `${a.title}: ${a.detail}`)
+        : ["Sin alertas críticas: operación estable en ventana analizada."];
+
+      const alertLevel = alerts.some(a => a.severity === "critical")
+        ? "critical"
+        : alerts.some(a => a.severity === "warning")
+          ? "warning"
+          : alerts.length > 0
+            ? "info"
+            : "ok";
+
+      res.json({
+        healthLevel: recentFailures >= policy.alertFailureCriticalPercent
+          ? "degraded"
+          : recentFailures >= policy.alertFailureWarningPercent
+            ? "warning"
+            : "healthy",
+        windowHours,
+        staleMinutes: Math.max(staleMinutes, 1),
+        alertLevel,
+        alerts,
+        recommendations,
+        indicators: {
+          totalRuns,
+          runningRuns,
+          failedRuns,
+          totalSteps,
+          stepFailed,
+          staleRuns,
+          successRatePercent: recentSuccess,
+          failureRatePercent: recentFailures,
+        },
+      });
+    } catch (error: any) {
+      console.error("[AgentRoutes] Error generating robustness alerts:", error);
+      res.status(500).json({
+        error: "Failed to generate robustness alerts",
+      });
+    }
+  });
+
+  router.get("/robustness/policy", requireAuth, async (_req: Request, res: Response) => {
+    try {
+      const policy = getRobustnessPolicy();
+      res.json({
+        policy,
+        env: {
+          AGENT_FAILURE_WARNING_PERCENT: process.env.AGENT_FAILURE_WARNING_PERCENT || null,
+          AGENT_FAILURE_CRITICAL_PERCENT: process.env.AGENT_FAILURE_CRITICAL_PERCENT || null,
+          AGENT_ALERT_FAILURE_WARNING_PERCENT: process.env.AGENT_ALERT_FAILURE_WARNING_PERCENT || null,
+          AGENT_ALERT_FAILURE_CRITICAL_PERCENT: process.env.AGENT_ALERT_FAILURE_CRITICAL_PERCENT || null,
+          AGENT_STALE_WARNING_COUNT: process.env.AGENT_STALE_WARNING_COUNT || null,
+          AGENT_STALE_CRITICAL_COUNT: process.env.AGENT_STALE_CRITICAL_COUNT || null,
+          AGENT_THROUGHPUT_MIN_RUNS: process.env.AGENT_THROUGHPUT_MIN_RUNS || null,
+          AGENT_RUNNING_MIN_RUNS: process.env.AGENT_RUNNING_MIN_RUNS || null,
+          AGENT_STEP_FAILURE_PERCENT: process.env.AGENT_STEP_FAILURE_PERCENT || null,
+          AGENT_ROBUSTNESS_MAX_HOURS: process.env.AGENT_ROBUSTNESS_MAX_HOURS || null,
+          AGENT_ROBUSTNESS_MIN_HOURS: process.env.AGENT_ROBUSTNESS_MIN_HOURS || null,
+          AGENT_ROBUSTNESS_DEFAULT_HOURS: process.env.AGENT_ROBUSTNESS_DEFAULT_HOURS || null,
+        },
+      });
+    } catch (error: any) {
+      console.error("[AgentRoutes] Error returning robustness policy:", error);
+      res.status(500).json({ error: "Failed to get robustness policy" });
+    }
+  });
+
+
 
   return router;
 }
