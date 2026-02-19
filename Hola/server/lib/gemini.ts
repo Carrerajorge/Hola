@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import { UpstreamBadRequestError } from "../utils/errors";
 
 let _client: GoogleGenAI | null = null;
 
@@ -53,6 +54,78 @@ export interface GeminiResponse {
   model: string;
 }
 
+/**
+ * Validate that contents are well-formed for the Gemini API.
+ * Catches common issues before sending to the provider.
+ */
+function validateGeminiContents(
+  contents: Array<{ role: string; parts: any[] }>,
+  model: string
+): void {
+  if (!contents || contents.length === 0) {
+    throw new UpstreamBadRequestError(
+      "gemini",
+      `Empty contents array for model ${model}. At least one message with role "user" or "model" is required.`
+    );
+  }
+
+  for (let i = 0; i < contents.length; i++) {
+    const msg = contents[i];
+    if (!msg.role || (msg.role !== "user" && msg.role !== "model")) {
+      throw new UpstreamBadRequestError(
+        "gemini",
+        `Invalid role "${msg.role}" at index ${i}. Gemini requires "user" or "model" (not "assistant" or "system").`
+      );
+    }
+    if (!msg.parts || !Array.isArray(msg.parts) || msg.parts.length === 0) {
+      throw new UpstreamBadRequestError(
+        "gemini",
+        `Empty parts array at index ${i} (role=${msg.role}). Each message must have at least one part.`
+      );
+    }
+    // Ensure at least one part has content
+    const hasContent = msg.parts.some(
+      (p: any) => (p.text != null && p.text !== "") || p.inlineData
+    );
+    if (!hasContent) {
+      throw new UpstreamBadRequestError(
+        "gemini",
+        `All parts are empty at index ${i} (role=${msg.role}). At least one part must have text or inlineData.`
+      );
+    }
+  }
+}
+
+/**
+ * Wrap Gemini SDK errors, preserving status codes and categorizing
+ * upstream 400s as adapter bugs (not user errors).
+ */
+function wrapGeminiError(error: any, model: string, traceId?: string): Error {
+  const status = error?.status ?? error?.statusCode ?? error?.code;
+  const message = error?.message || String(error);
+
+  // Log the full sanitized error for debugging
+  console.error("[Gemini] API error:", {
+    model,
+    status,
+    message: message.slice(0, 500),
+    traceId,
+    errorName: error?.name,
+  });
+
+  // 400 from Gemini = our adapter sent bad data → UpstreamBadRequestError (502 to client)
+  if (status === 400 || (typeof message === "string" && /\b400\b/.test(message) && /invalid|bad request|malformed/i.test(message))) {
+    return new UpstreamBadRequestError("gemini", message, error, traceId, 400);
+  }
+
+  // Preserve original status on the error object for retry logic
+  const wrapped = new Error(`Gemini API error: ${message}`);
+  (wrapped as any).status = status;
+  (wrapped as any).code = error?.code;
+  (wrapped as any).provider = "gemini";
+  return wrapped;
+}
+
 export async function geminiChat(
   messages: GeminiChatMessage[],
   options: GeminiChatOptions = {}
@@ -60,11 +133,14 @@ export async function geminiChat(
   const ai = getGeminiClientOrThrow();
   // Default to a stable, fast model. Preview models can be rate-limited or unavailable.
   const model = options.model || GEMINI_MODELS.FLASH;
-  
+
   const contents = messages.map(msg => ({
     role: msg.role,
     parts: msg.parts
   }));
+
+  // Pre-flight validation: catch malformed payloads before they hit the API
+  validateGeminiContents(contents, model);
 
   try {
     const result = await ai.models.generateContent({
@@ -86,8 +162,7 @@ export async function geminiChat(
       model,
     };
   } catch (error: any) {
-    console.error("[Gemini] Error generating content:", error.message);
-    throw new Error(`Gemini API error: ${error.message}`);
+    throw wrapGeminiError(error, model);
   }
 }
 
@@ -98,11 +173,14 @@ export async function* geminiStreamChat(
   const ai = getGeminiClientOrThrow();
   // Default to a stable, fast model. Preview models can be rate-limited or unavailable.
   const model = options.model || GEMINI_MODELS.FLASH;
-  
+
   const contents = messages.map(msg => ({
     role: msg.role,
     parts: msg.parts
   }));
+
+  // Pre-flight validation: catch malformed payloads before they hit the API
+  validateGeminiContents(contents, model);
 
   try {
     const response = await ai.models.generateContentStream({
@@ -126,7 +204,6 @@ export async function* geminiStreamChat(
 
     yield { content: "", done: true };
   } catch (error: any) {
-    console.error("[Gemini] Stream error:", error.message);
-    throw new Error(`Gemini API error: ${error.message}`);
+    throw wrapGeminiError(error, model);
   }
 }

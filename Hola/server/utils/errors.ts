@@ -71,6 +71,38 @@ export class ExternalServiceError extends AppError {
   }
 }
 
+/**
+ * Upstream provider returned a 400 (bad request). This is NOT the user's fault —
+ * it means our adapter sent an invalid payload to the provider (Gemini, OpenAI, etc.).
+ * We surface it as 502 to the client so the frontend can trigger retry/fallback.
+ */
+export class UpstreamBadRequestError extends AppError {
+  public readonly provider: string;
+  public readonly upstreamStatus: number;
+  public readonly traceId?: string;
+  public readonly originalError?: Error;
+
+  constructor(
+    provider: string,
+    message: string,
+    originalError?: Error,
+    traceId?: string,
+    upstreamStatus: number = 400
+  ) {
+    super(
+      `[${provider}] Upstream bad request: ${message}`,
+      502,
+      'UPSTREAM_BAD_REQUEST',
+      true,
+      { provider, upstreamStatus, traceId }
+    );
+    this.provider = provider;
+    this.upstreamStatus = upstreamStatus;
+    this.traceId = traceId;
+    this.originalError = originalError;
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string = 'Resource conflict') {
     super(message, 409, 'CONFLICT_ERROR', true);

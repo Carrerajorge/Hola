@@ -14,6 +14,7 @@ import { recordQualityMetric, getQualityStats, type QualityMetric, type QualityS
 import { recordConnectorUsage } from "./connectorMetrics";
 import { storage } from "../storage";
 import type { InsertApiLog } from "@shared/schema";
+import { UpstreamBadRequestError } from "../utils/errors";
 
 import { getCircuitBreaker, CircuitBreakerOpenError, CircuitState } from "./circuitBreaker";
 import type { ZodSchema } from "zod";
@@ -561,48 +562,88 @@ class LLMGateway {
 
   // ===== Message Conversion =====
   private convertToGeminiMessages(messages: ChatCompletionMessageParam[]): { messages: GeminiChatMessage[]; systemInstruction?: string } {
-    const systemMsg = messages.find(m => m.role === "system");
-    const systemInstruction = systemMsg && typeof systemMsg.content === "string" ? systemMsg.content : undefined;
+    // Collect ALL system messages into a single system instruction
+    const systemParts: string[] = [];
+    for (const m of messages) {
+      if (m.role === "system") {
+        const content = typeof m.content === "string"
+          ? m.content
+          : Array.isArray(m.content)
+            ? (m.content as any[]).filter((p: any) => p?.type === "text").map((p: any) => p.text).join("\n")
+            : m.content != null ? String(m.content) : "";
+        if (content.trim()) systemParts.push(content);
+      }
+    }
+    const systemInstruction = systemParts.length > 0 ? systemParts.join("\n\n") : undefined;
 
-    const geminiMessages: GeminiChatMessage[] = messages
-      .filter(m => m.role !== "system")
-      .map(m => {
-        const role = m.role === "assistant" ? "model" : "user";
+    const geminiMessages: GeminiChatMessage[] = [];
 
-        // Handle multimodal content (array of text + image_url parts)
-        if (Array.isArray(m.content)) {
-          const parts: any[] = [];
-          for (const part of m.content as any[]) {
-            if (part.type === "text") {
-              parts.push({ text: part.text });
-            } else if (part.type === "image_url" && part.image_url?.url) {
-              // Extract base64 from data URI for Gemini's inlineData format
-              const url = part.image_url.url as string;
-              const dataUriMatch = url.match(/^data:([^;]+);base64,(.+)$/);
-              if (dataUriMatch) {
-                parts.push({
-                  inlineData: {
-                    mimeType: dataUriMatch[1],
-                    data: dataUriMatch[2],
-                  },
-                });
-              } else {
-                // URL-based image — Gemini supports fileUri but for simplicity add as text reference
-                parts.push({ text: `[Image: ${url}]` });
-              }
+    for (const m of messages) {
+      if (m.role === "system") continue; // already extracted above
+
+      // Map OpenAI roles to Gemini roles — NEVER send "assistant" or "system" to Gemini
+      const role: "user" | "model" = m.role === "assistant" ? "model" : "user";
+
+      // Handle multimodal content (array of text + image_url parts)
+      if (Array.isArray(m.content)) {
+        const parts: any[] = [];
+        for (const part of m.content as any[]) {
+          if (part.type === "text" && part.text) {
+            parts.push({ text: part.text });
+          } else if (part.type === "image_url" && part.image_url?.url) {
+            // Extract base64 from data URI for Gemini's inlineData format
+            const url = part.image_url.url as string;
+            const dataUriMatch = url.match(/^data:([^;]+);base64,(.+)$/);
+            if (dataUriMatch) {
+              parts.push({
+                inlineData: {
+                  mimeType: dataUriMatch[1],
+                  data: dataUriMatch[2],
+                },
+              });
+            } else {
+              // URL-based image — Gemini supports fileUri but for simplicity add as text reference
+              parts.push({ text: `[Image: ${url}]` });
             }
           }
-          if (parts.length === 0) parts.push({ text: "" });
-          return { role, parts };
         }
+        // Gemini requires at least one non-empty part
+        if (parts.length === 0) parts.push({ text: "(empty message)" });
+        geminiMessages.push({ role, parts });
+        continue;
+      }
 
-        return {
-          role,
-          parts: [{ text: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }],
-        };
+      // Handle null/undefined content
+      const textContent = m.content == null
+        ? "(empty message)"
+        : typeof m.content === "string"
+          ? (m.content.trim() || "(empty message)")
+          : JSON.stringify(m.content);
+
+      geminiMessages.push({
+        role,
+        parts: [{ text: textContent }],
       });
+    }
 
-    return { messages: geminiMessages, systemInstruction };
+    // Gemini requires the first message to have role "user". If the conversation
+    // starts with "model" (e.g. from a skill seed), prepend a synthetic user turn.
+    if (geminiMessages.length > 0 && geminiMessages[0].role === "model") {
+      geminiMessages.unshift({ role: "user", parts: [{ text: "(conversation context)" }] });
+    }
+
+    // Gemini does not allow consecutive messages with the same role.
+    // Merge consecutive same-role messages to avoid 400 errors.
+    const merged: GeminiChatMessage[] = [];
+    for (const msg of geminiMessages) {
+      if (merged.length > 0 && merged[merged.length - 1].role === msg.role) {
+        merged[merged.length - 1].parts.push(...msg.parts);
+      } else {
+        merged.push({ role: msg.role, parts: [...msg.parts] });
+      }
+    }
+
+    return { messages: merged, systemInstruction };
   }
 
   // ===== Provider Selection =====
@@ -871,6 +912,13 @@ class LLMGateway {
         // xai / openai / deepseek
         return await this.executeOpenAICompatible(provider, messages, options, model, startTime);
       } catch (error: any) {
+        // Upstream 400 from provider = our adapter bug. Do NOT retry on the
+        // same provider (the payload is still wrong), but DO allow fallback
+        // to a different provider in executeWithFallback.
+        if (error instanceof UpstreamBadRequestError) {
+          throw error;
+        }
+
         const isRetryable =
           error.status === 429 ||
           error.status === 500 ||
@@ -1286,15 +1334,30 @@ class LLMGateway {
       // Record connector failure for gemini
       recordConnectorUsage("gemini", latencyMs, false);
 
+      // Determine the upstream status code for logging
+      const upstreamStatus = error instanceof UpstreamBadRequestError
+        ? error.upstreamStatus
+        : (error.status || 500);
+
       // Persist API error log to database asynchronously
       this.persistApiLog({
         provider: "gemini",
         model,
         endpoint: "/generateContent",
         latencyMs,
-        statusCode: error.status || 500,
-        errorMessage: error.message,
+        statusCode: upstreamStatus,
+        errorMessage: error.message?.slice(0, 500),
         userId: options.userId,
+      });
+
+      // Log full sanitized error context for debugging (never leak API keys)
+      console.error(`[LLMGateway] Gemini error on ${options.requestId}:`, {
+        model,
+        upstreamStatus,
+        isUpstreamBadRequest: error instanceof UpstreamBadRequestError,
+        messageCount: geminiMessages.length,
+        hasSystemInstruction: !!systemInstruction,
+        error: error.message?.slice(0, 300),
       });
 
       throw error;

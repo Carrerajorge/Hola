@@ -211,14 +211,51 @@ export function useStreamChat(deps: StreamChatDeps) {
 
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
-          const error = new Error(errorData.error || `HTTP ${response.status}`);
+
+          // Extract meaningful error info from structured error responses
+          const errorMessage = errorData.error
+            || errorData.message
+            || errorData.error?.message
+            || null;
+          const errorCode = errorData.code || errorData.error?.code || null;
+          const isRetryable = errorData.retryable !== false;
+          const traceId = errorData.traceId || errorData.requestId || null;
+
+          // Build a user-friendly error message instead of raw "HTTP 400"
+          let userFacingMessage: string;
+          if (errorMessage && errorMessage !== `HTTP ${response.status}`) {
+            userFacingMessage = errorMessage;
+          } else if (response.status === 502 || response.status === 503) {
+            userFacingMessage = "El servicio de IA no está disponible temporalmente. Intenta de nuevo.";
+          } else if (response.status === 429) {
+            userFacingMessage = "Demasiadas solicitudes. Espera unos segundos e intenta de nuevo.";
+          } else if (response.status === 400) {
+            userFacingMessage = "No se pudo procesar la solicitud. Intenta reformular tu mensaje.";
+          } else if (response.status >= 500) {
+            userFacingMessage = "Error del servidor. Intenta de nuevo en unos momentos.";
+          } else {
+            userFacingMessage = "Error de conexión. Por favor, intenta de nuevo.";
+          }
+
+          const error = new Error(userFacingMessage);
+          (error as any).status = response.status;
+          (error as any).code = errorCode;
+          (error as any).retryable = isRetryable;
+          (error as any).traceId = traceId;
 
           const errorMsg = buildErrorMessage?.(error, messageId) ?? {
             id: messageId,
             role: "assistant" as const,
-            content: error.message || "Error de conexión. Por favor, intenta de nuevo.",
+            content: userFacingMessage,
             timestamp: new Date(),
-            requestId: generateRequestId(),
+            requestId: traceId || generateRequestId(),
+            status: 'failed' as const,
+            metadata: {
+              errorCode,
+              httpStatus: response.status,
+              retryable: isRetryable,
+              traceId,
+            },
           };
 
           finalize(errorMsg);
@@ -362,8 +399,13 @@ export function useStreamChat(deps: StreamChatDeps) {
 
               // Terminal: error
               if (currentEventType === "error" || currentEventType === "production_error") {
-                const errorMsg = data.message || data.error || "Stream error";
-                throw new Error(errorMsg);
+                const errorMsg = data.error || data.message || "Error del servidor";
+                const streamError = new Error(errorMsg);
+                (streamError as any).code = data.code || 'STREAM_ERROR';
+                (streamError as any).category = data.category;
+                (streamError as any).retryable = data.retryable !== false;
+                (streamError as any).traceId = data.traceId || data.requestId;
+                throw streamError;
               }
             } catch (parseErr: any) {
               // If this is a re-thrown error from above, propagate it
@@ -409,14 +451,30 @@ export function useStreamChat(deps: StreamChatDeps) {
           return { ok: false, content: fullContent, response, error: err };
         }
 
-        console.error("[useStreamChat] Stream error:", err);
+        console.error("[useStreamChat] Stream error:", {
+          message: err.message,
+          code: err.code,
+          category: err.category,
+          retryable: err.retryable,
+          traceId: err.traceId,
+        });
+
+        // Build a user-friendly error message
+        const userMessage = err.message || "Error de conexión. Por favor, intenta de nuevo.";
 
         const errorMsg = buildErrorMessage?.(err, messageId) ?? {
           id: messageId,
           role: "assistant" as const,
-          content: err.message || "Error de conexión. Por favor, intenta de nuevo.",
+          content: userMessage,
           timestamp: new Date(),
-          requestId: generateRequestId(),
+          requestId: err.traceId || generateRequestId(),
+          status: 'failed' as const,
+          metadata: {
+            errorCode: err.code,
+            category: err.category,
+            retryable: err.retryable !== false,
+            traceId: err.traceId,
+          },
         };
 
         if (!finalizingRef.current) {

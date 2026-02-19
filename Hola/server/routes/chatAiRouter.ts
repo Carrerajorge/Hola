@@ -50,7 +50,9 @@ import { generateAndPersistChatTitle } from "../lib/chatTitleGenerator";
 import { validate } from "../lib/requestValidator";
 import { streamChatRequestSchema } from "../schemas/chatSchemas";
 
-type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
+import { UpstreamBadRequestError } from "../utils/errors";
+
+type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'upstream_bad_request' | 'unknown';
 const isDebugLogEnabled = process.env.DEBUG === "true";
 const MAX_STREAM_REQUEST_ID_LEN = 140;
 const MAX_STREAM_EVENT_PAYLOAD_BYTES = 4600;
@@ -295,6 +297,40 @@ function categorizeError(error: any, requestId: string): CategorizedError {
   const errorMessage = error?.message?.toLowerCase() || '';
   const errorCode = error?.code || error?.statusCode;
 
+  // UPSTREAM_BAD_REQUEST: Our adapter sent bad data to the provider.
+  // This is an internal bug, NOT the user's fault. Surface as 502 with retry.
+  if (error instanceof UpstreamBadRequestError) {
+    return {
+      category: 'upstream_bad_request',
+      userMessage: `El proveedor de IA (${error.provider}) rechazó la solicitud. Reintentando con otro proveedor...`,
+      technicalDetails: error.message,
+      requestId,
+      retryable: true,
+      statusCode: 502
+    };
+  }
+
+  // Check for upstream/provider 400 errors that aren't UpstreamBadRequestError yet
+  // (e.g. from OpenAI-compatible providers)
+  if (errorCode === 400 && (
+    errorMessage.includes('gemini') ||
+    errorMessage.includes('grok') ||
+    errorMessage.includes('openai') ||
+    errorMessage.includes('anthropic') ||
+    errorMessage.includes('deepseek') ||
+    errorMessage.includes('api error') ||
+    errorMessage.includes('upstream')
+  )) {
+    return {
+      category: 'upstream_bad_request',
+      userMessage: 'El servicio de IA rechazó la solicitud. Intenta de nuevo o cambia de modelo.',
+      technicalDetails: error.message,
+      requestId,
+      retryable: true,
+      statusCode: 502
+    };
+  }
+
   if (errorMessage.includes('rate limit') || errorMessage.includes('too many requests') || errorCode === 429) {
     return {
       category: 'rate_limit',
@@ -341,7 +377,9 @@ function categorizeError(error: any, requestId: string): CategorizedError {
     };
   }
 
-  if (errorMessage.includes('invalid') || errorMessage.includes('validation') || errorCode === 400) {
+  // Only classify as validation error if it's truly a user input issue,
+  // NOT an upstream provider rejection
+  if ((errorMessage.includes('invalid') || errorMessage.includes('validation')) && errorCode === 400) {
     return {
       category: 'validation',
       userMessage: 'Los datos enviados no son válidos. Por favor verifica tu solicitud.',
@@ -3105,12 +3143,21 @@ ${attachmentContext}`;
       }
 
     } catch (error: any) {
-      console.error(`[SSE] Stream error ${requestId}:`, error);
+      // Categorize the error for proper user-facing messaging
+      const categorized = categorizeError(error, requestId);
+
+      console.error(`[SSE] Stream error ${requestId}:`, {
+        category: categorized.category,
+        statusCode: categorized.statusCode,
+        retryable: categorized.retryable,
+        provider: error?.provider || (error instanceof UpstreamBadRequestError ? error.provider : undefined),
+        technicalDetails: categorized.technicalDetails?.slice(0, 300),
+      });
 
       // Mark run as failed if we claimed one
       if (claimedRun) {
         try {
-          await storage.updateChatRunStatus(claimedRun.id, 'failed', error.message);
+          await storage.updateChatRunStatus(claimedRun.id, 'failed', categorized.technicalDetails?.slice(0, 500));
         } catch (updateError) {
           console.error(`[SSE] Failed to update run status:`, updateError);
         }
@@ -3120,7 +3167,10 @@ ${attachmentContext}`;
       const errorTimings = reportTimings("error");
       if (!isConnectionClosed) {
         writeSse(res, 'error', {
-          error: error.message,
+          error: categorized.userMessage,
+          code: categorized.category === 'upstream_bad_request' ? 'UPSTREAM_BAD_REQUEST' : (error.code || categorized.category.toUpperCase()),
+          category: categorized.category,
+          retryable: categorized.retryable,
           requestId,
           runId: errorRunId,
           traceId: requestId,
@@ -3129,7 +3179,12 @@ ${attachmentContext}`;
         });
 
         emitTraceEvent(errorRunId, 'error', {
-          error: { message: error.message, code: error.code || 'UNKNOWN' }
+          error: {
+            message: categorized.userMessage,
+            code: categorized.category === 'upstream_bad_request' ? 'UPSTREAM_BAD_REQUEST' : (error.code || 'UNKNOWN'),
+            category: categorized.category,
+            retryable: categorized.retryable,
+          }
         }).catch(() => { });
       }
     } finally {

@@ -1,12 +1,14 @@
 
 import React, { memo, useState, useMemo } from "react";
 import {
+    AlertTriangle,
     CheckCircle2,
     Loader2,
     FileText,
     FileSpreadsheet,
     FileIcon,
     Maximize2,
+    RefreshCw,
     ZoomIn,
     Download,
     Eye
@@ -252,7 +254,35 @@ export const AssistantMessage = memo(function AssistantMessage({
                 <NewsCards sources={message.webSources} maxDisplay={5} />
             )}
 
-            {message.content && !message.isThinking && !message.agentRun && (
+            {/* Failed message with retry button */}
+            {message.status === 'failed' && (
+                <div className="flex items-start gap-3 p-3 rounded-lg border border-red-200 dark:border-red-800/50 bg-red-50 dark:bg-red-950/20 text-sm">
+                    <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                        <p className="text-red-700 dark:text-red-400">
+                            {message.content || "Error al procesar la solicitud."}
+                        </p>
+                        {message.metadata?.traceId && (
+                            <p className="text-[10px] text-red-400 dark:text-red-600 mt-1">
+                                ID: {message.metadata.traceId}
+                            </p>
+                        )}
+                    </div>
+                    {message.metadata?.retryable !== false && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            className="flex items-center gap-1.5 text-xs border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 flex-shrink-0"
+                            onClick={() => onRegenerate(msgIndex)}
+                        >
+                            <RefreshCw className="h-3 w-3" />
+                            Reintentar
+                        </Button>
+                    )}
+                </div>
+            )}
+
+            {message.content && !message.isThinking && !message.agentRun && message.status !== 'failed' && (
                 <>
                     {contentBlocks.map((block, blockIdx) =>
                         block.type === "python" ? (
@@ -556,6 +586,7 @@ export const AssistantMessage = memo(function AssistantMessage({
     return (
         prevProps.message.id === nextProps.message.id &&
         prevProps.message.content === nextProps.message.content &&
+        prevProps.message.status === nextProps.message.status &&
         prevProps.message.isThinking === nextProps.message.isThinking &&
         prevProps.message.webSources === nextProps.message.webSources &&
         prevProps.msgIndex === nextProps.msgIndex &&
