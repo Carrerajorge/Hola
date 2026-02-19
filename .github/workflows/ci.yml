@@ -647,7 +647,7 @@ jobs:
 
       - name: Upload Trivy secret scan report to GitHub Security
         if: always() && hashFiles('trivy-secrets/secret-scan.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-secrets/secret-scan.sarif
           category: trivy-secret-scan
