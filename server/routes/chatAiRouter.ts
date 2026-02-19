@@ -962,6 +962,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 let heartbeatInterval: NodeJS.Timeout | null = null;
 let isConnectionClosed = false;
 let claimedRun: any = null;
+let runFinalized = false; // true once run status has been set to done/failed
 let assistantMessageId: string | null = null;
 let streamHardTimeout: NodeJS.Timeout | null = null;
 let streamIdleTimeout: NodeJS.Timeout | null = null;
@@ -1280,14 +1281,29 @@ const cleanSkipRunStreamDedup = (): void => {
           // (best-effort), /chat/stream will still function.
         } else {
           if (existingRun.status === "processing") {
-            recordStage("run_claim_ms", claimStageStart);
-            console.log(`[Run] Run ${existingRun.id} is already being processed, returning status`);
-            return res.json({
-              status: "already_processing",
-              run: existingRun,
-              traceId: requestId,
-              timings: reportTimings("already_processing"),
-            });
+            const STALE_RUN_THRESHOLD_MS = 5 * 60 * 1000;
+            const runStartedAt = existingRun.startedAt ? new Date(existingRun.startedAt).getTime() : 0;
+            const runAge = Date.now() - runStartedAt;
+
+            // Allow run replacement in two cases:
+            // 1. queueMode "replace" (default) — client explicitly wants to supersede
+            // 2. Stale run (processing > 5 min) — abandoned connection safety net
+            if (queueMode === "replace" || runAge > STALE_RUN_THRESHOLD_MS) {
+              const reason = runAge > STALE_RUN_THRESHOLD_MS ? "stale_run_recovered" : "run_replaced";
+              console.log(`[Run] Resetting run ${existingRun.id} to pending (${reason}, age=${Math.round(runAge / 1000)}s)`);
+              await storage.updateChatRunStatus(existingRun.id, "pending", reason);
+              existingRun = { ...existingRun, status: "pending" };
+              // Fall through to claim the reset run below
+            } else {
+              recordStage("run_claim_ms", claimStageStart);
+              console.log(`[Run] Run ${existingRun.id} is already being processed (${Math.round(runAge / 1000)}s), returning status`);
+              return res.json({
+                status: "already_processing",
+                run: existingRun,
+                traceId: requestId,
+                timings: reportTimings("already_processing"),
+              });
+            }
           }
           if (existingRun.status === "done") {
             recordStage("run_claim_ms", claimStageStart);
@@ -1300,7 +1316,9 @@ const cleanSkipRunStreamDedup = (): void => {
             });
           }
           if (existingRun.status === "failed") {
-            console.log(`[Run] Run ${existingRun.id} previously failed`);
+            console.log(`[Run] Run ${existingRun.id} previously failed — resetting to pending for retry`);
+            await storage.updateChatRunStatus(existingRun.id, "pending");
+            existingRun = { ...existingRun, status: "pending" };
           }
 
           const claimKey = existingRun.clientRequestId || clientRequestId;
@@ -2025,16 +2043,25 @@ const cleanSkipRunStreamDedup = (): void => {
 
         // If run is already processing or done, don't re-process
         if (existingRun.status === 'processing') {
-          console.log(`[Run] Run ${runId} is already being processed, returning status`);
-          return res.json({ status: 'already_processing', run: existingRun });
+          const runStartedAt = existingRun.startedAt ? new Date(existingRun.startedAt).getTime() : 0;
+          const runAge = Date.now() - runStartedAt;
+          if (queueMode === "replace" || runAge > 5 * 60 * 1000) {
+            const reason = runAge > 5 * 60 * 1000 ? "stale_run_recovered" : "run_replaced";
+            console.log(`[Run] Resetting run ${runId} to pending (${reason}, age=${Math.round(runAge / 1000)}s)`);
+            await storage.updateChatRunStatus(existingRun.id, "pending", reason);
+            // Fall through to claim below
+          } else {
+            console.log(`[Run] Run ${runId} is already being processed, returning status`);
+            return res.json({ status: 'already_processing', run: existingRun });
+          }
         }
         if (existingRun.status === 'done') {
           console.log(`[Run] Run ${runId} already completed`);
           return res.json({ status: 'already_done', run: existingRun });
         }
         if (existingRun.status === 'failed') {
-          console.log(`[Run] Run ${runId} previously failed`);
-          // Allow retry for failed runs by claiming again
+          console.log(`[Run] Run ${runId} previously failed — resetting to pending for retry`);
+          await storage.updateChatRunStatus(existingRun.id, "pending");
         }
 
         // Atomically claim the pending run using clientRequestId for specificity
@@ -3029,6 +3056,7 @@ ${attachmentContext}`;
       // Mark run as done if we claimed one
       if (claimedRun) {
         await storage.updateChatRunStatus(claimedRun.id, 'done');
+        runFinalized = true;
       }
 
       // Fire-and-forget: Generate an AI-powered descriptive title for this chat
@@ -3119,6 +3147,7 @@ ${attachmentContext}`;
       if (claimedRun) {
         try {
           await storage.updateChatRunStatus(claimedRun.id, 'failed', error.message);
+          runFinalized = true;
         } catch (updateError) {
           console.error(`[SSE] Failed to update run status:`, updateError);
         }
@@ -3145,6 +3174,26 @@ ${attachmentContext}`;
         clearInterval(heartbeatInterval);
       }
       clearStreamTimeouts();
+
+      // Safety net: if we claimed a run but neither the try nor catch block
+      // updated its status (e.g. client disconnected mid-stream and the code
+      // fell through), mark it failed so it doesn't stay "processing" forever.
+      // We check startedAt to avoid clobbering a run that was re-claimed by a
+      // replacement request (queueMode=replace resets startedAt).
+      if (claimedRun && !runFinalized) {
+        try {
+          const currentRun = await storage.getChatRun(claimedRun.id);
+          const ourStartedAt = claimedRun.startedAt ? new Date(claimedRun.startedAt).getTime() : 0;
+          const currentStartedAt = currentRun?.startedAt ? new Date(currentRun.startedAt).getTime() : 0;
+          if (currentRun?.status === "processing" && currentStartedAt <= ourStartedAt) {
+            console.log(`[Run] Cleaning up orphaned run ${claimedRun.id} (connection_closed=${isConnectionClosed})`);
+            await storage.updateChatRunStatus(claimedRun.id, "failed", "stream_cleanup");
+          }
+        } catch (cleanupErr) {
+          console.warn("[Run] Failed to cleanup orphaned run:", cleanupErr);
+        }
+      }
+
       if (!timingReported) {
         reportTimings(isConnectionClosed ? "connection_closed" : "ended");
       }

@@ -923,6 +923,12 @@ export class MemStorage implements IStorage {
     if (status === 'done' || status === 'failed') {
       updates.completedAt = new Date();
     }
+    if (status === 'pending') {
+      // Reset run to pristine state for re-claiming (stale recovery / replace)
+      updates.startedAt = null;
+      updates.completedAt = null;
+      updates.error = null;
+    }
     if (error) {
       updates.error = error;
     }
