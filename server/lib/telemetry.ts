@@ -1,12 +1,4 @@
-/**
- * OpenTelemetry Tracing Service
- * 
- * Features:
- * - Automatic trace propagation
- * - Span creation for pipeline steps
- * - Export to Jaeger/Zipkin
- * - Custom attributes and events
- */
+/** * OpenTelemetry Tracing Service * * Features: * - Automatic trace propagation * - Span creation for pipeline steps * - Export to Jaeger/Zipkin * - Custom attributes and events */
 
 import { Request, Response, NextFunction } from "express";
 
@@ -83,7 +75,7 @@ export async function initTelemetry(customConfig: Partial<TelemetryConfig> = {})
         // Try to load OpenTelemetry SDK
         const { NodeSDK } = await import("@opentelemetry/sdk-node");
         const { getNodeAutoInstrumentations } = await import("@opentelemetry/auto-instrumentations-node");
-        const { Resource } = await import("@opentelemetry/resources");
+        const { resourceFromAttributes } = await import("@opentelemetry/resources");
         const { SemanticResourceAttributes } = await import("@opentelemetry/semantic-conventions");
 
         // Create exporter based on config
@@ -118,10 +110,10 @@ export async function initTelemetry(customConfig: Partial<TelemetryConfig> = {})
         }
 
         const sdk = new NodeSDK({
-            resource: new Resource({
-                [SemanticResourceAttributes.SERVICE_NAME]: config.serviceName,
-                [SemanticResourceAttributes.SERVICE_VERSION]: config.serviceVersion,
-                [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: config.environment,
+            resource: resourceFromAttributes({
+              [SemanticResourceAttributes.SERVICE_NAME]: config.serviceName,
+              [SemanticResourceAttributes.SERVICE_VERSION]: config.serviceVersion,
+              [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: config.environment,
             }),
             traceExporter: exporter,
             instrumentations: [getNodeAutoInstrumentations()],

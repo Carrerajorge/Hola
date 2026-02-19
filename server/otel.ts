@@ -7,10 +7,8 @@ import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
 
 import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 
-import { Resource } from "@opentelemetry/resources";
-
+import { resourceFromAttributes } from "@opentelemetry/resources";
 import { SemanticResourceAttributes } from "@opentelemetry/semantic-conventions";
-
 
 
 const OTEL_EXPORTER_OTLP_ENDPOINT =
@@ -37,14 +35,10 @@ const metricExporter = new OTLPMetricExporter({
 
 const sdk = new NodeSDK({
 
-  resource: new Resource({
-
-    [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
-
-    [SemanticResourceAttributes.SERVICE_VERSION]: serviceVersion,
-
-    [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: environment,
-
+  resource: resourceFromAttributes({
+    [SemanticResourceAttributes.SERVICE_NAME]: ...,
+    [SemanticResourceAttributes.SERVICE_VERSION]: ...,
+    [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: ...,
   }),
 
   metricReader: new PeriodicExportingMetricReader({ exporter: metricExporter, exportIntervalMillis: 10000 }),
