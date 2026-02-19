@@ -34,9 +34,9 @@ const PageLoader = () => (
 );
 
 function RootRoute() {
-  const { isReady, isAuthenticated } = useAuth();
+  const { isReady, user } = useAuth();
   if (!isReady) return <PageLoader />;
-  return isAuthenticated ? <Home /> : <LandingPage />;
+  return user ? <Home /> : <LandingPage />;
 }
 
 // Wouter passes RouteComponentProps to route components; pages typically ignore them.
