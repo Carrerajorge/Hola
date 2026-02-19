@@ -303,7 +303,7 @@ extract_manifest_digest() {
   local image_ref="$1"
   local digest
 
-  digest="$(docker manifest inspect "${image_ref}" | python3 -c 'import sys, json; d=json.load(sys.stdin); m=d.get("manifests") or []; print((m[0].get("digest") if m else (d.get("digest") or d.get("config", {} ).get("digest", "")))')"
+  digest="$(docker manifest inspect "${image_ref}" | python3 -c 'import sys, json; d=json.load(sys.stdin); m=d.get("manifests") or []; print((m[0].get("digest") if m else (d.get("digest") or d.get("config", {}).get("digest", ""))))')"
   if [ "${digest}" = "None" ] || [ -z "${digest}" ]; then
     echo ""
   else
