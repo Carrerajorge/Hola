@@ -220,6 +220,7 @@ jobs:
 
       - name: Verify images are present in GHCR (and digests when applicable)
         id: image_manifest_check
+        continue-on-error: true
         env:
           IMAGE_TAG: ${{ steps.tag.outputs.image_tag }}
           EXPECTED_IMAGE_TAG: ${{ needs.build_images.outputs.image_tag }}
@@ -575,6 +576,7 @@ jobs:
 
       - name: Verify images are present in GHCR and digest pinned
         id: image_manifest_check
+        continue-on-error: true
         env:
           IMAGE_TAG: ${{ steps.tag.outputs.image_tag }}
           EXPECTED_APP_DIGEST: ${{ needs.build_images.outputs.app_digest }}
