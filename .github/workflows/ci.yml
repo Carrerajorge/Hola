@@ -274,12 +274,7 @@ jobs:
   quality-gate:
     name: Quality Gate
     needs: [typecheck, merge-marker-guard, test, build, audit, python-security, secret-scan]
-<<<<<<< HEAD
     if: ${{ always() && github.event_name != 'pull_request' }}
-=======
-    if: always()
-    continue-on-error: true
->>>>>>> origin/main
     runs-on: ubuntu-latest
     services:
       postgres:
