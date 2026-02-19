@@ -1942,7 +1942,9 @@ export function ChatInterface({
 
     const idx = displayMessages.findIndex((m: any) => (m?.clientTempId || m?.id) === msgKey);
     const historyMsgs = idx >= 0 ? displayMessages.slice(0, idx + 1) : [...displayMessages, msg];
-    const history = historyMsgs.map((m: any) => ({ role: m.role, content: m.content }));
+    const history = historyMsgs
+      .map((m: any) => ({ role: m.role, content: String(m.content || '') }))
+      .filter((m: any) => m.content.length > 0);
 
     const hasDocumentAttachmentsForRetry = (msg.attachments || []).some((att: any) =>
       isDocumentFile(att?.mimeType || att?.type, att?.name || "", att?.type)
@@ -1981,7 +1983,7 @@ export function ChatInterface({
         clientRequestId: streamRunContext.clientRequestId,
         userRequestId: streamRunContext.userRequestId,
         attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
-        docTool: selectedDocTool || null,
+        docTool: selectedDocTool || undefined,
         provider: selectedProvider,
         model: selectedModel,
         latencyMode,
@@ -2441,7 +2443,9 @@ export function ChatInterface({
 
     setRegeneratingMsgIndex(null);
 
-    let chatHistory = contextUpToUser.map(m => ({ role: m.role, content: m.content }));
+    let chatHistory = contextUpToUser
+      .map(m => ({ role: m.role, content: String(m.content || '') }))
+      .filter(m => m.content.length > 0);
     if (instruction) {
       chatHistory = [...chatHistory, { role: "user" as const, content: `[Instrucción de regeneración: ${instruction}]` }];
     }
@@ -4199,7 +4203,7 @@ export function ChatInterface({
             chatId: effectiveChatIdForStream,
             signal: abortControllerRef.current.signal,
             body: {
-              messages: [...messages.map(m => ({ role: m.role, content: m.content })), { role: "user", content: generationInput }],
+              messages: [...messages.map(m => ({ role: m.role, content: String(m.content || '') })).filter(m => m.content.length > 0), { role: "user", content: generationInput }],
               chatId: effectiveChatIdForStream,
               conversationId: effectiveChatIdForStream,
               runId: streamRunContext.runId,
@@ -5264,10 +5268,9 @@ export function ChatInterface({
             ? `${fileContents}\n\n[SOLICITUD DEL USUARIO]: ${userInput}`
             : userInput;
 
-          const chatHistory = [...messages, { ...userMsg, content: messageWithFiles }].map(m => ({
-            role: m.role,
-            content: m.content
-          }));
+          const chatHistory = [...messages, { ...userMsg, content: messageWithFiles }]
+            .map(m => ({ role: m.role, content: String(m.content || '') }))
+            .filter(m => m.content.length > 0);
 
           // Extract image data URLs from current files
           const imageDataUrls = currentUploadedFiles
@@ -5478,7 +5481,7 @@ IMPORTANTE:
                 attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
                 // Send image base64 directly for vision fallback if storagePath resolution fails
                 lastImageBase64: firstImageDataUrl,
-                docTool: selectedDocTool || null,
+                docTool: selectedDocTool || undefined,
                 provider: selectedProvider,
                 model: selectedModel,
                 latencyMode,

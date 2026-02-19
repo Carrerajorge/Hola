@@ -179,6 +179,12 @@
     "Más antiguo": "Older",
     "Sin resultados": "No results",
     "Reintentar": "Retry",
-    "Cambiar vista": "Switch view"
+    "Cambiar vista": "Switch view",
+    "Entregado": "Delivered",
+    "Enviado": "Sent",
+    "Enviando...": "Sending...",
+    "Respuesta completada": "Response completed",
+    "Procesando tu mensaje...": "Processing your message...",
+    "Generando respuesta...": "Generating response..."
   }
 }

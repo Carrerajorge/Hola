@@ -178,6 +178,12 @@
     "Older": "Más antiguo",
     "No results": "Sin resultados",
     "Retry": "Reintentar",
-    "Switch view": "Cambiar vista"
+    "Switch view": "Cambiar vista",
+    "Entregado": "Entregado",
+    "Enviado": "Enviado",
+    "Enviando...": "Enviando...",
+    "Respuesta completada": "Respuesta completada",
+    "Procesando tu mensaje...": "Procesando tu mensaje...",
+    "Generando respuesta...": "Generando respuesta..."
   }
 }
