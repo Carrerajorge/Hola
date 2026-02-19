@@ -462,12 +462,12 @@ export default function Home() {
     const realId = result?.run?.chatId || (result ? resolveRealChatId(pendingId) : null);
     if (realId && !realId.startsWith("pending-")) {
       moveConversationUiState(pendingId, realId);
-      // CRITICAL: Update internal state WITHOUT triggering wouter's router.
-      // setLocation() causes a full component remount cascade that kills the
-      // SSE stream before ChatInterface can start it. Instead:
-      // 1. Update activeChatId directly (re-renders ChatInterface with correct chatId prop)
-      // 2. Silently update the URL bar via replaceState (no routing, no remount)
+      // addMessage already renames the chat entry and updates activeChatId,
+      // but call setActiveChatId again as a safety net.
       setActiveChatId(realId);
+      // Clear the pending ref so future messages use activeChat.id (real ID)
+      pendingChatIdRef.current = null;
+      // Silently update the URL bar without triggering wouter's router.
       window.history.replaceState(null, "", `/chat/${realId}`);
     }
     return result;

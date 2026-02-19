@@ -276,9 +276,17 @@ function mergeServerChatsWithLocal(serverChats: Chat[], localChats: Chat[]): Cha
     if (c?.id) localById.set(c.id, c);
   }
 
-  const pendingChats = localChats.filter(
-    (c) => typeof c?.id === "string" && c.id.startsWith(PENDING_CHAT_PREFIX)
-  );
+  const serverIds = new Set(serverChats.map((c) => c.id));
+
+  // Keep pending chats only if their resolved real ID is NOT already on the server.
+  // This prevents duplicates when a pending chat was created locally and the server
+  // already returned the real chat (e.g. after addMessage created it).
+  const pendingChats = localChats.filter((c) => {
+    if (typeof c?.id !== "string" || !c.id.startsWith(PENDING_CHAT_PREFIX)) return false;
+    const realId = pendingToRealIdMap.get(c.id);
+    if (realId && serverIds.has(realId)) return false; // server already has the real version
+    return true;
+  });
 
   const mergedServerChats = serverChats.map((serverChat) => {
     const local = localById.get(serverChat.id);
@@ -1614,6 +1622,24 @@ export function useChats() {
         setActiveChatId(fallbackChatId);
       }
       resolvedChatId = fallbackChatId;
+    } else if (isPending && resolvedChatId !== safeChatId) {
+      // The pending chat already has a real resolvedChatId (from createChat's
+      // provisionalRealId), but the chat entry in state still has the pending
+      // id. Rename it now so that:
+      //   1. Server sync (mergeServerChatsWithLocal) won't create a duplicate
+      //   2. Title refresh and other lookups by real ID will find the entry
+      //   3. setActiveChatId(realId) from handleSendNewChatMessage will match
+      setChats(prev => {
+        // Only rename if the real ID doesn't already exist (avoid duplication)
+        const realAlreadyExists = prev.some(c => c.id === resolvedChatId);
+        if (realAlreadyExists) return prev;
+        return prev.map(chat =>
+          chat.id === safeChatId ? { ...chat, id: resolvedChatId } : chat
+        );
+      });
+      if (activeChatId === safeChatId) {
+        setActiveChatId(resolvedChatId);
+      }
     }
 
     // Insert into local state (optimistic) if not present.
