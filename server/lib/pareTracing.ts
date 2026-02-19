@@ -1,7 +1,7 @@
 import { trace, context, SpanStatusCode, propagation, Span, SpanKind, Context } from '@opentelemetry/api';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import { SimpleSpanProcessor, ConsoleSpanExporter, BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
-import { Resource } from '@opentelemetry/resources';
+import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
@@ -19,7 +19,7 @@ function initializeTracing(): void {
   }
 
   try {
-    const resource = new Resource({
+    const resource = resourceFromAttributes({
       [ATTR_SERVICE_NAME]: SERVICE_NAME,
     });
 

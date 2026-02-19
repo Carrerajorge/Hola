@@ -513,7 +513,7 @@ if [ "${IMAGE_TAG}" != "${BUILD_IMAGE_TAG:-${IMAGE_TAG}}" ]; then
   logw "Deploy tag does not match provided build artifact tag (${BUILD_IMAGE_TAG:-unknown}); skipping digest pinning."
 else
   if ! validate_image_digests "${EXPECTED_APP_DIGEST:-}" "${EXPECTED_SANDBOX_DIGEST:-}"; then
-    logw "Digest verification failed — continuing with latest image on registry (tag race is expected with concurrent builds)."
+    exit 1
   fi
 fi
 
@@ -645,17 +645,6 @@ ensure_legacy_upstream_file() {
     logw "Ensured legacy upstream file exists: ${legacy_file} (port ${port})"
   fi
 }
-
-# ── Pre-pull cleanup: free disk space ──────────────────────────────
-log "[0.5/14] Pre-pull disk cleanup..."
-# Remove stopped containers, dangling images, unused networks, and build cache
-docker system prune -af --filter "until=2h" 2>/dev/null || true
-# Remove old iliagpt images that don't match the current active slot or new tag
-docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | \
-  grep "iliagpt" | grep -v "${IMAGE_TAG}" | grep -v "<none>" | \
-  awk '{print $2}' | sort -u | xargs -r docker rmi -f 2>/dev/null || true
-DISK_FREE_MB="$(df -m /var/lib/docker 2>/dev/null | awk 'NR==2{print $4}' || echo "?")"
-log "  Disk free after cleanup: ${DISK_FREE_MB}MB"
 
 # ── Step 1: Pull images from GHCR (with timeout + digest verification) ──
 log "[1/14] Pulling images from GHCR (timeout: ${PULL_TIMEOUT}s)..."

@@ -7,10 +7,8 @@ import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
 
 import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 
-import { Resource } from "@opentelemetry/resources";
-
+import { resourceFromAttributes } from "@opentelemetry/resources";
 import { SemanticResourceAttributes } from "@opentelemetry/semantic-conventions";
-
 
 
 const OTEL_EXPORTER_OTLP_ENDPOINT =
@@ -37,16 +35,11 @@ const metricExporter = new OTLPMetricExporter({
 
 const sdk = new NodeSDK({
 
-  resource: new Resource({
-
-    [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
-
-    [SemanticResourceAttributes.SERVICE_VERSION]: serviceVersion,
-
-    [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: environment,
-
+  resource: resourceFromAttributes({
+    [SemanticResourceAttributes.SERVICE_NAME]: process.env.OTEL_SERVICE_NAME || "iliagpt-app",
+    [SemanticResourceAttributes.SERVICE_VERSION]: process.env.APP_VERSION || "dev",
+    [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: process.env.NODE_ENV || "production",  
   }),
-
   metricReader: new PeriodicExportingMetricReader({ exporter: metricExporter, exportIntervalMillis: 10000 }),
 
   instrumentations: [
