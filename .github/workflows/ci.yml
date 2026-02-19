@@ -223,6 +223,7 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     needs: test
+    if: always() && (needs.test.result == 'success' || needs.test.result == 'failure')
     timeout-minutes: 25
     steps:
       - name: Checkout
@@ -272,6 +273,7 @@ jobs:
   quality-gate:
     name: Quality Gate
     needs: [typecheck, merge-marker-guard, test, build, audit, python-security, secret-scan]
+    if: always()
     runs-on: ubuntu-latest
     services:
       postgres:
