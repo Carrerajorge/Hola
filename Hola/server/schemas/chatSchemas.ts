@@ -50,7 +50,8 @@ export const streamChatRequestSchema = chatRequestSchema.extend({
     runId: z.string().max(200).optional(),
     chatId: z.string().max(200).optional(),
     // Client may send docTool="figma" even when server ignores it; accept to avoid hard-failing validation.
-    docTool: z.enum(['word', 'excel', 'ppt', 'figma']).optional(),
+    // Client sends null when no doc tool is selected — must accept null alongside undefined.
+    docTool: z.enum(['word', 'excel', 'ppt', 'figma']).nullable().optional(),
 
     // Streaming/runtime controls (used by /api/chat/stream)
     latencyMode: z.enum(['fast', 'deep', 'auto']).optional(),
