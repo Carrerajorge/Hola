@@ -246,29 +246,29 @@ const FORMAT_CONFIG: Record<QuestionType, {
 }> = {
     factual_simple: {
         format: 'single_value',
-        maxTokens: 50,
-        maxCharacters: 200,
+        maxTokens: 150,  // Was 50 — too aggressive, caused mid-sentence truncation
+        maxCharacters: 600,
         requiresCitation: true,
         allowsExpansion: false
     },
     yes_no: {
         format: 'yes_no_explanation',
-        maxTokens: 80,
-        maxCharacters: 300,
+        maxTokens: 200,  // Was 80 — users expect a brief explanation alongside yes/no
+        maxCharacters: 800,
         requiresCitation: true,
         allowsExpansion: false
     },
     factual_multiple: {
         format: 'short_list',
-        maxTokens: 150,
-        maxCharacters: 600,
+        maxTokens: 300,  // Was 150 — list items need room to be useful
+        maxCharacters: 1200,
         requiresCitation: true,
         allowsExpansion: true
     },
     extraction: {
         format: 'numbered_list',
-        maxTokens: 300,
-        maxCharacters: 1200,
+        maxTokens: 500,  // Was 300
+        maxCharacters: 2000,
         requiresCitation: true,
         allowsExpansion: true
     },
@@ -295,8 +295,8 @@ const FORMAT_CONFIG: Record<QuestionType, {
     },
     explanation: {
         format: 'paragraph',
-        maxTokens: 250,
-        maxCharacters: 1000,
+        maxTokens: 500,  // Was 250 — explanations need room to be useful
+        maxCharacters: 2000,
         requiresCitation: true,
         allowsExpansion: true
     },
@@ -309,8 +309,8 @@ const FORMAT_CONFIG: Record<QuestionType, {
     },
     open_ended: {
         format: 'paragraph',
-        maxTokens: 300,
-        maxCharacters: 1200,
+        maxTokens: 600,  // Was 300 — open-ended questions are the most common type and need full answers
+        maxCharacters: 2400,
         requiresCitation: false,
         allowsExpansion: true
     },

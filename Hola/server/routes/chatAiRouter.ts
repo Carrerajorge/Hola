@@ -1646,7 +1646,7 @@ const cleanSkipRunStreamDedup = (): void => {
             requestId,
             model: model || DEFAULT_MODEL,
             provider,
-            maxTokens: Math.min(answerFirstPrompt.maxTokens || 120, 200),
+            maxTokens: Math.min(answerFirstPrompt.maxTokens || 300, 600), // Was 200 cap — caused mid-sentence truncation on simple questions
             temperature: 0.2,
             timeout: 12000,
             enableFallback: true,
@@ -2867,7 +2867,7 @@ ${attachmentContext}`;
       const laneMaxTokens = hasWebSearchContext
         ? safeMaxTokens // Web search results need full token budget regardless of lane
         : resolvedLane === 'fast'
-          ? Math.min(safeMaxTokens, 400)
+          ? Math.min(safeMaxTokens, 1200) // Was 400 — too restrictive, caused mid-sentence truncation
           : safeMaxTokens;
 
       // Emit thinking event so user sees we're about to generate
