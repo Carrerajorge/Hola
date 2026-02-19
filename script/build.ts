@@ -4,23 +4,7 @@ import { copyFile, mkdir, rm, readFile, writeFile } from "fs/promises";
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times.
-// Also bundle CJS-only packages that break ESM named exports at runtime.
-const allowlist: string[] = [
-  "@opentelemetry/resources",
-  "@opentelemetry/semantic-conventions",
-  "@opentelemetry/sdk-trace-node",
-  "@opentelemetry/sdk-trace-base",
-  "@opentelemetry/sdk-node",
-  "@opentelemetry/sdk-metrics",
-  "@opentelemetry/exporter-metrics-otlp-http",
-  "@opentelemetry/exporter-trace-otlp-http",
-  "@opentelemetry/auto-instrumentations-node",
-  "@opentelemetry/api",
-  "@opentelemetry/context-async-hooks",
-  "@opentelemetry/instrumentation-http",
-  "@opentelemetry/instrumentation-express",
-  "@opentelemetry/instrumentation-pg",
-];
+const allowlist: string[] = [];
 
 async function bumpBuiltSwCleanupVersion() {
   // Ensure the built SW cleanup script changes on each production build.
