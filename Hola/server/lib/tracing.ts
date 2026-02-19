@@ -20,8 +20,7 @@ import {
   Tracer,
   SpanOptions,
 } from "@opentelemetry/api";
-import otelResources from "@opentelemetry/resources";
-const { resourceFromAttributes } = otelResources;
+import { resourceFromAttributes } from "@opentelemetry/resources";
 import { HttpInstrumentation } from "@opentelemetry/instrumentation-http";
 import { ExpressInstrumentation } from "@opentelemetry/instrumentation-express";
 import { PgInstrumentation } from "@opentelemetry/instrumentation-pg";
