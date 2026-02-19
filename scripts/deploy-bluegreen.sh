@@ -648,10 +648,12 @@ ensure_legacy_upstream_file() {
 
 # ── Pre-pull cleanup: free disk space ──────────────────────────────
 log "[0.5/14] Pre-pull disk cleanup..."
-docker image prune -f 2>/dev/null || true
-docker builder prune -f 2>/dev/null || true
-# Remove old images not used by the currently active slot
-docker images --filter "dangling=true" -q | xargs -r docker rmi 2>/dev/null || true
+# Remove stopped containers, dangling images, unused networks, and build cache
+docker system prune -af --filter "until=2h" 2>/dev/null || true
+# Remove old iliagpt images that don't match the current active slot or new tag
+docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | \
+  grep "iliagpt" | grep -v "${IMAGE_TAG}" | grep -v "<none>" | \
+  awk '{print $2}' | sort -u | xargs -r docker rmi -f 2>/dev/null || true
 DISK_FREE_MB="$(df -m /var/lib/docker 2>/dev/null | awk 'NR==2{print $4}' || echo "?")"
 log "  Disk free after cleanup: ${DISK_FREE_MB}MB"
 
