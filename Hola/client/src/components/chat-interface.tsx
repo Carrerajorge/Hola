@@ -1498,6 +1498,10 @@ export function ChatInterface({
   const aiStateRef = useRef<AiState>("idle");
   const composerRef = useRef<HTMLDivElement>(null);
   const handleStopChatRef = useRef<(() => void) | null>(null);
+  // Mutex: prevents re-entrant handleSubmit calls during async message send + stream setup.
+  // Without this, React re-renders (from chatId prop change) can re-trigger handleSubmit
+  // before the first invocation has finished, causing duplicate chats and split messages.
+  const isSubmittingRef = useRef(false);
 
   const isScopedConversation = useCallback((conversationId?: string | null) => {
     const activeConversationId = latestChatIdRef.current;
@@ -3611,6 +3615,14 @@ export function ChatInterface({
   }, [input]);
 
   const handleSubmit = async () => {
+    // ── Mutex guard: prevent re-entrant calls ──────────────────────────
+    // React re-renders (from chatId prop change after new-chat creation)
+    // can cause handleSubmit to be called again before the first async
+    // invocation completes. This ref-based lock prevents that entirely.
+    if (isSubmittingRef.current) {
+      console.log("[handleSubmit] Blocked: already submitting (re-entrant guard)");
+      return;
+    }
     // Prevent double-submit while THIS chat has a request in flight.
     // If a DIFFERENT chat is busy (aiStateChatId !== chatId), allow submission.
     const thisChatBusy = aiState !== "idle" && (!aiStateChatId || aiStateChatId === chatId);
@@ -3618,6 +3630,11 @@ export function ChatInterface({
       console.log("[handleSubmit] Blocked: aiState is", aiState, "for chatId", aiStateChatId);
       return;
     }
+    isSubmittingRef.current = true;
+    // Safety net: auto-release the lock after 3s in case of unexpected early return
+    // without explicit cleanup. The lock is explicitly released below once the stream
+    // starts (aiState = "thinking") or on any error/early return path.
+    const submitLockTimer = setTimeout(() => { isSubmittingRef.current = false; }, 3000);
     const submitConversationId = chatId || latestChatIdRef.current;
     // When sending the very first message, the parent may create a pending chatId asynchronously.
     // We may need to wait briefly for `chatId` (and `latestChatIdRef`) to update before starting SSE.

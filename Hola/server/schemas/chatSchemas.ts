@@ -38,8 +38,8 @@ export const chatRequestSchema = z.object({
     provider: z.string().max(40).optional().default('gemini'),
     model: z.string().max(160).trim().optional().default('gemini-2.5-flash'),
     attachments: z.array(attachmentSchema).max(20).optional(),
-    lastImageBase64: z.string().max(500_000).optional(),
-    lastImageId: z.string().max(200).optional(),
+    lastImageBase64: z.string().max(500_000).nullable().optional(),
+    lastImageId: z.string().max(200).nullable().optional(),
     session_id: z.string().max(120).optional(),
 });
 
@@ -67,7 +67,10 @@ export const streamChatRequestSchema = chatRequestSchema.extend({
     skillId: z.string().max(120).optional(),
     skill: z.any().optional(),
     skillScopes: z.array(z.string().max(120)).max(30).optional(),
-});
+
+    // Client-generated request correlation ID
+    requestId: z.string().max(200).optional(),
+}).passthrough(); // allow extra fields from client without hard-failing
 
 export type StreamChatRequest = z.infer<typeof streamChatRequestSchema>;
 

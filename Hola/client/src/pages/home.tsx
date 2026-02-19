@@ -762,7 +762,7 @@ export default function Home() {
               }}
             />
           </Suspense>
-        ) : (activeChat || isNewChatMode || chats.length === 0 || selectedProjectId) && (
+        ) : (
           <ChatErrorBoundary>
             <ChatInterface
               key={chatInterfaceKey}

@@ -101,15 +101,30 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
       }
 
       // Build authorization URL
+      // Providers disagree on how scopes are separated in the authorization URL.
+      // GitHub and Slack commonly expect comma-separated scopes; most others accept space-delimited scopes.
+      const authUrlHost = (() => {
+        try {
+          return new URL(oauthConfig.authorizationUrl).hostname.toLowerCase();
+        } catch {
+          return "";
+        }
+      })();
+      const scopeSeparator =
+        connectorId === "github" || authUrlHost.endsWith("github.com") ? ","
+          : connectorId === "slack" || authUrlHost.endsWith("slack.com") ? ","
+            : " ";
       const params = new URLSearchParams({
         response_type: "code",
         client_id: clientId,
         redirect_uri: redirectUri,
-        scope: oauthConfig.scopes.join(" "),
         state,
         ...(oauthConfig.offlineAccess ? { access_type: "offline", prompt: "consent" } : {}),
         ...(oauthConfig.extraAuthParams || {}),
       });
+      if (oauthConfig.scopes?.length) {
+        params.set("scope", oauthConfig.scopes.join(scopeSeparator));
+      }
 
       const authUrl = `${oauthConfig.authorizationUrl}?${params.toString()}`;
       return res.redirect(authUrl);
@@ -202,22 +217,39 @@ export function createConnectorOAuthRouter(connectorId: string): Router {
       }
 
       // Exchange code for tokens
-      const tokenBody = new URLSearchParams({
-        grant_type: "authorization_code",
-        code: String(code),
-        redirect_uri: redirectUri,
-        client_id: clientId,
-        client_secret: clientSecret,
-      });
+      const tokenTimeout = AbortSignal.timeout(15_000);
+      const tokenHeaders: Record<string, string> = {
+        Accept: "application/json",
+      };
+
+      let tokenBody: string;
+
+      // Notion requires HTTP Basic auth for token exchange.
+      if (connectorId === "notion" || oauthConfig.tokenUrl.includes("api.notion.com")) {
+        const basic = Buffer.from(`${clientId}:${clientSecret}`, "utf8").toString("base64");
+        tokenHeaders.Authorization = `Basic ${basic}`;
+        tokenHeaders["Content-Type"] = "application/json";
+        tokenBody = JSON.stringify({
+          grant_type: "authorization_code",
+          code: String(code),
+          redirect_uri: redirectUri,
+        });
+      } else {
+        tokenHeaders["Content-Type"] = "application/x-www-form-urlencoded";
+        tokenBody = new URLSearchParams({
+          grant_type: "authorization_code",
+          code: String(code),
+          redirect_uri: redirectUri,
+          client_id: clientId,
+          client_secret: clientSecret,
+        }).toString();
+      }
 
       const tokenResponse = await fetch(oauthConfig.tokenUrl, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Accept: "application/json",
-        },
+        headers: tokenHeaders,
         body: tokenBody,
-        signal: AbortSignal.timeout(15_000),
+        signal: tokenTimeout,
       });
 
       if (!tokenResponse.ok) {
