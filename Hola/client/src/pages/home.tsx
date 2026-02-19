@@ -465,8 +465,11 @@ export default function Home() {
       // addMessage already renames the chat entry and updates activeChatId,
       // but call setActiveChatId again as a safety net.
       setActiveChatId(realId);
-      // Clear the pending ref so future messages use activeChat.id (real ID)
-      pendingChatIdRef.current = null;
+      // Keep the ref pointing to the real ID so that stale closures in
+      // useStreamChat.finalize → handleSendMessage can still find the correct
+      // chat via pendingChatIdRef.current (refs are read by reference, not
+      // captured by value like state).
+      pendingChatIdRef.current = realId;
       // Silently update the URL bar without triggering wouter's router.
       window.history.replaceState(null, "", `/chat/${realId}`);
     }
