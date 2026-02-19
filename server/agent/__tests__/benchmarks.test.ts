@@ -4,7 +4,11 @@ import { RunStateMachine } from "../stateMachine";
 import { ToolRegistry } from "../toolRegistry";
 import { MetricsCollector } from "../metricsCollector";
 
-describe("Performance Benchmarks - Agent Infrastructure", () => {
+// Benchmarks are timing-sensitive and can be flaky on CI/VPS.
+// Only run them when explicitly enabled.
+const describeBench = process.env.RUN_BENCHMARKS === "true" ? describe : describe.skip;
+
+describeBench("Performance Benchmarks - Agent Infrastructure", () => {
   const isCI = process.env.CI === "true";
   const benchmarkBudgetMultiplier = Number.parseFloat(process.env.BENCHMARK_BUDGET_MULTIPLIER || (isCI ? "4" : "1"));
   const budget = (ms: number): number => Math.ceil(ms * Math.max(1, benchmarkBudgetMultiplier));

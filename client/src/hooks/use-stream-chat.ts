@@ -509,6 +509,13 @@ export function useStreamChat(deps: StreamChatDeps) {
         };
 
         try {
+          // Normalize optional array fields — never send null (breaks PARE schema validation)
+          const cleanedBody = {
+            ...requestBody,
+            attachments: Array.isArray((requestBody as any).attachments) ? (requestBody as any).attachments : undefined,
+            images: Array.isArray((requestBody as any).images) ? (requestBody as any).images : undefined,
+          };
+
           response = await fetch(url, {
             method: "POST",
             headers: {
@@ -517,8 +524,8 @@ export function useStreamChat(deps: StreamChatDeps) {
               ...getAnonUserIdHeader(),
             },
             credentials: "include",
-            body: JSON.stringify(requestBody),
-            signal: combinedSignal,
+            body: JSON.stringify(cleanedBody),
+            signal: combinedSignal, 
           });
 
           if (!response.ok) {

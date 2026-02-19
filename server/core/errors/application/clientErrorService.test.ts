@@ -1,10 +1,14 @@
-import { describe, expect, it } from "vitest";
-
+import { describe, expect, it, vi, afterEach } from "vitest";
 import { InMemoryClientErrorLogStore } from "../infrastructure/inMemoryClientErrorLogStore";
 import { getClientErrorStats, getRecentClientErrors, logClientError } from "./clientErrorService";
 
 describe("client error service", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
   it("logs and queries recent + stats", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-02-18T00:00:00.000Z"));
     const store = new InMemoryClientErrorLogStore({ maxLogs: 5 });
 
     const logged = await logClientError(store, {
