@@ -1,10 +1,8 @@
 import { trace, context, SpanStatusCode, propagation, Span, SpanKind, Context } from '@opentelemetry/api';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import { SimpleSpanProcessor, ConsoleSpanExporter, BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
-import otelResources from '@opentelemetry/resources';
-const { Resource } = otelResources;
-import otelSemConv from '@opentelemetry/semantic-conventions';
-const { ATTR_SERVICE_NAME } = otelSemConv as any;
+import { Resource } from '@opentelemetry/resources';
+import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import type { Request, Response, NextFunction } from 'express';
