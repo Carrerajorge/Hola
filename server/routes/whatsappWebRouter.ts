@@ -238,9 +238,15 @@ async function autoReplyFromWhatsApp(opts: {
     return;
   }
 
-  // Check if auto-reply is enabled for this user
-  if (!whatsappWebManager.isAutoReplyEnabled(userId)) {
-    console.log('[WhatsApp AutoReply] Auto-reply is disabled for this user');
+  // Determine whether the sender is the owner (self-chat / same number).
+  const myJid = whatsappWebManager.getMyJid(userId);
+  const isSelfChat = Boolean(myJid && fromJid === myJid);
+
+  // Auto-reply logic:
+  //  - Owner (self-chat) always gets an AI response regardless of the toggle.
+  //  - Other contacts get a response only when auto-reply is enabled.
+  if (!isSelfChat && !whatsappWebManager.isAutoReplyEnabled(userId)) {
+    console.log('[WhatsApp AutoReply] Auto-reply is disabled and sender is not the owner – skipping');
     return;
   }
 

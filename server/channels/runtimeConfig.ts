@@ -47,7 +47,7 @@ export const DEFAULT_CHANNEL_RUNTIME_CONFIG: Required<Pick<ChannelRuntimeConfig,
   allowlist?: string[];
   owner_external_ids?: string[];
 } = {
-  responder_enabled: false,
+  responder_enabled: true,
   owner_only: false,
   response_style: "default",
   rate_limit_per_minute: 6,

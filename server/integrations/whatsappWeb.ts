@@ -141,7 +141,7 @@ export class WhatsAppWebManager extends EventEmitter {
       const settingsPath = this.autoReplySettingsPath(userId);
       const tmp = `${settingsPath}.tmp`;
       const payload = {
-        autoReplyEnabled: this.autoReplyPrefs.get(userId) ?? false,
+        autoReplyEnabled: this.autoReplyPrefs.get(userId) ?? true,
         customPrompt: this.autoReplyPrompts.get(userId) ?? '',
         updatedAt: new Date().toISOString(),
       };
@@ -168,12 +168,24 @@ export class WhatsAppWebManager extends EventEmitter {
     return this.sockets.get(userId)?.status || { state: 'disconnected' };
   }
 
+  /**
+   * Returns the base JID (e.g. "51918714054@s.whatsapp.net") of the connected account,
+   * or null if not connected.  Used to detect owner / self-chat messages.
+   */
+  getMyJid(userId: string): string | null {
+    const rec = this.sockets.get(userId);
+    if (!rec || rec.status.state !== 'connected') return null;
+    const raw = rec.sock.user?.id;
+    if (!raw) return null;
+    return raw.includes(':') ? raw.split(':')[0] + '@s.whatsapp.net' : raw;
+  }
+
   isAutoReplyEnabled(userId: string): boolean {
     this.loadAutoReplySettingsOnce(userId);
     const socketVal = this.sockets.get(userId)?.autoReplyEnabled;
     if (typeof socketVal === 'boolean') return socketVal;
-    // Default to OFF for safety; auto-replies should be explicitly enabled by the user.
-    return this.autoReplyPrefs.get(userId) ?? false;
+    // Default to ON so the AI responds to contacts and the owner out of the box.
+    return this.autoReplyPrefs.get(userId) ?? true;
   }
 
   setAutoReply(userId: string, enabled: boolean): void {
@@ -286,7 +298,7 @@ export class WhatsAppWebManager extends EventEmitter {
       auth: state,
       status: { state: 'connecting' },
       qrCount: 0,
-      autoReplyEnabled: this.autoReplyPrefs.get(userId) ?? false,
+      autoReplyEnabled: this.autoReplyPrefs.get(userId) ?? true,
     };
     this.sockets.set(userId, record);
     this.reconnectAttempts.set(userId, 0);
