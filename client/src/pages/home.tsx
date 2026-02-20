@@ -198,7 +198,9 @@ export default function Home() {
       setUiPhase('console');
       setActiveRunId(planId);
     } else if (!planId && activeRunId && uiPhase === 'console') {
-      // Clear if removed from URL? Optional.
+      // URL no longer has planId but state is stale — clear it
+      setUiPhase('idle');
+      setActiveRunId(null);
     }
   }, [search, activeRunId, uiPhase]);
 

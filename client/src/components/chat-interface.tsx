@@ -2594,6 +2594,12 @@ export function ChatInterface({
     }));
   }, []);
 
+  const handleRunComplete = useCallback(() => {
+    console.log('[uiPhase] Run completed, uiPhase=done');
+    setUiPhase('done');
+    setActiveRunId(null);
+  }, [setUiPhase, setActiveRunId]);
+
   const handleSuperAgentCancel = useCallback((messageId: string) => {
     const { updateState } = useSuperAgentStore.getState();
     updateState(messageId, {
@@ -4694,9 +4700,14 @@ export function ChatInterface({
 
             completeRun(superAgentMessageId, finalResult);
             setActiveRunId(null);
+            setUiPhase('done');
 
             // Request AI-generated title refresh after Super Agent completes
             requestTitleRefresh(chatId);
+          } else {
+            // No final result — still reset UI to avoid stuck console state
+            setActiveRunId(null);
+            setUiPhase('idle');
           }
 
         } catch (error) {
@@ -4721,6 +4732,7 @@ export function ChatInterface({
           );
           onSendMessage(errorMessage);
           setActiveRunId(null);
+          setUiPhase('idle');
         }
 
         setAiStateForChat("idle", submitConversationId);
@@ -6254,11 +6266,7 @@ IMPORTANTE:
                       onSuperAgentRetry={handleSuperAgentRetry}
                       onQuestionClick={(text) => setInput(text)}
                       activeRunId={activeRunId}
-                      onRunComplete={() => {
-                        console.log('[uiPhase] Run completed, uiPhase=done');
-                        setUiPhase('done');
-                        setActiveRunId(null);
-                      }}
+                      onRunComplete={handleRunComplete}
                       uiPhase={uiPhase}
                       aiProcessSteps={aiProcessSteps}
                     />
