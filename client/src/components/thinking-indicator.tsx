@@ -199,41 +199,43 @@ export const PhaseNarrator = memo(function PhaseNarrator({
   onTimeout?: () => void;
 }) {
   const [currentPhaseIndex, setCurrentPhaseIndex] = useState(0);
+  const currentPhaseIndexRef = useRef(0);
   const [currentNarration, setCurrentNarration] = useState("");
   const [selfDestructed, setSelfDestructed] = useState(false);
   const narrationIndex = useRef(0);
   const phaseStartTime = useRef(Date.now());
   const animationFrame = useRef<number | null>(null);
 
-  // Feature: Deep Work/Long Running logic
+  // Feature: Deep Work/Long Running logic — use ref to avoid re-triggering effects
   const [isDeepWork, setIsDeepWork] = useState(false);
+  const isDeepWorkRef = useRef(false);
   const elapsedTimeRef = useRef(0);
 
   // Safety self-destruct: if mounted for too long, hide and notify parent
+  const onTimeoutRef = useRef(onTimeout);
+  onTimeoutRef.current = onTimeout;
   useEffect(() => {
     const timer = setTimeout(() => {
       setSelfDestructed(true);
-      onTimeout?.();
+      onTimeoutRef.current?.();
     }, MAX_NARRATOR_LIFETIME_MS);
     return () => clearTimeout(timer);
-  }, [onTimeout]);
+  }, []);
 
   if (selfDestructed) return null;
 
   const currentPhase = phase || phaseSequence[currentPhaseIndex];
 
-  // Logic to determine narrations
-  let narrations = phaseNarrations[currentPhase] || phaseNarrations.searching;
-  const isIntentActive = intent && intentNarrations[intent] && (currentPhase === 'searching' || currentPhase === 'processing' || currentPhase === 'analyzing');
-
-  if (isIntentActive) {
-    narrations = intentNarrations[intent!];
-  }
+  // Logic to determine narrations — use stable references from constant objects
+  const isIntentActive = !!(intent && intentNarrations[intent] && (currentPhase === 'searching' || currentPhase === 'processing' || currentPhase === 'analyzing'));
+  const narrations = isIntentActive
+    ? intentNarrations[intent!]
+    : (phaseNarrations[currentPhase] || phaseNarrations.searching);
 
   // Feature: Dynamic Icon
   const Icon = isDeepWork ? Zap : (isIntentActive ? getIntentIcon(intent) : (currentPhase === 'connecting' ? Sparkles : Loader2));
 
-  // Cycle narrations
+  // Cycle narrations — NO isDeepWork in deps to prevent re-trigger loops
   useEffect(() => {
     if (message) {
       setCurrentNarration(message);
@@ -244,39 +246,41 @@ export const PhaseNarrator = memo(function PhaseNarrator({
     setCurrentNarration(narrations[0]);
     narrationIndex.current = 0;
     elapsedTimeRef.current = 0;
+    isDeepWorkRef.current = false;
     setIsDeepWork(false);
 
     const startTime = Date.now();
-
-    // Feature: Micro-Sequences - Cycle faster for dynamic effect
-    const intervalTime = isDeepWork ? 2500 : 1800;
 
     const narrationInterval = setInterval(() => {
       narrationIndex.current = (narrationIndex.current + 1) % narrations.length;
       setCurrentNarration(narrations[narrationIndex.current]);
 
-      // Feature: Deep Work detection
+      // Feature: Deep Work detection — read/write ref, only setState once
       const totalElapsed = Date.now() - startTime;
-      if (totalElapsed > 8000 && !isDeepWork) {
+      if (totalElapsed > 8000 && !isDeepWorkRef.current) {
+        isDeepWorkRef.current = true;
         setIsDeepWork(true);
       }
-    }, intervalTime);
+    }, 1800);
 
     return () => clearInterval(narrationInterval);
-  }, [currentPhase, message, narrations, isDeepWork]);
+  }, [currentPhase, message, narrations]);
 
-  // Handle Phrase Progress
+  // Handle Phase auto-progression — use refs to avoid deps on state
   useEffect(() => {
     if (!autoProgress || phase) return;
 
+    currentPhaseIndexRef.current = 0;
     phaseStartTime.current = Date.now();
 
     const progressPhase = () => {
       const elapsed = Date.now() - phaseStartTime.current;
-      const currentPhaseDuration = phaseDurations[phaseSequence[currentPhaseIndex]];
+      const idx = currentPhaseIndexRef.current;
+      const currentPhaseDuration = phaseDurations[phaseSequence[idx]];
 
-      if (elapsed >= currentPhaseDuration && currentPhaseIndex < phaseSequence.length - 2) {
-        setCurrentPhaseIndex(prev => prev + 1);
+      if (elapsed >= currentPhaseDuration && idx < phaseSequence.length - 2) {
+        currentPhaseIndexRef.current = idx + 1;
+        setCurrentPhaseIndex(idx + 1);
         phaseStartTime.current = Date.now();
       }
 
@@ -290,12 +294,7 @@ export const PhaseNarrator = memo(function PhaseNarrator({
         cancelAnimationFrame(animationFrame.current);
       }
     };
-  }, [autoProgress, phase, currentPhaseIndex]);
-
-  useEffect(() => {
-    setCurrentPhaseIndex(0);
-    phaseStartTime.current = Date.now();
-  }, []);
+  }, [autoProgress, phase]);
 
   return (
     <div className={cn("phase-narrator-wrapper flex items-center gap-2.5", className)}>

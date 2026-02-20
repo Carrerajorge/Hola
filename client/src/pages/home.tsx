@@ -188,25 +188,29 @@ export default function Home() {
   }>({ status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null });
 
   // URL Persistence for Simulator/Plan (B4)
+  // Read planId from URL on mount/navigation only — avoid circular deps
+  // by NOT including activeRunId/uiPhase in the restore effect deps.
   const search = useSearch();
+  const activeRunIdRef = useRef(activeRunId);
+  activeRunIdRef.current = activeRunId;
+  const uiPhaseRef = useRef(uiPhase);
+  uiPhaseRef.current = uiPhase;
+
   useEffect(() => {
     const params = new URLSearchParams(search);
     const planId = params.get("planId");
 
-    if (planId && planId !== activeRunId) {
-      // Restore Simulator view
+    if (planId && planId !== activeRunIdRef.current) {
       setUiPhase('console');
       setActiveRunId(planId);
-    } else if (!planId && activeRunId && uiPhase === 'console') {
-      // URL no longer has planId but state is stale — clear it
+    } else if (!planId && activeRunIdRef.current && uiPhaseRef.current === 'console') {
       setUiPhase('idle');
       setActiveRunId(null);
     }
-  }, [search, activeRunId, uiPhase]);
+  }, [search]);
 
-  // Update URL when activeRunId changes
+  // Update URL when activeRunId changes — one-way data flow (state → URL)
   useEffect(() => {
-    // Only manage URL if we are in console mode or have an active run
     if (activeRunId && uiPhase === 'console') {
       const url = new URL(window.location.href);
       url.searchParams.set("planId", activeRunId);
