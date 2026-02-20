@@ -505,17 +505,17 @@ async function executeToolCall(
           // Merge: prefer pre-extracted details from user's original message, fill gaps from goal text
           const reservationDetailsFromGoal = isReservationGoal
             ? {
-                ...goalDetails,
-                ...(preExtractedReservation || {}),
-                // Keep goal details only where pre-extracted is empty
-                restaurant: preExtractedReservation?.restaurant || goalDetails?.restaurant,
-                date: preExtractedReservation?.date || goalDetails?.date,
-                time: preExtractedReservation?.time || goalDetails?.time,
-                partySize: preExtractedReservation?.partySize || goalDetails?.partySize,
-                contactName: preExtractedReservation?.contactName || goalDetails?.contactName,
-                email: preExtractedReservation?.email || goalDetails?.email,
-                phone: preExtractedReservation?.phone || goalDetails?.phone,
-              }
+              ...goalDetails,
+              ...(preExtractedReservation || {}),
+              // Keep goal details only where pre-extracted is empty
+              restaurant: preExtractedReservation?.restaurant || goalDetails?.restaurant,
+              date: preExtractedReservation?.date || goalDetails?.date,
+              time: preExtractedReservation?.time || goalDetails?.time,
+              partySize: preExtractedReservation?.partySize || goalDetails?.partySize,
+              contactName: preExtractedReservation?.contactName || goalDetails?.contactName,
+              email: preExtractedReservation?.email || goalDetails?.email,
+              phone: preExtractedReservation?.phone || goalDetails?.phone,
+            }
             : undefined;
           const requestedUrl = String(args.url || "");
           const effectiveUrl = isCalaReservation
@@ -546,7 +546,7 @@ async function executeToolCall(
                   })}\n\n`);
                   if (typeof r.flush === "function") r.flush();
                 }
-              } catch {}
+              } catch { }
             }
 
             await universalBrowserController.navigate(sessionId, effectiveUrl);
@@ -696,7 +696,7 @@ async function executeToolCall(
             };
           } finally {
             if (heartbeatInterval) clearInterval(heartbeatInterval);
-            await universalBrowserController.closeSession(sessionId).catch(() => {});
+            await universalBrowserController.closeSession(sessionId).catch(() => { });
             console.log(`[AgentExecutor] Browser session closed: ${sessionId}`);
           }
         } catch (err: any) {
@@ -1572,6 +1572,10 @@ Please rewrite your response addressing these issues.`
     iterations: iteration,
     artifactsGenerated: artifacts.length
   });
+
+  // Ensure deterministic termination signal is sent when the agent finishes,
+  // preventing the frontend from getting stuck in an infinite polling loop.
+  writeSse(res, "done", { runId, status: "completed", isFallback: true });
 
   return fullResponse;
 }

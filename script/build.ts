@@ -66,6 +66,7 @@ async function buildAll() {
     ...Object.keys(pkg.devDependencies || {}),
   ];
   const externals = allDeps.filter((dep) => !allowlist.includes(dep));
+  const appVersion = process.env.VITE_APP_VERSION || process.env.APP_VERSION || `build-${Date.now()}`;
 
   // Common esbuild options for optimal bundle size
   const commonOptions = {
@@ -79,6 +80,7 @@ async function buildAll() {
     external: [...externals, "./node_modules/*"],
     define: {
       "process.env.NODE_ENV": '"production"',
+      "process.env.APP_VERSION": JSON.stringify(appVersion),
     },
     banner: {
       js: `
