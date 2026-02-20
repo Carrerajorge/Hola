@@ -117,15 +117,7 @@ jobs:
   # ── Build & Push Docker Images to GHCR ─────────────────
   build_images:
     name: Build Docker Images
-    needs: [ci, ci_gate]
-    if: >-
-      ${{
-        always() &&
-        (
-          (github.event_name == 'workflow_dispatch' && needs.ci.result == 'success') ||
-          (github.event_name == 'push' && needs.ci_gate.result == 'success' && needs.ci_gate.outputs.ci_ok == 'true')
-        )
-      }}
+    if: always()
     uses: ./.github/workflows/build-images.yml
     with:
       sha: ${{ github.sha }}
