@@ -618,11 +618,11 @@ export function createLibraryRouter() {
     try {
       const user = (req as any).user;
       const userId = user?.claims?.sub;
-      
+
       if (!userId) {
         return res.status(401).json({ error: "Authentication required" });
       }
-      
+
       const mediaType = req.query.type as string | undefined;
       const items = await storage.getLibraryItems(userId, mediaType);
       res.json(items);
@@ -636,13 +636,13 @@ export function createLibraryRouter() {
     try {
       const user = (req as any).user;
       const userId = user?.claims?.sub;
-      
+
       if (!userId) {
         return res.status(401).json({ error: "Authentication required" });
       }
-      
+
       const { mediaType, title, description, storagePath, thumbnailPath, mimeType, size, metadata, sourceChatId } = req.body;
-      
+
       const item = await storage.createLibraryItem({
         userId,
         mediaType,
@@ -655,7 +655,7 @@ export function createLibraryRouter() {
         metadata: metadata || null,
         sourceChatId: sourceChatId || null,
       });
-      
+
       res.json(item);
     } catch (error: any) {
       console.error("Error creating library item:", error);
@@ -667,17 +667,17 @@ export function createLibraryRouter() {
     try {
       const user = (req as any).user;
       const userId = user?.claims?.sub;
-      
+
       if (!userId) {
         return res.status(401).json({ error: "Authentication required" });
       }
-      
+
       const deleted = await storage.deleteLibraryItem(req.params.id, userId);
-      
+
       if (!deleted) {
         return res.status(404).json({ error: "Library item not found" });
       }
-      
+
       res.json({ success: true });
     } catch (error: any) {
       console.error("Error deleting library item:", error);
@@ -782,7 +782,7 @@ export function createLibraryRouter() {
         await fs.promises.writeFile(tmpPath, buffer, { mode: 0o640 });
         await fs.promises.rename(tmpPath, filePath);
       } catch (writeErr: any) {
-        await fs.promises.unlink(tmpPath).catch(() => {}); // cleanup tmp on error
+        await fs.promises.unlink(tmpPath).catch(() => { }); // cleanup tmp on error
         if (writeErr?.code === "ENOSPC") {
           return res.status(507).json({ error: "Insufficient disk space to save document" });
         }
@@ -831,6 +831,25 @@ export function createLibraryRouter() {
       }
       // Don't leak internal error details to client
       res.status(500).json({ error: "Failed to save document to library" });
+    }
+  });
+
+  router.get("/api/library/export", async (req, res) => {
+    try {
+      const userId = getOrCreateSecureUserId(req);
+      const metadata = await libraryService.exportLibraryMetadata(userId);
+
+      // Set headers for file download
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="library_export_${new Date().toISOString().split('T')[0]}.json"`);
+
+      res.json(metadata);
+    } catch (error: any) {
+      if (error instanceof LibraryServiceError) {
+        return res.status(error.statusCode).json({ error: error.message, code: error.code });
+      }
+      console.error("Error exporting library:", error);
+      res.status(500).json({ error: "Failed to export library" });
     }
   });
 

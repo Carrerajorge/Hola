@@ -68,34 +68,34 @@ function log(level: "info" | "warn" | "error" | "debug", message: string, data?:
 
 function calculateQualityScore(result: EnhancedSearchResult): number {
   let score = 50;
-  
+
   try {
     const url = new URL(result.url);
     const domain = url.hostname.toLowerCase();
-    
+
     if (HIGH_AUTHORITY_DOMAINS.some(d => domain.includes(d) || domain.endsWith(`.${d}`))) {
       score += 30;
     } else if (MEDIUM_AUTHORITY_DOMAINS.some(d => domain.includes(d))) {
       score += 15;
     }
-    
+
     if (url.protocol === "https:") {
       score += 5;
     }
   } catch {
     score -= 10;
   }
-  
+
   if (result.title && result.title.length > 10 && result.title.length < 200) {
     score += 10;
   }
-  
+
   if (result.snippet) {
     if (result.snippet.length > 50) score += 5;
     if (result.snippet.length > 100) score += 5;
     if (result.snippet.length > 200) score += 5;
   }
-  
+
   return Math.min(100, Math.max(0, score));
 }
 
@@ -109,7 +109,7 @@ async function withRetry<T>(
   baseDelay: number = 1000
 ): Promise<T> {
   let lastError: Error | null = null;
-  
+
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       return await fn();
@@ -122,7 +122,7 @@ async function withRetry<T>(
       }
     }
   }
-  
+
   throw lastError;
 }
 
@@ -136,25 +136,25 @@ function getHeaders(): Record<string, string> {
 
 class SearXNGAdapter implements SearchAdapter {
   name = "searxng";
-  
+
   isAvailable(): boolean {
     return !!process.env.SEARXNG_URL;
   }
-  
+
   async search(query: string, maxResults: number, timeout: number): Promise<EnhancedSearchResult[]> {
     const baseUrl = process.env.SEARXNG_URL;
     if (!baseUrl) {
       throw new Error("SEARXNG_URL not configured");
     }
-    
+
     const url = new URL("/search", baseUrl);
     url.searchParams.set("q", query);
     url.searchParams.set("format", "json");
     url.searchParams.set("categories", "general");
-    
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
-    
+
     try {
       const response = await fetch(url.toString(), {
         headers: {
@@ -163,16 +163,16 @@ class SearXNGAdapter implements SearchAdapter {
         },
         signal: controller.signal
       });
-      
+
       clearTimeout(timeoutId);
-      
+
       if (!response.ok) {
         throw new Error(`SearXNG request failed: ${response.status}`);
       }
-      
+
       const data = await response.json();
       const results: EnhancedSearchResult[] = [];
-      
+
       if (data.results && Array.isArray(data.results)) {
         for (const item of data.results.slice(0, maxResults)) {
           if (item.url && item.title) {
@@ -187,7 +187,7 @@ class SearXNGAdapter implements SearchAdapter {
           }
         }
       }
-      
+
       log("info", "SearXNG search completed", { query, resultCount: results.length });
       return results;
     } catch (error) {
@@ -200,24 +200,24 @@ class SearXNGAdapter implements SearchAdapter {
 class BraveSearchAdapter implements SearchAdapter {
   name = "brave";
   private apiEndpoint = "https://api.search.brave.com/res/v1/web/search";
-  
+
   isAvailable(): boolean {
     return !!process.env.BRAVE_API_KEY;
   }
-  
+
   async search(query: string, maxResults: number, timeout: number): Promise<EnhancedSearchResult[]> {
     const apiKey = process.env.BRAVE_API_KEY;
     if (!apiKey) {
       throw new Error("BRAVE_API_KEY not configured");
     }
-    
+
     const url = new URL(this.apiEndpoint);
     url.searchParams.set("q", query);
     url.searchParams.set("count", String(Math.min(maxResults, 20)));
-    
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
-    
+
     try {
       const response = await fetch(url.toString(), {
         headers: {
@@ -226,16 +226,16 @@ class BraveSearchAdapter implements SearchAdapter {
         },
         signal: controller.signal
       });
-      
+
       clearTimeout(timeoutId);
-      
+
       if (!response.ok) {
         throw new Error(`Brave Search request failed: ${response.status}`);
       }
-      
+
       const data = await response.json();
       const results: EnhancedSearchResult[] = [];
-      
+
       if (data.web?.results && Array.isArray(data.web.results)) {
         for (const item of data.web.results.slice(0, maxResults)) {
           if (item.url && item.title) {
@@ -250,7 +250,7 @@ class BraveSearchAdapter implements SearchAdapter {
           }
         }
       }
-      
+
       log("info", "Brave search completed", { query, resultCount: results.length });
       return results;
     } catch (error) {
@@ -262,47 +262,69 @@ class BraveSearchAdapter implements SearchAdapter {
 
 class DuckDuckGoAdapter implements SearchAdapter {
   name = "duckduckgo";
-  
+
   isAvailable(): boolean {
     return true;
   }
-  
+
   async search(query: string, maxResults: number, timeout: number): Promise<EnhancedSearchResult[]> {
-    const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    
+    // Apply specialized search dorks based on simple heuristics
+    let isNews = false;
+    let modifiedQuery = query;
+    const lowerQuery = query.toLowerCase();
+
+    if (lowerQuery.includes("noticia") || lowerQuery.includes("news") || lowerQuery.includes("última hora")) {
+      isNews = true;
+    } else if (lowerQuery.includes("legal") || lowerQuery.includes("ley ") || lowerQuery.includes("jurisprudencia") || lowerQuery.includes("sentencia")) {
+      modifiedQuery += " (site:gov OR site:edu OR site:org)";
+    } else if (lowerQuery.includes("financiero") || lowerQuery.includes("bolsa") || lowerQuery.includes("acciones") || lowerQuery.includes("financial")) {
+      modifiedQuery += " (site:bloomberg.com OR site:reuters.com OR site:ft.com OR site:wsj.com)";
+    } else if (lowerQuery.includes("dataset") || lowerQuery.includes("estadística") || lowerQuery.includes("datos") || lowerQuery.includes("statistics")) {
+      modifiedQuery += " (site:gov OR site:org OR filetype:csv OR filetype:json)";
+    }
+
+    const searchUrl = isNews
+      ? `https://html.duckduckgo.com/html/?q=${encodeURIComponent(modifiedQuery)}&iar=news`
+      : `https://html.duckduckgo.com/html/?q=${encodeURIComponent(modifiedQuery)}`;
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
-    
+
     try {
-      const response = await fetch(searchUrl, {
+      // Small randomized delay to avoid aggressive rate limiting
+      await sleep(500 + Math.random() * 1000);
+
+      log("info", `[DuckDuckGo] Executing basic HTML search: ${modifiedQuery}`);
+
+      const response = await withRetry(() => fetch(searchUrl, {
         headers: getHeaders(),
         signal: controller.signal
-      });
-      
+      }), 3, 1000);
+
       clearTimeout(timeoutId);
-      
+
       if (!response.ok) {
         throw new Error(`DuckDuckGo request failed: ${response.status}`);
       }
-      
+
       const html = await response.text();
       const dom = new JSDOM(html);
       const doc = dom.window.document;
       const results: EnhancedSearchResult[] = [];
-      
+
       for (const resultEl of Array.from(doc.querySelectorAll(".result")).slice(0, maxResults)) {
         const titleEl = resultEl.querySelector(".result__title a");
         const snippetEl = resultEl.querySelector(".result__snippet");
-        
+
         if (titleEl) {
           const href = titleEl.getAttribute("href") || "";
           let url = href;
-          
+
           if (href.includes("uddg=")) {
             const match = href.match(/uddg=([^&]+)/);
             if (match) url = decodeURIComponent(match[1]);
           }
-          
+
           if (url && !url.includes("duckduckgo.com")) {
             const result: EnhancedSearchResult = {
               url,
@@ -315,7 +337,7 @@ class DuckDuckGoAdapter implements SearchAdapter {
           }
         }
       }
-      
+
       log("info", "DuckDuckGo search completed", { query, resultCount: results.length });
       return results;
     } catch (error) {
@@ -332,26 +354,26 @@ async function fetchPageContent(
 ): Promise<{ title: string; content: string } | null> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeout);
-  
+
   try {
     const response = await fetch(url, {
       signal: controller.signal,
       headers: getHeaders()
     });
-    
+
     clearTimeout(timeoutId);
-    
+
     if (!response.ok) return null;
-    
+
     const contentType = response.headers.get("content-type") || "";
     if (!contentType.includes("text/html")) return null;
-    
+
     const html = await response.text();
     const dom = new JSDOM(html, { url });
-    
+
     const reader = new Readability(dom.window.document);
     const article = reader.parse();
-    
+
     if (article?.textContent) {
       const content = article.textContent.replace(/\s+/g, " ").trim();
       return {
@@ -359,7 +381,7 @@ async function fetchPageContent(
         content: content.slice(0, maxLength)
       };
     }
-    
+
     const doc = dom.window.document;
     const fallbackContent = doc.body?.textContent?.replace(/\s+/g, " ").trim() || "";
     return {
@@ -379,20 +401,20 @@ async function runWithConcurrencyLimit<T, R>(
 ): Promise<R[]> {
   const results: R[] = [];
   const executing: Promise<void>[] = [];
-  
+
   for (const item of items) {
     const promise = fn(item).then(result => {
       results.push(result);
     });
-    
+
     executing.push(promise);
-    
+
     if (executing.length >= limit) {
       await Promise.race(executing);
       executing.splice(0, executing.findIndex(p => p === promise) + 1);
     }
   }
-  
+
   await Promise.all(executing);
   return results;
 }
@@ -430,17 +452,17 @@ export class SearchOrchestrator {
       new BraveSearchAdapter(),
       new DuckDuckGoAdapter()
     ];
-    
+
     log("info", "SearchOrchestrator initialized", {
       adapters: this.adapters.map(a => ({ name: a.name, available: a.isAvailable() })),
       cacheTTL: this.cacheTTL
     });
   }
-  
+
   private getCacheKey(query: string, options?: SearchOptions): string {
     return `${query}:${options?.maxResults || 10}:${(options?.sources || []).join(",")}`;
   }
-  
+
   private getFromCache<T>(cache: Map<string, CacheEntry<T>>, key: string): T | null {
     const entry = cache.get(key);
     if (entry && entry.expiresAt > Date.now()) {
@@ -452,14 +474,14 @@ export class SearchOrchestrator {
     }
     return null;
   }
-  
+
   private setCache<T>(cache: Map<string, CacheEntry<T>>, key: string, data: T): void {
     cache.set(key, {
       data,
       expiresAt: Date.now() + this.cacheTTL
     });
   }
-  
+
   private cleanExpiredCache(): void {
     const now = Date.now();
     for (const [key, entry] of this.cache.entries()) {
@@ -473,11 +495,11 @@ export class SearchOrchestrator {
       }
     }
   }
-  
+
   private deduplicateByUrl(results: EnhancedSearchResult[]): EnhancedSearchResult[] {
     const seen = new Set<string>();
     const deduplicated: EnhancedSearchResult[] = [];
-    
+
     for (const result of results) {
       const normalizedUrl = result.url.toLowerCase().replace(/\/$/, "");
       if (!seen.has(normalizedUrl)) {
@@ -485,20 +507,20 @@ export class SearchOrchestrator {
         deduplicated.push(result);
       }
     }
-    
+
     return deduplicated;
   }
-  
+
   private getAvailableAdapters(sources?: string[]): SearchAdapter[] {
     let available = this.adapters.filter(a => a.isAvailable());
-    
+
     if (sources && sources.length > 0) {
       available = available.filter(a => sources.includes(a.name));
     }
-    
+
     return available;
   }
-  
+
   async search(query: string, options?: SearchOptions): Promise<EnhancedSearchResult[]> {
     const startTime = Date.now();
     const maxResults = Math.max(1, Math.min(100, options?.maxResults || LIMITS.MAX_SEARCH_RESULTS));
@@ -510,7 +532,6 @@ export class SearchOrchestrator {
       log("warn", "Empty query after sanitization");
       return [];
     }
-
     const cacheKey = this.getCacheKey(sanitizedQuery, options);
     const cached = this.getFromCache(this.cache, cacheKey);
     if (cached) {
@@ -536,7 +557,7 @@ export class SearchOrchestrator {
           2,
           500
         );
-        
+
         if (results.length > 0) {
           log("info", "Search successful", {
             adapter: adapter.name,
@@ -550,11 +571,11 @@ export class SearchOrchestrator {
         log("warn", `Adapter ${adapter.name} failed, trying next`, { error: lastError.message });
       }
     }
-    
+
     if (results.length === 0 && lastError) {
       log("error", "All search adapters failed", { error: lastError.message });
     }
-    
+
     // Sanitize all results to prevent XSS
     results = results.map(r => this.sanitizeResult(r));
     results = this.deduplicateByUrl(results);
@@ -562,35 +583,35 @@ export class SearchOrchestrator {
     results = results.slice(0, maxResults);
 
     this.setCache(this.cache, cacheKey, results);
-    
+
     if (this.cache.size > 100) {
       this.cleanExpiredCache();
     }
-    
+
     return results;
   }
-  
+
   async deepSearch(query: string, options?: DeepSearchOptions): Promise<DeepSearchResult[]> {
     const startTime = Date.now();
     const maxResults = Math.max(1, Math.min(50, options?.maxResults || LIMITS.MAX_SEARCH_RESULTS));
     const maxContentLength = Math.max(1000, Math.min(50000, options?.maxContentLength || 10000));
     const concurrencyLimit = Math.max(1, Math.min(10, options?.concurrencyLimit || 3));
     const extractContent = options?.extractContent !== false;
-    
+
     const cacheKey = `deep:${this.getCacheKey(query, options)}`;
     const cached = this.getFromCache(this.deepCache, cacheKey);
     if (cached) {
       return cached;
     }
-    
+
     log("info", "Starting deep search", { query, maxResults, concurrencyLimit });
-    
+
     const searchResults = await this.search(query, {
       maxResults: maxResults + 5,
       timeout: options?.timeout,
       sources: options?.sources
     });
-    
+
     if (!extractContent) {
       const results: DeepSearchResult[] = searchResults.slice(0, maxResults).map(r => ({
         ...r,
@@ -599,11 +620,11 @@ export class SearchOrchestrator {
       this.setCache(this.deepCache, cacheKey, results);
       return results;
     }
-    
+
     const urlsToFetch = searchResults
       .filter(r => r.url && r.url.startsWith("http"))
       .slice(0, maxResults);
-    
+
     const fetchResults = await runWithConcurrencyLimit(
       urlsToFetch,
       concurrencyLimit,
@@ -614,7 +635,7 @@ export class SearchOrchestrator {
             options?.timeout || TIMEOUTS.PAGE_FETCH,
             maxContentLength
           );
-          
+
           return {
             ...result,
             content: content?.content,
@@ -628,31 +649,31 @@ export class SearchOrchestrator {
         }
       }
     );
-    
+
     const results = fetchResults
       .filter((r): r is DeepSearchResult => r !== null)
       .sort((a, b) => (b.score || 0) - (a.score || 0));
-    
+
     log("info", "Deep search completed", {
       query,
       totalResults: results.length,
       withContent: results.filter(r => r.content).length,
       durationMs: Date.now() - startTime
     });
-    
+
     this.setCache(this.deepCache, cacheKey, results);
-    
+
     if (this.deepCache.size > 50) {
       this.cleanExpiredCache();
     }
-    
+
     return results;
   }
-  
+
   getAvailableSources(): string[] {
     return this.adapters.filter(a => a.isAvailable()).map(a => a.name);
   }
-  
+
   clearCache(): void {
     this.cache.clear();
     this.deepCache.clear();

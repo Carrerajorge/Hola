@@ -86,11 +86,11 @@ export interface AcademicPaper {
   rawData?: any;
 }
 
-export type SourceType = 
-  | "scielo" 
-  | "openalex" 
-  | "semantic_scholar" 
-  | "crossref" 
+export type SourceType =
+  | "scielo"
+  | "openalex"
+  | "semantic_scholar"
+  | "crossref"
   | "core"
   | "pubmed"
   | "arxiv"
@@ -103,12 +103,14 @@ export interface SearchOptions {
   yearTo?: number;
   countries?: string[];
   languages?: string[];
+  languageStrict?: boolean;
   documentTypes?: string[];
   sources?: SourceType[];
   openAccessOnly?: boolean;
   sortBy?: "relevance" | "date" | "citations";
   includeAbstract?: boolean;
   includeKeywords?: boolean;
+  minCitations?: number;
 }
 
 export interface SearchResult {
@@ -133,22 +135,22 @@ export interface SourceStats {
   error?: string;
 }
 
-export type CitationFormat = 
-  | "apa7" 
-  | "mla9" 
-  | "chicago" 
-  | "harvard" 
-  | "ieee" 
+export type CitationFormat =
+  | "apa7"
+  | "mla9"
+  | "chicago"
+  | "harvard"
+  | "ieee"
   | "vancouver"
   | "ama"
   | "asa";
 
-export type ExportFormat = 
-  | "excel" 
-  | "word" 
-  | "bibtex" 
-  | "ris" 
-  | "endnote" 
+export type ExportFormat =
+  | "excel"
+  | "word"
+  | "bibtex"
+  | "ris"
+  | "endnote"
   | "csv"
   | "json";
 
@@ -158,8 +160,8 @@ export type ExportFormat =
 
 const LATIN_AMERICA_COUNTRIES = [
   "argentina", "bolivia", "brazil", "brasil", "chile", "colombia", "costa rica",
-  "cuba", "dominican republic", "república dominicana", "ecuador", "el salvador", 
-  "guatemala", "honduras", "mexico", "méxico", "nicaragua", "panama", "panamá", 
+  "cuba", "dominican republic", "república dominicana", "ecuador", "el salvador",
+  "guatemala", "honduras", "mexico", "méxico", "nicaragua", "panama", "panamá",
   "paraguay", "peru", "perú", "puerto rico", "uruguay", "venezuela"
 ];
 
@@ -167,8 +169,8 @@ const SPAIN_COUNTRIES = ["spain", "españa"];
 const PORTUGAL_COUNTRIES = ["portugal"];
 
 const ALL_IBEROAMERICAN_COUNTRIES = [
-  ...LATIN_AMERICA_COUNTRIES, 
-  ...SPAIN_COUNTRIES, 
+  ...LATIN_AMERICA_COUNTRIES,
+  ...SPAIN_COUNTRIES,
   ...PORTUGAL_COUNTRIES
 ];
 
@@ -196,7 +198,7 @@ const MAX_RETRIES = 2;
 async function fetchWithRetry(url: string, options: RequestInit = {}, retries = MAX_RETRIES): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), API_TIMEOUT);
-  
+
   try {
     const response = await fetch(url, {
       ...options,
@@ -243,16 +245,16 @@ function detectLanguage(text: string): string {
   const spanishWords = ["el", "la", "los", "las", "de", "del", "en", "para", "con", "por", "que", "una", "uno"];
   const portugueseWords = ["o", "a", "os", "as", "de", "do", "da", "em", "para", "com", "por", "que", "uma", "um"];
   const englishWords = ["the", "of", "and", "in", "for", "with", "by", "that", "an", "on", "is", "are"];
-  
+
   const words = text.toLowerCase().split(/\s+/);
   let spanishScore = 0, portugueseScore = 0, englishScore = 0;
-  
+
   for (const word of words) {
     if (spanishWords.includes(word)) spanishScore++;
     if (portugueseWords.includes(word)) portugueseScore++;
     if (englishWords.includes(word)) englishScore++;
   }
-  
+
   if (portugueseScore > spanishScore && portugueseScore > englishScore) return "pt";
   if (spanishScore > englishScore) return "es";
   return "en";
@@ -260,34 +262,34 @@ function detectLanguage(text: string): string {
 
 function calculateQualityScore(paper: AcademicPaper): number {
   let score = 0;
-  
+
   // Has DOI: +20
   if (paper.doi) score += 20;
-  
+
   // Has abstract: +15
   if (paper.abstract && paper.abstract.length > 100) score += 15;
-  
+
   // Has keywords: +10
   if (paper.keywords && paper.keywords.length > 0) score += 10;
-  
+
   // Has journal: +10
   if (paper.journal) score += 10;
-  
+
   // Has authors with affiliations: +15
   if (paper.authors.some(a => a.affiliation)) score += 15;
-  
+
   // Has citation count: +10
   if (paper.citationCount && paper.citationCount > 0) score += 10;
-  
+
   // Is open access: +5
   if (paper.isOpenAccess) score += 5;
-  
+
   // Has PDF URL: +10
   if (paper.pdfUrl) score += 10;
-  
+
   // Recent publication: +5
   if (paper.year >= new Date().getFullYear() - 2) score += 5;
-  
+
   return Math.min(score, 100);
 }
 
@@ -311,24 +313,24 @@ async function searchSciELO(query: string, maxResults: number = 100): Promise<{ 
   try {
     // SciELO search API
     const searchUrl = `https://search.scielo.org/api/v1/search?q=${encodeURIComponent(query)}&count=${clampedMax}&output=json&lang=en`;
-    
+
     const response = await fetchWithRetry(searchUrl);
-    
+
     if (!response.ok) {
       // Fallback to web scraping approach
       console.log(`[SciELO] API failed (${response.status}), using alternative`);
       return { papers: [], time: Date.now() - startTime, error: `HTTP ${response.status}` };
     }
-    
+
     const data = await response.json();
-    
+
     if (data.response?.docs) {
       for (const doc of data.response.docs.slice(0, clampedMax)) {
         const authors: Author[] = (doc.au || []).map((name: string) => {
           const { firstName, lastName } = parseAuthorName(name);
           return { name, firstName, lastName, affiliation: doc.aff?.[0] || "" };
         });
-        
+
         papers.push({
           id: doc.id || `scielo_${Date.now()}_${Math.random().toString(36).substring(7)}`,
           title: doc.ti || doc.title || "",
@@ -357,7 +359,7 @@ async function searchSciELO(query: string, maxResults: number = 100): Promise<{ 
         });
       }
     }
-    
+
     console.log(`[SciELO] Found ${papers.length} papers in ${Date.now() - startTime}ms`);
     return { papers, time: Date.now() - startTime };
   } catch (error: any) {
@@ -374,7 +376,8 @@ async function searchOpenAlex(
   maxResults: number = 100,
   yearFrom?: number,
   yearTo?: number,
-  countries?: string[]
+  countries?: string[],
+  minCitations?: number
 ): Promise<{ papers: AcademicPaper[]; time: number; error?: string }> {
   const startTime = Date.now();
   const papers: AcademicPaper[] = [];
@@ -396,34 +399,38 @@ async function searchOpenAlex(
       const to = Math.max(from, Math.min(currentYear + 1, yearTo || currentYear));
       filters.push(`publication_year:${from}-${to}`);
     }
-    
+
     if (countries && countries.length > 0) {
       // OpenAlex uses country codes
       const countryCodes = Object.entries(COUNTRY_CODES)
-        .filter(([code, name]) => countries.some(c => 
+        .filter(([code, name]) => countries.some(c =>
           name.toLowerCase().includes(c.toLowerCase()) || c.toLowerCase().includes(name.toLowerCase())
         ))
         .map(([code]) => code);
-      
+
       if (countryCodes.length > 0) {
         filters.push(`institutions.country_code:${countryCodes.join("|")}`);
       }
     }
-    
+
+    if (minCitations !== undefined) {
+      filters.push(`cited_by_count:>${minCitations}`);
+    }
+
     if (filters.length > 0) {
       searchUrl += `&filter=${filters.join(",")}`;
     }
-    
+
     searchUrl += "&select=id,title,authorships,publication_year,publication_date,primary_location,abstract_inverted_index,keywords,doi,language,type,cited_by_count,referenced_works_count,open_access,grants";
-    
+
     const response = await fetchWithRetry(searchUrl);
-    
+
     if (!response.ok) {
       return { papers: [], time: Date.now() - startTime, error: `HTTP ${response.status}` };
     }
-    
+
     const data = await response.json();
-    
+
     if (data.results) {
       for (const work of data.results) {
         // Reconstruct abstract from inverted index
@@ -438,7 +445,7 @@ async function searchOpenAlex(
           words.sort((a, b) => a.pos - b.pos);
           abstract = words.map(w => w.word).join(" ");
         }
-        
+
         // Extract authors with full details
         const authors: Author[] = (work.authorships || []).map((a: any) => {
           const institution = a.institutions?.[0];
@@ -450,9 +457,9 @@ async function searchOpenAlex(
             orcid: a.author?.orcid?.replace("https://orcid.org/", "") || ""
           };
         });
-        
+
         const primaryLocation = work.primary_location;
-        
+
         papers.push({
           id: work.id || `openalex_${Date.now()}`,
           title: work.title || "",
@@ -462,8 +469,8 @@ async function searchOpenAlex(
           journalAbbreviation: primaryLocation?.source?.abbreviated_title || "",
           volume: primaryLocation?.volume || "",
           issue: primaryLocation?.issue || "",
-          pages: primaryLocation?.first_page && primaryLocation?.last_page 
-            ? `${primaryLocation.first_page}-${primaryLocation.last_page}` 
+          pages: primaryLocation?.first_page && primaryLocation?.last_page
+            ? `${primaryLocation.first_page}-${primaryLocation.last_page}`
             : "",
           abstract,
           keywords: (work.keywords || []).map((k: any) => k.keyword || k.display_name || k),
@@ -487,7 +494,7 @@ async function searchOpenAlex(
         });
       }
     }
-    
+
     console.log(`[OpenAlex] Found ${papers.length} papers in ${Date.now() - startTime}ms`);
     return { papers, time: Date.now() - startTime };
   } catch (error: any) {
@@ -503,7 +510,8 @@ async function searchSemanticScholar(
   query: string,
   maxResults: number = 100,
   yearFrom?: number,
-  yearTo?: number
+  yearTo?: number,
+  minCitations?: number
 ): Promise<{ papers: AcademicPaper[]; time: number; error?: string }> {
   const startTime = Date.now();
   const papers: AcademicPaper[] = [];
@@ -525,22 +533,27 @@ async function searchSemanticScholar(
       const to = yearTo ? Math.max(1900, Math.min(currentYear + 1, yearTo)) : "";
       searchUrl += `&year=${from}-${to}`;
     }
-    
+
     const response = await fetchWithRetry(searchUrl);
-    
+
     if (!response.ok) {
       return { papers: [], time: Date.now() - startTime, error: `HTTP ${response.status}` };
     }
-    
+
     const data = await response.json();
-    
+
     if (data.data) {
       for (const paper of data.data) {
-        const authors: Author[] = (paper.authors || []).map((a: any) => ({ 
+        // Apply minCitations filter post-fetch as Semantic Scholar's /search endpoint doesn't directly support it
+        if (minCitations !== undefined && (paper.citationCount || 0) < minCitations) {
+          continue; // Skip this paper if it doesn't meet the minCitations
+        }
+
+        const authors: Author[] = (paper.authors || []).map((a: any) => ({
           name: a.name || "Unknown",
           authorId: a.authorId
         }));
-        
+
         papers.push({
           id: paper.paperId || `ss_${Date.now()}`,
           title: paper.title || "",
@@ -565,7 +578,7 @@ async function searchSemanticScholar(
         });
       }
     }
-    
+
     console.log(`[SemanticScholar] Found ${papers.length} papers in ${Date.now() - startTime}ms`);
     return { papers, time: Date.now() - startTime };
   } catch (error: any) {
@@ -602,15 +615,15 @@ async function searchCrossRef(
       const to = Math.max(from, Math.min(currentYear + 1, yearTo || currentYear));
       searchUrl += `&filter=from-pub-date:${from},until-pub-date:${to}`;
     }
-    
+
     const response = await fetchWithRetry(searchUrl);
-    
+
     if (!response.ok) {
       return { papers: [], time: Date.now() - startTime, error: `HTTP ${response.status}` };
     }
-    
+
     const data = await response.json();
-    
+
     if (data.message?.items) {
       for (const item of data.message.items) {
         const authors: Author[] = (item.author || []).map((a: any) => ({
@@ -620,26 +633,26 @@ async function searchCrossRef(
           affiliation: a.affiliation?.[0]?.name || "",
           orcid: a.ORCID?.replace("http://orcid.org/", "") || ""
         }));
-        
+
         const pubDate = item.published?.["date-parts"]?.[0] || item.created?.["date-parts"]?.[0] || [];
-        
-	        papers.push({
-	          id: item.DOI || `crossref_${Date.now()}`,
-	          title: item.title?.[0] || "",
-	          authors,
-	          year: pubDate[0] || 0,
-	          month: pubDate[1],
-	          journal: item["container-title"]?.[0] || "",
-	          journalAbbreviation: item["short-container-title"]?.[0] || "",
-	          volume: item.volume || "",
-	          issue: item.issue || "",
-	          pages: item.page || "",
-	          abstract: sanitizePlainText(item.abstract, { maxLen: 12000, collapseWs: true }),
-	          keywords: item.subject || [],
-	          doi: item.DOI || "",
-	          url: item.URL || `https://doi.org/${item.DOI}`,
-	          language: item.language || "en",
-	          documentType: item.type || "article",
+
+        papers.push({
+          id: item.DOI || `crossref_${Date.now()}`,
+          title: item.title?.[0] || "",
+          authors,
+          year: pubDate[0] || 0,
+          month: pubDate[1],
+          journal: item["container-title"]?.[0] || "",
+          journalAbbreviation: item["short-container-title"]?.[0] || "",
+          volume: item.volume || "",
+          issue: item.issue || "",
+          pages: item.page || "",
+          abstract: sanitizePlainText(item.abstract, { maxLen: 12000, collapseWs: true }),
+          keywords: item.subject || [],
+          doi: item.DOI || "",
+          url: item.URL || `https://doi.org/${item.DOI}`,
+          language: item.language || "en",
+          documentType: item.type || "article",
           cityOfPublication: item["publisher-location"] || "",
           publisher: item.publisher || "",
           issn: item.ISSN?.[0] || "",
@@ -655,11 +668,8 @@ async function searchCrossRef(
         });
       }
     }
-    
+
     console.log(`[CrossRef] Found ${papers.length} papers in ${Date.now() - startTime}ms`);
-    return { papers, time: Date.now() - startTime };
-  } catch (error: any) {
-    console.error("[CrossRef] Error:", error.message);
     return { papers: [], time: Date.now() - startTime, error: error.message };
   }
 }
@@ -680,25 +690,25 @@ async function searchCORE(query: string, maxResults: number = 100): Promise<{ pa
   try {
     // CORE requires API key, but has a free tier
     const searchUrl = `https://api.core.ac.uk/v3/search/works?q=${encodeURIComponent(query)}&limit=${clampedMax}`;
-    
+
     const response = await fetchWithRetry(searchUrl, {
       headers: {
         "Authorization": "Bearer FREE_API_ACCESS" // CORE allows limited free access
       }
     });
-    
+
     if (!response.ok) {
       return { papers: [], time: Date.now() - startTime, error: `HTTP ${response.status}` };
     }
-    
+
     const data = await response.json();
-    
+
     if (data.results) {
       for (const item of data.results) {
         const authors: Author[] = (item.authors || []).map((a: any) => ({
           name: a.name || "Unknown"
         }));
-        
+
         papers.push({
           id: item.id || `core_${Date.now()}`,
           title: item.title || "",
@@ -720,7 +730,7 @@ async function searchCORE(query: string, maxResults: number = 100): Promise<{ pa
         });
       }
     }
-    
+
     console.log(`[CORE] Found ${papers.length} papers in ${Date.now() - startTime}ms`);
     return { papers, time: Date.now() - startTime };
   } catch (error: any) {
@@ -745,39 +755,39 @@ async function searchPubMed(query: string, maxResults: number = 100): Promise<{ 
   try {
     // Step 1: Search for IDs
     const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmax=${clampedMax}&retmode=json`;
-    
+
     const searchResponse = await fetchWithRetry(searchUrl);
-    
+
     if (!searchResponse.ok) {
       return { papers: [], time: Date.now() - startTime, error: `HTTP ${searchResponse.status}` };
     }
-    
+
     const searchData = await searchResponse.json();
     const ids = searchData.esearchresult?.idlist || [];
-    
+
     if (ids.length === 0) {
       return { papers: [], time: Date.now() - startTime };
     }
-    
+
     // Step 2: Fetch details
     const fetchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=${ids.join(",")}&retmode=xml`;
-    
+
     const fetchResponse = await fetchWithRetry(fetchUrl);
     const xmlText = await fetchResponse.text();
-    
+
     // Simple XML parsing (for production, use proper XML parser)
-	    const articleMatches = xmlText.match(/<PubmedArticle>[\s\S]*?<\/PubmedArticle>/g) || [];
-	    
-	    for (const articleXml of articleMatches) {
-	      const titleRaw = articleXml.match(/<ArticleTitle>([\s\S]*?)<\/ArticleTitle>/)?.[1] ?? "";
-	      const abstractRaw = articleXml.match(/<AbstractText[^>]*>([\s\S]*?)<\/AbstractText>/)?.[1] ?? "";
-	      const title = sanitizePlainText(titleRaw, { maxLen: 2000, collapseWs: true });
-	      const abstract = sanitizePlainText(abstractRaw, { maxLen: 12000, collapseWs: true });
-	      const year = articleXml.match(/<PubDate>[\s\S]*?<Year>(\d+)<\/Year>/)?.[1] || "";
-	      const journal = articleXml.match(/<Journal>[\s\S]*?<Title>([\s\S]*?)<\/Title>/)?.[1] || "";
-	      const doi = articleXml.match(/<ArticleId IdType="doi">([\s\S]*?)<\/ArticleId>/)?.[1] || "";
-	      const pmid = articleXml.match(/<PMID[^>]*>(\d+)<\/PMID>/)?.[1] || "";
-      
+    const articleMatches = xmlText.match(/<PubmedArticle>[\s\S]*?<\/PubmedArticle>/g) || [];
+
+    for (const articleXml of articleMatches) {
+      const titleRaw = articleXml.match(/<ArticleTitle>([\s\S]*?)<\/ArticleTitle>/)?.[1] ?? "";
+      const abstractRaw = articleXml.match(/<AbstractText[^>]*>([\s\S]*?)<\/AbstractText>/)?.[1] ?? "";
+      const title = sanitizePlainText(titleRaw, { maxLen: 2000, collapseWs: true });
+      const abstract = sanitizePlainText(abstractRaw, { maxLen: 12000, collapseWs: true });
+      const year = articleXml.match(/<PubDate>[\s\S]*?<Year>(\d+)<\/Year>/)?.[1] || "";
+      const journal = articleXml.match(/<Journal>[\s\S]*?<Title>([\s\S]*?)<\/Title>/)?.[1] || "";
+      const doi = articleXml.match(/<ArticleId IdType="doi">([\s\S]*?)<\/ArticleId>/)?.[1] || "";
+      const pmid = articleXml.match(/<PMID[^>]*>(\d+)<\/PMID>/)?.[1] || "";
+
       // Extract authors
       const authorMatches = articleXml.match(/<Author[^>]*>[\s\S]*?<\/Author>/g) || [];
       const authors: Author[] = authorMatches.map(authorXml => {
@@ -786,17 +796,17 @@ async function searchPubMed(query: string, maxResults: number = 100): Promise<{ 
         const affiliation = authorXml.match(/<Affiliation>([\s\S]*?)<\/Affiliation>/)?.[1] || "";
         return { name: `${firstName} ${lastName}`.trim(), firstName, lastName, affiliation };
       });
-	      
-	      // Extract MeSH terms
-	      const meshMatches = articleXml.match(/<DescriptorName[^>]*>([\s\S]*?)<\/DescriptorName>/g) || [];
-	      const meshTerms = meshMatches
-	        .map((m) => sanitizePlainText(m, { maxLen: 300, collapseWs: true }))
-	        .filter((t): t is string => Boolean(t));
-	      
-	      papers.push({
-	        id: pmid || `pubmed_${Date.now()}`,
-	        title,
-	        authors,
+
+      // Extract MeSH terms
+      const meshMatches = articleXml.match(/<DescriptorName[^>]*>([\s\S]*?)<\/DescriptorName>/g) || [];
+      const meshTerms = meshMatches
+        .map((m) => sanitizePlainText(m, { maxLen: 300, collapseWs: true }))
+        .filter((t): t is string => Boolean(t));
+
+      papers.push({
+        id: pmid || `pubmed_${Date.now()}`,
+        title,
+        authors,
         year: parseInt(year) || 0,
         journal,
         abstract,
@@ -810,7 +820,7 @@ async function searchPubMed(query: string, maxResults: number = 100): Promise<{ 
         retrievedAt: new Date()
       });
     }
-    
+
     console.log(`[PubMed] Found ${papers.length} papers in ${Date.now() - startTime}ms`);
     return { papers, time: Date.now() - startTime };
   } catch (error: any) {
@@ -835,25 +845,25 @@ async function searchArXiv(query: string, maxResults: number = 100): Promise<{ p
   try {
     // Use HTTPS instead of HTTP for security
     const searchUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(query)}&start=0&max_results=${clampedMax}`;
-    
+
     const response = await fetchWithRetry(searchUrl);
-    
+
     if (!response.ok) {
       return { papers: [], time: Date.now() - startTime, error: `HTTP ${response.status}` };
     }
-    
+
     const xmlText = await response.text();
-    
+
     // Parse entries
     const entryMatches = xmlText.match(/<entry>[\s\S]*?<\/entry>/g) || [];
-    
+
     for (const entryXml of entryMatches) {
       const title = entryXml.match(/<title>([\s\S]*?)<\/title>/)?.[1]?.replace(/\s+/g, " ").trim() || "";
       const abstract = entryXml.match(/<summary>([\s\S]*?)<\/summary>/)?.[1]?.replace(/\s+/g, " ").trim() || "";
       const published = entryXml.match(/<published>([\s\S]*?)<\/published>/)?.[1] || "";
       const arxivId = entryXml.match(/<id>([\s\S]*?)<\/id>/)?.[1]?.split("/abs/")[1] || "";
       const doi = entryXml.match(/<arxiv:doi[^>]*>([\s\S]*?)<\/arxiv:doi>/)?.[1] || "";
-      
+
       // Extract authors
       const authorMatches = entryXml.match(/<author>[\s\S]*?<\/author>/g) || [];
       const authors: Author[] = authorMatches.map(authorXml => {
@@ -861,11 +871,11 @@ async function searchArXiv(query: string, maxResults: number = 100): Promise<{ p
         const affiliation = authorXml.match(/<arxiv:affiliation[^>]*>([\s\S]*?)<\/arxiv:affiliation>/)?.[1] || "";
         return { name, affiliation };
       });
-      
+
       // Extract categories
       const categoryMatches = entryXml.match(/<category[^>]*term="([^"]+)"/g) || [];
       const categories = categoryMatches.map(c => c.match(/term="([^"]+)"/)?.[1] || "");
-      
+
       papers.push({
         id: arxivId || `arxiv_${Date.now()}`,
         title,
@@ -884,7 +894,7 @@ async function searchArXiv(query: string, maxResults: number = 100): Promise<{ p
         retrievedAt: new Date()
       });
     }
-    
+
     console.log(`[arXiv] Found ${papers.length} papers in ${Date.now() - startTime}ms`);
     return { papers, time: Date.now() - startTime };
   } catch (error: any) {
@@ -908,24 +918,24 @@ async function searchDOAJ(query: string, maxResults: number = 100): Promise<{ pa
 
   try {
     const searchUrl = `https://doaj.org/api/search/articles/${encodeURIComponent(query)}?pageSize=${clampedMax}`;
-    
+
     const response = await fetchWithRetry(searchUrl);
-    
+
     if (!response.ok) {
       return { papers: [], time: Date.now() - startTime, error: `HTTP ${response.status}` };
     }
-    
+
     const data = await response.json();
-    
+
     if (data.results) {
       for (const item of data.results) {
         const bibjson = item.bibjson || {};
-        
+
         const authors: Author[] = (bibjson.author || []).map((a: any) => ({
           name: a.name || "",
           affiliation: a.affiliation?.name || ""
         }));
-        
+
         papers.push({
           id: item.id || `doaj_${Date.now()}`,
           title: bibjson.title || "",
@@ -954,7 +964,7 @@ async function searchDOAJ(query: string, maxResults: number = 100): Promise<{ pa
         });
       }
     }
-    
+
     console.log(`[DOAJ] Found ${papers.length} papers in ${Date.now() - startTime}ms`);
     return { papers, time: Date.now() - startTime };
   } catch (error: any) {
@@ -970,7 +980,7 @@ async function searchDOAJ(query: string, maxResults: number = 100): Promise<{ pa
 function deduplicatePapers(papers: AcademicPaper[]): AcademicPaper[] {
   const seen = new Map<string, AcademicPaper>();
   const titleIndex = new Map<string, AcademicPaper>();
-  
+
   for (const paper of papers) {
     // Primary key: DOI (if available)
     if (paper.doi) {
@@ -990,11 +1000,11 @@ function deduplicatePapers(papers: AcademicPaper[]): AcademicPaper[] {
       }
       continue;
     }
-    
+
     // Fallback: normalized title (first 80 chars)
     const normalizedTitle = normalizeText(paper.title).substring(0, 80);
     if (normalizedTitle.length < 20) continue; // Skip very short titles
-    
+
     if (!titleIndex.has(normalizedTitle)) {
       titleIndex.set(normalizedTitle, paper);
       paper.qualityScore = calculateQualityScore(paper);
@@ -1008,7 +1018,7 @@ function deduplicatePapers(papers: AcademicPaper[]): AcademicPaper[] {
       }
     }
   }
-  
+
   // Merge DOI-keyed and title-keyed results
   const result = [...seen.values()];
   for (const [title, paper] of titleIndex) {
@@ -1017,28 +1027,28 @@ function deduplicatePapers(papers: AcademicPaper[]): AcademicPaper[] {
       result.push(paper);
     }
   }
-  
+
   return result;
 }
 
 function filterByCountry(papers: AcademicPaper[], targetCountries: string[]): AcademicPaper[] {
   if (targetCountries.length === 0) return papers;
-  
+
   const normalizedTargets = targetCountries.map(c => normalizeText(c));
-  
+
   return papers.filter(paper => {
     // Check country of study
     if (paper.countryOfStudy) {
       const country = normalizeText(paper.countryOfStudy);
       if (normalizedTargets.some(t => country.includes(t) || t.includes(country))) return true;
     }
-    
+
     // Check country of publication
     if (paper.countryOfPublication) {
       const country = normalizeText(paper.countryOfPublication);
       if (normalizedTargets.some(t => country.includes(t) || t.includes(country))) return true;
     }
-    
+
     // Check author affiliations
     for (const author of paper.authors) {
       if (author.affiliationCountry) {
@@ -1050,23 +1060,33 @@ function filterByCountry(papers: AcademicPaper[], targetCountries: string[]): Ac
         if (normalizedTargets.some(t => aff.includes(t))) return true;
       }
     }
-    
+
     // Check if title/abstract mentions target countries
     const text = normalizeText(`${paper.title} ${paper.abstract || ""}`);
     if (normalizedTargets.some(t => text.includes(t))) return true;
-    
+
     return false;
   });
 }
 
-function filterByLanguage(papers: AcademicPaper[], languages: string[]): AcademicPaper[] {
+function filterByLanguage(papers: AcademicPaper[], languages: string[], languageStrict: boolean = false): AcademicPaper[] {
   if (languages.length === 0) return papers;
-  
+
   const normalizedLangs = languages.map(l => l.toLowerCase());
-  
+
   return papers.filter(paper => {
     if (!paper.language) return true; // Include if unknown
-    return normalizedLangs.includes(paper.language.toLowerCase());
+    const paperLang = paper.language.toLowerCase();
+
+    if (languageStrict) {
+      return normalizedLangs.includes(paperLang);
+    } else {
+      // Soft filter: if detected language is not in wanted list, decrease score but keep
+      if (!normalizedLangs.includes(paperLang)) {
+        paper.qualityScore = (paper.qualityScore || 0) * 0.5; // Reduce score for non-matching language
+      }
+      return true; // Always include in soft mode, but with reduced score
+    }
   });
 }
 
@@ -1129,7 +1149,7 @@ export function generateAPACitation(paper: AcademicPaper): string {
 
 function formatAuthorsAPA(authors: Author[]): string {
   if (!authors || authors.length === 0) return "Unknown Author";
-  
+
   const formatOne = (a: Author): string => {
     if (a.lastName && a.firstName) {
       const initials = a.firstName.split(/\s+/).map(n => n.charAt(0).toUpperCase() + ".").join(" ");
@@ -1140,7 +1160,7 @@ function formatAuthorsAPA(authors: Author[]): string {
     const initials = firstName.split(/\s+/).map(n => n.charAt(0).toUpperCase() + ".").join(" ");
     return `${lastName}, ${initials}`;
   };
-  
+
   if (authors.length === 1) {
     return formatOne(authors[0]);
   } else if (authors.length === 2) {
@@ -1209,14 +1229,14 @@ export function generateHarvardCitation(paper: AcademicPaper): string {
 
 function formatAuthorsHarvard(authors: Author[]): string {
   if (!authors || authors.length === 0) return "Unknown Author";
-  
+
   const formatOne = (a: Author): string => {
     const { firstName, lastName } = parseAuthorName(a.name);
     if (!lastName) return a.name;
     const initial = firstName ? firstName.charAt(0).toUpperCase() + "." : "";
     return `${lastName}, ${initial}`;
   };
-  
+
   if (authors.length === 1) return formatOne(authors[0]);
   if (authors.length === 2) return `${formatOne(authors[0])} and ${formatOne(authors[1])}`;
   return `${formatOne(authors[0])} et al.`;
@@ -1237,14 +1257,14 @@ export function generateIEEECitation(paper: AcademicPaper): string {
 
 function formatAuthorsIEEE(authors: Author[]): string {
   if (!authors || authors.length === 0) return "Unknown Author,";
-  
+
   const formatOne = (a: Author): string => {
     const { firstName, lastName } = parseAuthorName(a.name);
     if (!lastName) return a.name;
     const initials = firstName.split(/\s+/).map(n => n.charAt(0).toUpperCase() + ".").join(" ");
     return `${initials} ${lastName}`;
   };
-  
+
   if (authors.length <= 6) {
     return authors.map(formatOne).join(", ") + ",";
   }
@@ -1266,14 +1286,14 @@ export function generateVancouverCitation(paper: AcademicPaper): string {
 
 function formatAuthorsVancouver(authors: Author[]): string {
   if (!authors || authors.length === 0) return "Unknown Author.";
-  
+
   const formatOne = (a: Author): string => {
     const { firstName, lastName } = parseAuthorName(a.name);
     if (!lastName) return a.name;
     const initials = firstName.split(/\s+/).map(n => n.charAt(0).toUpperCase()).join("");
     return `${lastName} ${initials}`;
   };
-  
+
   if (authors.length <= 6) {
     return authors.map(formatOne).join(", ") + ".";
   }
@@ -1306,12 +1326,12 @@ export async function exportToExcel(papers: AcademicPaper[], citationFormat: Cit
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "IliaGPT Academic Research Engine v3.0";
   workbook.created = new Date();
-  
+
   // Main sheet with papers
   const mainSheet = workbook.addWorksheet("Academic Papers", {
     properties: { tabColor: { argb: "1A365D" } }
   });
-  
+
   // Define columns (comprehensive)
   mainSheet.columns = [
     { header: "#", key: "num", width: 5 },
@@ -1341,7 +1361,7 @@ export async function exportToExcel(papers: AcademicPaper[], citationFormat: Cit
     { header: "MLA 9 Citation", key: "mla9", width: 120 },
     { header: "Chicago Citation", key: "chicago", width: 120 },
   ];
-  
+
   // Style header row
   const headerRow = mainSheet.getRow(1);
   headerRow.font = { bold: true, color: { argb: "FFFFFF" }, size: 11 };
@@ -1352,7 +1372,7 @@ export async function exportToExcel(papers: AcademicPaper[], citationFormat: Cit
   };
   headerRow.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
   headerRow.height = 30;
-  
+
   // Add data rows
   papers.forEach((paper, index) => {
     const row = mainSheet.addRow({
@@ -1383,7 +1403,7 @@ export async function exportToExcel(papers: AcademicPaper[], citationFormat: Cit
       mla9: generateMLACitation(paper),
       chicago: generateChicagoCitation(paper),
     });
-    
+
     // Alternate row colors
     if (index % 2 === 0) {
       row.fill = {
@@ -1392,39 +1412,39 @@ export async function exportToExcel(papers: AcademicPaper[], citationFormat: Cit
         fgColor: { argb: "F7FAFC" }
       };
     }
-    
+
     row.alignment = { vertical: "top", wrapText: true };
   });
-  
+
   // Auto-filter
   mainSheet.autoFilter = {
     from: "A1",
     to: `Z${papers.length + 1}`
   };
-  
+
   // Freeze header row
   mainSheet.views = [{ state: "frozen", ySplit: 1 }];
-  
+
   // Add summary sheet
   const summarySheet = workbook.addWorksheet("Summary", {
     properties: { tabColor: { argb: "38A169" } }
   });
-  
+
   summarySheet.columns = [
     { header: "Metric", key: "metric", width: 30 },
     { header: "Value", key: "value", width: 20 }
   ];
-  
+
   const sourceCount = papers.reduce((acc, p) => {
     acc[p.source] = (acc[p.source] || 0) + 1;
     return acc;
   }, {} as Record<string, number>);
-  
+
   const yearCount = papers.reduce((acc, p) => {
     if (p.year) acc[p.year] = (acc[p.year] || 0) + 1;
     return acc;
   }, {} as Record<number, number>);
-  
+
   const summaryData = [
     { metric: "Total Papers", value: papers.length },
     { metric: "Papers with DOI", value: papers.filter(p => p.doi).length },
@@ -1439,9 +1459,9 @@ export async function exportToExcel(papers: AcademicPaper[], citationFormat: Cit
     { metric: "--- Years ---", value: "" },
     ...Object.entries(yearCount).sort((a, b) => Number(b[0]) - Number(a[0])).slice(0, 10).map(([year, count]) => ({ metric: year, value: count })),
   ];
-  
+
   summaryData.forEach(row => summarySheet.addRow(row));
-  
+
   // Style summary header
   const summaryHeader = summarySheet.getRow(1);
   summaryHeader.font = { bold: true, color: { argb: "FFFFFF" } };
@@ -1450,13 +1470,13 @@ export async function exportToExcel(papers: AcademicPaper[], citationFormat: Cit
     pattern: "solid",
     fgColor: { argb: "38A169" }
   };
-  
+
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
 export async function exportToWord(papers: AcademicPaper[], citationFormat: CitationFormat = "apa7"): Promise<Buffer> {
   const children: any[] = [];
-  
+
   // Title
   children.push(
     new Paragraph({
@@ -1466,7 +1486,7 @@ export async function exportToWord(papers: AcademicPaper[], citationFormat: Cita
       spacing: { after: 400 }
     })
   );
-  
+
   // Metadata
   children.push(
     new Paragraph({
@@ -1478,7 +1498,7 @@ export async function exportToWord(papers: AcademicPaper[], citationFormat: Cita
       spacing: { after: 400 }
     })
   );
-  
+
   children.push(
     new Paragraph({
       text: "References",
@@ -1486,7 +1506,7 @@ export async function exportToWord(papers: AcademicPaper[], citationFormat: Cita
       spacing: { before: 400, after: 200 }
     })
   );
-  
+
   // Add each paper as a citation
   papers.forEach((paper, index) => {
     children.push(
@@ -1499,7 +1519,7 @@ export async function exportToWord(papers: AcademicPaper[], citationFormat: Cita
         indent: { left: 720, hanging: 720 } // Hanging indent for references
       })
     );
-    
+
     // Add abstract if available
     if (paper.abstract) {
       children.push(
@@ -1514,24 +1534,24 @@ export async function exportToWord(papers: AcademicPaper[], citationFormat: Cita
       );
     }
   });
-  
+
   const doc = new Document({
     sections: [{
       properties: {},
       children
     }]
   });
-  
+
   return Buffer.from(await Packer.toBuffer(doc));
 }
 
 export function exportToBibTeX(papers: AcademicPaper[]): string {
   const entries: string[] = [];
-  
+
   for (const paper of papers) {
     const key = generateBibTeXKey(paper);
     const authors = paper.authors.map(a => a.name).join(" and ");
-    
+
     let entry = `@article{${key},\n`;
     entry += `  author = {${authors}},\n`;
     entry += `  title = {${paper.title}},\n`;
@@ -1547,10 +1567,10 @@ export function exportToBibTeX(papers: AcademicPaper[]): string {
     if (paper.abstract) entry += `  abstract = {${paper.abstract.substring(0, 1000)}},\n`;
     if (paper.url) entry += `  url = {${paper.url}},\n`;
     entry += `}`;
-    
+
     entries.push(entry);
   }
-  
+
   return entries.join("\n\n");
 }
 
@@ -1563,7 +1583,7 @@ function generateBibTeXKey(paper: AcademicPaper): string {
 
 export function exportToRIS(papers: AcademicPaper[]): string {
   const entries: string[] = [];
-  
+
   for (const paper of papers) {
     const lines: string[] = [];
     lines.push("TY  - JOUR");
@@ -1591,20 +1611,20 @@ export function exportToRIS(papers: AcademicPaper[]): string {
     if (paper.url) lines.push(`UR  - ${paper.url}`);
     if (paper.language) lines.push(`LA  - ${paper.language}`);
     lines.push("ER  - ");
-    
+
     entries.push(lines.join("\n"));
   }
-  
+
   return entries.join("\n\n");
 }
 
 export function exportToCSV(papers: AcademicPaper[]): string {
   const headers = [
-    "Title", "Authors", "Year", "Journal", "Volume", "Issue", "Pages", 
-    "DOI", "Abstract", "Keywords", "Language", "Document Type", 
+    "Title", "Authors", "Year", "Journal", "Volume", "Issue", "Pages",
+    "DOI", "Abstract", "Keywords", "Language", "Document Type",
     "Country", "Citations", "Open Access", "Source", "APA Citation"
   ];
-  
+
   const escapeCSV = (val: string | number | undefined): string => {
     if (val === undefined || val === null) return "";
     const str = String(val);
@@ -1613,7 +1633,7 @@ export function exportToCSV(papers: AcademicPaper[]): string {
     }
     return str;
   };
-  
+
   const rows = papers.map(p => [
     escapeCSV(p.title),
     escapeCSV(p.authors.map(a => a.name).join("; ")),
@@ -1633,7 +1653,7 @@ export function exportToCSV(papers: AcademicPaper[]): string {
     escapeCSV(p.source),
     escapeCSV(generateAPACitation(p))
   ].join(","));
-  
+
   return [headers.join(","), ...rows].join("\n");
 }
 
@@ -1682,11 +1702,13 @@ export class AcademicResearchEngineV3 {
     if (!sanitizedQuery) {
       return {
         papers: [],
-        total: 0,
+        totalFound: 0,
+        totalBeforeDedup: 0,
         query: options.query,
         sources: [],
-        timing: 0,
-        deduplicatedCount: 0,
+        searchTime: 0,
+        deduplicated: 0,
+        filters: {}
       };
     }
 
@@ -1703,9 +1725,9 @@ export class AcademicResearchEngineV3 {
           case "scielo":
             return { source, result: await searchSciELO(sanitizedQuery, maxPerSource) };
           case "openalex":
-            return { source, result: await searchOpenAlex(sanitizedQuery, maxPerSource, options.yearFrom, options.yearTo, options.countries) };
+            return { source, result: await searchOpenAlex(sanitizedQuery, maxPerSource, options.yearFrom, options.yearTo, options.countries, options.minCitations) };
           case "semantic_scholar":
-            return { source, result: await searchSemanticScholar(sanitizedQuery, maxPerSource, options.yearFrom, options.yearTo) };
+            return { source, result: await searchSemanticScholar(sanitizedQuery, maxPerSource, options.yearFrom, options.yearTo, options.minCitations) };
           case "crossref":
             return { source, result: await searchCrossRef(sanitizedQuery, maxPerSource, options.yearFrom, options.yearTo) };
           case "core":
@@ -1722,9 +1744,9 @@ export class AcademicResearchEngineV3 {
       })();
       searchPromises.push(promise);
     }
-    
+
     const results = await Promise.all(searchPromises);
-    
+
     // Aggregate papers and sanitize results
     let allPapers: AcademicPaper[] = [];
     const sourceStats: SourceStats[] = [];
@@ -1739,12 +1761,12 @@ export class AcademicResearchEngineV3 {
         error: result.error
       });
     }
-    
+
     const totalBeforeDedup = allPapers.length;
-    
+
     // Deduplicate
     allPapers = deduplicatePapers(allPapers);
-    
+
     // Filter by year
     if (options.yearFrom || options.yearTo) {
       allPapers = allPapers.filter(p => {
@@ -1754,34 +1776,39 @@ export class AcademicResearchEngineV3 {
         return true;
       });
     }
-    
+
     // Filter by country (if specified)
     if (options.countries && options.countries.length > 0) {
       allPapers = filterByCountry(allPapers, options.countries);
     }
-    
+
     // Filter by language (if specified)
     if (options.languages && options.languages.length > 0) {
-      allPapers = filterByLanguage(allPapers, options.languages);
+      allPapers = filterByLanguage(allPapers, options.languages, options.languageStrict);
     }
-    
+
+    // Filter by minCitations (if specified)
+    if (options.minCitations !== undefined) {
+      allPapers = allPapers.filter(p => (p.citationCount || 0) >= options.minCitations!);
+    }
+
     // Filter by open access (if specified)
     if (options.openAccessOnly) {
       allPapers = allPapers.filter(p => p.isOpenAccess);
     }
-    
+
     // Sort results
     allPapers = sortPapers(allPapers, options.sortBy || "relevance");
-    
+
     // Limit results
     if (options.maxResults && allPapers.length > options.maxResults) {
       allPapers = allPapers.slice(0, options.maxResults);
     }
-    
+
     const searchTime = Date.now() - startTime;
-    
+
     console.log(`[AcademicEngineV3] Search complete: ${allPapers.length} papers (${totalBeforeDedup - allPapers.length} deduplicated) in ${searchTime}ms`);
-    
+
     return {
       papers: allPapers,
       totalFound: allPapers.length,
@@ -1797,11 +1824,11 @@ export class AcademicResearchEngineV3 {
       }
     };
   }
-  
+
   async searchLatinAmericaAndSpain(
-    query: string, 
-    maxResults: number = 100, 
-    yearFrom?: number, 
+    query: string,
+    maxResults: number = 100,
+    yearFrom?: number,
     yearTo?: number
   ): Promise<SearchResult> {
     return this.search({
@@ -1813,14 +1840,14 @@ export class AcademicResearchEngineV3 {
       sources: ["openalex", "semantic_scholar", "crossref", "doaj"]
     });
   }
-  
+
   async searchWithExport(
     options: SearchOptions,
     exportFormat: ExportFormat,
     citationFormat: CitationFormat = "apa7"
   ): Promise<{ result: SearchResult; exportData: Buffer | string }> {
     const result = await this.search(options);
-    
+
     let exportData: Buffer | string;
     switch (exportFormat) {
       case "excel":
@@ -1844,7 +1871,7 @@ export class AcademicResearchEngineV3 {
       default:
         exportData = await exportToExcel(result.papers, citationFormat);
     }
-    
+
     return { result, exportData };
   }
 }
