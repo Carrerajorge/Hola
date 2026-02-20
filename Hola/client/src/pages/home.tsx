@@ -338,7 +338,15 @@ export default function Home() {
       setNewChatStableKey(null);
     }
 
-    pendingChatIdRef.current = null;
+    // CRITICAL: Do NOT clear pendingChatIdRef when the URL change came from
+    // our own new-chat flow (replaceState in handleSendNewChatMessage).
+    // The ref is needed by stale closures in useStreamChat.finalize →
+    // handleSendMessage to find the correct chat for the assistant response.
+    // Clearing it here causes finalize to fall through to
+    // handleSendNewChatMessage, creating a SECOND pending chat (split bug).
+    if (!isPendingChatNavigation) {
+      pendingChatIdRef.current = null;
+    }
 
     setSelectedProjectId(null);
 
