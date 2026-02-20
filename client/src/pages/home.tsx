@@ -3,6 +3,7 @@ import { SkeletonPage } from "@/components/skeletons";
 import { MiniSidebar } from "@/components/mini-sidebar";
 import { ChatInterface } from "@/components/chat-interface";
 import { ChatErrorBoundary } from "@/components/error-boundaries";
+// Re-deploy: override manual hotfix-20260220-051334 with git-tracked code
 import type { Gpt } from "@/components/gpt-explorer";
 import { OfflineIndicator, OfflineBanner } from "@/components/offline-indicator";
 import { useMediaLibrary } from "@/hooks/use-media-library";
