@@ -1427,7 +1427,11 @@ const cleanSkipRunStreamDedup = (): void => {
       let agentLoopHandled = false;
       let shouldRunModel = true;
       let skillSeedForModel = "";
-      let doneSent = false; // Track whether a 'done' event was sent to prevent duplicates
+      // NOTE: doneSent is wrapped in an object so that the bundler cannot
+      // tree-shake it away (the declaration was previously stripped from the
+      // compiled output, causing "doneSent is not defined" ReferenceErrors
+      // in catch/finally blocks).
+      const streamFlags = { doneSent: false };
       let skillExecutionResult: SkillExecutionResult | null = null;
 
       const effectiveSkillRunId = claimedRun?.id || sanitizeStreamText(runId, MAX_STREAM_REQUEST_ID_LEN) || requestId;
@@ -2982,7 +2986,7 @@ ${attachmentContext}`;
           writer.finalize();
 
           console.log(`[Stream] Sending 'done' event with ${detectedWebSources.length} webSources`);
-          doneSent = true;
+          streamFlags.doneSent = true;
           writeSse(res, 'done', {
             sequenceId: chunk.sequenceId,
             requestId: chunk.requestId,
@@ -3088,8 +3092,8 @@ ${attachmentContext}`;
         }
 
         // Send done event with webSources for frontend NewsCards
-        if (!doneSent) {
-          doneSent = true;
+        if (!streamFlags.doneSent) {
+          streamFlags.doneSent = true;
           writeSse(res, 'done', {
             requestId,
             runId: effectiveRunId,
@@ -3173,8 +3177,8 @@ ${attachmentContext}`;
         // Always send a done event after error so the client can finalize.
         // Without this, the client relies on its own timeout to detect the stream
         // ended, which can leave the UI spinner stuck for up to 45s.
-        if (!doneSent) {
-          doneSent = true;
+        if (!streamFlags.doneSent) {
+          streamFlags.doneSent = true;
           writeSse(res, 'done', {
             requestId,
             runId: errorRunId,
@@ -3219,7 +3223,7 @@ ${attachmentContext}`;
       }
       // Safety net: if no done event was sent and the connection is still open,
       // emit one now so the client can finalize its UI state (spinner, etc.).
-      if (!doneSent && !isConnectionClosed && !(res as any).writableEnded) {
+      if (!streamFlags.doneSent && !isConnectionClosed && !(res as any).writableEnded) {
         try {
           writeSse(res, 'done', {
             requestId,
