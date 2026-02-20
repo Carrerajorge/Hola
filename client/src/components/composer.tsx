@@ -497,13 +497,13 @@ export function Composer({
           if (isImage && file.dataUrl) {
             return (
               <div key={file.id} className="relative group">
-                  <div
-                    className={cn(
-                      "relative w-12 h-12 rounded-lg overflow-hidden cursor-pointer",
-                      SILVER_HAIRLINE,
-                      "border-[#c7c7c7]/55 dark:border-white/10",
-                      SILVER_HOVER_BORDER_SOFT,
-                      "transition-colors duration-150"
+                <div
+                  className={cn(
+                    "relative w-12 h-12 rounded-lg overflow-hidden cursor-pointer",
+                    SILVER_HAIRLINE,
+                    "border-[#c7c7c7]/55 dark:border-white/10",
+                    SILVER_HOVER_BORDER_SOFT,
+                    "transition-colors duration-150"
                   )}
                   onClick={() => setPreviewUploadedImage?.({ name: file.name, dataUrl: file.dataUrl! })}
                   data-testid={`preview-image-${index}`}
@@ -1234,7 +1234,7 @@ export function Composer({
               {/* Character counter */}
               {input.length > 0 && (
                 <span className="text-[11px] text-muted-foreground tabular-nums" data-testid="char-counter">
-                  {input.length.toLocaleString()} / 10,000
+                  {input.length.toLocaleString('es-ES')} / 10.000
                 </span>
               )}
 

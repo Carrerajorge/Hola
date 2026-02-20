@@ -383,10 +383,10 @@ function isSubmitLocked(): boolean {
   } catch { return false; }
 }
 function setSubmitLock(): void {
-  try { sessionStorage.setItem("__sira_submit_lock", String(Date.now())); } catch {}
+  try { sessionStorage.setItem("__sira_submit_lock", String(Date.now())); } catch { }
 }
 function clearSubmitLock(): void {
-  try { sessionStorage.removeItem("__sira_submit_lock"); } catch {}
+  try { sessionStorage.removeItem("__sira_submit_lock"); } catch { }
 }
 
 export function ChatInterface({
@@ -453,7 +453,7 @@ export function ChatInterface({
 
   const { user } = useAuth();
   const { toast } = useToast();
-  
+
   // First visit explosion
   const { showExplosion, completeWelcome } = useFirstVisit();
 
@@ -474,7 +474,7 @@ export function ChatInterface({
     closePrompt: closeUpgradePrompt,
     isFreeUser,
   } = useUpgradePrompt(user?.plan ?? undefined);
-  
+
   const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
 
   // Sync with chat store for future full migration
@@ -935,7 +935,7 @@ export function ChatInterface({
       if (found) return found;
     }
     // Default: prefer Gemini models over others (Perplexity has no API key)
-    const preferredModel = availableModels.find((m: any) => 
+    const preferredModel = availableModels.find((m: any) =>
       m.provider === 'google' && m.modelId?.includes('gemini')
     );
     return preferredModel || availableModels[0] || null;
@@ -1896,6 +1896,11 @@ export function ChatInterface({
         timestamp: new Date(),
       });
     }
+
+    // Explicitly reset UI Phase and AI state to clear any stuck indicator banners
+    setUiPhase('idle');
+    setAiStateForChat('idle', chatId || 'default');
+    setAiProcessStepsForChat([], chatId || 'default');
   };
 
   // Keep handleStopChatRef in sync for keyboard shortcut access
@@ -3644,666 +3649,666 @@ export function ChatInterface({
     setSubmitLock();
     isSubmittingRef.current = true;
     try {
-    const submitConversationId = chatId || latestChatIdRef.current;
-    // When sending the very first message, the parent may create a pending chatId asynchronously.
-    // We may need to wait briefly for `chatId` (and `latestChatIdRef`) to update before starting SSE.
-    const waitForActiveChatId = async (timeoutMs = 1200): Promise<string | null> => {
-      const started = Date.now();
-      while (Date.now() - started < timeoutMs) {
-        const id = latestChatIdRef.current;
-        if (id) return id;
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
-      return latestChatIdRef.current || null;
-    };
-
-    // EMERGENCY BYPASS intentionally disabled in this branch to preserve chat run persistence/idempotency.
-    // Re-enable only in an explicit temporary local debug profile if required.
-    const ENABLE_EMERGENCY_BYPASS = false;
-
-    // If input is present and starts with "!", do direct API call (dev only).
-    if (ENABLE_EMERGENCY_BYPASS && input.trim().startsWith("!")) {
-      const cleanInput = input.trim().substring(1);
-      setInput("");
-
-      const effectiveChatIdForStream = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
-      if (chatId?.startsWith("pending-")) {
-        window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: effectiveChatIdForStream, preserveKey: true } }));
-      }
-
-      const emergencyResult = await streamChat.stream("/api/chat/stream", {
-        chatId: effectiveChatIdForStream,
-        body: {
-          messages: [{ role: "user", content: cleanInput }],
-          chatId: effectiveChatIdForStream,
-          conversationId: effectiveChatIdForStream,
-          model: selectedModel || "grok-3",
-          latencyMode,
-        },
-        onEvent: (eventType, data) => {
-          if (eventType === "tool_start" && data.toolName === "browse_and_act") {
-            setAiStateForChat("agent_working", effectiveChatIdForStream);
-            globalStartSseSession(data.args?.goal || "Automatización web");
-            setIsBrowserOpen(true);
-          } else if (eventType === "browser_step") {
-            globalUpdateFromSseStep(data);
-            setAiStateForChat("agent_working", effectiveChatIdForStream);
-            if (!isBrowserOpen) setIsBrowserOpen(true);
-          }
-        },
-        buildFinalMessage: (content, _lastEvent, messageId) => ({
-          id: messageId || `emergency-${Date.now()}`,
-          role: "assistant",
-          content: content || "No response received",
-          timestamp: new Date(),
-        }),
-      });
-      if (emergencyResult.ok) requestTitleRefresh(effectiveChatIdForStream);
-      return;
-    }
-    
-    // MOCK CITATION TRIGGER FOR VERIFICATION
-    if (input.trim() === "/test-citation") {
-      const mockMsg: Message = {
-        id: `mock-${Date.now()}`,
-        role: "assistant",
-        content: "Aquí hay una respuesta con una cita interna [[FUENTE:Documento de Diseño|http://example.com/doc.pdf]].",
-        timestamp: new Date(),
-        webSources: [
-          {
-            source: { name: "Documento de Diseño", domain: "example.com" },
-            url: "http://example.com/doc.pdf",
-            title: "Especificación Técnica",
-            domain: "example.com",
-            metadata: {
-              pageNumber: 42,
-              section: "3.5 Arquitectura",
-              totalPages: 100
-            } as any
-          }
-        ]
+      const submitConversationId = chatId || latestChatIdRef.current;
+      // When sending the very first message, the parent may create a pending chatId asynchronously.
+      // We may need to wait briefly for `chatId` (and `latestChatIdRef`) to update before starting SSE.
+      const waitForActiveChatId = async (timeoutMs = 1200): Promise<string | null> => {
+        const started = Date.now();
+        while (Date.now() - started < timeoutMs) {
+          const id = latestChatIdRef.current;
+          if (id) return id;
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        return latestChatIdRef.current || null;
       };
-      onSendMessage(mockMsg);
-      setInput("");
-      return;
-    }
 
-    if (import.meta.env.DEV) {
-      chatLogger.debug("handleSubmit called", { inputLength: input.length, selectedTool });
-    }
+      // EMERGENCY BYPASS intentionally disabled in this branch to preserve chat run persistence/idempotency.
+      // Re-enable only in an explicit temporary local debug profile if required.
+      const ENABLE_EMERGENCY_BYPASS = false;
 
-    // Allow submit if: there's input text, OR there are files, OR there's selected doc text with instruction
-    const hasInput = input.trim().length > 0;
-    const hasFiles = uploadedFilesRef.current.length > 0;
-    const hasSelectionWithInstruction = selectedDocText && input.trim();
+      // If input is present and starts with "!", do direct API call (dev only).
+      if (ENABLE_EMERGENCY_BYPASS && input.trim().startsWith("!")) {
+        const cleanInput = input.trim().substring(1);
+        setInput("");
 
-    if (import.meta.env.DEV) {
-      chatLogger.debug("handleSubmit content check", { hasInput, hasFiles });
-    }
-    if (!hasInput && !hasFiles && !hasSelectionWithInstruction) {
-      if (import.meta.env.DEV) {
-        chatLogger.debug("handleSubmit no content, returning");
-      }
-      return;
-    }
+        const effectiveChatIdForStream = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
+        if (chatId?.startsWith("pending-")) {
+          window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: effectiveChatIdForStream, preserveKey: true } }));
+        }
 
-    // FIX: Auto-generate a prompt when the user sends ONLY files without text.
-    // The backend rejects empty message content even when attachments are present,
-    // which causes files to "disappear" from the UI (already cleared) with no response.
-    let autoPromptForFiles = "";
-    if (!hasInput && hasFiles) {
-      const filesRef = uploadedFilesRef.current;
-      const hasImage = filesRef.some((f: any) => (f.type || "").startsWith("image/"));
-      const hasDoc = filesRef.some((f: any) => !(f.type || "").startsWith("image/"));
-      autoPromptForFiles = hasImage && !hasDoc
-        ? "Describe la imagen adjunta."
-        : hasDoc && !hasImage
-          ? "Analiza los documentos adjuntos y resume lo importante."
-          : "Analiza los archivos adjuntos y dime lo más importante.";
-      console.log("[handleSubmit] No text provided with files, using auto-prompt:", autoPromptForFiles);
-    }
-
-    // EMERGENCY BYPASS (DEV-ONLY, DISABLED IN PROD): For simple text messages without files, go directly to streaming API
-    // This bypasses normal chat_run creation and WILL break persistence/idempotency if enabled in prod.
-    // Keep behind explicit flag for dev troubleshooting only.
-    if (ENABLE_EMERGENCY_BYPASS && hasInput && !hasFiles && (!selectedTool || selectedTool === "web") && !selectedDocText) {
-      console.error("[EMERGENCY BYPASS] Simple text message - going direct to API", selectedTool === "web" ? "(with web search)" : "");
-      const userInput = input.trim();
-      setInput("");
-      
-      // Track query for free users (upgrade prompt)
-      incrementQuery();
-      
-      // Clear the web tool after use
-      if (selectedTool === "web") {
-        setSelectedTool(null);
-      }
-      
-      // Show user message immediately
-      const userMsgId = `user-${Date.now()}`;
-      const userMessage: Message = {
-        id: userMsgId,
-        role: "user",
-        content: selectedTool === "web" ? `🌐 ${userInput}` : userInput,
-        timestamp: new Date(),
-        requestId: `req_${Date.now()}`
-      };
-      // Show user message immediately (optimistic update) — BEFORE any async work
-      setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
-      onSendMessage(userMessage);
-
-      // Stream the response using the all-in-one hook
-      // Handles: fetch + SSE parsing + RAF-throttled updates + atomic finalize
-      const isWebSearch = selectedTool === "web" || userInput.startsWith("🌐 ");
-      const cleanInput = userInput.replace(/^🌐\s*/, "");
-
-      const effectiveChatIdForStream = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
-      if (chatId?.startsWith("pending-")) {
-        window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: effectiveChatIdForStream, preserveKey: true } }));
-      }
-
-      const streamResult = await streamChat.stream("/api/chat/stream", {
-        chatId: effectiveChatIdForStream,
-        body: {
-          messages: [{ role: "user", content: cleanInput }],
+        const emergencyResult = await streamChat.stream("/api/chat/stream", {
           chatId: effectiveChatIdForStream,
-          conversationId: effectiveChatIdForStream,
-          model: selectedModel || "grok-3",
-          forceWebSearch: isWebSearch,
-          webSearchAuto: isWebSearch,
-          latencyMode,
-        },
-        onEvent: (eventType, data) => {
-          // Handle browser automation events from agent loop
-          if (eventType === "tool_start" && data.toolName === "browse_and_act") {
-            setAiStateForChat("agent_working", effectiveChatIdForStream);
-            globalStartSseSession(data.args?.goal || "Automatización web");
-            setIsBrowserOpen(true);
-          } else if (eventType === "browser_step") {
-            globalUpdateFromSseStep(data);
-            setAiStateForChat("agent_working", effectiveChatIdForStream);
-            if (!isBrowserOpen) setIsBrowserOpen(true);
-          } else if (eventType === "tool_result" && data.toolName === "browse_and_act") {
-            if (data.result?.success) {
-              globalUpdateFromSseStep({
-                stepNumber: data.result.stepsCount || 0,
-                totalSteps: data.result.stepsCount || 0,
-                action: "done",
-                reasoning: "Tarea completada",
-                goalProgress: "100%",
-                screenshot: "",
-                url: "",
-                title: "",
-              });
+          body: {
+            messages: [{ role: "user", content: cleanInput }],
+            chatId: effectiveChatIdForStream,
+            conversationId: effectiveChatIdForStream,
+            model: selectedModel || "grok-3",
+            latencyMode,
+          },
+          onEvent: (eventType, data) => {
+            if (eventType === "tool_start" && data.toolName === "browse_and_act") {
+              setAiStateForChat("agent_working", effectiveChatIdForStream);
+              globalStartSseSession(data.args?.goal || "Automatización web");
+              setIsBrowserOpen(true);
+            } else if (eventType === "browser_step") {
+              globalUpdateFromSseStep(data);
+              setAiStateForChat("agent_working", effectiveChatIdForStream);
+              if (!isBrowserOpen) setIsBrowserOpen(true);
             }
-          }
-        },
-        buildFinalMessage: (fullContent, _lastEvent, messageId) => ({
-          id: messageId || `assistant-${Date.now()}`,
+          },
+          buildFinalMessage: (content, _lastEvent, messageId) => ({
+            id: messageId || `emergency-${Date.now()}`,
+            role: "assistant",
+            content: content || "No response received",
+            timestamp: new Date(),
+          }),
+        });
+        if (emergencyResult.ok) requestTitleRefresh(effectiveChatIdForStream);
+        return;
+      }
+
+      // MOCK CITATION TRIGGER FOR VERIFICATION
+      if (input.trim() === "/test-citation") {
+        const mockMsg: Message = {
+          id: `mock-${Date.now()}`,
           role: "assistant",
-          content: fullContent || "No se recibió respuesta del servidor.",
+          content: "Aquí hay una respuesta con una cita interna [[FUENTE:Documento de Diseño|http://example.com/doc.pdf]].",
           timestamp: new Date(),
-          userMessageId: userMsgId,
-        }),
-        buildErrorMessage: (_error, messageId) => ({
-          id: messageId || `error-${Date.now()}`,
-          role: "assistant",
-          content: "Error de conexión. Por favor, verifica tu conexión e intenta de nuevo.",
-          timestamp: new Date(),
-        }),
-      });
-      if (streamResult.ok) requestTitleRefresh(effectiveChatIdForStream);
-      return;
-    }
-
-    // Handle Agent mode - show in chat, not side panel
-    if (selectedTool === "agent") {
-      // Save files before clearing so we can restore on error
-      const savedAgentFiles = [...uploadedFilesRef.current];
-      try {
-        const userMessageContent = input || autoPromptForFiles;
-        const readyFiles = uploadedFilesRef.current.filter((f: any) => f.status === "ready");
-
-        // Agent runner expects rich attachment metadata; include storagePath as both `storagePath` and `path`.
-        const attachments = readyFiles
-          .filter((f: any) => typeof f.id === "string" && f.id.length > 0 && !f.id.startsWith("temp-"))
-          .map((f: any) => ({
-            id: f.id,
-            name: f.name,
-            mimeType: f.type,
-            type: f.type,
-            storagePath: f.storagePath,
-            path: f.storagePath,
-            size: f.size,
-            metadata: {
-              spreadsheetData: f.spreadsheetData,
-              analysisId: f.analysisId,
-            },
-          }));
-
-        const messageAttachments = readyFiles
-          .filter((f: any) => typeof f.id === "string" && f.id.length > 0 && !f.id.startsWith("temp-"))
-          .map((f: any) => ({
-            type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
-            name: f.name,
-            documentType: (() => {
-              if (f.type.startsWith("image/")) return undefined;
-              if (f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf")) return "pdf";
-              if (f.type.includes("sheet") || f.type.includes("excel") || f.type.includes("csv") || f.name.match(/\.(xlsx|xls|csv)$/i)) return "excel";
-              if (f.type.includes("presentation") || f.type.includes("powerpoint") || f.name.match(/\.(pptx|ppt)$/i)) return "ppt";
-              return "word";
-            })() as "word" | "excel" | "ppt" | "pdf",
-            mimeType: f.type,
-            imageUrl: f.type.startsWith("image/") ? f.storagePath : undefined,
-            storagePath: f.storagePath,
-            fileId: f.id,
-            spreadsheetData: f.spreadsheetData,
-          }));
-
-        // Generate a unique message ID for tracking in the store
-        const agentMessageId = `agent-${Date.now()}`;
-        setCurrentAgentMessageId(agentMessageId);
-
-        // Add user message to chat via the callback
-        const userMessage: Message = {
-          id: `user-${Date.now()}`,
-          role: "user",
-          content: userMessageContent,
-          timestamp: new Date(),
-          requestId: generateRequestId(),
-          skipRun: true, // Agent mode: persist message but don't create a normal chat run
-          attachments: messageAttachments.length > 0 ? messageAttachments : undefined,
+          webSources: [
+            {
+              source: { name: "Documento de Diseño", domain: "example.com" },
+              url: "http://example.com/doc.pdf",
+              title: "Especificación Técnica",
+              domain: "example.com",
+              metadata: {
+                pageNumber: 42,
+                section: "3.5 Arquitectura",
+                totalPages: 100
+              } as any
+            }
+          ]
         };
-        // Show message immediately (optimistic update)
+        onSendMessage(mockMsg);
+        setInput("");
+        return;
+      }
+
+      if (import.meta.env.DEV) {
+        chatLogger.debug("handleSubmit called", { inputLength: input.length, selectedTool });
+      }
+
+      // Allow submit if: there's input text, OR there are files, OR there's selected doc text with instruction
+      const hasInput = input.trim().length > 0;
+      const hasFiles = uploadedFilesRef.current.length > 0;
+      const hasSelectionWithInstruction = selectedDocText && input.trim();
+
+      if (import.meta.env.DEV) {
+        chatLogger.debug("handleSubmit content check", { hasInput, hasFiles });
+      }
+      if (!hasInput && !hasFiles && !hasSelectionWithInstruction) {
+        if (import.meta.env.DEV) {
+          chatLogger.debug("handleSubmit no content, returning");
+        }
+        return;
+      }
+
+      // FIX: Auto-generate a prompt when the user sends ONLY files without text.
+      // The backend rejects empty message content even when attachments are present,
+      // which causes files to "disappear" from the UI (already cleared) with no response.
+      let autoPromptForFiles = "";
+      if (!hasInput && hasFiles) {
+        const filesRef = uploadedFilesRef.current;
+        const hasImage = filesRef.some((f: any) => (f.type || "").startsWith("image/"));
+        const hasDoc = filesRef.some((f: any) => !(f.type || "").startsWith("image/"));
+        autoPromptForFiles = hasImage && !hasDoc
+          ? "Describe la imagen adjunta."
+          : hasDoc && !hasImage
+            ? "Analiza los documentos adjuntos y resume lo importante."
+            : "Analiza los archivos adjuntos y dime lo más importante.";
+        console.log("[handleSubmit] No text provided with files, using auto-prompt:", autoPromptForFiles);
+      }
+
+      // EMERGENCY BYPASS (DEV-ONLY, DISABLED IN PROD): For simple text messages without files, go directly to streaming API
+      // This bypasses normal chat_run creation and WILL break persistence/idempotency if enabled in prod.
+      // Keep behind explicit flag for dev troubleshooting only.
+      if (ENABLE_EMERGENCY_BYPASS && hasInput && !hasFiles && (!selectedTool || selectedTool === "web") && !selectedDocText) {
+        console.error("[EMERGENCY BYPASS] Simple text message - going direct to API", selectedTool === "web" ? "(with web search)" : "");
+        const userInput = input.trim();
+        setInput("");
+
+        // Track query for free users (upgrade prompt)
+        incrementQuery();
+
+        // Clear the web tool after use
+        if (selectedTool === "web") {
+          setSelectedTool(null);
+        }
+
+        // Show user message immediately
+        const userMsgId = `user-${Date.now()}`;
+        const userMessage: Message = {
+          id: userMsgId,
+          role: "user",
+          content: selectedTool === "web" ? `🌐 ${userInput}` : userInput,
+          timestamp: new Date(),
+          requestId: `req_${Date.now()}`
+        };
+        // Show user message immediately (optimistic update) — BEFORE any async work
         setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
         onSendMessage(userMessage);
 
-        // Clear input IMMEDIATELY after capturing the value to prevent duplicates
-        setInput("");
-        setUploadedFiles([]);
+        // Stream the response using the all-in-one hook
+        // Handles: fetch + SSE parsing + RAF-throttled updates + atomic finalize
+        const isWebSearch = selectedTool === "web" || userInput.startsWith("🌐 ");
+        const cleanInput = userInput.replace(/^🌐\s*/, "");
 
-        console.log("[Agent Mode] Starting run with input:", userMessageContent);
-
-        // Use the store-based approach for starting the run
-        // This will create the run in the store and start polling automatically
-        const result = await startAgentRun(
-          chatId || "",
-          userMessageContent,
-          agentMessageId,
-          attachments
-        );
-
-        console.log("[Agent Mode] Run result:", result);
-
-        if (result) {
-          // Tool already cleared above; now clear selected tool
-          setSelectedTool(null);
-
-          // Navigate to new chat if created
-          if (result.chatId && (!chatId || chatId.startsWith("pending-") || chatId === "")) {
-            console.log("[Agent Mode] Navigating to chat:", result.chatId);
-            window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: result.chatId, preserveKey: true } }));
-          }
-          // Polling is handled automatically by useAgentPolling hook
-        } else {
-          // Show error when agent run fails to start
-          console.error("[Agent Mode] Failed to start run, result is null");
-          // Remove the optimistic message since the agent failed to start
-          setOptimisticMessages((prev: Message[]) => prev.filter((m: Message) => m.id !== userMessage.id));
-          toast({
-            title: "Error",
-            description: "No se pudo iniciar el agente. Por favor, inicia sesión para usar esta función.",
-            variant: "destructive"
-          });
+        const effectiveChatIdForStream = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
+        if (chatId?.startsWith("pending-")) {
+          window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: effectiveChatIdForStream, preserveKey: true } }));
         }
-      } catch (error) {
-        console.error("Failed to start agent run:", error);
-        // Remove the optimistic message since the agent failed to start
-        setOptimisticMessages((prev: Message[]) => prev.filter((m: Message) => !m.id.startsWith('user-')));
-        // Restore files so user doesn't lose them
-        if (savedAgentFiles.length > 0) {
-          setUploadedFiles(savedAgentFiles);
-        }
-        toast({ title: "Error", description: "Error al iniciar el agente. Tus archivos fueron restaurados.", variant: "destructive" });
-      }
-      return;
-    }
 
-    // If there's selected text from document, rewrite it
-    if (selectedDocText && applyRewriteRef.current && input.trim()) {
-      const rewritePrompt = input.trim();
-      setInput("");
-      if (chatId) {
-        clearDraft(chatId);
-      }
-      setAiStateForChat("thinking", submitConversationId);
-
-      try {
-        abortControllerRef.current = new AbortController();
-        const response = await apiFetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-          credentials: "include",
-          body: JSON.stringify({
-            messages: [{
-              role: "user",
-              content: `Reescribe el siguiente texto según esta instrucción: "${rewritePrompt}"\n\nTexto original:\n${selectedDocText}\n\nDevuelve SOLO el texto reescrito, sin explicaciones ni comentarios adicionales.`
-            }],
-            provider: selectedProvider,
-            model: selectedModel
+        const streamResult = await streamChat.stream("/api/chat/stream", {
+          chatId: effectiveChatIdForStream,
+          body: {
+            messages: [{ role: "user", content: cleanInput }],
+            chatId: effectiveChatIdForStream,
+            conversationId: effectiveChatIdForStream,
+            model: selectedModel || "grok-3",
+            forceWebSearch: isWebSearch,
+            webSearchAuto: isWebSearch,
+            latencyMode,
+          },
+          onEvent: (eventType, data) => {
+            // Handle browser automation events from agent loop
+            if (eventType === "tool_start" && data.toolName === "browse_and_act") {
+              setAiStateForChat("agent_working", effectiveChatIdForStream);
+              globalStartSseSession(data.args?.goal || "Automatización web");
+              setIsBrowserOpen(true);
+            } else if (eventType === "browser_step") {
+              globalUpdateFromSseStep(data);
+              setAiStateForChat("agent_working", effectiveChatIdForStream);
+              if (!isBrowserOpen) setIsBrowserOpen(true);
+            } else if (eventType === "tool_result" && data.toolName === "browse_and_act") {
+              if (data.result?.success) {
+                globalUpdateFromSseStep({
+                  stepNumber: data.result.stepsCount || 0,
+                  totalSteps: data.result.stepsCount || 0,
+                  action: "done",
+                  reasoning: "Tarea completada",
+                  goalProgress: "100%",
+                  screenshot: "",
+                  url: "",
+                  title: "",
+                });
+              }
+            }
+          },
+          buildFinalMessage: (fullContent, _lastEvent, messageId) => ({
+            id: messageId || `assistant-${Date.now()}`,
+            role: "assistant",
+            content: fullContent || "No se recibió respuesta del servidor.",
+            timestamp: new Date(),
+            userMessageId: userMsgId,
           }),
-          signal: abortControllerRef.current.signal
+          buildErrorMessage: (_error, messageId) => ({
+            id: messageId || `error-${Date.now()}`,
+            role: "assistant",
+            content: "Error de conexión. Por favor, verifica tu conexión e intenta de nuevo.",
+            timestamp: new Date(),
+          }),
         });
-
-        const data = await response.json();
-        if (response.ok && data.content) {
-          applyRewriteRef.current(data.content.trim());
-        }
-
-        setSelectedDocText("");
-        applyRewriteRef.current = null;
-        setAiStateForChat("idle", submitConversationId);
-        abortControllerRef.current = null;
-        return;
-      } catch (error: any) {
-        if (error.name !== "AbortError") {
-          console.error("Rewrite error:", error);
-        }
-        setAiStateForChat("idle", submitConversationId);
-        abortControllerRef.current = null;
+        if (streamResult.ok) requestTitleRefresh(effectiveChatIdForStream);
         return;
       }
-    }
 
-    // GENERATION INTENT DETECTION: Handle image, document, spreadsheet, presentation requests
-    // These are handled directly by /api/chat + ProductionWorkflowRunner - no agent mode or SSE needed
-    const generationPatterns = [
-      /\b(crea|create|genera|generate|haz|make)\b.*\b(imagen|image|foto|photo|ilustración|illustration)\b/i,
-      /\b(crea|create|genera|generate|haz|make)\b.*\b(documento|document|word|docx)\b/i,
-      /\b(crea|create|genera|generate|haz|make)\b.*\b(excel|hoja de cálculo|spreadsheet|xlsx)\b/i,
-      /\b(crea|create|genera|generate|haz|make)\b.*\b(presentación|presentation|ppt|powerpoint|slides|diapositivas)\b/i,
-      /\b(crea|create|genera|generate|haz|make)\b.*\b(pdf)\b/i,
-      /\b(cv|curriculum|resume|currículum|carta de presentación|cover letter)\b/i,
-    ];
-
-    const imageEditPatterns = [
-      // Spanish - explicit image reference
-      /\b(edita|modifica|cambia|ajusta|arregla)\s+(la\s+)?(última|anterior|esa|esta)\s*(imagen|foto)?/i,
-      /\b(hazle|ponle|agrégale|quítale|añádele)\s+/i,
-      /\bpon(le|er)?\s+/i,
-      /\bagrega(r|le)?\s+(a\s+)?(la\s+)?imagen/i,
-      /\bcambia(r|le)?\s+(a\s+)?(la\s+)?imagen/i,
-
-      // Spanish - IMPLICIT edit commands (when there's a recent image, these imply editing it)
-      /\bagrega\s+(a\s+)?[A-Z]/i,                   // "agrega a Cristiano", "agrega un árbol"
-      /\bañade\s+(a\s+)?[A-Z]/i,                    // "añade a Messi"
-      /\bpon\s+(a\s+)?[A-Z]/i,                      // "pon a Neymar"
-      /\bquita(r)?\s+(a\s+)?[A-Z]/i,               // "quita a alguien"
-      /\b(al\s+)?(costado|lado|fondo|frente)\b/i,   // "al costado", "al lado", "al fondo"
-      /\b(en\s+el\s+)?(costado|lado|fondo|frente)\b/i,
-      /\bcámbia(le|r)?\s+(el|la|los|las)\s+\w+/i,   // "cámbiale el color", "cambiar el fondo"
-      /\bhaz(le|lo)?\s+más\s+\w+/i,                 // "hazlo más grande", "hazle más brillante"
-
-      // English - explicit
-      /\b(edit|modify|change|adjust|fix)\s+(the\s+)?(last|previous|that|this)\s*(image|photo)?/i,
-
-      // English - implicit edit commands
-      /\badd\s+[A-Z]/i,                             // "add Ronaldo", "add a tree"
-      /\bput\s+[A-Z]/i,                             // "put Messi"
-      /\bremove\s+[A-Z]/i,                          // "remove the person"
-      /\b(on\s+the\s+)?(side|left|right|background|front)\b/i,
-      /\bmake\s+(it|the\s+\w+)\s+more\s+\w+/i,      // "make it more colorful"
-    ];
-
-    const isGenerationRequest = generationPatterns.some(p => p.test(input));
-    const hasEditPattern = imageEditPatterns.some(p => p.test(input));
-
-    // IMPORTANT: When a doc tool is explicitly selected (Word/Excel/PPT), we bypass the legacy
-    // generation pattern detection and use the new /api/chat/stream flow with docTool parameter,
-    // which triggers production mode directly on the backend
-    const hasDocToolSelected = selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool);
-
-    // When document files are attached, skip generation pattern detection entirely
-    // to let the document analysis path (DATA_MODE / /api/analyze) handle them.
-    const hasDocumentFiles = uploadedFilesRef.current.some(
-      // Treat uploading/processing docs as present too; otherwise fast-submit can misroute into generation/edit mode.
-      (f: any) => f?.status !== "error" && !(f.type || "").startsWith("image/")
-    );
-
-    if ((isGenerationRequest || hasEditPattern) && !hasDocToolSelected && !hasDocumentFiles) {
-      console.log("[handleSubmit] Generation/Edit pattern detected - checking image context...");
-
-      // Set thinking state
-      setAiStateForChat("thinking", submitConversationId);
-      setAiProcessStepsForChat([
-        { step: "Procesando tu solicitud", status: "active" },
-        { step: "Generando contenido", status: "pending" }
-      ], submitConversationId);
-
-      const generationInput = input;
-      setInput("");
-      if (chatId) {
-        clearDraft(chatId);
-      }
-
-      // Add user message to chat
-      const userMsgId = `temp-gen-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-      const userMsg: Message = {
-      id: userMsgId,
-      clientTempId: userMsgId,
-      role: "user",
-      content: generationInput,
-      timestamp: new Date(),
-      requestId: generateRequestId(),
-      clientRequestId: generateClientRequestId(),
-      status: "pending",
-      deliveryStatus: "sending",
-      deliveryError: undefined,
-    };
-	      // Show message immediately (optimistic update)
-	      setOptimisticMessages((prev: Message[]) => [...prev, userMsg]);
-	      const persistGenerationUserMessagePromise = onSendMessage(userMsg).catch((err) => {
-	        console.warn("[handleSubmit] Failed to persist generation user message:", err);
-	        return undefined;
-	      });
-
-	      try {
-        // Only fetch image context if we have an edit pattern (not for generation-only requests)
-        // This prevents misrouting generation requests like "agrega una conclusión" to image edit
-        let lastImageBase64: string | null = null;
-        let lastImageId: string | null = null;
-        let isImageEditRequest = false;
-
-        if (hasEditPattern) {
-          console.log("[handleSubmit] Edit pattern detected - checking for image context...");
-
-          // Strategy 1: Check local memory cache first (fastest)
-          const lastImage = getLastGeneratedImage();
-          if (lastImage?.base64) {
-            lastImageBase64 = lastImage.base64;
-            lastImageId = lastImage.artifactId || lastImage.messageId;
-            console.log("[handleSubmit] Found last image in local memory:", lastImageId);
-          } else if (lastImage?.previewUrl) {
-            lastImageBase64 = await fetchImageAsBase64(lastImage.previewUrl);
-            lastImageId = lastImage.artifactId || lastImage.messageId;
-            console.log("[handleSubmit] Fetched last image base64 from local memory:", lastImageId);
-          } else {
-            // Strategy 2: Search visible messages for image artifacts (works after refresh)
-            const messagesWithImages = messages.filter(m => m.artifact?.type === "image" && (m.artifact.previewUrl || m.artifact.downloadUrl));
-            if (messagesWithImages.length > 0) {
-              const lastImageMsg = messagesWithImages[messagesWithImages.length - 1];
-              const imageUrl = lastImageMsg.artifact?.previewUrl || lastImageMsg.artifact?.downloadUrl;
-              if (imageUrl) {
-                console.log("[handleSubmit] Found image in chat messages, fetching from URL:", imageUrl);
-                try {
-                  lastImageBase64 = await fetchImageAsBase64(imageUrl);
-                  lastImageId = lastImageMsg.artifact?.artifactId || lastImageMsg.id;
-                  console.log("[handleSubmit] Fetched last image base64 from chat messages:", lastImageId);
-                } catch (fetchError) {
-                  console.warn("[handleSubmit] Failed to fetch image from chat messages:", fetchError);
-                }
-              }
-            }
-
-            // Strategy 3: Try server memory system (last resort)
-            if (!lastImageBase64) {
-              console.log("[handleSubmit] No local image, checking server memory...");
-              try {
-                const serverImage = await getLatestImageFromServer();
-                if (serverImage?.base64Preview) {
-                  lastImageBase64 = serverImage.base64Preview;
-                  lastImageId = serverImage.id;
-                  console.log("[handleSubmit] Found last image from server memory:", lastImageId);
-                } else if (serverImage?.imageUrl) {
-                  lastImageBase64 = await fetchImageAsBase64(serverImage.imageUrl);
-                  lastImageId = serverImage.id;
-                  console.log("[handleSubmit] Fetched last image base64 from server:", lastImageId);
-                } else {
-                  console.log("[handleSubmit] No images found in server memory");
-                }
-              } catch (serverError) {
-                console.warn("[handleSubmit] Failed to get image from server:", serverError);
-              }
-            }
-          }
-
-          // Determine if this is an edit request based on whether we found an image
-          const hasImageContext = !!lastImageBase64;
-          isImageEditRequest = hasImageContext;
-
-          // If we retrieved an image from server, persist it to local cache for future use
-          if (lastImageBase64 && lastImageId && !getLastGeneratedImage()) {
-            console.log("[handleSubmit] Persisting server image to local cache:", lastImageId);
-            storeLastGeneratedImageInfo({
-              messageId: lastImageId,
-              base64: lastImageBase64,
-              artifactId: lastImageId,
-            });
-          }
-
-        }
-
-        if (isImageEditRequest) {
-          console.log("[handleSubmit] Image edit request confirmed with image context");
-          // Update UI to reflect edit mode
-          setAiProcessStepsForChat([
-            { step: "Procesando edición de imagen", status: "active" },
-            { step: "Editando imagen", status: "pending" }
-          ], submitConversationId);
-        }
-
-        // Direct call to /api/chat/stream for generation - REAL-TIME SSE
-        console.log("[handleSubmit] ⚡ Starting standard chat stream...");
-        setAiProcessStepsForChat((prev: any[]) => prev.map((s: any, i: number) =>
-          i === 0 ? { ...s, status: "done" as const } : { ...s, status: "active" as const }
-        ), submitConversationId);
-
-        // Ensure abort controller is active
-        if (!abortControllerRef.current) {
-          abortControllerRef.current = new AbortController();
-        }
-
+      // Handle Agent mode - show in chat, not side panel
+      if (selectedTool === "agent") {
+        // Save files before clearing so we can restore on error
+        const savedAgentFiles = [...uploadedFilesRef.current];
         try {
-          const streamRunContext = buildStreamRunContext(userMsg);
-          const fallbackChatId: string | null =
-            latestChatIdRef.current || chatId || (await waitForActiveChatId());
-          const effectiveChatIdForStream = resolveStreamChatId(undefined, fallbackChatId);
-          if (!effectiveChatIdForStream) {
+          const userMessageContent = input || autoPromptForFiles;
+          const readyFiles = uploadedFilesRef.current.filter((f: any) => f.status === "ready");
+
+          // Agent runner expects rich attachment metadata; include storagePath as both `storagePath` and `path`.
+          const attachments = readyFiles
+            .filter((f: any) => typeof f.id === "string" && f.id.length > 0 && !f.id.startsWith("temp-"))
+            .map((f: any) => ({
+              id: f.id,
+              name: f.name,
+              mimeType: f.type,
+              type: f.type,
+              storagePath: f.storagePath,
+              path: f.storagePath,
+              size: f.size,
+              metadata: {
+                spreadsheetData: f.spreadsheetData,
+                analysisId: f.analysisId,
+              },
+            }));
+
+          const messageAttachments = readyFiles
+            .filter((f: any) => typeof f.id === "string" && f.id.length > 0 && !f.id.startsWith("temp-"))
+            .map((f: any) => ({
+              type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
+              name: f.name,
+              documentType: (() => {
+                if (f.type.startsWith("image/")) return undefined;
+                if (f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf")) return "pdf";
+                if (f.type.includes("sheet") || f.type.includes("excel") || f.type.includes("csv") || f.name.match(/\.(xlsx|xls|csv)$/i)) return "excel";
+                if (f.type.includes("presentation") || f.type.includes("powerpoint") || f.name.match(/\.(pptx|ppt)$/i)) return "ppt";
+                return "word";
+              })() as "word" | "excel" | "ppt" | "pdf",
+              mimeType: f.type,
+              imageUrl: f.type.startsWith("image/") ? f.storagePath : undefined,
+              storagePath: f.storagePath,
+              fileId: f.id,
+              spreadsheetData: f.spreadsheetData,
+            }));
+
+          // Generate a unique message ID for tracking in the store
+          const agentMessageId = `agent-${Date.now()}`;
+          setCurrentAgentMessageId(agentMessageId);
+
+          // Add user message to chat via the callback
+          const userMessage: Message = {
+            id: `user-${Date.now()}`,
+            role: "user",
+            content: userMessageContent,
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+            skipRun: true, // Agent mode: persist message but don't create a normal chat run
+            attachments: messageAttachments.length > 0 ? messageAttachments : undefined,
+          };
+          // Show message immediately (optimistic update)
+          setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
+          onSendMessage(userMessage);
+
+          // Clear input IMMEDIATELY after capturing the value to prevent duplicates
+          setInput("");
+          setUploadedFiles([]);
+
+          console.log("[Agent Mode] Starting run with input:", userMessageContent);
+
+          // Use the store-based approach for starting the run
+          // This will create the run in the store and start polling automatically
+          const result = await startAgentRun(
+            chatId || "",
+            userMessageContent,
+            agentMessageId,
+            attachments
+          );
+
+          console.log("[Agent Mode] Run result:", result);
+
+          if (result) {
+            // Tool already cleared above; now clear selected tool
+            setSelectedTool(null);
+
+            // Navigate to new chat if created
+            if (result.chatId && (!chatId || chatId.startsWith("pending-") || chatId === "")) {
+              console.log("[Agent Mode] Navigating to chat:", result.chatId);
+              window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: result.chatId, preserveKey: true } }));
+            }
+            // Polling is handled automatically by useAgentPolling hook
+          } else {
+            // Show error when agent run fails to start
+            console.error("[Agent Mode] Failed to start run, result is null");
+            // Remove the optimistic message since the agent failed to start
+            setOptimisticMessages((prev: Message[]) => prev.filter((m: Message) => m.id !== userMessage.id));
             toast({
               title: "Error",
-              description: "No se pudo crear/confirmar el chat para generar contenido. Intenta de nuevo.",
-              variant: "destructive",
-              duration: 5000,
+              description: "No se pudo iniciar el agente. Por favor, inicia sesión para usar esta función.",
+              variant: "destructive"
             });
-            setAiStateForChat("idle", submitConversationId);
-            setAiProcessStepsForChat([], submitConversationId);
-            abortControllerRef.current = null;
-            return;
+          }
+        } catch (error) {
+          console.error("Failed to start agent run:", error);
+          // Remove the optimistic message since the agent failed to start
+          setOptimisticMessages((prev: Message[]) => prev.filter((m: Message) => !m.id.startsWith('user-')));
+          // Restore files so user doesn't lose them
+          if (savedAgentFiles.length > 0) {
+            setUploadedFiles(savedAgentFiles);
+          }
+          toast({ title: "Error", description: "Error al iniciar el agente. Tus archivos fueron restaurados.", variant: "destructive" });
+        }
+        return;
+      }
+
+      // If there's selected text from document, rewrite it
+      if (selectedDocText && applyRewriteRef.current && input.trim()) {
+        const rewritePrompt = input.trim();
+        setInput("");
+        if (chatId) {
+          clearDraft(chatId);
+        }
+        setAiStateForChat("thinking", submitConversationId);
+
+        try {
+          abortControllerRef.current = new AbortController();
+          const response = await apiFetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+            credentials: "include",
+            body: JSON.stringify({
+              messages: [{
+                role: "user",
+                content: `Reescribe el siguiente texto según esta instrucción: "${rewritePrompt}"\n\nTexto original:\n${selectedDocText}\n\nDevuelve SOLO el texto reescrito, sin explicaciones ni comentarios adicionales.`
+              }],
+              provider: selectedProvider,
+              model: selectedModel
+            }),
+            signal: abortControllerRef.current.signal
+          });
+
+          const data = await response.json();
+          if (response.ok && data.content) {
+            applyRewriteRef.current(data.content.trim());
           }
 
-          const generationResult = await streamChat.stream("/api/chat/stream", {
-            chatId: effectiveChatIdForStream,
-            signal: abortControllerRef.current.signal,
-            body: {
-              messages: [...messages.map(m => ({ role: m.role, content: m.content })), { role: "user", content: generationInput }],
-              chatId: effectiveChatIdForStream,
-              conversationId: effectiveChatIdForStream,
-              runId: streamRunContext.runId,
-              clientRequestId: streamRunContext.clientRequestId,
-              userRequestId: streamRunContext.userRequestId,
-              provider: selectedProvider,
-              model: selectedModel,
-              lastImageBase64,
-              lastImageId,
-              latencyMode,
-            },
-            onEvent: (eventType, data) => {
-              if (eventType === "tool_start" && data.toolName === "browse_and_act") {
-                setAiStateForChat("agent_working", effectiveChatIdForStream);
-                setAiProcessStepsForChat([{
-                  id: "init",
-                  step: "init",
-                  title: `Iniciando producción: ${data.topic || "Documento"}`,
-                  status: "pending",
-                  description: `Generando ${data.deliverables?.join(", ") || "archivos"}`,
-                }], effectiveChatIdForStream);
-              } else if (eventType === "production_start") {
-                setAiStateForChat("agent_working", effectiveChatIdForStream);
-                setAiProcessStepsForChat([{
-                  id: "init",
-                  step: "init",
-                  title: `Iniciando producción: ${data.topic || "Documento"}`,
-                  status: "pending",
-                  description: `Generando ${data.deliverables?.join(", ") || "archivos"}`
-                }], effectiveChatIdForStream);
-              } else if (eventType === "production_event") {
-                setAiProcessStepsForChat((prev: any[]) => {
-                  const newSteps = [...prev];
-                  const lastStep = newSteps[newSteps.length - 1];
-                  if (lastStep && lastStep.status === "pending" && data.message) {
-                    // Update generic pending step
-                    lastStep.title = data.message;
-                  } else {
-                    newSteps.push({
-                      id: `step-${Date.now()}`,
-                      title: data.message || "Procesando...",
-                      status: "pending",
-                      description: data.stage,
-                    });
+          setSelectedDocText("");
+          applyRewriteRef.current = null;
+          setAiStateForChat("idle", submitConversationId);
+          abortControllerRef.current = null;
+          return;
+        } catch (error: any) {
+          if (error.name !== "AbortError") {
+            console.error("Rewrite error:", error);
+          }
+          setAiStateForChat("idle", submitConversationId);
+          abortControllerRef.current = null;
+          return;
+        }
+      }
+
+      // GENERATION INTENT DETECTION: Handle image, document, spreadsheet, presentation requests
+      // These are handled directly by /api/chat + ProductionWorkflowRunner - no agent mode or SSE needed
+      const generationPatterns = [
+        /\b(crea|create|genera|generate|haz|make)\b.*\b(imagen|image|foto|photo|ilustración|illustration)\b/i,
+        /\b(crea|create|genera|generate|haz|make)\b.*\b(documento|document|word|docx)\b/i,
+        /\b(crea|create|genera|generate|haz|make)\b.*\b(excel|hoja de cálculo|spreadsheet|xlsx)\b/i,
+        /\b(crea|create|genera|generate|haz|make)\b.*\b(presentación|presentation|ppt|powerpoint|slides|diapositivas)\b/i,
+        /\b(crea|create|genera|generate|haz|make)\b.*\b(pdf)\b/i,
+        /\b(cv|curriculum|resume|currículum|carta de presentación|cover letter)\b/i,
+      ];
+
+      const imageEditPatterns = [
+        // Spanish - explicit image reference
+        /\b(edita|modifica|cambia|ajusta|arregla)\s+(la\s+)?(última|anterior|esa|esta)\s*(imagen|foto)?/i,
+        /\b(hazle|ponle|agrégale|quítale|añádele)\s+/i,
+        /\bpon(le|er)?\s+/i,
+        /\bagrega(r|le)?\s+(a\s+)?(la\s+)?imagen/i,
+        /\bcambia(r|le)?\s+(a\s+)?(la\s+)?imagen/i,
+
+        // Spanish - IMPLICIT edit commands (when there's a recent image, these imply editing it)
+        /\bagrega\s+(a\s+)?[A-Z]/i,                   // "agrega a Cristiano", "agrega un árbol"
+        /\bañade\s+(a\s+)?[A-Z]/i,                    // "añade a Messi"
+        /\bpon\s+(a\s+)?[A-Z]/i,                      // "pon a Neymar"
+        /\bquita(r)?\s+(a\s+)?[A-Z]/i,               // "quita a alguien"
+        /\b(al\s+)?(costado|lado|fondo|frente)\b/i,   // "al costado", "al lado", "al fondo"
+        /\b(en\s+el\s+)?(costado|lado|fondo|frente)\b/i,
+        /\bcámbia(le|r)?\s+(el|la|los|las)\s+\w+/i,   // "cámbiale el color", "cambiar el fondo"
+        /\bhaz(le|lo)?\s+más\s+\w+/i,                 // "hazlo más grande", "hazle más brillante"
+
+        // English - explicit
+        /\b(edit|modify|change|adjust|fix)\s+(the\s+)?(last|previous|that|this)\s*(image|photo)?/i,
+
+        // English - implicit edit commands
+        /\badd\s+[A-Z]/i,                             // "add Ronaldo", "add a tree"
+        /\bput\s+[A-Z]/i,                             // "put Messi"
+        /\bremove\s+[A-Z]/i,                          // "remove the person"
+        /\b(on\s+the\s+)?(side|left|right|background|front)\b/i,
+        /\bmake\s+(it|the\s+\w+)\s+more\s+\w+/i,      // "make it more colorful"
+      ];
+
+      const isGenerationRequest = generationPatterns.some(p => p.test(input));
+      const hasEditPattern = imageEditPatterns.some(p => p.test(input));
+
+      // IMPORTANT: When a doc tool is explicitly selected (Word/Excel/PPT), we bypass the legacy
+      // generation pattern detection and use the new /api/chat/stream flow with docTool parameter,
+      // which triggers production mode directly on the backend
+      const hasDocToolSelected = selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool);
+
+      // When document files are attached, skip generation pattern detection entirely
+      // to let the document analysis path (DATA_MODE / /api/analyze) handle them.
+      const hasDocumentFiles = uploadedFilesRef.current.some(
+        // Treat uploading/processing docs as present too; otherwise fast-submit can misroute into generation/edit mode.
+        (f: any) => f?.status !== "error" && !(f.type || "").startsWith("image/")
+      );
+
+      if ((isGenerationRequest || hasEditPattern) && !hasDocToolSelected && !hasDocumentFiles) {
+        console.log("[handleSubmit] Generation/Edit pattern detected - checking image context...");
+
+        // Set thinking state
+        setAiStateForChat("thinking", submitConversationId);
+        setAiProcessStepsForChat([
+          { step: "Procesando tu solicitud", status: "active" },
+          { step: "Generando contenido", status: "pending" }
+        ], submitConversationId);
+
+        const generationInput = input;
+        setInput("");
+        if (chatId) {
+          clearDraft(chatId);
+        }
+
+        // Add user message to chat
+        const userMsgId = `temp-gen-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        const userMsg: Message = {
+          id: userMsgId,
+          clientTempId: userMsgId,
+          role: "user",
+          content: generationInput,
+          timestamp: new Date(),
+          requestId: generateRequestId(),
+          clientRequestId: generateClientRequestId(),
+          status: "pending",
+          deliveryStatus: "sending",
+          deliveryError: undefined,
+        };
+        // Show message immediately (optimistic update)
+        setOptimisticMessages((prev: Message[]) => [...prev, userMsg]);
+        const persistGenerationUserMessagePromise = onSendMessage(userMsg).catch((err) => {
+          console.warn("[handleSubmit] Failed to persist generation user message:", err);
+          return undefined;
+        });
+
+        try {
+          // Only fetch image context if we have an edit pattern (not for generation-only requests)
+          // This prevents misrouting generation requests like "agrega una conclusión" to image edit
+          let lastImageBase64: string | null = null;
+          let lastImageId: string | null = null;
+          let isImageEditRequest = false;
+
+          if (hasEditPattern) {
+            console.log("[handleSubmit] Edit pattern detected - checking for image context...");
+
+            // Strategy 1: Check local memory cache first (fastest)
+            const lastImage = getLastGeneratedImage();
+            if (lastImage?.base64) {
+              lastImageBase64 = lastImage.base64;
+              lastImageId = lastImage.artifactId || lastImage.messageId;
+              console.log("[handleSubmit] Found last image in local memory:", lastImageId);
+            } else if (lastImage?.previewUrl) {
+              lastImageBase64 = await fetchImageAsBase64(lastImage.previewUrl);
+              lastImageId = lastImage.artifactId || lastImage.messageId;
+              console.log("[handleSubmit] Fetched last image base64 from local memory:", lastImageId);
+            } else {
+              // Strategy 2: Search visible messages for image artifacts (works after refresh)
+              const messagesWithImages = messages.filter(m => m.artifact?.type === "image" && (m.artifact.previewUrl || m.artifact.downloadUrl));
+              if (messagesWithImages.length > 0) {
+                const lastImageMsg = messagesWithImages[messagesWithImages.length - 1];
+                const imageUrl = lastImageMsg.artifact?.previewUrl || lastImageMsg.artifact?.downloadUrl;
+                if (imageUrl) {
+                  console.log("[handleSubmit] Found image in chat messages, fetching from URL:", imageUrl);
+                  try {
+                    lastImageBase64 = await fetchImageAsBase64(imageUrl);
+                    lastImageId = lastImageMsg.artifact?.artifactId || lastImageMsg.id;
+                    console.log("[handleSubmit] Fetched last image base64 from chat messages:", lastImageId);
+                  } catch (fetchError) {
+                    console.warn("[handleSubmit] Failed to fetch image from chat messages:", fetchError);
                   }
-                  return newSteps;
-                }, effectiveChatIdForStream);
-              } else if (eventType === "production_complete") {
-                setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })), effectiveChatIdForStream);
-              } else if (eventType === "tool_start") {
-                // keep compatibility with older backend tool events
-                if (data.toolName === "browse_and_act") {
-                  setAiStateForChat("agent_working", effectiveChatIdForStream);
                 }
               }
-            },
-            onAiStateChange: (nextState) => {
-              setAiStateForChat(nextState, effectiveChatIdForStream);
-            },
-            buildFinalMessage: (fullContent, data, messageId) => ({
-              id: messageId || `assistant-${Date.now()}`,
-              role: "assistant",
-              content: fullContent || "No se recibió respuesta del servidor.",
-              timestamp: new Date(),
-              requestId: data?.requestId || generateRequestId(),
-              userMessageId: userMsgId,
-              artifact: data?.artifact,
-              webSources: data?.webSources,
-            }),
-            buildErrorMessage: (_error, messageId) => ({
-              id: messageId || `error-${Date.now()}`,
-              role: "assistant",
-              content: "Error de conexión. Por favor, intenta de nuevo.",
-              timestamp: new Date(),
-              requestId: generateRequestId(),
-              userMessageId: userMsgId,
-            }),
-          });
+
+              // Strategy 3: Try server memory system (last resort)
+              if (!lastImageBase64) {
+                console.log("[handleSubmit] No local image, checking server memory...");
+                try {
+                  const serverImage = await getLatestImageFromServer();
+                  if (serverImage?.base64Preview) {
+                    lastImageBase64 = serverImage.base64Preview;
+                    lastImageId = serverImage.id;
+                    console.log("[handleSubmit] Found last image from server memory:", lastImageId);
+                  } else if (serverImage?.imageUrl) {
+                    lastImageBase64 = await fetchImageAsBase64(serverImage.imageUrl);
+                    lastImageId = serverImage.id;
+                    console.log("[handleSubmit] Fetched last image base64 from server:", lastImageId);
+                  } else {
+                    console.log("[handleSubmit] No images found in server memory");
+                  }
+                } catch (serverError) {
+                  console.warn("[handleSubmit] Failed to get image from server:", serverError);
+                }
+              }
+            }
+
+            // Determine if this is an edit request based on whether we found an image
+            const hasImageContext = !!lastImageBase64;
+            isImageEditRequest = hasImageContext;
+
+            // If we retrieved an image from server, persist it to local cache for future use
+            if (lastImageBase64 && lastImageId && !getLastGeneratedImage()) {
+              console.log("[handleSubmit] Persisting server image to local cache:", lastImageId);
+              storeLastGeneratedImageInfo({
+                messageId: lastImageId,
+                base64: lastImageBase64,
+                artifactId: lastImageId,
+              });
+            }
+
+          }
+
+          if (isImageEditRequest) {
+            console.log("[handleSubmit] Image edit request confirmed with image context");
+            // Update UI to reflect edit mode
+            setAiProcessStepsForChat([
+              { step: "Procesando edición de imagen", status: "active" },
+              { step: "Editando imagen", status: "pending" }
+            ], submitConversationId);
+          }
+
+          // Direct call to /api/chat/stream for generation - REAL-TIME SSE
+          console.log("[handleSubmit] ⚡ Starting standard chat stream...");
+          setAiProcessStepsForChat((prev: any[]) => prev.map((s: any, i: number) =>
+            i === 0 ? { ...s, status: "done" as const } : { ...s, status: "active" as const }
+          ), submitConversationId);
+
+          // Ensure abort controller is active
+          if (!abortControllerRef.current) {
+            abortControllerRef.current = new AbortController();
+          }
+
+          try {
+            const streamRunContext = buildStreamRunContext(userMsg);
+            const fallbackChatId: string | null =
+              latestChatIdRef.current || chatId || (await waitForActiveChatId());
+            const effectiveChatIdForStream = resolveStreamChatId(undefined, fallbackChatId);
+            if (!effectiveChatIdForStream) {
+              toast({
+                title: "Error",
+                description: "No se pudo crear/confirmar el chat para generar contenido. Intenta de nuevo.",
+                variant: "destructive",
+                duration: 5000,
+              });
+              setAiStateForChat("idle", submitConversationId);
+              setAiProcessStepsForChat([], submitConversationId);
+              abortControllerRef.current = null;
+              return;
+            }
+
+            const generationResult = await streamChat.stream("/api/chat/stream", {
+              chatId: effectiveChatIdForStream,
+              signal: abortControllerRef.current.signal,
+              body: {
+                messages: [...messages.map(m => ({ role: m.role, content: m.content })), { role: "user", content: generationInput }],
+                chatId: effectiveChatIdForStream,
+                conversationId: effectiveChatIdForStream,
+                runId: streamRunContext.runId,
+                clientRequestId: streamRunContext.clientRequestId,
+                userRequestId: streamRunContext.userRequestId,
+                provider: selectedProvider,
+                model: selectedModel,
+                lastImageBase64,
+                lastImageId,
+                latencyMode,
+              },
+              onEvent: (eventType, data) => {
+                if (eventType === "tool_start" && data.toolName === "browse_and_act") {
+                  setAiStateForChat("agent_working", effectiveChatIdForStream);
+                  setAiProcessStepsForChat([{
+                    id: "init",
+                    step: "init",
+                    title: `Iniciando producción: ${data.topic || "Documento"}`,
+                    status: "pending",
+                    description: `Generando ${data.deliverables?.join(", ") || "archivos"}`,
+                  }], effectiveChatIdForStream);
+                } else if (eventType === "production_start") {
+                  setAiStateForChat("agent_working", effectiveChatIdForStream);
+                  setAiProcessStepsForChat([{
+                    id: "init",
+                    step: "init",
+                    title: `Iniciando producción: ${data.topic || "Documento"}`,
+                    status: "pending",
+                    description: `Generando ${data.deliverables?.join(", ") || "archivos"}`
+                  }], effectiveChatIdForStream);
+                } else if (eventType === "production_event") {
+                  setAiProcessStepsForChat((prev: any[]) => {
+                    const newSteps = [...prev];
+                    const lastStep = newSteps[newSteps.length - 1];
+                    if (lastStep && lastStep.status === "pending" && data.message) {
+                      // Update generic pending step
+                      lastStep.title = data.message;
+                    } else {
+                      newSteps.push({
+                        id: `step-${Date.now()}`,
+                        title: data.message || "Procesando...",
+                        status: "pending",
+                        description: data.stage,
+                      });
+                    }
+                    return newSteps;
+                  }, effectiveChatIdForStream);
+                } else if (eventType === "production_complete") {
+                  setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })), effectiveChatIdForStream);
+                } else if (eventType === "tool_start") {
+                  // keep compatibility with older backend tool events
+                  if (data.toolName === "browse_and_act") {
+                    setAiStateForChat("agent_working", effectiveChatIdForStream);
+                  }
+                }
+              },
+              onAiStateChange: (nextState) => {
+                setAiStateForChat(nextState, effectiveChatIdForStream);
+              },
+              buildFinalMessage: (fullContent, data, messageId) => ({
+                id: messageId || `assistant-${Date.now()}`,
+                role: "assistant",
+                content: fullContent || "No se recibió respuesta del servidor.",
+                timestamp: new Date(),
+                requestId: data?.requestId || generateRequestId(),
+                userMessageId: userMsgId,
+                artifact: data?.artifact,
+                webSources: data?.webSources,
+              }),
+              buildErrorMessage: (_error, messageId) => ({
+                id: messageId || `error-${Date.now()}`,
+                role: "assistant",
+                content: "Error de conexión. Por favor, intenta de nuevo.",
+                timestamp: new Date(),
+                requestId: generateRequestId(),
+                userMessageId: userMsgId,
+              }),
+            });
 
             if (!generationResult.ok) {
               const quotaCode = (generationResult.error as any)?.payload?.code;
@@ -4320,478 +4325,416 @@ export function ChatInterface({
               }
             } else {
               requestTitleRefresh(effectiveChatIdForStream);
+            }
+          } catch (error: any) {
+            if (error.name === "AbortError") return;
+            console.error("[Generation] Stream Error:", error);
+            streamTransition.finalize({
+              id: (Date.now() + 1).toString(),
+              role: "assistant",
+              content: error.message || "Error de conexión. Por favor, intenta de nuevo.",
+              timestamp: new Date(),
+              requestId: generateRequestId(),
+              userMessageId: userMsgId,
+            });
+          } finally {
+            abortControllerRef.current = null;
           }
-        } catch (error: any) {
-          if (error.name === "AbortError") return;
-          console.error("[Generation] Stream Error:", error);
-          streamTransition.finalize({
-            id: (Date.now() + 1).toString(),
-            role: "assistant",
-            content: error.message || "Error de conexión. Por favor, intenta de nuevo.",
-            timestamp: new Date(),
-            requestId: generateRequestId(),
-            userMessageId: userMsgId,
-          });
-        } finally {
-          abortControllerRef.current = null;
+        } catch (error) {
+          console.error("[handleSubmit] Top-level error:", error);
+          setAiStateForChat("idle", submitConversationId);
         }
-      } catch (error) {
-        console.error("[handleSubmit] Top-level error:", error);
-        setAiStateForChat("idle", submitConversationId);
-      }
         return;
-	    } // Close if ((isGenerationRequest ...
+      } // Close if ((isGenerationRequest ...
 
 
-    // Check if this is a Super Agent research request with sources
-    const effectiveInputForChecks = input || autoPromptForFiles;
-    const superAgentCheck = shouldUseSuperAgent(effectiveInputForChecks);
-    if (superAgentCheck.use) {
-      console.log("[handleSubmit] Super Agent detected:", superAgentCheck.reason);
+      // Check if this is a Super Agent research request with sources
+      const effectiveInputForChecks = input || autoPromptForFiles;
+      const superAgentCheck = shouldUseSuperAgent(effectiveInputForChecks);
+      if (superAgentCheck.use) {
+        console.log("[handleSubmit] Super Agent detected:", superAgentCheck.reason);
 
-      const userInput = effectiveInputForChecks;
-      const superAgentMessageId = `super-agent-${Date.now()}`;
+        const userInput = effectiveInputForChecks;
+        const superAgentMessageId = `super-agent-${Date.now()}`;
 
-      // Clear input immediately
-      setInput("");
-      if (chatId) {
-        clearDraft(chatId);
-      }
-      setUploadedFiles([]);
-
-      // Create user message
-      const userMsgId = Date.now().toString();
-      const userMessage: Message = {
-        id: userMsgId,
-        role: "user",
-        content: userInput,
-        timestamp: new Date(),
-        requestId: generateRequestId(),
-      };
-
-      // Show user message immediately
-      setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
-      onSendMessage(userMessage);
-
-      // Create assistant message placeholder for Super Agent display
-      const assistantMessage: Message = {
-        id: superAgentMessageId,
-        role: "assistant",
-        content: "",
-        timestamp: new Date(),
-        requestId: generateRequestId(),
-        userMessageId: userMsgId,
-        isThinking: true,
-      };
-
-      // Add assistant message that will show SuperAgentDisplay
-      setOptimisticMessages((prev: Message[]) => [...prev, assistantMessage]);
-
-      // Start Super Agent run in store
-      const { startRun, updateState, completeRun } = useSuperAgentStore.getState();
-      startRun(superAgentMessageId);
-
-      // Generate run ID on frontend to enable immediate LiveExecutionConsole display
-      const frontendRunId = `run_${crypto.randomUUID()}`;
-      console.log('[uiPhase] runId created, uiPhase=console (immediate)', { runId: frontendRunId });
-
-      // Set uiPhase to 'console' IMMEDIATELY (no grace window)
-      // This ensures LiveExecutionConsole connects to SSE as soon as possible
-      // to receive all events from the backend
-      setUiPhase('console');
-
-      setActiveRunId(frontendRunId);
-
-      // Set up SSE stream by making POST request
-      setAiStateForChat("thinking", submitConversationId);
-
-      try {
-        const response = await apiFetch("/api/super/stream", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            prompt: userInput,
-            session_id: superAgentMessageId,
-            run_id: frontendRunId,
-            options: {
-              enforce_min_sources: true,
-            },
-          }),
-        });
-
-        if (!response.ok) {
-          setActiveRunId(null);
-          throw new Error(`Super Agent request failed: ${response.status}`);
+        // Clear input immediately
+        setInput("");
+        if (chatId) {
+          clearDraft(chatId);
         }
+        setUploadedFiles([]);
 
-        const reader = response.body?.getReader();
-        if (!reader) {
-          throw new Error("No response body reader");
-        }
+        // Create user message
+        const userMsgId = Date.now().toString();
+        const userMessage: Message = {
+          id: userMsgId,
+          role: "user",
+          content: userInput,
+          timestamp: new Date(),
+          requestId: generateRequestId(),
+        };
 
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let finalResult: SuperAgentFinal | null = null;
-        let currentEventType = "";
+        // Show user message immediately
+        setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
+        onSendMessage(userMessage);
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+        // Create assistant message placeholder for Super Agent display
+        const assistantMessage: Message = {
+          id: superAgentMessageId,
+          role: "assistant",
+          content: "",
+          timestamp: new Date(),
+          requestId: generateRequestId(),
+          userMessageId: userMsgId,
+          isThinking: true,
+        };
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
+        // Add assistant message that will show SuperAgentDisplay
+        setOptimisticMessages((prev: Message[]) => [...prev, assistantMessage]);
 
-          for (const line of lines) {
-            if (line.startsWith("event: ")) {
-              currentEventType = line.slice(7).trim();
-            } else if (line.startsWith("data: ")) {
-              const jsonStr = line.slice(6);
-              if (jsonStr === "[DONE]") continue;
+        // Start Super Agent run in store
+        const { startRun, updateState, completeRun } = useSuperAgentStore.getState();
+        startRun(superAgentMessageId);
 
-              try {
-                const eventData = JSON.parse(jsonStr);
-                const eventType = currentEventType || eventData.type;
+        // Generate run ID on frontend to enable immediate LiveExecutionConsole display
+        const frontendRunId = `run_${crypto.randomUUID()}`;
+        console.log('[uiPhase] runId created, uiPhase=console (immediate)', { runId: frontendRunId });
 
-                // Update store based on event type
-                const currentState = useSuperAgentStore.getState().runs[superAgentMessageId];
-                if (currentState) {
-                  let updates: Partial<SuperAgentState> = {};
+        // Set uiPhase to 'console' IMMEDIATELY (no grace window)
+        // This ensures LiveExecutionConsole connects to SSE as soon as possible
+        // to receive all events from the backend
+        setUiPhase('console');
 
-                  switch (eventType) {
-                    case "contract":
-                      updates = {
-                        contract: eventData,
-                        sourcesTarget: eventData.requirements?.min_sources || 100,
-                        phase: "planning",
-                      };
-                      break;
-                    case "production_start":
-                      updates = {
-                        phase: "planning",
-                        contract: {
-                          contract_id: eventData.runId,
-                          intent: eventData.intent,
-                          requirements: {
-                            min_sources: 0,
-                            must_create: eventData.deliverables || ["word"],
-                            language: "es"
-                          },
-                          plan: [],
-                          original_prompt: eventData.topic || ""
-                        }
-                      };
-                      // Document Generation: Set blank page with generating status for any doc type
-                      if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)) {
-                        const deliverables = eventData.deliverables || [];
-                        const deliverableMap: Record<string, string> = { word: 'word', excel: 'excel', ppt: 'ppt' };
-                        const matchType = deliverableMap[selectedDocTool];
-                        if (deliverables.includes(matchType) || deliverables.length === 0) {
-                          setDocGenerationState({
-                            status: 'generating',
-                            progress: 0,
-                            stage: 'Iniciando generación...',
-                            downloadUrl: null,
-                            fileName: null,
-                            fileSize: null
-                          });
-                          // Clear editor content to show blank page
-                          setEditedDocumentContent('');
-                        }
-                      }
-                      break;
-                    case "progress":
-                      updates = {
-                        phase: eventData.phase || currentState.phase,
-                        progress: eventData,
-                      };
-                      break;
-                    case "production_event":
-                      const stageMap: Record<string, any> = {
-                        init: "planning",
-                        blueprint: "planning",
-                        research: "signals",
-                        writing: "creating",
-                        review: "verifying",
-                        render: "creating",
-                        final: "finalizing"
-                      };
-                      const mappedPhase = stageMap[eventData.stage] || currentState.phase;
-                      updates = {
-                        phase: mappedPhase,
-                        progress: {
-                          phase: mappedPhase,
-                          status: eventData.message,
-                          collected: eventData.progress,
-                          target: 100
-                        }
-                      };
+        setActiveRunId(frontendRunId);
 
-                      // Document Generation: Update progress state for all doc types
-                      if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)) {
-                        const stageLabels: Record<string, string> = {
-                          intake: "Procesando solicitud...",
-                          blueprint: "Diseñando estructura...",
-                          research: "Investigando contenido...",
-                          analysis: "Analizando información...",
-                          writing: "Redactando documento...",
-                          qa: "Verificando calidad...",
-                          consistency: "Validando consistencia...",
-                          render: "Generando documento final..."
+        // Set up SSE stream by making POST request
+        setAiStateForChat("thinking", submitConversationId);
+
+        try {
+          const response = await apiFetch("/api/super/stream", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              prompt: userInput,
+              session_id: superAgentMessageId,
+              run_id: frontendRunId,
+              options: {
+                enforce_min_sources: true,
+              },
+            }),
+          });
+
+          if (!response.ok) {
+            setActiveRunId(null);
+            throw new Error(`Super Agent request failed: ${response.status}`);
+          }
+
+          const reader = response.body?.getReader();
+          if (!reader) {
+            throw new Error("No response body reader");
+          }
+
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let finalResult: SuperAgentFinal | null = null;
+          let currentEventType = "";
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+              if (line.startsWith("event: ")) {
+                currentEventType = line.slice(7).trim();
+              } else if (line.startsWith("data: ")) {
+                const jsonStr = line.slice(6);
+                if (jsonStr === "[DONE]") continue;
+
+                try {
+                  const eventData = JSON.parse(jsonStr);
+                  const eventType = currentEventType || eventData.type;
+
+                  // Update store based on event type
+                  const currentState = useSuperAgentStore.getState().runs[superAgentMessageId];
+                  if (currentState) {
+                    let updates: Partial<SuperAgentState> = {};
+
+                    switch (eventType) {
+                      case "contract":
+                        updates = {
+                          contract: eventData,
+                          sourcesTarget: eventData.requirements?.min_sources || 100,
+                          phase: "planning",
                         };
-                        const progress = eventData.progress || 0;
-                        setDocGenerationState((prev: any) => ({
-                          ...prev,
-                          status: 'generating',
-                          progress,
-                          stage: stageLabels[eventData.stage] || eventData.message || prev.stage
-                        }));
-                      }
-                      break;
-                    case "source_signal":
-                      const existingIdx = currentState.sources.findIndex((s: any) => s.id === eventData.id);
-                      if (existingIdx >= 0) {
-                        const newSources = [...currentState.sources];
-                        newSources[existingIdx] = eventData;
-                        updates = { sources: newSources };
-                      } else {
-                        updates = { sources: [...currentState.sources, eventData] };
-                      }
-                      break;
-                    case "source_deep":
-                      const deepIdx = currentState.sources.findIndex((s: any) => s.id === eventData.id);
-                      if (deepIdx >= 0) {
-                        const newSources = [...currentState.sources];
-                        newSources[deepIdx] = { ...newSources[deepIdx], ...eventData, fetched: true };
-                        updates = { sources: newSources };
-                      }
-                      break;
-                    case "artifact":
-                      const artifactObj = {
-                        id: eventData.id || `art_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                        type: eventData.type,
-                        name: eventData.name || eventData.filename || "Documento",
-                        downloadUrl: eventData.downloadUrl,
-                        size: eventData.size
-                      };
-                      updates = {
-                        artifacts: [...currentState.artifacts, artifactObj],
-                        phase: "creating"
-                      };
+                        break;
+                      case "production_start":
+                        updates = {
+                          phase: "planning",
+                          contract: {
+                            contract_id: eventData.runId,
+                            intent: eventData.intent,
+                            requirements: {
+                              min_sources: 0,
+                              must_create: eventData.deliverables || ["word"],
+                              language: "es"
+                            },
+                            plan: [],
+                            original_prompt: eventData.topic || ""
+                          }
+                        };
+                        // Document Generation: Set blank page with generating status for any doc type
+                        if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)) {
+                          const deliverables = eventData.deliverables || [];
+                          const deliverableMap: Record<string, string> = { word: 'word', excel: 'excel', ppt: 'ppt' };
+                          const matchType = deliverableMap[selectedDocTool];
+                          if (deliverables.includes(matchType) || deliverables.length === 0) {
+                            setDocGenerationState({
+                              status: 'generating',
+                              progress: 0,
+                              stage: 'Iniciando generación...',
+                              downloadUrl: null,
+                              fileName: null,
+                              fileSize: null
+                            });
+                            // Clear editor content to show blank page
+                            setEditedDocumentContent('');
+                          }
+                        }
+                        break;
+                      case "progress":
+                        updates = {
+                          phase: eventData.phase || currentState.phase,
+                          progress: eventData,
+                        };
+                        break;
+                      case "production_event":
+                        const stageMap: Record<string, any> = {
+                          init: "planning",
+                          blueprint: "planning",
+                          research: "signals",
+                          writing: "creating",
+                          review: "verifying",
+                          render: "creating",
+                          final: "finalizing"
+                        };
+                        const mappedPhase = stageMap[eventData.stage] || currentState.phase;
+                        updates = {
+                          phase: mappedPhase,
+                          progress: {
+                            phase: mappedPhase,
+                            status: eventData.message,
+                            collected: eventData.progress,
+                            target: 100
+                          }
+                        };
 
-                      // Document Generation: Set ready status with download info for any doc type
-                      const docTypeMap: Record<string, string> = { word: 'word', excel: 'excel', ppt: 'ppt', xlsx: 'excel', docx: 'word', pptx: 'ppt' };
-                      const artifactDocType = docTypeMap[eventData.type] || eventData.type;
-                      const selectedDocTypeNorm = selectedDocTool ? (docTypeMap[selectedDocTool] || selectedDocTool) : null;
-                      if (selectedDocTypeNorm && artifactDocType === selectedDocTypeNorm) {
-                        const defaultNames: Record<string, string> = { word: 'Documento.docx', excel: 'Hoja.xlsx', ppt: 'Presentación.pptx' };
-                        setDocGenerationState({
-                          status: 'ready',
-                          progress: 100,
-                          stage: '¡Documento listo!',
-                          downloadUrl: eventData.downloadUrl || null,
-                          fileName: eventData.filename || eventData.name || defaultNames[artifactDocType] || 'Documento',
-                          fileSize: eventData.size || null
-                        });
-                      }
-                      break;
-                    case "verify":
-                      updates = { verify: eventData, phase: "verifying" };
-                      break;
-                    case "final":
-                      finalResult = eventData;
-                      updates = {
-                        final: eventData,
-                        phase: "completed",
-                        isRunning: false,
-                      };
-                      break;
-                    case "production_complete":
-                      const finalObj = {
-                        response: eventData.summary,
-                        sources_count: 0,
-                        artifacts: currentState.artifacts,
-                        duration_ms: 0,
-                        iterations: 1
-                      };
-                      finalResult = finalObj;
-                      updates = {
-                        final: finalObj,
-                        phase: "completed",
-                        isRunning: false
-                      };
-                      break;
-                    case "error":
-                      updates = {
-                        error: eventData.message || "Error en Super Agent",
-                        phase: "error",
-                        isRunning: false,
-                      };
-                      break;
-                    case "production_error":
-                      updates = {
-                        error: eventData.error,
-                        phase: "error",
-                        isRunning: false
-                      };
-                      break;
-                  }
+                        // Document Generation: Update progress state for all doc types
+                        if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)) {
+                          const stageLabels: Record<string, string> = {
+                            intake: "Procesando solicitud...",
+                            blueprint: "Diseñando estructura...",
+                            research: "Investigando contenido...",
+                            analysis: "Analizando información...",
+                            writing: "Redactando documento...",
+                            qa: "Verificando calidad...",
+                            consistency: "Validando consistencia...",
+                            render: "Generando documento final..."
+                          };
+                          const progress = eventData.progress || 0;
+                          setDocGenerationState((prev: any) => ({
+                            ...prev,
+                            status: 'generating',
+                            progress,
+                            stage: stageLabels[eventData.stage] || eventData.message || prev.stage
+                          }));
+                        }
+                        break;
+                      case "source_signal":
+                        const existingIdx = currentState.sources.findIndex((s: any) => s.id === eventData.id);
+                        if (existingIdx >= 0) {
+                          const newSources = [...currentState.sources];
+                          newSources[existingIdx] = eventData;
+                          updates = { sources: newSources };
+                        } else {
+                          updates = { sources: [...currentState.sources, eventData] };
+                        }
+                        break;
+                      case "source_deep":
+                        const deepIdx = currentState.sources.findIndex((s: any) => s.id === eventData.id);
+                        if (deepIdx >= 0) {
+                          const newSources = [...currentState.sources];
+                          newSources[deepIdx] = { ...newSources[deepIdx], ...eventData, fetched: true };
+                          updates = { sources: newSources };
+                        }
+                        break;
+                      case "artifact":
+                        const artifactObj = {
+                          id: eventData.id || `art_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                          type: eventData.type,
+                          name: eventData.name || eventData.filename || "Documento",
+                          downloadUrl: eventData.downloadUrl,
+                          size: eventData.size
+                        };
+                        updates = {
+                          artifacts: [...currentState.artifacts, artifactObj],
+                          phase: "creating"
+                        };
 
-                  if (Object.keys(updates).length > 0) {
-                    updateState(superAgentMessageId, updates);
+                        // Document Generation: Set ready status with download info for any doc type
+                        const docTypeMap: Record<string, string> = { word: 'word', excel: 'excel', ppt: 'ppt', xlsx: 'excel', docx: 'word', pptx: 'ppt' };
+                        const artifactDocType = docTypeMap[eventData.type] || eventData.type;
+                        const selectedDocTypeNorm = selectedDocTool ? (docTypeMap[selectedDocTool] || selectedDocTool) : null;
+                        if (selectedDocTypeNorm && artifactDocType === selectedDocTypeNorm) {
+                          const defaultNames: Record<string, string> = { word: 'Documento.docx', excel: 'Hoja.xlsx', ppt: 'Presentación.pptx' };
+                          setDocGenerationState({
+                            status: 'ready',
+                            progress: 100,
+                            stage: '¡Documento listo!',
+                            downloadUrl: eventData.downloadUrl || null,
+                            fileName: eventData.filename || eventData.name || defaultNames[artifactDocType] || 'Documento',
+                            fileSize: eventData.size || null
+                          });
+                        }
+                        break;
+                      case "verify":
+                        updates = { verify: eventData, phase: "verifying" };
+                        break;
+                      case "final":
+                        finalResult = eventData;
+                        updates = {
+                          final: eventData,
+                          phase: "completed",
+                          isRunning: false,
+                        };
+                        break;
+                      case "production_complete":
+                        const finalObj = {
+                          response: eventData.summary,
+                          sources_count: 0,
+                          artifacts: currentState.artifacts,
+                          duration_ms: 0,
+                          iterations: 1
+                        };
+                        finalResult = finalObj;
+                        updates = {
+                          final: finalObj,
+                          phase: "completed",
+                          isRunning: false
+                        };
+                        break;
+                      case "error":
+                        updates = {
+                          error: eventData.message || "Error en Super Agent",
+                          phase: "error",
+                          isRunning: false,
+                        };
+                        break;
+                      case "production_error":
+                        updates = {
+                          error: eventData.error,
+                          phase: "error",
+                          isRunning: false
+                        };
+                        break;
+                    }
+
+                    if (Object.keys(updates).length > 0) {
+                      updateState(superAgentMessageId, updates);
+                    }
                   }
+                } catch (parseError) {
+                  console.warn("[Super Agent] Failed to parse SSE event:", parseError);
                 }
-              } catch (parseError) {
-                console.warn("[Super Agent] Failed to parse SSE event:", parseError);
               }
             }
           }
-        }
 
-        // Stream completed - update assistant message with final content
-        if (finalResult) {
-          const finalAssistantMessage: Message = {
+          // Stream completed - update assistant message with final content
+          if (finalResult) {
+            const finalAssistantMessage: Message = {
+              id: superAgentMessageId,
+              role: "assistant",
+              content: finalResult.response,
+              timestamp: new Date(),
+              requestId: generateRequestId(),
+              userMessageId: userMsgId,
+            };
+
+            // Update optimistic message
+            setOptimisticMessages((prev: Message[]) =>
+              prev.map((m: Message) => m.id === superAgentMessageId ? finalAssistantMessage : m)
+            );
+            onSendMessage(finalAssistantMessage);
+
+            completeRun(superAgentMessageId, finalResult);
+            setActiveRunId(null);
+
+            // Request AI-generated title refresh after Super Agent completes
+            requestTitleRefresh(chatId);
+          }
+
+        } catch (error) {
+          console.error("[Super Agent] Stream error:", error);
+          updateState(superAgentMessageId, {
+            error: error instanceof Error ? error.message : "Error de conexión",
+            phase: "error",
+            isRunning: false,
+          });
+
+          const errorMessage: Message = {
             id: superAgentMessageId,
             role: "assistant",
-            content: finalResult.response,
+            content: "Error al procesar la investigación. Por favor, intenta de nuevo.",
             timestamp: new Date(),
             requestId: generateRequestId(),
             userMessageId: userMsgId,
           };
 
-          // Update optimistic message
           setOptimisticMessages((prev: Message[]) =>
-            prev.map((m: Message) => m.id === superAgentMessageId ? finalAssistantMessage : m)
+            prev.map((m: Message) => m.id === superAgentMessageId ? errorMessage : m)
           );
-          onSendMessage(finalAssistantMessage);
-
-          completeRun(superAgentMessageId, finalResult);
+          onSendMessage(errorMessage);
           setActiveRunId(null);
-
-          // Request AI-generated title refresh after Super Agent completes
-          requestTitleRefresh(chatId);
         }
 
-      } catch (error) {
-        console.error("[Super Agent] Stream error:", error);
-        updateState(superAgentMessageId, {
-          error: error instanceof Error ? error.message : "Error de conexión",
-          phase: "error",
-          isRunning: false,
-        });
-
-        const errorMessage: Message = {
-          id: superAgentMessageId,
-          role: "assistant",
-          content: "Error al procesar la investigación. Por favor, intenta de nuevo.",
-          timestamp: new Date(),
-          requestId: generateRequestId(),
-          userMessageId: userMsgId,
-        };
-
-        setOptimisticMessages((prev: Message[]) =>
-          prev.map((m: Message) => m.id === superAgentMessageId ? errorMessage : m)
-        );
-        onSendMessage(errorMessage);
-        setActiveRunId(null);
+        setAiStateForChat("idle", submitConversationId);
+        setAiProcessStepsForChat([], submitConversationId);
+        return;
       }
 
-      setAiStateForChat("idle", submitConversationId);
-      setAiProcessStepsForChat([], submitConversationId);
-      return;
-    }
+      // -------------------------------------------------------------------------
+      // 1. OPTIMISTIC UI: IMMEDIATE UPDATE (0ms LATENCY)
+      // -------------------------------------------------------------------------
+      // Capture state immediately — use auto-generated prompt if user sent only files
+      const userInput = input || autoPromptForFiles;
+      let currentUploadedFiles = [...uploadedFilesRef.current];
+      const userMsgId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      const hasUnsettledUploadsAtSubmit = currentUploadedFiles.some(
+        (f: any) => f?.status === "uploading" || f?.status === "processing"
+      );
+      const hadPendingUploadsAtSubmit =
+        pendingUploadsRef.current.size > 0 || hasUnsettledUploadsAtSubmit;
+      const failedUploadsAtSubmit = currentUploadedFiles.filter((f: any) => f?.status === "error");
 
-    // -------------------------------------------------------------------------
-    // 1. OPTIMISTIC UI: IMMEDIATE UPDATE (0ms LATENCY)
-    // -------------------------------------------------------------------------
-    // Capture state immediately — use auto-generated prompt if user sent only files
-    const userInput = input || autoPromptForFiles;
-    let currentUploadedFiles = [...uploadedFilesRef.current];
-    const userMsgId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-    const hasUnsettledUploadsAtSubmit = currentUploadedFiles.some(
-      (f: any) => f?.status === "uploading" || f?.status === "processing"
-    );
-    const hadPendingUploadsAtSubmit =
-      pendingUploadsRef.current.size > 0 || hasUnsettledUploadsAtSubmit;
-    const failedUploadsAtSubmit = currentUploadedFiles.filter((f: any) => f?.status === "error");
+      // Reset UI state immediately — save files for restoration on error
+      let savedMainFiles = [...uploadedFilesRef.current];
+      setInput("");
+      if (chatId) clearDraft(chatId);
+      // If uploads are still in flight, don't clear the composer file list yet or we lose upload progress updates.
+      // We'll clear once uploads settle (after optimistic message is already on screen).
+      if (!hadPendingUploadsAtSubmit) {
+        // Clear successful uploads immediately; keep only errored ones so user can retry/remove them.
+        setUploadedFiles(failedUploadsAtSubmit);
+      }
 
-    // Reset UI state immediately — save files for restoration on error
-    let savedMainFiles = [...uploadedFilesRef.current];
-    setInput("");
-    if (chatId) clearDraft(chatId);
-    // If uploads are still in flight, don't clear the composer file list yet or we lose upload progress updates.
-    // We'll clear once uploads settle (after optimistic message is already on screen).
-    if (!hadPendingUploadsAtSubmit) {
-      // Clear successful uploads immediately; keep only errored ones so user can retry/remove them.
-      setUploadedFiles(failedUploadsAtSubmit);
-    }
-
-    // Process attachments for message construction
-    let attachments = currentUploadedFiles
-      // For UI: include anything not in a terminal error state so the message shows files immediately.
-      .filter((f: any) => f?.status !== "error")
-      .map((f: any) => ({
-        type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
-        name: f.name,
-        documentType: (() => {
-          if (f.type.startsWith("image/")) return undefined;
-          if (f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf")) return "pdf";
-          if (f.type.includes("sheet") || f.type.includes("excel") || f.type.includes("csv") || f.name.match(/\.(xlsx|xls|csv)$/i)) return "excel";
-          if (f.type.includes("presentation") || f.type.includes("powerpoint") || f.name.match(/\.(pptx|ppt)$/i)) return "ppt";
-          return "word"; // default to word for text/docs
-        })() as "word" | "excel" | "ppt" | "pdf",
-        mimeType: f.type,
-        imageUrl: f.dataUrl,
-        storagePath: f.storagePath,
-        fileId: f.id,
-        spreadsheetData: f.spreadsheetData,
-      }));
-
-    // Construct the User Message object
-    const userMsg: Message = {
-      id: userMsgId,
-      clientTempId: userMsgId,
-      role: "user",
-      content: userInput,
-      timestamp: new Date(),
-      requestId: generateRequestId(),
-      clientRequestId: generateClientRequestId(),
-      status: 'pending',
-      deliveryStatus: "sending",
-      deliveryError: undefined,
-      attachments: attachments.length > 0 ? attachments : undefined,
-    };
-
-    // Apply Optimistic Update IMMEDIATELY
-    const optimisticStart = import.meta.env.DEV && typeof performance !== "undefined" ? performance.now() : null;
-    setOptimisticMessages((prev: Message[]) => [...prev, userMsg]);
-    if (optimisticStart !== null) {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          console.debug("[Perf] optimistic_render_ms", Math.max(0, performance.now() - optimisticStart).toFixed(1));
-        });
-      });
-    }
-
-    // Set initial AI state
-    setAiStateForChat("thinking", submitConversationId);
-    streamingContentRef.current = "";
-    setStreamingContent("");
-
-    // Track document attachments for analysis (declared here to avoid TDZ with later reassignment)
-    let hasDocumentAttachments = false;
-    let documentAttachmentsForAnalysis: any[] = [];
-
-    // If there are pending uploads, wait for them before kicking off any backend work.
-    // The user message is already visible (optimistic), so this doesn't block perceived responsiveness.
-    if (hadPendingUploadsAtSubmit) {
-      await waitForPendingUploads();
-
-      currentUploadedFiles = [...uploadedFilesRef.current];
-      savedMainFiles = [...currentUploadedFiles];
-      const failedAfterWait = currentUploadedFiles.filter((f: any) => f?.status === "error");
-      attachments = currentUploadedFiles
-        .filter((f: any) => f.status === "ready" || f.status === "processing")
+      // Process attachments for message construction
+      let attachments = currentUploadedFiles
+        // For UI: include anything not in a terminal error state so the message shows files immediately.
+        .filter((f: any) => f?.status !== "error")
         .map((f: any) => ({
           type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
           name: f.name,
@@ -4800,7 +4743,7 @@ export function ChatInterface({
             if (f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf")) return "pdf";
             if (f.type.includes("sheet") || f.type.includes("excel") || f.type.includes("csv") || f.name.match(/\.(xlsx|xls|csv)$/i)) return "excel";
             if (f.type.includes("presentation") || f.type.includes("powerpoint") || f.name.match(/\.(pptx|ppt)$/i)) return "ppt";
-            return "word";
+            return "word"; // default to word for text/docs
           })() as "word" | "excel" | "ppt" | "pdf",
           mimeType: f.type,
           imageUrl: f.dataUrl,
@@ -4809,304 +4752,379 @@ export function ChatInterface({
           spreadsheetData: f.spreadsheetData,
         }));
 
-      const nextAttachments = attachments.length > 0 ? attachments : undefined;
-      userMsg.attachments = nextAttachments;
-      setOptimisticMessages((prev: Message[]) =>
-        prev.map((m: Message) => (m.id === userMsgId ? { ...m, attachments: nextAttachments } : m))
-      );
+      // Construct the User Message object
+      const userMsg: Message = {
+        id: userMsgId,
+        clientTempId: userMsgId,
+        role: "user",
+        content: userInput,
+        timestamp: new Date(),
+        requestId: generateRequestId(),
+        clientRequestId: generateClientRequestId(),
+        status: 'pending',
+        deliveryStatus: "sending",
+        deliveryError: undefined,
+        attachments: attachments.length > 0 ? attachments : undefined,
+      };
 
-      // Now it's safe to clear successful uploads from the composer (uploads have reached a stable state).
-      // Keep any failed uploads so the user can retry/remove them.
-      setUploadedFiles(failedAfterWait);
-      if (failedAfterWait.length > 0) {
-        toast({
-          title: "Algunos archivos fallaron",
-          description: `${failedAfterWait.length} archivo(s) no se pudieron subir y no se incluyeron en el mensaje.`,
-          variant: "destructive",
-          duration: 5000,
+      // Apply Optimistic Update IMMEDIATELY
+      const optimisticStart = import.meta.env.DEV && typeof performance !== "undefined" ? performance.now() : null;
+      setOptimisticMessages((prev: Message[]) => [...prev, userMsg]);
+      if (optimisticStart !== null) {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            console.debug("[Perf] optimistic_render_ms", Math.max(0, performance.now() - optimisticStart).toFixed(1));
+          });
         });
       }
 
-      hasDocumentAttachments = attachments.some((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
-      documentAttachmentsForAnalysis = attachments.filter((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
-    }
+      // Set initial AI state
+      setAiStateForChat("thinking", submitConversationId);
+      streamingContentRef.current = "";
+      setStreamingContent("");
 
-    if (hasDocumentAttachments && documentAttachmentsForAnalysis.length > 0) {
-      void runDocumentAnalysisAsync({
-        userMessageId: userMsgId,
-        conversationId: chatId,
-        history: [
-          ...messages.map(m => ({
-            role: m.role,
-            content: m.content,
-          })),
-          { role: "user", content: userInput },
-        ],
-        attachments: documentAttachmentsForAnalysis,
-        sourceLabel: "envío",
-      }).catch((error) => {
-        console.error("[handleSubmit] DATA_MODE: document analysis bootstrap failed:", error);
-      });
-    }
+      // Track document attachments for analysis (declared here to avoid TDZ with later reassignment)
+      let hasDocumentAttachments = false;
+      let documentAttachmentsForAnalysis: any[] = [];
 
-    // -------------------------------------------------------------------------
-    // 2. ASYNC LOGIC (Agent Mode / Server Request)
-    // -------------------------------------------------------------------------
+      // If there are pending uploads, wait for them before kicking off any backend work.
+      // The user message is already visible (optimistic), so this doesn't block perceived responsiveness.
+      if (hadPendingUploadsAtSubmit) {
+        await waitForPendingUploads();
 
-    // Auto-detect if task requires Agent mode (only for non-generation complex tasks)
-    // Use captured state (userInput, currentUploadedFiles) not component state
-    const hasAttachedFiles = attachments.length > 0;
-    const complexityCheck = shouldAutoActivateAgent(userInput, hasAttachedFiles);
-
-    if (!isGenerationRequest && complexityCheck.agent_required && complexityCheck.confidence === 'high') {
-
-
-      const readyFiles = currentUploadedFiles.filter((f: any) => f.status === "ready");
-      const agentAttachments = readyFiles
-        .filter((f: any) => typeof f.id === "string" && f.id.length > 0 && !f.id.startsWith("temp-"))
-        .map((f: any) => ({
-          id: f.id,
-          name: f.name,
-          mimeType: f.type,
-          type: f.type,
-          storagePath: f.storagePath,
-          path: f.storagePath,
-          size: f.size,
-          metadata: {
+        currentUploadedFiles = [...uploadedFilesRef.current];
+        savedMainFiles = [...currentUploadedFiles];
+        const failedAfterWait = currentUploadedFiles.filter((f: any) => f?.status === "error");
+        attachments = currentUploadedFiles
+          .filter((f: any) => f.status === "ready" || f.status === "processing")
+          .map((f: any) => ({
+            type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
+            name: f.name,
+            documentType: (() => {
+              if (f.type.startsWith("image/")) return undefined;
+              if (f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf")) return "pdf";
+              if (f.type.includes("sheet") || f.type.includes("excel") || f.type.includes("csv") || f.name.match(/\.(xlsx|xls|csv)$/i)) return "excel";
+              if (f.type.includes("presentation") || f.type.includes("powerpoint") || f.name.match(/\.(pptx|ppt)$/i)) return "ppt";
+              return "word";
+            })() as "word" | "excel" | "ppt" | "pdf",
+            mimeType: f.type,
+            imageUrl: f.dataUrl,
+            storagePath: f.storagePath,
+            fileId: f.id,
             spreadsheetData: f.spreadsheetData,
-            analysisId: f.analysisId,
-          },
-        }));
+          }));
 
-      const agentMessageId = `agent-${Date.now()}`;
-      setCurrentAgentMessageId(agentMessageId);
-
-      try {
-        const result = await startAgentRun(
-          chatId || "",
-          userInput,
-          agentMessageId,
-          agentAttachments
+        const nextAttachments = attachments.length > 0 ? attachments : undefined;
+        userMsg.attachments = nextAttachments;
+        setOptimisticMessages((prev: Message[]) =>
+          prev.map((m: Message) => (m.id === userMsgId ? { ...m, attachments: nextAttachments } : m))
         );
 
-        if (result) {
+        // Now it's safe to clear successful uploads from the composer (uploads have reached a stable state).
+        // Keep any failed uploads so the user can retry/remove them.
+        setUploadedFiles(failedAfterWait);
+        if (failedAfterWait.length > 0) {
           toast({
-            title: "Modo Agente activado",
-            description: complexityCheck.agent_reason || "Tarea compleja detectada",
-            duration: 4000,
+            title: "Algunos archivos fallaron",
+            description: `${failedAfterWait.length} archivo(s) no se pudieron subir y no se incluyeron en el mensaje.`,
+            variant: "destructive",
+            duration: 5000,
           });
+        }
 
-          // Optimistic message already added above! just notify parent/server if needed
-          onSendMessage({ ...userMsg, skipRun: true });
+        hasDocumentAttachments = attachments.some((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
+        documentAttachmentsForAnalysis = attachments.filter((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
+      }
 
-          setSelectedTool(null);
-          if (result.chatId && (!chatId || chatId.startsWith("pending-") || chatId === "")) {
-            window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: result.chatId, preserveKey: true } }));
+      if (hasDocumentAttachments && documentAttachmentsForAnalysis.length > 0) {
+        void runDocumentAnalysisAsync({
+          userMessageId: userMsgId,
+          conversationId: chatId,
+          history: [
+            ...messages.map(m => ({
+              role: m.role,
+              content: m.content,
+            })),
+            { role: "user", content: userInput },
+          ],
+          attachments: documentAttachmentsForAnalysis,
+          sourceLabel: "envío",
+        }).catch((error) => {
+          console.error("[handleSubmit] DATA_MODE: document analysis bootstrap failed:", error);
+        });
+      }
+
+      // -------------------------------------------------------------------------
+      // 2. ASYNC LOGIC (Agent Mode / Server Request)
+      // -------------------------------------------------------------------------
+
+      // Auto-detect if task requires Agent mode (only for non-generation complex tasks)
+      // Use captured state (userInput, currentUploadedFiles) not component state
+      const hasAttachedFiles = attachments.length > 0;
+      const complexityCheck = shouldAutoActivateAgent(userInput, hasAttachedFiles);
+
+      if (!isGenerationRequest && complexityCheck.agent_required && complexityCheck.confidence === 'high') {
+
+
+        const readyFiles = currentUploadedFiles.filter((f: any) => f.status === "ready");
+        const agentAttachments = readyFiles
+          .filter((f: any) => typeof f.id === "string" && f.id.length > 0 && !f.id.startsWith("temp-"))
+          .map((f: any) => ({
+            id: f.id,
+            name: f.name,
+            mimeType: f.type,
+            type: f.type,
+            storagePath: f.storagePath,
+            path: f.storagePath,
+            size: f.size,
+            metadata: {
+              spreadsheetData: f.spreadsheetData,
+              analysisId: f.analysisId,
+            },
+          }));
+
+        const agentMessageId = `agent-${Date.now()}`;
+        setCurrentAgentMessageId(agentMessageId);
+
+        try {
+          const result = await startAgentRun(
+            chatId || "",
+            userInput,
+            agentMessageId,
+            agentAttachments
+          );
+
+          if (result) {
+            toast({
+              title: "Modo Agente activado",
+              description: complexityCheck.agent_reason || "Tarea compleja detectada",
+              duration: 4000,
+            });
+
+            // Optimistic message already added above! just notify parent/server if needed
+            onSendMessage({ ...userMsg, skipRun: true });
+
+            setSelectedTool(null);
+            if (result.chatId && (!chatId || chatId.startsWith("pending-") || chatId === "")) {
+              window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: result.chatId, preserveKey: true } }));
+            }
+          } else {
+            // Agent failed - Fall through to normal chat processing
+
+            // No need to reset input/files, as message is already "sent" optimistically. 
+            // Just ensure onSendMessage runs below for the normal path.
+            setCurrentAgentMessageId(null);
+          }
+        } catch (error) {
+          console.error("Failed to auto-start agent run:", error);
+          setCurrentAgentMessageId(null);
+          // Fall through to normal chat
+        }
+
+        // Only return if agent succeeded (result is truthy)
+        if (useAgentStore.getState().runs[agentMessageId]?.runId) {
+          return;
+        }
+      }
+
+
+      // Regular Chat Flow (or fallback from failed Agent Mode)
+      // Reset uiPhase to 'idle' for regular (non-Super Agent) messages
+      if (uiPhase !== 'idle') {
+
+        setUiPhase('idle');
+      }
+      // Clear any pending uiPhase timer
+      if (uiPhaseTimerRef.current) {
+        clearTimeout(uiPhaseTimerRef.current);
+        uiPhaseTimerRef.current = null;
+      }
+
+      // Initialize process steps based on context (reuse hasAttachedFiles from above)
+      const initialSteps: { step: string; status: "pending" | "active" | "done" }[] = [];
+      if (hasAttachedFiles) {
+        initialSteps.push({ step: "Analizando archivos adjuntos", status: "active" });
+      }
+      initialSteps.push({ step: "Procesando tu mensaje", status: hasAttachedFiles ? "pending" : "active" });
+      initialSteps.push({ step: "Buscando información relevante", status: "pending" });
+      initialSteps.push({ step: "Generando respuesta", status: "pending" });
+      setAiProcessStepsForChat(initialSteps, submitConversationId);
+
+      // NOTE: Input/Files already reset and UserMessage already constructed above.
+
+      console.log("[handleSubmit] sending user message:", userMsg, "chatId:", chatId);
+      // Optimistic update ALREAD done. just send to parent/server.
+      // onSendMessage calls useChats.addMessage which handles server request
+
+
+      hasDocumentAttachments = attachments.some((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
+      documentAttachmentsForAnalysis = attachments.filter((a: any) =>
+        isDocumentFile(a.mimeType || a.type, a.name, a.type)
+      );
+
+      // Send user message — await for NEW chats (need chatId), fire-and-forget for existing ones
+      let sendMessageAck: SendMessageAck | undefined;
+      try {
+        const isNewChat = !chatId || chatId.startsWith("pending-");
+        console.log("[handleSubmit] ABOUT TO CALL onSendMessage", isNewChat ? "(await — new chat, need chatId)" : "(fire-and-forget)");
+
+        if (isNewChat) {
+          // NEW CHAT: We MUST await to get the real chatId from the server.
+          // Without this, the stream has no chatId and silently fails.
+          try {
+            sendMessageAck = await onSendMessage(userMsg);
+            console.log("[handleSubmit] onSendMessage resolved for new chat:", sendMessageAck?.chatId);
+          } catch (err) {
+            console.warn("[handleSubmit] Failed to persist new chat message:", err);
           }
         } else {
-          // Agent failed - Fall through to normal chat processing
-
-          // No need to reset input/files, as message is already "sent" optimistically. 
-          // Just ensure onSendMessage runs below for the normal path.
-          setCurrentAgentMessageId(null);
+          // EXISTING CHAT: Fire-and-forget for speed (chatId already known).
+          onSendMessage(userMsg).catch((err) => {
+            console.warn("[handleSubmit] Failed to persist user message (will still attempt streaming):", err);
+            return undefined;
+          });
         }
-      } catch (error) {
-        console.error("Failed to auto-start agent run:", error);
-        setCurrentAgentMessageId(null);
-        // Fall through to normal chat
-      }
 
-      // Only return if agent succeeded (result is truthy)
-      if (useAgentStore.getState().runs[agentMessageId]?.runId) {
-        return;
-      }
-    }
-
-
-    // Regular Chat Flow (or fallback from failed Agent Mode)
-    // Reset uiPhase to 'idle' for regular (non-Super Agent) messages
-    if (uiPhase !== 'idle') {
-
-      setUiPhase('idle');
-    }
-    // Clear any pending uiPhase timer
-    if (uiPhaseTimerRef.current) {
-      clearTimeout(uiPhaseTimerRef.current);
-      uiPhaseTimerRef.current = null;
-    }
-
-    // Initialize process steps based on context (reuse hasAttachedFiles from above)
-    const initialSteps: { step: string; status: "pending" | "active" | "done" }[] = [];
-    if (hasAttachedFiles) {
-      initialSteps.push({ step: "Analizando archivos adjuntos", status: "active" });
-    }
-    initialSteps.push({ step: "Procesando tu mensaje", status: hasAttachedFiles ? "pending" : "active" });
-    initialSteps.push({ step: "Buscando información relevante", status: "pending" });
-    initialSteps.push({ step: "Generando respuesta", status: "pending" });
-    setAiProcessStepsForChat(initialSteps, submitConversationId);
-
-    // NOTE: Input/Files already reset and UserMessage already constructed above.
-
-    console.log("[handleSubmit] sending user message:", userMsg, "chatId:", chatId);
-    // Optimistic update ALREAD done. just send to parent/server.
-    // onSendMessage calls useChats.addMessage which handles server request
-
-
-    hasDocumentAttachments = attachments.some((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
-    documentAttachmentsForAnalysis = attachments.filter((a: any) =>
-      isDocumentFile(a.mimeType || a.type, a.name, a.type)
-    );
-
-    // Send user message — await for NEW chats (need chatId), fire-and-forget for existing ones
-    let sendMessageAck: SendMessageAck | undefined;
-    try {
-	      const isNewChat = !chatId || chatId.startsWith("pending-");
-	      console.log("[handleSubmit] ABOUT TO CALL onSendMessage", isNewChat ? "(await — new chat, need chatId)" : "(fire-and-forget)");
-
-	      if (isNewChat) {
-	        // NEW CHAT: We MUST await to get the real chatId from the server.
-	        // Without this, the stream has no chatId and silently fails.
-	        try {
-	          sendMessageAck = await onSendMessage(userMsg);
-	          console.log("[handleSubmit] onSendMessage resolved for new chat:", sendMessageAck?.chatId);
-	        } catch (err) {
-	          console.warn("[handleSubmit] Failed to persist new chat message:", err);
-	        }
-	      } else {
-	        // EXISTING CHAT: Fire-and-forget for speed (chatId already known).
-	        onSendMessage(userMsg).catch((err) => {
-	          console.warn("[handleSubmit] Failed to persist user message (will still attempt streaming):", err);
-	          return undefined;
-	        });
-	      }
-
-	      // Start image detection early (runs in parallel with intent checks below).
-	      // Previously this was sequential AFTER onSendMessage, adding another 200-500ms.
-	      const isImageTool = selectedTool === "image";
+        // Start image detection early (runs in parallel with intent checks below).
+        // Previously this was sequential AFTER onSendMessage, adding another 200-500ms.
+        const isImageTool = selectedTool === "image";
         const shouldAutoDetectImage =
           !isImageTool && !selectedTool && !selectedDocTool && !hasAttachedFiles;
         const imageDetectController =
           shouldAutoDetectImage && typeof AbortController !== "undefined"
             ? new AbortController()
             : null;
-	      const imageDetectPromise: Promise<boolean> = (
-	        shouldAutoDetectImage
-	      )
-	        ? apiFetch("/api/image/detect", {
-	            method: "POST",
-	            headers: { "Content-Type": "application/json" },
-	            body: JSON.stringify({ message: userInput }),
-              signal: imageDetectController?.signal ?? undefined,
-	          })
-	            .then(r => r.json())
-	            .then(d => !!d.isImageRequest)
-	            .catch(() => false)
-	        : Promise.resolve(!!isImageTool);
+        const imageDetectPromise: Promise<boolean> = (
+          shouldAutoDetectImage
+        )
+          ? apiFetch("/api/image/detect", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: userInput }),
+            signal: imageDetectController?.signal ?? undefined,
+          })
+            .then(r => r.json())
+            .then(d => !!d.isImageRequest)
+            .catch(() => false)
+          : Promise.resolve(!!isImageTool);
 
-      // Check for Google Forms intent - ONLY trigger on HIGH confidence to prevent false positives
-      const { hasMention, cleanPrompt } = extractMentionFromPrompt(userInput);
-      const formIntent = detectFormIntent(cleanPrompt, isGoogleFormsActive, hasMention);
+        // Check for Google Forms intent - ONLY trigger on HIGH confidence to prevent false positives
+        const { hasMention, cleanPrompt } = extractMentionFromPrompt(userInput);
+        const formIntent = detectFormIntent(cleanPrompt, isGoogleFormsActive, hasMention);
 
-      // Only activate Google Forms on HIGH confidence (explicit mention or specific phrase match)
-      if (formIntent.hasFormIntent && formIntent.confidence === 'high') {
-        // Create file context from uploaded files
-        if (currentUploadedFiles.length > 0) {
-          // Add file context if files are present
-          const fileContext = currentUploadedFiles
-            .filter(f => f.content && f.status === "ready")
-            .map(f => ({
-              name: f.name,
-              content: f.content || "",
-              type: f.type
-            }));
+        // Only activate Google Forms on HIGH confidence (explicit mention or specific phrase match)
+        if (formIntent.hasFormIntent && formIntent.confidence === 'high') {
+          // Create file context from uploaded files
+          if (currentUploadedFiles.length > 0) {
+            // Add file context if files are present
+            const fileContext = currentUploadedFiles
+              .filter(f => f.content && f.status === "ready")
+              .map(f => ({
+                name: f.name,
+                content: f.content || "",
+                type: f.type
+              }));
 
-          // Create assistant message with inline form preview
-          const formPreviewMsg: Message = {
-            id: (Date.now() + 1).toString(),
-            role: "assistant",
-            content: "Creando formulario en base a tu solicitud...",
-            timestamp: new Date(),
-            requestId: generateRequestId(),
-            userMessageId: userMsgId,
-            googleFormPreview: {
-              prompt: cleanPrompt,
-              fileContext: fileContext.length > 0 ? fileContext : undefined,
-              autoStart: true
-            }
-          };
+            // Create assistant message with inline form preview
+            const formPreviewMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              role: "assistant",
+              content: "Creando formulario en base a tu solicitud...",
+              timestamp: new Date(),
+              requestId: generateRequestId(),
+              userMessageId: userMsgId,
+              googleFormPreview: {
+                prompt: cleanPrompt,
+                fileContext: fileContext.length > 0 ? fileContext : undefined,
+                autoStart: true
+              }
+            };
 
-          setOptimisticMessages((prev: Message[]) => [...prev, formPreviewMsg]);
-          onSendMessage(formPreviewMsg);
-          // Note: markRequestComplete is called inside addMessage after persistence
-          setAiStateForChat("idle", submitConversationId);
-          setAiProcessStepsForChat([], submitConversationId);
-          return;
+            setOptimisticMessages((prev: Message[]) => [...prev, formPreviewMsg]);
+            onSendMessage(formPreviewMsg);
+            // Note: markRequestComplete is called inside addMessage after persistence
+            setAiStateForChat("idle", submitConversationId);
+            setAiProcessStepsForChat([], submitConversationId);
+            return;
+          }
         }
-      }
 
-      // Check for Gmail intent
-      const hasGmailMention = userInput.toLowerCase().includes('@gmail');
-      const gmailIntent = detectGmailIntent(cleanPrompt, isGmailActive, hasGmailMention);
+        // Check for Gmail intent
+        const hasGmailMention = userInput.toLowerCase().includes('@gmail');
+        const gmailIntent = detectGmailIntent(cleanPrompt, isGmailActive, hasGmailMention);
 
-      if (gmailIntent.hasGmailIntent && gmailIntent.confidence !== 'low') {
-        setAiStateForChat("thinking", submitConversationId);
-        setAiProcessStepsForChat([
-          { step: "Buscando en tu correo electrónico", status: "active" },
-          { step: "Analizando correos encontrados", status: "pending" },
-          { step: "Generando respuesta inteligente", status: "pending" }
-        ], submitConversationId);
+        if (gmailIntent.hasGmailIntent && gmailIntent.confidence !== 'low') {
+          setAiStateForChat("thinking", submitConversationId);
+          setAiProcessStepsForChat([
+            { step: "Buscando en tu correo electrónico", status: "active" },
+            { step: "Analizando correos encontrados", status: "pending" },
+            { step: "Generando respuesta inteligente", status: "pending" }
+          ], submitConversationId);
 
-	          try {
-	          const fullMessages = messages.map(m => ({ role: m.role, content: m.content }));
-	          fullMessages.push({ role: "user", content: cleanPrompt });
-          const fallbackChatId: string | null =
-            latestChatIdRef.current || chatId || (await waitForActiveChatId());
-          const gmailConversationId = resolveStreamChatId(undefined, fallbackChatId);
-	          if (!gmailConversationId) {
-	            throw new Error("No se pudo confirmar la sesión del chat.");
-	          }
+          try {
+            const fullMessages = messages.map(m => ({ role: m.role, content: m.content }));
+            fullMessages.push({ role: "user", content: cleanPrompt });
+            const fallbackChatId: string | null =
+              latestChatIdRef.current || chatId || (await waitForActiveChatId());
+            const gmailConversationId = resolveStreamChatId(undefined, fallbackChatId);
+            if (!gmailConversationId) {
+              throw new Error("No se pudo confirmar la sesión del chat.");
+            }
 
-	          const chatResponse = await apiFetch("/api/chat", {
-	            method: "POST",
-	            headers: {
-	              "Content-Type": "application/json",
-	              "x-client-send-ts": String(Date.now()),
-	              ...getAnonUserIdHeader(),
-	            },
-	            credentials: "include",
-	            body: JSON.stringify({
-	              messages: fullMessages,
-	              conversationId: gmailConversationId,
-	              useRag: true
-	            })
-	          });
+            const chatResponse = await apiFetch("/api/chat", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "x-client-send-ts": String(Date.now()),
+                ...getAnonUserIdHeader(),
+              },
+              credentials: "include",
+              body: JSON.stringify({
+                messages: fullMessages,
+                conversationId: gmailConversationId,
+                useRag: true
+              })
+            });
 
             setAiProcessStepsForChat((prev: any[]) => prev.map((s: any, i: number) =>
               i === 0 ? { ...s, status: "done" as const } :
                 i === 1 ? { ...s, status: "active" as const } : s
             ), gmailConversationId || submitConversationId);
 
-          if (chatResponse.ok) {
-            const data = await chatResponse.json();
+            if (chatResponse.ok) {
+              const data = await chatResponse.json();
 
-            setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })), gmailConversationId || submitConversationId);
+              setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })), gmailConversationId || submitConversationId);
 
-            const gmailResponseMsg: Message = {
-              id: (Date.now() + 1).toString(),
-              role: "assistant",
-              content: data.content || "No se pudo obtener una respuesta.",
-              timestamp: new Date(),
-              requestId: generateRequestId(),
-              userMessageId: userMsgId,
-              webSources: data.webSources,
-            };
-            setOptimisticMessages((prev: Message[]) => [...prev, gmailResponseMsg]);
-            onSendMessage(gmailResponseMsg);
-          } else {
+              const gmailResponseMsg: Message = {
+                id: (Date.now() + 1).toString(),
+                role: "assistant",
+                content: data.content || "No se pudo obtener una respuesta.",
+                timestamp: new Date(),
+                requestId: generateRequestId(),
+                userMessageId: userMsgId,
+                webSources: data.webSources,
+              };
+              setOptimisticMessages((prev: Message[]) => [...prev, gmailResponseMsg]);
+              onSendMessage(gmailResponseMsg);
+            } else {
+              const gmailErrorMsg: Message = {
+                id: (Date.now() + 1).toString(),
+                role: "assistant",
+                content: "❌ Error al analizar tus correos. Por favor, verifica que Gmail esté conectado e intenta de nuevo.",
+                timestamp: new Date(),
+                requestId: generateRequestId(),
+                userMessageId: userMsgId
+              };
+              setOptimisticMessages((prev: Message[]) => [...prev, gmailErrorMsg]);
+              onSendMessage(gmailErrorMsg);
+            }
+          } catch (error) {
+            console.error("Gmail chat error:", error);
             const gmailErrorMsg: Message = {
               id: (Date.now() + 1).toString(),
               role: "assistant",
-              content: "❌ Error al analizar tus correos. Por favor, verifica que Gmail esté conectado e intenta de nuevo.",
+              content: "❌ Error al procesar tu solicitud de correos. Por favor, intenta de nuevo.",
               timestamp: new Date(),
               requestId: generateRequestId(),
               userMessageId: userMsgId
@@ -5114,235 +5132,222 @@ export function ChatInterface({
             setOptimisticMessages((prev: Message[]) => [...prev, gmailErrorMsg]);
             onSendMessage(gmailErrorMsg);
           }
-        } catch (error) {
-          console.error("Gmail chat error:", error);
-          const gmailErrorMsg: Message = {
-            id: (Date.now() + 1).toString(),
-            role: "assistant",
-            content: "❌ Error al procesar tu solicitud de correos. Por favor, intenta de nuevo.",
-            timestamp: new Date(),
-            requestId: generateRequestId(),
-            userMessageId: userMsgId
-          };
-          setOptimisticMessages((prev: Message[]) => [...prev, gmailErrorMsg]);
-          onSendMessage(gmailErrorMsg);
+
+          setAiStateForChat("idle", submitConversationId);
+          setAiProcessStepsForChat([], submitConversationId);
+          return;
         }
 
-        setAiStateForChat("idle", submitConversationId);
-        setAiProcessStepsForChat([], submitConversationId);
-        return;
-      }
+        // Check if Excel is open and prompt is complex - route through orchestrator
+        const isExcelEditorOpen = (activeDocEditorRef.current?.type === "excel") || (previewDocumentRef.current?.type === "excel");
+        if (isExcelEditorOpen && isComplexExcelPrompt(cleanPrompt) && orchestratorRef.current) {
+          setAiStateForChat("thinking", submitConversationId);
+          setAiProcessStepsForChat([
+            { step: "Analizando estructura del workbook", status: "active" },
+            { step: "Creando hojas y datos", status: "pending" },
+            { step: "Aplicando fórmulas y gráficos", status: "pending" }
+          ], submitConversationId);
 
-      // Check if Excel is open and prompt is complex - route through orchestrator
-      const isExcelEditorOpen = (activeDocEditorRef.current?.type === "excel") || (previewDocumentRef.current?.type === "excel");
-      if (isExcelEditorOpen && isComplexExcelPrompt(cleanPrompt) && orchestratorRef.current) {
-        setAiStateForChat("thinking", submitConversationId);
-        setAiProcessStepsForChat([
-          { step: "Analizando estructura del workbook", status: "active" },
-          { step: "Creando hojas y datos", status: "pending" },
-          { step: "Aplicando fórmulas y gráficos", status: "pending" }
-        ], submitConversationId);
+          try {
+            await orchestratorRef.current.runOrchestrator(cleanPrompt);
+
+            setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })), submitConversationId);
+
+            const orchestratorMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              role: "assistant",
+              content: "✅ Workbook generado exitosamente con múltiples hojas, datos, fórmulas y gráficos. Revisa el editor de Excel para ver los resultados.",
+              timestamp: new Date(),
+              requestId: generateRequestId(),
+              userMessageId: userMsgId
+            };
+            setOptimisticMessages((prev: Message[]) => [...prev, orchestratorMsg]);
+            onSendMessage(orchestratorMsg);
+          } catch (err) {
+            console.error("[Orchestrator] Error:", err);
+            const errorMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              role: "assistant",
+              content: "❌ Error al generar el workbook. Por favor, intenta de nuevo.",
+              timestamp: new Date(),
+              requestId: generateRequestId(),
+              userMessageId: userMsgId
+            };
+            setOptimisticMessages((prev: Message[]) => [...prev, errorMsg]);
+            onSendMessage(errorMsg);
+          }
+
+          setAiStateForChat("idle", submitConversationId);
+          setAiProcessStepsForChat([], submitConversationId);
+          return;
+        }
 
         try {
-          await orchestratorRef.current.runOrchestrator(cleanPrompt);
+          abortControllerRef.current = new AbortController();
 
-          setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })), submitConversationId);
-
-          const orchestratorMsg: Message = {
-            id: (Date.now() + 1).toString(),
-            role: "assistant",
-            content: "✅ Workbook generado exitosamente con múltiples hojas, datos, fórmulas y gráficos. Revisa el editor de Excel para ver los resultados.",
-            timestamp: new Date(),
-            requestId: generateRequestId(),
-            userMessageId: userMsgId
-          };
-          setOptimisticMessages((prev: Message[]) => [...prev, orchestratorMsg]);
-          onSendMessage(orchestratorMsg);
-        } catch (err) {
-          console.error("[Orchestrator] Error:", err);
-          const errorMsg: Message = {
-            id: (Date.now() + 1).toString(),
-            role: "assistant",
-            content: "❌ Error al generar el workbook. Por favor, intenta de nuevo.",
-            timestamp: new Date(),
-            requestId: generateRequestId(),
-            userMessageId: userMsgId
-          };
-          setOptimisticMessages((prev: Message[]) => [...prev, errorMsg]);
-          onSendMessage(errorMsg);
-        }
-
-        setAiStateForChat("idle", submitConversationId);
-        setAiProcessStepsForChat([], submitConversationId);
-        return;
-      }
-
-      try {
-        abortControllerRef.current = new AbortController();
-
-	        // Await image detection with a strict timeout so chat streaming is not blocked.
-	        // If detection is slow, default to chat mode and continue immediately.
+          // Await image detection with a strict timeout so chat streaming is not blocked.
+          // If detection is slow, default to chat mode and continue immediately.
           const IMAGE_DETECT_TIMEOUT_MS = 180;
-	        const detectResult = await Promise.race<boolean | null>([
+          const detectResult = await Promise.race<boolean | null>([
             imageDetectPromise,
             new Promise<boolean | null>((resolve) => setTimeout(() => resolve(null), IMAGE_DETECT_TIMEOUT_MS)),
           ]);
           const imageDetectTimedOut = detectResult === null;
-	        let shouldGenerateImage = detectResult ?? false;
+          let shouldGenerateImage = detectResult ?? false;
           if (imageDetectTimedOut) {
             imageDetectController?.abort();
             console.debug("[Perf] image_detect_timeout_ms", IMAGE_DETECT_TIMEOUT_MS);
           }
 
-        // If files are attached, log that we're skipping image detection
-        if (hasAttachedFiles && !isImageTool) {
-          console.log(`[ChatInterface] Files attached (${currentUploadedFiles.length}), skipping image auto-detection - will process as document analysis`);
-        }
+          // If files are attached, log that we're skipping image detection
+          if (hasAttachedFiles && !isImageTool) {
+            console.log(`[ChatInterface] Files attached (${currentUploadedFiles.length}), skipping image auto-detection - will process as document analysis`);
+          }
 
-        // Generate image if needed
-        if (shouldGenerateImage) {
-          setIsGeneratingImage(true);
-          setAiProcessStepsForChat([
-            { step: "Analizando tu petición", status: "done" },
-            { step: "Generando imagen con IA", status: "active" },
-            { step: "Procesando resultado", status: "pending" }
-          ], submitConversationId);
+          // Generate image if needed
+          if (shouldGenerateImage) {
+            setIsGeneratingImage(true);
+            setAiProcessStepsForChat([
+              { step: "Analizando tu petición", status: "done" },
+              { step: "Generando imagen con IA", status: "active" },
+              { step: "Procesando resultado", status: "pending" }
+            ], submitConversationId);
 
-          try {
-            const imageRes = await apiFetch("/api/image/generate", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ prompt: userInput }),
-              signal: abortControllerRef.current.signal
-            });
-
-            const imageData = await imageRes.json();
-
-            if (imageRes.ok && imageData.success) {
-              setAiProcessStepsForChat((prev: AiProcessStep[]) => prev.map((s: AiProcessStep) => ({ ...s, status: "done" as const })), submitConversationId);
-
-              const msgId = (Date.now() + 1).toString();
-
-              // Store image in separate memory store to prevent loss during localStorage sync
-              storeGeneratedImage(msgId, imageData.imageData);
-
-              // Track last generated image for edit operations
-              storeLastGeneratedImageInfo({
-                messageId: msgId,
-                base64: imageData.imageData,
-                artifactId: imageData.artifactId || null,
-                previewUrl: imageData.previewUrl,
+            try {
+              const imageRes = await apiFetch("/api/image/generate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ prompt: userInput }),
+                signal: abortControllerRef.current.signal
               });
 
-              // Save generated image to user's library (fire and forget)
-              if (user) {
-                apiFetch("/api/library", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  credentials: "include",
-                  body: JSON.stringify({
-                    mediaType: "image",
-                    title: `Imagen generada - ${new Date().toLocaleDateString('es-ES')}`,
-                    description: userInput.slice(0, 200),
-                    storagePath: imageData.imageData,
-                    mimeType: "image/png",
-                    sourceChatId: chatId || null,
-                    metadata: { prompt: userInput }
-                  })
-                }).catch(err => console.error("Failed to save image to library:", err));
+              const imageData = await imageRes.json();
+
+              if (imageRes.ok && imageData.success) {
+                setAiProcessStepsForChat((prev: AiProcessStep[]) => prev.map((s: AiProcessStep) => ({ ...s, status: "done" as const })), submitConversationId);
+
+                const msgId = (Date.now() + 1).toString();
+
+                // Store image in separate memory store to prevent loss during localStorage sync
+                storeGeneratedImage(msgId, imageData.imageData);
+
+                // Track last generated image for edit operations
+                storeLastGeneratedImageInfo({
+                  messageId: msgId,
+                  base64: imageData.imageData,
+                  artifactId: imageData.artifactId || null,
+                  previewUrl: imageData.previewUrl,
+                });
+
+                // Save generated image to user's library (fire and forget)
+                if (user) {
+                  apiFetch("/api/library", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "include",
+                    body: JSON.stringify({
+                      mediaType: "image",
+                      title: `Imagen generada - ${new Date().toLocaleDateString('es-ES')}`,
+                      description: userInput.slice(0, 200),
+                      storagePath: imageData.imageData,
+                      mimeType: "image/png",
+                      sourceChatId: chatId || null,
+                      metadata: { prompt: userInput }
+                    })
+                  }).catch(err => console.error("Failed to save image to library:", err));
+                }
+
+                // Also store in local component state and ref for persistence across remounts
+                const pendingImage = { messageId: msgId, imageData: imageData.imageData };
+                setPendingGeneratedImage(pendingImage);
+                latestGeneratedImageRef.current = pendingImage;
+
+                const aiMsg: Message = {
+                  id: msgId,
+                  role: "assistant",
+                  content: "Aquí está la imagen que generé basada en tu descripción:",
+                  generatedImage: imageData.imageData,
+                  timestamp: new Date(),
+                  requestId: generateRequestId(),
+                  userMessageId: userMsgId,
+                };
+                setOptimisticMessages((prev: Message[]) => [...prev, aiMsg]);
+                onSendMessage(aiMsg);
+
+                setIsGeneratingImage(false);
+                setAiStateForChat("idle", submitConversationId);
+                setAiProcessStepsForChat([], submitConversationId);
+                setSelectedTool(null);
+                abortControllerRef.current = null;
+                return;
+              } else {
+                throw new Error(imageData.error || "Error al generar imagen");
               }
-
-              // Also store in local component state and ref for persistence across remounts
-              const pendingImage = { messageId: msgId, imageData: imageData.imageData };
-              setPendingGeneratedImage(pendingImage);
-              latestGeneratedImageRef.current = pendingImage;
-
-              const aiMsg: Message = {
-                id: msgId,
-                role: "assistant",
-                content: "Aquí está la imagen que generé basada en tu descripción:",
-                generatedImage: imageData.imageData,
-                timestamp: new Date(),
-                requestId: generateRequestId(),
-                userMessageId: userMsgId,
-              };
-              setOptimisticMessages((prev: Message[]) => [...prev, aiMsg]);
-              onSendMessage(aiMsg);
-
+            } catch (imgError: any) {
               setIsGeneratingImage(false);
-              setAiStateForChat("idle", submitConversationId);
-              setAiProcessStepsForChat([], submitConversationId);
-              setSelectedTool(null);
-              abortControllerRef.current = null;
-              return;
-            } else {
-              throw new Error(imageData.error || "Error al generar imagen");
+              if (imgError.name === "AbortError") {
+                setAiStateForChat("idle", submitConversationId);
+                setAiProcessStepsForChat([], submitConversationId);
+                abortControllerRef.current = null;
+                return;
+              }
+              // If image generation fails, continue with normal chat to explain
+              console.error("Image generation failed:", imgError);
             }
-          } catch (imgError: any) {
-            setIsGeneratingImage(false);
-            if (imgError.name === "AbortError") {
-              setAiStateForChat("idle", submitConversationId);
-              setAiProcessStepsForChat([], submitConversationId);
-              abortControllerRef.current = null;
-              return;
-            }
-            // If image generation fails, continue with normal chat to explain
-            console.error("Image generation failed:", imgError);
           }
-        }
 
-        // ── SSE STREAMING (runs for ALL messages, not just image fallback) ──
-        {
-          const fileContents = currentUploadedFiles
-            .filter(f => f.content && f.status === "ready")
-            .map(f => `[ARCHIVO ADJUNTO: "${f.name}"]\n${f.content}\n[FIN DEL ARCHIVO]`)
-            .join("\n\n");
+          // ── SSE STREAMING (runs for ALL messages, not just image fallback) ──
+          {
+            const fileContents = currentUploadedFiles
+              .filter(f => f.content && f.status === "ready")
+              .map(f => `[ARCHIVO ADJUNTO: "${f.name}"]\n${f.content}\n[FIN DEL ARCHIVO]`)
+              .join("\n\n");
 
-          const messageWithFiles = fileContents
-            ? `${fileContents}\n\n[SOLICITUD DEL USUARIO]: ${userInput}`
-            : userInput;
+            const messageWithFiles = fileContents
+              ? `${fileContents}\n\n[SOLICITUD DEL USUARIO]: ${userInput}`
+              : userInput;
 
-          const chatHistory = [...messages, { ...userMsg, content: messageWithFiles }].map(m => ({
-            role: m.role,
-            content: m.content
-          }));
+            const chatHistory = [...messages, { ...userMsg, content: messageWithFiles }].map(m => ({
+              role: m.role,
+              content: m.content
+            }));
 
-          // Extract image data URLs from current files
-          const imageDataUrls = currentUploadedFiles
-            .filter(f => f.type.startsWith("image/") && f.dataUrl)
-            .map(f => f.dataUrl as string);
+            // Extract image data URLs from current files
+            const imageDataUrls = currentUploadedFiles
+              .filter(f => f.type.startsWith("image/") && f.dataUrl)
+              .map(f => f.dataUrl as string);
 
-          // Determine if we're in document mode for special AI behavior
-          // Check both activeDocEditor and previewDocument for Excel mode
-          const isDocumentMode = !!activeDocEditorRef.current || !!previewDocumentRef.current;
-          const documentType = activeDocEditorRef.current?.type || previewDocumentRef.current?.type || null;
-          const isFigmaMode = selectedDocTool === "figma";
-          const isPptMode = documentType === "ppt";
-          const isWordMode = documentType === "word";
-          const isExcelMode = documentType === "excel";
+            // Determine if we're in document mode for special AI behavior
+            // Check both activeDocEditor and previewDocument for Excel mode
+            const isDocumentMode = !!activeDocEditorRef.current || !!previewDocumentRef.current;
+            const documentType = activeDocEditorRef.current?.type || previewDocumentRef.current?.type || null;
+            const isFigmaMode = selectedDocTool === "figma";
+            const isPptMode = documentType === "ppt";
+            const isWordMode = documentType === "word";
+            const isExcelMode = documentType === "excel";
 
-          console.log('[ChatInterface] Document mode detection:', { isDocumentMode, documentType, isExcelMode, hasInsertFn: !!docInsertContentRef.current });
+            console.log('[ChatInterface] Document mode detection:', { isDocumentMode, documentType, isExcelMode, hasInsertFn: !!docInsertContentRef.current });
 
-          // Check if document has existing content (not just placeholder)
-          const currentDocContent = editedDocumentContent || "";
-          const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '').trim();
-          const plainTextContent = stripHtml(currentDocContent);
-          const placeholderPhrases = [
-            "comienza a escribir tu documento aquí",
-            "comienza a escribir",
-            "escribe aquí"
-          ];
-          const isPlaceholder = placeholderPhrases.some(p =>
-            plainTextContent.toLowerCase().includes(p)
-          );
-          // Any non-empty, non-placeholder content should be preserved
-          const hasExistingContent = isWordMode && !isPlaceholder && plainTextContent.length > 0;
+            // Check if document has existing content (not just placeholder)
+            const currentDocContent = editedDocumentContent || "";
+            const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '').trim();
+            const plainTextContent = stripHtml(currentDocContent);
+            const placeholderPhrases = [
+              "comienza a escribir tu documento aquí",
+              "comienza a escribir",
+              "escribe aquí"
+            ];
+            const isPlaceholder = placeholderPhrases.some(p =>
+              plainTextContent.toLowerCase().includes(p)
+            );
+            // Any non-empty, non-placeholder content should be preserved
+            const hasExistingContent = isWordMode && !isPlaceholder && plainTextContent.length > 0;
 
-          // Build system prompt for Word document mode (cumulative - each response adds to document)
-          let wordSystemPrompt = "";
-          if (isWordMode) {
-            if (hasExistingContent) {
-              wordSystemPrompt = `Eres un asistente de edición de documentos. El usuario tiene un documento con contenido previo y quiere AÑADIR más contenido.
+            // Build system prompt for Word document mode (cumulative - each response adds to document)
+            let wordSystemPrompt = "";
+            if (isWordMode) {
+              if (hasExistingContent) {
+                wordSystemPrompt = `Eres un asistente de edición de documentos. El usuario tiene un documento con contenido previo y quiere AÑADIR más contenido.
 
 CONTEXTO DEL DOCUMENTO EXISTENTE (para referencia):
 ${plainTextContent.slice(0, 500)}${plainTextContent.length > 500 ? '...' : ''}
@@ -5352,14 +5357,14 @@ INSTRUCCIONES IMPORTANTES:
 2. NO repitas ni incluyas el contenido existente del documento
 3. Tu respuesta se AÑADIRÁ automáticamente al final del documento existente
 4. Responde SOLO con el nuevo contenido en formato Markdown, sin explicaciones adicionales`;
-            } else {
-              wordSystemPrompt = `Eres un asistente de creación de documentos. Genera el contenido del documento según las instrucciones del usuario.
+              } else {
+                wordSystemPrompt = `Eres un asistente de creación de documentos. Genera el contenido del documento según las instrucciones del usuario.
 Responde SOLO con el contenido del documento en formato Markdown, sin explicaciones adicionales.`;
+              }
             }
-          }
 
-          // Build Excel system prompt for direct streaming to spreadsheet
-          const excelSystemPrompt = `Eres un asistente de hojas de cálculo Excel. Genera datos estructurados en formato CSV.
+            // Build Excel system prompt for direct streaming to spreadsheet
+            const excelSystemPrompt = `Eres un asistente de hojas de cálculo Excel. Genera datos estructurados en formato CSV.
 
 FORMATO DE RESPUESTA:
 - Para crear una nueva hoja: [NUEVA_HOJA:Nombre de la hoja]
@@ -5380,706 +5385,706 @@ IMPORTANTE:
 - Cada fila en una línea separada
 - Los datos numéricos sin formato de moneda (solo números)`;
 
-          // Build chat history with appropriate system prompt
-          let finalChatHistory: Array<{ role: string; content: string }> = chatHistory;
-          if (isPptMode) {
-            finalChatHistory = [{ role: "system", content: PPT_STREAMING_SYSTEM_PROMPT }, ...chatHistory];
-          } else if (isExcelMode) {
-            finalChatHistory = [{ role: "system", content: excelSystemPrompt }, ...chatHistory];
-          } else if (isWordMode) {
-            finalChatHistory = [{ role: "system", content: wordSystemPrompt }, ...chatHistory];
-          }
+            // Build chat history with appropriate system prompt
+            let finalChatHistory: Array<{ role: string; content: string }> = chatHistory;
+            if (isPptMode) {
+              finalChatHistory = [{ role: "system", content: PPT_STREAMING_SYSTEM_PROMPT }, ...chatHistory];
+            } else if (isExcelMode) {
+              finalChatHistory = [{ role: "system", content: excelSystemPrompt }, ...chatHistory];
+            } else if (isWordMode) {
+              finalChatHistory = [{ role: "system", content: wordSystemPrompt }, ...chatHistory];
+            }
 
-          // Capture document mode state NOW using ref (avoids closure issues)
-          // For Excel, also check previewDocument since Excel can be opened via preview
-          const shouldWriteToDoc = !!activeDocEditorRef.current || (isExcelMode && !!docInsertContentRef.current);
+            // Capture document mode state NOW using ref (avoids closure issues)
+            // For Excel, also check previewDocument since Excel can be opened via preview
+            const shouldWriteToDoc = !!activeDocEditorRef.current || (isExcelMode && !!docInsertContentRef.current);
 
-          // Capture existing document HTML for cumulative mode (shared between SSE and legacy)
-          // Note: currentDocContent is HTML from the editor
-          const existingDocHTML = isWordMode && hasExistingContent ? currentDocContent : "";
-          const separatorHTML = existingDocHTML ? '<hr class="my-4" />' : "";
+            // Capture existing document HTML for cumulative mode (shared between SSE and legacy)
+            // Note: currentDocContent is HTML from the editor
+            const existingDocHTML = isWordMode && hasExistingContent ? currentDocContent : "";
+            const separatorHTML = existingDocHTML ? '<hr class="my-4" />' : "";
 
-          // Use latest available chatId for stream routing; fallback to resolved persistent id when available.
-          const streamRunContext = buildStreamRunContext(userMsg, sendMessageAck);
-          const ackChatId = sendMessageAck?.chatId || sendMessageAck?.run?.chatId;
-          const fallbackChatId: string | null =
-            ackChatId || latestChatIdRef.current || chatId || (await waitForActiveChatId());
-          const effectiveStreamChatId = resolveStreamChatId(sendMessageAck, fallbackChatId);
-	          if (!effectiveStreamChatId) {
-	            toast({
-	              title: "Error",
-	              description: "No se pudo crear/confirmar el chat para enviar este mensaje. Intenta de nuevo.",
-	              variant: "destructive",
-              duration: 5000,
-            });
-            setAiStateForChat("idle", submitConversationId);
-            setAiProcessStepsForChat([], submitConversationId);
-	            abortControllerRef.current = null;
-	            return;
-	          }
-	          if (effectiveStreamChatId) {
-            // SSE streaming mode - real-time streaming from server
-            setAiStateForChat("responding", effectiveStreamChatId);
-
-            // Update steps: mark processing done, searching active
-            setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => {
-              // Guard against undefined step or s
-              if (!s || !s.step) return s;
-
-              if (s.step.includes("Analizando")) return { ...s, status: "done" };
-              if (s.step.includes("Procesando")) return { ...s, status: "done" };
-              if (s.step.includes("Buscando")) return { ...s, status: "active" };
-              return s;
-            }), effectiveStreamChatId);
-
-            let fullContent = "";
-            let sseError: Error | null = null;
-
-            // Build attachments array for streaming endpoint
-            // FIX: Normalize type to match backend schema: "document" | "image" | "file"
-            console.log("[handleSubmit] currentUploadedFiles:", currentUploadedFiles.map(f => ({
-              id: f.id, name: f.name, type: f.type, status: f.status,
-              storagePath: f.storagePath, hasContent: !!f.content,
-            })));
-            const streamAttachments = currentUploadedFiles
-              .filter(f => f.status === "ready" || f.status === "processing")
-              .map(f => ({
-                type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
-                name: f.name,
-                mimeType: f.type,
-                storagePath: f.storagePath,
-                fileId: f.id,
-                content: f.content,
-              }));
-            console.log("[handleSubmit] streamAttachments:", JSON.stringify(streamAttachments.map(a => ({
-              type: a.type, name: a.name, mimeType: a.mimeType, storagePath: a.storagePath,
-              fileId: a.fileId, hasContent: !!a.content,
-            }))));
-
-            if (hasDocumentAttachments && documentAttachmentsForAnalysis.length > 0) {
-              console.log("[handleSubmit] DATA_MODE (SSE): document attachments detected, async analysis running");
+            // Use latest available chatId for stream routing; fallback to resolved persistent id when available.
+            const streamRunContext = buildStreamRunContext(userMsg, sendMessageAck);
+            const ackChatId = sendMessageAck?.chatId || sendMessageAck?.run?.chatId;
+            const fallbackChatId: string | null =
+              ackChatId || latestChatIdRef.current || chatId || (await waitForActiveChatId());
+            const effectiveStreamChatId = resolveStreamChatId(sendMessageAck, fallbackChatId);
+            if (!effectiveStreamChatId) {
+              toast({
+                title: "Error",
+                description: "No se pudo crear/confirmar el chat para enviar este mensaje. Intenta de nuevo.",
+                variant: "destructive",
+                duration: 5000,
+              });
+              setAiStateForChat("idle", submitConversationId);
+              setAiProcessStepsForChat([], submitConversationId);
+              abortControllerRef.current = null;
               return;
             }
+            if (effectiveStreamChatId) {
+              // SSE streaming mode - real-time streaming from server
+              setAiStateForChat("responding", effectiveStreamChatId);
 
-            if (import.meta.env.DEV) {
-              chatLogger.debug("handleSubmit docTool", { selectedDocTool, isWordMode });
-            }
+              // Update steps: mark processing done, searching active
+              setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => {
+                // Guard against undefined step or s
+                if (!s || !s.step) return s;
 
-            // NOTE: Previously there was a redundant raw `apiFetch("/api/chat/stream")` here
-            // that sent a duplicate request before `streamChat.stream()`. This caused:
-            //   1. Two concurrent LLM requests per message (double cost, double rate-limit usage)
-            //   2. The first response body was never consumed (SSE stream abandoned)
-            // Removed: the single `streamChat.stream()` call below handles everything.
+                if (s.step.includes("Analizando")) return { ...s, status: "done" };
+                if (s.step.includes("Procesando")) return { ...s, status: "done" };
+                if (s.step.includes("Buscando")) return { ...s, status: "active" };
+                return s;
+              }), effectiveStreamChatId);
 
-            const firstImageDataUrl = imageDataUrls.length > 0 ? imageDataUrls[0] : undefined;
-            const artifactTypeMap: Record<string, string> = { word: 'document', excel: 'spreadsheet', ppt: 'presentation', docx: 'document', xlsx: 'spreadsheet', pptx: 'presentation' };
-            const artifactMimeTypeMap: Record<string, string> = {
-              word: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-              excel: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-              ppt: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-              docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-              xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-              pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            };
+              let fullContent = "";
+              let sseError: Error | null = null;
 
-            if (isPptMode && shouldWriteToDoc) {
-              pptStreaming.startStreaming();
-              streamingContentRef.current = "";
-              setStreamingContent("");
-            }
+              // Build attachments array for streaming endpoint
+              // FIX: Normalize type to match backend schema: "document" | "image" | "file"
+              console.log("[handleSubmit] currentUploadedFiles:", currentUploadedFiles.map(f => ({
+                id: f.id, name: f.name, type: f.type, status: f.status,
+                storagePath: f.storagePath, hasContent: !!f.content,
+              })));
+              const streamAttachments = currentUploadedFiles
+                .filter(f => f.status === "ready" || f.status === "processing")
+                .map(f => ({
+                  type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
+                  name: f.name,
+                  mimeType: f.type,
+                  storagePath: f.storagePath,
+                  fileId: f.id,
+                  content: f.content,
+                }));
+              console.log("[handleSubmit] streamAttachments:", JSON.stringify(streamAttachments.map(a => ({
+                type: a.type, name: a.name, mimeType: a.mimeType, storagePath: a.storagePath,
+                fileId: a.fileId, hasContent: !!a.content,
+              }))));
 
-            const productionArtifacts: Array<{
-              type: string;
-              filename: string;
-              downloadUrl: string;
-              size?: number;
-              library?: string;
-            }> = [];
-            const streamArtifactMimeTypes = new Map<string, string>();
-            let streamWebSources: any[] | undefined;
-            let isProductionStream = false;
+              if (hasDocumentAttachments && documentAttachmentsForAnalysis.length > 0) {
+                console.log("[handleSubmit] DATA_MODE (SSE): document attachments detected, async analysis running");
+                return;
+              }
 
-            const setAiStateForStream = (value: React.SetStateAction<AiState>) =>
-              setAiStateForChat(value, effectiveStreamChatId);
-            const setAiProcessStepsForStream = (value: React.SetStateAction<AiProcessStep[]>) =>
-              setAiProcessStepsForChat(value, effectiveStreamChatId);
+              if (import.meta.env.DEV) {
+                chatLogger.debug("handleSubmit docTool", { selectedDocTool, isWordMode });
+              }
 
-            const streamResult = await streamChat.stream("/api/chat/stream", {
-              chatId: effectiveStreamChatId,
-              signal: abortControllerRef.current?.signal,
-              body: {
-                messages: finalChatHistory,
-                conversationId: effectiveStreamChatId,
+              // NOTE: Previously there was a redundant raw `apiFetch("/api/chat/stream")` here
+              // that sent a duplicate request before `streamChat.stream()`. This caused:
+              //   1. Two concurrent LLM requests per message (double cost, double rate-limit usage)
+              //   2. The first response body was never consumed (SSE stream abandoned)
+              // Removed: the single `streamChat.stream()` call below handles everything.
+
+              const firstImageDataUrl = imageDataUrls.length > 0 ? imageDataUrls[0] : undefined;
+              const artifactTypeMap: Record<string, string> = { word: 'document', excel: 'spreadsheet', ppt: 'presentation', docx: 'document', xlsx: 'spreadsheet', pptx: 'presentation' };
+              const artifactMimeTypeMap: Record<string, string> = {
+                word: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                excel: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ppt: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+              };
+
+              if (isPptMode && shouldWriteToDoc) {
+                pptStreaming.startStreaming();
+                streamingContentRef.current = "";
+                setStreamingContent("");
+              }
+
+              const productionArtifacts: Array<{
+                type: string;
+                filename: string;
+                downloadUrl: string;
+                size?: number;
+                library?: string;
+              }> = [];
+              const streamArtifactMimeTypes = new Map<string, string>();
+              let streamWebSources: any[] | undefined;
+              let isProductionStream = false;
+
+              const setAiStateForStream = (value: React.SetStateAction<AiState>) =>
+                setAiStateForChat(value, effectiveStreamChatId);
+              const setAiProcessStepsForStream = (value: React.SetStateAction<AiProcessStep[]>) =>
+                setAiProcessStepsForChat(value, effectiveStreamChatId);
+
+              const streamResult = await streamChat.stream("/api/chat/stream", {
                 chatId: effectiveStreamChatId,
-                runId: streamRunContext.runId,
-                clientRequestId: streamRunContext.clientRequestId,
-                userRequestId: userMsg.requestId,
-                attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
-                // Send image base64 directly for vision fallback if storagePath resolution fails
-                lastImageBase64: firstImageDataUrl,
-                docTool: selectedDocTool || null,
-                provider: selectedProvider,
-                model: selectedModel,
-                latencyMode,
-              },
-              onAiStateChange: (nextState) => setAiStateForStream(nextState),
-              onEvent: (eventType, data) => {
-                if (eventType === "production_start") {
-                  isProductionStream = true;
-                  setAiStateForStream("agent_working");
-                  if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)) {
-                    setDocGenerationState({
-                      status: 'generating',
-                      progress: 0,
-                      stage: data?.topic || 'Iniciando generación...',
-                      downloadUrl: null,
-                      fileName: null,
-                      fileSize: null,
-                    });
-                    setEditedDocumentContent('');
+                signal: abortControllerRef.current?.signal,
+                body: {
+                  messages: finalChatHistory,
+                  conversationId: effectiveStreamChatId,
+                  chatId: effectiveStreamChatId,
+                  runId: streamRunContext.runId,
+                  clientRequestId: streamRunContext.clientRequestId,
+                  userRequestId: userMsg.requestId,
+                  attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
+                  // Send image base64 directly for vision fallback if storagePath resolution fails
+                  lastImageBase64: firstImageDataUrl,
+                  docTool: selectedDocTool || null,
+                  provider: selectedProvider,
+                  model: selectedModel,
+                  latencyMode,
+                },
+                onAiStateChange: (nextState) => setAiStateForStream(nextState),
+                onEvent: (eventType, data) => {
+                  if (eventType === "production_start") {
+                    isProductionStream = true;
+                    setAiStateForStream("agent_working");
+                    if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)) {
+                      setDocGenerationState({
+                        status: 'generating',
+                        progress: 0,
+                        stage: data?.topic || 'Iniciando generación...',
+                        downloadUrl: null,
+                        fileName: null,
+                        fileSize: null,
+                      });
+                      setEditedDocumentContent('');
+                    }
+                    return;
                   }
-                  return;
-                }
 
-                if (eventType === "production_event") {
-                  if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)) {
-                    const stageLabels: Record<string, string> = {
-                      intake: "Procesando solicitud...",
-                      blueprint: "Diseñando estructura...",
-                      research: "Investigando contenido...",
-                      analysis: "Analizando información...",
-                      writing: "Redactando documento...",
-                      data: "Procesando datos...",
-                      slides: "Creando diapositivas...",
-                      qa: "Verificando calidad...",
-                      consistency: "Validando consistencia...",
-                      render: "Generando documento final...",
-                    };
+                  if (eventType === "production_event") {
+                    if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)) {
+                      const stageLabels: Record<string, string> = {
+                        intake: "Procesando solicitud...",
+                        blueprint: "Diseñando estructura...",
+                        research: "Investigando contenido...",
+                        analysis: "Analizando información...",
+                        writing: "Redactando documento...",
+                        data: "Procesando datos...",
+                        slides: "Creando diapositivas...",
+                        qa: "Verificando calidad...",
+                        consistency: "Validando consistencia...",
+                        render: "Generando documento final...",
+                      };
+                      setDocGenerationState((prev: any) => ({
+                        ...prev,
+                        status: 'generating',
+                        progress: data?.progress || prev.progress,
+                        stage: stageLabels[data?.stage] || data?.message || prev.stage,
+                      }));
+                    }
+                    return;
+                  }
+
+                  if (eventType === "production_complete") {
+                    isProductionStream = true;
                     setDocGenerationState((prev: any) => ({
                       ...prev,
-                      status: 'generating',
-                      progress: data?.progress || prev.progress,
-                      stage: stageLabels[data?.stage] || data?.message || prev.stage,
+                      status: 'complete',
+                      progress: 100,
+                      stage: data?.summary || prev.stage || '¡Documento listo!',
                     }));
+                    return;
                   }
-                  return;
-                }
 
-                if (eventType === "production_complete") {
-                  isProductionStream = true;
-                  setDocGenerationState((prev: any) => ({
-                    ...prev,
-                    status: 'complete',
-                    progress: 100,
-                    stage: data?.summary || prev.stage || '¡Documento listo!',
-                  }));
-                  return;
-                }
-
-                if (eventType === "artifact") {
-                  productionArtifacts.push({
-                    type: data?.type || "document",
-                    filename: data?.filename || "Documento",
-                    downloadUrl: data?.downloadUrl || "",
-                    size: data?.size,
-                    library: data?.library,
-                  });
-                  if (data?.type) {
-                    streamArtifactMimeTypes.set(String(data.type), artifactMimeTypeMap[data.type] || data?.mimeType || "application/octet-stream");
+                  if (eventType === "artifact") {
+                    productionArtifacts.push({
+                      type: data?.type || "document",
+                      filename: data?.filename || "Documento",
+                      downloadUrl: data?.downloadUrl || "",
+                      size: data?.size,
+                      library: data?.library,
+                    });
+                    if (data?.type) {
+                      streamArtifactMimeTypes.set(String(data.type), artifactMimeTypeMap[data.type] || data?.mimeType || "application/octet-stream");
+                    }
+                    if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)) {
+                      const docTypeMap: Record<string, string> = { word: 'word', excel: 'excel', ppt: 'ppt', xlsx: 'excel', docx: 'word', pptx: 'ppt' };
+                      const artifactDocType = docTypeMap[data?.type] || String(data?.type || "");
+                      const selectedDocTypeNorm = docTypeMap[selectedDocTool] || selectedDocTool;
+                      if (artifactDocType === selectedDocTypeNorm) {
+                        setDocGenerationState({
+                          status: 'ready',
+                          progress: 100,
+                          stage: data?.summary || '¡Documento listo!',
+                          downloadUrl: data?.downloadUrl || null,
+                          fileName: data?.filename || data?.name || 'Documento',
+                          fileSize: data?.size || null,
+                        });
+                      }
+                    }
+                    return;
                   }
-                  if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)) {
-                    const docTypeMap: Record<string, string> = { word: 'word', excel: 'excel', ppt: 'ppt', xlsx: 'excel', docx: 'word', pptx: 'ppt' };
-                    const artifactDocType = docTypeMap[data?.type] || String(data?.type || "");
-                    const selectedDocTypeNorm = docTypeMap[selectedDocTool] || selectedDocTool;
-                    if (artifactDocType === selectedDocTypeNorm) {
-                      setDocGenerationState({
-                        status: 'ready',
-                        progress: 100,
-                        stage: data?.summary || '¡Documento listo!',
-                        downloadUrl: data?.downloadUrl || null,
-                        fileName: data?.filename || data?.name || 'Documento',
-                        fileSize: data?.size || null,
+
+                  if (eventType === "tool_start" && data?.toolName === "browse_and_act") {
+                    setAiStateForStream("agent_working");
+                    setIsBrowserOpen(true);
+                    globalStartSseSession(data?.args?.goal || "Automatización web");
+                    return;
+                  }
+
+                  if (eventType === "browser_step") {
+                    setAiStateForStream("agent_working");
+                    if (!isBrowserOpen) setIsBrowserOpen(true);
+                    globalUpdateFromSseStep(data);
+                    return;
+                  }
+
+                  if (eventType === "tool_result" && data?.toolName === "browse_and_act") {
+                    if (data?.result?.success) {
+                      globalUpdateFromSseStep({
+                        stepNumber: data.result.stepsCount || 0,
+                        totalSteps: data.result.stepsCount || 0,
+                        action: "done",
+                        reasoning: "Tarea completada",
+                        goalProgress: "100%",
+                        screenshot: "",
+                        url: "",
+                        title: "",
                       });
                     }
+                    return;
                   }
-                  return;
-                }
 
-                if (eventType === "tool_start" && data?.toolName === "browse_and_act") {
-                  setAiStateForStream("agent_working");
-                  setIsBrowserOpen(true);
-                  globalStartSseSession(data?.args?.goal || "Automatización web");
-                  return;
-                }
-
-                if (eventType === "browser_step") {
-                  setAiStateForStream("agent_working");
-                  if (!isBrowserOpen) setIsBrowserOpen(true);
-                  globalUpdateFromSseStep(data);
-                  return;
-                }
-
-                if (eventType === "tool_result" && data?.toolName === "browse_and_act") {
-                  if (data?.result?.success) {
-                    globalUpdateFromSseStep({
-                      stepNumber: data.result.stepsCount || 0,
-                      totalSteps: data.result.stepsCount || 0,
-                      action: "done",
-                      reasoning: "Tarea completada",
-                      goalProgress: "100%",
-                      screenshot: "",
-                      url: "",
-                      title: "",
-                    });
+                  if (eventType === "tool_start" || eventType === "tool_result") {
+                    return;
                   }
-                  return;
-                }
 
-                if (eventType === "tool_start" || eventType === "tool_result") {
-                  return;
-                }
-
-                if (eventType === "context") {
-                  setAiStateForStream("responding");
-                  if (data?.isAgenticMode === true) {
-                    setAiProcessStepsForStream((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
-                  }
-                  if (Array.isArray(data?.webSources)) {
-                    streamWebSources = data.webSources;
-                  }
-                  return;
-                }
-
-                if (eventType === "thinking") {
-                  if (data?.step && data?.message) {
-                    setAiProcessStepsForStream((prev: any[]) => {
-                      const exists = prev.find((s: any) => s.id === data.step);
-                      if (exists) return prev;
-                      return [...prev, {
-                        id: data.step,
-                        step: data.step,
-                        title: data.message,
-                        status: "pending",
-                      }];
-                    });
-                  }
-                  return;
-                }
-
-                if (eventType === "intent") {
-                  console.log('[SSE] Intent:', data?.intent, data?.confidence);
-                }
-              },
-              onChunk: (chunk, _chunkEventData, fullContent) => {
-                if (isPptMode && shouldWriteToDoc) {
-                  pptStreaming.processChunk(chunk);
-                  return false;
-                }
-
-                if (isExcelMode && shouldWriteToDoc) {
-                  streamingContentRef.current = fullContent;
-                  setStreamingContent(fullContent);
-                  return true;
-                }
-
-                if (isWordMode && shouldWriteToDoc && docInsertContentRef.current) {
-                  try {
-                    const newContentHTML = markdownToTipTap(fullContent);
-                    const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
-                    docInsertContentRef.current(cumulativeHTML, 'html');
-                    setEditedDocumentContent(cumulativeHTML);
-                  } catch (err) {
-                    console.error('[ChatInterface] Error streaming to document:', err);
-                  }
-                  return false;
-                }
-
-                streamingContentRef.current = fullContent;
-                setStreamingContent(fullContent);
-                return true;
-              },
-              buildFinalMessage: (fullContent, data, messageId) => {
-                const uncertainty = (!isProductionStream && !isWordMode && !isExcelMode && !isPptMode)
-                  ? detectUncertainty(fullContent)
-                  : null;
-
-                if (isProductionStream && productionArtifacts.length > 0) {
-                  const primaryArtifact = productionArtifacts[0];
-                  const type = artifactTypeMap[primaryArtifact.type] || primaryArtifact.type || "document";
-                  const typeConfirm: Record<string, string> = { word: 'Documento generado correctamente', excel: 'Hoja de cálculo generada correctamente', presentation: 'Presentación generada correctamente', ppt: 'Presentación generada correctamente', doc: 'Documento generado correctamente', spreadsheet: 'Hoja de cálculo generada correctamente' };
-                  const friendlyType = selectedDocTool || 'word';
-                  const messageContent = `✓ ${typeConfirm[friendlyType] || 'Documento generado correctamente'}`;
-                  const artifactMimeType = primaryArtifact.type ? (artifactMimeTypeMap[primaryArtifact.type] || streamArtifactMimeTypes.get(primaryArtifact.type) || "application/octet-stream") : "application/octet-stream";
-                  const artifactName = primaryArtifact.filename || `${friendlyType}.${friendlyType === "word" ? "docx" : friendlyType === "excel" ? "xlsx" : friendlyType === "ppt" ? "pptx" : "bin"}`;
-
-                  return {
-                    id: messageId || `assistant-${Date.now()}`,
-                    role: "assistant",
-                    content: messageContent,
-                    timestamp: new Date(),
-                    requestId: data?.requestId || generateRequestId(),
-                    userMessageId: userMsgId,
-                    artifact: {
-                      artifactId: `${messageId || Date.now()}_${friendlyType}`,
-                      type: type,
-                      mimeType: artifactMimeType,
-                      sizeBytes: primaryArtifact.size,
-                      downloadUrl: primaryArtifact.downloadUrl,
-                      name: artifactName,
-                      filename: artifactName,
-                    } as Message["artifact"],
-                  };
-                }
-
-                if (isPptMode && shouldWriteToDoc && !isProductionStream) {
-                  pptStreaming.stopStreaming();
-                  return {
-                    id: messageId || `assistant-${Date.now()}`,
-                    role: "assistant",
-                    content: "✓ Presentación generada correctamente",
-                    timestamp: new Date(),
-                    requestId: data?.requestId || generateRequestId(),
-                    userMessageId: userMsgId,
-                  };
-                }
-
-                if (isExcelMode && shouldWriteToDoc && docInsertContentRef.current && !isProductionStream) {
-                  if (docInsertContentRef.current) {
-                    try {
-                      streamingContentRef.current = "";
-                      setStreamingContent("");
-                      docInsertContentRef.current(fullContent);
-                    } catch (err) {
-                      console.error('[ChatInterface] Error streaming to Excel:', err);
+                  if (eventType === "context") {
+                    setAiStateForStream("responding");
+                    if (data?.isAgenticMode === true) {
+                      setAiProcessStepsForStream((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
                     }
+                    if (Array.isArray(data?.webSources)) {
+                      streamWebSources = data.webSources;
+                    }
+                    return;
                   }
-                  return {
-                    id: messageId || `assistant-${Date.now()}`,
-                    role: "assistant",
-                    content: "✓ Datos generados en la hoja de cálculo",
-                    timestamp: new Date(),
-                    requestId: data?.requestId || generateRequestId(),
-                    userMessageId: userMsgId,
-                  };
-                }
 
-                if (isWordMode && shouldWriteToDoc && docInsertContentRef.current && !isProductionStream) {
-                  if (docInsertContentRef.current) {
+                  if (eventType === "thinking") {
+                    if (data?.step && data?.message) {
+                      setAiProcessStepsForStream((prev: any[]) => {
+                        const exists = prev.find((s: any) => s.id === data.step);
+                        if (exists) return prev;
+                        return [...prev, {
+                          id: data.step,
+                          step: data.step,
+                          title: data.message,
+                          status: "pending",
+                        }];
+                      });
+                    }
+                    return;
+                  }
+
+                  if (eventType === "intent") {
+                    console.log('[SSE] Intent:', data?.intent, data?.confidence);
+                  }
+                },
+                onChunk: (chunk, _chunkEventData, fullContent) => {
+                  if (isPptMode && shouldWriteToDoc) {
+                    pptStreaming.processChunk(chunk);
+                    return false;
+                  }
+
+                  if (isExcelMode && shouldWriteToDoc) {
+                    streamingContentRef.current = fullContent;
+                    setStreamingContent(fullContent);
+                    return true;
+                  }
+
+                  if (isWordMode && shouldWriteToDoc && docInsertContentRef.current) {
                     try {
                       const newContentHTML = markdownToTipTap(fullContent);
                       const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
                       docInsertContentRef.current(cumulativeHTML, 'html');
                       setEditedDocumentContent(cumulativeHTML);
                     } catch (err) {
-                      console.error('[ChatInterface] Error finalizing document:', err);
+                      console.error('[ChatInterface] Error streaming to document:', err);
                     }
+                    return false;
                   }
+
+                  streamingContentRef.current = fullContent;
+                  setStreamingContent(fullContent);
+                  return true;
+                },
+                buildFinalMessage: (fullContent, data, messageId) => {
+                  const uncertainty = (!isProductionStream && !isWordMode && !isExcelMode && !isPptMode)
+                    ? detectUncertainty(fullContent)
+                    : null;
+
+                  if (isProductionStream && productionArtifacts.length > 0) {
+                    const primaryArtifact = productionArtifacts[0];
+                    const type = artifactTypeMap[primaryArtifact.type] || primaryArtifact.type || "document";
+                    const typeConfirm: Record<string, string> = { word: 'Documento generado correctamente', excel: 'Hoja de cálculo generada correctamente', presentation: 'Presentación generada correctamente', ppt: 'Presentación generada correctamente', doc: 'Documento generado correctamente', spreadsheet: 'Hoja de cálculo generada correctamente' };
+                    const friendlyType = selectedDocTool || 'word';
+                    const messageContent = `✓ ${typeConfirm[friendlyType] || 'Documento generado correctamente'}`;
+                    const artifactMimeType = primaryArtifact.type ? (artifactMimeTypeMap[primaryArtifact.type] || streamArtifactMimeTypes.get(primaryArtifact.type) || "application/octet-stream") : "application/octet-stream";
+                    const artifactName = primaryArtifact.filename || `${friendlyType}.${friendlyType === "word" ? "docx" : friendlyType === "excel" ? "xlsx" : friendlyType === "ppt" ? "pptx" : "bin"}`;
+
+                    return {
+                      id: messageId || `assistant-${Date.now()}`,
+                      role: "assistant",
+                      content: messageContent,
+                      timestamp: new Date(),
+                      requestId: data?.requestId || generateRequestId(),
+                      userMessageId: userMsgId,
+                      artifact: {
+                        artifactId: `${messageId || Date.now()}_${friendlyType}`,
+                        type: type,
+                        mimeType: artifactMimeType,
+                        sizeBytes: primaryArtifact.size,
+                        downloadUrl: primaryArtifact.downloadUrl,
+                        name: artifactName,
+                        filename: artifactName,
+                      } as Message["artifact"],
+                    };
+                  }
+
+                  if (isPptMode && shouldWriteToDoc && !isProductionStream) {
+                    pptStreaming.stopStreaming();
+                    return {
+                      id: messageId || `assistant-${Date.now()}`,
+                      role: "assistant",
+                      content: "✓ Presentación generada correctamente",
+                      timestamp: new Date(),
+                      requestId: data?.requestId || generateRequestId(),
+                      userMessageId: userMsgId,
+                    };
+                  }
+
+                  if (isExcelMode && shouldWriteToDoc && docInsertContentRef.current && !isProductionStream) {
+                    if (docInsertContentRef.current) {
+                      try {
+                        streamingContentRef.current = "";
+                        setStreamingContent("");
+                        docInsertContentRef.current(fullContent);
+                      } catch (err) {
+                        console.error('[ChatInterface] Error streaming to Excel:', err);
+                      }
+                    }
+                    return {
+                      id: messageId || `assistant-${Date.now()}`,
+                      role: "assistant",
+                      content: "✓ Datos generados en la hoja de cálculo",
+                      timestamp: new Date(),
+                      requestId: data?.requestId || generateRequestId(),
+                      userMessageId: userMsgId,
+                    };
+                  }
+
+                  if (isWordMode && shouldWriteToDoc && docInsertContentRef.current && !isProductionStream) {
+                    if (docInsertContentRef.current) {
+                      try {
+                        const newContentHTML = markdownToTipTap(fullContent);
+                        const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
+                        docInsertContentRef.current(cumulativeHTML, 'html');
+                        setEditedDocumentContent(cumulativeHTML);
+                      } catch (err) {
+                        console.error('[ChatInterface] Error finalizing document:', err);
+                      }
+                    }
+                    return {
+                      id: messageId || `assistant-${Date.now()}`,
+                      role: "assistant",
+                      content: "✓ Documento generado correctamente",
+                      timestamp: new Date(),
+                      requestId: data?.requestId || generateRequestId(),
+                      userMessageId: userMsgId,
+                    };
+                  }
+
                   return {
                     id: messageId || `assistant-${Date.now()}`,
                     role: "assistant",
-                    content: "✓ Documento generado correctamente",
+                    content: fullContent || "No se recibió respuesta del servidor.",
                     timestamp: new Date(),
                     requestId: data?.requestId || generateRequestId(),
                     userMessageId: userMsgId,
+                    confidence: uncertainty?.confidence,
+                    uncertaintyReason: uncertainty?.reason,
+                    webSources: data?.webSources || streamWebSources,
                   };
-                }
-
-                return {
-                  id: messageId || `assistant-${Date.now()}`,
+                },
+                buildErrorMessage: (error, messageId) => ({
+                  id: messageId || `error-${Date.now()}`,
                   role: "assistant",
-                  content: fullContent || "No se recibió respuesta del servidor.",
+                  content: error?.message || "Error de conexión. Por favor, intenta de nuevo.",
                   timestamp: new Date(),
-                  requestId: data?.requestId || generateRequestId(),
+                  requestId: generateRequestId(),
                   userMessageId: userMsgId,
-                  confidence: uncertainty?.confidence,
-                  uncertaintyReason: uncertainty?.reason,
-                  webSources: data?.webSources || streamWebSources,
-                };
-              },
-              buildErrorMessage: (error, messageId) => ({
-                id: messageId || `error-${Date.now()}`,
-                role: "assistant",
-                content: error?.message || "Error de conexión. Por favor, intenta de nuevo.",
-                timestamp: new Date(),
-                requestId: generateRequestId(),
-                userMessageId: userMsgId,
-              }),
-            });
+                }),
+              });
 
-            if (streamResult.ok) {
-              requestTitleRefresh(effectiveStreamChatId);
-            } else {
-              if (streamResult.response?.status === 402 && (streamResult.error as any)?.payload?.code === "QUOTA_EXCEEDED") {
-                const quota = (streamResult.error as any)?.payload?.quota;
-                if (quota) {
-                  setQuotaInfo(quota);
-                  setShowPricingModal(true);
+              if (streamResult.ok) {
+                requestTitleRefresh(effectiveStreamChatId);
+              } else {
+                if (streamResult.response?.status === 402 && (streamResult.error as any)?.payload?.code === "QUOTA_EXCEEDED") {
+                  const quota = (streamResult.error as any)?.payload?.quota;
+                  if (quota) {
+                    setQuotaInfo(quota);
+                    setShowPricingModal(true);
+                  }
                 }
               }
-            }
-            agent.complete();
-            abortControllerRef.current = null;
+              agent.complete();
+              abortControllerRef.current = null;
 
-          } else {
-            // Legacy mode - fall back to non-streaming /api/chat for Figma diagrams or when no run info
-            if (hasDocumentAttachments && documentAttachmentsForAnalysis.length > 0) {
-              console.log("[handleSubmit] DATA_MODE (Legacy): document attachments detected, async analysis running");
-              return;
-            }
+            } else {
+              // Legacy mode - fall back to non-streaming /api/chat for Figma diagrams or when no run info
+              if (hasDocumentAttachments && documentAttachmentsForAnalysis.length > 0) {
+                console.log("[handleSubmit] DATA_MODE (Legacy): document attachments detected, async analysis running");
+                return;
+              }
 
 
-            const response = await apiFetch("/api/chat", {
-              method: "POST",
-              headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-              credentials: "include",
-              body: JSON.stringify({
-                messages: finalChatHistory,
-                images: imageDataUrls.length > 0 ? imageDataUrls : undefined,
-                documentMode: isDocumentMode && !isPptMode ? { type: documentType } : undefined,
-                figmaMode: isFigmaMode,
-                pptMode: isPptMode,
-                provider: selectedProvider,
-                model: selectedModel,
-                attachments: attachments.length > 0 ? attachments : undefined,
-                gptId: activeGpt?.id,
-                session_id: gptSessionId
-              }),
-              signal: abortControllerRef.current?.signal
-            });
-
-            // Update steps: mark processing done, searching active
-            setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => {
-              if (!s || !s.step) return s;
-              if (s.step.includes("Analizando")) return { ...s, status: "done" };
-              if (s.step.includes("Procesando")) return { ...s, status: "done" };
-              if (s.step.includes("Buscando")) return { ...s, status: "active" };
-              return s;
-            }), effectiveStreamChatId);
-
-            const data = await response.json();
-
-            if (!response.ok) {
-              throw new Error(data.error || "Failed to get response");
-            }
-
-            // Save and log GPT session metadata from server
-            if (data.session_id) {
-              setGptSessionId(data.session_id);
-              console.log('[Chat] Using GPT session:', {
-                sessionId: data.session_id,
-                gptId: data.gpt_id,
-                configVersion: data.config_version,
-                toolPermissions: data.tool_permissions
+              const response = await apiFetch("/api/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+                credentials: "include",
+                body: JSON.stringify({
+                  messages: finalChatHistory,
+                  images: imageDataUrls.length > 0 ? imageDataUrls : undefined,
+                  documentMode: isDocumentMode && !isPptMode ? { type: documentType } : undefined,
+                  figmaMode: isFigmaMode,
+                  pptMode: isPptMode,
+                  provider: selectedProvider,
+                  model: selectedModel,
+                  attachments: attachments.length > 0 ? attachments : undefined,
+                  gptId: activeGpt?.id,
+                  session_id: gptSessionId
+                }),
+                signal: abortControllerRef.current?.signal
               });
-            }
 
-            // Update steps: mark searching done, generating active
-            setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => {
-              if (!s || !s.step) return s;
-              if (s.step.includes("Buscando")) return { ...s, status: "done" };
-              if (s.step.includes("Generando")) return { ...s, status: "active" };
-              return { ...s, status: s.status === "pending" ? "pending" : "done" };
-            }), effectiveStreamChatId);
+              // Update steps: mark processing done, searching active
+              setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => {
+                if (!s || !s.step) return s;
+                if (s.step.includes("Analizando")) return { ...s, status: "done" };
+                if (s.step.includes("Procesando")) return { ...s, status: "done" };
+                if (s.step.includes("Buscando")) return { ...s, status: "active" };
+                return s;
+              }), effectiveStreamChatId);
 
-            const fullContent = data.content;
-            const responseSources = data.sources || [];
-            const figmaDiagram = data.figmaDiagram as FigmaDiagram | undefined;
-            const responseArtifact = data.artifact;
-            const responseWebSources = data.webSources;
+              const data = await response.json();
 
-            // If Figma diagram was generated, add it to chat with simulated streaming
-            if (figmaDiagram) {
+              if (!response.ok) {
+                throw new Error(data.error || "Failed to get response");
+              }
+
+              // Save and log GPT session metadata from server
+              if (data.session_id) {
+                setGptSessionId(data.session_id);
+                console.log('[Chat] Using GPT session:', {
+                  sessionId: data.session_id,
+                  gptId: data.gpt_id,
+                  configVersion: data.config_version,
+                  toolPermissions: data.tool_permissions
+                });
+              }
+
+              // Update steps: mark searching done, generating active
+              setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => {
+                if (!s || !s.step) return s;
+                if (s.step.includes("Buscando")) return { ...s, status: "done" };
+                if (s.step.includes("Generando")) return { ...s, status: "active" };
+                return { ...s, status: s.status === "pending" ? "pending" : "done" };
+              }), effectiveStreamChatId);
+
+              const fullContent = data.content;
+              const responseSources = data.sources || [];
+              const figmaDiagram = data.figmaDiagram as FigmaDiagram | undefined;
+              const responseArtifact = data.artifact;
+              const responseWebSources = data.webSources;
+
+              // If Figma diagram was generated, add it to chat with simulated streaming
+              if (figmaDiagram) {
+                setAiStateForChat("responding", effectiveStreamChatId);
+
+                let currentIndex = 0;
+                streamIntervalRef.current = setInterval(() => {
+                  if (currentIndex < fullContent.length) {
+                    const chunkSize = Math.floor(Math.random() * 5) + 3;
+                    currentIndex = Math.min(currentIndex + chunkSize, fullContent.length);
+                    streamingContentRef.current = fullContent.slice(0, currentIndex);
+                    setStreamingContent(fullContent.slice(0, currentIndex));
+                  } else {
+                    if (streamIntervalRef.current) {
+                      clearInterval(streamIntervalRef.current);
+                      streamIntervalRef.current = null;
+                    }
+
+                    const uncertainty = detectUncertainty(fullContent);
+                    streamTransition.finalize({
+                      id: (Date.now() + 1).toString(),
+                      role: "assistant",
+                      content: fullContent,
+                      timestamp: new Date(),
+                      requestId: generateRequestId(),
+                      userMessageId: userMsgId,
+                      figmaDiagram,
+                      webSources: responseWebSources,
+                      confidence: uncertainty.confidence,
+                      uncertaintyReason: uncertainty.reason,
+                    });
+                    // Only reset doc tool if there's no active document editor
+                    if (!activeDocEditorRef.current) {
+                      setSelectedDocTool(null);
+                    }
+                    agent.complete();
+                    abortControllerRef.current = null;
+                  }
+                }, 10);
+                return;
+              }
+
+              // Legacy simulated streaming for other cases
               setAiStateForChat("responding", effectiveStreamChatId);
 
+              // Check document modes
+              const isExcelModeLegacy = (activeDocEditorRef.current?.type === "excel") || (previewDocumentRef.current?.type === "excel");
+              const isWordModeLegacy = activeDocEditorRef.current?.type === "word";
+              const shouldWriteToDocLegacy = !!activeDocEditorRef.current && isWordModeLegacy;
+
+              console.log('[ChatInterface] Legacy mode:', { isExcelModeLegacy, isWordModeLegacy, hasInsertFn: !!docInsertContentRef.current });
+
+              // Excel mode: send data directly to Excel at the end (no progressive streaming in chat)
+              if (isExcelModeLegacy && docInsertContentRef.current) {
+                console.log('[ChatInterface] Excel mode (legacy): sending', fullContent.length, 'chars to Excel');
+                try {
+                  await docInsertContentRef.current(fullContent);
+                  streamTransition.finalize({
+                    id: (Date.now() + 1).toString(),
+                    role: "assistant",
+                    content: "✓ Datos generados en la hoja de cálculo",
+                    timestamp: new Date(),
+                    requestId: generateRequestId(),
+                    userMessageId: userMsgId,
+                  });
+                } catch (err) {
+                  console.error('[ChatInterface] Error streaming to Excel (legacy):', err);
+                  streamTransition.finalize({
+                    id: (Date.now() + 1).toString(),
+                    role: "assistant",
+                    content: fullContent,
+                    timestamp: new Date(),
+                    requestId: generateRequestId(),
+                    userMessageId: userMsgId,
+                  });
+                }
+                agent.complete();
+                abortControllerRef.current = null;
+                return;
+              }
+
+              // Word mode or normal chat: use progressive streaming
               let currentIndex = 0;
+
               streamIntervalRef.current = setInterval(() => {
                 if (currentIndex < fullContent.length) {
-                  const chunkSize = Math.floor(Math.random() * 5) + 3;
-                  currentIndex = Math.min(currentIndex + chunkSize, fullContent.length);
-                  streamingContentRef.current = fullContent.slice(0, currentIndex);
-                  setStreamingContent(fullContent.slice(0, currentIndex));
+                  const chunkSize = Math.floor(Math.random() * 3) + 1;
+                  const newContent = fullContent.slice(0, currentIndex + chunkSize);
+
+                  // Write to document if in document mode (cumulative)
+                  if (shouldWriteToDocLegacy && docInsertContentRef.current) {
+                    try {
+                      const newContentHTML = markdownToTipTap(newContent);
+                      const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
+                      docInsertContentRef.current(cumulativeHTML, 'html');
+                      // Update state so subsequent instructions have the current content
+                      setEditedDocumentContent(cumulativeHTML);
+                    } catch (err) {
+                      console.error('[ChatInterface] Error streaming to document (legacy):', err);
+                    }
+                  } else {
+                    // Store content in streaming store for conversation affinity
+                    const originalChatId = streamingChatIdRef.current;
+                    if (originalChatId) {
+                      appendContent(originalChatId, fullContent.slice(currentIndex, currentIndex + chunkSize), currentIndex);
+                    }
+                    streamingContentRef.current = newContent;
+                    setStreamingContent(newContent);
+                  }
+                  currentIndex += chunkSize;
                 } else {
                   if (streamIntervalRef.current) {
                     clearInterval(streamIntervalRef.current);
                     streamIntervalRef.current = null;
                   }
 
-                  const uncertainty = detectUncertainty(fullContent);
-                  streamTransition.finalize({
-                    id: (Date.now() + 1).toString(),
-                    role: "assistant",
-                    content: fullContent,
-                    timestamp: new Date(),
-                    requestId: generateRequestId(),
-                    userMessageId: userMsgId,
-                    figmaDiagram,
-                    webSources: responseWebSources,
-                    confidence: uncertainty.confidence,
-                    uncertaintyReason: uncertainty.reason,
-                  });
-                  // Only reset doc tool if there's no active document editor
-                  if (!activeDocEditorRef.current) {
-                    setSelectedDocTool(null);
+                  // Finalize document or create message (cumulative)
+                  if (shouldWriteToDocLegacy && docInsertContentRef.current) {
+                    try {
+                      const newContentHTML = markdownToTipTap(fullContent);
+                      const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
+                      docInsertContentRef.current(cumulativeHTML, 'html');
+                      // Update state so subsequent instructions have the current content
+                      setEditedDocumentContent(cumulativeHTML);
+                    } catch (err) {
+                      console.error('[ChatInterface] Error finalizing document (legacy):', err);
+                    }
+
+                    streamTransition.finalize({
+                      id: (Date.now() + 1).toString(),
+                      role: "assistant",
+                      content: "✓ Documento generado correctamente",
+                      timestamp: new Date(),
+                      requestId: generateRequestId(),
+                      userMessageId: userMsgId,
+                    });
+                  } else {
+                    const uncertainty = detectUncertainty(fullContent);
+                    streamTransition.finalize({
+                      id: (Date.now() + 1).toString(),
+                      role: "assistant",
+                      content: fullContent,
+                      timestamp: new Date(),
+                      requestId: generateRequestId(),
+                      userMessageId: userMsgId,
+                      sources: responseSources.length > 0 ? responseSources : undefined,
+                      artifact: responseArtifact,
+                      webSources: responseWebSources,
+                      confidence: uncertainty.confidence,
+                      uncertaintyReason: uncertainty.reason,
+                    });
                   }
+
                   agent.complete();
                   abortControllerRef.current = null;
                 }
-              }, 10);
-              return;
+              }, 15);
+
             }
-
-            // Legacy simulated streaming for other cases
-            setAiStateForChat("responding", effectiveStreamChatId);
-
-            // Check document modes
-            const isExcelModeLegacy = (activeDocEditorRef.current?.type === "excel") || (previewDocumentRef.current?.type === "excel");
-            const isWordModeLegacy = activeDocEditorRef.current?.type === "word";
-            const shouldWriteToDocLegacy = !!activeDocEditorRef.current && isWordModeLegacy;
-
-            console.log('[ChatInterface] Legacy mode:', { isExcelModeLegacy, isWordModeLegacy, hasInsertFn: !!docInsertContentRef.current });
-
-            // Excel mode: send data directly to Excel at the end (no progressive streaming in chat)
-            if (isExcelModeLegacy && docInsertContentRef.current) {
-              console.log('[ChatInterface] Excel mode (legacy): sending', fullContent.length, 'chars to Excel');
-              try {
-                await docInsertContentRef.current(fullContent);
-                streamTransition.finalize({
-                  id: (Date.now() + 1).toString(),
-                  role: "assistant",
-                  content: "✓ Datos generados en la hoja de cálculo",
-                  timestamp: new Date(),
-                  requestId: generateRequestId(),
-                  userMessageId: userMsgId,
-                });
-              } catch (err) {
-                console.error('[ChatInterface] Error streaming to Excel (legacy):', err);
-                streamTransition.finalize({
-                  id: (Date.now() + 1).toString(),
-                  role: "assistant",
-                  content: fullContent,
-                  timestamp: new Date(),
-                  requestId: generateRequestId(),
-                  userMessageId: userMsgId,
-                });
-              }
-              agent.complete();
-              abortControllerRef.current = null;
-              return;
-            }
-
-            // Word mode or normal chat: use progressive streaming
-            let currentIndex = 0;
-
-            streamIntervalRef.current = setInterval(() => {
-              if (currentIndex < fullContent.length) {
-                const chunkSize = Math.floor(Math.random() * 3) + 1;
-                const newContent = fullContent.slice(0, currentIndex + chunkSize);
-
-                // Write to document if in document mode (cumulative)
-                if (shouldWriteToDocLegacy && docInsertContentRef.current) {
-                  try {
-                    const newContentHTML = markdownToTipTap(newContent);
-                    const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
-                    docInsertContentRef.current(cumulativeHTML, 'html');
-                    // Update state so subsequent instructions have the current content
-                    setEditedDocumentContent(cumulativeHTML);
-                  } catch (err) {
-                    console.error('[ChatInterface] Error streaming to document (legacy):', err);
-                  }
-                } else {
-                  // Store content in streaming store for conversation affinity
-                  const originalChatId = streamingChatIdRef.current;
-                  if (originalChatId) {
-                    appendContent(originalChatId, fullContent.slice(currentIndex, currentIndex + chunkSize), currentIndex);
-                  }
-                  streamingContentRef.current = newContent;
-                  setStreamingContent(newContent);
-                }
-                currentIndex += chunkSize;
-              } else {
-                if (streamIntervalRef.current) {
-                  clearInterval(streamIntervalRef.current);
-                  streamIntervalRef.current = null;
-                }
-
-                // Finalize document or create message (cumulative)
-                if (shouldWriteToDocLegacy && docInsertContentRef.current) {
-                  try {
-                    const newContentHTML = markdownToTipTap(fullContent);
-                    const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
-                    docInsertContentRef.current(cumulativeHTML, 'html');
-                    // Update state so subsequent instructions have the current content
-                    setEditedDocumentContent(cumulativeHTML);
-                  } catch (err) {
-                    console.error('[ChatInterface] Error finalizing document (legacy):', err);
-                  }
-
-                  streamTransition.finalize({
-                    id: (Date.now() + 1).toString(),
-                    role: "assistant",
-                    content: "✓ Documento generado correctamente",
-                    timestamp: new Date(),
-                    requestId: generateRequestId(),
-                    userMessageId: userMsgId,
-                  });
-                } else {
-                  const uncertainty = detectUncertainty(fullContent);
-                  streamTransition.finalize({
-                    id: (Date.now() + 1).toString(),
-                    role: "assistant",
-                    content: fullContent,
-                    timestamp: new Date(),
-                    requestId: generateRequestId(),
-                    userMessageId: userMsgId,
-                    sources: responseSources.length > 0 ? responseSources : undefined,
-                    artifact: responseArtifact,
-                    webSources: responseWebSources,
-                    confidence: uncertainty.confidence,
-                    uncertaintyReason: uncertainty.reason,
-                  });
-                }
-
-                agent.complete();
-                abortControllerRef.current = null;
-              }
-            }, 15);
-
           }
-        }
 
-      } catch (error: any) {
-        console.error("[handleSubmit] Error:", error);
-        // Restore files on error so user doesn't lose them
+        } catch (error: any) {
+          console.error("[handleSubmit] Error:", error);
+          // Restore files on error so user doesn't lose them
+          if (savedMainFiles.length > 0) {
+            setUploadedFiles(savedMainFiles);
+          }
+          if (error?.name !== "AbortError") {
+            toast({
+              title: "Error al procesar",
+              description: "Hubo un error al enviar tu mensaje. Tus archivos fueron restaurados.",
+              variant: "destructive",
+              duration: 5000,
+            });
+          }
+          setAiStateForChat("idle", submitConversationId);
+          setAiProcessStepsForChat([], submitConversationId);
+          abortControllerRef.current = null;
+        }
+      } catch (outerError: any) {
+        console.error("[handleSubmit] Outer error:", outerError);
         if (savedMainFiles.length > 0) {
           setUploadedFiles(savedMainFiles);
         }
-        if (error?.name !== "AbortError") {
-          toast({
-            title: "Error al procesar",
-            description: "Hubo un error al enviar tu mensaje. Tus archivos fueron restaurados.",
-            variant: "destructive",
-            duration: 5000,
-          });
-        }
+        toast({
+          title: "Error inesperado",
+          description: "Algo salió mal. Tus archivos fueron restaurados.",
+          variant: "destructive",
+          duration: 5000,
+        });
         setAiStateForChat("idle", submitConversationId);
         setAiProcessStepsForChat([], submitConversationId);
         abortControllerRef.current = null;
       }
-    } catch (outerError: any) {
-      console.error("[handleSubmit] Outer error:", outerError);
-      if (savedMainFiles.length > 0) {
-        setUploadedFiles(savedMainFiles);
-      }
-      toast({
-        title: "Error inesperado",
-        description: "Algo salió mal. Tus archivos fueron restaurados.",
-        variant: "destructive",
-        duration: 5000,
-      });
-      setAiStateForChat("idle", submitConversationId);
-      setAiProcessStepsForChat([], submitConversationId);
-      abortControllerRef.current = null;
-    }
     } finally {
       // Always release the submit lock so the user can send again.
       clearSubmitLock();
@@ -6095,102 +6100,406 @@ IMPORTANTE:
       {showExplosion && (
         <WelcomeExplosion onComplete={completeWelcome} />
       )}
-      
-    <div className="flex h-full flex-col bg-transparent relative">
-      {/* Header */}
-      <ChatHeader
-        chatId={chatId || null}
-        activeGpt={activeGpt || {
-          id: 'default',
-          name: 'ILIAGPT',
-          description: 'Asistente IA',
-          systemPrompt: '',
-          model: 'gpt-4o',
-          temperature: 0.7,
-          maxTokens: 4096,
-          topP: 1,
-          frequencyPenalty: 0,
-          presencePenalty: 0,
-          isPublic: false,
-          userId: 'system',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          welcomeMessage: '',
-          conversationStarters: [],
-          avatar: ''
-        }}
-        messages={displayMessages}
-        folders={folders}
-        currentFolderId={currentFolderId}
-        isPinned={isPinned}
-        isArchived={isArchived}
-        isSidebarOpen={isSidebarOpen}
-        onToggleSidebar={onToggleSidebar || (() => { })}
-        onNewChat={onNewChat}
-        onEditGpt={onEditGpt}
-        onHideGptFromSidebar={onHideGptFromSidebar}
-        onPinGptToSidebar={onPinGptToSidebar}
-        isGptPinned={isGptPinned}
-        onAboutGpt={onAboutGpt}
-        onPinChat={onPinChat}
-        onArchiveChat={onArchiveChat}
-        onHideChat={onHideChat}
-        onDeleteChat={onDeleteChat}
-        onDownloadChat={onDownloadChat}
-        onEditChatTitle={onEditChatTitle}
-        onMoveToFolder={onMoveToFolder}
-        onCreateFolder={onCreateFolder}
-        userPlanInfo={userPlanInfo}
-      />
-      {/* Main Content Area with Side Panel */}
-      {(previewDocument || activeDocEditor || (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool))) ? (
-        <PanelGroup direction="horizontal" className="flex-1">
-          {/* Left Panel: Minimized Chat for Document Mode */}
-          <Panel defaultSize={(activeDocEditor || selectedDocTool) ? 25 : 50} minSize={20} maxSize={(activeDocEditor || selectedDocTool) ? 35 : 70}>
-            <div className="flex flex-col min-w-0 h-full bg-background/50">
-              {/* Compact Header for Document Mode */}
-              {activeDocEditor && (
-                <div className="p-3 border-b border-border/50 bg-muted/30">
-                  <div className="flex items-center gap-2">
-                    <div className={cn(
-                      "w-8 h-8 rounded-lg flex items-center justify-center",
-                      activeDocEditor.type === "word" && "bg-blue-600",
-                      activeDocEditor.type === "excel" && "bg-green-600",
-                      activeDocEditor.type === "ppt" && "bg-orange-500"
-                    )}>
-                      <span className="text-white text-sm font-bold">
-                        {activeDocEditor.type === "word" ? "W" : activeDocEditor.type === "excel" ? "E" : "P"}
-                      </span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">Instrucciones</p>
-                      <p className="text-xs text-muted-foreground">El AI escribe directo al documento</p>
+
+      <div className="flex h-full flex-col bg-transparent relative">
+        {/* Header */}
+        <ChatHeader
+          chatId={chatId || null}
+          activeGpt={activeGpt || {
+            id: 'default',
+            name: 'ILIAGPT',
+            description: 'Asistente IA',
+            systemPrompt: '',
+            model: 'gpt-4o',
+            temperature: 0.7,
+            maxTokens: 4096,
+            topP: 1,
+            frequencyPenalty: 0,
+            presencePenalty: 0,
+            isPublic: false,
+            userId: 'system',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            welcomeMessage: '',
+            conversationStarters: [],
+            avatar: ''
+          }}
+          messages={displayMessages}
+          folders={folders}
+          currentFolderId={currentFolderId}
+          isPinned={isPinned}
+          isArchived={isArchived}
+          isSidebarOpen={isSidebarOpen}
+          onToggleSidebar={onToggleSidebar || (() => { })}
+          onNewChat={onNewChat}
+          onEditGpt={onEditGpt}
+          onHideGptFromSidebar={onHideGptFromSidebar}
+          onPinGptToSidebar={onPinGptToSidebar}
+          isGptPinned={isGptPinned}
+          onAboutGpt={onAboutGpt}
+          onPinChat={onPinChat}
+          onArchiveChat={onArchiveChat}
+          onHideChat={onHideChat}
+          onDeleteChat={onDeleteChat}
+          onDownloadChat={onDownloadChat}
+          onEditChatTitle={onEditChatTitle}
+          onMoveToFolder={onMoveToFolder}
+          onCreateFolder={onCreateFolder}
+          userPlanInfo={userPlanInfo}
+        />
+        {/* Main Content Area with Side Panel */}
+        {(previewDocument || activeDocEditor || (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool))) ? (
+          <PanelGroup direction="horizontal" className="flex-1">
+            {/* Left Panel: Minimized Chat for Document Mode */}
+            <Panel defaultSize={(activeDocEditor || selectedDocTool) ? 25 : 50} minSize={20} maxSize={(activeDocEditor || selectedDocTool) ? 35 : 70}>
+              <div className="flex flex-col min-w-0 h-full bg-background/50">
+                {/* Compact Header for Document Mode */}
+                {activeDocEditor && (
+                  <div className="p-3 border-b border-border/50 bg-muted/30">
+                    <div className="flex items-center gap-2">
+                      <div className={cn(
+                        "w-8 h-8 rounded-lg flex items-center justify-center",
+                        activeDocEditor.type === "word" && "bg-blue-600",
+                        activeDocEditor.type === "excel" && "bg-green-600",
+                        activeDocEditor.type === "ppt" && "bg-orange-500"
+                      )}>
+                        <span className="text-white text-sm font-bold">
+                          {activeDocEditor.type === "word" ? "W" : activeDocEditor.type === "excel" ? "E" : "P"}
+                        </span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">Instrucciones</p>
+                        <p className="text-xs text-muted-foreground">El AI escribe directo al documento</p>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* Messages Area - Compact for document mode */}
-              {isConversationStateLoading ? (
-                <div
-                  className={cn(
-                    "flex-1 overflow-y-auto space-y-3 overscroll-contain pb-[var(--composer-height,120px)]",
-                    activeDocEditor ? "p-3" : "p-4 sm:p-6 md:p-10 space-y-6"
+                {/* Messages Area - Compact for document mode */}
+                {isConversationStateLoading ? (
+                  <div
+                    className={cn(
+                      "flex-1 overflow-y-auto space-y-3 overscroll-contain pb-[var(--composer-height,120px)]",
+                      activeDocEditor ? "p-3" : "p-4 sm:p-6 md:p-10 space-y-6"
+                    )}
+                  >
+                    <SkeletonChatMessages count={3} />
+                  </div>
+                ) : hasMessages && (
+                  <div
+                    className={cn(
+                      "flex-1 overflow-y-auto space-y-3 overscroll-contain pb-[var(--composer-height,120px)]",
+                      activeDocEditor ? "p-3" : "p-4 sm:p-6 md:p-10 space-y-6"
+                    )}
+                  >
+                    <ChatMessageList
+                      messages={displayMessages}
+                      onUserRetrySend={handleUserRetrySend}
+                      variant={activeDocEditor ? "compact" : "default"}
+                      editingMessageId={editingMessageId}
+                      editContent={editContent}
+                      setEditContent={setEditContent}
+                      copiedMessageId={copiedMessageId}
+                      messageFeedback={messageFeedback}
+                      speakingMessageId={speakingMessageId}
+                      isGeneratingImage={isGeneratingImage}
+                      pendingGeneratedImage={pendingGeneratedImage}
+                      latestGeneratedImageRef={latestGeneratedImageRef}
+                      streamingContent={streamingContent}
+                      streamingMsgId={streamChat.nextMessageIdRef.current}
+                      aiState={aiState}
+                      regeneratingMsgIndex={regeneratingMsgIndex}
+                      handleCopyMessage={handleCopyMessage}
+                      handleStartEdit={handleStartEdit}
+                      handleCancelEdit={handleCancelEdit}
+                      handleSendEdit={handleSendEdit}
+                      handleFeedback={handleFeedback}
+                      handleRegenerate={handleRegenerate}
+                      handleShare={handleShare}
+                      handleReadAloud={handleReadAloud}
+                      handleOpenDocumentPreview={handleOpenDocumentPreview}
+                      handleOpenFileAttachmentPreview={handleOpenFileAttachmentPreview}
+                      handleDownloadImage={handleDownloadImage}
+                      setLightboxImage={setLightboxImage}
+                      handleReopenDocument={handleReopenDocument}
+                      minimizedDocument={minimizedDocument}
+                      onRestoreDocument={restoreDocEditor}
+                      onSelectSuggestedReply={(text) => setInput(text)}
+                      onAgentCancel={handleAgentCancel}
+                      onAgentRetry={handleAgentRetry}
+                      onAgentArtifactPreview={(artifact) => setDocumentPreviewArtifact(artifact as DocumentPreviewArtifact)}
+                      onSuperAgentCancel={handleSuperAgentCancel}
+                      onSuperAgentRetry={handleSuperAgentRetry}
+                      onQuestionClick={(text) => setInput(text)}
+                      activeRunId={activeRunId}
+                      onRunComplete={() => {
+                        console.log('[uiPhase] Run completed, uiPhase=done');
+                        setUiPhase('done');
+                        setActiveRunId(null);
+                      }}
+                      uiPhase={uiPhase}
+                      aiProcessSteps={aiProcessSteps}
+                    />
+
+                    {/* Agent Observer - Show when agent is running */}
+                    {agent.state.status !== "idle" && (
+                      <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
+                        <AgentObserver
+                          steps={agent.state.steps}
+                          objective={agent.state.objective}
+                          status={agent.state.status}
+                          onCancel={agent.cancel}
+                        />
+                      </div>
+                    )}
+
+                    {/* Production Mode Progress */}
+                    {aiState === "agent_working" && aiProcessSteps.length > 0 && (
+                      <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start mb-4">
+                        <ProductionProgress steps={aiProcessSteps} />
+                      </div>
+                    )}
+
+                    {/* Image Generation Loading Skeleton */}
+                    {isGeneratingImage && (
+                      <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
+                        <div className="flex flex-col gap-2 items-start">
+                          <div className="liquid-message-ai-light px-4 py-3 text-sm mb-2">
+                            <div className="flex items-center gap-2">
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              <span>Generando imagen...</span>
+                            </div>
+                          </div>
+                          <div className="px-4">
+                            <div className="w-64 h-64 bg-muted rounded-lg animate-pulse flex items-center justify-center">
+                              <Image className="h-8 w-8 text-muted-foreground" />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Thinking/Responding State - only show if aiState belongs to current chat and uiPhase is not 'console' */}
+                    {aiState !== "idle" && !isGeneratingImage && (!aiStateChatId || chatId === aiStateChatId) && uiPhase !== 'console' && (
+                      <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
+                        {/* Streaming Indicator with cancel button */}
+                        <StreamingIndicator
+                          aiState={aiState}
+                          streamingContent={streamingContent}
+                          onCancel={handleStopChat}
+                          uiPhase={uiPhase}
+                        />
+
+                        {/* Streaming content with fade-in animation */}
+                        {aiState === "responding" && streamingContent && (
+                          <div className="animate-content-fade-in px-4 py-3 text-foreground min-w-0 font-sans text-base leading-relaxed font-normal">
+                            <MarkdownErrorBoundary fallbackContent={streamingContent}>
+                              <MarkdownRenderer
+                                content={streamingContent}
+                                customComponents={{ ...CleanDataTableComponents }}
+                              />
+                            </MarkdownErrorBoundary>
+                            <span className="typing-cursor">|</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Execution Console - Show UniversalExecutionConsole when state is available, fallback to LiveExecutionConsole */}
+                    {uiPhase === 'console' && activeRunId && (
+                      <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
+                        {executionRunState ? (
+                          <UniversalExecutionConsole
+                            runState={executionRunState as any}
+                            className="mb-4"
+                          />
+                        ) : (
+                          <LiveExecutionConsole
+                            runId={activeRunId}
+                            forceShow={true}
+                          />
+                        )}
+                      </div>
+                    )}
+
+                    <div ref={bottomRef} />
+                  </div>
+                )}
+
+                {/* Centered content when no messages - Futuristic Welcome */}
+                {!hasMessages && (
+                  <div className="flex-1 flex flex-col items-center justify-center">
+                    {activeGpt ? (
+                      <div className="flex flex-col items-center justify-center text-center space-y-4 mb-6">
+                        <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mb-2">
+                          {activeGpt.avatar ? (
+                            <img src={activeGpt.avatar} alt={activeGpt.name} className="w-full h-full rounded-2xl object-cover" />
+                          ) : (
+                            <Bot className="h-8 w-8 text-muted-foreground" />
+                          )}
+                        </div>
+                        <h2 className="text-xl font-semibold">{activeGpt.name}</h2>
+                        <p className="text-muted-foreground max-w-md">{activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?"}</p>
+                        {activeGpt.conversationStarters && activeGpt.conversationStarters.length > 0 && (
+                          <div className="flex flex-wrap gap-2 mt-4 justify-center max-w-xl">
+                            {activeGpt.conversationStarters.filter(s => s).map((starter, idx) => (
+                              <button
+                                key={idx}
+                                onClick={() => setInput(starter)}
+                                className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50 transition-colors text-left"
+                              >
+                                {starter}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <WelcomeAnimation />
+                    )}
+                  </div>
+                )}
+
+                <Composer
+                  input={input}
+                  setInput={setInput}
+                  textareaRef={textareaRef}
+                  composerRef={composerRef}
+                  fileInputRef={fileInputRef}
+                  uploadedFiles={uploadedFiles}
+                  removeFile={removeFile}
+                  handleSubmit={handleSubmit}
+                  handleFileUpload={handleFileUpload}
+                  handlePaste={handlePaste}
+                  handleDragOver={handleDragOver}
+                  handleDragEnter={handleDragEnter}
+                  handleDragLeave={handleDragLeave}
+                  handleDrop={handleDrop}
+                  isDraggingOver={isDraggingOver}
+                  selectedTool={selectedTool}
+                  setSelectedTool={setSelectedTool}
+                  selectedDocTool={selectedDocTool}
+                  setSelectedDocTool={setSelectedDocTool}
+                  closeDocEditor={closeDocEditor}
+                  openBlankDocEditor={openBlankDocEditor}
+                  aiState={aiState}
+                  isRecording={isRecording}
+                  isPaused={isPaused}
+                  recordingTime={recordingTime}
+                  toggleVoiceRecording={toggleVoiceRecording}
+                  discardVoiceRecording={discardVoiceRecording}
+                  pauseVoiceRecording={pauseVoiceRecording}
+                  resumeVoiceRecording={resumeVoiceRecording}
+                  sendVoiceRecording={sendVoiceRecording}
+                  handleStopChat={handleStopChat}
+                  isAgentRunning={isAgentRunning}
+                  handleAgentStop={handleAgentStop}
+                  setIsVoiceChatOpen={setIsVoiceChatOpen}
+                  browserSession={browserSession}
+                  isBrowserOpen={isBrowserOpen}
+                  setIsBrowserOpen={setIsBrowserOpen}
+                  isBrowserMaximized={isBrowserMaximized}
+                  setIsBrowserMaximized={setIsBrowserMaximized}
+                  browserUrl={browserUrl}
+                  variant="document"
+                  placeholder={selectedDocText ? "Escribe cómo mejorar el texto..." : "Type your message here..."}
+                  selectedDocText={selectedDocText}
+                  handleDocTextDeselect={handleDocTextDeselect}
+                  onTextareaFocus={handleCloseModelSelector}
+                  isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
+                  latencyMode={latencyMode}
+                  setLatencyMode={setLatencyMode}
+                />
+              </div>
+            </Panel>
+
+            {/* Resize Handle */}
+            <PanelResizeHandle className="w-2 bg-border/50 hover:bg-primary/30 transition-colors cursor-col-resize flex items-center justify-center group">
+              <GripVertical className="h-6 w-6 text-muted-foreground/50 group-hover:text-primary transition-colors" />
+            </PanelResizeHandle>
+
+            {/* Right: Document Editor Panel */}
+            <Panel defaultSize={(activeDocEditor || selectedDocTool) ? 75 : 50} minSize={25}>
+              <EditorErrorBoundary>
+                <div className="h-full animate-in slide-in-from-right duration-300">
+                  {(activeDocEditor?.type === "ppt") ? (
+                    <PPTEditorShellLazy
+                      onClose={closeDocEditor}
+                      onInsertContent={(insertFn) => { docInsertContentRef.current = insertFn; }}
+                      initialShowInstructions={activeDocEditor?.showInstructions}
+                      initialContent={activeDocEditor?.content}
+                    />
+                  ) : (activeDocEditor?.type === "excel" || previewDocument?.type === "excel") ? (
+                    <SpreadsheetEditorLazy
+                      key="excel-editor-stable"
+                      title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
+                      content={editedDocumentContent}
+                      onChange={setEditedDocumentContent}
+                      onClose={activeDocEditor ? closeDocEditor : handleCloseDocumentPreview}
+                      onDownload={() => {
+                        if (activeDocEditor) {
+                          handleDownloadDocument({
+                            type: activeDocEditor.type,
+                            title: activeDocEditor.title,
+                            content: editedDocumentContent
+                          });
+                        } else if (previewDocument) {
+                          handleDownloadDocument(previewDocument);
+                        }
+                      }}
+                      onInsertContent={(insertFn: (content: string) => void) => { docInsertContentRef.current = insertFn; }}
+                      onOrchestratorReady={(orch: { runOrchestrator: (prompt: string) => Promise<void> }) => { orchestratorRef.current = orch; }}
+                    />
+                  ) : (
+                    <div className="relative h-full">
+                      {/* Word/generic document editor — always visible when activeDocEditor or previewDocument exists */}
+                      <EnhancedDocumentEditorLazy
+                        key={activeDocEditor ? `new-${activeDocEditor.type}` : previewDocument?.title}
+                        title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
+                        content={editedDocumentContent}
+                        onChange={setEditedDocumentContent}
+                        onClose={activeDocEditor ? minimizeDocEditor : handleCloseDocumentPreview}
+                        onDownload={() => {
+                          if (activeDocEditor) {
+                            handleDownloadDocument({
+                              type: activeDocEditor.type,
+                              title: activeDocEditor.title,
+                              content: editedDocumentContent
+                            });
+                          } else if (previewDocument) {
+                            handleDownloadDocument(previewDocument);
+                          }
+                        }}
+                        onSaveToLibrary={() => handleSaveToLibrary()}
+                        onTextSelect={handleDocTextSelect}
+                        onTextDeselect={handleDocTextDeselect}
+                        onInsertContent={(insertFn: (content: string) => void) => { docInsertContentRef.current = insertFn; }}
+                      />
+                    </div>
                   )}
-                >
-                  <SkeletonChatMessages count={3} />
                 </div>
-              ) : hasMessages && (
+              </EditorErrorBoundary>
+            </Panel>
+          </PanelGroup>
+        ) : (
+          <div className="flex-1 flex flex-col min-w-0 min-h-0 h-full overflow-hidden">
+            {/* Content Area - conditional based on whether we have messages */}
+            {isConversationStateLoading ? (
+              <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6">
+                <SkeletonChatMessages count={3} />
+              </div>
+            ) : hasMessages ? (
+              <>
+                {/* Scrollable messages container */}
                 <div
-                  className={cn(
-                    "flex-1 overflow-y-auto space-y-3 overscroll-contain pb-[var(--composer-height,120px)]",
-                    activeDocEditor ? "p-3" : "p-4 sm:p-6 md:p-10 space-y-6"
-                  )}
+                  ref={messagesContainerRef}
+                  onScroll={handleScroll}
+                  className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6"
                 >
                   <ChatMessageList
                     messages={displayMessages}
                     onUserRetrySend={handleUserRetrySend}
-                    variant={activeDocEditor ? "compact" : "default"}
+                    variant="default"
                     editingMessageId={editingMessageId}
                     editContent={editContent}
                     setEditContent={setEditContent}
@@ -6201,7 +6510,6 @@ IMPORTANTE:
                     pendingGeneratedImage={pendingGeneratedImage}
                     latestGeneratedImageRef={latestGeneratedImageRef}
                     streamingContent={streamingContent}
-                    streamingMsgId={streamChat.nextMessageIdRef.current}
                     aiState={aiState}
                     regeneratingMsgIndex={regeneratingMsgIndex}
                     handleCopyMessage={handleCopyMessage}
@@ -6235,59 +6543,42 @@ IMPORTANTE:
                     uiPhase={uiPhase}
                     aiProcessSteps={aiProcessSteps}
                   />
+                  <div ref={messagesEndRef} />
+                </div>
 
-                  {/* Agent Observer - Show when agent is running */}
-                  {agent.state.status !== "idle" && (
-                    <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
-                      <AgentObserver
-                        steps={agent.state.steps}
-                        objective={agent.state.objective}
-                        status={agent.state.status}
-                        onCancel={agent.cancel}
-                      />
-                    </div>
-                  )}
-
-                  {/* Production Mode Progress */}
-                  {aiState === "agent_working" && aiProcessSteps.length > 0 && (
-                    <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start mb-4">
-                      <ProductionProgress steps={aiProcessSteps} />
-                    </div>
-                  )}
-
-                  {/* Image Generation Loading Skeleton */}
-                  {isGeneratingImage && (
-                    <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
-                      <div className="flex flex-col gap-2 items-start">
-                        <div className="liquid-message-ai-light px-4 py-3 text-sm mb-2">
-                          <div className="flex items-center gap-2">
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            <span>Generando imagen...</span>
-                          </div>
-                        </div>
-                        <div className="px-4">
-                          <div className="w-64 h-64 bg-muted rounded-lg animate-pulse flex items-center justify-center">
-                            <Image className="h-8 w-8 text-muted-foreground" />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Thinking/Responding State - only show if aiState belongs to current chat and uiPhase is not 'console' */}
-                  {aiState !== "idle" && !isGeneratingImage && (!aiStateChatId || chatId === aiStateChatId) && uiPhase !== 'console' && (
-                    <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
-                      {/* Streaming Indicator with cancel button */}
-                      <StreamingIndicator
-                        aiState={aiState}
-                        streamingContent={streamingContent}
-                        onCancel={handleStopChat}
-                        uiPhase={uiPhase}
-                      />
-
-                      {/* Streaming content with fade-in animation */}
-                      {aiState === "responding" && streamingContent && (
-                        <div className="animate-content-fade-in px-4 py-3 text-foreground min-w-0 font-sans text-base leading-relaxed font-normal">
+                {/* Scroll to bottom button */}
+                {showScrollButton && (
+                  <motion.button
+                    initial={{ opacity: 0, scale: 0.8, y: 10 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.8, y: 10 }}
+                    onClick={() => {
+                      setUserHasScrolledUp(false);
+                      scrollToBottom();
+                    }}
+                    className="fixed bottom-32 right-8 z-40 flex items-center gap-2 px-3 py-2 bg-primary text-primary-foreground rounded-full shadow-lg hover:shadow-xl transition-all hover:scale-105"
+                    data-testid="button-scroll-to-bottom"
+                  >
+                    <ChevronDown className="h-4 w-4" />
+                    <span className="text-sm font-medium">Ir al final</span>
+                  </motion.button>
+                )}
+              </>
+            ) : (
+              /* No messages - center content vertically */
+              <div className="flex-1 min-h-0 flex flex-col items-center justify-center px-4">
+                {aiState !== "idle" && (!aiStateChatId || chatId === aiStateChatId) && uiPhase !== 'console' ? (
+                  /* Processing indicators when AI is working */
+                  <div className="w-full max-w-3xl mx-auto flex flex-col gap-4">
+                    <StreamingIndicator
+                      aiState={aiState}
+                      streamingContent={streamingContent}
+                      onCancel={handleStopChat}
+                      uiPhase={uiPhase}
+                    />
+                    {streamingContent && (
+                      <div className="animate-content-fade-in flex flex-col gap-2 max-w-[85%] items-start min-w-0">
+                        <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
                           <MarkdownErrorBoundary fallbackContent={streamingContent}>
                             <MarkdownRenderer
                               content={streamingContent}
@@ -6296,819 +6587,533 @@ IMPORTANTE:
                           </MarkdownErrorBoundary>
                           <span className="typing-cursor">|</span>
                         </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Execution Console - Show UniversalExecutionConsole when state is available, fallback to LiveExecutionConsole */}
-                  {uiPhase === 'console' && activeRunId && (
-                    <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
-                      {executionRunState ? (
-                        <UniversalExecutionConsole
-                          runState={executionRunState as any}
-                          className="mb-4"
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  /* Welcome Screen */
+                  <>
+                    <motion.div
+                      initial={{ scale: 0.8, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{ duration: 0.5, ease: "easeOut" }}
+                      className="mb-8"
+                    >
+                      {activeGpt?.avatar ? (
+                        <AvatarWithFallback
+                          src={activeGpt.avatar}
+                          alt={activeGpt.name}
+                          fallback={<Bot className="h-10 w-10 text-white" />}
                         />
                       ) : (
-                        <LiveExecutionConsole
-                          runId={activeRunId}
-                          forceShow={true}
-                        />
+                        <IliaGPTLogo size={80} />
                       )}
-                    </div>
-                  )}
-
-                  <div ref={bottomRef} />
-                </div>
-              )}
-
-              {/* Centered content when no messages - Futuristic Welcome */}
-              {!hasMessages && (
-                <div className="flex-1 flex flex-col items-center justify-center">
-                  {activeGpt ? (
-                    <div className="flex flex-col items-center justify-center text-center space-y-4 mb-6">
-                      <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mb-2">
-                        {activeGpt.avatar ? (
-                          <img src={activeGpt.avatar} alt={activeGpt.name} className="w-full h-full rounded-2xl object-cover" />
-                        ) : (
-                          <Bot className="h-8 w-8 text-muted-foreground" />
-                        )}
-                      </div>
-                      <h2 className="text-xl font-semibold">{activeGpt.name}</h2>
-                      <p className="text-muted-foreground max-w-md">{activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?"}</p>
-                      {activeGpt.conversationStarters && activeGpt.conversationStarters.length > 0 && (
-                        <div className="flex flex-wrap gap-2 mt-4 justify-center max-w-xl">
-                          {activeGpt.conversationStarters.filter(s => s).map((starter, idx) => (
+                    </motion.div>
+                    <motion.h1
+                      initial={{ y: 20, opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      transition={{ duration: 0.5, delay: 0.2 }}
+                      className="text-4xl font-bold text-center mb-3 bg-gradient-to-r from-foreground via-foreground/90 to-foreground/70 bg-clip-text"
+                    >
+                      {activeGpt ? activeGpt.name : "¿En qué puedo ayudarte?"}
+                    </motion.h1>
+                    <motion.p
+                      initial={{ y: 20, opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      transition={{ duration: 0.5, delay: 0.3 }}
+                      className="text-muted-foreground text-center max-w-md text-base"
+                    >
+                      {activeGpt
+                        ? (activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?")
+                        : selectedProject
+                          ? (
+                            <span>
+                              <span className="font-semibold text-foreground">{selectedProject.name}</span> lista para empezar a chartear con esa carpeta y sirven para organizar conversaciones y proyectos por tema, mantener contexto, usar archivos e instrucciones específicas, y trabajar de forma ordenada sin mezclar información entre distintos objetivos.
+                            </span>
+                          )
+                          : "Soy ILIAGPT, tu asistente de IA. Puedo responder preguntas, generar documentos, analizar archivos y mucho más."
+                      }
+                    </motion.p>
+                    {activeGpt?.conversationStarters && activeGpt.conversationStarters.length > 0 && (
+                      <motion.div
+                        initial={{ y: 20, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        transition={{ duration: 0.5, delay: 0.4 }}
+                        className="flex flex-wrap gap-2 mt-6 justify-center max-w-xl"
+                      >
+                        {activeGpt.conversationStarters
+                          .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+                          .map((starter, idx) => (
                             <button
                               key={idx}
                               onClick={() => setInput(starter)}
                               className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50 transition-colors text-left"
+                              data-testid={`button-starter-${idx}`}
                             >
                               {starter}
                             </button>
                           ))}
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <WelcomeAnimation />
-                  )}
-                </div>
-              )}
-
-              <Composer
-                input={input}
-                setInput={setInput}
-                textareaRef={textareaRef}
-                composerRef={composerRef}
-                fileInputRef={fileInputRef}
-                uploadedFiles={uploadedFiles}
-                removeFile={removeFile}
-                handleSubmit={handleSubmit}
-                handleFileUpload={handleFileUpload}
-                handlePaste={handlePaste}
-                handleDragOver={handleDragOver}
-                handleDragEnter={handleDragEnter}
-                handleDragLeave={handleDragLeave}
-                handleDrop={handleDrop}
-                isDraggingOver={isDraggingOver}
-                selectedTool={selectedTool}
-                setSelectedTool={setSelectedTool}
-                selectedDocTool={selectedDocTool}
-                setSelectedDocTool={setSelectedDocTool}
-                closeDocEditor={closeDocEditor}
-                openBlankDocEditor={openBlankDocEditor}
-                aiState={aiState}
-                isRecording={isRecording}
-                isPaused={isPaused}
-                recordingTime={recordingTime}
-                toggleVoiceRecording={toggleVoiceRecording}
-                discardVoiceRecording={discardVoiceRecording}
-                pauseVoiceRecording={pauseVoiceRecording}
-                resumeVoiceRecording={resumeVoiceRecording}
-                sendVoiceRecording={sendVoiceRecording}
-                handleStopChat={handleStopChat}
-                isAgentRunning={isAgentRunning}
-                handleAgentStop={handleAgentStop}
-                setIsVoiceChatOpen={setIsVoiceChatOpen}
-                browserSession={browserSession}
-                isBrowserOpen={isBrowserOpen}
-                setIsBrowserOpen={setIsBrowserOpen}
-                isBrowserMaximized={isBrowserMaximized}
-                setIsBrowserMaximized={setIsBrowserMaximized}
-                browserUrl={browserUrl}
-                variant="document"
-                placeholder={selectedDocText ? "Escribe cómo mejorar el texto..." : "Type your message here..."}
-                selectedDocText={selectedDocText}
-                handleDocTextDeselect={handleDocTextDeselect}
-                onTextareaFocus={handleCloseModelSelector}
-                isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
-                latencyMode={latencyMode}
-                setLatencyMode={setLatencyMode}
-              />
-            </div>
-          </Panel>
-
-          {/* Resize Handle */}
-          <PanelResizeHandle className="w-2 bg-border/50 hover:bg-primary/30 transition-colors cursor-col-resize flex items-center justify-center group">
-            <GripVertical className="h-6 w-6 text-muted-foreground/50 group-hover:text-primary transition-colors" />
-          </PanelResizeHandle>
-
-          {/* Right: Document Editor Panel */}
-          <Panel defaultSize={(activeDocEditor || selectedDocTool) ? 75 : 50} minSize={25}>
-            <EditorErrorBoundary>
-            <div className="h-full animate-in slide-in-from-right duration-300">
-              {(activeDocEditor?.type === "ppt") ? (
-                <PPTEditorShellLazy
-                  onClose={closeDocEditor}
-                  onInsertContent={(insertFn) => { docInsertContentRef.current = insertFn; }}
-                  initialShowInstructions={activeDocEditor?.showInstructions}
-                  initialContent={activeDocEditor?.content}
-                />
-              ) : (activeDocEditor?.type === "excel" || previewDocument?.type === "excel") ? (
-                <SpreadsheetEditorLazy
-                  key="excel-editor-stable"
-                  title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
-                  content={editedDocumentContent}
-                  onChange={setEditedDocumentContent}
-                  onClose={activeDocEditor ? closeDocEditor : handleCloseDocumentPreview}
-                  onDownload={() => {
-                    if (activeDocEditor) {
-                      handleDownloadDocument({
-                        type: activeDocEditor.type,
-                        title: activeDocEditor.title,
-                        content: editedDocumentContent
-                      });
-                    } else if (previewDocument) {
-                      handleDownloadDocument(previewDocument);
-                    }
-                  }}
-                  onInsertContent={(insertFn: (content: string) => void) => { docInsertContentRef.current = insertFn; }}
-                  onOrchestratorReady={(orch: { runOrchestrator: (prompt: string) => Promise<void> }) => { orchestratorRef.current = orch; }}
-                />
-              ) : (
-                <div className="relative h-full">
-                  {/* Word/generic document editor — always visible when activeDocEditor or previewDocument exists */}
-                  <EnhancedDocumentEditorLazy
-                    key={activeDocEditor ? `new-${activeDocEditor.type}` : previewDocument?.title}
-                    title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
-                    content={editedDocumentContent}
-                    onChange={setEditedDocumentContent}
-                    onClose={activeDocEditor ? minimizeDocEditor : handleCloseDocumentPreview}
-                    onDownload={() => {
-                      if (activeDocEditor) {
-                        handleDownloadDocument({
-                          type: activeDocEditor.type,
-                          title: activeDocEditor.title,
-                          content: editedDocumentContent
-                        });
-                      } else if (previewDocument) {
-                        handleDownloadDocument(previewDocument);
-                      }
-                    }}
-                    onSaveToLibrary={() => handleSaveToLibrary()}
-                    onTextSelect={handleDocTextSelect}
-                    onTextDeselect={handleDocTextDeselect}
-                    onInsertContent={(insertFn: (content: string) => void) => { docInsertContentRef.current = insertFn; }}
-                  />
-                </div>
-              )}
-            </div>
-            </EditorErrorBoundary>
-          </Panel>
-        </PanelGroup>
-      ) : (
-        <div className="flex-1 flex flex-col min-w-0 min-h-0 h-full overflow-hidden">
-          {/* Content Area - conditional based on whether we have messages */}
-          {isConversationStateLoading ? (
-            <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6">
-              <SkeletonChatMessages count={3} />
-            </div>
-          ) : hasMessages ? (
-            <>
-              {/* Scrollable messages container */}
-              <div
-                ref={messagesContainerRef}
-                onScroll={handleScroll}
-                className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6"
-              >
-                <ChatMessageList
-                  messages={displayMessages}
-                  onUserRetrySend={handleUserRetrySend}
-                  variant="default"
-                  editingMessageId={editingMessageId}
-                  editContent={editContent}
-                  setEditContent={setEditContent}
-                  copiedMessageId={copiedMessageId}
-                  messageFeedback={messageFeedback}
-                  speakingMessageId={speakingMessageId}
-                  isGeneratingImage={isGeneratingImage}
-                  pendingGeneratedImage={pendingGeneratedImage}
-                  latestGeneratedImageRef={latestGeneratedImageRef}
-                  streamingContent={streamingContent}
-                  aiState={aiState}
-                  regeneratingMsgIndex={regeneratingMsgIndex}
-                  handleCopyMessage={handleCopyMessage}
-                  handleStartEdit={handleStartEdit}
-                  handleCancelEdit={handleCancelEdit}
-                  handleSendEdit={handleSendEdit}
-                  handleFeedback={handleFeedback}
-                  handleRegenerate={handleRegenerate}
-                  handleShare={handleShare}
-                  handleReadAloud={handleReadAloud}
-                  handleOpenDocumentPreview={handleOpenDocumentPreview}
-                  handleOpenFileAttachmentPreview={handleOpenFileAttachmentPreview}
-                  handleDownloadImage={handleDownloadImage}
-                  setLightboxImage={setLightboxImage}
-                  handleReopenDocument={handleReopenDocument}
-                  minimizedDocument={minimizedDocument}
-                  onRestoreDocument={restoreDocEditor}
-                  onSelectSuggestedReply={(text) => setInput(text)}
-                  onAgentCancel={handleAgentCancel}
-                  onAgentRetry={handleAgentRetry}
-                  onAgentArtifactPreview={(artifact) => setDocumentPreviewArtifact(artifact as DocumentPreviewArtifact)}
-                  onSuperAgentCancel={handleSuperAgentCancel}
-                  onSuperAgentRetry={handleSuperAgentRetry}
-                  onQuestionClick={(text) => setInput(text)}
-                  activeRunId={activeRunId}
-                  onRunComplete={() => {
-                    console.log('[uiPhase] Run completed, uiPhase=done');
-                    setUiPhase('done');
-                    setActiveRunId(null);
-                  }}
-                  uiPhase={uiPhase}
-                  aiProcessSteps={aiProcessSteps}
-                />
-                <div ref={messagesEndRef} />
-              </div>
-
-              {/* Scroll to bottom button */}
-              {showScrollButton && (
-                <motion.button
-                  initial={{ opacity: 0, scale: 0.8, y: 10 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.8, y: 10 }}
-                  onClick={() => {
-                    setUserHasScrolledUp(false);
-                    scrollToBottom();
-                  }}
-                  className="fixed bottom-32 right-8 z-40 flex items-center gap-2 px-3 py-2 bg-primary text-primary-foreground rounded-full shadow-lg hover:shadow-xl transition-all hover:scale-105"
-                  data-testid="button-scroll-to-bottom"
-                >
-                  <ChevronDown className="h-4 w-4" />
-                  <span className="text-sm font-medium">Ir al final</span>
-                </motion.button>
-              )}
-            </>
-          ) : (
-            /* No messages - center content vertically */
-            <div className="flex-1 min-h-0 flex flex-col items-center justify-center px-4">
-              {aiState !== "idle" && (!aiStateChatId || chatId === aiStateChatId) && uiPhase !== 'console' ? (
-                /* Processing indicators when AI is working */
-                <div className="w-full max-w-3xl mx-auto flex flex-col gap-4">
-                  <StreamingIndicator
-                    aiState={aiState}
-                    streamingContent={streamingContent}
-                    onCancel={handleStopChat}
-                    uiPhase={uiPhase}
-                  />
-                  {streamingContent && (
-                    <div className="animate-content-fade-in flex flex-col gap-2 max-w-[85%] items-start min-w-0">
-                      <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
-                        <MarkdownErrorBoundary fallbackContent={streamingContent}>
-                          <MarkdownRenderer
-                            content={streamingContent}
-                            customComponents={{ ...CleanDataTableComponents }}
-                          />
-                        </MarkdownErrorBoundary>
-                        <span className="typing-cursor">|</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                /* Welcome Screen */
-                <>
-                  <motion.div
-                    initial={{ scale: 0.8, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    transition={{ duration: 0.5, ease: "easeOut" }}
-                    className="mb-8"
-                  >
-                    {activeGpt?.avatar ? (
-                      <AvatarWithFallback
-                        src={activeGpt.avatar}
-                        alt={activeGpt.name}
-                        fallback={<Bot className="h-10 w-10 text-white" />}
-                      />
-                    ) : (
-                      <IliaGPTLogo size={80} />
+                      </motion.div>
                     )}
-                  </motion.div>
-                  <motion.h1
-                    initial={{ y: 20, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    transition={{ duration: 0.5, delay: 0.2 }}
-                    className="text-4xl font-bold text-center mb-3 bg-gradient-to-r from-foreground via-foreground/90 to-foreground/70 bg-clip-text"
-                  >
-                    {activeGpt ? activeGpt.name : "¿En qué puedo ayudarte?"}
-                  </motion.h1>
-                  <motion.p
-                    initial={{ y: 20, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    transition={{ duration: 0.5, delay: 0.3 }}
-                    className="text-muted-foreground text-center max-w-md text-base"
-                  >
-                    {activeGpt
-                      ? (activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?")
-                      : selectedProject
-                        ? (
-                          <span>
-                            <span className="font-semibold text-foreground">{selectedProject.name}</span> lista para empezar a chartear con esa carpeta y sirven para organizar conversaciones y proyectos por tema, mantener contexto, usar archivos e instrucciones específicas, y trabajar de forma ordenada sin mezclar información entre distintos objetivos.
-                          </span>
-                        )
-                        : "Soy ILIAGPT, tu asistente de IA. Puedo responder preguntas, generar documentos, analizar archivos y mucho más."
-                    }
-                  </motion.p>
-                  {activeGpt?.conversationStarters && activeGpt.conversationStarters.length > 0 && (
-                    <motion.div
-                      initial={{ y: 20, opacity: 0 }}
-                      animate={{ y: 0, opacity: 1 }}
-                      transition={{ duration: 0.5, delay: 0.4 }}
-                      className="flex flex-wrap gap-2 mt-6 justify-center max-w-xl"
-                    >
-                      {activeGpt.conversationStarters
-                        .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
-                        .map((starter, idx) => (
-                          <button
-                            key={idx}
-                            onClick={() => setInput(starter)}
-                            className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50 transition-colors text-left"
-                            data-testid={`button-starter-${idx}`}
-                          >
-                            {starter}
-                          </button>
-                        ))}
-                    </motion.div>
-                  )}
-                  {/* Show PromptSuggestions when no conversation starters available */}
-                  {(!activeGpt?.conversationStarters || activeGpt.conversationStarters.length === 0) && (
-                    <PromptSuggestions
-                      onSelect={(action) => setInput(action)}
-                      hasAttachment={uploadedFiles.length > 0}
-                      className="mt-6 justify-center max-w-xl"
-                    />
-                  )}
-                </>
-              )}
-            </div>
-          )}
+                    {/* Show PromptSuggestions when no conversation starters available */}
+                    {(!activeGpt?.conversationStarters || activeGpt.conversationStarters.length === 0) && (
+                      <PromptSuggestions
+                        onSelect={(action) => setInput(action)}
+                        hasAttachment={uploadedFiles.length > 0}
+                        className="mt-6 justify-center max-w-xl"
+                      />
+                    )}
+                  </>
+                )}
+              </div>
+            )}
 
-          {/* Input Bar - flex shrink-0, stays at bottom */}
-          {/* Sync Status Indicator */}
-          <div className="flex justify-end px-4 py-1">
-            <SyncStatusIndicator />
-          </div>
-          <Composer
-            input={input}
-            setInput={setInput}
-            textareaRef={textareaRef}
-            composerRef={composerRef}
-            fileInputRef={fileInputRef}
-            uploadedFiles={uploadedFiles}
-            removeFile={removeFile}
-            handleSubmit={handleSubmit}
-            handleFileUpload={handleFileUpload}
-            handlePaste={handlePaste}
-            handleDragOver={handleDragOver}
-            handleDragEnter={handleDragEnter}
-            handleDragLeave={handleDragLeave}
-            handleDrop={handleDrop}
-            isDraggingOver={isDraggingOver}
-            selectedTool={selectedTool}
-            setSelectedTool={setSelectedTool}
-            selectedDocTool={selectedDocTool}
-            setSelectedDocTool={setSelectedDocTool}
-            closeDocEditor={closeDocEditor}
-            openBlankDocEditor={openBlankDocEditor}
-            aiState={aiState}
-            isRecording={isRecording}
-            isPaused={isPaused}
-            recordingTime={recordingTime}
-            toggleVoiceRecording={toggleVoiceRecording}
-            discardVoiceRecording={discardVoiceRecording}
-            pauseVoiceRecording={pauseVoiceRecording}
-            resumeVoiceRecording={resumeVoiceRecording}
-            sendVoiceRecording={sendVoiceRecording}
-            handleStopChat={handleStopChat}
-            isAgentRunning={isAgentRunning}
-            handleAgentStop={handleAgentStop}
-            setIsVoiceChatOpen={setIsVoiceChatOpen}
-            browserSession={browserSession}
-            isBrowserOpen={isBrowserOpen}
-            setIsBrowserOpen={setIsBrowserOpen}
-            isBrowserMaximized={isBrowserMaximized}
-            setIsBrowserMaximized={setIsBrowserMaximized}
-            browserUrl={browserUrl}
-            variant="default"
-            placeholder="Escribe tu mensaje aquí..."
-            onCloseSidebar={onCloseSidebar}
-            setPreviewUploadedImage={setPreviewUploadedImage}
-            isFigmaConnected={isFigmaConnected}
-            isFigmaConnecting={isFigmaConnecting}
-            handleFigmaConnect={handleFigmaConnect}
-            handleFigmaDisconnect={handleFigmaDisconnect}
-            onOpenGoogleForms={() => setIsGoogleFormsOpen(true)}
-            onOpenApps={onOpenApps}
-            isGoogleFormsActive={isGoogleFormsActive}
-            setIsGoogleFormsActive={setIsGoogleFormsActive}
-            onTextareaFocus={handleCloseModelSelector}
-            isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
-            latencyMode={latencyMode}
-            setLatencyMode={setLatencyMode}
-          />
-        </div>
-      )}
-      <ETLDialog
-        open={isETLDialogOpen}
-        onClose={() => setIsETLDialogOpen(false)}
-        onComplete={(summary) => {
-          onSendMessage({
-            id: `etl-${Date.now()}`,
-            role: "assistant",
-            content: `ETL Agent completed. ${summary}`,
-            timestamp: new Date()
-          });
-        }}
-      />
-      <DocumentGeneratorDialog
-        open={isDocGeneratorOpen}
-        onClose={() => setIsDocGeneratorOpen(false)}
-        documentType={docGeneratorType}
-        onComplete={(message) => {
-          onSendMessage({
-            id: `doc-gen-${Date.now()}`,
-            role: "assistant",
-            content: message,
-            timestamp: new Date()
-          });
-        }}
-      />
-      <GoogleFormsDialog
-        open={isGoogleFormsOpen}
-        onClose={() => {
-          setIsGoogleFormsOpen(false);
-          setGoogleFormsPrompt("");
-        }}
-        initialPrompt={googleFormsPrompt}
-        onComplete={(message, formUrl) => {
-          onSendMessage({
-            id: `forms-gen-${Date.now()}`,
-            role: "assistant",
-            content: message + (formUrl ? `\n\n[Abrir en Google Forms](${formUrl})` : ""),
-            timestamp: new Date()
-          });
-        }}
-      />
-      {/* Voice Chat Mode - Fullscreen conversation with Grok */}
-      <VoiceChatMode
-        open={isVoiceChatOpen}
-        onClose={() => setIsVoiceChatOpen(false)}
-      />
-      {/* Image Lightbox Modal */}
-      {lightboxImage && (
-        <div
-          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
-          onClick={() => setLightboxImage(null)}
-        >
-          <div className="relative max-w-[90vw] max-h-[90vh]">
-            <img
-              src={lightboxImage}
-              alt="Imagen ampliada"
-              className="max-w-full max-h-[90vh] rounded-lg shadow-2xl"
-              onClick={(e: React.MouseEvent) => e.stopPropagation()}
+            {/* Input Bar - flex shrink-0, stays at bottom */}
+            {/* Sync Status Indicator */}
+            <div className="flex justify-end px-4 py-1">
+              <SyncStatusIndicator />
+            </div>
+            <Composer
+              input={input}
+              setInput={setInput}
+              textareaRef={textareaRef}
+              composerRef={composerRef}
+              fileInputRef={fileInputRef}
+              uploadedFiles={uploadedFiles}
+              removeFile={removeFile}
+              handleSubmit={handleSubmit}
+              handleFileUpload={handleFileUpload}
+              handlePaste={handlePaste}
+              handleDragOver={handleDragOver}
+              handleDragEnter={handleDragEnter}
+              handleDragLeave={handleDragLeave}
+              handleDrop={handleDrop}
+              isDraggingOver={isDraggingOver}
+              selectedTool={selectedTool}
+              setSelectedTool={setSelectedTool}
+              selectedDocTool={selectedDocTool}
+              setSelectedDocTool={setSelectedDocTool}
+              closeDocEditor={closeDocEditor}
+              openBlankDocEditor={openBlankDocEditor}
+              aiState={aiState}
+              isRecording={isRecording}
+              isPaused={isPaused}
+              recordingTime={recordingTime}
+              toggleVoiceRecording={toggleVoiceRecording}
+              discardVoiceRecording={discardVoiceRecording}
+              pauseVoiceRecording={pauseVoiceRecording}
+              resumeVoiceRecording={resumeVoiceRecording}
+              sendVoiceRecording={sendVoiceRecording}
+              handleStopChat={handleStopChat}
+              isAgentRunning={isAgentRunning}
+              handleAgentStop={handleAgentStop}
+              setIsVoiceChatOpen={setIsVoiceChatOpen}
+              browserSession={browserSession}
+              isBrowserOpen={isBrowserOpen}
+              setIsBrowserOpen={setIsBrowserOpen}
+              isBrowserMaximized={isBrowserMaximized}
+              setIsBrowserMaximized={setIsBrowserMaximized}
+              browserUrl={browserUrl}
+              variant="default"
+              placeholder="Escribe tu mensaje aquí..."
+              onCloseSidebar={onCloseSidebar}
+              setPreviewUploadedImage={setPreviewUploadedImage}
+              isFigmaConnected={isFigmaConnected}
+              isFigmaConnecting={isFigmaConnecting}
+              handleFigmaConnect={handleFigmaConnect}
+              handleFigmaDisconnect={handleFigmaDisconnect}
+              onOpenGoogleForms={() => setIsGoogleFormsOpen(true)}
+              onOpenApps={onOpenApps}
+              isGoogleFormsActive={isGoogleFormsActive}
+              setIsGoogleFormsActive={setIsGoogleFormsActive}
+              onTextareaFocus={handleCloseModelSelector}
+              isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
+              latencyMode={latencyMode}
+              setLatencyMode={setLatencyMode}
             />
-            <Button
-              variant="secondary"
-              size="icon"
-              className="absolute top-4 right-4 h-10 w-10 bg-black/60 hover:bg-black/80 text-white"
-              onClick={() => setLightboxImage(null)}
-              data-testid="button-close-lightbox"
-              aria-label="Cerrar imagen"
-            >
-              <X className="h-5 w-5" />
-            </Button>
-            <Button
-              variant="secondary"
-              size="icon"
-              className="absolute top-4 right-16 h-10 w-10 bg-black/60 hover:bg-black/80 text-white"
-              onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleDownloadImage(lightboxImage); }}
-              data-testid="button-download-lightbox"
-              aria-label="Descargar imagen"
-            >
-              <Download className="h-5 w-5" />
-            </Button>
           </div>
-        </div>
-      )}
-      {/* File Attachment Preview Modal */}
-      {previewFileAttachment && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.2 }}
-          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
-          onClick={() => setPreviewFileAttachment(null)}
-          data-testid="file-attachment-preview-overlay"
-        >
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            transition={{ duration: 0.25, ease: "easeOut" }}
-            className="relative bg-card rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
-            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+        )}
+        <ETLDialog
+          open={isETLDialogOpen}
+          onClose={() => setIsETLDialogOpen(false)}
+          onComplete={(summary) => {
+            onSendMessage({
+              id: `etl-${Date.now()}`,
+              role: "assistant",
+              content: `ETL Agent completed. ${summary}`,
+              timestamp: new Date()
+            });
+          }}
+        />
+        <DocumentGeneratorDialog
+          open={isDocGeneratorOpen}
+          onClose={() => setIsDocGeneratorOpen(false)}
+          documentType={docGeneratorType}
+          onComplete={(message) => {
+            onSendMessage({
+              id: `doc-gen-${Date.now()}`,
+              role: "assistant",
+              content: message,
+              timestamp: new Date()
+            });
+          }}
+        />
+        <GoogleFormsDialog
+          open={isGoogleFormsOpen}
+          onClose={() => {
+            setIsGoogleFormsOpen(false);
+            setGoogleFormsPrompt("");
+          }}
+          initialPrompt={googleFormsPrompt}
+          onComplete={(message, formUrl) => {
+            onSendMessage({
+              id: `forms-gen-${Date.now()}`,
+              role: "assistant",
+              content: message + (formUrl ? `\n\n[Abrir en Google Forms](${formUrl})` : ""),
+              timestamp: new Date()
+            });
+          }}
+        />
+        {/* Voice Chat Mode - Fullscreen conversation with Grok */}
+        <VoiceChatMode
+          open={isVoiceChatOpen}
+          onClose={() => setIsVoiceChatOpen(false)}
+        />
+        {/* Image Lightbox Modal */}
+        {lightboxImage && (
+          <div
+            className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+            onClick={() => setLightboxImage(null)}
           >
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-              <div className="flex items-center gap-3">
-                {(() => {
-                  const attTheme = getFileTheme(previewFileAttachment.name, previewFileAttachment.mimeType);
-                  return (
-                    <motion.div
-                      initial={{ scale: 0.8 }}
-                      animate={{ scale: 1 }}
-                      transition={{ delay: 0.1, duration: 0.2 }}
-                      className={cn(
-                        "flex items-center justify-center w-10 h-10 rounded-lg",
-                        attTheme.bgColor
-                      )}
-                    >
-                      <span className="text-white text-sm font-bold">
-                        {attTheme.icon}
-                      </span>
-                    </motion.div>
-                  );
-                })()}
-                <div>
-                  <h3 className="font-semibold text-lg text-foreground truncate max-w-md" data-testid="preview-file-name">
-                    {previewFileAttachment.name}
-                  </h3>
-                  <p className="text-sm text-muted-foreground">
-                    {previewFileAttachment.mimeType || "Archivo"}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                {previewFileAttachment.content && !previewFileAttachment.isLoading && !previewFileAttachment.isProcessing && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleCopyAttachmentContent}
-                        data-testid="button-copy-attachment-content"
-                      >
-                        {copiedAttachmentContent ? (
-                          <>
-                            <Check className="h-4 w-4 mr-2 text-green-500" />
-                            Copiado
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="h-4 w-4 mr-2" />
-                            Copiar
-                          </>
-                        )}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Copiar contenido al portapapeles</TooltipContent>
-                  </Tooltip>
-                )}
-                {previewFileAttachment.storagePath && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleDownloadFileAttachment}
-                    data-testid="button-download-attachment"
-                  >
-                    <Download className="h-4 w-4 mr-2" />
-                    Descargar
-                  </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setPreviewFileAttachment(null)}
-                  data-testid="button-close-attachment-preview"
-                  aria-label="Cerrar vista previa"
-                >
-                  <X className="h-5 w-5" />
-                </Button>
-              </div>
+            <div className="relative max-w-[90vw] max-h-[90vh]">
+              <img
+                src={lightboxImage}
+                alt="Imagen ampliada"
+                className="max-w-full max-h-[90vh] rounded-lg shadow-2xl"
+                onClick={(e: React.MouseEvent) => e.stopPropagation()}
+              />
+              <Button
+                variant="secondary"
+                size="icon"
+                className="absolute top-4 right-4 h-10 w-10 bg-black/60 hover:bg-black/80 text-white"
+                onClick={() => setLightboxImage(null)}
+                data-testid="button-close-lightbox"
+                aria-label="Cerrar imagen"
+              >
+                <X className="h-5 w-5" />
+              </Button>
+              <Button
+                variant="secondary"
+                size="icon"
+                className="absolute top-4 right-16 h-10 w-10 bg-black/60 hover:bg-black/80 text-white"
+                onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleDownloadImage(lightboxImage); }}
+                data-testid="button-download-lightbox"
+                aria-label="Descargar imagen"
+              >
+                <Download className="h-5 w-5" />
+              </Button>
             </div>
-
-            {/* Content */}
-            <div className="flex-1 overflow-auto p-6">
-              {previewFileAttachment.isLoading ? (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="flex items-center justify-center h-64"
-                >
-                  <div className="flex flex-col items-center gap-3">
-                    <motion.div
-                      animate={{ rotate: 360 }}
-                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                    >
-                      <Loader2 className="h-8 w-8 text-primary" />
-                    </motion.div>
-                    <motion.p
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.2 }}
-                      className="text-muted-foreground"
-                    >
-                      Cargando contenido...
-                    </motion.p>
+          </div>
+        )}
+        {/* File Attachment Preview Modal */}
+        {previewFileAttachment && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+            onClick={() => setPreviewFileAttachment(null)}
+            data-testid="file-attachment-preview-overlay"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ duration: 0.25, ease: "easeOut" }}
+              className="relative bg-card rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
+              onClick={(e: React.MouseEvent) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+                <div className="flex items-center gap-3">
+                  {(() => {
+                    const attTheme = getFileTheme(previewFileAttachment.name, previewFileAttachment.mimeType);
+                    return (
+                      <motion.div
+                        initial={{ scale: 0.8 }}
+                        animate={{ scale: 1 }}
+                        transition={{ delay: 0.1, duration: 0.2 }}
+                        className={cn(
+                          "flex items-center justify-center w-10 h-10 rounded-lg",
+                          attTheme.bgColor
+                        )}
+                      >
+                        <span className="text-white text-sm font-bold">
+                          {attTheme.icon}
+                        </span>
+                      </motion.div>
+                    );
+                  })()}
+                  <div>
+                    <h3 className="font-semibold text-lg text-foreground truncate max-w-md" data-testid="preview-file-name">
+                      {previewFileAttachment.name}
+                    </h3>
+                    <p className="text-sm text-muted-foreground">
+                      {previewFileAttachment.mimeType || "Archivo"}
+                    </p>
                   </div>
-                </motion.div>
-              ) : previewFileAttachment.isProcessing ? (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="flex items-center justify-center h-64"
-                >
-                  <div className="flex flex-col items-center gap-4 p-6 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800">
-                    <motion.div
-                      animate={{
-                        scale: [1, 1.1, 1],
-                        rotate: [0, 5, -5, 0]
-                      }}
-                      transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-                    >
-                      <RefreshCw className="h-10 w-10 text-amber-600 dark:text-amber-400" />
-                    </motion.div>
-                    <div className="text-center">
-                      <p className="font-medium text-amber-800 dark:text-amber-200">
-                        Procesando archivo...
-                      </p>
-                      <p className="text-sm text-amber-600 dark:text-amber-400 mt-1">
-                        El contenido estará disponible en breve
-                      </p>
-                    </div>
-                  </div>
-                </motion.div>
-              ) : previewFileAttachment.content ? (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3 }}
-                  className="prose prose-sm dark:prose-invert max-w-none"
-                >
-                  <div className="bg-muted/30 p-4 rounded-lg overflow-auto max-h-[60vh]">
-                    <MarkdownErrorBoundary fallbackContent={previewFileAttachment.content}>
-                      <MarkdownRenderer content={previewFileAttachment.content} />
-                    </MarkdownErrorBoundary>
-                  </div>
-                </motion.div>
-              ) : (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ duration: 0.3 }}
-                  className="flex flex-col items-center justify-center h-64 text-center"
-                >
-                  <FileText className="h-16 w-16 text-muted-foreground/50 mb-4" />
-                  <p className="text-muted-foreground">
-                    La vista previa no está disponible para este tipo de archivo.
-                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {previewFileAttachment.content && !previewFileAttachment.isLoading && !previewFileAttachment.isProcessing && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleCopyAttachmentContent}
+                          data-testid="button-copy-attachment-content"
+                        >
+                          {copiedAttachmentContent ? (
+                            <>
+                              <Check className="h-4 w-4 mr-2 text-green-500" />
+                              Copiado
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="h-4 w-4 mr-2" />
+                              Copiar
+                            </>
+                          )}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Copiar contenido al portapapeles</TooltipContent>
+                    </Tooltip>
+                  )}
                   {previewFileAttachment.storagePath && (
                     <Button
                       variant="outline"
-                      className="mt-4"
+                      size="sm"
                       onClick={handleDownloadFileAttachment}
+                      data-testid="button-download-attachment"
                     >
                       <Download className="h-4 w-4 mr-2" />
-                      Descargar archivo
+                      Descargar
                     </Button>
                   )}
-                </motion.div>
-              )}
-            </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setPreviewFileAttachment(null)}
+                    data-testid="button-close-attachment-preview"
+                    aria-label="Cerrar vista previa"
+                  >
+                    <X className="h-5 w-5" />
+                  </Button>
+                </div>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-auto p-6">
+                {previewFileAttachment.isLoading ? (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="flex items-center justify-center h-64"
+                  >
+                    <div className="flex flex-col items-center gap-3">
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                      >
+                        <Loader2 className="h-8 w-8 text-primary" />
+                      </motion.div>
+                      <motion.p
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.2 }}
+                        className="text-muted-foreground"
+                      >
+                        Cargando contenido...
+                      </motion.p>
+                    </div>
+                  </motion.div>
+                ) : previewFileAttachment.isProcessing ? (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="flex items-center justify-center h-64"
+                  >
+                    <div className="flex flex-col items-center gap-4 p-6 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800">
+                      <motion.div
+                        animate={{
+                          scale: [1, 1.1, 1],
+                          rotate: [0, 5, -5, 0]
+                        }}
+                        transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                      >
+                        <RefreshCw className="h-10 w-10 text-amber-600 dark:text-amber-400" />
+                      </motion.div>
+                      <div className="text-center">
+                        <p className="font-medium text-amber-800 dark:text-amber-200">
+                          Procesando archivo...
+                        </p>
+                        <p className="text-sm text-amber-600 dark:text-amber-400 mt-1">
+                          El contenido estará disponible en breve
+                        </p>
+                      </div>
+                    </div>
+                  </motion.div>
+                ) : previewFileAttachment.content ? (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className="prose prose-sm dark:prose-invert max-w-none"
+                  >
+                    <div className="bg-muted/30 p-4 rounded-lg overflow-auto max-h-[60vh]">
+                      <MarkdownErrorBoundary fallbackContent={previewFileAttachment.content}>
+                        <MarkdownRenderer content={previewFileAttachment.content} />
+                      </MarkdownErrorBoundary>
+                    </div>
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.3 }}
+                    className="flex flex-col items-center justify-center h-64 text-center"
+                  >
+                    <FileText className="h-16 w-16 text-muted-foreground/50 mb-4" />
+                    <p className="text-muted-foreground">
+                      La vista previa no está disponible para este tipo de archivo.
+                    </p>
+                    {previewFileAttachment.storagePath && (
+                      <Button
+                        variant="outline"
+                        className="mt-4"
+                        onClick={handleDownloadFileAttachment}
+                      >
+                        <Download className="h-4 w-4 mr-2" />
+                        Descargar archivo
+                      </Button>
+                    )}
+                  </motion.div>
+                )}
+              </div>
+            </motion.div>
           </motion.div>
-        </motion.div>
-      )}
-      {/* Uploaded Image Preview Modal */}
-      {previewUploadedImage && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4"
-          onClick={() => setPreviewUploadedImage(null)}
-        >
+        )}
+        {/* Uploaded Image Preview Modal */}
+        {previewUploadedImage && (
           <motion.div
-            initial={{ scale: 0.9, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.9, opacity: 0 }}
-            className="relative max-w-4xl max-h-[90vh] rounded-lg overflow-hidden"
-            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4"
+            onClick={() => setPreviewUploadedImage(null)}
           >
-            <img
-              src={previewUploadedImage.dataUrl}
-              alt={previewUploadedImage.name}
-              className="max-w-full max-h-[90vh] object-contain"
-            />
-            <button
-              onClick={() => setPreviewUploadedImage(null)}
-              className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center transition-colors"
-              data-testid="button-close-image-preview"
-              aria-label="Cerrar vista previa de imagen"
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative max-w-4xl max-h-[90vh] rounded-lg overflow-hidden"
+              onClick={(e: React.MouseEvent) => e.stopPropagation()}
             >
-              <X className="h-5 w-5" />
-            </button>
-            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-4">
-              <p className="text-white text-sm truncate">{previewUploadedImage.name}</p>
-            </div>
+              <img
+                src={previewUploadedImage.dataUrl}
+                alt={previewUploadedImage.name}
+                className="max-w-full max-h-[90vh] object-contain"
+              />
+              <button
+                onClick={() => setPreviewUploadedImage(null)}
+                className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center transition-colors"
+                data-testid="button-close-image-preview"
+                aria-label="Cerrar vista previa de imagen"
+              >
+                <X className="h-5 w-5" />
+              </button>
+              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-4">
+                <p className="text-white text-sm truncate">{previewUploadedImage.name}</p>
+              </div>
+            </motion.div>
           </motion.div>
-        </motion.div>
-      )}
+        )}
 
-      {/* Screen reader announcements */}
-      <div
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-        className="sr-only"
-      >
-        {screenReaderAnnouncement}
-      </div>
+        {/* Screen reader announcements */}
+        <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className="sr-only"
+        >
+          {screenReaderAnnouncement}
+        </div>
 
-      {/* Keyboard shortcuts dialog */}
-      <KeyboardShortcutsDialog
-        open={isKeyboardShortcutsOpen}
-        onOpenChange={setIsKeyboardShortcutsOpen}
-      />
+        {/* Keyboard shortcuts dialog */}
+        <KeyboardShortcutsDialog
+          open={isKeyboardShortcutsOpen}
+          onOpenChange={setIsKeyboardShortcutsOpen}
+        />
 
-      {/* Upgrade Plan Dialog */}
-      <UpgradePlanDialog
-        open={isUpgradeDialogOpen}
-        onOpenChange={setIsUpgradeDialogOpen}
-      />
+        {/* Upgrade Plan Dialog */}
+        <UpgradePlanDialog
+          open={isUpgradeDialogOpen}
+          onOpenChange={setIsUpgradeDialogOpen}
+        />
 
-      {/* Document Preview Panel for agent-generated documents */}
-      <DocumentPreviewPanel
-        isOpen={!!documentPreviewArtifact}
-        onClose={() => setDocumentPreviewArtifact(null)}
-        artifact={documentPreviewArtifact}
-        onDownload={(artifact: any) => {
-          if (artifact.data?.base64) {
-            const byteCharacters = atob(artifact.data.base64);
-            const byteNumbers = new Array(byteCharacters.length);
-            for (let i = 0; i < byteCharacters.length; i++) {
-              byteNumbers[i] = byteCharacters.charCodeAt(i);
+        {/* Document Preview Panel for agent-generated documents */}
+        <DocumentPreviewPanel
+          isOpen={!!documentPreviewArtifact}
+          onClose={() => setDocumentPreviewArtifact(null)}
+          artifact={documentPreviewArtifact}
+          onDownload={(artifact: any) => {
+            if (artifact.data?.base64) {
+              const byteCharacters = atob(artifact.data.base64);
+              const byteNumbers = new Array(byteCharacters.length);
+              for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+              }
+              const byteArray = new Uint8Array(byteNumbers);
+              const blob = new Blob([byteArray], { type: artifact.mimeType || 'application/octet-stream' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = artifact.name;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
             }
-            const byteArray = new Uint8Array(byteNumbers);
-            const blob = new Blob([byteArray], { type: artifact.mimeType || 'application/octet-stream' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = artifact.name;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-          }
-        }}
-      />
+          }}
+        />
 
-      {/* Pricing Modal for quota exceeded */}
-      <PricingModal
-        open={showPricingModal}
-        onClose={() => setShowPricingModal(false)}
-        quota={quotaInfo || { remaining: 0, limit: 3, resetAt: null, plan: "free" }}
-      />
+        {/* Pricing Modal for quota exceeded */}
+        <PricingModal
+          open={showPricingModal}
+          onClose={() => setShowPricingModal(false)}
+          quota={quotaInfo || { remaining: 0, limit: 3, resetAt: null, plan: "free" }}
+        />
 
-      {/* Upgrade Prompt Modal for free users after 3rd query */}
-      <UpgradePromptModal
-        isOpen={showUpgradePrompt}
-        onClose={closeUpgradePrompt}
-        onUpgrade={() => {
-          closeUpgradePrompt();
-          setShowUpgradeDialog(true);
-        }}
-        queryCount={queryCount}
-      />
+        {/* Upgrade Prompt Modal for free users after 3rd query */}
+        <UpgradePromptModal
+          isOpen={showUpgradePrompt}
+          onClose={closeUpgradePrompt}
+          onUpgrade={() => {
+            closeUpgradePrompt();
+            setShowUpgradeDialog(true);
+          }}
+          queryCount={queryCount}
+        />
 
-      {/* Upgrade Dialog triggered from prompt */}
-      <UpgradePlanDialog
-        open={showUpgradeDialog}
-        onOpenChange={setShowUpgradeDialog}
-      />
+        {/* Upgrade Dialog triggered from prompt */}
+        <UpgradePlanDialog
+          open={showUpgradeDialog}
+          onOpenChange={setShowUpgradeDialog}
+        />
 
-      {/* Agent Panel removed - progress is shown inline in chat messages */}
-    </div>
+        {/* Agent Panel removed - progress is shown inline in chat messages */}
+      </div>
     </>
   );
 }
