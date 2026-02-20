@@ -20,6 +20,10 @@ from .file_tools import (
     FileWriteInput,
     FileWriteOutput,
 )
+from .pdf_tools import PdfTool, PdfInput, PdfOutput
+from .image_gen import ImageGenTool, ImageGenInput, ImageGenOutput
+from .tts_tools import TTSTool, TTSInput, TTSOutput
+from . import dynamic_skills  # Automatically registers 95+ data tools
 
 __all__ = [
     "BaseTool",

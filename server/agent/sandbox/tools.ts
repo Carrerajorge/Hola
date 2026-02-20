@@ -5,6 +5,7 @@ import { DocumentCreator, documentCreator } from "./documentCreator";
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import { searchOrchestrator, EnhancedSearchResult, DeepSearchResult } from "../../services/enhancedWebSearch";
+import { executeTool } from "../../services/pythonAgentClient";
 
 export abstract class BaseTool implements IAgentTool {
   abstract name: string;
@@ -1395,6 +1396,57 @@ export class TrelloTool extends BaseTool {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// MEDIA & PROCESSING TOOLS (Phase 3 - Bridged to Python Agent)
+// ═══════════════════════════════════════════════════════════════════════════════
+export class PdfTool extends BaseTool {
+  name = "nano-pdf";
+  description = "PDF operations: extract text, retrieve metadata, or merge multiple PDFs";
+  category: ToolCategory = "file";
+
+  async execute(params: Record<string, any>): Promise<ToolResult> {
+    const startTime = Date.now();
+    try {
+      const result = await executeTool({ tool: "nano-pdf", params });
+      return this.createResult(result.success, result.data, result.message, result.error || undefined, startTime, result.files_created);
+    } catch (error) {
+      return this.createResult(false, null, "", error instanceof Error ? error.message : String(error), startTime);
+    }
+  }
+}
+
+export class ImageGenTool extends BaseTool {
+  name = "openai-image-gen";
+  description = "Generates images from text prompts using OpenAI DALL-E";
+  category: ToolCategory = "ai";
+
+  async execute(params: Record<string, any>): Promise<ToolResult> {
+    const startTime = Date.now();
+    try {
+      const result = await executeTool({ tool: "openai-image-gen", params });
+      return this.createResult(result.success, result.data, result.message, result.error || undefined, startTime, result.files_created);
+    } catch (error) {
+      return this.createResult(false, null, "", error instanceof Error ? error.message : String(error), startTime);
+    }
+  }
+}
+
+export class TTSTool extends BaseTool {
+  name = "sag";
+  description = "Generates high-quality speech audio from text using ElevenLabs API";
+  category: ToolCategory = "ai";
+
+  async execute(params: Record<string, any>): Promise<ToolResult> {
+    const startTime = Date.now();
+    try {
+      const result = await executeTool({ tool: "sag", params });
+      return this.createResult(result.success, result.data, result.message, result.error || undefined, startTime, result.files_created);
+    } catch (error) {
+      return this.createResult(false, null, "", error instanceof Error ? error.message : String(error), startTime);
+    }
+  }
+}
+
 export function createDefaultToolRegistry(
   executor?: CommandExecutor,
   fileManager?: FileManager,
@@ -1427,6 +1479,11 @@ export function createDefaultToolRegistry(
   registry.register(new GitHubTool());
   registry.register(new NotionTool());
   registry.register(new TrelloTool());
+
+  // Phase 3 Tools
+  registry.register(new PdfTool());
+  registry.register(new ImageGenTool());
+  registry.register(new TTSTool());
 
   return registry;
 }
