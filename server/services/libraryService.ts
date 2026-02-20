@@ -537,9 +537,6 @@ export class LibraryService {
       console.error("Error logging activity:", error);
     }
   }
-}
-
-export const libraryService = new LibraryService();
 
   /**
    * Export the user's entire library metadata as a structured JSON object
@@ -548,7 +545,7 @@ export const libraryService = new LibraryService();
     if (!userId) {
       throw new LibraryServiceError("User ID is required", "UNAUTHORIZED", 401);
     }
-    
+
     try {
       // 1. Get all folders
       const folders = await db
@@ -560,7 +557,7 @@ export const libraryService = new LibraryService();
             isNull(libraryFolders.deletedAt)
           )
         );
-        
+
       // 2. Get all files
       const files = await db
         .select()
@@ -571,15 +568,15 @@ export const libraryService = new LibraryService();
             isNull(libraryFiles.deletedAt)
           )
         );
-        
+
       // 3. Structure into a hierarchy
       const rootFiles = files.filter(f => !f.folderId).map(f => this.formatFileForExport(f));
-      
+
       const structuredFolders = folders.map(folder => {
         const folderFiles = files
           .filter(f => f.folderId === folder.id)
           .map(f => this.formatFileForExport(f));
-          
+
         return {
           id: folder.id,
           name: folder.name,
@@ -589,7 +586,7 @@ export const libraryService = new LibraryService();
           files: folderFiles
         };
       });
-      
+
       return {
         exportDate: new Date().toISOString(),
         totalFiles: files.length,
@@ -599,8 +596,8 @@ export const libraryService = new LibraryService();
       };
 
     } catch (error) {
-       console.error("Error exporting library metadata:", error);
-       throw new LibraryServiceError("Failed to export library metadata", "EXPORT_FAILED");
+      console.error("Error exporting library metadata:", error);
+      throw new LibraryServiceError("Failed to export library metadata", "EXPORT_FAILED");
     }
   }
 
@@ -619,3 +616,6 @@ export const libraryService = new LibraryService();
       downloadUrlPath: `/api/library/files/${file.id}/download`
     };
   }
+}
+
+export const libraryService = new LibraryService();

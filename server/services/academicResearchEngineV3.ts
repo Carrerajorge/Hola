@@ -670,6 +670,9 @@ async function searchCrossRef(
     }
 
     console.log(`[CrossRef] Found ${papers.length} papers in ${Date.now() - startTime}ms`);
+    return { papers, time: Date.now() - startTime };
+  } catch (error: any) {
+    console.error("[CrossRef] Error:", error.message);
     return { papers: [], time: Date.now() - startTime, error: error.message };
   }
 }
