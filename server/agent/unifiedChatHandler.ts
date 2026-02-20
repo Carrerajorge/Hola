@@ -55,7 +55,7 @@ export class SseBufferedWriter {
     private runId: string,
     private flushIntervalMs = 30,
     private maxBufferBytes = 512,
-  ) {}
+  ) { }
 
   /** True when the underlying response can no longer accept writes. */
   private get isWritable(): boolean {
@@ -171,7 +171,25 @@ function writeSse(res: Response, event: string, data: object): boolean {
     const r = res as any;
     if (r.writableEnded || r.destroyed) return false;
 
-    const chunk = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    const streamMeta = r?.locals?.streamMeta;
+    const assistantMessageId = streamMeta?.assistantMessageId ||
+      (typeof streamMeta?.getAssistantMessageId === "function" ? streamMeta.getAssistantMessageId() : undefined);
+
+    const enrichedPayload: Record<string, unknown> = {
+      ...(data as Record<string, unknown>),
+    };
+
+    if (!enrichedPayload.conversationId && streamMeta?.conversationId) {
+      enrichedPayload.conversationId = streamMeta.conversationId;
+    }
+    if (!enrichedPayload.requestId && streamMeta?.requestId) {
+      enrichedPayload.requestId = streamMeta.requestId;
+    }
+    if (!enrichedPayload.assistantMessageId && assistantMessageId) {
+      enrichedPayload.assistantMessageId = assistantMessageId;
+    }
+
+    const chunk = `event: ${event}\ndata: ${JSON.stringify(enrichedPayload)}\n\n`;
     res.write(chunk);
     if (typeof (r).flush === 'function') {
       (r).flush();
@@ -205,11 +223,11 @@ export async function hydrateSessionState(chatId: string, userId: string): Promi
     }
 
     const previousIntents = previousSpecs.length > 0
-      ? previousSpecs.map(spec => spec.intent)
+      ? previousSpecs.map(spec => spec.intent as NonNullable<SessionState["previousIntents"]>[number])
       : allMessages
         .filter(m => m.role === 'user')
         .slice(0, 5)
-        .map(m => detectIntent(m.content).intent);
+        .map(m => detectIntent(m.content).intent as NonNullable<SessionState["previousIntents"]>[number]);
 
     const previousDeliverables = previousSpecs
       .filter(spec => spec.deliverableType && spec.status === 'completed')
@@ -561,6 +579,9 @@ export async function executeUnifiedChat(
     });
   }
 
+  // Hoisted so the catch block can destroy it on error
+  let activeWriter: SseBufferedWriter | null = null;
+
   try {
     const systemContent = options.systemPrompt || buildSystemPrompt(requestSpec);
 
@@ -577,8 +598,6 @@ export async function executeUnifiedChat(
 
     let fullResponse = '';
     let chunkCount = 0;
-    // Hoisted so the catch block can destroy it on error
-    let activeWriter: SseBufferedWriter | null = null;
 
     if (isAgenticMode) {
       await executeAgentLoop(formattedMessages, res, {

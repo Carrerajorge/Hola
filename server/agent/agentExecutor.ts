@@ -974,6 +974,19 @@ async function executeToolCall(
 }
 
 function writeSse(res: Response, event: string, data: any): void {
+  const r = res as any;
+  if (r.writableEnded || r.destroyed) return;
+
+  const streamMeta = r?.locals?.streamMeta;
+  const assistantMessageId = streamMeta?.assistantMessageId ||
+    (typeof streamMeta?.getAssistantMessageId === "function" ? streamMeta.getAssistantMessageId() : undefined);
+
+  if (typeof data === 'object' && data !== null) {
+    if (!data.conversationId && streamMeta?.conversationId) data.conversationId = streamMeta.conversationId;
+    if (!data.requestId && streamMeta?.requestId) data.requestId = streamMeta.requestId;
+    if (!data.assistantMessageId && assistantMessageId) data.assistantMessageId = assistantMessageId;
+  }
+
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   if (typeof (res as any).flush === "function") {
     (res as any).flush();
