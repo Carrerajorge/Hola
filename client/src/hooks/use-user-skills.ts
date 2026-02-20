@@ -96,6 +96,9 @@ async function fetchServerSkills(): Promise<UserSkill[]> {
   return coerced;
 }
 
+// runtime skills fetch removed
+
+
 async function importSkillsToServer(skills: UserSkillUpsert[]): Promise<void> {
   const res = await apiFetch("/api/skills/import", {
     method: "POST",
@@ -122,6 +125,8 @@ export function useUserSkills() {
     staleTime: 1000 * 30,
     refetchOnWindowFocus: true,
   });
+
+  // runtime query removed
 
   // One-time migration: if there are skills in localStorage that are missing on the server, import them.
   useEffect(() => {

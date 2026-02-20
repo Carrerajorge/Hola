@@ -62,6 +62,8 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/component
 import { NewChatButton } from "@/components/chat/NewChatButton";
 import { useProcessingChatIds, useChatStreamContent } from "@/stores/streamingStore";
 import { CreateProjectModal, type CreateProjectData } from "@/components/create-project-modal";
+import { useUserSkills } from "@/hooks/use-user-skills";
+import { BUNDLED_SKILLS } from "@/data/bundledSkills";
 import { EditProjectModal } from "@/components/edit-project-modal";
 import { ProjectMemoriesModal } from "@/components/project-memories-modal";
 import { ShareProjectModal } from "@/components/share-project-modal";
@@ -256,6 +258,8 @@ export function Sidebar({
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const searchButtonRef = useRef<HTMLButtonElement>(null);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [isSkillsExpanded, setIsSkillsExpanded] = useState(false);
+  const runtimeSkills = BUNDLED_SKILLS;
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
@@ -684,6 +688,35 @@ export function Sidebar({
 
       <ScrollArea className="flex-1 px-2 liquid-scroll [&_[data-radix-scroll-area-viewport]]:scrollbar-thin [&_[data-radix-scroll-area-viewport]]:scrollbar-thumb-muted-foreground/30 [&_[data-radix-scroll-area-viewport]]:scrollbar-track-transparent hover:[&_[data-radix-scroll-area-viewport]]:scrollbar-thumb-muted-foreground/50">
         <div className="flex flex-col gap-4 pb-4">
+          {runtimeSkills && runtimeSkills.length > 0 && (
+            <div className="flex flex-col gap-0.5">
+              <Collapsible open={isSkillsExpanded} onOpenChange={setIsSkillsExpanded}>
+                <CollapsibleTrigger asChild>
+                  <div className="flex items-center gap-2 px-2 py-2 rounded-xl cursor-pointer hover:bg-accent transition-all duration-300">
+                    <Zap className="h-4 w-4 text-amber-500" />
+                    <span className="text-sm font-medium flex-1">Skills ({runtimeSkills.length})</span>
+                    <ChevronRight className={cn("h-4 w-4 text-muted-foreground transition-transform", isSkillsExpanded && "rotate-90")} />
+                  </div>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="flex flex-col gap-0.5 mt-0.5">
+                    {runtimeSkills.map((skill: any) => (
+                      <div
+                        key={skill.id}
+                        className="group flex w-full items-center px-1 py-1.5 ml-2 rounded-xl cursor-pointer liquid-hover hover:bg-accent transition-all duration-300"
+                        onClick={onOpenSkills}
+                        title={skill.description}
+                      >
+                        <Bot className="h-3.5 w-3.5 text-muted-foreground mr-2 shrink-0" />
+                        <span className="truncate text-xs font-medium text-muted-foreground group-hover:text-foreground">{skill.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            </div>
+          )}
+
           {folders.length > 0 && (
             <div className="flex flex-col gap-0.5">
               <div className="px-2 py-1.5">
