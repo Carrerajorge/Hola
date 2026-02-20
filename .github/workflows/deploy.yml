@@ -308,7 +308,17 @@ jobs:
             for port in "${uniq_ports[@]}"; do
               echo "Trying ${VPS_USER}@${host}:${port}..."
               ssh-keyscan -p "$port" -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
-              if ssh -i ~/.ssh/deploy_key -4 -p "$port"                 -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=8                 "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1; then
+              ssh_probe_opts=(
+                -i ~/.ssh/deploy_key
+                -p "$port"
+                -o StrictHostKeyChecking=accept-new
+                -o BatchMode=yes
+                -o ConnectTimeout=8
+                -o PubkeyAcceptedAlgorithms=+ssh-rsa
+                -o HostKeyAlgorithms=+ssh-rsa
+              )
+              if ssh "${ssh_probe_opts[@]}" -4 "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1 || \
+                 ssh "${ssh_probe_opts[@]}" "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1; then
                 echo "host=${host}" >> "$GITHUB_OUTPUT"
                 echo "port=${port}" >> "$GITHUB_OUTPUT"
                 echo "✓ Selected endpoint ${host}:${port}"
@@ -673,7 +683,17 @@ jobs:
             for port in "${uniq_ports[@]}"; do
               echo "Trying ${VPS_USER}@${host}:${port}..."
               ssh-keyscan -p "$port" -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
-              if ssh -i ~/.ssh/deploy_key -4 -p "$port"                 -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=8                 "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1; then
+              ssh_probe_opts=(
+                -i ~/.ssh/deploy_key
+                -p "$port"
+                -o StrictHostKeyChecking=accept-new
+                -o BatchMode=yes
+                -o ConnectTimeout=8
+                -o PubkeyAcceptedAlgorithms=+ssh-rsa
+                -o HostKeyAlgorithms=+ssh-rsa
+              )
+              if ssh "${ssh_probe_opts[@]}" -4 "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1 || \
+                 ssh "${ssh_probe_opts[@]}" "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1; then
                 echo "host=${host}" >> "$GITHUB_OUTPUT"
                 echo "port=${port}" >> "$GITHUB_OUTPUT"
                 echo "✓ Selected endpoint ${host}:${port}"
