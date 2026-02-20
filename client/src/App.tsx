@@ -19,12 +19,38 @@ import { OfflineIndicator } from "@/components/OfflineIndicator";
 import { SkipLink } from "@/lib/accessibility";
 import { trackWorkspaceEvent } from "@/lib/analytics";
 import { Loader2 } from "lucide-react";
-const Home = lazy(() => import("@/pages/home"));
+
+const lazyWithRetry = <T extends React.ComponentType<any>>(
+  componentImport: () => Promise<{ default: T }>
+) =>
+  lazy(async () => {
+    try {
+      return await componentImport();
+    } catch (error) {
+      if (typeof window !== "undefined") {
+        const isChunkLoadFailed = error instanceof Error &&
+          (/Failed to fetch dynamically imported module/i.test(error.message) ||
+            /Importing a module script failed/i.test(error.message) ||
+            /Unable to load/i.test(error.message));
+        if (isChunkLoadFailed) {
+          // Evitar bucles infinitos
+          if (!sessionStorage.getItem('chunk-reload')) {
+            sessionStorage.setItem('chunk-reload', 'true');
+            window.location.reload();
+            return { default: (() => <PageLoader />) as unknown as T };
+          }
+        }
+      }
+      throw error;
+    }
+  });
+
+const Home = lazyWithRetry(() => import("@/pages/home"));
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { PlatformSettingsProvider, usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import { isAdminUser } from "@/lib/admin";
-const MaintenancePage = lazy(() => import("@/pages/maintenance"));
-const LandingPage = lazy(() => import("@/pages/landing"));
+const MaintenancePage = lazyWithRetry(() => import("@/pages/maintenance"));
+const LandingPage = lazyWithRetry(() => import("@/pages/landing"));
 import type { ComponentType } from "react";
 
 const PageLoader = () => (
@@ -89,32 +115,32 @@ function ChatPageRedirect() {
   return <Home />;
 }
 
-const LoginPage = lazy(() => import("@/pages/login"));
-const LoginApprovePage = lazy(() => import("@/pages/login-approve"));
-const SignupPage = lazy(() => import("@/pages/signup"));
-const NotFound = lazy(() => import("@/pages/not-found"));
+const LoginPage = lazyWithRetry(() => import("@/pages/login"));
+const LoginApprovePage = lazyWithRetry(() => import("@/pages/login-approve"));
+const SignupPage = lazyWithRetry(() => import("@/pages/signup"));
+const NotFound = lazyWithRetry(() => import("@/pages/not-found"));
 
-const ProfilePage = lazy(() => import("@/pages/profile"));
-const BillingPage = lazy(() => import("@/pages/billing"));
-const SettingsPage = lazy(() => import("@/pages/settings"));
-const PrivacyPage = lazy(() => import("@/pages/privacy"));
-const PrivacyPolicyPage = lazy(() => import("@/pages/privacy-policy"));
-const TermsPage = lazy(() => import("@/pages/terms"));
-const AdminPage = lazy(() => import("@/pages/admin"));
-const SystemHealthPage = lazy(() => import("@/pages/admin/SystemHealth"));
-const WorkspaceSettingsPage = lazy(() => import("@/pages/workspace-settings"));
-const WorkspacePage = lazy(() => import("@/pages/workspace"));
-const SkillsPage = lazy(() => import("@/pages/skills"));
-const CodexPage = lazy(() => import("@/pages/codex"));
-const SpreadsheetAnalyzerPage = lazy(() => import("@/pages/SpreadsheetAnalyzer"));
-const MonitoringDashboard = lazy(() => import("@/pages/MonitoringDashboard"));
-const AboutPage = lazy(() => import("@/pages/about"));
-const LearnPage = lazy(() => import("@/pages/learn"));
-const PricingPage = lazy(() => import("@/pages/pricing"));
-const BusinessPage = lazy(() => import("@/pages/business"));
-const DownloadPage = lazy(() => import("@/pages/download"));
-const PowerPage = lazy(() => import("@/pages/power"));
-const MemoryPage = lazy(() => import("@/pages/memory"));
+const ProfilePage = lazyWithRetry(() => import("@/pages/profile"));
+const BillingPage = lazyWithRetry(() => import("@/pages/billing"));
+const SettingsPage = lazyWithRetry(() => import("@/pages/settings"));
+const PrivacyPage = lazyWithRetry(() => import("@/pages/privacy"));
+const PrivacyPolicyPage = lazyWithRetry(() => import("@/pages/privacy-policy"));
+const TermsPage = lazyWithRetry(() => import("@/pages/terms"));
+const AdminPage = lazyWithRetry(() => import("@/pages/admin"));
+const SystemHealthPage = lazyWithRetry(() => import("@/pages/admin/SystemHealth"));
+const WorkspaceSettingsPage = lazyWithRetry(() => import("@/pages/workspace-settings"));
+const WorkspacePage = lazyWithRetry(() => import("@/pages/workspace"));
+const SkillsPage = lazyWithRetry(() => import("@/pages/skills"));
+const CodexPage = lazyWithRetry(() => import("@/pages/codex"));
+const SpreadsheetAnalyzerPage = lazyWithRetry(() => import("@/pages/SpreadsheetAnalyzer"));
+const MonitoringDashboard = lazyWithRetry(() => import("@/pages/MonitoringDashboard"));
+const AboutPage = lazyWithRetry(() => import("@/pages/about"));
+const LearnPage = lazyWithRetry(() => import("@/pages/learn"));
+const PricingPage = lazyWithRetry(() => import("@/pages/pricing"));
+const BusinessPage = lazyWithRetry(() => import("@/pages/business"));
+const DownloadPage = lazyWithRetry(() => import("@/pages/download"));
+const PowerPage = lazyWithRetry(() => import("@/pages/power"));
+const MemoryPage = lazyWithRetry(() => import("@/pages/memory"));
 
 const ProtectedProfilePage = requireAuth(ProfilePage);
 const ProtectedBillingPage = requireAuth(BillingPage);
@@ -333,7 +359,7 @@ function AppContent() {
         }}
       />
       <Router />
-      <BackgroundNotificationContainer onNavigateToChat={() => {}} />
+      <BackgroundNotificationContainer onNavigateToChat={() => { }} />
     </>
   );
 }
