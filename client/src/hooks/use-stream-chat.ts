@@ -60,6 +60,7 @@ interface ConversationSession {
   timeoutId: ReturnType<typeof setTimeout> | null;
   firstTokenTimeoutId: ReturnType<typeof setTimeout> | null;
   doneTimeoutId: ReturnType<typeof setTimeout> | null;
+  contentTokenTimeoutId: ReturnType<typeof setTimeout> | null;
 }
 
 function createSession(): ConversationSession {
@@ -74,12 +75,17 @@ function createSession(): ConversationSession {
     timeoutId: null,
     firstTokenTimeoutId: null,
     doneTimeoutId: null,
+    contentTokenTimeoutId: null,
   };
 }
 
 const DEFAULT_STREAM_TIMEOUT_MS = 300_000;
 const DEFAULT_FIRST_TOKEN_TIMEOUT_MS = 30_000;
 const DEFAULT_DONE_TIMEOUT_MS = 45_000;
+// Gap guard: max time between receiving any SSE event and the first content token.
+// Covers the window after firstTokenTimeout is cleared (by a non-content event like
+// "thinking") but before doneTimeout is armed (which requires a content chunk).
+const DEFAULT_CONTENT_TOKEN_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_RETRIES = 1;
 const DEFAULT_RETRY_BACKOFF_MS = 800;
 const DEFAULT_RETRY_JITTER_MS = 250;
@@ -506,6 +512,10 @@ export function useStreamChat(deps: StreamChatDeps) {
             clearTimeout(session.doneTimeoutId);
             session.doneTimeoutId = null;
           }
+          if (session.contentTokenTimeoutId) {
+            clearTimeout(session.contentTokenTimeoutId);
+            session.contentTokenTimeoutId = null;
+          }
         };
 
         try {
@@ -634,6 +644,17 @@ export function useStreamChat(deps: StreamChatDeps) {
                   clearTimeout(session.firstTokenTimeoutId);
                   session.firstTokenTimeoutId = null;
                 }
+                // Arm contentTokenTimeout: guards the gap between receiving any SSE
+                // event and the first content chunk. Without this, the spinner could
+                // stay visible for up to 5 min (overallTimeout) if no chunks arrive.
+                if (!hasReceivedToken && !session.contentTokenTimeoutId) {
+                  session.contentTokenTimeoutId = setTimeout(() => {
+                    if (!hasReceivedToken && !session.finalizing && session.pendingRequestId === streamRequestId) {
+                      timeoutCause = "first-token";
+                      controller.abort();
+                    }
+                  }, DEFAULT_CONTENT_TOKEN_TIMEOUT_MS);
+                }
               }
 
               onEvent?.(currentEventType, data);
@@ -647,6 +668,14 @@ export function useStreamChat(deps: StreamChatDeps) {
                       clearTimeout(session.firstTokenTimeoutId);
                       session.firstTokenTimeoutId = null;
                     }
+                    // Clear contentTokenTimeout — we got a real token
+                    if (session.contentTokenTimeoutId) {
+                      clearTimeout(session.contentTokenTimeoutId);
+                      session.contentTokenTimeoutId = null;
+                    }
+                    armDoneTimeout();
+                  } else {
+                    // Re-arm on every chunk so it acts as an inactivity timer
                     armDoneTimeout();
                   }
                   fullContent += content;
@@ -833,6 +862,10 @@ export function useStreamChat(deps: StreamChatDeps) {
           if (session.doneTimeoutId) {
             clearTimeout(session.doneTimeoutId);
             session.doneTimeoutId = null;
+          }
+          if (session.contentTokenTimeoutId) {
+            clearTimeout(session.contentTokenTimeoutId);
+            session.contentTokenTimeoutId = null;
           }
 
           if (abortControllerRef.current === controller) {

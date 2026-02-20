@@ -54,7 +54,7 @@ const CHAT_MODEL_PATTERNS: Readonly<Record<ChatRuntimeProvider, RegExp>> = Objec
 });
 
 /** Model types considered chat-capable. */
-const CHAT_MODEL_TYPES: ReadonlySet<string> = Object.freeze(new Set(["TEXT", "MULTIMODAL"]));
+const CHAT_MODEL_TYPES: ReadonlySet<string> = Object.freeze(new Set(["TEXT", "MULTIMODAL", "CHAT"]));
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

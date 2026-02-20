@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
+import React, { createContext, useContext, useEffect, useState, useCallback, ReactNode, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useSettingsContext } from "@/contexts/SettingsContext";
@@ -144,13 +144,18 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
     }
   }, [enabledModels, selectedModelId, settings.defaultModel, updateSetting]);
 
+  const prevDefaultModelRef = useRef(settings.defaultModel);
+
   // If the user changes Default Model from Settings, reflect it in the selector.
   useEffect(() => {
-    if (!settings.defaultModel) return;
-    const target = enabledModels.find((m) => m.modelId === settings.defaultModel || m.id === settings.defaultModel);
-    if (!target) return;
-    if (selectedModelId === target.id || selectedModelId === target.modelId) return;
-    setSelectedModelIdState(target.id);
+    if (settings.defaultModel !== prevDefaultModelRef.current) {
+      prevDefaultModelRef.current = settings.defaultModel;
+      if (!settings.defaultModel) return;
+      const target = enabledModels.find((m) => m.modelId === settings.defaultModel || m.id === settings.defaultModel);
+      if (!target) return;
+      if (selectedModelId === target.id || selectedModelId === target.modelId) return;
+      setSelectedModelIdState(target.id);
+    }
   }, [enabledModels, selectedModelId, settings.defaultModel]);
 
   const toggleMutation = useMutation({

@@ -1427,6 +1427,7 @@ const cleanSkipRunStreamDedup = (): void => {
       let agentLoopHandled = false;
       let shouldRunModel = true;
       let skillSeedForModel = "";
+      let doneSent = false; // Track whether a 'done' event was sent to prevent duplicates
       let skillExecutionResult: SkillExecutionResult | null = null;
 
       const effectiveSkillRunId = claimedRun?.id || sanitizeStreamText(runId, MAX_STREAM_REQUEST_ID_LEN) || requestId;
@@ -2981,6 +2982,7 @@ ${attachmentContext}`;
           writer.finalize();
 
           console.log(`[Stream] Sending 'done' event with ${detectedWebSources.length} webSources`);
+          doneSent = true;
           writeSse(res, 'done', {
             sequenceId: chunk.sequenceId,
             requestId: chunk.requestId,
@@ -3086,16 +3088,19 @@ ${attachmentContext}`;
         }
 
         // Send done event with webSources for frontend NewsCards
-        writeSse(res, 'done', {
-          requestId,
-          runId: effectiveRunId,
-          assistantMessageId,
-          latencyLane: resolvedLane,
-          webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
-          traceId: requestId,
-          timings: finalTimings,
-          timestamp: Date.now()
-        });
+        if (!doneSent) {
+          doneSent = true;
+          writeSse(res, 'done', {
+            requestId,
+            runId: effectiveRunId,
+            assistantMessageId,
+            latencyLane: resolvedLane,
+            webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
+            traceId: requestId,
+            timings: finalTimings,
+            timestamp: Date.now()
+          });
+        }
 
         writeSse(res, 'complete', {
           requestId,
@@ -3165,6 +3170,21 @@ ${attachmentContext}`;
           timestamp: Date.now()
         });
 
+        // Always send a done event after error so the client can finalize.
+        // Without this, the client relies on its own timeout to detect the stream
+        // ended, which can leave the UI spinner stuck for up to 45s.
+        if (!doneSent) {
+          doneSent = true;
+          writeSse(res, 'done', {
+            requestId,
+            runId: errorRunId,
+            traceId: requestId,
+            timings: errorTimings,
+            timestamp: Date.now(),
+            error: true,
+          });
+        }
+
         emitTraceEvent(errorRunId, 'error', {
           error: { message: error.message, code: error.code || 'UNKNOWN' }
         }).catch(() => { });
@@ -3197,6 +3217,20 @@ ${attachmentContext}`;
       if (!timingReported) {
         reportTimings(isConnectionClosed ? "connection_closed" : "ended");
       }
+      // Safety net: if no done event was sent and the connection is still open,
+      // emit one now so the client can finalize its UI state (spinner, etc.).
+      if (!doneSent && !isConnectionClosed && !(res as any).writableEnded) {
+        try {
+          writeSse(res, 'done', {
+            requestId,
+            runId: claimedRun?.id || requestId,
+            traceId: requestId,
+            timestamp: Date.now(),
+            safety_net: true,
+          });
+        } catch { /* connection may have closed between our check and this write */ }
+      }
+
       if (!isConnectionClosed && !(res as any).writableEnded) {
         res.end();
       }

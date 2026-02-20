@@ -179,21 +179,28 @@ const getIntentIcon = (intent?: string) => {
   }
 };
 
+// Maximum time (ms) the PhaseNarrator can be mounted before self-destructing.
+// Acts as an absolute safety net if all stream timeout mechanisms fail.
+const MAX_NARRATOR_LIFETIME_MS = 90_000;
+
 export const PhaseNarrator = memo(function PhaseNarrator({
   phase,
   message,
   className,
   autoProgress = true,
-  intent
+  intent,
+  onTimeout
 }: {
   phase?: ThinkingPhase;
   message?: string;
   className?: string;
   autoProgress?: boolean;
   intent?: string;
+  onTimeout?: () => void;
 }) {
   const [currentPhaseIndex, setCurrentPhaseIndex] = useState(0);
   const [currentNarration, setCurrentNarration] = useState("");
+  const [selfDestructed, setSelfDestructed] = useState(false);
   const narrationIndex = useRef(0);
   const phaseStartTime = useRef(Date.now());
   const animationFrame = useRef<number | null>(null);
@@ -201,6 +208,17 @@ export const PhaseNarrator = memo(function PhaseNarrator({
   // Feature: Deep Work/Long Running logic
   const [isDeepWork, setIsDeepWork] = useState(false);
   const elapsedTimeRef = useRef(0);
+
+  // Safety self-destruct: if mounted for too long, hide and notify parent
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSelfDestructed(true);
+      onTimeout?.();
+    }, MAX_NARRATOR_LIFETIME_MS);
+    return () => clearTimeout(timer);
+  }, [onTimeout]);
+
+  if (selfDestructed) return null;
 
   const currentPhase = phase || phaseSequence[currentPhaseIndex];
 

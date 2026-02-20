@@ -1563,6 +1563,28 @@ export function ChatInterface({
     streamChat.synchronizeConversation(chatId || null);
   }, [chatId, streamChat.synchronizeConversation]);
 
+  // Stuck-state watchdog: if aiState stays non-idle for too long without any
+  // streaming content, forcibly reset to idle. This is the ultimate safety net
+  // for the race condition where the server never sends a done/finish event and
+  // all client-side timeouts fail to trigger (e.g. TCP kept alive by heartbeats).
+  useEffect(() => {
+    if (aiState === "idle" || aiState === "done" || aiState === "error") return;
+    // Don't force-reset if there's active streaming content (response is flowing)
+    if (streamingContent) return;
+
+    const MAX_STUCK_MS = 120_000; // 2 minutes absolute maximum for thinking state
+    const timer = setTimeout(() => {
+      // Double-check: only reset if still stuck (no content arrived meanwhile)
+      if (aiStateRef.current !== "idle" && aiStateRef.current !== "done" && !streamingContentRef.current) {
+        console.warn("[Watchdog] aiState stuck at", aiStateRef.current, "for", MAX_STUCK_MS, "ms — forcing idle");
+        setAiState("idle");
+        setAiProcessSteps([]);
+      }
+    }, MAX_STUCK_MS);
+
+    return () => clearTimeout(timer);
+  }, [aiState, streamingContent]);
+
   // Request a refresh of the AI-generated title after streaming completes.
   // The server generates the title asynchronously, so we delay the fetch.
   const requestTitleRefresh = useCallback((targetChatId: string | null | undefined) => {

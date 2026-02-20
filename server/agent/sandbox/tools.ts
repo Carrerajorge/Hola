@@ -600,7 +600,7 @@ export class PlanTool extends BaseTool {
 
     try {
       const { taskPlanner } = await import("./taskPlanner");
-      
+
       switch (action) {
         case "create":
         case "new":
@@ -608,19 +608,19 @@ export class PlanTool extends BaseTool {
           if (!input) return this.createResult(false, null, "", "Input/task is required to create a plan. Use: { input: 'your task' }", startTime);
           const plan = await taskPlanner.createPlan(input);
           return this.createResult(true, { plan }, `Plan created with ${plan.phases.length} phases`, undefined, startTime);
-        
+
         case "detect":
         case "analyze":
         case "intent":
           if (!input) return this.createResult(false, null, "", "Input is required to detect intent", startTime);
           const intent = await taskPlanner.detectIntent(input);
           return this.createResult(true, intent, `Detected intent: ${intent.intent}`, undefined, startTime);
-        
+
         case "status":
         case "check":
         case "get":
           return this.createResult(true, { message: "Plan tool ready", available: true }, "Plan tool ready", undefined, startTime);
-        
+
         default:
           return this.createResult(false, null, "", `Unknown action: ${action}. Use: create, detect, status`, startTime);
       }
@@ -654,7 +654,7 @@ export class SlidesTool extends BaseTool {
     try {
       const docTool = new DocumentTool();
       const content = outline || { slides: [{ title: title || topic, content: topic }] };
-      
+
       return await docTool.execute({
         type: "pptx",
         title: title || topic,
@@ -736,7 +736,7 @@ export class WebDevTool extends BaseTool {
       const fs = await import("fs/promises");
       const path = await import("path");
       const projectPath = path.join(outputDir, projectName);
-      
+
       await fs.mkdir(projectPath, { recursive: true });
       for (const dir of template.dirs) {
         await fs.mkdir(path.join(projectPath, dir), { recursive: true });
@@ -788,11 +788,11 @@ export class ScheduleTool extends BaseTool {
           const scheduledAt = new Date(Date.now() + (delay || 0));
           this.scheduledTasks.set(id, { task, scheduledAt, status: "scheduled" });
           return this.createResult(true, { taskId: id, task, scheduledAt, status: "scheduled" }, `Task scheduled: ${id}`, undefined, startTime);
-        
+
         case "list":
           const tasks = Array.from(this.scheduledTasks.entries()).map(([id, t]) => ({ id, ...t }));
           return this.createResult(true, { tasks, count: tasks.length }, `${tasks.length} scheduled tasks`, undefined, startTime);
-        
+
         case "cancel":
           if (!taskId) return this.createResult(false, null, "", "Task ID is required to cancel", startTime);
           if (this.scheduledTasks.has(taskId)) {
@@ -800,7 +800,7 @@ export class ScheduleTool extends BaseTool {
             return this.createResult(true, { taskId, status: "cancelled" }, `Task ${taskId} cancelled`, undefined, startTime);
           }
           return this.createResult(false, null, "", `Task ${taskId} not found`, startTime);
-        
+
         default:
           return this.createResult(false, null, "", `Unknown action: ${action}. Use: create, list, cancel`, startTime);
       }
@@ -839,16 +839,16 @@ export class ExposeTool extends BaseTool {
           const expiresAt = new Date(Date.now() + duration * 1000);
           this.exposedPorts.set(port, { url: publicUrl, expiresAt });
           return this.createResult(true, { port, url: publicUrl, expiresAt }, `Port ${port} exposed at ${publicUrl}`, undefined, startTime);
-        
+
         case "list":
           const ports = Array.from(this.exposedPorts.entries()).map(([p, info]) => ({ port: p, ...info }));
           return this.createResult(true, { ports, count: ports.length }, `${ports.length} ports exposed`, undefined, startTime);
-        
+
         case "close":
           if (!port) return this.createResult(false, null, "", "Port is required to close", startTime);
           this.exposedPorts.delete(port);
           return this.createResult(true, { port, status: "closed" }, `Port ${port} exposure closed`, undefined, startTime);
-        
+
         default:
           return this.createResult(false, null, "", `Unknown action: ${action}. Use: expose, list, close`, startTime);
       }
@@ -882,12 +882,12 @@ export class GenerateTool extends BaseTool {
     try {
       const fs = await import("fs/promises");
       const path = await import("path");
-      
+
       switch (type) {
         case "image":
           const { generateImage } = await import("../../services/imageGeneration");
           const imageResult = await generateImage(prompt);
-          
+
           if (imageResult && imageResult.success && imageResult.imageUrl) {
             return this.createResult(
               true,
@@ -899,14 +899,14 @@ export class GenerateTool extends BaseTool {
             );
           }
           return this.createResult(false, null, "", imageResult?.error || "Image generation failed", startTime);
-        
+
         case "placeholder":
           const placeholderPath = `/tmp/agent-generated/placeholder_${Date.now()}.svg`;
           const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect fill="#ddd" width="400" height="300"/><text x="50%" y="50%" text-anchor="middle" fill="#666">${prompt}</text></svg>`;
           await fs.mkdir("/tmp/agent-generated", { recursive: true });
           await fs.writeFile(placeholderPath, svg);
           return this.createResult(true, { path: placeholderPath, type: "placeholder" }, `Placeholder created`, undefined, startTime, [placeholderPath]);
-        
+
         default:
           return this.createResult(false, null, "", `Unsupported type: ${type}. Use: image, placeholder`, startTime);
       }
@@ -1091,6 +1091,310 @@ export class ToolRegistry {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// WEATHER TOOL - Current Weather & Forecasts (Open-Meteo)
+// ═══════════════════════════════════════════════════════════════════════════════
+export class WeatherTool extends BaseTool {
+  name = "weather";
+  description = "Get current weather and forecasts for any location via Open-Meteo";
+  category: ToolCategory = "data";
+
+  async execute(params: Record<string, any>): Promise<ToolResult> {
+    const startTime = Date.now();
+    const location = params.location || params.city || params.place;
+    const forecastDays = params.days || params.forecast_days || 3;
+
+    if (!location) {
+      return this.createResult(false, null, "", "Location is required. Use: { location: 'London' }", startTime);
+    }
+
+    try {
+      // 1. Geocode
+      const geoRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=1&language=en&format=json`);
+      if (!geoRes.ok) throw new Error("Geocoding failed");
+      const geoData = await geoRes.json();
+
+      if (!geoData.results || geoData.results.length === 0) {
+        return this.createResult(false, null, "", `Location '${location}' not found`, startTime);
+      }
+
+      const { latitude, longitude, name, country } = geoData.results[0];
+
+      // 2. Weather
+      const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto&forecast_days=${forecastDays}`);
+
+      if (!weatherRes.ok) throw new Error("Weather fetch failed");
+      const weatherData = await weatherRes.json();
+
+      return this.createResult(true, {
+        location: { name, country, latitude, longitude },
+        current: weatherData.current,
+        daily: weatherData.daily,
+        timezone: weatherData.timezone
+      }, `Fetched weather for ${name}, ${country}`, undefined, startTime);
+    } catch (error) {
+      return this.createResult(false, null, "", error instanceof Error ? error.message : String(error), startTime);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PLACES TOOL - Location & POI search
+// ═══════════════════════════════════════════════════════════════════════════════
+export class PlacesTool extends BaseTool {
+  name = "goplaces";
+  description = "Search for places, businesses, and points of interest using Nominatim/OSM";
+  category: ToolCategory = "search";
+
+  async execute(params: Record<string, any>): Promise<ToolResult> {
+    const startTime = Date.now();
+    const query = params.query || params.place || params.search;
+    const limit = params.limit || 5;
+
+    if (!query) return this.createResult(false, null, "", "Query is required. Use: { query: 'coffee shops in NY' }", startTime);
+
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=${limit}`, {
+        headers: { "User-Agent": "ILIAGPT-Agent/1.0" }
+      });
+      if (!res.ok) throw new Error("Places fetch failed");
+      const data = await res.json();
+
+      const places = data.map((p: any) => ({
+        name: p.display_name,
+        type: p.type,
+        lat: p.lat,
+        lon: p.lon,
+        importance: p.importance
+      }));
+
+      return this.createResult(true, { places, count: places.length }, `Found ${places.length} places for '${query}'`, undefined, startTime);
+    } catch (error) {
+      return this.createResult(false, null, "", error instanceof Error ? error.message : String(error), startTime);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SUMMARIZE TOOL - Deep Web URL Summarization
+// ═══════════════════════════════════════════════════════════════════════════════
+export class SummarizeTool extends BaseTool {
+  name = "summarize";
+  description = "Extracts and summarizes long articles, documents, or web pages";
+  category: ToolCategory = "ai";
+
+  async execute(params: Record<string, any>): Promise<ToolResult> {
+    const startTime = Date.now();
+    const url = params.url || params.link;
+    const text = params.text || params.content;
+    const length = params.length || "medium";
+
+    if (!url && !text) {
+      return this.createResult(false, null, "", "Either 'url' or 'text' is required.", startTime);
+    }
+
+    try {
+      let contentToSummarize = text;
+
+      if (url) {
+        const browser = new BrowserTool();
+        const bResult = await browser.execute({ url, extractText: true });
+        if (!bResult.success) throw new Error(`Fetch failed: ${bResult.error}`);
+        contentToSummarize = bResult.data.content;
+      }
+
+      if (!contentToSummarize) throw new Error("No content found to summarize");
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) return this.createResult(false, { content: contentToSummarize.slice(0, 1000) + "..." }, "API Key missing, returning truncated content", undefined, startTime);
+
+      const { geminiChat } = await import("../../lib/gemini");
+      const prompt = `Please provide a ${length} summary of the following text. Be concise but capture the key points:\n\n${contentToSummarize.slice(0, 30000)}`;
+
+      const result = await geminiChat([{ role: "user", parts: [{ text: prompt }] }], { model: "gemini-2.0-flash", temperature: 0.3 });
+
+      return this.createResult(true, { summary: result.content, originalLength: contentToSummarize.length }, "Summarization successful", undefined, startTime);
+    } catch (error) {
+      return this.createResult(false, null, "", error instanceof Error ? error.message : String(error), startTime);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GITHUB TOOL - Repository and PR Management
+// ═══════════════════════════════════════════════════════════════════════════════
+export class GitHubTool extends BaseTool {
+  name = "github";
+  description = "Interact with GitHub API to manage repositories, issues, and pull requests";
+  category: ToolCategory = "integration";
+
+  async execute(params: Record<string, any>): Promise<ToolResult> {
+    const startTime = Date.now();
+    const action = params.action || "list_issues";
+    const owner = params.owner || params.org;
+    const repo = params.repo || params.repository;
+
+    // We expect the user to have GITHUB_TOKEN in env or pass it
+    const token = params.token || process.env.GITHUB_TOKEN || process.env.GITHUB_API_KEY;
+
+    if (!token) return this.createResult(false, null, "", "GitHub Token is required in environment (GITHUB_TOKEN) or params", startTime);
+    if (!owner || !repo) return this.createResult(false, null, "", "Owner and repo are required (e.g., owner: 'microsoft', repo: 'vscode')", startTime);
+
+    const headers = {
+      "Accept": "application/vnd.github.v3+json",
+      "Authorization": `token ${token}`,
+      "User-Agent": "ILIAGPT-Agent/1.0"
+    };
+
+    try {
+      let url = `https://api.github.com/repos/${owner}/${repo}`;
+      let method = "GET";
+      let body = undefined;
+
+      switch (action) {
+        case "list_issues":
+          url += "/issues?state=all&per_page=10";
+          break;
+        case "create_issue":
+          if (!params.title) throw new Error("Title is required for create_issue");
+          url += "/issues";
+          method = "POST";
+          body = JSON.stringify({ title: params.title, body: params.body || "" });
+          break;
+        case "list_prs":
+          url += "/pulls?state=all&per_page=10";
+          break;
+        case "get_repo":
+          // Uses base url
+          break;
+        default:
+          return this.createResult(false, null, "", `Unknown GitHub action: ${action}`, startTime);
+      }
+
+      const res = await fetch(url, { method, headers, body });
+      if (!res.ok) throw new Error(`GitHub API error: ${res.statusText}`);
+      const data = await res.json();
+
+      return this.createResult(true, { action, data }, `GitHub action '${action}' completed`, undefined, startTime);
+    } catch (error) {
+      return this.createResult(false, null, "", error instanceof Error ? error.message : String(error), startTime);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NOTION TOOL - Workspace Management
+// ═══════════════════════════════════════════════════════════════════════════════
+export class NotionTool extends BaseTool {
+  name = "notion";
+  description = "Interact with Notion API to read databases and create pages";
+  category: ToolCategory = "integration";
+
+  async execute(params: Record<string, any>): Promise<ToolResult> {
+    const startTime = Date.now();
+    const action = params.action || "search"; // search, create_page, query_db
+    const token = params.token || process.env.NOTION_API_KEY;
+
+    if (!token) return this.createResult(false, null, "", "Notion API Key is required", startTime);
+
+    const headers = {
+      "Authorization": `Bearer ${token}`,
+      "Notion-Version": "2022-06-28",
+      "Content-Type": "application/json"
+    };
+
+    try {
+      let url = "https://api.notion.com/v1";
+      let method = "POST";
+      let body: any = {};
+
+      switch (action) {
+        case "search":
+          url += "/search";
+          body = { query: params.query || "" };
+          break;
+        case "query_db":
+          if (!params.database_id) throw new Error("database_id required");
+          url += `/databases/${params.database_id}/query`;
+          break;
+        case "create_page":
+          if (!params.parent_id) throw new Error("parent_id (page or database) required");
+          url += "/pages";
+          body = {
+            parent: params.parent_type === "database" ? { database_id: params.parent_id } : { page_id: params.parent_id },
+            properties: {
+              title: { title: [{ text: { content: params.title || "New Page" } }] }
+            }
+          };
+          break;
+        default:
+          return this.createResult(false, null, "", `Unknown Notion action: ${action}`, startTime);
+      }
+
+      const res = await fetch(url, { method, headers, body: JSON.stringify(body) });
+      if (!res.ok) throw new Error(`Notion API error: ${res.statusText}`);
+      const data = await res.json();
+
+      return this.createResult(true, { action, data }, `Notion action '${action}' completed`, undefined, startTime);
+    } catch (error) {
+      return this.createResult(false, null, "", error instanceof Error ? error.message : String(error), startTime);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TRELLO TOOL - Boards and Cards Management
+// ═══════════════════════════════════════════════════════════════════════════════
+export class TrelloTool extends BaseTool {
+  name = "trello";
+  description = "Interact with Trello API to manage boards, lists, and cards";
+  category: ToolCategory = "integration";
+
+  async execute(params: Record<string, any>): Promise<ToolResult> {
+    const startTime = Date.now();
+    const action = params.action || "get_boards";
+    const apiKey = params.apiKey || process.env.TRELLO_API_KEY;
+    const token = params.token || process.env.TRELLO_TOKEN;
+
+    if (!apiKey || !token) return this.createResult(false, null, "", "Trello API Key and Token are required", startTime);
+
+    const baseUrl = "https://api.trello.com/1";
+    const authQuery = `key=${apiKey}&token=${token}`;
+
+    try {
+      let url = "";
+      let method = "GET";
+      let body = undefined;
+
+      switch (action) {
+        case "get_boards":
+          url = `${baseUrl}/members/me/boards?${authQuery}`;
+          break;
+        case "get_lists":
+          if (!params.board_id) throw new Error("board_id required");
+          url = `${baseUrl}/boards/${params.board_id}/lists?${authQuery}`;
+          break;
+        case "create_card":
+          if (!params.list_id || !params.name) throw new Error("list_id and name required");
+          url = `${baseUrl}/cards?idList=${params.list_id}&name=${encodeURIComponent(params.name)}&${authQuery}`;
+          method = "POST";
+          if (params.desc) url += `&desc=${encodeURIComponent(params.desc)}`;
+          break;
+        default:
+          return this.createResult(false, null, "", `Unknown Trello action: ${action}`, startTime);
+      }
+
+      const res = await fetch(url, { method });
+      if (!res.ok) throw new Error(`Trello API error: ${res.statusText}`);
+      const data = await res.json();
+
+      return this.createResult(true, { action, data }, `Trello action '${action}' completed`, undefined, startTime);
+    } catch (error) {
+      return this.createResult(false, null, "", error instanceof Error ? error.message : String(error), startTime);
+    }
+  }
+}
+
 export function createDefaultToolRegistry(
   executor?: CommandExecutor,
   fileManager?: FileManager,
@@ -1107,14 +1411,22 @@ export function createDefaultToolRegistry(
   registry.register(new DocumentTool(docCreator));
   registry.register(new MessageTool());
   registry.register(new ResearchTool());
-  
+
   // Extended tools
   registry.register(new PlanTool());
   registry.register(new SlidesTool());
   registry.register(new WebDevTool());
   registry.register(new ScheduleTool());
   registry.register(new ExposeTool());
-  registry.register(new GenerateTool());
+  // Phase 1 Tools
+  registry.register(new WeatherTool());
+  registry.register(new PlacesTool());
+  registry.register(new SummarizeTool());
+
+  // Phase 2 Tools
+  registry.register(new GitHubTool());
+  registry.register(new NotionTool());
+  registry.register(new TrelloTool());
 
   return registry;
 }
