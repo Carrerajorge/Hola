@@ -10,8 +10,8 @@ import { apiFetch } from "@/lib/apiClient";
 
 const COUNTRY_CODES = [
   { code: "+1", country: "US", flag: "\u{1F1FA}\u{1F1F8}", name: "Estados Unidos" },
-  { code: "+52", country: "MX", flag: "\u{1F1F2}\u{1F1FD}", name: "M\u00e9xico" },
-  { code: "+51", country: "PE", flag: "\u{1F1F5}\u{1F1EA}", name: "Per\u00fa" },
+  { code: "+52", country: "MX", flag: "\u{1F1F2}\u{1F1FD}", name: "México" },
+  { code: "+51", country: "PE", flag: "\u{1F1F5}\u{1F1EA}", name: "Perú" },
   { code: "+54", country: "AR", flag: "\u{1F1E6}\u{1F1F7}", name: "Argentina" },
   { code: "+55", country: "BR", flag: "\u{1F1E7}\u{1F1F7}", name: "Brasil" },
   { code: "+56", country: "CL", flag: "\u{1F1E8}\u{1F1F1}", name: "Chile" },
@@ -22,29 +22,29 @@ const COUNTRY_CODES = [
   { code: "+595", country: "PY", flag: "\u{1F1F5}\u{1F1FE}", name: "Paraguay" },
   { code: "+598", country: "UY", flag: "\u{1F1FA}\u{1F1FE}", name: "Uruguay" },
   { code: "+506", country: "CR", flag: "\u{1F1E8}\u{1F1F7}", name: "Costa Rica" },
-  { code: "+507", country: "PA", flag: "\u{1F1F5}\u{1F1E6}", name: "Panam\u00e1" },
-  { code: "+34", country: "ES", flag: "\u{1F1EA}\u{1F1F8}", name: "Espa\u00f1a" },
+  { code: "+507", country: "PA", flag: "\u{1F1F5}\u{1F1E6}", name: "Panamá" },
+  { code: "+34", country: "ES", flag: "\u{1F1EA}\u{1F1F8}", name: "España" },
   { code: "+44", country: "GB", flag: "\u{1F1EC}\u{1F1E7}", name: "Reino Unido" },
   { code: "+49", country: "DE", flag: "\u{1F1E9}\u{1F1EA}", name: "Alemania" },
   { code: "+33", country: "FR", flag: "\u{1F1EB}\u{1F1F7}", name: "Francia" },
   { code: "+39", country: "IT", flag: "\u{1F1EE}\u{1F1F9}", name: "Italia" },
-  { code: "+81", country: "JP", flag: "\u{1F1EF}\u{1F1F5}", name: "Jap\u00f3n" },
+  { code: "+81", country: "JP", flag: "\u{1F1EF}\u{1F1F5}", name: "Japón" },
   { code: "+86", country: "CN", flag: "\u{1F1E8}\u{1F1F3}", name: "China" },
   { code: "+91", country: "IN", flag: "\u{1F1EE}\u{1F1F3}", name: "India" },
 ];
 
 const OAUTH_ERROR_MESSAGES: Record<string, string> = {
-  auth_failed: "Error de autenticaci\u00f3n con Google. Por favor intenta de nuevo.",
-  no_user: "No se pudo obtener la informaci\u00f3n del usuario. Por favor intenta de nuevo.",
-  login_failed: "Error al iniciar sesi\u00f3n. Por favor intenta de nuevo.",
-  invalid_token: "Enlace m\u00e1gico inv\u00e1lido o expirado.",
-  magic_link_expired: "El enlace m\u00e1gico ha expirado. Solicita uno nuevo.",
-  session_error: "Error al crear la sesi\u00f3n. Por favor intenta de nuevo.",
+  auth_failed: "Error de autenticación con Google. Por favor intenta de nuevo.",
+  no_user: "No se pudo obtener la información del usuario. Por favor intenta de nuevo.",
+  login_failed: "Error al iniciar sesión. Por favor intenta de nuevo.",
+  invalid_token: "Enlace mágico inválido o expirado.",
+  magic_link_expired: "El enlace mágico ha expirado. Solicita uno nuevo.",
+  session_error: "Error al crear la sesión. Por favor intenta de nuevo.",
   verification_failed: "Error al verificar el enlace. Por favor intenta de nuevo.",
-  google_failed: "Error al iniciar sesi\u00f3n con Google. Por favor intenta de nuevo.",
-  microsoft_failed: "Error al iniciar sesi\u00f3n con Microsoft. Por favor intenta de nuevo.",
-  auth0_failed: "Error al iniciar sesi\u00f3n con Auth0. Por favor intenta de nuevo.",
-  replit_disabled: "El inicio de sesi\u00f3n con Replit fue desactivado. Usa Google, tel\u00e9fono o correo.",
+  google_failed: "Error al iniciar sesión con Google. Por favor intenta de nuevo.",
+  microsoft_failed: "Error al iniciar sesión con Microsoft. Por favor intenta de nuevo.",
+  auth0_failed: "Error al iniciar sesión con Auth0. Por favor intenta de nuevo.",
+  replit_disabled: "El inicio de sesión con Replit fue desactivado. Usa Google, teléfono o correo.",
 };
 
 export default function LoginPage() {
@@ -157,9 +157,9 @@ export default function LoginPage() {
 
         if (!data.active) {
           if (status === "denied") {
-            setError("Solicitud rechazada. Intenta iniciar sesi\u00f3n de nuevo.");
+            setError("Solicitud rechazada. Intenta iniciar sesión de nuevo.");
           } else if (status === "expired") {
-            setError("La solicitud expir\u00f3. Intenta iniciar sesi\u00f3n de nuevo.");
+            setError("La solicitud expiró. Intenta iniciar sesión de nuevo.");
           }
           if (intervalId) window.clearInterval(intervalId);
           intervalId = null;
@@ -180,7 +180,7 @@ export default function LoginPage() {
               window.location.href = "/";
               return;
             }
-            setError((verifyData as any)?.message || "No se pudo completar el inicio de sesi\u00f3n.");
+            setError((verifyData as any)?.message || "No se pudo completar el inicio de sesión.");
           } finally {
             setIsMfaVerifying(false);
           }
@@ -240,9 +240,9 @@ export default function LoginPage() {
         window.location.href = "/";
         return;
       }
-      setError((data as any)?.message || "No se pudo verificar el c\u00f3digo.");
+      setError((data as any)?.message || "No se pudo verificar el código.");
     } catch {
-      setError("Error al verificar el c\u00f3digo.");
+      setError("Error al verificar el código.");
     } finally {
       setIsMfaVerifying(false);
     }
@@ -275,14 +275,14 @@ export default function LoginPage() {
           return;
         }
 
-        setError((data as any)?.message || "Credenciales inv\u00e1lidas");
+        setError((data as any)?.message || "Credenciales inválidas");
       } catch (err) {
-        setError("Error al iniciar sesi\u00f3n");
+        setError("Error al iniciar sesión");
       } finally {
         setIsLoading(false);
       }
     } else if (email && !password) {
-      setError("Por favor ingresa tu contrase\u00f1a");
+      setError("Por favor ingresa tu contraseña");
     }
   };
 
@@ -294,7 +294,7 @@ export default function LoginPage() {
 
   const handleMagicLink = async () => {
     if (!email) {
-      setError("Ingresa tu correo electr\u00f3nico para recibir el enlace m\u00e1gico");
+      setError("Ingresa tu correo electrónico para recibir el enlace mágico");
       return;
     }
 
@@ -318,10 +318,10 @@ export default function LoginPage() {
           setMagicLinkUrl(data.magicLinkUrl);
         }
       } else {
-        setError(data.message || "Error al enviar el enlace m\u00e1gico");
+        setError(data.message || "Error al enviar el enlace mágico");
       }
     } catch (err) {
-      setError("Error al enviar el enlace m\u00e1gico");
+      setError("Error al enviar el enlace mágico");
     } finally {
       setIsMagicLinkLoading(false);
     }
@@ -330,7 +330,7 @@ export default function LoginPage() {
   // Phone authentication handlers
   const handleSendOtp = async () => {
     if (!phoneNumber) {
-      setError("Ingresa tu n\u00famero de tel\u00e9fono");
+      setError("Ingresa tu número de teléfono");
       return;
     }
 
@@ -355,10 +355,10 @@ export default function LoginPage() {
           setDevCode(data.devCode);
         }
       } else {
-        setError(data.message || "Error al enviar el c\u00f3digo");
+        setError(data.message || "Error al enviar el código");
       }
     } catch (err) {
-      setError("Error al enviar el c\u00f3digo");
+      setError("Error al enviar el código");
     } finally {
       setIsPhoneLoading(false);
     }
@@ -366,7 +366,7 @@ export default function LoginPage() {
 
   const handleVerifyOtp = async () => {
     if (!otpCode) {
-      setError("Ingresa el c\u00f3digo de verificaci\u00f3n");
+      setError("Ingresa el código de verificación");
       return;
     }
 
@@ -400,9 +400,9 @@ export default function LoginPage() {
         return;
       }
 
-      setError((data as any)?.message || "C\u00f3digo incorrecto");
+      setError((data as any)?.message || "Código incorrecto");
     } catch (err) {
-      setError("Error al verificar el c\u00f3digo");
+      setError("Error al verificar el código");
     } finally {
       setIsPhoneLoading(false);
     }
@@ -436,13 +436,13 @@ export default function LoginPage() {
               <Icon className="h-5 w-5 text-muted-foreground" />
               <span className="text-muted-foreground">{label}</span>
               <span className="ml-auto text-xs bg-background text-muted-foreground border border-border px-2 py-0.5 rounded-full font-medium">
-                Pr\u00f3ximamente
+                Próximamente
               </span>
             </Button>
           </div>
         </TooltipTrigger>
         <TooltipContent>
-          <p>Esta opci\u00f3n estar\u00e1 disponible pronto</p>
+          <p>Esta opción estará disponible pronto</p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -470,7 +470,7 @@ export default function LoginPage() {
               </span>
             </h1>
             <p className="text-muted-foreground">
-              Obt\u00e9n respuestas m\u00e1s inteligentes, carga archivos e im\u00e1genes, y m\u00e1s.
+              Obtén respuestas más inteligentes, carga archivos e imágenes, y más.
             </p>
           </div>
 
@@ -530,13 +530,13 @@ export default function LoginPage() {
                         </svg>
                         <span className="text-muted-foreground">Continuar con Microsoft</span>
                         <span className="ml-auto text-xs bg-background text-muted-foreground border border-border px-2 py-0.5 rounded-full font-medium">
-                          Pr\u00f3ximamente
+                          Próximamente
                         </span>
                       </Button>
                     </div>
                   </TooltipTrigger>
                   <TooltipContent>
-                    <p>Esta opci\u00f3n estar\u00e1 disponible pronto</p>
+                    <p>Esta opción estará disponible pronto</p>
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
@@ -549,7 +549,7 @@ export default function LoginPage() {
                 data-testid="button-login-phone"
               >
                 <Phone className="h-5 w-5" />
-                Continuar con el tel\u00e9fono
+                Continuar con el teléfono
               </Button>
             </div>
           )}
@@ -567,7 +567,7 @@ export default function LoginPage() {
               <div className="space-y-4 fade-in-up">
                 <div className="bg-muted/30 border border-border rounded-xl p-4 text-center">
                   <Sparkles className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-                  <h3 className="font-semibold text-foreground mb-1">Enlace m\u00e1gico enviado</h3>
+                  <h3 className="font-semibold text-foreground mb-1">Enlace mágico enviado</h3>
                   <p className="text-sm text-muted-foreground">{successMessage}</p>
                 </div>
 
@@ -575,7 +575,7 @@ export default function LoginPage() {
                 {magicLinkUrl && (
                   <div className="bg-muted/20 border border-border rounded-xl p-4">
                     <p className="text-xs text-muted-foreground mb-2 font-semibold">
-                      Modo desarrollo: click para iniciar sesi\u00f3n
+                      Modo desarrollo: click para iniciar sesión
                     </p>
                     <a href={magicLinkUrl} className="text-sm text-foreground underline break-all">
                       {magicLinkUrl}
@@ -609,11 +609,11 @@ export default function LoginPage() {
 
                 <div className="bg-muted/30 border border-border rounded-xl p-4 text-center">
                   <ShieldCheck className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-                  <h3 className="font-semibold text-foreground mb-1">Verificaci\u00f3n de seguridad</h3>
+                  <h3 className="font-semibold text-foreground mb-1">Verificación de seguridad</h3>
                   <p className="text-sm text-muted-foreground">
                     {mfaMethods?.push
-                      ? "Aprueba el inicio de sesi\u00f3n en tu dispositivo de confianza o ingresa tu c\u00f3digo 2FA."
-                      : "Ingresa tu c\u00f3digo 2FA para continuar."}
+                      ? "Aprueba el inicio de sesión en tu dispositivo de confianza o ingresa tu código 2FA."
+                      : "Ingresa tu código 2FA para continuar."}
                   </p>
                 </div>
 
@@ -639,7 +639,7 @@ export default function LoginPage() {
                               : "Pendiente"}
                       </p>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Revisa la notificaci\u00f3n push en tu dispositivo de confianza.
+                        Revisa la notificación push en tu dispositivo de confianza.
                       </p>
                       {mfaApprovalId ? (
                         <p className="text-[11px] text-muted-foreground mt-2 break-all">
@@ -657,7 +657,7 @@ export default function LoginPage() {
                   <div className="space-y-3">
                     <Input
                       type="text"
-                      placeholder="C\u00f3digo 2FA"
+                      placeholder="Código 2FA"
                       value={mfaCode}
                       onChange={(e) => setMfaCode(e.target.value)}
                       className="h-12 text-base rounded-xl bg-background border-input text-foreground placeholder:text-muted-foreground"
@@ -694,7 +694,7 @@ export default function LoginPage() {
               >
                 <Input
                   type="email"
-                  placeholder="Direcci\u00f3n de correo electr\u00f3nico"
+                  placeholder="Dirección de correo electrónico"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="h-12 text-base rounded-xl bg-background border-input text-foreground placeholder:text-muted-foreground"
@@ -702,7 +702,7 @@ export default function LoginPage() {
                 />
                 <Input
                   type="password"
-                  placeholder="Contrase\u00f1a"
+                  placeholder="Contraseña"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="h-12 text-base rounded-xl bg-background border-input text-foreground placeholder:text-muted-foreground"
@@ -743,7 +743,7 @@ export default function LoginPage() {
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent>
-                        <p>Iniciar sesi\u00f3n con enlace m\u00e1gico (sin contrase\u00f1a)</p>
+                        <p>Iniciar sesión con enlace mágico (sin contraseña)</p>
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
@@ -778,11 +778,11 @@ export default function LoginPage() {
                         ? "bg-primary/20 text-primary"
                         : "bg-primary text-primary-foreground"
                     }`}>1</div>
-                    <h3 className="text-sm font-semibold text-foreground">Tu n\u00famero</h3>
+                    <h3 className="text-sm font-semibold text-foreground">Tu número</h3>
                   </div>
 
                   <p className="text-xs text-muted-foreground mb-3">
-                    Selecciona tu pa\u00eds e ingresa tu n\u00famero sin el c\u00f3digo de \u00e1rea.
+                    Selecciona tu país e ingresa tu número sin el código de área.
                   </p>
 
                   {/* Country selector */}
@@ -846,7 +846,7 @@ export default function LoginPage() {
                       disabled={isPhoneLoading || !phoneNumber.replace(/\D/g, "")}
                       data-testid="button-send-otp"
                     >
-                      {isPhoneLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Enviar c\u00f3digo"}
+                      {isPhoneLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Enviar código"}
                     </Button>
                   )}
 
@@ -861,7 +861,7 @@ export default function LoginPage() {
                         setError("");
                       }}
                     >
-                      Cambiar n\u00famero
+                      Cambiar número
                     </button>
                   )}
                 </div>
@@ -878,13 +878,13 @@ export default function LoginPage() {
                         ? "bg-primary text-primary-foreground"
                         : "bg-muted text-muted-foreground"
                     }`}>2</div>
-                    <h3 className="text-sm font-semibold text-foreground">C\u00f3digo de verificaci\u00f3n</h3>
+                    <h3 className="text-sm font-semibold text-foreground">Código de verificación</h3>
                   </div>
 
                   <p className="text-xs text-muted-foreground mb-3">
                     {otpSent
                       ? `Enviado a ${selectedCountry.code} ${phoneNumber}`
-                      : "Ingresa el c\u00f3digo de 6 d\u00edgitos que recibir\u00e1s."}
+                      : "Ingresa el código de 6 dígitos que recibirás."}
                   </p>
 
                   {devCode && otpSent && (
@@ -937,7 +937,7 @@ export default function LoginPage() {
                         handleSendOtp();
                       }}
                     >
-                      Reenviar c\u00f3digo
+                      Reenviar código
                     </button>
                   )}
                 </div>
@@ -961,13 +961,13 @@ export default function LoginPage() {
           {!showPhoneAuth && (
             allowRegistration ? (
               <p className="text-center text-sm text-zinc-500 mt-6 fade-in-up fade-in-up-delay-5">
-                \u00bfNo tienes una cuenta?{" "}
+                ¿No tienes una cuenta?{" "}
                 <button
                   onClick={() => setLocation("/signup")}
                   className="text-foreground font-semibold hover:underline transition-colors"
                   data-testid="link-goto-signup"
                 >
-                  Suscr\u00edbete gratis
+                  Suscríbete gratis
                 </button>
               </p>
             ) : (
