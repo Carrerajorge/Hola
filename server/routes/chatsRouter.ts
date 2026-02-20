@@ -14,7 +14,7 @@ import { isTitlePlaceholder } from "../lib/chatTitleGenerator";
 const messageBodyLimit = express.json({ limit: '100mb' });
 
 // SECURITY FIX #44: Message content length limits
-const MAX_MESSAGE_LENGTH = 100000; // 100KB max message
+const MAX_MESSAGE_LENGTH = 5000000; // 5MB max message for 1M context window
 const MAX_TITLE_LENGTH = 200;
 const MAX_MESSAGES_PER_CREATE = 100;
 const MAX_ATTACHMENTS_PER_MESSAGE = 20;

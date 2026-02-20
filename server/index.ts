@@ -66,11 +66,11 @@ function clampConfigNumber(value: string | undefined, fallback: number, min: num
 }
 
 const stopSocketHardening = hardenServer(httpServer, {
-  headersTimeout: Number(process.env.SOCKET_HEADERS_TIMEOUT_MS) || 10_000,
-  keepAliveTimeout: Number(process.env.SOCKET_KEEP_ALIVE_TIMEOUT_MS) || 65_000,
-  requestTimeout: Number(process.env.SOCKET_REQUEST_TIMEOUT_MS) || 120_000,
-  maxConnectionsPerIP: Number(process.env.SOCKET_MAX_CONNECTIONS_PER_IP) || 100,
-  minBytesPerSecond: Number(process.env.SOCKET_MIN_BYTES_PER_SEC) || 100,
+  headersTimeout: Number(process.env.SOCKET_HEADERS_TIMEOUT_MS) || 60_000, // 1 min (was 10_000)
+  keepAliveTimeout: Number(process.env.SOCKET_KEEP_ALIVE_TIMEOUT_MS) || 605_000, // 10 min 5 sec (was 65_000)
+  requestTimeout: Number(process.env.SOCKET_REQUEST_TIMEOUT_MS) || 600_000, // 10 min (was 120_000)
+  maxConnectionsPerIP: Number(process.env.SOCKET_MAX_CONNECTIONS_PER_IP) || 300, // accommodate higher traffic
+  minBytesPerSecond: Number(process.env.SOCKET_MIN_BYTES_PER_SEC) || 100, // Prevent slowloris but allow slow streams
   cleanupIntervalMs: Number(process.env.SOCKET_CLEANUP_INTERVAL_MS) || 60_000,
 });
 
