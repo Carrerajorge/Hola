@@ -76,7 +76,7 @@ RUN groupadd --system --gid 1001 nodejs \
 ENV NODE_ENV=production
 ENV PORT=5000
 
-# Install Playwright Chromium system dependencies + wget for healthcheck.
+# Install Playwright Chromium system dependencies + wget for healthcheck + python3/matplotlib for Code Interpreter.
 # These are the shared libraries Playwright's bundled Chromium needs on Debian.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       bash \
@@ -86,8 +86,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libnspr4 libnss3 libpango-1.0-0 libx11-6 libx11-xcb1 \
       libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
       libxkbcommon0 libxrandr2 libxshmfence1 xdg-utils \
+      python3 python3-matplotlib \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
 
 # Copy prod dependencies only (with ownership)
 COPY --chown=iliagpt:nodejs --from=builder /app/node_modules ./node_modules
