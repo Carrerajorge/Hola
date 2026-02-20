@@ -120,7 +120,7 @@ const LANGUAGE_PATTERNS: Record<string, RegExp[]> = {
 };
 
 export function detectLanguage(text: string): LanguageInfo {
-    const sample = text.slice(0, 5000);
+    const sample = text.slice(0, 5000000);
     const scores: Record<string, number> = {};
 
     for (const [lang, patterns] of Object.entries(LANGUAGE_PATTERNS)) {
@@ -208,7 +208,7 @@ const CONTENT_INDICATORS: Record<DocumentCategory, RegExp[]> = {
 };
 
 export function detectContentType(text: string): ContentType {
-    const sample = text.slice(0, 10000);
+    const sample = text.slice(0, 5000000);
     const scores: Record<string, { score: number; indicators: string[] }> = {};
 
     for (const [type, patterns] of Object.entries(CONTENT_INDICATORS)) {

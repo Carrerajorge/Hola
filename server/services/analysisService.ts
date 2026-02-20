@@ -111,7 +111,7 @@ export class AnalysisService {
                     analysisId: chatAnalysis.id,
                     sessionId: `doc_${uploadId}`,
                     status: "completed",
-                    fileContent: content.length > 10000 ? content.substring(0, 10000) + "..." : content,
+                    fileContent: content.length > 5000000 ? content.substring(0, 5000000) + "..." : content,
                     message: `El documento "${genericFileData.name}" ha sido procesado y está listo para consultas.`,
                 };
             } else if (genericFileData.status === 'processing') {

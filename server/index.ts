@@ -1,6 +1,5 @@
 
 import "./otel";
-import "./config/load-env"; import { env } from "./config/env"; // Validates env vars immediately on import
 
 import "./config/load-env";
 import "./lib/expressAsyncPatch";
@@ -135,8 +134,10 @@ app.disable("x-powered-by");
 // Route-specific body limits (MUST come before global parser)
 // /api/chat/stream needs a higher limit to support inline image base64 for vision
 app.use("/api/chat/stream", express.json({
-  limit: '10mb',
-  verify: (req, _res, buf) => { req.rawBody = buf; },
+  limit: "100mb", // Supports massive contexts > 1M tokens
+  verify: (req: any, _res, buf) => {
+    req.rawBody = buf.toString();
+  },
   strict: true,
 }));
 
@@ -144,9 +145,9 @@ app.use("/api/chat/stream", express.json({
 // For large file uploads, use specific routes with increased limits (e.g. Multer)
 app.use(
   express.json({
-    limit: '1mb',
-    verify: (req, _res, buf) => {
-      req.rawBody = buf;
+    limit: "100mb",
+    verify: (req: any, res: any, buf: Buffer) => {
+      req.rawBody = buf.toString();
     },
     // SECURITY FIX #15: Strict JSON parsing to reject malformed JSON
     strict: true,
@@ -307,7 +308,7 @@ export function log(message: string, source = "express") {
 
   // API Error Handler (Centralized)
   app.use("/api", apiErrorHandler);
-  
+
   // App-level error handler (catch-all)
   app.use(errorHandler);
 
@@ -341,6 +342,11 @@ export function log(message: string, source = "express") {
     } else {
       log("[Schedules] Skipping schedule runner start because DB is not connected");
     }
+
+    // Advanced 1 Million Tokens Hyperparametrizations - Deep Scaling
+    // Keeps connection alive for up to 6 minutes for massive O(N^2) context generations
+    server.keepAliveTimeout = 360000;
+    server.headersTimeout = 361000;
 
     // Setup graceful shutdown with connection draining
     setupGracefulShutdown(httpServer, {
@@ -401,12 +407,12 @@ export function log(message: string, source = "express") {
 
     // Schedule Daily Cleanup (24h)
     setInterval(() => {
-        runCleanup().catch(err => log(`[Cleanup Error] ${err.message}`));
+      runCleanup().catch(err => log(`[Cleanup Error] ${err.message}`));
     }, 24 * 60 * 60 * 1000);
     // Run once on startup after delay
     setTimeout(() => {
-        runCleanup().catch(err => log(`[Cleanup Error] ${err.message}`));
-    }, 60 * 1000); 
+      runCleanup().catch(err => log(`[Cleanup Error] ${err.message}`));
+    }, 60 * 1000);
 
     const tracingStatus = getTracingMetrics();
     log(

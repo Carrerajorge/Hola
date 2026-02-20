@@ -34,7 +34,7 @@ export class ImrydExtractor {
         }
 
         // Limit text length to avoid token limits (approx 50k chars is safe for most modern models)
-        const MAX_CHARS = 100000;
+        const MAX_CHARS = 5000000;
         let textToProcess = paperText;
         if (paperText.length > MAX_CHARS) {
             this.logger.warn(`Paper text exceeds ${MAX_CHARS} chars. Truncating for IMRyD extraction.`);

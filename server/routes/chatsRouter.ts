@@ -11,7 +11,7 @@ import { isTitlePlaceholder } from "../lib/chatTitleGenerator";
 // The global limit is 1MB, but messages with attachment metadata can be larger.
 // Actual file data is uploaded separately via presigned URLs, so this only
 // covers JSON metadata (storagePath, fileId, etc.) — typically well under 5MB.
-const messageBodyLimit = express.json({ limit: '5mb' });
+const messageBodyLimit = express.json({ limit: '100mb' });
 
 // SECURITY FIX #44: Message content length limits
 const MAX_MESSAGE_LENGTH = 100000; // 100KB max message
@@ -243,7 +243,7 @@ export function createChatsRouter() {
 
         const sanitizedMessages = [];
 
-      for (const rawMessage of messages) {
+        for (const rawMessage of messages) {
           const messageRole = normalizeRole(rawMessage?.role);
           if (!validateMessageRole(rawMessage?.role)) {
             return res.status(400).json({ error: "Each message role must be user|assistant|system" });
@@ -255,9 +255,9 @@ export function createChatsRouter() {
 
           const attachments = Array.isArray(rawMessage?.attachments)
             ? rawMessage.attachments
-                .slice(0, MAX_ATTACHMENTS_PER_MESSAGE)
-                .map((att: any) => sanitizeAndValidateAttachment(att))
-                .filter((att): att is Record<string, any> => att !== null)
+              .slice(0, MAX_ATTACHMENTS_PER_MESSAGE)
+              .map((att: any) => sanitizeAndValidateAttachment(att))
+              .filter((att): att is Record<string, any> => att !== null)
             : null;
           if (rawMessage?.attachments && !Array.isArray(rawMessage.attachments)) {
             return res.status(400).json({ error: "attachments must be an array" });

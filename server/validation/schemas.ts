@@ -20,7 +20,7 @@ export const registerSchema = z.object({
     .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
     .regex(/[0-9]/, "Password must contain at least one number"),
   fullName: z.string().min(2, "Name must be at least 2 characters").max(100),
-  acceptTerms: z.literal(true, { 
+  acceptTerms: z.literal(true, {
     errorMap: () => ({ message: "You must accept the terms and conditions" })
   })
 });
@@ -46,13 +46,13 @@ export const changePasswordSchema = z.object({
 export const createChatSchema = z.object({
   title: z.string().max(200).optional(),
   model: z.string().optional(),
-  systemPrompt: z.string().max(10000).optional()
+  systemPrompt: z.string().max(5000000).optional()
 });
 
 export const sendMessageSchema = z.object({
   content: z.string()
     .min(1, "Message cannot be empty")
-    .max(100000, "Message too long"),
+    .max(5000000, "Message too long"),
   model: z.string().optional(),
   attachments: z.array(z.object({
     type: z.enum(["image", "file", "audio"]),
@@ -164,10 +164,10 @@ export const executeQuerySchema = z.object({
 /**
  * Validate request body against schema
  */
-export function validateBody<T>(schema: z.ZodSchema<T>, body: unknown): { 
-  success: boolean; 
-  data?: T; 
-  errors?: z.ZodError 
+export function validateBody<T>(schema: z.ZodSchema<T>, body: unknown): {
+  success: boolean;
+  data?: T;
+  errors?: z.ZodError
 } {
   const result = schema.safeParse(body);
   if (result.success) {
