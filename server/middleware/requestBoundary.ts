@@ -28,6 +28,7 @@ const KNOWN_SAFE_PATH_PATTERNS = [
 
 const MAX_BYTES_BY_ROUTE: ReadonlyArray<{ pattern: RegExp; maxBytes: number }> = [
   { pattern: /^\/api\/chat\/stream(?:\/|$)/, maxBytes: CHAT_STREAM_MAX_BODY_BYTES },
+  { pattern: /^\/api\/chats(?:\/|$)/, maxBytes: CHAT_STREAM_MAX_BODY_BYTES },
   { pattern: /^\/api\/files(?:\/|$)/, maxBytes: MAX_MULTIPART_BYTES },
 ];
 
@@ -288,7 +289,7 @@ function validateMethodPayload(req: Request): { ok: boolean; status: number; mes
   }
 
   const maxBytes = getMaxBodyBytes(req.path);
-  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+  if (contentLength !== undefined && Number.isFinite(contentLength) && contentLength > maxBytes) {
     return { ok: false, status: 413, message: `Payload too large (${contentLength} > ${maxBytes})` };
   }
 
