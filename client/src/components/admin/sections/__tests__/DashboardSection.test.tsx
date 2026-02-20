@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DashboardSection } from '../DashboardSection';
 
@@ -130,7 +129,6 @@ describe('DashboardSection', () => {
   });
 
   it('calls refetch when refresh button is clicked', async () => {
-    const user = userEvent.setup();
     renderWithProviders(<DashboardSection />);
 
     await waitFor(() => {
@@ -138,10 +136,12 @@ describe('DashboardSection', () => {
     });
 
     const refreshButton = screen.getByRole('button', { name: /actualizar dashboard/i });
-    await user.click(refreshButton);
+    fireEvent.click(refreshButton);
 
-    // fetch should be called at least twice (initial + refresh)
-    expect(global.fetch).toHaveBeenCalledTimes(2);
+    await waitFor(() => {
+      // fetch should be called at least twice (initial + refresh)
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
   });
 
   it('has proper ARIA roles for metrics list', async () => {

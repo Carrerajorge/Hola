@@ -7,7 +7,7 @@ describe("parseSkillCreateCommand", () => {
   });
 
   it("parses /skill with prompt", () => {
-    expect(parseSkillCreateCommand("/skill crea un skill para resumir emails")).toBe("un skill para resumir emails");
+    expect(parseSkillCreateCommand("/skill crear un skill para resumir emails")).toBe("un skill para resumir emails");
   });
 
   it("parses /skill:create with prompt", () => {

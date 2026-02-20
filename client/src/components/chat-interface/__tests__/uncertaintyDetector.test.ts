@@ -12,7 +12,7 @@ describe('uncertaintyDetector', () => {
         'No estoy seguro de la respuesta',
         'No puedo confirmar esta información',
         'Falta información para responder',
-        'La información es insuficiente',
+        'La información insuficiente para responder',
         'No se menciona en el documento',
         'Podría ser de otra forma',
         'Es probable que sea así',

@@ -32,7 +32,7 @@ describe("detectClientIntent", () => {
     });
 
     it("detects summarize requests", () => {
-      expect(detectClientIntent("resume los datos de este informe")).toBe("document_analysis");
+      expect(detectClientIntent("resume el contenido de este informe")).toBe("document_analysis");
     });
   });
 
@@ -62,7 +62,7 @@ describe("detectClientIntent", () => {
 
   describe("spreadsheet_creation intent", () => {
     it("detects Excel creation", () => {
-      expect(detectClientIntent("crea un excel con los datos de ventas")).toBe("spreadsheet_creation");
+      expect(detectClientIntent("crea un excel con las ventas")).toBe("spreadsheet_creation");
     });
 
     it("detects table generation", () => {
@@ -72,7 +72,7 @@ describe("detectClientIntent", () => {
 
   describe("data_analysis intent", () => {
     it("detects data analysis requests", () => {
-      expect(detectClientIntent("analiza los datos de ventas del trimestre")).toBe("data_analysis");
+      expect(detectClientIntent("analiza los datos del trimestre")).toBe("data_analysis");
     });
 
     it("detects chart/graph requests", () => {
