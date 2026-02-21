@@ -277,10 +277,12 @@ const getExtraSkillIcon = (id: string) => {
     case "gifgrep": return <ImageIcon {...props} className="h-6 w-6 text-pink-500" />;
     case "github": return <Code {...props} className="h-6 w-6 text-black" />;
     case "gog": return <LayoutTemplate {...props} className="h-6 w-6 text-blue-500" />;
+    case "goplaces": return <Globe {...props} className="h-6 w-6 text-green-500" />;
     case "healthcheck": return <Activity {...props} className="h-6 w-6 text-red-500" />;
     case "himalaya": return <Mail {...props} className="h-6 w-6 text-gray-500" />;
     case "imsg": return <MessageSquare {...props} className="h-6 w-6 text-green-500" />;
     case "mcporter": return <Layers {...props} className="h-6 w-6 text-orange-600" />;
+    case "model-usage": return <BarChart2 {...props} className="h-6 w-6 text-indigo-500" />;
     case "nano-banana-pro": return <ImageIcon {...props} className="h-6 w-6 text-yellow-500" />;
     case "nano-pdf": return <FileType {...props} className="h-6 w-6 text-red-500" />;
     case "notion": return <FileText {...props} className="h-6 w-6 text-gray-900" />;
@@ -293,7 +295,9 @@ const getExtraSkillIcon = (id: string) => {
     case "ordercli": return <ShoppingBag {...props} className="h-6 w-6 text-pink-600" />;
     case "peekaboo": return <Eye {...props} className="h-6 w-6 text-blue-400" />;
     case "sag": return <Speaker {...props} className="h-6 w-6 text-indigo-500" />;
+    case "session-logs": return <Search {...props} className="h-6 w-6 text-gray-400" />;
     case "sherpa-onnx-tts": return <Speaker {...props} className="h-6 w-6 text-indigo-600" />;
+    case "skill-creator": return <LayoutTemplate {...props} className="h-6 w-6 text-blue-500" />;
     case "slack": return <MessageSquare {...props} className="h-6 w-6 text-purple-700" />;
     case "songsee": return <Music {...props} className="h-6 w-6 text-pink-500" />;
     case "wacli": return <Phone {...props} className="h-6 w-6 text-green-500" />;
