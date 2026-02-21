@@ -505,6 +505,11 @@ export default function SkillsPage() {
     if (skill.builtIn) {
       return (skill as BuiltInSkill).icon;
     }
+    // Try to match imported bundled skills by name
+    const bundledMatch = BUNDLED_SKILLS.find(s => s.name.toLowerCase() === skill.name.toLowerCase());
+    if (bundledMatch) {
+      return getExtraSkillIcon(bundledMatch.id);
+    }
     return <Sparkles className="h-6 w-6 text-purple-500" />;
   };
 
