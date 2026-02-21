@@ -3764,7 +3764,7 @@ export function ChatInterface({
       // Deterministic local shortcut (no LLM/stream): create Desktop folder immediately.
       if (hasInput && !hasFiles) {
         const userText = input.trim();
-        const folderMatch = userText.match(/(?:crea|crear|creame|haz|genera)\s+(?:una\s+)?carpeta(?:\s+en\s+mi\s+escritorio)?(?:\s+(?:llamada|con\s+nombre))?\s+["']?([^"'\n]{1,120})["']?/i);
+        const folderMatch = userText.match(/(?:crea|crear|creame|haz|genera)\s+(?:una\s+)?(?:carpeta|caroeta|carepta)(?:\s+en\s+mi\s+(?:escritorio|excritorio))?(?:\s+(?:llamada|con\s+nombre))?\s+["']?([^"'\n]{1,120})["']?/i);
         if (folderMatch?.[1]) {
           const folderName = folderMatch[1].trim();
           const userMsg: Message = {

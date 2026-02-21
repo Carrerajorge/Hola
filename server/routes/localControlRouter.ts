@@ -10,7 +10,7 @@ function extractFolderName(input: string): string | null {
   if (!prompt) return null;
 
   const patterns = [
-    /(?:crea|crear|creame|haz|genera)\s+(?:una\s+)?carpeta(?:\s+en\s+mi\s+escritorio)?(?:\s+(?:llamada|con\s+nombre))?\s+["']?([^"'\n]{1,120})["']?/i,
+    /(?:crea|crear|creame|haz|genera)\s+(?:una\s+)?(?:carpeta|caroeta|carepta)(?:\s+en\s+mi\s+(?:escritorio|excritorio))?(?:\s+(?:llamada|con\s+nombre))?\s+["']?([^"'\n]{1,120})["']?/i,
     /^(?:\/)?mkdir\s+["']?([^"'\n]{1,120})["']?$/i,
   ];
 

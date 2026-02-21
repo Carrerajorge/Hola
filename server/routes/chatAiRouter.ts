@@ -150,9 +150,9 @@ function extractDesktopFolderNameFromPrompt(input: string): string | null {
   if (!prompt) return null;
 
   const folderNamePatterns = [
-    /(?:crea|crear|creame|haz|genera)\s+(?:una\s+)?carpeta(?:\s+en\s+mi\s+escritorio)?\s+(?:llamada|con\s+nombre)\s+["']?([^"'\n]{1,120})["']?\s*$/i,
-    /(?:crea|crear|creame|haz|genera)\s+(?:una\s+)?carpeta\s+(?:llamada|con\s+nombre)\s+["']?([^"'\n]{1,120})["']?\s+en\s+(?:mi\s+)?escritorio\b/i,
-    /(?:crea|crear|creame|haz|genera)\s+(?:una\s+)?carpeta\s+["']?([^"'\n]{1,120})["']?\s+en\s+(?:mi\s+)?escritorio\b/i,
+    /(?:crea|crear|creame|haz|genera)\s+(?:una\s+)?(?:carpeta|caroeta|carepta)(?:\s+en\s+mi\s+(?:escritorio|excritorio))?\s+(?:llamada|con\s+nombre)\s+["']?([^"'\n]{1,120})["']?\s*$/i,
+    /(?:crea|crear|creame|haz|genera)\s+(?:una\s+)?(?:carpeta|caroeta|carepta)\s+(?:llamada|con\s+nombre)\s+["']?([^"'\n]{1,120})["']?\s+en\s+(?:mi\s+)?(?:escritorio|excritorio)\b/i,
+    /(?:crea|crear|creame|haz|genera)\s+(?:una\s+)?(?:carpeta|caroeta|carepta)\s+["']?([^"'\n]{1,120})["']?\s+en\s+(?:mi\s+)?(?:escritorio|excritorio)\b/i,
     /^(?:\/?mkdir|local:\s*mkdir)\s+["']?([^"'\n]{1,120})["']?\s*$/i,
   ];
 
@@ -165,6 +165,540 @@ function extractDesktopFolderNameFromPrompt(input: string): string | null {
   }
 
   return null;
+}
+
+type LocalControlCommand =
+  | "help"
+  | "status"
+  | "deteneroff"
+  | "deteneron"
+  | "mkdir"
+  | "ls"
+  | "mv"
+  | "rename";
+
+type LocalControlRequest = {
+  command: LocalControlCommand;
+  args: string[];
+  token: string | null;
+  confirm: boolean;
+  raw: string;
+  source: "prefixed" | "natural" | "kill_switch";
+};
+
+type LocalControlState = {
+  disabled: boolean;
+  updatedAt: string;
+  updatedBy?: string;
+  reason?: string;
+};
+
+type LocalControlResult =
+  | { handled: false }
+  | {
+      handled: true;
+      ok: boolean;
+      statusCode: number;
+      code: string;
+      message: string;
+      payload?: Record<string, unknown>;
+    };
+
+const LOCAL_ACTION_AUDIT_LOG_PATH = path.join(os.homedir(), ".iliagpt-control-audit.log");
+const LOCAL_ACTION_STATE_PATH = path.join(os.homedir(), ".iliagpt-local-actions-state.json");
+const LOCAL_ACTIONS_DEFAULT_ROOT = path.resolve(path.join(os.homedir(), "Desktop"));
+const LOCAL_ACTIONS_PROJECT_ROOT = path.resolve(process.cwd());
+const LOCAL_ACTION_ADMIN_TOKEN = (process.env.ILIAGPT_LOCAL_ACTION_TOKEN || "").trim();
+const LOCAL_CONFIRM_RE = /\b(?:confirmar|confirm|--confirm)\b/i;
+const LOCAL_TOKEN_RE = /(?:^|\s)token=([^\s]+)/i;
+
+function tokenizeLocalCommand(input: string): string[] {
+  const tokens: string[] = [];
+  const tokenRegex = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let match: RegExpExecArray | null = null;
+  while ((match = tokenRegex.exec(input)) !== null) {
+    const token = (match[1] ?? match[2] ?? match[3] ?? "").trim();
+    if (token) tokens.push(token);
+  }
+  return tokens;
+}
+
+function extractLocalToken(input: string): string | null {
+  const match = String(input || "").match(LOCAL_TOKEN_RE);
+  return match?.[1]?.trim() || null;
+}
+
+function parseConfiguredLocalRoot(rawRoot: string): string | null {
+  const trimmed = rawRoot.trim();
+  if (!trimmed) return null;
+  if (/^desktop$/i.test(trimmed)) return LOCAL_ACTIONS_DEFAULT_ROOT;
+  if (/^project$/i.test(trimmed)) return LOCAL_ACTIONS_PROJECT_ROOT;
+  if (trimmed.startsWith("~/")) return path.resolve(path.join(os.homedir(), trimmed.slice(2)));
+  return path.isAbsolute(trimmed)
+    ? path.resolve(trimmed)
+    : path.resolve(LOCAL_ACTIONS_PROJECT_ROOT, trimmed);
+}
+
+function getAllowedLocalRoots(): string[] {
+  const roots = new Set<string>([LOCAL_ACTIONS_DEFAULT_ROOT, LOCAL_ACTIONS_PROJECT_ROOT]);
+  const rawRoots = process.env.ILIAGPT_LOCAL_ALLOWED_ROOTS;
+  if (rawRoots) {
+    for (const segment of rawRoots.split(",")) {
+      const parsed = parseConfiguredLocalRoot(segment);
+      if (parsed) roots.add(parsed);
+    }
+  }
+  return Array.from(roots);
+}
+
+function isPathInsideRoot(targetPath: string, rootPath: string): boolean {
+  const resolvedTarget = path.resolve(targetPath);
+  const resolvedRoot = path.resolve(rootPath);
+  return resolvedTarget === resolvedRoot || resolvedTarget.startsWith(`${resolvedRoot}${path.sep}`);
+}
+
+function isAllowedLocalPath(targetPath: string, allowedRoots: string[]): boolean {
+  return allowedRoots.some((rootPath) => isPathInsideRoot(targetPath, rootPath));
+}
+
+function resolveLocalPath(rawPath: string | undefined, basePath: string = LOCAL_ACTIONS_DEFAULT_ROOT): string {
+  const trimmed = String(rawPath || "").trim();
+  if (!trimmed) return path.resolve(basePath);
+
+  if (trimmed.startsWith("~/")) {
+    return path.resolve(path.join(os.homedir(), trimmed.slice(2)));
+  }
+
+  const desktopAlias = trimmed.match(/^desktop:(.*)$/i);
+  if (desktopAlias) {
+    const relative = (desktopAlias[1] || "").trim().replace(/^[/\\]+/, "");
+    return path.resolve(LOCAL_ACTIONS_DEFAULT_ROOT, relative);
+  }
+
+  const projectAlias = trimmed.match(/^project:(.*)$/i);
+  if (projectAlias) {
+    const relative = (projectAlias[1] || "").trim().replace(/^[/\\]+/, "");
+    return path.resolve(LOCAL_ACTIONS_PROJECT_ROOT, relative);
+  }
+
+  if (path.isAbsolute(trimmed)) {
+    return path.resolve(trimmed);
+  }
+
+  return path.resolve(basePath, trimmed);
+}
+
+async function readLocalControlState(): Promise<LocalControlState> {
+  try {
+    const raw = await fs.readFile(LOCAL_ACTION_STATE_PATH, "utf-8");
+    const parsed = JSON.parse(raw) as Partial<LocalControlState>;
+    if (typeof parsed.disabled === "boolean") {
+      return {
+        disabled: parsed.disabled,
+        updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date(0).toISOString(),
+        updatedBy: typeof parsed.updatedBy === "string" ? parsed.updatedBy : undefined,
+        reason: typeof parsed.reason === "string" ? parsed.reason : undefined,
+      };
+    }
+  } catch {
+    // File not found/invalid: treat as enabled.
+  }
+  return {
+    disabled: false,
+    updatedAt: new Date(0).toISOString(),
+  };
+}
+
+async function writeLocalControlState(disabled: boolean, updatedBy: string, reason: string): Promise<LocalControlState> {
+  const nextState: LocalControlState = {
+    disabled,
+    updatedAt: new Date().toISOString(),
+    updatedBy,
+    reason,
+  };
+  await fs.writeFile(LOCAL_ACTION_STATE_PATH, JSON.stringify(nextState, null, 2), "utf-8");
+  return nextState;
+}
+
+async function appendLocalControlAudit(event: string, payload: Record<string, unknown>): Promise<void> {
+  const line = JSON.stringify({
+    ts: new Date().toISOString(),
+    event,
+    ...payload,
+  });
+  try {
+    await fs.appendFile(LOCAL_ACTION_AUDIT_LOG_PATH, `${line}\n`, "utf-8");
+  } catch (error) {
+    console.warn("[LocalControl] audit append failed:", (error as Error)?.message || error);
+  }
+}
+
+function buildLocalHelpText(): string {
+  const tokenHint = LOCAL_ACTION_ADMIN_TOKEN
+    ? "Incluye token=<tu_token> en comandos de ejecucion."
+    : "Tip: configura ILIAGPT_LOCAL_ACTION_TOKEN para requerir token admin.";
+  return [
+    "Comandos locales permitidos:",
+    "1) DETENEROFF",
+    "2) DETENERON token=<token> confirmar",
+    "3) /local status",
+    "4) /local ls [desktop:|project:|ruta]",
+    "5) /local mkdir <ruta>",
+    "6) /local mv <origen> <destino> confirmar",
+    "7) /local rename <origen> <nuevo_nombre> confirmar",
+    tokenHint,
+  ].join("\n");
+}
+
+function parseLocalControlRequest(input: string): LocalControlRequest | null {
+  const raw = String(input || "").trim();
+  if (!raw) return null;
+
+  const tokenFromRaw = extractLocalToken(raw);
+  const confirmFromRaw = LOCAL_CONFIRM_RE.test(raw);
+
+  if (/^(?:deteneroff|deterneroff)\b/i.test(raw)) {
+    return {
+      command: "deteneroff",
+      args: [],
+      token: tokenFromRaw,
+      confirm: confirmFromRaw,
+      raw,
+      source: "kill_switch",
+    };
+  }
+
+  if (/^(?:deteneron|deterneron)\b/i.test(raw)) {
+    return {
+      command: "deteneron",
+      args: [],
+      token: tokenFromRaw,
+      confirm: confirmFromRaw,
+      raw,
+      source: "kill_switch",
+    };
+  }
+
+  const prefixedMatch = raw.match(/^(?:\/local|local:)\s*(.*)$/i);
+  if (!prefixedMatch) {
+    const folderName = extractDesktopFolderNameFromPrompt(raw);
+    if (!folderName) return null;
+    return {
+      command: "mkdir",
+      args: [folderName],
+      token: tokenFromRaw,
+      confirm: confirmFromRaw,
+      raw,
+      source: "natural",
+    };
+  }
+
+  let commandBody = String(prefixedMatch[1] || "").trim();
+  const token = extractLocalToken(commandBody);
+  const confirm = LOCAL_CONFIRM_RE.test(commandBody);
+  commandBody = commandBody
+    .replace(/\btoken=[^\s]+\b/gi, " ")
+    .replace(/\b(?:confirmar|confirm|--confirm)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const tokens = tokenizeLocalCommand(commandBody);
+  if (!tokens.length) {
+    return {
+      command: "help",
+      args: [],
+      token,
+      confirm,
+      raw,
+      source: "prefixed",
+    };
+  }
+
+  const operation = tokens[0].toLowerCase();
+  const args = tokens.slice(1);
+
+  const command: LocalControlCommand =
+    operation === "help" || operation === "ayuda"
+      ? "help"
+      : operation === "status" || operation === "estado"
+        ? "status"
+        : operation === "ls" || operation === "dir" || operation === "listar"
+          ? "ls"
+          : operation === "mkdir" || operation === "carpeta"
+            ? "mkdir"
+            : operation === "mv" || operation === "mover"
+              ? "mv"
+              : operation === "rename" || operation === "renombrar"
+                ? "rename"
+                : operation === "deteneroff" || operation === "deterneroff"
+                  ? "deteneroff"
+                  : operation === "deteneron" || operation === "deterneron"
+                    ? "deteneron"
+                    : "help";
+
+  return {
+    command,
+    args,
+    token,
+    confirm,
+    raw,
+    source: "prefixed",
+  };
+}
+
+function localErrorResult(statusCode: number, code: string, message: string, payload?: Record<string, unknown>): LocalControlResult {
+  return {
+    handled: true,
+    ok: false,
+    statusCode,
+    code,
+    message,
+    payload,
+  };
+}
+
+function localSuccessResult(code: string, message: string, payload?: Record<string, unknown>): LocalControlResult {
+  return {
+    handled: true,
+    ok: true,
+    statusCode: 200,
+    code,
+    message,
+    payload,
+  };
+}
+
+async function executeLocalControlRequest(
+  input: string,
+  context: { requestId: string; userId?: string | null }
+): Promise<LocalControlResult> {
+  const parsed = parseLocalControlRequest(input);
+  if (!parsed) return { handled: false };
+
+  if (!LOCAL_DESKTOP_ACTIONS_ENABLED) {
+    return localErrorResult(
+      403,
+      "LOCAL_ACTIONS_DISABLED",
+      "Las acciones locales estan desactivadas. Activa ILIAGPT_ENABLE_LOCAL_DESKTOP_ACTIONS=true."
+    );
+  }
+
+  const actor = (context.userId || "anonymous").slice(0, 120);
+  const allowedRoots = getAllowedLocalRoots();
+  const tokenRequired = LOCAL_ACTION_ADMIN_TOKEN.length > 0;
+  const requiresAdminToken = !["help", "status", "deteneroff"].includes(parsed.command);
+
+  if (tokenRequired && requiresAdminToken && parsed.token !== LOCAL_ACTION_ADMIN_TOKEN) {
+    await appendLocalControlAudit("local_control_denied", {
+      requestId: context.requestId,
+      userId: actor,
+      command: parsed.command,
+      reason: "invalid_token",
+    });
+    return localErrorResult(
+      401,
+      "LOCAL_ACTION_INVALID_TOKEN",
+      "Token admin inválido. Usa token=<tu_token>."
+    );
+  }
+
+  if (parsed.command === "help") {
+    return localSuccessResult("LOCAL_HELP", buildLocalHelpText(), {
+      command: parsed.command,
+      allowedRoots,
+      tokenRequired,
+    });
+  }
+
+  if (parsed.command === "deteneroff") {
+    const next = await writeLocalControlState(true, actor, "manual_deteneroff");
+    await appendLocalControlAudit("local_control_disabled", {
+      requestId: context.requestId,
+      userId: actor,
+      command: parsed.command,
+      state: next,
+    });
+    return localSuccessResult(
+      "LOCAL_ACTIONS_DISABLED_BY_KILL_SWITCH",
+      "Kill switch activado (DETENEROFF). Las acciones locales quedaron deshabilitadas."
+    );
+  }
+
+  const controlState = await readLocalControlState();
+  if (parsed.command === "status") {
+    const statusText = controlState.disabled ? "DESHABILITADAS" : "HABILITADAS";
+    return localSuccessResult(
+      "LOCAL_STATUS",
+      `Estado actual: ${statusText}.`,
+      {
+        command: parsed.command,
+        state: controlState,
+        allowedRoots,
+        tokenRequired,
+      }
+    );
+  }
+
+  if (controlState.disabled && parsed.command !== "deteneron") {
+    return localErrorResult(
+      423,
+      "LOCAL_ACTIONS_KILL_SWITCH_ACTIVE",
+      "Las acciones locales estan bloqueadas por DETENEROFF. Usa DETENERON token=<token> confirmar para reactivarlas."
+    );
+  }
+
+  if (parsed.command === "deteneron") {
+    if (!parsed.confirm) {
+      return localErrorResult(
+        400,
+        "LOCAL_CONFIRM_REQUIRED",
+        "Confirma la reapertura con: DETENERON token=<token> confirmar"
+      );
+    }
+    const next = await writeLocalControlState(false, actor, "manual_deteneron");
+    await appendLocalControlAudit("local_control_enabled", {
+      requestId: context.requestId,
+      userId: actor,
+      command: parsed.command,
+      state: next,
+    });
+    return localSuccessResult(
+      "LOCAL_ACTIONS_ENABLED",
+      "Kill switch desactivado (DETENERON). Las acciones locales volvieron a habilitarse."
+    );
+  }
+
+  const commandRequiresConfirm = parsed.command === "mv" || parsed.command === "rename";
+  if (commandRequiresConfirm && !parsed.confirm) {
+    return localErrorResult(
+      400,
+      "LOCAL_CONFIRM_REQUIRED",
+      "Esta accion requiere confirmacion. Repite con la palabra confirmar."
+    );
+  }
+
+  try {
+    if (parsed.command === "mkdir") {
+      const targetRaw = parsed.args[0];
+      if (!targetRaw) {
+        return localErrorResult(400, "LOCAL_MISSING_ARG", "Uso: /local mkdir <ruta>");
+      }
+      const targetPath = resolveLocalPath(targetRaw, LOCAL_ACTIONS_DEFAULT_ROOT);
+      if (!isAllowedLocalPath(targetPath, allowedRoots)) {
+        return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "Ruta fuera de las carpetas permitidas.");
+      }
+      if (/[\\:*?"<>|]/.test(targetRaw) || targetRaw.includes("..")) {
+        return localErrorResult(400, "LOCAL_INVALID_FOLDER_NAME", "Nombre o ruta de carpeta inválida.");
+      }
+
+      await fs.mkdir(targetPath, { recursive: true });
+      await appendLocalControlAudit("local_control_mkdir", {
+        requestId: context.requestId,
+        userId: actor,
+        targetPath,
+      });
+      return localSuccessResult("LOCAL_MKDIR_OK", `Carpeta creada: ${targetPath}`, {
+        command: parsed.command,
+        path: targetPath,
+      });
+    }
+
+    if (parsed.command === "ls") {
+      const targetRaw = parsed.args[0] || "desktop:";
+      const targetPath = resolveLocalPath(targetRaw, LOCAL_ACTIONS_DEFAULT_ROOT);
+      if (!isAllowedLocalPath(targetPath, allowedRoots)) {
+        return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "Ruta fuera de las carpetas permitidas.");
+      }
+      const stat = await fs.stat(targetPath);
+      if (!stat.isDirectory()) {
+        return localErrorResult(400, "LOCAL_NOT_DIRECTORY", "La ruta indicada no es un directorio.");
+      }
+      const entries = await fs.readdir(targetPath, { withFileTypes: true });
+      const sorted = entries
+        .map((entry) => `${entry.isDirectory() ? "[DIR]" : "[FILE]"} ${entry.name}`)
+        .sort((a, b) => a.localeCompare(b, "es"));
+      const maxItems = 80;
+      const shown = sorted.slice(0, maxItems);
+      const remainder = sorted.length > shown.length ? `\n... y ${sorted.length - shown.length} elemento(s) mas.` : "";
+      const listingText = shown.join("\n") || "(directorio vacio)";
+      const message = `Contenido de ${targetPath}:\n${listingText}${remainder}`;
+      await appendLocalControlAudit("local_control_ls", {
+        requestId: context.requestId,
+        userId: actor,
+        targetPath,
+        total: sorted.length,
+      });
+      return localSuccessResult("LOCAL_LS_OK", message, {
+        command: parsed.command,
+        path: targetPath,
+        total: sorted.length,
+      });
+    }
+
+    if (parsed.command === "mv" || parsed.command === "rename") {
+      const sourceRaw = parsed.args[0];
+      const destinationRaw = parsed.args[1];
+      if (!sourceRaw || !destinationRaw) {
+        return localErrorResult(
+          400,
+          "LOCAL_MISSING_ARG",
+          parsed.command === "mv"
+            ? "Uso: /local mv <origen> <destino> confirmar"
+            : "Uso: /local rename <origen> <nuevo_nombre> confirmar"
+        );
+      }
+
+      const sourcePath = resolveLocalPath(sourceRaw, LOCAL_ACTIONS_DEFAULT_ROOT);
+      if (!isAllowedLocalPath(sourcePath, allowedRoots)) {
+        return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "Ruta de origen fuera de las carpetas permitidas.");
+      }
+
+      const destinationPath =
+        parsed.command === "rename" && !/[\\/]/.test(destinationRaw)
+          ? path.resolve(path.dirname(sourcePath), destinationRaw)
+          : resolveLocalPath(destinationRaw, LOCAL_ACTIONS_DEFAULT_ROOT);
+
+      if (!isAllowedLocalPath(destinationPath, allowedRoots)) {
+        return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "Ruta de destino fuera de las carpetas permitidas.");
+      }
+
+      if (destinationPath === sourcePath) {
+        return localErrorResult(400, "LOCAL_SAME_PATH", "Origen y destino no pueden ser iguales.");
+      }
+
+      await fs.stat(sourcePath);
+      const destinationParent = path.dirname(destinationPath);
+      await fs.mkdir(destinationParent, { recursive: true });
+      await fs.rename(sourcePath, destinationPath);
+      await appendLocalControlAudit("local_control_move", {
+        requestId: context.requestId,
+        userId: actor,
+        sourcePath,
+        destinationPath,
+        mode: parsed.command,
+      });
+      return localSuccessResult(
+        "LOCAL_MOVE_OK",
+        `Movimiento completado: ${sourcePath} -> ${destinationPath}`,
+        {
+          command: parsed.command,
+          sourcePath,
+          destinationPath,
+        }
+      );
+    }
+
+    return localErrorResult(400, "LOCAL_UNSUPPORTED_COMMAND", "Comando no soportado. Usa /local help.");
+  } catch (error) {
+    const errorMessage = (error as Error)?.message || "Fallo al ejecutar accion local.";
+    await appendLocalControlAudit("local_control_failed", {
+      requestId: context.requestId,
+      userId: actor,
+      command: parsed.command,
+      error: errorMessage,
+    });
+    return localErrorResult(500, "LOCAL_ACTION_FAILED", errorMessage);
+  }
 }
 
 /**
@@ -482,48 +1016,31 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
       const effectiveUserId = getUserId(req) || getOrCreateSecureUserId(req);
       const userId = effectiveUserId;
 
-      // Fast local desktop action shortcut for non-stream endpoint.
+      // Local control commands (safe mode): /local ..., DETENEROFF/DETENERON, and desktop-folder shortcut.
       const latestUserMessage = [...clientMessages].reverse().find((m: any) => m?.role === "user");
       const latestUserText = extractUserText(latestUserMessage?.content);
-      const requestedDesktopFolderName = extractDesktopFolderNameFromPrompt(latestUserText);
-      if (requestedDesktopFolderName) {
-        const rawName = requestedDesktopFolderName.trim();
-        const invalid = /[\\/:*?"<>|]/.test(rawName) || rawName.includes("..") || rawName.length > 120;
-        if (!LOCAL_DESKTOP_ACTIONS_ENABLED) {
-          return res.status(403).json({
-            error: "Las acciones locales estan desactivadas. Activa ILIAGPT_ENABLE_LOCAL_DESKTOP_ACTIONS=true.",
-            code: "LOCAL_ACTIONS_DISABLED",
+      const localControlResult = await executeLocalControlRequest(latestUserText, {
+        requestId: `chat_${uuidv4().replace(/-/g, "").slice(0, 16)}`,
+        userId,
+      });
+      if (localControlResult.handled) {
+        if (!localControlResult.ok) {
+          return res.status(localControlResult.statusCode).json({
+            error: localControlResult.message,
+            code: localControlResult.code,
+            localAction: localControlResult.payload || null,
           });
         }
-        if (invalid) {
-          return res.status(400).json({
-            error: "Nombre de carpeta inválido",
-            code: "INVALID_FOLDER_NAME",
-          });
-        }
-        const desktopDir = path.join(os.homedir(), "Desktop");
-        const resolvedDesktopDir = path.resolve(desktopDir);
-        const folderPath = path.resolve(resolvedDesktopDir, rawName);
-        const isInsideDesktop =
-          folderPath === resolvedDesktopDir || folderPath.startsWith(`${resolvedDesktopDir}${path.sep}`);
-        if (!isInsideDesktop) {
-          return res.status(400).json({
-            error: "La carpeta debe crearse dentro de tu Desktop.",
-            code: "INVALID_FOLDER_PATH",
-          });
-        }
-        await fs.mkdir(folderPath, { recursive: true });
-        await fs.appendFile(
-          path.join(os.homedir(), ".iliagpt-control-audit.log"),
-          `${new Date().toISOString()} chat_shortcut_nonstream mkdir path=${folderPath}\n`,
-          "utf-8"
-        );
-        return res.json({
-          content: `Listo. Carpeta creada en tu escritorio: ${folderPath}`,
+        return res.status(200).json({
+          content: localControlResult.message,
           provider: "local-system",
           model: "local-system",
           usage: null,
           files: [],
+          localAction: {
+            code: localControlResult.code,
+            ...(localControlResult.payload || {}),
+          },
         });
       }
 
@@ -1464,14 +1981,13 @@ const cleanSkipRunStreamDedup = (): void => {
       const userQuery = extractUserText(lastUserMsg?.content);
       const earlyQuestionClassification = questionClassifier.classifyQuestion(userQuery || "");
 
-      // Fast local desktop action shortcut: create folder on macOS Desktop.
-      // Scoped action only: no unrestricted computer control.
-      const requestedDesktopFolderName = extractDesktopFolderNameFromPrompt(userQuery);
-      if (requestedDesktopFolderName) {
-        const rawName = requestedDesktopFolderName.trim();
-        const invalid = /[\\/:*?"<>|]/.test(rawName) || rawName.includes("..") || rawName.length > 120;
-
-        // Ensure SSE is initialized before emitting events.
+      // Local control commands (safe mode): /local ..., DETENEROFF/DETENERON, and desktop-folder shortcut.
+      const localControlResult = await executeLocalControlRequest(userQuery, {
+        requestId,
+        userId: effectiveUserId,
+      });
+      if (localControlResult.handled) {
+        // Ensure SSE is initialized before emitting local-control result events.
         if (!res.headersSent) {
           res.setHeader("Content-Type", "text/event-stream");
           res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
@@ -1485,67 +2001,29 @@ const cleanSkipRunStreamDedup = (): void => {
           writeSse(res, "start", { requestId, latencyMode, timestamp: Date.now() });
         }
 
-        if (!LOCAL_DESKTOP_ACTIONS_ENABLED) {
-          writeSse(res, "error", {
-            code: "local_actions_disabled",
-            error: "Las acciones locales estan desactivadas. Activa ILIAGPT_ENABLE_LOCAL_DESKTOP_ACTIONS=true.",
+        if (localControlResult.ok) {
+          writeSse(res, "chunk", {
+            content: localControlResult.message,
             requestId,
             timestamp: Date.now(),
+            localAction: {
+              code: localControlResult.code,
+              ...(localControlResult.payload || {}),
+            },
           });
           writeSse(res, "done", { requestId, timestamp: Date.now() });
           return res.end();
         }
 
-        if (invalid) {
-          writeSse(res, "error", {
-            code: "invalid_folder_name",
-            error: "Nombre de carpeta inválido",
-            requestId,
-            timestamp: Date.now(),
-          });
-          writeSse(res, "done", { requestId, timestamp: Date.now() });
-          return res.end();
-        }
-
-        try {
-          const desktopDir = path.join(os.homedir(), "Desktop");
-          const resolvedDesktopDir = path.resolve(desktopDir);
-          const folderPath = path.resolve(resolvedDesktopDir, rawName);
-          const isInsideDesktop =
-            folderPath === resolvedDesktopDir || folderPath.startsWith(`${resolvedDesktopDir}${path.sep}`);
-
-          if (!isInsideDesktop) {
-            writeSse(res, "error", {
-              code: "invalid_folder_path",
-              error: "La carpeta debe crearse dentro de tu Desktop.",
-              requestId,
-              timestamp: Date.now(),
-            });
-            writeSse(res, "done", { requestId, timestamp: Date.now() });
-            return res.end();
-          }
-
-          await fs.mkdir(folderPath, { recursive: true });
-          await fs.appendFile(
-            path.join(os.homedir(), ".iliagpt-control-audit.log"),
-            `${new Date().toISOString()} chat_shortcut mkdir path=${folderPath}\n`,
-            "utf-8"
-          );
-
-          const successText = `Listo. Carpeta creada en tu escritorio: ${folderPath}`;
-          writeSse(res, "chunk", { content: successText, requestId, timestamp: Date.now() });
-          writeSse(res, "done", { requestId, timestamp: Date.now() });
-          return res.end();
-        } catch (error: any) {
-          writeSse(res, "error", {
-            code: "mkdir_failed",
-            error: error?.message || "No se pudo crear la carpeta",
-            requestId,
-            timestamp: Date.now(),
-          });
-          writeSse(res, "done", { requestId, timestamp: Date.now() });
-          return res.end();
-        }
+        writeSse(res, "error", {
+          code: localControlResult.code,
+          error: localControlResult.message,
+          requestId,
+          timestamp: Date.now(),
+          localAction: localControlResult.payload || null,
+        });
+        writeSse(res, "done", { requestId, timestamp: Date.now() });
+        return res.end();
       }
 
       // Auto: decide based on complexity signals (simple vs complex).
