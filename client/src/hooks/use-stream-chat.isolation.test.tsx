@@ -260,4 +260,89 @@ describe("useStreamChat conversation isolation", () => {
     expect(result.current.streamingContent).toBe("");
     expect(streamingSnapshots.some((v) => v.includes("LONG_RUNNING_TOKEN"))).toBe(false);
   });
+
+  it("recovers to idle if stale busy state is set after stream completion", async () => {
+    vi.useFakeTimers();
+
+    const activeConversation = { current: "chat_recovery" };
+    let forceBusyState: ((value: any) => void) | null = null;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const payload = JSON.parse(String(init?.body || "{}"));
+
+        return makeSseResponse([
+          {
+            event: "chunk",
+            data: {
+              conversationId: payload.conversationId,
+              requestId: payload.requestId,
+              content: "respuesta ok",
+            },
+          },
+          {
+            event: "done",
+            data: {
+              conversationId: payload.conversationId,
+              requestId: payload.requestId,
+            },
+          },
+        ]);
+      })
+    );
+
+    const { result } = renderHook(() => {
+      const [optimisticMessages, setOptimisticMessages] = useState<any[]>([]);
+      const [streamingContent, setStreamingContent] = useState("");
+      const [aiState, setAiState] = useState<any>("idle");
+      const [steps, setAiProcessSteps] = useState<any[]>([]);
+      const streamingContentRef = useRef("");
+
+      forceBusyState = setAiState;
+
+      const hook = useStreamChat({
+        setOptimisticMessages,
+        onSendMessage: async () => undefined,
+        setStreamingContent,
+        streamingContentRef,
+        setAiState,
+        setAiProcessSteps,
+        getActiveConversationId: () => activeConversation.current,
+      });
+
+      return { hook, optimisticMessages, streamingContent, aiState, steps };
+    });
+
+    await act(async () => {
+      await result.current.hook.stream("/api/chat/stream", {
+        conversationId: "chat_recovery",
+        chatId: "chat_recovery",
+        body: {
+          messages: [{ role: "user", content: "hola" }],
+          conversationId: "chat_recovery",
+          requestId: "req_recovery",
+        },
+        onEvent: (eventType) => {
+          if (eventType === "done") {
+            setTimeout(() => {
+              forceBusyState?.("thinking");
+            }, 0);
+          }
+        },
+      });
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    expect(result.current.aiState).toBe("thinking");
+
+    act(() => {
+      vi.advanceTimersByTime(1600);
+    });
+    expect(result.current.aiState).toBe("idle");
+
+    vi.useRealTimers();
+  });
 });

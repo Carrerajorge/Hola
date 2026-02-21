@@ -61,6 +61,7 @@ interface ConversationSession {
   firstTokenTimeoutId: ReturnType<typeof setTimeout> | null;
   doneTimeoutId: ReturnType<typeof setTimeout> | null;
   contentTokenTimeoutId: ReturnType<typeof setTimeout> | null;
+  idleRecoveryTimeoutId: ReturnType<typeof setTimeout> | null;
 }
 
 function createSession(): ConversationSession {
@@ -76,6 +77,7 @@ function createSession(): ConversationSession {
     firstTokenTimeoutId: null,
     doneTimeoutId: null,
     contentTokenTimeoutId: null,
+    idleRecoveryTimeoutId: null,
   };
 }
 
@@ -86,9 +88,17 @@ const DEFAULT_DONE_TIMEOUT_MS = 45_000;
 // Covers the window after firstTokenTimeout is cleared (by a non-content event like
 // "thinking") but before doneTimeout is armed (which requires a content chunk).
 const DEFAULT_CONTENT_TOKEN_TIMEOUT_MS = 60_000;
+const DEFAULT_IDLE_RECOVERY_MS = 1_500;
 const DEFAULT_MAX_RETRIES = 1;
 const DEFAULT_RETRY_BACKOFF_MS = 800;
 const DEFAULT_RETRY_JITTER_MS = 250;
+
+const isBusyAiState = (state: AIState): boolean =>
+  state === "sending" ||
+  state === "streaming" ||
+  state === "thinking" ||
+  state === "responding" ||
+  state === "agent_working";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -205,6 +215,14 @@ export function useStreamChat(deps: StreamChatDeps) {
       clearTimeout(session.doneTimeoutId);
       session.doneTimeoutId = null;
     }
+    if (session.contentTokenTimeoutId) {
+      clearTimeout(session.contentTokenTimeoutId);
+      session.contentTokenTimeoutId = null;
+    }
+    if (session.idleRecoveryTimeoutId) {
+      clearTimeout(session.idleRecoveryTimeoutId);
+      session.idleRecoveryTimeoutId = null;
+    }
 
     if (session.rafId !== null) {
       cancelAnimationFrame(session.rafId);
@@ -288,6 +306,25 @@ export function useStreamChat(deps: StreamChatDeps) {
             setAiState((prev) => (prev === state ? "idle" : prev), targetId);
           });
         }
+
+        if (!targetId) return;
+
+        const targetSession = getSession(targetId);
+        if (targetSession.idleRecoveryTimeoutId) {
+          clearTimeout(targetSession.idleRecoveryTimeoutId);
+          targetSession.idleRecoveryTimeoutId = null;
+        }
+
+        // Aggressive stale-state recovery:
+        // if no request is pending shortly after finalize, force non-terminal busy
+        // states back to idle so "stop chat" and thinking indicators never stick.
+        targetSession.idleRecoveryTimeoutId = setTimeout(() => {
+          const latestSession = getSession(targetId);
+          latestSession.idleRecoveryTimeoutId = null;
+          if (latestSession.pendingRequestId) return;
+          setAiState((prev) => (isBusyAiState(prev) ? "idle" : prev), targetId);
+          setAiProcessSteps?.([], targetId);
+        }, DEFAULT_IDLE_RECOVERY_MS);
       };
 
       if (!targetConversationId) {
@@ -449,6 +486,10 @@ export function useStreamChat(deps: StreamChatDeps) {
         session.fullContent = "";
         session.pendingContent = null;
         session.finalizing = false;
+        if (session.idleRecoveryTimeoutId) {
+          clearTimeout(session.idleRecoveryTimeoutId);
+          session.idleRecoveryTimeoutId = null;
+        }
 
         if (isConversationActive(conversationId)) {
           nextMessageIdRef.current = messageId;
@@ -919,6 +960,14 @@ export function useStreamChat(deps: StreamChatDeps) {
         if (session.doneTimeoutId) {
           clearTimeout(session.doneTimeoutId);
           session.doneTimeoutId = null;
+        }
+        if (session.contentTokenTimeoutId) {
+          clearTimeout(session.contentTokenTimeoutId);
+          session.contentTokenTimeoutId = null;
+        }
+        if (session.idleRecoveryTimeoutId) {
+          clearTimeout(session.idleRecoveryTimeoutId);
+          session.idleRecoveryTimeoutId = null;
         }
         if (session.rafId !== null) {
           cancelAnimationFrame(session.rafId);
