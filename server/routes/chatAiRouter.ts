@@ -36,6 +36,9 @@ import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { ensureUserRowExists } from "../lib/ensureUserRowExists";
 import { buildSkillSystemPromptSection, drizzleSkillStore, resolveSkillContextFromRequest } from "../services/skillContextResolver";
 import { getSkillPlatformService, type SkillExecutionResult } from "../services/skillPlatform";
+import fs from "fs/promises";
+import os from "os";
+import path from "path";
 
 type AttachmentSpec = z.infer<typeof AttachmentSpecSchema>;
 
@@ -1367,6 +1370,64 @@ const cleanSkipRunStreamDedup = (): void => {
       const lastUserMsg = [...clientMessages].reverse().find((m: any) => m.role === 'user');
       const userQuery = typeof lastUserMsg?.content === 'string' ? lastUserMsg.content : String(lastUserMsg?.content || '');
       const earlyQuestionClassification = questionClassifier.classifyQuestion(userQuery || "");
+
+      // Fast local desktop action shortcut: create folder on macOS Desktop.
+      // Prevents LLM-only fallback responses for a very common local-control request.
+      const createDesktopFolderMatch = userQuery.match(/(?:crea|crear)\s+(?:una\s+)?carpeta(?:\s+en\s+mi\s+escritorio)?\s+(?:llamada|con\s+nombre)\s+([\w\s.-]{1,120})/i);
+      if (createDesktopFolderMatch?.[1]) {
+        const rawName = createDesktopFolderMatch[1].trim();
+        const invalid = /[\\/:*?"<>|]/.test(rawName) || rawName.includes("..");
+
+        // Ensure SSE is initialized before emitting events.
+        if (!res.headersSent) {
+          res.setHeader("Content-Type", "text/event-stream");
+          res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+          res.setHeader("Connection", "keep-alive");
+          res.setHeader("Transfer-Encoding", "chunked");
+          res.setHeader("X-Accel-Buffering", "no");
+          res.setHeader("X-Content-Type-Options", "nosniff");
+          res.setHeader("X-Request-Id", requestId);
+          res.setHeader("X-Trace-Id", requestId);
+          res.flushHeaders();
+          writeSse(res, "start", { requestId, latencyMode, timestamp: Date.now() });
+        }
+
+        if (invalid) {
+          writeSse(res, "error", {
+            code: "invalid_folder_name",
+            error: "Nombre de carpeta inválido",
+            requestId,
+            timestamp: Date.now(),
+          });
+          writeSse(res, "done", { requestId, timestamp: Date.now() });
+          return res.end();
+        }
+
+        try {
+          const desktopDir = path.join(os.homedir(), "Desktop");
+          const folderPath = path.join(desktopDir, rawName);
+          await fs.mkdir(folderPath, { recursive: true });
+          await fs.appendFile(
+            path.join(os.homedir(), ".iliagpt-control-audit.log"),
+            `${new Date().toISOString()} chat_shortcut mkdir path=${folderPath}\n`,
+            "utf-8"
+          );
+
+          const successText = `Listo. Carpeta creada en tu escritorio: ${folderPath}`;
+          writeSse(res, "chunk", { content: successText, requestId, timestamp: Date.now() });
+          writeSse(res, "done", { requestId, timestamp: Date.now() });
+          return res.end();
+        } catch (error: any) {
+          writeSse(res, "error", {
+            code: "mkdir_failed",
+            error: error?.message || "No se pudo crear la carpeta",
+            requestId,
+            timestamp: Date.now(),
+          });
+          writeSse(res, "done", { requestId, timestamp: Date.now() });
+          return res.end();
+        }
+      }
 
       // Auto: decide based on complexity signals (simple vs complex).
       if (latencyMode === 'auto') {
