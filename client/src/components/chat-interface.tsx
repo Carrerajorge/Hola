@@ -4036,6 +4036,20 @@ export function ChatInterface({
           isLocalExecIntent = true;
         }
 
+        // 20. Capability queries: "tienes acceso a mi terminal?" / "puedes ejecutar comandos?"
+        if (!isLocalExecIntent && /\b(?:tienes|tiene|tenés)\s+(?:acceso|conexión|conexion)\b/i.test(userText2) && /\b(?:terminal|computadora|pc|mac|sistema|archivos|shell|consola|equipo|ordenador|laptop|máquina|maquina)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+        if (!isLocalExecIntent && /\b(?:puedes|puede|podés|podrías|podrias)\s+(?:acceder|ver|controlar|ejecutar|usar|manejar)\b/i.test(userText2) && /\b(?:terminal|computadora|pc|mac|sistema|archivos|shell|consola|equipo)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+        if (!isLocalExecIntent && /\b(?:qué|que|cuáles|cuales)\s+(?:capacidades|habilidades|poderes|funciones)\s+(?:tienes|tiene)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+        if (!isLocalExecIntent && /\b(?:can\s+you|do\s+you)\s+(?:access|control|use|run|execute)\s+(?:my|the)\s+(?:terminal|computer|system|files|shell)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+
         console.log("[LocalControl] isLocalExecIntent:", isLocalExecIntent, "| input:", userText2.slice(0, 80));
 
         if (isLocalExecIntent) {

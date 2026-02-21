@@ -568,6 +568,56 @@ function extractNaturalNodeIntent(input: string): string | null {
   return null;
 }
 
+/**
+ * Detects when the user asks about ILIAGPT's local control capabilities.
+ * E.g.: "tienes acceso a mi terminal?", "puedes crear archivos?", "qué puedes hacer en mi computadora?"
+ */
+function isCapabilityQuery(input: string): boolean {
+  const prompt = String(input || "").trim().toLowerCase();
+  const patterns = [
+    // "tienes acceso a mi terminal/computadora/archivos/sistema"
+    /\b(?:tienes|tiene|tenés|tengo|hay)\s+(?:acceso|conexión|conexion)\s+(?:a\s+)?(?:mi|la|el|al)?\s*(?:terminal|computadora|computador|pc|mac|sistema|archivos|files|shell|consola|equipo|ordenador|laptop|maquina|máquina)\b/i,
+    // "puedes acceder/ver/controlar/ejecutar/usar mi terminal"
+    /\b(?:puedes|puede|podés|podrías|podrias|pueden|se\s+puede|es\s+posible|eres\s+capaz)\s+(?:acceder|ver|controlar|ejecutar|usar|manejar|gestionar|administrar|operar|correr|abrir|tocar)\s+(?:a\s+|en\s+)?(?:mi|la|el|al)?\s*(?:terminal|computadora|computador|pc|mac|sistema|archivos|files|shell|consola|equipo|carpetas|folders|disco|disk)\b/i,
+    // "tienes acceso a la terminal" / "tienes acceso al sistema"
+    /\b(?:tienes|tiene)\s+acceso\b/i,
+    // "puedes ejecutar comandos" / "puedes correr scripts"
+    /\b(?:puedes|puede|podés)\s+(?:ejecutar|correr|run|crear|eliminar|borrar|leer|escribir|abrir|instalar|desinstalar)\s+(?:comandos|scripts|archivos|carpetas|programas|paquetes|apps|aplicaciones)\b/i,
+    // "qué puedes hacer en mi computadora/con mi terminal"
+    /\b(?:qué|que|what)\s+(?:puedes|puede|podés|can\s+you)\s+(?:hacer|do)\s+(?:en|con|with|in|on)\s+(?:mi|la|el|al)?\s*(?:terminal|computadora|computador|pc|mac|sistema|equipo)\b/i,
+    // "qué capacidades tienes" / "cuáles son tus capacidades"
+    /\b(?:qué|que|cuáles|cuales|what)\s+(?:capacidades|habilidades|abilities|capabilities|poderes|funciones|features|powers)\s+(?:tienes|tiene|tenés|do\s+you\s+have)\b/i,
+    // "can you access my terminal" / "do you have access to my computer"
+    /\b(?:can\s+you|do\s+you)\s+(?:access|control|use|run|execute|manage)\s+(?:my|the)\s+(?:terminal|computer|system|files|shell|machine)\b/i,
+    // "do you have access" / "have access to"
+    /\b(?:do\s+you\s+have|have\s+you\s+got)\s+access\b/i,
+    // Direct: "acceso a mi terminal" / "controlar mi computadora"
+    /\b(?:acceso|control|acceder)\s+(?:a\s+)?(?:mi|la|el)?\s*(?:terminal|computadora|equipo|sistema|consola|pc|mac)\b/i,
+  ];
+  return patterns.some(re => re.test(prompt));
+}
+
+function buildCapabilityResponse(): string {
+  return `**Sí, tengo acceso completo a tu computadora.** Aquí están mis capacidades:
+
+🖥️ **Terminal**: Puedo ejecutar cualquier comando en tu terminal (bash, zsh, etc.)
+📂 **Archivos**: Crear, leer, escribir, copiar, mover, eliminar archivos y carpetas
+🔍 **Búsqueda**: Buscar archivos por nombre, buscar texto dentro de archivos
+💻 **Código**: Ejecutar Python, Node.js, scripts de cualquier lenguaje
+📊 **Sistema**: Ver procesos, puertos, CPU, RAM, disco, info del sistema
+📦 **Paquetes**: npm, pip, brew — instalar, listar, actualizar
+🔧 **Git**: status, commit, push, pull, diff, log, branch
+🐳 **Docker**: containers, images, run, stop
+📱 **Apps**: Abrir aplicaciones y archivos
+
+**Pruébame:** Dime qué necesitas y lo ejecuto directamente. Por ejemplo:
+- "Muéstrame los archivos de mi escritorio"
+- "Ejecuta python: print(2+2)"
+- "¿Qué puertos están abiertos?"
+- "Crea una carpeta en mi escritorio"
+- "git status"`;
+}
+
 type LocalControlCommand =
   | "help"
   | "status"
@@ -612,7 +662,8 @@ type LocalControlCommand =
   | "env"
   | "top"
   | "du"
-  | "which";
+  | "which"
+  | "capabilities";
 
 type LocalControlRequest = {
   command: LocalControlCommand;
@@ -1096,6 +1147,11 @@ function parseLocalControlRequest(input: string): LocalControlRequest | null {
       return { command: "read", args: [readIntent], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
     }
 
+    // 3.5 Capability query — MUST be checked BEFORE shell intent to avoid "puedes ejecutar comandos" matching shell
+    if (isCapabilityQuery(raw)) {
+      return { command: "capabilities" as LocalControlCommand, args: [], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
+    }
+
     // 4. shell — "ejecuta/corre/run el comando X" / "en la terminal haz X"
     const shellIntent = extractNaturalShellIntent(raw);
     if (shellIntent) {
@@ -1188,7 +1244,15 @@ function parseLocalControlRequest(input: string): LocalControlRequest | null {
     }
 
     // 19. direct terminal line — "git status", "npm run dev", "docker ps", etc.
-    if (/^(?:git|npm|pip|pip3|brew|docker|python|python3|node|bash|sh|ps|top|du|which|find|grep|tree|open|kill|ports|lsof)\b/i.test(raw)) {
+    // Route to dedicated handlers when possible
+    const directCmdMatch = raw.match(/^(git|npm|pip|pip3|brew|docker)\s+(.*)/i);
+    if (directCmdMatch) {
+      const tool = directCmdMatch[1].toLowerCase().replace("pip3", "pip") as LocalControlCommand;
+      const subArgs = directCmdMatch[2]?.trim() || "";
+      return { command: tool, args: subArgs ? [subArgs] : [], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
+    }
+    // Other direct commands route to shell
+    if (/^(?:python3?|node|bash|sh|ps|top|du|which|find|grep|tree|open|kill|ports|lsof)\b/i.test(raw)) {
       return { command: "shell", args: [raw], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
     }
 
@@ -1426,6 +1490,12 @@ export async function executeLocalControlRequest(
       command: parsed.command,
       allowedRoots,
       tokenRequired,
+    });
+  }
+
+  if (parsed.command === "capabilities") {
+    return localSuccessResult("LOCAL_CAPABILITIES", buildCapabilityResponse(), {
+      command: "capabilities",
     });
   }
 
@@ -5229,7 +5299,58 @@ ${attachmentContext}`;
       const now = new Date();
       const currentDateTimeContext = `\n\nFECHA Y HORA ACTUAL:\n- ISO: ${now.toISOString()}`;
 
-      systemContent += `${currentDateTimeContext}${userProfileContext}${customInstructionsSection}${responseStyleModifier}${semanticMemoryContext ? `\n\n${semanticMemoryContext}` : ''}${codeInterpreterPrompt}${webSearchContextForLLM}${skillSystemSection}`;
+      // ── LOCAL CONTROL: Inform the LLM about its local system capabilities ──
+      const localControlSystemPrompt = LOCAL_DESKTOP_ACTIONS_ENABLED ? `
+
+[CAPACIDADES DE CONTROL LOCAL — IMPORTANTES]
+Tienes acceso COMPLETO a la computadora del usuario a través del sistema de control local. Esto incluye:
+
+🖥️ TERMINAL Y SHELL:
+- Ejecutar cualquier comando en la terminal (bash, zsh)
+- Persistencia de directorio de trabajo entre comandos
+- Historial de comandos ejecutados
+
+📂 ARCHIVOS Y CARPETAS:
+- Crear, leer, escribir, editar, copiar, mover, eliminar archivos y carpetas
+- Buscar archivos por patrón (find), buscar contenido dentro de archivos (grep)
+- Ver árbol de directorios (tree), permisos (chmod), tamaño (du)
+- Comparar archivos (diff), ver metadata (stat)
+
+💻 CÓDIGO Y SCRIPTS:
+- Ejecutar código Python en línea o archivos .py
+- Ejecutar código Node.js/JavaScript en línea o archivos .js
+- Ejecutar cualquier script (bash, ruby, etc.) detectando el lenguaje por extensión
+
+📊 SISTEMA:
+- Ver procesos activos (ps), matar procesos (kill), ver puertos en uso (ports)
+- Monitor del sistema: CPU, RAM, disco, uptime
+- Información detallada del sistema (sysinfo)
+
+📦 PAQUETES Y HERRAMIENTAS:
+- npm, pip, brew: instalar, listar, actualizar paquetes
+- git: status, add, commit, push, pull, diff, log, branch
+- docker: ps, images, run, stop, rm
+
+🔧 OTROS:
+- Abrir apps o archivos (open), ver variables de entorno (env)
+- Buscar ubicación de binarios (which)
+
+CÓMO FUNCIONA: Cuando el usuario pide algo relacionado con su computadora, archivos, terminal, o sistema — TÚ PUEDES HACERLO.
+El sistema intercepta tu respuesta y ejecuta la acción automáticamente.
+Para comandos, usa el prefijo "/local" seguido del comando. Ejemplos:
+- /local shell ls -la ~/Desktop
+- /local python print(2+2)
+- /local git status
+- /local ps
+- /local find *.json ~/project
+
+También puedes responder naturalmente y el sistema detectará la intención. Por ejemplo, si el usuario dice "muéstrame los procesos", puedes responder con /local ps.
+
+IMPORTANTE: NUNCA digas que no tienes acceso a la terminal, archivos, o sistema del usuario. SÍ tienes acceso completo. Siempre intenta ejecutar lo que pide.
+Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, confirma que SÍ y explica brevemente tus capacidades.
+` : '';
+
+      systemContent += `${currentDateTimeContext}${localControlSystemPrompt}${userProfileContext}${customInstructionsSection}${responseStyleModifier}${semanticMemoryContext ? `\n\n${semanticMemoryContext}` : ''}${codeInterpreterPrompt}${webSearchContextForLLM}${skillSystemSection}`;
 
       // DOC TOOL: Add format-specific system prompt so the LLM outputs structured content
       // that the client-side editors can render (markdown for Word, CSV for Excel, JSON for PPT)
