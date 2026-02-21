@@ -60,6 +60,28 @@ import {
   Pause,
   Settings2,
   BookOpen,
+  KeyRound,
+  FileEdit,
+  ListTodo,
+  StickyNote,
+  Rss,
+  Speaker,
+  MessageSquare,
+  Camera,
+  Layers,
+  Terminal,
+  ServerSnowflake,
+  Bot,
+  Flame,
+  Image as ImageIcon,
+  LayoutTemplate,
+  Mic,
+  Music,
+  ShoppingBag,
+  Eye,
+  Activity,
+  Phone,
+
   Download,
   CheckCircle2,
   XCircle,
@@ -232,12 +254,58 @@ const BASE_BUILT_IN_SKILLS: BuiltInSkill[] = [
   },
 ];
 
+
+const getExtraSkillIcon = (id: string) => {
+  const props = { className: "h-6 w-6 text-purple-500" };
+  switch (id) {
+    case "1password": return <KeyRound {...props} className="h-6 w-6 text-blue-500" />;
+    case "apple-notes": return <StickyNote {...props} className="h-6 w-6 text-yellow-500" />;
+    case "apple-reminders": return <ListTodo {...props} className="h-6 w-6 text-red-500" />;
+    case "bear-notes": return <FileEdit {...props} className="h-6 w-6 text-red-700" />;
+    case "blogwatcher": return <Rss {...props} className="h-6 w-6 text-orange-500" />;
+    case "blucli": return <Speaker {...props} className="h-6 w-6 text-blue-400" />;
+    case "bluebubbles": return <MessageSquare {...props} className="h-6 w-6 text-blue-500" />;
+    case "camsnap": return <Camera {...props} className="h-6 w-6 text-gray-500" />;
+    case "clawhub": return <Layers {...props} className="h-6 w-6 text-indigo-500" />;
+    case "coding-agent": return <Terminal {...props} className="h-6 w-6 text-green-500" />;
+    case "discord": return <MessageSquare {...props} className="h-6 w-6 text-indigo-400" />;
+    case "eightctl": return <ServerSnowflake {...props} className="h-6 w-6 text-blue-300" />;
+    case "gemini": return <Bot {...props} className="h-6 w-6 text-blue-600" />;
+    case "gh-issues": return <Code {...props} className="h-6 w-6 text-gray-800" />;
+    case "gifgrep": return <ImageIcon {...props} className="h-6 w-6 text-pink-500" />;
+    case "github": return <Code {...props} className="h-6 w-6 text-black" />;
+    case "gog": return <LayoutTemplate {...props} className="h-6 w-6 text-blue-500" />;
+    case "healthcheck": return <Activity {...props} className="h-6 w-6 text-red-500" />;
+    case "himalaya": return <Mail {...props} className="h-6 w-6 text-gray-500" />;
+    case "imsg": return <MessageSquare {...props} className="h-6 w-6 text-green-500" />;
+    case "mcporter": return <Layers {...props} className="h-6 w-6 text-orange-600" />;
+    case "nano-banana-pro": return <ImageIcon {...props} className="h-6 w-6 text-yellow-500" />;
+    case "nano-pdf": return <FileType {...props} className="h-6 w-6 text-red-500" />;
+    case "notion": return <FileText {...props} className="h-6 w-6 text-gray-900" />;
+    case "obsidian": return <FileEdit {...props} className="h-6 w-6 text-purple-600" />;
+    case "openai-image-gen": return <ImageIcon {...props} className="h-6 w-6 text-emerald-500" />;
+    case "openai-whisper": return <Mic {...props} className="h-6 w-6 text-gray-600" />;
+    case "openai-whisper-api": return <Mic {...props} className="h-6 w-6 text-gray-700" />;
+    case "openhue": return <Flame {...props} className="h-6 w-6 text-yellow-400" />;
+    case "oracle": return <Search {...props} className="h-6 w-6 text-cyan-600" />;
+    case "ordercli": return <ShoppingBag {...props} className="h-6 w-6 text-pink-600" />;
+    case "peekaboo": return <Eye {...props} className="h-6 w-6 text-blue-400" />;
+    case "sag": return <Speaker {...props} className="h-6 w-6 text-indigo-500" />;
+    case "sherpa-onnx-tts": return <Speaker {...props} className="h-6 w-6 text-indigo-600" />;
+    case "slack": return <MessageSquare {...props} className="h-6 w-6 text-purple-700" />;
+    case "songsee": return <Music {...props} className="h-6 w-6 text-pink-500" />;
+    case "wacli": return <Phone {...props} className="h-6 w-6 text-green-500" />;
+    case "weather": return <ServerSnowflake {...props} className="h-6 w-6 text-cyan-500" />;
+    default: return <Sparkles {...props} />;
+  }
+};
+
 const EXTRA_SKILLS: BuiltInSkill[] = BUNDLED_SKILLS.map(skill => ({
   id: skill.id,
   name: skill.name,
   description: skill.description,
   category: skill.category === "automation" ? "integrations" : skill.category as "documents" | "data" | "integrations" | "custom",
-  icon: <Sparkles className="h-6 w-6 text-purple-500" />,
+  icon: getExtraSkillIcon(skill.id),
   enabled: true,
   builtIn: true,
   features: skill.features || [],
