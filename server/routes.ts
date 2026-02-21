@@ -59,6 +59,7 @@ import superAgentRouter from "./routes/superAgentRoutes";
 import conversationMemoryRoutes from "./routes/conversationMemoryRoutes";
 import { contextRoutes, semanticRoutes } from "./memory";
 import { createPythonToolsRouter } from "./routes/pythonToolsRouter";
+import { createLocalControlRouter } from "./routes/localControlRouter";
 import { createToolExecutionRouter } from "./routes/toolExecutionRouter";
 import agentPlanRouter from "./routes/agentPlanRouter";
 import scientificSearchRouter from "./routes/scientificSearchRouter";
@@ -780,6 +781,7 @@ export async function registerRoutes(
   app.use("/api/context", contextRoutes); // Enterprise context validation API
   app.use("/api", superAgentRouter);
   app.use("/api", createPythonToolsRouter());
+  app.use("/api", createLocalControlRouter());
   app.use("/api/execution", createToolExecutionRouter());
   app.use("/api/scientific", scientificSearchRouter);
   app.use("/api/planning", agentPlanRouter);

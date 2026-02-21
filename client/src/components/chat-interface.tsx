@@ -3096,72 +3096,45 @@ export function ChatInterface({
             }
           }
 
-          if (isImage) {
-            await ensureCsrfToken();
-            const registerRes = await apiFetch("/api/files", {
-              method: "POST",
-              headers: uploadHeaders,
-              body: JSON.stringify({
-                name: file.name,
-                type: file.type,
-                size: file.size,
-                storagePath,
-                uploadId,
-                ...(stableConversationId ? { conversationId: stableConversationId } : {}),
-              }),
+          setUploadedFiles((prev: any[]) =>
+            prev.map((f: any) => f.id === tempId ? { ...f, status: "processing", spreadsheetData } : f)
+          );
+
+          await ensureCsrfToken();
+          const registerRes = await apiFetch("/api/files", {
+            method: "POST",
+            headers: uploadHeaders,
+            body: JSON.stringify({
+              name: file.name,
+              type: file.type,
+              size: file.size,
+              storagePath,
+              uploadId,
+              ...(stableConversationId ? { conversationId: stableConversationId } : {}),
+            }),
+          });
+          const registeredFile = await safeJson(registerRes);
+          if (!registerRes.ok) {
+            throw new Error(registeredFile?.error || `File registration failed (status ${registerRes.status})`);
+          }
+          if (!registeredFile?.id) {
+            throw new Error("Server returned invalid file registration response");
+          }
+
+          setUploadedFiles((prev: any[]) =>
+            prev.map((f: any) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, spreadsheetData } : f)
+          );
+
+          // Await polling so pendingUploadsRef tracks the full lifecycle
+          // (upload + processing → ready/error) instead of resolving prematurely.
+          await pollFileStatusFast(registeredFile.id, tempId);
+
+          if (isAnalyzableFile(file.name) && !isExcel) {
+            triggerDocumentAnalysis(registeredFile.id, file.name, (analysisId) => {
+              setUploadedFiles((prev: any[]) =>
+                prev.map((f: any) => f.id === registeredFile.id || f.id === tempId ? { ...f, analysisId } : f)
+              );
             });
-            const registeredFile = await safeJson(registerRes);
-            if (!registerRes.ok) {
-              throw new Error(registeredFile?.error || `File registration failed (status ${registerRes.status})`);
-            }
-            if (!registeredFile?.id) {
-              throw new Error("Server returned invalid file registration response");
-            }
-
-            setUploadedFiles((prev: any[]) =>
-              prev.map((f: any) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, status: "ready" } : f)
-            );
-          } else {
-            setUploadedFiles((prev: any[]) =>
-              prev.map((f: any) => f.id === tempId ? { ...f, status: "processing", spreadsheetData } : f)
-            );
-
-            await ensureCsrfToken();
-            const registerRes = await apiFetch("/api/files", {
-              method: "POST",
-              headers: uploadHeaders,
-              body: JSON.stringify({
-                name: file.name,
-                type: file.type,
-                size: file.size,
-                storagePath,
-                uploadId,
-                ...(stableConversationId ? { conversationId: stableConversationId } : {}),
-              }),
-            });
-            const registeredFile = await safeJson(registerRes);
-            if (!registerRes.ok) {
-              throw new Error(registeredFile?.error || `File registration failed (status ${registerRes.status})`);
-            }
-            if (!registeredFile?.id) {
-              throw new Error("Server returned invalid file registration response");
-            }
-
-            setUploadedFiles((prev: any[]) =>
-              prev.map((f: any) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, spreadsheetData } : f)
-            );
-
-            // Await polling so pendingUploadsRef tracks the full lifecycle
-            // (upload + processing → ready/error) instead of resolving prematurely.
-            await pollFileStatusFast(registeredFile.id, tempId);
-
-            if (isAnalyzableFile(file.name) && !isExcel) {
-              triggerDocumentAnalysis(registeredFile.id, file.name, (analysisId) => {
-                setUploadedFiles((prev: any[]) =>
-                  prev.map((f: any) => f.id === registeredFile.id || f.id === tempId ? { ...f, analysisId } : f)
-                );
-              });
-            }
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
@@ -3786,6 +3759,51 @@ export function ChatInterface({
           chatLogger.debug("handleSubmit no content, returning");
         }
         return;
+      }
+
+      // Deterministic local shortcut (no LLM/stream): create Desktop folder immediately.
+      if (hasInput && !hasFiles) {
+        const userText = input.trim();
+        const folderMatch = userText.match(/(?:crea|crear|creame|haz|genera)\s+(?:una\s+)?carpeta(?:\s+en\s+mi\s+escritorio)?(?:\s+(?:llamada|con\s+nombre))?\s+["']?([^"'\n]{1,120})["']?/i);
+        if (folderMatch?.[1]) {
+          const folderName = folderMatch[1].trim();
+          const userMsg: Message = {
+            id: `user-${Date.now()}`,
+            role: "user",
+            content: userText,
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+          };
+          onSendMessage(userMsg);
+          setInput("");
+
+          try {
+            const res = await apiFetch("/api/local/create-folder", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+              credentials: "include",
+              body: JSON.stringify({ name: folderName, prompt: userText }),
+            });
+            const data = await res.json();
+            const assistantMsg: Message = {
+              id: `assistant-${Date.now()}`,
+              role: "assistant",
+              content: data?.message || (data?.path ? `Listo. Carpeta creada: ${data.path}` : "Listo."),
+              timestamp: new Date(),
+              requestId: generateRequestId(),
+            };
+            onSendMessage(assistantMsg);
+          } catch (error: any) {
+            onSendMessage({
+              id: `assistant-err-${Date.now()}`,
+              role: "assistant",
+              content: `No se pudo crear la carpeta: ${error?.message || "error desconocido"}`,
+              timestamp: new Date(),
+              requestId: generateRequestId(),
+            });
+          }
+          return;
+        }
       }
 
       // FIX: Auto-generate a prompt when the user sends ONLY files without text.
@@ -4835,7 +4853,7 @@ export function ChatInterface({
         await waitForPendingUploads();
 
         currentUploadedFiles = [...uploadedFilesRef.current];
-        savedMainFiles = [...currentUploadedFiles];
+        savedMainFiles = [...currentUploadedFiles]; // updated reference for error recovery
         const failedAfterWait = currentUploadedFiles.filter((f: any) => f?.status === "error");
         attachments = currentUploadedFiles
           .filter((f: any) => f.status === "ready" || f.status === "processing")
@@ -4874,6 +4892,13 @@ export function ChatInterface({
           });
         }
 
+        hasDocumentAttachments = attachments.some((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
+        documentAttachmentsForAnalysis = attachments.filter((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
+      } else {
+        // If there were no pending uploads at submit, we already cleared them from the UI (lines ~4746).
+        // Update savedMainFiles to ONLY contain failed uploads (the new baseline) so if standard chat streaming 
+        // fails later, we don't accidentally restore the successfully uploaded files back into the composer.
+        savedMainFiles = [...failedUploadsAtSubmit];
         hasDocumentAttachments = attachments.some((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
         documentAttachmentsForAnalysis = attachments.filter((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
       }
