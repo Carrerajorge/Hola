@@ -694,7 +694,7 @@ export function Sidebar({
                 <CollapsibleTrigger asChild>
                   <div className="flex items-center gap-2 px-2 py-2 rounded-xl cursor-pointer hover:bg-accent transition-all duration-300">
                     <Zap className="h-4 w-4 text-amber-500" />
-                    <span className="text-sm font-medium flex-1">Skills ({runtimeSkills.length})</span>
+                    <span className="text-sm font-medium flex-1">Skills</span>
                     <ChevronRight className={cn("h-4 w-4 text-muted-foreground transition-transform", isSkillsExpanded && "rotate-90")} />
                   </div>
                 </CollapsibleTrigger>

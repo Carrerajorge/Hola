@@ -166,6 +166,22 @@ const AGENT_TOOLS: FunctionDeclaration[] = [
 ];
 
 import { zodToJsonSchema } from "zod-to-json-schema";
+import { BUNDLED_SKILL_TOOLS } from "./tools/bundledSkillTools";
+
+const dynamicSkillTools: FunctionDeclaration[] = BUNDLED_SKILL_TOOLS.map(t => {
+  const schema = zodToJsonSchema(t.inputSchema, { target: "jsonSchema7" }) as any;
+  // Remove unsupported keywords for Gemini
+  if (schema.$schema) delete schema.$schema;
+  if (schema.additionalProperties !== undefined) delete schema.additionalProperties;
+
+  return {
+    name: t.name,
+    description: t.description,
+    parameters: schema
+  };
+});
+
+const ALL_AGENT_TOOLS = [...AGENT_TOOLS, ...dynamicSkillTools];
 
 function getToolsForIntent(intent: string): FunctionDeclaration[] {
   switch (intent) {
@@ -182,7 +198,7 @@ function getToolsForIntent(intent: string): FunctionDeclaration[] {
     case "web_automation":
       return AGENT_TOOLS.filter(t => ["web_search", "fetch_url", "browse_and_act"].includes(t.name));
     default:
-      return AGENT_TOOLS;
+      return ALL_AGENT_TOOLS;
   }
 }
 

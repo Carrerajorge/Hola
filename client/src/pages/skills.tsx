@@ -57,7 +57,6 @@ import { toast } from "sonner";
 import { useUserSkills, UserSkill } from "@/hooks/use-user-skills";
 import { SkillBuilder } from "@/components/skill-builder";
 import { BUNDLED_SKILLS } from "@/data/bundledSkills";
-
 interface BuiltInSkill {
   id: string;
   name: string;

@@ -1,5 +1,4 @@
 import { BUNDLED_SKILLS } from "../data/bundledSkills";
-
 type RuntimeSkill = {
   id: string;
   name: string;
