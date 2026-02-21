@@ -4881,8 +4881,9 @@ export function ChatInterface({
         );
 
         // Now it's safe to clear successful uploads from the composer (uploads have reached a stable state).
-        // Keep any failed uploads so the user can retry/remove them.
-        setUploadedFiles(failedAfterWait);
+        // By user requirement, we unconditionally clear ALL files from the composer so they don't get "stuck",
+        // even if they failed. The user is notified via toast if anything failed.
+        setUploadedFiles([]);
         if (failedAfterWait.length > 0) {
           toast({
             title: "Algunos archivos fallaron",
@@ -4896,9 +4897,9 @@ export function ChatInterface({
         documentAttachmentsForAnalysis = attachments.filter((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
       } else {
         // If there were no pending uploads at submit, we already cleared them from the UI (lines ~4746).
-        // Update savedMainFiles to ONLY contain failed uploads (the new baseline) so if standard chat streaming 
-        // fails later, we don't accidentally restore the successfully uploaded files back into the composer.
-        savedMainFiles = [...failedUploadsAtSubmit];
+        // Update savedMainFiles to empty so if standard chat streaming 
+        // fails later, we don't accidentally restore files.
+        savedMainFiles = [];
         hasDocumentAttachments = attachments.some((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
         documentAttachmentsForAnalysis = attachments.filter((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
       }
@@ -5380,8 +5381,10 @@ export function ChatInterface({
             }));
 
             // Extract image data URLs from current files
+            // Only include images that successfully uploaded or are processing, so failed
+            // local uploads don't secretly succeed in chat (causing severe UI/UX desync)
             const imageDataUrls = currentUploadedFiles
-              .filter(f => f.type.startsWith("image/") && f.dataUrl)
+              .filter(f => f.type.startsWith("image/") && f.dataUrl && (f.status === "ready" || f.status === "processing"))
               .map(f => f.dataUrl as string);
 
             // Determine if we're in document mode for special AI behavior
