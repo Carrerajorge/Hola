@@ -26,8 +26,8 @@ export interface UploadJobData {
     fileName: string;
     mimeType: string;
     size: number;
-    fileData: string; // Base64 encoded for now, S3 key later
-    priority: JobPriority;
+    fileId: string;
+    storagePath: string; priority: JobPriority;
     createdAt: string;
 }
 
@@ -195,9 +195,8 @@ export class UploadQueue extends EventEmitter {
     async add(
         userId: string,
         chatId: string,
-        file: { name: string; type: string; buffer: Buffer },
-        options: { priority?: JobPriority; userPlan?: "free" | "pro" | "admin" } = {}
-    ): Promise<{ jobId: string } | { error: string; retryAfter?: number }> {
+        file: { name: string; type: string; size: number; id: string; storagePath: string },
+        options: { priority?: JobPriority; userPlan?: "free" | "pro" | "admin" } = {}): Promise<{ jobId: string } | { error: string; retryAfter?: number }> {
         const { priority = "normal", userPlan = "free" } = options;
 
         // Check rate limit
@@ -209,13 +208,11 @@ export class UploadQueue extends EventEmitter {
             };
         }
 
-        // Check file size
-        if (file.buffer.length > this.rateLimiter.getMaxFileSize()) {
+        if (file.size > this.rateLimiter.getMaxFileSize()) {
             return {
                 error: `File too large. Max size: ${this.rateLimiter.getMaxFileSize() / 1024 / 1024}MB`,
             };
         }
-
         // Create job data
         const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         const jobData: UploadJobData = {
@@ -224,10 +221,10 @@ export class UploadQueue extends EventEmitter {
             chatId,
             fileName: file.name,
             mimeType: file.type,
-            size: file.buffer.length,
-            fileData: file.buffer.toString('base64'), // Temporary until S3
-            priority,
-            createdAt: new Date().toISOString(),
+            size: file.size,
+            fileId: file.id,
+            storagePath: file.storagePath,
+            priority, createdAt: new Date().toISOString(),
         };
 
         // Record rate limit
@@ -252,9 +249,8 @@ export class UploadQueue extends EventEmitter {
     async addBatch(
         userId: string,
         chatId: string,
-        files: Array<{ name: string; type: string; buffer: Buffer }>,
-        options: { priority?: JobPriority; userPlan?: "free" | "pro" | "admin" } = {}
-    ): Promise<{ jobIds: string[] } | { error: string }> {
+        files: Array<{ name: string; type: string; size: number; id: string; storagePath: string }>,
+        options: { priority?: JobPriority; userPlan?: "free" | "pro" | "admin" } = {}): Promise<{ jobIds: string[] } | { error: string }> {
         if (files.length > this.rateLimiter.getMaxFilesPerBatch()) {
             return {
                 error: `Too many files. Max: ${this.rateLimiter.getMaxFilesPerBatch()} per batch`,

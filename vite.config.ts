@@ -139,7 +139,7 @@ export default defineConfig(async () => {
         deny: ["**/.*"],
       },
       watch: {
-        ignored: ["**/node_modules/**", "**/node_modules_backup/**"],
+        ignored: ["**/node_modules/**", "**/node_modules_backup/**", "**/uploads/**"],
       },
       proxy: {
         "/api": {

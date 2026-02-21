@@ -31,6 +31,21 @@ import { pollingManager } from "@/lib/polling-manager";
 import { queryClient } from "@/lib/queryClient";
 import { apiFetch } from "@/lib/apiClient";
 
+const isLocalDevHost = () => {
+  if (typeof window === "undefined") return false;
+  if (import.meta.env.DEV) return true;
+  const host = window.location.hostname;
+  if (host === "localhost" || host === "127.0.0.1" || host.endsWith(".local")) return true;
+  if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+  if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+  const private172 = host.match(/^172\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/);
+  if (private172) {
+    const second = Number(private172[1]);
+    if (second >= 16 && second <= 31) return true;
+  }
+  return false;
+};
+
 const AppsViewLazy = lazy(() => import("@/components/apps-view").then((m) => ({ default: m.AppsView })));
 const ChannelsHubDialogLazy = lazy(() =>
   import("@/components/channels-hub-dialog").then((m) => ({ default: m.ChannelsHubDialog }))
@@ -65,9 +80,8 @@ export default function Home() {
 
 
   useEffect(() => {
-    // Allow anonymous/guest sessions to use the chat UI. Only redirect when we
-    // couldn't establish any identity at all (e.g. auth fetch and anon identity failed).
-    if (isReady && !isLoading && !user) {
+    // Keep login requirement outside local development host.
+    if (isReady && !isLoading && !user && !isLocalDevHost()) {
       setLocation("/welcome");
     }
   }, [user, isLoading, isReady, setLocation]);

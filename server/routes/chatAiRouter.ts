@@ -39,6 +39,8 @@ import { getSkillPlatformService, type SkillExecutionResult } from "../services/
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
+import { terminalController } from "../agent/computerUse/terminalController";
+import type { CommandRequest, CommandResult, ProcessInfo } from "../agent/computerUse/terminalController";
 
 type AttachmentSpec = z.infer<typeof AttachmentSpecSchema>;
 
@@ -149,10 +151,31 @@ function extractDesktopFolderNameFromPrompt(input: string): string | null {
   const prompt = String(input || "").trim();
   if (!prompt) return null;
 
+  const cleanCandidate = (candidate: string): string => {
+    let cleaned = candidate.trim();
+    cleaned = cleaned
+      .replace(/^[\s("'`[{]+/, "")
+      .replace(/[\s)"'`\]}]+$/g, "")
+      .replace(/\s+(?:en\s+(?:mi|el)\s+mac|en\s+mac)\b.*$/i, "")
+      .replace(/\s+on\s+(?:my|the)\s+mac\b.*$/i, "")
+      .replace(/\s+en\s+(?:(?:mi|el|la|tu|su)\s+)?(?:escritorio|excritorio|desktop)\b.*$/i, "")
+      .replace(/\s+on\s+(?:(?:my|the)\s+)?desktop\b.*$/i, "")
+      .replace(/\s+(?:por\s+favor|gracias)\b.*$/i, "")
+      .replace(/[.,;:!?]+$/g, "")
+      .trim();
+    return cleaned;
+  };
+
   const folderNamePatterns = [
-    /(?:crea|crear|creame|haz|genera)\s+(?:una\s+)?(?:carpeta|caroeta|carepta)(?:\s+en\s+mi\s+(?:escritorio|excritorio))?\s+(?:llamada|con\s+nombre)\s+["']?([^"'\n]{1,120})["']?\s*$/i,
-    /(?:crea|crear|creame|haz|genera)\s+(?:una\s+)?(?:carpeta|caroeta|carepta)\s+(?:llamada|con\s+nombre)\s+["']?([^"'\n]{1,120})["']?\s+en\s+(?:mi\s+)?(?:escritorio|excritorio)\b/i,
-    /(?:crea|crear|creame|haz|genera)\s+(?:una\s+)?(?:carpeta|caroeta|carepta)\s+["']?([^"'\n]{1,120})["']?\s+en\s+(?:mi\s+)?(?:escritorio|excritorio)\b/i,
+    // Priority 1: Explicit name markers (llamada, con nombre, named, que se llame) + desktop context
+    /(?:crea|crear|creame|creá|crees|haz|hazme|genera|generar|make|create)\s+(?:otra\s+|una\s+)?(?:carpeta|caroeta|carepta|carptea|careta|folder|directorio|directory)\s+(?:llamada|con\s+nombre|named)\s+["']?([^"'\n]{1,160}?)["']?\s+(?:en\s+)?(?:(?:mi|el|la|tu|su)\s+)?(?:mac|escritorio|excritorio|desktop)\b/i,
+    // Priority 2: "carpeta que se llame X" / "carpeta con el nombre X" / "carpeta llamada X" (BEFORE generic capture)
+    /(?:carpeta|caroeta|carepta|carptea|careta|folder|directorio|directory)\s+(?:con\s+(?:el\s+)?nombre|llamada|named|que\s+se\s+llame)\s+["']?([^"'\n]{1,160})["']?/i,
+    // Priority 3: "crea carpeta X en escritorio" (generic — after name markers)
+    /(?:crea|crear|creame|creá|crees|haz|hazme|genera|generar|make|create)\s+(?:otra\s+|una\s+)?(?:carpeta|caroeta|carepta|carptea|careta|folder|directorio|directory)\s+["']?([^"'\n]{1,160}?)["']?\s+(?:en\s+)?(?:(?:mi|el|la|tu|su)\s+)?(?:mac|escritorio|excritorio|desktop)\b/i,
+    // Priority 4: "crea carpeta [en desktop] llamada/named X" (desktop in middle, name at end)
+    /(?:crea|crear|creame|creá|crees|haz|hazme|genera|generar|make|create)\s+(?:otra\s+|una\s+)?(?:carpeta|caroeta|carepta|carptea|careta|folder|directorio|directory)(?:\s+en\s+(?:(?:mi|el)\s+)?(?:escritorio|excritorio|desktop))?\s+(?:llamada|con\s+nombre|named)\s+["']?([^"'\n]{1,160})["']?\s*$/i,
+    // Priority 5: /mkdir command
     /^(?:\/?mkdir|local:\s*mkdir)\s+["']?([^"'\n]{1,120})["']?\s*$/i,
   ];
 
@@ -160,10 +183,388 @@ function extractDesktopFolderNameFromPrompt(input: string): string | null {
     const match = prompt.match(pattern);
     const candidate = match?.[1]?.trim();
     if (!candidate) continue;
-    const cleaned = candidate.replace(/[.,;:!?]+$/g, "").trim();
+    const cleaned = cleanCandidate(candidate);
     if (cleaned) return cleaned;
   }
 
+  // Fallback heuristic: if phrase clearly asks to create a desktop folder,
+  // extract token after "nombre/llamada/named" until first connector.
+  const hasCreateVerb = /\b(?:crea|crear|creame|creá|crees|haz|hazme|genera|generar|make|create)\b/i.test(prompt);
+  const hasFolderWord = /\b(?:carpeta|caroeta|carepta|carptea|careta|folder|directorio|directory)\b/i.test(prompt);
+  const intent = hasCreateVerb && hasFolderWord;
+  if (intent) {
+    // Strategy A: explicit name markers
+    const byNameMatch = prompt.match(/(?:nombre|llamada|named|que\s+se\s+llame)\s+["'""]?([^"'""\\n]{1,180})["'""]?/i);
+    const candidate = byNameMatch?.[1] ? cleanCandidate(byNameMatch[1]) : "";
+    if (candidate) return candidate;
+
+    // Strategy B: quoted string anywhere in the phrase
+    const quotedMatch = prompt.match(/["'""]([^"'""\\n]{1,120})["'""]/);
+    if (quotedMatch?.[1]) {
+      const qCandidate = cleanCandidate(quotedMatch[1]);
+      if (qCandidate) return qCandidate;
+    }
+
+    // Strategy C: find capitalized/alphanumeric token that isn't a stop word
+    const hasDesktop = /\b(?:escritorio|excritorio|desktop|mi\s+mac)\b/i.test(prompt);
+    if (hasDesktop) {
+      const stopWords = new Set([
+        "en", "mi", "una", "un", "la", "el", "de", "del", "con", "que", "se", "por",
+        "tu", "su", "al", "es", "lo", "le", "crear", "crea", "creame", "haz", "hazme",
+        "genera", "make", "create", "carpeta", "caroeta", "carepta", "folder", "directorio",
+        "escritorio", "excritorio", "desktop", "mac", "nombre", "llamada", "puedes",
+        "podrias", "porfavor", "favor", "gracias", "please", "otra", "nueva", "nuevo",
+        "quiero", "necesito", "me", "los", "las", "the", "on", "a", "my",
+      ]);
+      const words = prompt.split(/\s+/);
+      const nameTokens: string[] = [];
+      for (const w of words) {
+        const plain = w.replace(/^["'`([{]+/, "").replace(/["'`)\]},.:;!?]+$/, "");
+        if (!plain || stopWords.has(plain.toLowerCase())) continue;
+        if (/^[A-Z]/.test(plain) || /\d/.test(plain) || /[=_-]/.test(plain)) {
+          nameTokens.push(plain);
+        }
+      }
+      if (nameTokens.length > 0) {
+        const nameCandidate = cleanCandidate(nameTokens.join(""));
+        if (nameCandidate) return nameCandidate;
+      }
+    }
+  }
+
+  return null;
+}
+
+function looksLikeDesktopFolderIntent(input: string): boolean {
+  const prompt = String(input || "").trim();
+  if (!prompt) return false;
+  const hasCreateVerb = /\b(?:crea|crear|creame|creá|crees|haz|hazme|genera|generar|make|create)\b/i.test(prompt);
+  const hasFolderWord = /\b(?:carpeta|caroeta|carepta|carptea|careta|folder|directorio|directory)\b/i.test(prompt);
+  const hasDesktopContext = /\b(?:escritorio|excritorio|desktop|mi\s+mac|my\s+mac)\b/i.test(prompt);
+  return hasCreateVerb && hasFolderWord && hasDesktopContext;
+}
+
+// ── Natural language intent extractors for all local control commands ──
+
+function extractNaturalRmIntent(input: string): string | null {
+  const prompt = String(input || "").trim();
+  const patterns = [
+    // "elimina/borra/delete la carpeta/archivo X (de mi escritorio)"
+    /\b(?:elimina|eliminar|borra|borrar|delete|remove|quita|quitar)\s+(?:la\s+|el\s+|the\s+)?(?:carpeta|archivo|folder|file|directorio|directory)\s+["']?([^"'\n]{1,160})["']?/i,
+    // "elimina X de mi escritorio" / "delete X from my desktop"
+    /\b(?:elimina|eliminar|borra|borrar|delete|remove)\s+["']?([^"'\n]{1,120})["']?\s+(?:de|del|from)\s+(?:(?:mi|my)\s+)?(?:escritorio|desktop)/i,
+  ];
+  for (const re of patterns) {
+    const m = prompt.match(re);
+    if (m?.[1]) {
+      let name = m[1].trim()
+        .replace(/\s+(?:de|del|from)\s+(?:(?:mi|my)\s+)?(?:escritorio|desktop)\b.*$/i, "")
+        .replace(/\s+(?:por\s+favor|please)\b.*$/i, "")
+        .replace(/[.,;:!?]+$/, "")
+        .trim();
+      if (name) return name;
+    }
+  }
+  return null;
+}
+
+function extractNaturalReadIntent(input: string): string | null {
+  const prompt = String(input || "").trim();
+  const patterns = [
+    // "lee/muéstrame/abre el archivo X"
+    /\b(?:lee|leer|muestra|muéstrame|mostrar|abre|abrir|show|read|open|display|cat)\s+(?:el\s+)?(?:archivo|file|contenido\s+de(?:l)?)\s+["']?([^"'\n]{1,160})["']?/i,
+    // "qué contiene/tiene el archivo X" — require "archivo/file" to avoid matching "qué hay en mi escritorio" (which is ls)
+    /\b(?:qué|que|what)\s+(?:contiene|tiene|contains)\s+(?:el\s+)?(?:archivo\s+)?["']?([^"'\n]{1,160})["']?/i,
+    /\b(?:qué|que|what)\s+(?:hay\s+en)\s+(?:el\s+)?(?:archivo|file)\s+["']?([^"'\n]{1,160})["']?/i,
+    // "lee X" (short form when it looks like a file path)
+    /\b(?:lee|leer|read|cat)\s+["']?([^\s"']{2,}\.[\w]{1,10})["']?\s*$/i,
+  ];
+  for (const re of patterns) {
+    const m = prompt.match(re);
+    if (m?.[1]) {
+      let name = m[1].trim().replace(/[.,;:!?]+$/, "").trim();
+      if (name) return name;
+    }
+  }
+  return null;
+}
+
+function extractNaturalShellIntent(input: string): string | null {
+  const prompt = String(input || "").trim();
+  const patterns = [
+    // "ejecuta/corre/run el comando X"
+    /\b(?:ejecuta|ejecutar|corre|correr|run|lanza|lanzar|execute)\s+(?:el\s+)?(?:comando|command)?\s*[:\-]?\s*[`"']?(.+?)[`"']?\s*$/i,
+    // "en la terminal haz/ejecuta X"
+    /\b(?:en\s+(?:la\s+)?terminal|in\s+(?:the\s+)?terminal)\s*[,:]?\s*(?:ejecuta|haz|run|do|type)\s+[`"']?(.+?)[`"']?\s*$/i,
+    // "corre en bash: X"
+    /\b(?:en\s+)?(?:bash|shell|terminal|consola)\s*[:\-]\s*[`"']?(.+?)[`"']?\s*$/i,
+  ];
+  for (const re of patterns) {
+    const m = prompt.match(re);
+    if (m?.[1]?.trim()) return m[1].trim();
+  }
+  return null;
+}
+
+function extractNaturalSysinfoIntent(input: string): boolean {
+  const prompt = String(input || "").trim().toLowerCase();
+  const keywords = [
+    /\b(?:info(?:rmacion)?|información)\s+(?:del?\s+)?(?:sistema|equipo|computadora|mac|pc)\b/i,
+    /\b(?:cuanta|cuánta|how\s+much)\s+(?:memoria|ram|memory)\b/i,
+    /\b(?:espacio|space)\s+(?:en\s+)?(?:disco|disk)\b/i,
+    /\b(?:que|qué|which)\s+(?:version|versión)\s+(?:de\s+)?(?:mac|macos|os)\b/i,
+    /\b(?:cuantos|cuántos|how\s+many)\s+(?:cores?|núcleos|procesadores?|cpus?)\b/i,
+    /\b(?:datos|detalles|specs|especificaciones)\s+(?:del?\s+)?(?:sistema|equipo|computadora|hardware)\b/i,
+  ];
+  return keywords.some(re => re.test(prompt));
+}
+
+function extractNaturalWriteIntent(input: string): { path: string; content: string } | null {
+  const prompt = String(input || "").trim();
+  const patterns = [
+    // "crea un archivo X con el contenido Y"
+    /\b(?:crea|crear|make|create|genera)\s+(?:un\s+)?(?:archivo|file)\s+["']?([^"'\n]{1,120})["']?\s+(?:con\s+(?:el\s+)?(?:contenido|texto|content)|que\s+(?:contenga|diga|tenga))\s+["']?(.+?)["']?\s*$/i,
+    // "escribe/guarda en el archivo X: contenido"
+    /\b(?:escribe|escribir|guarda|guardar|write|save)\s+(?:en\s+)?(?:el\s+)?(?:archivo\s+)?["']?([^"'\n]{1,120})["']?\s*[:\-]\s*["']?(.+?)["']?\s*$/i,
+  ];
+  for (const re of patterns) {
+    const m = prompt.match(re);
+    if (m?.[1]?.trim() && m?.[2]?.trim()) {
+      return { path: m[1].trim(), content: m[2].trim() };
+    }
+  }
+  return null;
+}
+
+function extractNaturalLsIntent(input: string): string | null {
+  const prompt = String(input || "").trim();
+  const patterns = [
+    // "muéstrame los archivos de mi escritorio" / "lista las carpetas de mi escritorio"
+    /\b(?:muestra|muéstrame|lista|listar|show|list)\s+(?:los\s+|las\s+)?(?:archivos|carpetas|files|folders|contenido)\s+(?:de|del|en|in|from)\s+(?:mi\s+)?["']?([^"'\n]{1,120})["']?\s*$/i,
+    // "qué hay en mi escritorio" / "qué archivos tengo en Desktop"
+    /\b(?:qué|que|what)\s+(?:hay|archivos|carpetas|files|folders)\s+(?:en|in|tengo\s+en)\s+(?:mi\s+)?["']?([^"'\n]{1,120})["']?\s*$/i,
+  ];
+  for (const re of patterns) {
+    const m = prompt.match(re);
+    if (m?.[1]?.trim()) {
+      let target = m[1].trim().replace(/[.,;:!?]+$/, "").trim();
+      // Map common words to path aliases
+      if (/^(?:escritorio|desktop)$/i.test(target)) target = "desktop:";
+      return target;
+    }
+  }
+  return null;
+}
+
+// ── New natural language extractors for expanded commands ──
+
+function extractNaturalPsIntent(input: string): boolean {
+  const prompt = String(input || "").trim();
+  const patterns = [
+    /\b(?:muestra|muéstrame|show|list|lista)\s+(?:los\s+)?(?:procesos|processes)\b/i,
+    /\b(?:qué|que|what)\s+(?:procesos|processes)\s+(?:están|estan|are)\s+(?:corriendo|running|activos|active)\b/i,
+    /\b(?:procesos|processes)\s+(?:activos|running|corriendo|en\s+ejecución)\b/i,
+    /\b(?:running|active)\s+(?:procesos|processes)\b/i,
+  ];
+  return patterns.some(re => re.test(prompt));
+}
+
+function extractNaturalKillIntent(input: string): { pid?: string; name?: string } | null {
+  const prompt = String(input || "").trim();
+  const patterns = [
+    // "mata/kill/termina el proceso X" or "mata el proceso con PID 1234"
+    /\b(?:mata|matar|kill|termina|terminar|detén|deten|para|stop)\s+(?:el\s+)?(?:proceso|process)\s+(?:con\s+)?(?:PID\s+)?["']?(\S+)["']?/i,
+    // "kill PID 1234" / "kill 1234"
+    /\b(?:kill|mata|matar|termina)\s+(?:PID\s+)?(\d+)\b/i,
+  ];
+  for (const re of patterns) {
+    const m = prompt.match(re);
+    if (m?.[1]?.trim()) {
+      const val = m[1].trim();
+      if (/^\d+$/.test(val)) return { pid: val };
+      return { name: val };
+    }
+  }
+  return null;
+}
+
+function extractNaturalPortsIntent(input: string): boolean {
+  const prompt = String(input || "").trim();
+  const patterns = [
+    /\b(?:qué|que|which|what)\s+(?:puertos|ports)\s+(?:están|estan|are)\s+(?:abiertos|open|en\s+uso|in\s+use|listening|escuchando)\b/i,
+    /\b(?:puertos|ports)\s+(?:abiertos|open|en\s+uso|in\s+use|listening|activos)\b/i,
+    /\b(?:muestra|muéstrame|show|list|lista)\s+(?:los\s+)?(?:puertos|ports)\b/i,
+    /\b(?:listening)\s+(?:puertos|ports)\b/i,
+  ];
+  return patterns.some(re => re.test(prompt));
+}
+
+function extractNaturalGitIntent(input: string): string | null {
+  const prompt = String(input || "").trim();
+  const patterns = [
+    // "git status" / "git add ." / "git commit -m ..."
+    /^git\s+(.+)$/i,
+    // "haz un commit con mensaje X"
+    /\b(?:haz|hacer|make|do)\s+(?:un\s+)?commit\s+(?:con\s+(?:el\s+)?(?:mensaje|message)\s+)?["']?(.+?)["']?\s*$/i,
+    // "estado del repositorio" / "repository status"
+    /\b(?:estado|status)\s+(?:del?\s+)?(?:repositorio|repo|repository)\b/i,
+    // "push to remote" / "sube los cambios"
+    /\b(?:push|sube|subir)\s+(?:(?:los|the)\s+)?(?:cambios|changes|commits?)\b/i,
+    // "pull / jala los cambios"
+    /\b(?:pull|jala|bajar|download)\s+(?:(?:los|the)\s+)?(?:cambios|changes|commits?)\b/i,
+  ];
+  for (const re of patterns) {
+    const m = prompt.match(re);
+    if (m) {
+      // For the "git <subcommand>" form, return the subcommand
+      if (/^git\s+/i.test(prompt)) return prompt.replace(/^git\s+/i, "").trim();
+      // For "haz un commit con mensaje X"
+      if (m[1] && /commit/i.test(prompt)) return `commit -m "${m[1].trim()}"`;
+      // Status
+      if (/(?:estado|status)/i.test(prompt)) return "status";
+      if (/(?:push|sube|subir)/i.test(prompt)) return "push";
+      if (/(?:pull|jala|bajar)/i.test(prompt)) return "pull";
+      return m[1]?.trim() || "status";
+    }
+  }
+  return null;
+}
+
+function extractNaturalDockerIntent(input: string): string | null {
+  const prompt = String(input || "").trim();
+  const patterns = [
+    /^docker\s+(.+)$/i,
+    /\b(?:contenedores|containers)\s+(?:activos|running|corriendo)\b/i,
+    /\b(?:muestra|muéstrame|show|list|lista)\s+(?:los\s+)?(?:contenedores|containers|dockers?)\b/i,
+    /\b(?:imágenes|imagenes|images)\s+(?:de\s+)?docker\b/i,
+  ];
+  for (const re of patterns) {
+    const m = prompt.match(re);
+    if (m) {
+      if (/^docker\s+/i.test(prompt)) return prompt.replace(/^docker\s+/i, "").trim();
+      if (/(?:contenedores|containers)/i.test(prompt)) return "ps";
+      if (/(?:imágenes|imagenes|images)/i.test(prompt)) return "images";
+      return m[1]?.trim() || "ps";
+    }
+  }
+  return null;
+}
+
+function extractNaturalInstallIntent(input: string): { manager: string; packages: string[] } | null {
+  const prompt = String(input || "").trim();
+  const patterns = [
+    // "instala express con npm" / "npm install express"
+    /\b(?:instala|instalar|install)\s+(.+?)\s+(?:con|with|using|via)\s+(npm|pip|brew|pip3)\b/i,
+    /\b(npm|pip|pip3|brew)\s+install\s+(.+?)\s*$/i,
+    // "instala X usando npm"
+    /\b(?:instala|instalar|install)\s+(.+?)\s+(?:usando|con)\s+(npm|pip|brew|pip3)\b/i,
+  ];
+  for (const re of patterns) {
+    const m = prompt.match(re);
+    if (m) {
+      let manager: string;
+      let pkgStr: string;
+      if (/^(?:npm|pip|pip3|brew)\s+install/i.test(prompt)) {
+        manager = m[1].toLowerCase().replace("pip3", "pip");
+        pkgStr = m[2];
+      } else {
+        pkgStr = m[1];
+        manager = m[2].toLowerCase().replace("pip3", "pip");
+      }
+      const packages = pkgStr.split(/[\s,]+/).filter(Boolean);
+      if (packages.length > 0) return { manager, packages };
+    }
+  }
+  return null;
+}
+
+function extractNaturalScriptIntent(input: string): { file: string; language?: string } | null {
+  const prompt = String(input || "").trim();
+  const patterns = [
+    // "ejecuta el script test.py" / "corre main.js" / "run script.sh"
+    /\b(?:ejecuta|ejecutar|corre|correr|run)\s+(?:el\s+)?(?:script|archivo|file)\s+["']?([^\s"']{2,}\.\w{1,10})["']?/i,
+    // "python test.py" / "node main.js"
+    /^(?:python3?|node|bash|sh)\s+["']?([^\s"']{2,}\.\w{1,10})["']?/i,
+  ];
+  for (const re of patterns) {
+    const m = prompt.match(re);
+    if (m?.[1]?.trim()) {
+      const file = m[1].trim();
+      const ext = path.extname(file).toLowerCase();
+      let language: string | undefined;
+      if ([".py", ".python"].includes(ext)) language = "python";
+      else if ([".js", ".mjs", ".cjs"].includes(ext)) language = "node";
+      else if ([".sh", ".bash", ".zsh"].includes(ext)) language = "bash";
+      else if ([".ts", ".tsx"].includes(ext)) language = "node";
+      return { file, language };
+    }
+  }
+  return null;
+}
+
+function extractNaturalFindIntent(input: string): { pattern: string; dir?: string } | null {
+  const prompt = String(input || "").trim();
+  const patterns = [
+    // "busca archivos .txt en mi escritorio" / "find all json files"
+    /\b(?:busca|buscar|find|search)\s+(?:todos?\s+(?:los\s+)?)?(?:archivos|files)\s+(?:con\s+extensión\s+)?["']?(\.\w+|\*\.\w+)["']?\s*(?:en|in)\s+(?:mi\s+)?["']?([^"'\n]{1,120})["']?/i,
+    // "busca archivos .txt" (no dir)
+    /\b(?:busca|buscar|find|search)\s+(?:todos?\s+(?:los\s+)?)?(?:archivos|files)\s+(?:con\s+extensión\s+)?["']?(\.\w+|\*\.\w+)["']?\s*$/i,
+    // "busca *.ts" / "find *.json"
+    /\b(?:busca|buscar|find|search)\s+["']?(\*?\.\w+)["']?\s*(?:(?:en|in)\s+(?:mi\s+)?["']?([^"'\n]{1,120})["']?)?\s*$/i,
+  ];
+  for (const re of patterns) {
+    const m = prompt.match(re);
+    if (m?.[1]?.trim()) {
+      let pattern = m[1].trim();
+      if (!pattern.startsWith("*")) pattern = `*${pattern}`;
+      let dir = m[2]?.trim();
+      if (dir && /^(?:escritorio|desktop)$/i.test(dir)) dir = "desktop:";
+      return { pattern, dir };
+    }
+  }
+  return null;
+}
+
+function extractNaturalCdIntent(input: string): string | null {
+  const prompt = String(input || "").trim();
+  const patterns = [
+    // "ve a la carpeta X" / "entra en el directorio X" / "cd al proyecto"
+    /\b(?:ve|ir|entra|entrar|cambia|cambiar|go|move|switch)\s+(?:a\s+(?:la\s+)?|en\s+(?:el\s+)?|al?\s+|to\s+)(?:carpeta|directorio|folder|directory|dir)?\s*["']?([^"'\n]{1,160})["']?\s*$/i,
+    // "cd /tmp" / "cd ~/Desktop"
+    /^cd\s+["']?([^"'\n]{1,160})["']?\s*$/i,
+  ];
+  for (const re of patterns) {
+    const m = prompt.match(re);
+    if (m?.[1]?.trim()) return m[1].trim();
+  }
+  return null;
+}
+
+function extractNaturalPythonIntent(input: string): string | null {
+  const prompt = String(input || "").trim();
+  // "python: print('hola')" / "py: 2+2" / "ejecuta en python: ..."
+  const patterns = [
+    /^(?:python3?|py)\s*[:\-]\s*(.+)$/i,
+    /\b(?:ejecuta|run|corre)\s+(?:en\s+)?(?:python3?|py)\s*[:\-]\s*(.+)$/i,
+    /^(?:python3?|py)\s+(?![\w/\\~.])(.+)$/i,
+  ];
+  for (const re of patterns) {
+    const m = prompt.match(re);
+    if (m?.[1]?.trim()) return m[1].trim();
+  }
+  return null;
+}
+
+function extractNaturalNodeIntent(input: string): string | null {
+  const prompt = String(input || "").trim();
+  const patterns = [
+    /^(?:node|js)\s*[:\-]\s*(.+)$/i,
+    /\b(?:ejecuta|run|corre)\s+(?:en\s+)?(?:node|javascript|js)\s*[:\-]\s*(.+)$/i,
+  ];
+  for (const re of patterns) {
+    const m = prompt.match(re);
+    if (m?.[1]?.trim()) return m[1].trim();
+  }
   return null;
 }
 
@@ -175,7 +576,43 @@ type LocalControlCommand =
   | "mkdir"
   | "ls"
   | "mv"
-  | "rename";
+  | "rename"
+  | "rm"
+  | "touch"
+  | "read"
+  | "write"
+  | "append"
+  | "replace"
+  | "stat"
+  | "sysinfo"
+  | "shell"
+  | "cp"
+  // ── New commands (Phase 1 expansion) ──
+  | "ps"
+  | "kill"
+  | "ports"
+  | "find"
+  | "grep"
+  | "tree"
+  | "chmod"
+  | "diff"
+  | "python"
+  | "node"
+  | "script"
+  | "npm"
+  | "pip"
+  | "brew"
+  | "git"
+  | "docker"
+  | "cd"
+  | "pwd"
+  | "history"
+  | "monitor"
+  | "open"
+  | "env"
+  | "top"
+  | "du"
+  | "which";
 
 type LocalControlRequest = {
   command: LocalControlCommand;
@@ -193,7 +630,7 @@ type LocalControlState = {
   reason?: string;
 };
 
-type LocalControlResult =
+export type LocalControlResult =
   | { handled: false }
   | {
       handled: true;
@@ -209,8 +646,199 @@ const LOCAL_ACTION_STATE_PATH = path.join(os.homedir(), ".iliagpt-local-actions-
 const LOCAL_ACTIONS_DEFAULT_ROOT = path.resolve(path.join(os.homedir(), "Desktop"));
 const LOCAL_ACTIONS_PROJECT_ROOT = path.resolve(process.cwd());
 const LOCAL_ACTION_ADMIN_TOKEN = (process.env.ILIAGPT_LOCAL_ACTION_TOKEN || "").trim();
+const LOCAL_MAX_CONTROL_ENABLED =
+  process.env.ILIAGPT_LOCAL_FULL_SHELL === "true" ||
+  process.env.ILIAGPT_LOCAL_FULL_ACCESS === "true";
+const LOCAL_FULL_SHELL_ENABLED =
+  process.env.ILIAGPT_LOCAL_FULL_SHELL === "true" ||
+  process.env.ILIAGPT_LOCAL_FULL_ACCESS === "true" ||
+  process.env.NODE_ENV !== "production";
 const LOCAL_CONFIRM_RE = /\b(?:confirmar|confirm|--confirm)\b/i;
 const LOCAL_TOKEN_RE = /(?:^|\s)token=([^\s]+)/i;
+const LOCAL_SHELL_TIMEOUT_MS = 45_000;
+const LOCAL_SHELL_MAX_STDOUT_CHARS = 24_000;
+const LOCAL_SHELL_MAX_STDERR_CHARS = 8_000;
+const LOCAL_SHELL_MAX_BUFFER_BYTES = 8 * 1024 * 1024;
+
+// ── TerminalController Session Manager ──
+// Module-level to avoid bundler try/catch variable renaming bug
+let _localTerminalSessionId: string | null = null;
+let _localTerminalSessionCwd: string = LOCAL_ACTIONS_DEFAULT_ROOT;
+let _localCommandHistory: Array<{ ts: string; command: string; exitCode: number | null }> = [];
+
+function getOrCreateLocalTerminalSession(): string {
+  if (_localTerminalSessionId) {
+    try {
+      terminalController.getCwd(_localTerminalSessionId);
+      return _localTerminalSessionId;
+    } catch {
+      _localTerminalSessionId = null;
+    }
+  }
+  _localTerminalSessionId = terminalController.createSession(os.homedir(), { ...process.env as Record<string, string> });
+  _localTerminalSessionCwd = LOCAL_ACTIONS_DEFAULT_ROOT;
+  return _localTerminalSessionId;
+}
+
+function pushLocalCommandHistory(command: string, exitCode: number | null): void {
+  _localCommandHistory.push({ ts: new Date().toISOString(), command, exitCode });
+  if (_localCommandHistory.length > 200) _localCommandHistory = _localCommandHistory.slice(-200);
+}
+
+type LocalShellExecutionResult = {
+  commandLine: string;
+  cwd: string;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  truncated: boolean;
+  timedOut: boolean;
+};
+
+function shellQuoteArg(value: string): string {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+function normalizeLocalSignal(rawSignal?: string): string {
+  const cleaned = String(rawSignal || "SIGTERM").trim().toUpperCase();
+  if (!cleaned) return "SIGTERM";
+  const normalized = cleaned.startsWith("SIG") ? cleaned : `SIG${cleaned}`;
+  if (!/^SIG[A-Z0-9]+$/.test(normalized)) return "SIGTERM";
+  return normalized;
+}
+
+function ensureLocalCwd(allowedRoots: string[]): string {
+  const current = path.resolve(_localTerminalSessionCwd || LOCAL_ACTIONS_DEFAULT_ROOT);
+  if (isAllowedLocalPath(current, allowedRoots)) {
+    return current;
+  }
+  const fallback = isAllowedLocalPath(LOCAL_ACTIONS_DEFAULT_ROOT, allowedRoots)
+    ? LOCAL_ACTIONS_DEFAULT_ROOT
+    : allowedRoots[0] || path.resolve("/");
+  _localTerminalSessionCwd = path.resolve(fallback);
+  return _localTerminalSessionCwd;
+}
+
+function formatLocalShellMessage(result: LocalShellExecutionResult): string {
+  const header = `$ ${result.commandLine}`;
+  const stdoutBlock = result.stdout || "(sin salida)";
+  const truncatedInfo = result.truncated ? "\n[...salida truncada...]" : "";
+  const pieces = [
+    `cwd: ${result.cwd}`,
+    `\`\`\`\n${header}\n${stdoutBlock}${truncatedInfo}\n\`\`\``,
+  ];
+  if (result.stderr) {
+    pieces.push(`STDERR:\n\`\`\`\n${result.stderr}\n\`\`\``);
+  }
+  pieces.push(`exit_code=${result.exitCode}${result.timedOut ? " (timeout)" : ""}`);
+  return pieces.join("\n");
+}
+
+async function runLocalShellCommand(
+  commandLine: string,
+  options: {
+    allowedRoots: string[];
+    cwd?: string;
+    timeoutMs?: number;
+    stdoutMaxChars?: number;
+    stderrMaxChars?: number;
+  }
+): Promise<LocalShellExecutionResult> {
+  const trimmedCommand = String(commandLine || "").trim();
+  const cwd = path.resolve(options.cwd || ensureLocalCwd(options.allowedRoots));
+  const timeoutMs = Math.max(1000, options.timeoutMs ?? LOCAL_SHELL_TIMEOUT_MS);
+  const stdoutMaxChars = Math.max(500, options.stdoutMaxChars ?? LOCAL_SHELL_MAX_STDOUT_CHARS);
+  const stderrMaxChars = Math.max(500, options.stderrMaxChars ?? LOCAL_SHELL_MAX_STDERR_CHARS);
+
+  if (!trimmedCommand) {
+    return {
+      commandLine: "",
+      cwd,
+      exitCode: 1,
+      stdout: "",
+      stderr: "Comando vacio.",
+      truncated: false,
+      timedOut: false,
+    };
+  }
+
+  const BLOCKED_SHELL_PATTERNS = [
+    /:\(\)\s*\{.*\}\s*;/i, // fork bomb
+    /\bdd\s+if=\/dev\/(zero|random)/i, // disk destroyer
+    /\bmkfs\b/i, // filesystem formatting
+    />\s*\/dev\/(sd[a-z]\d*|disk\d+)/i, // writes to raw disks
+  ];
+  for (const pattern of BLOCKED_SHELL_PATTERNS) {
+    if (pattern.test(trimmedCommand)) {
+      return {
+        commandLine: trimmedCommand,
+        cwd,
+        exitCode: 1,
+        stdout: "",
+        stderr: "Comando bloqueado por filtro de seguridad.",
+        truncated: false,
+        timedOut: false,
+      };
+    }
+  }
+
+  const { execFile } = await import("child_process");
+  const { promisify } = await import("util");
+  const execFileAsync = promisify(execFile);
+
+  try {
+    const runResult = await execFileAsync("/bin/bash", ["-lc", `set -o pipefail; ${trimmedCommand}`], {
+      timeout: timeoutMs,
+      maxBuffer: LOCAL_SHELL_MAX_BUFFER_BYTES,
+      cwd,
+      env: { ...process.env, HOME: os.homedir(), PWD: cwd },
+    });
+    const rawStdout = String(runResult.stdout || "");
+    const rawStderr = String(runResult.stderr || "");
+    const stdout = rawStdout.slice(0, stdoutMaxChars);
+    const stderr = rawStderr.slice(0, stderrMaxChars);
+    const truncated = rawStdout.length > stdout.length || rawStderr.length > stderr.length;
+    pushLocalCommandHistory(trimmedCommand, 0);
+    return {
+      commandLine: trimmedCommand,
+      cwd,
+      exitCode: 0,
+      stdout,
+      stderr,
+      truncated,
+      timedOut: false,
+    };
+  } catch (error: any) {
+    const rawStdout = String(error?.stdout || "");
+    const stderrFromProcess = String(error?.stderr || "");
+    const rawExitCandidate = error?.code ?? error?.status;
+    const parsedExitCandidate = typeof rawExitCandidate === "number"
+      ? rawExitCandidate
+      : Number.parseInt(String(rawExitCandidate ?? ""), 10);
+    const hasKnownExitCode = Number.isFinite(parsedExitCandidate);
+    const exitCode = hasKnownExitCode ? Number(parsedExitCandidate) : 1;
+    const fallbackMessage = String(error?.message || "");
+    const shouldUseFallbackMessage =
+      !stderrFromProcess &&
+      !rawStdout &&
+      !hasKnownExitCode;
+    const rawStderr = stderrFromProcess || (shouldUseFallbackMessage ? fallbackMessage : "");
+    const stdout = rawStdout.slice(0, stdoutMaxChars);
+    const stderr = rawStderr.slice(0, stderrMaxChars);
+    const timedOut = Boolean(error?.killed);
+    const truncated = rawStdout.length > stdout.length || rawStderr.length > stderr.length;
+    pushLocalCommandHistory(trimmedCommand, exitCode);
+    return {
+      commandLine: trimmedCommand,
+      cwd,
+      exitCode,
+      stdout,
+      stderr,
+      truncated,
+      timedOut,
+    };
+  }
+}
 
 function tokenizeLocalCommand(input: string): string[] {
   const tokens: string[] = [];
@@ -241,6 +869,9 @@ function parseConfiguredLocalRoot(rawRoot: string): string | null {
 
 function getAllowedLocalRoots(): string[] {
   const roots = new Set<string>([LOCAL_ACTIONS_DEFAULT_ROOT, LOCAL_ACTIONS_PROJECT_ROOT]);
+  if (LOCAL_MAX_CONTROL_ENABLED) {
+    roots.add(path.resolve("/"));
+  }
   const rawRoots = process.env.ILIAGPT_LOCAL_ALLOWED_ROOTS;
   if (rawRoots) {
     for (const segment of rawRoots.split(",")) {
@@ -254,6 +885,10 @@ function getAllowedLocalRoots(): string[] {
 function isPathInsideRoot(targetPath: string, rootPath: string): boolean {
   const resolvedTarget = path.resolve(targetPath);
   const resolvedRoot = path.resolve(rootPath);
+  // Special-case filesystem root ("/" on macOS/Linux): every absolute path is inside it.
+  if (resolvedRoot === path.parse(resolvedRoot).root) {
+    return path.isAbsolute(resolvedTarget);
+  }
   return resolvedTarget === resolvedRoot || resolvedTarget.startsWith(`${resolvedRoot}${path.sep}`);
 }
 
@@ -286,6 +921,40 @@ function resolveLocalPath(rawPath: string | undefined, basePath: string = LOCAL_
   }
 
   return path.resolve(basePath, trimmed);
+}
+
+const LOCAL_FILE_READ_MAX_BYTES = 120_000;
+const LOCAL_FILE_READ_MAX_CHARS = 16_000;
+const LOCAL_FILE_WRITE_MAX_CHARS = 200_000;
+
+function formatLocalBytes(value: number): string {
+  if (!Number.isFinite(value) || value < 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = value;
+  let unitIdx = 0;
+  while (size >= 1024 && unitIdx < units.length - 1) {
+    size /= 1024;
+    unitIdx += 1;
+  }
+  const rounded = size >= 10 || unitIdx === 0 ? size.toFixed(0) : size.toFixed(1);
+  return `${rounded} ${units[unitIdx]}`;
+}
+
+function isLikelyTextBuffer(buffer: Buffer): boolean {
+  if (!buffer.length) return true;
+  const sample = buffer.subarray(0, Math.min(buffer.length, 4096));
+  let suspiciousBytes = 0;
+  for (const byte of sample) {
+    if (byte === 0) return false;
+    const isControl = byte < 32 && byte !== 9 && byte !== 10 && byte !== 13;
+    if (isControl) suspiciousBytes += 1;
+  }
+  return suspiciousBytes / sample.length < 0.12;
+}
+
+function isProtectedLocalRootPath(targetPath: string, allowedRoots: string[]): boolean {
+  const resolvedTarget = path.resolve(targetPath);
+  return allowedRoots.some((rootPath) => path.resolve(rootPath) === resolvedTarget);
 }
 
 async function readLocalControlState(): Promise<LocalControlState> {
@@ -338,14 +1007,40 @@ function buildLocalHelpText(): string {
     ? "Incluye token=<tu_token> en comandos de ejecucion."
     : "Tip: configura ILIAGPT_LOCAL_ACTION_TOKEN para requerir token admin.";
   return [
-    "Comandos locales permitidos:",
-    "1) DETENEROFF",
-    "2) DETENERON token=<token> confirmar",
-    "3) /local status",
-    "4) /local ls [desktop:|project:|ruta]",
-    "5) /local mkdir <ruta>",
-    "6) /local mv <origen> <destino> confirmar",
-    "7) /local rename <origen> <nuevo_nombre> confirmar",
+    "=== Control Local ILIAGPT — 42 Comandos ===\n",
+    "📂 Archivos:",
+    "  ls [ruta] • mkdir <ruta> • touch <archivo> • read <archivo>",
+    "  write <archivo> \"contenido\" • append <archivo> \"contenido\"",
+    "  replace <archivo> \"buscar\" \"reemplazo\" confirmar",
+    "  mv <origen> <destino> • rename <origen> <nuevo> • rm <ruta> confirmar",
+    "  cp <origen> <destino> • stat <ruta> • find <patron> [ruta]",
+    "  grep <patron> <archivo|ruta> • tree [ruta] • chmod <permisos> <ruta>",
+    "  diff <archivo1> <archivo2>\n",
+    "💻 Terminal:",
+    "  shell <comando> • cd <ruta> • pwd • history",
+    "  python <codigo|archivo> • node <codigo|archivo> • script <archivo>",
+    "  open <app|archivo> • env [VAR=valor] • which <programa>\n",
+    "📊 Sistema:",
+    "  sysinfo • ps • kill <PID> • ports • top • du <ruta> • monitor\n",
+    "📦 Paquetes:",
+    "  npm <subcomando> • pip <subcomando> • brew <subcomando>\n",
+    "🔧 Git:",
+    "  git status • git add . • git commit -m \"msg\" • git push",
+    "  git pull • git diff • git log • git branch\n",
+    "🐳 Docker:",
+    "  docker ps • docker images • docker run <image> <cmd>",
+    "  docker stop <id> • docker rm <id>\n",
+    "⚙️ Control:",
+    "  help • status • DETENEROFF • DETENERON token=<token> confirmar\n",
+    "Lenguaje natural soportado:",
+    '  "muéstrame los procesos" • "qué puertos están abiertos"',
+    '  "mata el proceso 1234" • "busca archivos .txt en mi escritorio"',
+    '  "git status" • "instala express con npm"',
+    '  "ejecuta en python: print(2+2)" • "ve a la carpeta /tmp"',
+    "",
+    LOCAL_MAX_CONTROL_ENABLED
+      ? "🟢 Modo max-control activo: rutas de sistema permitidas."
+      : "🔴 Modo restringido: limita rutas con ILIAGPT_LOCAL_ALLOWED_ROOTS.",
     tokenHint,
   ].join("\n");
 }
@@ -381,16 +1076,123 @@ function parseLocalControlRequest(input: string): LocalControlRequest | null {
 
   const prefixedMatch = raw.match(/^(?:\/local|local:)\s*(.*)$/i);
   if (!prefixedMatch) {
+    // ── Natural language detection for ALL local commands ──
+
+    // 1. mkdir — "crea una carpeta llamada X en mi escritorio"
     const folderName = extractDesktopFolderNameFromPrompt(raw);
-    if (!folderName) return null;
-    return {
-      command: "mkdir",
-      args: [folderName],
-      token: tokenFromRaw,
-      confirm: confirmFromRaw,
-      raw,
-      source: "natural",
-    };
+    if (folderName) {
+      return { command: "mkdir", args: [folderName], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
+    }
+
+    // 2. rm — "elimina/borra/delete la carpeta/archivo X"
+    const rmIntent = extractNaturalRmIntent(raw);
+    if (rmIntent) {
+      return { command: "rm", args: [rmIntent], token: tokenFromRaw, confirm: true, raw, source: "natural" };
+    }
+
+    // 3. read — "lee/muéstrame/abre el archivo X" / "qué contiene X"
+    const readIntent = extractNaturalReadIntent(raw);
+    if (readIntent) {
+      return { command: "read", args: [readIntent], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
+    }
+
+    // 4. shell — "ejecuta/corre/run el comando X" / "en la terminal haz X"
+    const shellIntent = extractNaturalShellIntent(raw);
+    if (shellIntent) {
+      return { command: "shell", args: [shellIntent], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
+    }
+
+    // 5. sysinfo — "info del sistema" / "cuanta memoria" / "espacio en disco"
+    const sysinfoIntent = extractNaturalSysinfoIntent(raw);
+    if (sysinfoIntent) {
+      return { command: "sysinfo", args: [], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
+    }
+
+    // 6. write — "crea un archivo X con el contenido Y"
+    const writeIntent = extractNaturalWriteIntent(raw);
+    if (writeIntent) {
+      return { command: "write", args: [writeIntent.path, writeIntent.content], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
+    }
+
+    // 7. ls — "muéstrame los archivos de mi escritorio" / "lista las carpetas"
+    const lsIntent = extractNaturalLsIntent(raw);
+    if (lsIntent) {
+      return { command: "ls", args: lsIntent ? [lsIntent] : [], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
+    }
+
+    // 8. ps — "muéstrame los procesos" / "qué procesos están corriendo"
+    if (extractNaturalPsIntent(raw)) {
+      return { command: "ps", args: [], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
+    }
+
+    // 9. kill — "mata el proceso X" / "kill 1234"
+    const killIntent = extractNaturalKillIntent(raw);
+    if (killIntent) {
+      return { command: "kill", args: [killIntent.pid || killIntent.name || ""], token: tokenFromRaw, confirm: true, raw, source: "natural" };
+    }
+
+    // 10. ports — "qué puertos están abiertos"
+    if (extractNaturalPortsIntent(raw)) {
+      return { command: "ports", args: [], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
+    }
+
+    // 11. git — "git status" / "haz un commit con mensaje X"
+    const gitIntent = extractNaturalGitIntent(raw);
+    if (gitIntent) {
+      return { command: "git", args: [gitIntent], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
+    }
+
+    // 12. docker — "docker ps" / "contenedores activos"
+    const dockerIntent = extractNaturalDockerIntent(raw);
+    if (dockerIntent) {
+      return { command: "docker", args: [dockerIntent], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
+    }
+
+    // 13. install — "instala express con npm" / "pip install numpy"
+    const installIntent = extractNaturalInstallIntent(raw);
+    if (installIntent) {
+      const cmd = installIntent.manager === "pip" ? "pip" : installIntent.manager === "brew" ? "brew" : "npm";
+      return { command: cmd as LocalControlCommand, args: ["install", ...installIntent.packages], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
+    }
+
+    // 14. script — "ejecuta el script test.py" / "corre main.js"
+    const scriptIntent = extractNaturalScriptIntent(raw);
+    if (scriptIntent) {
+      return { command: "script", args: [scriptIntent.file], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
+    }
+
+    // 15. find — "busca archivos .txt en mi escritorio"
+    const findIntent = extractNaturalFindIntent(raw);
+    if (findIntent) {
+      const findArgs = [findIntent.pattern];
+      if (findIntent.dir) findArgs.push(findIntent.dir);
+      return { command: "find", args: findArgs, token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
+    }
+
+    // 16. cd — "ve a la carpeta X" / "cd /tmp"
+    const cdIntent = extractNaturalCdIntent(raw);
+    if (cdIntent) {
+      return { command: "cd", args: [cdIntent], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
+    }
+
+    // 17. python inline — "python: print(2+2)"
+    const pythonIntent = extractNaturalPythonIntent(raw);
+    if (pythonIntent) {
+      return { command: "python", args: [pythonIntent], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
+    }
+
+    // 18. node inline — "node: console.log('hello')"
+    const nodeIntent = extractNaturalNodeIntent(raw);
+    if (nodeIntent) {
+      return { command: "node", args: [nodeIntent], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
+    }
+
+    // 19. direct terminal line — "git status", "npm run dev", "docker ps", etc.
+    if (/^(?:git|npm|pip|pip3|brew|docker|python|python3|node|bash|sh|ps|top|du|which|find|grep|tree|open|kill|ports|lsof)\b/i.test(raw)) {
+      return { command: "shell", args: [raw], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
+    }
+
+    return null;
   }
 
   let commandBody = String(prefixedMatch[1] || "").trim();
@@ -416,25 +1218,133 @@ function parseLocalControlRequest(input: string): LocalControlRequest | null {
 
   const operation = tokens[0].toLowerCase();
   const args = tokens.slice(1);
-
-  const command: LocalControlCommand =
-    operation === "help" || operation === "ayuda"
-      ? "help"
-      : operation === "status" || operation === "estado"
-        ? "status"
-        : operation === "ls" || operation === "dir" || operation === "listar"
-          ? "ls"
-          : operation === "mkdir" || operation === "carpeta"
-            ? "mkdir"
-            : operation === "mv" || operation === "mover"
-              ? "mv"
-              : operation === "rename" || operation === "renombrar"
-                ? "rename"
-                : operation === "deteneroff" || operation === "deterneroff"
-                  ? "deteneroff"
-                  : operation === "deteneron" || operation === "deterneron"
-                    ? "deteneron"
-                    : "help";
+  const commandAliasMap: Record<string, LocalControlCommand> = {
+    help: "help",
+    ayuda: "help",
+    status: "status",
+    estado: "status",
+    ls: "ls",
+    dir: "ls",
+    listar: "ls",
+    mkdir: "mkdir",
+    carpeta: "mkdir",
+    "crear-carpeta": "mkdir",
+    touch: "touch",
+    mkfile: "touch",
+    archivo: "touch",
+    "crear-archivo": "touch",
+    cat: "read",
+    read: "read",
+    leer: "read",
+    write: "write",
+    escribir: "write",
+    guardar: "write",
+    append: "append",
+    anexar: "append",
+    agregar: "append",
+    replace: "replace",
+    reemplazar: "replace",
+    sustituir: "replace",
+    stat: "stat",
+    detalle: "stat",
+    metadata: "stat",
+    mv: "mv",
+    mover: "mv",
+    rename: "rename",
+    renombrar: "rename",
+    rm: "rm",
+    del: "rm",
+    delete: "rm",
+    borrar: "rm",
+    eliminar: "rm",
+    sysinfo: "sysinfo",
+    sistema: "sysinfo",
+    infoequipo: "sysinfo",
+    info_pc: "sysinfo",
+    info: "sysinfo",
+    shell: "shell",
+    sh: "shell",
+    bash: "shell",
+    exec: "shell",
+    ejecutar: "shell",
+    comando: "shell",
+    terminal: "shell",
+    cp: "cp",
+    copy: "cp",
+    copiar: "cp",
+    copia: "cp",
+    // ── New commands ──
+    ps: "ps",
+    procesos: "ps",
+    processes: "ps",
+    kill: "kill",
+    matar: "kill",
+    terminar: "kill",
+    ports: "ports",
+    puertos: "ports",
+    listening: "ports",
+    find: "find",
+    buscar: "find",
+    search: "find",
+    grep: "grep",
+    "buscar-contenido": "grep",
+    tree: "tree",
+    arbol: "tree",
+    árbol: "tree",
+    chmod: "chmod",
+    permisos: "chmod",
+    diff: "diff",
+    comparar: "diff",
+    compare: "diff",
+    python: "python",
+    py: "python",
+    python3: "python",
+    node: "node",
+    js: "node",
+    script: "script",
+    "ejecutar-script": "script",
+    run: "script",
+    correr: "script",
+    npm: "npm",
+    pip: "pip",
+    pip3: "pip",
+    brew: "brew",
+    homebrew: "brew",
+    git: "git",
+    docker: "docker",
+    contenedor: "docker",
+    container: "docker",
+    cd: "cd",
+    ir: "cd",
+    cambiar: "cd",
+    pwd: "pwd",
+    donde: "pwd",
+    "directorio-actual": "pwd",
+    history: "history",
+    historial: "history",
+    monitor: "monitor",
+    monitorear: "monitor",
+    open: "open",
+    abrir: "open",
+    "abrir-app": "open",
+    env: "env",
+    variables: "env",
+    entorno: "env",
+    top: "top",
+    du: "du",
+    tamano: "du",
+    tamaño: "du",
+    which: "which",
+    "donde-esta": "which",
+    "donde-está": "which",
+    df: "shell",
+    disco: "shell",
+    deteneroff: "deteneroff",
+    deterneroff: "deteneroff",
+    deteneron: "deteneron",
+    deterneron: "deteneron",
+  };
+  const command: LocalControlCommand = commandAliasMap[operation] || "help";
 
   return {
     command,
@@ -468,12 +1378,21 @@ function localSuccessResult(code: string, message: string, payload?: Record<stri
   };
 }
 
-async function executeLocalControlRequest(
+export async function executeLocalControlRequest(
   input: string,
   context: { requestId: string; userId?: string | null }
 ): Promise<LocalControlResult> {
   const parsed = parseLocalControlRequest(input);
-  if (!parsed) return { handled: false };
+  if (!parsed) {
+    if (looksLikeDesktopFolderIntent(input)) {
+      return localErrorResult(
+        400,
+        "LOCAL_FOLDER_NAME_NOT_DETECTED",
+        "Detecte una orden de crear carpeta, pero no pude leer el nombre. Usa: crea una carpeta con nombre <nombre> en mi escritorio."
+      );
+    }
+    return { handled: false };
+  }
 
   if (!LOCAL_DESKTOP_ACTIONS_ENABLED) {
     return localErrorResult(
@@ -568,7 +1487,7 @@ async function executeLocalControlRequest(
     );
   }
 
-  const commandRequiresConfirm = parsed.command === "mv" || parsed.command === "rename";
+  const commandRequiresConfirm = ["mv", "rename", "rm", "replace", "kill", "chmod"].includes(parsed.command);
   if (commandRequiresConfirm && !parsed.confirm) {
     return localErrorResult(
       400,
@@ -583,11 +1502,17 @@ async function executeLocalControlRequest(
       if (!targetRaw) {
         return localErrorResult(400, "LOCAL_MISSING_ARG", "Uso: /local mkdir <ruta>");
       }
+      const normalizedTargetRaw = targetRaw.trim();
+      const targetForValidation = normalizedTargetRaw.replace(/^(desktop|project):/i, "");
       const targetPath = resolveLocalPath(targetRaw, LOCAL_ACTIONS_DEFAULT_ROOT);
       if (!isAllowedLocalPath(targetPath, allowedRoots)) {
         return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "Ruta fuera de las carpetas permitidas.");
       }
-      if (/[\\:*?"<>|]/.test(targetRaw) || targetRaw.includes("..")) {
+      if (
+        /[\\*?"<>|]/.test(targetForValidation) ||
+        targetForValidation.includes("..") ||
+        /:[^/\\]/.test(targetForValidation)
+      ) {
         return localErrorResult(400, "LOCAL_INVALID_FOLDER_NAME", "Nombre o ruta de carpeta inválida.");
       }
 
@@ -632,6 +1557,402 @@ async function executeLocalControlRequest(
         command: parsed.command,
         path: targetPath,
         total: sorted.length,
+      });
+    }
+
+    if (parsed.command === "sysinfo") {
+      const cpus = os.cpus();
+      const cpuModel = cpus[0]?.model || "unknown";
+      const message = [
+        `Sistema: ${os.type()} ${os.release()} (${os.platform()}/${os.arch()})`,
+        `Host: ${os.hostname()}`,
+        `Node: ${process.version}`,
+        `CPU: ${cpuModel} x${cpus.length}`,
+        `Memoria libre: ${formatLocalBytes(os.freemem())} / Total: ${formatLocalBytes(os.totalmem())}`,
+        `Uptime (s): ${Math.floor(os.uptime())}`,
+        `Home: ${os.homedir()}`,
+        `Proyecto: ${LOCAL_ACTIONS_PROJECT_ROOT}`,
+        `Roots permitidos: ${allowedRoots.join(", ")}`,
+      ].join("\n");
+      await appendLocalControlAudit("local_control_sysinfo", {
+        requestId: context.requestId,
+        userId: actor,
+      });
+      return localSuccessResult("LOCAL_SYSINFO_OK", message, {
+        command: parsed.command,
+        platform: os.platform(),
+        arch: os.arch(),
+        hostname: os.hostname(),
+        nodeVersion: process.version,
+      });
+    }
+
+    if (parsed.command === "stat") {
+      const targetRaw = parsed.args[0];
+      if (!targetRaw) {
+        return localErrorResult(400, "LOCAL_MISSING_ARG", "Uso: /local stat <ruta>");
+      }
+      const targetPath = resolveLocalPath(targetRaw, LOCAL_ACTIONS_DEFAULT_ROOT);
+      if (!isAllowedLocalPath(targetPath, allowedRoots)) {
+        return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "Ruta fuera de las carpetas permitidas.");
+      }
+      let targetStat;
+      try {
+        targetStat = await fs.stat(targetPath);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException)?.code;
+        if (code === "ENOENT") {
+          return localErrorResult(404, "LOCAL_NOT_FOUND", "La ruta no existe.");
+        }
+        throw error;
+      }
+      const type = targetStat.isDirectory() ? "directory" : targetStat.isFile() ? "file" : "other";
+      const details = [
+        `Ruta: ${targetPath}`,
+        `Tipo: ${type}`,
+        `Tamano: ${formatLocalBytes(targetStat.size)} (${targetStat.size} bytes)`,
+        `Creado: ${targetStat.birthtime.toISOString()}`,
+        `Modificado: ${targetStat.mtime.toISOString()}`,
+      ];
+      if (targetStat.isDirectory()) {
+        try {
+          const entries = await fs.readdir(targetPath);
+          details.push(`Elementos: ${entries.length}`);
+        } catch {
+          details.push("Elementos: no disponible");
+        }
+      }
+      await appendLocalControlAudit("local_control_stat", {
+        requestId: context.requestId,
+        userId: actor,
+        targetPath,
+      });
+      return localSuccessResult("LOCAL_STAT_OK", details.join("\n"), {
+        command: parsed.command,
+        path: targetPath,
+        type,
+        size: targetStat.size,
+      });
+    }
+
+    if (parsed.command === "touch") {
+      const targetRaw = parsed.args[0];
+      if (!targetRaw) {
+        return localErrorResult(400, "LOCAL_MISSING_ARG", "Uso: /local touch <ruta_archivo>");
+      }
+      const targetPath = resolveLocalPath(targetRaw, LOCAL_ACTIONS_DEFAULT_ROOT);
+      if (!isAllowedLocalPath(targetPath, allowedRoots)) {
+        return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "Ruta fuera de las carpetas permitidas.");
+      }
+      let existed = false;
+      try {
+        const beforeStat = await fs.stat(targetPath);
+        if (beforeStat.isDirectory()) {
+          return localErrorResult(400, "LOCAL_IS_DIRECTORY", "La ruta apunta a un directorio. Usa una ruta de archivo.");
+        }
+        existed = true;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException)?.code;
+        if (code !== "ENOENT") throw error;
+      }
+
+      await fs.mkdir(path.dirname(targetPath), { recursive: true });
+      const handle = await fs.open(targetPath, "a");
+      await handle.close();
+      const now = new Date();
+      await fs.utimes(targetPath, now, now).catch(() => undefined);
+
+      await appendLocalControlAudit("local_control_touch", {
+        requestId: context.requestId,
+        userId: actor,
+        targetPath,
+        existed,
+      });
+      return localSuccessResult(
+        "LOCAL_TOUCH_OK",
+        existed ? `Archivo actualizado: ${targetPath}` : `Archivo creado: ${targetPath}`,
+        {
+          command: parsed.command,
+          path: targetPath,
+          existed,
+        }
+      );
+    }
+
+    if (parsed.command === "read") {
+      const targetRaw = parsed.args[0];
+      if (!targetRaw) {
+        return localErrorResult(400, "LOCAL_MISSING_ARG", "Uso: /local read <ruta_archivo>");
+      }
+      const targetPath = resolveLocalPath(targetRaw, LOCAL_ACTIONS_DEFAULT_ROOT);
+      if (!isAllowedLocalPath(targetPath, allowedRoots)) {
+        return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "Ruta fuera de las carpetas permitidas.");
+      }
+      let targetStat;
+      try {
+        targetStat = await fs.stat(targetPath);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException)?.code;
+        if (code === "ENOENT") {
+          return localErrorResult(404, "LOCAL_NOT_FOUND", "El archivo no existe.");
+        }
+        throw error;
+      }
+      if (!targetStat.isFile()) {
+        return localErrorResult(400, "LOCAL_NOT_FILE", "La ruta indicada no es un archivo.");
+      }
+
+      const bytesToRead = Math.min(Number(targetStat.size) || 0, LOCAL_FILE_READ_MAX_BYTES);
+      let chunk = Buffer.alloc(0);
+      if (bytesToRead > 0) {
+        const handle = await fs.open(targetPath, "r");
+        try {
+          const buffer = Buffer.alloc(bytesToRead);
+          const { bytesRead } = await handle.read(buffer, 0, bytesToRead, 0);
+          chunk = buffer.subarray(0, bytesRead);
+        } finally {
+          await handle.close();
+        }
+      }
+
+      if (!isLikelyTextBuffer(chunk)) {
+        return localSuccessResult(
+          "LOCAL_READ_BINARY",
+          `El archivo parece binario: ${targetPath} (${formatLocalBytes(targetStat.size)}).`,
+          {
+            command: parsed.command,
+            path: targetPath,
+            size: targetStat.size,
+            binary: true,
+          }
+        );
+      }
+
+      let text = chunk.toString("utf-8");
+      const wasByteTruncated = targetStat.size > bytesToRead;
+      let wasCharTruncated = false;
+      if (text.length > LOCAL_FILE_READ_MAX_CHARS) {
+        text = text.slice(0, LOCAL_FILE_READ_MAX_CHARS);
+        wasCharTruncated = true;
+      }
+      const suffix = wasByteTruncated || wasCharTruncated
+        ? `\n\n[Salida truncada. Tamano total: ${formatLocalBytes(targetStat.size)}]`
+        : "";
+
+      await appendLocalControlAudit("local_control_read", {
+        requestId: context.requestId,
+        userId: actor,
+        targetPath,
+        size: targetStat.size,
+        truncated: wasByteTruncated || wasCharTruncated,
+      });
+      return localSuccessResult(
+        "LOCAL_READ_OK",
+        `Contenido de ${targetPath}:\n${text || "(archivo vacio)"}${suffix}`,
+        {
+          command: parsed.command,
+          path: targetPath,
+          size: targetStat.size,
+          truncated: wasByteTruncated || wasCharTruncated,
+        }
+      );
+    }
+
+    if (parsed.command === "write") {
+      const targetRaw = parsed.args[0];
+      const content = parsed.args.slice(1).join(" ");
+      if (!targetRaw || parsed.args.length < 2) {
+        return localErrorResult(400, "LOCAL_MISSING_ARG", "Uso: /local write <ruta_archivo> \"contenido\"");
+      }
+      if (content.length > LOCAL_FILE_WRITE_MAX_CHARS) {
+        return localErrorResult(
+          400,
+          "LOCAL_CONTENT_TOO_LARGE",
+          `Contenido demasiado grande. Maximo permitido: ${LOCAL_FILE_WRITE_MAX_CHARS} caracteres.`
+        );
+      }
+
+      const targetPath = resolveLocalPath(targetRaw, LOCAL_ACTIONS_DEFAULT_ROOT);
+      if (!isAllowedLocalPath(targetPath, allowedRoots)) {
+        return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "Ruta fuera de las carpetas permitidas.");
+      }
+
+      let existed = false;
+      try {
+        const current = await fs.stat(targetPath);
+        if (current.isDirectory()) {
+          return localErrorResult(400, "LOCAL_IS_DIRECTORY", "La ruta apunta a un directorio. Usa una ruta de archivo.");
+        }
+        existed = true;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException)?.code;
+        if (code !== "ENOENT") throw error;
+      }
+
+      if (existed && !parsed.confirm) {
+        return localErrorResult(
+          400,
+          "LOCAL_CONFIRM_REQUIRED",
+          "El archivo ya existe. Repite con confirmar para sobrescribir."
+        );
+      }
+
+      await fs.mkdir(path.dirname(targetPath), { recursive: true });
+      await fs.writeFile(targetPath, content, "utf-8");
+      await appendLocalControlAudit("local_control_write", {
+        requestId: context.requestId,
+        userId: actor,
+        targetPath,
+        existed,
+        contentLength: content.length,
+      });
+      return localSuccessResult(
+        "LOCAL_WRITE_OK",
+        existed ? `Archivo sobrescrito: ${targetPath}` : `Archivo creado: ${targetPath}`,
+        {
+          command: parsed.command,
+          path: targetPath,
+          existed,
+          contentLength: content.length,
+        }
+      );
+    }
+
+    if (parsed.command === "append") {
+      const targetRaw = parsed.args[0];
+      const content = parsed.args.slice(1).join(" ");
+      if (!targetRaw || parsed.args.length < 2) {
+        return localErrorResult(400, "LOCAL_MISSING_ARG", "Uso: /local append <ruta_archivo> \"contenido\"");
+      }
+      if (content.length > LOCAL_FILE_WRITE_MAX_CHARS) {
+        return localErrorResult(
+          400,
+          "LOCAL_CONTENT_TOO_LARGE",
+          `Contenido demasiado grande. Maximo permitido: ${LOCAL_FILE_WRITE_MAX_CHARS} caracteres.`
+        );
+      }
+      const targetPath = resolveLocalPath(targetRaw, LOCAL_ACTIONS_DEFAULT_ROOT);
+      if (!isAllowedLocalPath(targetPath, allowedRoots)) {
+        return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "Ruta fuera de las carpetas permitidas.");
+      }
+
+      try {
+        const current = await fs.stat(targetPath);
+        if (current.isDirectory()) {
+          return localErrorResult(400, "LOCAL_IS_DIRECTORY", "La ruta apunta a un directorio. Usa una ruta de archivo.");
+        }
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException)?.code;
+        if (code !== "ENOENT") throw error;
+      }
+
+      await fs.mkdir(path.dirname(targetPath), { recursive: true });
+      await fs.appendFile(targetPath, content, "utf-8");
+      await appendLocalControlAudit("local_control_append", {
+        requestId: context.requestId,
+        userId: actor,
+        targetPath,
+        contentLength: content.length,
+      });
+      return localSuccessResult("LOCAL_APPEND_OK", `Contenido agregado en: ${targetPath}`, {
+        command: parsed.command,
+        path: targetPath,
+        contentLength: content.length,
+      });
+    }
+
+    if (parsed.command === "replace") {
+      const targetRaw = parsed.args[0];
+      const searchText = parsed.args[1];
+      const replaceText = parsed.args.slice(2).join(" ");
+      if (!targetRaw || typeof searchText !== "string" || parsed.args.length < 3) {
+        return localErrorResult(
+          400,
+          "LOCAL_MISSING_ARG",
+          "Uso: /local replace <ruta_archivo> \"buscar\" \"reemplazo\" confirmar"
+        );
+      }
+      const targetPath = resolveLocalPath(targetRaw, LOCAL_ACTIONS_DEFAULT_ROOT);
+      if (!isAllowedLocalPath(targetPath, allowedRoots)) {
+        return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "Ruta fuera de las carpetas permitidas.");
+      }
+
+      let targetStat;
+      try {
+        targetStat = await fs.stat(targetPath);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException)?.code;
+        if (code === "ENOENT") {
+          return localErrorResult(404, "LOCAL_NOT_FOUND", "El archivo no existe.");
+        }
+        throw error;
+      }
+      if (!targetStat.isFile()) {
+        return localErrorResult(400, "LOCAL_NOT_FILE", "La ruta indicada no es un archivo.");
+      }
+      if (targetStat.size > 3_000_000) {
+        return localErrorResult(400, "LOCAL_FILE_TOO_LARGE", "Archivo demasiado grande para replace (>3MB).");
+      }
+
+      const rawBuffer = await fs.readFile(targetPath);
+      if (!isLikelyTextBuffer(rawBuffer)) {
+        return localErrorResult(400, "LOCAL_NOT_TEXT_FILE", "El archivo parece binario y no se puede reemplazar texto.");
+      }
+
+      const currentContent = rawBuffer.toString("utf-8");
+      if (!currentContent.includes(searchText)) {
+        return localErrorResult(404, "LOCAL_TEXT_NOT_FOUND", "No se encontro el texto a reemplazar.");
+      }
+
+      const nextContent = currentContent.replace(searchText, replaceText);
+      await fs.writeFile(targetPath, nextContent, "utf-8");
+      await appendLocalControlAudit("local_control_replace", {
+        requestId: context.requestId,
+        userId: actor,
+        targetPath,
+        searchLength: searchText.length,
+        replaceLength: replaceText.length,
+      });
+      return localSuccessResult("LOCAL_REPLACE_OK", `Reemplazo aplicado en: ${targetPath}`, {
+        command: parsed.command,
+        path: targetPath,
+      });
+    }
+
+    if (parsed.command === "rm") {
+      const targetRaw = parsed.args[0];
+      if (!targetRaw) {
+        return localErrorResult(400, "LOCAL_MISSING_ARG", "Uso: /local rm <ruta> confirmar");
+      }
+      const targetPath = resolveLocalPath(targetRaw, LOCAL_ACTIONS_DEFAULT_ROOT);
+      if (!isAllowedLocalPath(targetPath, allowedRoots)) {
+        return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "Ruta fuera de las carpetas permitidas.");
+      }
+      if (isProtectedLocalRootPath(targetPath, allowedRoots)) {
+        return localErrorResult(403, "LOCAL_PROTECTED_PATH", "No se puede eliminar una carpeta root permitida.");
+      }
+
+      let targetStat;
+      try {
+        targetStat = await fs.stat(targetPath);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException)?.code;
+        if (code === "ENOENT") {
+          return localErrorResult(404, "LOCAL_NOT_FOUND", "La ruta no existe.");
+        }
+        throw error;
+      }
+
+      await fs.rm(targetPath, { recursive: true, force: false });
+      await appendLocalControlAudit("local_control_rm", {
+        requestId: context.requestId,
+        userId: actor,
+        targetPath,
+        targetType: targetStat.isDirectory() ? "directory" : targetStat.isFile() ? "file" : "other",
+      });
+      return localSuccessResult("LOCAL_RM_OK", `Eliminado: ${targetPath}`, {
+        command: parsed.command,
+        path: targetPath,
       });
     }
 
@@ -686,6 +2007,703 @@ async function executeLocalControlRequest(
           destinationPath,
         }
       );
+    }
+
+    if (parsed.command === "cd") {
+      const targetRaw = parsed.args[0];
+      if (!targetRaw) {
+        return localErrorResult(400, "LOCAL_MISSING_ARG", "Uso: /local cd <ruta>");
+      }
+      const currentCwd = ensureLocalCwd(allowedRoots);
+      const targetPath = resolveLocalPath(targetRaw, currentCwd);
+      if (!isAllowedLocalPath(targetPath, allowedRoots)) {
+        return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "Ruta fuera de las carpetas permitidas.");
+      }
+      let targetStat;
+      try {
+        targetStat = await fs.stat(targetPath);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException)?.code;
+        if (code === "ENOENT") {
+          return localErrorResult(404, "LOCAL_NOT_FOUND", "La ruta indicada no existe.");
+        }
+        throw error;
+      }
+      if (!targetStat.isDirectory()) {
+        return localErrorResult(400, "LOCAL_NOT_DIRECTORY", "La ruta indicada no es un directorio.");
+      }
+      _localTerminalSessionCwd = targetPath;
+      await appendLocalControlAudit("local_control_cd", {
+        requestId: context.requestId,
+        userId: actor,
+        cwd: _localTerminalSessionCwd,
+      });
+      return localSuccessResult("LOCAL_CD_OK", `Directorio actual: ${_localTerminalSessionCwd}`, {
+        command: "cd",
+        cwd: _localTerminalSessionCwd,
+      });
+    }
+
+    if (parsed.command === "pwd") {
+      const cwd = ensureLocalCwd(allowedRoots);
+      return localSuccessResult("LOCAL_PWD_OK", cwd, { command: "pwd", cwd });
+    }
+
+    if (parsed.command === "history") {
+      const requestedLimit = Number.parseInt(parsed.args[0] || "20", 10);
+      const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(100, requestedLimit)) : 20;
+      const recent = _localCommandHistory.slice(-limit);
+      const lines = recent.length
+        ? recent.map((entry, idx) => `${idx + 1}. [${entry.ts}] (${entry.exitCode ?? "?"}) ${entry.command}`)
+        : ["(sin historial todavia)"];
+      return localSuccessResult("LOCAL_HISTORY_OK", lines.join("\n"), {
+        command: "history",
+        total: _localCommandHistory.length,
+        shown: recent.length,
+      });
+    }
+
+    if (parsed.command === "env") {
+      if (!parsed.args.length) {
+        const entries = Object.entries(process.env)
+          .sort(([a], [b]) => a.localeCompare(b, "en"))
+          .slice(0, 120)
+          .map(([key, value]) => `${key}=${String(value || "")}`);
+        return localSuccessResult("LOCAL_ENV_OK", entries.join("\n"), {
+          command: "env",
+          shown: entries.length,
+        });
+      }
+      const firstArg = parsed.args[0];
+      if (firstArg.includes("=")) {
+        const eqIdx = firstArg.indexOf("=");
+        const varName = firstArg.slice(0, eqIdx).trim();
+        const varValue = [firstArg.slice(eqIdx + 1), ...parsed.args.slice(1)].join(" ").trim();
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(varName)) {
+          return localErrorResult(400, "LOCAL_INVALID_ENV_NAME", "Nombre de variable invalido.");
+        }
+        process.env[varName] = varValue;
+        return localSuccessResult("LOCAL_ENV_SET_OK", `Variable asignada: ${varName}=${varValue}`, {
+          command: "env",
+          key: varName,
+          valueLength: varValue.length,
+        });
+      }
+      const key = firstArg.trim();
+      if (!key) {
+        return localErrorResult(400, "LOCAL_MISSING_ARG", "Uso: /local env [VAR] o /local env VAR=valor");
+      }
+      return localSuccessResult("LOCAL_ENV_VALUE_OK", `${key}=${String(process.env[key] || "")}`, {
+        command: "env",
+        key,
+      });
+    }
+
+    // ── shell: execute arbitrary shell commands with persistent cwd ──
+    if (parsed.command === "shell") {
+      if (!LOCAL_FULL_SHELL_ENABLED) {
+        return localErrorResult(
+          403,
+          "LOCAL_SHELL_DISABLED",
+          "Ejecucion de shell deshabilitada. Establece ILIAGPT_LOCAL_FULL_SHELL=true en .env"
+        );
+      }
+      const commandLine = parsed.args.join(" ").trim();
+      if (!commandLine) {
+        return localErrorResult(400, "LOCAL_MISSING_ARG", "Uso: /local shell <comando>");
+      }
+
+      const cdOnlyMatch = commandLine.match(/^cd\s+(.+)$/i);
+      if (cdOnlyMatch?.[1]) {
+        const targetRaw = cdOnlyMatch[1].trim().replace(/^["']|["']$/g, "");
+        const currentCwd = ensureLocalCwd(allowedRoots);
+        const targetPath = resolveLocalPath(targetRaw, currentCwd);
+        if (!isAllowedLocalPath(targetPath, allowedRoots)) {
+          return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "Ruta fuera de las carpetas permitidas.");
+        }
+        const targetStat = await fs.stat(targetPath);
+        if (!targetStat.isDirectory()) {
+          return localErrorResult(400, "LOCAL_NOT_DIRECTORY", "La ruta indicada no es un directorio.");
+        }
+        _localTerminalSessionCwd = targetPath;
+        await appendLocalControlAudit("local_control_shell_cd", {
+          requestId: context.requestId,
+          userId: actor,
+          command: commandLine,
+          cwd: _localTerminalSessionCwd,
+        });
+        return localSuccessResult("LOCAL_SHELL_CD_OK", `Directorio actualizado: ${_localTerminalSessionCwd}`, {
+          command: "shell",
+          shellCommand: commandLine,
+          cwd: _localTerminalSessionCwd,
+        });
+      }
+
+      const shellResult = await runLocalShellCommand(commandLine, {
+        allowedRoots,
+        cwd: ensureLocalCwd(allowedRoots),
+      });
+      await appendLocalControlAudit(
+        shellResult.exitCode === 0 ? "local_control_shell" : "local_control_shell_error",
+        {
+          requestId: context.requestId,
+          userId: actor,
+          command: shellResult.commandLine,
+          cwd: shellResult.cwd,
+          exitCode: shellResult.exitCode,
+          timedOut: shellResult.timedOut,
+        }
+      );
+
+      if (shellResult.timedOut) {
+        return localErrorResult(408, "LOCAL_SHELL_TIMEOUT", `Comando excedio el timeout de ${LOCAL_SHELL_TIMEOUT_MS / 1000}s.`);
+      }
+      return localSuccessResult(
+        shellResult.exitCode === 0 ? "LOCAL_SHELL_OK" : "LOCAL_SHELL_ERROR",
+        formatLocalShellMessage(shellResult),
+        {
+          command: "shell",
+          shellCommand: shellResult.commandLine,
+          cwd: shellResult.cwd,
+          exitCode: shellResult.exitCode,
+          truncated: shellResult.truncated,
+        }
+      );
+    }
+
+    if (parsed.command === "ps") {
+      const filter = parsed.args.join(" ").trim();
+      const commandLine = filter
+        ? `ps aux | grep -i -- ${shellQuoteArg(filter)} | grep -v grep | head -n 180`
+        : "ps aux | head -n 180";
+      const result = await runLocalShellCommand(commandLine, { allowedRoots });
+      await appendLocalControlAudit("local_control_ps", {
+        requestId: context.requestId,
+        userId: actor,
+        filter,
+        exitCode: result.exitCode,
+      });
+      if (result.exitCode !== 0 && !result.stdout.trim()) {
+        return localErrorResult(404, "LOCAL_PS_EMPTY", filter ? `No hay procesos que coincidan con "${filter}".` : "No se pudieron obtener procesos.");
+      }
+      return localSuccessResult("LOCAL_PS_OK", formatLocalShellMessage(result), {
+        command: "ps",
+        filter: filter || null,
+      });
+    }
+
+    if (parsed.command === "kill") {
+      const target = String(parsed.args[0] || "").trim();
+      if (!target) {
+        return localErrorResult(400, "LOCAL_MISSING_ARG", "Uso: /local kill <pid|nombre_proceso> [signal] confirmar");
+      }
+      const signal = normalizeLocalSignal(parsed.args[1]);
+      const signalShort = signal.replace(/^SIG/, "");
+      const commandLine = /^\d+$/.test(target)
+        ? `kill -s ${signalShort} ${shellQuoteArg(target)}`
+        : `pkill -${signalShort} -f -- ${shellQuoteArg(target)}`;
+      const result = await runLocalShellCommand(commandLine, { allowedRoots });
+      await appendLocalControlAudit("local_control_kill", {
+        requestId: context.requestId,
+        userId: actor,
+        target,
+        signal,
+        exitCode: result.exitCode,
+      });
+      if (result.exitCode !== 0) {
+        return localErrorResult(400, "LOCAL_KILL_FAILED", formatLocalShellMessage(result));
+      }
+      return localSuccessResult("LOCAL_KILL_OK", formatLocalShellMessage(result), {
+        command: "kill",
+        target,
+        signal,
+      });
+    }
+
+    if (parsed.command === "ports") {
+      const commandLine = "lsof -nP -iTCP -sTCP:LISTEN | head -n 200";
+      const result = await runLocalShellCommand(commandLine, { allowedRoots });
+      await appendLocalControlAudit("local_control_ports", {
+        requestId: context.requestId,
+        userId: actor,
+        exitCode: result.exitCode,
+      });
+      return localSuccessResult("LOCAL_PORTS_OK", formatLocalShellMessage(result), {
+        command: "ports",
+      });
+    }
+
+    if (parsed.command === "find") {
+      if (!parsed.args.length) {
+        return localErrorResult(400, "LOCAL_MISSING_ARG", "Uso: /local find <ruta> <patron> (o /local find <patron> [ruta])");
+      }
+      const first = parsed.args[0];
+      const second = parsed.args[1];
+      const firstLooksPath = /^(?:desktop:|project:|~\/|\/|\.{1,2}\/)/i.test(first || "");
+      const secondLooksPath = /^(?:desktop:|project:|~\/|\/|\.{1,2}\/)/i.test(second || "");
+      let patternRaw = "";
+      let searchPathRaw = ".";
+      if (parsed.args.length === 1) {
+        patternRaw = first;
+      } else if (firstLooksPath && !secondLooksPath) {
+        searchPathRaw = first;
+        patternRaw = parsed.args.slice(1).join(" ").trim();
+      } else {
+        patternRaw = first;
+        searchPathRaw = second || ".";
+      }
+      if (!patternRaw) {
+        return localErrorResult(400, "LOCAL_MISSING_ARG", "Debes indicar el patron de busqueda.");
+      }
+      const searchBase = ensureLocalCwd(allowedRoots);
+      const searchPath = resolveLocalPath(searchPathRaw, searchBase);
+      if (!isAllowedLocalPath(searchPath, allowedRoots)) {
+        return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "Ruta de busqueda fuera de las carpetas permitidas.");
+      }
+      const commandLine = `find ${shellQuoteArg(searchPath)} -iname ${shellQuoteArg(patternRaw)} -print | head -n 250`;
+      const result = await runLocalShellCommand(commandLine, { allowedRoots, cwd: searchPath });
+      await appendLocalControlAudit("local_control_find", {
+        requestId: context.requestId,
+        userId: actor,
+        searchPath,
+        pattern: patternRaw,
+        exitCode: result.exitCode,
+      });
+      return localSuccessResult("LOCAL_FIND_OK", formatLocalShellMessage(result), {
+        command: "find",
+        searchPath,
+        pattern: patternRaw,
+      });
+    }
+
+    if (parsed.command === "grep") {
+      if (parsed.args.length < 2) {
+        return localErrorResult(400, "LOCAL_MISSING_ARG", "Uso: /local grep <ruta> <texto> (o /local grep <texto> [ruta])");
+      }
+      const first = parsed.args[0];
+      const second = parsed.args[1];
+      const firstLooksPath = /^(?:desktop:|project:|~\/|\/|\.{1,2}\/)/i.test(first || "");
+      let targetRaw = ".";
+      let patternRaw = "";
+      if (firstLooksPath) {
+        targetRaw = first;
+        patternRaw = parsed.args.slice(1).join(" ").trim();
+      } else {
+        patternRaw = first;
+        targetRaw = second || ".";
+      }
+      if (!patternRaw) {
+        return localErrorResult(400, "LOCAL_MISSING_ARG", "Debes indicar el texto/patron a buscar.");
+      }
+      const searchBase = ensureLocalCwd(allowedRoots);
+      const targetPath = resolveLocalPath(targetRaw, searchBase);
+      if (!isAllowedLocalPath(targetPath, allowedRoots)) {
+        return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "Ruta fuera de las carpetas permitidas.");
+      }
+      const commandLine = `grep -RIn --binary-files=without-match -- ${shellQuoteArg(patternRaw)} ${shellQuoteArg(targetPath)} | head -n 250`;
+      const result = await runLocalShellCommand(commandLine, { allowedRoots, cwd: path.dirname(targetPath) });
+      await appendLocalControlAudit("local_control_grep", {
+        requestId: context.requestId,
+        userId: actor,
+        targetPath,
+        pattern: patternRaw,
+        exitCode: result.exitCode,
+      });
+      if (result.exitCode !== 0 && !result.stderr.trim()) {
+        return localSuccessResult("LOCAL_GREP_EMPTY", `Sin coincidencias para "${patternRaw}" en ${targetPath}.`, {
+          command: "grep",
+          targetPath,
+          pattern: patternRaw,
+        });
+      }
+      return localSuccessResult("LOCAL_GREP_OK", formatLocalShellMessage(result), {
+        command: "grep",
+        targetPath,
+        pattern: patternRaw,
+      });
+    }
+
+    if (parsed.command === "tree") {
+      const depthArg = parsed.args.at(-1) || "";
+      const parsedDepth = Number.parseInt(depthArg, 10);
+      const depth = Number.isFinite(parsedDepth) ? Math.max(1, Math.min(8, parsedDepth)) : 3;
+      const pathArgs = Number.isFinite(parsedDepth) ? parsed.args.slice(0, -1) : parsed.args;
+      const targetRaw = pathArgs[0] || ".";
+      const targetPath = resolveLocalPath(targetRaw, ensureLocalCwd(allowedRoots));
+      if (!isAllowedLocalPath(targetPath, allowedRoots)) {
+        return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "Ruta fuera de las carpetas permitidas.");
+      }
+      const commandLine = `if command -v tree >/dev/null 2>&1; then tree -a -L ${depth} ${shellQuoteArg(targetPath)}; else find ${shellQuoteArg(targetPath)} -maxdepth ${depth} -print; fi`;
+      const result = await runLocalShellCommand(commandLine, { allowedRoots });
+      await appendLocalControlAudit("local_control_tree", {
+        requestId: context.requestId,
+        userId: actor,
+        targetPath,
+        depth,
+        exitCode: result.exitCode,
+      });
+      return localSuccessResult("LOCAL_TREE_OK", formatLocalShellMessage(result), {
+        command: "tree",
+        targetPath,
+        depth,
+      });
+    }
+
+    if (parsed.command === "chmod") {
+      const mode = String(parsed.args[0] || "").trim();
+      const targetRaw = parsed.args[1];
+      if (!mode || !targetRaw) {
+        return localErrorResult(400, "LOCAL_MISSING_ARG", "Uso: /local chmod <modo> <ruta> confirmar");
+      }
+      if (!/^(?:[0-7]{3,4}|[ugoa]+[+\-=][rwxXst]+)$/.test(mode)) {
+        return localErrorResult(400, "LOCAL_INVALID_CHMOD_MODE", "Modo chmod invalido.");
+      }
+      const targetPath = resolveLocalPath(targetRaw, ensureLocalCwd(allowedRoots));
+      if (!isAllowedLocalPath(targetPath, allowedRoots)) {
+        return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "Ruta fuera de las carpetas permitidas.");
+      }
+      const result = await runLocalShellCommand(`chmod ${shellQuoteArg(mode)} ${shellQuoteArg(targetPath)}`, { allowedRoots });
+      await appendLocalControlAudit("local_control_chmod", {
+        requestId: context.requestId,
+        userId: actor,
+        targetPath,
+        mode,
+        exitCode: result.exitCode,
+      });
+      if (result.exitCode !== 0) {
+        return localErrorResult(400, "LOCAL_CHMOD_FAILED", formatLocalShellMessage(result));
+      }
+      return localSuccessResult("LOCAL_CHMOD_OK", formatLocalShellMessage(result), {
+        command: "chmod",
+        targetPath,
+        mode,
+      });
+    }
+
+    if (parsed.command === "diff") {
+      const leftRaw = parsed.args[0];
+      const rightRaw = parsed.args[1];
+      if (!leftRaw || !rightRaw) {
+        return localErrorResult(400, "LOCAL_MISSING_ARG", "Uso: /local diff <archivo_a> <archivo_b>");
+      }
+      const baseCwd = ensureLocalCwd(allowedRoots);
+      const leftPath = resolveLocalPath(leftRaw, baseCwd);
+      const rightPath = resolveLocalPath(rightRaw, baseCwd);
+      if (!isAllowedLocalPath(leftPath, allowedRoots) || !isAllowedLocalPath(rightPath, allowedRoots)) {
+        return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "Alguna ruta esta fuera de las carpetas permitidas.");
+      }
+      const result = await runLocalShellCommand(
+        `diff -u -- ${shellQuoteArg(leftPath)} ${shellQuoteArg(rightPath)} | head -n 500`,
+        { allowedRoots }
+      );
+      await appendLocalControlAudit("local_control_diff", {
+        requestId: context.requestId,
+        userId: actor,
+        leftPath,
+        rightPath,
+        exitCode: result.exitCode,
+      });
+      if (result.exitCode > 1) {
+        return localErrorResult(400, "LOCAL_DIFF_FAILED", formatLocalShellMessage(result));
+      }
+      if (result.exitCode === 0) {
+        return localSuccessResult("LOCAL_DIFF_IDENTICAL", `Sin diferencias entre:\n${leftPath}\n${rightPath}`, {
+          command: "diff",
+          leftPath,
+          rightPath,
+        });
+      }
+      return localSuccessResult("LOCAL_DIFF_DIFFERENT", formatLocalShellMessage(result), {
+        command: "diff",
+        leftPath,
+        rightPath,
+      });
+    }
+
+    if (parsed.command === "python" || parsed.command === "node" || parsed.command === "script") {
+      if (!LOCAL_FULL_SHELL_ENABLED) {
+        return localErrorResult(
+          403,
+          "LOCAL_SHELL_DISABLED",
+          "Ejecucion de scripts deshabilitada. Establece ILIAGPT_LOCAL_FULL_SHELL=true en .env"
+        );
+      }
+      let language = parsed.command;
+      let scriptArgs = [...parsed.args];
+      if (parsed.command === "script") {
+        const maybeLanguage = (scriptArgs[0] || "").toLowerCase();
+        if (["python", "python3", "node", "js", "bash", "sh"].includes(maybeLanguage)) {
+          language = maybeLanguage.startsWith("py")
+            ? "python"
+            : maybeLanguage === "js"
+              ? "node"
+              : maybeLanguage.startsWith("sh")
+                ? "bash"
+                : maybeLanguage;
+          scriptArgs = scriptArgs.slice(1);
+        } else if (scriptArgs[0]) {
+          const ext = path.extname(scriptArgs[0]).toLowerCase();
+          if (ext === ".py") language = "python";
+          else if (ext === ".js" || ext === ".mjs" || ext === ".cjs") language = "node";
+          else language = "bash";
+        }
+      }
+      if (!scriptArgs.length) {
+        return localErrorResult(
+          400,
+          "LOCAL_MISSING_ARG",
+          parsed.command === "script"
+            ? "Uso: /local script <python|node|bash> <codigo|archivo>"
+            : parsed.command === "python"
+              ? "Uso: /local python <codigo|archivo.py>"
+              : "Uso: /local node <codigo|archivo.js>"
+        );
+      }
+
+      const currentCwd = ensureLocalCwd(allowedRoots);
+      const maybePath = resolveLocalPath(scriptArgs[0], currentCwd);
+      let commandLine = "";
+      let executionMode: "file" | "inline" = "inline";
+      try {
+        const st = await fs.stat(maybePath);
+        if (st.isFile() && isAllowedLocalPath(maybePath, allowedRoots)) {
+          executionMode = "file";
+          const tailArgs = scriptArgs.slice(1).map((arg) => shellQuoteArg(arg)).join(" ");
+          if (language === "python") commandLine = `python3 ${shellQuoteArg(maybePath)}${tailArgs ? ` ${tailArgs}` : ""}`;
+          else if (language === "node") commandLine = `node ${shellQuoteArg(maybePath)}${tailArgs ? ` ${tailArgs}` : ""}`;
+          else commandLine = `bash ${shellQuoteArg(maybePath)}${tailArgs ? ` ${tailArgs}` : ""}`;
+        }
+      } catch {
+        executionMode = "inline";
+      }
+      if (!commandLine) {
+        const inlineCode = scriptArgs.join(" ").trim();
+        if (!inlineCode) {
+          return localErrorResult(400, "LOCAL_MISSING_ARG", "No hay codigo para ejecutar.");
+        }
+        if (language === "python") commandLine = `python3 -c ${shellQuoteArg(inlineCode)}`;
+        else if (language === "node") commandLine = `node -e ${shellQuoteArg(inlineCode)}`;
+        else commandLine = inlineCode;
+      }
+      const result = await runLocalShellCommand(commandLine, { allowedRoots, cwd: currentCwd });
+      await appendLocalControlAudit("local_control_script", {
+        requestId: context.requestId,
+        userId: actor,
+        language,
+        mode: executionMode,
+        exitCode: result.exitCode,
+      });
+      return localSuccessResult(
+        result.exitCode === 0 ? "LOCAL_SCRIPT_OK" : "LOCAL_SCRIPT_ERROR",
+        formatLocalShellMessage(result),
+        {
+          command: parsed.command,
+          language,
+          mode: executionMode,
+          exitCode: result.exitCode,
+        }
+      );
+    }
+
+    if (parsed.command === "npm" || parsed.command === "pip" || parsed.command === "brew" || parsed.command === "git" || parsed.command === "docker") {
+      if (!LOCAL_FULL_SHELL_ENABLED) {
+        return localErrorResult(
+          403,
+          "LOCAL_SHELL_DISABLED",
+          "Ejecucion de comandos de terminal deshabilitada. Establece ILIAGPT_LOCAL_FULL_SHELL=true en .env"
+        );
+      }
+      const normalizedArgs =
+        parsed.source === "natural" && parsed.args.length === 1 && /\s/.test(parsed.args[0] || "")
+          ? tokenizeLocalCommand(parsed.args[0])
+          : parsed.args;
+      if (!normalizedArgs.length) {
+        return localErrorResult(400, "LOCAL_MISSING_ARG", `Uso: /local ${parsed.command} <args>`);
+      }
+      const executable = parsed.command === "pip" ? "pip3" : parsed.command;
+      const joinedArgs = normalizedArgs.map((arg) => shellQuoteArg(arg)).join(" ");
+      const commandLine = `${executable}${joinedArgs ? ` ${joinedArgs}` : ""}`;
+      const result = await runLocalShellCommand(commandLine, { allowedRoots, cwd: ensureLocalCwd(allowedRoots) });
+      await appendLocalControlAudit("local_control_package_or_tool", {
+        requestId: context.requestId,
+        userId: actor,
+        tool: parsed.command,
+        commandLine,
+        exitCode: result.exitCode,
+      });
+      return localSuccessResult(
+        result.exitCode === 0 ? "LOCAL_TOOL_OK" : "LOCAL_TOOL_ERROR",
+        formatLocalShellMessage(result),
+        {
+          command: parsed.command,
+          shellCommand: commandLine,
+          exitCode: result.exitCode,
+        }
+      );
+    }
+
+    if (parsed.command === "open") {
+      const targetRaw = parsed.args.join(" ").trim();
+      if (!targetRaw) {
+        return localErrorResult(400, "LOCAL_MISSING_ARG", "Uso: /local open <ruta|url|app>");
+      }
+      const isUrl = /^https?:\/\//i.test(targetRaw);
+      let commandLine = "";
+      let resolvedPath: string | null = null;
+      if (isUrl) {
+        commandLine = `open ${shellQuoteArg(targetRaw)}`;
+      } else {
+        const candidate = resolveLocalPath(targetRaw, ensureLocalCwd(allowedRoots));
+        try {
+          const st = await fs.stat(candidate);
+          if (st && isAllowedLocalPath(candidate, allowedRoots)) {
+            resolvedPath = candidate;
+            commandLine = `open ${shellQuoteArg(candidate)}`;
+          }
+        } catch {
+          resolvedPath = null;
+        }
+        if (!commandLine) {
+          commandLine = `open -a ${shellQuoteArg(targetRaw)}`;
+        }
+      }
+      const result = await runLocalShellCommand(commandLine, { allowedRoots });
+      await appendLocalControlAudit("local_control_open", {
+        requestId: context.requestId,
+        userId: actor,
+        targetRaw,
+        resolvedPath,
+        exitCode: result.exitCode,
+      });
+      if (result.exitCode !== 0) {
+        return localErrorResult(400, "LOCAL_OPEN_FAILED", formatLocalShellMessage(result));
+      }
+      return localSuccessResult("LOCAL_OPEN_OK", formatLocalShellMessage(result), {
+        command: "open",
+        target: resolvedPath || targetRaw,
+      });
+    }
+
+    if (parsed.command === "top") {
+      const result = await runLocalShellCommand("top -l 1 | head -n 60", { allowedRoots });
+      await appendLocalControlAudit("local_control_top", {
+        requestId: context.requestId,
+        userId: actor,
+        exitCode: result.exitCode,
+      });
+      return localSuccessResult("LOCAL_TOP_OK", formatLocalShellMessage(result), {
+        command: "top",
+      });
+    }
+
+    if (parsed.command === "du") {
+      const targetRaw = parsed.args[0] || ".";
+      const targetPath = resolveLocalPath(targetRaw, ensureLocalCwd(allowedRoots));
+      if (!isAllowedLocalPath(targetPath, allowedRoots)) {
+        return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "Ruta fuera de las carpetas permitidas.");
+      }
+      const commandLine = `du -sh ${shellQuoteArg(targetPath)} 2>/dev/null; du -sh ${shellQuoteArg(targetPath)}/* 2>/dev/null | sort -hr | head -n 40`;
+      const result = await runLocalShellCommand(commandLine, { allowedRoots });
+      await appendLocalControlAudit("local_control_du", {
+        requestId: context.requestId,
+        userId: actor,
+        targetPath,
+        exitCode: result.exitCode,
+      });
+      return localSuccessResult("LOCAL_DU_OK", formatLocalShellMessage(result), {
+        command: "du",
+        targetPath,
+      });
+    }
+
+    if (parsed.command === "which") {
+      const binary = String(parsed.args[0] || "").trim();
+      if (!binary) {
+        return localErrorResult(400, "LOCAL_MISSING_ARG", "Uso: /local which <binario>");
+      }
+      const result = await runLocalShellCommand(`which ${shellQuoteArg(binary)} || command -v ${shellQuoteArg(binary)}`, { allowedRoots });
+      await appendLocalControlAudit("local_control_which", {
+        requestId: context.requestId,
+        userId: actor,
+        binary,
+        exitCode: result.exitCode,
+      });
+      if (result.exitCode !== 0) {
+        return localErrorResult(404, "LOCAL_WHICH_NOT_FOUND", `No se encontro el binario: ${binary}`);
+      }
+      return localSuccessResult("LOCAL_WHICH_OK", formatLocalShellMessage(result), {
+        command: "which",
+        binary,
+      });
+    }
+
+    if (parsed.command === "monitor") {
+      const sampleSecondsRaw = Number.parseInt(parsed.args[0] || "1", 10);
+      const sampleSeconds = Number.isFinite(sampleSecondsRaw) ? Math.max(1, Math.min(5, sampleSecondsRaw)) : 1;
+      const commandLine = [
+        "echo '=== UPTIME ==='",
+        "uptime",
+        "echo '\n=== MEMORIA ==='",
+        "vm_stat | head -n 10",
+        "echo '\n=== DISCO ==='",
+        "df -h | head -n 20",
+        "echo '\n=== PROCESOS TOP ==='",
+        "top -l 1 | head -n 35",
+        "echo '\n=== PUERTOS LISTEN ==='",
+        "lsof -nP -iTCP -sTCP:LISTEN | head -n 40",
+        sampleSeconds > 1 ? `echo '\n=== MUESTRA EXTRA (${sampleSeconds}s) ==='; sleep ${sampleSeconds}; top -l 1 | head -n 20` : "",
+      ].filter(Boolean).join("; ");
+      const result = await runLocalShellCommand(commandLine, {
+        allowedRoots,
+        timeoutMs: LOCAL_SHELL_TIMEOUT_MS + (sampleSeconds * 2000),
+        stdoutMaxChars: 32_000,
+      });
+      await appendLocalControlAudit("local_control_monitor", {
+        requestId: context.requestId,
+        userId: actor,
+        sampleSeconds,
+        exitCode: result.exitCode,
+      });
+      return localSuccessResult("LOCAL_MONITOR_OK", formatLocalShellMessage(result), {
+        command: "monitor",
+        sampleSeconds,
+      });
+    }
+
+    // ── cp: copy file or directory ──
+    if (parsed.command === "cp") {
+      const sourceRaw = parsed.args[0];
+      const destinationRaw = parsed.args[1];
+      if (!sourceRaw || !destinationRaw) {
+        return localErrorResult(400, "LOCAL_MISSING_ARG",
+          "Uso: /local cp <origen> <destino>\nEjemplo: /local cp desktop:archivo.txt desktop:copia.txt");
+      }
+      const sourcePath = resolveLocalPath(sourceRaw, LOCAL_ACTIONS_DEFAULT_ROOT);
+      const destinationPath = resolveLocalPath(destinationRaw, LOCAL_ACTIONS_DEFAULT_ROOT);
+
+      if (!isAllowedLocalPath(sourcePath, allowedRoots)) {
+        return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "Ruta de origen fuera de las carpetas permitidas.");
+      }
+      if (!isAllowedLocalPath(destinationPath, allowedRoots)) {
+        return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "Ruta de destino fuera de las carpetas permitidas.");
+      }
+
+      await fs.stat(sourcePath); // throws if not exists
+      const destParent = path.dirname(destinationPath);
+      await fs.mkdir(destParent, { recursive: true });
+      await fs.cp(sourcePath, destinationPath, { recursive: true });
+
+      await appendLocalControlAudit("local_control_cp", {
+        requestId: context.requestId,
+        userId: actor,
+        sourcePath,
+        destinationPath,
+      });
+      return localSuccessResult("LOCAL_CP_OK", `Copiado: ${sourcePath} -> ${destinationPath}`, {
+        command: "cp",
+        sourcePath,
+        destinationPath,
+      });
     }
 
     return localErrorResult(400, "LOCAL_UNSUPPORTED_COMMAND", "Comando no soportado. Usa /local help.");
@@ -1762,6 +3780,54 @@ const cleanSkipRunStreamDedup = (): void => {
         return res.status(400).json({ error: "Messages array is required" });
       }
 
+      // Fast local-control path: avoid expensive run-claim/skill-resolution before emitting SSE.
+      const latestUserForLocalControl = [...clientMessages].reverse().find((m: any) => m?.role === "user");
+      const latestUserTextForLocalControl = extractUserText(latestUserForLocalControl?.content);
+      console.log("[LocalControl] Stream interception check:", JSON.stringify(latestUserTextForLocalControl?.slice(0, 120)));
+      const earlyLocalControlResult = await executeLocalControlRequest(latestUserTextForLocalControl, {
+        requestId,
+        userId: effectiveUserId,
+      });
+      console.log("[LocalControl] Stream interception result:", earlyLocalControlResult.handled ? `HANDLED (${(earlyLocalControlResult as any).code})` : "NOT handled — passing to LLM");
+      if (earlyLocalControlResult.handled) {
+        if (!res.headersSent) {
+          res.setHeader("Content-Type", "text/event-stream");
+          res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+          res.setHeader("Connection", "keep-alive");
+          res.setHeader("Transfer-Encoding", "chunked");
+          res.setHeader("X-Accel-Buffering", "no");
+          res.setHeader("X-Content-Type-Options", "nosniff");
+          res.setHeader("X-Request-Id", requestId);
+          res.setHeader("X-Trace-Id", requestId);
+          res.flushHeaders();
+          writeSse(res, "start", { requestId, latencyMode, timestamp: Date.now() });
+        }
+
+        if (earlyLocalControlResult.ok) {
+          writeSse(res, "chunk", {
+            content: earlyLocalControlResult.message,
+            requestId,
+            timestamp: Date.now(),
+            localAction: {
+              code: earlyLocalControlResult.code,
+              ...(earlyLocalControlResult.payload || {}),
+            },
+          });
+          writeSse(res, "done", { requestId, timestamp: Date.now() });
+          return res.end();
+        }
+
+        writeSse(res, "error", {
+          code: earlyLocalControlResult.code,
+          error: earlyLocalControlResult.message,
+          requestId,
+          timestamp: Date.now(),
+          localAction: earlyLocalControlResult.payload || null,
+        });
+        writeSse(res, "done", { requestId, timestamp: Date.now() });
+        return res.end();
+      }
+
       const resolvedSkillContext = await resolveSkillContextFromRequest(drizzleSkillStore, {
         userId: effectiveUserId,
         skillId,
@@ -1787,10 +3853,7 @@ const cleanSkipRunStreamDedup = (): void => {
           ? sanitizeStreamText(rawUserRequestId, MAX_STREAM_REQUEST_ID_LEN)
           : undefined;
       const latestUserForRun = [...clientMessages].reverse().find((m: any) => m?.role === "user");
-      const latestUserTextForRun =
-        typeof latestUserForRun?.content === "string"
-          ? latestUserForRun.content
-          : String(latestUserForRun?.content || "");
+      const latestUserTextForRun = extractUserText(latestUserForRun?.content);
       const sanitizedRunAttachments =
         attachments && Array.isArray(attachments)
           ? attachments
@@ -1980,51 +4043,6 @@ const cleanSkipRunStreamDedup = (): void => {
       const lastUserMsg = [...clientMessages].reverse().find((m: any) => m.role === 'user');
       const userQuery = extractUserText(lastUserMsg?.content);
       const earlyQuestionClassification = questionClassifier.classifyQuestion(userQuery || "");
-
-      // Local control commands (safe mode): /local ..., DETENEROFF/DETENERON, and desktop-folder shortcut.
-      const localControlResult = await executeLocalControlRequest(userQuery, {
-        requestId,
-        userId: effectiveUserId,
-      });
-      if (localControlResult.handled) {
-        // Ensure SSE is initialized before emitting local-control result events.
-        if (!res.headersSent) {
-          res.setHeader("Content-Type", "text/event-stream");
-          res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-          res.setHeader("Connection", "keep-alive");
-          res.setHeader("Transfer-Encoding", "chunked");
-          res.setHeader("X-Accel-Buffering", "no");
-          res.setHeader("X-Content-Type-Options", "nosniff");
-          res.setHeader("X-Request-Id", requestId);
-          res.setHeader("X-Trace-Id", requestId);
-          res.flushHeaders();
-          writeSse(res, "start", { requestId, latencyMode, timestamp: Date.now() });
-        }
-
-        if (localControlResult.ok) {
-          writeSse(res, "chunk", {
-            content: localControlResult.message,
-            requestId,
-            timestamp: Date.now(),
-            localAction: {
-              code: localControlResult.code,
-              ...(localControlResult.payload || {}),
-            },
-          });
-          writeSse(res, "done", { requestId, timestamp: Date.now() });
-          return res.end();
-        }
-
-        writeSse(res, "error", {
-          code: localControlResult.code,
-          error: localControlResult.message,
-          requestId,
-          timestamp: Date.now(),
-          localAction: localControlResult.payload || null,
-        });
-        writeSse(res, "done", { requestId, timestamp: Date.now() });
-        return res.end();
-      }
 
       // Auto: decide based on complexity signals (simple vs complex).
       if (latencyMode === 'auto') {

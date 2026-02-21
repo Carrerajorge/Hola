@@ -410,8 +410,8 @@ function buildCompletionFingerprint(parts: { partNumber: number }[]): string {
   return normalized.join(",");
 }
 
-function buildUploadCacheKey(userId: string, uploadId: string, conversationId: string | null): string {
-  return `${userId}|${conversationId || "__no_conversation__"}|${uploadId}`;
+function buildUploadCacheKey(userId: string, uploadId: string, conversationId: string | null, prefix: string = ""): string {
+  return `${prefix}${userId}|${conversationId || "__no_conversation__"}|${uploadId}`;
 }
 
 function canAccessFileForActor(fileUserId: string | null | undefined, actorId: string): boolean {
@@ -924,132 +924,44 @@ async function signObjectURLForMultipart({
   return signedURL;
 }
 
+import { getUploadQueue } from "../services/uploadQueue";
+
 async function processFileAsync(fileId: string, storagePath: string, mimeType: string, filename?: string) {
   try {
-    let content: Buffer;
-    const fs = await import("fs");
-    const pathMod = await import("path");
+    console.log(`[processFileAsync] Enqueuing processing job for file ${fileId}, storagePath: ${storagePath}`);
 
-    console.log(`[processFileAsync] Starting processing for file ${fileId}, storagePath: ${storagePath}, mimeType: ${mimeType}`);
+    // Set status to pending/processing so the client knows it's analyzing
+    await storage.updateFileStatus(fileId, "processing");
 
-    // Determine all possible local file paths to try
-    const uploadsDir = pathMod.default.resolve(process.cwd(), "uploads");
+    // Queue the heavy OCR, chunking, and embedding generation to the background worker
+    const queue = getUploadQueue();
+    const result = await queue.add(
+      "system", // userId (system handles analysis)
+      "none", // chatId not strictly needed for the raw file parsing
+      {
+        id: fileId,
+        name: filename || "upload",
+        type: mimeType,
+        size: -1,
+        storagePath: storagePath
+      },
+      { priority: "high" }
+    );
 
-    const localCandidates: string[] = [];
-    if (storagePath.startsWith('/objects/uploads/')) {
-      localCandidates.push(pathMod.default.join(uploadsDir, storagePath.replace('/objects/uploads/', '')));
-    }
-    if (storagePath.startsWith('/objects/')) {
-      localCandidates.push(pathMod.default.join(uploadsDir, storagePath.replace('/objects/', '')));
-    }
-
-    // Try to read the file content from various sources
-    let fileReadSuccess = false;
-
-    // 1. Try local paths first (with waiting for file to be fully written)
-    for (const localFilePath of localCandidates) {
-      // Ensure path doesn't escape uploads directory
-      const safePrefix = uploadsDir + pathMod.default.sep;
-      if (!localFilePath.startsWith(safePrefix) && localFilePath !== uploadsDir) {
-        continue;
-      }
-
-      let attempts = 0;
-      const maxAttempts = 20; // Wait up to 10 seconds (20 * 500ms)
-      while (!fs.default.existsSync(localFilePath) && attempts < maxAttempts) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-        attempts++;
-      }
-
-      if (fs.default.existsSync(localFilePath)) {
-        // Wait a bit more to ensure write is complete
-        const stat = await fs.promises.stat(localFilePath);
-        if (stat.size === 0) {
-          // File exists but is empty - wait a bit more
-          let sizeAttempts = 0;
-          while (sizeAttempts < 10) {
-            await new Promise(resolve => setTimeout(resolve, 500));
-            const reStat = await fs.promises.stat(localFilePath);
-            if (reStat.size > 0) break;
-            sizeAttempts++;
-          }
-        }
-
-        content = await fs.promises.readFile(localFilePath);
-        if (content.length > 0) {
-          console.log(`[processFileAsync] Read ${content.length} bytes from local file: ${localFilePath}`);
-          fileReadSuccess = true;
-          break;
-        }
-      }
+    if ('error' in result) {
+      console.error(`[processFileAsync] Queue rejection for file ${fileId}: ${result.error}`);
+      await storage.updateFileStatus(fileId, "error");
+    } else {
+      console.log(`[processFileAsync] Job ${result.jobId} enqueued for file ${fileId}`);
     }
 
-    // 2. Try object storage
-    if (!fileReadSuccess) {
-      try {
-        const svc = new ObjectStorageService();
-        const objectFile = await svc.getObjectEntityFile(storagePath);
-        content = await svc.getFileContent(objectFile);
-        if (content && content.length > 0) {
-          console.log(`[processFileAsync] Read ${content.length} bytes from object storage`);
-          fileReadSuccess = true;
-        }
-      } catch (storageError: any) {
-        console.warn(`[processFileAsync] Object storage read failed for ${storagePath}:`, storageError.message);
-      }
-    }
-
-    if (!fileReadSuccess || !content! || content!.length === 0) {
-      console.error(`[processFileAsync] Could not read file content for ${fileId} from any source`);
-      throw new Error('File content could not be read from any storage source');
-    }
-
-    const result = await processDocument(content!, mimeType, filename);
-
-    if (!result.text || result.text.trim().length === 0) {
-      console.warn(`[processFileAsync] No text extracted from file ${fileId}, setting as ready with empty content`);
-      await storage.updateFileStatus(fileId, "ready");
-      return;
-    }
-
-    const chunks = chunkText(result.text, 1500, 150);
-
-    const chunksWithoutEmbeddings = chunks.map((chunk) => ({
-      fileId,
-      content: chunk.content,
-      embedding: null,
-      chunkIndex: chunk.chunkIndex,
-      pageNumber: chunk.pageNumber || null,
-      metadata: null,
-    }));
-
-    await storage.createFileChunks(chunksWithoutEmbeddings);
-    await storage.updateFileStatus(fileId, "ready");
-
-    console.log(`[processFileAsync] File ${fileId} processed: ${chunks.length} chunks created`);
-
-    generateEmbeddingsAsync(fileId, chunks);
   } catch (error: any) {
-    console.error(`[processFileAsync] Error processing file ${fileId}:`, error.message || error);
+    console.error(`[processFileAsync] Error enqueuing file ${fileId}:`, error.message || error);
     try {
       await storage.updateFileStatus(fileId, "error");
     } catch (updateError) {
       console.error(`[processFileAsync] Failed to update file status to error:`, updateError);
     }
-  }
-}
-
-async function generateEmbeddingsAsync(fileId: string, chunks: { content: string; chunkIndex: number; pageNumber?: number }[]) {
-  try {
-    const texts = chunks.map(c => c.content);
-    const embeddings = await generateEmbeddingsBatch(texts);
-
-    for (let i = 0; i < chunks.length; i++) {
-      await storage.updateFileChunkEmbedding(fileId, chunks[i].chunkIndex, embeddings[i]);
-    }
-    console.log(`File ${fileId} embeddings generated asynchronously`);
-  } catch (error) {
-    console.error(`Error generating embeddings for file ${fileId}:`, error);
   }
 }
 
@@ -1166,7 +1078,7 @@ export function createFilesRouter() {
       }
 
       if (uploadId) {
-        const idempotencyKey = buildUploadCacheKey(actorId, uploadId, conversationId);
+        const idempotencyKey = buildUploadCacheKey(actorId, uploadId, conversationId, "url|");
         const fingerprint = buildRequestFingerprint({
           route: "/api/objects/upload",
           uploadId,
@@ -1227,7 +1139,7 @@ export function createFilesRouter() {
           localFallback: true,
         };
         if (uploadId) {
-          const cacheKey = buildUploadCacheKey(actorId, uploadId, conversationId);
+          const cacheKey = buildUploadCacheKey(actorId, uploadId, conversationId, "url|");
           const existingRegistration = fileRegistrationCache.get(cacheKey);
           const fingerprint = buildRequestFingerprint({
             route: "/api/objects/upload",
@@ -1340,7 +1252,7 @@ export function createFilesRouter() {
 
       const objectId = `uploads/${uploadId}`;
       const storagePath = `/objects/${objectId}`;
-      const registrationKey = buildUploadCacheKey(actorId, uploadId, conversationId);
+      const registrationKey = buildUploadCacheKey(actorId, uploadId, conversationId, "multipart_create|");
       const fingerprint = buildRegistrationFingerprint(fileName, safeMimeType, fileSize, storagePath);
 
       const existingRegistration = fileRegistrationCache.get(registrationKey);
@@ -1514,7 +1426,8 @@ export function createFilesRouter() {
       const completionKey = buildUploadCacheKey(
         actorId,
         uploadId,
-        sessionConversationId || session.conversationId || null
+        sessionConversationId || session.conversationId || null,
+        "multipart_complete|"
       );
       const completionFingerprint = buildCompletionFingerprint(parts.map((partNumber) => ({ partNumber })));
       const existingCompletion = multipartCompletionCache.get(completionKey);
@@ -1698,9 +1611,9 @@ export function createFilesRouter() {
       const rawUploadId = req.body?.uploadId;
       if (typeof rawUploadId === "string") {
         const normalizedUploadId = sanitizeUploadId(rawUploadId);
-          if (normalizedUploadId) {
-            const conversationId = getConversationId(req, req.body?.conversationId);
-          const completionKey = buildUploadCacheKey(getUploadActorId(req), normalizedUploadId, conversationId);
+        if (normalizedUploadId) {
+          const conversationId = getConversationId(req, req.body?.conversationId);
+          const completionKey = buildUploadCacheKey(getUploadActorId(req), normalizedUploadId, conversationId, "multipart_complete|");
           multipartCompletionCache.delete(completionKey);
         }
       }
@@ -2027,7 +1940,7 @@ export function createFilesRouter() {
       }
 
       if (uploadId) {
-        const idempotencyKey = buildUploadCacheKey(actorId, uploadId, conversationId);
+        const idempotencyKey = buildUploadCacheKey(actorId, uploadId, conversationId, "file_quick|");
         const fingerprint = buildRequestFingerprint({
           route: "/api/files/quick",
           uploadId,
@@ -2056,7 +1969,7 @@ export function createFilesRouter() {
       });
 
       if (uploadId) {
-        const idempotencyKey = buildUploadCacheKey(actorId, uploadId, conversationId);
+        const idempotencyKey = buildUploadCacheKey(actorId, uploadId, conversationId, "file_quick|");
         const fingerprint = buildRequestFingerprint({
           route: "/api/files/quick",
           uploadId,
@@ -2152,7 +2065,7 @@ export function createFilesRouter() {
       const isImage = typeof type === "string" && type.startsWith("image/");
 
       if (uploadId) {
-        const idempotencyKey = buildUploadCacheKey(actorId, uploadId, conversationId);
+        const idempotencyKey = buildUploadCacheKey(actorId, uploadId, conversationId, "file_register|");
         const fingerprint = buildRequestFingerprint({
           route: "/api/files",
           uploadId,
@@ -2176,12 +2089,12 @@ export function createFilesRouter() {
         type,
         size,
         storagePath,
-        status: isImage ? "ready" : "processing",
+        status: "processing", // Ensure images also go to processing queue for Vision OCR
         userId: actorId,
       });
 
       if (uploadId) {
-        const idempotencyKey = buildUploadCacheKey(actorId, uploadId, conversationId);
+        const idempotencyKey = buildUploadCacheKey(actorId, uploadId, conversationId, "file_register|");
         const fingerprint = buildRequestFingerprint({
           route: "/api/files",
           uploadId,
@@ -2201,20 +2114,18 @@ export function createFilesRouter() {
         });
       }
 
-      if (!isImage) {
-        // Create a tracking job record and process asynchronously
-        try {
-          await storage.createFileJob({
-            fileId: file.id,
-            status: "pending",
-          });
-        } catch (jobError) {
-          // Non-critical: proceed even if job tracking fails
-          console.warn(`[FilesRouter] Could not create file job for ${file.id}:`, jobError);
-        }
-
-        processFileAsync(file.id, storagePath, type, name);
+      // Create a tracking job record and process asynchronously for all file types including images
+      try {
+        await storage.createFileJob({
+          fileId: file.id,
+          status: "pending",
+        });
+      } catch (jobError) {
+        // Non-critical: proceed even if job tracking fails
+        console.warn(`[FilesRouter] Could not create file job for ${file.id}:`, jobError);
       }
+
+      processFileAsync(file.id, storagePath, type, name);
 
       res.json(file);
     } catch (error: any) {
