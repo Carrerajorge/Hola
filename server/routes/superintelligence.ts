@@ -1,4 +1,7 @@
 import { Router } from 'express';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
 import { aiService } from '../lib/ai/modelOrchestrator';
 import { researcher as scientificDiscovery, hypothesis } from '../lib/ai/scientificDiscovery';
 // Note: importing instances directly
@@ -15,6 +18,37 @@ const router = Router();
 router.post('/chat', async (req, res) => {
     try {
         const { messages, requirements, taskId } = req.body;
+
+        // Local shortcut: create folder on Mac Desktop from natural language.
+        const latestUser = Array.isArray(messages)
+          ? [...messages].reverse().find((m: any) => m?.role === 'user')
+          : null;
+        const userTextRaw = typeof latestUser?.content === 'string'
+          ? latestUser.content
+          : Array.isArray(latestUser?.content)
+            ? latestUser.content.map((p: any) => (typeof p?.text === 'string' ? p.text : '')).join(' ')
+            : String(latestUser?.content || '');
+
+        const match = String(userTextRaw || '').match(/(?:crea|crear|creame|haz|genera)\s+(?:una\s+)?carpeta(?:\s+en\s+mi\s+escritorio)?(?:\s+(?:llamada|con\s+nombre))?\s+["']?([^"'\n]{1,120})["']?/i);
+        if (match?.[1]) {
+          const folderName = match[1].trim().replace(/[.,;:!?]+$/g, '').trim();
+          const invalid = /[\\/:*?"<>|]/.test(folderName) || folderName.includes('..');
+          if (invalid || !folderName) {
+            return res.status(400).json({ error: 'Nombre de carpeta inválido' });
+          }
+          const folderPath = path.join(os.homedir(), 'Desktop', folderName);
+          await fs.mkdir(folderPath, { recursive: true });
+          await fs.appendFile(
+            path.join(os.homedir(), '.iliagpt-control-audit.log'),
+            `${new Date().toISOString()} superintelligence_chat mkdir path=${folderPath}\n`,
+            'utf-8'
+          );
+          return res.json({
+            content: `Listo. Carpeta creada en tu escritorio: ${folderPath}`,
+            provider: 'local-system',
+            model: 'local-system',
+          });
+        }
 
         // Default requirements if not provided
         const reqs = requirements || { tier: 'pro' };

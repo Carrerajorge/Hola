@@ -77,6 +77,29 @@ const VALID_STREAM_SCOPE_SET = new Set<SkillScope>([
 const STREAM_IDENTIFIER_RE = /^[a-zA-Z0-9._-]{1,140}$/;
 const STREAM_ATTACHMENT_NAME_RE = /^[^<>:\"/\\|?*\u0000-\u001f]{1,220}$/;
 const STREAM_MIME_RE = /^[a-zA-Z0-9][a-zA-Z0-9.+-\/]*/;
+
+function extractUserText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part: any) => {
+        if (typeof part === "string") return part;
+        if (part && typeof part === "object") {
+          if (typeof part.text === "string") return part.text;
+          if (typeof part.content === "string") return part.content;
+        }
+        return "";
+      })
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+  }
+  if (content && typeof content === "object") {
+    const maybeText = (content as any).text ?? (content as any).content;
+    if (typeof maybeText === "string") return maybeText;
+  }
+  return String(content || "").trim();
+}
 const LOCAL_DESKTOP_ACTIONS_ENABLED =
   process.env.ILIAGPT_ENABLE_LOCAL_DESKTOP_ACTIONS === "true" ||
   process.env.NODE_ENV !== "production";
@@ -461,11 +484,17 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
 
       // Fast local desktop action shortcut for non-stream endpoint.
       const latestUserMessage = [...clientMessages].reverse().find((m: any) => m?.role === "user");
-      const latestUserText = typeof latestUserMessage?.content === "string" ? latestUserMessage.content : String(latestUserMessage?.content || "");
-      const createDesktopFolderMatch = latestUserText.match(/(?:crea|crear)\s+(?:una\s+)?carpeta(?:\s+en\s+mi\s+escritorio)?\s+(?:llamada|con\s+nombre)\s+([\w\s.-]{1,120})/i);
-      if (createDesktopFolderMatch?.[1]) {
-        const rawName = createDesktopFolderMatch[1].trim();
-        const invalid = /[\\/:*?"<>|]/.test(rawName) || rawName.includes("..");
+      const latestUserText = extractUserText(latestUserMessage?.content);
+      const requestedDesktopFolderName = extractDesktopFolderNameFromPrompt(latestUserText);
+      if (requestedDesktopFolderName) {
+        const rawName = requestedDesktopFolderName.trim();
+        const invalid = /[\\/:*?"<>|]/.test(rawName) || rawName.includes("..") || rawName.length > 120;
+        if (!LOCAL_DESKTOP_ACTIONS_ENABLED) {
+          return res.status(403).json({
+            error: "Las acciones locales estan desactivadas. Activa ILIAGPT_ENABLE_LOCAL_DESKTOP_ACTIONS=true.",
+            code: "LOCAL_ACTIONS_DISABLED",
+          });
+        }
         if (invalid) {
           return res.status(400).json({
             error: "Nombre de carpeta inválido",
@@ -473,7 +502,16 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
           });
         }
         const desktopDir = path.join(os.homedir(), "Desktop");
-        const folderPath = path.join(desktopDir, rawName);
+        const resolvedDesktopDir = path.resolve(desktopDir);
+        const folderPath = path.resolve(resolvedDesktopDir, rawName);
+        const isInsideDesktop =
+          folderPath === resolvedDesktopDir || folderPath.startsWith(`${resolvedDesktopDir}${path.sep}`);
+        if (!isInsideDesktop) {
+          return res.status(400).json({
+            error: "La carpeta debe crearse dentro de tu Desktop.",
+            code: "INVALID_FOLDER_PATH",
+          });
+        }
         await fs.mkdir(folderPath, { recursive: true });
         await fs.appendFile(
           path.join(os.homedir(), ".iliagpt-control-audit.log"),
@@ -1423,7 +1461,7 @@ const cleanSkipRunStreamDedup = (): void => {
 
       const hasAnyAttachments = sanitizedRunAttachments && sanitizedRunAttachments.length > 0;
       const lastUserMsg = [...clientMessages].reverse().find((m: any) => m.role === 'user');
-      const userQuery = typeof lastUserMsg?.content === 'string' ? lastUserMsg.content : String(lastUserMsg?.content || '');
+      const userQuery = extractUserText(lastUserMsg?.content);
       const earlyQuestionClassification = questionClassifier.classifyQuestion(userQuery || "");
 
       // Fast local desktop action shortcut: create folder on macOS Desktop.
