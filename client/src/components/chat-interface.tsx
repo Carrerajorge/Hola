@@ -1932,11 +1932,19 @@ export function ChatInterface({
 
   const handleCopyMessage = useCallback((content: string, msgId?: string) => {
     navigator.clipboard.writeText(content);
+
+    // Explicitly wipe the AI busy state. The bug causes `aiState` to remain stuck
+    // in `thinking` or `agent_working` after a response finishes. When the user 
+    // clicks copy, the component re-renders and mistakenly shows the PhaseNarrator again.
+    // By forcing it to idle here, we ensure interacting with the message clears the ghost state.
+    setAiStateForChat('idle', chatId || 'default');
+    setAiProcessStepsForChat([], chatId || 'default');
+
     if (msgId) {
       setCopiedMessageId(msgId);
       setTimeout(() => setCopiedMessageId(null), 2000);
     }
-  }, []);
+  }, [chatId, setAiStateForChat, setAiProcessStepsForChat]);
 
   const handleUserRetrySend = useCallback(async (msg: Message) => {
     if (!msg || msg.role !== "user") return;
