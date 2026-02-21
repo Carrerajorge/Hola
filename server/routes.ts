@@ -655,10 +655,15 @@ export async function registerRoutes(
   // Simple API health check (used by clients and local smoke checks)
   app.get("/api/health", (req, res) => {
     const mem = process.memoryUsage();
+    const appVersion = process.env.APP_VERSION || process.env.npm_package_version || "unknown";
+    const packageVersion = process.env.npm_package_version || "unknown";
     res.json({
       status: "ok",
       timestamp: new Date().toISOString(),
-      version: process.env.npm_package_version || process.env.APP_VERSION || "unknown",
+      version: appVersion,
+      app_version: appVersion,
+      package_version: packageVersion,
+      app_sha: process.env.APP_SHA || appVersion,
       node: {
         version: process.version,
         platform: process.platform,
