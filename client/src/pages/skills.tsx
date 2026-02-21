@@ -60,6 +60,8 @@ import {
   Pause,
   Settings2,
   BookOpen,
+  Speaker, Music, FileText, LayoutTemplate, MessageSquare, ListTodo, Frame, Phone, Cloud, Box, Server, CheckSquare, RefreshCcw, UploadCloud, Paintbrush, GitBranch, AlertTriangle, Activity, ShieldAlert, CreditCard, Send, Mail, Briefcase, Users, Ticket, ZoomIn, Video, Globe, Calendar, FormInput, LineChart, PieChart, TrendingUp, BarChart2, Layers, Database, Lock, Search, List, ArrowRight, ArrowRightCircle, Anchor, PlayCircle, FastForward, Cpu, Compass, HardDrive, Wifi, Eye, Edit3, Shield, Bug,
+
   KeyRound,
   FileEdit,
   ListTodo,
@@ -296,6 +298,68 @@ const getExtraSkillIcon = (id: string) => {
     case "songsee": return <Music {...props} className="h-6 w-6 text-pink-500" />;
     case "wacli": return <Phone {...props} className="h-6 w-6 text-green-500" />;
     case "weather": return <Snowflake {...props} className="h-6 w-6 text-cyan-500" />;
+    
+    case "sonoscli": return <Speaker {...props} className="h-6 w-6 text-gray-800" />;
+    case "spotify-player": return <Music {...props} className="h-6 w-6 text-green-600" />;
+    case "summarize": return <FileText {...props} className="h-6 w-6 text-blue-500" />;
+    case "things-mac": return <CheckSquare {...props} className="h-6 w-6 text-gray-700" />;
+    case "tmux": return <Terminal {...props} className="h-6 w-6 text-green-400" />;
+    case "trello": return <LayoutTemplate {...props} className="h-6 w-6 text-blue-600" />;
+    case "video-frames": return <Frame {...props} className="h-6 w-6 text-red-500" />;
+    case "voice-call": return <Phone {...props} className="h-6 w-6 text-green-500" />;
+    case "wacli": return <MessageSquare {...props} className="h-6 w-6 text-green-500" />;
+    case "weather": return <Cloud {...props} className="h-6 w-6 text-cyan-400" />;
+    case "aws-cli": return <Cloud {...props} className="h-6 w-6 text-orange-500" />;
+    case "docker-ops": return <Box {...props} className="h-6 w-6 text-blue-500" />;
+    case "jira-manager": return <LayoutTemplate {...props} className="h-6 w-6 text-blue-600" />;
+    case "linear-sync": return <RefreshCcw {...props} className="h-6 w-6 text-purple-500" />;
+    case "vercel-deploy": return <UploadCloud {...props} className="h-6 w-6 text-black" />;
+    case "figma-pull": return <Paintbrush {...props} className="h-6 w-6 text-pink-500" />;
+    case "gitlab-ops": return <GitBranch {...props} className="h-6 w-6 text-orange-600" />;
+    case "sentry-alert": return <AlertTriangle {...props} className="h-6 w-6 text-red-500" />;
+    case "datadog-metric": return <Activity {...props} className="h-6 w-6 text-purple-600" />;
+    case "pagerduty-oncall": return <ShieldAlert {...props} className="h-6 w-6 text-green-600" />;
+    case "stripe-dash": return <CreditCard {...props} className="h-6 w-6 text-indigo-500" />;
+    case "twilio-sms": return <MessageSquare {...props} className="h-6 w-6 text-red-600" />;
+    case "sendgrid-mail": return <Mail {...props} className="h-6 w-6 text-blue-400" />;
+    case "mailchimp-sync": return <Users {...props} className="h-6 w-6 text-yellow-600" />;
+    case "hubspot-crm": return <Briefcase {...props} className="h-6 w-6 text-orange-500" />;
+    case "salesforce-lookup": return <Cloud {...props} className="h-6 w-6 text-blue-500" />;
+    case "zendesk-ticket": return <Ticket {...props} className="h-6 w-6 text-green-600" />;
+    case "intercom-chat": return <MessageSquare {...props} className="h-6 w-6 text-blue-500" />;
+    case "zoom-meeting": return <Video {...props} className="h-6 w-6 text-blue-500" />;
+    case "google-meet": return <Video {...props} className="h-6 w-6 text-yellow-500" />;
+    case "teams-message": return <MessageSquare {...props} className="h-6 w-6 text-indigo-600" />;
+    case "webex-call": return <Phone {...props} className="h-6 w-6 text-green-600" />;
+    case "calendly-book": return <Calendar {...props} className="h-6 w-6 text-blue-500" />;
+    case "typeform-answers": return <FileText {...props} className="h-6 w-6 text-gray-800" />;
+    case "survey-monkey": return <FileText {...props} className="h-6 w-6 text-green-500" />;
+    case "google-analytics": return <LineChart {...props} className="h-6 w-6 text-orange-500" />;
+    case "mixpanel-events": return <PieChart {...props} className="h-6 w-6 text-purple-500" />;
+    case "amplitude-cohort": return <BarChart2 {...props} className="h-6 w-6 text-blue-600" />;
+    case "firebase-admin": return <Flame {...props} className="h-6 w-6 text-orange-500" />;
+    case "supabase-ops": return <Database {...props} className="h-6 w-6 text-green-500" />;
+    case "mongo-cloud": return <Database {...props} className="h-6 w-6 text-green-600" />;
+    case "postgres-ops": return <Database {...props} className="h-6 w-6 text-blue-500" />;
+    case "redis-cli": return <Database {...props} className="h-6 w-6 text-red-500" />;
+    case "elasticsearch-query": return <Search {...props} className="h-6 w-6 text-blue-400" />;
+    case "kafka-produce": return <FastForward {...props} className="h-6 w-6 text-black" />;
+    case "rabbitmq-queue": return <ArrowRightCircle {...props} className="h-6 w-6 text-orange-500" />;
+    case "kubernetes-ops": return <Anchor {...props} className="h-6 w-6 text-blue-600" />;
+    case "terraform-apply": return <Layers {...props} className="h-6 w-6 text-purple-600" />;
+    case "ansible-play": return <PlayCircle {...props} className="h-6 w-6 text-gray-800" />;
+    case "puppet-run": return <Cpu {...props} className="h-6 w-6 text-orange-400" />;
+    case "chef-client": return <Compass {...props} className="h-6 w-6 text-orange-600" />;
+    case "nagios-check": return <Activity {...props} className="h-6 w-6 text-black" />;
+    case "splunk-search": return <Search {...props} className="h-6 w-6 text-pink-600" />;
+    case "newrelic-apm": return <Activity {...props} className="h-6 w-6 text-teal-500" />;
+    case "grafana-dash": return <LineChart {...props} className="h-6 w-6 text-orange-500" />;
+    case "prometheus-query": return <Flame {...props} className="h-6 w-6 text-orange-600" />;
+    case "git-local": return <GitBranch {...props} className="h-6 w-6 text-gray-900" />;
+    case "nmap-scan": return <Wifi {...props} className="h-6 w-6 text-black" />;
+    case "wireshark-cap": return <Eye {...props} className="h-6 w-6 text-blue-600" />;
+    case "burpsuite-proxy": return <Bug {...props} className="h-6 w-6 text-orange-600" />;
+
     default: return <Sparkles {...props} />;
   }
 };
