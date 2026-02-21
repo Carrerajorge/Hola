@@ -9,6 +9,7 @@ import type { AuthenticatedRequest } from '../types/express';
 import { getSecureUserId } from '../lib/anonUserHelper';
 import { storage } from '../storage';
 import { createUnifiedRun, executeUnifiedChat } from '../agent/unifiedChatHandler';
+import OpenAI from 'openai';
 
 // Auto-reply timeout: 120 seconds max (document generation needs extra time)
 const AUTO_REPLY_TIMEOUT_MS = 120_000;
@@ -132,13 +133,22 @@ export function createWhatsAppWebRouter(): Router {
     const userId = requireUserId(req as any);
     if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
 
-    const { enabled } = (req.body || {}) as { enabled?: boolean };
-    if (typeof enabled !== 'boolean') {
-      return res.status(400).json({ success: false, error: 'enabled (boolean) is required' });
+    const { enabled, autoReplyToContacts } = (req.body || {}) as { enabled?: boolean, autoReplyToContacts?: boolean };
+    let hasChanges = false;
+    if (typeof enabled === 'boolean') {
+      whatsappWebManager.setAutoReply(userId, enabled);
+      hasChanges = true;
+    }
+    if (typeof autoReplyToContacts === 'boolean') {
+      whatsappWebManager.setAutoReplyToContacts(userId, autoReplyToContacts);
+      hasChanges = true;
     }
 
-    whatsappWebManager.setAutoReply(userId, enabled);
-    res.json({ success: true, autoReply: enabled });
+    if (!hasChanges) {
+      return res.status(400).json({ success: false, error: 'No settings provided to update' });
+    }
+
+    res.json({ success: true, autoReply: whatsappWebManager.isAutoReplyEnabled(userId), autoReplyToContacts: whatsappWebManager.isAutoReplyToContactsEnabled(userId) });
   });
 
   // Optional: customize how the bot should respond in WhatsApp auto-replies.
@@ -150,6 +160,7 @@ export function createWhatsAppWebRouter(): Router {
       success: true,
       settings: {
         autoReply: whatsappWebManager.isAutoReplyEnabled(userId),
+        autoReplyToContacts: whatsappWebManager.isAutoReplyToContactsEnabled(userId),
         customPrompt: whatsappWebManager.getAutoReplyPrompt(userId),
       },
     });
@@ -159,18 +170,22 @@ export function createWhatsAppWebRouter(): Router {
     const userId = requireUserId(req as any);
     if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
 
-    const raw = (req.body || {}) as { customPrompt?: unknown };
-    if (raw.customPrompt === undefined) {
-      return res.status(400).json({ success: false, error: 'customPrompt is required' });
-    }
+    const raw = (req.body || {}) as { customPrompt?: unknown, autoReplyToContacts?: boolean };
 
-    const customPrompt = safePromptText(raw.customPrompt);
-    whatsappWebManager.setAutoReplyPrompt(userId, customPrompt);
+    let customPrompt = whatsappWebManager.getAutoReplyPrompt(userId);
+    if (raw.customPrompt !== undefined) {
+      customPrompt = safePromptText(raw.customPrompt);
+      whatsappWebManager.setAutoReplyPrompt(userId, customPrompt);
+    }
+    if (typeof raw.autoReplyToContacts === 'boolean') {
+      whatsappWebManager.setAutoReplyToContacts(userId, raw.autoReplyToContacts);
+    }
 
     return res.json({
       success: true,
       settings: {
         autoReply: whatsappWebManager.isAutoReplyEnabled(userId),
+        autoReplyToContacts: whatsappWebManager.isAutoReplyToContactsEnabled(userId),
         customPrompt,
       },
     });
@@ -244,6 +259,16 @@ async function autoReplyFromWhatsApp(opts: {
     return;
   }
 
+  const status = whatsappWebManager.getStatus(userId);
+  const myJid = status.state === 'connected' ? status.me?.id : undefined;
+  const myBaseJid = myJid?.includes(':') ? myJid.split(':')[0] + '@s.whatsapp.net' : myJid;
+  const isOwner = myBaseJid && fromJid === myBaseJid;
+
+  if (!isOwner && !whatsappWebManager.isAutoReplyToContactsEnabled(userId)) {
+    console.log(`[WhatsApp AutoReply] Skipping message from contact ${fromJid} (Mirror mode only)`);
+    return;
+  }
+
   console.log('[WhatsApp AutoReply] Auto-reply enabled, building context...');
 
   // Build message history from mirrored chat.
@@ -284,11 +309,22 @@ async function autoReplyFromWhatsApp(opts: {
     }
   }
 
-  // Audio: add a note that a voice message was received
+  // Audio: transcribe and add a note
   if (media && media.type === 'audio') {
     const lastUserMsg = messages[messages.length - 1];
     if (lastUserMsg && lastUserMsg.role === 'user') {
-      lastUserMsg.content = `${lastUserMsg.content}\n\n[Mensaje de voz recibido (${media.mimetype}), guardado en: ${media.localPath}. No se puede transcribir automáticamente por ahora.]`;
+      try {
+        if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY missing for transcription');
+        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        const transcription = await openai.audio.transcriptions.create({
+          file: require('fs').createReadStream(media.localPath) as any,
+          model: 'whisper-1',
+        });
+        lastUserMsg.content = `${lastUserMsg.content}\n\n[Mensaje de voz transcrito:\n"${transcription.text}"]`;
+      } catch (err: any) {
+        console.error('[WhatsApp AutoReply] Audio transcription failed:', err?.message || err);
+        lastUserMsg.content = `${lastUserMsg.content}\n\n[Mensaje de voz recibido (${media.mimetype}). No se pudo transcribir por error en el sistema.]`;
+      }
     }
   }
 

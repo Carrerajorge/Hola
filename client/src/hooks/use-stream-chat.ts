@@ -134,15 +134,18 @@ function normalizeConversationId(options: StreamOptions): string | null {
 }
 
 export function useStreamChat(deps: StreamChatDeps) {
-  const {
-    setOptimisticMessages,
-    onSendMessage,
-    setStreamingContent,
-    streamingContentRef,
-    setAiState,
-    setAiProcessSteps,
-    getActiveConversationId,
-  } = deps;
+  const depsRef = useRef(deps);
+  depsRef.current = deps;
+
+  const { streamingContentRef } = deps;
+
+  const setAiState = useCallback<StreamChatDeps["setAiState"]>((...args) => depsRef.current.setAiState(...args), []);
+  const setAiProcessSteps = useCallback<NonNullable<StreamChatDeps["setAiProcessSteps"]>>((...args) => depsRef.current.setAiProcessSteps?.(...args), []);
+  const getActiveConversationId = useCallback<NonNullable<StreamChatDeps["getActiveConversationId"]>>(() => depsRef.current.getActiveConversationId?.(), []);
+  const setOptimisticMessages = useCallback<StreamChatDeps["setOptimisticMessages"]>((...args) => depsRef.current.setOptimisticMessages(...args), []);
+  const onSendMessage = useCallback<StreamChatDeps["onSendMessage"]>((...args) => depsRef.current.onSendMessage(...args), []);
+  const setStreamingContent = useCallback<StreamChatDeps["setStreamingContent"]>((...args) => depsRef.current.setStreamingContent(...args), []);
+
 
   const sessionsRef = useRef<Map<string, ConversationSession>>(new Map());
   const lastStartedConversationRef = useRef<string | null>(null);
@@ -576,7 +579,7 @@ export function useStreamChat(deps: StreamChatDeps) {
             },
             credentials: "include",
             body: JSON.stringify(cleanedBody),
-            signal: combinedSignal, 
+            signal: combinedSignal,
           });
 
           if (!response.ok) {

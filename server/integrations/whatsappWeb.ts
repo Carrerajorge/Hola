@@ -65,6 +65,7 @@ export class WhatsAppWebManager extends EventEmitter {
   private sockets = new Map<string, SocketRecord>();
   // Persist lightweight per-user preferences even when the socket is not connected.
   private autoReplyPrefs = new Map<string, boolean>();
+  private autoReplyToContactsPrefs = new Map<string, boolean>();
   private autoReplyPrompts = new Map<string, string>();
   private autoReplySettingsLoaded = new Set<string>();
   private reconnectAttempts = new Map<string, number>();
@@ -128,6 +129,9 @@ export class WhatsAppWebManager extends EventEmitter {
       if (typeof parsed?.autoReplyEnabled === 'boolean') {
         this.autoReplyPrefs.set(userId, parsed.autoReplyEnabled);
       }
+      if (typeof parsed?.autoReplyToContacts === 'boolean') {
+        this.autoReplyToContactsPrefs.set(userId, parsed.autoReplyToContacts);
+      }
       if (typeof parsed?.customPrompt === 'string') {
         this.autoReplyPrompts.set(userId, parsed.customPrompt);
       }
@@ -142,6 +146,7 @@ export class WhatsAppWebManager extends EventEmitter {
       const tmp = `${settingsPath}.tmp`;
       const payload = {
         autoReplyEnabled: this.autoReplyPrefs.get(userId) ?? false,
+        autoReplyToContacts: this.autoReplyToContactsPrefs.get(userId) ?? false,
         customPrompt: this.autoReplyPrompts.get(userId) ?? '',
         updatedAt: new Date().toISOString(),
       };
@@ -181,6 +186,17 @@ export class WhatsAppWebManager extends EventEmitter {
     this.autoReplyPrefs.set(userId, enabled);
     const rec = this.sockets.get(userId);
     if (rec) rec.autoReplyEnabled = enabled;
+    this.persistAutoReplySettings(userId);
+  }
+
+  isAutoReplyToContactsEnabled(userId: string): boolean {
+    this.loadAutoReplySettingsOnce(userId);
+    return this.autoReplyToContactsPrefs.get(userId) ?? false;
+  }
+
+  setAutoReplyToContacts(userId: string, enabled: boolean): void {
+    this.loadAutoReplySettingsOnce(userId);
+    this.autoReplyToContactsPrefs.set(userId, enabled);
     this.persistAutoReplySettings(userId);
   }
 
@@ -231,8 +247,8 @@ export class WhatsAppWebManager extends EventEmitter {
     const existing = this.sockets.get(userId);
     if (existing) {
       if (existing.status.state === 'connected' ||
-          existing.status.state === 'qr' ||
-          existing.status.state === 'pairing_code') {
+        existing.status.state === 'qr' ||
+        existing.status.state === 'pairing_code') {
         return existing.status;
       }
       await this.forceCleanup(userId);
