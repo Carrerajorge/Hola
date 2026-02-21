@@ -70,7 +70,7 @@ import {
   Camera,
   Layers,
   Terminal,
-  ServerSnowflake,
+  Snowflake,
   Bot,
   Flame,
   Image as ImageIcon,
@@ -269,7 +269,7 @@ const getExtraSkillIcon = (id: string) => {
     case "clawhub": return <Layers {...props} className="h-6 w-6 text-indigo-500" />;
     case "coding-agent": return <Terminal {...props} className="h-6 w-6 text-green-500" />;
     case "discord": return <MessageSquare {...props} className="h-6 w-6 text-indigo-400" />;
-    case "eightctl": return <ServerSnowflake {...props} className="h-6 w-6 text-blue-300" />;
+    case "eightctl": return <Snowflake {...props} className="h-6 w-6 text-blue-300" />;
     case "gemini": return <Bot {...props} className="h-6 w-6 text-blue-600" />;
     case "gh-issues": return <Code {...props} className="h-6 w-6 text-gray-800" />;
     case "gifgrep": return <ImageIcon {...props} className="h-6 w-6 text-pink-500" />;
@@ -295,7 +295,7 @@ const getExtraSkillIcon = (id: string) => {
     case "slack": return <MessageSquare {...props} className="h-6 w-6 text-purple-700" />;
     case "songsee": return <Music {...props} className="h-6 w-6 text-pink-500" />;
     case "wacli": return <Phone {...props} className="h-6 w-6 text-green-500" />;
-    case "weather": return <ServerSnowflake {...props} className="h-6 w-6 text-cyan-500" />;
+    case "weather": return <Snowflake {...props} className="h-6 w-6 text-cyan-500" />;
     default: return <Sparkles {...props} />;
   }
 };
