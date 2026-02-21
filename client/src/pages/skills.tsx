@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Progress } from "@/components/ui/progress";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,6 +25,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import {
   FileSpreadsheet,
   FileText,
@@ -50,7 +59,13 @@ import {
   Play,
   Pause,
   Settings2,
-  BookOpen
+  BookOpen,
+  Download,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  AlertTriangle,
+  Package
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -244,6 +259,43 @@ export default function SkillsPage() {
   const [editingSkill, setEditingSkill] = useState<UserSkill | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
+  // --- Fluid Pack Install State ---
+  const [fluidInstallOpen, setFluidInstallOpen] = useState(false);
+  const [fluidInstalling, setFluidInstalling] = useState(false);
+  const [fluidResult, setFluidResult] = useState<{
+    importedCount: number;
+    skippedCount: number;
+    catalogTotal: number;
+  } | null>(null);
+  const [fluidError, setFluidError] = useState<string | null>(null);
+
+  const handleInstallFluidPack = useCallback(async () => {
+    setFluidInstalling(true);
+    setFluidResult(null);
+    setFluidError(null);
+    try {
+      const res = await fetch("/api/skills/bootstrap/fluid", { method: "POST" });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setFluidResult({
+        importedCount: data.importedCount ?? 0,
+        skippedCount: data.skippedCount ?? 0,
+        catalogTotal: data.catalogTotal ?? 20,
+      });
+      if (data.importedCount > 0) {
+        toast.success(`${data.importedCount} skills importadas exitosamente`);
+      }
+    } catch (err: any) {
+      setFluidError(err?.message || "Error al instalar el pack");
+      toast.error("Error al instalar el pack Fluid 20");
+    } finally {
+      setFluidInstalling(false);
+    }
+  }, []);
+
   const allSkills = useMemo(() => {
     const builtIn: Skill[] = BUILT_IN_SKILLS.map(s => ({
       ...s,
@@ -357,6 +409,15 @@ export default function SkillsPage() {
                 {customCount} personalizados
               </Badge>
             )}
+            <Button
+              onClick={() => { setFluidResult(null); setFluidError(null); setFluidInstallOpen(true); }}
+              variant="outline"
+              className="gap-2 border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-900/20"
+              data-testid="button-install-fluid-pack"
+            >
+              <Package className="h-4 w-4" />
+              Instalar Pack Fluid 20
+            </Button>
             <Button onClick={handleCreateSkill} className="gap-2" data-testid="button-create-skill">
               <Plus className="h-4 w-4" />
               Crear Skill
@@ -470,8 +531,20 @@ export default function SkillsPage() {
                             )}
                             {skill.enabled && (
                               <span className="flex items-center gap-1 text-xs text-green-600">
-                                <span className="h-1.5 w-1.5 bg-green-500 rounded-full animate-pulse" />
+                                <CheckCircle2 className="h-3 w-3 text-green-500" />
                                 Activo
+                              </span>
+                            )}
+                            {!skill.enabled && skill.builtIn && (
+                              <span className="flex items-center gap-1 text-xs text-amber-600">
+                                <AlertTriangle className="h-3 w-3" />
+                                Pendiente
+                              </span>
+                            )}
+                            {!skill.enabled && !skill.builtIn && (
+                              <span className="flex items-center gap-1 text-xs text-gray-500">
+                                <XCircle className="h-3 w-3" />
+                                Inactivo
                               </span>
                             )}
                           </div>
@@ -634,6 +707,114 @@ export default function SkillsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Fluid Pack 20 Installation Dialog */}
+      <Dialog open={fluidInstallOpen} onOpenChange={setFluidInstallOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Package className="h-5 w-5 text-amber-600" />
+              Instalar Pack Fluid 20
+            </DialogTitle>
+            <DialogDescription>
+              Importa 20 capacidades funcionales avanzadas (AWS, Docker, Jira, Vercel, etc.) directamente a tu cuenta.
+              Las skills duplicadas se omiten automáticamente.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4">
+            {!fluidInstalling && !fluidResult && !fluidError && (
+              <div className="flex flex-col items-center gap-4 py-4">
+                <div className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-full">
+                  <Download className="h-8 w-8 text-amber-600" />
+                </div>
+                <p className="text-sm text-muted-foreground text-center">
+                  Se importarán 20 skills funcionales. Las que ya existan en tu cuenta se omitirán.
+                </p>
+              </div>
+            )}
+
+            {fluidInstalling && (
+              <div className="flex flex-col items-center gap-4 py-4">
+                <Loader2 className="h-8 w-8 text-amber-600 animate-spin" />
+                <p className="text-sm text-muted-foreground">Instalando skills...</p>
+                <Progress value={65} className="w-full" />
+              </div>
+            )}
+
+            {fluidResult && (
+              <div className="space-y-4">
+                <div className="flex items-center gap-3 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                  <CheckCircle2 className="h-6 w-6 text-green-600 flex-shrink-0" />
+                  <div>
+                    <p className="font-medium text-green-800 dark:text-green-300">
+                      ¡Instalación completada!
+                    </p>
+                    <p className="text-sm text-green-700 dark:text-green-400">
+                      {fluidResult.importedCount} importadas · {fluidResult.skippedCount} omitidas (duplicadas)
+                    </p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  <div className="p-3 bg-muted rounded-lg">
+                    <p className="text-2xl font-bold text-amber-600">{fluidResult.catalogTotal}</p>
+                    <p className="text-xs text-muted-foreground">Total Pack</p>
+                  </div>
+                  <div className="p-3 bg-muted rounded-lg">
+                    <p className="text-2xl font-bold text-green-600">{fluidResult.importedCount}</p>
+                    <p className="text-xs text-muted-foreground">Importadas</p>
+                  </div>
+                  <div className="p-3 bg-muted rounded-lg">
+                    <p className="text-2xl font-bold text-gray-500">{fluidResult.skippedCount}</p>
+                    <p className="text-xs text-muted-foreground">Omitidas</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {fluidError && (
+              <div className="flex items-center gap-3 p-3 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                <XCircle className="h-6 w-6 text-red-600 flex-shrink-0" />
+                <div>
+                  <p className="font-medium text-red-800 dark:text-red-300">Error al instalar</p>
+                  <p className="text-sm text-red-700 dark:text-red-400">{fluidError}</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            {!fluidResult && !fluidInstalling && (
+              <Button
+                onClick={handleInstallFluidPack}
+                className="gap-2 w-full bg-amber-600 hover:bg-amber-700"
+                data-testid="confirm-install-fluid"
+              >
+                <Download className="h-4 w-4" />
+                Instalar 20 Skills
+              </Button>
+            )}
+            {fluidResult && (
+              <Button
+                onClick={() => { setFluidInstallOpen(false); window.location.reload(); }}
+                className="w-full"
+              >
+                <Check className="h-4 w-4 mr-2" />
+                Cerrar y actualizar
+              </Button>
+            )}
+            {fluidError && (
+              <Button
+                onClick={handleInstallFluidPack}
+                variant="outline"
+                className="w-full gap-2"
+              >
+                Reintentar
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
