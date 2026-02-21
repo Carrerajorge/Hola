@@ -425,9 +425,9 @@ export class WhatsAppWebManager extends EventEmitter {
         if (shouldReconnect) {
           const attempts = (this.reconnectAttempts.get(userId) || 0) + 1;
           this.reconnectAttempts.set(userId, attempts);
-          const delay = Math.min(2000 * Math.pow(2, attempts - 1), 30_000);
+          const delay = Math.min(2000 * Math.pow(2, Math.min(attempts - 1, 5)), 60_000);
 
-          if (attempts <= 5) {
+          if (attempts <= 50) {
             console.info(`[WhatsApp] Reconnecting in ${delay}ms (attempt ${attempts})`, userId);
             const timer = setTimeout(() => {
               void this.startWithOptions(userId).catch((e) => {
@@ -437,7 +437,7 @@ export class WhatsAppWebManager extends EventEmitter {
             timer.unref?.();
           } else {
             console.warn('[WhatsApp] Max reconnect attempts reached', userId);
-            record.status = { state: 'disconnected', reason: 'No se pudo reconectar tras varios intentos' };
+            record.status = { state: 'disconnected', reason: 'No se pudo reconectar tras demasiados intentos. Intente manualmente.' };
             this.emit('status', userId, record.status);
             this.reconnectAttempts.delete(userId);
           }
