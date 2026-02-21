@@ -88,13 +88,26 @@ function getRateLimiter(tier: RateLimitTier): RateLimiterMemory | RateLimiterRed
             blockDuration: config.blockDuration,
         });
     } else {
-        // Fallback to in-memory
-        limiter = new RateLimiterMemory({
-            keyPrefix: `rl_${tier}`,
-            points: config.points,
-            duration: config.duration,
-            blockDuration: config.blockDuration,
-        });
+        const isProd = process.env.NODE_ENV === 'production';
+        if (isProd && process.env.REDIS_URL) {
+            // Force Redis via standard cache integration, avoiding permanent memory fallback on cold start
+            const redisConfigClient = new Redis(process.env.REDIS_URL);
+            limiter = new RateLimiterRedis({
+                storeClient: redisConfigClient,
+                keyPrefix: `rl_${tier}`,
+                points: config.points,
+                duration: config.duration,
+                blockDuration: config.blockDuration,
+            });
+        } else {
+            // Fallback to in-memory
+            limiter = new RateLimiterMemory({
+                keyPrefix: `rl_${tier}`,
+                points: config.points,
+                duration: config.duration,
+                blockDuration: config.blockDuration,
+            });
+        }
     }
 
     rateLimiters.set(key, limiter);
@@ -193,11 +206,22 @@ export function createCustomRateLimiter(options: {
             duration: duration,
         });
     } else {
-        limiter = new RateLimiterMemory({
-            keyPrefix: options.keyPrefix,
-            points: options.maxRequests,
-            duration: duration,
-        });
+        const isProd = process.env.NODE_ENV === 'production';
+        if (isProd && process.env.REDIS_URL) {
+            const redisConfigClient = new Redis(process.env.REDIS_URL);
+            limiter = new RateLimiterRedis({
+                storeClient: redisConfigClient,
+                keyPrefix: options.keyPrefix,
+                points: options.maxRequests,
+                duration: duration,
+            });
+        } else {
+            limiter = new RateLimiterMemory({
+                keyPrefix: options.keyPrefix,
+                points: options.maxRequests,
+                duration: duration,
+            });
+        }
     }
 
     return async (req: Request, res: Response, next: NextFunction) => {

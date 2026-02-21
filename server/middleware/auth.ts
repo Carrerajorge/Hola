@@ -60,3 +60,56 @@ export async function require2FA(req: Request, res: Response, next: NextFunction
         res.status(500).json({ error: "Internal Server Error during security check" });
     }
 }
+
+export type RBACRole = "USER" | "MOD" | "ADMIN" | "SYSTEM_AGENT";
+
+const roleHierarchy: Record<RBACRole, number> = {
+    USER: 1,
+    MOD: 5,
+    ADMIN: 10,
+    SYSTEM_AGENT: 20
+};
+
+/**
+ * Middleware to enforce ABAC Strict Role Checks on endpoints.
+ */
+export function requireRole(minimumRole: RBACRole) {
+    return async (req: Request, res: Response, next: NextFunction) => {
+        try {
+            const anyReq = req as any;
+            const session = req.session as any;
+            const userId = getSecureUserId(req);
+
+            if (!userId || String(userId).startsWith("anon_")) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+
+            let roleStr =
+                anyReq.user?.role ||
+                session?.passport?.user?.role ||
+                anyReq.user?.claims?.role;
+
+            if (!roleStr) {
+                const userRec = await storage.getUser(userId);
+                roleStr = userRec?.role;
+            }
+
+            const role = (String(roleStr || "USER").toUpperCase() as RBACRole);
+
+            const userLevel = roleHierarchy[role] || 0;
+            const requiredLevel = roleHierarchy[minimumRole];
+
+            if (userLevel < requiredLevel) {
+                return res.status(403).json({
+                    error: "Forbidden",
+                    message: "You do not have the required permissions to access this resource."
+                });
+            }
+
+            next();
+        } catch (error) {
+            console.error("[AuthMiddleware] requireRole error:", error);
+            res.status(500).json({ error: "Internal Server Error during permission check" });
+        }
+    };
+}

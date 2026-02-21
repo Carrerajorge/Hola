@@ -1,19 +1,19 @@
-import { drizzle } from "drizzle-orm/node-postgres"; import { migrate } from "drizzle-orm/node-postgres/migrator"; import * as pkg from "pg"; import type { PoolClient } from "pg"; import * as schema 
-from "../shared/schema"; import { Registry, Histogram, Counter, Gauge } from 'prom-client'; import { env } from "./config/env"; import { Logger } from "./lib/logger";
+import { drizzle } from "drizzle-orm/node-postgres"; import { migrate } from "drizzle-orm/node-postgres/migrator"; import * as pkg from "pg"; import type { PoolClient } from "pg"; import * as schema
+  from "../shared/schema"; import { Registry, Histogram, Counter, Gauge } from 'prom-client'; import { env } from "./config/env"; import { Logger } from "./lib/logger";
 
 const { Pool } = pkg;
 
 const pool = new Pool({
   connectionString: env.DATABASE_URL,
-  max: env.DB_POOL_MAX || (env.NODE_ENV === 'production' ? 20 : 5), // Higher in prod
-  min: env.DB_POOL_MIN || 2, // Always keep a few hot
-  idleTimeoutMillis: 10000, // Close idle connections faster (10s) to free up resources
-  connectionTimeoutMillis: 5000, // Fail fast
+  max: env.DB_POOL_MAX || (env.NODE_ENV === 'production' ? 25 : 5), // Pool Size of at least 20 for pg_bouncer
+  min: env.DB_POOL_MIN || 0, // Pg_bouncer handles underlying pool, allow 0 at app level
+  idleTimeoutMillis: 3000,   // Close idle connections very fast (3s) to rely on pg_bouncer
+  connectionTimeoutMillis: 3000, // Fail extremely fast (3s)
   allowExitOnIdle: false,
-  application_name: 'iliagpt_server_write', // Tag connections for PG logs
-  // Ensure predictable table resolution for queries/migrations that don't schema-qualify.
-  // Prevents runtime errors like: relation "chat_schedules" does not exist
-  options: '-c search_path=public',
+  keepAlive: true,           // Required for stability behind TCP load balancing
+  application_name: 'iliagpt_server_write',
+  // Ensure predictable table resolution and add strict statement timeout for heavy AI traffic
+  options: '-c search_path=public -c statement_timeout=15000',
 });
 
 // Read Replica Pool (Optional)
@@ -377,16 +377,16 @@ async function retryWithBackoff<T>(
 export async function verifyDatabaseConnection(): Promise<boolean> {
   try {
     const result = await retryWithBackoff(
-	  async () => {
-	    const client = await pool.connect();
-	    try {
-	      return await client.query('SELECT current_database(), NOW() as server_time');
-	    } finally {
-	      client.release();
-	    }
-	  },
-	  { label: "DB connect", retries: 10, delayMs: 300, maxDelayMs: 3000 }
-	);
+      async () => {
+        const client = await pool.connect();
+        try {
+          return await client.query('SELECT current_database(), NOW() as server_time');
+        } finally {
+          client.release();
+        }
+      },
+      { label: "DB connect", retries: 10, delayMs: 300, maxDelayMs: 3000 }
+    );
 
     console.log(`[DB] Connected to database: ${result.rows[0].current_database}`);
 

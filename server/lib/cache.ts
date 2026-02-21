@@ -25,6 +25,12 @@ export class CacheService {
             return;
         }
 
+        if (process.env.NODE_ENV === 'production' && !process.env.REDIS_URL) {
+            const msg = "[Cache] REDIS_URL must be defined in production. In-memory cache fallback is disabled for clustering compatibility.";
+            Logger.error(msg);
+            throw new Error(msg);
+        }
+
         if (process.env.REDIS_URL) {
             try {
                 this.redis = new Redis(process.env.REDIS_URL, {

@@ -515,31 +515,18 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - name: Evaluate E2E trigger
-        id: e2e_gate
-        run: |
-          set -euo pipefail
-          if [[ "${{ github.event_name }}" == "pull_request" && "${{ contains(github.event.pull_request.labels.*.name, 'run-e2e') }}" == "true" ]]; then
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "should_run=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Checkout
-        if: ${{ steps.e2e_gate.outputs.should_run == 'true' }}
         uses: actions/checkout@v4
         with:
           persist-credentials: false
 
       - name: Setup Node.js
-        if: ${{ steps.e2e_gate.outputs.should_run == 'true' }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
       - name: Install dependencies
-        if: ${{ steps.e2e_gate.outputs.should_run == 'true' }}
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
@@ -552,11 +539,9 @@ jobs:
           done
 
       - name: Install Playwright browsers
-        if: ${{ steps.e2e_gate.outputs.should_run == 'true' }}
         run: npx playwright install --with-deps
 
       - name: Run E2E tests
-        if: ${{ steps.e2e_gate.outputs.should_run == 'true' }}
         run: npm run test:e2e
         env:
           CI: "true"
@@ -572,16 +557,11 @@ jobs:
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4
-        if: always() && steps.e2e_gate.outputs.should_run == 'true'
+        if: always()
         with:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
-
-      - name: Skip E2E
-        if: ${{ steps.e2e_gate.outputs.should_run != 'true' }}
-        run: |
-          echo "E2E intentionally skipped. Add label 'run-e2e' on the pull request to run Playwright."
 
   secret-scan:
     name: Secret Scan (Trivy)
@@ -719,8 +699,6 @@ jobs:
           echo "| secret-scan | \`${{ needs.secret-scan.result }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| e2e | \`${{ needs.e2e.result }}\` |" >> $GITHUB_STEP_SUMMARY
 
-          # Every required job must be 'success'. The 'docker' job is excluded
-          # because it only runs on push-to-main and would be 'skipped' on PRs.
           FAILED=0
           for result in \
             "${{ needs.typecheck.result }}" \
@@ -729,7 +707,8 @@ jobs:
             "${{ needs.ocr_service.result }}" \
             "${{ needs.build.result }}" \
             "${{ needs.python-security.result }}" \
-            "${{ needs.secret-scan.result }}"; do
+            "${{ needs.secret-scan.result }}" \
+            "${{ needs.e2e.result }}"; do
             if [ "$result" != "success" ]; then
               echo "::error::Required job finished with result: ${result}"
               FAILED=1
@@ -740,12 +719,10 @@ jobs:
           # test: FK constraint failures in test fixtures (pre-existing)
           # audit: npm audit findings across worktrees (pre-existing)
           # quality-gate: depends on test/audit
-          # e2e: label-gated, optional
           for label_result in \
             "test:${{ needs.test.result }}" \
             "audit:${{ needs.audit.result }}" \
-            "quality-gate:${{ needs.quality-gate.result }}" \
-            "e2e:${{ needs.e2e.result }}"; do
+            "quality-gate:${{ needs.quality-gate.result }}"; do
             label="${label_result%%:*}"
             result="${label_result#*:}"
             if [ "$result" != "success" ] && [ "$result" != "failure" ] && [ "$result" != "skipped" ]; then
