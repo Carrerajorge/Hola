@@ -329,6 +329,12 @@ export const macDesktopCreateFolderTool = tool(
       const desktopDir = path.join(os.homedir(), "Desktop");
       const folderPath = path.join(desktopDir, rawName);
       await fs.mkdir(folderPath, { recursive: true });
+      const auditPath = path.join(os.homedir(), ".iliagpt-control-audit.log");
+      await fs.appendFile(
+        auditPath,
+        `${new Date().toISOString()} mac_desktop_create_folder name=${rawName} path=${folderPath}\n`,
+        "utf-8"
+      );
 
       return JSON.stringify({
         success: true,

@@ -180,7 +180,7 @@ export class LangGraphAgent {
       model: "grok-4-1-fast-non-reasoning",
       maxIterations: 10,
       timeout: 120000,
-      includeSystemTools: false,
+      includeSystemTools: process.env.ILIAGPT_LOCAL_FULL_ACCESS === "true",
       enableHumanInLoop: false,
       verbose: false,
       ...config,
