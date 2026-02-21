@@ -343,6 +343,15 @@ export function createAgentModeRouter() {
           : {};
       }
 
+      // Ensure response matches schema: dates must be ISO strings.
+      if (Array.isArray((response as any).steps)) {
+        (response as any).steps = (response as any).steps.map((s: any) => ({
+          ...s,
+          startedAt: s?.startedAt instanceof Date ? s.startedAt.toISOString() : (s?.startedAt ?? null),
+          completedAt: s?.completedAt instanceof Date ? s.completedAt.toISOString() : (s?.completedAt ?? null),
+        }));
+      }
+
       const validatedResponse = validateOrThrow(RunResponseSchema, response, `GET /runs/chat/${chatId} response`);
       res.json(validatedResponse);
     } catch (error: any) {
@@ -384,8 +393,8 @@ export function createAgentModeRouter() {
             status: dbStep.status,
             output: dbStep.toolOutput,
             error: dbStep.error,
-            startedAt: dbStep.startedAt,
-            completedAt: dbStep.completedAt,
+            startedAt: dbStep.startedAt ? dbStep.startedAt.toISOString() : null,
+            completedAt: dbStep.completedAt ? dbStep.completedAt.toISOString() : null,
           };
         }
         return {
@@ -437,6 +446,15 @@ export function createAgentModeRouter() {
           : {};
       }
 
+      // Ensure response matches schema: dates must be ISO strings.
+      if (Array.isArray((response as any).steps)) {
+        (response as any).steps = (response as any).steps.map((s: any) => ({
+          ...s,
+          startedAt: s?.startedAt instanceof Date ? s.startedAt.toISOString() : (s?.startedAt ?? null),
+          completedAt: s?.completedAt instanceof Date ? s.completedAt.toISOString() : (s?.completedAt ?? null),
+        }));
+      }
+
       const validatedResponse = validateOrThrow(RunResponseSchema, response, `GET /runs/${id} response`);
       res.json(validatedResponse);
     } catch (error: any) {
@@ -472,8 +490,8 @@ export function createAgentModeRouter() {
         status: s.status,
         output: s.toolOutput,
         error: s.error,
-        startedAt: s.startedAt,
-        completedAt: s.completedAt,
+        startedAt: s.startedAt ? s.startedAt.toISOString() : null,
+        completedAt: s.completedAt ? s.completedAt.toISOString() : null,
       }));
 
       const validatedResponse = validateOrThrow(StepsArrayResponseSchema, response, `GET /runs/${id}/steps response`);
