@@ -25,13 +25,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
-  FileSpreadsheet, 
-  FileText, 
-  Presentation, 
-  FileType, 
-  Database, 
-  Code, 
-  Globe, 
+  FileSpreadsheet,
+  FileText,
+  Presentation,
+  FileType,
+  Database,
+  Code,
+  Globe,
   Mail,
   MessageCircle,
   CalendarDays,
@@ -56,6 +56,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useUserSkills, UserSkill } from "@/hooks/use-user-skills";
 import { SkillBuilder } from "@/components/skill-builder";
+import { BUNDLED_SKILLS } from "@/data/bundledSkills";
 
 interface BuiltInSkill {
   id: string;
@@ -71,7 +72,7 @@ interface BuiltInSkill {
 
 type Skill = BuiltInSkill | (UserSkill & { triggers?: string[] });
 
-const BUILT_IN_SKILLS: BuiltInSkill[] = [
+const BASE_BUILT_IN_SKILLS: BuiltInSkill[] = [
   {
     id: "xlsx",
     name: "Excel",
@@ -217,6 +218,20 @@ const BUILT_IN_SKILLS: BuiltInSkill[] = [
   },
 ];
 
+const EXTRA_SKILLS: BuiltInSkill[] = BUNDLED_SKILLS.map(skill => ({
+  id: skill.id,
+  name: skill.name,
+  description: skill.description,
+  category: skill.category === "automation" ? "integrations" : skill.category as "documents" | "data" | "integrations" | "custom",
+  icon: <Sparkles className="h-6 w-6 text-purple-500" />,
+  enabled: true,
+  builtIn: true,
+  features: skill.features || [],
+  triggers: []
+}));
+
+const BUILT_IN_SKILLS: BuiltInSkill[] = [...BASE_BUILT_IN_SKILLS, ...EXTRA_SKILLS];
+
 export default function SkillsPage() {
   const [, setLocation] = useLocation();
   const { skills: userSkills, createSkill, updateSkill, deleteSkill, toggleSkill: toggleUserSkill, duplicateSkill } = useUserSkills();
@@ -258,7 +273,7 @@ export default function SkillsPage() {
 
   const filteredSkills = allSkills.filter(skill => {
     const matchesSearch = skill.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          skill.description.toLowerCase().includes(searchQuery.toLowerCase());
+      skill.description.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesCategory = selectedCategory === "all" || skill.category === selectedCategory;
     return matchesSearch && matchesCategory;
   });
@@ -313,8 +328,8 @@ export default function SkillsPage() {
       <header className="sticky top-0 z-20 backdrop-blur-xl bg-background/80 border-b">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <Button 
-              variant="ghost" 
+            <Button
+              variant="ghost"
               size="icon"
               className="rounded-full"
               onClick={() => setLocation("/")}
@@ -385,8 +400,8 @@ export default function SkillsPage() {
                     key={skill.id}
                     className={cn(
                       "group cursor-pointer transition-all duration-200 hover:shadow-md",
-                      skill.enabled 
-                        ? "border-primary/20 bg-card" 
+                      skill.enabled
+                        ? "border-primary/20 bg-card"
                         : "bg-muted/30 border-transparent",
                       selectedSkill?.id === skill.id && "ring-2 ring-primary"
                     )}
@@ -427,7 +442,7 @@ export default function SkillsPage() {
                                       Duplicar
                                     </DropdownMenuItem>
                                     <DropdownMenuSeparator />
-                                    <DropdownMenuItem 
+                                    <DropdownMenuItem
                                       className="text-red-600"
                                       onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(skill.id); }}
                                     >
@@ -562,7 +577,7 @@ export default function SkillsPage() {
             </ScrollArea>
 
             <div className="p-4 border-t bg-background space-y-2">
-              <Button 
+              <Button
                 className="w-full"
                 variant={selectedSkill.enabled ? "outline" : "default"}
                 onClick={() => handleToggleSkill(selectedSkill)}
@@ -580,7 +595,7 @@ export default function SkillsPage() {
                 )}
               </Button>
               {!selectedSkill.builtIn && (
-                <Button 
+                <Button
                   className="w-full"
                   variant="outline"
                   onClick={() => handleEditSkill(selectedSkill as UserSkill)}
