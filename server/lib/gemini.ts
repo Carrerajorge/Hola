@@ -27,6 +27,8 @@ export function getGeminiClientOrThrow(): GoogleGenAI {
 }
 
 export const GEMINI_MODELS = {
+  PRO_31: "gemini-3.1-pro",
+  FLASH_31: "gemini-3.1-flash",
   FLASH_PREVIEW: "gemini-3-flash-preview",
   FLASH: "gemini-2.5-flash",
   PRO: "gemini-2.5-pro",
