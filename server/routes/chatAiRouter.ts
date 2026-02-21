@@ -77,6 +77,9 @@ const VALID_STREAM_SCOPE_SET = new Set<SkillScope>([
 const STREAM_IDENTIFIER_RE = /^[a-zA-Z0-9._-]{1,140}$/;
 const STREAM_ATTACHMENT_NAME_RE = /^[^<>:\"/\\|?*\u0000-\u001f]{1,220}$/;
 const STREAM_MIME_RE = /^[a-zA-Z0-9][a-zA-Z0-9.+-\/]*/;
+const LOCAL_DESKTOP_ACTIONS_ENABLED =
+  process.env.ILIAGPT_ENABLE_LOCAL_DESKTOP_ACTIONS === "true" ||
+  process.env.NODE_ENV !== "production";
 
 // ── PER-USER SSE CONNECTION LIMITER ────────────────────────────
 const MAX_SSE_CONNECTIONS_PER_USER = 5;
@@ -117,6 +120,28 @@ function releaseSseSlot(userId: string, requestId: string): void {
     connections.delete(requestId);
     if (connections.size === 0) SSE_CONNECTION_TRACKER.delete(userId);
   }
+}
+
+function extractDesktopFolderNameFromPrompt(input: string): string | null {
+  const prompt = String(input || "").trim();
+  if (!prompt) return null;
+
+  const folderNamePatterns = [
+    /(?:crea|crear|creame|haz|genera)\s+(?:una\s+)?carpeta(?:\s+en\s+mi\s+escritorio)?\s+(?:llamada|con\s+nombre)\s+["']?([^"'\n]{1,120})["']?\s*$/i,
+    /(?:crea|crear|creame|haz|genera)\s+(?:una\s+)?carpeta\s+(?:llamada|con\s+nombre)\s+["']?([^"'\n]{1,120})["']?\s+en\s+(?:mi\s+)?escritorio\b/i,
+    /(?:crea|crear|creame|haz|genera)\s+(?:una\s+)?carpeta\s+["']?([^"'\n]{1,120})["']?\s+en\s+(?:mi\s+)?escritorio\b/i,
+    /^(?:\/?mkdir|local:\s*mkdir)\s+["']?([^"'\n]{1,120})["']?\s*$/i,
+  ];
+
+  for (const pattern of folderNamePatterns) {
+    const match = prompt.match(pattern);
+    const candidate = match?.[1]?.trim();
+    if (!candidate) continue;
+    const cleaned = candidate.replace(/[.,;:!?]+$/g, "").trim();
+    if (cleaned) return cleaned;
+  }
+
+  return null;
 }
 
 /**
@@ -433,6 +458,36 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
       // persist conversation state.
       const effectiveUserId = getUserId(req) || getOrCreateSecureUserId(req);
       const userId = effectiveUserId;
+
+      // Fast local desktop action shortcut for non-stream endpoint.
+      const latestUserMessage = [...clientMessages].reverse().find((m: any) => m?.role === "user");
+      const latestUserText = typeof latestUserMessage?.content === "string" ? latestUserMessage.content : String(latestUserMessage?.content || "");
+      const createDesktopFolderMatch = latestUserText.match(/(?:crea|crear)\s+(?:una\s+)?carpeta(?:\s+en\s+mi\s+escritorio)?\s+(?:llamada|con\s+nombre)\s+([\w\s.-]{1,120})/i);
+      if (createDesktopFolderMatch?.[1]) {
+        const rawName = createDesktopFolderMatch[1].trim();
+        const invalid = /[\\/:*?"<>|]/.test(rawName) || rawName.includes("..");
+        if (invalid) {
+          return res.status(400).json({
+            error: "Nombre de carpeta inválido",
+            code: "INVALID_FOLDER_NAME",
+          });
+        }
+        const desktopDir = path.join(os.homedir(), "Desktop");
+        const folderPath = path.join(desktopDir, rawName);
+        await fs.mkdir(folderPath, { recursive: true });
+        await fs.appendFile(
+          path.join(os.homedir(), ".iliagpt-control-audit.log"),
+          `${new Date().toISOString()} chat_shortcut_nonstream mkdir path=${folderPath}\n`,
+          "utf-8"
+        );
+        return res.json({
+          content: `Listo. Carpeta creada en tu escritorio: ${folderPath}`,
+          provider: "local-system",
+          model: "local-system",
+          usage: null,
+          files: [],
+        });
+      }
 
       // CONTEXT FIX: Augment client messages with server-side history
       const messages = await conversationMemoryManager.augmentWithHistory(
@@ -1372,11 +1427,11 @@ const cleanSkipRunStreamDedup = (): void => {
       const earlyQuestionClassification = questionClassifier.classifyQuestion(userQuery || "");
 
       // Fast local desktop action shortcut: create folder on macOS Desktop.
-      // Prevents LLM-only fallback responses for a very common local-control request.
-      const createDesktopFolderMatch = userQuery.match(/(?:crea|crear)\s+(?:una\s+)?carpeta(?:\s+en\s+mi\s+escritorio)?\s+(?:llamada|con\s+nombre)\s+([\w\s.-]{1,120})/i);
-      if (createDesktopFolderMatch?.[1]) {
-        const rawName = createDesktopFolderMatch[1].trim();
-        const invalid = /[\\/:*?"<>|]/.test(rawName) || rawName.includes("..");
+      // Scoped action only: no unrestricted computer control.
+      const requestedDesktopFolderName = extractDesktopFolderNameFromPrompt(userQuery);
+      if (requestedDesktopFolderName) {
+        const rawName = requestedDesktopFolderName.trim();
+        const invalid = /[\\/:*?"<>|]/.test(rawName) || rawName.includes("..") || rawName.length > 120;
 
         // Ensure SSE is initialized before emitting events.
         if (!res.headersSent) {
@@ -1392,6 +1447,17 @@ const cleanSkipRunStreamDedup = (): void => {
           writeSse(res, "start", { requestId, latencyMode, timestamp: Date.now() });
         }
 
+        if (!LOCAL_DESKTOP_ACTIONS_ENABLED) {
+          writeSse(res, "error", {
+            code: "local_actions_disabled",
+            error: "Las acciones locales estan desactivadas. Activa ILIAGPT_ENABLE_LOCAL_DESKTOP_ACTIONS=true.",
+            requestId,
+            timestamp: Date.now(),
+          });
+          writeSse(res, "done", { requestId, timestamp: Date.now() });
+          return res.end();
+        }
+
         if (invalid) {
           writeSse(res, "error", {
             code: "invalid_folder_name",
@@ -1405,7 +1471,22 @@ const cleanSkipRunStreamDedup = (): void => {
 
         try {
           const desktopDir = path.join(os.homedir(), "Desktop");
-          const folderPath = path.join(desktopDir, rawName);
+          const resolvedDesktopDir = path.resolve(desktopDir);
+          const folderPath = path.resolve(resolvedDesktopDir, rawName);
+          const isInsideDesktop =
+            folderPath === resolvedDesktopDir || folderPath.startsWith(`${resolvedDesktopDir}${path.sep}`);
+
+          if (!isInsideDesktop) {
+            writeSse(res, "error", {
+              code: "invalid_folder_path",
+              error: "La carpeta debe crearse dentro de tu Desktop.",
+              requestId,
+              timestamp: Date.now(),
+            });
+            writeSse(res, "done", { requestId, timestamp: Date.now() });
+            return res.end();
+          }
+
           await fs.mkdir(folderPath, { recursive: true });
           await fs.appendFile(
             path.join(os.homedir(), ".iliagpt-control-audit.log"),
