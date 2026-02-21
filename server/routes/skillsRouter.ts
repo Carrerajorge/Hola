@@ -7,6 +7,7 @@ import { generateSkillFromPrompt } from "../services/skillGenerator";
 import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { createCustomRateLimiter } from "../middleware/userRateLimiter";
 import { getOpenClawSkillsRuntimeSnapshot } from "../services/openclawSkillsRuntimeAdapter";
+import { FLUID_FUNCTIONAL_SKILLS } from "../config/fluidFunctionalSkills";
 
 const generateSchema = z.object({
   prompt: z.string().min(1).max(2000),
@@ -418,6 +419,61 @@ export function createSkillsRouter(): Router {
       });
     } catch (error: any) {
       console.error("[SkillsRouter] import error:", error);
+      return res.status(503).json({ error: "Database unavailable" });
+    }
+  });
+
+  // GET /api/skills/library/fluid
+  // Preview: catálogo de capacidades funcionales listas para activar.
+  router.get("/library/fluid", async (_req, res) => {
+    return res.json({
+      total: FLUID_FUNCTIONAL_SKILLS.length,
+      skills: FLUID_FUNCTIONAL_SKILLS,
+    });
+  });
+
+  // POST /api/skills/bootstrap/fluid
+  // Inserta el pack "fluid functional" (20 skills) evitando duplicados por nombre.
+  router.post("/bootstrap/fluid", async (req, res) => {
+    const userId = getOrCreateSecureUserId(req);
+    await ensureUserRowExists(userId);
+
+    try {
+      const existing = await db
+        .select({ name: customSkills.name })
+        .from(customSkills)
+        .where(eq(customSkills.userId, userId));
+
+      const existingNames = new Set(existing.map((r) => (r.name || "").trim().toLowerCase()).filter(Boolean));
+      const toInsert = FLUID_FUNCTIONAL_SKILLS.filter((s) => !existingNames.has(s.name.trim().toLowerCase()));
+
+      const inserted = toInsert.length
+        ? await db
+          .insert(customSkills)
+          .values(
+            toInsert.map((s) => ({
+              userId,
+              name: s.name,
+              description: s.description,
+              instructions: s.instructions,
+              category: s.category,
+              enabled: true,
+              features: s.features,
+              triggers: triggersToDb(s.triggers),
+              updatedAt: new Date(),
+            }))
+          )
+          .returning()
+        : [];
+
+      return res.json({
+        catalogTotal: FLUID_FUNCTIONAL_SKILLS.length,
+        importedCount: inserted.length,
+        skippedCount: FLUID_FUNCTIONAL_SKILLS.length - inserted.length,
+        imported: inserted.map(toClientSkill),
+      });
+    } catch (error: any) {
+      console.error("[SkillsRouter] bootstrap fluid error:", error);
       return res.status(503).json({ error: "Database unavailable" });
     }
   });
