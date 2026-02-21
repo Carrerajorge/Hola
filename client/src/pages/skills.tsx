@@ -307,8 +307,6 @@ const getExtraSkillIcon = (id: string) => {
     case "trello": return <LayoutTemplate {...props} className="h-6 w-6 text-blue-600" />;
     case "video-frames": return <Frame {...props} className="h-6 w-6 text-red-500" />;
     case "voice-call": return <Phone {...props} className="h-6 w-6 text-green-500" />;
-    case "wacli": return <MessageSquare {...props} className="h-6 w-6 text-green-500" />;
-    case "weather": return <Cloud {...props} className="h-6 w-6 text-cyan-400" />;
     case "aws-cli": return <Cloud {...props} className="h-6 w-6 text-orange-500" />;
     case "docker-ops": return <Box {...props} className="h-6 w-6 text-blue-500" />;
     case "jira-manager": return <LayoutTemplate {...props} className="h-6 w-6 text-blue-600" />;
