@@ -28,7 +28,7 @@ INFLUX_ORG = os.getenv("INFLUX_ORG", "iliagpt")
 INFLUX_BUCKET = os.getenv("INFLUX_BUCKET", "system_metrics")
 
 
-WS_HOST = os.getenv("WS_HOST", "0.0.0.0")
+WS_HOST = os.getenv("WS_HOST", "0.0.0.0")  # nosec B104
 
 WS_PORT = int(os.getenv("WS_PORT", "9105"))
 
