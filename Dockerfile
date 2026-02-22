@@ -29,7 +29,7 @@ ENV VITE_APP_VERSION=$APP_VERSION
 RUN npm run build
 
 # Convert to production-only deps for runtime images
-RUN npm prune --omit=dev
+RUN npm prune --legacy-peer-deps --omit=dev
 
 # ============================================
 # Stage 2: Sandbox Runner
