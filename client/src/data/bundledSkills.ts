@@ -1,9 +1,4 @@
-export type BundledSkill = {
-    id: string;
-    name: string;
-    description: string;
-    category: "documents" | "data" | "integrations" | "custom" | "automation";
-    features?: string[];
+export type BundledSkill = { id: string; name: string; description: string; category: "documents" | "data" | "integrations" | "custom" | "automation"; features?: string[];
 };
 
 export const BUNDLED_SKILLS: BundledSkill[] = [
@@ -109,7 +104,9 @@ export const BUNDLED_SKILLS: BundledSkill[] = [
     { id: "git-local", name: "git-local", description: "Flujos de control local en Git: rebasing inteligente, bisect automático y recuperación via reflog.", category: "custom", features: ["Rebase interactivo", "Bisect", "Reflog de rescate", "Cherry-picking"] },
     { id: "nmap-scan", name: "nmap-scan", description: "Auditoría de perímetros de red, detección pasiva/activa de SO y escaneo de vulnerabilidades.", category: "custom", features: ["Descubrimiento de red", "Escaneo de puertos", "Detección de SO", "Scripts NSE"] },
     { id: "wireshark-cap", name: "wireshark-cap", description: "Captura y desensamblado forense de trazas de paquetes de red a nivel de protocolo (pcap).", category: "custom", features: ["Filtros de captura", "Inspección de protocolos", "Seguimiento de TCP", "Análisis de pcap"] },
-    { id: "burpsuite-proxy", name: "burpsuite-proxy", description: "Automatización de intercepción, fuzzing y auditoría activa de tráfico HTTP para pruebas de pentesting.", category: "custom", features: ["Intercepción HTTP", "Repetición de peticiones", "Fuzzing de parámetros", "Detección de vulns"] }
+    { id: "burpsuite-proxy", name: "burpsuite-proxy", description: "Automatización de intercepción, fuzzing y auditoría activa de tráfico HTTP para pruebas de pentesting.", category: "custom", 
+      features: ["Intercepción HTTP", "Repetición de peticiones", "Fuzzing de parámetros", "Detección de vulns"] },
+    
     {
         id: "analyze_spreadsheet",
         name: "Spreadsheet Analyzer",
@@ -164,11 +161,7 @@ export const BUNDLED_SKILLS: BundledSkill[] = [
         description: "Generate Office documents (Word, Excel, PowerPoint, CSV) from text or structured data.",
         category: "documents",
         features: [
-            "Word document (.docx) generation",
-            "Excel spreadsheet (.xlsx) generation",
-            "PowerPoint presentation (.pptx) creation",
-            "CSV format support",
-            "Automatic cloud library upload"
+            "Word document (.docx) generation", "Excel spreadsheet (.xlsx) generation", "PowerPoint presentation (.pptx) creation", "CSV format support", "Automatic cloud library upload"
         ]
-    }
+    },
 ];
