@@ -75,16 +75,16 @@ describe("Default model constants", () => {
     expect(DEFAULT_XAI_VISION_MODEL).toBe(XAI_MODELS.GROK_2_VISION);
   });
 
-  it("sets default Gemini text model to Flash 2.5", () => {
-    expect(DEFAULT_GEMINI_TEXT_MODEL).toBe(GEMINI_MODELS_REGISTRY.FLASH_25);
+  it("sets default Gemini text model to Pro 3.1", () => {
+    expect(DEFAULT_GEMINI_TEXT_MODEL).toBe(GEMINI_MODELS_REGISTRY.PRO_31);
   });
 
-  it("sets default Gemini reasoning model to Pro 2.5", () => {
-    expect(DEFAULT_GEMINI_REASONING_MODEL).toBe(GEMINI_MODELS_REGISTRY.PRO_25);
+  it("sets default Gemini reasoning model to Pro 3.1", () => {
+    expect(DEFAULT_GEMINI_REASONING_MODEL).toBe(GEMINI_MODELS_REGISTRY.PRO_31);
   });
 
-  it("sets default Gemini vision model to Flash 2.5", () => {
-    expect(DEFAULT_GEMINI_VISION_MODEL).toBe(GEMINI_MODELS_REGISTRY.FLASH_25);
+  it("sets default Gemini vision model to Flash 3.1", () => {
+    expect(DEFAULT_GEMINI_VISION_MODEL).toBe(GEMINI_MODELS_REGISTRY.FLASH_31);
   });
 
   it("has gemini as default provider", () => {

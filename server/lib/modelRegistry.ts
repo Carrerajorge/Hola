@@ -159,6 +159,9 @@ export const MODEL_PRICING_REGISTRY: Readonly<Record<string, ModelPricingEntry>>
   [XAI_MODELS.GROK_2_VISION]: { inputPerMillion: 2.00, outputPerMillion: 10.00 },
 
   // Gemini
+  [GEMINI_MODELS_REGISTRY.PRO_31]: { inputPerMillion: 1.25, outputPerMillion: 5.00 },
+  [GEMINI_MODELS_REGISTRY.FLASH_31]: { inputPerMillion: 0.075, outputPerMillion: 0.30 },
+  [GEMINI_MODELS_REGISTRY.PRO_PREVIEW]: { inputPerMillion: 1.25, outputPerMillion: 5.00 },
   [GEMINI_MODELS_REGISTRY.PRO_25]: { inputPerMillion: 1.25, outputPerMillion: 5.00 },
   [GEMINI_MODELS_REGISTRY.FLASH_25]: { inputPerMillion: 0.075, outputPerMillion: 0.30 },
   [GEMINI_MODELS_REGISTRY.FLASH_20]: { inputPerMillion: 0.10, outputPerMillion: 0.40 },
