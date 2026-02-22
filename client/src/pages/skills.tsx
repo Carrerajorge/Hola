@@ -89,7 +89,7 @@ import {
   XCircle,
   Loader2,
   AlertTriangle,
-  Package
+  Package,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
