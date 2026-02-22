@@ -55,7 +55,10 @@ import { generateAndPersistChatTitle } from "../lib/chatTitleGenerator";
 import { validate } from "../lib/requestValidator";
 import { streamChatRequestSchema } from "../schemas/chatSchemas";
 import { checkPromptIntegrity } from "../lib/promptIntegrityService";
-import { recordIntegrityCheck, recordTruncation, recordPromptTokens, recordDroppedChars } from "../lib/promptMetrics";
+import { recordIntegrityCheck, recordTruncation, recordPromptTokens, recordDroppedChars, recordPreprocessDuration, recordAnalysisDuration, recordContextStrategy, recordMustKeepSpans, recordLanguageDetected, recordDuplicateDetected, recordNfcNormalization } from "../lib/promptMetrics";
+import { promptPreProcessor } from "../lib/promptPreProcessor";
+import { promptAuditStore } from "../lib/promptAuditStore";
+import { promptAnalysisService } from "../services/promptAnalysisService";
 import * as macos from "../lib/macos";
 
 type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
@@ -3448,6 +3451,17 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
     res.json(AVAILABLE_MODELS);
   });
 
+  // ── Admin: Prompt Integrity Stats ──
+  router.get("/admin/prompt-integrity/stats", async (req, res) => {
+    try {
+      const stats = await promptAuditStore.getStats();
+      res.json(stats);
+    } catch (err: any) {
+      console.error("[Admin] Prompt integrity stats error:", err?.message);
+      res.status(500).json({ error: "Failed to retrieve stats" });
+    }
+  });
+
   // Helper function to detect if a file is a document (not an image)
   // Uses mimeType AND file extension for reliable detection
   const isDocumentAttachment = (mimeType: string, fileName: string, type?: string): boolean => {
@@ -4299,6 +4313,62 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         }
       } else {
         recordIntegrityCheck("skipped");
+      }
+
+      // ── Prompt Pre-Processing Pipeline ──
+      // NFC normalization, language detection, structure analysis, dedup, whitespace cleanup.
+      const latestUserForPreProcess = [...clientMessages].reverse().find((m: any) => m?.role === "user");
+      if (latestUserForPreProcess?.content && typeof latestUserForPreProcess.content === "string") {
+        try {
+          const preProcessResult = promptPreProcessor.process(latestUserForPreProcess.content);
+          recordPreprocessDuration(preProcessResult.processingTimeMs);
+          if (preProcessResult.nfcApplied) recordNfcNormalization();
+          if (preProcessResult.isDuplicate) recordDuplicateDetected();
+          recordLanguageDetected(preProcessResult.language.primaryLanguage);
+
+          // Attach to res.locals for downstream use
+          (res as any).locals.preProcessResult = preProcessResult;
+
+          // Persist pre-processing transformation to audit trail
+          promptAuditStore.logTransformation({
+            chatId: chatId || undefined,
+            runId: runId || undefined,
+            requestId,
+            stage: "normalize",
+            inputTokens: Math.ceil(preProcessResult.originalText.length / 4),
+            outputTokens: Math.ceil(preProcessResult.text.length / 4),
+            droppedChars: preProcessResult.whitespace.originalLen - preProcessResult.whitespace.normalizedLen,
+            transformationDetails: {
+              nfcApplied: preProcessResult.nfcApplied,
+              language: preProcessResult.language.primaryLanguage,
+              isMultiLingual: preProcessResult.language.isMultiLingual,
+              structureType: preProcessResult.structure.type,
+              isDuplicate: preProcessResult.isDuplicate,
+              whitespace: preProcessResult.whitespace,
+            },
+          });
+        } catch (ppErr) {
+          // Pre-processing is non-critical — log and continue
+          console.warn("[PromptPreProcessor] Failed (non-blocking):", ppErr);
+        }
+      }
+
+      // ── Persist integrity check to audit trail ──
+      if (clientPromptLen != null || clientPromptHash != null) {
+        const integrityForAudit = (res as any).locals.promptIntegrity;
+        if (integrityForAudit) {
+          promptAuditStore.saveIntegrityCheck({
+            chatId: chatId || undefined,
+            runId: runId || undefined,
+            messageRole: "user",
+            clientPromptLen,
+            clientPromptHash,
+            serverPromptLen: integrityForAudit.serverPromptLen,
+            serverPromptHash: integrityForAudit.serverPromptHash,
+            valid: integrityForAudit.verified,
+            requestId,
+          });
+        }
       }
 
       // Fast local-control path: avoid expensive run-claim/skill-resolution before emitting SSE.
@@ -5317,32 +5387,74 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           console.log(`[Stream] Emitted clarification request: "${intentResult.clarification_question}"`);
         }
 
-        // ── Prompt Understanding (sync/heuristic only) ──
+        // ── Prompt Understanding (sync/heuristic + async deep analysis) ──
         // Extract structured spec from the user's prompt for observability.
-        // Only runs for non-fast mode and prompts > 50 chars.
+        // Sync analysis: always for non-fast mode and prompts > 50 chars.
+        // Async analysis: for deep mode or prompts > 500 chars.
         if (latencyMode !== "fast" && latestUserTextForRun && latestUserTextForRun.length > 50) {
           try {
-            const { PromptUnderstanding } = await import("../agent/promptUnderstanding");
-            const pu = new PromptUnderstanding();
-            const promptSpec = pu.processSync(latestUserTextForRun);
+            // Sync analysis (< 5ms)
+            const syncResult = promptAnalysisService.analyzeSync(latestUserTextForRun);
+            recordAnalysisDuration(syncResult.processingTimeMs, "sync");
 
-            console.log("[PromptUnderstanding] Extraction complete", {
+            console.log("[PromptUnderstanding] Sync extraction complete", {
               requestId,
-              confidence: promptSpec.confidence,
-              taskCount: promptSpec.spec.tasks.length,
-              constraintCount: promptSpec.spec.constraints.length,
-              needsClarification: promptSpec.needsClarification,
-              processingTimeMs: promptSpec.processingTimeMs,
+              confidence: syncResult.confidence,
+              needsClarification: syncResult.needsClarification,
+              processingTimeMs: syncResult.processingTimeMs,
             });
 
-            // Emit low-confidence notice so frontend can display clarification suggestions
-            if (promptSpec.needsClarification && promptSpec.confidence < 0.3 && promptSpec.clarificationQuestions.length > 0) {
+            // Persist sync analysis to audit trail
+            promptAuditStore.saveAnalysisResult({
+              chatId: chatId || undefined,
+              runId: runId || undefined,
+              requestId,
+              confidence: syncResult.confidence,
+              needsClarification: syncResult.needsClarification,
+              clarificationQuestions: syncResult.clarificationQuestions,
+              extractedSpec: syncResult.spec,
+              usedLLM: false,
+              processingTimeMs: syncResult.processingTimeMs,
+            });
+
+            // Emit spec_extracted notice with analysis results
+            if (syncResult.confidence > 0) {
               writeSse(res, "notice", {
-                type: "low_confidence_prompt",
-                confidence: promptSpec.confidence,
-                clarificationQuestions: promptSpec.clarificationQuestions.slice(0, 3),
+                type: "spec_extracted",
+                spec: syncResult.spec,
+                confidence: syncResult.confidence,
                 requestId,
                 timestamp: Date.now(),
+              });
+            }
+
+            // Emit low-confidence notice so frontend can display clarification suggestions
+            if (syncResult.needsClarification && syncResult.confidence < 0.5 && syncResult.clarificationQuestions.length > 0) {
+              writeSse(res, "notice", {
+                type: "clarification_needed",
+                confidence: syncResult.confidence,
+                questions: syncResult.clarificationQuestions.slice(0, 5),
+                spec: syncResult.spec,
+                requestId,
+                timestamp: Date.now(),
+              });
+            }
+
+            // Async deep analysis for complex prompts (non-blocking)
+            if ((latencyMode === "deep" || latestUserTextForRun.length > 500) && !syncResult.cached) {
+              writeSse(res, "notice", {
+                type: "analysis_started",
+                requestId,
+                timestamp: Date.now(),
+              });
+              // Fire-and-forget: results will be available via cache for future requests
+              promptAnalysisService.analyzeAsync(
+                latestUserTextForRun,
+                chatId || undefined,
+                runId || undefined,
+                requestId,
+              ).catch((asyncErr) => {
+                console.warn("[PromptAnalysis] Async analysis failed (non-blocking):", asyncErr);
               });
             }
           } catch (puErr) {
@@ -6250,14 +6362,37 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
         const truncationInfo = (streamLlmOptions as any).__truncationResult;
         if (truncationInfo?.truncationApplied) {
           recordTruncation(truncationInfo.originalTokens, truncationInfo.finalTokens, truncationInfo.droppedMessages);
+          recordContextStrategy(truncationInfo.metadata?.strategy || "sliding_window");
+          if (truncationInfo.metadata?.mustKeepPreserved) {
+            recordMustKeepSpans(truncationInfo.metadata.mustKeepPreserved);
+          }
           writeSse(res, "notice", {
             type: "context_truncated",
             originalTokens: truncationInfo.originalTokens,
             finalTokens: truncationInfo.finalTokens,
             droppedMessages: truncationInfo.droppedMessages,
             truncatedMessageCount: truncationInfo.truncatedMessageCount,
+            strategy: truncationInfo.metadata?.strategy,
             requestId,
             timestamp: Date.now(),
+          });
+
+          // Persist truncation to audit trail
+          promptAuditStore.logTransformation({
+            chatId: chatId || undefined,
+            runId: runId || undefined,
+            requestId,
+            stage: "truncate",
+            inputTokens: truncationInfo.originalTokens,
+            outputTokens: truncationInfo.finalTokens,
+            droppedMessages: truncationInfo.droppedMessages,
+            droppedChars: 0,
+            transformationDetails: {
+              strategy: truncationInfo.metadata?.strategy,
+              mustKeepPreserved: truncationInfo.metadata?.mustKeepPreserved,
+              originalMessageCount: truncationInfo.metadata?.originalMessageCount,
+              keptMessageCount: truncationInfo.metadata?.keptMessageCount,
+            },
           });
         }
 
