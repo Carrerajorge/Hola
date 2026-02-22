@@ -39,6 +39,7 @@ export const GEMINI_MODELS_REGISTRY = {
   PRO_31: "gemini-3.1-pro",
   FLASH_31: "gemini-3.1-flash",
   FLASH_PREVIEW: "gemini-3-flash-preview",
+  PRO_PREVIEW: "gemini-3.1-pro-preview",
   FLASH_25: "gemini-2.5-flash",
   PRO_25: "gemini-2.5-pro",
   FLASH_20: "gemini-2.0-flash",

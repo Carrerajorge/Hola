@@ -90,6 +90,7 @@ import {
   Loader2,
   AlertTriangle,
   Package,
+  Blocks,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";

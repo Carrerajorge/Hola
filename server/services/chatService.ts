@@ -61,6 +61,7 @@ export const AVAILABLE_MODELS = {
     models: [
       { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", description: "Rápido y eficiente", default: true },
       { id: "gemini-3-flash-preview", name: "Gemini 3 Flash Preview", description: "Preview (puede variar disponibilidad)" },
+      { id: "gemini-3.1-pro-preview", name: "Gemini 3.1 Pro Preview", description: "El modelo más avanzado de Google (Preview)" },
       { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", description: "El más capaz" },
     ]
   }

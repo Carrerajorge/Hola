@@ -142,6 +142,7 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
 
   // Google
   'gemini-3-flash-preview': { inputPer1M: 0.075, outputPer1M: 0.30, contextWindow: 1000000, maxOutput: 65536 },
+  'gemini-3.1-pro-preview': { inputPer1M: 1.25, outputPer1M: 5.00, contextWindow: 2000000, maxOutput: 65536 },
   'gemini-2.5-pro': { inputPer1M: 1.25, outputPer1M: 5.00, contextWindow: 1000000, maxOutput: 65536 },
   'gemini-2.5-flash': { inputPer1M: 0.075, outputPer1M: 0.30, contextWindow: 1000000, maxOutput: 65536 },
 

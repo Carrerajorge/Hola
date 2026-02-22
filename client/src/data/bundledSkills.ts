@@ -110,4 +110,65 @@ export const BUNDLED_SKILLS: BundledSkill[] = [
     { id: "nmap-scan", name: "nmap-scan", description: "Auditoría de perímetros de red, detección pasiva/activa de SO y escaneo de vulnerabilidades.", category: "custom", features: ["Descubrimiento de red", "Escaneo de puertos", "Detección de SO", "Scripts NSE"] },
     { id: "wireshark-cap", name: "wireshark-cap", description: "Captura y desensamblado forense de trazas de paquetes de red a nivel de protocolo (pcap).", category: "custom", features: ["Filtros de captura", "Inspección de protocolos", "Seguimiento de TCP", "Análisis de pcap"] },
     { id: "burpsuite-proxy", name: "burpsuite-proxy", description: "Automatización de intercepción, fuzzing y auditoría activa de tráfico HTTP para pruebas de pentesting.", category: "custom", features: ["Intercepción HTTP", "Repetición de peticiones", "Fuzzing de parámetros", "Detección de vulns"] }
+    {
+        id: "analyze_spreadsheet",
+        name: "Spreadsheet Analyzer",
+        description: "Analyze Excel or CSV spreadsheet files. Performs data analysis, generates insights, charts, and summaries from spreadsheet data.",
+        category: "data",
+        features: [
+            "Data extraction and summarization",
+            "Chart and graph generation",
+            "Support for .xlsx and .csv formats",
+            "Custom analysis instructions"
+        ]
+    },
+    {
+        id: "web_search",
+        name: "Web & Academic Search",
+        description: "Search the web for information. Can search general web or academic/scholarly sources like Google Scholar.",
+        category: "data",
+        features: [
+            "Real-time web browsing",
+            "Academic source filtering (Google Scholar)",
+            "Configurable result limits",
+            "Content extraction"
+        ]
+    },
+    {
+        id: "generate_image",
+        name: "AI Image Generator",
+        description: "Generate an image using Gemini AI based on a text description.",
+        category: "custom",
+        features: [
+            "High-quality image synthesis",
+            "Prompt-based generation",
+            "Base64 image encoding",
+            "Artifact creation"
+        ]
+    },
+    {
+        id: "browse_url",
+        name: "Headless Browser",
+        description: "Navigate to a URL using a headless browser. Returns page content, title, and optionally a screenshot.",
+        category: "automation",
+        features: [
+            "Headless page rendering",
+            "HTML content extraction",
+            "Screenshot capture",
+            "Privacy-preserving fallback mode"
+        ]
+    },
+    {
+        id: "generate_document",
+        name: "Office Document Generator",
+        description: "Generate Office documents (Word, Excel, PowerPoint, CSV) from text or structured data.",
+        category: "documents",
+        features: [
+            "Word document (.docx) generation",
+            "Excel spreadsheet (.xlsx) generation",
+            "PowerPoint presentation (.pptx) creation",
+            "CSV format support",
+            "Automatic cloud library upload"
+        ]
+    }
 ];
