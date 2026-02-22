@@ -42,7 +42,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            npm ci && break
+            npm ci --legacy-peer-deps && break
             if [ "$attempt" -eq 3 ]; then
               echo "npm ci failed after 3 attempts" >&2
               exit 1
@@ -184,7 +184,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            npm ci && break
+            npm ci --legacy-peer-deps && break
             if [ "$attempt" -eq 3 ]; then
               echo "npm ci failed after 3 attempts" >&2
               exit 1
@@ -242,7 +242,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            npm ci && break
+            npm ci --legacy-peer-deps && break
             if [ "$attempt" -eq 3 ]; then
               echo "npm ci failed after 3 attempts" >&2
               exit 1
@@ -307,7 +307,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            npm ci && break
+            npm ci --legacy-peer-deps && break
             if [ "$attempt" -eq 3 ]; then
               echo "npm ci failed after 3 attempts" >&2
               exit 1
@@ -530,7 +530,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            npm ci && break
+            npm ci --legacy-peer-deps && break
             if [ "$attempt" -eq 3 ]; then
               echo "npm ci failed after 3 attempts" >&2
               exit 1
