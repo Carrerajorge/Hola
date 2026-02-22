@@ -9,6 +9,7 @@ import { browserAgent, BrowserAgent } from "./BrowserAgent";
 import { documentAgent, DocumentAgent } from "./DocumentAgent";
 import { qaAgent, QAAgent } from "./QAAgent";
 import { securityAgent, SecurityAgent } from "./SecurityAgent";
+import { criticAgent, CriticAgent } from "./CriticAgent";
 
 export {
   registerAgent,
@@ -38,6 +39,8 @@ export {
   qaAgent,
   SecurityAgent,
   securityAgent,
+  CriticAgent,
+  criticAgent,
 };
 
 export function initializeAgents(): void {
@@ -51,6 +54,7 @@ export function initializeAgents(): void {
   registerAgent(documentAgent);
   registerAgent(qaAgent);
   registerAgent(securityAgent);
+  registerAgent(criticAgent);
 
   console.log(`[AgentRegistry] Initialized ${AGENT_REGISTRY.size} specialized agents`);
 }
@@ -138,6 +142,12 @@ export const SPECIALIZED_AGENTS = [
     description: "Security analysis, vulnerability assessment, compliance",
     capabilities: ["vulnerability_scan", "security_audit", "compliance_check"],
     tools: ["encrypt_data", "decrypt_data", "hash_data", "validate_input", "audit_log", "secrets_manage"],
+  },
+  {
+    name: "CriticAgent",
+    description: "Rigorous evaluator and verifier. Audits the work of other agents.",
+    capabilities: ["verify_output", "fact_check"],
+    tools: ["verify_output", "fact_check"],
   },
 ];
 

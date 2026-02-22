@@ -25,6 +25,7 @@ import { REASONING_TOOLS, reasonTool, reflectTool, verifyTool } from "./reasonin
 import { ORCHESTRATION_TOOLS, orchestrateTool, workflowTool, strategicPlanTool } from "./orchestrationTools";
 import { COMMUNICATION_TOOLS, decideTool, clarifyTool, summarizeTool, explainTool } from "./communicationTools";
 import { ADVANCED_SYSTEM_TOOLS, codeExecuteTool, fileConvertTool, environmentTool, searchSemanticTool } from "./systemTools";
+import { MACOS_NATIVE_TOOLS } from "../tools/macosNativeTools";
 import { WEB_TOOLS } from "./webTools";
 import { GENERATION_TOOLS } from "./generationTools";
 import { PROCESSING_TOOLS } from "./processingTools";
@@ -422,6 +423,7 @@ export const ALL_TOOLS = [
   ...ORCHESTRATION_TOOLS,
   ...COMMUNICATION_TOOLS,
   ...ADVANCED_SYSTEM_TOOLS,
+  ...MACOS_NATIVE_TOOLS,
   ...WEB_TOOLS,
   ...GENERATION_TOOLS,
   ...PROCESSING_TOOLS,

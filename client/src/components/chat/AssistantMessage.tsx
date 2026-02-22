@@ -212,13 +212,27 @@ export const AssistantMessage = memo(function AssistantMessage({
                 />
             )}
 
-            {message.isThinking && message.steps && (
-                <div className="rounded-lg border bg-card p-4 space-y-3 w-full animate-in fade-in slide-in-from-bottom-2">
-                    <AgentStateIndicator
-                        status="thinking"
-                        message="Processing Goal"
-                        className="mb-2"
-                    />
+            {message.steps && message.steps.length > 0 && (
+                <div className={cn(
+                    "rounded-lg border p-4 space-y-3 w-full",
+                    message.isThinking
+                        ? "bg-card animate-in fade-in slide-in-from-bottom-2"
+                        : "bg-muted/30 border-border/50 opacity-90"
+                )}>
+                    {message.isThinking ? (
+                        <AgentStateIndicator
+                            status="thinking"
+                            message="Processing Goal"
+                            className="mb-2"
+                        />
+                    ) : (
+                        <div className="flex items-center gap-2 mb-2">
+                            <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                                Cadena de Razonamiento
+                            </span>
+                        </div>
+                    )}
                     {message.steps.map((step, idx) => (
                         <div key={idx} className="flex items-center gap-3 text-sm">
                             {step.status === "complete" ? (

@@ -119,6 +119,16 @@ const DEFAULT_STREAM_TIMEOUT_MS = 300000; // 5 minutes
 const STREAM_IDLE_TIMEOUT_MS = 60000; // 60 seconds – covers slow TTFT from Gemini/reasoning models
 const MAX_CONTEXT_TOKENS = 8000;
 const CACHE_TTL_MS = 300000; // 5 minutes
+
+/** Structured result from context truncation — replaces silent truncation. */
+export interface TruncationResult {
+  messages: ChatCompletionMessageParam[];
+  truncationApplied: boolean;
+  originalTokens: number;
+  finalTokens: number;
+  droppedMessages: number;
+  truncatedMessageCount: number;
+}
 const IN_FLIGHT_TIMEOUT_MS = 120000; // 2 minutes
 const TOKEN_HISTORY_MAX = 1000;
 
@@ -438,7 +448,7 @@ class LLMGateway {
   }
 
   // ===== Context Truncation =====
-  truncateContext(messages: ChatCompletionMessageParam[], maxTokens: number = MAX_CONTEXT_TOKENS): ChatCompletionMessageParam[] {
+  truncateContext(messages: ChatCompletionMessageParam[], maxTokens: number = MAX_CONTEXT_TOKENS): TruncationResult {
     const toText = (msg: ChatCompletionMessageParam): string =>
       typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
 
@@ -454,9 +464,17 @@ class LLMGateway {
 
     const totalEstimatedTokens = messages.reduce((sum, msg) => sum + estimateTokens(toText(msg)), 0);
     if (totalEstimatedTokens <= maxTokens) {
-      return messages;
+      return {
+        messages,
+        truncationApplied: false,
+        originalTokens: totalEstimatedTokens,
+        finalTokens: totalEstimatedTokens,
+        droppedMessages: 0,
+        truncatedMessageCount: 0,
+      };
     }
 
+    let truncatedMessageCount = 0;
     const systemMessages = messages.filter((m) => m.role === "system");
     const otherMessages = messages.filter((m) => m.role !== "system");
 
@@ -475,11 +493,20 @@ class LLMGateway {
         } else {
           out.push({ ...sys, content: truncateText(text, remaining) } as ChatCompletionMessageParam);
           remaining = 0;
+          truncatedMessageCount++;
           break;
         }
       }
-      console.log(`[LLMGateway] Truncated context from ${totalEstimatedTokens} to ~${maxTokens} tokens (system-only)`);
-      return out;
+      const finalTokens = maxTokens - remaining;
+      console.log(`[LLMGateway] Truncated context from ${totalEstimatedTokens} to ~${finalTokens} tokens (system-only)`);
+      return {
+        messages: out,
+        truncationApplied: true,
+        originalTokens: totalEstimatedTokens,
+        finalTokens,
+        droppedMessages: messages.length - out.length,
+        truncatedMessageCount,
+      };
     }
 
     // Always keep at least the last user message (or last non-system message as fallback) so we never
@@ -498,10 +525,20 @@ class LLMGateway {
       ? 500 // Flat estimate for multimodal messages (image data is not counted as context tokens)
       : estimateTokens(mustKeepText);
 
+    // CRITICAL: Never silently truncate the latest user message.
+    // If it alone exceeds budget, pass it through intact — let the provider decide how to handle it.
+    // The user's prompt integrity is more important than staying under the estimated budget.
     if (mustKeepTokens > maxTokens && !isMultimodal) {
-      mustKeepText = truncateText(mustKeepText, maxTokens);
-      mustKeep = { ...mustKeep, content: mustKeepText } as ChatCompletionMessageParam;
-      mustKeepTokens = estimateTokens(mustKeepText);
+      // Previously: truncated the user message silently. Now: keep it intact.
+      console.warn(`[LLMGateway] Latest user message (${mustKeepTokens} tokens) exceeds context budget (${maxTokens}). Sending intact — provider will enforce actual limits.`);
+      return {
+        messages: [mustKeep],
+        truncationApplied: true,
+        originalTokens: totalEstimatedTokens,
+        finalTokens: mustKeepTokens,
+        droppedMessages: messages.length - 1,
+        truncatedMessageCount: 0,
+      };
     }
 
     // Reserve budget for the must-keep message, then spend the remainder on system + recent history.
@@ -518,6 +555,7 @@ class LLMGateway {
       } else {
         outSystem.push({ ...sys, content: truncateText(text, remainingTokens) } as ChatCompletionMessageParam);
         remainingTokens = 0;
+        truncatedMessageCount++;
         break;
       }
     }
@@ -537,14 +575,23 @@ class LLMGateway {
         if (remainingTokens >= 50) {
           outOthers.unshift({ ...msg, content: truncateText(text, remainingTokens) } as ChatCompletionMessageParam);
           remainingTokens = 0;
+          truncatedMessageCount++;
         }
         break;
       }
     }
 
     const truncated: ChatCompletionMessageParam[] = [...outSystem, ...outOthers];
-    console.log(`[LLMGateway] Truncated context from ${totalEstimatedTokens} to ~${maxTokens - remainingTokens} tokens`);
-    return truncated;
+    const finalTokens = maxTokens - remainingTokens;
+    console.log(`[LLMGateway] Truncated context from ${totalEstimatedTokens} to ~${finalTokens} tokens (dropped ${messages.length - truncated.length} msgs, truncated ${truncatedMessageCount} msgs)`);
+    return {
+      messages: truncated,
+      truncationApplied: true,
+      originalTokens: totalEstimatedTokens,
+      finalTokens,
+      droppedMessages: messages.length - truncated.length,
+      truncatedMessageCount,
+    };
   }
 
   private getTruncationBudget(maxOutputTokens?: number): number {
@@ -737,7 +784,11 @@ class LLMGateway {
     }
 
     // Truncate context (budget is independent from max output tokens; we keep a safe floor for small outputs).
-    const truncatedMessages = this.truncateContext(messages, this.getTruncationBudget(options.maxTokens));
+    const truncationResult = this.truncateContext(messages, this.getTruncationBudget(options.maxTokens));
+    const truncatedMessages = truncationResult.messages;
+    if (truncationResult.truncationApplied) {
+      console.log(`[LLMGateway] chat() context truncation: ${truncationResult.originalTokens} → ${truncationResult.finalTokens} tokens, dropped ${truncationResult.droppedMessages} msgs`);
+    }
 
     // Create the request promise
     const requestPromise = this.executeWithFallback(
@@ -1408,7 +1459,13 @@ class LLMGateway {
       throw new Error(`Rate limit exceeded for user ${userId}`);
     }
 
-    const truncatedMessages = this.truncateContext(messages, this.getTruncationBudget(options.maxTokens));
+    const truncationResult = this.truncateContext(messages, this.getTruncationBudget(options.maxTokens));
+    const truncatedMessages = truncationResult.messages;
+    // Expose truncation metadata via options for callers to read
+    (options as any).__truncationResult = truncationResult;
+    if (truncationResult.truncationApplied) {
+      console.log(`[LLMGateway] streamChat() context truncation: ${truncationResult.originalTokens} → ${truncationResult.finalTokens} tokens, dropped ${truncationResult.droppedMessages} msgs, truncated ${truncationResult.truncatedMessageCount} msgs`);
+    }
 
     // Check for existing checkpoint (recovery)
     const existingCheckpoint = this.streamCheckpoints.get(requestId);

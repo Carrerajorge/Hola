@@ -65,6 +65,9 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
   }, [settings.spokenLanguage]);
 
   const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const transcriptRef = useRef<string>("");
   const interimTranscriptRef = useRef<string>("");
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -115,12 +118,19 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
     }
+    if (audioElementRef.current) {
+      audioElementRef.current.pause();
+      audioElementRef.current.src = "";
+    }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach(track => track.stop());
       mediaStreamRef.current = null;
     }
     if (audioContextRef.current) {
-      void audioContextRef.current.close().catch(() => {});
+      void audioContextRef.current.close().catch(() => { });
       audioContextRef.current = null;
     }
     analyserRef.current = null;
@@ -155,90 +165,108 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
     }
   };
 
-  const startListening = () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+  const sendAudioForTranscription = async (blob: Blob) => {
+    setIsProcessing(true);
+    setError(null);
+    setTranscript("");
 
-    if (!SpeechRecognition) {
-      setError("Tu navegador no soporta reconocimiento de voz");
-      return;
+    try {
+      const formData = new FormData();
+      formData.append("audio", blob, "audio.webm");
+      formData.append("language", speechLocale.split("-")[0]);
+
+      await ensureCsrfToken();
+      const res = await apiFetch("/api/voice/transcribe", {
+        method: "POST",
+        body: formData,
+        headers: {}, // Do not set Content-Type header when using FormData with fetch
+      });
+
+      if (!res.ok) {
+        throw new Error("Error en la transcripción de audio");
+      }
+
+      const data = await res.json();
+      const transcribedText = data.text;
+      setTranscript(transcribedText);
+
+      if (transcribedText) {
+        await sendToGrok(transcribedText);
+      }
+    } catch (err: any) {
+      console.error("Transcription error:", err);
+      setError("No se pudo transcribir el audio.");
+    } finally {
+      setIsProcessing(false);
     }
+  };
 
+  const startListening = async () => {
     setError(null);
     setTranscript("");
     transcriptRef.current = "";
     setInputMode("mic");
+    setIsListening(true);
 
-    const recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = true;
-    recognition.lang = speechLocale;
+    await startAudioAnalysis();
+    const stream = mediaStreamRef.current;
 
-    recognition.onstart = () => {
-      setIsListening(true);
-      startAudioAnalysis();
-    };
+    if (!stream) {
+      setIsListening(false);
+      setInputMode("idle");
+      return;
+    }
 
-    recognition.onresult = (event: any) => {
-      let finalTranscript = '';
-      let interimTranscript = '';
+    try {
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
 
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          finalTranscript += transcript;
-        } else {
-          interimTranscript = transcript;
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
         }
-      }
+      };
 
-      if (finalTranscript) {
-        transcriptRef.current = `${transcriptRef.current} ${finalTranscript}`.trim();
-      }
-      interimTranscriptRef.current = interimTranscript.trim();
-      const display = `${transcriptRef.current} ${interimTranscriptRef.current}`.trim();
-      setTranscript(display);
-    };
+      mediaRecorder.onstop = async () => {
+        setIsListening(false);
+        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        audioChunksRef.current = [];
 
-    recognition.onend = async () => {
+        cleanupAudio(); // Stop tracks immediately after recording
+        setAudioLevel(0);
+        setInputMode("idle");
+
+        if (audioBlob.size > 0) {
+          await sendAudioForTranscription(audioBlob);
+        }
+      };
+
+      mediaRecorder.start();
+    } catch (err) {
+      console.error("MediaRecorder error:", err);
+      setError("Error al iniciar la grabación");
       setIsListening(false);
-      cleanupAudio();
-      setAudioLevel(0);
-
-      const finalText = `${transcriptRef.current} ${interimTranscriptRef.current}`.trim();
-      if (finalText) {
-        await sendToGrok(finalText);
-      }
-      interimTranscriptRef.current = "";
       setInputMode("idle");
-    };
-
-    recognition.onerror = (event: any) => {
-      console.error('Speech recognition error:', event.error);
-      setIsListening(false);
-      cleanupAudio();
-      setAudioLevel(0);
-      setInputMode("idle");
-      if (event.error !== 'no-speech') {
-        setError(`Error: ${event.error}`);
-      }
-    };
-
-    recognitionRef.current = recognition;
-    recognition.start();
+    }
   };
 
   const stopListening = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-      recognitionRef.current = null;
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    } else {
+      setIsListening(false);
+      cleanupAudio();
+      setAudioLevel(0);
+      setInputMode("idle");
     }
-    setIsListening(false);
-    cleanupAudio();
-    setAudioLevel(0);
-    setInputMode("idle");
   };
 
   const stopSpeaking = () => {
+    if (audioElementRef.current) {
+      audioElementRef.current.pause();
+      audioElementRef.current.src = "";
+    }
     window.speechSynthesis.cancel();
     setIsSpeaking(false);
   };
@@ -415,32 +443,51 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
     }
   };
 
-  const speakResponse = (text: string) => {
+  const speakResponse = async (text: string) => {
     if (!text) return;
+    stopSpeaking();
 
-    // Cancel any ongoing speech
-    window.speechSynthesis.cancel();
+    setIsProcessing(true);
+    try {
+      await ensureCsrfToken();
+      const res = await apiFetch("/api/voice/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: text,
+          voice: settings.voice === "ember" ? "alloy" : "echo",
+          speed: settings.voiceSpeed ?? 1.0,
+        }),
+      });
 
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = speechLocale;
-    utterance.rate = settings.voiceSpeed ?? 1;
-    utterance.volume = settings.voiceVolume ?? 1;
-    utterance.pitch = settings.voice === "ember" ? 1.2 : settings.voice === "breeze" ? 0.9 : 1;
+      if (!res.ok) throw new Error("TTS failed");
 
-    // Try to get a voice matching the configured locale.
-    const voices = window.speechSynthesis.getVoices();
-    const languagePrefix = speechLocale.split("-")[0].toLowerCase();
-    const matchingVoice = voices.find(v => v.lang.toLowerCase().startsWith(languagePrefix));
-    if (matchingVoice) {
-      utterance.voice = matchingVoice;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioElementRef.current = audio;
+
+      audio.onplay = () => {
+        setIsSpeaking(true);
+        setIsProcessing(false);
+      };
+
+      audio.onended = () => {
+        setIsSpeaking(false);
+        URL.revokeObjectURL(url);
+      };
+
+      audio.onerror = () => {
+        setIsSpeaking(false);
+        URL.revokeObjectURL(url);
+        setIsProcessing(false);
+      };
+
+      await audio.play();
+    } catch (err) {
+      console.error("TTS error:", err);
+      setIsProcessing(false);
     }
-
-    utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
-
-    speechSynthesisRef.current = utterance;
-    window.speechSynthesis.speak(utterance);
   };
 
   const handleMicToggle = () => {
@@ -729,7 +776,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
                       {isCameraActive ? <VideoOff className="h-7 w-7" /> : <Video className="h-7 w-7" />}
                     </motion.button>
                   </TooltipTrigger>
-                  <TooltipContent side="top" className="bg-gray-800 text-white border-gray-700">
+                  <TooltipContent className="bg-gray-800 text-white border-gray-700">
                     {isCameraActive ? "Detener cámara" : "Iniciar cámara"}
                   </TooltipContent>
                 </Tooltip>
@@ -758,7 +805,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
                       )}
                     </motion.button>
                   </TooltipTrigger>
-                  <TooltipContent side="top" className="bg-gray-800 text-white border-gray-700">
+                  <TooltipContent className="bg-gray-800 text-white border-gray-700">
                     Adjuntar archivo
                   </TooltipContent>
                 </Tooltip>
@@ -787,7 +834,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
                   {isListening ? <MicOff className="h-7 w-7" /> : <Mic className="h-7 w-7" />}
                 </motion.button>
               </TooltipTrigger>
-              <TooltipContent side="top" className="bg-gray-800 text-white border-gray-700">
+              <TooltipContent className="bg-gray-800 text-white border-gray-700">
                 {isListening ? "Detener y enviar" : isSpeaking ? "Interrumpir y hablar" : "Hablar"}
               </TooltipContent>
             </Tooltip>

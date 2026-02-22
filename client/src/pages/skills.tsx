@@ -303,7 +303,7 @@ const getExtraSkillIcon = (id: string) => {
     case "songsee": return <Music {...props} className="h-6 w-6 text-pink-500" />;
     case "wacli": return <Phone {...props} className="h-6 w-6 text-green-500" />;
     case "weather": return <Snowflake {...props} className="h-6 w-6 text-cyan-500" />;
-    
+
     case "sonoscli": return <Speaker {...props} className="h-6 w-6 text-gray-800" />;
     case "spotify-player": return <Music {...props} className="h-6 w-6 text-green-600" />;
     case "summarize": return <FileText {...props} className="h-6 w-6 text-blue-500" />;

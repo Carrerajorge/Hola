@@ -140,7 +140,7 @@ const MAX_FAILED_QUEUE_ITEMS = 20;
 const MAX_FAILED_QUEUE_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_SAFE_CHAT_ID_LENGTH = 128;
 const CHAT_ID_SAFE_PATTERN = /^(?:chat_[A-Za-z0-9._-]{6,120}|pending-[A-Za-z0-9._-]{6,120}|[A-Za-z0-9._-]{6,120})$/;
-const MAX_MESSAGE_CONTENT_LENGTH = 12_000;
+const MAX_MESSAGE_CONTENT_LENGTH = 500_000;
 const MAX_REQUEST_ID_LENGTH = 120;
 const pendingToRealIdMap = new Map<string, string>();
 
@@ -193,9 +193,11 @@ function sanitizeSendMessage(message: Message): Message {
     throw new Error("Invalid message role");
   }
 
+  // Preserve full content — only trimEnd trailing whitespace, never truncate.
+  // The server enforces the real size limit (500K chars via Zod, 100MB via body-parser).
   const sanitizedContent = typeof message.content === "string" ? message.content.trimEnd() : "";
   if (role === "user" && sanitizedContent.length > MAX_MESSAGE_CONTENT_LENGTH) {
-    throw new Error("Message content too long");
+    throw new Error("Message content too long (max 500K characters)");
   }
 
   return {
@@ -218,48 +220,48 @@ function safeReadLocalChatsFromStorage(storageKey: string): Chat[] {
       stableKey: chat?.stableKey || `stable-${chat?.id}`,
       messages: Array.isArray(chat?.messages)
         ? chat.messages.map((msg: any) => {
-            // Hydrate savedRequestIds from localStorage data (best-effort).
-            // IMPORTANT: localStorage may include optimistic/failed messages that were never persisted,
-            // so only treat requestIds as "persisted" when we have evidence it reached the server.
-            if (msg?.requestId) {
-              const id = typeof msg.id === "string" ? msg.id : "";
-              const deliveryStatus = typeof msg.deliveryStatus === "string" ? msg.deliveryStatus : undefined;
-              const isUuid =
-                /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+          // Hydrate savedRequestIds from localStorage data (best-effort).
+          // IMPORTANT: localStorage may include optimistic/failed messages that were never persisted,
+          // so only treat requestIds as "persisted" when we have evidence it reached the server.
+          if (msg?.requestId) {
+            const id = typeof msg.id === "string" ? msg.id : "";
+            const deliveryStatus = typeof msg.deliveryStatus === "string" ? msg.deliveryStatus : undefined;
+            const isUuid =
+              /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
 
-              const isLikelyPersisted =
-                deliveryStatus === "sent" ||
-                deliveryStatus === "delivered" ||
-                (deliveryStatus !== "error" && deliveryStatus !== "sending" && isUuid) ||
-                // Back-compat: older messages won't have deliveryStatus, but server IDs are UUIDs.
-                (!deliveryStatus && isUuid);
+            const isLikelyPersisted =
+              deliveryStatus === "sent" ||
+              deliveryStatus === "delivered" ||
+              (deliveryStatus !== "error" && deliveryStatus !== "sending" && isUuid) ||
+              // Back-compat: older messages won't have deliveryStatus, but server IDs are UUIDs.
+              (!deliveryStatus && isUuid);
 
-              if (isLikelyPersisted) {
-                markRequestPersisted(msg.requestId);
-              }
+            if (isLikelyPersisted) {
+              markRequestPersisted(msg.requestId);
             }
+          }
 
-            const hydrated: Message = {
-              ...msg,
-              timestamp: new Date(msg.timestamp),
-            };
+          const hydrated: Message = {
+            ...msg,
+            timestamp: new Date(msg.timestamp),
+          };
 
-            // A "sending" message can't actually be in-flight across a reload.
-            // Treat it as retryable and queue it for recovery so it won't stay stuck forever.
-            if (
-              hydrated.role === "user" &&
-              hydrated.requestId &&
-              hydrated.deliveryStatus === "sending" &&
-              typeof chat?.id === "string" &&
-              !chat.id.startsWith(PENDING_CHAT_PREFIX)
-            ) {
-              enqueueFailedMessageForRecovery(chat.id, hydrated);
-              hydrated.deliveryStatus = "error";
-              hydrated.deliveryError = hydrated.deliveryError || "No se pudo confirmar el envío. Reintenta.";
-            }
+          // A "sending" message can't actually be in-flight across a reload.
+          // Treat it as retryable and queue it for recovery so it won't stay stuck forever.
+          if (
+            hydrated.role === "user" &&
+            hydrated.requestId &&
+            hydrated.deliveryStatus === "sending" &&
+            typeof chat?.id === "string" &&
+            !chat.id.startsWith(PENDING_CHAT_PREFIX)
+          ) {
+            enqueueFailedMessageForRecovery(chat.id, hydrated);
+            hydrated.deliveryStatus = "error";
+            hydrated.deliveryError = hydrated.deliveryError || "No se pudo confirmar el envío. Reintenta.";
+          }
 
-            return hydrated;
-          })
+          return hydrated;
+        })
         : [],
     }));
 
@@ -1013,7 +1015,7 @@ export function useChats() {
         headers: { ...getAnonUserIdHeader() },
         credentials: "include"
       });
-      
+
       if (!res.ok) {
         if (res.status === 404) {
           // Chat not found, maybe deleted. Remove from list.
@@ -1023,7 +1025,7 @@ export function useChats() {
       }
 
       const fullChat = await res.json();
-      
+
       // Hydrate attachments (logic copied from original loadChatsFromServer)
       const convDocs: any[] = fullChat.conversationDocuments || [];
       const docsByMessageId = new Map<string, any[]>();
@@ -1085,6 +1087,7 @@ export function useChats() {
           confidence: msg.confidence || msg.metadata?.confidence,
           uncertaintyReason: msg.uncertaintyReason || msg.metadata?.uncertaintyReason,
           retrievalSteps: msg.retrievalSteps || msg.metadata?.retrievalSteps,
+          steps: msg.steps || msg.metadata?.steps,
         };
       });
 
@@ -1128,7 +1131,7 @@ export function useChats() {
         messages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
       }
 
-      setChats(prev => prev.map(c => 
+      setChats(prev => prev.map(c =>
         c.id === chatId ? { ...c, messages } : c
       ));
 
@@ -1646,18 +1649,18 @@ export function useChats() {
     setChats(prev => {
       const chatExists = prev.some(chat => chat.id === safeChatId || chat.id === resolvedChatId);
 
-        if (!chatExists && isPending) {
-          return [...prev, {
-            id: safeChatId,
-            title,
-            messages: [normalizedMessage],
-            timestamp: Date.now(),
-            stableKey: `stable-${safeChatId}`,
-          }];
-        }
+      if (!chatExists && isPending) {
+        return [...prev, {
+          id: safeChatId,
+          title,
+          messages: [normalizedMessage],
+          timestamp: Date.now(),
+          stableKey: `stable-${safeChatId}`,
+        }];
+      }
 
-        return prev.map(chat => {
-          const matchId = chat.id === safeChatId || chat.id === resolvedChatId;
+      return prev.map(chat => {
+        const matchId = chat.id === safeChatId || chat.id === resolvedChatId;
         if (!matchId) return chat;
 
         const maybeMarkDelivered = (msgs: Message[]): Message[] => {
@@ -1681,10 +1684,10 @@ export function useChats() {
           const nextMessages = maybeMarkDelivered(
             chat.messages.map(m => (m.id === tempId || m.clientTempId === tempId)
               ? {
-                  ...m,
-                  deliveryStatus: normalizedMessage.deliveryStatus,
-                  deliveryError: normalizedMessage.deliveryError,
-                }
+                ...m,
+                deliveryStatus: normalizedMessage.deliveryStatus,
+                deliveryError: normalizedMessage.deliveryError,
+              }
               : m
             )
           );
@@ -1737,6 +1740,10 @@ export function useChats() {
             confidence: normalizedMessage.confidence,
             uncertaintyReason: normalizedMessage.uncertaintyReason,
             retrievalSteps: normalizedMessage.retrievalSteps,
+            // Prompt integrity metadata
+            clientPromptLen: (normalizedMessage as any).clientPromptLen,
+            clientPromptHash: (normalizedMessage as any).clientPromptHash,
+            promptMessageId: (normalizedMessage as any).promptMessageId,
           }),
         }, MESSAGE_SAVE_TIMEOUT_MS);
         // Retry on network failures and 5xx server errors; don't retry 4xx client errors.
@@ -1853,7 +1860,7 @@ export function useChats() {
     });
 
     try {
-      await apiFetch(`/api/chats/${chatId}`, { 
+      await apiFetch(`/api/chats/${chatId}`, {
         method: "DELETE",
         headers: { ...getAnonUserIdHeader() },
         credentials: "include"

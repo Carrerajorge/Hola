@@ -54,6 +54,9 @@ import { conversationStateService } from "../services/conversationStateService";
 import { generateAndPersistChatTitle } from "../lib/chatTitleGenerator";
 import { validate } from "../lib/requestValidator";
 import { streamChatRequestSchema } from "../schemas/chatSchemas";
+import { checkPromptIntegrity } from "../lib/promptIntegrityService";
+import { recordIntegrityCheck, recordTruncation, recordPromptTokens, recordDroppedChars } from "../lib/promptMetrics";
+import * as macos from "../lib/macos";
 
 type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
 const isDebugLogEnabled = process.env.DEBUG === "true";
@@ -168,15 +171,15 @@ function extractDesktopFolderNameFromPrompt(input: string): string | null {
 
   const folderNamePatterns = [
     // Priority 1: Explicit name markers (llamada, con nombre, named, que se llame) + desktop context
-    /(?:crea|crear|creame|creá|crees|haz|hazme|genera|generar|make|create)\s+(?:otra\s+|una\s+)?(?:carpeta|caroeta|carepta|carptea|careta|folder|directorio|directory)\s+(?:llamada|con\s+nombre|named)\s+["']?([^"'\n]{1,160}?)["']?\s+(?:en\s+)?(?:(?:mi|el|la|tu|su)\s+)?(?:mac|escritorio|excritorio|desktop)\b/i,
-    // Priority 2: "carpeta que se llame X" / "carpeta con el nombre X" / "carpeta llamada X" (BEFORE generic capture)
-    /(?:carpeta|caroeta|carepta|carptea|careta|folder|directorio|directory)\s+(?:con\s+(?:el\s+)?nombre|llamada|named|que\s+se\s+llame)\s+["']?([^"'\n]{1,160})["']?/i,
-    // Priority 3: "crea carpeta X en escritorio" (generic — after name markers)
-    /(?:crea|crear|creame|creá|crees|haz|hazme|genera|generar|make|create)\s+(?:otra\s+|una\s+)?(?:carpeta|caroeta|carepta|carptea|careta|folder|directorio|directory)\s+["']?([^"'\n]{1,160}?)["']?\s+(?:en\s+)?(?:(?:mi|el|la|tu|su)\s+)?(?:mac|escritorio|excritorio|desktop)\b/i,
-    // Priority 4: "crea carpeta [en desktop] llamada/named X" (desktop in middle, name at end)
-    /(?:crea|crear|creame|creá|crees|haz|hazme|genera|generar|make|create)\s+(?:otra\s+|una\s+)?(?:carpeta|caroeta|carepta|carptea|careta|folder|directorio|directory)(?:\s+en\s+(?:(?:mi|el)\s+)?(?:escritorio|excritorio|desktop))?\s+(?:llamada|con\s+nombre|named)\s+["']?([^"'\n]{1,160})["']?\s*$/i,
+    /(?:crea|crear|creame|creá|crees|haz|hazme|genera|generar|make|create)\s+(?:otra\s+|una\s+)?(?:carpeta|caroeta|carepta|carptea|careta|folder|directorio|directory)\s+(?:llamada|con\s+nombre|named)\s+["'“”]?([^"'“”\n]{1,160}?)["'“”]?\s+(?:en\s+)?(?:(?:mi|el|la|tu|su)\s+)?(?:mac|escritorio|excritorio|desktop)\b/i,
+    // Priority 2: "carpeta que se llame X" / "carpeta con el nombre X" / "carpeta llamada X"
+    /(?:carpeta|caroeta|carepta|carptea|careta|folder|directorio|directory)\s+(?:con\s+(?:el\s+)?nombre|llamada|named|que\s+se\s+llame)\s+["'“”]?([^"'“”\n]{1,160})["'“”]?/i,
+    // Priority 3: "crea carpeta [en desktop] llamada/named X" (desktop in middle, name at end)
+    /(?:crea|crear|creame|creá|crees|haz|hazme|genera|generar|make|create)\s+(?:otra\s+|una\s+)?(?:carpeta|caroeta|carepta|carptea|careta|folder|directorio|directory)(?:\s+en\s+(?:(?:mi|el)\s+)?(?:escritorio|excritorio|desktop))?\s+(?:llamada|llame|con\s+nombre|named)\s+["'“”]?([^"'“”\n]{1,160})["'“”]?\s*$/i,
+    // Priority 4: "crea carpeta X en escritorio" (relies on ending bounds to prevent capturing "en escritorio" as name)
+    /(?:crea|crear|creame|creá|crees|haz|hazme|genera|generar|make|create)\s+(?:otra\s+|una\s+)?(?:carpeta|caroeta|carepta|carptea|careta|folder|directorio|directory)\s+["'“”]?([^"'“”\n]{1,160}?)["'“”]?\s+(?:en\s+)?(?:(?:mi|el|la|tu|su)\s+)?(?:mac|escritorio|excritorio|desktop)\b/i,
     // Priority 5: /mkdir command
-    /^(?:\/?mkdir|local:\s*mkdir)\s+["']?([^"'\n]{1,120})["']?\s*$/i,
+    /^(?:\/?mkdir|local:\s*mkdir)\s+["'“”]?([^"'“”\n]{1,120})["'“”]?\s*$/i,
   ];
 
   for (const pattern of folderNamePatterns) {
@@ -184,7 +187,10 @@ function extractDesktopFolderNameFromPrompt(input: string): string | null {
     const candidate = match?.[1]?.trim();
     if (!candidate) continue;
     const cleaned = cleanCandidate(candidate);
-    if (cleaned) return cleaned;
+    // Explicitly reject if candidate is a common stop word due to regex overreach
+    if (cleaned && !/^(?:en|mi|el|la|una|un|de|del|con)$/i.test(cleaned)) {
+      return cleaned;
+    }
   }
 
   // Fallback heuristic: if phrase clearly asks to create a desktop folder,
@@ -192,43 +198,49 @@ function extractDesktopFolderNameFromPrompt(input: string): string | null {
   const hasCreateVerb = /\b(?:crea|crear|creame|creá|crees|haz|hazme|genera|generar|make|create)\b/i.test(prompt);
   const hasFolderWord = /\b(?:carpeta|caroeta|carepta|carptea|careta|folder|directorio|directory)\b/i.test(prompt);
   const intent = hasCreateVerb && hasFolderWord;
+
   if (intent) {
     // Strategy A: explicit name markers
-    const byNameMatch = prompt.match(/(?:nombre|llamada|named|que\s+se\s+llame)\s+["'""]?([^"'""\\n]{1,180})["'""]?/i);
+    const byNameMatch = prompt.match(/(?:nombre|llamada|named|que\s+se\s+llame)\s+["'“”]?([^"'“”\n]{1,180})["'“”]?/i);
     const candidate = byNameMatch?.[1] ? cleanCandidate(byNameMatch[1]) : "";
     if (candidate) return candidate;
 
     // Strategy B: quoted string anywhere in the phrase
-    const quotedMatch = prompt.match(/["'""]([^"'""\\n]{1,120})["'""]/);
+    const quotedMatch = prompt.match(/["'“”]([^"'“”\n]{1,120})["'“”]/);
     if (quotedMatch?.[1]) {
       const qCandidate = cleanCandidate(quotedMatch[1]);
       if (qCandidate) return qCandidate;
     }
 
-    // Strategy C: find capitalized/alphanumeric token that isn't a stop word
-    const hasDesktop = /\b(?:escritorio|excritorio|desktop|mi\s+mac)\b/i.test(prompt);
-    if (hasDesktop) {
-      const stopWords = new Set([
-        "en", "mi", "una", "un", "la", "el", "de", "del", "con", "que", "se", "por",
-        "tu", "su", "al", "es", "lo", "le", "crear", "crea", "creame", "haz", "hazme",
-        "genera", "make", "create", "carpeta", "caroeta", "carepta", "folder", "directorio",
-        "escritorio", "excritorio", "desktop", "mac", "nombre", "llamada", "puedes",
-        "podrias", "porfavor", "favor", "gracias", "please", "otra", "nueva", "nuevo",
-        "quiero", "necesito", "me", "los", "las", "the", "on", "a", "my",
-      ]);
-      const words = prompt.split(/\s+/);
-      const nameTokens: string[] = [];
-      for (const w of words) {
-        const plain = w.replace(/^["'`([{]+/, "").replace(/["'`)\]},.:;!?]+$/, "");
-        if (!plain || stopWords.has(plain.toLowerCase())) continue;
-        if (/^[A-Z]/.test(plain) || /\d/.test(plain) || /[=_-]/.test(plain)) {
-          nameTokens.push(plain);
-        }
+    // Strategy C: extract the last meaningful word at the end of the phrase, skipping generic stop words
+    const stopWords = new Set([
+      "en", "mi", "una", "un", "la", "el", "de", "del", "con", "que", "se", "por",
+      "tu", "su", "al", "es", "lo", "le", "crear", "crea", "creame", "haz", "hazme",
+      "genera", "make", "create", "carpeta", "caroeta", "carepta", "folder", "directorio",
+      "escritorio", "excritorio", "desktop", "mac", "nombre", "llamada", "puedes",
+      "podrias", "porfavor", "favor", "gracias", "please", "otra", "nueva", "nuevo",
+      "quiero", "necesito", "me", "los", "las", "the", "on", "a", "my", "llamado",
+    ]);
+
+    const words = prompt.split(/\s+/);
+    let nameCandidate = "";
+
+    // Scan backwards for the first word not in stopWords
+    for (let i = words.length - 1; i >= 0; i--) {
+      const w = words[i].replace(/^["'`([{]+/, "").replace(/["'`)\]},.:;!?]+$/, "");
+      if (!w) continue;
+
+      const lower = w.toLowerCase();
+      // If the word isn't a stopword, assume it's the target name
+      if (!stopWords.has(lower)) {
+        nameCandidate = w;
+        break;
       }
-      if (nameTokens.length > 0) {
-        const nameCandidate = cleanCandidate(nameTokens.join(""));
-        if (nameCandidate) return nameCandidate;
-      }
+    }
+
+    if (nameCandidate) {
+      const qCandidate = cleanCandidate(nameCandidate);
+      if (qCandidate) return qCandidate;
     }
   }
 
@@ -602,20 +614,31 @@ function buildCapabilityResponse(): string {
 
 🖥️ **Terminal**: Puedo ejecutar cualquier comando en tu terminal (bash, zsh, etc.)
 📂 **Archivos**: Crear, leer, escribir, copiar, mover, eliminar archivos y carpetas
-🔍 **Búsqueda**: Buscar archivos por nombre, buscar texto dentro de archivos
+🔍 **Búsqueda**: Buscar archivos por nombre, buscar texto dentro de archivos (+ Spotlight)
 💻 **Código**: Ejecutar Python, Node.js, scripts de cualquier lenguaje
 📊 **Sistema**: Ver procesos, puertos, CPU, RAM, disco, info del sistema
 📦 **Paquetes**: npm, pip, brew — instalar, listar, actualizar
 🔧 **Git**: status, commit, push, pull, diff, log, branch
 🐳 **Docker**: containers, images, run, stop
-📱 **Apps**: Abrir aplicaciones y archivos
+📱 **Apps**: Abrir, cerrar, enfocar aplicaciones — gestión de ventanas
+🍎 **macOS Nativo**:
+  - 🔊 Volumen y brillo
+  - 📶 WiFi y Bluetooth
+  - 🌙 Dark mode y No Molestar
+  - 🔒 Bloquear pantalla / suspender
+  - 📸 Screenshots nativos
+  - 📋 Clipboard (copiar/pegar)
+  - 🔔 Notificaciones del sistema
+  - 🗣️ Text-to-Speech (decir texto en voz alta)
+  - 📅 Calendario, Contactos, Recordatorios
+  - 🎵 Control de Music/Spotify
+  - 🔎 Búsqueda Spotlight
+  - ⚡ Ejecutar Shortcuts de macOS
+  - 📁 Control de Finder
+  - 🪟 Gestión de ventanas (mover, redimensionar, minimizar)
+  - 🍏 AppleScript/JXA directo
 
-**Pruébame:** Dime qué necesitas y lo ejecuto directamente. Por ejemplo:
-- "Muéstrame los archivos de mi escritorio"
-- "Ejecuta python: print(2+2)"
-- "¿Qué puertos están abiertos?"
-- "Crea una carpeta en mi escritorio"
-- "git status"`;
+**Pruébame:** Dime qué necesitas y lo ejecuto directamente.`;
 }
 
 type LocalControlCommand =
@@ -663,7 +686,29 @@ type LocalControlCommand =
   | "top"
   | "du"
   | "which"
-  | "capabilities";
+  | "capabilities"
+  // ── macOS native commands ──
+  | "volume"
+  | "brightness"
+  | "darkmode"
+  | "wifi"
+  | "bluetooth"
+  | "battery"
+  | "lock"
+  | "screenshot"
+  | "clipboard"
+  | "notify"
+  | "say"
+  | "calendar"
+  | "contacts"
+  | "reminders"
+  | "spotlight"
+  | "shortcut"
+  | "music"
+  | "apps"
+  | "windows"
+  | "finder"
+  | "osascript";
 
 type LocalControlRequest = {
   command: LocalControlCommand;
@@ -684,13 +729,13 @@ type LocalControlState = {
 export type LocalControlResult =
   | { handled: false }
   | {
-      handled: true;
-      ok: boolean;
-      statusCode: number;
-      code: string;
-      message: string;
-      payload?: Record<string, unknown>;
-    };
+    handled: true;
+    ok: boolean;
+    statusCode: number;
+    code: string;
+    message: string;
+    payload?: Record<string, unknown>;
+  };
 
 const LOCAL_ACTION_AUDIT_LOG_PATH = path.join(os.homedir(), ".iliagpt-control-audit.log");
 const LOCAL_ACTION_STATE_PATH = path.join(os.homedir(), ".iliagpt-local-actions-state.json");
@@ -1407,6 +1452,70 @@ function parseLocalControlRequest(input: string): LocalControlRequest | null {
     deterneroff: "deteneroff",
     deteneron: "deteneron",
     deterneron: "deteneron",
+    // ── macOS native aliases ──
+    volume: "volume",
+    volumen: "volume",
+    "set-volume": "volume",
+    "subir-volumen": "volume",
+    "bajar-volumen": "volume",
+    mute: "volume",
+    unmute: "volume",
+    brightness: "brightness",
+    brillo: "brightness",
+    darkmode: "darkmode",
+    "dark-mode": "darkmode",
+    "modo-oscuro": "darkmode",
+    oscuro: "darkmode",
+    wifi: "wifi",
+    bluetooth: "bluetooth",
+    bt: "bluetooth",
+    battery: "battery",
+    bateria: "battery",
+    batería: "battery",
+    lock: "lock",
+    bloquear: "lock",
+    "bloquear-pantalla": "lock",
+    screenshot: "screenshot",
+    captura: "screenshot",
+    "captura-pantalla": "screenshot",
+    pantallazo: "screenshot",
+    clipboard: "clipboard",
+    portapapeles: "clipboard",
+    copiar: "clipboard",
+    pegar: "clipboard",
+    notify: "notify",
+    notificar: "notify",
+    notificacion: "notify",
+    notificación: "notify",
+    alerta: "notify",
+    say: "say",
+    decir: "say",
+    hablar: "say",
+    calendar: "calendar",
+    calendario: "calendar",
+    eventos: "calendar",
+    contacts: "contacts",
+    contactos: "contacts",
+    reminders: "reminders",
+    recordatorios: "reminders",
+    spotlight: "spotlight",
+    buscar: "spotlight",
+    search: "spotlight",
+    shortcut: "shortcut",
+    shortcuts: "shortcut",
+    atajo: "shortcut",
+    atajos: "shortcut",
+    music: "music",
+    musica: "music",
+    música: "music",
+    spotify: "music",
+    apps: "apps",
+    aplicaciones: "apps",
+    windows: "windows",
+    ventanas: "windows",
+    finder: "finder",
+    osascript: "osascript",
+    applescript: "osascript",
   };
   const command: LocalControlCommand = commandAliasMap[operation] || "help";
 
@@ -2776,6 +2885,292 @@ export async function executeLocalControlRequest(
       });
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    //  macOS Native Commands
+    // ═══════════════════════════════════════════════════════════════════
+
+    if (parsed.command === "volume") {
+      const arg0 = (parsed.args[0] || "").toLowerCase();
+      if (!arg0 || arg0 === "get" || arg0 === "status") {
+        const vol = await macos.getVolume();
+        const muted = await macos.isMuted();
+        return localSuccessResult("MACOS_VOLUME", `🔊 Volumen: ${vol}%${muted ? " (silenciado)" : ""}`, { volume: vol, muted });
+      }
+      if (arg0 === "mute") {
+        await macos.muteVolume(true);
+        return localSuccessResult("MACOS_VOLUME_MUTED", "🔇 Volumen silenciado.");
+      }
+      if (arg0 === "unmute") {
+        await macos.muteVolume(false);
+        return localSuccessResult("MACOS_VOLUME_UNMUTED", "🔊 Volumen desilenciado.");
+      }
+      const level = parseInt(arg0, 10);
+      if (!isNaN(level)) {
+        await macos.setVolume(level);
+        return localSuccessResult("MACOS_VOLUME_SET", `🔊 Volumen ajustado a ${Math.min(100, Math.max(0, level))}%.`);
+      }
+      return localErrorResult(400, "MACOS_VOLUME_USAGE", "Uso: volume [get|mute|unmute|0-100]");
+    }
+
+    if (parsed.command === "brightness") {
+      const arg0 = (parsed.args[0] || "").toLowerCase();
+      if (!arg0 || arg0 === "get") {
+        const b = await macos.getBrightness();
+        return localSuccessResult("MACOS_BRIGHTNESS", `🔆 Brillo: ${Math.round(b * 100)}%`, { brightness: b });
+      }
+      const level = parseFloat(arg0);
+      if (!isNaN(level)) {
+        const normalized = level > 1 ? level / 100 : level;
+        await macos.setBrightness(normalized);
+        return localSuccessResult("MACOS_BRIGHTNESS_SET", `🔆 Brillo ajustado a ${Math.round(normalized * 100)}%.`);
+      }
+      return localErrorResult(400, "MACOS_BRIGHTNESS_USAGE", "Uso: brightness [get|0-100|0.0-1.0]");
+    }
+
+    if (parsed.command === "darkmode") {
+      const arg0 = (parsed.args[0] || "").toLowerCase();
+      if (!arg0 || arg0 === "get" || arg0 === "status") {
+        const dark = await macos.isDarkMode();
+        return localSuccessResult("MACOS_DARKMODE", `${dark ? "🌙 Dark mode activado" : "☀️ Light mode activado"}`, { darkMode: dark });
+      }
+      if (["on", "true", "dark", "activar", "enable"].includes(arg0)) {
+        await macos.setDarkMode(true);
+        return localSuccessResult("MACOS_DARKMODE_ON", "🌙 Dark mode activado.");
+      }
+      if (["off", "false", "light", "desactivar", "disable"].includes(arg0)) {
+        await macos.setDarkMode(false);
+        return localSuccessResult("MACOS_DARKMODE_OFF", "☀️ Light mode activado.");
+      }
+      const current = await macos.isDarkMode();
+      await macos.setDarkMode(!current);
+      return localSuccessResult("MACOS_DARKMODE_TOGGLE", `${!current ? "🌙 Dark mode" : "☀️ Light mode"} activado.`);
+    }
+
+    if (parsed.command === "wifi") {
+      const arg0 = (parsed.args[0] || "").toLowerCase();
+      if (!arg0 || arg0 === "status" || arg0 === "get") {
+        const status = await macos.getWiFiStatus();
+        return localSuccessResult("MACOS_WIFI", `📶 WiFi: ${status.power ? "encendido" : "apagado"}${status.ssid ? ` — Red: ${status.ssid}` : ""}`, status);
+      }
+      if (["on", "enable", "encender"].includes(arg0)) {
+        await macos.setWiFi(true);
+        return localSuccessResult("MACOS_WIFI_ON", "📶 WiFi encendido.");
+      }
+      if (["off", "disable", "apagar"].includes(arg0)) {
+        await macos.setWiFi(false);
+        return localSuccessResult("MACOS_WIFI_OFF", "📶 WiFi apagado.");
+      }
+      return localErrorResult(400, "MACOS_WIFI_USAGE", "Uso: wifi [status|on|off]");
+    }
+
+    if (parsed.command === "bluetooth") {
+      const arg0 = (parsed.args[0] || "").toLowerCase();
+      if (!arg0 || arg0 === "status") {
+        const on = await macos.getBluetoothStatus();
+        return localSuccessResult("MACOS_BT", `${on ? "🔵 Bluetooth encendido" : "⚪ Bluetooth apagado"}`, { power: on });
+      }
+      if (["on", "enable"].includes(arg0)) {
+        const r = await macos.setBluetooth(true);
+        return localSuccessResult("MACOS_BT_ON", r.success ? "🔵 Bluetooth encendido." : `Error: ${r.error}`);
+      }
+      if (["off", "disable"].includes(arg0)) {
+        const r = await macos.setBluetooth(false);
+        return localSuccessResult("MACOS_BT_OFF", r.success ? "⚪ Bluetooth apagado." : `Error: ${r.error}`);
+      }
+      return localErrorResult(400, "MACOS_BT_USAGE", "Uso: bluetooth [status|on|off]");
+    }
+
+    if (parsed.command === "battery") {
+      const info = await macos.getBatteryInfo();
+      return localSuccessResult("MACOS_BATTERY",
+        `🔋 Batería: ${info.percent}%${info.charging ? " ⚡ Cargando" : ""} — ${info.timeRemaining}`,
+        info
+      );
+    }
+
+    if (parsed.command === "lock") {
+      await macos.lockScreen();
+      return localSuccessResult("MACOS_LOCK", "🔒 Pantalla bloqueada.");
+    }
+
+    if (parsed.command === "screenshot") {
+      const r = await macos.takeScreenshot({ shadow: false });
+      if (!r.success) return localErrorResult(500, "MACOS_SCREENSHOT_FAIL", r.error || "Error al tomar screenshot");
+      return localSuccessResult("MACOS_SCREENSHOT", `📸 Screenshot guardado: ${r.path}`, {
+        path: r.path,
+        hasBase64: !!r.base64,
+      });
+    }
+
+    if (parsed.command === "clipboard") {
+      const arg0 = (parsed.args[0] || "").toLowerCase();
+      if (!arg0 || arg0 === "get" || arg0 === "read" || arg0 === "paste") {
+        const content = await macos.getClipboard();
+        return localSuccessResult("MACOS_CLIPBOARD", `📋 Clipboard (${content.length} chars):\n${content.slice(0, 2000)}${content.length > 2000 ? "\n...[truncado]" : ""}`, { length: content.length });
+      }
+      if (arg0 === "set" || arg0 === "copy") {
+        const text = parsed.args.slice(1).join(" ");
+        if (!text) return localErrorResult(400, "MACOS_CLIPBOARD_USAGE", "Uso: clipboard copy <texto>");
+        await macos.setClipboard(text);
+        return localSuccessResult("MACOS_CLIPBOARD_SET", `📋 Texto copiado al clipboard (${text.length} chars).`);
+      }
+      if (arg0 === "clear") {
+        await macos.clearClipboard();
+        return localSuccessResult("MACOS_CLIPBOARD_CLEAR", "📋 Clipboard limpiado.");
+      }
+      return localErrorResult(400, "MACOS_CLIPBOARD_USAGE", "Uso: clipboard [get|copy <texto>|clear]");
+    }
+
+    if (parsed.command === "notify") {
+      const message = parsed.args.join(" ");
+      if (!message) return localErrorResult(400, "MACOS_NOTIFY_USAGE", "Uso: notify <mensaje>");
+      await macos.showNotification(message, { title: "ILIAGPT" });
+      return localSuccessResult("MACOS_NOTIFY", `🔔 Notificación enviada: "${message}"`);
+    }
+
+    if (parsed.command === "say") {
+      const text = parsed.args.join(" ");
+      if (!text) return localErrorResult(400, "MACOS_SAY_USAGE", "Uso: say <texto>");
+      await macos.sayText(text);
+      return localSuccessResult("MACOS_SAY", `🗣️ Dicho: "${text}"`);
+    }
+
+    if (parsed.command === "calendar") {
+      const arg0 = (parsed.args[0] || "").toLowerCase();
+      if (!arg0 || arg0 === "events" || arg0 === "list") {
+        const days = parseInt(parsed.args[1] || "7", 10);
+        const events = await macos.getCalendarEvents(days);
+        if (events.length === 0) return localSuccessResult("MACOS_CALENDAR", `📅 No hay eventos en los próximos ${days} días.`);
+        const formatted = events.map(e =>
+          `• ${e.title} — ${new Date(e.startDate).toLocaleString("es")}${e.location ? ` 📍 ${e.location}` : ""}`
+        ).join("\n");
+        return localSuccessResult("MACOS_CALENDAR", `📅 Próximos eventos (${events.length}):\n${formatted}`, { events });
+      }
+      if (arg0 === "calendars") {
+        const cals = await macos.listCalendars();
+        return localSuccessResult("MACOS_CALENDARS", `📅 Calendarios: ${cals.join(", ")}`, { calendars: cals });
+      }
+      return localErrorResult(400, "MACOS_CALENDAR_USAGE", "Uso: calendar [events [días]|calendars]");
+    }
+
+    if (parsed.command === "contacts") {
+      const query = parsed.args.join(" ");
+      if (!query) return localErrorResult(400, "MACOS_CONTACTS_USAGE", "Uso: contacts <nombre>");
+      const contacts = await macos.searchContacts(query);
+      if (contacts.length === 0) return localSuccessResult("MACOS_CONTACTS", `👤 No se encontraron contactos para "${query}".`);
+      const formatted = contacts.map(c =>
+        `• ${c.name}${c.organization ? ` (${c.organization})` : ""}${c.email.length ? ` ✉️ ${c.email[0]}` : ""}${c.phone.length ? ` 📱 ${c.phone[0]}` : ""}`
+      ).join("\n");
+      return localSuccessResult("MACOS_CONTACTS", `👤 Contactos encontrados (${contacts.length}):\n${formatted}`, { contacts });
+    }
+
+    if (parsed.command === "reminders") {
+      const arg0 = (parsed.args[0] || "").toLowerCase();
+      if (!arg0 || arg0 === "list" || arg0 === "get") {
+        const listName = parsed.args[1] || undefined;
+        const reminders = await macos.getReminders(listName);
+        if (reminders.length === 0) return localSuccessResult("MACOS_REMINDERS", "✅ No hay recordatorios pendientes.");
+        const formatted = reminders.map(r =>
+          `• ${r.name}${r.dueDate ? ` — ${new Date(r.dueDate).toLocaleString("es")}` : ""}${r.list ? ` [${r.list}]` : ""}`
+        ).join("\n");
+        return localSuccessResult("MACOS_REMINDERS", `📝 Recordatorios (${reminders.length}):\n${formatted}`, { reminders });
+      }
+      if (arg0 === "add" || arg0 === "create" || arg0 === "new") {
+        const name = parsed.args.slice(1).join(" ");
+        if (!name) return localErrorResult(400, "MACOS_REMINDER_USAGE", "Uso: reminders add <nombre>");
+        await macos.createReminder(name);
+        return localSuccessResult("MACOS_REMINDER_CREATED", `✅ Recordatorio creado: "${name}"`);
+      }
+      if (arg0 === "complete" || arg0 === "done") {
+        const name = parsed.args.slice(1).join(" ");
+        if (!name) return localErrorResult(400, "MACOS_REMINDER_USAGE", "Uso: reminders complete <nombre>");
+        await macos.completeReminder(name);
+        return localSuccessResult("MACOS_REMINDER_COMPLETED", `✅ Recordatorio completado: "${name}"`);
+      }
+      return localErrorResult(400, "MACOS_REMINDERS_USAGE", "Uso: reminders [list|add <nombre>|complete <nombre>]");
+    }
+
+    if (parsed.command === "spotlight") {
+      const query = parsed.args.join(" ");
+      if (!query) return localErrorResult(400, "MACOS_SPOTLIGHT_USAGE", "Uso: spotlight <búsqueda>");
+      const results = await macos.spotlightSearch(query, { limit: 15 });
+      if (results.length === 0) return localSuccessResult("MACOS_SPOTLIGHT", `🔎 Sin resultados para "${query}".`);
+      const formatted = results.map(r => `• [${r.kind}] ${r.name}\n  ${r.path}`).join("\n");
+      return localSuccessResult("MACOS_SPOTLIGHT", `🔎 Resultados (${results.length}):\n${formatted}`, { results });
+    }
+
+    if (parsed.command === "shortcut") {
+      const arg0 = (parsed.args[0] || "").toLowerCase();
+      if (!arg0 || arg0 === "list") {
+        const shortcuts = await macos.listShortcuts();
+        return localSuccessResult("MACOS_SHORTCUTS", `⚡ Shortcuts (${shortcuts.length}):\n${shortcuts.map(s => `• ${s}`).join("\n")}`, { shortcuts });
+      }
+      if (arg0 === "run") {
+        const name = parsed.args.slice(1).join(" ");
+        if (!name) return localErrorResult(400, "MACOS_SHORTCUT_USAGE", "Uso: shortcut run <nombre>");
+        const r = await macos.runShortcut(name);
+        return localSuccessResult("MACOS_SHORTCUT_RUN", r.success ? `⚡ Shortcut "${name}" ejecutado: ${r.output}` : `Error: ${r.error}`);
+      }
+      return localErrorResult(400, "MACOS_SHORTCUT_USAGE", "Uso: shortcut [list|run <nombre>]");
+    }
+
+    if (parsed.command === "music") {
+      const action = (parsed.args[0] || "status").toLowerCase() as "play" | "pause" | "next" | "previous" | "status";
+      const app = (parsed.args[1] || "Music") as "Music" | "Spotify";
+      const r = await macos.musicControl(action, app);
+      const emoji = { play: "▶️", pause: "⏸️", next: "⏭️", previous: "⏮️", status: "🎵" }[action] || "🎵";
+      return localSuccessResult("MACOS_MUSIC", r.success ? `${emoji} ${r.output || action}` : `Error: ${r.error}`);
+    }
+
+    if (parsed.command === "apps") {
+      const arg0 = (parsed.args[0] || "").toLowerCase();
+      if (!arg0 || arg0 === "list" || arg0 === "running") {
+        const apps = await macos.listRunningApps();
+        const formatted = apps.map(a => `• ${a.name}${a.isFrontmost ? " ★" : ""}${a.isHidden ? " (oculto)" : ""}`).join("\n");
+        return localSuccessResult("MACOS_APPS", `📱 Apps en ejecución (${apps.length}):\n${formatted}`, { apps });
+      }
+      if (arg0 === "front" || arg0 === "active") {
+        const app = await macos.getFrontmostApp();
+        return localSuccessResult("MACOS_APP_FRONT", app ? `📱 App activa: ${app.name}` : "No se pudo determinar.", { app });
+      }
+      return localErrorResult(400, "MACOS_APPS_USAGE", "Uso: apps [list|front]");
+    }
+
+    if (parsed.command === "windows") {
+      const arg0 = (parsed.args[0] || "").toLowerCase();
+      if (!arg0 || arg0 === "list") {
+        const appFilter = parsed.args[1] || undefined;
+        const windows = await macos.listWindows(appFilter);
+        const formatted = windows.map(w =>
+          `• [${w.appName}] "${w.windowName}" — ${w.size.width}x${w.size.height} @ (${w.position.x},${w.position.y})${w.minimized ? " 📥" : ""}`
+        ).join("\n");
+        return localSuccessResult("MACOS_WINDOWS", `🪟 Ventanas (${windows.length}):\n${formatted}`, { windows });
+      }
+      return localErrorResult(400, "MACOS_WINDOWS_USAGE", "Uso: windows [list [app]]");
+    }
+
+    if (parsed.command === "finder") {
+      const arg0 = (parsed.args[0] || "").toLowerCase();
+      if (arg0 === "reveal" || arg0 === "show") {
+        const filePath = parsed.args.slice(1).join(" ");
+        if (!filePath) return localErrorResult(400, "MACOS_FINDER_USAGE", "Uso: finder reveal <ruta>");
+        await macos.revealInFinder(filePath);
+        return localSuccessResult("MACOS_FINDER_REVEAL", `📁 Mostrando en Finder: ${filePath}`);
+      }
+      if (arg0 === "selection") {
+        const files = await macos.getFinderSelection();
+        return localSuccessResult("MACOS_FINDER_SEL", files.length ? `📁 Seleccionado:\n${files.map(f => `• ${f}`).join("\n")}` : "📁 Nada seleccionado en Finder.", { files });
+      }
+      return localErrorResult(400, "MACOS_FINDER_USAGE", "Uso: finder [reveal <ruta>|selection]");
+    }
+
+    if (parsed.command === "osascript") {
+      const script = parsed.args.join(" ");
+      if (!script) return localErrorResult(400, "MACOS_OSASCRIPT_USAGE", "Uso: osascript <script AppleScript>");
+      const r = await macos.runOsascript(script);
+      return localSuccessResult("MACOS_OSASCRIPT", r.success ? `🍏 Resultado: ${r.output}` : `Error: ${r.error}`, { duration: r.duration });
+    }
+
     return localErrorResult(400, "LOCAL_UNSUPPORTED_COMMAND", "Comando no soportado. Usa /local help.");
   } catch (error) {
     const errorMessage = (error as Error)?.message || "Fallo al ejecutar accion local.";
@@ -3148,13 +3543,13 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         await ensureUserRowExists(userId);
 
         // 1. Token Quota Check (Read-only)
-		        const hasTokenQuota = await usageQuotaService.hasTokenQuota(userId);
-		        if (!hasTokenQuota) {
-		          return res.status(402).json({
-		            error: "Has excedido tu límite de tokens. Actualiza tu plan o agrega créditos para continuar.",
-	            code: "TOKEN_QUOTA_EXCEEDED"
-	          });
-	        }
+        const hasTokenQuota = await usageQuotaService.hasTokenQuota(userId);
+        if (!hasTokenQuota) {
+          return res.status(402).json({
+            error: "Has excedido tu límite de tokens. Actualiza tu plan o agrega créditos para continuar.",
+            code: "TOKEN_QUOTA_EXCEEDED"
+          });
+        }
 
         // 2. Daily Request Limit Check (Increments)
         const usageCheck = await usageQuotaService.checkAndIncrementUsage(userId);
@@ -3220,6 +3615,12 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
           console.error(`[Chat API] Error creating GPT session for gptId=${gptId}:`, sessionError);
           // Fall back to legacy gptConfig if session creation fails
         }
+      }
+
+      // Track GPT Usage (Fire-and-forget)
+      const usageGptId = gptSessionContract?.gptId || gptId;
+      if (usageGptId) {
+        storage.incrementGptUsage(usageGptId).catch(e => console.error(`[Chat API] Failed to increment GPT usage for ${usageGptId}:`, e));
       }
 
       // DATA_MODE ENFORCEMENT: Reject document attachments - must use /analyze endpoint
@@ -3660,81 +4061,81 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       return timings;
     };
 
-let heartbeatInterval: NodeJS.Timeout | null = null;
-let isConnectionClosed = false;
-let claimedRun: any = null;
-let runFinalized = false; // true once run status has been set to done/failed
-let assistantMessageId: string | null = null;
-let streamHardTimeout: NodeJS.Timeout | null = null;
-let streamIdleTimeout: NodeJS.Timeout | null = null;
+    let heartbeatInterval: NodeJS.Timeout | null = null;
+    let isConnectionClosed = false;
+    let claimedRun: any = null;
+    let runFinalized = false; // true once run status has been set to done/failed
+    let assistantMessageId: string | null = null;
+    let streamHardTimeout: NodeJS.Timeout | null = null;
+    let streamIdleTimeout: NodeJS.Timeout | null = null;
 
-const STREAM_HARD_TIMEOUT_MS = 180_000;
-const STREAM_IDLE_TIMEOUT_MS = 90_000; // must exceed llmGateway idle timeout (60s)
+    const STREAM_HARD_TIMEOUT_MS = 180_000;
+    const STREAM_IDLE_TIMEOUT_MS = 90_000; // must exceed llmGateway idle timeout (60s)
 
-const clearStreamTimeouts = (): void => {
-  if (streamHardTimeout) {
-    clearTimeout(streamHardTimeout);
-    streamHardTimeout = null;
-  }
-  if (streamIdleTimeout) {
-    clearTimeout(streamIdleTimeout);
-    streamIdleTimeout = null;
-  }
-};
+    const clearStreamTimeouts = (): void => {
+      if (streamHardTimeout) {
+        clearTimeout(streamHardTimeout);
+        streamHardTimeout = null;
+      }
+      if (streamIdleTimeout) {
+        clearTimeout(streamIdleTimeout);
+        streamIdleTimeout = null;
+      }
+    };
 
-const endStreamByTimeout = (code: string, message: string): void => {
-  if (isConnectionClosed) return;
-  isConnectionClosed = true;
-  clearStreamTimeouts();
-  if (heartbeatInterval) {
-    clearInterval(heartbeatInterval);
-  }
-  const streamMeta = (res as any)?.locals?.streamMeta;
-  if (streamMeta) {
-    streamMeta.onWrite = undefined;
-  }
-  writeSse(res, "error", {
-    code,
-    error: message,
-    timeout: true,
-    timestamp: Date.now(),
-  });
-  if (!(res as any).writableEnded) {
-    res.end();
-  }
-};
+    const endStreamByTimeout = (code: string, message: string): void => {
+      if (isConnectionClosed) return;
+      isConnectionClosed = true;
+      clearStreamTimeouts();
+      if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+      }
+      const streamMeta = (res as any)?.locals?.streamMeta;
+      if (streamMeta) {
+        streamMeta.onWrite = undefined;
+      }
+      writeSse(res, "error", {
+        code,
+        error: message,
+        timeout: true,
+        timestamp: Date.now(),
+      });
+      if (!(res as any).writableEnded) {
+        res.end();
+      }
+    };
 
-const resetIdleTimeout = (): void => {
-  if (isConnectionClosed) return;
-  if (streamIdleTimeout) {
-    clearTimeout(streamIdleTimeout);
-  }
-  streamIdleTimeout = setTimeout(() => {
-    endStreamByTimeout(
-      "stream_inactivity_timeout",
-      `Stream closed after ${STREAM_IDLE_TIMEOUT_MS}ms without SSE activity`
-    );
-  }, STREAM_IDLE_TIMEOUT_MS);
-};
+    const resetIdleTimeout = (): void => {
+      if (isConnectionClosed) return;
+      if (streamIdleTimeout) {
+        clearTimeout(streamIdleTimeout);
+      }
+      streamIdleTimeout = setTimeout(() => {
+        endStreamByTimeout(
+          "stream_inactivity_timeout",
+          `Stream closed after ${STREAM_IDLE_TIMEOUT_MS}ms without SSE activity`
+        );
+      }, STREAM_IDLE_TIMEOUT_MS);
+    };
 
-const skipRunStreamDedup = new Map<string, { requestId: string; startedAt: number }>();
-const SKIPRUN_STREAM_DEDUP_TTL_MS = 20_000;
+    const skipRunStreamDedup = new Map<string, { requestId: string; startedAt: number }>();
+    const SKIPRUN_STREAM_DEDUP_TTL_MS = 20_000;
 
-const buildSkipRunStreamKey = (chatId: string | undefined, clientRequestId?: string, userRequestId?: string): string | null => {
-  if (!chatId || !clientRequestId) {
-    return null;
-  }
-  return `skipRunStream:${chatId}:${clientRequestId}:${userRequestId || ""}`;
-};
+    const buildSkipRunStreamKey = (chatId: string | undefined, clientRequestId?: string, userRequestId?: string): string | null => {
+      if (!chatId || !clientRequestId) {
+        return null;
+      }
+      return `skipRunStream:${chatId}:${clientRequestId}:${userRequestId || ""}`;
+    };
 
-const cleanSkipRunStreamDedup = (): void => {
-  const now = Date.now();
-  for (const [key, value] of skipRunStreamDedup.entries()) {
-    if (now - value.startedAt > SKIPRUN_STREAM_DEDUP_TTL_MS) {
-      skipRunStreamDedup.delete(key);
-    }
-  }
-};
+    const cleanSkipRunStreamDedup = (): void => {
+      const now = Date.now();
+      for (const [key, value] of skipRunStreamDedup.entries()) {
+        if (now - value.startedAt > SKIPRUN_STREAM_DEDUP_TTL_MS) {
+          skipRunStreamDedup.delete(key);
+        }
+      }
+    };
 
     try {
       const {
@@ -3850,6 +4251,56 @@ const cleanSkipRunStreamDedup = (): void => {
         return res.status(400).json({ error: "Messages array is required" });
       }
 
+      // ── Prompt Integrity Check ──
+      // Verify the latest user message was not altered/truncated in transit.
+      const clientPromptLen = (req.body as any).clientPromptLen;
+      const clientPromptHash = (req.body as any).clientPromptHash;
+      if (clientPromptLen != null || clientPromptHash != null) {
+        const latestUserForIntegrity = [...clientMessages].reverse().find((m: any) => m?.role === "user");
+        if (latestUserForIntegrity?.content) {
+          const integrityResult = checkPromptIntegrity(
+            latestUserForIntegrity.content,
+            clientPromptLen,
+            clientPromptHash,
+          );
+
+          // Record prompt token estimate
+          const promptTokenEst = Math.ceil(latestUserForIntegrity.content.length / 4);
+          recordPromptTokens(promptTokenEst);
+          recordDroppedChars(0); // Invariant: no chars dropped at this stage
+
+          if (!integrityResult.valid) {
+            recordIntegrityCheck("fail");
+            console.error("[PromptIntegrity] MISMATCH detected", {
+              requestId,
+              mismatchType: integrityResult.mismatchType,
+              clientLen: integrityResult.clientPromptLen,
+              serverLen: integrityResult.serverPromptLen,
+              lenDelta: integrityResult.lenDelta,
+            });
+            return res.status(422).json({
+              error: "PROMPT_INTEGRITY_MISMATCH",
+              message: "The prompt content was altered during transmission. Please retry.",
+              details: {
+                mismatchType: integrityResult.mismatchType,
+                serverLen: integrityResult.serverPromptLen,
+                clientLen: integrityResult.clientPromptLen,
+                lenDelta: integrityResult.lenDelta,
+              },
+            });
+          }
+          recordIntegrityCheck("pass");
+          // Attach integrity metadata to res.locals for downstream logging
+          (res as any).locals.promptIntegrity = {
+            serverPromptLen: integrityResult.serverPromptLen,
+            serverPromptHash: integrityResult.serverPromptHash,
+            verified: true,
+          };
+        }
+      } else {
+        recordIntegrityCheck("skipped");
+      }
+
       // Fast local-control path: avoid expensive run-claim/skill-resolution before emitting SSE.
       const latestUserForLocalControl = [...clientMessages].reverse().find((m: any) => m?.role === "user");
       const latestUserTextForLocalControl = extractUserText(latestUserForLocalControl?.content);
@@ -3927,9 +4378,9 @@ const cleanSkipRunStreamDedup = (): void => {
       const sanitizedRunAttachments =
         attachments && Array.isArray(attachments)
           ? attachments
-              .slice(0, MAX_STREAM_SKILL_ATTACHMENTS)
-              .map(sanitizeStreamAttachment)
-              .filter((att) => !!att?.name)
+            .slice(0, MAX_STREAM_SKILL_ATTACHMENTS)
+            .map(sanitizeStreamAttachment)
+            .filter((att): att is NonNullable<ReturnType<typeof sanitizeStreamAttachment>> => !!att?.name)
           : null;
 
       // Claim run as early as possible (before any expensive routing/search work).
@@ -4393,7 +4844,7 @@ const cleanSkipRunStreamDedup = (): void => {
           ];
 
           const quick = await llmGateway.chat(llmMessages as any, {
-          userId: effectiveUserId || streamConversationId || "anonymous",
+            userId: effectiveUserId || streamConversationId || "anonymous",
             requestId,
             model: model || DEFAULT_MODEL,
             provider,
@@ -4595,7 +5046,7 @@ const cleanSkipRunStreamDedup = (): void => {
 
       // DATA_MODE ENFORCEMENT: Reject document attachments - must use /analyze endpoint
       const hasDocumentAttachments = sanitizedRunAttachments && sanitizedRunAttachments.length > 0
-        ? sanitizedRunAttachments.some((a) => isDocumentAttachment(a.mimeType || a.type || "", a.name || "", a.type || a.mimeType || ""))
+        ? sanitizedRunAttachments.some((a) => a && isDocumentAttachment(a.mimeType || a.type || "", a.name || "", a.type || a.mimeType || ""))
         : false;
 
       if (hasDocumentAttachments) {
@@ -4654,6 +5105,12 @@ const cleanSkipRunStreamDedup = (): void => {
         } catch (sessionError) {
           console.error(`[Stream] Error creating GPT session for gptId=${gptId}:`, sessionError);
         }
+      }
+
+      // Track GPT Usage (Fire-and-forget)
+      const streamUsageGptId = gptSessionContract?.gptId || gptId;
+      if (streamUsageGptId) {
+        storage.incrementGptUsage(streamUsageGptId).catch(e => console.error(`[Stream] Failed to increment GPT usage for ${streamUsageGptId}:`, e));
       }
 
       // Session metadata for SSE events
@@ -4858,6 +5315,40 @@ const cleanSkipRunStreamDedup = (): void => {
             confidence: intentResult.confidence
           });
           console.log(`[Stream] Emitted clarification request: "${intentResult.clarification_question}"`);
+        }
+
+        // ── Prompt Understanding (sync/heuristic only) ──
+        // Extract structured spec from the user's prompt for observability.
+        // Only runs for non-fast mode and prompts > 50 chars.
+        if (latencyMode !== "fast" && latestUserTextForRun && latestUserTextForRun.length > 50) {
+          try {
+            const { PromptUnderstanding } = await import("../agent/promptUnderstanding");
+            const pu = new PromptUnderstanding();
+            const promptSpec = pu.processSync(latestUserTextForRun);
+
+            console.log("[PromptUnderstanding] Extraction complete", {
+              requestId,
+              confidence: promptSpec.confidence,
+              taskCount: promptSpec.spec.tasks.length,
+              constraintCount: promptSpec.spec.constraints.length,
+              needsClarification: promptSpec.needsClarification,
+              processingTimeMs: promptSpec.processingTimeMs,
+            });
+
+            // Emit low-confidence notice so frontend can display clarification suggestions
+            if (promptSpec.needsClarification && promptSpec.confidence < 0.3 && promptSpec.clarificationQuestions.length > 0) {
+              writeSse(res, "notice", {
+                type: "low_confidence_prompt",
+                confidence: promptSpec.confidence,
+                clarificationQuestions: promptSpec.clarificationQuestions.slice(0, 3),
+                requestId,
+                timestamp: Date.now(),
+              });
+            }
+          } catch (puErr) {
+            // PromptUnderstanding is non-critical — log and continue
+            console.warn("[PromptUnderstanding] Failed (non-blocking):", puErr);
+          }
         }
 
         // PRODUCTION MODE INTERCEPT: Handle document creation requests
@@ -5403,27 +5894,27 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
             // The actual file content lives in object storage (storagePath) and conversationDocuments.
             const sanitizedAttachments = resolvedAttachments.length > 0
               ? resolvedAttachments.map((att: any) => {
-                  // Only keep lightweight metadata fields — strip content, imageUrl, thumbnail, dataUrl
-                  return {
-                    id: att.id || att.fileId,
-                    fileId: att.fileId,
-                    name: att.name,
-                    type: att.type,
-                    mimeType: att.mimeType || att.type,
-                    size: att.size,
-                    storagePath: att.storagePath,
-                  };
-                }).filter((att: any) => att.name)
+                // Only keep lightweight metadata fields — strip content, imageUrl, thumbnail, dataUrl
+                return {
+                  id: att.id || att.fileId,
+                  fileId: att.fileId,
+                  name: att.name,
+                  type: att.type,
+                  mimeType: att.mimeType || att.type,
+                  size: att.size,
+                  storagePath: att.storagePath,
+                };
+              }).filter((att: any) => att.name)
               : (attachments && Array.isArray(attachments) && attachments.length > 0
                 ? attachments.map((att: any) => ({
-                    id: att.id || att.fileId,
-                    fileId: att.fileId,
-                    name: att.name,
-                    type: att.type,
-                    mimeType: att.mimeType || att.type,
-                    size: att.size,
-                    storagePath: att.storagePath,
-                  })).filter((att: any) => att.name)
+                  id: att.id || att.fileId,
+                  fileId: att.fileId,
+                  name: att.name,
+                  type: att.type,
+                  mimeType: att.mimeType || att.type,
+                  size: att.size,
+                  storagePath: att.storagePath,
+                })).filter((att: any) => att.name)
                 : null);
 
             const userMsg = await storage.createChatMessage({
@@ -5737,75 +6228,91 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
       }
 
       if (shouldRunModel && !agentLoopHandled) {
-      const modelStreamStageStart = performance.now();
-      const modelMessages = [systemMessage, ...formattedMessages] as any[];
-      if (skillSeedForModel) {
-        modelMessages.push({ role: "assistant", content: skillSeedForModel });
-      }
-      const streamGenerator = llmGateway.streamChat(
-        modelMessages,
-        {
-          userId: userId || streamConversationId || "anonymous",
-          requestId,
-          model: effectiveModel,
-          provider: effectiveProvider,
-          disableImageGeneration: hasAttachments,
-          maxTokens: laneMaxTokens,
+        const modelStreamStageStart = performance.now();
+        const modelMessages = [systemMessage, ...formattedMessages] as any[];
+        if (skillSeedForModel) {
+          modelMessages.push({ role: "assistant", content: skillSeedForModel });
         }
-      );
+        const streamLlmOptions = {
+            userId: userId || streamConversationId || "anonymous",
+            requestId,
+            model: effectiveModel,
+            provider: effectiveProvider,
+            disableImageGeneration: hasAttachments,
+            maxTokens: laneMaxTokens,
+        };
+        const streamGenerator = llmGateway.streamChat(
+          modelMessages,
+          streamLlmOptions,
+        );
 
-      // ── BUFFERED WRITER ────────────────────────────────────────
-      // Batch small deltas into ~30ms flushes to reduce res.write()
-      // overhead. The frontend already does RAF throttling, so this
-      // matches perfectly.
-      const writer = new SseBufferedWriter(res, effectiveRunId, 30, 512);
-
-      // Cleanup writer timer if the client disconnects mid-stream
-      const onClose = () => writer.destroy();
-      req.once("close", onClose);
-
-      for await (const chunk of streamGenerator) {
-        if (isConnectionClosed) break;
-
-        if (chunk.content) {
-          markFirstToken();
-        }
-        fullContent += chunk.content;
-        lastAckSequence = Math.max(lastAckSequence, chunk.sequenceId);
-
-        // Update run's lastSeq for deduplication on reconnect
-        if (claimedRun && chunk.sequenceId > (claimedRun.lastSeq || 0)) {
-          await storage.updateChatRunLastSeq(claimedRun.id, chunk.sequenceId);
-        }
-
-        if (chunk.done) {
-          // Flush remaining buffered content before done event
-          writer.finalize();
-
-          console.log(`[Stream] Sending 'done' event with ${detectedWebSources.length} webSources`);
-          (res as any).__doneSent = true;
-          writeSse(res, 'done', {
-            sequenceId: chunk.sequenceId,
-            requestId: chunk.requestId,
-            runId: effectiveRunId,
-            intent: unifiedContext?.requestSpec.intent,
-            latencyLane: resolvedLane,
-            webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
-            traceId: requestId,
-            timings: buildTimingPayload(),
+        // Emit SSE notice if context was truncated (non-blocking, before streaming tokens)
+        const truncationInfo = (streamLlmOptions as any).__truncationResult;
+        if (truncationInfo?.truncationApplied) {
+          recordTruncation(truncationInfo.originalTokens, truncationInfo.finalTokens, truncationInfo.droppedMessages);
+          writeSse(res, "notice", {
+            type: "context_truncated",
+            originalTokens: truncationInfo.originalTokens,
+            finalTokens: truncationInfo.finalTokens,
+            droppedMessages: truncationInfo.droppedMessages,
+            truncatedMessageCount: truncationInfo.truncatedMessageCount,
+            requestId,
             timestamp: Date.now(),
-            ...sessionMetadata
           });
-        } else {
-          // Push delta into buffer — will be flushed on interval/size threshold
-          writer.pushDelta(chunk.content);
         }
-      }
 
-      // Ensure buffer is fully flushed after loop and clean up listener
-      writer.finalize();
-      req.removeListener("close", onClose);
-      recordStage("model_stream_ms", modelStreamStageStart);
+        // ── BUFFERED WRITER ────────────────────────────────────────
+        // Batch small deltas into ~30ms flushes to reduce res.write()
+        // overhead. The frontend already does RAF throttling, so this
+        // matches perfectly.
+        const writer = new SseBufferedWriter(res, effectiveRunId, 30, 512);
+
+        // Cleanup writer timer if the client disconnects mid-stream
+        const onClose = () => writer.destroy();
+        req.once("close", onClose);
+
+        for await (const chunk of streamGenerator) {
+          if (isConnectionClosed) break;
+
+          if (chunk.content) {
+            markFirstToken();
+          }
+          fullContent += chunk.content;
+          lastAckSequence = Math.max(lastAckSequence, chunk.sequenceId);
+
+          // Update run's lastSeq for deduplication on reconnect
+          if (claimedRun && chunk.sequenceId > (claimedRun.lastSeq || 0)) {
+            await storage.updateChatRunLastSeq(claimedRun.id, chunk.sequenceId);
+          }
+
+          if (chunk.done) {
+            // Flush remaining buffered content before done event
+            writer.finalize();
+
+            console.log(`[Stream] Sending 'done' event with ${detectedWebSources.length} webSources`);
+            (res as any).__doneSent = true;
+            writeSse(res, 'done', {
+              sequenceId: chunk.sequenceId,
+              requestId: chunk.requestId,
+              runId: effectiveRunId,
+              intent: unifiedContext?.requestSpec.intent,
+              latencyLane: resolvedLane,
+              webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
+              traceId: requestId,
+              timings: buildTimingPayload(),
+              timestamp: Date.now(),
+              ...sessionMetadata
+            });
+          } else {
+            // Push delta into buffer — will be flushed on interval/size threshold
+            writer.pushDelta(chunk.content);
+          }
+        }
+
+        // Ensure buffer is fully flushed after loop and clean up listener
+        writer.finalize();
+        req.removeListener("close", onClose);
+        recordStage("model_stream_ms", modelStreamStageStart);
       } // end if (!agentLoopHandled)
 
       // If upstream agentic pipeline produced no content, don't leave the UI hanging.
@@ -5835,8 +6342,24 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
       const finalizePersistenceStageStart = performance.now();
       if (assistantMessageId) {
         try {
-          const metadata = detectedWebSources.length > 0 ? { webSources: detectedWebSources } : undefined;
-          await storage.updateChatMessageContent(assistantMessageId, fullContent, 'done', metadata);
+          // --- Persistent CoT Integration ---
+          const traceHistory = agentEventBus.getHistory(effectiveRunId);
+          const cotSteps = traceHistory
+            .filter(e => e.event_type === 'thinking' || e.event_type === 'tool_call_started')
+            .map(e => ({
+              title: e.event_type === 'thinking'
+                ? (e.message || e.payload?.content || 'Analizando contexto...')
+                : `Sistema: ${e.payload?.toolCall?.name || 'Iniciando skill'}`,
+              status: "complete"
+            }));
+
+          const metadata: Record<string, any> = {};
+          if (detectedWebSources.length > 0) metadata.webSources = detectedWebSources;
+          if (cotSteps.length > 0) metadata.steps = cotSteps;
+
+          const finalMetadata = Object.keys(metadata).length > 0 ? metadata : undefined;
+
+          await storage.updateChatMessageContent(assistantMessageId, fullContent, 'done', finalMetadata);
 
           // Also persist assistant into Conversation State so /api/memory/chats/:id/state reflects reality.
           // Best-effort + idempotent.
@@ -5847,7 +6370,7 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
             {
               chatMessageId: assistantMessageId,
               requestId: `${requestId}:state:assistant`,
-              metadata: metadata || undefined,
+              metadata: finalMetadata || undefined,
             }
           );
         } catch (e) {
