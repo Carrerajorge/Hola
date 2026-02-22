@@ -282,8 +282,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
-          printf '%s' "${{ secrets.VPS_SSH_KEY_B64 }}" | base64 -d > ~/.ssh/deploy_key
+          printf '%s' "${{ secrets.VPS_SSH_KEY_B64 }}" | tr -d '\r\n' | base64 -d > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
+          wc -c ~/.ssh/deploy_key
+          head -n 1 ~/.ssh/deploy_key
           ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null
           {
             echo "Host *"
@@ -292,7 +294,6 @@ jobs:
             echo "  HostKeyAlgorithms +ssh-rsa"
           } > ~/.ssh/config
           chmod 600 ~/.ssh/config
-
       - name: Resolve reachable deploy endpoint
         id: target
         run: |
@@ -659,15 +660,18 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
-          printf '%s' "${{ secrets.VPS_SSH_KEY_B64 }}" | base64 -d > ~/.ssh/deploy_key
+          printf '%s' "${{ secrets.VPS_SSH_KEY_B64 }}" | tr -d '\r\n' | base64 -d > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
+          wc -c ~/.ssh/deploy_key
+          head -n 1 ~/.ssh/deploy_key
           ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null
-          echo "Host *" > ~/.ssh/config
-          echo "  StrictHostKeyChecking accept-new" >> ~/.ssh/config
-          echo "  PubkeyAcceptedKeyTypes +ssh-rsa" >> ~/.ssh/config
-          echo "  HostKeyAlgorithms +ssh-rsa" >> ~/.ssh/config
+          {
+            echo "Host *"
+            echo "  StrictHostKeyChecking accept-new"
+            echo "  PubkeyAcceptedKeyTypes +ssh-rsa"
+            echo "  HostKeyAlgorithms +ssh-rsa"
+          } > ~/.ssh/config
           chmod 600 ~/.ssh/config
-
       - name: Resolve reachable deploy endpoint
         id: target
         run: |
