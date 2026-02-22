@@ -86,7 +86,8 @@ def execute_dynamic_skill(name: str, input_text: str) -> str:
         elif name == "md5-hash":
             return hashlib.md5(input_text.encode()).hexdigest()
         elif name == "sha1-hash":
-            return hashlib.sha1(input_text.encode()).hexdigest()
+             # Bandit B324: SHA1 is intentionally offered as a utility hash (not for security).
+            return hashlib.sha1(input_text.encode()).hexdigest()  # nosec B324
         elif name == "sha256-hash":
             return hashlib.sha256(input_text.encode()).hexdigest()
         elif name == "sha512-hash":

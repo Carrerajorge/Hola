@@ -126,6 +126,7 @@ export const FALLBACK_CHAINS: Readonly<Record<string, readonly string[]>> = {
   [GEMINI_MODELS_REGISTRY.PRO_25]: [GEMINI_MODELS_REGISTRY.FLASH_25, GEMINI_MODELS_REGISTRY.FLASH_20],
   [GEMINI_MODELS_REGISTRY.FLASH_25]: [GEMINI_MODELS_REGISTRY.FLASH_PREVIEW, GEMINI_MODELS_REGISTRY.FLASH_20],
   [GEMINI_MODELS_REGISTRY.FLASH_20]: [GEMINI_MODELS_REGISTRY.FLASH_25],
+
 };
 
 // ============================================================================
@@ -162,4 +163,6 @@ export const MODEL_PRICING_REGISTRY: Readonly<Record<string, ModelPricingEntry>>
   [GEMINI_MODELS_REGISTRY.FLASH_25]: { inputPerMillion: 0.075, outputPerMillion: 0.30 },
   [GEMINI_MODELS_REGISTRY.FLASH_20]: { inputPerMillion: 0.10, outputPerMillion: 0.40 },
   [GEMINI_MODELS_REGISTRY.FLASH_PREVIEW]: { inputPerMillion: 0.10, outputPerMillion: 0.40 },
+  [GEMINI_MODELS_REGISTRY.PRO_31]: { inputPerMillion: 1.25, outputPerMillion: 5.00 },
+  [GEMINI_MODELS_REGISTRY.FLASH_31]: { inputPerMillion: 0.075, outputPerMillion: 0.30 },
 };
