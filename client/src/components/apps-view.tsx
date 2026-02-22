@@ -369,9 +369,9 @@ const apps: App[] = [
     developer: "Google",
     websiteUrl: "https://mail.google.com",
     privacyUrl: "https://policies.google.com/privacy",
-    statusEndpoint: "/api/oauth/google/gmail/status",
-    connectionEndpoint: "/api/oauth/google/gmail/start",
-    disconnectEndpoint: "/api/oauth/google/gmail/disconnect",
+    statusEndpoint: "/api/connectors/oauth/gmail/status",
+    connectionEndpoint: "/api/connectors/oauth/gmail/start",
+    disconnectEndpoint: "/api/connectors/oauth/gmail/disconnect",
   },
   {
     id: "google-calendar",

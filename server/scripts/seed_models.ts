@@ -2,6 +2,18 @@ import { storage } from "../storage";
 
 const NEW_MODELS = [
     {
+        name: "Gemini 3.1 Pro",
+        provider: "google",
+        modelId: "gemini-3.1-pro-preview",
+        description: "Google Gemini 3.1 Pro Preview",
+        isEnabled: "true",
+        status: "active",
+        displayOrder: 5,
+        modelType: "chat",
+        contextWindow: 2000000,
+        icon: "sparkles"
+    },
+    {
         name: "Gemini 1.5 Flash",
         provider: "google",
         modelId: "gemini-1.5-flash",

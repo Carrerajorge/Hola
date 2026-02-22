@@ -80,6 +80,7 @@ const KNOWN_MODELS: Readonly<Record<string, readonly KnownModel[]>> = deepFreeze
   google: [
     // Gemini 3 Series (Latest)
     { modelId: "gemini-3-flash-preview", name: "Gemini 3 Flash (Preview)", contextWindow: 1000000, maxOutput: 65536, type: "MULTIMODAL", inputCost: "0.0001", outputCost: "0.0004", description: "Fastest frontier-class model with upgraded reasoning" },
+    { modelId: "gemini-3.1-pro-preview", name: "Gemini 3.1 Pro (Preview)", contextWindow: 2000000, maxOutput: 65536, type: "MULTIMODAL", inputCost: "0.003", outputCost: "0.012", description: "Most powerful Google model - PhD-level reasoning" },
     { modelId: "gemini-3-pro", name: "Gemini 3 Pro", contextWindow: 1000000, maxOutput: 65536, type: "MULTIMODAL", inputCost: "0.003", outputCost: "0.012", description: "Most powerful Google model - PhD-level reasoning" },
     { modelId: "gemini-3-pro-image", name: "Gemini 3 Pro Image", contextWindow: 1000000, maxOutput: 65536, type: "MULTIMODAL", inputCost: "0.003", outputCost: "0.012", description: "Image generation with improved text rendering" },
     { modelId: "gemini-3-deep-think", name: "Gemini 3 Deep Think", contextWindow: 1000000, maxOutput: 65536, type: "TEXT", inputCost: "0.005", outputCost: "0.02", description: "Advanced reasoning for complex problems" },

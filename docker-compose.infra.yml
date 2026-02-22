@@ -61,6 +61,8 @@ services:
       - "log_connections=on"
       - "-c"
       - "log_disconnections=on"
+    ports:
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     tmpfs:
@@ -68,7 +70,7 @@ services:
     networks:
       - hola-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d iliagpt && psql -U postgres -d iliagpt -c 'SELECT 1' > /dev/null 2>&1"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d iliagpt && psql -U postgres -d iliagpt -c 'SELECT 1' > /dev/null 2>&1" ]
       interval: 10s
       timeout: 5s
       start_period: 30s
@@ -138,6 +140,8 @@ services:
       - "--rename-command"
       - "FLUSHDB"
       - "FLUSHDB_CONFIRMED"
+    ports:
+      - "6379:6379"
     volumes:
       - redis_data:/data
     tmpfs:
@@ -145,7 +149,7 @@ services:
     networks:
       - hola-net
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_secure_password_change_me}", "ping"]
+      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_secure_password_change_me}", "ping" ]
       interval: 10s
       timeout: 3s
       start_period: 10s
@@ -195,7 +199,7 @@ services:
     networks:
       - hola-net
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/healthz >/dev/null || exit 1"]
+      test: [ "CMD-SHELL", "curl -fsS http://127.0.0.1:8000/healthz >/dev/null || exit 1" ]
       interval: 15s
       timeout: 5s
       start_period: 60s
@@ -218,7 +222,6 @@ services:
     labels:
       com.iliagpt.component: "ocr"
       com.iliagpt.tier: "infrastructure"
-
 
   node-exporter:
     image: prom/node-exporter:v1.8.2
@@ -289,26 +292,25 @@ services:
     restart: unless-stopped
 
   grafana:
-      image: grafana/grafana:11.2.0
-      container_name: hola-grafana
-      hostname: hola-grafana
-      restart: unless-stopped
-      environment:
-        GF_SECURITY_ADMIN_USER: admin
-        GF_SECURITY_ADMIN_PASSWORD: admin
-        GF_USERS_ALLOW_SIGN_UP: "false"
-        GF_SECURITY_ALLOW_EMBEDDING: "true"
-        GF_SERVER_ROOT_URL: "https://iliagpt.com/grafana/"
-        GF_SERVER_SERVE_FROM_SUB_PATH: "true"
-      volumes:
-        - grafana_data:/var/lib/grafana
-      networks:
-        - hola-net
-      ports:
-        - "3001:3000"
-      depends_on:
-        - prometheus
-
+    image: grafana/grafana:11.2.0
+    container_name: hola-grafana
+    hostname: hola-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+      GF_SERVER_ROOT_URL: "https://iliagpt.com/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - hola-net
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
 
   influxdb:
     image: influxdb:2.7

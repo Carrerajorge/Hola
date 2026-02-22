@@ -602,18 +602,24 @@ export function Sidebar({
         </Button>
       </div>
 
-      <div className="px-2 py-2">
+      <div className="px-2 py-2 flex flex-col gap-1">
         <NewChatButton onNewChat={onNewChat} variant="full" showTooltip={false} />
-        <Button
+        
+        <button
           ref={searchButtonRef}
-          variant="ghost"
-          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
           onClick={() => setIsSearchModalOpen(true)}
+          className="w-full mt-1 mb-1 group flex items-center justify-between gap-2 px-3 py-2 text-sm text-muted-foreground bg-muted/40 hover:bg-muted/80 border border-transparent hover:border-border/50 rounded-lg transition-all duration-200"
           data-testid="button-search-chats"
         >
-          <Search className="h-4 w-4" />
-          Buscar chats
-        </Button>
+          <div className="flex items-center gap-2 font-medium">
+            <Search className="h-4 w-4" />
+            <span>Buscar chats...</span>
+          </div>
+          <kbd className="hidden lg:inline-flex h-5 items-center gap-1 rounded border bg-background/50 px-1.5 font-mono text-[10px] font-medium text-muted-foreground group-hover:bg-background transition-colors shadow-sm">
+            <span className="text-xs">⌘</span>K
+          </kbd>
+        </button>
+
         <Button
           variant="ghost"
           className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
