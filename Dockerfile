@@ -105,9 +105,9 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/app/.playwright-browsers
 RUN node ./node_modules/playwright/cli.js install chromium \
   && chown -R iliagpt:nodejs /app/.playwright-browsers
 
-# Create temp directories for uploads/sandbox with correct permissions
-RUN mkdir -p /app/uploads /app/artifacts /app/sandbox_workspace /app/data \
-  && chown -R iliagpt:nodejs /app/uploads /app/artifacts /app/sandbox_workspace /app/data
+# Create temp directories for uploads/sandbox/logs with correct permissions
+RUN mkdir -p /app/uploads /app/artifacts /app/sandbox_workspace /app/data /app/logs \
+  && chown -R iliagpt:nodejs /app/uploads /app/artifacts /app/sandbox_workspace /app/data /app/logs
 
 USER iliagpt
 
