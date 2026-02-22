@@ -84,9 +84,9 @@ def execute_dynamic_skill(name: str, input_text: str) -> str:
         elif name == "base64-decode":
             return base64.b64decode(input_text.encode()).decode()
         elif name == "md5-hash":
-            return hashlib.md5(input_text.encode()).hexdigest()
+            return hashlib.md5(input_text.encode(), usedforsecurity=False).hexdigest()  # nosec B324
         elif name == "sha1-hash":
-            return hashlib.sha1(input_text.encode()).hexdigest()
+            return hashlib.sha1(input_text.encode(), usedforsecurity=False).hexdigest()  # nosec B324
         elif name == "sha256-hash":
             return hashlib.sha256(input_text.encode()).hexdigest()
         elif name == "sha512-hash":
