@@ -160,12 +160,12 @@ jobs:
           VPS_PORT: ${{ env.VPS_PORT }}
           VPS_USER: ${{ env.VPS_USER }}
           DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
-          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_SSH_KEY_B64: ${{ secrets.VPS_SSH_KEY_B64 }}
           VPS_DEFAULT_HOST: "69.62.98.126"
         run: |
           set -euo pipefail
-          if [ -z "${VPS_SSH_KEY}" ]; then
-            echo "::error::VPS_SSH_KEY secret is required for deployment."
+          if [ -z "${VPS_SSH_KEY_B64}" ]; then
+            echo "::error::VPS_SSH_KEY_B64 secret is required for deployment."
             exit 1
           fi
 
@@ -540,12 +540,12 @@ jobs:
           VPS_PORT: ${{ env.VPS_PORT }}
           VPS_USER: ${{ env.VPS_USER }}
           DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
-          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_SSH_KEY_B64: ${{ secrets.VPS_SSH_KEY_B64 }}
           VPS_DEFAULT_HOST: "69.62.98.126"
         run: |
           set -euo pipefail
-          if [ -z "${VPS_SSH_KEY}" ]; then
-            echo "::error::VPS_SSH_KEY secret is required for deployment."
+          if [ -z "${VPS_SSH_KEY_B64}" ]; then
+            echo "::error::VPS_SSH_KEY_B64 secret is required for deployment."
             exit 1
           fi
           if ! printf '%s' "${VPS_PORT}" | grep -Eq '^[0-9]{1,5}$'; then
@@ -659,9 +659,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
-          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
-          echo "" >> ~/.ssh/deploy_key
+          printf '%s' "${{ secrets.VPS_SSH_KEY_B64 }}" | base64 -d > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
+          ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null
           echo "Host *" > ~/.ssh/config
           echo "  StrictHostKeyChecking accept-new" >> ~/.ssh/config
           echo "  PubkeyAcceptedKeyTypes +ssh-rsa" >> ~/.ssh/config

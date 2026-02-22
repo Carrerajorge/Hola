@@ -541,6 +541,12 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
 
+      - name: Bootstrap E2E DB
+        run: npm run db:bootstrap
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://e2e:e2e@localhost:5432/e2e
+
       - name: Run E2E tests
         run: npm run test:e2e
         env:
