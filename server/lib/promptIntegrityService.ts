@@ -5,7 +5,7 @@
  * what the client sent (byte length + SHA-256 hash).
  */
 
-import crypto from "crypto";
+import * as crypto from "crypto";
 
 export interface IntegrityCheckResult {
   valid: boolean;

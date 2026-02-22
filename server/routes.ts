@@ -144,7 +144,6 @@ import { createDeviceControlRouter } from "./routes/deviceControlRouter";
 import openClawRouter from "./routes/openClawRouter";
 import { createSkillPlatformRouter } from "./routes/skillPlatformRouter";
 import { CSRF_COOKIE_NAME, CSRF_TOKEN_PATTERN, issueCsrfCookie } from "./middleware/csrf";
-import { voiceRouter } from "./routes/voiceRouter";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -768,7 +767,6 @@ export async function registerRoutes(
   // New routes from 8H plan
   app.use("/api/templates", templatesRouter);
   app.use("/api/webhooks", webhooksRouter);
-  app.use("/api/voice", voiceRouter);
   app.use("/api/auth/mfa", createMfaRouter());
   app.use("/api/2fa", twoFactorRouter);
   app.use("/api/security", createSecurityRouter());
@@ -841,13 +839,13 @@ export async function registerRoutes(
     }).catch(err => {
       console.warn("[TriggerEngine] Start failed:", err.message);
     });
-  }).catch(() => {});
+  }).catch(() => { });
 
   // ===== Start Analytics Service =====
   import("./services/advancedAnalytics").then(({ analyticsService }) => {
     analyticsService.start();
     console.log("[Analytics] Cost tracking started");
-  }).catch(() => {});
+  }).catch(() => { });
 
   initializeRedisSSE().then(() => {
     console.log("[RedisSSE] Initialized");

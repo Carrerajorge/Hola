@@ -518,6 +518,12 @@ export function ChatInterface({
     });
   }, [chatId, saveDraftDebounced, currentTextRef]);
   const [streamingContent, setStreamingContent] = useState("");
+  const [contextNotice, setContextNotice] = useState<{
+    type: string;
+    originalTokens: number;
+    finalTokens: number;
+    droppedMessages: number;
+  } | null>(null);
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
   const [browserUrl, setBrowserUrl] = useState("https://www.google.com");
   const [isBrowserMaximized, setIsBrowserMaximized] = useState(false);
@@ -5067,6 +5073,7 @@ export function ChatInterface({
       // -------------------------------------------------------------------------
       // Capture state immediately — use auto-generated prompt if user sent only files
       const userInput = input || autoPromptForFiles;
+      setContextNotice(null); // Clear any previous truncation notice
       let currentUploadedFiles = [...uploadedFilesRef.current];
       const userMsgId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const hasUnsettledUploadsAtSubmit = currentUploadedFiles.some(
@@ -5906,6 +5913,29 @@ IMPORTANTE:
                 },
                 onAiStateChange: (nextState) => setAiStateForStream(nextState),
                 onEvent: (eventType, data) => {
+                  // Handle context truncation/compression notices
+                  if (eventType === "notice" && data?.type === "context_truncated") {
+                    setContextNotice({
+                      type: data.type,
+                      originalTokens: data.originalTokens,
+                      finalTokens: data.finalTokens,
+                      droppedMessages: data.droppedMessages,
+                    });
+                    return;
+                  }
+
+                  // Handle low-confidence prompt notice
+                  if (eventType === "notice" && data?.type === "low_confidence_prompt") {
+                    setContextNotice({
+                      type: data.type,
+                      originalTokens: 0,
+                      finalTokens: 0,
+                      droppedMessages: 0,
+                      ...data,
+                    });
+                    return;
+                  }
+
                   if (eventType === "production_start") {
                     isProductionStream = true;
                     setAiStateForStream("agent_working");
@@ -6662,6 +6692,33 @@ IMPORTANTE:
                           onCancel={handleStopChat}
                           uiPhase={uiPhase}
                         />
+
+                        {/* Context truncation notice */}
+                        {contextNotice && (
+                          <div className="mx-4 my-2 flex items-center gap-2 rounded-md bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-xs text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/40">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 flex-shrink-0">
+                              <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                            </svg>
+                            <span>
+                              {contextNotice.type === "context_truncated" ? (
+                                <>Contexto comprimido: {contextNotice.droppedMessages} mensaje{contextNotice.droppedMessages !== 1 ? 's' : ''} anterior{contextNotice.droppedMessages !== 1 ? 'es' : ''} omitido{contextNotice.droppedMessages !== 1 ? 's' : ''} para ajustar al límite del modelo ({contextNotice.originalTokens.toLocaleString()} &rarr; {contextNotice.finalTokens.toLocaleString()} tokens).</>
+                              ) : contextNotice.type === "low_confidence_prompt" ? (
+                                <>Prompt ambiguo (confianza: {((contextNotice as any).confidence * 100).toFixed(0)}%). {(contextNotice as any).clarificationQuestions?.[0] || "Intenta ser más específico."}</>
+                              ) : (
+                                <>Aviso del sistema.</>
+                              )}
+                            </span>
+                            <button
+                              onClick={() => setContextNotice(null)}
+                              className="ml-auto flex-shrink-0 text-amber-500 hover:text-amber-700 dark:hover:text-amber-300"
+                              aria-label="Cerrar aviso"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
+                                <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                              </svg>
+                            </button>
+                          </div>
+                        )}
 
                         {/* Streaming content with fade-in animation */}
                         {aiState === "responding" && streamingContent && (

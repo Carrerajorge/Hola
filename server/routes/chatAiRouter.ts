@@ -55,6 +55,7 @@ import { generateAndPersistChatTitle } from "../lib/chatTitleGenerator";
 import { validate } from "../lib/requestValidator";
 import { streamChatRequestSchema } from "../schemas/chatSchemas";
 import { checkPromptIntegrity } from "../lib/promptIntegrityService";
+import { recordIntegrityCheck, recordTruncation, recordPromptTokens, recordDroppedChars } from "../lib/promptMetrics";
 import * as macos from "../lib/macos";
 
 type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
@@ -4262,7 +4263,14 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
             clientPromptLen,
             clientPromptHash,
           );
+
+          // Record prompt token estimate
+          const promptTokenEst = Math.ceil(latestUserForIntegrity.content.length / 4);
+          recordPromptTokens(promptTokenEst);
+          recordDroppedChars(0); // Invariant: no chars dropped at this stage
+
           if (!integrityResult.valid) {
+            recordIntegrityCheck("fail");
             console.error("[PromptIntegrity] MISMATCH detected", {
               requestId,
               mismatchType: integrityResult.mismatchType,
@@ -4281,6 +4289,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
               },
             });
           }
+          recordIntegrityCheck("pass");
           // Attach integrity metadata to res.locals for downstream logging
           (res as any).locals.promptIntegrity = {
             serverPromptLen: integrityResult.serverPromptLen,
@@ -4288,6 +4297,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
             verified: true,
           };
         }
+      } else {
+        recordIntegrityCheck("skipped");
       }
 
       // Fast local-control path: avoid expensive run-claim/skill-resolution before emitting SSE.
@@ -5306,6 +5317,40 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           console.log(`[Stream] Emitted clarification request: "${intentResult.clarification_question}"`);
         }
 
+        // ── Prompt Understanding (sync/heuristic only) ──
+        // Extract structured spec from the user's prompt for observability.
+        // Only runs for non-fast mode and prompts > 50 chars.
+        if (latencyMode !== "fast" && latestUserTextForRun && latestUserTextForRun.length > 50) {
+          try {
+            const { PromptUnderstanding } = await import("../agent/promptUnderstanding");
+            const pu = new PromptUnderstanding();
+            const promptSpec = pu.processSync(latestUserTextForRun);
+
+            console.log("[PromptUnderstanding] Extraction complete", {
+              requestId,
+              confidence: promptSpec.confidence,
+              taskCount: promptSpec.spec.tasks.length,
+              constraintCount: promptSpec.spec.constraints.length,
+              needsClarification: promptSpec.needsClarification,
+              processingTimeMs: promptSpec.processingTimeMs,
+            });
+
+            // Emit low-confidence notice so frontend can display clarification suggestions
+            if (promptSpec.needsClarification && promptSpec.confidence < 0.3 && promptSpec.clarificationQuestions.length > 0) {
+              writeSse(res, "notice", {
+                type: "low_confidence_prompt",
+                confidence: promptSpec.confidence,
+                clarificationQuestions: promptSpec.clarificationQuestions.slice(0, 3),
+                requestId,
+                timestamp: Date.now(),
+              });
+            }
+          } catch (puErr) {
+            // PromptUnderstanding is non-critical — log and continue
+            console.warn("[PromptUnderstanding] Failed (non-blocking):", puErr);
+          }
+        }
+
         // PRODUCTION MODE INTERCEPT: Handle document creation requests
         // Debug log to trace production mode evaluation
         console.log(`\n\n🔥🔥🔥 [Stream] PRODUCTION CHECK START 🔥🔥🔥`);
@@ -6204,6 +6249,7 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
         // Emit SSE notice if context was truncated (non-blocking, before streaming tokens)
         const truncationInfo = (streamLlmOptions as any).__truncationResult;
         if (truncationInfo?.truncationApplied) {
+          recordTruncation(truncationInfo.originalTokens, truncationInfo.finalTokens, truncationInfo.droppedMessages);
           writeSse(res, "notice", {
             type: "context_truncated",
             originalTokens: truncationInfo.originalTokens,
