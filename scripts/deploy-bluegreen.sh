@@ -732,9 +732,13 @@ docker exec hola-postgres psql -U postgres -d iliagpt -c \
    INSERT INTO _deploy_migrations_log (version, image) VALUES ('${APP_VERSION}', '${IMAGE_TAG}');" \
   > /dev/null 2>&1 || logw "Could not write migration marker (non-fatal)"
 
+# Resolve IP to bypass ephemeral Docker DNS resolution issues
+PG_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' hola-postgres)
+log "  Resolved hola-postgres IP: ${PG_IP}"
+
 if ! timeout "${MIGRATION_TIMEOUT}" docker run --rm --network hola-net \
   --env-file .env.production \
-  -e DATABASE_URL="postgres://postgres:postgres@hola-postgres:5432/iliagpt" \
+  -e DATABASE_URL="postgres://postgres:postgres@${PG_IP}:5432/iliagpt" \
   -e NODE_ENV=production \
   --memory=512m --cpus=1 \
   "${REGISTRY}/iliagpt-app:${IMAGE_TAG}" \
