@@ -548,7 +548,7 @@ jobs:
           DATABASE_URL: postgresql://e2e:e2e@localhost:5432/e2e
 
       - name: Run E2E tests
-        run: npx playwright test --reporter=html --ignore-glob="**/production-rigorous.spec.ts" --ignore-glob="**/restaurantReservation.spec.ts"
+        run: npx playwright test --reporter=html
         env:
           CI: "true"
           NODE_ENV: test
