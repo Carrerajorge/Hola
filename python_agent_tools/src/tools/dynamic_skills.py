@@ -1,13 +1,5 @@
-"""Dynamic generation of 90+ standard OpenClaw skills."""
-from typing import Any, Dict, Optional, Type
-from pydantic import Field
-from .base import BaseTool, ToolCategory, Priority, ToolInput, ToolOutput
-from ..core.registry import ToolRegistry
-import base64
-import hashlib
-import urllib.parse
-import json
-import math
+"""Dynamic generation of 90+ standard OpenClaw skills.""" from typing import Any, Dict, Optional, Type from pydantic import Field from .base import BaseTool, ToolCategory, Priority, ToolInput, 
+ToolOutput from ..core.registry import ToolRegistry import base64 import hashlib import urllib.parse import json import math
 
 # A large list of utility tools to scale capabilities rapidly.
 DYNAMIC_SKILL_DEFINITIONS = [
@@ -84,9 +76,10 @@ def execute_dynamic_skill(name: str, input_text: str) -> str:
         elif name == "base64-decode":
             return base64.b64decode(input_text.encode()).decode()
         elif name == "md5-hash":
-            return hashlib.md5(input_text.encode()).hexdigest()
+            # Bandit B324: MD5 is intentionally offered as a utility hash (not for security).
+            return hashlib.md5(input_text.encode()).hexdigest()  # nosec B324
         elif name == "sha1-hash":
-             # Bandit B324: SHA1 is intentionally offered as a utility hash (not for security).
+            # Bandit B324: SHA1 is intentionally offered as a utility hash (not for security).
             return hashlib.sha1(input_text.encode()).hexdigest()  # nosec B324
         elif name == "sha256-hash":
             return hashlib.sha256(input_text.encode()).hexdigest()

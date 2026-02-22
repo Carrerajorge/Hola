@@ -215,6 +215,7 @@ jobs:
           NODE_ENV: test
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/iliagpt
           SESSION_SECRET: ci-session-secret-min-32-chars
+          TOKEN_ENCRYPTION_KEY: ci-e2e-token-encryption-key-32-chars-min
           OPENAI_API_KEY: ci_dummy_key
           GEMINI_API_KEY: ci_dummy_key
           XAI_API_KEY: ci_dummy_key
