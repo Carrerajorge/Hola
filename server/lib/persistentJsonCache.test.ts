@@ -202,7 +202,7 @@ describe("persistentJsonCacheSet", () => {
 
   it("should log warning when ACADEMIC_CACHE_DEBUG is enabled and write fails", async () => {
     process.env.ACADEMIC_CACHE_DEBUG = "true";
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => { });
     mockMkdir.mockRejectedValue(new Error("disk full"));
 
     await persistentJsonCacheSet("ns", "key", "data");
@@ -214,7 +214,7 @@ describe("persistentJsonCacheSet", () => {
   });
 
   it("should not log when ACADEMIC_CACHE_DEBUG is not enabled and write fails", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => { });
     mockMkdir.mockRejectedValue(new Error("disk full"));
 
     await persistentJsonCacheSet("ns", "key", "data");
@@ -272,10 +272,11 @@ describe("persistentJsonCacheSet", () => {
     await persistentJsonCacheSet("ns/with spaces!@#", "key", "value");
 
     const mkdirCall = mockMkdir.mock.calls[0][0] as string;
+    const finalDir = mkdirCall.split(/[/\\]/).pop() || "";
     // Special characters should be replaced with underscores
-    expect(mkdirCall).not.toContain(" ");
-    expect(mkdirCall).not.toContain("!");
-    expect(mkdirCall).not.toContain("@");
-    expect(mkdirCall).not.toContain("#");
+    expect(finalDir).not.toContain(" ");
+    expect(finalDir).not.toContain("!");
+    expect(finalDir).not.toContain("@");
+    expect(finalDir).not.toContain("#");
   });
 });

@@ -235,3 +235,77 @@ export const insertOfflineMessageQueueSchema = createInsertSchema(offlineMessage
 
 export type InsertOfflineMessageQueue = z.infer<typeof insertOfflineMessageQueueSchema>;
 export type OfflineMessageQueue = typeof offlineMessageQueue.$inferSelect;
+
+// ── Prompt Integrity Audit Trail ───────────────────────────
+
+/** Records every SHA-256 integrity check performed on incoming prompts. */
+export const promptIntegrityChecks = pgTable("prompt_integrity_checks", {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    chatId: varchar("chat_id").references(() => chats.id, { onDelete: "cascade" }),
+    runId: varchar("run_id"),
+    messageRole: text("message_role"), // "user" | "assistant" | "system"
+    clientPromptLen: integer("client_prompt_len"),
+    clientPromptHash: varchar("client_prompt_hash", { length: 64 }),
+    serverPromptLen: integer("server_prompt_len").notNull(),
+    serverPromptHash: varchar("server_prompt_hash", { length: 64 }).notNull(),
+    valid: boolean("valid").notNull(),
+    mismatchType: text("mismatch_type"), // "hash" | "length" | "both" | null
+    lenDelta: integer("len_delta"),
+    requestId: varchar("request_id"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table: any) => [
+    index("prompt_integrity_chat_idx").on(table.chatId),
+    index("prompt_integrity_created_idx").on(table.createdAt),
+    index("prompt_integrity_valid_idx").on(table.valid),
+    index("prompt_integrity_request_idx").on(table.requestId),
+]);
+
+export const insertPromptIntegrityCheckSchema = createInsertSchema(promptIntegrityChecks);
+export type InsertPromptIntegrityCheck = z.infer<typeof insertPromptIntegrityCheckSchema>;
+export type PromptIntegrityCheck = typeof promptIntegrityChecks.$inferSelect;
+
+/** Stores PromptUnderstanding analysis results for each processed prompt. */
+export const promptAnalysisResults = pgTable("prompt_analysis_results", {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    chatId: varchar("chat_id").references(() => chats.id, { onDelete: "cascade" }),
+    runId: varchar("run_id"),
+    requestId: varchar("request_id"),
+    confidence: integer("confidence"), // 0-100 (stored as integer percentage)
+    needsClarification: boolean("needs_clarification").default(false),
+    clarificationQuestions: jsonb("clarification_questions"), // string[]
+    extractedSpec: jsonb("extracted_spec"), // UserSpec JSON
+    policyViolations: jsonb("policy_violations"), // PolicyViolation[]
+    contradictions: jsonb("contradictions"), // ContradictionResult
+    usedLLM: boolean("used_llm").default(false),
+    processingTimeMs: integer("processing_time_ms"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table: any) => [
+    index("prompt_analysis_chat_idx").on(table.chatId),
+    index("prompt_analysis_created_idx").on(table.createdAt),
+    index("prompt_analysis_request_idx").on(table.requestId),
+    index("prompt_analysis_spec_idx").using("gin", table.extractedSpec),
+]);
+
+export const insertPromptAnalysisResultSchema = createInsertSchema(promptAnalysisResults);
+export type InsertPromptAnalysisResult = z.infer<typeof insertPromptAnalysisResultSchema>;
+export type PromptAnalysisResult = typeof promptAnalysisResults.$inferSelect;
+
+/** Logs every transformation applied to a prompt through the processing pipeline. */
+export const promptTransformationLog = pgTable("prompt_transformation_log", {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    chatId: varchar("chat_id").references(() => chats.id, { onDelete: "cascade" }),
+    runId: varchar("run_id"),
+    requestId: varchar("request_id"),
+    stage: text("stage").notNull(), // 'intake' | 'normalize' | 'truncate' | 'compress' | 'enrich'
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    droppedMessages: integer("dropped_messages").default(0),
+    droppedChars: integer("dropped_chars").default(0),
+    transformationDetails: jsonb("transformation_details"), // Arbitrary stage-specific metadata
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table: any) => [
+    index("prompt_transform_chat_idx").on(table.chatId),
+    index("prompt_transform_created_idx").on(table.createdAt),
+    index("prompt_transform_stage_idx").on(table.stage),
+    index("prompt_transform_request_idx").on(table.requestId),
+]);

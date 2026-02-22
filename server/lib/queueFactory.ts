@@ -40,6 +40,7 @@ export const QUEUE_NAMES = {
     PROCESSING: 'processing-queue',
     PAYMENTS_SYNC: 'payments-sync-queue',
     CHANNEL_INGEST: 'channel-ingest-queue',
+    PROMPT_ANALYSIS: 'prompt-analysis-queue',
 };
 
 // Registry for BullBoard

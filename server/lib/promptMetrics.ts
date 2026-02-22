@@ -76,3 +76,98 @@ export function recordDroppedChars(count: number): void {
     incCounter("prompt_dropped_chars_total", {}, count);
   }
 }
+
+// ── Phase 7: Expanded Metrics ──────────────────────────────
+
+registerHistogram({
+  name: "prompt_analysis_duration_seconds",
+  help: "Duration of prompt analysis (sync or async) in seconds",
+  labelNames: ["mode"], // "sync" | "async"
+  buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10, 30],
+});
+
+registerHistogram({
+  name: "prompt_preprocess_duration_seconds",
+  help: "Duration of prompt pre-processing pipeline in seconds",
+  labelNames: [],
+  buckets: [0.0001, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.05],
+});
+
+registerCounter({
+  name: "prompt_context_strategy_used_total",
+  help: "Context management strategy usage count",
+  labelNames: ["strategy"], // "sliding_window" | "importance_weighted" | "must_keep_spans"
+});
+
+registerCounter({
+  name: "prompt_must_keep_spans_total",
+  help: "Total must-keep spans detected across all prompts",
+  labelNames: [],
+});
+
+registerCounter({
+  name: "prompt_language_detected_total",
+  help: "Primary language detected in prompts",
+  labelNames: ["language"],
+});
+
+registerCounter({
+  name: "prompt_duplicate_detected_total",
+  help: "Total duplicate prompts detected",
+  labelNames: [],
+});
+
+registerCounter({
+  name: "prompt_nfc_normalization_total",
+  help: "Total prompts that required NFC normalization",
+  labelNames: [],
+});
+
+registerHistogram({
+  name: "prompt_token_count_accurate",
+  help: "Accurate token count (tiktoken) of incoming prompts",
+  labelNames: ["model"],
+  buckets: [50, 100, 250, 500, 1000, 2000, 4000, 8000, 16000, 32000, 64000, 128000],
+});
+
+/** Record analysis duration. */
+export function recordAnalysisDuration(durationMs: number, mode: "sync" | "async"): void {
+  observeHistogram("prompt_analysis_duration_seconds", durationMs / 1000, { mode });
+}
+
+/** Record pre-processing duration. */
+export function recordPreprocessDuration(durationMs: number): void {
+  observeHistogram("prompt_preprocess_duration_seconds", durationMs / 1000);
+}
+
+/** Record context management strategy used. */
+export function recordContextStrategy(strategy: string): void {
+  incCounter("prompt_context_strategy_used_total", { strategy });
+}
+
+/** Record must-keep spans detected. */
+export function recordMustKeepSpans(count: number): void {
+  if (count > 0) {
+    incCounter("prompt_must_keep_spans_total", {}, count);
+  }
+}
+
+/** Record detected language. */
+export function recordLanguageDetected(language: string): void {
+  incCounter("prompt_language_detected_total", { language });
+}
+
+/** Record duplicate prompt detection. */
+export function recordDuplicateDetected(): void {
+  incCounter("prompt_duplicate_detected_total");
+}
+
+/** Record NFC normalization event. */
+export function recordNfcNormalization(): void {
+  incCounter("prompt_nfc_normalization_total");
+}
+
+/** Record accurate token count. */
+export function recordAccurateTokenCount(tokens: number, model: string): void {
+  observeHistogram("prompt_token_count_accurate", tokens, { model });
+}

@@ -151,11 +151,11 @@ describe("FALLBACK_CHAINS", () => {
     expect(chain).toContain(XAI_MODELS.GROK_3_FAST);
   });
 
-  it("has fallback chain for Gemini Pro 2.5", () => {
-    const chain = FALLBACK_CHAINS[GEMINI_MODELS_REGISTRY.PRO_25];
+  it("has fallback chain for Gemini Pro 3.1", () => {
+    const chain = FALLBACK_CHAINS[GEMINI_MODELS_REGISTRY.PRO_31];
     expect(chain).toBeDefined();
-    expect(chain).toContain(GEMINI_MODELS_REGISTRY.FLASH_25);
-    expect(chain).toContain(GEMINI_MODELS_REGISTRY.FLASH_20);
+    expect(chain).toContain(GEMINI_MODELS_REGISTRY.FLASH_31);
+    expect(chain).toContain(GEMINI_MODELS_REGISTRY.PRO_25);
   });
 
   it("all fallback chains reference models from the registry constants", () => {
@@ -206,8 +206,8 @@ describe("MODEL_PRICING_REGISTRY", () => {
   });
 
   it("Gemini Flash models are cheaper than Gemini Pro", () => {
-    const flash = MODEL_PRICING_REGISTRY[GEMINI_MODELS_REGISTRY.FLASH_25];
-    const pro = MODEL_PRICING_REGISTRY[GEMINI_MODELS_REGISTRY.PRO_25];
+    const flash = MODEL_PRICING_REGISTRY[GEMINI_MODELS_REGISTRY.FLASH_31];
+    const pro = MODEL_PRICING_REGISTRY[GEMINI_MODELS_REGISTRY.PRO_31];
     expect(flash.inputPerMillion).toBeLessThan(pro.inputPerMillion);
     expect(flash.outputPerMillion).toBeLessThan(pro.outputPerMillion);
   });
