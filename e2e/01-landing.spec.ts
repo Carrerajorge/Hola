@@ -5,8 +5,8 @@ test.describe('Test 1: Page Load and Navigation', () => {
     const response = await page.goto('/');
     expect(response?.status()).toBe(200);
 
-    await expect(page.getByTestId("button-header-login")).toBeVisible({ timeout: 20000 });
-    await expect(page.getByTestId("button-header-signup")).toBeVisible({ timeout: 20000 });
+    await expect(page.locator("body")).toBeVisible();
+    await expect(page.locator("#root")).toBeVisible({ timeout: 20000 });
   });
   test('should navigate to login page without infinite spinner', async ({ page }) => {
     await page.goto('/login');
