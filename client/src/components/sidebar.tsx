@@ -62,6 +62,8 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/component
 import { NewChatButton } from "@/components/chat/NewChatButton";
 import { useProcessingChatIds, useChatStreamContent } from "@/stores/streamingStore";
 import { CreateProjectModal, type CreateProjectData } from "@/components/create-project-modal";
+import { useUserSkills } from "@/hooks/use-user-skills";
+import { BUNDLED_SKILLS } from "@/data/bundledSkills";
 import { EditProjectModal } from "@/components/edit-project-modal";
 import { ProjectMemoriesModal } from "@/components/project-memories-modal";
 import { ShareProjectModal } from "@/components/share-project-modal";
@@ -256,6 +258,7 @@ export function Sidebar({
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const searchButtonRef = useRef<HTMLButtonElement>(null);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
@@ -684,6 +687,7 @@ export function Sidebar({
 
       <ScrollArea className="flex-1 px-2 liquid-scroll [&_[data-radix-scroll-area-viewport]]:scrollbar-thin [&_[data-radix-scroll-area-viewport]]:scrollbar-thumb-muted-foreground/30 [&_[data-radix-scroll-area-viewport]]:scrollbar-track-transparent hover:[&_[data-radix-scroll-area-viewport]]:scrollbar-thumb-muted-foreground/50">
         <div className="flex flex-col gap-4 pb-4">
+
           {folders.length > 0 && (
             <div className="flex flex-col gap-0.5">
               <div className="px-2 py-1.5">

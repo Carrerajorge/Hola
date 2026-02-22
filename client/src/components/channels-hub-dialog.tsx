@@ -520,6 +520,8 @@ export function ChannelsHubDialog({
   const [autoResponderTargets, setAutoResponderTargets] = useState(0);
   const [responseInstructions, setResponseInstructions] = useState("");
   const [responseInstructionsMixed, setResponseInstructionsMixed] = useState(false);
+  const [autoResponderToContacts, setAutoResponderToContacts] = useState(false);
+  const [autoResponderToContactsMixed, setAutoResponderToContactsMixed] = useState(false);
   const [aiSettingsBusy, setAiSettingsBusy] = useState(false);
   const [aiSettingsError, setAiSettingsError] = useState<string | null>(null);
   const [aiSettingsSaved, setAiSettingsSaved] = useState(false);
@@ -549,6 +551,7 @@ export function ChannelsHubDialog({
         configured: boolean;
         enabled: boolean;
         prompt: string;
+        autoReplyToContacts: boolean;
       };
       const units: Unit[] = [];
 
@@ -556,6 +559,7 @@ export function ChannelsHubDialog({
       let waEnabled = false;
       let waPrompt = "";
       let waConfigured = false;
+      let waAutoReplyToContacts = false;
       if (waStatusRes.ok) {
         const waJson = await waStatusRes.json().catch(() => null);
         waEnabled = typeof waJson?.autoReply === "boolean" ? waJson.autoReply : false;
@@ -567,10 +571,11 @@ export function ChannelsHubDialog({
       if (waSettingsRes.ok) {
         const waSettingsJson = await waSettingsRes.json().catch(() => null);
         waPrompt = normalizePrompt(waSettingsJson?.settings?.customPrompt);
+        waAutoReplyToContacts = !!waSettingsJson?.settings?.autoReplyToContacts;
       }
       // Even when disconnected, treat WhatsApp as "configured" if the user already enabled auto-reply or set a custom prompt.
       waConfigured = waConfigured || waEnabled || Boolean(waPrompt);
-      units.push({ id: "whatsapp", label: "WhatsApp", configured: waConfigured, enabled: waEnabled, prompt: waPrompt });
+      units.push({ id: "whatsapp", label: "WhatsApp", configured: waConfigured, enabled: waEnabled, prompt: waPrompt, autoReplyToContacts: waAutoReplyToContacts });
 
       // Telegram (requires auth)
       const tgStatusJson = tgStatusRes.ok ? await tgStatusRes.json().catch(() => null) : null;
@@ -584,7 +589,7 @@ export function ChannelsHubDialog({
         tgEnabled = typeof s?.responder_enabled === "boolean" ? s.responder_enabled : false;
         tgPrompt = normalizePrompt(s?.custom_prompt);
       }
-      units.push({ id: "telegram", label: "Telegram", configured: tgConfigured, enabled: tgEnabled, prompt: tgPrompt });
+      units.push({ id: "telegram", label: "Telegram", configured: tgConfigured, enabled: tgEnabled, prompt: tgPrompt, autoReplyToContacts: false });
 
       // Messenger (can have multiple pages)
       const msgJson = msgStatusRes.ok ? await msgStatusRes.json().catch(() => null) : null;
@@ -617,6 +622,7 @@ export function ChannelsHubDialog({
           configured: true,
           enabled: s.enabled,
           prompt: s.prompt,
+          autoReplyToContacts: false,
         });
       }
 
@@ -651,6 +657,7 @@ export function ChannelsHubDialog({
           configured: true,
           enabled: s.enabled,
           prompt: s.prompt,
+          autoReplyToContacts: false,
         });
       }
 
@@ -665,6 +672,12 @@ export function ChannelsHubDialog({
       setAutoResponderTargets(configuredUnits.length);
       setAutoResponderMode(mode);
       setAutoResponderEnabled(anyEnabled);
+
+      const contactsValues = configuredUnits.map((u) => u.autoReplyToContacts);
+      const anyContacts = contactsValues.some(Boolean);
+      const mixedContacts = new Set(contactsValues).size > 1;
+      setAutoResponderToContacts(anyContacts);
+      setAutoResponderToContactsMixed(mixedContacts);
 
       const prompts = configuredUnits.map((u) => u.prompt);
       const promptSet = new Set(prompts.map((p) => p.trim()));
@@ -689,7 +702,7 @@ export function ChannelsHubDialog({
     void loadAiSettings();
   }, [open, loadAiSettings]);
 
-  const applyAutoResponderEnabled = useCallback(async (enabled: boolean) => {
+  const applySettings = useCallback(async (updates: { enabled?: boolean; autoReplyToContacts?: boolean }) => {
     setAiSettingsBusy(true);
     setAiSettingsError(null);
     setAiSettingsSaved(false);
@@ -700,13 +713,16 @@ export function ChannelsHubDialog({
       const waReq = apiFetch("/api/integrations/whatsapp/web/auto-reply", {
         method: "POST",
         headers,
-        body: JSON.stringify({ enabled }),
+        body: JSON.stringify(updates),
       });
+
+      const tgPayload: any = {};
+      if (typeof updates.enabled === "boolean") tgPayload.responder_enabled = updates.enabled;
 
       const tgReq = apiFetch("/api/integrations/telegram/settings", {
         method: "PUT",
         headers,
-        body: JSON.stringify({ responder_enabled: enabled }),
+        body: JSON.stringify(tgPayload),
       });
 
       const [msgStatusRes, wcStatusRes] = await Promise.all([
@@ -745,7 +761,7 @@ export function ChannelsHubDialog({
           promise: apiFetch("/api/integrations/messenger/settings", {
             method: "PUT",
             headers,
-            body: JSON.stringify({ pageId, responder_enabled: enabled }),
+            body: JSON.stringify({ pageId, ...tgPayload }),
           }),
         })),
         ...wcAppIds.map((appId) => ({
@@ -754,7 +770,7 @@ export function ChannelsHubDialog({
           promise: apiFetch("/api/integrations/wechat/settings", {
             method: "PUT",
             headers,
-            body: JSON.stringify({ appId, responder_enabled: enabled }),
+            body: JSON.stringify({ appId, ...tgPayload }),
           }),
         })),
       ];
@@ -1056,8 +1072,8 @@ export function ChannelsHubDialog({
                 {ch.id === "whatsapp" && waStatus.state === "connected"
                   ? "Conectado"
                   : ch.id !== "whatsapp" && getChannelIntegrationStatus(ch.id) === "active"
-                  ? "Conectado"
-                  : "Configurar →"}
+                    ? "Conectado"
+                    : "Configurar →"}
               </div>
             </button>
           ))}
@@ -1101,7 +1117,7 @@ export function ChannelsHubDialog({
                     size="sm"
                     onClick={() => {
                       setAutoResponderEnabled(false);
-                      void applyAutoResponderEnabled(false);
+                      void applySettings({ enabled: false });
                     }}
                     disabled={aiSettingsBusy}
                   >
@@ -1118,9 +1134,33 @@ export function ChannelsHubDialog({
                   return;
                 }
                 setAutoResponderEnabled(checked);
-                void applyAutoResponderEnabled(checked);
+                void applySettings({ enabled: checked });
               }}
               disabled={aiSettingsBusy}
+            />
+          </div>
+
+          <div className="flex items-start justify-between gap-3 mt-4 pt-4 border-t border-border/50">
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <div className="text-sm font-medium">Responder a mis contactos</div>
+                {autoResponderToContactsMixed && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+                    Mixto
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Si está desactivado, ILIAGPT solo te responderá a ti mismo (Modo Espejo). Actívalo para que responda a cualquier persona que te escriba.
+              </p>
+            </div>
+            <Switch
+              checked={autoResponderToContacts}
+              onCheckedChange={(checked) => {
+                setAutoResponderToContacts(checked);
+                void applySettings({ autoReplyToContacts: checked });
+              }}
+              disabled={aiSettingsBusy || !autoResponderEnabled}
             />
           </div>
 
@@ -1196,7 +1236,7 @@ export function ChannelsHubDialog({
                 onClick={() => {
                   setAutoResponderEnabled(true);
                   setConfirmEnableAutoResponderOpen(false);
-                  void applyAutoResponderEnabled(true);
+                  void applySettings({ enabled: true });
                 }}
               >
                 Permitir y activar

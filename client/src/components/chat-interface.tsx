@@ -1932,11 +1932,19 @@ export function ChatInterface({
 
   const handleCopyMessage = useCallback((content: string, msgId?: string) => {
     navigator.clipboard.writeText(content);
+
+    // Explicitly wipe the AI busy state. The bug causes `aiState` to remain stuck
+    // in `thinking` or `agent_working` after a response finishes. When the user 
+    // clicks copy, the component re-renders and mistakenly shows the PhaseNarrator again.
+    // By forcing it to idle here, we ensure interacting with the message clears the ghost state.
+    setAiStateForChat('idle', chatId || 'default');
+    setAiProcessStepsForChat([], chatId || 'default');
+
     if (msgId) {
       setCopiedMessageId(msgId);
       setTimeout(() => setCopiedMessageId(null), 2000);
     }
-  }, []);
+  }, [chatId, setAiStateForChat, setAiProcessStepsForChat]);
 
   const handleUserRetrySend = useCallback(async (msg: Message) => {
     if (!msg || msg.role !== "user") return;
@@ -2836,7 +2844,7 @@ export function ChatInterface({
             resolve();
             return;
           }
-          setTimeout(checkStatus, 2000);
+          setTimeout(checkStatus, 250);
         } catch (error) {
           console.error("Error polling file status:", error);
           setUploadedFiles((prev: UploadedFile[]) =>
@@ -2846,7 +2854,7 @@ export function ChatInterface({
         }
       };
 
-      setTimeout(checkStatus, 2000);
+      setTimeout(checkStatus, 250);
     });
   };
 
@@ -3088,72 +3096,45 @@ export function ChatInterface({
             }
           }
 
-          if (isImage) {
-            await ensureCsrfToken();
-            const registerRes = await apiFetch("/api/files", {
-              method: "POST",
-              headers: uploadHeaders,
-              body: JSON.stringify({
-                name: file.name,
-                type: file.type,
-                size: file.size,
-                storagePath,
-                uploadId,
-                ...(stableConversationId ? { conversationId: stableConversationId } : {}),
-              }),
+          setUploadedFiles((prev: any[]) =>
+            prev.map((f: any) => f.id === tempId ? { ...f, status: "processing", spreadsheetData } : f)
+          );
+
+          await ensureCsrfToken();
+          const registerRes = await apiFetch("/api/files", {
+            method: "POST",
+            headers: uploadHeaders,
+            body: JSON.stringify({
+              name: file.name,
+              type: file.type,
+              size: file.size,
+              storagePath,
+              uploadId,
+              ...(stableConversationId ? { conversationId: stableConversationId } : {}),
+            }),
+          });
+          const registeredFile = await safeJson(registerRes);
+          if (!registerRes.ok) {
+            throw new Error(registeredFile?.error || `File registration failed (status ${registerRes.status})`);
+          }
+          if (!registeredFile?.id) {
+            throw new Error("Server returned invalid file registration response");
+          }
+
+          setUploadedFiles((prev: any[]) =>
+            prev.map((f: any) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, spreadsheetData } : f)
+          );
+
+          // Await polling so pendingUploadsRef tracks the full lifecycle
+          // (upload + processing → ready/error) instead of resolving prematurely.
+          await pollFileStatusFast(registeredFile.id, tempId);
+
+          if (isAnalyzableFile(file.name) && !isExcel) {
+            triggerDocumentAnalysis(registeredFile.id, file.name, (analysisId) => {
+              setUploadedFiles((prev: any[]) =>
+                prev.map((f: any) => f.id === registeredFile.id || f.id === tempId ? { ...f, analysisId } : f)
+              );
             });
-            const registeredFile = await safeJson(registerRes);
-            if (!registerRes.ok) {
-              throw new Error(registeredFile?.error || `File registration failed (status ${registerRes.status})`);
-            }
-            if (!registeredFile?.id) {
-              throw new Error("Server returned invalid file registration response");
-            }
-
-            setUploadedFiles((prev: any[]) =>
-              prev.map((f: any) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, status: "ready" } : f)
-            );
-          } else {
-            setUploadedFiles((prev: any[]) =>
-              prev.map((f: any) => f.id === tempId ? { ...f, status: "processing", spreadsheetData } : f)
-            );
-
-            await ensureCsrfToken();
-            const registerRes = await apiFetch("/api/files", {
-              method: "POST",
-              headers: uploadHeaders,
-              body: JSON.stringify({
-                name: file.name,
-                type: file.type,
-                size: file.size,
-                storagePath,
-                uploadId,
-                ...(stableConversationId ? { conversationId: stableConversationId } : {}),
-              }),
-            });
-            const registeredFile = await safeJson(registerRes);
-            if (!registerRes.ok) {
-              throw new Error(registeredFile?.error || `File registration failed (status ${registerRes.status})`);
-            }
-            if (!registeredFile?.id) {
-              throw new Error("Server returned invalid file registration response");
-            }
-
-            setUploadedFiles((prev: any[]) =>
-              prev.map((f: any) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, spreadsheetData } : f)
-            );
-
-            // Await polling so pendingUploadsRef tracks the full lifecycle
-            // (upload + processing → ready/error) instead of resolving prematurely.
-            await pollFileStatusFast(registeredFile.id, tempId);
-
-            if (isAnalyzableFile(file.name) && !isExcel) {
-              triggerDocumentAnalysis(registeredFile.id, file.name, (analysisId) => {
-                setUploadedFiles((prev: any[]) =>
-                  prev.map((f: any) => f.id === registeredFile.id || f.id === tempId ? { ...f, analysisId } : f)
-                );
-              });
-            }
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
@@ -3248,7 +3229,7 @@ export function ChatInterface({
 
   const pollFileStatusFast = (fileId: string, trackingId: string): Promise<void> => {
     const uploader = getFileUploader();
-    const wsTimeoutMs = 1500;
+    const wsTimeoutMs = 500;
 
     return new Promise<void>((resolve) => {
       let settled = false;
@@ -3778,6 +3759,338 @@ export function ChatInterface({
           chatLogger.debug("handleSubmit no content, returning");
         }
         return;
+      }
+
+      // Deterministic local shortcut (no LLM/stream): create Desktop folder immediately.
+      // Uses keyword detection + name extraction to handle ANY word order in Spanish/English.
+      if (hasInput && !hasFiles) {
+        const userText = input.trim();
+
+        // Step 1: Detect intent — does the user want to create a folder on the desktop?
+        const hasCreateVerb = /\b(?:crea|crear|creame|creá|crees|haz|hazme|genera|generar|make|create)\b/i.test(userText);
+        const hasFolderWord = /\b(?:carpeta|caroeta|carepta|carptea|careta|folder|directorio|directory)\b/i.test(userText);
+        const hasDesktopContext = /\b(?:escritorio|excritorio|desktop|mi\s+mac|my\s+mac)\b/i.test(userText);
+        const isMkdirCommand = /^(?:\/?mkdir|local:\s*mkdir)\s+/i.test(userText);
+        const isLocalFolderIntent = (hasCreateVerb && hasFolderWord) || isMkdirCommand;
+
+        // Step 2: Extract folder name using multiple strategies (order matters — most specific first)
+        let folderName: string | null = null;
+        if (isLocalFolderIntent) {
+          const cleanName = (raw: string): string => {
+            return raw.trim()
+              .replace(/^[\s("'`\[{]+/, "").replace(/[\s)"'`\]},]+$/, "")
+              .replace(/\s+en\s+(?:(?:mi|el|la|tu|su)\s+)?(?:escritorio|excritorio|desktop|mac)\b.*$/i, "")
+              .replace(/\s+on\s+(?:(?:my|the)\s+)?(?:desktop|mac)\b.*$/i, "")
+              .replace(/\s+(?:por\s+favor|gracias|please|thanks)\b.*$/i, "")
+              .replace(/[.,;:!?]+$/, "")
+              .trim();
+          };
+
+          // Strategy A: Explicit name markers — "llamada X", "con el nombre X", "named X", "que se llame X"
+          const nameMarkerMatch = userText.match(
+            /(?:llamada|con\s+(?:el\s+)?nombre|named|que\s+se\s+llame)\s+["']?([^"'\n]{1,160})["']?/i
+          );
+          if (nameMarkerMatch?.[1]) folderName = cleanName(nameMarkerMatch[1]);
+
+          // Strategy B: Rigid patterns — "crea carpeta X en escritorio", "crea una carpeta X"
+          if (!folderName) {
+            const rigidPatterns = [
+              /(?:crea|crear|creame|creá|crees|haz|hazme|genera|generar|make|create)\s+(?:otra\s+|una\s+)?(?:carpeta|caroeta|carepta|carptea|careta|folder|directorio|directory)\s+["']?([^"'\n]{1,160}?)["']?\s+(?:en\s+)?(?:(?:mi|el|la|tu|su)\s+)?(?:escritorio|excritorio|desktop|mac)\b/i,
+              /(?:crea|crear|creame|creá|crees|haz|hazme|genera|generar|make|create)\s+(?:otra\s+|una\s+)?(?:carpeta|caroeta|carepta|carptea|careta|folder|directorio|directory)\s+["']?([^"'\n]{1,160})["']?\s*$/i,
+            ];
+            for (const re of rigidPatterns) {
+              const m = userText.match(re);
+              if (m?.[1]) { folderName = cleanName(m[1]); break; }
+            }
+          }
+
+          // Strategy C: /mkdir command
+          if (!folderName && isMkdirCommand) {
+            const mkdirMatch = userText.match(/^(?:\/?mkdir|local:\s*mkdir)\s+["']?([^"'\n]{1,120})["']?\s*$/i);
+            if (mkdirMatch?.[1]) folderName = cleanName(mkdirMatch[1]);
+          }
+
+          // Strategy D: Last resort — if intent is clear (create + folder + desktop), extract the most
+          // likely proper noun / quoted string as the folder name
+          if (!folderName && hasDesktopContext) {
+            // Try quoted strings first
+            const quotedMatch = userText.match(/["'""]([^"'""\n]{1,120})["'""]/);
+            if (quotedMatch?.[1]) {
+              folderName = cleanName(quotedMatch[1]);
+            } else {
+              // Extract the last capitalized word or word sequence that isn't a Spanish/English stop word
+              const stopWords = new Set([
+                "en", "mi", "una", "un", "la", "el", "de", "del", "con", "que", "se", "por", "los", "las",
+                "tu", "su", "al", "es", "lo", "le", "da", "di", "si", "no", "ya", "ha", "he", "fue", "ser",
+                "crear", "crea", "creame", "haz", "hazme", "genera", "make", "create",
+                "carpeta", "caroeta", "carepta", "folder", "directorio",
+                "escritorio", "excritorio", "desktop", "mac", "nombre", "llamada",
+                "puedes", "podrias", "porfavor", "favor", "gracias", "please",
+                "otra", "nueva", "nuevo", "quiero", "necesito", "me", "my", "the", "on", "a",
+              ]);
+              // Find words that look like a name (start with uppercase or contain numbers/special chars)
+              const words = userText.split(/\s+/);
+              const candidates: string[] = [];
+              for (const w of words) {
+                const plain = w.replace(/^["'`([{]+/, "").replace(/["'`)\]},.:;!?]+$/, "");
+                if (!plain) continue;
+                if (stopWords.has(plain.toLowerCase())) continue;
+                if (/^[A-Z]/.test(plain) || /\d/.test(plain) || /[=_-]/.test(plain)) {
+                  candidates.push(plain);
+                }
+              }
+              if (candidates.length > 0) {
+                folderName = cleanName(candidates.join(""));
+              }
+            }
+          }
+        }
+
+        console.log("[LocalControl] Folder check:", { isLocalFolderIntent, folderName, hasDesktopContext });
+
+        if (folderName) {
+          console.log("[LocalControl] ✅ FOLDER INTERCEPTED — calling /api/local/create-folder with name:", folderName);
+          const userMsg: Message = {
+            id: `user-${Date.now()}`,
+            role: "user",
+            content: userText,
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+          };
+          onSendMessage(userMsg);
+          setInput("");
+
+          try {
+            const res = await apiFetch("/api/local/create-folder", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+              credentials: "include",
+              body: JSON.stringify({ name: folderName, prompt: userText }),
+            });
+            const data = await res.json();
+            const assistantMsg: Message = {
+              id: `assistant-${Date.now()}`,
+              role: "assistant",
+              content: data?.message || (data?.path ? `Listo. Carpeta creada: ${data.path}` : "Listo."),
+              timestamp: new Date(),
+              requestId: generateRequestId(),
+            };
+            onSendMessage(assistantMsg);
+          } catch (error: any) {
+            onSendMessage({
+              id: `assistant-err-${Date.now()}`,
+              role: "assistant",
+              content: `No se pudo crear la carpeta: ${error?.message || "error desconocido"}`,
+              timestamp: new Date(),
+              requestId: generateRequestId(),
+            });
+          }
+          return;
+        }
+      }
+
+      // ── General local control interception ──
+      // Intercepts /local <cmd> prefixed commands AND natural language commands
+      // (rm, read, shell, sysinfo, write, ls, cp, etc.) BEFORE the LLM stream.
+      if (hasInput && !hasFiles) {
+        const userText2 = input.trim();
+        let isLocalExecIntent = false;
+        console.log("[LocalControl] Checking general interception for:", JSON.stringify(userText2));
+
+        // 1. Prefixed: /local <cmd> (skip mkdir which is handled above via create-folder)
+        const isLocalPrefixed = /^(?:\/local|local:)\s+/i.test(userText2);
+        const isLocalMkdirPrefixed = /^(?:\/local|local:)\s+(?:mkdir|carpeta|crear-carpeta)\b/i.test(userText2);
+        if (isLocalPrefixed && !isLocalMkdirPrefixed) {
+          isLocalExecIntent = true;
+        }
+
+        // 2. Natural language: "elimina/borra la carpeta X", "elimina el archivo Y"
+        if (!isLocalExecIntent && /\b(?:elimina|eliminar|borra|borrar|delete|remove|quita|quitar)\s+(?:la\s+|el\s+)?(?:carpeta|archivo|folder|file|directorio)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+
+        // 3. Natural language: "lee/muéstrame/abre el archivo X" / "qué contiene X"
+        if (!isLocalExecIntent && /\b(?:lee|leer|muestra|muéstrame|mostrar|abre|abrir|show|read|open|cat)\s+(?:el\s+)?(?:archivo|file|contenido)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+        if (!isLocalExecIntent && /\b(?:qué|que|what)\s+(?:contiene|tiene|hay\s+en|contains)\s+(?:el\s+)?(?:archivo)?\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+
+        // 4. Natural language: "ejecuta/corre/run el comando X"
+        if (!isLocalExecIntent && /\b(?:ejecuta|ejecutar|corre|correr|run|lanza|lanzar|execute)\s+(?:el\s+)?(?:comando|command)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+        if (!isLocalExecIntent && /\b(?:en\s+(?:la\s+)?terminal|in\s+(?:the\s+)?terminal)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+        if (!isLocalExecIntent && /\b(?:en\s+)?(?:bash|shell|terminal|consola)\s*[:\-]/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+
+        // 5. Natural language: sysinfo — "info del sistema" / "cuanta memoria" / "espacio en disco"
+        if (!isLocalExecIntent && /\b(?:info(?:rmacion)?|información)\s+(?:del?\s+)?(?:sistema|equipo|computadora|mac|pc)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+        if (!isLocalExecIntent && /\b(?:cuanta|cuánta|how\s+much)\s+(?:memoria|ram|memory)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+        if (!isLocalExecIntent && /\b(?:espacio|space)\s+(?:en\s+)?(?:disco|disk)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+
+        // 6. Natural language: "crea un archivo X con el contenido Y"
+        if (!isLocalExecIntent && /\b(?:crea|crear|make|create|genera)\s+(?:un\s+)?(?:archivo|file)\s+.+(?:con\s+(?:el\s+)?(?:contenido|texto|content)|que\s+(?:contenga|diga|tenga))\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+        if (!isLocalExecIntent && /\b(?:escribe|escribir|guarda|guardar|write|save)\s+(?:en\s+)?(?:el\s+)?(?:archivo)?\b/i.test(userText2) && /[:\-]/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+
+        // 7. Natural language: "muéstrame los archivos de mi escritorio" / "lista las carpetas"
+        if (!isLocalExecIntent && /\b(?:muestra|muéstrame|lista|listar|show|list)\s+(?:los\s+|las\s+)?(?:archivos|carpetas|files|folders|contenido)\s+(?:de|del|en|in|from)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+        if (!isLocalExecIntent && /\b(?:qué|que|what)\s+(?:hay|archivos|carpetas|files|folders)\s+(?:en|in|tengo\s+en)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+
+        // 8. Processes: "muéstrame los procesos" / "qué procesos están corriendo"
+        if (!isLocalExecIntent && /\b(?:muestra|muéstrame|show|list|lista)\s+(?:los\s+)?(?:procesos|processes)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+        if (!isLocalExecIntent && /\b(?:procesos|processes)\s+(?:activos|running|corriendo|en\s+ejecución)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+
+        // 9. Kill: "mata el proceso X" / "kill process X"
+        if (!isLocalExecIntent && /\b(?:mata|matar|kill|termina|terminar|detén|para|stop)\s+(?:el\s+)?(?:proceso|process)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+
+        // 10. Ports: "qué puertos están abiertos" / "puertos en uso"
+        if (!isLocalExecIntent && /\b(?:puertos?|ports?)\s+(?:abiertos?|open|en\s+uso|in\s+use|listening|escuchando|activos)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+        if (!isLocalExecIntent && /\b(?:muestra|muéstrame|show|list|lista)\s+(?:los\s+)?(?:puertos|ports)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+
+        // 11. Git: "git status" / "haz un commit" / direct git commands
+        if (!isLocalExecIntent && /^git\s+/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+        if (!isLocalExecIntent && /\b(?:haz|hacer|make|do)\s+(?:un\s+)?commit\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+        if (!isLocalExecIntent && /\b(?:estado|status)\s+(?:del?\s+)?(?:repositorio|repo)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+
+        // 12. Docker: "docker ps" / "contenedores activos"
+        if (!isLocalExecIntent && /^docker\s+/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+        if (!isLocalExecIntent && /\b(?:contenedores|containers)\s+(?:activos|running|corriendo)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+
+        // 13. Install: "instala express con npm" / "npm install X" / "pip install X"
+        if (!isLocalExecIntent && /\b(?:instala|instalar|install)\s+.+\b(?:npm|pip|brew)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+        if (!isLocalExecIntent && /^(?:npm|pip|pip3|brew)\s+install\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+
+        // 14. Script execution: "ejecuta el script test.py" / "corre main.js"
+        if (!isLocalExecIntent && /\b(?:ejecuta|ejecutar|corre|correr|run)\s+(?:el\s+)?(?:script|archivo)\s+\S+\.\w{1,5}\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+
+        // 15. Find files: "busca archivos .txt en mi escritorio"
+        if (!isLocalExecIntent && /\b(?:busca|buscar|find|search)\s+(?:todos?\s+(?:los\s+)?)?(?:archivos|files)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+
+        // 16. Python/Node inline: "python: print(2+2)" / "node: console.log(2)"
+        if (!isLocalExecIntent && /^(?:python3?|py|node|js)\s*[:\-]\s*.+/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+
+        // 17. cd: "ve a la carpeta X" / "cd /tmp" / "entra en el directorio X"
+        if (!isLocalExecIntent && /^cd\s+\S+/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+        if (!isLocalExecIntent && /\b(?:ve|ir|entra|entrar|cambia|cambiar)\s+(?:a\s+(?:la\s+)?|en\s+(?:el\s+)?)(?:carpeta|directorio|folder|directory)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+
+        // 18. Direct tool commands: "npm list" / "pip list" / "brew list" / "git status" / "docker ps"
+        if (!isLocalExecIntent && /^(?:npm|pip3?|brew|git|docker|python3?|node|bash|sh)\s+\S+/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+
+        // 19. Direct local utility commands: "pwd" / "history" / "top" / "du /tmp" / "which node" / "open /tmp"
+        if (!isLocalExecIntent && /^(?:pwd|history|top|du|which|open|ps|ports|grep|find|tree|chmod|diff|kill)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+
+        // 20. Capability queries: "tienes acceso a mi terminal?" / "puedes ejecutar comandos?"
+        if (!isLocalExecIntent && /\b(?:tienes|tiene|tenés)\s+(?:acceso|conexión|conexion)\b/i.test(userText2) && /\b(?:terminal|computadora|pc|mac|sistema|archivos|shell|consola|equipo|ordenador|laptop|máquina|maquina)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+        if (!isLocalExecIntent && /\b(?:puedes|puede|podés|podrías|podrias)\s+(?:acceder|ver|controlar|ejecutar|usar|manejar)\b/i.test(userText2) && /\b(?:terminal|computadora|pc|mac|sistema|archivos|shell|consola|equipo)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+        if (!isLocalExecIntent && /\b(?:qué|que|cuáles|cuales)\s+(?:capacidades|habilidades|poderes|funciones)\s+(?:tienes|tiene)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+        if (!isLocalExecIntent && /\b(?:can\s+you|do\s+you)\s+(?:access|control|use|run|execute)\s+(?:my|the)\s+(?:terminal|computer|system|files|shell)\b/i.test(userText2)) {
+          isLocalExecIntent = true;
+        }
+
+        console.log("[LocalControl] isLocalExecIntent:", isLocalExecIntent, "| input:", userText2.slice(0, 80));
+
+        if (isLocalExecIntent) {
+          console.log("[LocalControl] ✅ INTERCEPTED — calling /api/local/exec");
+          const userMsg: Message = {
+            id: `user-${Date.now()}`,
+            role: "user",
+            content: userText2,
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+          };
+          onSendMessage(userMsg);
+          setInput("");
+
+          try {
+            const res = await apiFetch("/api/local/exec", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+              credentials: "include",
+              body: JSON.stringify({ prompt: userText2, confirm: true }),
+            });
+            const data = await res.json();
+            const assistantMsg: Message = {
+              id: `assistant-${Date.now()}`,
+              role: "assistant",
+              content: data?.message || (data?.success ? "Listo." : `Error: ${data?.error || "error desconocido"}`),
+              timestamp: new Date(),
+              requestId: generateRequestId(),
+            };
+            onSendMessage(assistantMsg);
+          } catch (error: any) {
+            onSendMessage({
+              id: `assistant-err-${Date.now()}`,
+              role: "assistant",
+              content: `Error al ejecutar comando local: ${error?.message || "error desconocido"}`,
+              timestamp: new Date(),
+              requestId: generateRequestId(),
+            });
+          }
+          return;
+        }
       }
 
       // FIX: Auto-generate a prompt when the user sends ONLY files without text.
@@ -4827,7 +5140,7 @@ export function ChatInterface({
         await waitForPendingUploads();
 
         currentUploadedFiles = [...uploadedFilesRef.current];
-        savedMainFiles = [...currentUploadedFiles];
+        savedMainFiles = [...currentUploadedFiles]; // updated reference for error recovery
         const failedAfterWait = currentUploadedFiles.filter((f: any) => f?.status === "error");
         attachments = currentUploadedFiles
           .filter((f: any) => f.status === "ready" || f.status === "processing")
@@ -4855,8 +5168,9 @@ export function ChatInterface({
         );
 
         // Now it's safe to clear successful uploads from the composer (uploads have reached a stable state).
-        // Keep any failed uploads so the user can retry/remove them.
-        setUploadedFiles(failedAfterWait);
+        // By user requirement, we unconditionally clear ALL files from the composer so they don't get "stuck",
+        // even if they failed. The user is notified via toast if anything failed.
+        setUploadedFiles([]);
         if (failedAfterWait.length > 0) {
           toast({
             title: "Algunos archivos fallaron",
@@ -4866,6 +5180,13 @@ export function ChatInterface({
           });
         }
 
+        hasDocumentAttachments = attachments.some((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
+        documentAttachmentsForAnalysis = attachments.filter((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
+      } else {
+        // If there were no pending uploads at submit, we already cleared them from the UI (lines ~4746).
+        // Update savedMainFiles to empty so if standard chat streaming 
+        // fails later, we don't accidentally restore files.
+        savedMainFiles = [];
         hasDocumentAttachments = attachments.some((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
         documentAttachmentsForAnalysis = attachments.filter((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
       }
@@ -5347,8 +5668,10 @@ export function ChatInterface({
             }));
 
             // Extract image data URLs from current files
+            // Only include images that successfully uploaded or are processing, so failed
+            // local uploads don't secretly succeed in chat (causing severe UI/UX desync)
             const imageDataUrls = currentUploadedFiles
-              .filter(f => f.type.startsWith("image/") && f.dataUrl)
+              .filter(f => f.type.startsWith("image/") && f.dataUrl && (f.status === "ready" || f.status === "processing"))
               .map(f => f.dataUrl as string);
 
             // Determine if we're in document mode for special AI behavior

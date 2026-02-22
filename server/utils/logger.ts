@@ -25,7 +25,7 @@ const pinoLogger = pino({
     remove: true,
   },
   // In development, use pino-pretty for readability
-  // In production, keep JSON for aggregators
+  // In production, keep JSON and rotate daily using pino-roll
   transport: !isProduction
     ? {
       target: "pino-pretty",
@@ -35,7 +35,16 @@ const pinoLogger = pino({
         translateTime: "HH:MM:ss",
       },
     }
-    : undefined,
+    : {
+      target: "pino-roll",
+      options: {
+        file: "logs/app",
+        size: "10m",
+        frequency: "daily",
+        extension: ".log",
+        mkdir: true
+      }
+    },
   base: {
     env: process.env.NODE_ENV,
   },

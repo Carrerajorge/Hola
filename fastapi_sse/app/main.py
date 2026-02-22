@@ -66,6 +66,7 @@ async def lifespan(app: FastAPI):
         logger.info("redis_connected")
     except Exception as e:
         logger.error("redis_connection_failed", error=str(e))
+        raise RuntimeError(f"Failed to connect to Redis during startup: {e}") from e
     
     yield
     

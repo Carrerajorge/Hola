@@ -85,7 +85,7 @@ export const users = pgTable("users", {
     profileImageUrl: varchar("profile_image_url"),
     phone: varchar("phone"),
     company: varchar("company"),
-    role: text("role").default("user"), // admin, editor, viewer, api_only, user
+    role: text("role").default("USER"), // USER, MOD, ADMIN, SYSTEM_AGENT
     plan: text("plan").default("free"), // free, pro, enterprise
     status: text("status").default("active"), // active, inactive, suspended, pending_verification
     queryCount: integer("query_count").default(0),

@@ -60,7 +60,7 @@ const DEFAULT_CONFIG: PipelineConfig = {
   maxClarificationAttempts: 3,
   confidenceThresholdOk: 0.70,
   confidenceThresholdClarify: 0.40,
-  defaultModel: "grok-4-1-fast-non-reasoning",
+  defaultModel: "gemini-3.1-pro",
   fallbackModel: "gemini-2.5-flash"
 };
 

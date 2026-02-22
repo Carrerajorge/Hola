@@ -593,8 +593,10 @@ free_target_port_if_safe() {
   while IFS= read -r cname; do
     [ -z "${cname}" ] && continue
 
-    # Safe auto-cleanup for known legacy stack that collides with blue/green port.
-    if [[ "${cname}" =~ ^iliagpt-(app|worker|sandbox-runner)-1$ ]]; then
+    # Safe auto-cleanup for known legacy stacks that collide with blue/green ports.
+    # Includes historical project-name prefixes (iliagpt-*, hola-*) that are not slot-scoped.
+    if [[ "${cname}" =~ ^iliagpt-(app|worker|sandbox-runner)-1$ ]] || \
+       [[ "${cname}" =~ ^hola-(app|worker|sandbox-runner)(-[0-9]+)?$ ]]; then
       logw "Stopping legacy container ${cname} to free port ${target_port}..."
       docker rm -f "${cname}" >/dev/null 2>&1 || true
       continue

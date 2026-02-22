@@ -162,7 +162,7 @@ export class AgentLoopFacade extends EventEmitter {
     this.options = {
       enableQA: options.enableQA ?? true,
       maxExecutionTimeMs: options.maxExecutionTimeMs ?? 300000,
-      defaultModel: options.defaultModel ?? "grok-3-fast",
+      defaultModel: options.defaultModel ?? "gemini-3.1-pro",
       enableSSE: options.enableSSE ?? true,
       qaConfig: {
         minScore: options.qaConfig?.minScore ?? 0.7,

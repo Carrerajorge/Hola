@@ -1,5 +1,8 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
+import fs from "fs/promises";
+import os from "os";
+import path from "path";
 import {
   DocumentTool,
   SearchTool,
@@ -310,6 +313,48 @@ export const pythonTool = tool(
   }
 );
 
+export const macDesktopCreateFolderTool = tool(
+  async (input) => {
+    try {
+      const rawName = String(input.name || "").trim();
+      if (!rawName) {
+        return JSON.stringify({ success: false, error: "Folder name is required" });
+      }
+
+      const invalid = /[\\/:*?"<>|]/.test(rawName) || rawName.includes("..");
+      if (invalid) {
+        return JSON.stringify({ success: false, error: "Invalid folder name" });
+      }
+
+      const desktopDir = path.join(os.homedir(), "Desktop");
+      const folderPath = path.join(desktopDir, rawName);
+      await fs.mkdir(folderPath, { recursive: true });
+      const auditPath = path.join(os.homedir(), ".iliagpt-control-audit.log");
+      await fs.appendFile(
+        auditPath,
+        `${new Date().toISOString()} mac_desktop_create_folder name=${rawName} path=${folderPath}\n`,
+        "utf-8"
+      );
+
+      return JSON.stringify({
+        success: true,
+        created: true,
+        path: folderPath,
+        message: `Folder ready at ${folderPath}`,
+      });
+    } catch (error: any) {
+      return JSON.stringify({ success: false, error: error?.message || "Failed to create folder" });
+    }
+  },
+  {
+    name: "mac_desktop_create_folder",
+    description: "Creates a folder directly on this Mac Desktop. Use this when the user explicitly asks to create a folder in Escritorio/Desktop.",
+    schema: z.object({
+      name: z.string().min(1).max(120).describe("Folder name only (no slashes or path)"),
+    }),
+  }
+);
+
 export const SAFE_TOOLS = [
   documentTool,
   searchTool,
@@ -328,6 +373,7 @@ export const SYSTEM_TOOLS = [
   shellTool,
   fileTool,
   pythonTool,
+  macDesktopCreateFolderTool,
 ];
 
 export { MEMORY_TOOLS, memoryStoreTool, memoryRetrieveTool, contextManageTool, sessionStateTool };

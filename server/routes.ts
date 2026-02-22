@@ -59,6 +59,7 @@ import superAgentRouter from "./routes/superAgentRoutes";
 import conversationMemoryRoutes from "./routes/conversationMemoryRoutes";
 import { contextRoutes, semanticRoutes } from "./memory";
 import { createPythonToolsRouter } from "./routes/pythonToolsRouter";
+import { createLocalControlRouter } from "./routes/localControlRouter";
 import { createToolExecutionRouter } from "./routes/toolExecutionRouter";
 import agentPlanRouter from "./routes/agentPlanRouter";
 import scientificSearchRouter from "./routes/scientificSearchRouter";
@@ -655,10 +656,15 @@ export async function registerRoutes(
   // Simple API health check (used by clients and local smoke checks)
   app.get("/api/health", (req, res) => {
     const mem = process.memoryUsage();
+    const appVersion = process.env.APP_VERSION || process.env.npm_package_version || "unknown";
+    const packageVersion = process.env.npm_package_version || "unknown";
     res.json({
       status: "ok",
       timestamp: new Date().toISOString(),
-      version: process.env.npm_package_version || process.env.APP_VERSION || "unknown",
+      version: appVersion,
+      app_version: appVersion,
+      package_version: packageVersion,
+      app_sha: process.env.APP_SHA || appVersion,
       node: {
         version: process.version,
         platform: process.platform,
@@ -775,6 +781,7 @@ export async function registerRoutes(
   app.use("/api/context", contextRoutes); // Enterprise context validation API
   app.use("/api", superAgentRouter);
   app.use("/api", createPythonToolsRouter());
+  app.use("/api", createLocalControlRouter());
   app.use("/api/execution", createToolExecutionRouter());
   app.use("/api/scientific", scientificSearchRouter);
   app.use("/api/planning", agentPlanRouter);

@@ -209,7 +209,7 @@ export class ToolRegistry {
       tool,
       `ToolRegistry.register(${tool?.name || "unknown"})`
     );
-    
+
     if (this.tools.has(validatedTool.name)) {
       console.warn(`[ToolRegistry] Overwriting existing tool: ${validatedTool.name}`);
     }
@@ -230,11 +230,11 @@ export class ToolRegistry {
     return this.list().filter(t => allowedTools.includes(t.name));
   }
 
-	async execute(name: string, input: any, context: ToolContext): Promise<ToolResult> {
+  async execute(name: string, input: any, context: ToolContext): Promise<ToolResult> {
     let tool = this.tools.get(name);
     const startTime = Date.now();
     const logs: ToolLog[] = [];
-    
+
     const addLog = (level: ToolLog["level"], message: string, data?: any) => {
       logs.push({ level, message, timestamp: new Date(), data });
     };
@@ -525,7 +525,7 @@ export class ToolRegistry {
       // Best-effort: if settings can't be loaded, don't block tools.
       addLog("debug", "User settings feature-gate check skipped (unavailable)", e?.message || e);
     }
-    
+
     if (!tool) {
       // Try sandbox tools as fallback with proper adaptation
       if (sandboxToolRegistry.has(name)) {
@@ -693,19 +693,19 @@ export class ToolRegistry {
           const sandboxResult = await sandboxToolRegistry.execute(name, input);
           const artifacts: ToolArtifact[] = [];
           const previews: ToolPreview[] = [];
-          
+
           // Convert sandbox file outputs to artifacts
           if (sandboxResult.filesCreated && sandboxResult.filesCreated.length > 0) {
             for (const filePath of sandboxResult.filesCreated) {
               const ext = filePath.split('.').pop()?.toLowerCase();
               let type: ArtifactType = "file";
               let mimeType = "application/octet-stream";
-              
+
               if (ext === "pptx") { type = "document"; mimeType = "application/vnd.openxmlformats-officedocument.presentationml.presentation"; }
               else if (ext === "docx") { type = "document"; mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"; }
               else if (ext === "xlsx") { type = "document"; mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"; }
               else if (ext === "png" || ext === "jpg" || ext === "jpeg") { type = "image"; mimeType = `image/${ext}`; }
-              
+
               artifacts.push({
                 id: randomUUID(),
                 type,
@@ -717,24 +717,24 @@ export class ToolRegistry {
               });
             }
           }
-          
+
           // Properly format output based on sandbox tool type
           let output: any;
           if (sandboxResult.data) {
             // For structured data tools (search, browser, etc.), preserve the data structure
             output = sandboxResult.data;
-            
+
             // Add preview for search results
             if (name === "search" && sandboxResult.data.results) {
               previews.push({
                 type: "markdown",
-                content: `### Search Results\n${sandboxResult.data.results.slice(0, 5).map((r: any) => 
+                content: `### Search Results\n${sandboxResult.data.results.slice(0, 5).map((r: any) =>
                   `- **[${r.title}](${r.url})**\n  ${r.snippet || ''}`
                 ).join('\n\n')}`,
                 title: `Search: ${input.query || "results"}`,
               });
             }
-            
+
             // Add preview for browser content
             if (name === "browser" && sandboxResult.data.content) {
               previews.push({
@@ -746,30 +746,30 @@ export class ToolRegistry {
           } else {
             output = sandboxResult.message;
           }
-          
+
           metricsCollector.record({
             toolName: name,
             latencyMs: sandboxResult.executionTimeMs || (Date.now() - startTime),
             success: sandboxResult.success,
             timestamp: new Date(),
           });
-          
-	          return trackAndReturn({
-	            success: sandboxResult.success,
-	            output,
-	            artifacts,
-	            previews,
-	            logs,
-	            metrics: { durationMs: sandboxResult.executionTimeMs || (Date.now() - startTime) },
-	            error: sandboxResult.error ? {
-	              code: "SANDBOX_ERROR",
-	              message: sandboxResult.error,
-	              retryable: true,
-	            } : undefined,
-	          }, { providerId: "sandbox" });
-	        } catch (sandboxError: any) {
-	          addLog("error", `Sandbox tool error: ${sandboxError.message}`);
-          
+
+          return trackAndReturn({
+            success: sandboxResult.success,
+            output,
+            artifacts,
+            previews,
+            logs,
+            metrics: { durationMs: sandboxResult.executionTimeMs || (Date.now() - startTime) },
+            error: sandboxResult.error ? {
+              code: "SANDBOX_ERROR",
+              message: sandboxResult.error,
+              retryable: true,
+            } : undefined,
+          }, { providerId: "sandbox" });
+        } catch (sandboxError: any) {
+          addLog("error", `Sandbox tool error: ${sandboxError.message}`);
+
           metricsCollector.record({
             toolName: name,
             latencyMs: Date.now() - startTime,
@@ -777,39 +777,39 @@ export class ToolRegistry {
             errorCode: "SANDBOX_ERROR",
             timestamp: new Date(),
           });
-          
-	          return trackAndReturn({
-	            success: false,
-	            output: null,
-	            artifacts: [],
-	            previews: [],
-	            logs,
-	            metrics: { durationMs: Date.now() - startTime },
-	            error: {
-	              code: "SANDBOX_ERROR",
-	              message: sandboxError.message,
-	              retryable: false,
-	            },
-	          }, { providerId: "sandbox" });
-	        } finally {
-            releaseSlot?.();
-          }
-	      }
-	      
-	      return trackAndReturn({
-	        success: false,
-	        output: null,
-	        artifacts: [],
-	        previews: [],
-	        logs,
-	        metrics: { durationMs: Date.now() - startTime },
-	        error: {
-	          code: "TOOL_NOT_FOUND",
-	          message: `Tool "${name}" not found`,
-	          retryable: false,
-	        },
-	      }, { status: "not_found" });
-	    }
+
+          return trackAndReturn({
+            success: false,
+            output: null,
+            artifacts: [],
+            previews: [],
+            logs,
+            metrics: { durationMs: Date.now() - startTime },
+            error: {
+              code: "SANDBOX_ERROR",
+              message: sandboxError.message,
+              retryable: false,
+            },
+          }, { providerId: "sandbox" });
+        } finally {
+          releaseSlot?.();
+        }
+      }
+
+      return trackAndReturn({
+        success: false,
+        output: null,
+        artifacts: [],
+        previews: [],
+        logs,
+        metrics: { durationMs: Date.now() - startTime },
+        error: {
+          code: "TOOL_NOT_FOUND",
+          message: `Tool "${name}" not found`,
+          retryable: false,
+        },
+      }, { status: "not_found" });
+    }
 
     const policyContext: PolicyContext = {
       userId: context.userId,
@@ -819,28 +819,28 @@ export class ToolRegistry {
     };
 
     const policyCheck = policyEngine.checkAccess(policyContext);
-    
-	    if (!policyCheck.allowed) {
-	      addLog("warn", `Policy denied execution: ${policyCheck.reason}`);
-        const denialCode = policyCheck.requiresConfirmation
-          ? effectiveContext.autoConfirmPolicy === "never"
-            ? "ACCESS_DENIED"
-            : "REQUIRES_CONFIRMATION"
-          : "ACCESS_DENIED";
-	      return trackAndReturn({
-	        success: false,
-	        output: null,
-	        artifacts: [],
-	        previews: [],
-	        logs,
-	        metrics: { durationMs: Date.now() - startTime },
-	        error: {
-	          code: denialCode,
-	          message: policyCheck.reason || "Access denied",
-	          retryable: false,
-	        },
-	      }, { status: "denied" });
-	    }
+
+    if (!policyCheck.allowed) {
+      addLog("warn", `Policy denied execution: ${policyCheck.reason}`);
+      const denialCode = policyCheck.requiresConfirmation
+        ? effectiveContext.autoConfirmPolicy === "never"
+          ? "ACCESS_DENIED"
+          : "REQUIRES_CONFIRMATION"
+        : "ACCESS_DENIED";
+      return trackAndReturn({
+        success: false,
+        output: null,
+        artifacts: [],
+        previews: [],
+        logs,
+        metrics: { durationMs: Date.now() - startTime },
+        error: {
+          code: denialCode,
+          message: policyCheck.reason || "Access denied",
+          retryable: false,
+        },
+      }, { status: "denied" });
+    }
 
     // Enforce network access policy for tools that require network.
     if (
@@ -889,23 +889,23 @@ export class ToolRegistry {
           input,
           `ToolRegistry.execute(${name}).input`
         );
-	      } catch (validationError: any) {
-	        addLog("error", "Input validation failed", validationError.zodError?.errors || validationError.message);
-	        return trackAndReturn({
-	          success: false,
-	          output: null,
-	          artifacts: [],
-	          previews: [],
-	          logs,
-	          metrics: { durationMs: Date.now() - startTime },
-	          error: {
-	            code: "INVALID_INPUT",
-	            message: `Invalid input: ${validationError.message}`,
-	            retryable: false,
-	            details: validationError.zodError?.errors,
-	          },
-	        }, { status: "validation_error" });
-	      }
+      } catch (validationError: any) {
+        addLog("error", "Input validation failed", validationError.zodError?.errors || validationError.message);
+        return trackAndReturn({
+          success: false,
+          output: null,
+          artifacts: [],
+          previews: [],
+          logs,
+          metrics: { durationMs: Date.now() - startTime },
+          error: {
+            code: "INVALID_INPUT",
+            message: `Invalid input: ${validationError.message}`,
+            retryable: false,
+            details: validationError.zodError?.errors,
+          },
+        }, { status: "validation_error" });
+      }
 
       addLog("info", `Executing tool: ${name}`);
       try {
@@ -953,19 +953,19 @@ export class ToolRegistry {
 
         const result = denyRequiresConfirmation
           ? ({
-              ...executionResult.data,
-              success: false,
-              error: {
-                code: "ACCESS_DENIED",
-                message:
-                  "Blocked by settings: auto-confirm policy is set to 'never'.",
-                retryable: false,
-                details: executionResult.data?.error?.details,
-              },
-            } as ToolResult)
+            ...executionResult.data,
+            success: false,
+            error: {
+              code: "ACCESS_DENIED",
+              message:
+                "Blocked by settings: auto-confirm policy is set to 'never'.",
+              retryable: false,
+              details: executionResult.data?.error?.details,
+            },
+          } as ToolResult)
           : executionResult.data;
         addLog("info", `Tool completed successfully in ${executionResult.metrics.totalDurationMs}ms`);
-        
+
         metricsCollector.record({
           toolName: name,
           latencyMs: executionResult.metrics.totalDurationMs,
@@ -973,7 +973,7 @@ export class ToolRegistry {
           errorCode: result.success ? undefined : result.error?.code,
           timestamp: new Date(),
         });
-        
+
         const validatedOutput = ToolOutputSchema.safeParse(result);
         if (!validatedOutput.success) {
           addLog("warn", `Tool output validation failed: ${validatedOutput.error.message}`);
@@ -994,22 +994,22 @@ export class ToolRegistry {
             });
           }
         }
-        
-	        return trackAndReturn({
-	          success: result.success,
-	          output: result.output,
-	          artifacts: result.artifacts || [],
-	          previews: result.previews || [],
-	          logs: [...(result.logs || []), ...logs],
-	          metrics: {
-	            durationMs: executionResult.metrics.totalDurationMs,
-	            ...result.metrics,
-	          },
-	          error: result.error,
-	        }, denyRequiresConfirmation ? { status: "denied" } : undefined);
-	      } else {
+
+        return trackAndReturn({
+          success: result.success,
+          output: result.output,
+          artifacts: result.artifacts || [],
+          previews: result.previews || [],
+          logs: [...(result.logs || []), ...logs],
+          metrics: {
+            durationMs: executionResult.metrics.totalDurationMs,
+            ...result.metrics,
+          },
+          error: result.error,
+        }, denyRequiresConfirmation ? { status: "denied" } : undefined);
+      } else {
         addLog("error", `Tool failed: ${executionResult.error?.message}`, executionResult.error);
-        
+
         metricsCollector.record({
           toolName: name,
           latencyMs: executionResult.metrics.totalDurationMs,
@@ -1017,26 +1017,26 @@ export class ToolRegistry {
           errorCode: executionResult.error?.code || "EXECUTION_ERROR",
           timestamp: new Date(),
         });
-        
-	        return trackAndReturn({
-	          success: false,
-	          output: null,
-	          artifacts: [],
-	          previews: [],
-	          logs,
-	          metrics: {
-	            durationMs: executionResult.metrics.totalDurationMs,
-	          },
-	          error: {
-	            code: executionResult.error?.code || "EXECUTION_ERROR",
-	            message: executionResult.error?.message || "Unknown error",
-	            retryable: executionResult.error?.retryable || false,
-	          },
-	        });
-	      }
-	    } catch (error: any) {
+
+        return trackAndReturn({
+          success: false,
+          output: null,
+          artifacts: [],
+          previews: [],
+          logs,
+          metrics: {
+            durationMs: executionResult.metrics.totalDurationMs,
+          },
+          error: {
+            code: executionResult.error?.code || "EXECUTION_ERROR",
+            message: executionResult.error?.message || "Unknown error",
+            retryable: executionResult.error?.retryable || false,
+          },
+        });
+      }
+    } catch (error: any) {
       addLog("error", `Unexpected error: ${error.message}`, { stack: error.stack });
-      
+
       metricsCollector.record({
         toolName: name,
         latencyMs: Date.now() - startTime,
@@ -1044,24 +1044,24 @@ export class ToolRegistry {
         errorCode: "UNEXPECTED_ERROR",
         timestamp: new Date(),
       });
-      
-	      return trackAndReturn({
-	        success: false,
-	        output: null,
-	        artifacts: [],
-	        previews: [],
-	        logs,
-	        metrics: { durationMs: Date.now() - startTime },
-	        error: {
-	          code: "UNEXPECTED_ERROR",
-	          message: error.message || "Unknown error",
-	          retryable: false,
-	        },
-	      });
-	    } finally {
-        releaseSlot?.();
-      }
-	  }
+
+      return trackAndReturn({
+        success: false,
+        output: null,
+        artifacts: [],
+        previews: [],
+        logs,
+        metrics: { durationMs: Date.now() - startTime },
+        error: {
+          code: "UNEXPECTED_ERROR",
+          message: error.message || "Unknown error",
+          retryable: false,
+        },
+      });
+    } finally {
+      releaseSlot?.();
+    }
+  }
 
   createArtifact(type: ArtifactType, name: string, data: any, mimeType?: string): ToolArtifact {
     return createArtifact(type, name, data, mimeType);
@@ -1111,7 +1111,7 @@ const analyzeSpreadsheetTool: ToolDefinition = {
       };
 
       const result = await startAnalysis(params);
-      
+
       return {
         success: true,
         output: {
@@ -1253,7 +1253,7 @@ const generateImageTool: ToolDefinition = {
     const startTime = Date.now();
     try {
       const result = await generateImage(input.prompt);
-      
+
       return {
         success: true,
         output: {
@@ -1394,7 +1394,7 @@ const browseUrlTool: ToolDefinition = {
 
       if (context.signal?.aborted) {
         if (createdSession && sessionId) {
-          await browserWorker.destroySession(sessionId).catch(() => {});
+          await browserWorker.destroySession(sessionId).catch(() => { });
         }
         return {
           success: false,
@@ -1411,7 +1411,7 @@ const browseUrlTool: ToolDefinition = {
 
       if (context.signal?.aborted) {
         if (createdSession && sessionId) {
-          await browserWorker.destroySession(sessionId).catch(() => {});
+          await browserWorker.destroySession(sessionId).catch(() => { });
         }
         return {
           success: false,
@@ -1457,7 +1457,7 @@ const browseUrlTool: ToolDefinition = {
       };
     } catch (error: any) {
       if (createdSession && sessionId) {
-        await browserWorker.destroySession(sessionId).catch(() => {});
+        await browserWorker.destroySession(sessionId).catch(() => { });
       }
       if (context.signal?.aborted) {
         return {
@@ -2299,6 +2299,11 @@ function registerSimpleTools(
 registerSimpleTools(academicTools);
 registerSimpleTools(documentAdvancedTools);
 registerSimpleTools(agentManagementTools);
+
+import { BUNDLED_SKILL_TOOLS } from "./tools/bundledSkillTools";
+for (const tool of BUNDLED_SKILL_TOOLS) {
+  toolRegistry.register(tool);
+}
 
 export {
   analyzeSpreadsheetSchema,

@@ -36,6 +36,8 @@ export const XAI_MODELS = {
 // ============================================================================
 
 export const GEMINI_MODELS_REGISTRY = {
+  PRO_31: "gemini-3.1-pro",
+  FLASH_31: "gemini-3.1-flash",
   FLASH_PREVIEW: "gemini-3-flash-preview",
   FLASH_25: "gemini-2.5-flash",
   PRO_25: "gemini-2.5-pro",
@@ -56,13 +58,13 @@ export const DEFAULT_XAI_REASONING_MODEL = XAI_MODELS.GROK_4_1_FAST_REASONING;
 export const DEFAULT_XAI_VISION_MODEL = XAI_MODELS.GROK_2_VISION;
 
 /** Default Gemini model for general text completion. */
-export const DEFAULT_GEMINI_TEXT_MODEL = GEMINI_MODELS_REGISTRY.FLASH_25;
+export const DEFAULT_GEMINI_TEXT_MODEL = GEMINI_MODELS_REGISTRY.PRO_31;
 
 /** Default Gemini model for reasoning / planning tasks. */
-export const DEFAULT_GEMINI_REASONING_MODEL = GEMINI_MODELS_REGISTRY.PRO_25;
+export const DEFAULT_GEMINI_REASONING_MODEL = GEMINI_MODELS_REGISTRY.PRO_31;
 
 /** Default Gemini model for vision tasks. */
-export const DEFAULT_GEMINI_VISION_MODEL = GEMINI_MODELS_REGISTRY.FLASH_25;
+export const DEFAULT_GEMINI_VISION_MODEL = GEMINI_MODELS_REGISTRY.FLASH_31;
 
 /** Default provider (app-level). */
 export const DEFAULT_PROVIDER = "gemini" as const;
@@ -89,6 +91,8 @@ export const KNOWN_XAI_MODEL_IDS: ReadonlySet<string> = new Set(
 export const KNOWN_GEMINI_MODEL_IDS: ReadonlySet<string> = new Set([
   ...Object.values(GEMINI_MODELS_REGISTRY).map((id) => id.toLowerCase()),
   // Legacy IDs that may still appear in persisted data
+  "gemini-3.1-pro",
+  "gemini-3.1-flash",
   "gemini-2.0-flash",
   "gemini-1.5-flash",
   "gemini-1.5-pro",

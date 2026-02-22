@@ -59,10 +59,26 @@ const PageLoader = () => (
   </div>
 );
 
+const isLocalDevHost = () => {
+  if (typeof window === "undefined") return false;
+  if (import.meta.env.DEV) return true;
+  const host = window.location.hostname;
+  if (host === "localhost" || host === "127.0.0.1" || host.endsWith(".local")) return true;
+  if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+  if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+  const private172 = host.match(/^172\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/);
+  if (private172) {
+    const second = Number(private172[1]);
+    if (second >= 16 && second <= 31) return true;
+  }
+  return false;
+};
+
 function RootRoute() {
   const { isReady, isAuthenticated } = useAuth();
   if (!isReady) return <PageLoader />;
-  return isAuthenticated ? <Home /> : <LandingPage />;
+  // Local experiments can run from chat without forcing login on localhost.
+  return (isAuthenticated || isLocalDevHost()) ? <Home /> : <LandingPage />;
 }
 
 // Wouter passes RouteComponentProps to route components; pages typically ignore them.

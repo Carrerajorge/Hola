@@ -18,9 +18,9 @@ export default defineConfig(async () => {
   const replitPlugins =
     !isProd && isReplit
       ? [
-          (await import("@replit/vite-plugin-cartographer")).cartographer(),
-          (await import("@replit/vite-plugin-dev-banner")).devBanner(),
-        ]
+        (await import("@replit/vite-plugin-cartographer")).cartographer(),
+        (await import("@replit/vite-plugin-dev-banner")).devBanner(),
+      ]
       : [];
 
   return {
@@ -103,6 +103,15 @@ export default defineConfig(async () => {
         output: {
           manualChunks: {
             "vendor-react": ["react", "react-dom", "wouter"],
+            "vendor-tiptap": [
+              "@tiptap/react",
+              "@tiptap/starter-kit",
+              "@tiptap/extension-link",
+              "@tiptap/extension-image",
+              "@tiptap/extension-table"
+            ],
+            "vendor-zod": ["zod"],
+            "vendor-aws": ["@aws-sdk/client-s3", "@aws-sdk/s3-request-presigner"],
             "vendor-ui": [
               "@radix-ui/react-dialog",
               "@radix-ui/react-slot",
@@ -130,7 +139,7 @@ export default defineConfig(async () => {
         deny: ["**/.*"],
       },
       watch: {
-        ignored: ["**/node_modules/**", "**/node_modules_backup/**"],
+        ignored: ["**/node_modules/**", "**/node_modules_backup/**", "**/uploads/**"],
       },
       proxy: {
         "/api": {
