@@ -282,13 +282,15 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
-          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
-          echo "" >> ~/.ssh/deploy_key
+          echo "${{ secrets.VPS_SSH_KEY_B64 }}" | base64 -d > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          echo "Host *" > ~/.ssh/config
-          echo "  StrictHostKeyChecking accept-new" >> ~/.ssh/config
-          echo "  PubkeyAcceptedKeyTypes +ssh-rsa" >> ~/.ssh/config
-          echo "  HostKeyAlgorithms +ssh-rsa" >> ~/.ssh/config
+          ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null
+          {
+            echo "Host *"
+            echo "  StrictHostKeyChecking accept-new"
+            echo "  PubkeyAcceptedKeyTypes +ssh-rsa"
+            echo "  HostKeyAlgorithms +ssh-rsa"
+          } > ~/.ssh/config
           chmod 600 ~/.ssh/config
 
       - name: Resolve reachable deploy endpoint
