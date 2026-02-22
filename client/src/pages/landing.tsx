@@ -17,6 +17,10 @@ import {
   Clock,
   Lock,
   Send,
+  Palette,
+  Gift,
+  Drama,
+  Wand2,
 } from "lucide-react";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 
@@ -43,11 +47,11 @@ function useReveal(threshold = 0.15) {
    Typing‑text animation for the hero
    ───────────────────────────────────────────── */
 const heroSuggestions = [
-  "Explicame la teoria de la relatividad...",
+  "Explícame la teoría de la relatividad...",
   "Escribe un correo profesional para...",
   "Crea una imagen de un paisaje futurista...",
-  "Ayudame a estudiar biologia molecular...",
-  "Resume este articulo en 3 puntos clave...",
+  "Ayúdame a estudiar biología molecular...",
+  "Resume este artículo en 3 puntos clave...",
   "Genera un plan de negocios para...",
 ];
 
@@ -101,7 +105,7 @@ export default function LandingPage() {
   const typingPlaceholder = useTypingPlaceholder();
 
   // Scroll‑reveal refs
-  const ctaReveal   = useReveal(0.15);
+  const ctaReveal = useReveal(0.15);
 
   /* ── Mobile menu body‑lock & close helpers ── */
   useEffect(() => {
@@ -144,10 +148,10 @@ export default function LandingPage() {
 
   const features = [
     { icon: Paperclip, label: "Adjuntar" },
-    { icon: Search,    label: "Buscar" },
-    { icon: BookOpen,  label: "Estudiemos" },
-    { icon: Image,     label: "Crear imagen" },
-    { icon: Mic,       label: "Voz" },
+    { icon: Search, label: "Buscar" },
+    { icon: BookOpen, label: "Estudiemos" },
+    { icon: Image, label: "Crear imagen" },
+    { icon: Mic, label: "Voz" },
   ];
 
   const marqueeLogos = [
@@ -209,7 +213,7 @@ export default function LandingPage() {
             onClick={() => setLocation("/login")}
             data-testid="button-header-login"
           >
-            Inicia sesion
+            Inicia sesión
           </Button>
           <Button
             variant="outline"
@@ -217,7 +221,7 @@ export default function LandingPage() {
             onClick={() => setLocation("/signup")}
             data-testid="button-header-signup"
           >
-            Suscribete gratis
+            Suscríbete gratis
           </Button>
         </div>
       </header>
@@ -252,7 +256,7 @@ export default function LandingPage() {
           <div className="px-3 pt-4 border-t border-neutral-100 mx-3">
             <Button className="w-full rounded-full bg-black text-white hover:bg-neutral-800 font-semibold"
               onClick={() => { setMobileMenuOpen(false); setLocation("/signup"); }}>
-              Suscribete gratis
+              Suscríbete gratis
             </Button>
           </div>
         </div>
@@ -277,7 +281,7 @@ export default function LandingPage() {
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-black opacity-60" />
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-black" />
               </span>
-              Mas de 10 millones de consultas resueltas
+              Más de 10 millones de consultas resueltas
             </div>
           </div>
 
@@ -294,15 +298,16 @@ export default function LandingPage() {
               </span>
             </h1>
             <p className="text-lg md:text-xl text-neutral-500 max-w-2xl mx-auto leading-relaxed font-medium">
-              El asistente de IA mas avanzado en espanol. Crea contenido, genera imagenes,
-              investiga, aprende y automatiza — todo en una sola conversacion.
+              El asistente de IA más avanzado en español. Crea contenido, genera imágenes,
+              investiga, aprende y automatiza — todo en una sola conversación.
             </p>
           </div>
 
           {/* Search */}
-          <div className="space-y-5 fade-in-up fade-in-up-delay-1">
-            <div className="relative group">
-              <div className="rounded-2xl border-2 border-neutral-200 bg-white shadow-xl shadow-black/[0.04] transition-all duration-300 group-focus-within:shadow-2xl group-focus-within:shadow-black/[0.08] group-focus-within:border-black/20 flex items-center">
+          <div className="space-y-5 fade-in-up fade-in-up-delay-1 relative z-10">
+            <div className="relative group mx-auto max-w-2xl">
+              <div className="absolute -inset-1 bg-gradient-to-r from-[#A5A0FF]/0 via-[#A5A0FF]/30 to-[#A5A0FF]/0 rounded-[24px] blur-md opacity-0 group-focus-within:opacity-100 transition-opacity duration-500" />
+              <div className="relative rounded-2xl border border-white/60 bg-white/70 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.06)] transition-all duration-500 group-focus-within:shadow-[0_8px_40px_rgba(165,160,255,0.25)] group-focus-within:border-white group-focus-within:-translate-y-1 group-hover:-translate-y-0.5 flex items-center overflow-hidden">
                 <Input
                   placeholder={typingPlaceholder}
                   value={inputValue}
@@ -313,7 +318,7 @@ export default function LandingPage() {
                 />
                 <Button
                   size="icon"
-                  className="mr-3 h-11 w-11 rounded-xl bg-black text-white hover:bg-neutral-800 transition-all flex-shrink-0"
+                  className="mr-3 h-11 w-11 rounded-xl bg-black text-white hover:bg-neutral-800 transition-all flex-shrink-0 group-focus-within:bg-[#A5A0FF] group-focus-within:text-white"
                   onClick={handleSubmit}
                 >
                   <Send className="h-5 w-5" />
@@ -325,7 +330,7 @@ export default function LandingPage() {
             <div className="flex items-center justify-center gap-2 flex-wrap">
               {features.map((f, i) => (
                 <Button key={f.label} variant="outline"
-                  className="rounded-full gap-2 text-[13px] border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50 hover:text-black hover:border-neutral-300 transition-all duration-200 fade-in-up h-9 px-4"
+                  className="rounded-full gap-2 text-[13px] border-neutral-200 bg-white text-neutral-600 hover:bg-black hover:text-white hover:border-black transition-all duration-300 hover:scale-105 hover:shadow-md fade-in-up h-9 px-4"
                   style={{ animationDelay: `${(i + 2) * 80}ms` }}
                   onClick={() => setLocation("/login")}
                   data-testid={`button-${f.label.toLowerCase().replace(" ", "-")}`}
@@ -356,7 +361,7 @@ export default function LandingPage() {
                   </span>
                   <h3 className="text-xl font-bold text-black mb-2">Crea tu primera imagen</h3>
                   <p className="text-sm text-neutral-500 mb-5 leading-relaxed max-w-md">
-                    Transforma cualquier idea en arte visual. Elige entre mas de 20 estilos artisticos o deja volar tu imaginacion desde cero.
+                    Transforma cualquier idea en arte visual. Elige entre más de 20 estilos artísticos o deja volar tu imaginación desde cero.
                   </p>
                   <Button className="rounded-full bg-black text-white hover:bg-neutral-800 transition-all font-semibold shadow-md hover:shadow-lg"
                     onClick={() => setLocation("/login")} data-testid="button-try-now"
@@ -367,14 +372,14 @@ export default function LandingPage() {
                 </div>
                 <div className="flex gap-3 overflow-x-auto pb-2 md:pb-0 md:overflow-visible md:flex-wrap md:justify-center md:gap-3">
                   {[
-                    { emoji: "🎨", label: "Boceto",    bg: "bg-orange-50 border-orange-200 hover:bg-orange-100" },
-                    { emoji: "🎄", label: "Festivo",   bg: "bg-emerald-50 border-emerald-200 hover:bg-emerald-100" },
-                    { emoji: "🎭", label: "Dramatico", bg: "bg-violet-50 border-violet-200 hover:bg-violet-100" },
-                    { emoji: "🧸", label: "Peluche",   bg: "bg-pink-50 border-pink-200 hover:bg-pink-100" },
+                    { icon: Palette, label: "Boceto", bg: "bg-orange-50 border-orange-200 text-orange-500 hover:bg-orange-100 hover:border-orange-300 hover:text-orange-600" },
+                    { icon: Gift, label: "Festivo", bg: "bg-emerald-50 border-emerald-200 text-emerald-500 hover:bg-emerald-100 hover:border-emerald-300 hover:text-emerald-600" },
+                    { icon: Drama, label: "Dramático", bg: "bg-violet-50 border-violet-200 text-violet-500 hover:bg-violet-100 hover:border-violet-300 hover:text-violet-600" },
+                    { icon: Wand2, label: "Magia", bg: "bg-pink-50 border-pink-200 text-pink-500 hover:bg-pink-100 hover:border-pink-300 hover:text-pink-600" },
                   ].map((s) => (
                     <div key={s.label} className="flex flex-col items-center gap-2 min-w-[72px] cursor-pointer group/style" onClick={() => setLocation("/login")}>
-                      <div className={`w-16 h-16 md:w-[76px] md:h-[76px] rounded-2xl ${s.bg} border flex items-center justify-center transition-all duration-200 group-hover/style:scale-110 group-hover/style:shadow-md`}>
-                        <span className="text-2xl">{s.emoji}</span>
+                      <div className={`w-16 h-16 md:w-[76px] md:h-[76px] rounded-2xl ${s.bg} border flex items-center justify-center transition-all duration-300 group-hover/style:scale-110 group-hover/style:shadow-md`}>
+                        <s.icon className="w-8 h-8 opacity-90 transition-opacity" strokeWidth={1.5} />
                       </div>
                       <span className="text-xs text-neutral-500 group-hover/style:text-black transition-colors font-semibold">{s.label}</span>
                     </div>
@@ -402,12 +407,19 @@ export default function LandingPage() {
       </section>
 
       {/* ════════════════════ MARQUEE LOGOS ════════════════════ */}
-      <div className="border-y border-neutral-100 bg-neutral-50/50 py-5 overflow-hidden">
-        <div className="flex items-center gap-12 animate-marquee whitespace-nowrap">
+      <div className="border-y border-neutral-100 bg-neutral-50/50 py-7 overflow-hidden relative">
+        <div className="absolute inset-y-0 left-0 w-32 bg-gradient-to-r from-neutral-50/50 to-transparent z-10 pointer-events-none" />
+        <div className="absolute inset-y-0 right-0 w-32 bg-gradient-to-l from-neutral-50/50 to-transparent z-10 pointer-events-none" />
+        <div className="flex items-center gap-16 animate-marquee whitespace-nowrap opacity-70 hover:opacity-100 transition-opacity duration-500">
           {[...marqueeLogos, ...marqueeLogos].map((name, i) => (
-            <span key={i} className="text-sm font-semibold text-neutral-300 tracking-wide uppercase select-none flex-shrink-0">
-              {name}
-            </span>
+            <div key={i} className="flex items-center gap-2 flex-shrink-0 grayscale hover:grayscale-0 transition-all duration-300 cursor-default">
+              <div className="w-7 h-7 rounded-[10px] bg-white border border-neutral-200 shadow-sm flex items-center justify-center text-[13px] font-black text-neutral-900 font-sans">
+                {name.charAt(0)}
+              </div>
+              <span className="text-[17px] font-bold text-neutral-400 tracking-tight select-none">
+                {name}
+              </span>
+            </div>
           ))}
         </div>
       </div>
@@ -422,10 +434,10 @@ export default function LandingPage() {
 
         <div className={`relative max-w-3xl mx-auto text-center ${rv(ctaReveal.visible)}`}>
           <h2 className="text-3xl md:text-5xl lg:text-6xl font-black text-white tracking-tight mb-6">
-            El futuro de la productividad<br />empieza aqui
+            El futuro de la productividad<br />empieza aquí
           </h2>
           <p className="text-lg text-white/60 mb-10 max-w-xl mx-auto font-medium">
-            Unete a mas de 10 millones de personas que ya amplifican su potencial con ILIAGPT. Gratis, para siempre.
+            Únete a más de 10 millones de personas que ya amplifican su potencial con ILIAGPT. Gratis, para siempre.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <Button className="rounded-full bg-white text-black hover:bg-neutral-100 transition-all h-13 px-8 text-base font-bold shadow-lg"
@@ -438,7 +450,7 @@ export default function LandingPage() {
               Ver todos los planes
             </Button>
           </div>
-          <p className="text-xs text-white/30 mt-6 font-medium">Sin tarjeta de credito requerida — Configuracion en 30 segundos</p>
+          <p className="text-xs text-white/30 mt-6 font-medium">Sin tarjeta de crédito requerida — Configuración en 30 segundos</p>
         </div>
       </section>
 
@@ -452,31 +464,39 @@ export default function LandingPage() {
                 <span className="font-black text-black">ILIAGPT</span>
               </div>
               <p className="text-sm text-neutral-500 leading-relaxed max-w-[240px]">
-                La plataforma de inteligencia artificial mas avanzada del mundo hispanohablante.
+                La plataforma de inteligencia artificial más avanzada del mundo hispanohablante.
               </p>
             </div>
             {[
-              { title: "Producto", links: [
-                { label: "Precios", to: "/pricing" },
-                { label: "Descargar", to: "/download" },
-                { label: "Business", to: "/business" },
-                { label: "Imagenes", to: "/login" },
-              ]},
-              { title: "Recursos", links: [
-                { label: "Aprender", to: "/learn" },
-                { label: "Sobre nosotros", to: "/about" },
-                { label: "Blog", to: "/learn" },
-              ]},
-              { title: "Soporte", links: [
-                { label: "Centro de ayuda", to: "/about" },
-                { label: "Contacto", to: "/about" },
-                { label: "Status", to: "/about" },
-              ]},
-              { title: "Legal", links: [
-                { label: "Terminos de uso", to: "/terms", isLink: true },
-                { label: "Privacidad", to: "/privacy-policy", isLink: true },
-                { label: "Cookies", to: "/privacy-policy", isLink: true },
-              ]},
+              {
+                title: "Producto", links: [
+                  { label: "Precios", to: "/pricing" },
+                  { label: "Descargar", to: "/download" },
+                  { label: "Business", to: "/business" },
+                  { label: "Imagenes", to: "/login" },
+                ]
+              },
+              {
+                title: "Recursos", links: [
+                  { label: "Aprender", to: "/learn" },
+                  { label: "Sobre nosotros", to: "/about" },
+                  { label: "Blog", to: "/learn" },
+                ]
+              },
+              {
+                title: "Soporte", links: [
+                  { label: "Centro de ayuda", to: "/about" },
+                  { label: "Contacto", to: "/about" },
+                  { label: "Status", to: "/about" },
+                ]
+              },
+              {
+                title: "Legal", links: [
+                  { label: "Términos de uso", to: "/terms", isLink: true },
+                  { label: "Privacidad", to: "/privacy-policy", isLink: true },
+                  { label: "Cookies", to: "/privacy-policy", isLink: true },
+                ]
+              },
             ].map((col) => (
               <div key={col.title}>
                 <h4 className="font-bold text-black text-xs uppercase tracking-wider mb-4">{col.title}</h4>
@@ -501,9 +521,9 @@ export default function LandingPage() {
             </p>
             <p className="text-[11px] text-neutral-400 text-center md:text-right max-w-md leading-relaxed">
               Al enviar un mensaje a ILIAGPT aceptas nuestros{" "}
-              <Link href="/terms" className="underline hover:text-black transition-colors">Terminos</Link>{" "}
+              <Link href="/terms" className="underline hover:text-black transition-colors">Términos</Link>{" "}
               y reconoces nuestra{" "}
-              <Link href="/privacy-policy" className="underline hover:text-black transition-colors">Politica de privacidad</Link>.
+              <Link href="/privacy-policy" className="underline hover:text-black transition-colors">Política de privacidad</Link>.
             </p>
           </div>
         </div>

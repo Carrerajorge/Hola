@@ -298,20 +298,37 @@ export const PhaseNarrator = memo(function PhaseNarrator({
 
   return (
     <div className={cn("phase-narrator-wrapper flex items-center gap-2.5", className)}>
-      <motion.div
-        initial={{ scale: 0.8, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1, rotate: isDeepWork ? 0 : 360 }}
-        transition={{
-          rotate: { duration: 3, repeat: Infinity, ease: "linear" },
-          scale: { duration: 0.3 }
-        }}
-        className={cn(
-          "flex items-center justify-center w-4 h-4 rounded-full",
-          isDeepWork ? "text-amber-500" : "text-primary"
-        )}
-      >
-        <Icon className={cn("w-4 h-4", isDeepWork && "animate-pulse")} />
-      </motion.div>
+      <div className="relative flex items-center justify-center w-5 h-5 shrink-0">
+        <motion.div
+          animate={{
+            scale: [1, 1.3, 1],
+            opacity: [0.3, 0.7, 0.3],
+          }}
+          transition={{
+            duration: 2.5,
+            repeat: Infinity,
+            ease: "easeInOut",
+          }}
+          className={cn(
+            "absolute inset-0 rounded-full blur-[3px]",
+            isDeepWork ? "bg-amber-500/40" : "bg-[#A5A0FF]/40"
+          )}
+        />
+        <motion.div
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1, rotate: isDeepWork ? 0 : 360 }}
+          transition={{
+            rotate: { duration: 3, repeat: Infinity, ease: "linear" },
+            scale: { duration: 0.3 }
+          }}
+          className={cn(
+            "relative flex items-center justify-center w-4 h-4 rounded-full",
+            isDeepWork ? "text-amber-500" : "text-[#A5A0FF]"
+          )}
+        >
+          <Icon className={cn("w-4 h-4 shadow-[#A5A0FF]/20 drop-shadow-sm", isDeepWork && "animate-pulse")} />
+        </motion.div>
+      </div>
 
       <div className="relative overflow-hidden h-6 flex items-center min-w-[200px]">
         <AnimatePresence mode="wait">
@@ -337,9 +354,9 @@ export const PhaseNarrator = memo(function PhaseNarrator({
             90deg,
             rgb(120, 120, 120) 0%,
             rgb(120, 120, 120) 35%,
-            rgb(0, 180, 255) 45%,
-            rgb(0, 220, 255) 50%,
-            rgb(0, 180, 255) 55%,
+            #A5A0FF 45%,
+            #C4C0FF 50%,
+            #A5A0FF 55%,
             rgb(120, 120, 120) 65%,
             rgb(120, 120, 120) 100%
           );
@@ -347,7 +364,7 @@ export const PhaseNarrator = memo(function PhaseNarrator({
           -webkit-background-clip: text;
           background-clip: text;
           -webkit-text-fill-color: transparent;
-          animation: lightning-flash 1.5s linear infinite;
+          animation: lightning-flash 2s linear infinite;
         }
         
         .dark .phase-narrator-text {
@@ -355,9 +372,9 @@ export const PhaseNarrator = memo(function PhaseNarrator({
             90deg,
             rgb(180, 180, 180) 0%,
             rgb(180, 180, 180) 35%,
-            rgb(0, 200, 255) 45%,
-            rgb(80, 240, 255) 50%,
-            rgb(0, 200, 255) 55%,
+            #A5A0FF 45%,
+            #D8D5FF 50%,
+            #A5A0FF 55%,
             rgb(180, 180, 180) 65%,
             rgb(180, 180, 180) 100%
           );

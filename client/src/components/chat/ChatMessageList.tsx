@@ -62,10 +62,10 @@ export interface ChatMessageListProps {
     onRunComplete?: (artifacts: Array<{ id: string; type: string; name: string; url: string }>) => void;
     uiPhase?: 'idle' | 'thinking' | 'console' | 'done';
     aiProcessSteps?: { step: string; status: "pending" | "active" | "done" }[];
-    /** Pre-generated message ID for zero-flicker streaming→final transition.
-     *  When provided, the streaming message uses this ID so it matches the finalized message key. */
     streamingMsgId?: string | null;
     onUserRetrySend?: (message: Message) => void;
+    onToolConfirm?: (messageId: string, toolName: string, stepIndex: number) => void;
+    onToolDeny?: (messageId: string, toolName: string, stepIndex: number) => void;
 }
 
 export function ChatMessageList({
@@ -111,7 +111,9 @@ export function ChatMessageList({
     uiPhase = 'idle',
     aiProcessSteps = [],
     streamingMsgId,
-    onUserRetrySend
+    onUserRetrySend,
+    onToolConfirm,
+    onToolDeny
 }: ChatMessageListProps) {
     const virtuosoRef = useRef<VirtuosoHandle>(null);
 
@@ -313,6 +315,8 @@ export function ChatMessageList({
                     onSuperAgentCancel={onSuperAgentCancel}
                     onSuperAgentRetry={onSuperAgentRetry}
                     onQuestionClick={onQuestionClick}
+                    onToolConfirm={onToolConfirm}
+                    onToolDeny={onToolDeny}
                 />
             </div>
         );

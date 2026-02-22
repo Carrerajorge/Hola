@@ -27,6 +27,7 @@ import { AgentStepsDisplay, type AgentArtifact } from "@/components/agent-steps-
 import { PlanViewer } from "@/components/agent/PlanViewer";
 import { MarkdownRenderer, MarkdownErrorBoundary } from "@/components/markdown-renderer";
 import { JsonArgumentsViewer } from "@/components/chat/JsonArgumentsViewer";
+import { ToolInvocationCard, ToolStatus } from "@/components/chat/ToolInvocationCard";
 
 interface AgentRunContentProps {
     agentRun: {
@@ -54,9 +55,21 @@ interface AgentRunContentProps {
     onResume?: () => void;
     onArtifactPreview?: (artifact: AgentArtifact) => void;
     onOpenLightbox?: (imageUrl: string) => void;
+    onToolConfirm?: (toolName: string, stepIndex: number) => void;
+    onToolDeny?: (toolName: string, stepIndex: number) => void;
 }
 
-export const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRetry, onPause, onResume, onArtifactPreview, onOpenLightbox }: AgentRunContentProps) {
+export const AgentRunContent = memo(function AgentRunContent({
+    agentRun,
+    onCancel,
+    onRetry,
+    onPause,
+    onResume,
+    onArtifactPreview,
+    onOpenLightbox,
+    onToolConfirm,
+    onToolDeny
+}: AgentRunContentProps) {
     const [isExpanded, setIsExpanded] = useState(true);
     const [showAllEvents, setShowAllEvents] = useState(false);
     const [isSlowConnection, setIsSlowConnection] = useState(false);
@@ -456,29 +469,26 @@ export const AgentRunContent = memo(function AgentRunContent({ agentRun, onCance
 
                     {/* Steps progress - fallback if no event stream */}
                     {(!agentRun.eventStream || agentRun.eventStream.length === 0) && agentRun.steps && agentRun.steps.length > 0 && (
-                        <div className="space-y-2 pl-3 border-l-2 border-blue-500/30">
-                            {agentRun.steps.map((step, idx) => (
-                                <div key={idx} className="flex items-center gap-2 text-sm py-1">
-                                    {step.status === "succeeded" ? (
-                                        <CheckCircle2 className="h-4 w-4 text-green-500" />
-                                    ) : step.status === "running" ? (
-                                        <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-                                    ) : step.status === "failed" ? (
-                                        <XCircle className="h-4 w-4 text-red-500" />
-                                    ) : (
-                                        <div className="w-4 h-4 rounded-full border-2 border-muted-foreground/30" />
-                                    )}
-                                    <span className={cn(
-                                        "transition-colors",
-                                        step.status === "pending" && "text-muted-foreground",
-                                        step.status === "running" && "text-foreground font-medium",
-                                        step.status === "succeeded" && "text-green-600 dark:text-green-400",
-                                        step.status === "failed" && "text-red-600 dark:text-red-400"
-                                    )}>
-                                        {getToolDisplayName(step.toolName)}
-                                    </span>
-                                </div>
-                            ))}
+                        <div className="space-y-3 pl-2 border-l-2 border-purple-500/20">
+                            {agentRun.steps.map((step, idx) => {
+                                let status: ToolStatus = "running";
+                                if (step.status === "succeeded" || step.status === "completed" || step.status === "success") status = "succeeded";
+                                else if (step.status === "failed" || step.status === "error") status = "failed";
+                                else if (step.status === "requires_confirmation" || step.status === "pending_approval") status = "requires_confirmation";
+
+                                return (
+                                    <ToolInvocationCard
+                                        key={idx}
+                                        toolName={step.toolName}
+                                        status={status}
+                                        input={step.output?.input || step.output /* fallback depending on structure */}
+                                        output={step.status === "succeeded" ? step.output : undefined}
+                                        error={step.error}
+                                        onConfirm={() => onToolConfirm?.(step.toolName, step.stepIndex)}
+                                        onDeny={() => onToolDeny?.(step.toolName, step.stepIndex)}
+                                    />
+                                );
+                            })}
                         </div>
                     )}
 

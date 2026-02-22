@@ -346,8 +346,8 @@ export function Sidebar({
     <div
       key={chat.id}
       className={cn(
-        "group relative flex w-full items-center px-2 py-2.5 rounded-xl cursor-pointer liquid-hover hover:bg-accent transition-all duration-300",
-        activeChatId === chat.id && "bg-accent shadow-sm",
+        "group relative flex w-full items-center px-2 py-2.5 rounded-xl cursor-pointer liquid-hover hover:bg-[#A5A0FF]/10 transition-all duration-300",
+        activeChatId === chat.id && "bg-[#A5A0FF]/15 shadow-sm text-primary",
         chat.archived && "opacity-70",
         indented && "ml-4"
       )}
@@ -604,11 +604,11 @@ export function Sidebar({
 
       <div className="px-2 py-2 flex flex-col gap-1">
         <NewChatButton onNewChat={onNewChat} variant="full" showTooltip={false} />
-        
+
         <button
           ref={searchButtonRef}
           onClick={() => setIsSearchModalOpen(true)}
-          className="w-full mt-1 mb-1 group flex items-center justify-between gap-2 px-3 py-2 text-sm text-muted-foreground bg-muted/40 hover:bg-muted/80 border border-transparent hover:border-border/50 rounded-lg transition-all duration-200"
+          className="w-full mt-1 mb-1 group flex items-center justify-between gap-2 px-3 py-2 text-sm text-muted-foreground bg-muted/40 hover:bg-[#A5A0FF]/10 border border-transparent hover:border-[#A5A0FF]/30 rounded-lg transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-[#A5A0FF]/50"
           data-testid="button-search-chats"
         >
           <div className="flex items-center gap-2 font-medium">
@@ -622,7 +622,7 @@ export function Sidebar({
 
         <Button
           variant="ghost"
-          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
+          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button hover:bg-[#A5A0FF]/10 hover:text-primary transition-all duration-300"
           onClick={onOpenLibrary}
           data-testid="button-library"
         >
@@ -631,7 +631,7 @@ export function Sidebar({
         </Button>
         <Button
           variant="ghost"
-          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
+          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button hover:bg-[#A5A0FF]/10 hover:text-primary transition-all duration-300"
           onClick={onOpenGpts}
           data-testid="button-gpts"
         >
@@ -640,7 +640,7 @@ export function Sidebar({
         </Button>
         <Button
           variant="ghost"
-          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
+          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button hover:bg-[#A5A0FF]/10 hover:text-primary transition-all duration-300"
           onClick={onOpenSkills}
           data-testid="button-skills"
         >
@@ -652,7 +652,7 @@ export function Sidebar({
         </Button>
         <Button
           variant="ghost"
-          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
+          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button hover:bg-[#A5A0FF]/10 hover:text-primary transition-all duration-300"
           onClick={onOpenApps}
           data-testid="button-apps"
         >
@@ -661,7 +661,7 @@ export function Sidebar({
         </Button>
         <Button
           variant="ghost"
-          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
+          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button hover:bg-[#A5A0FF]/10 hover:text-primary transition-all duration-300"
           onClick={onOpenWhatsAppConnect}
           data-testid="button-whatsapp-connect"
         >

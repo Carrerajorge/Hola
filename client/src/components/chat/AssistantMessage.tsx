@@ -82,6 +82,8 @@ export interface AssistantMessageProps {
     onQuestionClick?: (question: string) => void;
     onSuperAgentCancel?: (messageId: string) => void;
     onSuperAgentRetry?: (messageId: string) => void;
+    onToolConfirm?: (messageId: string, toolName: string, stepIndex: number) => void;
+    onToolDeny?: (messageId: string, toolName: string, stepIndex: number) => void;
 }
 
 export const AssistantMessage = memo(function AssistantMessage({
@@ -113,7 +115,9 @@ export const AssistantMessage = memo(function AssistantMessage({
     onAgentArtifactPreview,
     onQuestionClick,
     onSuperAgentCancel,
-    onSuperAgentRetry
+    onSuperAgentRetry,
+    onToolConfirm,
+    onToolDeny
 }: AssistantMessageProps) {
     const [sourcesPanelOpen, setSourcesPanelOpen] = useState(false);
     const superAgentState = useSuperAgentRun(message.id);
@@ -200,6 +204,8 @@ export const AssistantMessage = memo(function AssistantMessage({
                     onCancel={onAgentCancel ? () => onAgentCancel(message.id, message.agentRun!.runId || "") : undefined}
                     onRetry={onAgentRetry ? () => onAgentRetry(message.id, message.agentRun?.userMessage || "") : undefined}
                     onArtifactPreview={onAgentArtifactPreview}
+                    onToolConfirm={onToolConfirm ? (toolName, stepIndex) => onToolConfirm(message.id, toolName, stepIndex) : undefined}
+                    onToolDeny={onToolDeny ? (toolName, stepIndex) => onToolDeny(message.id, toolName, stepIndex) : undefined}
                 />
             )}
 
@@ -544,7 +550,7 @@ export const AssistantMessage = memo(function AssistantMessage({
                         copiedMessageId={copiedMessageId}
                         messageFeedback={messageFeedback}
                         speakingMessageId={speakingMessageId}
-                        aiState={aiState}
+                        aiState={aiState as "idle" | "agent_working" | "thinking" | "responding"}
                         isRegenerating={isRegenerating}
                         variant={variant}
                         webSources={message.webSources}

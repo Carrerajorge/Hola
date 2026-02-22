@@ -1,5 +1,2 @@
-/**
- * GitHub Connector — Re-exports
- */
 export { githubManifest } from "./manifest";
-export { githubHandler } from "./handler";
+export { handler } from "./handler";

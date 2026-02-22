@@ -150,7 +150,7 @@ export function CreateProjectModal({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-[520px] max-h-[90vh] overflow-hidden flex flex-col">
+            <DialogContent className="sm:max-w-[520px] max-h-[90vh] overflow-hidden flex flex-col shadow-2xl border-white/20 bg-white/95 backdrop-blur-xl">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                         <FolderPlus className="h-5 w-5" />
@@ -161,7 +161,7 @@ export function CreateProjectModal({
                     </DialogDescription>
                 </DialogHeader>
 
-                <ScrollArea className="flex-1 pr-4 -mr-4">
+                <div className="flex-1 overflow-y-auto pr-4 -mr-4">
                     <div className="space-y-6 py-4">
                         {/* Project Name */}
                         <div className="space-y-2">
@@ -173,7 +173,7 @@ export function CreateProjectModal({
                                 placeholder="Enter project name"
                                 value={name}
                                 onChange={(e) => setName(e.target.value)}
-                                className="h-10"
+                                className="h-11 rounded-xl bg-neutral-50 border-neutral-200 focus-visible:ring-[#A5A0FF] focus-visible:border-[#A5A0FF] transition-all shadow-sm"
                                 data-testid="input-project-name"
                             />
                         </div>
@@ -181,19 +181,21 @@ export function CreateProjectModal({
                         {/* Project Color */}
                         <div className="space-y-2">
                             <Label className="text-sm font-medium">Project Color</Label>
-                            <div className="flex gap-2 flex-wrap">
+                            <div className="flex gap-3 flex-wrap pt-1">
                                 {PROJECT_COLORS.map((color) => (
                                     <button
                                         key={color}
                                         type="button"
                                         className={cn(
-                                            "h-8 w-8 rounded-full transition-all duration-200 ring-2 ring-offset-2 ring-offset-background",
-                                            selectedColor === color ? "ring-foreground scale-110" : "ring-transparent hover:scale-105"
+                                            "h-9 w-9 rounded-full transition-all duration-300 ring-2 ring-offset-2 flex items-center justify-center shadow-sm",
+                                            selectedColor === color ? "ring-[#A5A0FF] scale-110" : "ring-transparent hover:scale-105"
                                         )}
                                         style={{ backgroundColor: color }}
                                         onClick={() => setSelectedColor(color)}
                                         data-testid={`color-${color}`}
-                                    />
+                                    >
+                                        {selectedColor === color && <Check className="h-4 w-4 text-white drop-shadow-md" />}
+                                    </button>
                                 ))}
                             </div>
                         </div>
@@ -229,12 +231,14 @@ export function CreateProjectModal({
                             ) : (
                                 <Button
                                     variant="outline"
-                                    className="w-full h-24 border-dashed flex flex-col gap-2 hover:bg-accent/50"
+                                    className="w-full h-28 border-2 border-dashed border-neutral-200 bg-neutral-50/50 hover:bg-neutral-50 hover:border-[#A5A0FF]/50 flex flex-col gap-3 transition-colors shadow-sm rounded-xl group"
                                     onClick={() => imageInputRef.current?.click()}
                                     data-testid="button-upload-background"
                                 >
-                                    <Image className="h-6 w-6 text-muted-foreground" />
-                                    <span className="text-sm text-muted-foreground">Upload</span>
+                                    <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform border border-neutral-100">
+                                        <Image className="h-5 w-5 text-neutral-500 group-hover:text-[#A5A0FF] transition-colors" />
+                                    </div>
+                                    <span className="text-sm font-medium text-neutral-600">Click to upload image</span>
                                 </Button>
                             )}
                         </div>
@@ -246,10 +250,10 @@ export function CreateProjectModal({
                             </Label>
                             <Textarea
                                 id="system-prompt"
-                                placeholder="Write your model system prompt content here&#10;e.g.) You are Mario from Super Mario Bros, acting as an assistant."
+                                placeholder="Escribe tu prompt de sistema aquí...&#10;ej. Eres un asistentente enfocado en neurociencias."
                                 value={systemPrompt}
                                 onChange={(e) => setSystemPrompt(e.target.value)}
-                                className="min-h-[100px] resize-y"
+                                className="min-h-[110px] resize-y rounded-xl bg-neutral-50 border-neutral-200 focus-visible:ring-[#A5A0FF] focus-visible:border-[#A5A0FF] shadow-sm transition-all"
                                 data-testid="textarea-system-prompt"
                             />
                         </div>
@@ -263,7 +267,7 @@ export function CreateProjectModal({
                                 <Button
                                     variant="outline"
                                     size="sm"
-                                    className="gap-2"
+                                    className="gap-2 rounded-full font-normal shadow-sm"
                                     onClick={() => setShowKnowledgeSelector(!showKnowledgeSelector)}
                                     data-testid="button-select-knowledge"
                                 >
@@ -281,7 +285,7 @@ export function CreateProjectModal({
                                 <Button
                                     variant="outline"
                                     size="sm"
-                                    className="gap-2"
+                                    className="gap-2 rounded-full font-normal shadow-sm"
                                     onClick={() => fileInputRef.current?.click()}
                                     data-testid="button-upload-files"
                                 >
@@ -367,28 +371,29 @@ export function CreateProjectModal({
                             )}
                         </div>
                     </div>
-                </ScrollArea>
+                </div>
 
                 {/* Footer */}
-                <div className="flex justify-end gap-2 pt-4 border-t">
+                <div className="flex justify-end gap-3 pt-4 border-t px-2">
                     <Button
                         variant="outline"
+                        className="rounded-xl px-6 font-medium shadow-none hover:bg-muted"
                         onClick={() => onOpenChange(false)}
                         disabled={isSubmitting}
                         data-testid="button-cancel"
                     >
-                        Cancel
+                        Cancelar
                     </Button>
                     <Button
                         onClick={handleSubmit}
                         disabled={!name.trim() || isSubmitting}
-                        className="min-w-[80px]"
+                        className="rounded-xl min-w-[90px] px-6 font-medium bg-[#A5A0FF] hover:bg-[#8D88E6] text-white shadow-none"
                         data-testid="button-save-project"
                     >
                         {isSubmitting ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
-                            "Save"
+                            "Guardar"
                         )}
                     </Button>
                 </div>

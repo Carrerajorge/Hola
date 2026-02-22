@@ -143,12 +143,12 @@ export default defineConfig(async () => {
       },
       proxy: {
         "/api": {
-          target: "http://localhost:5001",
+          target: process.env.VITE_API_URL || "http://localhost:5002",
           changeOrigin: true,
           secure: false,
         },
         "/ws": {
-          target: "ws://localhost:5001",
+          target: process.env.VITE_WS_URL || "ws://localhost:5002",
           ws: true,
         },
       },

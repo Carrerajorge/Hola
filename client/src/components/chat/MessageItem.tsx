@@ -46,6 +46,8 @@ export interface MessageItemProps {
     onSuperAgentRetry?: (messageId: string) => void;
     onQuestionClick?: (question: string) => void;
     onUserRetrySend?: (message: Message) => void;
+    onToolConfirm?: (messageId: string, toolName: string, stepIndex: number) => void;
+    onToolDeny?: (messageId: string, toolName: string, stepIndex: number) => void;
 }
 
 export const MessageItem = memo(function MessageItem({
@@ -85,7 +87,9 @@ export const MessageItem = memo(function MessageItem({
     onSuperAgentCancel,
     onSuperAgentRetry,
     onQuestionClick,
-    onUserRetrySend
+    onUserRetrySend,
+    onToolConfirm,
+    onToolDeny
 }: MessageItemProps) {
     return (
         <div
@@ -164,6 +168,8 @@ export const MessageItem = memo(function MessageItem({
                         onQuestionClick={onQuestionClick}
                         onSuperAgentCancel={onSuperAgentCancel}
                         onSuperAgentRetry={onSuperAgentRetry}
+                        onToolConfirm={onToolConfirm}
+                        onToolDeny={onToolDeny}
                     />
                 )}
             </div>

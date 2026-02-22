@@ -963,7 +963,7 @@ const UserMessage = memo(function UserMessage({
             onReopenDocument={onReopenDocument}
           />
           {message.content && (
-            <div className="liquid-message-user px-4 py-2.5 text-sm break-words leading-relaxed">
+            <div className="px-5 py-3 text-[15px] break-words leading-relaxed bg-[#A5A0FF]/15 backdrop-blur-xl border border-[#A5A0FF]/30 shadow-lg shadow-[#A5A0FF]/5 rounded-[24px] rounded-tr-[4px] text-foreground transition-all duration-300 hover:bg-[#A5A0FF]/25 hover:shadow-[#A5A0FF]/10 max-w-full">
               {message.content}
             </div>
           )}
@@ -1746,7 +1746,7 @@ const AssistantMessage = memo(function AssistantMessage({
     !imageData;
 
   return (
-    <div className="flex flex-col gap-2 w-full min-w-0">
+    <div className="flex flex-col gap-2 w-full min-w-0 bg-[#A5A0FF]/[0.02] dark:bg-[#A5A0FF]/[0.04] backdrop-blur-sm border border-[#A5A0FF]/10 rounded-[28px] rounded-tl-[6px] p-5 shadow-sm transition-all hover:bg-[#A5A0FF]/[0.04] dark:hover:bg-[#A5A0FF]/[0.06]">
       {/* Uncertainty Badge */}
       {message.confidence && message.confidence !== 'high' && (
         <div className="flex justify-start mb-1">
@@ -2007,111 +2007,111 @@ const AssistantMessage = memo(function AssistantMessage({
               const artType = artTypeNorm[message.artifact.type] || message.artifact.type;
               const artFileName = message.artifact.filename || message.artifact.name;
               return (
-            <div className={cn("p-4 rounded-xl border shadow-sm",
-              artType === "document" && "bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800",
-              artType === "spreadsheet" && "bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/30 border-green-200 dark:border-green-800",
-              artType === "presentation" && "bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-950/30 dark:to-amber-950/30 border-orange-200 dark:border-orange-800",
-              artType === "pdf" && "bg-gradient-to-r from-red-50 to-rose-50 dark:from-red-950/30 dark:to-rose-950/30 border-red-200 dark:border-red-800",
-              !["document", "spreadsheet", "presentation", "pdf"].includes(artType) && "bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800"
-            )}>
-              <div className="flex items-center gap-3">
-                <div className={cn(
-                  "w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm",
-                  artType === "document" && "bg-blue-600",
-                  artType === "spreadsheet" && "bg-green-600",
-                  artType === "presentation" && "bg-orange-500",
-                  artType === "pdf" && "bg-red-600",
-                  !["document", "spreadsheet", "presentation", "pdf"].includes(artType) && "bg-gray-600"
+                <div className={cn("p-4 rounded-xl border shadow-sm",
+                  artType === "document" && "bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800",
+                  artType === "spreadsheet" && "bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/30 border-green-200 dark:border-green-800",
+                  artType === "presentation" && "bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-950/30 dark:to-amber-950/30 border-orange-200 dark:border-orange-800",
+                  artType === "pdf" && "bg-gradient-to-r from-red-50 to-rose-50 dark:from-red-950/30 dark:to-rose-950/30 border-red-200 dark:border-red-800",
+                  !["document", "spreadsheet", "presentation", "pdf"].includes(artType) && "bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800"
                 )}>
-                  {artType === "document" && <span className="text-white text-lg font-bold">W</span>}
-                  {artType === "spreadsheet" && <span className="text-white text-lg font-bold">E</span>}
-                  {artType === "presentation" && <span className="text-white text-lg font-bold">P</span>}
-                  {artType === "pdf" && <FileText className="h-6 w-6 text-white" />}
-                  {!["document", "spreadsheet", "presentation", "pdf"].includes(artType) && <FileIcon className="h-6 w-6 text-white" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate" title={artFileName}>
-                    {artFileName || (artType === "document" ? "Documento Word" : artType === "spreadsheet" ? "Hoja de cálculo Excel" : artType === "presentation" ? "Presentación PowerPoint" : artType === "pdf" ? "Documento PDF" : "Documento")}
-                  </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {message.artifact.sizeBytes ? `${Math.round(message.artifact.sizeBytes / 1024)}KB · ` : ""}{artType === "document" ? "Word" : artType === "spreadsheet" ? "Excel" : artType === "presentation" ? "PowerPoint" : artType === "pdf" ? "PDF" : "Documento"}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {(artType === "presentation" || artType === "document" || artType === "spreadsheet") && onReopenDocument && (
-                    <button
-                      onClick={async () => {
-                        const docType = artType === "presentation" ? "ppt"
-                          : artType === "document" ? "word"
-                            : "excel";
-                        const docTitle = artType === "presentation" ? "Presentación PowerPoint"
-                          : artType === "document" ? "Documento Word"
-                            : "Hoja de cálculo Excel";
+                  <div className="flex items-center gap-3">
+                    <div className={cn(
+                      "w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm",
+                      artType === "document" && "bg-blue-600",
+                      artType === "spreadsheet" && "bg-green-600",
+                      artType === "presentation" && "bg-orange-500",
+                      artType === "pdf" && "bg-red-600",
+                      !["document", "spreadsheet", "presentation", "pdf"].includes(artType) && "bg-gray-600"
+                    )}>
+                      {artType === "document" && <span className="text-white text-lg font-bold">W</span>}
+                      {artType === "spreadsheet" && <span className="text-white text-lg font-bold">E</span>}
+                      {artType === "presentation" && <span className="text-white text-lg font-bold">P</span>}
+                      {artType === "pdf" && <FileText className="h-6 w-6 text-white" />}
+                      {!["document", "spreadsheet", "presentation", "pdf"].includes(artType) && <FileIcon className="h-6 w-6 text-white" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate" title={artFileName}>
+                        {artFileName || (artType === "document" ? "Documento Word" : artType === "spreadsheet" ? "Hoja de cálculo Excel" : artType === "presentation" ? "Presentación PowerPoint" : artType === "pdf" ? "Documento PDF" : "Documento")}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {message.artifact.sizeBytes ? `${Math.round(message.artifact.sizeBytes / 1024)}KB · ` : ""}{artType === "document" ? "Word" : artType === "spreadsheet" ? "Excel" : artType === "presentation" ? "PowerPoint" : artType === "pdf" ? "PDF" : "Documento"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {(artType === "presentation" || artType === "document" || artType === "spreadsheet") && onReopenDocument && (
+                        <button
+                          onClick={async () => {
+                            const docType = artType === "presentation" ? "ppt"
+                              : artType === "document" ? "word"
+                                : "excel";
+                            const docTitle = artType === "presentation" ? "Presentación PowerPoint"
+                              : artType === "document" ? "Documento Word"
+                                : "Hoja de cálculo Excel";
 
-                        // Try to fetch content from contentUrl if available (for PPT deck JSON)
-                        let content = "";
-                        const contentUrl = (message.artifact as any)?.contentUrl;
-                        if (contentUrl && docType === "ppt") {
-                          try {
-                            const response = await fetch(contentUrl);
-                            if (response.ok) {
-                              // Get raw text - PPTEditorShell will parse it
-                              content = await response.text();
-                              console.log("[View] Fetched PPT deck content, length:", content.length);
+                            // Try to fetch content from contentUrl if available (for PPT deck JSON)
+                            let content = "";
+                            const contentUrl = (message.artifact as any)?.contentUrl;
+                            if (contentUrl && docType === "ppt") {
+                              try {
+                                const response = await fetch(contentUrl);
+                                if (response.ok) {
+                                  // Get raw text - PPTEditorShell will parse it
+                                  content = await response.text();
+                                  console.log("[View] Fetched PPT deck content, length:", content.length);
+                                }
+                              } catch (error) {
+                                console.error("[View] Failed to fetch content:", error);
+                              }
                             }
-                          } catch (error) {
-                            console.error("[View] Failed to fetch content:", error);
-                          }
-                        }
 
-                        // For Word documents from production pipeline, fetch the docx and convert to HTML
-                        if (!content && docType === "word" && message.artifact.downloadUrl) {
-                          try {
-                            const response = await fetch(message.artifact.downloadUrl);
-                            if (response.ok) {
-                              const blob = await response.blob();
-                              const arrayBuffer = await blob.arrayBuffer();
-                              const mammoth = await import('mammoth');
-                              const result = await mammoth.convertToHtml({ arrayBuffer });
-                              content = result.value;
-                              console.log("[View] Converted Word doc to HTML, length:", content.length);
+                            // For Word documents from production pipeline, fetch the docx and convert to HTML
+                            if (!content && docType === "word" && message.artifact.downloadUrl) {
+                              try {
+                                const response = await fetch(message.artifact.downloadUrl);
+                                if (response.ok) {
+                                  const blob = await response.blob();
+                                  const arrayBuffer = await blob.arrayBuffer();
+                                  const mammoth = await import('mammoth');
+                                  const result = await mammoth.convertToHtml({ arrayBuffer });
+                                  content = result.value;
+                                  console.log("[View] Converted Word doc to HTML, length:", content.length);
+                                }
+                              } catch (error) {
+                                console.error("[View] Failed to convert Word doc:", error);
+                              }
                             }
-                          } catch (error) {
-                            console.error("[View] Failed to convert Word doc:", error);
-                          }
-                        }
 
-                        onReopenDocument({
-                          type: docType as "word" | "excel" | "ppt",
-                          title: docTitle,
-                          content
-                        });
-                      }}
-                      className="px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 text-sm font-medium rounded-lg flex items-center gap-2 transition-colors"
-                      data-testid={`button-view-artifact-${message.id}`}
-                    >
-                      <Eye className="h-4 w-4" />
-                      Ver
-                    </button>
-                  )}
-                  <a
-                    href={message.artifact.downloadUrl}
-                    download={artFileName || true}
-                    className={cn("px-4 py-2 text-white text-sm font-medium rounded-lg flex items-center gap-2 transition-colors",
-                      artType === "document" && "bg-blue-600 hover:bg-blue-700",
-                      artType === "spreadsheet" && "bg-green-600 hover:bg-green-700",
-                      artType === "presentation" && "bg-orange-500 hover:bg-orange-600",
-                      artType === "pdf" && "bg-red-600 hover:bg-red-700",
-                      !["document", "spreadsheet", "presentation", "pdf"].includes(artType) && "bg-blue-600 hover:bg-blue-700"
-                    )}
-                    data-testid={`button-download-artifact-${message.id}`}
-                  >
-                    <Download className="h-4 w-4" />
-                    Descargar
-                  </a>
+                            onReopenDocument({
+                              type: docType as "word" | "excel" | "ppt",
+                              title: docTitle,
+                              content
+                            });
+                          }}
+                          className="px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 text-sm font-medium rounded-lg flex items-center gap-2 transition-colors"
+                          data-testid={`button-view-artifact-${message.id}`}
+                        >
+                          <Eye className="h-4 w-4" />
+                          Ver
+                        </button>
+                      )}
+                      <a
+                        href={message.artifact.downloadUrl}
+                        download={artFileName || true}
+                        className={cn("px-4 py-2 text-white text-sm font-medium rounded-lg flex items-center gap-2 transition-colors",
+                          artType === "document" && "bg-blue-600 hover:bg-blue-700",
+                          artType === "spreadsheet" && "bg-green-600 hover:bg-green-700",
+                          artType === "presentation" && "bg-orange-500 hover:bg-orange-600",
+                          artType === "pdf" && "bg-red-600 hover:bg-red-700",
+                          !["document", "spreadsheet", "presentation", "pdf"].includes(artType) && "bg-blue-600 hover:bg-blue-700"
+                        )}
+                        data-testid={`button-download-artifact-${message.id}`}
+                      >
+                        <Download className="h-4 w-4" />
+                        Descargar
+                      </a>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
               );
             })()
           )}

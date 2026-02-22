@@ -1,2 +1,2 @@
-export { manifest } from "./manifest";
+export { googledriveManifest } from "./manifest";
 export { handler } from "./handler";
