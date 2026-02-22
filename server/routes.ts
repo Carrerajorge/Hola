@@ -60,6 +60,10 @@ import conversationMemoryRoutes from "./routes/conversationMemoryRoutes";
 import { contextRoutes, semanticRoutes } from "./memory";
 import { createPythonToolsRouter } from "./routes/pythonToolsRouter";
 import { createLocalControlRouter } from "./routes/localControlRouter";
+import { createMacOSControlRouter } from "./routes/macosControlRouter";
+import { createAutomationTriggersRouter } from "./routes/automationTriggersRouter";
+import { createVoiceRouter } from "./routes/voiceRouter";
+import { createAnalyticsRouter } from "./routes/analyticsRouter";
 import { createToolExecutionRouter } from "./routes/toolExecutionRouter";
 import agentPlanRouter from "./routes/agentPlanRouter";
 import scientificSearchRouter from "./routes/scientificSearchRouter";
@@ -140,6 +144,7 @@ import { createDeviceControlRouter } from "./routes/deviceControlRouter";
 import openClawRouter from "./routes/openClawRouter";
 import { createSkillPlatformRouter } from "./routes/skillPlatformRouter";
 import { CSRF_COOKIE_NAME, CSRF_TOKEN_PATTERN, issueCsrfCookie } from "./middleware/csrf";
+import { voiceRouter } from "./routes/voiceRouter";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -253,34 +258,34 @@ export async function registerRoutes(
               }
             }
 
-	            return (req as any).logIn(user, (loginErr: any) => {
-	              if (loginErr) {
-	                console.error("[Auth] Google login error:", loginErr);
-	                return res.redirect("/login?error=login_failed");
-	              }
-	
-	              // Persist userId explicitly for robust auth across deployments.
-	              // Keep Passport's `session.passport.user` as a string id to ensure deserializeUser works.
-	              const session = (req as any).session as any | undefined;
-	              if (session) {
-	                session.authUserId = String(userId);
-	                session.passport = session.passport || {};
-	                if (typeof session.passport.user !== "string") {
-	                  session.passport.user = String(userId);
-	                }
-	              }
-	
-	              const sess = (req as any).session;
-	              if (sess?.save) {
-	                sess.save((saveErr: any) => {
-	                  if (saveErr) {
-	                    console.error("[Auth] Google session save error:", saveErr);
-	                    return res.redirect("/login?error=session_error");
-	                  }
-	                  res.redirect("/?auth=success");
-	                });
-	                return;
-	              }
+            return (req as any).logIn(user, (loginErr: any) => {
+              if (loginErr) {
+                console.error("[Auth] Google login error:", loginErr);
+                return res.redirect("/login?error=login_failed");
+              }
+
+              // Persist userId explicitly for robust auth across deployments.
+              // Keep Passport's `session.passport.user` as a string id to ensure deserializeUser works.
+              const session = (req as any).session as any | undefined;
+              if (session) {
+                session.authUserId = String(userId);
+                session.passport = session.passport || {};
+                if (typeof session.passport.user !== "string") {
+                  session.passport.user = String(userId);
+                }
+              }
+
+              const sess = (req as any).session;
+              if (sess?.save) {
+                sess.save((saveErr: any) => {
+                  if (saveErr) {
+                    console.error("[Auth] Google session save error:", saveErr);
+                    return res.redirect("/login?error=session_error");
+                  }
+                  res.redirect("/?auth=success");
+                });
+                return;
+              }
 
               res.redirect("/?auth=success");
             });
@@ -331,34 +336,34 @@ export async function registerRoutes(
               }
             }
 
-	            return (req as any).logIn(user, (loginErr: any) => {
-	              if (loginErr) {
-	                console.error("[Auth] Microsoft login error:", loginErr);
-	                return res.redirect("/login?error=login_failed");
-	              }
-	
-	              // Persist userId explicitly for robust auth across deployments.
-	              // Keep Passport's `session.passport.user` as a string id to ensure deserializeUser works.
-	              const session = (req as any).session as any | undefined;
-	              if (session) {
-	                session.authUserId = String(userId);
-	                session.passport = session.passport || {};
-	                if (typeof session.passport.user !== "string") {
-	                  session.passport.user = String(userId);
-	                }
-	              }
-	
-	              const sess = (req as any).session;
-	              if (sess?.save) {
-	                sess.save((saveErr: any) => {
-	                  if (saveErr) {
-	                    console.error("[Auth] Microsoft session save error:", saveErr);
-	                    return res.redirect("/login?error=session_error");
-	                  }
-	                  res.redirect("/?auth=success");
-	                });
-	                return;
-	              }
+            return (req as any).logIn(user, (loginErr: any) => {
+              if (loginErr) {
+                console.error("[Auth] Microsoft login error:", loginErr);
+                return res.redirect("/login?error=login_failed");
+              }
+
+              // Persist userId explicitly for robust auth across deployments.
+              // Keep Passport's `session.passport.user` as a string id to ensure deserializeUser works.
+              const session = (req as any).session as any | undefined;
+              if (session) {
+                session.authUserId = String(userId);
+                session.passport = session.passport || {};
+                if (typeof session.passport.user !== "string") {
+                  session.passport.user = String(userId);
+                }
+              }
+
+              const sess = (req as any).session;
+              if (sess?.save) {
+                sess.save((saveErr: any) => {
+                  if (saveErr) {
+                    console.error("[Auth] Microsoft session save error:", saveErr);
+                    return res.redirect("/login?error=session_error");
+                  }
+                  res.redirect("/?auth=success");
+                });
+                return;
+              }
 
               res.redirect("/?auth=success");
             });
@@ -408,34 +413,34 @@ export async function registerRoutes(
               }
             }
 
-	            return (req as any).logIn(user, (loginErr: any) => {
-	              if (loginErr) {
-	                console.error("[Auth] Auth0 login error:", loginErr);
-	                return res.redirect("/login?error=login_failed");
-	              }
-	
-	              // Persist userId explicitly for robust auth across deployments.
-	              // Keep Passport's `session.passport.user` as a string id to ensure deserializeUser works.
-	              const session = (req as any).session as any | undefined;
-	              if (session) {
-	                session.authUserId = String(userId);
-	                session.passport = session.passport || {};
-	                if (typeof session.passport.user !== "string") {
-	                  session.passport.user = String(userId);
-	                }
-	              }
-	
-	              const sess = (req as any).session;
-	              if (sess?.save) {
-	                sess.save((saveErr: any) => {
-	                  if (saveErr) {
-	                    console.error("[Auth] Auth0 session save error:", saveErr);
-	                    return res.redirect("/login?error=session_error");
-	                  }
-	                  res.redirect("/?auth=success");
-	                });
-	                return;
-	              }
+            return (req as any).logIn(user, (loginErr: any) => {
+              if (loginErr) {
+                console.error("[Auth] Auth0 login error:", loginErr);
+                return res.redirect("/login?error=login_failed");
+              }
+
+              // Persist userId explicitly for robust auth across deployments.
+              // Keep Passport's `session.passport.user` as a string id to ensure deserializeUser works.
+              const session = (req as any).session as any | undefined;
+              if (session) {
+                session.authUserId = String(userId);
+                session.passport = session.passport || {};
+                if (typeof session.passport.user !== "string") {
+                  session.passport.user = String(userId);
+                }
+              }
+
+              const sess = (req as any).session;
+              if (sess?.save) {
+                sess.save((saveErr: any) => {
+                  if (saveErr) {
+                    console.error("[Auth] Auth0 session save error:", saveErr);
+                    return res.redirect("/login?error=session_error");
+                  }
+                  res.redirect("/?auth=success");
+                });
+                return;
+              }
 
               res.redirect("/?auth=success");
             });
@@ -467,7 +472,7 @@ export async function registerRoutes(
   app.get("/api/session/identity", async (req: Request, res: Response) => {
     const user = (req as AuthenticatedRequest).user;
     const session = req.session as any;
-    
+
     // First try req.user (Passport authenticated)
     let authUserId = user?.claims?.sub || user?.id;
     let authEmail = user?.claims?.email || (user as any)?.email;
@@ -652,7 +657,7 @@ export async function registerRoutes(
 
   app.use("/health", healthRouter);
   app.use("/health/pare", createPareHealthRouter());
-  
+
   // Simple API health check (used by clients and local smoke checks)
   app.get("/api/health", (req, res) => {
     const mem = process.memoryUsage();
@@ -747,10 +752,10 @@ export async function registerRoutes(
   });
   app.use("/api/ai", aiExcelRouter);
   app.use("/api/power", powerRouter);
-    app.use("/api/agents", multiAgentRouter);
-    app.use("/api/errors", errorRouter);
-    app.use("/api/spreadsheet", createSpreadsheetRouter());
-    app.use("/api/skill-platform", createSkillPlatformRouter());
+  app.use("/api/agents", multiAgentRouter);
+  app.use("/api/errors", errorRouter);
+  app.use("/api/spreadsheet", createSpreadsheetRouter());
+  app.use("/api/skill-platform", createSkillPlatformRouter());
   app.use("/api/chat", createChatRoutes());
   app.use("/api/agent", createAgentModeRouter());
   app.use("/api/orchestrator", createOrchestratorRouter());
@@ -759,10 +764,11 @@ export async function registerRoutes(
   registerAgenticTools();
   app.use("/api", createSandboxAgentRouter());
   app.use("/api", createLangGraphRouter());
-  
+
   // New routes from 8H plan
   app.use("/api/templates", templatesRouter);
   app.use("/api/webhooks", webhooksRouter);
+  app.use("/api/voice", voiceRouter);
   app.use("/api/auth/mfa", createMfaRouter());
   app.use("/api/2fa", twoFactorRouter);
   app.use("/api/security", createSecurityRouter());
@@ -805,6 +811,19 @@ export async function registerRoutes(
   // ===== Browser & Terminal Control =====
   app.use("/api/browser-control", createBrowserControlRouter());
   app.use("/api/terminal", requireAdminMiddleware, require2FA, createTerminalControlRouter());
+
+  // ===== macOS Native Control (AppleScript, System, Apps, Calendar, etc.) =====
+  app.use("/api/macos", requireAdminMiddleware, createMacOSControlRouter());
+
+  // ===== Automation Triggers (Cron, File Watch, Webhooks, System Events) =====
+  app.use("/api/triggers", requireAdminMiddleware, createAutomationTriggersRouter());
+
+  // ===== Voice & Audio (TTS, STT, Recording) =====
+  app.use("/api/voice", requireAdminMiddleware, createVoiceRouter());
+
+  // ===== Analytics & Cost Tracking =====
+  app.use("/api/analytics", requireAdminMiddleware, createAnalyticsRouter());
+
   app.use("/api/workflows", createWorkflowRouter());
 
   // ===== OpenClaw 500 Capabilities Verification =====
@@ -814,6 +833,21 @@ export async function registerRoutes(
   app.use("/api/runs", createRunRouter());
 
   initializeEventStore().catch(console.error);
+
+  // ===== Start Persistent Trigger Engine =====
+  import("./services/persistentTriggerEngine").then(({ triggerEngine }) => {
+    triggerEngine.start().then(() => {
+      console.log("[TriggerEngine] Started");
+    }).catch(err => {
+      console.warn("[TriggerEngine] Start failed:", err.message);
+    });
+  }).catch(() => {});
+
+  // ===== Start Analytics Service =====
+  import("./services/advancedAnalytics").then(({ analyticsService }) => {
+    analyticsService.start();
+    console.log("[Analytics] Cost tracking started");
+  }).catch(() => {});
 
   initializeRedisSSE().then(() => {
     console.log("[RedisSSE] Initialized");

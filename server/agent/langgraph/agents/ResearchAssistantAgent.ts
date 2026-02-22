@@ -106,25 +106,78 @@ Output format:
   }
 
   private async quickSearch(task: AgentTask): Promise<any> {
-    const response = await xaiClient.chat.completions.create({
-      model: this.config.model,
-      messages: [
-        { role: "system", content: this.config.systemPrompt },
-        {
-          role: "user",
-          content: `Quick search for: ${task.description}
-Input: ${JSON.stringify(task.input)}
+    const messages: any[] = [
+      { role: "system", content: this.config.systemPrompt },
+      {
+        role: "user",
+        content: `Quick search for: ${task.description}\nInput: ${JSON.stringify(task.input)}\n\nProvide a concise answer with key facts and sources.`,
+      },
+    ];
 
-Provide a concise answer with key facts and sources.`,
-        },
-      ],
-      temperature: 0.2,
-    });
+    let content = "";
+    let isComplete = false;
+    let iteration = 0;
+
+    while (!isComplete && iteration < this.config.maxIterations) {
+      iteration++;
+      const response = await xaiClient.chat.completions.create({
+        model: this.config.model,
+        messages,
+        temperature: 0.2,
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "delegate_task",
+              description: "Delegate a sub-task to a specialized agent (like CodeAgent to parse data).",
+              parameters: {
+                type: "object",
+                properties: {
+                  targetAgentName: { type: "string", description: "Name of the target agent" },
+                  subTaskDescription: { type: "string", description: "Instructions for the sub-task" },
+                  inputData: { type: "object", description: "Any context data" }
+                },
+                required: ["targetAgentName", "subTaskDescription"]
+              }
+            }
+          }
+        ],
+        tool_choice: "auto",
+      });
+
+      const message = response.choices[0].message;
+      messages.push(message);
+
+      if (message.tool_calls) {
+        for (const toolCall of message.tool_calls) {
+          if (toolCall.type === "function" && toolCall.function?.name === "delegate_task") {
+            const args = JSON.parse(toolCall.function.arguments);
+            try {
+              const result = await this.delegateTask(args.targetAgentName, args.subTaskDescription, args.inputData || {});
+              messages.push({
+                role: "tool",
+                tool_call_id: toolCall.id,
+                content: JSON.stringify(result.output)
+              });
+            } catch (err: any) {
+              messages.push({
+                role: "tool",
+                tool_call_id: toolCall.id,
+                content: `Error delegating task: ${err.message}`
+              });
+            }
+          }
+        }
+      } else {
+        content = message.content || "";
+        isComplete = true;
+      }
+    }
 
     return {
       type: "quick_search",
       query: task.description,
-      result: response.choices[0].message.content,
+      result: content,
       confidence: 0.85,
       timestamp: new Date().toISOString(),
     };
@@ -216,38 +269,75 @@ Provide:
   }
 
   private async factCheck(task: AgentTask): Promise<any> {
-    const response = await xaiClient.chat.completions.create({
-      model: this.config.model,
-      messages: [
-        {
-          role: "system", content: `${this.config.systemPrompt}
+    const messages: any[] = [
+      {
+        role: "system", content: `${this.config.systemPrompt}\n\nFor fact-checking, evaluate:\n1. Source credibility\n2. Evidence quality\n3. Consistency with other sources\n4. Potential biases\n5. Date and context relevance`
+      },
+      {
+        role: "user",
+        content: `Fact check this claim: ${task.description}\nAdditional context: ${JSON.stringify(task.input)}\n\nReturn JSON:\n{\n  "claim": "the claim being checked",\n  "verdict": "true|false|partially_true|unverifiable",\n  "confidence": 0.0-1.0,\n  "evidence": [{"source": "", "finding": "", "supports": boolean}],\n  "analysis": "detailed analysis",\n  "caveats": ["any important caveats"]\n}`,
+      },
+    ];
 
-For fact-checking, evaluate:
-1. Source credibility
-2. Evidence quality
-3. Consistency with other sources
-4. Potential biases
-5. Date and context relevance` },
-        {
-          role: "user",
-          content: `Fact check this claim: ${task.description}
-Additional context: ${JSON.stringify(task.input)}
+    let content = "";
+    let isComplete = false;
+    let iteration = 0;
 
-Return JSON:
-{
-  "claim": "the claim being checked",
-  "verdict": "true|false|partially_true|unverifiable",
-  "confidence": 0.0-1.0,
-  "evidence": [{"source": "", "finding": "", "supports": boolean}],
-  "analysis": "detailed analysis",
-  "caveats": ["any important caveats"]
-}`,
-        },
-      ],
-      temperature: 0.1,
-    });
+    while (!isComplete && iteration < this.config.maxIterations) {
+      iteration++;
+      const response = await xaiClient.chat.completions.create({
+        model: this.config.model,
+        messages,
+        temperature: 0.1,
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "delegate_task",
+              description: "Delegate a sub-task to a specialized agent.",
+              parameters: {
+                type: "object",
+                properties: {
+                  targetAgentName: { type: "string" },
+                  subTaskDescription: { type: "string" },
+                  inputData: { type: "object" }
+                },
+                required: ["targetAgentName", "subTaskDescription"]
+              }
+            }
+          }
+        ],
+        tool_choice: "auto",
+      });
 
-    const content = response.choices[0].message.content || "{}";
+      const message = response.choices[0].message;
+      messages.push(message);
+
+      if (message.tool_calls) {
+        for (const toolCall of message.tool_calls) {
+          if (toolCall.type === "function" && toolCall.function?.name === "delegate_task") {
+            const args = JSON.parse(toolCall.function.arguments);
+            try {
+              const result = await this.delegateTask(args.targetAgentName, args.subTaskDescription, args.inputData || {});
+              messages.push({
+                role: "tool",
+                tool_call_id: toolCall.id,
+                content: JSON.stringify(result.output)
+              });
+            } catch (err: any) {
+              messages.push({
+                role: "tool",
+                tool_call_id: toolCall.id,
+                content: `Error delegating task: ${err.message}`
+              });
+            }
+          }
+        }
+      } else {
+        content = message.content || "{}";
+        isComplete = true;
+      }
+    }
     const jsonMatch = content.match(/\{[\s\S]*\}/);
 
     return {

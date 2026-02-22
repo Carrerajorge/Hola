@@ -111,10 +111,15 @@ Return a JSON plan with:
     const content = response.choices[0].message.content || "{}";
     const jsonMatch = content.match(/\{[\s\S]*\}/);
 
+    console.log("[OrchestratorAgent] Raw LLM Plan Content: ", content);
+
     if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]) as ExecutionPlan;
+      const parsed = JSON.parse(jsonMatch[0]) as ExecutionPlan;
+      console.log("[OrchestratorAgent] Parsed Plan: ", JSON.stringify(parsed, null, 2));
+      return parsed;
     }
 
+    console.warn("[OrchestratorAgent] Failed to parse JSON plan, falling back to direct execution.");
     return {
       analysis: "Direct execution",
       steps: [{
@@ -136,7 +141,14 @@ Return a JSON plan with:
     const completedSteps = new Set<string>();
     const failedSteps = new Set<string>();
 
-    for (const group of plan.parallelGroups) {
+    // Safeguard: If the LLM generates steps but fails to put them into parallelGroups, 
+    // we create a sequential group structure automatically.
+    let groupsToExecute = plan.parallelGroups;
+    if (!groupsToExecute || groupsToExecute.length === 0) {
+      groupsToExecute = plan.steps.map(s => [s.id]);
+    }
+
+    for (const group of groupsToExecute) {
       const groupSteps = plan.steps.filter(s => group.includes(s.id));
 
       const groupPromises = groupSteps.map(async (step) => {
@@ -161,22 +173,70 @@ Return a JSON plan with:
 
         const agent = AGENT_REGISTRY.get(step.agent);
         if (agent) {
+          // NEW: Inject output from dependencies into the step input so downstream agents have context
+          const dependencyOutputs: any[] = [];
+          for (const depId of step.dependencies) {
+            const depResult = results.find(r => r.stepId === depId);
+            if (depResult && depResult.success) {
+              dependencyOutputs.push({
+                sourceStep: depId,
+                output: depResult.output
+              });
+            }
+          }
+
+          const enhancedInput = {
+            ...step.input,
+            _upstream_context: dependencyOutputs.length > 0 ? JSON.stringify(dependencyOutputs, null, 2) : undefined
+          };
+
           const result = await agent.execute({
             id: step.id,
             type: step.action,
-            description: step.action,
-            input: step.input,
+            description: `${step.action}\n\n[CONTEXT FROM PREVIOUS STEPS]:\n${enhancedInput._upstream_context || 'None'}`,
+            input: enhancedInput,
             priority: step.priority as any,
             retries: 0,
             maxRetries: 3,
           });
-          // Only mark as completed if actually successful
-          if (result.success) {
+
+          // NEW: Critic Verification Loop
+          let finalSuccess = result.success;
+          let finalOutput = result.output;
+          let finalError = result.error;
+
+          if (result.success && step.agent !== "CriticAgent" && step.agent !== "OrchestratorAgent") {
+            const critic = AGENT_REGISTRY.get("CriticAgent");
+            if (critic) {
+              const criticResult = await critic.execute({
+                id: `verify_${step.id}`,
+                type: "verify_output",
+                description: `Verify output of ${step.agent}`,
+                input: {
+                  originalPrompt: step.action,
+                  workerOutput: result.output,
+                  workerType: step.agent
+                },
+                priority: "high",
+                retries: 0,
+                maxRetries: 1,
+              });
+
+              if (criticResult.success && criticResult.output?.verdict === "FAIL") {
+                // The critic failed the output.
+                finalSuccess = false;
+                finalError = `Critic Verification Failed: ${criticResult.output.critique} | Fix instructions: ${criticResult.output.feedback_for_worker}`;
+              }
+            }
+          }
+
+          // Only mark as completed if actually successful AND passed critic
+          if (finalSuccess) {
             completedSteps.add(step.id);
           } else {
             failedSteps.add(step.id);
           }
-          return { stepId: step.id, success: result.success, output: result.output, error: result.error };
+          return { stepId: step.id, success: finalSuccess, output: finalOutput, error: finalError };
         }
 
         const directResult = await this.executeDirectly(step);

@@ -7,7 +7,7 @@ import { z } from 'zod';
 // Chat message schema
 export const chatMessageSchema = z.object({
     role: z.enum(['user', 'assistant', 'system']),
-    content: z.string().min(1, 'Message content cannot be empty').max(32_000, 'Message too long'),
+    content: z.string().min(1, 'Message content cannot be empty').max(500_000, 'Message too long'),
 });
 
 export type ChatMessage = z.infer<typeof chatMessageSchema>;

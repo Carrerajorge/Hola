@@ -62,6 +62,7 @@ function normalizeCapabilities(value: unknown) {
     imageGeneration: asBoolean(source.imageGeneration, false),
     fileUpload: asBoolean(source.fileUpload, false),
     dataAnalysis: asBoolean(source.dataAnalysis, false),
+    canvas: asBoolean(source.canvas, false),
   };
 }
 
@@ -79,7 +80,7 @@ function normalizeRuntimePolicy(value: unknown) {
   };
 }
 
-function normalizeToolPermissions(value: unknown) {
+function normalizeToolPermissions(value: unknown): { mode: "allowlist" | "denylist"; tools: string[]; actionsEnabled: boolean } {
   const source = asRecord(value) || {};
   return {
     mode: source.mode === "denylist" ? "denylist" : "allowlist",
@@ -96,7 +97,7 @@ function definitionFromRequest(body: any) {
   const knowledgeSources = Array.isArray(definitionBody.knowledgeSources) ? definitionBody.knowledgeSources : (Array.isArray(body.knowledgeSources) ? body.knowledgeSources : undefined);
   const actions = Array.isArray(definitionBody.actions) ? definitionBody.actions : (Array.isArray(body.actions) ? body.actions : undefined);
 
-  return {
+  const result = {
     name: asString(definitionBody.name) || asString(body.name),
     description: asString(definitionBody.description) || asString(body.description),
     avatar: asString(definitionBody.avatar) || asString(body.avatar),
@@ -110,6 +111,8 @@ function definitionFromRequest(body: any) {
     actions: Array.isArray(actions) ? actions : undefined,
     policies: policies ? normalizeRuntimePolicy(policies) : undefined,
   };
+
+  return Object.fromEntries(Object.entries(result).filter(([_, v]) => v !== undefined));
 }
 
 function normalizeDefinitionFromLegacyGpt(gpt: any) {
@@ -150,12 +153,13 @@ function mergeDefinitions(base: any, patch: any) {
 }
 
 function getRuntimePolicyPayload(policies: any) {
+  const safePolicies = policies || {};
   return {
-    enforceModel: asBoolean(policies.enforceModel, false),
-    modelFallbacks: asStringArray(policies.modelFallbacks),
-    maxTokensOverride: asNumber(policies.maxTokensOverride),
-    temperatureOverride: asNumber(policies.temperatureOverride),
-    allowClientOverride: asBoolean(policies.allowClientOverride, false),
+    enforceModel: asBoolean(safePolicies.enforceModel, false),
+    modelFallbacks: asStringArray(safePolicies.modelFallbacks),
+    maxTokensOverride: asNumber(safePolicies.maxTokensOverride),
+    temperatureOverride: asNumber(safePolicies.temperatureOverride),
+    allowClientOverride: asBoolean(safePolicies.allowClientOverride, false),
   };
 }
 
@@ -486,8 +490,8 @@ export function createGptRouter() {
       const userId = (req as any).user?.claims?.sub || (req as any).user?.id || session?.authUserId;
       const creatorId = userId || null;
 
-      if (!canonicalName || !slug || !finalDefinition.instructions) {
-        return res.status(400).json({ error: "name, slug, and systemPrompt/instructions are required" });
+      if (!canonicalName || !slug) {
+        return res.status(400).json({ error: "El nombre y el slug son requeridos." });
       }
 
       const existing = await storage.getGptBySlug(slug);
@@ -503,7 +507,7 @@ export function createGptRouter() {
         categoryId: categoryId || null,
         creatorId: creatorId,
         visibility: visibility || "private",
-        systemPrompt: finalDefinition.instructions,
+        systemPrompt: finalDefinition.instructions || "",
         temperature: temperature || "0.7",
         topP: topP || "1",
         maxTokens: asNumber(maxTokens, 4096),
@@ -520,7 +524,7 @@ export function createGptRouter() {
       await storage.createGptVersion({
         gptId: gpt.id,
         versionNumber: 1,
-        systemPrompt: finalDefinition.instructions,
+        systemPrompt: finalDefinition.instructions || "",
         temperature: temperature || "0.7",
         topP: topP || "1",
         maxTokens: asNumber(maxTokens, 4096),
@@ -535,6 +539,7 @@ export function createGptRouter() {
       };
       res.json(response);
     } catch (error: any) {
+      console.error("[POST /api/gpts] Creation failed:", error);
       res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
@@ -1037,7 +1042,7 @@ export function createGptRouter() {
         conversationId: normalizedConversationId,
         request: normalizeGptActionRequestPayload({
           request: normalizedRequestPayload,
-        } as Record<string, unknown>),
+        } as Record<string, unknown>) as Record<string, unknown>,
         userId: normalizedActorId || getOrCreateSecureUserId(req),
         requestId: resolvedRequestId || undefined,
         headers: validation.data.headers,

@@ -105,6 +105,7 @@ import { CodeExecutionBlock } from "@/components/code-execution-block";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { ShareChatDialog, ShareIcon } from "@/components/share-chat-dialog";
 import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
+import { computePromptIntegrity } from "@/lib/promptIntegrity";
 import { DocumentGeneratorDialog } from "@/components/document-generator-dialog";
 import { GoogleFormsDialog } from "@/components/google-forms-dialog";
 import { InlineGoogleFormPreview } from "@/components/inline-google-form-preview";
@@ -4434,6 +4435,7 @@ export function ChatInterface({
 
         // Add user message to chat
         const userMsgId = `temp-gen-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        const genIntegrity = await computePromptIntegrity(generationInput);
         const userMsg: Message = {
           id: userMsgId,
           clientTempId: userMsgId,
@@ -4445,7 +4447,10 @@ export function ChatInterface({
           status: "pending",
           deliveryStatus: "sending",
           deliveryError: undefined,
-        };
+          clientPromptLen: genIntegrity.clientPromptLen,
+          clientPromptHash: genIntegrity.clientPromptHash,
+          promptMessageId: genIntegrity.messageId,
+        } as any;
         // Show message immediately (optimistic update)
         setOptimisticMessages((prev: Message[]) => [...prev, userMsg]);
         const persistGenerationUserMessagePromise = onSendMessage(userMsg).catch((err) => {
@@ -4582,6 +4587,10 @@ export function ChatInterface({
                 lastImageBase64,
                 lastImageId,
                 latencyMode,
+                // Prompt integrity metadata
+                clientPromptLen: (userMsg as any).clientPromptLen,
+                clientPromptHash: (userMsg as any).clientPromptHash,
+                promptMessageId: (userMsg as any).promptMessageId,
               },
               onEvent: (eventType, data) => {
                 if (eventType === "tool_start" && data.toolName === "browse_and_act") {
@@ -5099,6 +5108,9 @@ export function ChatInterface({
           spreadsheetData: f.spreadsheetData,
         }));
 
+      // Compute prompt integrity metadata (SHA-256 hash + byte length)
+      const promptIntegrity = await computePromptIntegrity(userInput);
+
       // Construct the User Message object
       const userMsg: Message = {
         id: userMsgId,
@@ -5112,7 +5124,11 @@ export function ChatInterface({
         deliveryStatus: "sending",
         deliveryError: undefined,
         attachments: attachments.length > 0 ? attachments : undefined,
-      };
+        // Prompt integrity fields — server validates these to detect data loss
+        clientPromptLen: promptIntegrity.clientPromptLen,
+        clientPromptHash: promptIntegrity.clientPromptHash,
+        promptMessageId: promptIntegrity.messageId,
+      } as any;
 
       // Apply Optimistic Update IMMEDIATELY
       const optimisticStart = import.meta.env.DEV && typeof performance !== "undefined" ? performance.now() : null;
@@ -5883,6 +5899,10 @@ IMPORTANTE:
                   provider: selectedProvider,
                   model: selectedModel,
                   latencyMode,
+                  // Prompt integrity metadata for server-side verification
+                  clientPromptLen: (userMsg as any).clientPromptLen,
+                  clientPromptHash: (userMsg as any).clientPromptHash,
+                  promptMessageId: (userMsg as any).promptMessageId,
                 },
                 onAiStateChange: (nextState) => setAiStateForStream(nextState),
                 onEvent: (eventType, data) => {

@@ -207,6 +207,10 @@ export function log(message: string, source = "express") {
     // Initialize CQRS admin projection (subscribes to auth events, refreshes materialized view)
     const { initAdminProjection } = await import("./services/adminProjection");
     initAdminProjection();
+
+    // Start background ActionTriggerDaemon
+    const { actionTriggerDaemon } = await import("./services/actionTriggerDaemon");
+    await actionTriggerDaemon.start();
   } else {
     log("[WARNING] Database connection failed - some features may not work");
   }

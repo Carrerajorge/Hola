@@ -31,6 +31,7 @@ export const gptCapabilitiesSchema = z.object({
     imageGeneration: z.boolean().default(false),
     fileUpload: z.boolean().default(false),
     dataAnalysis: z.boolean().default(false),
+    canvas: z.boolean().default(false), // New canvas feature
 });
 
 // GPT Runtime Policy Schema
@@ -83,6 +84,7 @@ export const gptDefinitionSchema = z.object({
         imageGeneration: false,
         fileUpload: false,
         dataAnalysis: false,
+        canvas: false,
     }),
     knowledgeSources: z.array(gptKnowledgeSourceSchema).default([]),
     actions: z.array(z.string()).default([]),
@@ -193,10 +195,10 @@ export const gptActionHttpMethodSchema = z.enum(["GET", "POST", "PUT", "DELETE",
 export const gptActionAuthTypeSchema = z.enum(["none", "api_key", "oauth", "bearer", "basic", "custom"]);
 export const gptActionProviderStatusSchema = z.enum(["true", "false"]);
 export const gptActionParameterSchema = z.object({
-  name: z.string().trim().min(1).max(80),
-  type: z.enum(["string", "number", "boolean", "integer", "array", "object", "date"]).default("string"),
-  required: z.boolean().default(false),
-  description: z.string().max(255).optional(),
+    name: z.string().trim().min(1).max(80),
+    type: z.enum(["string", "number", "boolean", "integer", "array", "object", "date"]).default("string"),
+    required: z.boolean().default(false),
+    description: z.string().max(255).optional(),
 }).strict();
 export const gptActionJsonSchema = z.record(z.string(), z.unknown());
 
@@ -233,52 +235,52 @@ export const gptActions = pgTable("gpt_actions", {
 ]);
 
 export const insertGptActionSchema = createInsertSchema(gptActions).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-  usageCount: true,
-  lastUsedAt: true,
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+    usageCount: true,
+    lastUsedAt: true,
 }).extend({
-  name: z.string().trim().min(1).max(120),
-  description: z.string().max(4096).optional(),
-  actionType: gptActionTypeSchema.default("api"),
-  httpMethod: gptActionHttpMethodSchema.default("GET"),
-  endpoint: z.string().trim().max(2048).url(),
-  headers: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({}),
-  bodyTemplate: z.string().max(65536).optional(),
-  responseMapping: gptActionJsonSchema.optional(),
-  openApiSpec: gptActionJsonSchema.optional(),
-  requestSchema: gptActionJsonSchema.optional(),
-  responseSchema: gptActionJsonSchema.optional(),
-  domainAllowlist: z.array(z.string().trim().max(253)).default([]),
-  piiRedactionRules: z.record(z.string(), z.unknown()).default({}),
-  authType: gptActionAuthTypeSchema.default("none"),
-  authConfig: gptActionJsonSchema.optional(),
-  parameters: z.array(gptActionParameterSchema).default([]),
-  rateLimit: z.number().int().min(1).max(10_000).default(100),
-  timeout: z.number().int().min(250).max(120_000).default(30000),
-  isActive: gptActionProviderStatusSchema.default("true"),
-  operationId: z.string().trim().max(160).optional(),
+    name: z.string().trim().min(1).max(120),
+    description: z.string().max(4096).optional(),
+    actionType: gptActionTypeSchema.default("api"),
+    httpMethod: gptActionHttpMethodSchema.default("GET"),
+    endpoint: z.string().trim().max(2048).url(),
+    headers: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({}),
+    bodyTemplate: z.string().max(65536).optional(),
+    responseMapping: gptActionJsonSchema.optional(),
+    openApiSpec: gptActionJsonSchema.optional(),
+    requestSchema: gptActionJsonSchema.optional(),
+    responseSchema: gptActionJsonSchema.optional(),
+    domainAllowlist: z.array(z.string().trim().max(253)).default([]),
+    piiRedactionRules: z.record(z.string(), z.unknown()).default({}),
+    authType: gptActionAuthTypeSchema.default("none"),
+    authConfig: gptActionJsonSchema.optional(),
+    parameters: z.array(gptActionParameterSchema).default([]),
+    rateLimit: z.number().int().min(1).max(10_000).default(100),
+    timeout: z.number().int().min(250).max(120_000).default(30000),
+    isActive: gptActionProviderStatusSchema.default("true"),
+    operationId: z.string().trim().max(160).optional(),
 }).strict();
 
 export const gptActionCreateSchema = insertGptActionSchema.extend({
-  gptId: z.string().trim().min(1),
+    gptId: z.string().trim().min(1),
 }).strict();
 
 export const gptActionUpdateSchema = insertGptActionSchema.partial().omit({
-  gptId: true,
+    gptId: true,
 }).strict();
 
 export const gptActionUseSchema = z.object({
-  conversationId: z.string().trim().min(1).max(120).regex(/^[a-zA-Z0-9._-]+$/),
-  userId: z.string().trim().max(120).optional(),
-  requestId: z.string().trim().min(1).max(140).optional(),
-  request: z.record(z.string(), z.unknown()).default({}),
-  input: z.record(z.string(), z.unknown()).optional(),
-  headers: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
-  timeoutMs: z.number().int().min(250).max(120_000).optional(),
-  idempotencyKey: z.string().trim().min(6).max(140).optional(),
-  maxRetries: z.number().int().min(0).max(10).optional(),
+    conversationId: z.string().trim().min(1).max(120).regex(/^[a-zA-Z0-9._-]+$/),
+    userId: z.string().trim().max(120).optional(),
+    requestId: z.string().trim().min(1).max(140).optional(),
+    request: z.record(z.string(), z.unknown()).default({}),
+    input: z.record(z.string(), z.unknown()).optional(),
+    headers: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+    timeoutMs: z.number().int().min(250).max(120_000).optional(),
+    idempotencyKey: z.string().trim().min(6).max(140).optional(),
+    maxRetries: z.number().int().min(0).max(10).optional(),
 }).strict();
 
 export type GptActionCreateInput = z.infer<typeof gptActionCreateSchema>;

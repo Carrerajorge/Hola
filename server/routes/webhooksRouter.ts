@@ -9,6 +9,7 @@ import { sql } from "drizzle-orm";
 import { auditLog } from "../services/auditLogger";
 import crypto from "crypto";
 import net from "net";
+import { actionTriggerDaemon } from "../services/actionTriggerDaemon";
 
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 function safeErrorMessage(error: unknown): string {
@@ -118,6 +119,16 @@ webhooksRouter.get("/events", async (req, res) => {
   res.json(EVENT_TYPES);
 });
 
+// POST /api/webhooks/inbound/:hookId - Receiver for incoming webhook requests handled by ActionTriggerDaemon
+webhooksRouter.post("/inbound/:hookId", (req, res) => {
+  const hookId = req.params.hookId;
+  const payload = req.body;
+
+  // Pass payload directly to the daemon which will trigger loaded workflows/agents if active
+  actionTriggerDaemon.handleWebhook(hookId, payload);
+  res.status(200).json({ success: true, message: "Webhook received and trigger emitted." });
+});
+
 // POST /api/webhooks - Create webhook
 webhooksRouter.post("/", async (req, res) => {
   try {
@@ -150,7 +161,7 @@ webhooksRouter.post("/", async (req, res) => {
       resource: "webhooks",
       resourceId: result.rows?.[0]?.id,
       details: { name, url, events },
-      category: "integration",
+      category: "system",
       severity: "info"
     });
 
