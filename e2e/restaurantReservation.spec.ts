@@ -41,7 +41,7 @@ test.describe("Restaurant Reservation Flow", () => {
     await expect(response).toBeVisible({ timeout: 30000 });
 
     // Verify the response contains clarification about missing fields
-    const pageContent = page.locator("main");
+    const pageContent = page.locator("#main-content");
     await expect(pageContent).toContainText(/nombre|telefono|email/i, {
       timeout: 30000,
     });
@@ -81,7 +81,7 @@ test.describe("Restaurant Reservation Flow", () => {
     // With a complete request, the system should proceed to web automation
     // or show a confirmation with the detected fields.
     // Wait for any response from the assistant
-    const assistantResponse = page.locator("main");
+    const assistantResponse = page.locator("#main-content");
     await expect(assistantResponse).toContainText(
       /Maido|reserva|navegador|browser|mesa247|confirma/i,
       { timeout: 45000 }
@@ -101,7 +101,7 @@ test.describe("Restaurant Reservation Flow", () => {
     await sendButton.click();
 
     // Wait for clarification response
-    const mainContent = page.locator("main");
+    const mainContent = page.locator("#main-content");
     await expect(mainContent).toContainText(/nombre|telefono|email|datos/i, {
       timeout: 30000,
     });
