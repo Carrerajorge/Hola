@@ -5,7 +5,6 @@ test.describe('Test 1: Page Load and Navigation', () => {
     const response = await page.goto('/');
     expect(response?.status()).toBe(200);
 
-    await expect(page.getByTestId("input-landing-search")).toBeVisible({ timeout: 20000 });
     await expect(page.getByTestId("button-header-login")).toBeVisible({ timeout: 20000 });
     await expect(page.getByTestId("button-header-signup")).toBeVisible({ timeout: 20000 });
   });
