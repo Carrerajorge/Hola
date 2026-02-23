@@ -36,3 +36,11 @@ export class TelemetryEmitter extends EventEmitter {
 }
 
 export const telemetryEmitter = new TelemetryEmitter();
+
+/**
+ * Emit a real-time dashboard event (SRE/FinOps dashboards).
+ * Wraps the telemetry emitter with a structured event type.
+ */
+export function emitDashboardEvent(evt: any) {
+  telemetryEmitter.emit('event', { type: 'dashboard', ...evt, ts: Date.now() });
+}

@@ -38,3 +38,16 @@ export class RateLimiter {
 
 export const rpcRateLimiter = new RateLimiter(100, 20); // RPC permite alta frecuencia
 export const httpRateLimiter = new RateLimiter(30, 2);  // HTTP (A11y dumps) es estricto
+// Back-compat exports (some routes expect these names)
+export const rateLimiter = httpRateLimiter;
+
+export function createCustomRateLimiter(capacity = 30, refillRatePerSec = 2) {
+  return new RateLimiter(capacity, refillRatePerSec);
+}
+
+export function getRateLimitStats() {
+  return {
+    rpc: { capacity: 100, refillRatePerSec: 20 },
+    http: { capacity: 30, refillRatePerSec: 2 }
+  };
+}

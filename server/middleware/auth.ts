@@ -61,6 +61,18 @@ export async function require2FA(req: Request, res: Response, next: NextFunction
     }
 }
 
+/**
+ * Basic authentication middleware — rejects unauthenticated / anonymous users.
+ * Used by feature routers (finops, SRE, etc.) that require a logged-in user.
+ */
+export function requireAuth(req: Request, res: Response, next: NextFunction) {
+    const userId = getSecureUserId(req);
+    if (!userId || String(userId).startsWith("anon_")) {
+        return res.status(401).json({ error: "Unauthorized" });
+    }
+    next();
+}
+
 export type RBACRole = "USER" | "MOD" | "ADMIN" | "SYSTEM_AGENT";
 
 const roleHierarchy: Record<RBACRole, number> = {
