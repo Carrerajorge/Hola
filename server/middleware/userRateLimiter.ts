@@ -38,8 +38,15 @@ export class RateLimiter {
 
 export const rpcRateLimiter = new RateLimiter(100, 20); // RPC permite alta frecuencia
 export const httpRateLimiter = new RateLimiter(30, 2);  // HTTP (A11y dumps) es estricto
-// Back-compat exports (some routes expect these names)
-export const rateLimiter = httpRateLimiter;
+// Express middleware wrapper — routes use `rateLimiter` as (req, res, next) middleware.
+// Identifies clients by IP and returns 429 when the token bucket is exhausted.
+export function rateLimiter(req: any, res: any, next: any) {
+  const clientId = req.ip || req.connection?.remoteAddress || 'unknown';
+  if (httpRateLimiter.checkLimit(clientId)) {
+    return next();
+  }
+  return res.status(429).json({ error: 'Too many requests. Please try again later.' });
+}
 
 export function createCustomRateLimiter(capacity = 30, refillRatePerSec = 2) {
   return new RateLimiter(capacity, refillRatePerSec);
