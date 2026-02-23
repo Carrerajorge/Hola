@@ -58,6 +58,52 @@ import { useWhatsAppWebStatus } from "@/hooks/use-whatsapp-web";
 import { Folder as FolderType } from "@/hooks/use-chat-folders";
 import { diffZonedDays, formatZonedDate, getZonedDateParts, normalizeTimeZone } from "@/lib/platformDateTime";
 import { DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuPortal } from "@/components/ui/dropdown-menu";
+
+const PremiumIcons = {
+  Library: ({ className }: { className?: string }) => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
+      <path d="M8 7h6" />
+      <path d="M8 11h8" />
+    </svg>
+  ),
+  Gpt: ({ className }: { className?: string }) => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M9.88 3.2a1 1 0 0 0-1.76 0L5.3 8.3c-.3.56-.74 1-1.3 1.3L1.2 11.2a1 1 0 0 0 0 1.76l2.8 1.6c.56.3 1 .74 1.3 1.3l1.6 2.8c.2.36.72.36.92 0l1.6-2.8c.3-.56.74-1 1.3-1.3l2.8-1.6c.36-.2.36-.72 0-.92l-2.8-1.6c-.56-.3-1-.74-1.3-1.3l-1.6-2.8Z" />
+      <path d="M19.2 4.2a.6.6 0 0 0-1.1 0l-.8 1.4c-.1.2-.3.3-.5.4l-1.4.8a.6.6 0 0 0 0 1.1l1.4.8c.2.1.4.3.5.5l.8 1.4a.6.6 0 0 0 1.1 0l.8-1.4c.1-.2.3-.3.5-.5l1.4-.8a.6.6 0 0 0 0-1.1l-1.4-.8c-.2-.1-.4-.3-.5-.4l-.8-1.4Z" opacity="0.6" />
+      <path d="M21.2 16.2a.6.6 0 0 0-1.1 0l-.3.6c-.1.2-.3.3-.5.4l-.6.3a.6.6 0 0 0 0 1.1l.6.3c.2.1.4.3.5.5l.3.6a.6.6 0 0 0 1.1 0l.3-.6c.1-.2.3-.3.5-.5l.6-.3a.6.6 0 0 0 0-1.1l-.6-.3c-.2-.1-.4-.3-.5-.4l-.3-.6Z" opacity="0.4" />
+    </svg>
+  ),
+  Skills: ({ className }: { className?: string }) => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+    </svg>
+  ),
+  Apps: ({ className }: { className?: string }) => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <rect x="3" y="3" width="7" height="7" rx="1.5" />
+      <rect x="14" y="3" width="7" height="7" rx="1.5" opacity="0.5" />
+      <rect x="14" y="14" width="7" height="7" rx="1.5" />
+      <path d="M6.5 17.5h.01" strokeWidth="3" strokeLinecap="round" />
+    </svg>
+  ),
+  ChatQr: ({ className }: { className?: string }) => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+      <rect x="8" y="8" width="3" height="3" rx="0.5" />
+      <rect x="13" y="8" width="3" height="3" rx="0.5" />
+      <rect x="8" y="13" width="3" height="3" rx="0.5" />
+      <rect x="13" y="13" width="3" height="3" rx="0.5" fill="currentColor" />
+    </svg>
+  ),
+  Code: ({ className }: { className?: string }) => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+      <polyline points="8 10 12 14 8 18" />
+      <line x1="16" y1="18" x2="16" y2="18" strokeWidth="2.5" />
+    </svg>
+  )
+};
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { NewChatButton } from "@/components/chat/NewChatButton";
 import { useProcessingChatIds, useChatStreamContent } from "@/stores/streamingStore";
@@ -626,7 +672,7 @@ export function Sidebar({
           onClick={onOpenLibrary}
           data-testid="button-library"
         >
-          <Library className="h-4 w-4" />
+          <PremiumIcons.Library className="h-[18px] w-[18px] opacity-80" />
           Biblioteca
         </Button>
         <Button
@@ -635,7 +681,7 @@ export function Sidebar({
           onClick={onOpenGpts}
           data-testid="button-gpts"
         >
-          <Bot className="h-4 w-4" />
+          <PremiumIcons.Gpt className="h-[18px] w-[18px] opacity-80" />
           GPTs
         </Button>
         <Button
@@ -644,7 +690,7 @@ export function Sidebar({
           onClick={onOpenSkills}
           data-testid="button-skills"
         >
-          <Zap className="h-4 w-4 shrink-0" />
+          <PremiumIcons.Skills className="h-[18px] w-[18px] shrink-0 opacity-80" />
           <span className="flex flex-col items-start leading-tight">
             <span>Skills</span>
             <span className="text-[10px] font-normal text-muted-foreground">Capacidades modulares de IliaGPT</span>
@@ -656,7 +702,7 @@ export function Sidebar({
           onClick={onOpenApps}
           data-testid="button-apps"
         >
-          <LayoutGrid className="h-4 w-4" />
+          <PremiumIcons.Apps className="h-[18px] w-[18px] opacity-80" />
           Aplicaciones
         </Button>
         <Button
@@ -665,7 +711,7 @@ export function Sidebar({
           onClick={onOpenWhatsAppConnect}
           data-testid="button-whatsapp-connect"
         >
-          <MessageSquare className="h-4 w-4" />
+          <PremiumIcons.ChatQr className="h-[18px] w-[18px] opacity-80" />
           <span className="flex-1 text-left">AppsWebChat (QR)</span>
           <span
             className={cn(
@@ -684,7 +730,7 @@ export function Sidebar({
           onClick={onOpenCodex}
           data-testid="button-codex"
         >
-          <Code className="h-4 w-4" />
+          <PremiumIcons.Code className="h-[18px] w-[18px] opacity-80" />
           Codex
         </Button>
       </div>
