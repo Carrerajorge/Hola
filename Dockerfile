@@ -18,10 +18,9 @@ COPY package.json package-lock.json ./
 COPY scripts/sync-mathjax-assets.cjs scripts/sync-mathjax-assets.cjs
 RUN npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts \
   && npm i -D @rollup/rollup-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund \
-  && npm rebuild esbuild bcrypt node-pty sharp \
+  && npm rebuild esbuild bcrypt node-pty sharp lightningcss \
   && node scripts/sync-mathjax-assets.cjs \
   && npm cache clean --force
-
 # Build client and server assets
 COPY . .
 ARG APP_VERSION=dev
