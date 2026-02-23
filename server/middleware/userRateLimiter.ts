@@ -1,348 +1,40 @@
 /**
- * User-Based Rate Limiter Middleware
- * Rate limits by user ID in addition to IP
+ * T21: Security & Rate Limiting (Token Bucket Algorithm)
+ * Protege al Daemon hipervisor y al EventBus de saturaciones (Flood / DDoS preventions).
  */
+export class RateLimiter {
+    private requests = new Map<string, { tokens: number; lastRefill: number }>();
+    private REFILL_RATE: number; // tokens per millisecond
+    private CAPACITY: number;
 
-import { Request, Response, NextFunction } from 'express';
-import { RateLimiterMemory, RateLimiterRedis, RateLimiterRes } from 'rate-limiter-flexible';
-import Redis from 'ioredis';
-import { cache } from '../lib/cache';
-import { createAlert } from '../lib/alertManager';
-import { logger } from '../utils/logger';
-import { getSecureUserId } from '../lib/anonUserHelper';
-
-// Rate limit configurations for different endpoints
-const RATE_LIMIT_CONFIGS = {
-    // Chat endpoints - more generous
-    chat: {
-        points: 1000,          // 60 requests
-        duration: 60,        // per 60 seconds
-        blockDuration: 120,  // block for 2 minutes if exceeded
-    },
-    // Conversation memory state endpoints can be polled by the UI. Keep these permissive to
-    // avoid retry-loops that lock users out of chat initialization.
-    memoryState: {
-        points: 300,         // 300 requests
-        duration: 60,        // per 60 seconds
-        blockDuration: 30,   // short block; UI should backoff
-    },
-    // Document generation - more restrictive
-    documents: {
-        points: 20,
-        duration: 60,
-        blockDuration: 300,
-    },
-    // Authentication endpoints - strict
-    auth: {
-        points: 25,
-        duration: 60,
-        blockDuration: 600,
-    },
-    // AI endpoints - based on cost
-    ai: {
-        points: 30,
-        duration: 60,
-        blockDuration: 180,
-    },
-    // General API - default
-    default: {
-        points: 1000,
-        duration: 60,
-        blockDuration: 60,
-    },
-    // Trusted IPs / Admins / Development - Very high limits
-    trusted: {
-        points: 10000,
-        duration: 60,
-        blockDuration: 5,
-    },
-};
-
-type RateLimitTier = keyof typeof RATE_LIMIT_CONFIGS;
-
-// Store for rate limiters
-const rateLimiters: Map<string, RateLimiterMemory | RateLimiterRedis> = new Map();
-
-/**
- * Initialize rate limiter for a tier
- */
-function getRateLimiter(tier: RateLimitTier): RateLimiterMemory | RateLimiterRedis {
-    const key = tier;
-
-    if (rateLimiters.has(key)) {
-        return rateLimiters.get(key)!;
+    constructor(capacity = 50, refillRatePerSec = 5) {
+        this.CAPACITY = capacity;
+        this.REFILL_RATE = refillRatePerSec / 1000;
     }
 
-    const config = RATE_LIMIT_CONFIGS[tier];
-    const redisClient = cache.getConnectedRedisClient();
+    public checkLimit(clientId: string): boolean {
+        const now = Date.now();
 
-    let limiter: RateLimiterMemory | RateLimiterRedis;
-
-    if (redisClient) {
-        // Use Redis for distributed rate limiting
-        limiter = new RateLimiterRedis({
-            storeClient: redisClient,
-            keyPrefix: `rl_${tier}`,
-            points: config.points,
-            duration: config.duration,
-            blockDuration: config.blockDuration,
-        });
-    } else {
-        const isProd = process.env.NODE_ENV === 'production';
-        if (isProd && process.env.REDIS_URL) {
-            // Force Redis via standard cache integration, avoiding permanent memory fallback on cold start
-            const redisConfigClient = new Redis(process.env.REDIS_URL);
-            limiter = new RateLimiterRedis({
-                storeClient: redisConfigClient,
-                keyPrefix: `rl_${tier}`,
-                points: config.points,
-                duration: config.duration,
-                blockDuration: config.blockDuration,
-            });
-        } else {
-            // Fallback to in-memory
-            limiter = new RateLimiterMemory({
-                keyPrefix: `rl_${tier}`,
-                points: config.points,
-                duration: config.duration,
-                blockDuration: config.blockDuration,
-            });
+        if (!this.requests.has(clientId)) {
+            this.requests.set(clientId, { tokens: this.CAPACITY - 1, lastRefill: now });
+            return true;
         }
-    }
 
-    rateLimiters.set(key, limiter);
-    return limiter;
-}
+        const record = this.requests.get(clientId)!;
+        const timePassed = now - record.lastRefill;
 
-/**
- * Get rate limit key from request
- * Combines user ID (if authenticated) with IP for uniqueness
- */
-function getRateLimitKey(req: Request): string {
-    const ip = req.ip || req.socket.remoteAddress || 'unknown';
-    const stableUserId = getSecureUserId(req);
+        // Refill
+        let tokens = record.tokens + (timePassed * this.REFILL_RATE);
+        if (tokens > this.CAPACITY) tokens = this.CAPACITY;
 
-    // Authenticated or session-bound anonymous users get their own bucket.
-    if (stableUserId) {
-        return `user_${stableUserId}`;
-    }
-
-    // Anonymous users are limited by IP
-    return `ip_${ip}`;
-}
-
-/**
- * Create user-based rate limiter middleware
- */
-export function createUserRateLimiter(tier: RateLimitTier = 'default') {
-    return async (req: Request, res: Response, next: NextFunction) => {
-        const limiter = getRateLimiter(tier);
-        const config = RATE_LIMIT_CONFIGS[tier];
-        const key = getRateLimitKey(req);
-
-        // Allow whitelisted IPs/Users (future implementation)
-        // if (isWhitelisted(req)) return next();
-
-        try {
-            const result = await limiter.consume(key);
-
-            // Add rate limit headers
-            res.setHeader('X-RateLimit-Limit', config.points);
-            res.setHeader('X-RateLimit-Remaining', result.remainingPoints);
-            res.setHeader('X-RateLimit-Reset', new Date(Date.now() + result.msBeforeNext).toISOString());
-
-            next();
-        } catch (error) {
-            if (error instanceof RateLimiterRes) {
-                const retryAfter = Math.ceil(error.msBeforeNext / 1000);
-
-                res.setHeader('Retry-After', retryAfter);
-                res.setHeader('X-RateLimit-Limit', config.points);
-                res.setHeader('X-RateLimit-Remaining', 0);
-                res.setHeader('X-RateLimit-Reset', new Date(Date.now() + error.msBeforeNext).toISOString());
-
-                // Trigger Alert for abuse
-                createAlert({
-                    type: "rate_limit",
-                    service: "api-gateway",
-                    severity: "medium", // Escalate to high if critical endpoint
-                    message: `Rate limit exceeded for ${tier} tier by ${key}`,
-                    resolved: false
-                });
-
-                return res.status(429).json({
-                    error: 'Too Many Requests',
-                    message: 'Has excedido el límite de solicitudes. Por favor espera antes de intentar de nuevo.',
-                    retryAfter,
-                    tier,
-                });
-            }
-
-            // Unknown error, let it pass but log it
-            logger.error('Rate limiter error:', { error });
-            next();
+        if (tokens >= 1) {
+            this.requests.set(clientId, { tokens: tokens - 1, lastRefill: now });
+            return true; // Allowed
         }
-    };
+
+        return false; // Rate limited
+    }
 }
 
-/**
- * Create a custom rate limiter for specific routes
- */
-export function createCustomRateLimiter(options: {
-    windowMs: number;
-    maxRequests: number;
-    keyPrefix: string;
-    message?: string;
-}) {
-    const redisClient = cache.getConnectedRedisClient();
-    let limiter: RateLimiterMemory | RateLimiterRedis;
-    const duration = Math.ceil(options.windowMs / 1000);
-
-    if (redisClient) {
-        limiter = new RateLimiterRedis({
-            storeClient: redisClient,
-            keyPrefix: options.keyPrefix,
-            points: options.maxRequests,
-            duration: duration,
-        });
-    } else {
-        const isProd = process.env.NODE_ENV === 'production';
-        if (isProd && process.env.REDIS_URL) {
-            const redisConfigClient = new Redis(process.env.REDIS_URL);
-            limiter = new RateLimiterRedis({
-                storeClient: redisConfigClient,
-                keyPrefix: options.keyPrefix,
-                points: options.maxRequests,
-                duration: duration,
-            });
-        } else {
-            limiter = new RateLimiterMemory({
-                keyPrefix: options.keyPrefix,
-                points: options.maxRequests,
-                duration: duration,
-            });
-        }
-    }
-
-    return async (req: Request, res: Response, next: NextFunction) => {
-        // Match the main /api rate limiter behavior (skip in development).
-        const isDev = process.env.NODE_ENV === 'development';
-        if (isDev) return next();
-
-        // Use authenticated ID or session-bound anonymous ID if available, else IP.
-        const userId = getSecureUserId(req);
-        const ip = req.ip || req.socket.remoteAddress || 'unknown';
-        const key = userId ? `user_${userId}` : `ip_${ip}`;
-
-        try {
-            const result = await limiter.consume(key);
-
-            res.setHeader('X-RateLimit-Limit', options.maxRequests);
-            res.setHeader('X-RateLimit-Remaining', result.remainingPoints);
-            res.setHeader('X-RateLimit-Reset', new Date(Date.now() + result.msBeforeNext).toISOString());
-
-            next();
-        } catch (error) {
-            if (error && typeof error === 'object' && 'msBeforeNext' in error) {
-                const limitErr = error as RateLimiterRes;
-                const retryAfter = Math.ceil(limitErr.msBeforeNext / 1000);
-
-                res.setHeader('Retry-After', retryAfter);
-                res.setHeader('X-RateLimit-Limit', options.maxRequests);
-                res.setHeader('X-RateLimit-Remaining', 0);
-                res.setHeader('X-RateLimit-Reset', new Date(Date.now() + limitErr.msBeforeNext).toISOString());
-
-                return res.status(429).json({
-                    error: 'Too Many Requests',
-                    message: options.message || 'Rate limit exceeded.',
-                    retryAfter
-                });
-            }
-            // Log unknown error
-            console.error('Custom Rate limiter error:', error);
-            next();
-        }
-    };
-}
-
-/**
- * Smart Rate Limiter that routes based on path
- * This is the main middleware to be used in routes
- */
-export const rateLimiter = (req: Request, res: Response, next: NextFunction) => {
-    // NOTE: this middleware is mounted at app.use('/api', rateLimiter).
-    // Use baseUrl + path so routing decisions are stable regardless of mount behavior.
-    const fullPath = `${req.baseUrl || ''}${req.path || ''}`.toLowerCase();
-
-    // Skip rate limiting for health checks and status endpoints
-    if (fullPath.includes('/health') || fullPath.includes('/status') || fullPath === '/' || fullPath === '/api') {
-        return next();
-    }
-
-    // Google OAuth redirects/callbacks should not be blocked by generic auth limiter,
-    // otherwise users can get locked out with long Retry-After windows.
-    if (fullPath.startsWith('/api/auth/google')) {
-        return next();
-    }
-
-    // Determine which limiter to use based on path
-    let tier: RateLimitTier = 'default';
-
-    // Check for Trusted Role (Admin) or Trusted IP (Internal)
-    const user = (req as any).user;
-    const ip = req.ip || req.socket.remoteAddress || '';
-    const isLocalhost = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1' || ip.includes('localhost');
-
-    // Check if user is admin (claims.role or role property depending on object structure)
-    const isAdmin = user?.claims?.role === 'admin' || user?.role === 'admin';
-
-    // In development, be more permissive - BYPASS rate limiting entirely
-    const isDev = process.env.NODE_ENV === 'development';
-
-    if (isDev) {
-        // Skip rate limiting entirely in development
-        return next();
-    }
-
-    // Avoid substring matching bugs (e.g. '/memory/chats' accidentally matching '/chat')
-    const hasSegment = (segment: string) => {
-        const re = new RegExp(`(^|/)${segment}(/|$)`, 'i');
-        return re.test(fullPath);
-    };
-
-    // UI polls this endpoint during chat init; keep it permissive to avoid 429/lockouts.
-    // Example: /api/memory/chats/pending-123/state
-    const isConversationMemoryState = /\/api\/memory\/chats\/[^/]+\/state(\/|$)/i.test(fullPath);
-
-    if (isAdmin || isLocalhost) {
-        tier = 'trusted';
-    } else if (isConversationMemoryState) {
-        tier = 'memoryState';
-    } else if (hasSegment('chat') || hasSegment('message')) {
-        tier = 'chat';
-    } else if (fullPath.includes('/document') || fullPath.includes('/export')) {
-        tier = 'documents';
-    } else if (fullPath.includes('/auth') || fullPath.includes('/login') || fullPath.includes('/register')) {
-        tier = 'auth';
-    } else if (fullPath.includes('/ai') || fullPath.includes('/generate') || fullPath.includes('/model')) {
-        tier = 'ai';
-    }
-
-    createUserRateLimiter(tier)(req, res, next);
-};
-
-
-/**
- * Get internal stats about active rate limiters
- */
-export function getRateLimitStats() {
-    const stats: Record<string, any> = {};
-    for (const [key, limiter] of rateLimiters.entries()) {
-        stats[key] = {
-            points: (limiter as any).points,
-            duration: (limiter as any).duration,
-            type: limiter instanceof RateLimiterRedis ? 'Redis' : 'Memory'
-        };
-    }
-    return stats;
-}
+export const rpcRateLimiter = new RateLimiter(100, 20); // RPC permite alta frecuencia
+export const httpRateLimiter = new RateLimiter(30, 2);  // HTTP (A11y dumps) es estricto
