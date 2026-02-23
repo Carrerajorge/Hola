@@ -380,7 +380,7 @@ function AppContent() {
   );
 }
 
-import OverlayHUD from "./components/overlay/OverlayHUD";
+import { OverlayHUD } from "./components/overlay/OverlayHUD";
 
 function App() {
   const isOverlayMode = typeof window !== 'undefined' && window.location.search.includes('mode=overlay');
