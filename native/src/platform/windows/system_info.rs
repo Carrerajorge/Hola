@@ -2,9 +2,10 @@
 #![allow(non_snake_case)]
 
 use napi::bindgen_prelude::*;
+use napi_derive::napi;
 
 use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
-use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX, RtlGetVersion, OSVERSIONINFOW};
+use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX, GetVersionExW, OSVERSIONINFOW};
 
 #[napi]
 pub fn get_battery_level_win() -> Result<f64> {
@@ -30,8 +31,8 @@ pub fn get_os_version_win() -> Result<String> {
         let mut info: OSVERSIONINFOW = std::mem::zeroed();
         info.dwOSVersionInfoSize = std::mem::size_of::<OSVERSIONINFOW>() as u32;
         
-        // Return result of RtlGetVersion directly as there's no safe fallback for exact build fetching on Windows RS 
-        if RtlGetVersion(&mut info).is_ok() {
+        let success = GetVersionExW(&mut info);
+        if success.is_ok() {
             Ok(format!("Windows {}.{} (Build {})", info.dwMajorVersion, info.dwMinorVersion, info.dwBuildNumber))
         } else {
             Ok("Windows (Unknown Version)".to_string())
