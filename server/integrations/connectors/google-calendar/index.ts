@@ -1,7 +1,2 @@
-import { manifest } from "./manifest";
-import { handler } from "./handler";
-
-export default {
-  manifest,
-  handler,
-};
+export { googlecalendarManifest } from "./manifest";
+export { handler } from "./handler";

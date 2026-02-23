@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/apiClient';
 import { whatsappWebEventStream, type WhatsAppWebStatus } from '@/lib/whatsapp-web-events';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { COUNTRIES } from '@/lib/countries';
 
 // Max time to wait before resetting busy state (safety net)
 const BUSY_TIMEOUT_MS = 20_000;
@@ -42,7 +44,7 @@ export function WhatsAppConnectDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
-  const [countryCode, setCountryCode] = useState('+51');
+  const [countryName, setCountryName] = useState('Perú');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [autoReply, setAutoReply] = useState(true);
   const lastQrRef = useRef<string | null>(null);
@@ -190,7 +192,10 @@ export function WhatsAppConnectDialog({
   };
 
   const generatePairingCode = async () => {
-    const validationErr = isValidPhone(countryCode, phoneNumber);
+    const selectedCountry = COUNTRIES.find(c => c.name === countryName);
+    const codeToUse = selectedCountry?.code || '+51';
+
+    const validationErr = isValidPhone(codeToUse, phoneNumber);
     if (validationErr) {
       setError(validationErr);
       return;
@@ -199,7 +204,7 @@ export function WhatsAppConnectDialog({
     startBusy();
     setError(null);
     try {
-      const cc = countryCode.trim().replace(/\s+/g, '');
+      const cc = codeToUse.trim().replace(/\s+/g, '');
       const num = phoneNumber.trim().replace(/\s+/g, '');
       const phone = `${cc}${num}`;
 
@@ -416,13 +421,25 @@ export function WhatsAppConnectDialog({
                 Vincular por número (alternativa al QR)
               </div>
               <div className="flex gap-2">
-                <input
-                  value={countryCode}
-                  onChange={(e) => setCountryCode(e.target.value)}
-                  placeholder="+51"
-                  className="h-9 w-20 rounded-md border bg-background px-2 text-sm"
+                <Select
+                  value={countryName}
+                  onValueChange={setCountryName}
                   disabled={busy}
-                />
+                >
+                  <SelectTrigger className="h-9 w-[130px] rounded-md border bg-background px-2 text-sm flex gap-2">
+                    <SelectValue placeholder="+51" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-[280px]">
+                    <SelectGroup>
+                      {COUNTRIES.map((c) => (
+                        <SelectItem key={c.name} value={c.name} className="cursor-pointer">
+                          <span className="mr-2 text-base">{c.flag}</span>
+                          {c.code}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
                 <input
                   value={phoneNumber}
                   onChange={(e) => setPhoneNumber(e.target.value.replace(/[^0-9]/g, ''))}

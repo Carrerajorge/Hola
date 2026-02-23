@@ -3,8 +3,7 @@ import type { Response } from "express";
 import { toolRegistry, type ToolContext, type ToolResult } from "./toolRegistry";
 import { emitTraceEvent } from "./unifiedChatHandler";
 import type { RequestSpec } from "./requestSpec";
-import { renderPresentation, renderDocument, renderSpreadsheet } from "./artifactRenderer";
-import { PresentationSpecSchema, DocSpecSchema, SheetSpecSchema } from "./builderSpec";
+
 import { randomUUID } from "crypto";
 import { getGeminiClientOrThrow } from "../lib/gemini";
 import { requestUnderstandingAgent } from "./requestUnderstanding";
@@ -16,154 +15,10 @@ export interface AgentExecutorOptions {
   userId: string;
   chatId: string;
   requestSpec: RequestSpec;
+  accessLevel?: 'owner' | 'trusted' | 'unknown';
 }
 
-interface FunctionDeclaration {
-  name: string;
-  description: string;
-  parameters: {
-    type: string;
-    properties: Record<string, any>;
-    required?: string[];
-  };
-}
-
-const AGENT_TOOLS: FunctionDeclaration[] = [
-  {
-    name: "web_search",
-    description: "Search the web for current information on any topic",
-    parameters: {
-      type: "object",
-      properties: {
-        query: { type: "string", description: "The search query" },
-        maxResults: { type: "number", description: "Maximum results (default 5)" }
-      },
-      required: ["query"]
-    }
-  },
-  {
-    name: "fetch_url",
-    description: "Fetch and extract text content from a URL",
-    parameters: {
-      type: "object",
-      properties: {
-        url: { type: "string", description: "URL to fetch" },
-        extractText: { type: "boolean", description: "Extract readable text (default true)" }
-      },
-      required: ["url"]
-    }
-  },
-  {
-    name: "browse_and_act",
-    description: "Open a real browser and autonomously accomplish a goal: navigate websites, fill forms, click buttons, make reservations, purchases, etc. Use this when you need to INTERACT with a website (not just read it). The browser uses AI vision to analyze pages and decide actions automatically.",
-    parameters: {
-      type: "object",
-      properties: {
-        url: { type: "string", description: "Starting URL to navigate to (e.g., https://www.mesa247.pe)" },
-        goal: { type: "string", description: "Detailed description of what to accomplish (e.g., 'Make a reservation for 2 people on February 15, 2026 at 8:00 PM at a restaurant in Lima')" },
-        maxSteps: { type: "number", description: "Maximum browser actions to take (default 20)" }
-      },
-      required: ["url", "goal"]
-    }
-  },
-  {
-    name: "create_presentation",
-    description: "Create a PowerPoint presentation with slides",
-    parameters: {
-      type: "object",
-      properties: {
-        title: { type: "string", description: "Presentation title" },
-        slides: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              title: { type: "string" },
-              content: { type: "string" },
-              bullets: { type: "array", items: { type: "string" } },
-              layout: { type: "string", enum: ["title", "content", "twoColumn", "imageLeft", "imageRight"] }
-            }
-          },
-          description: "Array of slide definitions"
-        },
-        theme: { type: "string", description: "Theme name (default 'professional')" }
-      },
-      required: ["title", "slides"]
-    }
-  },
-  {
-    name: "create_document",
-    description: "Create a Word document with sections and content",
-    parameters: {
-      type: "object",
-      properties: {
-        title: { type: "string", description: "Document title" },
-        sections: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              heading: { type: "string" },
-              content: { type: "string" },
-              bullets: { type: "array", items: { type: "string" } },
-              level: { type: "number" }
-            }
-          },
-          description: "Document sections"
-        }
-      },
-      required: ["title", "sections"]
-    }
-  },
-  {
-    name: "create_spreadsheet",
-    description: "Create an Excel spreadsheet with data",
-    parameters: {
-      type: "object",
-      properties: {
-        title: { type: "string", description: "Spreadsheet title" },
-        sheets: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              name: { type: "string" },
-              headers: { type: "array", items: { type: "string" } },
-              rows: { type: "array", items: { type: "array" } }
-            }
-          },
-          description: "Sheet definitions"
-        }
-      },
-      required: ["title", "sheets"]
-    }
-  },
-  {
-    name: "analyze_data",
-    description: "Analyze data and provide statistical insights",
-    parameters: {
-      type: "object",
-      properties: {
-        data: { type: "string", description: "Data to analyze (JSON, CSV, or description)" },
-        analysisType: { type: "string", enum: ["summary", "trends", "comparison", "forecast"] }
-      },
-      required: ["data"]
-    }
-  },
-  {
-    name: "generate_chart",
-    description: "Generate a chart visualization",
-    parameters: {
-      type: "object",
-      properties: {
-        chartType: { type: "string", enum: ["bar", "line", "pie", "scatter", "area"] },
-        title: { type: "string" },
-        data: { type: "object", description: "Chart data with labels and values" }
-      },
-      required: ["chartType", "data"]
-    }
-  }
-];
+import { type FunctionDeclaration, AGENT_TOOLS } from "../config/agentTools";
 
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { BUNDLED_SKILL_TOOLS } from "./tools/bundledSkillTools";
@@ -183,272 +38,55 @@ const dynamicSkillTools: FunctionDeclaration[] = BUNDLED_SKILL_TOOLS.map(t => {
 
 const ALL_AGENT_TOOLS = [...AGENT_TOOLS, ...dynamicSkillTools];
 
-function getToolsForIntent(intent: string): FunctionDeclaration[] {
+function getToolsForIntent(intent: string, accessLevel: 'owner' | 'trusted' | 'unknown' = 'owner'): FunctionDeclaration[] {
+  let matchedTools = ALL_AGENT_TOOLS;
+
   switch (intent) {
     case "research":
-      return AGENT_TOOLS.filter(t => ["web_search", "fetch_url"].includes(t.name));
-    case "presentation_creation":
-      return AGENT_TOOLS.filter(t => ["create_presentation", "web_search"].includes(t.name));
-    case "document_generation":
-      return AGENT_TOOLS.filter(t => ["create_document", "web_search"].includes(t.name));
-    case "spreadsheet_creation":
-      return AGENT_TOOLS.filter(t => ["create_spreadsheet", "analyze_data"].includes(t.name));
-    case "data_analysis":
-      return AGENT_TOOLS.filter(t => ["analyze_data", "generate_chart", "create_spreadsheet"].includes(t.name));
-    case "web_automation":
-      return AGENT_TOOLS.filter(t => ["web_search", "fetch_url", "browse_and_act"].includes(t.name));
-    default:
-      return ALL_AGENT_TOOLS;
-  }
-}
-
-type ReservationMissingField =
-  | "restaurant"
-  | "date"
-  | "time"
-  | "partySize"
-  | "contactName"
-  | "contactPhone"
-  | "contactEmail";
-
-interface ReservationDetails {
-  restaurant?: string;
-  date?: string;
-  time?: string;
-  partySize?: number;
-  contactName?: string;
-  phone?: string;
-  email?: string;
-  location?: string;
-}
-
-const RESERVATION_FIELD_LABELS: Record<ReservationMissingField, string> = {
-  restaurant: "restaurante exacto",
-  date: "fecha exacta (dia/mes/anio)",
-  time: "hora exacta (ej. 20:00 o 8:00 pm)",
-  partySize: "cantidad de personas",
-  contactName: "nombre para la reserva",
-  contactPhone: "telefono de contacto",
-  contactEmail: "email de contacto",
-};
-
-function normalizeSpaces(value: string): string {
-  return String(value || "").replace(/\s+/g, " ").trim();
-}
-
-function collectRecentUserText(messages: Array<{ role: string; content: string }>): string {
-  return messages
-    .filter((m) => m.role === "user")
-    .slice(-4)
-    .map((m) => normalizeSpaces(m.content))
-    .filter(Boolean)
-    .join(" ");
-}
-
-function isRestaurantReservationRequest(text: string): boolean {
-  const normalized = normalizeSpaces(text).toLowerCase();
-  if (!normalized) return false;
-  const hasReservationVerb = /\b(reserva|reservar|reservacion|reservation|book|booking)\b/i.test(normalized);
-  const hasRestaurantTerm = /\b(restaurante|restaurant|mesa|table)\b/i.test(normalized);
-  // Also match "reserva en Cala" (known restaurant) or "reserva en [Name] para X personas"
-  const hasReservaEnPattern = /\breserva(?:r)?\s+(?:en|at)\s+[A-Za-zÁÉÍÓÚÑáéíóúñ'\-]+/i.test(normalized);
-  // Match "reserva para X personas" (implies restaurant context)
-  const hasReservaParaPersonas = /\breserva(?:r|cion)?\b.*\b\d+\s*personas?\b/i.test(normalized);
-  return hasReservationVerb && (hasRestaurantTerm || hasReservaEnPattern || hasReservaParaPersonas);
-}
-
-function extractReservationDetails(text: string): ReservationDetails {
-  const source = normalizeSpaces(text);
-  const details: ReservationDetails = {};
-  if (!source) return details;
-
-  const partyMatch =
-    source.match(/\b(?:para|for)\s+(\d{1,2})\s*(?:personas?|people|guests?|comensales?)\b/i) ||
-    source.match(/\b(\d{1,2})\s*(?:personas?|people|guests?|comensales?)\b/i);
-  if (partyMatch) {
-    const parsed = Number(partyMatch[1]);
-    if (Number.isFinite(parsed) && parsed > 0) details.partySize = parsed;
-  }
-
-  const monthEs = "enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre";
-  const monthEn = "january|february|march|april|may|june|july|august|september|october|november|december";
-  const datePatterns: RegExp[] = [
-    /\b\d{4}-\d{2}-\d{2}\b/i,
-    /\b\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})\b/i,
-    new RegExp(`\\b\\d{1,2}\\s+de\\s+(?:${monthEs})(?:\\s+de?\\s*\\d{4})?\\b`, "i"),
-    new RegExp(`\\b(?:${monthEn})\\s+\\d{1,2}(?:,\\s*\\d{4})?\\b`, "i"),
-    /\b(?:hoy|manana|mañana|today|tomorrow)\b/i,
-    /\b(?:d[ií]a|el)\s+(\d{1,2})\b/i,
-  ];
-  for (const pattern of datePatterns) {
-    const match = source.match(pattern);
-    if (match?.[0]) {
-      details.date = normalizeSpaces(match[0]);
+      matchedTools = AGENT_TOOLS.filter(t => ["web_search", "fetch_url"].includes(t.name));
       break;
-    }
+    case "presentation_creation":
+      matchedTools = AGENT_TOOLS.filter(t => ["create_presentation", "web_search"].includes(t.name));
+      break;
+    case "document_generation":
+      matchedTools = AGENT_TOOLS.filter(t => ["create_document", "web_search"].includes(t.name));
+      break;
+    case "spreadsheet_creation":
+      matchedTools = AGENT_TOOLS.filter(t => ["create_spreadsheet", "analyze_data"].includes(t.name));
+      break;
+    case "data_analysis":
+      matchedTools = AGENT_TOOLS.filter(t => ["analyze_data", "generate_chart", "create_spreadsheet"].includes(t.name));
+      break;
+    case "web_automation":
+      matchedTools = AGENT_TOOLS.filter(t => ["web_search", "fetch_url", "browse_and_act"].includes(t.name));
+      break;
   }
 
-  const timeMatch =
-    source.match(/\b(?:a las|at)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)\b/i) ||
-    source.match(/\b(\d{1,2}:\d{2}\s*(?:am|pm)?)\b/i) ||
-    source.match(/\b(\d{1,2}\s*(?:am|pm|a\.m\.|p\.m\.))\b/i);
-  if (timeMatch?.[1]) {
-    details.time = normalizeSpaces(timeMatch[1]);
+  // Filter out sensitive tools if user is not the owner
+  if (accessLevel !== 'owner') {
+    const sensitiveToolPatterns = ["browse_and_act", "skill_shell", "skill_run_command", "skill_system", "skill_file"];
+    matchedTools = matchedTools.filter(t => !sensitiveToolPatterns.some(pattern => t.name.includes(pattern)));
   }
 
-  // Pattern 1 (highest priority): "restaurante [Name]" — name comes AFTER "restaurante" (e.g., "restaurante Cala")
-  const restaurantAfterKeyword = source.match(
-    /\b(?:restaurante|restaurant)\s+([A-Za-zÁÉÍÓÚÑáéíóúñ'\-]+)(?:\s|$|,)/i
-  );
-  const afterKeywordCandidate = restaurantAfterKeyword?.[1]?.toLowerCase();
-  const afterKeywordStopwords = new Set([
-    "para",
-    "for",
-    "en",
-    "in",
-    "de",
-    "del",
-    "la",
-    "el",
-    "los",
-    "las",
-    "the",
-    "at",
-  ]);
-  const restaurantAfterKeywordValue =
-    afterKeywordCandidate && afterKeywordStopwords.has(afterKeywordCandidate)
-      ? undefined
-      : restaurantAfterKeyword?.[1];
-  // Pattern 2: "en [Name] restaurante" — name comes BEFORE "restaurante" (e.g., "en Cala restaurante")
-  // Skip articles (el, la, los, las, the) that may appear before "restaurante"
-  const restaurantBeforeKeyword = source.match(
-    /\b(?:reserva(?:r)?|book(?:ing)?)\s+(?:mesa|table)?\s*(?:en|at)\s+(?:el\s+|la\s+|los\s+|las\s+|the\s+)?(.+?)\s+(?:restaurante|restaurant)\b/i
-  );
-  // Pattern 3: "reserva en [Name]" — broader fallback (single token to avoid greediness)
-  const restaurantByReservePattern = source.match(
-    /\b(?:reserva(?:r)?|book(?:ing)?)\s+(?:mesa|table)?\s*(?:en|at)\s+(?:el\s+|la\s+|the\s+)?([A-Za-zÁÉÍÓÚÑáéíóúñ'\-]+)(?:\s|$|,)/i
-  );
-  // Priority: afterKeyword > beforeKeyword > byReservePattern
-  const restaurantRaw = restaurantAfterKeywordValue || restaurantBeforeKeyword?.[1] || restaurantByReservePattern?.[1];
-  if (restaurantRaw) {
-    // Clean up: remove leading articles and trailing punctuation
-    details.restaurant = normalizeSpaces(
-      restaurantRaw
-        .replace(/^(?:en|el|la|los|las|the)\s+/i, "")
-        .replace(/[,;.]$/, ""),
-    );
+  // Restrict completely unknown users to safe, read-only tools
+  if (accessLevel === 'unknown') {
+    const safeToolPatterns = ["web_search", "fetch_url", "analyze_data"];
+    matchedTools = matchedTools.filter(t => safeToolPatterns.some(pattern => t.name.includes(pattern)));
   }
 
-  // Prefer "restaurante en [City]" pattern — capture single word city name (no spaces to avoid greediness)
-  const locationAfterRestaurant = source.match(
-    /\b(?:restaurante|restaurant)\s+(?:en|in|de)\s+([A-Za-zÁÉÍÓÚÑáéíóúñ'\-]+)(?:\s|,|$)/i
-  );
-  const locationGeneric = source.match(
-    /\b(?:en|in)\s+([A-Za-zÁÉÍÓÚÑáéíóúñ'\-]+)\s+(?:para|for|el|on|a las|at)\b/i
-  );
-  const locationMatch = locationAfterRestaurant || locationGeneric;
-  if (locationMatch?.[1]) {
-    // Avoid setting location to the restaurant name itself
-    const loc = normalizeSpaces(locationMatch[1]);
-    if (loc.toLowerCase() !== (details.restaurant || "").toLowerCase()) {
-      details.location = loc;
-    }
-  }
-  if (!details.location && details.restaurant) {
-    const cityFromRestaurant = details.restaurant.match(/\bde\s+([A-Za-zÁÉÍÓÚÑáéíóúñ'\- ]{2,40})$/i);
-    if (cityFromRestaurant?.[1]) {
-      details.location = normalizeSpaces(cityFromRestaurant[1]);
-    }
-  }
-
-  const emailMatch = source.match(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i);
-  if (emailMatch?.[0]) {
-    details.email = emailMatch[0];
-  }
-
-  const sourceWithoutEmails = source.replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, " ");
-  const labeledPhoneMatch = sourceWithoutEmails.match(
-    /\b(?:telefono|tel[eé]fono|phone|cel|celular|whatsapp|n[uú]mero|mi\s+numero)\b\s*(?:es|de|:|\-)?\s*(\+?\d[\d\s().-]{7,}\d)\b/i
-  );
-  if (labeledPhoneMatch?.[1]) {
-    const candidate = normalizeSpaces(labeledPhoneMatch[1]);
-    const digitCount = candidate.replace(/\D/g, "").length;
-    if (digitCount >= 8 && digitCount <= 15) {
-      details.phone = candidate;
-    }
-  }
-
-  if (!details.phone) {
-    const loosePhoneMatches = sourceWithoutEmails.match(/\+?\d[\d\s().-]{8,}\d/g) || [];
-    for (const rawMatch of loosePhoneMatches) {
-      const candidate = normalizeSpaces(rawMatch);
-      if (/[:/]/.test(candidate)) continue; // avoid date/time-like tokens
-      const digitCount = candidate.replace(/\D/g, "").length;
-      if (digitCount >= 8 && digitCount <= 15) {
-        details.phone = candidate;
-        break;
-      }
-    }
-  }
-
-  const nameMatch = source.match(
-    /\b(?:a nombre de|(?:mi\s+)?nombre(?:\s+(?:de|es))?|name(?:\s+is)?|my name is|me llamo|soy)\s*[:\-]?\s*([A-Za-zÁÉÍÓÚÑáéíóúñ'\- ]{2,60})/i
-  );
-  if (nameMatch?.[1]) {
-    const cleaned = normalizeSpaces(nameMatch[1]).split(/\b(?:telefono|tel|phone|email|correo|a\s+las|para|n[uú]mero|mi\s+numero|mi\s+correo|mi\s+tel)\b/i)[0].trim();
-    if (cleaned.length >= 2) {
-      details.contactName = cleaned;
-    }
-  }
-
-  return details;
+  return matchedTools;
 }
 
-function getMissingReservationFields(details: ReservationDetails): ReservationMissingField[] {
-  const missing: ReservationMissingField[] = [];
-  if (!details.restaurant) missing.push("restaurant");
-  if (!details.date) missing.push("date");
-  if (!details.time) missing.push("time");
-  if (!details.partySize) missing.push("partySize");
-  if (!details.contactName) missing.push("contactName");
-  if (!details.phone) missing.push("contactPhone");
-  if (!details.email) missing.push("contactEmail");
-  return missing;
-}
-
-function formatReservationDetails(details: ReservationDetails): string {
-  const parts: string[] = [];
-  if (details.restaurant) parts.push(`restaurante="${details.restaurant}"`);
-  if (details.location) parts.push(`ciudad="${details.location}"`);
-  if (details.date) parts.push(`fecha="${details.date}"`);
-  if (details.time) parts.push(`hora="${details.time}"`);
-  if (details.partySize) parts.push(`personas=${details.partySize}`);
-  if (details.contactName) parts.push(`nombre="${details.contactName}"`);
-  if (details.phone) parts.push(`telefono="${details.phone}"`);
-  if (details.email) parts.push(`email="${details.email}"`);
-  return parts.join(", ");
-}
-
-function buildReservationClarificationQuestion(
-  details: ReservationDetails,
-  missingFields: ReservationMissingField[]
-): string {
-  const knownParts: string[] = [];
-  if (details.restaurant) knownParts.push(`**Restaurante:** ${details.restaurant}`);
-  if (details.location) knownParts.push(`**Ciudad:** ${details.location}`);
-  if (details.date) knownParts.push(`**Fecha:** ${details.date}`);
-  if (details.time) knownParts.push(`**Hora:** ${details.time}`);
-  if (details.partySize) knownParts.push(`**Personas:** ${details.partySize}`);
-  if (details.contactName) knownParts.push(`**Nombre:** ${details.contactName}`);
-  if (details.phone) knownParts.push(`**Teléfono:** ${details.phone}`);
-  if (details.email) knownParts.push(`**Email:** ${details.email}`);
-
-  const knownBlock = knownParts.length > 0
-    ? `✅ **Datos detectados:**  \n${knownParts.join("  \n")}\n\n`
-    : "";
-  const missingList = missingFields.map((field) => `- ${RESERVATION_FIELD_LABELS[field]}`).join("\n");
-  return `${knownBlock}📋 **Para completar la reserva necesito estos datos:**\n${missingList}\n\nCompártelos en un solo mensaje y continúo con la reserva real en la web.`;
-}
+import {
+  type ReservationDetails,
+  type ReservationMissingField,
+  extractReservationDetails,
+  getMissingReservationFields,
+  isRestaurantReservationRequest,
+  normalizeSpaces,
+  formatReservationDetails,
+  buildReservationClarificationQuestion
+} from "./utils/reservationExtractor";
 
 async function executeToolCall(
   toolName: string,
@@ -508,367 +146,9 @@ async function executeToolCall(
         break;
       }
 
-      case "browse_and_act": {
-        let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
-        try {
-          const { universalBrowserController } = await import("./computerUse/universalBrowserController");
-          const sessionId = await universalBrowserController.createSession("chrome-desktop");
-          const goalText = String(args.goal || "");
-          const isReservationGoal = /\b(reserv(a|ar|ation)|book(ing)?|mesa|restaurant|restaurante)\b/i.test(goalText);
-          const normalizedGoal = goalText.toLowerCase();
-          const isCalaReservation = isReservationGoal && /\bcala\b/i.test(normalizedGoal);
-          const goalDetails = isReservationGoal ? extractReservationDetails(goalText) : undefined;
-          // Merge: prefer pre-extracted details from user's original message, fill gaps from goal text
-          const reservationDetailsFromGoal = isReservationGoal
-            ? {
-              ...goalDetails,
-              ...(preExtractedReservation || {}),
-              // Keep goal details only where pre-extracted is empty
-              restaurant: preExtractedReservation?.restaurant || goalDetails?.restaurant,
-              date: preExtractedReservation?.date || goalDetails?.date,
-              time: preExtractedReservation?.time || goalDetails?.time,
-              partySize: preExtractedReservation?.partySize || goalDetails?.partySize,
-              contactName: preExtractedReservation?.contactName || goalDetails?.contactName,
-              email: preExtractedReservation?.email || goalDetails?.email,
-              phone: preExtractedReservation?.phone || goalDetails?.phone,
-            }
-            : undefined;
-          const requestedUrl = String(args.url || "");
-          const effectiveUrl = isCalaReservation
-            ? "https://www.covermanager.com/reserve/module_restaurant/cala-restaurante/spanish"
-            : (requestedUrl || "https://www.mesa247.pe");
-          console.log(`[AgentExecutor] Browser session created: ${sessionId}, navigating to ${effectiveUrl}`);
-          const requestedMaxSteps = Number.isFinite(Number(args.maxSteps)) ? Number(args.maxSteps) : undefined;
-          // Allow up to 20 steps, 3 minutes total runtime, 25s per Gemini vision decision
-          const maxSteps = Math.max(1, Math.min(requestedMaxSteps ?? 15, 20));
-          const maxRuntimeMs = 300000;  // 5 minutes max
-          const decisionTimeoutMs = 25000;  // 25s per Gemini vision decision
-          try {
-            // Send immediate "browser_started" event so the UI opens the virtual computer immediately
-            if (sseRes) {
-              try {
-                const r = sseRes as any;
-                if (!r.writableEnded && !r.destroyed) {
-                  sseRes.write(`event: browser_step\ndata: ${JSON.stringify({
-                    runId,
-                    stepNumber: 0,
-                    totalSteps: maxSteps,
-                    action: "navigate",
-                    reasoning: `Abriendo navegador y navegando a ${effectiveUrl}...`,
-                    goalProgress: "0%",
-                    screenshot: "",
-                    url: effectiveUrl,
-                    title: "Cargando...",
-                  })}\n\n`);
-                  if (typeof r.flush === "function") r.flush();
-                }
-              } catch { }
-            }
 
-            await universalBrowserController.navigate(sessionId, effectiveUrl);
 
-            // Start heartbeat: sends keep-alive events every 5s during long operations
-            if (sseRes) {
-              heartbeatInterval = setInterval(() => {
-                try {
-                  const r = sseRes as any;
-                  if (!r.writableEnded && !r.destroyed) {
-                    sseRes.write(`event: heartbeat\ndata: ${JSON.stringify({ runId, timestamp: Date.now() })}\n\n`);
-                    if (typeof r.flush === "function") r.flush();
-                  } else {
-                    if (heartbeatInterval) clearInterval(heartbeatInterval);
-                  }
-                } catch {
-                  if (heartbeatInterval) clearInterval(heartbeatInterval);
-                }
-              }, 5000);
-            }
 
-            // Real-time step callback: sends browser_step SSE events with screenshots
-            // Also sends browser_report events for inline chat display
-            const onBrowserStep = (step: {
-              stepNumber: number;
-              totalSteps: number;
-              action: string;
-              reasoning: string;
-              goalProgress: string;
-              screenshot: string;
-              url: string;
-              title: string;
-            }) => {
-              try {
-                if (!sseRes) return;
-                // Emit browser_step event with screenshot for real-time UI (VirtualComputer)
-                const r = sseRes as any;
-                if (!r.writableEnded && !r.destroyed) {
-                  const sseData = {
-                    runId,
-                    stepNumber: step.stepNumber,
-                    totalSteps: step.totalSteps,
-                    action: step.action,
-                    reasoning: step.reasoning,
-                    goalProgress: step.goalProgress,
-                    screenshot: step.screenshot, // base64 JPEG
-                    url: step.url,
-                    title: step.title,
-                  };
-                  sseRes.write(`event: browser_step\ndata: ${JSON.stringify(sseData)}\n\n`);
-                  // Also emit browser_report for inline chat step display
-                  // Emit for ALL steps (not just ones with screenshots) so user sees every action
-                  if (step.stepNumber > 0) {
-                    sseRes.write(`event: browser_report\ndata: ${JSON.stringify({
-                      runId,
-                      stepNumber: step.stepNumber,
-                      action: step.action,
-                      reasoning: step.reasoning,
-                      goalProgress: step.goalProgress,
-                      screenshot: step.screenshot || "",
-                      url: step.url,
-                    })}\n\n`);
-                  }
-                  if (typeof (sseRes as any).flush === "function") {
-                    (sseRes as any).flush();
-                  }
-                }
-              } catch (sseErr) {
-                console.warn(`[AgentExecutor] SSE browser_step write error:`, sseErr);
-              }
-            };
-
-            const taskResult = isCalaReservation
-              ? await (async () => {
-                const missingFields = reservationDetailsFromGoal
-                  ? getMissingReservationFields(reservationDetailsFromGoal)
-                  : (["restaurant", "date", "time", "partySize", "contactName", "contactPhone", "contactEmail"] as string[]);
-                if (missingFields.length > 0) {
-                  return {
-                    success: false,
-                    steps: ["Cala reservation requires additional user data before execution."],
-                    data: {
-                      status: "needs_user_input",
-                      missingFields,
-                      question: `Para reservar en Cala necesito: ${missingFields.join(", ")}.`,
-                    },
-                    screenshots: [],
-                  };
-                }
-                return universalBrowserController.runCalaReservation(
-                  sessionId,
-                  {
-                    restaurant: reservationDetailsFromGoal?.restaurant,
-                    date: reservationDetailsFromGoal?.date,
-                    time: reservationDetailsFromGoal?.time,
-                    partySize: reservationDetailsFromGoal?.partySize,
-                    contactName: reservationDetailsFromGoal?.contactName,
-                    email: reservationDetailsFromGoal?.email,
-                    phone: reservationDetailsFromGoal?.phone,
-                  },
-                  onBrowserStep,
-                  { maxRuntimeMs: 300000 }
-                );
-              })()
-              : await universalBrowserController.agenticNavigate(
-                sessionId,
-                args.goal,
-                maxSteps,
-                onBrowserStep,
-                {
-                  maxRuntimeMs,
-                  decisionTimeoutMs,
-                  maxConsecutiveDecisionFailures: isReservationGoal ? 3 : 2,
-                }
-              );
-            // Stop heartbeat after task completes
-            if (heartbeatInterval) clearInterval(heartbeatInterval);
-
-            console.log(`[AgentExecutor] Browser task completed: success=${taskResult.success}, steps=${taskResult.steps.length}, maxSteps=${maxSteps}, runtimeMs=${maxRuntimeMs}`);
-            const rawStatus = String(taskResult?.data?.status || "").toLowerCase();
-            const hasConfirmationEvidence = Boolean(
-              taskResult?.data?.confirmationCode ||
-              taskResult?.data?.reservationCode ||
-              taskResult?.data?.bookingReference ||
-              taskResult?.data?.confirmation
-            );
-            const explicitNeedsInput = rawStatus === "needs_user_input" || Array.isArray(taskResult?.data?.missingFields);
-            let normalizedSuccess = taskResult.success === true;
-            if (isReservationGoal) {
-              if (explicitNeedsInput) {
-                normalizedSuccess = false;
-              } else if (rawStatus === "confirmed" || rawStatus === "completed" || rawStatus === "success") {
-                normalizedSuccess = true;
-              } else if (!hasConfirmationEvidence) {
-                normalizedSuccess = false;
-              }
-              if (!taskResult?.data?.status && !normalizedSuccess) {
-                taskResult.data = { ...(taskResult.data || {}), status: "unconfirmed" };
-              }
-            }
-            result = {
-              success: normalizedSuccess,
-              steps: taskResult.steps,
-              data: taskResult.data,
-              stepsCount: taskResult.steps.length,
-              screenshotsCount: taskResult.screenshots.length,
-            };
-          } finally {
-            if (heartbeatInterval) clearInterval(heartbeatInterval);
-            await universalBrowserController.closeSession(sessionId).catch(() => { });
-            console.log(`[AgentExecutor] Browser session closed: ${sessionId}`);
-          }
-        } catch (err: any) {
-          if (heartbeatInterval) clearInterval(heartbeatInterval);
-          console.error(`[AgentExecutor] browse_and_act error:`, err?.message || err);
-          console.error(`[AgentExecutor] browse_and_act stack:`, err?.stack?.split('\n').slice(0, 5).join('\n'));
-          result = { error: err.message, details: err?.cause?.message || err?.code || 'unknown' };
-        }
-        break;
-      }
-
-      case "create_presentation": {
-        const slideSpec = {
-          title: args.title,
-          theme: args.theme || "professional",
-          slides: args.slides.map((s: any, i: number) => ({
-            id: `slide-${i + 1}`,
-            layout: s.layout || "content",
-            elements: [
-              ...(s.title ? [{
-                id: `title-${i}`,
-                type: "text" as const,
-                content: s.title,
-                position: { x: 5, y: 5, w: 90, h: 15 },
-                style: { fontSize: 32, bold: true, align: "center" as const }
-              }] : []),
-              ...(s.content ? [{
-                id: `content-${i}`,
-                type: "text" as const,
-                content: s.content,
-                position: { x: 5, y: 25, w: 90, h: 60 }
-              }] : []),
-              ...(s.bullets ? [{
-                id: `bullets-${i}`,
-                type: "list" as const,
-                items: s.bullets,
-                position: { x: 5, y: 25, w: 90, h: 60 }
-              }] : [])
-            ]
-          })),
-          metadata: { author: context.userId, createdAt: new Date() }
-        };
-
-        const validatedSpec = PresentationSpecSchema.parse(slideSpec);
-        const { buffer } = await renderPresentation(validatedSpec);
-        const filename = `${args.title.replace(/[^a-zA-Z0-9]/g, "_")}_${Date.now()}.pptx`;
-        const fs = await import("fs/promises");
-        const path = await import("path");
-        const outputDir = path.join(process.cwd(), "generated_artifacts");
-        await fs.mkdir(outputDir, { recursive: true });
-        const outputPath = path.join(outputDir, filename);
-        await fs.writeFile(outputPath, buffer);
-
-        result = { success: true, filename, slidesCount: args.slides.length };
-        artifact = { type: "presentation", url: `/api/artifacts/${filename}`, name: filename };
-
-        await emitTraceEvent(runId, "artifact_created", {
-          artifact: {
-            id: randomUUID(),
-            type: "presentation",
-            name: filename,
-            url: artifact.url,
-            size: buffer.length,
-            mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-          }
-        });
-        break;
-      }
-
-      case "create_document": {
-        const docSpec = {
-          title: args.title,
-          sections: args.sections.map((s: any, i: number) => ({
-            id: `section-${i + 1}`,
-            heading: s.heading,
-            level: s.level || 1,
-            content: s.content ? [{ type: "paragraph" as const, text: s.content }] : [],
-            bullets: s.bullets
-          })),
-          metadata: { author: context.userId, createdAt: new Date() }
-        };
-
-        const validatedSpec = DocSpecSchema.parse(docSpec);
-        const { buffer } = await renderDocument(validatedSpec);
-        const filename = `${args.title.replace(/[^a-zA-Z0-9]/g, "_")}_${Date.now()}.docx`;
-        const fs = await import("fs/promises");
-        const path = await import("path");
-        const outputDir = path.join(process.cwd(), "generated_artifacts");
-        await fs.mkdir(outputDir, { recursive: true });
-        const outputPath = path.join(outputDir, filename);
-        await fs.writeFile(outputPath, buffer);
-
-        result = { success: true, filename, sectionsCount: args.sections.length };
-        artifact = { type: "document", url: `/api/artifacts/${filename}`, name: filename };
-
-        await emitTraceEvent(runId, "artifact_created", {
-          artifact: {
-            id: randomUUID(),
-            type: "document",
-            name: filename,
-            url: artifact.url,
-            size: buffer.length,
-            mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-          }
-        });
-        break;
-      }
-
-      case "create_spreadsheet": {
-        const sheetSpec = {
-          title: args.title,
-          sheets: args.sheets.map((s: any, i: number) => ({
-            id: `sheet-${i + 1}`,
-            name: s.name || `Sheet${i + 1}`,
-            columns: s.headers.map((h: string, j: number) => ({
-              id: `col-${j}`,
-              header: h,
-              type: "text" as const,
-              width: 15
-            })),
-            rows: s.rows.map((row: any[], k: number) => ({
-              id: `row-${k}`,
-              cells: row.map((cell, l) => ({
-                columnId: `col-${l}`,
-                value: cell
-              }))
-            }))
-          })),
-          metadata: { author: context.userId, createdAt: new Date() }
-        };
-
-        const validatedSpec = SheetSpecSchema.parse(sheetSpec);
-        const { buffer } = await renderSpreadsheet(validatedSpec);
-        const filename = `${args.title.replace(/[^a-zA-Z0-9]/g, "_")}_${Date.now()}.xlsx`;
-        const fs = await import("fs/promises");
-        const path = await import("path");
-        const outputDir = path.join(process.cwd(), "generated_artifacts");
-        await fs.mkdir(outputDir, { recursive: true });
-        const outputPath = path.join(outputDir, filename);
-        await fs.writeFile(outputPath, buffer);
-
-        result = { success: true, filename, sheetsCount: args.sheets.length };
-        artifact = { type: "spreadsheet", url: `/api/artifacts/${filename}`, name: filename };
-
-        await emitTraceEvent(runId, "artifact_created", {
-          artifact: {
-            id: randomUUID(),
-            type: "spreadsheet",
-            name: filename,
-            url: artifact.url,
-            size: buffer.length,
-            mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          }
-        });
-        break;
-      }
 
       case "analyze_data": {
         try {
@@ -989,24 +269,13 @@ async function executeToolCall(
   }
 }
 
-function writeSse(res: Response, event: string, data: any): void {
-  const r = res as any;
-  if (r.writableEnded || r.destroyed) return;
-
-  const streamMeta = r?.locals?.streamMeta;
-  const assistantMessageId = streamMeta?.assistantMessageId ||
-    (typeof streamMeta?.getAssistantMessageId === "function" ? streamMeta.getAssistantMessageId() : undefined);
-
-  if (typeof data === 'object' && data !== null) {
-    if (!data.conversationId && streamMeta?.conversationId) data.conversationId = streamMeta.conversationId;
-    if (!data.requestId && streamMeta?.requestId) data.requestId = streamMeta.requestId;
-    if (!data.assistantMessageId && assistantMessageId) data.assistantMessageId = assistantMessageId;
-  }
-
-  res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-  if (typeof (res as any).flush === "function") {
-    (res as any).flush();
-  }
+function collectRecentUserText(messages: Array<{ role: string; content: string }>): string {
+  return messages
+    .filter((m) => m.role === "user")
+    .slice(-4)
+    .map((m) => normalizeSpaces(m.content))
+    .filter(Boolean)
+    .join(" ");
 }
 
 export async function executeAgentLoop(
@@ -1015,9 +284,9 @@ export async function executeAgentLoop(
   options: AgentExecutorOptions
 ): Promise<string> {
   const ai = getGeminiClientOrThrow();
-  const { runId, userId, chatId, requestSpec, maxIterations = 10 } = options;
+  const { runId, userId, chatId, requestSpec, maxIterations = 10, accessLevel = 'owner' } = options;
 
-  const tools = getToolsForIntent(requestSpec.intent);
+  const tools = getToolsForIntent(requestSpec.intent, accessLevel);
   const toolContext: ToolContext = { userId, chatId, runId };
 
   const artifacts: Array<{ type: string; url: string; name: string }> = [];
@@ -1264,7 +533,7 @@ DO NOT respond with text. CALL browse_and_act NOW.${reservationHint}`
           hasToolCall = true;
           const { name, args } = part.functionCall;
 
-          writeSse(res, "tool_start", {
+          sse.write("tool_start", {
             runId,
             toolName: name!,
             args,
@@ -1284,7 +553,7 @@ DO NOT respond with text. CALL browse_and_act NOW.${reservationHint}`
             artifacts.push(artifact);
           }
 
-          writeSse(res, "tool_result", {
+          sse.write("tool_result", {
             runId,
             toolName: name,
             result,
@@ -1370,7 +639,7 @@ DO NOT respond with text. CALL browse_and_act NOW.${reservationHint}`
               } else {
                 summaryText = question;
               }
-              writeSse(res, "clarification", {
+              sse.write("clarification", {
                 runId,
                 question,
                 missingFields,
@@ -1409,7 +678,7 @@ DO NOT respond with text. CALL browse_and_act NOW.${reservationHint}`
             fullResponse = summaryText;
             // Send the entire summary as a single chunk to preserve markdown formatting.
             // Leading \n\n separates it from inline browser_report blockquotes already streamed.
-            writeSse(res, "chunk", {
+            sse.write("chunk", {
               content: "\n\n" + summaryText,
               sequence: 1,
               runId,
@@ -1503,7 +772,7 @@ Please rewrite your response addressing these issues.`
 
           const chunks = textContent.match(/.{1,100}/g) || [textContent];
           for (let i = 0; i < chunks.length; i++) {
-            writeSse(res, "chunk", {
+            sse.write("chunk", {
               content: chunks[i],
               sequence: i + 1,
               runId
@@ -1557,7 +826,7 @@ Please rewrite your response addressing these issues.`
         fullResponse = fallback;
         const chunks = fallback.match(/.{1,100}/g) || [fallback];
         for (let i = 0; i < chunks.length; i++) {
-          writeSse(res, "chunk", {
+          sse.write("chunk", {
             content: chunks[i],
             sequence: i + 1,
             runId
@@ -1577,7 +846,7 @@ Please rewrite your response addressing these issues.`
       ? `He completado las tareas solicitadas y generé ${artifacts.length} archivo(s) para ti.`
       : "He procesado tu solicitud. Avísame si necesitas algo más.";
     fullResponse = fallbackMsg;
-    writeSse(res, "chunk", {
+    sse.write("chunk", {
       content: fallbackMsg,
       sequence: 1,
       runId
@@ -1585,7 +854,7 @@ Please rewrite your response addressing these issues.`
   }
 
   if (artifacts.length > 0) {
-    writeSse(res, "artifacts", {
+    sse.write("artifacts", {
       runId,
       artifacts,
       count: artifacts.length
@@ -1604,7 +873,8 @@ Please rewrite your response addressing these issues.`
 
   // Ensure deterministic termination signal is sent when the agent finishes,
   // preventing the frontend from getting stuck in an infinite polling loop.
-  writeSse(res, "done", { runId, status: "completed", isFallback: true });
+  sse.write("done", { runId, status: "completed", isFallback: true });
+  sse.end();
 
   return fullResponse;
 }

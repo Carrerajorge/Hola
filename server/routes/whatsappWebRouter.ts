@@ -8,8 +8,9 @@ import { chunkText, isGroupJid, MemorySseResponse } from '../integrations/whatsa
 import type { AuthenticatedRequest } from '../types/express';
 import { getSecureUserId } from '../lib/anonUserHelper';
 import { storage } from '../storage';
-import { createUnifiedRun, executeUnifiedChat } from '../agent/unifiedChatHandler';
-import OpenAI from 'openai';
+import { OpenAI } from 'openai';
+import { MultimodalResponseSender } from '../channels/multimodalResponseSender';
+import { executeChannelAgent } from '../channels/channelAgentExecutor';
 
 // Auto-reply timeout: 120 seconds max (document generation needs extra time)
 const AUTO_REPLY_TIMEOUT_MS = 120_000;
@@ -243,7 +244,7 @@ async function autoReplyFromWhatsApp(opts: {
   chatTitle?: string;
   media?: WhatsAppMediaAttachment;
 }): Promise<void> {
-  const { userId, fromJid, chatId, chatTitle, media } = opts;
+  const { userId, fromJid, chatId, chatTitle, inboundText, media } = opts;
 
   console.log(`[WhatsApp AutoReply] Processing message from ${fromJid} for user ${userId}${media ? ` [media: ${media.type}]` : ''}`);
 
@@ -261,179 +262,46 @@ async function autoReplyFromWhatsApp(opts: {
 
   const status = whatsappWebManager.getStatus(userId);
   const myJid = status.state === 'connected' ? status.me?.id : undefined;
+  const myLid = status.state === 'connected' ? status.me?.lid : undefined;
+
   const myBaseJid = myJid?.includes(':') ? myJid.split(':')[0] + '@s.whatsapp.net' : myJid;
-  const isOwner = myBaseJid && fromJid === myBaseJid;
+  const myBaseLid = myLid?.includes(':') ? myLid.split(':')[0] + '@lid' : myLid;
+
+  // Extraer solo los números para la comparación owner
+  const myPhoneNumbers = (myBaseJid || '').replace(/[^0-9]/g, '');
+  const fromPhoneNumbers = (fromJid || '').replace(/[^0-9]/g, '');
+
+  // Es dueño si los números de teléfono principales coinciden (self-chat) o si es el alias LID
+  const isOwner = Boolean(myPhoneNumbers && fromPhoneNumbers && myPhoneNumbers === fromPhoneNumbers) || Boolean(myBaseLid && myBaseLid === fromJid);
+
+  console.log(`[WhatsApp AutoReply] Validation: from=${fromJid} (nums: ${fromPhoneNumbers}), baseLid=${myBaseLid}, isOwner=${isOwner}, replyContacts=${whatsappWebManager.isAutoReplyToContactsEnabled(userId)}`);
 
   if (!isOwner && !whatsappWebManager.isAutoReplyToContactsEnabled(userId)) {
-    console.log(`[WhatsApp AutoReply] Skipping message from contact ${fromJid} (Mirror mode only)`);
+    console.log(`[WhatsApp AutoReply] Skipping message from contact ${fromJid} (Mirror mode only is ON)`);
     return;
   }
 
-  console.log('[WhatsApp AutoReply] Auto-reply enabled, building context...');
-
-  // Build message history from mirrored chat.
-  const history = await storage.getChatMessages(chatId).then((msgs) => msgs.slice(-20));
-  const messages: Array<{ role: string; content: string }> = history
-    .filter((m: any) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
-    .map((m: any) => ({ role: m.role, content: m.content }));
-
   const customPrompt = whatsappWebManager.getAutoReplyPrompt(userId).trim();
-  if (customPrompt) {
-    // Keep the default unified system prompt, but add a per-user style hint with high priority.
-    messages.unshift({ role: 'system', content: customPrompt });
-  }
 
-  // If the message has an image, inject a system hint about the image being available
-  // and encode the image as base64 data URL in the last user message for vision models
-  if (media && media.type === 'image') {
-    const lastUserMsg = messages[messages.length - 1];
-    if (lastUserMsg && lastUserMsg.role === 'user') {
-      const b64 = media.buffer.toString('base64');
-      const dataUrl = `data:${media.mimetype};base64,${b64}`;
-      lastUserMsg.content = `${lastUserMsg.content}\n\n[Imagen adjunta - data URL: ${dataUrl}]`;
-    }
-  }
+  // Initialize unified multi-model sender
+  const sender = new MultimodalResponseSender(whatsappWebManager);
 
-  // If the message has a document, add context about the document
-  if (media && media.type === 'document') {
-    const lastUserMsg = messages[messages.length - 1];
-    if (lastUserMsg && lastUserMsg.role === 'user') {
-      // For text-based documents, try to read content
-      const textMimes = ['application/pdf', 'text/plain', 'text/csv', 'application/json'];
-      const isTextDoc = textMimes.some(m => media.mimetype.includes(m));
-      if (isTextDoc) {
-        lastUserMsg.content = `${lastUserMsg.content}\n\n[Documento adjunto: ${media.fileName} (${media.mimetype}), guardado en: ${media.localPath}]`;
-      } else {
-        lastUserMsg.content = `${lastUserMsg.content}\n\n[Documento adjunto: ${media.fileName} (${media.mimetype}), guardado en: ${media.localPath}]`;
-      }
-    }
-  }
-
-  // Audio: transcribe and add a note
-  if (media && media.type === 'audio') {
-    const lastUserMsg = messages[messages.length - 1];
-    if (lastUserMsg && lastUserMsg.role === 'user') {
-      try {
-        if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY missing for transcription');
-        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-        const transcription = await openai.audio.transcriptions.create({
-          file: require('fs').createReadStream(media.localPath) as any,
-          model: 'whisper-1',
-        });
-        lastUserMsg.content = `${lastUserMsg.content}\n\n[Mensaje de voz transcrito:\n"${transcription.text}"]`;
-      } catch (err: any) {
-        console.error('[WhatsApp AutoReply] Audio transcription failed:', err?.message || err);
-        lastUserMsg.content = `${lastUserMsg.content}\n\n[Mensaje de voz recibido (${media.mimetype}). No se pudo transcribir por error en el sistema.]`;
-      }
-    }
-  }
-
-  const unifiedContext = await createUnifiedRun({
-    messages,
-    chatId,
+  // Execute unified channel agent completely abstracted
+  await executeChannelAgent({
     userId,
-    messageId: `wa_msg_${Date.now()}`,
-  });
-
-  const memRes = new MemorySseResponse();
-
-  console.log(`[WhatsApp AutoReply] Calling executeUnifiedChat with ${messages.length} messages...`);
-
-  // Execute with timeout to prevent hanging
-  await withTimeout(
-    executeUnifiedChat(unifiedContext, {
-      messages,
-      chatId,
-      userId,
-      messageId: `wa_msg_${Date.now()}`,
-    }, memRes as any as Response),
-    AUTO_REPLY_TIMEOUT_MS,
-    'Auto-reply AI'
-  );
-
-  console.log(`[WhatsApp AutoReply] AI finished. Chunks: ${memRes.chunks.length}, events: ${memRes.chunks.map(c => c.event).join(',')}`);
-
-  const assistantText = memRes.chunks
-    .filter(c => c.event === 'chunk' && typeof c.data?.content === 'string')
-    .map(c => c.data.content)
-    .join('')
-    .trim();
-
-  const confirmationEvent = memRes.chunks.find(c => c.event === 'confirmation');
-
-  const finalText = assistantText || (confirmationEvent
-    ? 'Listo. Responda CONFIRM o CANCEL para continuar.'
-    : 'Listo.');
-
-  // Persist assistant message to mirrored chat.
-  const savedAssistantMessage = await storage.createChatMessage({
     chatId,
-    role: 'assistant',
-    content: finalText,
-    status: 'done',
-    requestId: `wa_out_${unifiedContext.runId}`,
-    metadata: {
+    chatTitle,
+    inboundText,
+    media,
+    sender,
+    sendTarget: {
       channel: 'whatsapp_web',
-      to: fromJid,
+      userId,
+      recipientId: fromJid,
     },
-  } as any);
-  await storage.updateChat(chatId, { lastMessageAt: new Date() } as any);
-
-  whatsappWebSseHub.broadcast(userId, 'wa_message', {
-    chat: {
-      id: chatId,
-      title: chatTitle || `WhatsApp: ${fromJid}`,
-      channel: 'whatsapp_web',
-      updatedAt: new Date().toISOString(),
-    },
-    message: {
-      id: savedAssistantMessage.id,
-      role: savedAssistantMessage.role,
-      content: savedAssistantMessage.content,
-      createdAt: savedAssistantMessage.createdAt instanceof Date ? savedAssistantMessage.createdAt.toISOString() : savedAssistantMessage.createdAt,
-      requestId: savedAssistantMessage.requestId,
-      userMessageId: savedAssistantMessage.userMessageId,
-      metadata: savedAssistantMessage.metadata,
-    },
+    customPrompt: customPrompt || undefined,
+    accessLevel: isOwner ? 'owner' : 'trusted',
   });
-
-  console.log(`[WhatsApp AutoReply] Sending reply (${finalText.length} chars) to ${fromJid}`);
-
-  // Send to WhatsApp (split if needed)
-  for (const part of chunkText(finalText, 1400)) {
-    await whatsappWebManager.sendText(userId, fromJid, part);
-  }
-
-  // Check for generated artifacts (documents, spreadsheets, presentations) and send them
-  const artifactEvents = memRes.chunks.filter(c => c.event === 'artifacts' && c.data?.artifacts);
-  for (const evt of artifactEvents) {
-    const artifacts: Array<{ type?: string; url?: string; name?: string }> = evt.data.artifacts || [];
-    for (const artifact of artifacts) {
-      if (!artifact.name) continue;
-
-      // Artifact files are stored in generated_artifacts/{filename}
-      const filePath = path.join(process.cwd(), 'generated_artifacts', artifact.name);
-      try {
-        const fileBuffer = await fs.readFile(filePath);
-        const ext = path.extname(artifact.name).toLowerCase();
-        const mimeMap: Record<string, string> = {
-          '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-          '.pdf': 'application/pdf',
-        };
-        const mimetype = mimeMap[ext] || 'application/octet-stream';
-
-        console.log(`[WhatsApp AutoReply] Sending document "${artifact.name}" (${fileBuffer.length} bytes) to ${fromJid}`);
-        await whatsappWebManager.sendDocument(userId, fromJid, fileBuffer, artifact.name, mimetype, `Documento generado: ${artifact.name}`);
-        console.log(`[WhatsApp AutoReply] Document "${artifact.name}" sent successfully`);
-      } catch (fileErr: any) {
-        console.error(`[WhatsApp AutoReply] Failed to send document "${artifact.name}":`, fileErr?.message || fileErr);
-      }
-    }
-  }
-
-  console.log('[WhatsApp AutoReply] Reply sent successfully');
 }
 
 // Wire inbound WhatsApp messages into IliaGPT chats (in-app inbox) and auto-reply.

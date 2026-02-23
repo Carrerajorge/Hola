@@ -131,8 +131,8 @@ export default defineConfig(async () => {
       },
     },
     server: {
-      // Bind to 0.0.0.0 on Replit/remote dev; use localhost locally so cookies persist across reloads.
-      host: isReplit ? "0.0.0.0" : "localhost",
+      // Bind to 0.0.0.0 so it's accessible on both IPv4 (127.0.0.1) and IPv6 (::1)
+      host: "0.0.0.0",
       allowedHosts: true,
       fs: {
         strict: true,
@@ -143,12 +143,12 @@ export default defineConfig(async () => {
       },
       proxy: {
         "/api": {
-          target: "http://localhost:5001",
+          target: process.env.VITE_API_URL || "http://localhost:5002",
           changeOrigin: true,
           secure: false,
         },
         "/ws": {
-          target: "ws://localhost:5001",
+          target: process.env.VITE_WS_URL || "ws://localhost:5002",
           ws: true,
         },
       },

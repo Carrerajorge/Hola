@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { 
-  Dialog, 
-  DialogContent, 
+import {
+  Dialog,
+  DialogContent,
   DialogHeader,
   DialogTitle,
   DialogDescription
@@ -59,7 +59,7 @@ const ALLOWED_APP_ID_PREFIX = "app-";
 function parseErrorResponse(error: any, responseData?: any): ConnectionError {
   const errorMessage = error?.message || responseData?.message || responseData?.error || 'Error desconocido';
   const errorDetails = responseData?.details || error?.details;
-  
+
   if (errorMessage.includes('OAuth') || errorMessage.includes('oauth') || errorMessage.includes('denied') || errorMessage.includes('access_denied')) {
     return {
       type: 'oauth_denied',
@@ -68,7 +68,7 @@ function parseErrorResponse(error: any, responseData?: any): ConnectionError {
       retryable: true
     };
   }
-  
+
   if (errorMessage.includes('expired') || errorMessage.includes('token') || errorMessage.includes('invalid_grant')) {
     return {
       type: 'token_expired',
@@ -77,7 +77,7 @@ function parseErrorResponse(error: any, responseData?: any): ConnectionError {
       retryable: true
     };
   }
-  
+
   if (errorMessage.includes('rate') || errorMessage.includes('limit') || errorMessage.includes('429') || errorMessage.includes('too many')) {
     return {
       type: 'rate_limited',
@@ -86,7 +86,7 @@ function parseErrorResponse(error: any, responseData?: any): ConnectionError {
       retryable: true
     };
   }
-  
+
   if (errorMessage.includes('network') || errorMessage.includes('fetch') || errorMessage.includes('ECONNREFUSED') || error?.name === 'TypeError') {
     return {
       type: 'network_error',
@@ -95,7 +95,7 @@ function parseErrorResponse(error: any, responseData?: any): ConnectionError {
       retryable: true
     };
   }
-  
+
   if (errorMessage.includes('not configured') || errorMessage.includes('no está configurado') || errorMessage.includes('integraciones')) {
     return {
       type: 'not_configured',
@@ -104,7 +104,7 @@ function parseErrorResponse(error: any, responseData?: any): ConnectionError {
       retryable: false
     };
   }
-  
+
   if (errorMessage.includes('invalid endpoint') || errorMessage.includes('Cross-origin') || errorMessage.includes('cross-origin')) {
     return {
       type: 'invalid_endpoint',
@@ -113,7 +113,7 @@ function parseErrorResponse(error: any, responseData?: any): ConnectionError {
       retryable: false
     };
   }
-  
+
   if (errorMessage.includes('permission') || errorMessage.includes('forbidden') || errorMessage.includes('403')) {
     return {
       type: 'permission_denied',
@@ -122,7 +122,7 @@ function parseErrorResponse(error: any, responseData?: any): ConnectionError {
       retryable: false
     };
   }
-  
+
   if (errorMessage.includes('500') || errorMessage.includes('server') || errorMessage.includes('internal')) {
     return {
       type: 'server_error',
@@ -131,7 +131,7 @@ function parseErrorResponse(error: any, responseData?: any): ConnectionError {
       retryable: true
     };
   }
-  
+
   return {
     type: 'unknown',
     message: errorMessage || 'Error al conectar',
@@ -207,11 +207,11 @@ function buildRequestId(): string {
   return `${ALLOWED_APP_ID_PREFIX}${now}-${random}`;
 }
 
-export function AppDetailDialog({ 
-  app, 
-  open, 
+export function AppDetailDialog({
+  app,
+  open,
   onOpenChange,
-  onConnectionChange 
+  onConnectionChange
 }: AppDetailDialogProps) {
   const queryClient = useQueryClient();
   const [isConnected, setIsConnected] = useState(false);
@@ -223,22 +223,22 @@ export function AppDetailDialog({
 
   const checkConnectionStatus = useCallback(async () => {
     if (!app?.statusEndpoint) return;
-    
+
     setIsLoading(true);
     setConnectionError(null);
-    
+
     try {
       const resolvedStatusEndpoint = resolveSameOriginAppEndpoint(app.statusEndpoint);
       const controller = createTimeoutController(CONNECTION_REQUEST_TIMEOUT_MS);
       const res = await apiFetch(resolvedStatusEndpoint, { signal: controller.signal });
-      
+
       if (res.ok) {
         const data = await res.json().catch(() => ({}));
         setIsConnected(data.connected === true);
         setConnectionEmail(typeof data?.email === "string" ? data.email : "");
-        
+
         queryClient.invalidateQueries({ queryKey: ["connected-sources"] });
-        
+
         if (data.connected && retryCount > 0) {
           toast.success(`${app.name} conectado`, {
             description: data.email ? `Conectado como ${data.email}` : 'Conexión establecida correctamente'
@@ -276,10 +276,10 @@ export function AppDetailDialog({
       });
       return;
     }
-    
+
     setIsConnecting(true);
     setConnectionError(null);
-    
+
     const requestId = buildRequestId();
 
     // First check if user is authenticated
@@ -387,10 +387,10 @@ export function AppDetailDialog({
       });
       return;
     }
-    
+
     setIsConnecting(true);
     setConnectionError(null);
-    
+
     try {
       const requestId = buildRequestId();
       const resolvedDisconnectEndpoint = resolveSafeAppEndpoint(app.disconnectEndpoint);
@@ -403,10 +403,10 @@ export function AppDetailDialog({
           "X-Idempotency-Key": requestId,
         },
       });
-      
+
       if (res.ok) {
         const data = await res.json();
-        
+
         if (data.disconnectUrl) {
           toast.info('Redirigiéndote para completar la desconexión...', {
             duration: 3000
@@ -414,13 +414,13 @@ export function AppDetailDialog({
           // FRONTEND FIX #40: Add noopener,noreferrer to prevent window.opener attacks
           window.open(data.disconnectUrl, '_blank', 'noopener,noreferrer');
         }
-        
+
         setIsConnected(false);
         setConnectionEmail("");
         onConnectionChange?.(app.id, false);
-        
+
         queryClient.invalidateQueries({ queryKey: ["connected-sources"] });
-        
+
         toast.success(`${app.name} desconectado`, {
           description: 'La aplicación ha sido desconectada correctamente.'
         });
@@ -428,7 +428,7 @@ export function AppDetailDialog({
         const errorData = await res.json().catch(() => ({}));
         const error = parseErrorResponse(new Error(`HTTP ${res.status}`), errorData);
         setConnectionError(error);
-        
+
         toast.error('Error al desconectar', {
           description: error.message
         });
@@ -437,7 +437,7 @@ export function AppDetailDialog({
       console.error("Error disconnecting:", error);
       const parsedError = parseErrorResponse(error);
       setConnectionError(parsedError);
-      
+
       toast.error('Error al desconectar', {
         description: parsedError.message
       });
@@ -459,7 +459,7 @@ export function AppDetailDialog({
       <DialogContent className="max-w-lg p-0 gap-0" aria-describedby="app-dialog-description">
         <DialogHeader className="p-4 pb-0">
           <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
-            <button 
+            <button
               onClick={() => onOpenChange(false)}
               className="hover:text-foreground transition-colors flex items-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-sm"
               aria-label="Go back to applications"
@@ -478,7 +478,7 @@ export function AppDetailDialog({
 
         <div className="px-6 pb-6">
           <div className="flex items-start gap-4 mb-6">
-            <div className="flex-shrink-0 w-16 h-16 rounded-2xl overflow-hidden flex items-center justify-center bg-muted">
+            <div className="flex-shrink-0 w-20 h-20 rounded-3xl overflow-hidden flex items-center justify-center bg-gradient-to-br from-[#A5A0FF]/10 to-transparent border border-[#A5A0FF]/20 shadow-lg shadow-[#A5A0FF]/5">
               {app.icon}
             </div>
             <div className="flex-1 min-w-0">
@@ -494,17 +494,21 @@ export function AppDetailDialog({
                   disabled={isLoading || isConnecting || !app.connectionEndpoint}
                   variant={isConnected ? "outline" : "default"}
                   className={cn(
-                    "min-w-[100px]",
-                    isConnected && "border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+                    "min-w-[140px] rounded-full font-medium transition-all duration-300",
+                    !isConnected && !isLoading && !isConnecting && "bg-foreground hover:bg-foreground/90 shadow-md shadow-[#A5A0FF]/20 hover:shadow-lg hover:shadow-[#A5A0FF]/30",
+                    isConnected && "border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 hover:text-red-700"
                   )}
                   data-testid={`button-${isConnected ? 'disconnect' : 'connect'}-${app.id}`}
                 >
                   {isLoading || isConnecting ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>{isConnected ? "Desconectando..." : "Conectando..."}</span>
+                    </div>
                   ) : isConnected ? (
                     "Desconectar"
                   ) : (
-                    "Conectar"
+                    "Conectar aplicación"
                   )}
                 </Button>
               </div>
@@ -512,7 +516,7 @@ export function AppDetailDialog({
           </div>
 
           {connectionError && (
-            <div 
+            <div
               className={cn(
                 "mb-6 p-4 rounded-lg border",
                 connectionError.type === 'rate_limited' || connectionError.type === 'token_expired'
@@ -610,20 +614,20 @@ export function AppDetailDialog({
                 <span className="text-muted-foreground">Categoría</span>
                 <span className="font-medium capitalize">{app.category}</span>
               </div>
-              
+
               {app.developer && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Desarrollador</span>
                   <span className="font-medium">{app.developer}</span>
                 </div>
               )}
-              
+
               {app.websiteUrl && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Sitio web</span>
-                  <a 
-                    href={app.websiteUrl} 
-                    target="_blank" 
+                  <a
+                    href={app.websiteUrl}
+                    target="_blank"
                     rel="noopener noreferrer"
                     className="text-primary hover:underline flex items-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-sm"
                     aria-label={`Visit ${app.name} website (opens in new tab)`}
@@ -633,13 +637,13 @@ export function AppDetailDialog({
                   </a>
                 </div>
               )}
-              
+
               {app.privacyUrl && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Política de privacidad</span>
-                  <a 
-                    href={app.privacyUrl} 
-                    target="_blank" 
+                  <a
+                    href={app.privacyUrl}
+                    target="_blank"
                     rel="noopener noreferrer"
                     className="text-primary hover:underline flex items-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-sm"
                     aria-label={`${app.name} privacy policy (opens in new tab)`}
@@ -657,13 +661,13 @@ export function AppDetailDialog({
                 ) : (
                   <span className={cn(
                     "font-medium",
-                    isConnected ? "text-green-600 dark:text-green-400" : 
-                    connectionError ? "text-red-600 dark:text-red-400" : 
-                    "text-muted-foreground"
+                    isConnected ? "text-green-600 dark:text-green-400" :
+                      connectionError ? "text-red-600 dark:text-red-400" :
+                        "text-muted-foreground"
                   )}>
-                    {isConnected ? "Conectado" : 
-                     connectionError ? "Error" : 
-                     "No conectado"}
+                    {isConnected ? "Conectado" :
+                      connectionError ? "Error" :
+                        "No conectado"}
                   </span>
                 )}
               </div>

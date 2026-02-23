@@ -48,7 +48,6 @@ const OPTS_MIN_COLUMN_WIDTH = 180;
 
 function VirtualizedMediaGrid({ items, onSelect, onDelete, onDownload }: VirtualizedGridProps) {
   return (
-    // @ts-ignore - react-virtualized-auto-sizer types mismatch
     <AutoSizer>
       {({ height, width }: { height: number; width: number }) => {
         const columnCount = Math.floor((width + GUTTER_SIZE) / (OPTS_MIN_COLUMN_WIDTH + GUTTER_SIZE));
@@ -57,7 +56,6 @@ function VirtualizedMediaGrid({ items, onSelect, onDelete, onDownload }: Virtual
         const rowCount = Math.ceil(items.length / safeColumnCount);
 
         return (
-          // @ts-ignore - react-window prop types mismatch with modern React 18 children
           <Grid
             columnCount={safeColumnCount}
             columnWidth={columnWidth + GUTTER_SIZE}
@@ -119,17 +117,15 @@ function EmptyState({ filter }: { filter: FilterType }) {
 
   return (
     <div
-      className="flex flex-col items-center justify-center py-24 text-center h-full w-full opacity-0 animate-[fadeIn_0.5s_ease-out_forwards]"
+      className="flex flex-col items-center justify-center py-16 text-center"
       data-testid="empty-state"
     >
-      <div className="relative flex h-20 w-20 items-center justify-center rounded-2xl bg-muted/40 border border-border/50 shadow-inner mb-6 transition-transform hover:scale-105">
-        <FolderOpen className="h-10 w-10 text-muted-foreground/60" />
-      </div>
-      <p className="text-xl font-semibold tracking-tight text-foreground/80">
+      <FolderOpen className="h-16 w-16 text-muted-foreground/50 mb-4" />
+      <p className="text-lg font-medium text-muted-foreground">
         {messages[filter]}
       </p>
-      <p className="text-sm text-muted-foreground mt-2 max-w-[280px]">
-        Los archivos que subas aparecerán aquí y podrás acceder a ellos fácilmente en cualquier momento.
+      <p className="text-sm text-muted-foreground/70 mt-1">
+        Los archivos que subas aparecerán aquí
       </p>
     </div>
   );
@@ -151,39 +147,34 @@ function MediaThumbnail({
 
   return (
     <div
-      className="group relative flex flex-col gap-2 cursor-pointer outline-none"
+      className="group relative flex flex-col h-full cursor-pointer rounded-3xl border border-border/50 bg-card overflow-hidden hover:bg-[#A5A0FF]/[0.02] hover:border-[#A5A0FF]/40 transition-all duration-300 hover:shadow-lg hover:shadow-[#A5A0FF]/10 hover:-translate-y-1"
       onClick={onClick}
       data-testid={`media-item-${item.uuid}`}
     >
-      <div className="relative aspect-square w-full overflow-hidden rounded-2xl bg-muted/30 border border-border/40 transition-all duration-300 ease-out group-hover:border-primary/40 group-hover:shadow-[0_8px_30px_rgb(0,0,0,0.12)] group-hover:-translate-y-1">
+      <div className="relative flex-1 w-full overflow-hidden bg-muted/30">
         {displayType === "image" ? (
           <img
             src={thumbnailUrl}
             alt={item.name}
-            className="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-110"
+            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
             onError={(e) => {
               (e.target as HTMLImageElement).style.display = 'none';
             }}
           />
         ) : displayType === "video" ? (
-          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-purple-500/10 to-blue-500/10">
-            <Video className="h-12 w-12 text-foreground/40 transition-transform duration-300 group-hover:scale-110 group-hover:text-foreground/70" />
+          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-purple-500/10 to-[#A5A0FF]/20">
+            <Video className="h-12 w-12 text-[#A5A0FF]/70 transition-transform duration-500 group-hover:scale-110" />
           </div>
         ) : (
-          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-orange-500/10 to-red-500/10">
-            <FileText className="h-12 w-12 text-foreground/40 transition-transform duration-300 group-hover:scale-110 group-hover:text-foreground/70" />
+          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[#A5A0FF]/10 to-transparent">
+            <FileText className="h-12 w-12 text-[#A5A0FF]/70 transition-transform duration-500 group-hover:scale-110" />
           </div>
         )}
-
-        {/* Hover overlay masking */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-
-        {/* Action Buttons (Slide up effect) */}
-        <div className="absolute inset-x-0 bottom-0 p-4 flex items-center justify-end gap-2 translate-y-4 opacity-0 transition-all duration-300 ease-out group-hover:translate-y-0 group-hover:opacity-100">
+        <div className="absolute inset-0 flex items-center justify-center gap-3 bg-black/0 opacity-0 transition-all duration-300 group-hover:bg-black/40 group-hover:opacity-100 group-hover:backdrop-blur-[2px]">
           <Button
             variant="secondary"
             size="icon"
-            className="h-9 w-9 rounded-full bg-white/10 backdrop-blur-md text-white border border-white/20 hover:bg-white/30 hover:scale-105 transition-all"
+            className="h-10 w-10 rounded-full bg-white/90 hover:bg-white shadow-lg hover:scale-110 transition-transform"
             onClick={(e) => {
               e.stopPropagation();
               onDownload();
@@ -191,12 +182,12 @@ function MediaThumbnail({
             data-testid={`download-button-${item.uuid}`}
             aria-label={`Descargar ${item.name}`}
           >
-            <Download className="h-4 w-4" />
+            <Download className="h-5 w-5 text-gray-700" />
           </Button>
           <Button
             variant="secondary"
             size="icon"
-            className="h-9 w-9 rounded-full bg-destructive/80 backdrop-blur-md text-white border border-white/20 hover:bg-destructive hover:scale-105 transition-all"
+            className="h-10 w-10 rounded-full bg-white/90 hover:bg-red-50 hover:text-red-500 shadow-lg hover:scale-110 transition-transform"
             onClick={(e) => {
               e.stopPropagation();
               onDelete();
@@ -204,20 +195,20 @@ function MediaThumbnail({
             data-testid={`delete-button-${item.uuid}`}
             aria-label={`Eliminar ${item.name}`}
           >
-            <Trash2 className="h-4 w-4" />
+            <Trash2 className="h-5 w-5 text-red-600" />
           </Button>
         </div>
-
-        {/* Size Badge */}
         {item.size > 0 && (
-          <div className="absolute top-2 right-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10 px-2 py-1 text-[10px] font-medium tracking-wider text-white opacity-100 transition-opacity duration-300 group-hover:opacity-0">
+          <div className="absolute bottom-2 right-2 rounded-full bg-black/60 backdrop-blur-md px-2 py-1 text-[10px] font-medium text-white border border-white/10">
             {formatFileSize(item.size)}
           </div>
         )}
       </div>
-      <p className="truncate text-sm font-medium text-foreground/80 px-1 text-center transition-colors group-hover:text-foreground">
-        {item.name}
-      </p>
+      <div className="p-3 bg-background/50 backdrop-blur-xs border-t border-border/30">
+        <p className="truncate text-sm font-medium text-foreground/90">
+          {item.name}
+        </p>
+      </div>
     </div>
   );
 }
@@ -236,17 +227,14 @@ function LightboxView({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-background/90 backdrop-blur-2xl animate-[fadeIn_0.2s_ease-out_forwards]"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-xl animate-in fade-in duration-300"
       onClick={onClose}
       data-testid="lightbox-overlay"
     >
-      <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/50 to-transparent pointer-events-none" />
-      <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/50 to-transparent pointer-events-none" />
-
       <Button
         variant="ghost"
         size="icon"
-        className="absolute right-6 top-6 h-12 w-12 rounded-full bg-white/10 backdrop-blur-md text-white border border-white/20 hover:bg-white/20 hover:scale-105 transition-all z-50"
+        className="absolute right-4 top-4 h-10 w-10 rounded-full bg-white/10 text-white hover:bg-white/20"
         onClick={onClose}
         data-testid="lightbox-close"
         aria-label="Cerrar vista previa"
@@ -256,7 +244,7 @@ function LightboxView({
       <Button
         variant="ghost"
         size="icon"
-        className="absolute right-24 top-6 h-12 w-12 rounded-full bg-white/10 backdrop-blur-md text-white border border-white/20 hover:bg-white/20 hover:scale-105 transition-all z-50"
+        className="absolute right-16 top-4 h-10 w-10 rounded-full bg-white/10 text-white hover:bg-white/20"
         onClick={(e) => {
           e.stopPropagation();
           onDownload();
@@ -267,50 +255,49 @@ function LightboxView({
         <Download className="h-5 w-5" />
       </Button>
       <div
-        className="relative max-h-[85vh] max-w-[85vw] w-full flex items-center justify-center z-10 animate-[zoomIn_0.3s_ease-out_forwards]"
+        className="max-h-[90vh] max-w-[90vw]"
         onClick={(e) => e.stopPropagation()}
       >
         {displayType === "image" ? (
           <img
             src={fileUrl}
             alt={item.name}
-            className="max-h-[85vh] max-w-[85vw] object-contain rounded-xl shadow-2xl ring-1 ring-white/10"
+            className="max-h-[90vh] max-w-[90vw] object-contain rounded-2xl shadow-2xl ring-1 ring-white/10"
           />
         ) : displayType === "video" ? (
           <video
             src={fileUrl}
             controls
             autoPlay
-            className="max-h-[85vh] max-w-[85vw] rounded-xl shadow-2xl ring-1 ring-white/10"
+            className="max-h-[90vh] max-w-[90vw] rounded-2xl shadow-2xl ring-1 ring-white/10"
           />
         ) : (
-          <div className="flex flex-col items-center justify-center gap-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-xl p-16 shadow-2xl">
-            <div className="p-6 rounded-3xl bg-white/10">
-              <FileText className="h-24 w-24 text-white/80" />
+          <div className="flex flex-col items-center justify-center gap-6 rounded-3xl bg-white/5 border border-white/10 backdrop-blur-3xl p-16 shadow-2xl">
+            <div className="p-6 rounded-3xl bg-gradient-to-br from-[#A5A0FF]/20 to-transparent shadow-inner">
+              <FileText className="h-24 w-24 text-[#A5A0FF]" />
             </div>
             <div className="text-center space-y-1">
-              <p className="text-xl font-semibold text-white tracking-tight">{item.name}</p>
-              <p className="text-sm font-medium text-white/60">{formatFileSize(item.size)}</p>
+              <p className="text-2xl font-semibold text-white tracking-tight">{item.name}</p>
+              <p className="text-base text-white/50">{formatFileSize(item.size)}</p>
             </div>
             <Button
-              className="mt-4 rounded-full px-8 bg-white/10 hover:bg-white/20 text-white border border-white/20"
+              size="lg"
+              className="mt-6 rounded-full bg-[#A5A0FF] hover:bg-[#8E88FF] text-white shadow-lg shadow-[#A5A0FF]/20 transition-all hover:scale-105"
               onClick={(e) => {
                 e.stopPropagation();
                 onDownload();
               }}
               data-testid="lightbox-download-document"
             >
-              <Download className="h-4 w-4 mr-2" />
-              Descargar Archivo
+              <Download className="h-5 w-5 mr-2" />
+              Descargar documento
             </Button>
           </div>
         )}
       </div>
-      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 px-6 py-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10 shadow-lg z-50">
-        <p className="text-sm font-medium tracking-wide text-white/90">
-          {item.name}
-        </p>
-      </div>
+      <p className="absolute bottom-4 left-1/2 -translate-x-1/2 text-sm text-white/70">
+        {item.name}
+      </p>
     </div>
   );
 }
@@ -319,18 +306,18 @@ function UploadProgressBar({ uploads }: { uploads: { fileName: string; progress:
   if (uploads.length === 0) return null;
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 w-80 space-y-3 rounded-xl bg-background/80 backdrop-blur-xl border border-border/50 shadow-2xl p-5 ring-1 ring-white/10 opacity-0 animate-[slideUp_0.3s_ease-out_forwards]">
-      <div className="flex items-center gap-2 text-sm font-semibold text-foreground/90">
-        <Upload className="h-4 w-4 text-primary animate-pulse" />
+    <div className="fixed bottom-4 right-4 z-50 w-80 space-y-2 rounded-lg bg-background border shadow-lg p-4">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <Upload className="h-4 w-4 animate-pulse" />
         Subiendo {uploads.length} archivo{uploads.length > 1 ? 's' : ''}
       </div>
       {uploads.map((upload, i) => (
-        <div key={i} className="space-y-1.5">
-          <div className="flex justify-between text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-            <span className="truncate max-w-[180px]">{upload.fileName}</span>
-            <span className="text-primary">{upload.progress}%</span>
+        <div key={i} className="space-y-1">
+          <div className="flex justify-between text-xs text-muted-foreground">
+            <span className="truncate max-w-[200px]">{upload.fileName}</span>
+            <span>{upload.progress}%</span>
           </div>
-          <Progress value={upload.progress} className="h-1.5 bg-secondary/50" />
+          <Progress value={upload.progress} className="h-1" />
         </div>
       ))}
     </div>
@@ -341,18 +328,15 @@ function StorageInfo({ stats }: { stats: { totalBytes: number; quotaBytes: numbe
   if (!stats) return null;
 
   const usagePercent = stats.quotaBytes > 0 ? (stats.totalBytes / stats.quotaBytes) * 100 : 0;
-  const isWarning = usagePercent > 85;
 
   return (
-    <div className="flex items-center gap-4 text-sm bg-muted/30 px-4 py-2 rounded-full border border-border/40 backdrop-blur-sm transition-colors hover:bg-muted/50">
-      <HardDrive className={cn("h-4 w-4", isWarning ? "text-red-500" : "text-muted-foreground")} />
-      <div className="flex-1 w-[120px]">
-        <Progress value={usagePercent} className={cn("h-1.5", isWarning ? "[&>div]:bg-red-500" : "")} />
+    <div className="flex items-center gap-3 text-sm text-muted-foreground">
+      <HardDrive className="h-4 w-4" />
+      <div className="flex-1 max-w-[200px]">
+        <Progress value={usagePercent} className="h-1.5" />
       </div>
-      <div className="flex gap-1 items-center font-medium">
-        <span className="text-foreground/80">{formatStorageUsage(stats.totalBytes, stats.quotaBytes)}</span>
-        <span className="text-muted-foreground/60 text-xs tabular-nums tracking-wide">({stats.fileCount})</span>
-      </div>
+      <span>{formatStorageUsage(stats.totalBytes, stats.quotaBytes)}</span>
+      <span className="text-xs">({stats.fileCount} archivos)</span>
     </div>
   );
 }
@@ -460,23 +444,21 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent
-          className="max-w-none w-screen h-screen max-h-screen p-0 rounded-none border-0 gap-0 bg-background/60 backdrop-blur-2xl"
+          className="max-w-none w-screen h-screen max-h-screen p-0 rounded-none border-0 gap-0"
           data-testid="user-library-dialog"
         >
-          <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-background/60 to-background/95 pointer-events-none" />
-
-          <DialogHeader className="relative z-10 px-8 py-5 border-b border-border/40 shadow-sm bg-background/50 backdrop-blur-xl supports-[backdrop-filter]:bg-background/30">
+          <DialogHeader className="px-6 py-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
             <div className="flex items-center justify-between">
-              <DialogTitle className="text-2xl font-bold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent" data-testid="library-title">
+              <DialogTitle className="text-xl font-semibold" data-testid="library-title">
                 Tu Biblioteca de Medios
               </DialogTitle>
-              <div className="flex items-center gap-6">
+              <div className="flex items-center gap-4">
                 <StorageInfo stats={stats ?? null} />
                 <label htmlFor="file-upload">
-                  <Button asChild className="rounded-full shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200" disabled={isUploading}>
+                  <Button asChild variant="outline" size="sm" disabled={isUploading}>
                     <span>
                       <Upload className="h-4 w-4 mr-2" />
-                      {isUploading ? "Subiendo..." : "Subir archivo"}
+                      Subir archivo
                     </span>
                   </Button>
                 </label>
@@ -488,15 +470,6 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
                   onChange={handleFileUpload}
                   data-testid="file-upload-input"
                 />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => onOpenChange(false)}
-                  className="rounded-full h-10 w-10 hover:bg-muted/50 border border-transparent hover:border-border/50 text-muted-foreground hover:text-foreground transition-all"
-                  aria-label="Cerrar biblioteca"
-                >
-                  <X className="h-5 w-5" />
-                </Button>
               </div>
             </div>
             <VisuallyHidden>
@@ -507,21 +480,20 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
           <Tabs
             value={activeTab}
             onValueChange={handleTabChange}
-            className="flex flex-col h-[calc(100vh-85px)] relative z-10"
+            className="flex flex-col h-[calc(100vh-73px)]"
           >
-            <div className="px-8 pt-6 pb-2 border-b border-border/20 bg-background/20 backdrop-blur-md">
-              <TabsList className="h-11 bg-muted/40 p-1 rounded-2xl border border-border/30" data-testid="library-tabs">
+            <div className="px-6 pt-4 pb-2 border-b bg-background">
+              <TabsList className="h-10" data-testid="library-tabs">
                 <TabsTrigger
                   value="all"
-                  className="px-5 rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/50 transition-all font-medium"
+                  className="px-4"
                   data-testid="tab-all"
                 >
-                  <LayoutGrid className="h-4 w-4 mr-2" />
                   Todo ({safeFiles.length})
                 </TabsTrigger>
                 <TabsTrigger
                   value="image"
-                  className="px-5 rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/50 transition-all font-medium gap-2"
+                  className="px-4 gap-2"
                   data-testid="tab-images"
                 >
                   <Image className="h-4 w-4" />
@@ -529,7 +501,7 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
                 </TabsTrigger>
                 <TabsTrigger
                   value="video"
-                  className="px-5 rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/50 transition-all font-medium gap-2"
+                  className="px-4 gap-2"
                   data-testid="tab-videos"
                 >
                   <Video className="h-4 w-4" />
@@ -537,7 +509,7 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
                 </TabsTrigger>
                 <TabsTrigger
                   value="document"
-                  className="px-5 rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/50 transition-all font-medium gap-2"
+                  className="px-4 gap-2"
                   data-testid="tab-documents"
                 >
                   <FileText className="h-4 w-4" />
@@ -546,7 +518,7 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
 
                 <TabsTrigger
                   value="app"
-                  className="px-5 rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/50 transition-all font-medium gap-2"
+                  className="px-4 gap-2"
                   data-testid="tab-apps"
                 >
                   <LayoutGrid className="h-4 w-4" />

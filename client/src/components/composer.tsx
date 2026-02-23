@@ -920,20 +920,13 @@ export function Composer({
         "transition-colors duration-200"
       )
       : cn(
-        // Professional Premium Container
         "max-w-3xl mx-auto relative transition-all duration-300 ease-out overflow-visible",
-        // Glass Background & Blur
-        SILVER_GLASS_BG,
-        // Premium Border (silver, ultra-thin)
-        SILVER_HAIRLINE,
-        "border-[#c7c7c7]/55 dark:border-white/10",
-        SILVER_HOVER_BORDER_SOFT,
-        // Shape & Spacing
-        "rounded-[22px] px-3 py-1.5",
-        // Elevated Shadow
-        SILVER_CONTAINER_SHADOW,
-        // Focus State (minimal silver)
-        SILVER_CONTAINER_FOCUS,
+        "bg-white/40 dark:bg-[#0d0d0d]/40 backdrop-blur-2xl",
+        "border border-[#A5A0FF]/30",
+        "hover:border-[#A5A0FF]/50",
+        "rounded-[28px] p-2",
+        "shadow-xl shadow-[#A5A0FF]/10",
+        "focus-within:ring-4 focus-within:ring-[#A5A0FF]/20 focus-within:border-[#A5A0FF]/70"
       ),
     // Keep these highlights in document mode too
     selectedDocText && "border-primary/20",

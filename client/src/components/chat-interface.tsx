@@ -2485,6 +2485,25 @@ export function ChatInterface({
     }
   }, [speakingMessageId]);
 
+  const handleToolConfirm = useCallback((messageId: string, toolName: string, stepIndex: number) => {
+    chatLogger.info("User confirmed tool execution", { messageId, toolName, stepIndex });
+    toast({
+      title: "Ejecución Aprobada",
+      description: `Se ha autorizado la ejecución de ${toolName}.`,
+    });
+    // In a full implementation, we would call the backend to resume the pending tool call here.
+  }, [toast]);
+
+  const handleToolDeny = useCallback((messageId: string, toolName: string, stepIndex: number) => {
+    chatLogger.info("User denied tool execution", { messageId, toolName, stepIndex });
+    toast({
+      title: "Ejecución Cancelada",
+      description: `Se ha denegado la ejecución de ${toolName}.`,
+      variant: "destructive"
+    });
+    // In a full implementation, we would call the backend to cancel the run or tool call here.
+  }, [toast]);
+
   const handleRegenerate = useCallback(async (msgIndex: number, instruction?: string) => {
     const prevMessages = messages.slice(0, msgIndex);
     const lastUserMsgIndex = [...prevMessages].reverse().findIndex(m => m.role === "user");
@@ -6638,6 +6657,8 @@ IMPORTANTE:
                       onSuperAgentCancel={handleSuperAgentCancel}
                       onSuperAgentRetry={handleSuperAgentRetry}
                       onQuestionClick={(text) => setInput(text)}
+                      onToolConfirm={handleToolConfirm}
+                      onToolDeny={handleToolDeny}
                       activeRunId={activeRunId}
                       onRunComplete={handleRunComplete}
                       uiPhase={uiPhase}
@@ -6964,6 +6985,8 @@ IMPORTANTE:
                     onSuperAgentCancel={handleSuperAgentCancel}
                     onSuperAgentRetry={handleSuperAgentRetry}
                     onQuestionClick={(text) => setInput(text)}
+                    onToolConfirm={handleToolConfirm}
+                    onToolDeny={handleToolDeny}
                     activeRunId={activeRunId}
                     onRunComplete={() => {
                       console.log('[uiPhase] Run completed, uiPhase=done');

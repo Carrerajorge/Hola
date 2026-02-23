@@ -27,7 +27,7 @@ export type WhatsAppWebStatus =
   | { state: 'connecting' }
   | { state: 'qr'; qr: string }
   | { state: 'pairing_code'; phone: string; code: string }
-  | { state: 'connected'; me?: { id?: string; name?: string } };
+  | { state: 'connected'; me?: { id?: string; name?: string; lid?: string } };
 
 export interface WhatsAppMediaAttachment {
   type: 'image' | 'document' | 'audio' | 'video' | 'sticker';
@@ -404,11 +404,11 @@ export class WhatsAppWebManager extends EventEmitter {
       if (connection === 'open') {
         record.status = {
           state: 'connected',
-          me: { id: sock.user?.id, name: sock.user?.name },
+          me: { id: sock.user?.id, name: sock.user?.name, lid: sock.user?.lid },
         };
         this.reconnectAttempts.set(userId, 0);
         this.emit('status', userId, record.status);
-        console.info('[WhatsApp] Connected:', userId, sock.user?.id);
+        console.info('[WhatsApp] Connected:', userId, 'User Details:', JSON.stringify(sock.user));
       }
 
       if (connection === 'close') {
@@ -456,15 +456,28 @@ export class WhatsAppWebManager extends EventEmitter {
           const from = msg.key.remoteJid || 'unknown';
           if (from === 'unknown' || from === 'status@broadcast') continue;
 
+          // INYECCIÓN DE DIAGNÓSTICO PARA VER TODO LO QUE LLEGA 
+          const rawText = (msg.message as any)?.conversation || (msg.message as any)?.extendedTextMessage?.text || '';
+          console.log(`[WhatsApp Debug] message from=${from} fromMe=${msg.key.fromMe} id=${msg.key.id} text="${rawText.slice(0, 30)}..."`);
+
           // Allow messages from self-chat (same JID as connected user) even if fromMe
           const myJid = sock.user?.id;
           const myBaseJid = myJid?.includes(':') ? myJid.split(':')[0] + '@s.whatsapp.net' : myJid;
-          const isSelfChat = myBaseJid && from === myBaseJid;
 
-          // Skip own messages UNLESS it's a self-chat (user messaging themselves to talk to ILIAGPT)
+          const myLid = sock.user?.lid;
+          const myBaseLid = myLid?.includes(':') ? myLid.split(':')[0] + '@lid' : myLid;
+
+          const myPhoneNumbers = (myBaseJid || '').replace(/[^0-9]/g, '');
+          const fromPhoneNumbers = (from || '').replace(/[^0-9]/g, '');
+
+          // isSelfChat = El mensaje viene de un número que es el nuestro o de nuestro LID (Mirror Mode)
+          const isSelfChat = Boolean(myPhoneNumbers && fromPhoneNumbers && myPhoneNumbers === fromPhoneNumbers) || Boolean(myBaseLid && from === myBaseLid);
+
+          // Si el mensaje fue enviado por NOSOTROS MISMOS, lo ignoramos A MENOS que
+          // el destinatario también seamos nosotros mismos (self user-chat)
           if (msg.key.fromMe && !isSelfChat) continue;
 
-          // Skip bot-sent messages to prevent infinite self-chat loops
+          // Skip bot-sent messages (evita que el bot se responda a sí mismo cuando emite respuestas de IA)
           if (msg.key.id && this.botSentMessageIds.has(msg.key.id)) continue;
 
           const text =
@@ -697,6 +710,121 @@ export class WhatsAppWebManager extends EventEmitter {
       this.botSentMessageIds.add(sent.key.id);
       setTimeout(() => this.botSentMessageIds.delete(sent.key.id!), 5 * 60_000).unref?.();
     }
+  }
+
+  async sendImage(userId: string, toJid: string, image: Buffer, mimetype: string, caption?: string): Promise<void> {
+    const rec = this.sockets.get(userId);
+    if (!rec || rec.status.state !== 'connected') {
+      throw new Error('WhatsApp no está conectado');
+    }
+    const sent = await rec.sock.sendMessage(toJid, {
+      image,
+      mimetype,
+      caption: caption || undefined,
+    });
+    if (sent?.key?.id) {
+      this.botSentMessageIds.add(sent.key.id);
+      setTimeout(() => this.botSentMessageIds.delete(sent.key.id!), 5 * 60_000).unref?.();
+    }
+  }
+
+  async sendAudioNote(userId: string, toJid: string, audio: Buffer, mimetype: string = 'audio/ogg; codecs=opus'): Promise<void> {
+    const rec = this.sockets.get(userId);
+    if (!rec || rec.status.state !== 'connected') {
+      throw new Error('WhatsApp no está conectado');
+    }
+    const sent = await rec.sock.sendMessage(toJid, {
+      audio,
+      mimetype,
+      ptt: true,
+    });
+    if (sent?.key?.id) {
+      this.botSentMessageIds.add(sent.key.id);
+      setTimeout(() => this.botSentMessageIds.delete(sent.key.id!), 5 * 60_000).unref?.();
+    }
+  }
+
+  async sendVideo(userId: string, toJid: string, video: Buffer, mimetype: string = 'video/mp4', caption?: string): Promise<void> {
+    const rec = this.sockets.get(userId);
+    if (!rec || rec.status.state !== 'connected') {
+      throw new Error('WhatsApp no está conectado');
+    }
+    const sent = await rec.sock.sendMessage(toJid, {
+      video,
+      mimetype,
+      caption: caption || undefined,
+    });
+    if (sent?.key?.id) {
+      this.botSentMessageIds.add(sent.key.id);
+      setTimeout(() => this.botSentMessageIds.delete(sent.key.id!), 5 * 60_000).unref?.();
+    }
+  }
+
+  async sendSticker(userId: string, toJid: string, sticker: Buffer, mimetype: string = 'image/webp'): Promise<void> {
+    const rec = this.sockets.get(userId);
+    if (!rec || rec.status.state !== 'connected') {
+      throw new Error('WhatsApp no está conectado');
+    }
+    const sent = await rec.sock.sendMessage(toJid, {
+      sticker,
+      mimetype,
+    });
+    if (sent?.key?.id) {
+      this.botSentMessageIds.add(sent.key.id);
+      setTimeout(() => this.botSentMessageIds.delete(sent.key.id!), 5 * 60_000).unref?.();
+    }
+  }
+
+  async sendContact(userId: string, toJid: string, vcard: string, displayName: string): Promise<void> {
+    const rec = this.sockets.get(userId);
+    if (!rec || rec.status.state !== 'connected') {
+      throw new Error('WhatsApp no está conectado');
+    }
+    const sent = await rec.sock.sendMessage(toJid, {
+      contacts: {
+        displayName,
+        contacts: [{ vcard }],
+      },
+    });
+    if (sent?.key?.id) {
+      this.botSentMessageIds.add(sent.key.id);
+      setTimeout(() => this.botSentMessageIds.delete(sent.key.id!), 5 * 60_000).unref?.();
+    }
+  }
+
+  async sendLocation(userId: string, toJid: string, lat: number, lng: number, name?: string, address?: string): Promise<void> {
+    const rec = this.sockets.get(userId);
+    if (!rec || rec.status.state !== 'connected') {
+      throw new Error('WhatsApp no está conectado');
+    }
+    const sent = await rec.sock.sendMessage(toJid, {
+      location: {
+        degreesLatitude: lat,
+        degreesLongitude: lng,
+        name,
+        address,
+      },
+    });
+    if (sent?.key?.id) {
+      this.botSentMessageIds.add(sent.key.id);
+      setTimeout(() => this.botSentMessageIds.delete(sent.key.id!), 5 * 60_000).unref?.();
+    }
+  }
+
+  async sendReaction(userId: string, toJid: string, messageId: string, emoji: string): Promise<void> {
+    const rec = this.sockets.get(userId);
+    if (!rec || rec.status.state !== 'connected') {
+      throw new Error('WhatsApp no está conectado');
+    }
+    await rec.sock.sendMessage(toJid, {
+      react: {
+        text: emoji,
+        key: {
+          remoteJid: toJid,
+          id: messageId,
+        },
+      },
+    });
   }
   /**
    * Auto-reconnect persisted sessions on server startup.

@@ -152,6 +152,47 @@ export async function telegramSendDocument(
   mimeType: string,
   caption?: string,
 ): Promise<void> {
+  return telegramSendMediaInternal(chatId, "document", fileBuffer, fileName, mimeType, caption);
+}
+
+export async function telegramSendPhoto(
+  chatId: string,
+  fileBuffer: Buffer,
+  fileName: string,
+  mimeType: string,
+  caption?: string,
+): Promise<void> {
+  return telegramSendMediaInternal(chatId, "photo", fileBuffer, fileName, mimeType, caption);
+}
+
+export async function telegramSendVideo(
+  chatId: string,
+  fileBuffer: Buffer,
+  fileName: string,
+  mimeType: string,
+  caption?: string,
+): Promise<void> {
+  return telegramSendMediaInternal(chatId, "video", fileBuffer, fileName, mimeType, caption);
+}
+
+export async function telegramSendVoice(
+  chatId: string,
+  fileBuffer: Buffer,
+  fileName: string,
+  mimeType: string,
+  caption?: string,
+): Promise<void> {
+  return telegramSendMediaInternal(chatId, "voice", fileBuffer, fileName, mimeType, caption);
+}
+
+async function telegramSendMediaInternal(
+  chatId: string,
+  mediaType: "document" | "photo" | "video" | "voice",
+  fileBuffer: Buffer,
+  fileName: string,
+  mimeType: string,
+  caption?: string,
+): Promise<void> {
   const safeToken = normalizeToken(env.TELEGRAM_BOT_TOKEN);
   if (!safeToken) {
     throw new Error("TELEGRAM_BOT_TOKEN is not configured");
@@ -162,7 +203,7 @@ export async function telegramSendDocument(
   }
 
   const fileValidation = sanitizeOutboundFilePayload({
-    kind: "document",
+    kind: "document", // uses document generic validation regardless of type
     fileBuffer,
     fileName,
     mimeType,
@@ -175,11 +216,12 @@ export async function telegramSendDocument(
   for (let attempt = 0; attempt <= TELEGRAM_MAX_RETRY_ATTEMPTS; attempt++) {
     if (attempt > 0) await sleep(computeBackoffMs(attempt));
 
-    const url = `${TELEGRAM_API_BASE}/bot${safeToken}/sendDocument`;
+    const method = `send${mediaType.charAt(0).toUpperCase() + mediaType.slice(1)}`;
+    const url = `${TELEGRAM_API_BASE}/bot${safeToken}/${method}`;
     const form = new FormData();
     form.append("chat_id", safeChatId);
     form.append(
-      "document",
+      mediaType,
       new Blob([new Uint8Array(fileValidation.value.fileBuffer)], { type: fileValidation.value.mimeType }),
       fileValidation.value.fileName,
     );
@@ -199,7 +241,7 @@ export async function telegramSendDocument(
         expectedHost: TELEGRAM_HOST,
         allowedHostSuffixes: [TELEGRAM_HOST],
         timeoutMs: 60_000,
-        traceId: `tg-doc:${safeChatId}`,
+        traceId: `tg-${mediaType}:${safeChatId}`,
       },
     );
 
@@ -220,13 +262,43 @@ export async function telegramSendDocument(
 
     lastError = `HTTP ${response.status} ${bodyText}`;
     if (!isRetryableStatus(response.status) || attempt >= TELEGRAM_MAX_RETRY_ATTEMPTS) {
-      throw new Error(`Telegram sendDocument failed: ${lastError}`);
+      throw new Error(`Telegram ${method} failed: ${lastError}`);
     }
   }
 
   if (lastError) {
-    throw new Error(`Telegram sendDocument failed: ${lastError}`);
+    throw new Error(`Telegram send ${mediaType} failed: ${lastError}`);
   }
+}
+
+export async function downloadTelegramMedia(fileId: string): Promise<{ buffer: Buffer; mimeType: string; fileName: string }> {
+  const safeToken = normalizeToken(env.TELEGRAM_BOT_TOKEN);
+  if (!safeToken) throw new Error("TELEGRAM_BOT_TOKEN is not configured");
+
+  const fileInfo = await telegramCall<{ file_path: string }>(safeToken, "getFile", { file_id: fileId });
+  if (!fileInfo.file_path) {
+    throw new Error("Could not get file_path from Telegram getFile");
+  }
+
+  const url = `https://api.telegram.org/file/bot${safeToken}/${fileInfo.file_path}`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to download Telegram media: ${response.statusText}`);
+  }
+  const arrayBuffer = await response.arrayBuffer();
+
+  // Adivinar el nombre y mimetype desde la ruta de archivo (ej: photos/file_0.jpg o voice/voice_1.oga)
+  const fileName = fileInfo.file_path.split('/').pop() || 'telegram_media';
+
+  let mimeType = 'application/octet-stream';
+  if (fileName.endsWith('.jpg') || fileName.endsWith('.jpeg')) mimeType = 'image/jpeg';
+  else if (fileName.endsWith('.png')) mimeType = 'image/png';
+  else if (fileName.endsWith('.oga') || fileName.endsWith('.ogg')) mimeType = 'audio/ogg';
+  else if (fileName.endsWith('.mp3')) mimeType = 'audio/mpeg';
+  else if (fileName.endsWith('.mp4')) mimeType = 'video/mp4';
+  else if (fileName.endsWith('.pdf')) mimeType = 'application/pdf';
+
+  return { buffer: Buffer.from(arrayBuffer), mimeType, fileName };
 }
 
 export async function telegramSetWebhook(input: {

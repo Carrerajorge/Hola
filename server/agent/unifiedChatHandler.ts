@@ -30,6 +30,7 @@ export interface UnifiedChatRequest {
   attachments?: AttachmentSpec[];
   sessionState?: SessionState;
   latencyMode?: LatencyMode;
+  accessLevel?: 'owner' | 'trusted' | 'unknown';
 }
 
 export interface UnifiedChatContext {
@@ -39,6 +40,7 @@ export interface UnifiedChatContext {
   isAgenticMode: boolean;
   latencyMode: LatencyMode;
   resolvedLane: 'fast' | 'deep';
+  accessLevel: 'owner' | 'trusted' | 'unknown';
 }
 
 // ============================================================================
@@ -456,6 +458,7 @@ export async function createUnifiedRun(
     isAgenticMode,
     latencyMode,
     resolvedLane,
+    accessLevel: request.accessLevel || 'owner',
   };
 }
 
@@ -605,7 +608,8 @@ export async function executeUnifiedChat(
         userId: request.userId,
         chatId: request.chatId,
         requestSpec,
-        maxIterations: 10
+        maxIterations: 10,
+        accessLevel: context.accessLevel
       });
 
       await emitTraceEvent(runId, 'done', {

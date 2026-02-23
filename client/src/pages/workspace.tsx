@@ -40,13 +40,12 @@ function ResizeHandle({ className, ...props }: { className?: string; id?: string
   return (
     <PanelResizeHandle
       className={cn(
-        "group relative flex w-1.5 items-center justify-center bg-transparent transition-colors hover:bg-accent/50 active:bg-accent",
+        "group relative flex w-1.5 items-center justify-center bg-transparent transition-colors hover:bg-[#A5A0FF]/20 active:bg-[#A5A0FF]/30",
         className
       )}
       {...props}
     >
-      <div className="z-10 flex h-8 w-3 items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 transition-opacity">
-        <GripVertical className="h-4 w-4 text-muted-foreground" />
+      <div className="z-10 flex h-12 w-1 items-center justify-center rounded-full bg-[#A5A0FF]/50 opacity-0 group-hover:opacity-100 transition-all duration-300 shadow-[0_0_8px_rgba(165,160,255,0.4)]">
       </div>
     </PanelResizeHandle>
   );
@@ -69,7 +68,7 @@ function WorkspaceContent() {
   const [isNewChatMode, setIsNewChatMode] = useState(false);
   const [newChatStableKey, setNewChatStableKey] = useState<string | null>(null);
 
-  type WorkspaceAiState = "idle" | "thinking" | "responding" | "agent_working";
+  type WorkspaceAiState = "idle" | "thinking" | "responding" | "streaming" | "agent_working" | "sending" | "error" | "done";
   type WorkspaceAiStep = { step: string; status: "pending" | "active" | "done" };
   type WorkspaceConversationUiState = {
     aiState: WorkspaceAiState;
@@ -86,7 +85,23 @@ function WorkspaceContent() {
   });
 
   const [conversationUiStateMap, setConversationUiStateMap] = useState<Record<string, WorkspaceConversationUiState>>({});
-  
+
+  const {
+    chats,
+    hiddenChats,
+    pinnedChats,
+    activeChat,
+    setActiveChatId,
+    createChat,
+    addMessage,
+    deleteChat,
+    editChatTitle,
+    archiveChat,
+    hideChat,
+    pinChat,
+    downloadChat,
+  } = useChats();
+
   // Use global streaming store for tracking processing chats and pending badges
   const processingChatIds = useProcessingChatIds();
   const pendingResponseCounts = usePendingBadges();
@@ -192,21 +207,7 @@ function WorkspaceContent() {
     });
   }, []);
 
-  const {
-    chats,
-    hiddenChats,
-    pinnedChats,
-    activeChat,
-    setActiveChatId,
-    createChat,
-    addMessage,
-    deleteChat,
-    editChatTitle,
-    archiveChat,
-    hideChat,
-    pinChat,
-    downloadChat,
-  } = useChats();
+
 
   const {
     folders,
@@ -283,7 +284,7 @@ function WorkspaceContent() {
 
   // Local messages state for agent mode updates (syncs with currentMessages)
   const [displayMessages, setDisplayMessages] = useState<Message[]>([]);
-  
+
   // Sync displayMessages with currentMessages when it changes
   useEffect(() => {
     setDisplayMessages(currentMessages);
@@ -353,9 +354,9 @@ function WorkspaceContent() {
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background relative" data-testid="workspace-container">
-      <div className="liquid-blob liquid-blob-1 opacity-30"></div>
-      <div className="liquid-blob liquid-blob-2 opacity-20"></div>
-      <div className="liquid-blob liquid-blob-3 opacity-25"></div>
+      <div className="liquid-blob liquid-blob-1 opacity-[0.07] dark:opacity-[0.05]"></div>
+      <div className="liquid-blob liquid-blob-2 opacity-[0.05] dark:opacity-[0.03]"></div>
+      <div className="liquid-blob liquid-blob-3 opacity-[0.06] dark:opacity-[0.04]"></div>
 
       {isMobile ? (
         <>
