@@ -3,7 +3,7 @@
 # ============================================
 # Stage 1: Build (dependencies + compile)
 # ============================================
-FROM node:20-slim AS builder
+FROM node:22-slim AS builder
 WORKDIR /app
 
 # Build-time tooling for native modules
@@ -19,6 +19,7 @@ COPY scripts/sync-mathjax-assets.cjs scripts/sync-mathjax-assets.cjs
 RUN npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts \
   && npm i -D @rollup/rollup-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund \
   && npm i -D lightningcss-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund \
+  && npm i -D @tailwindcss/oxide-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund \
   && npm rebuild esbuild bcrypt node-pty sharp \
   && node scripts/sync-mathjax-assets.cjs \
   && npm cache clean --force
@@ -35,7 +36,7 @@ RUN npm prune --legacy-peer-deps --omit=dev
 # ============================================
 # Stage 2: Sandbox Runner
 # ============================================
-FROM node:20-slim AS sandbox-runner
+FROM node:22-slim AS sandbox-runner
 WORKDIR /app
 
 # Bake APP_VERSION into the image so runtime can report the deployed commit SHA
@@ -63,7 +64,7 @@ CMD ["node", "dist/sandbox-runner.cjs"]
 # ============================================
 # Stage 3: Production Runner
 # ============================================
-FROM node:20-slim AS runner
+FROM node:22-slim AS runner
 WORKDIR /app
 
 # Bake APP_VERSION into the image (source of truth for /api/health version).
@@ -87,11 +88,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   libnspr4 libnss3 libpango-1.0-0 libx11-6 libx11-xcb1 \
   libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
   libxkbcommon0 libxrandr2 libxshmfence1 xdg-utils \
+  libxtst6 \
+  libjpeg62-turbo libgif7 librsvg2-2 libpixman-1-0 libpangocairo-1.0-0 \
   python3 python3-matplotlib \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
-
-
 # Copy prod dependencies only (with ownership)
 COPY --chown=iliagpt:nodejs --from=builder /app/node_modules ./node_modules
 # Copy built artifacts
