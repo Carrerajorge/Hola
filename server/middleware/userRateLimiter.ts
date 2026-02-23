@@ -48,8 +48,35 @@ export function rateLimiter(req: any, res: any, next: any) {
   return res.status(429).json({ error: 'Too many requests. Please try again later.' });
 }
 
-export function createCustomRateLimiter(capacity = 30, refillRatePerSec = 2) {
-  return new RateLimiter(capacity, refillRatePerSec);
+/**
+ * Create an Express middleware rate-limiter.
+ * Accepts either positional args (capacity, refillRate) for simple use,
+ * or an options object { windowMs, maxRequests, keyPrefix, message } for express-rate-limit style.
+ */
+export function createCustomRateLimiter(
+  optsOrCapacity: number | { windowMs?: number; maxRequests?: number; keyPrefix?: string; message?: string } = 30,
+  refillRatePerSec = 2
+) {
+  let limiter: RateLimiter;
+  let msg = 'Too many requests. Please try again later.';
+
+  if (typeof optsOrCapacity === 'object') {
+    const { maxRequests = 30, windowMs = 60000, message } = optsOrCapacity;
+    // Convert window-based rate to token-bucket refill rate
+    const refillRate = maxRequests / (windowMs / 1000);
+    limiter = new RateLimiter(maxRequests, refillRate);
+    if (message) msg = message;
+  } else {
+    limiter = new RateLimiter(optsOrCapacity, refillRatePerSec);
+  }
+
+  return function rateLimitMiddleware(req: any, res: any, next: any) {
+    const clientId = req.ip || req.connection?.remoteAddress || 'unknown';
+    if (limiter.checkLimit(clientId)) {
+      return next();
+    }
+    return res.status(429).json({ error: msg });
+  };
 }
 
 export function getRateLimitStats() {
