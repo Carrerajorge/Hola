@@ -4,3 +4,4 @@ export * from "./common"; export * from "./auth"; export * from "./admin"; expor
     from "./billingCredits"; export * from "./rag"; export * from "./packageManager"; export * from "./telemetry";
 export * from "./iam";
 export * from "./finops";
+export * from "../schema.bak";
