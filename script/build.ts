@@ -78,6 +78,10 @@ async function buildAll() {
     splitting: true, // Enable code splitting to share common chunks between server and worker
     // Mark ALL node_modules as external - they're installed at runtime
     external: [...externals, "./node_modules/*", "fsevents"],
+    // Resolve path aliases matching tsconfig.json / vite.config.ts
+    alias: {
+      "@shared": "./shared",
+    },
     define: {
       "process.env.NODE_ENV": '"production"',
       "process.env.APP_VERSION": JSON.stringify(appVersion),
