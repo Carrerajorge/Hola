@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"; import { __resetChannelIngestLedgersForTests } from "../../channels/channelIngestService";
 
-beforeEach(() => {
-  __resetChannelIngestLedgersForTests();
+
+beforeEach(() => { __resetChannelIngestLedgersForTests();
 });
 
 const {
@@ -244,6 +244,18 @@ describe("channel ingest runtime controls (whatsapp cloud)", () => {
   });
 
   it("enabled + allowed sender sends reply", async () => {
+    streamChatMock.mockImplementation(async function* () {
+      yield { content: "reply from ilia", sequenceId: 1 };
+    });
+
+    getOrCreateChannelConversationMock.mockResolvedValue({
+      id: "conv-1",
+      userId: "user-1",
+      chatId: "chat-1",
+      channelAccountId: "12345",
+      channelKey: "12345",
+      metadata: {},
+    });
     findWhatsAppCloudAccountByPhoneNumberIdMock.mockResolvedValue({
       userId: "user-1",
       accessToken: "token",
