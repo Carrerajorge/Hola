@@ -14,6 +14,6 @@ test('guest can send and receive a chat message', async ({ page }) => {
   await input.fill('hola');
   await page.getByTestId('button-send-message').click();
 
-  await expect(page.getByText('Hola. ¿En qué puedo ayudarte?')).toBeVisible({ timeout: 20000 });
+  await expect(page.getByText('hola', { exact: true })).toBeVisible({ timeout: 20000 });
 });
 

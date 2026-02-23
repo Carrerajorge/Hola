@@ -260,8 +260,8 @@ export const RunResponseSchema = z.object({
     name: z.string(),
     url: z.string().optional(),
   })),
-  summary: z.string().optional(),
-  error: z.string().optional(),
+  summary: z.string().optional().nullable(),
+  error: z.string().optional().nullable(),
   // Optional debug/UX helpers (present for in-memory runs; empty for historical runs).
   eventStream: z.array(z.any()).optional(),
   todoList: z.array(z.any()).optional(),

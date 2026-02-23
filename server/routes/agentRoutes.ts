@@ -1,24 +1,14 @@
-import { Router, Request, Response, NextFunction } from "express";
-import { AuthenticatedRequest } from "../types/express";
-import { db } from "../db";
-import { agentModeRuns, agentModeSteps, agentModeEvents } from "@shared/schema";
-import { agentManager, AgentPlan } from "../agent/agentOrchestrator";
-import { agentEventBus } from "../agent/eventBus";
-import { activityStreamPublisher, agentLoopFacade } from "../agent/orchestration";
-import { eq, desc, asc, and, gte, lt, count } from "drizzle-orm";
-import { randomUUID } from "crypto";
-import { CreateRunRequestSchema, RunResponseSchema, StepsArrayResponseSchema } from "../agent/contracts";
-import { validateOrThrow, ValidationError } from "../agent/validation";
-import { checkIdempotency } from "../agent/idempotency";
-import { updateRunWithLock } from "../agent/dbTransactions";
-import { toolRegistry, TOOL_CATEGORIES } from "../agent/registry/toolRegistry";
-import { ToolArtifact } from "../agent/toolRegistry";
-import { agentRegistry } from "../agent/registry/agentRegistry";
+import { Router, Request, Response, NextFunction } from "express"; import { AuthenticatedRequest } from "../types/express"; import { db } from "../db"; import { agentModeRuns, agentModeSteps, 
+agentModeEvents } from "@shared/schema"; import { agentManager, AgentPlan } from "../agent/agentOrchestrator"; import { agentEventBus } from "../agent/eventBus"; import { activityStreamPublisher, 
+agentLoopFacade } from "../agent/orchestration"; import { eq, desc, asc, and, gte, lt, count } from "drizzle-orm"; import { randomUUID } from "crypto"; import { CreateRunRequestSchema, 
+RunResponseSchema, StepsArrayResponseSchema } from "../agent/contracts"; import { validateOrThrow, ValidationError } from "../agent/validation"; import { checkIdempotency } from 
+"../agent/idempotency"; import { updateRunWithLock } from "../agent/dbTransactions"; import { toolRegistry, TOOL_CATEGORIES } from "../agent/registry/toolRegistry"; import { ToolArtifact } from 
+"../agent/toolRegistry"; import { agentRegistry } from "../agent/registry/agentRegistry";
 
-function requireAuth(req: Request, res: Response, next: NextFunction) {
-  const user = (req as AuthenticatedRequest).user;
-  if (!user) {
-    return res.status(401).json({ error: "Authentication required" });
+
+
+function requireAuth(req: Request, res: Response, next: NextFunction) { const user = (req as AuthenticatedRequest).user; if (!user) { return res.status(401).json({ error: "Authentication required" 
+    });
   }
   next();
 }
@@ -263,78 +253,96 @@ export function createAgentModeRouter() {
     try {
       const { chatId } = req.params;
 
-      const [run] = await db.select()
-        .from(agentModeRuns)
-        .where(eq(agentModeRuns.chatId, chatId))
-        .orderBy(desc(agentModeRuns.createdAt))
-        .limit(1);
+      const runs = await db.select()
+          .from(agentModeRuns)
+          .where(eq(agentModeRuns.chatId, chatId))
+          .orderBy(desc(agentModeRuns.createdAt))
+          .limit(1);
 
-      if (!run) {
-        return res.json(null);
-      }
+        const run = runs[0];
+        if (!run) {
+          return res.status(404).json({ error: "Run not found for chat", code: "RUN_NOT_FOUND" });
+        }      
+
+      let effectiveRun = run;      
+
+      const ageMs = Date.now() - run.createdAt.getTime();
+        if (run.status === "planning" && !run.startedAt && ageMs > 5_000) {
+          await db.update(agentModeRuns)
+            .set({
+              status: "failed",
+              error: "Run stalled in planning (no startedAt)",
+              completedAt: new Date(),
+            })
+            .where(eq(agentModeRuns.id, run.id));
+
+          // Re-fetch the updated run (simple + consistent)
+          const [updatedRun] = await db.select().from(agentModeRuns).where(eq(agentModeRuns.id, run.id));
+          if (updatedRun) effectiveRun = updatedRun;
+        }       
 
       const steps = await db.select()
         .from(agentModeSteps)
         .where(eq(agentModeSteps.runId, run.id))
         .orderBy(agentModeSteps.stepIndex);
 
-      const planSteps = (run.plan as AgentPlan)?.steps || [];
+      const planSteps = (effectiveRun.plan as AgentPlan)?.steps || [];
 
-      const mergedSteps = planSteps.map((planStep: any, index: number) => {
-        const dbStep = steps.find(s => s.stepIndex === index);
-        if (dbStep) {
+        const mergedSteps = planSteps.map((planStep: any, index: number) => {
+          const dbStep = steps.find(s => s.stepIndex === index);
+          if (dbStep) {
+            return {
+              stepIndex: dbStep.stepIndex,
+              toolName: dbStep.toolName,
+              description: planStep.description,
+              status: dbStep.status,
+              output: dbStep.toolOutput,
+              error: dbStep.error,
+              startedAt: dbStep.startedAt,
+              completedAt: dbStep.completedAt,
+            };
+          }
+          const cur = effectiveRun.currentStepIndex || 0;
           return {
-            stepIndex: dbStep.stepIndex,
-            toolName: dbStep.toolName,
+            stepIndex: index,
+            toolName: planStep.toolName,
             description: planStep.description,
-            status: dbStep.status,
-            output: dbStep.toolOutput,
-            error: dbStep.error,
-            startedAt: dbStep.startedAt,
-            completedAt: dbStep.completedAt,
+            status: index < cur ? "pending" : (index === cur && effectiveRun.status === "running" ? "running" : "pending"),
+            output: null,
+            error: null,
+            startedAt: null,
+            completedAt: null,
           };
-        }
-        return {
-          stepIndex: index,
-          toolName: planStep.toolName,
-          description: planStep.description,
-          status: index < (run.currentStepIndex || 0) ? "pending" :
-            index === (run.currentStepIndex || 0) && run.status === "running" ? "running" : "pending",
-          output: null,
-          error: null,
-          startedAt: null,
-          completedAt: null,
-        };
-      });
+        });      
 
       const response: any = {
-        id: run.id,
-        chatId: run.chatId,
-        status: run.status,
-        plan: run.plan,
-        currentStepIndex: run.currentStepIndex ?? 0,
-        totalSteps: run.totalSteps ?? planSteps.length,
-        completedSteps: run.completedSteps ?? 0,
-        steps: mergedSteps.length > 0 ? mergedSteps : steps.map(s => ({
-          stepIndex: s.stepIndex,
-          toolName: s.toolName,
-          description: null,
-          status: s.status,
-          output: s.toolOutput,
-          error: s.error,
-          startedAt: s.startedAt,
-          completedAt: s.completedAt,
-        })),
-        artifacts: (run.artifacts as ToolArtifact[]) || [],
-        summary: run.summary,
-        error: run.error,
-        startedAt: run.startedAt?.toISOString(),
-        completedAt: run.completedAt?.toISOString(),
-        createdAt: run.createdAt.toISOString(),
-      };
+          id: effectiveRun.id,
+          chatId: effectiveRun.chatId,
+          status: effectiveRun.status,
+          plan: effectiveRun.plan,
+          currentStepIndex: effectiveRun.currentStepIndex ?? 0,
+          totalSteps: effectiveRun.totalSteps ?? planSteps.length,
+          completedSteps: effectiveRun.completedSteps ?? 0,
+          steps: mergedSteps.length > 0 ? mergedSteps : steps.map(s => ({
+            stepIndex: s.stepIndex,
+            toolName: s.toolName,
+            description: null,
+            status: s.status,
+            output: s.toolOutput,
+            error: s.error,
+            startedAt: s.startedAt,
+            completedAt: s.completedAt,
+          })),
+          artifacts: (effectiveRun.artifacts as ToolArtifact[]) || [],
+          summary: effectiveRun.summary ?? "",
+          error: effectiveRun.error ?? "",
+          startedAt: effectiveRun.startedAt?.toISOString(),
+          completedAt: effectiveRun.completedAt?.toISOString(),
+          createdAt: effectiveRun.createdAt.toISOString(),
+        };      
 
       // If this run is still active in-memory, include richer debug fields for the AgentPanel tabs.
-      const activeOrchestrator = agentManager.getOrchestrator(run.id);
+      const activeOrchestrator = agentManager.getOrchestrator(effectiveRun.id);
       if (activeOrchestrator) {
         response.eventStream = activeOrchestrator.getEventStream?.() || [];
         response.todoList = activeOrchestrator.getTodoList?.() || [];
@@ -343,96 +351,118 @@ export function createAgentModeRouter() {
           : {};
       }
 
-      try {
-        const validatedResponse = validateOrThrow(RunResponseSchema, response, `GET /runs/chat/${chatId} response`);
-        res.json(validatedResponse);
-      } catch (validationErr: any) {
-        // Schema validation failed — return the raw response with a warning header
-        // instead of a 500 that breaks the frontend polling loop.
-        console.warn(`[AgentRoutes] Response validation soft-fail for chat/${chatId}:`, validationErr?.zodError?.errors || validationErr.message);
-        res.setHeader("x-validation-warning", "schema_mismatch");
-        res.json(response);
+      // Ensure response matches schema: dates must be ISO strings.
+      if (Array.isArray((response as any).steps)) {
+        (response as any).steps = (response as any).steps.map((s: any) => ({
+          ...s,
+          startedAt: s?.startedAt instanceof Date ? s.startedAt.toISOString() : (s?.startedAt ?? null),
+          completedAt: s?.completedAt instanceof Date ? s.completedAt.toISOString() : (s?.completedAt ?? null),
+        }));
       }
+
+      const validatedResponse = validateOrThrow(RunResponseSchema, response, `GET /runs/chat/${chatId} response`);
+      res.json(validatedResponse);
     } catch (error: any) {
       console.error("[AgentRoutes] Error getting chat run:", error);
       res.status(500).json({ error: "Failed to get agent run for chat" });
     }
   });
 
-  router.get("/runs/:id", requireAuth, async (req: Request, res: Response) => {
-    try {
+  router.get("/runs/:id", requireAuth, async (req: Request, res: Response) => { try {
+
       const { id } = req.params;
 
-      const [run] = await db.select()
-        .from(agentModeRuns)
-        .where(eq(agentModeRuns.id, id));
+      const runs = await db.select()
+          .from(agentModeRuns)
+          .where(eq(agentModeRuns.id, id))
+          .limit(1);
 
-      if (!run) {
-        return res.status(404).json({ error: "Run not found" });
-      }
+        const run = runs[0];
+        if (!run) {
+          return res.status(404).json({ error: "Run not found", code: "RUN_NOT_FOUND" });
+        }
+
+        let effectiveRun = run;
+
+      const ageMs = Date.now() - run.createdAt.getTime();
+        if (run.status === "planning" && !run.startedAt && ageMs > 5_000) {
+          await db.update(agentModeRuns)
+            .set({
+              status: "failed",
+              error: "Run stalled in planning (no startedAt)",
+              completedAt: new Date(),
+            })
+            .where(eq(agentModeRuns.id, run.id));
+
+          // Re-fetch the updated run (simple + consistent)
+          const [updatedRun] = await db.select().from(agentModeRuns).where(eq(agentModeRuns.id, run.id));
+          if (updatedRun) {
+            if (updatedRun) effectiveRun = updatedRun;
+          }
+        }
 
       const steps = await db.select()
         .from(agentModeSteps)
         .where(eq(agentModeSteps.runId, id))
         .orderBy(agentModeSteps.stepIndex);
 
-      const planSteps = (run.plan as AgentPlan)?.steps || [];
+      const planSteps = (effectiveRun.plan as AgentPlan)?.steps || [];
 
       const mergedSteps = planSteps.map((planStep: any, index: number) => {
-        const dbStep = steps.find(s => s.stepIndex === index);
-        if (dbStep) {
-          return {
-            stepIndex: dbStep.stepIndex,
-            toolName: dbStep.toolName,
-            description: planStep.description,
-            status: dbStep.status,
-            output: dbStep.toolOutput,
-            error: dbStep.error,
-            startedAt: dbStep.startedAt,
-            completedAt: dbStep.completedAt,
-          };
-        }
-        return {
-          stepIndex: index,
-          toolName: planStep.toolName,
-          description: planStep.description,
-          status: index < (run.currentStepIndex || 0) ? "pending" :
-            index === (run.currentStepIndex || 0) && run.status === "running" ? "running" : "pending",
-          output: null,
-          error: null,
-          startedAt: null,
-          completedAt: null,
-        };
-      });
+	  const dbStep = steps.find(s => s.stepIndex === index);
+	  if (dbStep) {
+	    return {
+	      stepIndex: dbStep.stepIndex,
+	      toolName: dbStep.toolName,
+	      description: planStep.description,
+	      status: dbStep.status,
+	      output: dbStep.toolOutput,
+	      error: dbStep.error,
+	      startedAt: dbStep.startedAt,
+	      completedAt: dbStep.completedAt,
+	    };
+	  }
+	  const cur = effectiveRun.currentStepIndex || 0;
+	  return {
+	    stepIndex: index,
+	    toolName: planStep.toolName,
+	    description: planStep.description,
+	    status: index < cur ? "pending" : (index === cur && effectiveRun.status === "running" ? "running" : "pending"),
+	    output: null,
+	    error: null,
+	    startedAt: null,
+	    completedAt: null,
+	  };
+	});
 
       const response: any = {
-        id: run.id,
-        chatId: run.chatId,
-        status: run.status,
-        plan: run.plan,
-        currentStepIndex: run.currentStepIndex ?? 0,
-        totalSteps: run.totalSteps ?? planSteps.length,
-        completedSteps: run.completedSteps ?? 0,
-        steps: mergedSteps.length > 0 ? mergedSteps : steps.map(s => ({
-          stepIndex: s.stepIndex,
-          toolName: s.toolName,
-          description: null,
-          status: s.status,
-          output: s.toolOutput,
-          error: s.error,
-          startedAt: s.startedAt,
-          completedAt: s.completedAt,
-        })),
-        artifacts: (run.artifacts as ToolArtifact[]) || [],
-        summary: run.summary,
-        error: run.error,
-        startedAt: run.startedAt?.toISOString(),
-        completedAt: run.completedAt?.toISOString(),
-        createdAt: run.createdAt.toISOString(),
-      };
+	  id: effectiveRun.id,
+	  chatId: effectiveRun.chatId,
+	  status: effectiveRun.status,
+	  plan: effectiveRun.plan,
+	  currentStepIndex: effectiveRun.currentStepIndex ?? 0,
+	  totalSteps: effectiveRun.totalSteps ?? planSteps.length,
+	  completedSteps: effectiveRun.completedSteps ?? 0,
+	  steps: mergedSteps.length > 0 ? mergedSteps : steps.map(s => ({
+	    stepIndex: s.stepIndex,
+	    toolName: s.toolName,
+	    description: null,
+	    status: s.status,
+	    output: s.toolOutput,
+	    error: s.error,
+	    startedAt: s.startedAt,
+	    completedAt: s.completedAt,
+	  })),
+	  artifacts: (effectiveRun.artifacts as ToolArtifact[]) || [],
+	  summary: effectiveRun.summary ?? "",
+	  error: effectiveRun.error ?? "",
+	  startedAt: effectiveRun.startedAt?.toISOString(),
+	  completedAt: effectiveRun.completedAt?.toISOString(),
+	  createdAt: effectiveRun.createdAt.toISOString(),
+	};      
 
       // If this run is still active in-memory, include richer debug fields for the AgentPanel tabs.
-      const activeOrchestrator = agentManager.getOrchestrator(run.id);
+      const activeOrchestrator = agentManager.getOrchestrator(effectiveRun.id);
       if (activeOrchestrator) {
         response.eventStream = activeOrchestrator.getEventStream?.() || [];
         response.todoList = activeOrchestrator.getTodoList?.() || [];
@@ -440,14 +470,18 @@ export function createAgentModeRouter() {
           ? Object.fromEntries(activeOrchestrator.getWorkspaceFiles())
           : {};
       }
+      // Ensure response matches schema: dates must be ISO strings.
+      if (Array.isArray((response as any).steps)) {
+        (response as any).steps = (response as any).steps.map((s: any) => ({
+          ...s,
+          startedAt: s?.startedAt instanceof Date ? s.startedAt.toISOString() : (s?.startedAt ?? null),
+          completedAt: s?.completedAt instanceof Date ? s.completedAt.toISOString() : (s?.completedAt ?? null),
+        }));
+      }
 
       const validatedResponse = validateOrThrow(RunResponseSchema, response, `GET /runs/${id} response`);
       res.json(validatedResponse);
     } catch (error: any) {
-      if (error instanceof ValidationError) {
-        console.error(`[AgentRoutes] Response validation failed:`, error.zodError.errors);
-        return res.status(500).json({ error: "Internal response validation failed" });
-      }
       console.error("[AgentRoutes] Error getting run:", error);
       res.status(500).json({ error: "Failed to get agent run" });
     }
@@ -476,20 +510,22 @@ export function createAgentModeRouter() {
         status: s.status,
         output: s.toolOutput,
         error: s.error,
-        startedAt: s.startedAt,
-        completedAt: s.completedAt,
-      }));
+        startedAt: s.startedAt ? s.startedAt.toISOString() : null,
+        completedAt: s.completedAt ? s.completedAt.toISOString() : null,
+      }));      
 
       const validatedResponse = validateOrThrow(StepsArrayResponseSchema, response, `GET /runs/${id}/steps response`);
-      res.json(validatedResponse);
+      res.json(response);
     } catch (error: any) {
       if (error instanceof ValidationError) {
         console.error(`[AgentRoutes] Response validation failed:`, error.zodError.errors);
         return res.status(500).json({ error: "Internal response validation failed" });
       }
       console.error("[AgentRoutes] Error getting steps:", error);
-      res.status(500).json({ error: "Failed to get agent run steps" });
-    }
+      res.status(500).json({ error: "Failed to get run steps" });
+    }  
+ 
+
   });
 
   router.get("/runs/:id/events", requireAuth, async (req: Request, res: Response) => {

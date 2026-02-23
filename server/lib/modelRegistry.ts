@@ -1,10 +1,5 @@
-/**
- * MODEL REGISTRY - Single Source of Truth for all model IDs and defaults.
- *
- * Every file that references a model name MUST import from here.
- * This prevents the scattered, inconsistent model references that
- * caused silent failures across the codebase.
- */
+/** * MODEL REGISTRY - Single Source of Truth for all model IDs and defaults. * * Every file that references a model name MUST import from here. * This prevents the scattered, inconsistent model 
+ references that * caused silent failures across the codebase. */
 
 // ============================================================================
 // XAI (Grok) Models
@@ -130,6 +125,7 @@ export const FALLBACK_CHAINS: Readonly<Record<string, readonly string[]>> = {
   [GEMINI_MODELS_REGISTRY.PRO_25]: [GEMINI_MODELS_REGISTRY.FLASH_25, GEMINI_MODELS_REGISTRY.FLASH_20],
   [GEMINI_MODELS_REGISTRY.FLASH_25]: [GEMINI_MODELS_REGISTRY.FLASH_PREVIEW, GEMINI_MODELS_REGISTRY.FLASH_20],
   [GEMINI_MODELS_REGISTRY.FLASH_20]: [GEMINI_MODELS_REGISTRY.FLASH_25],
+
 };
 
 // ============================================================================
@@ -169,4 +165,7 @@ export const MODEL_PRICING_REGISTRY: Readonly<Record<string, ModelPricingEntry>>
   [GEMINI_MODELS_REGISTRY.FLASH_25]: { inputPerMillion: 0.075, outputPerMillion: 0.30 },
   [GEMINI_MODELS_REGISTRY.FLASH_20]: { inputPerMillion: 0.10, outputPerMillion: 0.40 },
   [GEMINI_MODELS_REGISTRY.FLASH_PREVIEW]: { inputPerMillion: 0.10, outputPerMillion: 0.40 },
+  [GEMINI_MODELS_REGISTRY.PRO_31]: { inputPerMillion: 1.25, outputPerMillion: 5.00 },
+  "gemini-3.1-pro-preview": { inputPerMillion: 1.25, outputPerMillion: 5.00 },
+  [GEMINI_MODELS_REGISTRY.FLASH_31]: { inputPerMillion: 0.075, outputPerMillion: 0.30 },
 };

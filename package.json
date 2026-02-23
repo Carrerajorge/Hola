@@ -294,7 +294,7 @@
         "zustand": "^5.0.11"
     },
     "devDependencies": {
-        "@eslint/js": "^10.0.1",
+        "@eslint/js": "^9.39.0",
         "@playwright/test": "^1.58.2",
         "@replit/vite-plugin-cartographer": "^0.4.4",
         "@replit/vite-plugin-dev-banner": "^0.1.1",
@@ -323,7 +323,7 @@
         "autoprefixer": "^10.4.24",
         "drizzle-kit": "^0.31.9",
         "esbuild": "^0.25.0",
-        "eslint": "^10.0.1",
+        "eslint": "^9.39.0",
         "fast-check": "^4.5.3",
         "globals": "^17.3.0",
         "happy-dom": "^20.5.3",

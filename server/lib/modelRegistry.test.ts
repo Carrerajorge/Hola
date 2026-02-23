@@ -56,6 +56,8 @@ describe("GEMINI_MODELS_REGISTRY", () => {
     expect(GEMINI_MODELS_REGISTRY.FLASH_25).toBe("gemini-2.5-flash");
     expect(GEMINI_MODELS_REGISTRY.PRO_25).toBe("gemini-2.5-pro");
     expect(GEMINI_MODELS_REGISTRY.FLASH_20).toBe("gemini-2.0-flash");
+    expect(GEMINI_MODELS_REGISTRY.PRO_31).toBe("gemini-3.1-pro");
+    expect(GEMINI_MODELS_REGISTRY.FLASH_31).toBe("gemini-3.1-flash");
   });
 });
 
@@ -86,7 +88,7 @@ describe("Default model constants", () => {
   it("sets default Gemini vision model to Flash 3.1", () => {
     expect(DEFAULT_GEMINI_VISION_MODEL).toBe(GEMINI_MODELS_REGISTRY.FLASH_31);
   });
-
+  
   it("has gemini as default provider", () => {
     expect(DEFAULT_PROVIDER).toBe("gemini");
   });

@@ -1,9 +1,4 @@
-export type BundledSkill = {
-    id: string;
-    name: string;
-    description: string;
-    category: "documents" | "data" | "integrations" | "custom" | "automation";
-    features?: string[];
+export type BundledSkill = { id: string; name: string; description: string; category: "documents" | "data" | "integrations" | "custom" | "automation"; features?: string[];
 };
 
 export const BUNDLED_SKILLS: BundledSkill[] = [
@@ -164,11 +159,7 @@ export const BUNDLED_SKILLS: BundledSkill[] = [
         description: "Generate Office documents (Word, Excel, PowerPoint, CSV) from text or structured data.",
         category: "documents",
         features: [
-            "Word document (.docx) generation",
-            "Excel spreadsheet (.xlsx) generation",
-            "PowerPoint presentation (.pptx) creation",
-            "CSV format support",
-            "Automatic cloud library upload"
+            "Word document (.docx) generation", "Excel spreadsheet (.xlsx) generation", "PowerPoint presentation (.pptx) creation", "CSV format support", "Automatic cloud library upload"
         ]
-    }
+    },
 ];

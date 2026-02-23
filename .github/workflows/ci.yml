@@ -541,8 +541,14 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
 
+      - name: Bootstrap E2E DB
+        run: npm run db:bootstrap
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://e2e:e2e@localhost:5432/e2e
+
       - name: Run E2E tests
-        run: npm run test:e2e
+        run: npx playwright test --reporter=html
         env:
           CI: "true"
           NODE_ENV: test
@@ -550,6 +556,7 @@ jobs:
           BASE_URL: "http://localhost:5050"
           DATABASE_URL: postgresql://e2e:e2e@localhost:5432/e2e
           SESSION_SECRET: ci-e2e-session-secret
+          TOKEN_ENCRYPTION_KEY: ci-e2e-token-encryption-key-32-chars-min
           OPENAI_API_KEY: ci_dummy_key
           GEMINI_API_KEY: ci_dummy_key
           XAI_API_KEY: ci_dummy_key
@@ -627,7 +634,8 @@ jobs:
 
       - name: Upload Trivy secret scan report to GitHub Security
         if: always() && hashFiles('trivy-secrets/secret-scan.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
+        continue-on-error: true
         with:
           sarif_file: trivy-secrets/secret-scan.sarif
           category: trivy-secret-scan
