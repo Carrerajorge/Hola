@@ -112,11 +112,14 @@ async function fetchUploadSecurityContract(): Promise<{ fetchedAt: number; csrfR
   }
 
   uploadSecurityContractInFlight = (async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
     try {
       const response = await fetch("/api/objects/security-contract", {
         method: "GET",
         credentials: "include",
         cache: "no-store",
+        signal: controller.signal,
       });
       if (!response.ok) return null;
 
@@ -135,6 +138,7 @@ async function fetchUploadSecurityContract(): Promise<{ fetchedAt: number; csrfR
     } catch {
       return null;
     } finally {
+      clearTimeout(timeout);
       uploadSecurityContractInFlight = null;
     }
   })();
@@ -143,68 +147,76 @@ async function fetchUploadSecurityContract(): Promise<{ fetchedAt: number; csrfR
 }
 
 export async function ensureCsrfToken(): Promise<void> {
-  const securityContract = await fetchUploadSecurityContract();
-  if (securityContract?.csrfRequired === false) {
-    return;
-  }
+  const guarantee = new Promise<void>((_, reject) => {
+    setTimeout(() => reject(new Error("Global CSRF Token Timeout")), 15000);
+  });
 
-  const existingToken = getCookieValue("XSRF-TOKEN");
-  if (isToken(existingToken)) {
-    return;
-  }
-  if (csrfRefreshInFlight) {
-    await csrfRefreshInFlight;
-    return;
-  }
-
-  csrfRefreshInFlight = (async () => {
-    let lastError: Error | null = null;
-    for (let attempt = 0; attempt < CSRF_REFRESH_RETRY_ATTEMPTS; attempt++) {
-      const abortController = new AbortController();
-      const timeoutId = window.setTimeout(() => {
-        abortController.abort(new DOMException("CSRF refresh timeout", "TimeoutError"));
-      }, CSRF_REFRESH_TIMEOUT_MS);
-      try {
-        const response = await fetch("/api/csrf/token?rotate=1", {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-          signal: abortController.signal,
-        });
-        if (!response.ok) {
-          throw new Error("Failed to refresh CSRF token");
-        }
-
-        const responseBody = await response.json().catch(() => ({} as { csrfToken?: string }));
-        const rotatedToken = responseBody?.csrfToken;
-        const cookieToken = getCookieValue("XSRF-TOKEN");
-        const effectiveToken = isToken(rotatedToken) ? rotatedToken : cookieToken;
-        if (!isToken(effectiveToken)) {
-          throw new Error("Invalid CSRF token after refresh");
-        }
+  return Promise.race([
+    guarantee,
+    (async () => {
+      const securityContract = await fetchUploadSecurityContract();
+      if (securityContract?.csrfRequired === false) {
         return;
-      } catch (error: unknown) {
-        lastError = error instanceof Error ? error : new Error("Failed to refresh CSRF token");
-        if (attempt < CSRF_REFRESH_RETRY_ATTEMPTS - 1) {
-          const backoffMs = 250 * (attempt + 1) + Math.floor(Math.random() * 150);
-          await new Promise((resolve) => window.setTimeout(resolve, backoffMs));
-        }
-      } finally {
-        window.clearTimeout(timeoutId);
       }
-    }
-    throw lastError || new Error("Failed to refresh CSRF token");
-  })();
 
-  try {
-    await csrfRefreshInFlight;
-  } finally {
-    csrfRefreshInFlight = null;
-  }
+      const existingToken = getCookieValue("XSRF-TOKEN");
+      if (isToken(existingToken)) {
+        return;
+      }
+      if (csrfRefreshInFlight) {
+        await csrfRefreshInFlight;
+        return;
+      }
 
-  if (!isToken(getCookieValue("XSRF-TOKEN"))) {
-    throw new Error("CSRF token missing after refresh attempt");
-  }
+      csrfRefreshInFlight = (async () => {
+        let lastError: Error | null = null;
+        for (let attempt = 0; attempt < CSRF_REFRESH_RETRY_ATTEMPTS; attempt++) {
+          const abortController = new AbortController();
+          const timeoutId = window.setTimeout(() => {
+            abortController.abort(new DOMException("CSRF refresh timeout", "TimeoutError"));
+          }, CSRF_REFRESH_TIMEOUT_MS);
+          try {
+            const response = await fetch("/api/csrf/token?rotate=1", {
+              method: "GET",
+              credentials: "include",
+              cache: "no-store",
+              signal: abortController.signal,
+            });
+            if (!response.ok) {
+              throw new Error("Failed to refresh CSRF token");
+            }
+
+            const responseBody = await response.json().catch(() => ({} as { csrfToken?: string }));
+            const rotatedToken = responseBody?.csrfToken;
+            const cookieToken = getCookieValue("XSRF-TOKEN");
+            const effectiveToken = isToken(rotatedToken) ? rotatedToken : cookieToken;
+            if (!isToken(effectiveToken)) {
+              throw new Error("Invalid CSRF token after refresh");
+            }
+            return;
+          } catch (error: unknown) {
+            lastError = error instanceof Error ? error : new Error("Failed to refresh CSRF token");
+            if (attempt < CSRF_REFRESH_RETRY_ATTEMPTS - 1) {
+              const backoffMs = 250 * (attempt + 1) + Math.floor(Math.random() * 150);
+              await new Promise((resolve) => window.setTimeout(resolve, backoffMs));
+            }
+          } finally {
+            window.clearTimeout(timeoutId);
+          }
+        }
+        throw lastError || new Error("Failed to refresh CSRF token");
+      })();
+
+      try {
+        await csrfRefreshInFlight;
+      } finally {
+        csrfRefreshInFlight = null;
+      }
+
+      if (!isToken(getCookieValue("XSRF-TOKEN"))) {
+        throw new Error("CSRF token missing after refresh attempt");
+      }
+    })()]);
 }
 
 function createAbortSignal(signal: AbortSignal | undefined, timeoutMs: number | undefined): AbortController {
@@ -257,8 +269,8 @@ export async function uploadBlob(
   const bodyToUpload = body instanceof Blob
     ? body
     : body instanceof Uint8Array
-      ? new Blob([body])
-      : new Blob([body]);
+      ? new Blob([body as any])
+      : new Blob([body as any]);
   const finalHeaders = new Headers(headers);
   if (options.skipContentType) {
     finalHeaders.delete("content-type");
@@ -293,8 +305,8 @@ export async function uploadBlobWithProgress(
   if (shouldEnforceCsrf && !getCookieValue("XSRF-TOKEN")) {
     throw new Error("CSRF token missing after refresh attempt");
   }
-  const bodyForUpload = body instanceof ArrayBuffer ? new Blob([body]) : body;
-  const file = bodyForUpload instanceof Blob ? bodyForUpload : new Blob([bodyForUpload]);
+  const bodyForUpload = body instanceof ArrayBuffer ? new Blob([body as any]) : body;
+  const file = bodyForUpload instanceof Blob ? bodyForUpload : new Blob([bodyForUpload as any]);
   const finalHeaders = new Headers(headers);
   if (options.skipContentType) {
     finalHeaders.delete("content-type");

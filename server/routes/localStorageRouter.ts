@@ -58,6 +58,14 @@ export function createLocalStorageRouter() {
             let totalSize = 0;
             let aborted = false;
 
+            // Idle timeout to prevent hung uploads from dropping connections
+            req.setTimeout(30000, () => {
+                if (aborted) return;
+                aborted = true;
+                console.warn(`[LocalStorage] Upload timeout for ${objectId}`);
+                req.destroy(new Error("Upload timeout"));
+            });
+
             req.on("data", (chunk: Buffer) => {
                 if (aborted) return;
                 totalSize += chunk.length;
@@ -81,7 +89,7 @@ export function createLocalStorageRouter() {
                     res.status(200).json({ success: true, storagePath: `/objects/uploads/${objectId}` });
                 } catch (writeErr: any) {
                     // Cleanup tmp file on any write error
-                    await fs.promises.unlink(tmpPath).catch(() => {});
+                    await fs.promises.unlink(tmpPath).catch(() => { });
                     if (writeErr?.code === "ENOSPC") {
                         if (!res.headersSent) return res.status(507).json({ error: "Insufficient disk space" });
                         return;
@@ -92,7 +100,7 @@ export function createLocalStorageRouter() {
             });
             req.on("error", (error) => {
                 // Cleanup tmp file on stream error
-                fs.promises.unlink(tmpPath).catch(() => {});
+                fs.promises.unlink(tmpPath).catch(() => { });
                 console.error("Upload stream error:", error instanceof Error ? error.message : String(error));
                 if (!res.headersSent) res.status(500).json({ error: "Upload failed" });
             });

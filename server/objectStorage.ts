@@ -53,7 +53,7 @@ export class ObjectNotFoundError extends Error {
 }
 
 export class ObjectStorageService {
-  constructor() {}
+  constructor() { }
 
   getPublicObjectSearchPaths(): Array<string> {
     const pathsStr = process.env.PUBLIC_OBJECT_SEARCH_PATHS || "";
@@ -68,7 +68,7 @@ export class ObjectStorageService {
     if (paths.length === 0) {
       throw new Error(
         "PUBLIC_OBJECT_SEARCH_PATHS not set. Create a bucket in 'Object Storage' " +
-          "tool and set PUBLIC_OBJECT_SEARCH_PATHS env var (comma-separated paths)."
+        "tool and set PUBLIC_OBJECT_SEARCH_PATHS env var (comma-separated paths)."
       );
     }
     return paths;
@@ -79,7 +79,7 @@ export class ObjectStorageService {
     if (!dir) {
       throw new Error(
         "PRIVATE_OBJECT_DIR not set. Create a bucket in 'Object Storage' " +
-          "tool and set PRIVATE_OBJECT_DIR env var."
+        "tool and set PRIVATE_OBJECT_DIR env var."
       );
     }
     return dir;
@@ -135,7 +135,7 @@ export class ObjectStorageService {
     if (!privateObjectDir) {
       throw new Error(
         "PRIVATE_OBJECT_DIR not set. Create a bucket in 'Object Storage' " +
-          "tool and set PRIVATE_OBJECT_DIR env var."
+        "tool and set PRIVATE_OBJECT_DIR env var."
       );
     }
     const safeUploadId = sanitizeUploadId(uploadId);
@@ -267,12 +267,13 @@ async function signObjectURL({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
+      signal: AbortSignal.timeout(3000)
     }
   );
   if (!response.ok) {
     throw new Error(
       `Failed to sign object URL, errorcode: ${response.status}, ` +
-        `make sure you're running on Replit`
+      `make sure you're running on Replit`
     );
   }
   const { signed_url: signedURL } = await response.json();

@@ -23,11 +23,13 @@ function generateRequestId(): string {
   return `req_${now}_${random}`;
 }
 
-export async function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
+export async function apiFetch(url: string, options: RequestInit & { timeoutMs?: number } = {}): Promise<Response> {
   const safeUrl = resolveSafeUrl(url);
   const anonUserId = getStoredAnonUserId();
   const anonToken = getStoredAnonToken();
-  const headers = new Headers(options.headers);
+
+  const { timeoutMs, headers: optionsHeaders, ...fetchOptions } = options;
+  const headers = new Headers(optionsHeaders);
 
   if (anonUserId) {
     headers.set("X-Anonymous-User-Id", anonUserId);
@@ -51,11 +53,32 @@ export async function apiFetch(url: string, options: RequestInit = {}): Promise<
     headers.set("X-Correlation-Id", requestId);
   }
 
-  return fetch(safeUrl, {
-    ...options,
+  const finalOptions: RequestInit = {
+    ...fetchOptions,
     headers,
     credentials: "include",
-  });
+  };
+
+  if (timeoutMs && timeoutMs > 0) {
+    if ('timeout' in AbortSignal) {
+      finalOptions.signal = AbortSignal.timeout(timeoutMs);
+    } else {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new Error("Request timeout")), timeoutMs);
+      finalOptions.signal = controller.signal;
+    }
+  }
+
+  const fetchPromise = fetch(safeUrl, finalOptions);
+
+  if (timeoutMs && timeoutMs > 0) {
+    const timeoutPromise = new Promise<Response>((_, reject) => {
+      setTimeout(() => reject(new Error("Request timeout")), timeoutMs);
+    });
+    return Promise.race([fetchPromise, timeoutPromise]);
+  }
+
+  return fetchPromise;
 }
 
 export function getAnonUserIdHeader(): Record<string, string> {

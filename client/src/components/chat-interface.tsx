@@ -152,6 +152,7 @@ import {
   normalizeFileForUpload,
   normalizeHttpUrl,
   uniq,
+  compressImageToDataUrl,
 } from "@/lib/attachmentIngest";
 import { useChats } from "@/hooks/use-chats";
 import { useChatFolders, type Folder as FolderType } from "@/hooks/use-chat-folders";
@@ -2825,7 +2826,7 @@ export function ChatInterface({
   // This allows callers (and pendingUploadsRef) to properly await the full file lifecycle.
   const pollFileStatus = (fileId: string, trackingId: string): Promise<void> => {
     return new Promise<void>((resolve) => {
-      const maxAttempts = 30;
+      const maxAttempts = 120; // Aumentado a 30 segundos (120 * 250ms)
       let attempts = 0;
 
       const checkStatus = async () => {
@@ -2833,7 +2834,7 @@ export function ChatInterface({
           const stillTracked = uploadedFilesRef.current.some((f: UploadedFile) => f.id === fileId || f.id === trackingId);
           if (!stillTracked) { resolve(); return; }
 
-          const contentRes = await apiFetch(`/api/files/${fileId}/content`);
+          const contentRes = await apiFetch(`/api/files/${fileId}/content`, { timeoutMs: 30000 });
 
           if (!contentRes.ok && contentRes.status !== 202) {
             setUploadedFiles((prev: any[]) =>
@@ -2910,7 +2911,7 @@ export function ChatInterface({
     "image/tiff",
   ];
 
-  const MAX_FILE_SIZE_MB = 100;
+  const MAX_FILE_SIZE_MB = 500;
   const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
   const MAX_IMAGE_PREVIEW_BYTES = 15 * 1024 * 1024;
 
@@ -2972,11 +2973,16 @@ export function ChatInterface({
 
       let dataUrl: string | undefined;
       if (isImage && file.size <= MAX_IMAGE_PREVIEW_BYTES) {
-        dataUrl = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.readAsDataURL(file);
-        });
+        try {
+          dataUrl = await compressImageToDataUrl(file);
+        } catch (e) {
+          console.warn("Failed to compress image, falling back to basic FileReader", e);
+          dataUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.readAsDataURL(file);
+          });
+        }
       }
 
       const tempFile: UploadedFile = {
@@ -2991,11 +2997,14 @@ export function ChatInterface({
       setUploadedFiles((prev: any) => [...prev, tempFile]);
 
       const doUpload = async (): Promise<void> => {
-        const retryFetch = async (fn: () => Promise<Response>, maxRetries = 3): Promise<Response> => {
+        const retryFetch = async (fn: () => Promise<Response>, maxRetries = 3, timeoutMs = 15000): Promise<Response> => {
           let lastError: Error | null = null;
           for (let attempt = 0; attempt <= maxRetries; attempt++) {
             try {
-              const res = await fn();
+              const res = await Promise.race([
+                fn(),
+                new Promise<Response>((_, reject) => setTimeout(() => reject(new Error("Request timeout")), timeoutMs))
+              ]);
               return res;
             } catch (err: any) {
               lastError = err;
@@ -3084,6 +3093,7 @@ export function ChatInterface({
                 method: 'POST',
                 headers: multipartHeaders,
                 body: formData,
+                timeoutMs: 30000,
               });
 
               if (spreadsheetRes.ok) {
@@ -3138,6 +3148,7 @@ export function ChatInterface({
               uploadId,
               ...(stableConversationId ? { conversationId: stableConversationId } : {}),
             }),
+            timeoutMs: 30000,
           });
           const registeredFile = await safeJson(registerRes);
           if (!registerRes.ok) {
@@ -3171,7 +3182,7 @@ export function ChatInterface({
             variant: "destructive",
           });
           setUploadedFiles((prev: any[]) =>
-            prev.map((f: any) => (f.id === tempId ? { ...f, status: "error", error: message } : f))
+            prev.map((f: any) => (f.id === tempId || (f.id !== tempId && f.name === file.name && f.size === file.size) ? { ...f, status: "error", error: message } : f))
           );
         }
       };
@@ -3213,7 +3224,7 @@ export function ChatInterface({
         }
 
         try {
-          const contentRes = await apiFetch(`/api/files/${fileId}/content`);
+          const contentRes = await apiFetch(`/api/files/${fileId}/content`, { timeoutMs: 30000 });
 
           if (!contentRes.ok && contentRes.status !== 202) {
             setUploadedFiles((prev: any[]) =>
@@ -3262,13 +3273,18 @@ export function ChatInterface({
       let sawWsEvent = false;
       let unsubscribe: (() => void) | null = null;
       let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      let globalTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
       const stillTracked = () => uploadedFilesRef.current.some((f: UploadedFile) => f.id === fileId || f.id === trackingId);
 
-      const cleanup = () => {
+      let cleanup = () => {
         if (timeoutId) {
           clearTimeout(timeoutId);
           timeoutId = null;
+        }
+        if (globalTimeoutId) {
+          clearTimeout(globalTimeoutId);
+          globalTimeoutId = null;
         }
         if (unsubscribe) {
           unsubscribe();
@@ -3288,6 +3304,32 @@ export function ChatInterface({
         settled = true;
         cleanup();
         pollFileStatusFastPolling(fileId, trackingId).then(resolve);
+      };
+
+      // Periodic safety poll every 2 seconds in case WS event drops
+      const safetyPollInterval = setInterval(async () => {
+        if (settled) {
+          clearInterval(safetyPollInterval);
+          return;
+        }
+        try {
+          const contentRes = await apiFetch(`/api/files/${fileId}/content`, { timeoutMs: 5000 });
+          if (contentRes.status === 200) {
+            clearInterval(safetyPollInterval);
+            fallback();
+          } else if (contentRes.status !== 202) {
+            clearInterval(safetyPollInterval);
+            fallback();
+          }
+        } catch {
+          // ignore
+        }
+      }, 2000);
+
+      const originalCleanup = cleanup;
+      cleanup = () => {
+        clearInterval(safetyPollInterval);
+        originalCleanup();
       };
 
       if (!stillTracked()) { done(); return; }
@@ -3326,7 +3368,7 @@ export function ChatInterface({
             // Fetch content once (with short retry for eventual consistency).
             for (let attempt = 0; attempt < 5; attempt++) {
               try {
-                const contentRes = await apiFetch(`/api/files/${fileId}/content`);
+                const contentRes = await apiFetch(`/api/files/${fileId}/content`, { timeoutMs: 30000 });
                 if (contentRes.ok) {
                   const contentData = await contentRes.json();
                   if (contentData.status === "ready") {
@@ -3360,10 +3402,16 @@ export function ChatInterface({
 
         timeoutId = setTimeout(() => {
           if (!sawWsEvent) {
-            console.warn("[FileStatus] WS timeout, falling back to polling");
+            console.warn("[FileStatus] WS initial timeout, falling back to polling");
             fallback();
           }
         }, wsTimeoutMs);
+
+        // AGGRESSIVE FIX: Max limits on WebSocket listening (60 seconds) to avoid infinite loading.
+        globalTimeoutId = setTimeout(() => {
+          console.warn("[FileStatus] WS global wait timeout exceeded, falling back to polling");
+          fallback();
+        }, 60000);
       } catch (error) {
         console.warn("[FileStatus] WS subscribe failed, falling back to polling:", error);
         fallback();

@@ -305,3 +305,52 @@ export async function extractFilesFromDataTransfer(
 
   return out.length > 0 ? out : Array.from(dataTransfer.files || []);
 }
+
+export async function compressImageToDataUrl(file: File, maxWidth = 1920, maxHeight = 1080, quality = 0.8): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        reject(new Error("Image compression timeout"));
+      }
+    }, 10000); // 10 seconds max
+
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onerror = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Failed to load image for compression"));
+    };
+    img.onload = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      URL.revokeObjectURL(objectUrl);
+      let { width, height } = img;
+      if (width > maxWidth || height > maxHeight) {
+        const ratio = Math.min(maxWidth / width, maxHeight / height);
+        width = width * ratio;
+        height = height * ratio;
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        // Fallback to FileReader if canvas fails
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target?.result as string);
+        reader.readAsDataURL(file);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+      // use jpeg for robust compatibility with OpenAI Vision
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.src = objectUrl;
+  });
+}

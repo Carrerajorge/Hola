@@ -134,7 +134,7 @@ app.disable("x-powered-by");
 // Route-specific body limits (MUST come before global parser)
 // /api/chat/stream needs a higher limit to support inline image base64 for vision
 app.use("/api/chat/stream", express.json({
-  limit: "100mb", // Supports massive contexts > 1M tokens
+  limit: "500mb", // Supports massive contexts > 1M tokens and heavy files
   verify: (req: any, _res, buf) => {
     req.rawBody = buf.toString();
   },
@@ -145,7 +145,7 @@ app.use("/api/chat/stream", express.json({
 // For large file uploads, use specific routes with increased limits (e.g. Multer)
 app.use(
   express.json({
-    limit: "100mb",
+    limit: "500mb",
     verify: (req: any, res: any, buf: Buffer) => {
       req.rawBody = buf.toString();
     },
@@ -154,7 +154,7 @@ app.use(
   }),
 );
 
-app.use(express.urlencoded({ extended: false, limit: '1mb', parameterLimit: 1000 }));
+app.use(express.urlencoded({ extended: false, limit: '500mb', parameterLimit: 1000 }));
 
 // API hardening boundary: path/query/payload validation and canonicalization
 app.use("/api", requestBoundaryGuard);

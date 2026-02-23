@@ -34,7 +34,7 @@ const DEFAULT_ACCEPTED_TYPES = [
     '.csv', '.json',
 ];
 
-const MAX_FILE_SIZE_MB = 50;
+const MAX_FILE_SIZE_MB = 500;
 
 export function FileDropZone({
     onFilesDropped,

@@ -336,9 +336,9 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
     };
 
     // Validate file
-    const maxSize = 50 * 1024 * 1024; // 50MB
+    const maxSize = 500 * 1024 * 1024; // 500MB
     if (normalizedFile.size > maxSize) {
-      setError("El archivo es demasiado grande (máximo 50MB)");
+      setError("El archivo es demasiado grande (máximo 500MB)");
       setInputMode("idle");
       return;
     }

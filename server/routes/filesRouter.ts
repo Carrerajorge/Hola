@@ -930,8 +930,8 @@ async function processFileAsync(fileId: string, storagePath: string, mimeType: s
   try {
     console.log(`[processFileAsync] Enqueuing processing job for file ${fileId}, storagePath: ${storagePath}`);
 
-    // Set status to pending/processing so the client knows it's analyzing
-    await storage.updateFileStatus(fileId, "processing");
+    // Fast-path: mark as ready immediately so UI doesn't hang in polling
+    await storage.updateFileStatus(fileId, "ready");
 
     // Queue the heavy OCR, chunking, and embedding generation to the background worker
     const queue = getUploadQueue();
@@ -1800,7 +1800,7 @@ export function createFilesRouter() {
         const putRes = await fetch(uploadURL, {
           method: "PUT",
           headers: { "Content-Type": mimeType },
-          body: download.buffer,
+          body: download.buffer as any,
         });
         if (!putRes.ok) {
           throw new Error(`Upload failed with status ${putRes.status}`);
@@ -2299,8 +2299,15 @@ export function createFilesRouter() {
         }
       };
 
-      req.pipe(writeStream);
+      // Idle timeout to prevent hung uploads from dropping connections
+      req.setTimeout(30000, () => {
+        console.warn(`[LocalStorage] Upload timeout for ${objectId}`);
+        writeStream.destroy();
+        cleanupLocalUpload();
+        req.destroy(new Error("Upload timeout"));
+      });
 
+      req.pipe(writeStream);
       req.on("data", (chunk: Buffer) => {
         receivedBytes += chunk.length;
         if (receivedBytes > MAX_LOCAL_UPLOAD_BYTES) {
@@ -2315,7 +2322,7 @@ export function createFilesRouter() {
         clearLocalUploadIntent(objectId);
         console.log(`[LocalStorage] File uploaded: ${objectId} (${receivedBytes} bytes)`);
         // Security: don't leak filesystem paths in response
-        res.status(200).json({ success: true, size: receivedBytes, storagePath: intent.storagePath });
+        res.status(200).json({ success: true, size: receivedBytes, storagePath: intent?.storagePath || "" });
       });
 
       req.on("aborted", () => {
