@@ -64,7 +64,7 @@ function buildSwaggerSpec() {
     process.env.CI === 'true' ||
     process.env.NODE_ENV === 'test'
   ) {
-    return options.definition as any;
+    return options.swaggerDefinition as any;
   }
 
   try {
@@ -74,7 +74,7 @@ function buildSwaggerSpec() {
       '[Swagger] swagger-jsdoc generation failed; using static definition',
       err
     );
-    return options.definition as any;
+    return options.swaggerDefinition as any;
   }
 }
 

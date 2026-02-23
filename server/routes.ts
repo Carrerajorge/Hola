@@ -601,7 +601,7 @@ export async function registerRoutes(
   const { createTelemetryRouter } = await import('./telemetry/telemetryRouter');
   app.use("/api/telemetry", createTelemetryRouter());
 
-  const { createPublicReleasesRouter } = await import("./releasesRouter");
+  const { createPublicReleasesRouter } = await import("./routes/releasesRouter");
   app.use("/api/public/releases", createPublicReleasesRouter());
 
   app.use(createFigmaRouter());
