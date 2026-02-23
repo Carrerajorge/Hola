@@ -4,8 +4,8 @@ use napi::Result;
 use crate::types::{UIElement, Rect, Point, UIRole};
 use std::collections::HashMap;
 
-use windows::Win32::UI::Accessibility::{IUIAutomation, CUIAutomation, TreeScope_Children};
-use windows::core::{Interface, BSTR};
+use windows::Win32::UI::Accessibility::{IUIAutomation, CUIAutomation};
+use windows::core::BSTR;
 use windows::Win32::System::Com::{CoInitializeEx, CoCreateInstance, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
 
 #[napi]

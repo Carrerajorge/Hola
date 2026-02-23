@@ -5,6 +5,7 @@
 // use core_graphics::display::CGDisplay; // (Mocked to match syntax as package requires cargo toml deps)
 // use image::DynamicImage;
 
+use napi_derive::napi;
 use napi::bindgen_prelude::*;
 
 // Mocks to satisfy the gist logic without full compilation crash
@@ -18,9 +19,9 @@ mod core_graphics {
     }
 }
 
-pub fn capture_main_display() -> Result<Vec<u8>, String> {
+pub fn capture_main_display() -> std::result::Result<Vec<u8>, String> {
     let display = core_graphics::display::CGDisplay::main();
-    let image = display.image().ok_or("Failed to capture screen")?;
+    let image = display.image().ok_or("Failed to capture screen".to_string())?;
     // Convert to standard RGBA format for ONNX ingestion
     // ...
     Ok(image)
@@ -39,7 +40,7 @@ pub fn start_screen_stream(callback: ThreadsafeFunction<Vec<u8>, ErrorStrategy::
     std::thread::spawn(move || {
         loop {
             if let Ok(frame) = capture_main_display() {
-                callback.call(Ok(frame), napi::threadsafe_function::ThreadsafeFunctionCallMode::NonBlocking);
+                callback.call(frame, napi::threadsafe_function::ThreadsafeFunctionCallMode::NonBlocking);
             }
             std::thread::sleep(std::time::Duration::from_millis(16)); // ~60 FPS
         }

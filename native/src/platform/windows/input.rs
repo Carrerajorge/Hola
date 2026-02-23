@@ -29,14 +29,9 @@ struct MOUSEINPUT {
 }
 
 #[repr(C)]
-union INPUT_0 {
-    mi: std::mem::ManuallyDrop<MOUSEINPUT>,
-}
-
-#[repr(C)]
 struct INPUT {
     type_: u32,
-    Anonymous: INPUT_0,
+    mi: std::mem::ManuallyDrop<MOUSEINPUT>,
 }
 
 pub unsafe fn SendInput(inputs: &[INPUT], cbSize: i32) -> u32 {
@@ -47,16 +42,14 @@ pub unsafe fn SendInput(inputs: &[INPUT], cbSize: i32) -> u32 {
 pub fn perform_click(x: i32, y: i32) {
     let input = INPUT {
         type_: INPUT_MOUSE,
-        Anonymous: INPUT_0 {
-            mi: std::mem::ManuallyDrop::new(MOUSEINPUT {
-                dx: x,
-                dy: y,
-                mouseData: 0,
-                dwFlags: MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_LEFTUP,
-                time: 0,
-                dwExtraInfo: 0,
-            })
-        }
+        mi: std::mem::ManuallyDrop::new(MOUSEINPUT {
+            dx: x,
+            dy: y,
+            mouseData: 0,
+            dwFlags: MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_LEFTUP,
+            time: 0,
+            dwExtraInfo: 0,
+        })
     };
     unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32); }
 }

@@ -14,7 +14,8 @@ export function setupTray(): Tray {
     }
 
     const tray = new Tray(icon);
-    tray.setToolTip('ILIAGPT v2.1.0 — Agente Autónomo');
+    const version = app.getVersion();
+    tray.setToolTip(`ILIAGPT v${version} — Agente Autónomo`);
 
     const contextMenu = Menu.buildFromTemplate([
         {
@@ -65,7 +66,7 @@ export function setupTray(): Tray {
         },
         { type: 'separator' },
         {
-            label: 'ILIAGPT v2.1.0',
+            label: `ILIAGPT v${app.getVersion()}`,
             enabled: false
         },
         {

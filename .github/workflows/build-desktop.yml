@@ -3,7 +3,7 @@ name: Build Desktop Apps & Publish Release
 on:
   push:
     tags:
-      - 'v*' # Se activa al pushear un tag como v2.1.0
+      - "v*" # Se activa al pushear un tag como v2.1.0
   workflow_dispatch: # También se puede ejecutar manualmente desde GitHub
 
 permissions:
@@ -19,10 +19,19 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Native Bindings (macOS)
+        run: |
+          cd native
+          npm ci
+          npm run build:native
 
       - name: Build web + compile desktop TypeScript
         run: |
@@ -52,10 +61,19 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Native Bindings (Windows)
+        run: |
+          cd native
+          npm ci
+          npm run build:native
 
       - name: Build web + compile desktop TypeScript
         run: |
@@ -84,10 +102,22 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential libx11-dev
+
+      - name: Build Native Bindings (Linux)
+        run: |
+          cd native
+          npm ci
+          npm run build:native
 
       - name: Build web + compile desktop TypeScript
         run: |

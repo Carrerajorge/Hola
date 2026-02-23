@@ -82,7 +82,7 @@ pub fn mouse_move(x: f64, y: f64) -> Result<()> {
 
 #[napi]
 pub fn mouse_click(x: f64, y: f64, button: u32) -> Result<()> {
-    let pt = CGPoint { x, y };
+    let _pt = CGPoint { x, y };
     let (down_type, up_type, btn_enum) = match button {
         2 => (K_CG_EVENT_RIGHT_MOUSE_DOWN, K_CG_EVENT_RIGHT_MOUSE_UP, 1),
         _ => (K_CG_EVENT_LEFT_MOUSE_DOWN, K_CG_EVENT_LEFT_MOUSE_UP, 0),

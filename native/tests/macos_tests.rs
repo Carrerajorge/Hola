@@ -1,10 +1,10 @@
 #[cfg(target_os = "macos")]
 mod macos_tests {
-    use iliagpt_native::platform::macos::screen_capture::capture_screen;
+    use iliagpt_native::platform::macos::screen_capture::capture_main_display;
 
     #[test]
     fn test_capture_screen_returns_valid_jpeg() {
-        let result = capture_screen(0);
+        let result = capture_main_display();
         assert!(result.is_ok(), "capture_screen should return Ok");
 
         let buffer = result.unwrap();
