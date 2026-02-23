@@ -53,6 +53,12 @@ export async function apiFetch(url: string, options: RequestInit & { timeoutMs?:
     headers.set("X-Correlation-Id", requestId);
   }
 
+  // T100-5.1: FinOps Distributed Tracing (Observabilidad de Rutas de Alto Costo)
+  const highCostRoutes = ["/api/chat", "/api/agent", "/api/gemini/chat", "/api/documents/extract"];
+  if (highCostRoutes.some(route => safeUrl.includes(route))) {
+    console.debug(`[FinOps Trace] 💸 Red de Alto Costo Triggered -> Route: ${safeUrl} | Correlation-ID: ${requestId} | Esperando métricas de Token Ledger...`);
+  }
+
   const finalOptions: RequestInit = {
     ...fetchOptions,
     headers,

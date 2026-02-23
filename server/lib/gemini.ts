@@ -1,12 +1,14 @@
 import { GoogleGenAI } from "@google/genai";
+import { secretManager } from "../services/secretManager";
 
 let _client: GoogleGenAI | null = null;
 
 function getGeminiApiKey(): string | null {
-  const raw = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-  if (!raw) return null;
-  const trimmed = raw.trim();
-  return trimmed.length ? trimmed : null;
+  try {
+    return secretManager.getLLMProviderKey("gemini");
+  } catch {
+    return null;
+  }
 }
 
 export function getGeminiClient(): GoogleGenAI | null {
@@ -63,7 +65,7 @@ export async function geminiChat(
   const ai = getGeminiClientOrThrow();
   // Default to a stable, fast model. Preview models can be rate-limited or unavailable.
   const model = options.model || GEMINI_MODELS.FLASH;
-  
+
   const contents = messages.map(msg => ({
     role: msg.role,
     parts: msg.parts
@@ -101,7 +103,7 @@ export async function* geminiStreamChat(
   const ai = getGeminiClientOrThrow();
   // Default to a stable, fast model. Preview models can be rate-limited or unavailable.
   const model = options.model || GEMINI_MODELS.FLASH;
-  
+
   const contents = messages.map(msg => ({
     role: msg.role,
     parts: msg.parts

@@ -145,6 +145,7 @@ import { createDeviceControlRouter } from "./routes/deviceControlRouter";
 import openClawRouter from "./routes/openClawRouter";
 import { createSkillPlatformRouter } from "./routes/skillPlatformRouter";
 import { CSRF_COOKIE_NAME, CSRF_TOKEN_PATTERN, issueCsrfCookie } from "./middleware/csrf";
+import { finopsRouter } from "./routes/finopsRouter";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -594,6 +595,7 @@ export async function registerRoutes(
   app.use("/api", createGptRouter());
   app.use("/api/documents", createDocumentsRouter());
   app.use("/api/admin", createAdminRouter());
+  app.use("/api/finops", finopsRouter);
   app.use("/api/admin", createRetrievalAdminRouter());
   app.use("/api", createAgentRouter(broadcastBrowserEvent));
 

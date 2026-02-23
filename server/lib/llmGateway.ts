@@ -18,6 +18,7 @@ import type { InsertApiLog } from "@shared/schema";
 import { getCircuitBreaker, CircuitBreakerOpenError, CircuitState } from "./circuitBreaker";
 import type { ZodSchema } from "zod";
 import { type AgentEvent } from "./typedStreaming";
+import { costEngine } from "../services/finops/costEngine";
 
 interface RateLimitState {
   tokens: number;
@@ -654,8 +655,11 @@ class LLMGateway {
 
   // ===== Provider Selection =====
   private getXaiApiKey(): string | undefined {
-    // Legacy/alias support: some deployments use GROK_API_KEY or ILIAGPT_API_KEY.
-    return process.env.XAI_API_KEY || process.env.GROK_API_KEY || process.env.ILIAGPT_API_KEY;
+    try {
+      return secretManager.getLLMProviderKey("xai");
+    } catch {
+      return undefined;
+    }
   }
 
   private getGeminiApiKey(): string | undefined {
@@ -677,10 +681,29 @@ class LLMGateway {
     }
   }
 
-  private getConfiguredProvidersInOrder(): LLMProvider[] {
-    // Prefer Gemini by default for lower latency and broader availability on iliagpt.com.
-    const order: LLMProvider[] = ["gemini", "xai", "openai", "anthropic", "deepseek"];
-    return order.filter((p) => this.isProviderConfigured(p));
+  // T100-7.1: Algoritmo Inteligente de Enrutamiento (Smart Routing)
+  // Evalúa dinámicamente Costo, Latencia (Observabilidad) y Tasa de Errores (Breakers)
+  private getSmartRoutedProviders(): LLMProvider[] {
+    const configured: LLMProvider[] = ["gemini", "deepseek", "xai", "openai", "anthropic"];
+    const active = configured.filter((p) => this.isProviderConfigured(p));
+
+    return active.sort((a, b) => {
+      const latA = this.metrics.byProvider[a]?.latency || Infinity;
+      const latB = this.metrics.byProvider[b]?.latency || Infinity;
+
+      const errA = this.metrics.byProvider[a]?.failures || 0;
+      const errB = this.metrics.byProvider[b]?.failures || 0;
+
+      // Hardcoded tier list for cost approximation per 1M tokens (Flash/Haiku/Chat)
+      // 1 = Cheapest, 5 = Most Expensive
+      const costTiers: Record<LLMProvider, number> = { deepseek: 1, gemini: 2, xai: 3, openai: 4, anthropic: 5 };
+
+      // Score Heurístico = (Costo * 1000) + Latencia_P95 + Penalización por Errores
+      const scoreA = (costTiers[a] * 1000) + (latA === Infinity ? 2000 : latA) + (errA * 5000);
+      const scoreB = (costTiers[b] * 1000) + (latB === Infinity ? 2000 : latB) + (errB * 5000);
+
+      return scoreA - scoreB;
+    });
   }
 
   private selectProvider(options: LLMRequestOptions): LLMProvider {
@@ -701,16 +724,17 @@ class LLMGateway {
       return detectedProvider;
     }
 
-    // Pick the first configured provider whose circuit is not OPEN.
-    for (const provider of this.getConfiguredProvidersInOrder()) {
+    // T100-7.1: Pick the first configured provider whose circuit is not OPEN using Smart Routing.
+    const smartOrder = this.getSmartRoutedProviders();
+    for (const provider of smartOrder) {
       const breaker = getCircuitBreaker("system", provider);
       if (breaker.getState() !== CircuitState.OPEN) {
         return provider;
       }
     }
 
-    // If all circuits are OPEN, fall back to the first configured provider (if any).
-    return this.getConfiguredProvidersInOrder()[0] || "gemini";
+    // If all circuits are OPEN, fall back to the most optimal configured provider (if any).
+    return smartOrder[0] || "gemini";
   }
 
   // ===== Token Usage Tracking =====
@@ -721,6 +745,18 @@ class LLMGateway {
     }
     this.metrics.totalTokens += record.totalTokens;
     this.metrics.byProvider[record.provider].tokens += record.totalTokens;
+
+    // T100-2: Contabilidad FinOps Inmutable Asíncrona
+    costEngine.recordTokensAndCost({
+      requestId: record.requestId,
+      userId: record.userId,
+      workspaceId: 'system', // Defaults to system for shared logic
+      modelName: record.model,
+      inputTokens: record.promptTokens,
+      outputTokens: record.completionTokens,
+      latencyMs: record.latencyMs,
+      metadata: { cached: record.cached, fallback: record.fromFallback }
+    }).catch(err => console.error(`[FinOps] Ledger Error:`, err));
   }
 
   getTokenUsageStats(since?: number): {
@@ -824,7 +860,7 @@ class LLMGateway {
     startTime: number,
     enableFallback: boolean
   ): Promise<LLMResponse> {
-    const configuredProviders = this.getConfiguredProvidersInOrder();
+    const configuredProviders = this.getSmartRoutedProviders();
     if (configuredProviders.length === 0) {
       throw new Error(
         "No LLM providers configured. Set at least one of: XAI_API_KEY (or GROK_API_KEY/ILIAGPT_API_KEY), GEMINI_API_KEY (or GOOGLE_API_KEY), OPENAI_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY."
@@ -834,6 +870,9 @@ class LLMGateway {
     if (options.provider && options.provider !== "auto" && !this.isProviderConfigured(options.provider)) {
       throw new Error(`Provider '${options.provider}' requested but not configured (missing API key).`);
     }
+
+    // T100-2: Budget Guardrails (Deny execution if wallet is fully exhausted)
+    await costEngine.enforceGuardrails(options.userId || "anonymous", 0);
 
     // Respect explicit provider selection / auto selection.
     const selected = this.selectProvider(options);
@@ -957,7 +996,7 @@ class LLMGateway {
     if (provider === "openai") {
       if (!this.openaiClient) {
         this.openaiClient = new OpenAI({
-          apiKey: process.env.OPENAI_API_KEY || "missing",
+          apiKey: secretManager.getLLMProviderKey("openai"),
         });
       }
       return this.openaiClient;
@@ -966,7 +1005,7 @@ class LLMGateway {
     if (!this.deepseekClient) {
       this.deepseekClient = new OpenAI({
         baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1",
-        apiKey: process.env.DEEPSEEK_API_KEY || "missing",
+        apiKey: secretManager.getLLMProviderKey("deepseek"),
       });
     }
     return this.deepseekClient;
@@ -1092,7 +1131,7 @@ class LLMGateway {
   private getAnthropicClient(): Anthropic {
     if (!this.anthropicClient) {
       this.anthropicClient = new Anthropic({
-        apiKey: process.env.ANTHROPIC_API_KEY || "missing",
+        apiKey: secretManager.getLLMProviderKey("anthropic"),
       });
     }
     return this.anthropicClient;
