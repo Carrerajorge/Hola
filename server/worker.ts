@@ -34,6 +34,18 @@ createWorker<UploadJobData, any>(QUEUE_NAMES.UPLOAD, async (job) => {
 
         await storage.updateFileStatus(fileId, "processing");
 
+        // ── FAST PATH: Images don't need OCR pre-processing ──────────────────
+        // The AI model receives the image directly as a base64 attachment during
+        // chat, so there's no text to extract here. Running Grok Vision + Tesseract
+        // fallback was the 1-minute bottleneck for image uploads.
+        const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/bmp", "image/webp", "image/tiff"];
+        if (IMAGE_MIME_TYPES.includes(mimeType.toLowerCase())) {
+            await storage.updateFileStatus(fileId, "ready");
+            Logger.info(`[UploadJob:${job.id}] Image fast-path: marked ${fileId} ready (no OCR needed).`);
+            return { processed: true, chunks: 0, textLength: 0, method: "image-fast-path" };
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         let content: Buffer | undefined;
         let fileReadSuccess = false;
 

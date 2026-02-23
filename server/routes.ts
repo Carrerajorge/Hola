@@ -17,6 +17,7 @@ import { passport } from "./lib/auth/passport";
 import { swaggerSpec } from "./lib/swagger";
 import { createChatsRouter } from "./routes/chatsRouter";
 import { createFilesRouter } from "./routes/filesRouter";
+import { createLocalStorageRouter } from "./routes/localStorageRouter";
 import { createGptRouter } from "./routes/gptRouter";
 import { createDocumentsRouter } from "./routes/documentsRouter";
 import { createAdminRouter } from "./routes/admin";
@@ -592,6 +593,7 @@ export async function registerRoutes(
   app.use("/api/ppt", pptExportRouter);
   app.use("/api", createChatsRouter());
   app.use(createFilesRouter());
+  app.use(createLocalStorageRouter());
   app.use("/api", createGptRouter());
   app.use("/api/documents", createDocumentsRouter());
   app.use("/api/admin", createAdminRouter());

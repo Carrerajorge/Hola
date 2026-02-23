@@ -209,7 +209,8 @@ export function Composer({
   setLatencyMode,
 }: ComposerProps) {
   const isDocumentMode = variant === "document";
-  const hasContent = input.trim().length > 0 || uploadedFiles.length > 0;
+  const hasAttachableFiles = uploadedFiles.some((file) => file.status !== "error");
+  const hasContent = input.trim().length > 0 || hasAttachableFiles;
   const { settings } = useSettingsContext();
   const webSearchEnabled = !!settings.webSearch;
   const canvasEnabled = !!settings.canvas;
@@ -1115,7 +1116,7 @@ export function Composer({
                 handleMentionKeyDown(e);
                 if (showMentionPopover) return;
                 handleHistoryNavigation(e);
-                const filesStillLoading = isFilesLoading || uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
+                const filesStillLoading = isFilesLoading;
                 if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !filesStillLoading && hasContent) {
                   e.preventDefault();
                   handleSubmitWithHistory();
