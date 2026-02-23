@@ -21,6 +21,10 @@ import {
   Gift,
   Drama,
   Wand2,
+  Terminal,
+  Cpu,
+  MonitorSmartphone,
+  Command,
 } from "lucide-react";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 
@@ -47,12 +51,12 @@ function useReveal(threshold = 0.15) {
    Typing‑text animation for the hero
    ───────────────────────────────────────────── */
 const heroSuggestions = [
-  "Explícame la teoría de la relatividad...",
-  "Escribe un correo profesional para...",
-  "Crea una imagen de un paisaje futurista...",
-  "Ayúdame a estudiar biología molecular...",
-  "Resume este artículo en 3 puntos clave...",
-  "Genera un plan de negocios para...",
+  "Busca el reporte de ventas en mis archivos locales...",
+  "Escribe un script en Python para renombrar imágenes...",
+  "Analiza los logs del servidor y encuentra el error...",
+  "Abre mi calendario y programa una reunión mañana...",
+  "Resume este documento PDF de mi escritorio...",
+  "Instala las dependencias y arranca el entorno de desarrollo...",
 ];
 
 function useTypingPlaceholder() {
@@ -147,11 +151,11 @@ export default function LandingPage() {
   /* ══════════ DATA ══════════ */
 
   const features = [
-    { icon: Paperclip, label: "Adjuntar" },
-    { icon: Search, label: "Buscar" },
-    { icon: BookOpen, label: "Estudiemos" },
-    { icon: Image, label: "Crear imagen" },
-    { icon: Mic, label: "Voz" },
+    { icon: Terminal, label: "Control Total" },
+    { icon: MonitorSmartphone, label: "Archivos Locales" },
+    { icon: Cpu, label: "Modo Agente" },
+    { icon: Command, label: "Terminal" },
+    { icon: Paperclip, label: "Multimodal" },
   ];
 
   const marqueeLogos = [
@@ -288,18 +292,17 @@ export default function LandingPage() {
           {/* Title */}
           <div className="text-center fade-in-up">
             <h1 className="text-5xl sm:text-6xl md:text-8xl font-black tracking-tight text-black leading-[1.05] mb-6">
-              Tu mente,
+              Tu computadora,
               <br />
               <span className="relative inline-block">
-                amplificada
+                bajo control
                 <svg className="absolute -bottom-2 left-0 w-full" viewBox="0 0 300 12" fill="none">
                   <path d="M2 8 Q75 2 150 6 Q225 10 298 4" stroke="black" strokeWidth="3" strokeLinecap="round" fill="none" opacity="0.15" />
                 </svg>
               </span>
             </h1>
             <p className="text-lg md:text-xl text-neutral-500 max-w-2xl mx-auto leading-relaxed font-medium">
-              El asistente de IA más avanzado en español. Crea contenido, genera imágenes,
-              investiga, aprende y automatiza — todo en una sola conversación.
+              El primer Agente Multimodal que no solo charla contigo, sino que toma acción autónoma sobre tu equipo. Ejecuta comandos de terminal, busca archivos, diseña y automatiza — todo desde una sola interfaz conversacional local.
             </p>
           </div>
 
@@ -342,48 +345,64 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {/* Promo Card */}
+          {/* Promo Card: Agent Control */}
           {showPromo && (
-            <div className="rounded-2xl border border-neutral-200 bg-gradient-to-br from-neutral-50 to-white p-6 md:p-8 relative overflow-hidden fade-in-up fade-in-up-delay-3 group/promo hover:shadow-lg transition-shadow duration-300">
-              <div className="absolute top-0 right-0 w-40 h-40 bg-gradient-to-bl from-neutral-100 to-transparent rounded-bl-[80px] opacity-60" />
+            <div className="rounded-2xl border border-neutral-200 bg-gradient-to-br from-neutral-900 to-black p-6 md:p-8 relative overflow-hidden fade-in-up fade-in-up-delay-3 group/promo shadow-[0_20px_40px_rgba(0,0,0,0.15)] transition-shadow duration-300">
+              <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-bl from-[#A5A0FF]/20 to-transparent rounded-full blur-3xl opacity-60" />
+              <div className="absolute bottom-0 left-0 w-48 h-48 bg-gradient-to-tr from-[#8D88E6]/20 to-transparent rounded-full blur-2xl opacity-40" />
               <Button variant="ghost" size="icon"
-                className="absolute top-3 right-3 h-8 w-8 text-neutral-400 hover:text-black hover:bg-neutral-200 rounded-full z-10"
+                className="absolute top-3 right-3 h-8 w-8 text-neutral-400 hover:text-white hover:bg-white/10 rounded-full z-10"
                 onClick={() => setShowPromo(false)} data-testid="button-close-promo"
               >
                 <X className="h-4 w-4" />
               </Button>
 
-              <div className="relative flex flex-col md:flex-row md:items-center gap-6">
+              <div className="relative flex flex-col md:flex-row md:items-center gap-8">
                 <div className="flex-1">
-                  <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-black uppercase tracking-[0.15em] bg-black/[0.04] px-3 py-1 rounded-full mb-3">
-                    <Sparkles className="h-3 w-3" />
-                    Nuevo
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-[#A5A0FF] uppercase tracking-[0.15em] bg-[#A5A0FF]/10 px-3 py-1 rounded-full mb-3 border border-[#A5A0FF]/20">
+                    <Terminal className="h-3 w-3" />
+                    Agentic Mode
                   </span>
-                  <h3 className="text-xl font-bold text-black mb-2">Crea tu primera imagen</h3>
-                  <p className="text-sm text-neutral-500 mb-5 leading-relaxed max-w-md">
-                    Transforma cualquier idea en arte visual. Elige entre más de 20 estilos artísticos o deja volar tu imaginación desde cero.
+                  <h3 className="text-2xl font-bold text-white mb-2 tracking-tight">Control Autónomo de tu PC</h3>
+                  <p className="text-sm text-neutral-400 mb-6 leading-relaxed max-w-md">
+                    Descubre un paradigma superior. ILIAGPT ahora puede operar tu sistema operativo local de forma segura: navegar directorios, correr scripts, y manipular tu entorno de desarrollo al instante.
                   </p>
-                  <Button className="rounded-full bg-black text-white hover:bg-neutral-800 transition-all font-semibold shadow-md hover:shadow-lg"
-                    onClick={() => setLocation("/login")} data-testid="button-try-now"
+                  <Button className="rounded-full bg-white text-black hover:bg-neutral-200 transition-all font-semibold shadow-lg hover:shadow-xl hover:scale-105"
+                    onClick={() => setLocation("/login")} data-testid="button-try-agent"
                   >
-                    Probar ahora
+                    Probar en Local
                     <ArrowRight className="h-4 w-4 ml-2" />
                   </Button>
                 </div>
-                <div className="flex gap-3 overflow-x-auto pb-2 md:pb-0 md:overflow-visible md:flex-wrap md:justify-center md:gap-3">
-                  {[
-                    { icon: Palette, label: "Boceto", bg: "bg-orange-50 border-orange-200 text-orange-500 hover:bg-orange-100 hover:border-orange-300 hover:text-orange-600" },
-                    { icon: Gift, label: "Festivo", bg: "bg-emerald-50 border-emerald-200 text-emerald-500 hover:bg-emerald-100 hover:border-emerald-300 hover:text-emerald-600" },
-                    { icon: Drama, label: "Dramático", bg: "bg-violet-50 border-violet-200 text-violet-500 hover:bg-violet-100 hover:border-violet-300 hover:text-violet-600" },
-                    { icon: Wand2, label: "Magia", bg: "bg-pink-50 border-pink-200 text-pink-500 hover:bg-pink-100 hover:border-pink-300 hover:text-pink-600" },
-                  ].map((s) => (
-                    <div key={s.label} className="flex flex-col items-center gap-2 min-w-[72px] cursor-pointer group/style" onClick={() => setLocation("/login")}>
-                      <div className={`w-16 h-16 md:w-[76px] md:h-[76px] rounded-2xl ${s.bg} border flex items-center justify-center transition-all duration-300 group-hover/style:scale-110 group-hover/style:shadow-md`}>
-                        <s.icon className="w-8 h-8 opacity-90 transition-opacity" strokeWidth={1.5} />
-                      </div>
-                      <span className="text-xs text-neutral-500 group-hover/style:text-black transition-colors font-semibold">{s.label}</span>
-                    </div>
-                  ))}
+
+                {/* Modern SVG Illustration */}
+                <div className="relative w-full md:w-auto flex justify-center md:block">
+                  <svg className="w-full max-w-[280px] drop-shadow-2xl" viewBox="0 0 300 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    {/* Mac window frame */}
+                    <rect x="10" y="10" width="280" height="180" rx="12" fill="#121212" stroke="#333333" strokeWidth="2" />
+                    <path d="M10 22 C10 15.3726 15.3726 10 22 10 L278 10 C284.627 10 290 15.3726 290 22 L290 34 L10 34 L10 22 Z" fill="#1A1A1A" />
+                    {/* Window buttons */}
+                    <circle cx="28" cy="22" r="4" fill="#FF5F56" />
+                    <circle cx="44" cy="22" r="4" fill="#FFBD2E" />
+                    <circle cx="60" cy="22" r="4" fill="#27C93F" />
+
+                    {/* Terminal lines animation */}
+                    <g className="animate-pulse">
+                      <text x="25" y="60" fontFamily="monospace" fontSize="11" fill="#A5A0FF">~ % ilia-agent start</text>
+                      <text x="25" y="80" fontFamily="monospace" fontSize="11" fill="#666666">[INFO] Connecting to system core...</text>
+                      <rect x="25" y="100" width="200" height="4" rx="2" fill="#333333" />
+                      <rect x="25" y="100" width="140" height="4" rx="2" fill="#A5A0FF">
+                        <animate attributeName="width" values="10;140;200" dur="3s" repeatCount="indefinite" />
+                      </rect>
+                      <text x="25" y="125" fontFamily="monospace" fontSize="11" fill="#4ade80">✓ Access granted</text>
+                      <text x="25" y="145" fontFamily="monospace" fontSize="11" fill="#A5A0FF">~ % <tspan fill="#ffffff" className="animate-ping">_</tspan></text>
+                    </g>
+
+                    {/* Glowing circuit lines */}
+                    <path d="M150 190 L150 170 L250 170 L250 150" stroke="#A5A0FF" strokeWidth="1.5" strokeDasharray="4 4" opacity="0.5" />
+                    <circle cx="250" cy="150" r="3" fill="#A5A0FF" />
+                    <path d="M290 100 L270 100 L270 120" stroke="#A5A0FF" strokeWidth="1.5" strokeDasharray="4 4" opacity="0.5" />
+                  </svg>
                 </div>
               </div>
             </div>

@@ -32,14 +32,14 @@ export default function PricingPage() {
               <span className="text-future-gradient">Planes flexibles</span>
             </div>
             <h1 className="text-4xl md:text-6xl font-semibold mb-6 text-foreground leading-tight tracking-tight">
-              Elige tu{" "}
+              Obtén el{" "}
               <span className="text-future-gradient">
-                plan perfecto
+                Control Total
               </span>
             </h1>
             <p className="text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-              Desde uso personal hasta soluciones empresariales.
-              Comienza gratis, escala cuando lo necesites.
+              Desbloquea control remoto de terminal proxy, scripts personalizados,
+              automatización de archivos locales y flujos de trabajo autónomos.
             </p>
           </section>
 

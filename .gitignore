@@ -124,3 +124,4 @@ audit.json
 
 # local secrets
 monitoring/alertmanager/secrets/
+server_dev.log

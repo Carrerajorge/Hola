@@ -1,6 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, Bell, Apple, Monitor, Chrome, Check } from "lucide-react";
+import { ChevronLeft, Bell, Apple, Monitor, Terminal, Check } from "lucide-react";
 
 export default function DownloadPage() {
   const [, setLocation] = useLocation();
@@ -23,11 +23,11 @@ export default function DownloadPage() {
       available: false,
     },
     {
-      icon: Chrome,
-      name: "Extensión Chrome",
-      version: "v1.5.0",
-      size: "2 MB",
-      requirements: "Chrome 90+",
+      icon: Terminal,
+      name: "Linux",
+      version: "v2.1.0 (AppImage)",
+      size: "89 MB",
+      requirements: "Ubuntu 20.04+",
       available: false,
     },
   ];
@@ -58,15 +58,14 @@ export default function DownloadPage() {
         <div className="w-full max-w-5xl space-y-12">
           <section className="text-center fade-in-up">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900 border border-zinc-700 text-xs font-medium text-zinc-200 mb-6 shadow-sm">
-              <Bell className="h-3 w-3" />
-              <span>Estado de lanzamiento</span>
+              <Terminal className="h-3 w-3" />
+              <span>Kernel Build Status</span>
             </div>
             <h1 className="text-4xl md:text-6xl font-black tracking-tight mb-6 text-white leading-[1.05]">
-              Descargas <span className="text-cyan-400">próximamente</span>
+              Lleva el Agente <span className="text-cyan-400">a tu SO</span>
             </h1>
             <p className="text-lg text-zinc-400 max-w-2xl mx-auto leading-relaxed">
-              Estamos preparando instaladores oficiales para macOS, Windows y Chrome.
-              Publicaremos descargas reales y verificadas en esta misma página.
+              Descarga el cliente nativo de ILIAGPT para otorgarle a la IA control seguro sobre tu sistema operativo local (macOS, Windows, Linux).
             </p>
           </section>
 

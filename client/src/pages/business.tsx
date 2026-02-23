@@ -79,34 +79,31 @@ export default function BusinessPage() {
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-50 border border-black/10 text-xs font-semibold text-zinc-700 mb-6">
               <Building2 className="h-3 w-3 text-violet-700" />
               <span>
-                Soluciones{" "}
+                ILIAGPT{" "}
                 <span className="bg-gradient-to-r from-cyan-600 via-violet-600 to-fuchsia-600 bg-clip-text text-transparent">
-                  Enterprise
+                  Enterprise OS
                 </span>
               </span>
             </div>
             <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight mb-6 text-zinc-950 leading-[1.05]">
               <span className="text-zinc-950">
-                <span className="bg-gradient-to-r from-cyan-600 via-violet-600 to-fuchsia-600 bg-clip-text text-transparent">
-                  IA
-                </span>{" "}
-                que escala con
+                Fuerza Laboral Autónoma para
               </span>
               <br />
               <span className="bg-gradient-to-r from-cyan-600 via-violet-600 to-fuchsia-600 bg-clip-text text-transparent drop-shadow-[0_1px_0_rgba(0,0,0,0.06)]">
-                tu empresa
+                tu Empresa
               </span>
             </h1>
             <p className="text-lg text-zinc-600 max-w-2xl mx-auto leading-relaxed mb-8">
-              Desde startups hasta Fortune 500. Seguridad de grado bancario, 
-              integraciones personalizadas y soporte dedicado.
+              Despliega flotas de Agentes Operativos que controlan aplicaciones, extraen y analizan datos,
+              y ejecutan pipelines de software integrales en tu propia infraestructura segura.
             </p>
             <div className="flex items-center justify-center gap-3 flex-col sm:flex-row">
               <Button
                 onClick={() => setLocation("/signup")}
                 className="rounded-full bg-black text-white hover:bg-zinc-900 px-8 w-full sm:w-auto"
               >
-                Solicitar demo
+                Desplegar Flota
                 <ArrowRight className="h-4 w-4 ml-2" />
               </Button>
               <Button
@@ -149,6 +146,40 @@ export default function BusinessPage() {
             ))}
           </div>
 
+          {/* SVG Diagram Section */}
+          <div className="my-16 flex justify-center fade-in-up fade-in-up-delay-2 w-full">
+            <div className="w-full max-w-4xl rounded-3xl border border-black/10 bg-zinc-950 p-8 md:p-12 shadow-2xl relative overflow-hidden">
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(165,160,255,0.1)_0%,transparent_70%)]" />
+
+              <svg className="w-full h-auto max-h-[300px] relative z-10" viewBox="0 0 800 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+                {/* Cloud Node */}
+                <rect x="50" y="110" width="120" height="80" rx="16" fill="#1A1A1A" stroke="#333" strokeWidth="2" />
+                <text x="110" y="155" fill="#A5A0FF" fontSize="14" fontFamily="monospace" textAnchor="middle" className="font-bold">ILIAGPT Core</text>
+
+                {/* Connecting Pipes */}
+                <path d="M170 150 L350 150" stroke="#A5A0FF" strokeWidth="3" strokeDasharray="6 6" className="animate-[dash_3s_linear_infinite]" opacity="0.6" />
+                <path d="M260 150 L260 80 L350 80" stroke="#4ade80" strokeWidth="3" strokeDasharray="6 6" className="animate-[dash_3s_linear_infinite]" opacity="0.6" />
+                <path d="M260 150 L260 220 L350 220" stroke="#f472b6" strokeWidth="3" strokeDasharray="6 6" className="animate-[dash_3s_linear_infinite]" opacity="0.6" />
+
+                {/* Pipeline Nodes */}
+                <rect x="350" y="50" width="160" height="60" rx="12" fill="#121212" stroke="#4ade80" strokeWidth="2" />
+                <text x="430" y="85" fill="#fff" fontSize="13" fontFamily="sans-serif" textAnchor="middle">Análisis de Datos</text>
+
+                <rect x="350" y="120" width="160" height="60" rx="12" fill="#121212" stroke="#A5A0FF" strokeWidth="2" />
+                <text x="430" y="155" fill="#fff" fontSize="13" fontFamily="sans-serif" textAnchor="middle">Despliegue de Código</text>
+
+                <rect x="350" y="190" width="160" height="60" rx="12" fill="#121212" stroke="#f472b6" strokeWidth="2" />
+                <text x="430" y="225" fill="#fff" fontSize="13" fontFamily="sans-serif" textAnchor="middle">Terminal Bash</text>
+
+                {/* Final Output */}
+                <path d="M510 150 L650 150" stroke="#fff" strokeWidth="2" opacity="0.2" />
+                <circle cx="680" cy="150" r="30" fill="#27272a" stroke="#fff" strokeWidth="2" opacity="0.5" />
+                <path d="M670 150 L685 150 M680 145 L685 150 L680 155" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <text x="680" y="200" fill="#a1a1aa" fontSize="12" fontFamily="sans-serif" textAnchor="middle">Acción Autónoma</text>
+              </svg>
+              <style>{`@keyframes dash { to { stroke-dashoffset: -24; } }`}</style>
+            </div>
+          </div>
           {/* Social Proof */}
           <section className="fade-in-up fade-in-up-delay-2">
             <h2 className="text-2xl font-extrabold tracking-tight text-zinc-950 mb-8 text-center">

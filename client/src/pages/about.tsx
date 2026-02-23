@@ -1,22 +1,22 @@
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, Globe, Shield, Users, Zap } from "lucide-react";
+import { ChevronLeft, Terminal, Shield, Cpu, Zap } from "lucide-react";
 
 const VALUES = [
     {
-        icon: Users,
-        title: "Centrado en el Usuario",
-        desc: "Diseñamos para humanos, no para máquinas. Simplicidad por encima de todo.",
+        icon: Terminal,
+        title: "Control Absoluto",
+        desc: "Tu computadora bajo tu mando. El agente ejecuta acciones directamente en tu sistema.",
     },
     {
         icon: Shield,
-        title: "Privacidad Primero",
-        desc: "Tus datos son tuyos. Implementamos seguridad de grado empresarial.",
+        title: "Ejecución Local Segura",
+        desc: "Arquitectura On-Premise. Tus datos, archivos locales y scripts nunca abandonan tu máquina.",
     },
     {
-        icon: Globe,
-        title: "Impacto Global",
-        desc: "Rompiendo barreras de idioma y acceso en todo el mundo.",
+        icon: Cpu,
+        title: "Ingeniería Autónoma",
+        desc: "Desarrollamos verdaderos 'Agentes Operativos' capaces de razonar, planificar y ejecutar.",
     },
 ] as const;
 
@@ -59,11 +59,11 @@ export default function AboutPage() {
                         </div>
 
                         <h1 className="mt-6 text-4xl md:text-6xl font-black tracking-tight text-zinc-950 leading-[1.05]">
-                            Democratizando la{" "}
+                            Evolucionando el{" "}
                             <br className="hidden md:block" />
                             <span className="relative inline-block">
                                 <span className="relative z-10 bg-gradient-to-r from-sky-600 via-violet-600 to-fuchsia-600 bg-clip-text text-transparent">
-                                    Inteligencia Artificial
+                                    Agente Operativo Local
                                 </span>
                                 <span
                                     aria-hidden="true"
@@ -73,8 +73,8 @@ export default function AboutPage() {
                         </h1>
 
                         <p className="mt-6 text-base md:text-lg text-zinc-700 max-w-2xl mx-auto leading-relaxed">
-                            En ILIAGPT creemos que el acceso al conocimiento y la creatividad debe ser universal.
-                            Estamos construyendo el asistente más intuitivo y potente para potenciar la mente humana.
+                            No queríamos hacer otro chat pasivo de IA. Hemos construido el primer sistema inteligente diseñado desde cero para
+                            conectar, operar y automatizar directamente el núcleo de tu sistema operativo con privacidad absoluta.
                         </p>
 
                         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
@@ -122,17 +122,16 @@ export default function AboutPage() {
                                 <h2 className="text-3xl md:text-4xl font-black tracking-tight text-zinc-950">
                                     Nuestra{" "}
                                     <span className="bg-gradient-to-r from-sky-600 via-violet-600 to-fuchsia-600 bg-clip-text text-transparent">
-                                        Historia
+                                        Revolución
                                     </span>
                                 </h2>
                                 <p className="text-zinc-700 leading-relaxed">
-                                    Nacimos con una pregunta simple: ¿Qué pasaría si la IA fuera tan fácil de usar como
-                                    hablar con un amigo?
+                                    Nacimos frustrados por las IAs que solo responden texto en la web, aisladas de donde ocurre el trabajo real.
                                     <br />
                                     <br />
-                                    Desde nuestros inicios, hemos iterado obsesivamente en la interfaz y la experiencia,
-                                    eliminando la fricción tecnológica para que puedas centrarte en lo que importa:
-                                    <span className="font-semibold text-violet-700"> crear, aprender y resolver.</span>
+                                    Es por eso que diseñamos ILIAGPT: Un Agente con protocolo MCP que abre una terminal invisible, lee tus sistemas de archivos y
+                                    toma el timón cuando se lo pides para resolver problemas complejos de ingeniería y automatización.
+                                    <span className="font-semibold text-violet-700"> IA que realmente "hace" el trabajo.</span>
                                 </p>
 
                                 <div className="pt-2 flex flex-wrap gap-3">
@@ -153,27 +152,38 @@ export default function AboutPage() {
                             </div>
 
                             <div className="mx-auto w-full max-w-md">
-                                <div className="relative aspect-square rounded-3xl border border-zinc-200 bg-white p-8 overflow-hidden">
-                                    <div
-                                        aria-hidden="true"
-                                        className="absolute -right-24 -top-24 h-64 w-64 rounded-full bg-zinc-100"
-                                    />
-                                    <div
-                                        aria-hidden="true"
-                                        className="absolute -left-28 -bottom-28 h-72 w-72 rounded-full bg-zinc-100"
-                                    />
-                                    <div className="relative h-full flex flex-col justify-between">
-                                        <Zap className="h-10 w-10 text-zinc-950" />
+                                <div className="relative aspect-square rounded-3xl border border-zinc-200 bg-black p-8 overflow-hidden shadow-2xl">
+                                    <div className="absolute inset-0 bg-gradient-to-br from-violet-900/40 via-transparent to-sky-900/40 opacity-80" />
+                                    <div className="relative h-full flex flex-col justify-between items-center text-center">
+
+                                        {/* Advanced SVG Iconography */}
+                                        <svg className="w-full h-full max-h-[200px]" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                            {/* Microchip Hub */}
+                                            <rect x="60" y="60" width="80" height="80" rx="16" stroke="#A5A0FF" strokeWidth="4" fill="#0A0A0A" />
+                                            <rect x="75" y="75" width="50" height="50" rx="8" fill="#A5A0FF" opacity="0.2" />
+                                            <circle cx="100" cy="100" r="10" fill="#A5A0FF" className="animate-pulse" />
+
+                                            {/* Neural Connections */}
+                                            <path d="M100 20 L100 60" stroke="#4ade80" strokeWidth="3" strokeLinecap="round" strokeDasharray="4 4" className="animate-pulse" />
+                                            <path d="M100 180 L100 140" stroke="#4ade80" strokeWidth="3" strokeLinecap="round" strokeDasharray="4 4" className="animate-pulse" />
+                                            <path d="M20 100 L60 100" stroke="#4ade80" strokeWidth="3" strokeLinecap="round" strokeDasharray="4 4" className="animate-pulse" />
+                                            <path d="M180 100 L140 100" stroke="#4ade80" strokeWidth="3" strokeLinecap="round" strokeDasharray="4 4" className="animate-pulse" />
+
+                                            {/* Peripheral Nodes */}
+                                            <circle cx="100" cy="20" r="6" fill="#8D88E6" />
+                                            <circle cx="100" cy="180" r="6" fill="#8D88E6" />
+                                            <circle cx="20" cy="100" r="6" fill="#8D88E6" />
+                                            <circle cx="180" cy="100" r="6" fill="#8D88E6" />
+                                        </svg>
+
                                         <div>
-                                            <p className="text-xs font-semibold text-zinc-600 tracking-wide">ILIAGPT</p>
-                                            <p className="mt-3 text-3xl md:text-4xl font-black tracking-tight text-zinc-950">
-                                                <span className="bg-gradient-to-r from-sky-600 via-violet-600 to-fuchsia-600 bg-clip-text text-transparent">
-                                                    IA
+                                            <p className="mt-3 text-3xl md:text-4xl font-black tracking-tight text-white mb-2">
+                                                <span className="bg-gradient-to-r from-sky-400 via-violet-400 to-fuchsia-400 bg-clip-text text-transparent">
+                                                    Agent OS
                                                 </span>
-                                                , sin fricción.
                                             </p>
-                                            <p className="mt-2 text-sm text-zinc-600">
-                                                Rápida, privada y diseñada para personas.
+                                            <p className="mt-2 text-sm text-zinc-300">
+                                                Interconexión Total de Sistemas.
                                             </p>
                                         </div>
                                     </div>
