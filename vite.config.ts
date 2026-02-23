@@ -131,8 +131,8 @@ export default defineConfig(async () => {
       },
     },
     server: {
-      // Bind to 0.0.0.0 on Replit/remote dev; use localhost locally so cookies persist across reloads.
-      host: isReplit ? "0.0.0.0" : "localhost",
+      // Bind to 0.0.0.0 so it's accessible on both IPv4 (127.0.0.1) and IPv6 (::1)
+      host: "0.0.0.0",
       allowedHosts: true,
       fs: {
         strict: true,

@@ -37,7 +37,7 @@ import {
   parseRuntimeConfig,
   resolveRuntimeConfig,
 } from "./runtimeConfig";
-import type { MessageRecord } from "../../shared/schema/chat";
+import type { ChatMessage } from "../../shared/schema/chat";
 import { Logger } from "../lib/logger";
 import { llmGateway } from "../lib/llmGateway";
 import { storage } from "../storage";
@@ -220,7 +220,7 @@ function markOutboundCircuitSuccess(channel: ExternalChannel): void {
 
 function markOutboundCircuitFailure(channel: ExternalChannel, reason: string): void {
   const state = outboundCircuitState.get(channel) || { failures: 0, lastFailureAt: 0 };
-  const next = {
+  const next: { failures: number; lastFailureAt: number; openedUntil?: number } = {
     failures: state.failures + 1,
     lastFailureAt: Date.now(),
   };
@@ -885,7 +885,7 @@ function sanitizeStreamChunk(value: string, limit = MAX_STREAM_CHUNK_LENGTH): st
 
 function waitForAbortSignal(signal?: AbortSignal): Promise<never> {
   if (!signal) {
-    return new Promise<never>(() => {});
+    return new Promise<never>(() => { });
   }
 
   return new Promise<never>((_, reject) => {
@@ -947,7 +947,7 @@ async function sendTextWithRetries(
   }
   const normalizedText = enforceSafeLimit(payload.text, MAX_OUTBOUND_TEXT_LENGTH);
   const safeRecipient = normalizeIdentifier(envelope.threadId, MAX_ID_LENGTH);
-  const safeChannelAccount = normalizeIdentifier(conversation.channelAccountId, MAX_ID_LENGTH);
+  const safeChannelAccount = normalizeIdentifier(conversation.channelKey, MAX_ID_LENGTH);
   if (!safeRecipient || !safeChannelAccount || !normalizedText) {
     throw new Error("Invalid outbound envelope metadata");
   }
@@ -1050,8 +1050,8 @@ async function sendTextWithRetries(
 }
 
 function mapToLlmMessages(
-  history: MessageRecord[],
-  userContent: string,
+  history: ChatMessage[],
+  userContent: string | object[],
   stylePrompt: string | null,
 ): ChatCompletionMessageParam[] {
   const mapped: ChatCompletionMessageParam[] = [];
@@ -1064,10 +1064,10 @@ function mapToLlmMessages(
   for (const message of bounded) {
     if (message.role !== "user" && message.role !== "assistant") continue;
     if (!message.content) continue;
-    mapped.push({ role: message.role, content: message.content });
+    mapped.push({ role: message.role, content: message.content as string });
   }
 
-  mapped.push({ role: "user", content: userContent });
+  mapped.push({ role: "user", content: userContent as any });
 
   return mapped;
 }
@@ -1249,16 +1249,14 @@ async function runOutboundDecision(
     await storage.updateChatMessageContent(
       options.assistantMessageId,
       safeAssistantContent,
+      "done",
       {
-        status: "done",
-        metadata: {
-          runId: safeRunId,
-          requestId: safeRequestId,
-          sourceChannel: context.jobChannel,
-          conversationKey: context.envelope.conversationKey,
-          traceId: safeTraceId,
-        },
-      },
+        runId: safeRunId,
+        requestId: safeRequestId,
+        sourceChannel: context.jobChannel,
+        conversationKey: context.envelope.conversationKey,
+        traceId: safeTraceId,
+      }
     ).catch(() => null);
   }
 
@@ -1434,66 +1432,66 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
     });
 
     if (consumed?.userId) {
-  await setConversationOwnerIdentity(conversation.id, {
-    ownerExternalId: safeEnvelope.senderId,
-    owners: [safeEnvelope.senderId],
-    linkedAt: nowIso(),
-  });
+      await setConversationOwnerIdentity(conversation.id, {
+        ownerExternalId: safeEnvelope.senderId,
+        owners: [safeEnvelope.senderId],
+        linkedAt: nowIso(),
+      });
 
-  const ackText = `✅ Handshake confirmado. Tu cuenta está vinculada para este chat (${jobChannel}).`;
+      const ackText = `✅ Handshake confirmado. Tu cuenta está vinculada para este chat (${jobChannel}).`;
 
-  try {
-    await runOutboundDecision(
-      {
-        ...context,
-        envelope: safeEnvelope,
-      },
-      ackText,
-      "",
-      "",
-      safeScopedRequestId,
-      {
-        traceId: eventTraceId,
-        skipRunStatusUpdate: true,
-        abortSignal: runAbort.signal,
-      },
-    );
-  } catch (error) {
-    Logger.warn("[Channels] pairing confirmation response failed", {
-      conversation: safeEnvelope.conversationKey,
-      channel: jobChannel,
-      reason: String((error as Error)?.message || error),
-    });
-  }
+      try {
+        await runOutboundDecision(
+          {
+            ...context,
+            envelope: safeEnvelope,
+          },
+          ackText,
+          "",
+          "",
+          safeScopedRequestId,
+          {
+            traceId: eventTraceId,
+            skipRunStatusUpdate: true,
+            abortSignal: runAbort.signal,
+          },
+        );
+      } catch (error) {
+        Logger.warn("[Channels] pairing confirmation response failed", {
+          conversation: safeEnvelope.conversationKey,
+          channel: jobChannel,
+          reason: String((error as Error)?.message || error),
+        });
+      }
 
-  return;
-}
+      return;
+    }
 
-try {
-  await runOutboundDecision(
-    {
-      ...context,
-      envelope: safeEnvelope,
-    },
-    "❌ Código no válido o caducado. Solicita un nuevo QR/código de vinculación.",
-    "",
-    "",
-    safeScopedRequestId,
-    {
-      traceId: eventTraceId,
-      skipRunStatusUpdate: true,
-      abortSignal: runAbort.signal,
-    },
-  );
-} catch (error) {
-  Logger.warn("[Channels] pairing error response failed", {
-    conversation: safeEnvelope.conversationKey,
-    channel: jobChannel,
-    reason: String((error as Error)?.message || error),
-  });
-}
+    try {
+      await runOutboundDecision(
+        {
+          ...context,
+          envelope: safeEnvelope,
+        },
+        "❌ Código no válido o caducado. Solicita un nuevo QR/código de vinculación.",
+        "",
+        "",
+        safeScopedRequestId,
+        {
+          traceId: eventTraceId,
+          skipRunStatusUpdate: true,
+          abortSignal: runAbort.signal,
+        },
+      );
+    } catch (error) {
+      Logger.warn("[Channels] pairing error response failed", {
+        conversation: safeEnvelope.conversationKey,
+        channel: jobChannel,
+        reason: String((error as Error)?.message || error),
+      });
+    }
 
-return;  
+    return;
 
   }
 
@@ -1687,7 +1685,45 @@ return;
       .slice(-RUN_QUEUE_MAX_HISTORY)
       .filter((msg) => msg.role === "user" || msg.role === "assistant");
 
-    const llmMessages = mapToLlmMessages(historicalMessages, userPromptText, stylePrompt);
+    // --- Multimodal Media Processing ---
+    let llmUserContent: string | object[] = userPromptText;
+    try {
+      let mediaAttachment: any = undefined;
+
+      if (safeEnvelope.channel === 'telegram' && safeEnvelope.media?.providerAssetId) {
+        const { downloadTelegramMedia } = await import('./telegram/telegramApi');
+        const fs = await import('fs/promises');
+        const os = await import('os');
+        const path = await import('path');
+
+        const downloaded = await downloadTelegramMedia(safeEnvelope.media.providerAssetId);
+        mediaAttachment = {
+          type: safeEnvelope.messageType,
+          mimetype: downloaded.mimeType,
+          fileName: downloaded.fileName,
+          buffer: downloaded.buffer,
+          localPath: ''
+        };
+
+        if (['audio', 'video', 'document'].includes(mediaAttachment.type)) {
+          mediaAttachment.localPath = path.join(os.tmpdir(), `tg_media_${Date.now()}_${downloaded.fileName}`);
+          await fs.writeFile(mediaAttachment.localPath, downloaded.buffer);
+        }
+      }
+
+      if (mediaAttachment) {
+        const { processInboundMedia } = await import('./mediaProcessor');
+        const processed = await processInboundMedia(mediaAttachment, safeEnvelope.text || "");
+        if (processed.messages && processed.messages.length > 0) {
+          // processInboundMedia returns an array of messages, we just take the last one's content which is the combined one
+          llmUserContent = processed.messages[processed.messages.length - 1].content;
+        }
+      }
+    } catch (mediaErr: any) {
+      Logger.warn("[Channels] Failed to process inbound media", { error: mediaErr?.message });
+    }
+
+    const llmMessages = mapToLlmMessages(historicalMessages, llmUserContent, stylePrompt);
 
     const assistantPlaceholder = await withTimeoutGuard(
       "channel_create_assistant_placeholder",
@@ -1762,18 +1798,15 @@ return;
 
     const finalOutput = output.trim() || "No pude redactar una respuesta en este momento. Reintenta en unos segundos.";
 
-    await storage.updateChatMessageContent(assistantMessageId, finalOutput, {
-        status: "done",
-        metadata: {
-          runId,
-          requestId: safeScopedRequestId,
-          sourceChannel: jobChannel,
-          conversationKey: safeEnvelope.conversationKey,
-          policyCode: policy.code,
-          policyTraceId: policy.policyTraceId,
-          traceId: eventTraceId,
-        },
-      });
+    await storage.updateChatMessageContent(assistantMessageId, finalOutput, "done", {
+      runId,
+      requestId: safeScopedRequestId,
+      sourceChannel: jobChannel,
+      conversationKey: safeEnvelope.conversationKey,
+      policyCode: policy.code,
+      policyTraceId: policy.policyTraceId,
+      traceId: eventTraceId,
+    });
 
     await runOutboundDecision(
       {
@@ -1806,11 +1839,8 @@ return;
     const fallback = "No puedo responder ahora. Reintenta en unos minutos.";
 
     if (assistantMessageId) {
-      await storage.updateChatMessageContent(assistantMessageId, aborted ? "[Flujo cancelado por mensaje nuevo]" : fallback, {
-        status: "failed",
-        metadata: {
-          runId, requestId: safeScopedRequestId, error: reason, sourceChannel: jobChannel, aborted, policyCode: policy.code, policyTraceId: policy.policyTraceId, traceId: eventTraceId,
-        },
+      await storage.updateChatMessageContent(assistantMessageId, aborted ? "[Flujo cancelado por mensaje nuevo]" : fallback, "failed", {
+        runId, requestId: safeScopedRequestId, error: reason, sourceChannel: jobChannel, aborted, policyCode: policy.code, policyTraceId: policy.policyTraceId, traceId: eventTraceId,
       }).catch(() => null);
     }
 
@@ -1853,8 +1883,9 @@ return;
       }
     }
 
-    Logger[aborted ? "warn" : "error"]("[Channels] failed to process inbound message", { messageId: safeScopedRequestId, runId: safeRunId, conversation: safeEnvelope.conversationKey, channel: 
-      jobChannel, error: reason, aborted, traceId: eventTraceId,
+    Logger[aborted ? "warn" : "error"]("[Channels] failed to process inbound message", {
+      messageId: safeScopedRequestId, runId: safeRunId, conversation: safeEnvelope.conversationKey, channel:
+        jobChannel, error: reason, aborted, traceId: eventTraceId,
     });
   } finally {
     releaseConversationRunReservation(conversationKey, safeScopedRequestId);

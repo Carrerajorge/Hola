@@ -1577,7 +1577,7 @@ const generateDocumentTool: ToolDefinition = {
         await fetch(upload.uploadUrl, {
           method: "PUT",
           headers: { "Content-Type": mimeType },
-          body: buffer,
+          body: Buffer.from(buffer) as unknown as BodyInit,
         });
 
         const ext = extension;
@@ -2137,7 +2137,7 @@ const shellCommandTool: ToolDefinition = {
         context.signal.addEventListener("abort", abortHandler, { once: true });
       }
 
-      child.on("close", (code, signal) => {
+      child.on("close", (code: number | null, signal: NodeJS.Signals | null) => {
         clearTimeout(timeoutHandle);
         context.signal?.removeEventListener?.("abort", abortHandler as any);
 
@@ -2180,7 +2180,7 @@ const shellCommandTool: ToolDefinition = {
         });
       });
 
-      child.on("error", (err) => {
+      child.on("error", (err: Error) => {
         clearTimeout(timeoutHandle);
         context.signal?.removeEventListener?.("abort", abortHandler as any);
 
@@ -2253,6 +2253,18 @@ toolRegistry.register(readFileTool);
 toolRegistry.register(writeFileTool);
 toolRegistry.register(shellCommandTool);
 toolRegistry.register(listFilesTool);
+
+import { browseAndActTool } from "./tools/browseAndActTool";
+import {
+  createPresentationTool,
+  createDocumentTool,
+  createSpreadsheetTool
+} from "./tools/artifactTools";
+
+toolRegistry.register(browseAndActTool);
+toolRegistry.register(createPresentationTool);
+toolRegistry.register(createDocumentTool);
+toolRegistry.register(createSpreadsheetTool);
 
 // Register extended tools
 import { extendedTools } from "./extendedTools";

@@ -1,7 +1,7 @@
 import swaggerJsdoc from 'swagger-jsdoc';
 
 const options: swaggerJsdoc.Options = {
-    definition: {
+    swaggerDefinition: {
         openapi: '3.0.0',
         info: {
             title: 'ILIAGPT PRO API',
@@ -53,7 +53,7 @@ const options: swaggerJsdoc.Options = {
             },
         ],
     },
-    apis: ['./server/routes/**/*.ts', './server/routes.ts'], // Path to the API docs
+    apis: [], // Temporarily disabled glob scanning to prevent ENOENT crash
 };
 
 export const swaggerSpec = swaggerJsdoc(options);
