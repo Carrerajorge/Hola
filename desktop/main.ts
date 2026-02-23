@@ -6,10 +6,48 @@ import { registerIpcHandlers } from './ipc/handlers';
 import { setupAutoUpdater } from './services/autoUpdater';
 
 let overlayWindow: BrowserWindow | null = null;
+let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+
+const PANEL_URL = process.env.ILIAGPT_PANEL_URL || 'https://iliagpt.com';
 
 export function getOverlayWindow() {
     return overlayWindow;
+}
+
+export function getMainWindow() {
+    return mainWindow;
+}
+
+function createMainWindow() {
+    const isDev = !app.isPackaged;
+    mainWindow = new BrowserWindow({
+        width: 1280,
+        height: 850,
+        minWidth: 900,
+        minHeight: 600,
+        title: 'ILIAGPT — Panel Administrativo',
+        titleBarStyle: 'hiddenInset',
+        trafficLightPosition: { x: 15, y: 15 },
+        backgroundColor: '#09090b',
+        webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            nodeIntegration: false,
+            contextIsolation: true,
+        }
+    });
+
+    const panelUrl = isDev ? 'http://localhost:5050' : PANEL_URL;
+    mainWindow.loadURL(panelUrl);
+
+    mainWindow.on('closed', () => {
+        mainWindow = null;
+    });
+
+    // Show window when ready to avoid white flash
+    mainWindow.once('ready-to-show', () => {
+        mainWindow?.show();
+    });
 }
 
 function createOverlayWindow() {
@@ -32,9 +70,11 @@ function createOverlayWindow() {
     // Make window click-through so user can interact with their desktop
     overlayWindow.setIgnoreMouseEvents(true, { forward: true });
 
-    // Enters overlay mode in React
+    // En producción, conecta al panel administrativo real (iliagpt.com)
+    // En desarrollo, usa el servidor local
     const isDev = !app.isPackaged;
-    const url = isDev ? 'http://localhost:5050?mode=overlay' : 'http://localhost:5055?mode=overlay';
+    const PANEL_URL = process.env.ILIAGPT_PANEL_URL || 'https://iliagpt.com';
+    const url = isDev ? 'http://localhost:5050?mode=overlay' : `${PANEL_URL}?mode=overlay`;
 
     overlayWindow.loadURL(url);
 
@@ -65,18 +105,21 @@ app.whenReady().then(() => {
     if (app.isPackaged) {
         setupAutoUpdater();
     }
-    // Hide macOS dock icon since it's a daemon overlay
-    if (app.dock) app.dock.hide();
 
-    startBackendServer();
-    createOverlayWindow();
+    // Crear ventana principal conectada al panel administrativo
+    createMainWindow();
+
+    // Overlay HUD para control autónomo (opcional, activable desde tray)
+    // createOverlayWindow();
 
     tray = setupTray();
     setupGlobalShortcuts(overlayWindow);
     registerIpcHandlers(overlayWindow);
 
     app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) createOverlayWindow();
+        if (BrowserWindow.getAllWindows().length === 0) {
+            createMainWindow();
+        }
     });
 });
 

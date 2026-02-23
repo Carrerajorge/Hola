@@ -38,23 +38,44 @@ const electron_1 = require("electron");
 const path = __importStar(require("path"));
 const main_1 = require("../main");
 function setupTray() {
-    // Generar icono neutro o de recursos (Placeholder temporal en runtime)
     const iconPath = path.join(__dirname, '..', '..', 'build', 'icon.png');
-    // Si falla cargar local, usamos empty image map para el Tray en dev
     let icon;
     try {
         icon = electron_1.nativeImage.createFromPath(iconPath);
         icon = icon.resize({ width: 16, height: 16 });
     }
     catch (e) {
-        // Fallback transparent buffer
         icon = electron_1.nativeImage.createEmpty();
     }
     const tray = new electron_1.Tray(icon);
-    tray.setToolTip('ILIA Autonomous Brain');
+    tray.setToolTip('ILIAGPT v2.1.0 — Agente Autónomo');
     const contextMenu = electron_1.Menu.buildFromTemplate([
         {
-            label: 'Toggle HUD',
+            label: '🧠 Abrir Panel Administrativo',
+            click: () => {
+                const main = (0, main_1.getMainWindow)();
+                if (main) {
+                    main.show();
+                    main.focus();
+                }
+                else {
+                    // Re-create if closed
+                    const { createMainWindow } = require('../main');
+                    if (typeof createMainWindow === 'function')
+                        createMainWindow();
+                }
+            }
+        },
+        {
+            label: '🌐 Panel en Navegador',
+            click: () => {
+                const panelUrl = process.env.ILIAGPT_PANEL_URL || 'https://iliagpt.com';
+                electron_1.shell.openExternal(panelUrl);
+            }
+        },
+        { type: 'separator' },
+        {
+            label: '👁 Toggle Overlay HUD',
             click: () => {
                 const overlay = (0, main_1.getOverlayWindow)();
                 if (overlay) {
@@ -66,15 +87,37 @@ function setupTray() {
             }
         },
         {
-            label: 'Start Agent',
-            click: () => console.log('Starting Agent Activity...')
+            label: '🤖 Iniciar Agente Autónomo',
+            click: () => {
+                const main = (0, main_1.getMainWindow)();
+                if (main) {
+                    main.webContents.executeJavaScript(`
+                        fetch('/api/agent/start', { method: 'POST' })
+                            .then(r => r.json())
+                            .then(d => console.log('Agent started:', d))
+                            .catch(e => console.error('Agent start failed:', e));
+                    `);
+                }
+            }
         },
         { type: 'separator' },
         {
-            label: 'Quit',
+            label: 'ILIAGPT v2.1.0',
+            enabled: false
+        },
+        {
+            label: 'Salir',
             click: () => electron_1.app.quit()
         }
     ]);
     tray.setContextMenu(contextMenu);
+    // Double-click tray opens main window
+    tray.on('double-click', () => {
+        const main = (0, main_1.getMainWindow)();
+        if (main) {
+            main.show();
+            main.focus();
+        }
+    });
     return tray;
 }

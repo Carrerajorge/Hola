@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getOverlayWindow = getOverlayWindow;
+exports.getMainWindow = getMainWindow;
 const electron_1 = require("electron");
 const path = __importStar(require("path"));
 const trayManager_1 = require("./services/trayManager");
@@ -41,9 +42,41 @@ const globalShortcuts_1 = require("./services/globalShortcuts");
 const handlers_1 = require("./ipc/handlers");
 const autoUpdater_1 = require("./services/autoUpdater");
 let overlayWindow = null;
+let mainWindow = null;
 let tray = null;
+const PANEL_URL = process.env.ILIAGPT_PANEL_URL || 'https://iliagpt.com';
 function getOverlayWindow() {
     return overlayWindow;
+}
+function getMainWindow() {
+    return mainWindow;
+}
+function createMainWindow() {
+    const isDev = !electron_1.app.isPackaged;
+    mainWindow = new electron_1.BrowserWindow({
+        width: 1280,
+        height: 850,
+        minWidth: 900,
+        minHeight: 600,
+        title: 'ILIAGPT — Panel Administrativo',
+        titleBarStyle: 'hiddenInset',
+        trafficLightPosition: { x: 15, y: 15 },
+        backgroundColor: '#09090b',
+        webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            nodeIntegration: false,
+            contextIsolation: true,
+        }
+    });
+    const panelUrl = isDev ? 'http://localhost:5050' : PANEL_URL;
+    mainWindow.loadURL(panelUrl);
+    mainWindow.on('closed', () => {
+        mainWindow = null;
+    });
+    // Show window when ready to avoid white flash
+    mainWindow.once('ready-to-show', () => {
+        mainWindow?.show();
+    });
 }
 function createOverlayWindow() {
     overlayWindow = new electron_1.BrowserWindow({
@@ -63,9 +96,11 @@ function createOverlayWindow() {
     });
     // Make window click-through so user can interact with their desktop
     overlayWindow.setIgnoreMouseEvents(true, { forward: true });
-    // Enters overlay mode in React
+    // En producción, conecta al panel administrativo real (iliagpt.com)
+    // En desarrollo, usa el servidor local
     const isDev = !electron_1.app.isPackaged;
-    const url = isDev ? 'http://localhost:5050?mode=overlay' : 'http://localhost:5055?mode=overlay';
+    const PANEL_URL = process.env.ILIAGPT_PANEL_URL || 'https://iliagpt.com';
+    const url = isDev ? 'http://localhost:5050?mode=overlay' : `${PANEL_URL}?mode=overlay`;
     overlayWindow.loadURL(url);
     // Permitir clics SOLO en la ventana, gobernado temporalmente por React via IPC (luego)
     // overlayWindow.setIgnoreMouseEvents(false);
@@ -91,17 +126,17 @@ electron_1.app.whenReady().then(() => {
     if (electron_1.app.isPackaged) {
         (0, autoUpdater_1.setupAutoUpdater)();
     }
-    // Hide macOS dock icon since it's a daemon overlay
-    if (electron_1.app.dock)
-        electron_1.app.dock.hide();
-    startBackendServer();
-    createOverlayWindow();
+    // Crear ventana principal conectada al panel administrativo
+    createMainWindow();
+    // Overlay HUD para control autónomo (opcional, activable desde tray)
+    // createOverlayWindow();
     tray = (0, trayManager_1.setupTray)();
     (0, globalShortcuts_1.setupGlobalShortcuts)(overlayWindow);
     (0, handlers_1.registerIpcHandlers)(overlayWindow);
     electron_1.app.on('activate', () => {
-        if (electron_1.BrowserWindow.getAllWindows().length === 0)
-            createOverlayWindow();
+        if (electron_1.BrowserWindow.getAllWindows().length === 0) {
+            createMainWindow();
+        }
     });
 });
 electron_1.app.on('window-all-closed', () => {

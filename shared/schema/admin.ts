@@ -611,3 +611,23 @@ export const insertNotificationLogSchema = createInsertSchema(notificationLogs);
 
 export type InsertNotificationLog = z.infer<typeof insertNotificationLogSchema>;
 export type NotificationLog = typeof notificationLogs.$inferSelect;
+
+// App Releases (Desktop Native Binarles)
+export const appReleases = pgTable("app_releases", {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    platform: text("platform").notNull(), // 'macOS', 'Windows', 'Linux'
+    version: text("version").notNull(), // e.g., 'v2.1.0'
+    size: text("size").notNull(), // e.g., '~98 MB'
+    requirements: text("requirements").notNull(),
+    available: text("available").default("false"), // true/false manually parsed or handle as string
+    fileName: text("file_name").notNull(),
+    downloadUrl: text("download_url").notNull(),
+    note: text("note"),
+    isActive: text("is_active").default("true"), // to keep history
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertAppReleaseSchema = createInsertSchema(appReleases);
+export type InsertAppRelease = z.infer<typeof insertAppReleaseSchema>;
+export type AppRelease = typeof appReleases.$inferSelect;

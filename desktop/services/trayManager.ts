@@ -1,27 +1,46 @@
-import { app, Tray, Menu, nativeImage } from 'electron';
+import { app, Tray, Menu, nativeImage, shell } from 'electron';
 import * as path from 'path';
-import { getOverlayWindow } from '../main';
+import { getOverlayWindow, getMainWindow } from '../main';
 
 export function setupTray(): Tray {
-    // Generar icono neutro o de recursos (Placeholder temporal en runtime)
     const iconPath = path.join(__dirname, '..', '..', 'build', 'icon.png');
 
-    // Si falla cargar local, usamos empty image map para el Tray en dev
     let icon;
     try {
         icon = nativeImage.createFromPath(iconPath);
         icon = icon.resize({ width: 16, height: 16 });
     } catch (e) {
-        // Fallback transparent buffer
         icon = nativeImage.createEmpty();
     }
 
     const tray = new Tray(icon);
-    tray.setToolTip('ILIA Autonomous Brain');
+    tray.setToolTip('ILIAGPT v2.1.0 — Agente Autónomo');
 
     const contextMenu = Menu.buildFromTemplate([
         {
-            label: 'Toggle HUD',
+            label: '🧠 Abrir Panel Administrativo',
+            click: () => {
+                const main = getMainWindow();
+                if (main) {
+                    main.show();
+                    main.focus();
+                } else {
+                    // Re-create if closed
+                    const { createMainWindow } = require('../main');
+                    if (typeof createMainWindow === 'function') createMainWindow();
+                }
+            }
+        },
+        {
+            label: '🌐 Panel en Navegador',
+            click: () => {
+                const panelUrl = process.env.ILIAGPT_PANEL_URL || 'https://iliagpt.com';
+                shell.openExternal(panelUrl);
+            }
+        },
+        { type: 'separator' },
+        {
+            label: '👁 Toggle Overlay HUD',
             click: () => {
                 const overlay = getOverlayWindow();
                 if (overlay) {
@@ -31,17 +50,40 @@ export function setupTray(): Tray {
             }
         },
         {
-            label: 'Start Agent',
-            click: () => console.log('Starting Agent Activity...')
+            label: '🤖 Iniciar Agente Autónomo',
+            click: () => {
+                const main = getMainWindow();
+                if (main) {
+                    main.webContents.executeJavaScript(`
+                        fetch('/api/agent/start', { method: 'POST' })
+                            .then(r => r.json())
+                            .then(d => console.log('Agent started:', d))
+                            .catch(e => console.error('Agent start failed:', e));
+                    `);
+                }
+            }
         },
         { type: 'separator' },
         {
-            label: 'Quit',
+            label: 'ILIAGPT v2.1.0',
+            enabled: false
+        },
+        {
+            label: 'Salir',
             click: () => app.quit()
         }
     ]);
 
     tray.setContextMenu(contextMenu);
+
+    // Double-click tray opens main window
+    tray.on('double-click', () => {
+        const main = getMainWindow();
+        if (main) {
+            main.show();
+            main.focus();
+        }
+    });
 
     return tray;
 }

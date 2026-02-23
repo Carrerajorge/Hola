@@ -598,8 +598,11 @@ export async function registerRoutes(
   app.use("/api", createAgentRouter(broadcastBrowserEvent));
 
   // Telemetry Dashboard
-  const { createTelemetryRouter } = require('./telemetry/telemetryRouter');
+  const { createTelemetryRouter } = await import('./telemetry/telemetryRouter');
   app.use("/api/telemetry", createTelemetryRouter());
+
+  const { createPublicReleasesRouter } = await import("./releasesRouter");
+  app.use("/api/public/releases", createPublicReleasesRouter());
 
   app.use(createFigmaRouter());
   app.use(createLibraryRouter());

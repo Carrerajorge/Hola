@@ -1,9 +1,13 @@
-import { useState, useRef, useEffect } from "react"; import { useLocation } from "wouter"; import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"; import { Button } from 
-"@/components/ui/button"; import { Input } from "@/components/ui/input"; import { Badge } from "@/components/ui/badge"; import { Switch } from "@/components/ui/switch"; import { ScrollArea } from 
-"@/components/ui/scroll-area"; import { Separator } from "@/components/ui/separator"; import { Progress } from "@/components/ui/progress"; import { Dialog, DialogContent, DialogHeader, DialogTitle, 
-DialogTrigger } from "@/components/ui/dialog"; import { Label } from "@/components/ui/label"; import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"; 
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"; import { Checkbox } from "@/components/ui/checkbox"; import { Card, CardContent, CardDescription, CardFooter, 
-CardHeader, CardTitle } from "@/components/ui/card"; import { Skeleton, TableSkeleton } from "@/components/ui/skeleton"; import {
+import { useState, useRef, useEffect } from "react"; import { useLocation } from "wouter"; import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"; import { Button } from
+  "@/components/ui/button"; import { Input } from "@/components/ui/input"; import { Badge } from "@/components/ui/badge"; import { Switch } from "@/components/ui/switch"; import { ScrollArea } from
+  "@/components/ui/scroll-area"; import { Separator } from "@/components/ui/separator"; import { Progress } from "@/components/ui/progress"; import {
+    Dialog, DialogContent, DialogHeader, DialogTitle,
+    DialogTrigger
+  } from "@/components/ui/dialog"; import { Label } from "@/components/ui/label"; import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"; import { Checkbox } from "@/components/ui/checkbox"; import {
+  Card, CardContent, CardDescription, CardFooter,
+  CardHeader, CardTitle
+} from "@/components/ui/card"; import { Skeleton, TableSkeleton } from "@/components/ui/skeleton"; import {
   ArrowLeft,
   LayoutDashboard,
   Users,
@@ -80,8 +84,9 @@ import { RealtimeMetricsPanel } from "@/components/admin/RealtimeMetrics";
 import { SecurityAlertsPanel } from "@/components/admin/SecurityAlerts";
 import { AdminNotificationsPopover } from "@/components/admin/NotificationsPopover";
 import { TerminalPanel } from "@/components/terminal-panel";
+import ReleasesManager from "./admin/ReleasesManager";
 
-type AdminSection = "dashboard" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings" | "agentic" | "excel" | "terminal" | "monitoring";
+type AdminSection = "dashboard" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings" | "agentic" | "excel" | "terminal" | "monitoring" | "releases";
 
 const navItems: { id: AdminSection; label: string; icon: React.ElementType }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -99,6 +104,7 @@ const navItems: { id: AdminSection; label: string; icon: React.ElementType }[] =
   { id: "agentic", label: "Agentic Engine", icon: Bot },
   { id: "excel", label: "Excel Manager", icon: FileSpreadsheet },
   { id: "terminal", label: "Terminal", icon: Terminal },
+  { id: "releases", label: "App Releases", icon: Download },
 ];
 
 function DashboardSection() {
@@ -455,7 +461,7 @@ function UsersSection() {
 
   const filteredAndSortedUsers = users
     .filter((u: any) => {
-      const matchesSearch = u.username?.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      const matchesSearch = u.username?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         u.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         u.fullName?.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesPlan = !filters.plan || u.plan === filters.plan;
@@ -798,7 +804,7 @@ function formatRelativeTime(date: Date | string | null): string {
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMs / 3600000);
   const diffDays = Math.floor(diffMs / 86400000);
-  
+
   if (diffMins < 1) return "just now";
   if (diffMins < 60) return `${diffMins}m ago`;
   if (diffHours < 24) return `${diffHours}h ago`;
@@ -927,9 +933,9 @@ function ConversationsSection() {
       setSearchResults([]);
       return;
     }
-    
+
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-    
+
     searchTimeoutRef.current = setTimeout(async () => {
       setIsSearching(true);
       try {
@@ -1838,10 +1844,10 @@ function AIModelsSection() {
   };
 
   const models = modelsData?.models || [];
-  const pagination = { 
-    page: modelsData?.page || 1, 
-    totalPages: modelsData?.totalPages || 1, 
-    total: modelsData?.total || 0 
+  const pagination = {
+    page: modelsData?.page || 1,
+    totalPages: modelsData?.totalPages || 1,
+    total: modelsData?.total || 0
   };
 
   const MetricCardSkeleton = () => (
@@ -2100,22 +2106,22 @@ function AIModelsSection() {
               ) : models.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="p-8 text-center text-muted-foreground">
-	                      <div className="flex flex-col items-center gap-2">
-	                      <Bot className="h-8 w-8 text-muted-foreground/50" />
-	                      <p>
-	                        No hay modelos{" "}
-	                        {debouncedSearch || providerFilter !== "all" || typeFilter !== "all" || statusFilter !== "all"
-	                          ? "que coincidan con los filtros"
-	                          : modelsScope === "integrated"
-	                            ? "integrados (configura API keys)"
-	                            : modelsScope === "supported"
-	                              ? "soportados"
-	                              : "configurados"}
-	                      </p>
-	                      {!debouncedSearch && providerFilter === "all" && typeFilter === "all" && statusFilter === "all" && (
-	                        <Button variant="outline" size="sm" onClick={syncAll} disabled={isSyncing} className="mt-2" data-testid="button-sync-empty">
-	                          <RefreshCw className="h-4 w-4 mr-2" />
-	                          Sincronizar modelos
+                    <div className="flex flex-col items-center gap-2">
+                      <Bot className="h-8 w-8 text-muted-foreground/50" />
+                      <p>
+                        No hay modelos{" "}
+                        {debouncedSearch || providerFilter !== "all" || typeFilter !== "all" || statusFilter !== "all"
+                          ? "que coincidan con los filtros"
+                          : modelsScope === "integrated"
+                            ? "integrados (configura API keys)"
+                            : modelsScope === "supported"
+                              ? "soportados"
+                              : "configurados"}
+                      </p>
+                      {!debouncedSearch && providerFilter === "all" && typeFilter === "all" && statusFilter === "all" && (
+                        <Button variant="outline" size="sm" onClick={syncAll} disabled={isSyncing} className="mt-2" data-testid="button-sync-empty">
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                          Sincronizar modelos
                         </Button>
                       )}
                     </div>
@@ -2144,15 +2150,15 @@ function AIModelsSection() {
                           className={cn(
                             "text-xs border",
                             model.isSupported === false ? "bg-red-500/10 text-red-600 border-red-500/30" :
-                            model.isIntegrated === false ? "bg-amber-500/10 text-amber-700 border-amber-500/30" :
-                            model.isChatCapable === false ? "bg-amber-500/10 text-amber-700 border-amber-500/30" :
-                            "bg-green-500/10 text-green-600 border-green-500/30"
+                              model.isIntegrated === false ? "bg-amber-500/10 text-amber-700 border-amber-500/30" :
+                                model.isChatCapable === false ? "bg-amber-500/10 text-amber-700 border-amber-500/30" :
+                                  "bg-green-500/10 text-green-600 border-green-500/30"
                           )}
                           title={
                             model.isSupported === false ? "Proveedor no soportado por el runtime" :
-                            model.isIntegrated === false ? "API key no configurada para este proveedor" :
-                            model.isChatCapable === false ? "Modelo no compatible con chat (solo TEXT/MULTIMODAL gemini*/grok*)" :
-                            "Integrado"
+                              model.isIntegrated === false ? "API key no configurada para este proveedor" :
+                                model.isChatCapable === false ? "Modelo no compatible con chat (solo TEXT/MULTIMODAL gemini*/grok*)" :
+                                  "Integrado"
                           }
                         >
                           {model.isSupported === false ? "UNSUPPORTED" : model.isIntegrated === false ? "NO KEY" : model.isChatCapable === false ? "NO CHAT" : "OK"}
@@ -2194,9 +2200,9 @@ function AIModelsSection() {
                         data-testid={`switch-enabled-${model.id}`}
                         title={
                           model.isEnabled !== "true" && model.status !== "active" ? "Activa el modelo primero (Status)" :
-                          model.isIntegrated === false && model.isEnabled !== "true" ? "API key no configurada para este proveedor" :
-                          model.isChatCapable === false && model.isEnabled !== "true" ? "Modelo no compatible con chat (solo TEXT/MULTIMODAL gemini*/grok*)" :
-                          undefined
+                            model.isIntegrated === false && model.isEnabled !== "true" ? "API key no configurada para este proveedor" :
+                              model.isChatCapable === false && model.isEnabled !== "true" ? "Modelo no compatible con chat (solo TEXT/MULTIMODAL gemini*/grok*)" :
+                                undefined
                         }
                       />
                     </td>
@@ -2214,8 +2220,8 @@ function AIModelsSection() {
                           data-testid={`button-test-model-${model.id}`}
                           title={
                             model.isIntegrated !== true ? "Configura API key para testear" :
-                            model.isChatCapable !== true ? "Modelo no compatible con chat" :
-                            "Testear modelo"
+                              model.isChatCapable !== true ? "Modelo no compatible con chat" :
+                                "Testear modelo"
                           }
                         >
                           {testModelMutation.isPending && testingModelId === model.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
@@ -3208,7 +3214,7 @@ function InvoicesSection() {
       return res.json();
     }
   });
-  
+
   const invoices = invoicesData?.invoices || invoicesData || [];
 
   const createInvoiceMutation = useMutation({
@@ -3249,22 +3255,22 @@ function InvoicesSection() {
             <div className="space-y-4 py-4">
               <div className="space-y-2">
                 <Label>Número de factura</Label>
-                <Input 
-                  placeholder="INV-2024-001" 
+                <Input
+                  placeholder="INV-2024-001"
                   value={newInvoice.invoiceNumber}
                   onChange={(e) => setNewInvoice({ ...newInvoice, invoiceNumber: e.target.value })}
                 />
               </div>
               <div className="space-y-2">
                 <Label>Importe</Label>
-                <Input 
-                  placeholder="99.00" 
+                <Input
+                  placeholder="99.00"
                   value={newInvoice.amount}
                   onChange={(e) => setNewInvoice({ ...newInvoice, amount: e.target.value })}
                 />
               </div>
-              <Button 
-                className="w-full" 
+              <Button
+                className="w-full"
                 onClick={() => createInvoiceMutation.mutate(newInvoice)}
                 disabled={!newInvoice.invoiceNumber || !newInvoice.amount}
               >
@@ -3870,7 +3876,7 @@ function SecuritySection() {
       priority: newPolicy.priority,
       rules: newPolicy.rules
     };
-    
+
     if (editingPolicy) {
       updatePolicyMutation.mutate({ id: editingPolicy.id, ...policyData });
     } else {
@@ -3908,8 +3914,8 @@ function SecuritySection() {
     if (!severity && typeof details.statusCode === "number") {
       severity =
         details.statusCode >= 500 ? "error" :
-        details.statusCode >= 400 ? "warning" :
-        "info";
+          details.statusCode >= 400 ? "warning" :
+            "info";
     }
 
     // Fallback heuristics based on action string.
@@ -3938,7 +3944,7 @@ function SecuritySection() {
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>Allowed Origins (one per line)</Label>
-              <Textarea 
+              <Textarea
                 data-testid="input-cors-origins"
                 placeholder="https://example.com&#10;https://api.example.com"
                 value={newPolicy.rules.allowed_origins || ""}
@@ -3951,7 +3957,7 @@ function SecuritySection() {
               <div className="flex flex-wrap gap-3">
                 {["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"].map(method => (
                   <label key={method} className="flex items-center gap-2">
-                    <Checkbox 
+                    <Checkbox
                       data-testid={`checkbox-method-${method.toLowerCase()}`}
                       checked={(newPolicy.rules.allowed_methods || []).includes(method)}
                       onCheckedChange={(checked) => {
@@ -3972,7 +3978,7 @@ function SecuritySection() {
             </div>
             <div className="space-y-2">
               <Label>Max Age (seconds)</Label>
-              <Input 
+              <Input
                 data-testid="input-cors-max-age"
                 type="number"
                 value={newPolicy.rules.max_age || 86400}
@@ -3986,7 +3992,7 @@ function SecuritySection() {
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>Requests per Minute</Label>
-              <Input 
+              <Input
                 data-testid="input-rate-requests"
                 type="number"
                 value={newPolicy.rules.requests_per_minute || 60}
@@ -3995,7 +4001,7 @@ function SecuritySection() {
             </div>
             <div className="space-y-2">
               <Label>Burst Limit</Label>
-              <Input 
+              <Input
                 data-testid="input-rate-burst"
                 type="number"
                 value={newPolicy.rules.burst_limit || 10}
@@ -4004,7 +4010,7 @@ function SecuritySection() {
             </div>
             <div className="space-y-2">
               <Label>Scope</Label>
-              <Select 
+              <Select
                 value={newPolicy.rules.scope || "ip"}
                 onValueChange={(v) => setNewPolicy({ ...newPolicy, rules: { ...newPolicy.rules, scope: v } })}
               >
@@ -4025,7 +4031,7 @@ function SecuritySection() {
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>Whitelist CIDRs (one per line)</Label>
-              <Textarea 
+              <Textarea
                 data-testid="input-ip-whitelist"
                 placeholder="192.168.1.0/24&#10;10.0.0.0/8"
                 value={newPolicy.rules.whitelist_cidrs || ""}
@@ -4035,7 +4041,7 @@ function SecuritySection() {
             </div>
             <div className="space-y-2">
               <Label>Blacklist CIDRs (one per line)</Label>
-              <Textarea 
+              <Textarea
                 data-testid="input-ip-blacklist"
                 placeholder="0.0.0.0/0"
                 value={newPolicy.rules.blacklist_cidrs || ""}
@@ -4050,7 +4056,7 @@ function SecuritySection() {
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>default-src</Label>
-              <Input 
+              <Input
                 data-testid="input-csp-default"
                 placeholder="'self'"
                 value={newPolicy.rules.default_src || ""}
@@ -4059,7 +4065,7 @@ function SecuritySection() {
             </div>
             <div className="space-y-2">
               <Label>script-src</Label>
-              <Input 
+              <Input
                 data-testid="input-csp-script"
                 placeholder="'self' 'unsafe-inline'"
                 value={newPolicy.rules.script_src || ""}
@@ -4068,7 +4074,7 @@ function SecuritySection() {
             </div>
             <div className="space-y-2">
               <Label>style-src</Label>
-              <Input 
+              <Input
                 data-testid="input-csp-style"
                 placeholder="'self' 'unsafe-inline'"
                 value={newPolicy.rules.style_src || ""}
@@ -4077,7 +4083,7 @@ function SecuritySection() {
             </div>
             <div className="space-y-2">
               <Label>img-src</Label>
-              <Input 
+              <Input
                 data-testid="input-csp-img"
                 placeholder="'self' data: https:"
                 value={newPolicy.rules.img_src || ""}
@@ -4090,7 +4096,7 @@ function SecuritySection() {
         return (
           <div className="space-y-4">
             <div className="flex items-center gap-3">
-              <Checkbox 
+              <Checkbox
                 id="require_2fa"
                 data-testid="checkbox-require-2fa"
                 checked={newPolicy.rules.require_2fa || false}
@@ -4100,7 +4106,7 @@ function SecuritySection() {
             </div>
             <div className="space-y-2">
               <Label>Session Timeout (minutes)</Label>
-              <Input 
+              <Input
                 data-testid="input-session-timeout"
                 type="number"
                 value={newPolicy.rules.session_timeout_minutes || 60}
@@ -4114,7 +4120,7 @@ function SecuritySection() {
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>Audit Logs Retention (days)</Label>
-              <Input 
+              <Input
                 data-testid="input-retention-audit"
                 type="number"
                 value={newPolicy.rules.audit_logs_days || 365}
@@ -4123,7 +4129,7 @@ function SecuritySection() {
             </div>
             <div className="space-y-2">
               <Label>User Data Retention (days)</Label>
-              <Input 
+              <Input
                 data-testid="input-retention-user"
                 type="number"
                 value={newPolicy.rules.user_data_days || 730}
@@ -4132,7 +4138,7 @@ function SecuritySection() {
             </div>
             <div className="space-y-2">
               <Label>Chat History Retention (days)</Label>
-              <Input 
+              <Input
                 data-testid="input-retention-chat"
                 type="number"
                 value={newPolicy.rules.chat_history_days || 90}
@@ -4258,7 +4264,7 @@ function SecuritySection() {
                 <div className="space-y-4 py-4">
                   <div className="space-y-2">
                     <Label>Policy Name</Label>
-                    <Input 
+                    <Input
                       data-testid="input-policy-name"
                       placeholder="My Security Policy"
                       value={newPolicy.policyName}
@@ -4267,7 +4273,7 @@ function SecuritySection() {
                   </div>
                   <div className="space-y-2">
                     <Label>Policy Type</Label>
-                    <Select 
+                    <Select
                       value={newPolicy.policyType}
                       onValueChange={(v) => setNewPolicy({ ...newPolicy, policyType: v, rules: {} })}
                     >
@@ -4289,7 +4295,7 @@ function SecuritySection() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>Applied To</Label>
-                      <Select 
+                      <Select
                         value={newPolicy.appliedTo}
                         onValueChange={(v) => setNewPolicy({ ...newPolicy, appliedTo: v })}
                       >
@@ -4305,7 +4311,7 @@ function SecuritySection() {
                     </div>
                     <div className="space-y-2">
                       <Label>Priority</Label>
-                      <Input 
+                      <Input
                         data-testid="input-priority"
                         type="number"
                         value={newPolicy.priority}
@@ -4313,13 +4319,13 @@ function SecuritySection() {
                       />
                     </div>
                   </div>
-                  
+
                   <Separator />
                   <h4 className="font-medium">Policy Rules</h4>
                   {renderPolicyRulesForm()}
-                  
-                  <Button 
-                    className="w-full" 
+
+                  <Button
+                    className="w-full"
                     onClick={handleSavePolicy}
                     disabled={!newPolicy.policyName || createPolicyMutation.isPending || updatePolicyMutation.isPending}
                     data-testid="button-save-policy"
@@ -4370,7 +4376,7 @@ function SecuritySection() {
                         </td>
                         <td className="p-3 text-sm">{policy.priority}</td>
                         <td className="p-3">
-                          <Switch 
+                          <Switch
                             checked={policy.isEnabled === "true"}
                             onCheckedChange={(checked) => togglePolicyMutation.mutate({ id: policy.id, isEnabled: checked })}
                             data-testid={`toggle-policy-${policy.id}`}
@@ -4378,18 +4384,18 @@ function SecuritySection() {
                         </td>
                         <td className="p-3 text-right">
                           <div className="flex items-center justify-end gap-1">
-                            <Button 
-                              variant="ghost" 
-                              size="sm" 
+                            <Button
+                              variant="ghost"
+                              size="sm"
                               className="h-8 w-8 p-0"
                               onClick={() => handleEditPolicy(policy)}
                               data-testid={`button-edit-${policy.id}`}
                             >
                               <Edit className="h-4 w-4" />
                             </Button>
-                            <Button 
-                              variant="ghost" 
-                              size="sm" 
+                            <Button
+                              variant="ghost"
+                              size="sm"
                               className="h-8 w-8 p-0 text-destructive hover:text-destructive"
                               onClick={() => deletePolicyMutation.mutate(policy.id)}
                               data-testid={`button-delete-${policy.id}`}
@@ -4415,7 +4421,7 @@ function SecuritySection() {
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2">
               <Label className="text-xs text-muted-foreground">Action:</Label>
-              <Input 
+              <Input
                 data-testid="filter-action"
                 placeholder="Filter by action..."
                 className="h-8 w-40"
@@ -4425,7 +4431,7 @@ function SecuritySection() {
             </div>
             <div className="flex items-center gap-2">
               <Label className="text-xs text-muted-foreground">User:</Label>
-              <Input 
+              <Input
                 data-testid="filter-actor"
                 placeholder="Email or userId..."
                 className="h-8 w-44"
@@ -4435,7 +4441,7 @@ function SecuritySection() {
             </div>
             <div className="flex items-center gap-2">
               <Label className="text-xs text-muted-foreground">From:</Label>
-              <Input 
+              <Input
                 data-testid="filter-date-from"
                 type="date"
                 className="h-8 w-36"
@@ -4445,7 +4451,7 @@ function SecuritySection() {
             </div>
             <div className="flex items-center gap-2">
               <Label className="text-xs text-muted-foreground">To:</Label>
-              <Input 
+              <Input
                 data-testid="filter-date-to"
                 type="date"
                 className="h-8 w-36"
@@ -4453,9 +4459,9 @@ function SecuritySection() {
                 onChange={(e) => setAuditFilters({ ...auditFilters, dateTo: e.target.value })}
               />
             </div>
-            <Button 
-              variant="outline" 
-              size="sm" 
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => {
                 setAuditFilters({ action: "", actor: "", dateFrom: "", dateTo: "" });
                 setAuditPage(1);
@@ -4509,8 +4515,8 @@ function SecuritySection() {
                 Page {auditLogsData.pagination.page} of {auditLogsData.pagination.totalPages} ({auditLogsData.pagination.total} total)
               </span>
               <div className="flex items-center gap-2">
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   size="sm"
                   disabled={auditPage <= 1}
                   onClick={() => setAuditPage(p => p - 1)}
@@ -4518,8 +4524,8 @@ function SecuritySection() {
                 >
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   size="sm"
                   disabled={auditPage >= auditLogsData.pagination.totalPages}
                   onClick={() => setAuditPage(p => p + 1)}
@@ -4679,8 +4685,8 @@ function ReportsSection() {
                   )}
                 </CardContent>
                 <CardFooter>
-                  <Button 
-                    className="w-full" 
+                  <Button
+                    className="w-full"
                     size="sm"
                     onClick={() => handleGenerateFromTemplate(template.id)}
                     data-testid={`button-generate-${template.id}`}
@@ -4718,8 +4724,8 @@ function ReportsSection() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Date From (Optional)</Label>
-                  <Input 
-                    type="date" 
+                  <Input
+                    type="date"
                     value={dateFrom}
                     onChange={(e) => setDateFrom(e.target.value)}
                     data-testid="input-date-from"
@@ -4727,8 +4733,8 @@ function ReportsSection() {
                 </div>
                 <div className="space-y-2">
                   <Label>Date To (Optional)</Label>
-                  <Input 
-                    type="date" 
+                  <Input
+                    type="date"
                     value={dateTo}
                     onChange={(e) => setDateTo(e.target.value)}
                     data-testid="input-date-to"
@@ -4750,8 +4756,8 @@ function ReportsSection() {
               </div>
             </CardContent>
             <CardFooter>
-              <Button 
-                className="w-full" 
+              <Button
+                className="w-full"
                 onClick={handleSubmitGenerate}
                 disabled={!selectedTemplate || generateReportMutation.isPending}
                 data-testid="button-submit-generate"
@@ -4779,9 +4785,9 @@ function ReportsSection() {
                 <CardTitle>Generated Reports</CardTitle>
                 <CardDescription>View and download previously generated reports</CardDescription>
               </div>
-              <Button 
-                variant="outline" 
-                size="sm" 
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => refetchReports()}
                 data-testid="button-refresh-history"
               >
@@ -4828,9 +4834,9 @@ function ReportsSection() {
                           <td className="px-4 py-3 text-right">
                             <div className="flex items-center justify-end gap-2">
                               {report.status === "completed" && (
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm" 
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
                                   className="h-8 px-2"
                                   onClick={() => handleDownload(report.id)}
                                   data-testid={`button-download-${report.id}`}
@@ -4838,9 +4844,9 @@ function ReportsSection() {
                                   <Download className="h-4 w-4" />
                                 </Button>
                               )}
-                              <Button 
-                                variant="ghost" 
-                                size="sm" 
+                              <Button
+                                variant="ghost"
+                                size="sm"
                                 className="h-8 px-2 text-destructive hover:text-destructive"
                                 onClick={() => deleteReportMutation.mutate(report.id)}
                                 data-testid={`button-delete-${report.id}`}
@@ -4862,8 +4868,8 @@ function ReportsSection() {
                     Page {pagination.page} of {pagination.totalPages} ({pagination.total} total)
                   </span>
                   <div className="flex items-center gap-2">
-                    <Button 
-                      variant="outline" 
+                    <Button
+                      variant="outline"
                       size="sm"
                       disabled={historyPage <= 1}
                       onClick={() => setHistoryPage(p => p - 1)}
@@ -4871,8 +4877,8 @@ function ReportsSection() {
                     >
                       <ChevronLeft className="h-4 w-4" />
                     </Button>
-                    <Button 
-                      variant="outline" 
+                    <Button
+                      variant="outline"
                       size="sm"
                       disabled={historyPage >= pagination.totalPages}
                       onClick={() => setHistoryPage(p => p + 1)}
@@ -5402,7 +5408,7 @@ function SettingsSection() {
 
 function AgenticEngineSection() {
   const [activeTab, setActiveTab] = useState("overview");
-  
+
   const { data: toolsData, isLoading: toolsLoading, refetch: refetchTools } = useQuery({
     queryKey: ["/api/admin/agent/tools"],
     queryFn: async () => {
@@ -5975,7 +5981,7 @@ function ExcelManagerSection() {
     day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
   });
 
-  const filtered = documents.filter((d: ExcelDocument) => 
+  const filtered = documents.filter((d: ExcelDocument) =>
     d.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -6206,7 +6212,7 @@ function ExcelManagerSection() {
 export default function AdminPage() {
   const [, setLocation] = useLocation();
   const [activeSection, setActiveSection] = useState<AdminSection>("dashboard");
-  
+
   // Security: Verify admin role
   const { data: currentUser, isLoading: isLoadingUser } = useQuery({
     queryKey: ["/api/auth/user"],
@@ -6283,6 +6289,8 @@ export default function AdminPage() {
         );
       case "monitoring":
         return <MonitoringSection />;
+      case "releases":
+        return <ReleasesManager />;
       default:
         return <DashboardSection />;
     }
@@ -6292,9 +6300,9 @@ export default function AdminPage() {
     <div className="flex h-screen bg-background">
       <aside className="w-56 border-r flex flex-col shrink-0">
         <div className="p-4 border-b shrink-0">
-          <Button 
-            variant="ghost" 
-            size="sm" 
+          <Button
+            variant="ghost"
+            size="sm"
             className="w-full justify-start gap-2"
             onClick={() => setLocation("/")}
             data-testid="button-back-to-app"
