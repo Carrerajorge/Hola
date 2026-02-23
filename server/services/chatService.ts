@@ -7,7 +7,12 @@ import { responseCache } from "./responseCache";
 import { generateEmbedding } from "../embeddingService";
 import { searchWeb, searchScholar, needsWebSearch, needsAcademicSearch } from "./webSearch";
 import { academicEngineV3, generateAPACitation } from "./academicResearchEngineV3";
-import { routeMessage, runPipeline, ProgressUpdate, checkDomainPolicy, checkRateLimit, sanitizeUrl, isValidObjective, multiIntentManager, multiIntentPipeline } from "../agent";
+import { routeMessage } from "../agent/router";
+import { runPipeline } from "../agent/pipeline/engine";
+import type { ProgressUpdate } from "../agent/pipeline/types";
+import { checkDomainPolicy, checkRateLimit, sanitizeUrl, isValidObjective } from "../agent/security";
+import { multiIntentManager } from "../agent/pipeline/multiIntentManager";
+import { multiIntentPipeline } from "../agent/pipeline/multiIntentPipeline";
 import type { PipelineResponse } from "../../shared/schemas/multiIntent";
 import { checkToolPolicy, logToolCall } from "./integrationPolicyService";
 import { detectEmailIntent, handleEmailChatRequest } from "./gmailChatIntegration";
@@ -1604,7 +1609,7 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
           yearTo: new Date().getFullYear(),
           sources: ["scielo", "openalex", "semantic_scholar", "crossref", "core", "pubmed", "arxiv", "doaj"]
         });
-        
+
         await logToolCall(userId || "anonymous", "academic_search", "academic_engine_v3",
           { query: lastUserMessage.content }, { count: engineResult.papers.length, sources: engineResult.sources }, "success", Date.now() - searchStartTime);
 
@@ -1618,22 +1623,22 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
           webSources = engineResult.papers
             .filter(p => p.url || p.doi)
             .map(p => extractWebSource(
-              p.url || `https://doi.org/${p.doi}`, 
-              p.title, 
-              p.abstract?.substring(0, 200) || "", 
-              p.year?.toString(), 
-              undefined, 
-              p.journal, 
+              p.url || `https://doi.org/${p.doi}`,
+              p.title,
+              p.abstract?.substring(0, 200) || "",
+              p.year?.toString(),
+              undefined,
+              p.journal,
               p.doi ? `https://doi.org/${p.doi}` : undefined
             ));
-            
+
           console.log(`[ChatService:AcademicEngine] Found ${engineResult.papers.length} papers from ${engineResult.sources.map(s => s.name).join(", ")} in ${engineResult.searchTime}ms`);
         }
       } catch (error) {
         await logToolCall(userId || "anonymous", "academic_search", "academic_engine",
           { query: lastUserMessage.content }, null, "error", Date.now() - searchStartTime, String(error));
         console.error("Academic engine error, falling back to Google Scholar:", error);
-        
+
         // Fallback to old Google Scholar search
         try {
           const scholarResults = await searchScholar(lastUserMessage.content, 15);

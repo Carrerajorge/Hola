@@ -197,3 +197,4 @@ class AgentEventBus extends EventEmitter {
 }
 
 export const agentEventBus = new AgentEventBus();
+export const unifiedEventBus = agentEventBus;

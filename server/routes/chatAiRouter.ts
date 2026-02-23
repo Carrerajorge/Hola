@@ -39,8 +39,8 @@ import { getSkillPlatformService, type SkillExecutionResult } from "../services/
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
-import { terminalController } from "../agent/computerUse/terminalController";
-import type { CommandRequest, CommandResult, ProcessInfo } from "../agent/computerUse/terminalController";
+import { terminalController } from "../agent/terminalController";
+import type { CommandRequest, CommandResult, ProcessInfo } from "../agent/terminalController";
 
 type AttachmentSpec = z.infer<typeof AttachmentSpecSchema>;
 
@@ -1484,7 +1484,7 @@ function parseLocalControlRequest(input: string): LocalControlRequest | null {
     pantallazo: "screenshot",
     clipboard: "clipboard",
     portapapeles: "clipboard",
-    copiar: "clipboard",
+    copiar_clipboard: "clipboard",
     pegar: "clipboard",
     notify: "notify",
     notificar: "notify",
@@ -1502,8 +1502,8 @@ function parseLocalControlRequest(input: string): LocalControlRequest | null {
     reminders: "reminders",
     recordatorios: "reminders",
     spotlight: "spotlight",
-    buscar: "spotlight",
-    search: "spotlight",
+    buscar_spotlight: "spotlight",
+    search_spotlight: "spotlight",
     shortcut: "shortcut",
     shortcuts: "shortcut",
     atajo: "shortcut",
@@ -2610,7 +2610,7 @@ export async function executeLocalControlRequest(
           "Ejecucion de scripts deshabilitada. Establece ILIAGPT_LOCAL_FULL_SHELL=true en .env"
         );
       }
-      let language = parsed.command;
+      let language: string = parsed.command;
       let scriptArgs = [...parsed.args];
       if (parsed.command === "script") {
         const maybeLanguage = (scriptArgs[0] || "").toLowerCase();
@@ -6346,12 +6346,12 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
           modelMessages.push({ role: "assistant", content: skillSeedForModel });
         }
         const streamLlmOptions = {
-            userId: userId || streamConversationId || "anonymous",
-            requestId,
-            model: effectiveModel,
-            provider: effectiveProvider,
-            disableImageGeneration: hasAttachments,
-            maxTokens: laneMaxTokens,
+          userId: userId || streamConversationId || "anonymous",
+          requestId,
+          model: effectiveModel,
+          provider: effectiveProvider,
+          disableImageGeneration: hasAttachments,
+          maxTokens: laneMaxTokens,
         };
         const streamGenerator = llmGateway.streamChat(
           modelMessages,
@@ -6483,8 +6483,8 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
             .filter(e => e.event_type === 'thinking' || e.event_type === 'tool_call_started')
             .map(e => ({
               title: e.event_type === 'thinking'
-                ? (e.message || e.payload?.content || 'Analizando contexto...')
-                : `Sistema: ${e.payload?.toolCall?.name || 'Iniciando skill'}`,
+                ? ((e as any).message || (e as any).payload?.content || 'Analizando contexto...')
+                : `Sistema: ${(e as any).payload?.toolCall?.name || 'Iniciando skill'}`,
               status: "complete"
             }));
 

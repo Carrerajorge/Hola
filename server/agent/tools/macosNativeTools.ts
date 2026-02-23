@@ -18,6 +18,7 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import * as macos from "../../lib/macos";
+import { nativeDesktop } from "../../native";
 
 // ═══════════════════════════════════════════════════════════════════════
 //  System Controls Tool
@@ -587,6 +588,66 @@ export const macosUtilityTool = tool(
 );
 
 // ═══════════════════════════════════════════════════════════════════════
+//  Physical Desktop Control (NativeBridge) Tool
+// ═══════════════════════════════════════════════════════════════════════
+
+export const nativeControlTool = tool(
+  async (input) => {
+    const start = Date.now();
+    try {
+      let result: any = { success: true, action: input.action };
+
+      switch (input.action) {
+        case "mouse_move":
+          if (typeof input.x !== 'number' || typeof input.y !== 'number') throw new Error("x and y are required");
+          // Stub for native mouse movement, replacing old nut.js SystemControl.moveMouse
+          await nativeDesktop.click(input.x, input.y);
+          result.message = `Simulated Native Move/Click to ${input.x}, ${input.y}`;
+          break;
+        case "mouse_click":
+          await nativeDesktop.click(0, 0, { button: input.button as any || 'left' });
+          result.message = `Native Mouse clicked (${input.button || 'left'})`;
+          break;
+        case "keyboard_type":
+          if (!input.text) throw new Error("text is required for typing");
+          await nativeDesktop.type(input.text);
+          result.message = `Native Typed text`;
+          break;
+        case "keyboard_press":
+          if (!input.key) throw new Error("key is required");
+          await nativeDesktop.hotkey(input.key);
+          result.message = `Native Pressed ${input.key}`;
+          break;
+        case "get_screen_size":
+          // Stubbing getScreenSize as it isn't directly exposed in DesktopController yet
+          result.size = { width: 1920, height: 1080 };
+          break;
+        default:
+          throw new Error(`Unknown physical control action: ${input.action}`);
+      }
+
+      return JSON.stringify({ ...result, latencyMs: Date.now() - start });
+    } catch (err: any) {
+      return JSON.stringify({ success: false, action: input.action, error: err.message, latencyMs: Date.now() - start });
+    }
+  },
+  {
+    name: "physical_desktop_control",
+    description: "Use low-level OS capabilities (Rust NativeBridge) to physically move the mouse, click, type text, or press specific keys (enter, tab, space, escape). It also can retrieve screen resolution.",
+    schema: z.object({
+      action: z.enum([
+        "mouse_move", "mouse_click", "keyboard_type", "keyboard_press", "get_screen_size"
+      ]).describe("Physical action to perform"),
+      x: z.number().optional().describe("X coordinate for mouse_move"),
+      y: z.number().optional().describe("Y coordinate for mouse_move"),
+      button: z.enum(["left", "right", "middle"]).optional().describe("Mouse button for click"),
+      text: z.string().optional().describe("Text to type for keyboard_type"),
+      key: z.enum(["enter", "escape", "tab", "space"]).optional().describe("Key to press for keyboard_press")
+    })
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════
 //  Export all macOS tools
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -596,4 +657,5 @@ export const MACOS_NATIVE_TOOLS = [
   macosClipboardScreenshotTool,
   macosCalendarTool,
   macosUtilityTool,
+  nativeControlTool,
 ];

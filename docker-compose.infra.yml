@@ -343,6 +343,21 @@ services:
     depends_on:
       - influxdb
 
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    container_name: hola-clickhouse
+    hostname: hola-clickhouse
+    ports:
+      - "8123:8123"   # HTTP
+      - "9000:9000"   # Native
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    environment:
+      CLICKHOUSE_DB: iliagpt_telemetry
+    networks:
+      - hola-net
+    restart: unless-stopped
+
 networks:
   hola-net:
     name: hola-net
@@ -365,3 +380,5 @@ volumes:
     name: hola_influxdb_data
   hola-whatsapp-bridge-auth:
     name: hola_whatsapp_bridge_auth
+  clickhouse_data:
+    name: hola_clickhouse_data

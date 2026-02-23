@@ -111,9 +111,9 @@ export async function initTelemetry(customConfig: Partial<TelemetryConfig> = {})
 
         const sdk = new NodeSDK({
             resource: resourceFromAttributes({
-              [SemanticResourceAttributes.SERVICE_NAME]: config.serviceName,
-              [SemanticResourceAttributes.SERVICE_VERSION]: config.serviceVersion,
-              [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: config.environment,
+                [SemanticResourceAttributes.SERVICE_NAME]: config.serviceName,
+                [SemanticResourceAttributes.SERVICE_VERSION]: config.serviceVersion,
+                [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: config.environment,
             }),
             traceExporter: exporter,
             instrumentations: [getNodeAutoInstrumentations()],

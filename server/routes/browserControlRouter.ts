@@ -24,8 +24,8 @@ import {
   ExtractionRule,
   AgenticTask,
   AgenticStep,
-} from "../agent/computerUse/universalBrowserController";
-import { browserEngineExtensions, BrowserEngineExtensions } from "../agent/computerUse/browserEngineExtensions";
+} from "../agent/universalBrowserController";
+import { browserEngineExtensions, BrowserEngineExtensions } from "../agent/browserEngineExtensions";
 
 const browserController = new UniversalBrowserController();
 

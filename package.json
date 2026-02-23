@@ -1,13 +1,21 @@
 {
     "name": "rest-express",
     "version": "1.0.0",
+    "description": "Plataforma de IA Autónoma Desktop V2",
+    "author": "ILIA",
+    "main": "dist-desktop/main.js",
     "type": "module",
     "license": "MIT",
     "scripts": {
         "lint": "eslint .",
+        "daemon": "node --import tsx server/daemon/desktopDaemon.ts",
         "dev:client": "vite dev --port 5050",
         "dev": "node scripts/with-env.cjs NODE_ENV=development -- node --import tsx server/index.ts",
+        "dev:desktop": "concurrently \"npm run dev\" \"npm run dev:client\" \"wait-on http://localhost:5050 && electron .\"",
         "build": "node scripts/with-env.cjs NODE_ENV=production -- node --import tsx script/build.ts",
+        "build:desktop:mac": "npm run build && tsc -p desktop/tsconfig.json && npx electron-builder --mac",
+        "build:desktop:win": "npm run build && tsc -p desktop/tsconfig.json && npx electron-builder --win",
+        "build:extension": "mkdir -p dist/extension && cp -r extension/* dist/extension/ && cd dist/extension && zip -r ../../client/public/downloads/ILIAGPT-Chrome-Extension-v1.5.0.zip *",
         "worker": "node --import tsx server/worker.ts",
         "start": "node scripts/with-env.cjs NODE_ENV=production -- node dist/index.cjs",
         "postinstall": "node scripts/sync-mathjax-assets.cjs",
@@ -55,6 +63,7 @@
         "@aws-sdk/s3-request-presigner": "^3.985.0",
         "@bull-board/api": "^6.18.2",
         "@bull-board/express": "^6.17.0",
+        "@clickhouse/client": "^1.17.0",
         "@e965/xlsx": "^0.20.3",
         "@google-cloud/storage": "^7.18.0",
         "@google/genai": "^1.40.0",
@@ -63,10 +72,16 @@
         "@hookform/resolvers": "^3.10.0",
         "@jridgewell/trace-mapping": "^0.3.25",
         "@langchain/anthropic": "^1.3.17",
+        "@langchain/community": "^1.1.17",
         "@langchain/core": "^1.1.9",
+        "@langchain/google-genai": "^2.1.20",
         "@langchain/langgraph": "^1.1.4",
+        "@langchain/openai": "^1.2.9",
+        "@modelcontextprotocol/sdk": "^1.26.0",
         "@monaco-editor/react": "^4.7.0",
         "@mozilla/readability": "^0.6.0",
+        "@msgpack/msgpack": "^3.1.3",
+        "@nut-tree-fork/nut-js": "^4.2.6",
         "@opentelemetry/api": "^1.9.0",
         "@opentelemetry/auto-instrumentations-node": "^0.70.0",
         "@opentelemetry/context-async-hooks": "^2.5.1",
@@ -151,7 +166,6 @@
         "@types/supertest": "^6.0.3",
         "@types/swagger-jsdoc": "^6.0.4",
         "@types/swagger-ui-express": "^4.1.8",
-        "@types/three": "^0.182.0",
         "@types/unist": "^3.0.3",
         "@uppy/aws-s3": "^5.1.0",
         "@uppy/core": "^5.2.0",
@@ -178,14 +192,15 @@
         "d3": "^7.9.0",
         "date-fns": "^3.6.0",
         "dockerode": "^4.0.9",
-        "docx": "^9.5.1",
+        "docx": "^9.5.3",
         "dompurify": "^3.3.1",
         "dotenv": "^17.2.4",
         "drizzle-orm": "^0.45.1",
         "drizzle-zod": "^0.8.3",
         "duck-duck-scrape": "^2.2.7",
         "echarts": "^6.0.0",
-        "echarts-for-react": "^3.0.5",
+        "echarts-for-react": "^3.0.6",
+        "electron-updater": "^6.8.3",
         "embla-carousel-react": "^8.6.0",
         "emoji-regex": "^10.6.0",
         "exceljs": "^4.1.1",
@@ -246,6 +261,7 @@
         "react": "^19.2.0",
         "react-day-picker": "^9.13.2",
         "react-dom": "^19.2.0",
+        "react-force-graph-3d": "^1.29.1",
         "react-hook-form": "^7.66.0",
         "react-konva": "^19.2.2",
         "react-markdown": "^10.1.0",
@@ -265,6 +281,7 @@
         "remark-parse": "^11.0.0",
         "remark-rehype": "^11.1.2",
         "resend": "^4.0.0",
+        "simple-git": "^3.32.2",
         "simple-statistics": "^7.8.8",
         "sonner": "^2.0.7",
         "ssh2": "^1.17.0",
@@ -285,8 +302,9 @@
         "vite-plugin-pwa": "^1.2.0",
         "vitest": "^4.0.16",
         "web-push": "^1.0.2",
+        "wikipedia": "^2.4.2",
         "wouter": "^3.3.5",
-        "ws": "^8.18.0",
+        "ws": "^8.19.0",
         "xlsx": "npm:@e965/xlsx@^0.20.3",
         "zod": "^3.25.76",
         "zod-to-json-schema": "^3.25.1",
@@ -318,10 +336,13 @@
         "@types/qrcode": "^1.5.6",
         "@types/react": "^19.2.14",
         "@types/react-dom": "^19.2.0",
-        "@types/ws": "^8.5.13",
+        "@types/three": "^0.183.1",
+        "@types/ws": "^8.18.1",
         "@vitejs/plugin-react": "^5.1.4",
         "autoprefixer": "^10.4.24",
         "drizzle-kit": "^0.31.9",
+        "electron": "^40.6.0",
+        "electron-builder": "^26.8.1",
         "esbuild": "^0.25.0",
         "eslint": "^9.39.0",
         "fast-check": "^4.5.3",
@@ -333,9 +354,10 @@
         "postcss": "^8.5.6",
         "tailwindcss": "^4.1.14",
         "tsx": "^4.21.0",
-        "typescript": "5.9.3",
+        "typescript": "^5.9.3",
         "typescript-eslint": "^8.36.0",
-        "vite": "^7.1.9"
+        "vite": "^7.1.9",
+        "wait-on": "^9.0.4"
     },
     "optionalDependencies": {
         "bufferutil": "^4.0.8"
@@ -348,7 +370,6 @@
         "esbuild": "^0.25.0",
         "mermaid": "^11.12.3",
         "markdown-it": "^14.1.1",
-        "ajv": "^8.18.0",
         "langium": "^4.2.1",
         "@mermaid-js/parser": "^1.0.0",
         "chevrotain": "^11.1.1",
@@ -357,8 +378,47 @@
         "lodash-es": "^4.17.23",
         "minimatch": "^10.2.1",
         "validator": "^13.12.0",
+        "fsevents": "^2.3.3",
         "bn": {
             "js": "^5.2.3"
         }
+    },
+    "build": {
+        "appId": "com.iliagpt.desktop",
+        "productName": "IliaGPT",
+        "directories": {
+            "output": "dist/desktop_build"
+        },
+        "mac": {
+            "category": "public.app-category.productivity",
+            "target": [
+                "dmg",
+                "zip"
+            ],
+            "entitlements": "desktop/build/entitlements.mac.plist",
+            "entitlementsInherit": "desktop/build/entitlements.mac.plist"
+        },
+        "win": {
+            "target": [
+                "nsis",
+                "portable"
+            ]
+        },
+        "extraResources": [
+            {
+                "from": "native",
+                "to": "native",
+                "filter": [
+                    "iliagpt-native.node"
+                ]
+            }
+        ],
+        "files": [
+            "desktop/**/*",
+            "dist-desktop/**/*",
+            "dist/**/*",
+            "server/**/*",
+            "package.json"
+        ]
     }
 }

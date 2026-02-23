@@ -13,6 +13,7 @@ import { EventEmitter } from "events";
 import { randomUUID } from "crypto";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
+import { ActiveInferenceBrain, AgentGoal } from "../agent/computerUse/autonomousAgentBrain";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -257,6 +258,40 @@ export class DelegationEngine extends EventEmitter {
     this.emit("task:cancelled", task);
   }
 
+  // Inyectado soporte para resolución autónoma usando Sub-Cerebros Active Inference
+  async delegateWithAutonomousBrain(params: {
+    parentAgentId: string;
+    goal: AgentGoal;
+    requiredCapabilities?: string[];
+    timeoutMs?: number;
+  }): Promise<DelegationTask> {
+    const taskDef = await this.delegate({
+      parentAgentId: params.parentAgentId,
+      task: params.goal.description,
+      requiredCapabilities: params.requiredCapabilities,
+      timeoutMs: params.timeoutMs
+    });
+
+    // Invocamos un cerebro efímero para el Sub-Agent
+    const subBrain = new ActiveInferenceBrain();
+
+    // Background execution
+    this.startTask(taskDef.id).then(async () => {
+      try {
+        const result = await subBrain.executionLoop(params.goal);
+        if (result.success) {
+          await this.completeTask(taskDef.id, JSON.stringify(result));
+        } else {
+          await this.failTask(taskDef.id, result.reason || "ActiveInference Brain fail");
+        }
+      } catch (e: any) {
+        await this.failTask(taskDef.id, e.message);
+      }
+    });
+
+    return taskDef;
+  }
+
   getTask(id: string): DelegationTask | undefined {
     return this.tasks.get(id);
   }
@@ -277,7 +312,7 @@ export class DelegationEngine extends EventEmitter {
         task.timeoutAt &&
         now > task.timeoutAt.getTime()
       ) {
-        this.failTask(task.id, "Task timed out").catch(() => {});
+        this.failTask(task.id, "Task timed out").catch(() => { });
       }
     }
   }
