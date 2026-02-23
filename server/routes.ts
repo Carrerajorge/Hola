@@ -61,6 +61,7 @@ import { contextRoutes, semanticRoutes } from "./memory";
 import { createPythonToolsRouter } from "./routes/pythonToolsRouter";
 import { createLocalControlRouter } from "./routes/localControlRouter";
 import { createMacOSControlRouter } from "./routes/macosControlRouter";
+import { systemControlRouter } from "./routes/systemControlRouter";
 import { createAutomationTriggersRouter } from "./routes/automationTriggersRouter";
 import { createVoiceRouter } from "./routes/voiceRouter";
 import { createAnalyticsRouter } from "./routes/analyticsRouter";
@@ -595,6 +596,11 @@ export async function registerRoutes(
   app.use("/api/admin", createAdminRouter());
   app.use("/api/admin", createRetrievalAdminRouter());
   app.use("/api", createAgentRouter(broadcastBrowserEvent));
+
+  // Telemetry Dashboard
+  const { createTelemetryRouter } = require('./telemetry/telemetryRouter');
+  app.use("/api/telemetry", createTelemetryRouter());
+
   app.use(createFigmaRouter());
   app.use(createLibraryRouter());
   app.use(createWorkspaceRouter());
@@ -786,6 +792,7 @@ export async function registerRoutes(
   app.use("/api", superAgentRouter);
   app.use("/api", createPythonToolsRouter());
   app.use("/api", createLocalControlRouter());
+  app.use("/api/system", systemControlRouter);
   app.use("/api/execution", createToolExecutionRouter());
   app.use("/api/scientific", scientificSearchRouter);
   app.use("/api/planning", agentPlanRouter);

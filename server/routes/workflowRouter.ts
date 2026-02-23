@@ -6,7 +6,7 @@
  */
 
 import { Router, Request, Response } from "express";
-import { workflowEngine, WorkflowDefinition } from "../agent/computerUse/workflowEngine";
+import { workflowEngine, WorkflowDefinition } from "../agent/workflowEngine";
 
 export function createWorkflowRouter(): Router {
   const router = Router();

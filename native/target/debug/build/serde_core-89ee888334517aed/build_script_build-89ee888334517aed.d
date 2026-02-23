@@ -1,0 +1,5 @@
+/Users/ale/Desktop/ILIACODEX V2/native/target/debug/build/serde_core-89ee888334517aed/build_script_build-89ee888334517aed.d: /Users/ale/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/build.rs
+
+/Users/ale/Desktop/ILIACODEX V2/native/target/debug/build/serde_core-89ee888334517aed/build_script_build-89ee888334517aed: /Users/ale/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/build.rs
+
+/Users/ale/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.228/build.rs:

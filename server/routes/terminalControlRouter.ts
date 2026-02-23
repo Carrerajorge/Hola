@@ -19,8 +19,8 @@
 
 import { Router, Request, Response } from "express";
 import { EventEmitter } from "events";
-import { TerminalController, CommandRequest, FileOperation } from "../agent/computerUse/terminalController";
-import { RemoteShellController } from "../agent/computerUse/remoteShellController";
+import { TerminalController, CommandRequest, FileOperation } from "../agent/terminalController";
+import { RemoteShellController } from "../agent/remoteShellController";
 import { remoteShellRepository } from "../repositories/remoteShellRepository";
 import { encryptSecret, decryptSecret, isRemoteSecretConfigured } from "../lib/crypto/secretVault";
 import { storage } from "../storage";
@@ -237,9 +237,9 @@ export function createTerminalControlRouter(): Router {
         args,
         cwd,
         env,
-        timeout, 
-        shell, 
-        stream, 
+        timeout,
+        shell,
+        stream,
         background,
         interactive,
         inDocker,

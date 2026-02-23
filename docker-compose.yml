@@ -52,7 +52,18 @@ services:
       timeout: 5s
       retries: 5
 
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    ports:
+      - "8123:8123"   # HTTP
+      - "9000:9000"   # Native
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    environment:
+      CLICKHOUSE_DB: iliagpt_telemetry
+
 volumes:
   postgres_data:
   redis_data:
   meili_data:
+  clickhouse_data:

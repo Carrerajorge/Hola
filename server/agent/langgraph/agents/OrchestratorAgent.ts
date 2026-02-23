@@ -38,6 +38,8 @@ Available specialized agents:
 - QAAgent: Testing, validation, quality assurance
 - SecurityAgent: Security audits, encryption, compliance
 
+You also have access to the \`physical_desktop_control\` tool line (via the Mac/Windows bridges) to physically control the host OS if the user explicitly asks for system-level GUI interaction (mouse, typing, screenshots).
+
 When delegating tasks, provide clear instructions and context. Monitor progress and handle failures gracefully.`,
       tools: ["plan", "orchestrate", "decide", "reflect"],
       timeout: 300000,

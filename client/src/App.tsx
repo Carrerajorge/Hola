@@ -380,7 +380,15 @@ function AppContent() {
   );
 }
 
+import OverlayHUD from "./components/overlay/OverlayHUD";
+
 function App() {
+  const isOverlayMode = typeof window !== 'undefined' && window.location.search.includes('mode=overlay');
+
+  if (isOverlayMode) {
+    return <OverlayHUD />;
+  }
+
   return (
     <QueryClientProvider client={queryClient}>
       <PlatformSettingsProvider>

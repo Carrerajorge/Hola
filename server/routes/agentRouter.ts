@@ -4,7 +4,9 @@ import { eq } from "drizzle-orm";
 import { storage } from "../storage";
 import { db } from "../db";
 import { agentModeRuns, agentModeSteps } from "@shared/schema";
-import { agentOrchestrator, agentManager, guardrails } from "../agent";
+import { agentOrchestrator } from "../agent/orchestrator";
+import { agentManager } from "../services/agentManager";
+import { guardrails } from "../agent/guardrails";
 import { agentQueue } from "../agent/queue/agentQueue";
 import { browserSessionManager, SessionEvent } from "../agent/browser";
 

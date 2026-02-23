@@ -77,7 +77,7 @@ async function buildAll() {
     minify: true,
     splitting: true, // Enable code splitting to share common chunks between server and worker
     // Mark ALL node_modules as external - they're installed at runtime
-    external: [...externals, "./node_modules/*"],
+    external: [...externals, "./node_modules/*", "fsevents"],
     define: {
       "process.env.NODE_ENV": '"production"',
       "process.env.APP_VERSION": JSON.stringify(appVersion),
@@ -187,7 +187,9 @@ import(pathToFileURL(join(__dirname, "agent/sandboxRunner/index.mjs")).href).cat
 }
 
 
-buildAll().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+buildAll()
+  .then(() => process.exit(0))
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });

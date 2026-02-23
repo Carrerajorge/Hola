@@ -3,9 +3,9 @@ import {
   TerminalController,
   type CommandRequest,
   type CommandResult,
-} from "../agent/computerUse/terminalController";
-import { UniversalBrowserController } from "../agent/computerUse/universalBrowserController";
-import { RemoteShellController } from "../agent/computerUse/remoteShellController";
+} from "../agent/terminalController";
+import { UniversalBrowserController } from "../agent/universalBrowserController";
+import { RemoteShellController } from "../agent/remoteShellController";
 import { remoteShellRepository } from "../repositories/remoteShellRepository";
 import { decryptSecret, isRemoteSecretConfigured } from "../lib/crypto/secretVault";
 import { requireAdmin as requireAdminMiddleware } from "./admin/utils";

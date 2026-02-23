@@ -8,6 +8,14 @@ import { chats, chatMessages } from "./chat";
 import { integrationAccounts } from "./integration";
 
 // Agent Web Navigation Tables
+export const agentCheckpoints = pgTable("agent_checkpoints", {
+    id: varchar("id").primaryKey(),
+    timestamp: timestamp("timestamp", { mode: "date" }).notNull(),
+    data: text("data").notNull(),
+});
+export const insertAgentCheckpointSchema = createInsertSchema(agentCheckpoints);
+export type AgentCheckpoint = typeof agentCheckpoints.$inferSelect;
+
 export const agentRuns = pgTable("agent_runs", {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
     conversationId: varchar("conversation_id").references(() => chats.id, { onDelete: "set null" }),
