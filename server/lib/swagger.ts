@@ -56,8 +56,26 @@ const options: swaggerJsdoc.Options = {
   apis: ['./server/routes/**/*.ts', './server/routes.ts'],
 };
 
-// En CI / tests (Playwright), no necesitamos Swagger y evita que el server crashee por swagger-jsdoc.
-export const swaggerSpec =
-  process.env.CI === 'true' || process.env.NODE_ENV === 'test'
-    ? (options.definition as any)
-    : swaggerJsdoc(options);
+function buildSwaggerSpec() {
+  // En prod/CI/tests no queremos que swagger-jsdoc tumbe el server.
+  // (En prod normalmente ni siquiera se usa swagger UI.)
+  if (
+    process.env.NODE_ENV === 'production' ||
+    process.env.CI === 'true' ||
+    process.env.NODE_ENV === 'test'
+  ) {
+    return options.definition as any;
+  }
+
+  try {
+    return swaggerJsdoc(options);
+  } catch (err) {
+    console.warn(
+      '[Swagger] swagger-jsdoc generation failed; using static definition',
+      err
+    );
+    return options.definition as any;
+  }
+}
+
+export const swaggerSpec = buildSwaggerSpec();
