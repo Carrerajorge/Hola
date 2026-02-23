@@ -17,6 +17,7 @@ COPY package.json package-lock.json ./
 # Ensure mathjax sync script exists before npm ci postinstall hook
 COPY scripts/sync-mathjax-assets.cjs scripts/sync-mathjax-assets.cjs
 RUN npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts \
+  && npm i -D @rollup/rollup-linux-x64-gnu --no-audit --no-fund \
   && npm rebuild esbuild bcrypt node-pty sharp \
   && node scripts/sync-mathjax-assets.cjs \
   && npm cache clean --force
