@@ -1,3 +1,5 @@
+import { enhancedExecutor, classifyError } from './agentOrchestration';
+import type { ExecutorConfig } from './agentOrchestration';
 import { ToolDefinition, toolRegistry } from './toolRegistry';
 
 export interface SubTask {
@@ -217,6 +219,30 @@ export class OrchestrationEngine {
       results: Object.fromEntries(orchestrationResult.results),
       errors: Object.fromEntries(orchestrationResult.errors)
     };
+  }
+
+  /**
+   * Enhanced execution with retry + model failover.
+   * Wraps executeSubtask with the enhanced executor from the OpenClaw fusion.
+   * This is an additive integration — existing executeSubtask is unchanged.
+   */
+  async executeWithEnhancedRetry(
+    task: SubTask,
+    config: ExecutorConfig,
+  ): Promise<any> {
+    const result = await enhancedExecutor.execute(
+      async (_model) => {
+        const output = await this.executeSubtask(task);
+        return JSON.stringify(output);
+      },
+      config,
+    );
+
+    if (!result.success) {
+      throw new Error(`Enhanced execution failed after ${result.attempts.length} attempts`);
+    }
+
+    return JSON.parse(result.output);
   }
 }
 
