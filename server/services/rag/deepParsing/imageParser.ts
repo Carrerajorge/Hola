@@ -1,0 +1,11 @@
+import type { ParsedStructure } from "./types";
+
+export async function parseImage(_buffer: Buffer, _mimeType: string, fileName: string): Promise<ParsedStructure> {
+    return {
+        sections: [{ title: fileName, level: 1, content: `[Image: ${fileName}]`, pageNumber: 1, children: [], type: "figure" }],
+        tables: [],
+        figures: [{ caption: fileName, pageNumber: 1, context: `Image file: ${fileName}` }],
+        rawText: `[Image: ${fileName}]`,
+        metadata: { documentType: "generic", language: "unknown", pageCount: 1, hasImages: true, hasTables: false, wordCount: 0 },
+    };
+}
