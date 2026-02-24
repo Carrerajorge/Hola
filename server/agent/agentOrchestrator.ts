@@ -10,6 +10,7 @@ import { agentModeRuns } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { getUserSettingsCached } from "../services/userSettingsCache";
 import { policyEngine } from "./policyEngine";
+import { hookSystem } from "../openclaw/plugins/hookSystem";
 
 // Agentic orchestrator bridge
 import {
@@ -1106,6 +1107,14 @@ Respond with ONLY valid JSON in this exact format:
 
     console.log(`[AgentOrchestrator] Executing step ${stepIndex}: ${step.toolName}`);
 
+    // OpenClaw hook: before_tool_call
+    await hookSystem.dispatch('before_tool_call', {
+      runId: this.runId,
+      userId: this.userId,
+      toolName: step.toolName,
+      toolInput: step.input,
+    });
+
     try {
       const result = await toolRegistry.execute(step.toolName, step.input, {
         userId: this.userId,
@@ -1225,6 +1234,14 @@ Respond with ONLY valid JSON in this exact format:
       });
 
       // Note: shell_command streaming is emitted via onStream (chunks) + onExit (final exit code).
+
+      // OpenClaw hook: after_tool_call
+      await hookSystem.dispatch('after_tool_call', {
+        runId: this.runId,
+        userId: this.userId,
+        toolName: step.toolName,
+        toolResult: result,
+      });
 
       if (result.success) {
         await this.emitTraceEvent('step_completed', {
@@ -1587,6 +1604,13 @@ Respond with ONLY valid JSON in this exact format:
       } catch { /* non-critical */ }
 
       this.status = "completed";
+
+      // OpenClaw hook: agent_end
+      await hookSystem.dispatch('agent_end', {
+        runId: this.runId,
+        userId: this.userId,
+      });
+
       this.logEvent('observation', {
         type: 'run_completed',
         totalSteps: this.plan.steps.length,
@@ -1804,6 +1828,12 @@ Provide a brief, user-friendly summary (2-4 sentences) of what was accomplished.
         return this.executeHTNTask(task);
       });
 
+      // OpenClaw hook: agent_end (HTN path)
+      await hookSystem.dispatch('agent_end', {
+        runId: this.runId,
+        userId: this.userId,
+      });
+
       if (result.success) {
         this.status = "completed";
         this.logEvent('observation', { type: 'run_completed', duration: result.executionTime });
@@ -1849,6 +1879,14 @@ Provide a brief, user-friendly summary (2-4 sentences) of what was accomplished.
       summary: task.description
     });
 
+    // OpenClaw hook: before_tool_call (HTN path)
+    await hookSystem.dispatch('before_tool_call', {
+      runId: this.runId,
+      userId: this.userId,
+      toolName: task.toolName || 'unknown',
+      toolInput: task.toolParams,
+    });
+
     try {
       const result = await toolRegistry.execute(task.toolName || 'unknown', task.toolParams, {
         userId: this.userId,
@@ -1856,6 +1894,14 @@ Provide a brief, user-friendly summary (2-4 sentences) of what was accomplished.
         runId: this.runId,
         userPlan: this.userPlan,
         signal: this.abortController.signal,
+      });
+
+      // OpenClaw hook: after_tool_call (HTN path)
+      await hookSystem.dispatch('after_tool_call', {
+        runId: this.runId,
+        userId: this.userId,
+        toolName: task.toolName || 'unknown',
+        toolResult: result,
       });
 
       if (stepIndex >= 0) {
