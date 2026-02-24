@@ -2127,3 +2127,13 @@ class LLMGateway {
 
 export const llmGateway = new LLMGateway();
 export type { LLMRequestOptions, LLMResponse, StreamChunk, StreamCheckpoint, TokenUsageRecord };
+
+// ── OpenClaw Enhanced Fallback Bridge ───────────────────────────────
+// Re-export the gateway bridge so callers can use enhanced model fallback
+// without importing from openclaw directly.
+// Usage:
+//   import { executeWithEnhancedFallback } from '../lib/llmGateway';
+//   const result = await executeWithEnhancedFallback('balanced', ['fast'], async (ref) => {
+//     return llmGateway.chat(messages, { provider: ref.provider as any, model: ref.model });
+//   });
+export { executeWithEnhancedFallback, resolveModel } from '../openclaw/modelFallback/gatewayBridge';
