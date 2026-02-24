@@ -5,11 +5,11 @@ export function normalizeAgentId(id: string): string {
 }
 
 export function buildMainSessionKey(agentId: string, userId: string): SessionKey {
-  return `agent:${normalizeAgentId(agentId)}:main:${userId}` as SessionKey;
+  return `agent:${normalizeAgentId(agentId)}:main:${userId}`;
 }
 
 export function buildPeerSessionKey(agentId: string, kind: string, peerId: string): SessionKey {
-  return `agent:${normalizeAgentId(agentId)}:peer:${kind}:${peerId}` as SessionKey;
+  return `agent:${normalizeAgentId(agentId)}:peer:${kind}:${peerId}`;
 }
 
 interface ParsedMainKey { agentId: string; type: 'main'; identifier: string; }

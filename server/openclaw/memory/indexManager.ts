@@ -53,14 +53,15 @@ export class MemoryIndexManager implements MemorySearchManager {
     // FTS search: keyword matching with simple scoring
     const keywordResults = this.ftsSearch(queryKeywords);
 
-    // Vector search (if provider available)
+    // Embed query once (reused for vector search and MMR)
+    let queryVec: number[] | null = null;
     let vectorResults: Array<{
       id: string; path: string; snippet: string; vectorScore: number;
       startLine: number; endLine: number; source: 'memory' | 'sessions';
     }> = [];
 
     if (this.embeddingProvider) {
-      const queryVec = await this.embeddingProvider.embedQuery(query);
+      queryVec = await this.embeddingProvider.embedQuery(query);
       vectorResults = this.vectorSearch(queryVec);
     }
 
@@ -72,8 +73,7 @@ export class MemoryIndexManager implements MemorySearchManager {
 
     // Apply MMR if enabled and we have vectors
     let results = merged;
-    if (this.config.mmrEnabled && this.embeddingProvider && vectorResults.length > 0) {
-      const queryVec = await this.embeddingProvider.embedQuery(query);
+    if (this.config.mmrEnabled && queryVec && vectorResults.length > 0) {
       const docVecs = new Map<string, number[]>();
       for (const chunk of this.chunks) {
         if (chunk.vector) docVecs.set(chunk.id, chunk.vector);

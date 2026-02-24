@@ -1,4 +1,4 @@
-export type SessionKey = `agent:${string}:${string}`;
+export type SessionKey = `agent:${string}`;
 
 export interface WsRequest {
   type: 'req';

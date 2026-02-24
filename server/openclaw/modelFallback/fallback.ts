@@ -1,7 +1,13 @@
 import type { ModelRef, ModelFallbackResult, ModelFallbackAttempt } from '../types';
 
-// Track cooldown per provider
+// Track cooldown per provider (bounded: expired entries evicted each call)
 const cooldownMap = new Map<string, number>();
+
+function evictExpiredCooldowns(now: number): void {
+  for (const [key, until] of cooldownMap) {
+    if (now >= until) cooldownMap.delete(key);
+  }
+}
 
 interface FallbackOptions<T> {
   candidates: ModelRef[];
@@ -12,6 +18,9 @@ interface FallbackOptions<T> {
 export async function runWithModelFallback<T>(opts: FallbackOptions<T>): Promise<ModelFallbackResult<T>> {
   const attempts: ModelFallbackAttempt[] = [];
   const now = Date.now();
+
+  // Evict expired entries to keep the map bounded
+  evictExpiredCooldowns(now);
 
   // Filter out candidates in cooldown
   const available = opts.candidates.filter(c => {

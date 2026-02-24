@@ -59,6 +59,16 @@ const DEFAULT_SAFE_BINS = [
   'docker', 'docker-compose', 'make', 'cmake',
 ];
 
+function toExecSecurity(val: string | undefined): 'ask' | 'warn' | 'allow' | undefined {
+  if (val === 'ask' || val === 'warn' || val === 'allow') return val;
+  return undefined;
+}
+
+function toPreviewMode(val: string | undefined): 'off' | 'partial' | 'block' | 'progress' | undefined {
+  if (val === 'off' || val === 'partial' || val === 'block' || val === 'progress') return val;
+  return undefined;
+}
+
 export function getOpenClawConfig(): OpenClawConfig {
   return {
     gateway: {
@@ -72,7 +82,7 @@ export function getOpenClawConfig(): OpenClawConfig {
         : DEFAULT_SAFE_BINS,
       workspaceRoot: process.env.OPENCLAW_WORKSPACE_ROOT || '/tmp/openclaw-workspaces',
       execTimeout: Number(process.env.OPENCLAW_EXEC_TIMEOUT) || 120_000,
-      execSecurity: (process.env.OPENCLAW_EXEC_SECURITY as any) || 'warn',
+      execSecurity: toExecSecurity(process.env.OPENCLAW_EXEC_SECURITY) ?? 'warn',
     },
     plugins: {
       enabled: process.env.ENABLE_OPENCLAW_PLUGINS === 'true',
@@ -86,7 +96,7 @@ export function getOpenClawConfig(): OpenClawConfig {
       enabled: process.env.ENABLE_OPENCLAW_STREAMING === 'true',
       blockMinChars: Number(process.env.OPENCLAW_BLOCK_MIN_CHARS) || 50,
       blockMaxChars: Number(process.env.OPENCLAW_BLOCK_MAX_CHARS) || 500,
-      previewMode: (process.env.OPENCLAW_PREVIEW_MODE as any) || 'partial',
+      previewMode: toPreviewMode(process.env.OPENCLAW_PREVIEW_MODE) ?? 'partial',
     },
     memory: {
       enabled: process.env.OPENCLAW_MEMORY_ENABLED === 'true',
