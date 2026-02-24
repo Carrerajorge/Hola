@@ -18,6 +18,11 @@ const MODEL_NORMALIZATIONS: Record<string, string> = {
   'gpt-4': 'gpt-4o',
   'gemini-pro': 'gemini-2.5-pro-preview-05-06',
   'gemini-flash': 'gemini-2.0-flash',
+  'grok': 'grok-4-1-fast-non-reasoning',
+  'grok-4': 'grok-4-0709',
+  'grok-4.1': 'grok-4-1-fast-non-reasoning',
+  'grok-4.1-reasoning': 'grok-4-1-fast-reasoning',
+  'grok-fast': 'grok-3-fast',
 };
 
 export function parseModelRef(input: string): ModelRef {

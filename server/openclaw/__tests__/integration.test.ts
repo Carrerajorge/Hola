@@ -129,6 +129,22 @@ describe('OpenClaw Integration Test', () => {
     expect(anthropicModels.length).toBeGreaterThan(0);
     expect(anthropicModels.every(m => m.provider === 'anthropic')).toBe(true);
 
+    // Verify 5 Grok models in catalog
+    const xaiModels = listModels({ provider: 'xai' });
+    expect(xaiModels).toHaveLength(5);
+    const grokIds = xaiModels.map(m => m.id).sort();
+    expect(grokIds).toEqual([
+      'grok-3',
+      'grok-3-fast',
+      'grok-4-0709',
+      'grok-4-1-fast-non-reasoning',
+      'grok-4-1-fast-reasoning',
+    ]);
+
+    // Verify Grok alias resolution
+    const grokRef = normalizeModelRef('grok');
+    expect(grokRef.model).toBe('grok-4-1-fast-non-reasoning');
+
     // Fallback chain
     let attempts = 0;
     const result = await runWithModelFallback({

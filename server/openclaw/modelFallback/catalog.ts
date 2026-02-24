@@ -15,7 +15,11 @@ const CATALOG: ModelInfo[] = [
   { id: 'o3', provider: 'openai', contextWindow: 200000, pricingTier: 'premium', capabilities: ['vision', 'function_calling', 'streaming', 'reasoning'] },
   { id: 'gemini-2.5-pro-preview-05-06', provider: 'google', contextWindow: 1048576, pricingTier: 'standard', capabilities: ['vision', 'function_calling', 'streaming', 'reasoning'] },
   { id: 'gemini-2.0-flash', provider: 'google', contextWindow: 1048576, pricingTier: 'cheap', capabilities: ['vision', 'function_calling', 'streaming'] },
+  { id: 'grok-4-1-fast-non-reasoning', provider: 'xai', contextWindow: 2000000, pricingTier: 'cheap', capabilities: ['function_calling', 'streaming'] },
+  { id: 'grok-4-1-fast-reasoning', provider: 'xai', contextWindow: 2000000, pricingTier: 'standard', capabilities: ['function_calling', 'streaming', 'reasoning'] },
+  { id: 'grok-4-0709', provider: 'xai', contextWindow: 256000, pricingTier: 'premium', capabilities: ['function_calling', 'streaming', 'reasoning'] },
   { id: 'grok-3', provider: 'xai', contextWindow: 131072, pricingTier: 'standard', capabilities: ['function_calling', 'streaming'] },
+  { id: 'grok-3-fast', provider: 'xai', contextWindow: 131072, pricingTier: 'cheap', capabilities: ['function_calling', 'streaming'] },
 ];
 
 export function getModelInfo(modelId: string): ModelInfo | null {
