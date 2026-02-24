@@ -7,6 +7,7 @@ import type { RequestSpec } from "./requestSpec";
 import { randomUUID } from "crypto";
 import { getGeminiClientOrThrow } from "../lib/gemini";
 import { requestUnderstandingAgent } from "./requestUnderstanding";
+import { injectMemoryContext } from "../openclaw/memory/agentMemoryBridge";
 
 export interface AgentExecutorOptions {
   maxIterations?: number;
@@ -445,6 +446,13 @@ MANDATORY RULES:
 
 DO NOT respond with text. CALL browse_and_act NOW.${reservationHint}`
     });
+  }
+
+  // OpenClaw: Inject memory/RAG context if enabled (non-blocking)
+  try {
+    conversationHistory = await injectMemoryContext(conversationHistory, recentUserText);
+  } catch (_memErr) {
+    // Memory injection is best-effort; continue without it
   }
 
   console.log(`[AgentExecutor] Starting loop: intent=${requestSpec.intent}, tools=[${tools.map(t => t.name).join(', ')}], messages=${conversationHistory.length}, systemMsgs=${conversationHistory.filter(m => m.role === 'system').length}, toolDeclarations=${tools.length}`);
