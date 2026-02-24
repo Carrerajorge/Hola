@@ -297,6 +297,10 @@ export function log(message: string, source = "express") {
 
   await registerRoutes(httpServer, app);
 
+  // Initialize OpenClaw agentic integration layer (feature-flagged)
+  const { initializeOpenClaw } = await import("./openclaw/index");
+  await initializeOpenClaw(httpServer);
+
   // Ensure unmatched API routes return consistent JSON (instead of Express' default HTML 404).
   // This MUST be registered after all routes, but before the API error handler.
   app.use("/api", (req, _res, next) => {
