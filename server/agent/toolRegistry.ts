@@ -23,6 +23,7 @@ import { defaultToolRegistry as sandboxToolRegistry } from "./sandbox/tools";
 import { getIntegrationPolicyCached } from "../services/integrationPolicyCache";
 import { getUserSettingsCached } from "../services/userSettingsCache";
 import { getUserPrivacySettings } from "../services/privacyService";
+import { checkOpenClawToolPolicy } from "../openclaw/tools/registryBridge";
 
 const AGENT_WORKSPACE_ROOT = process.env.AGENT_WORKSPACE_ROOT || "/tmp/agent-workspace";
 const getRunWorkspaceDir = (runId: string) => path.resolve(AGENT_WORKSPACE_ROOT, runId);
@@ -809,6 +810,25 @@ export class ToolRegistry {
           retryable: false,
         },
       }, { status: "not_found" });
+    }
+
+    // OpenClaw: additive policy pipeline check (agent-level allow/deny)
+    const openclawPolicy = checkOpenClawToolPolicy(name);
+    if (!openclawPolicy.allowed) {
+      addLog("warn", `OpenClaw policy denied execution: ${openclawPolicy.deniedBy}`);
+      return trackAndReturn({
+        success: false,
+        output: null,
+        artifacts: [],
+        previews: [],
+        logs,
+        metrics: { durationMs: Date.now() - startTime },
+        error: {
+          code: "ACCESS_DENIED",
+          message: `Denied by OpenClaw policy: ${openclawPolicy.deniedBy}`,
+          retryable: false,
+        },
+      }, { status: "denied" });
     }
 
     const policyContext: PolicyContext = {
