@@ -13,6 +13,7 @@ import { analyzeResponseQuality, calculateQualityScore } from "../services/respo
 import { recordQualityMetric, getQualityStats, type QualityMetric, type QualityStats } from "./qualityMetrics";
 import { recordConnectorUsage } from "./connectorMetrics";
 import { storage } from "../storage";
+import { secretManager } from "../services/secretManager";
 import type { InsertApiLog } from "@shared/schema";
 
 import { getCircuitBreaker, CircuitBreakerOpenError, CircuitState } from "./circuitBreaker";
@@ -1478,7 +1479,7 @@ class LLMGateway {
     const enableFallback = options.enableFallback !== false;
     let sequenceId = 0;
     let accumulatedContent = "";
-    const configuredProviders = this.getConfiguredProvidersInOrder();
+    const configuredProviders = this.getSmartRoutedProviders();
     if (configuredProviders.length === 0) {
       throw new Error(
         "No LLM providers configured. Set at least one of: XAI_API_KEY (or GROK_API_KEY/ILIAGPT_API_KEY), GEMINI_API_KEY (or GOOGLE_API_KEY), OPENAI_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY."

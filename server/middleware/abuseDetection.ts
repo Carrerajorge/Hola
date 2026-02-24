@@ -23,6 +23,14 @@ const EXEMPT_PATH_PREFIX = new Set([
   "/api/oauth",
   "/api/figma/status",
   "/api/agent/runs",
+  // Additional SPA bootstrap endpoints
+  "/api/session",
+  "/api/user",
+  "/api/workspace",
+  "/api/csrf-token",
+  "/api/tools",
+  "/api/plugins",
+  "/api/skills",
 ]);
 
 interface AbuseRecord {
@@ -113,6 +121,15 @@ export function stopAbuseDetectionCleanup(): void {
 }
 
 export function abuseDetection() {
+  // In development mode, skip abuse detection entirely — SPA page-load bursts
+  // trigger false positives that block legitimate requests.
+  const isDev = process.env.NODE_ENV === "development" || process.env.NODE_ENV === undefined;
+  if (isDev) {
+    return function noopAbuseDetection(_req: Request, _res: Response, next: NextFunction): void {
+      next();
+    };
+  }
+
   startCleanupLoop();
 
   return function abuseDetectionMiddleware(

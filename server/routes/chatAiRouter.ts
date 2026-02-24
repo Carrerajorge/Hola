@@ -4687,6 +4687,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           clearStreamTimeouts();
           console.log("[SSE] Connection closed (early handler)", { requestId });
         });
+
       }
 
       let fullContent = "";
@@ -6424,7 +6425,6 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
             // Flush remaining buffered content before done event
             writer.finalize();
 
-            console.log(`[Stream] Sending 'done' event with ${detectedWebSources.length} webSources`);
             (res as any).__doneSent = true;
             writeSse(res, 'done', {
               sequenceId: chunk.sequenceId,
