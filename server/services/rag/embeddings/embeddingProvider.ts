@@ -19,6 +19,12 @@ export interface EmbeddingProvider {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** Shape returned by Gemini embedContent — varies across SDK versions. */
+interface GeminiEmbedResponse {
+    embedding?: { values?: number[] };
+    embeddings?: { values?: number[] };
+}
+
 function isTestEnv(): boolean {
     return (
         process.env.NODE_ENV === "test" ||
@@ -31,7 +37,7 @@ function isTestEnv(): boolean {
 // 1. Gemini Embedding Provider
 // ---------------------------------------------------------------------------
 
-const GEMINI_MAX_CHARS = 8000;
+const EMBEDDING_MAX_CHARS = 8000;
 const GEMINI_BATCH_SIZE = 10;
 
 export class GeminiEmbeddingProvider implements EmbeddingProvider {
@@ -49,8 +55,8 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
 
     async embed(text: string): Promise<number[]> {
         const safeText =
-            text.length > GEMINI_MAX_CHARS
-                ? text.slice(0, GEMINI_MAX_CHARS)
+            text.length > EMBEDDING_MAX_CHARS
+                ? text.slice(0, EMBEDDING_MAX_CHARS)
                 : text;
 
         const result = await this.ai.models.embedContent({
@@ -58,14 +64,14 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
             contents: [{ role: "user", parts: [{ text: safeText }] }],
         });
 
+        const typed = result as unknown as GeminiEmbedResponse;
         const embedding =
-            (result as any).embedding?.values ??
-            (result as any).embeddings?.values;
+            typed.embedding?.values ?? typed.embeddings?.values;
 
         if (!embedding) {
             throw new Error("Gemini returned no embedding values");
         }
-        return embedding as number[];
+        return embedding;
     }
 
     async embedBatch(texts: string[]): Promise<number[][]> {
@@ -108,6 +114,10 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     async embedBatch(texts: string[]): Promise<number[][]> {
         if (texts.length === 0) return [];
 
+        const safeBatch = texts.map((t) =>
+            t.length > EMBEDDING_MAX_CHARS ? t.slice(0, EMBEDDING_MAX_CHARS) : t,
+        );
+
         const response = await fetch(
             "https://api.openai.com/v1/embeddings",
             {
@@ -118,7 +128,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
                 },
                 body: JSON.stringify({
                     model: this.model,
-                    input: texts,
+                    input: safeBatch,
                 }),
             },
         );
@@ -227,8 +237,8 @@ export class EmbeddingProviderFactory {
 
         if (this.instance) return this.instance;
 
-        const geminiKey = process.env.GEMINI_API_KEY;
-        const openaiKey = process.env.OPENAI_API_KEY;
+        const geminiKey = process.env.GEMINI_API_KEY?.trim();
+        const openaiKey = process.env.OPENAI_API_KEY?.trim();
 
         if (geminiKey) {
             this.instance = new GeminiEmbeddingProvider(geminiKey);
