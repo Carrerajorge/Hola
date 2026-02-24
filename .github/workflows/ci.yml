@@ -9,8 +9,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write # Allow commenting PRs
-
+  pull-requests: read
 jobs:
   static-analysis:
     name: Lint & Typecheck
