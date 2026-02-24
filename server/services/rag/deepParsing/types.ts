@@ -99,7 +99,7 @@ export function detectDocumentType(text: string): DocumentType {
     const tableRatio = tableMatches.join("").length / (text.length || 1);
 
     if (tableRatio > 0.3) return "table";
-    if (paperScore >= 3) return "paper";
+    if (paperScore >= 2) return "paper";
     if (legalScore >= 2) return "legal";
     if (manualScore >= 2) return "manual";
     return "generic";
