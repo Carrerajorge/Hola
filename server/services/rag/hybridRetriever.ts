@@ -5,11 +5,10 @@
  * supports query rewriting and cross-encoder reranking.
  */
 
-import crypto from "crypto";
 import { db } from "../../db";
-import { ragChunks, type RagChunk } from "@shared/schema/rag";
-import { eq, and, sql, inArray, gte, lte, arrayContains } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { getEmbedding, cosineSimilarity } from "../embeddings";
+import { rerankChunks } from "./reranker";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -159,6 +158,7 @@ function applyMMR(
 
 // ---------------------------------------------------------------------------
 // Cross-encoder re-ranker (lightweight heuristic — no external model)
+// @deprecated Use rerankChunks from ./reranker instead. Kept for backward compat.
 // ---------------------------------------------------------------------------
 
 function crossEncoderRerank(query: string, chunks: ScoredChunk[]): ScoredChunk[] {
@@ -229,94 +229,89 @@ export async function retrieve(
 
     // 1. Optional query rewriting
     const effectiveQuery = enableQueryRewrite ? rewriteQuery(query) : query;
-    const queryTerms = effectiveQuery.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
 
     // 2. Generate query embedding
     const queryEmbedding = await getEmbedding(query);
 
-    // 3. Build SQL conditions
-    const conditions: ReturnType<typeof eq>[] = [
-        eq(ragChunks.tenantId, tenantId),
-        eq(ragChunks.userId, userId),
-        eq(ragChunks.isActive, true),
-    ];
-
-    if (conversationId) conditions.push(eq(ragChunks.conversationId, conversationId));
-    if (sources && sources.length > 0) conditions.push(inArray(ragChunks.source, sources));
-    if (dateRange?.start) conditions.push(gte(ragChunks.createdAt, dateRange.start));
-    if (dateRange?.end) conditions.push(lte(ragChunks.createdAt, dateRange.end));
-
-    // 4. Fetch candidate chunks (wide retrieval)
+    // 3. Fetch candidates using pgvector + tsvector scoring
     const candidateLimit = Math.max(topK * 5, 50);
-    const allChunks = await db
-        .select()
-        .from(ragChunks)
-        .where(and(...conditions))
-        .limit(candidateLimit);
+    const embeddingStr = `[${queryEmbedding.join(",")}]`;
 
-    if (allChunks.length === 0) {
+    const result = await db.execute(sql`
+        SELECT id, content, page_number, section_title, source, source_id,
+               chunk_type, metadata, tags, acl_tags, embedding,
+               1 - (embedding <=> ${embeddingStr}::vector) AS vector_score,
+               ts_rank_cd(search_vector, plainto_tsquery('simple', ${effectiveQuery})) AS fts_score
+        FROM rag_chunks
+        WHERE tenant_id = ${tenantId}
+          AND user_id = ${userId}
+          AND is_active = true
+          ${conversationId ? sql`AND conversation_id = ${conversationId}` : sql``}
+          ${sources && sources.length > 0 ? sql`AND source = ANY(${sources})` : sql``}
+          ${dateRange?.start ? sql`AND created_at >= ${dateRange.start}` : sql``}
+          ${dateRange?.end ? sql`AND created_at <= ${dateRange.end}` : sql``}
+        ORDER BY embedding <=> ${embeddingStr}::vector
+        LIMIT ${candidateLimit}
+    `);
+
+    const rows = (result as any).rows || result || [];
+
+    if (rows.length === 0) {
         return { chunks: [], totalCandidates: 0, processingTimeMs: Date.now() - startTime };
     }
 
-    // 5. ACL / tag filter (in-memory for flexibility with array overlap)
-    let filtered = allChunks;
+    // 4. ACL / tag filter (in-memory for flexibility with array overlap)
+    let filtered = rows;
     if (aclTags && aclTags.length > 0) {
-        filtered = filtered.filter((c) =>
-            (c.aclTags || []).length === 0 || (c.aclTags || []).some((t) => aclTags.includes(t)),
+        filtered = filtered.filter((c: any) =>
+            (c.acl_tags || []).length === 0 || (c.acl_tags || []).some((t: string) => aclTags.includes(t)),
         );
     }
     if (tags && tags.length > 0) {
-        filtered = filtered.filter((c) => (c.tags || []).some((t) => tags.includes(t)));
+        filtered = filtered.filter((c: any) => (c.tags || []).some((t: string) => tags.includes(t)));
     }
 
-    // 6. Hybrid scoring
-    const avgDocLen = filtered.reduce((s, c) => s + c.content.split(/\s+/).length, 0) / (filtered.length || 1);
+    // 5. Build scored chunks from SQL results
     const chunkEmbeddings = new Map<string, number[]>();
 
-    const scored: ScoredChunk[] = filtered.map((chunk) => {
-        const chunkEmb = chunk.embedding as number[] | null;
-        if (chunkEmb) chunkEmbeddings.set(chunk.id, chunkEmb);
+    const scored: ScoredChunk[] = filtered.map((row: any) => {
+        const chunkEmb = row.embedding as number[] | null;
+        if (chunkEmb) chunkEmbeddings.set(row.id, chunkEmb);
 
-        const vecScore =
-            chunkEmb && chunkEmb.length === queryEmbedding.length
-                ? cosineSimilarity(queryEmbedding, chunkEmb)
-                : 0;
-
-        const docTerms = chunk.content.toLowerCase().split(/\s+/);
-        const bm25 = calculateBM25(queryTerms, docTerms, avgDocLen);
-        const normBm25 = Math.min(bm25 / 10, 1);
-
-        const combined = vectorWeight * vecScore + bm25Weight * normBm25;
+        const vecScore = typeof row.vector_score === "number" ? row.vector_score : 0;
+        const ftsScore = typeof row.fts_score === "number" ? row.fts_score : 0;
+        const normFts = Math.min(ftsScore / 10, 1);
+        const combined = vectorWeight * vecScore + bm25Weight * normFts;
 
         return {
-            id: chunk.id,
-            content: chunk.content,
+            id: row.id,
+            content: row.content,
             score: combined,
             vectorScore: vecScore,
-            bm25Score: normBm25,
-            pageNumber: chunk.pageNumber ?? undefined,
-            sectionTitle: chunk.sectionTitle,
-            source: chunk.source,
-            sourceId: chunk.sourceId,
-            chunkType: chunk.chunkType,
-            metadata: (chunk.metadata as Record<string, unknown>) || {},
-            tags: chunk.tags || [],
+            bm25Score: normFts,
+            pageNumber: row.page_number ?? undefined,
+            sectionTitle: row.section_title,
+            source: row.source,
+            sourceId: row.source_id,
+            chunkType: row.chunk_type,
+            metadata: (row.metadata as Record<string, unknown>) || {},
+            tags: row.tags || [],
         };
     });
 
-    // 7. Filter by min score & sort
+    // 6. Filter by min score & sort
     let results = scored.filter((c) => c.score >= minScore);
     results.sort((a, b) => b.score - a.score);
 
-    // 8. Re-ranker
+    // 7. Re-ranker (uses model-based reranker from ./reranker)
     if (enableReranker) {
-        results = crossEncoderRerank(query, results);
+        results = await rerankChunks(query, results);
     }
 
-    // 9. MMR diversification
+    // 8. MMR diversification
     results = applyMMR(results, queryEmbedding, topK, mmrLambda, chunkEmbeddings);
 
-    // 10. Update access counts
+    // 9. Update access counts
     const resultIds = results.map((r) => r.id);
     if (resultIds.length > 0) {
         await db.execute(sql`
