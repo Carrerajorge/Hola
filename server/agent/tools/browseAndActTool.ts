@@ -13,7 +13,8 @@ import {
 const BrowseAndActSchema = z.object({
     url: z.string().url().describe("Starting URL to navigate to"),
     goal: z.string().describe("Detailed description of what to accomplish"),
-    maxSteps: z.number().optional().describe("Maximum browser actions to take (default 20)")
+    maxSteps: z.number().optional().describe("Maximum browser actions to take (default 20)"),
+    allowedDomains: z.array(z.string()).optional().describe("List of allowed domains to restrict hallucinated navigation")
 });
 
 export const browseAndActTool: ToolDefinition = {
@@ -28,7 +29,7 @@ export const browseAndActTool: ToolDefinition = {
 
         try {
             // Dynamic import to avoid loading puppeteer if not used
-            const { universalBrowserController } = await import("../computerUse/universalBrowserController");
+            const { universalBrowserController } = await import("../universalBrowserController");
             const sessionId = await universalBrowserController.createSession("chrome-desktop");
             const goalText = String(args.goal || "");
             const isReservationGoal = /\b(reserv(a|ar|ation)|book(ing)?|mesa|restaurant|restaurante)\b/i.test(goalText);
@@ -100,6 +101,7 @@ export const browseAndActTool: ToolDefinition = {
                             maxRuntimeMs,
                             decisionTimeoutMs,
                             maxConsecutiveDecisionFailures: isReservationGoal ? 3 : 2,
+                            allowedDomains: args.allowedDomains,
                         }
                     );
 

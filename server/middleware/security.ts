@@ -33,7 +33,7 @@ const cspDirectives: NonNullable<ContentSecurityPolicyOptions["directives"]> = {
     "https://api.anthropic.com",
     "https://accounts.google.com",
     "wss:",
-    ...(isProduction ? [] : ["ws:"]),
+    ...(isProduction ? [] : ["ws:", "http:"]),
   ],
   fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
   frameSrc: ["'self'", "https://accounts.google.com"],

@@ -20,10 +20,7 @@ export function createExecTool(
     name: 'openclaw_exec',
     description: 'Execute a shell command securely with safe-bins policy and workspace isolation. Supports python, node, git, npm, curl, and more.',
     inputSchema: ExecInputSchema,
-    capabilities: [
-      { name: 'executes_code', description: 'Runs shell commands' },
-      { name: 'system_access', description: 'System-level operations' },
-    ],
+    capabilities: ['executes_code', 'high_risk'],
     execute: async (input: z.infer<typeof ExecInputSchema>, context: ToolContext): Promise<ToolResult> => {
       const { command, cwd, timeout: overrideTimeout, env: extraEnv } = input;
 

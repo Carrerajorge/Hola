@@ -6,6 +6,7 @@ import { geminiChat, geminiStreamChat, GEMINI_MODELS, type GeminiChatMessage } f
 import {
   KNOWN_XAI_MODEL_IDS,
   KNOWN_GEMINI_MODEL_IDS,
+  KNOWN_LOCAL_MODEL_IDS,
   XAI_MODELS,
 } from "./modelRegistry";
 import crypto from "crypto";
@@ -13,12 +14,14 @@ import { analyzeResponseQuality, calculateQualityScore } from "../services/respo
 import { recordQualityMetric, getQualityStats, type QualityMetric, type QualityStats } from "./qualityMetrics";
 import { recordConnectorUsage } from "./connectorMetrics";
 import { storage } from "../storage";
+import { redis } from "./redis";
 import type { InsertApiLog } from "@shared/schema";
 
 import { getCircuitBreaker, CircuitBreakerOpenError, CircuitState } from "./circuitBreaker";
 import type { ZodSchema } from "zod";
 import { type AgentEvent } from "./typedStreaming";
 import { costEngine } from "../services/finops/costEngine";
+import { secretManager } from "../services/secretManager";
 
 interface RateLimitState {
   tokens: number;
@@ -171,6 +174,11 @@ function detectProviderFromModel(model: string | undefined): LLMProvider | null 
     return "deepseek";
   }
 
+  // Si es un modelo local (llama3, mistral), lo ruteamos via SDK OpenAI compatible
+  if (KNOWN_LOCAL_MODEL_IDS.has(normalizedModel) || normalizedModel.includes("llama") || normalizedModel.includes("mistral")) {
+    return "openai";
+  }
+
   if (/gemini/i.test(model)) {
     return "gemini";
   }
@@ -216,11 +224,11 @@ class LLMGateway {
     deduplicatedRequests: number;
     streamRecoveries: number;
     byProvider: {
-      xai: { requests: number; tokens: number; failures: number };
-      gemini: { requests: number; tokens: number; failures: number };
-      openai: { requests: number; tokens: number; failures: number };
-      anthropic: { requests: number; tokens: number; failures: number };
-      deepseek: { requests: number; tokens: number; failures: number };
+      xai: { requests: number; tokens: number; failures: number; latency?: number };
+      gemini: { requests: number; tokens: number; failures: number; latency?: number };
+      openai: { requests: number; tokens: number; failures: number; latency?: number };
+      anthropic: { requests: number; tokens: number; failures: number; latency?: number };
+      deepseek: { requests: number; tokens: number; failures: number; latency?: number };
     };
   };
 
@@ -673,6 +681,8 @@ class LLMGateway {
       case "gemini":
         return Boolean(this.getGeminiApiKey() && this.getGeminiApiKey()!.trim());
       case "openai":
+        // Si hay un BASE_URL customizado, está preconfigurado para Local Host (Ollama/LM Studio)
+        if (Boolean(process.env.OPENAI_BASE_URL)) return true;
         return Boolean(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim());
       case "anthropic":
         return Boolean(process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.trim());
@@ -794,14 +804,27 @@ class LLMGateway {
 
     this.metrics.totalRequests++;
 
-    // Check cache first
+    // Check cache first (Redis with in-memory fallback)
     const cacheKey = this.getCacheKey(messages, options);
     if (cacheKey) {
-      const cached = this.requestCache.get(cacheKey);
-      if (cached && cached.expiresAt > Date.now()) {
-        this.metrics.cacheHits++;
-        console.log(`[LLMGateway] ${requestId} cache hit`);
-        return { ...cached.response, cached: true, requestId };
+      try {
+        const redisCached = await redis.get(cacheKey);
+        if (redisCached) {
+          const parsed = JSON.parse(redisCached) as { response: LLMResponse; expiresAt: number };
+          if (parsed.expiresAt > Date.now()) {
+            this.metrics.cacheHits++;
+            console.log(`[LLMGateway] ${requestId} cache hit (Redis)`);
+            return { ...parsed.response, cached: true, requestId };
+          }
+        }
+      } catch (redisErr) {
+        // Fallback to in-memory cache if Redis fails
+        const cached = this.requestCache.get(cacheKey);
+        if (cached && cached.expiresAt > Date.now()) {
+          this.metrics.cacheHits++;
+          console.log(`[LLMGateway] ${requestId} cache hit (Memory Fallback)`);
+          return { ...cached.response, cached: true, requestId };
+        }
       }
     }
 
@@ -840,12 +863,19 @@ class LLMGateway {
     try {
       const result = await requestPromise;
 
-      // Cache successful response
+      // Cache successful response (Redis + memory)
       if (cacheKey) {
-        this.requestCache.set(cacheKey, {
+        const cacheEntry = {
           response: result,
           expiresAt: Date.now() + CACHE_TTL_MS,
-        });
+        };
+        this.requestCache.set(cacheKey, cacheEntry);
+        try {
+          // Set in Redis with PX (milliseconds)
+          await redis.set(cacheKey, JSON.stringify(cacheEntry), "PX", CACHE_TTL_MS);
+        } catch (err) {
+          console.warn(`[LLMGateway] Failed to set cache in Redis for ${cacheKey}`, err);
+        }
       }
 
       return result;
@@ -996,7 +1026,8 @@ class LLMGateway {
     if (provider === "openai") {
       if (!this.openaiClient) {
         this.openaiClient = new OpenAI({
-          apiKey: secretManager.getLLMProviderKey("openai"),
+          apiKey: process.env.OPENAI_BASE_URL ? (process.env.OPENAI_API_KEY || "dummy-key") : secretManager.getLLMProviderKey("openai"),
+          baseURL: process.env.OPENAI_BASE_URL || undefined,
         });
       }
       return this.openaiClient;
@@ -1478,7 +1509,7 @@ class LLMGateway {
     const enableFallback = options.enableFallback !== false;
     let sequenceId = 0;
     let accumulatedContent = "";
-    const configuredProviders = this.getConfiguredProvidersInOrder();
+    const configuredProviders = this.getSmartRoutedProviders();
     if (configuredProviders.length === 0) {
       throw new Error(
         "No LLM providers configured. Set at least one of: XAI_API_KEY (or GROK_API_KEY/ILIAGPT_API_KEY), GEMINI_API_KEY (or GOOGLE_API_KEY), OPENAI_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY."
@@ -1516,7 +1547,7 @@ class LLMGateway {
     }
 
     const providers: LLMProvider[] = enableFallback
-      ? [currentProvider, ...configuredProviders.filter((p) => p !== currentProvider)]
+      ? [currentProvider, ...configuredProviders.filter((p: LLMProvider) => p !== currentProvider)]
       : [currentProvider];
 
     for (const provider of providers) {

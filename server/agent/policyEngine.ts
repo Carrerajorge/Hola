@@ -3,7 +3,7 @@ import type { ToolCapability, UserPlan } from "./contracts";
 
 export const ToolCapabilities = {
   REQUIRES_NETWORK: "requires_network",
-  PRODUCES_ARTIFACTS: "produces_artifacts", 
+  PRODUCES_ARTIFACTS: "produces_artifacts",
   READS_FILES: "reads_files",
   WRITES_FILES: "writes_files",
   EXECUTES_CODE: "executes_code",
@@ -24,6 +24,18 @@ export interface ToolPolicy {
     windowMs: number;
   };
   deniedByDefault: boolean;
+  allowedWorkspaces?: string[]; // Empty implies no restriction
+}
+
+export interface PolicyDecisionAudit {
+  id: string;
+  timestamp: Date;
+  userId: string;
+  workspaceId?: string;
+  toolName: string;
+  allowed: boolean;
+  reason?: string;
+  context: PolicyContext;
 }
 
 const DEFAULT_TOOL_POLICIES: Record<string, Partial<ToolPolicy>> = {
@@ -106,6 +118,87 @@ const DEFAULT_TOOL_POLICIES: Record<string, Partial<ToolPolicy>> = {
     requiresConfirmation: false,
     maxExecutionTimeMs: 5000,
     maxRetries: 2,
+    deniedByDefault: false,
+  },
+  // Native agentic fusion tools
+  spawn_subagent: {
+    capabilities: ["long_running"],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 300000,
+    maxRetries: 1,
+    deniedByDefault: false,
+  },
+  memory_search: {
+    capabilities: ["reads_files"],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 45000,
+    maxRetries: 2,
+    deniedByDefault: false,
+  },
+  openclaw_spawn_subagent: {
+    capabilities: ["long_running"],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 300000,
+    maxRetries: 1,
+    deniedByDefault: false,
+  },
+  openclaw_subagent_status: {
+    capabilities: [],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 20000,
+    maxRetries: 2,
+    deniedByDefault: false,
+  },
+  openclaw_subagent_list: {
+    capabilities: [],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 20000,
+    maxRetries: 2,
+    deniedByDefault: false,
+  },
+  openclaw_subagent_cancel: {
+    capabilities: ["high_risk"],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 20000,
+    maxRetries: 1,
+    deniedByDefault: false,
+  },
+  openclaw_rag_search: {
+    capabilities: ["reads_files", "accesses_external_api"],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 60000,
+    maxRetries: 2,
+    deniedByDefault: false,
+  },
+  openclaw_rag_context: {
+    capabilities: ["reads_files"],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 30000,
+    maxRetries: 2,
+    deniedByDefault: false,
+  },
+  openclaw_clawi_status: {
+    capabilities: ["reads_files"],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 20000,
+    maxRetries: 2,
+    deniedByDefault: false,
+  },
+  openclaw_clawi_exec: {
+    capabilities: ["executes_code", "high_risk", "long_running"],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 300000,
+    maxRetries: 1,
     deniedByDefault: false,
   },
 
@@ -328,12 +421,14 @@ export interface PolicyContext {
   userId: string;
   userPlan: UserPlan;
   toolName: string;
+  workspaceId?: string;
   isConfirmed?: boolean;
 }
 
 export class PolicyEngine {
   private policies: Map<string, ToolPolicy> = new Map();
   private callCounts: Map<string, { count: number; windowStart: number }> = new Map();
+  private auditLog: PolicyDecisionAudit[] = [];
 
   constructor() {
     this.initializeDefaultPolicies();
@@ -365,6 +460,12 @@ export class PolicyEngine {
   }
 
   checkAccess(context: PolicyContext): PolicyCheckResult {
+    const result = this._checkAccessInternal(context);
+    this.recordAudit(context, result);
+    return result;
+  }
+
+  private _checkAccessInternal(context: PolicyContext): PolicyCheckResult {
     const policy = this.policies.get(context.toolName);
 
     if (!policy) {
@@ -394,6 +495,17 @@ export class PolicyEngine {
       };
     }
 
+    if (policy.allowedWorkspaces && policy.allowedWorkspaces.length > 0) {
+      if (!context.workspaceId || !policy.allowedWorkspaces.includes(context.workspaceId)) {
+        return {
+          allowed: false,
+          requiresConfirmation: false,
+          reason: `Tool ${context.toolName} is not enabled for the current workspace`,
+          policy,
+        };
+      }
+    }
+
     if (policy.rateLimit) {
       const key = `${context.userId}:${context.toolName}`;
       const now = Date.now();
@@ -411,7 +523,7 @@ export class PolicyEngine {
         return {
           allowed: false,
           requiresConfirmation: false,
-          reason: `Rate limit exceeded for ${context.toolName}: ${policy.rateLimit.maxCalls} calls per ${policy.rateLimit.windowMs}ms`,
+          reason: `Rate limit exceeded for ${context.toolName}`,
           policy,
         };
       }
@@ -433,10 +545,36 @@ export class PolicyEngine {
     };
   }
 
+  private recordAudit(context: PolicyContext, result: PolicyCheckResult): void {
+    const entry: PolicyDecisionAudit = {
+      id: crypto.randomUUID(),
+      timestamp: new Date(),
+      userId: context.userId,
+      workspaceId: context.workspaceId,
+      toolName: context.toolName,
+      allowed: result.allowed,
+      reason: result.reason,
+      context: { ...context }
+    };
+
+    // Immutable append to in-memory audit trail, keeping last 10000
+    this.auditLog.push(Object.freeze(entry));
+    if (this.auditLog.length > 10000) {
+      this.auditLog.shift();
+    }
+  }
+
+  getAuditTrail(userId?: string): readonly PolicyDecisionAudit[] {
+    if (userId) {
+      return this.auditLog.filter(a => a.userId === userId);
+    }
+    return this.auditLog;
+  }
+
   incrementRateLimit(context: PolicyContext): void {
     const policy = this.policies.get(context.toolName);
     if (!policy?.rateLimit) return;
-    
+
     const key = `${context.userId}:${context.toolName}`;
     const callData = this.callCounts.get(key);
     if (callData) {

@@ -1,4 +1,5 @@
-export type BundledSkill = { id: string; name: string; description: string; category: "documents" | "data" | "integrations" | "custom" | "automation"; features?: string[];
+export type BundledSkill = {
+    id: string; name: string; description: string; category: "documents" | "data" | "integrations" | "custom" | "automation"; features?: string[];
 };
 
 export const BUNDLED_SKILLS: BundledSkill[] = [
@@ -160,6 +161,30 @@ export const BUNDLED_SKILLS: BundledSkill[] = [
         category: "documents",
         features: [
             "Word document (.docx) generation", "Excel spreadsheet (.xlsx) generation", "PowerPoint presentation (.pptx) creation", "CSV format support", "Automatic cloud library upload"
+        ]
+    },
+    {
+        id: "spawn_subagent",
+        name: "Nested Subagents (Clawi Integration)",
+        description: "Enables the AI to spawn nested, autonomous subagents to handle complex multi-step routines in the background.",
+        category: "automation",
+        features: [
+            "Autonomous routine execution",
+            "Multi-step task delegation",
+            "Parallelized agent workflows",
+            "Clawi compatibility"
+        ]
+    },
+    {
+        id: "memory_search",
+        name: "Semantic Memory (RAG)",
+        description: "Retrieval-Augmented Generation context engine. Searches past conversations, facts, and user preferences semantically.",
+        category: "data",
+        features: [
+            "Vector database semantic search",
+            "Keyword hybrid matching",
+            "Temporal decay handling",
+            "Long-term memory persistence"
         ]
     },
 ];

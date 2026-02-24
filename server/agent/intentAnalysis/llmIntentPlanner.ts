@@ -69,7 +69,9 @@ Responde ÚNICAMENTE con un JSON válido siguiendo este esquema exacto:
   "requiresWebSearch": <true|false>,
   "requiresDocumentGeneration": <true|false>,
   "requiresBrowserAutomation": <true|false>,
-  "ambiguities": [<lista de ambigüedades detectadas, si las hay>]
+  "ambiguities": [<lista de ambigüedades detectadas, si las hay>],
+  "riskLevel": "<low|medium|high|critical>",
+  "extractedEntities": { "<clave>": "<valor>" }
 }
 
 REGLAS:
@@ -78,7 +80,9 @@ REGLAS:
 - "web_automation" requiere interacción real con un navegador (reservas, compras, navegación)
 - "research" es para búsqueda de información, NO para navegar sitios
 - Las reservas de restaurantes/hoteles/vuelos son SIEMPRE "web_automation"
-- Preguntas simples tipo "¿qué es X?" son "chat", no "research"`;
+- Preguntas simples tipo "¿qué es X?" son "chat", no "research"
+- "riskLevel": usa "low" por defecto. "medium" si implica datos externos públicos. "high" si implica compras, correos o datos privados. "critical" para transferencias, borrado o permisos.
+- "extractedEntities": extrae nombres, fechas, emails, URLs, lugares, requerimientos técnicos, etc.`;
 
 // ─── Core Analysis Function ─────────────────────────────────────────
 
@@ -141,7 +145,7 @@ async function analyzeIntentViaGraph(params: AnalyzeIntentParams): Promise<Inten
     confidence: merged?.confidence ?? 0.5,
     source: merged?.source ?? "regex",
     brief: result.brief ?? null,
-    escalationReason: result.llmResult ? `LLM escalation (regex < 0.7)` : undefined,
+    escalationReason: result.llmResult ? `LLM escalation(regex < 0.7)` : undefined,
     llmClassification: result.llmResult ?? null,
     latencyMs,
   };
@@ -219,12 +223,12 @@ async function analyzeIntentDirect(
 
   // ── Step 2: LLM escalation ─────────────────────────────────────
   logger.info("Escalating to LLM planner", {
-    reason: `regex confidence ${regexResult.confidence} < ${ESCALATION_THRESHOLD}`,
+    reason: `regex confidence ${regexResult.confidence} <${ESCALATION_THRESHOLD}`,
     regexIntent: regexResult.intent,
   });
 
   let llmResult: LlmIntentClassification | null = null;
-  let escalationReason = `regex confidence ${regexResult.confidence.toFixed(2)} < ${ESCALATION_THRESHOLD}`;
+  let escalationReason = `regex confidence ${regexResult.confidence.toFixed(2)} <${ESCALATION_THRESHOLD}`;
 
   try {
     llmResult = await classifyWithLlm(rawMessage, conversationHistory, userId);
@@ -300,12 +304,12 @@ async function classifyWithLlm(
   if (conversationHistory && conversationHistory.length > 1) {
     const recentTurns = conversationHistory.slice(-6); // last 3 exchanges
     contextStr = recentTurns
-      .map((m) => `${m.role === "user" ? "Usuario" : "Asistente"}: ${m.content.slice(0, 200)}`)
+      .map((m) => `${m.role === "user" ? "Usuario" : "Asistente"}: ${m.content.slice(0, 200)} `)
       .join("\n");
-    contextStr = `\n\nCONTEXTO RECIENTE DE LA CONVERSACIÓN:\n${contextStr}`;
+    contextStr = `\n\nCONTEXTO RECIENTE DE LA CONVERSACIÓN: \n${contextStr} `;
   }
 
-  const userPrompt = `MENSAJE DEL USUARIO:\n${rawMessage}${contextStr}`;
+  const userPrompt = `MENSAJE DEL USUARIO: \n${rawMessage}${contextStr} `;
 
   const messages = [
     { role: "system" as const, content: INTENT_CLASSIFICATION_SYSTEM_PROMPT },
@@ -314,11 +318,11 @@ async function classifyWithLlm(
 
   // Use a timeout race to prevent blocking the pipeline
   const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error(`LLM planner timeout (${LLM_TIMEOUT_MS}ms)`)), LLM_TIMEOUT_MS),
+    setTimeout(() => reject(new Error(`LLM planner timeout(${LLM_TIMEOUT_MS}ms)`)), LLM_TIMEOUT_MS),
   );
 
   const llmPromise = llmGateway.chat(messages, {
-    requestId: `intent_${Date.now()}`,
+    requestId: `intent_${Date.now()} `,
     userId,
     temperature: 0,
     maxTokens: 400,
@@ -331,7 +335,7 @@ async function classifyWithLlm(
   let raw = (response.content || "").trim();
 
   // Strip markdown code blocks if present
-  raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+  raw = raw.replace(/^```(?: json) ?\s * /i, "").replace(/\s * ```$/i, "");
 
   const parsed = JSON.parse(raw);
   return LlmIntentClassificationSchema.parse(parsed);
@@ -357,7 +361,7 @@ async function generateBriefSafe(
           extractedText: a.extractedContent || "",
         })),
       userId,
-      requestId: `brief_${Date.now()}`,
+      requestId: `brief_${Date.now()} `,
     });
     return brief;
   } catch (err) {

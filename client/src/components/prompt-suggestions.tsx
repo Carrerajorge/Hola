@@ -99,7 +99,7 @@ export function PromptSuggestions({
 
     return (
         <div className={cn(
-            "flex flex-wrap gap-2 p-3 animate-in fade-in-50 duration-300",
+            "flex flex-wrap gap-3 justify-center p-3 animate-in fade-in-50 duration-300",
             className
         )}>
             {suggestions.map((suggestion, index) => (
@@ -107,17 +107,26 @@ export function PromptSuggestions({
                     key={index}
                     onClick={() => onSelect(suggestion.action)}
                     className={cn(
-                        "flex items-center gap-2 px-3 py-2 rounded-full",
-                        "text-sm font-medium transition-all duration-200",
-                        "bg-muted/50 hover:bg-muted border border-border/50",
-                        "hover:border-primary/30 hover:shadow-sm",
+                        "group flex items-center gap-3 px-5 py-3 rounded-2xl",
+                        "text-sm font-medium transition-all duration-300",
+                        "bg-background/60 backdrop-blur-md border border-border/40 shadow-sm",
+                        "hover:border-primary/30 hover:shadow-lg hover:-translate-y-1 text-foreground/80 hover:text-foreground",
                         "active:scale-95",
-                        suggestion.category === "analyze" && "hover:bg-blue-50 hover:border-blue-200 dark:hover:bg-blue-950/30",
-                        suggestion.category === "create" && "hover:bg-green-50 hover:border-green-200 dark:hover:bg-green-950/30",
-                        suggestion.category === "search" && "hover:bg-purple-50 hover:border-purple-200 dark:hover:bg-purple-950/30"
+                        suggestion.category === "analyze" && "hover:bg-blue-500/5 dark:hover:bg-blue-400/10 hover:border-blue-500/30",
+                        suggestion.category === "create" && "hover:bg-green-500/5 dark:hover:bg-green-400/10 hover:border-green-500/30",
+                        suggestion.category === "search" && "hover:bg-purple-500/5 dark:hover:bg-purple-400/10 hover:border-purple-500/30",
+                        suggestion.category === "general" && "hover:bg-muted/80"
                     )}
                 >
-                    <span className="text-muted-foreground">{suggestion.icon}</span>
+                    <span className={cn(
+                        "p-1.5 rounded-lg transition-colors duration-300 bg-muted/60 text-muted-foreground",
+                        suggestion.category === "analyze" && "group-hover:bg-blue-500/10 group-hover:text-blue-500 dark:group-hover:text-blue-400",
+                        suggestion.category === "create" && "group-hover:bg-green-500/10 group-hover:text-green-500 dark:group-hover:text-green-400",
+                        suggestion.category === "search" && "group-hover:bg-purple-500/10 group-hover:text-purple-500 dark:group-hover:text-purple-400",
+                        suggestion.category === "general" && "group-hover:bg-foreground/10 group-hover:text-foreground"
+                    )}>
+                        {suggestion.icon}
+                    </span>
                     <span>{suggestion.label}</span>
                 </button>
             ))}

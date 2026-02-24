@@ -33,4 +33,22 @@ describe('OpenClaw Config', () => {
     expect(config.gateway.path).toBe('/custom/ws');
     delete process.env.OPENCLAW_WS_PATH;
   });
+
+  it('reads skills extra dirs and toggles from env', () => {
+    process.env.OPENCLAW_SKILLS_EXTRA_DIRS = '/tmp/s1,/tmp/s2';
+    process.env.OPENCLAW_SKILLS_INCLUDE_BUILTINS = 'false';
+    process.env.OPENCLAW_SKILLS_AUTO_IMPORT_CLAWI = 'false';
+    process.env.OPENCLAW_SKILL_MAX_BYTES = '12345';
+
+    const config = getOpenClawConfig();
+    expect(config.skills.extraDirectories).toEqual(['/tmp/s1', '/tmp/s2']);
+    expect(config.skills.includeBuiltins).toBe(false);
+    expect(config.skills.autoImportClawi).toBe(false);
+    expect(config.skills.maxSkillFileBytes).toBe(12345);
+
+    delete process.env.OPENCLAW_SKILLS_EXTRA_DIRS;
+    delete process.env.OPENCLAW_SKILLS_INCLUDE_BUILTINS;
+    delete process.env.OPENCLAW_SKILLS_AUTO_IMPORT_CLAWI;
+    delete process.env.OPENCLAW_SKILL_MAX_BYTES;
+  });
 });

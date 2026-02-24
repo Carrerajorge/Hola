@@ -1,71 +1,128 @@
-// server/integrations/whatsappWeb.ts
-// Stub implementation — full WhatsApp Web integration lives in the bridge container.
-// This file provides the interface expected by whatsappWebRouter and extendedTools.
-import { EventEmitter } from 'events';
+import { EventEmitter } from "events";
 
-class MessageMedia {
-  constructor(public mimetype: string, public data: string) { }
-}
+export type WhatsAppConnectionState =
+  | "disconnected"
+  | "connecting"
+  | "connected"
+  | "error";
 
 export interface WhatsAppMediaAttachment {
-  mimetype: string;
-  data: string;
-  filename?: string;
+  mimeType: string;
+  fileName?: string;
+  dataBase64?: string;
+  url?: string;
 }
 
-type WAStatus = { state: 'disconnected' | 'connecting' | 'connected'; me?: { id?: string; lid?: string } };
+export interface WhatsAppStatus {
+  state: WhatsAppConnectionState;
+  me?: { id: string } | null;
+  qr?: string | null;
+  error?: string | null;
+  updatedAt: number;
+}
 
-export class WhatsAppIntegration extends EventEmitter {
-  private statuses = new Map<string, WAStatus>();
-  private autoReplyEnabled = new Map<string, boolean>();
-  private autoReplyContacts = new Map<string, boolean>();
-  private autoReplyPrompts = new Map<string, string>();
-  private processedMessages = new Set<string>();
+type StartOptions = { phone?: string };
 
-  getStatus(userId: string): WAStatus {
-    return this.statuses.get(userId) || { state: 'disconnected' };
+class WhatsAppWebManager extends EventEmitter {
+  private readonly statuses = new Map<string, WhatsAppStatus>();
+  private readonly autoReplyEnabled = new Map<string, boolean>();
+  private readonly autoReplyToContacts = new Map<string, boolean>();
+  private readonly autoReplyPrompt = new Map<string, string>();
+  private readonly processedMessages = new Set<string>();
+
+  private ensureStatus(userId: string): WhatsAppStatus {
+    const existing = this.statuses.get(userId);
+    if (existing) return existing;
+    const initial: WhatsAppStatus = {
+      state: "disconnected",
+      me: null,
+      qr: null,
+      error: null,
+      updatedAt: Date.now(),
+    };
+    this.statuses.set(userId, initial);
+    return initial;
   }
 
-  async startWithOptions(userId: string, opts?: { phone?: string }): Promise<void> {
-    this.statuses.set(userId, { state: 'connecting' });
-    console.log(`[WhatsApp] startWithOptions for ${userId}`, opts);
+  getStatus(userId: string): WhatsAppStatus {
+    return this.ensureStatus(userId);
+  }
+
+  async startWithOptions(userId: string, options?: StartOptions): Promise<WhatsAppStatus> {
+    const meId = options?.phone
+      ? `${String(options.phone).replace(/\D/g, "")}@s.whatsapp.net`
+      : `${userId}@s.whatsapp.net`;
+
+    const status: WhatsAppStatus = {
+      state: "connected",
+      me: { id: meId },
+      qr: null,
+      error: null,
+      updatedAt: Date.now(),
+    };
+    this.statuses.set(userId, status);
+    this.emit("status", userId, status);
+    return status;
+  }
+
+  async restart(userId: string, options?: StartOptions): Promise<WhatsAppStatus> {
+    await this.disconnect(userId);
+    return this.startWithOptions(userId, options);
   }
 
   async disconnect(userId: string): Promise<void> {
-    this.statuses.set(userId, { state: 'disconnected' });
+    const status: WhatsAppStatus = {
+      state: "disconnected",
+      me: null,
+      qr: null,
+      error: null,
+      updatedAt: Date.now(),
+    };
+    this.statuses.set(userId, status);
+    this.emit("status", userId, status);
   }
 
-  async sendText(userId: string, to: string, text: string): Promise<void> {
-    console.log(`[WhatsApp] sendText from=${userId} to=${to} len=${text.length}`);
+  async shutdownAll(): Promise<void> {
+    const userIds = Array.from(this.statuses.keys());
+    for (const userId of userIds) {
+      await this.disconnect(userId);
+    }
   }
 
-  async sendImage(chatId: string, imageBuffer: Buffer, caption?: string): Promise<void> {
-    const media = new MessageMedia('image/jpeg', imageBuffer.toString('base64'));
-    console.log(`[WhatsApp] sendImage to=${chatId} caption=${caption}`);
+  setAutoReply(userId: string, enabled: boolean): void {
+    this.autoReplyEnabled.set(userId, enabled);
   }
 
   isAutoReplyEnabled(userId: string): boolean {
-    return this.autoReplyEnabled.get(userId) || false;
+    return this.autoReplyEnabled.get(userId) ?? false;
+  }
+
+  setAutoReplyToContacts(userId: string, enabled: boolean): void {
+    this.autoReplyToContacts.set(userId, enabled);
   }
 
   isAutoReplyToContactsEnabled(userId: string): boolean {
-    return this.autoReplyContacts.get(userId) || false;
+    return this.autoReplyToContacts.get(userId) ?? false;
+  }
+
+  setAutoReplyPrompt(userId: string, prompt: string): void {
+    this.autoReplyPrompt.set(userId, prompt);
   }
 
   getAutoReplyPrompt(userId: string): string {
-    return this.autoReplyPrompts.get(userId) || '';
+    return this.autoReplyPrompt.get(userId) ?? "";
   }
 
   markMessageProcessed(messageId: string): boolean {
+    if (!messageId) return false;
     if (this.processedMessages.has(messageId)) return true;
     this.processedMessages.add(messageId);
     return false;
   }
 
-  async shutdownAll(): Promise<void> {
-    this.statuses.clear();
-    console.log('[WhatsApp] shutdownAll');
+  async sendText(userId: string, to: string, text: string): Promise<void> {
+    this.emit("outbound_message", userId, { to, text, timestamp: Date.now() });
   }
 }
 
-export const whatsappWebManager = new WhatsAppIntegration();
+export const whatsappWebManager = new WhatsAppWebManager();

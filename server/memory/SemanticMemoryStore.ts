@@ -14,6 +14,9 @@ import { llmGateway } from "../lib/llmGateway";
 import { semanticMemoryChunks } from "../../shared/schema/memory";
 import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import * as crypto from "crypto";
+import { applyMMRToHybridResults } from "./mmr";
+import { applyTemporalDecayToResults } from "./temporalDecay";
+import { expandQueryForFts } from "./queryExpansion";
 
 // ============================================================================
 // TYPES
@@ -171,14 +174,14 @@ class EmbeddingProvider {
     private getSimpleEmbedding(text: string): number[] {
         const words = text.toLowerCase().split(/\s+/);
         const wordFreq = new Map<string, number>();
-        
+
         for (const word of words) {
             wordFreq.set(word, (wordFreq.get(word) || 0) + 1);
         }
 
         // Create a simple 256-dimensional vector based on character/word patterns
         const vector = new Array(256).fill(0);
-        
+
         for (const [word, freq] of Array.from(wordFreq.entries())) {
             for (let i = 0; i < word.length; i++) {
                 const idx = word.charCodeAt(i) % 256;
@@ -297,7 +300,7 @@ export class SemanticMemoryStore {
 
         // Load existing memories
         const userChunks = await this.loadUserMemories(userId);
-        
+
         // Check for duplicates by semantic similarity
         const similar = await this.findSimilar(userId, content, { limit: 1, minScore: 0.95 });
         if (similar.length > 0) {
@@ -306,7 +309,7 @@ export class SemanticMemoryStore {
             existing.metadata.lastAccessed = new Date();
             existing.metadata.accessCount++;
             existing.metadata.confidence = Math.max(existing.metadata.confidence, options.confidence ?? 0.8);
-            
+
             // Update in database
             try {
                 await db.update(semanticMemoryChunks)
@@ -320,7 +323,7 @@ export class SemanticMemoryStore {
             } catch (error) {
                 console.error("[SemanticMemoryStore] Error updating in DB:", error);
             }
-            
+
             console.log(`[SemanticMemoryStore] Updated existing memory: ${existing.id}`);
             return existing;
         }
@@ -389,8 +392,9 @@ export class SemanticMemoryStore {
         if (userChunks.length === 0) return [];
 
         // Get query embedding
+        const expandedQuery = expandQueryForFts(query);
         const queryEmbedding = await this.embeddingProvider.getEmbedding(query);
-        const queryWords = new Set(query.toLowerCase().split(/\s+/));
+        const queryWords = new Set(expandedQuery.keywords.length > 0 ? expandedQuery.keywords : expandedQuery.original.toLowerCase().split(/\s+/));
 
         const results: SearchResult[] = [];
 
@@ -435,7 +439,19 @@ export class SemanticMemoryStore {
 
         // Sort by score descending and limit
         results.sort((a, b) => b.score - a.score);
-        const topResults = results.slice(0, limit);
+
+        // Apply Temporal Decay & MMR from OpenClaw integration
+        let finalResults = applyTemporalDecayToResults(
+            results.map(r => ({ ...r, timestamp: r.chunk.metadata.createdAt })),
+            { enabled: true, halfLifeDays: 30 }
+        );
+
+        finalResults = applyMMRToHybridResults(
+            finalResults.map(r => ({ ...r, content: r.chunk.content, id: r.chunk.id })),
+            { enabled: true, lambda: 0.7 }
+        );
+
+        const topResults = finalResults.slice(0, limit);
 
         // Persist access count updates to DB for matched memories
         const matchedIds = topResults.map(r => r.chunk.id);
@@ -490,12 +506,12 @@ export class SemanticMemoryStore {
         // Sort
         switch (options.sortBy) {
             case "recent":
-                chunks.sort((a, b) => 
+                chunks.sort((a, b) =>
                     b.metadata.createdAt.getTime() - a.metadata.createdAt.getTime()
                 );
                 break;
             case "accessed":
-                chunks.sort((a, b) => 
+                chunks.sort((a, b) =>
                     b.metadata.lastAccessed.getTime() - a.metadata.lastAccessed.getTime()
                 );
                 break;
@@ -557,9 +573,9 @@ export class SemanticMemoryStore {
         for (const result of results) {
             const line = `• [${result.chunk.type}] ${result.chunk.content}`;
             const lineTokens = Math.ceil(line.length / 4);
-            
+
             if (tokenCount + lineTokens > maxTokens) break;
-            
+
             lines.push(line);
             tokenCount += lineTokens;
         }

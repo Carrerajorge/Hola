@@ -353,21 +353,42 @@ function extractNaturalWriteIntent(input: string): { path: string; content: stri
 
 function extractNaturalLsIntent(input: string): string | null {
   const prompt = String(input || "").trim();
+  const normalizeTarget = (rawTarget: string): string => {
+    const cleaned = String(rawTarget || "")
+      .trim()
+      .replace(/[.,;:!?]+$/g, "")
+      .trim();
+    if (!cleaned) return "";
+    if (/^(?:mi\s+)?(?:escritorio|excritorio|desktop|mac|computadora|pc|laptop|home)$/i.test(cleaned)) {
+      return "desktop:";
+    }
+    return cleaned;
+  };
+
   const patterns = [
     // "muéstrame los archivos de mi escritorio" / "lista las carpetas de mi escritorio"
     /\b(?:muestra|muéstrame|lista|listar|show|list)\s+(?:los\s+|las\s+)?(?:archivos|carpetas|files|folders|contenido)\s+(?:de|del|en|in|from)\s+(?:mi\s+)?["']?([^"'\n]{1,120})["']?\s*$/i,
     // "qué hay en mi escritorio" / "qué archivos tengo en Desktop"
     /\b(?:qué|que|what)\s+(?:hay|archivos|carpetas|files|folders)\s+(?:en|in|tengo\s+en)\s+(?:mi\s+)?["']?([^"'\n]{1,120})["']?\s*$/i,
+    // "cuántas carpetas tengo en mi escritorio" (tolerates common typo "caprteas")
+    /\b(?:cu[aá]ntas?|how\s+many|cantidad(?:\s+de)?|n[uú]mero(?:\s+de)?)\s+(?:carpetas?|caprteas?|careptas?|carpteas?|folders?|directorios?|directories?|archivos?|files?)\b(?:.*?\b(?:en|in|de|del|from)\s+(?:mi\s+)?["']?([^"'\n]{1,120})["']?)?/i,
   ];
   for (const re of patterns) {
     const m = prompt.match(re);
     if (m?.[1]?.trim()) {
-      let target = m[1].trim().replace(/[.,;:!?]+$/, "").trim();
-      // Map common words to path aliases
-      if (/^(?:escritorio|desktop)$/i.test(target)) target = "desktop:";
-      return target;
+      const target = normalizeTarget(m[1]);
+      if (target) return target;
     }
   }
+
+  // Fallback: if the user asks for counts in desktop/mac context, default to Desktop.
+  const asksForCount = /\b(?:cu[aá]ntas?|how\s+many|cantidad|n[uú]mero)\b/i.test(prompt);
+  const asksAboutFoldersOrFiles = /\b(?:carpetas?|caprteas?|careptas?|carpteas?|folders?|directorios?|directories?|archivos?|files?)\b/i.test(prompt);
+  const hasDesktopContext = /\b(?:escritorio|excritorio|desktop|mi\s+mac|my\s+mac|computadora|pc|laptop)\b/i.test(prompt);
+  if (asksForCount && asksAboutFoldersOrFiles && hasDesktopContext) {
+    return "desktop:";
+  }
+
   return null;
 }
 
@@ -5939,15 +5960,9 @@ Tienes acceso COMPLETO a la computadora del usuario a través del sistema de con
 - Buscar ubicación de binarios (which)
 
 CÓMO FUNCIONA: Cuando el usuario pide algo relacionado con su computadora, archivos, terminal, o sistema — TÚ PUEDES HACERLO.
-El sistema intercepta tu respuesta y ejecuta la acción automáticamente.
-Para comandos, usa el prefijo "/local" seguido del comando. Ejemplos:
-- /local shell ls -la ~/Desktop
-- /local python print(2+2)
-- /local git status
-- /local ps
-- /local find *.json ~/project
-
-También puedes responder naturalmente y el sistema detectará la intención. Por ejemplo, si el usuario dice "muéstrame los procesos", puedes responder con /local ps.
+El sistema puede ejecutar acciones locales internamente cuando corresponda.
+Responde con resultados concretos (salida, rutas, conteos o estado).
+NUNCA le pidas al usuario ejecutar comandos y NUNCA respondas con instrucciones del tipo "/local ...".
 
 IMPORTANTE: NUNCA digas que no tienes acceso a la terminal, archivos, o sistema del usuario. SÍ tienes acceso completo. Siempre intenta ejecutar lo que pide.
 Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, confirma que SÍ y explica brevemente tus capacidades.
@@ -6286,10 +6301,24 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
       }
 
       // ── AGENT LOOP INTERCEPT ──────────────────────────────────
-      // For web_automation intent, route through the agent executor which has
-      // tools like browse_and_act (Playwright), web_search, fetch_url
-      if (shouldRunModel && unifiedContext?.isAgenticMode && unifiedContext.requestSpec.intent === "web_automation") {
-        console.log(`[Stream] 🤖 WEB AUTOMATION: routing through executeAgentLoop with browse_and_act tool`);
+      // Route agentic intents through executeAgentLoop so tools run natively
+      // instead of falling back to plain text instructions.
+      const localFsSignal =
+        /\b(?:carpetas?|caprteas?|careptas?|carpteas?|folders?|directorios?|directories?|archivos?|files?)\b.*\b(?:mac|computadora|pc|laptop|sistema|escritorio|desktop|descargas|downloads|documentos|documents|home|disco)\b|\b(?:analiza|explora|listar|list|revisa|cuenta|count|cu[aá]ntas?)\b.*\b(?:mi\s+(?:mac|computadora|pc)|desktop|escritorio|home)\b/i.test(
+          userMessageText || "",
+        );
+      const agentLoopIntents = new Set(["web_automation", "multi_step_task", "research", "data_analysis", "document_analysis"]);
+      const shouldRouteThroughAgentLoop =
+        shouldRunModel &&
+        Boolean(unifiedContext?.isAgenticMode) &&
+        (
+          agentLoopIntents.has(unifiedContext!.requestSpec.intent) ||
+          localFsSignal
+        );
+
+      if (shouldRouteThroughAgentLoop) {
+        const activeIntent = unifiedContext?.requestSpec?.intent || "unknown";
+        console.log(`[Stream] 🤖 AGENT LOOP: routing intent=${activeIntent} through executeAgentLoop`);
         try {
           const agentMessages = [
             { role: "system", content: typeof systemMessage.content === "string" ? systemMessage.content : "" },
@@ -6321,9 +6350,10 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
             agentLoopHandled = true;
           } else {
             // Provide a direct fallback message instead of falling through to
-            // normal streaming which would ignore the browser automation context
-            fullContent = "He intentado realizar la automatización web pero encontré un problema. " +
-              "Puedes intentar de nuevo o describir tu solicitud de otra manera.";
+            // normal streaming which would ignore agentic execution context.
+            const failedIntent = unifiedContext?.requestSpec?.intent || "agentic_task";
+            fullContent = `Intenté ejecutar la solicitud (${failedIntent}) pero encontré un problema. ` +
+              "Inténtalo de nuevo o reformula la petición.";
             agentLoopHandled = true;
             if (!isConnectionClosed) {
               writeSse(res, 'chunk', {

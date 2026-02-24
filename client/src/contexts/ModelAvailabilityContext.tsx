@@ -59,7 +59,24 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
     refetchOnWindowFocus: true,
   });
 
-  const allModels = modelsData?.models || [];
+  const localMockModels: AvailableModel[] = [
+    {
+      id: "llama3-8b",
+      name: "Llama 3 (M\u00e1quina Local / Ollama)",
+      provider: "Local (Off-Grid)",
+      modelId: "llama3-8b",
+      description: "Modelo Llama 3 ejecutado directamente en su hardware local via ollama o LM Studio",
+      isEnabled: "true",
+      enabledAt: new Date().toISOString(),
+      enabledByAdminId: "system",
+      displayOrder: -1,
+      icon: null,
+      modelType: "chat",
+      contextWindow: 128000
+    }
+  ];
+
+  const allModels = [...localMockModels, ...(modelsData?.models || [])];
   const enabledModels = allModels
     .filter((m) => m.isEnabled === "true")
     .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));

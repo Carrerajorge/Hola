@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { normalizeFileForUpload } from "@/lib/attachmentIngest";
 import { apiFetch } from "@/lib/apiClient";
-import { ensureCsrfToken, uploadBlobWithProgress } from "@/lib/uploadTransport";
+import { ensureCsrfToken, resolveUploadUrlForResponse, uploadBlobWithProgress } from "@/lib/uploadTransport";
 
 const VOICE_UPLOAD_ALLOWED_TYPES = new Set([
   "text/plain",
@@ -370,10 +370,11 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
       }
 
       const { uploadURL, storagePath } = await uploadRes.json();
+      const effectiveUploadUrl = resolveUploadUrlForResponse(uploadURL, uploadRes.url);
 
       // Upload file directly to storage
       await retryUpload(() =>
-        uploadBlobWithProgress(uploadURL, normalizedFile, undefined, {
+        uploadBlobWithProgress(effectiveUploadUrl, normalizedFile, undefined, {
           timeoutMs: 120000,
           skipContentType: true,
         })

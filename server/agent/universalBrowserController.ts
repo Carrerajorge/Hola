@@ -1190,6 +1190,7 @@ export class UniversalBrowserController extends EventEmitter {
     maxRuntimeMs?: number;
     decisionTimeoutMs?: number;
     maxConsecutiveDecisionFailures?: number;
+    allowedDomains?: string[];
   }): Promise<{
     success: boolean;
     steps: string[];
@@ -1376,7 +1377,7 @@ RULES:
 - After typing in search fields, you may need to click a search/submit button or press Enter
 - If you see a cookie banner or popup, dismiss it first
 - If the page hasn't loaded yet, use "wait"
-- ONLY use "done" when the goal is truly accomplished${reservationInstructions}`;
+- ONLY use "done" when the goal is truly accomplished${options?.allowedDomains ? `\n- You MUST NOT navigate outside these allowed domains: ${options.allowedDomains.join(", ")}` : ""}${reservationInstructions}`;
 
       let planned: any = null;
 
@@ -1604,6 +1605,23 @@ RULES:
             }
             break;
           case "navigate":
+            if (options?.allowedDomains && options.allowedDomains.length > 0) {
+              try {
+                const targetUrlStr = planned.value.startsWith('http') ? planned.value : `https://${planned.value}`;
+                const targetUrl = new URL(targetUrlStr);
+                const isAllowed = options.allowedDomains.some(domain =>
+                  targetUrl.hostname === domain || targetUrl.hostname.endsWith(`.${domain}`)
+                );
+                if (!isAllowed) {
+                  throw new Error(`Domain '${targetUrl.hostname}' is not in the allowed domains list (${options.allowedDomains.join(", ")}). Halting navigation to prevent hallucination.`);
+                }
+              } catch (urlErr: any) {
+                if (urlErr.message.includes('not in the allowed domains list')) {
+                  throw urlErr; // rethrow logic error
+                }
+                throw new Error(`Invalid URL format for navigation: ${planned.value}`);
+              }
+            }
             await this.navigate(sessionId, planned.value);
             break;
           case "scroll":
@@ -1615,9 +1633,9 @@ RULES:
             } catch {
               // Fallback: try clicking the option text
               try {
-                await page.click(`${planned.selector} option:has-text("${planned.value}")`);
+                await page.click(`${planned.selector} option: has - text("${planned.value}")`);
               } catch {
-                steps.push(`Warning: Could not select "${planned.value}" in ${planned.selector}`);
+                steps.push(`Warning: Could not select "${planned.value}" in ${planned.selector} `);
               }
             }
             break;
@@ -1636,7 +1654,7 @@ RULES:
           // Best-effort pause; continue loop if page changed/closed
         }
       } catch (error: any) {
-        steps.push(`Error executing ${planned.action}: ${error.message}`);
+        steps.push(`Error executing ${planned.action}: ${error.message} `);
         // Don't abort on action errors - let the LLM see the new state and adapt
       }
     }
@@ -1791,7 +1809,7 @@ RULES:
       if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
         return null;
       }
-      return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+      return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")} `;
     };
 
     const toMinutes = (hhmm: string): number => {
@@ -1977,7 +1995,7 @@ RULES:
       const page = this.getActivePage(sessionId);
       const exact = value.trim();
       if (!exact) return false;
-      const regex = new RegExp(`^\\s*${escapeRegex(exact)}\\s*$`, "i");
+      const regex = new RegExp(`^\\s * ${escapeRegex(exact)} \\s * $`, "i");
       const locators = [
         page.getByText(exact, { exact: true }),
         page.locator("button, a, span, div").filter({ hasText: regex }),
@@ -2148,7 +2166,7 @@ RULES:
       await quickType("#user_first_name", fn);
       await quickType("#user_last_name", ln);
       // Single full-name field fallback
-      await quickType("#user_name", `${fn} ${ln}`.trim());
+      await quickType("#user_name", `${fn} ${ln} `.trim());
       await quickType("#user_email", defaults.email);
       await quickType("#user_email2", defaults.email);
       await quickType("#user_phone", defaults.phone);
@@ -2299,7 +2317,7 @@ RULES:
       const selectResult = await this.select(sessionId, partySizeSelector, String(partySize)).catch(() => ({ success: false }));
       if (!(selectResult as any)?.success) {
         // Try multiple label formats: "2 personas", "2 Personas", "2 pax", "2 comensales"
-        for (const label of [`${partySize} personas`, `${partySize} Personas`, `${partySize} pax`, `${partySize} comensales`, `${partySize}`]) {
+        for (const label of [`${partySize} personas`, `${partySize} Personas`, `${partySize} pax`, `${partySize} comensales`, `${partySize} `]) {
           const ok = await page.selectOption(partySizeSelector, { label }).catch(() => null);
           if (ok) break;
         }
@@ -2312,7 +2330,7 @@ RULES:
         if (sel.value === String(expected)) return true;
         const selectedText = sel.selectedOptions?.[0]?.text || "";
         // Strict check: the number must be a standalone token, not part of a larger number
-        const regex = new RegExp(`\\\\b${expected}\\\\b`);
+        const regex = new RegExp(`\\\\b${expected} \\\\b`);
         return regex.test(selectedText);
       }, { expected: partySize, selector: partySizeSelector }).catch(() => null);
       if (verifiedPartySize === false) {
@@ -2383,7 +2401,7 @@ RULES:
           data: {
             status: "needs_user_input",
             missingFields: ["date"],
-            question: `El día ${day} ya pasó este mes. ¿Quieres reservar para una fecha futura?`,
+            question: `El día ${day} ya pasó este mes. ¿Quieres reservar para una fecha futura ? `,
             reason: "past_date",
           },
           screenshots,
@@ -2502,7 +2520,7 @@ RULES:
               }
             }
             // Also try td[data-day] approach
-            const byDataDay = document.querySelector(`td[data-day="${dayStr}"] a, td[data-day="${dayStr}"] span`);
+            const byDataDay = document.querySelector(`td[data - day= "${dayStr}"]a, td[data - day= "${dayStr}"]span`);
             if (byDataDay) {
               try {
                 (byDataDay as HTMLElement).click();
@@ -2517,10 +2535,10 @@ RULES:
       // Strategy 3: Playwright selector-based click as last resort
       if (!dateClicked) {
         const selectorClicked = await clickFirstVisible([
-          `span.date:has-text("${day}")`,
-          `.ui-datepicker-calendar td a:has-text("${day}")`,
-          `td[data-day="${day}"] a`,
-          `td[data-day="${day}"] span`,
+          `span.date: has - text("${day}")`,
+          `.ui - datepicker - calendar td a: has - text("${day}")`,
+          `td[data - day= "${day}"]a`,
+          `td[data - day= "${day}"]span`,
         ]);
         if (selectorClicked) dateClicked = "selector";
       }
@@ -2531,22 +2549,22 @@ RULES:
           const dpDays = Array.from(document.querySelectorAll(".ui-datepicker-calendar td a")).map(el => (el.textContent || "").trim());
           return { stripDays, dpDays, dpVisible: !!document.querySelector(".ui-datepicker-calendar")?.closest("[style*='block']") };
         }).catch(() => ({ stripDays: [], dpDays: [], dpVisible: false }));
-        console.log(`[CalaReservation] Day ${day} click failed. State:`, JSON.stringify(calState));
+        console.log(`[CalaReservation] Day ${day} click failed.State: `, JSON.stringify(calState));
         return {
           success: false,
           steps,
           data: {
             status: "needs_user_input",
             missingFields: ["date"],
-            question: `No pude seleccionar el día ${day} en el calendario. ¿Quieres que pruebe otra fecha?`,
+            question: `No pude seleccionar el día ${day} en el calendario. ¿Quieres que pruebe otra fecha ? `,
           },
           screenshots,
         };
       }
-      console.log(`[CalaReservation] Day ${day} clicked via ${dateClicked}`);
+      console.log(`[CalaReservation] Day ${day} clicked via ${dateClicked} `);
       await page.waitForTimeout(500).catch(() => { });
       steps.push(`Selected date day: ${day}.`);
-      await emitProgress("click", `Fecha seleccionada (día ${day})`, "30%");
+      await emitProgress("click", `Fecha seleccionada(día ${day})`, "30%");
 
       const timeText = normalizeTime(reservation.time);
       if (!timeText) {
@@ -2578,7 +2596,7 @@ RULES:
               const [hh, mm] = match.split(":").map(Number);
               // Filter to restaurant-plausible hours (7:00 - 23:59) to avoid phone/date false positives
               if (hh >= 7 && hh <= 23 && mm >= 0 && mm <= 59) {
-                set.add(`${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`);
+                set.add(`${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")} `);
               }
             }
           }
@@ -2594,7 +2612,7 @@ RULES:
         await page.waitForTimeout(200).catch(() => { });
         availableTimes = await scanAvailableTimes();
         if (availableTimes.length > 0) {
-          console.log(`[CalaReservation] Time slots found after ${Date.now() - timePollStart}ms: ${availableTimes.join(", ")}`);
+          console.log(`[CalaReservation] Time slots found after ${Date.now() - timePollStart} ms: ${availableTimes.join(", ")} `);
           break;
         }
         // Also check if changeDay AJAX returned a "no availability" signal
@@ -2611,14 +2629,14 @@ RULES:
         const pageText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
         const changeDayNotAvail = backendSignals.changeDay?.not_avaible;
         if (/reservas?\s+completas?\s+por\s+web|no\s+availability\s+online/i.test(pageText) || changeDayNotAvail) {
-          await emitProgress("wait", `Sin disponibilidad web para el día ${day}`, "30%");
+          await emitProgress("wait", `Sin disponibilidad web para el día ${day} `, "30%");
           return {
             success: false,
             steps,
             data: {
               status: "needs_user_input",
               missingFields: ["alternativeDateOrTime"],
-              question: `No hay disponibilidad web para el día ${day}. ¿Quieres que pruebe otro día u horario?`,
+              question: `No hay disponibilidad web para el día ${day}. ¿Quieres que pruebe otro día u horario ? `,
               reason: "no_web_availability",
               backendMessage: changeDayNotAvail || undefined,
             },
@@ -2643,14 +2661,14 @@ RULES:
         if (await clickVisibleText(timeVal)) return true;
         // Strategy 2: CSS selectors with data attributes
         const selectorClicked = await clickFirstVisible([
-          `[data-hour="${timeVal}"]`, `[data-time="${timeVal}"]`,
-          `button:has-text("${timeVal}")`, `a:has-text("${timeVal}")`,
-          `span:has-text("${timeVal}")`, `div.hour:has-text("${timeVal}")`,
+          `[data - hour= "${timeVal}"]`, `[data - time= "${timeVal}"]`,
+          `button: has - text("${timeVal}")`, `a: has - text("${timeVal}")`,
+          `span: has - text("${timeVal}")`, `div.hour: has - text("${timeVal}")`,
         ]);
         if (selectorClicked) return true;
         // Strategy 3: JS click on element containing the time text
         const jsClicked = await page.evaluate((t) => {
-          const regex = new RegExp(`\\b${t}\\b`);
+          const regex = new RegExp(`\\b${t} \\b`);
           for (const el of document.querySelectorAll("button, a, span, div, li")) {
             if (regex.test((el.textContent || "").trim()) && (el as HTMLElement).offsetParent !== null) {
               try {
@@ -2679,7 +2697,7 @@ RULES:
           data: {
             status: "needs_user_input",
             missingFields: ["time"],
-            question: `No pude seleccionar la hora ${timeText}. Horas detectadas: ${availableTimes.slice(0, 8).join(", ") || "ninguna"}. ¿Otra hora?`,
+            question: `No pude seleccionar la hora ${timeText}. Horas detectadas: ${availableTimes.slice(0, 8).join(", ") || "ninguna"}. ¿Otra hora ? `,
           },
           screenshots,
         };
@@ -2688,15 +2706,15 @@ RULES:
       await page.waitForTimeout(150).catch(() => { });
       const timeWasAdjusted = selectedTime !== timeText;
       if (timeWasAdjusted) {
-        steps.push(`Requested time ${timeText} not available. Selected closest: ${selectedTime}.`);
+        steps.push(`Requested time ${timeText} not available.Selected closest: ${selectedTime}.`);
         data.timeAdjusted = true;
         data.requestedTime = timeText;
         data.selectedTime = selectedTime;
         data.availableTimes = availableTimes.slice(0, 10);
-        await emitProgress("click", `${timeText} no disponible → seleccionada ${selectedTime}`, "40%");
+        await emitProgress("click", `${timeText} no disponible → seleccionada ${selectedTime} `, "40%");
       } else {
         steps.push(`Selected time: ${selectedTime}.`);
-        await emitProgress("click", `Hora seleccionada: ${selectedTime}`, "40%");
+        await emitProgress("click", `Hora seleccionada: ${selectedTime} `, "40%");
       }
 
       // ── Wait for contact form to appear after time selection ──
@@ -2763,7 +2781,7 @@ RULES:
           data: {
             status: "needs_user_input",
             missingFields: ["contactEmail"],
-            question: `El email "${email}" no parece válido. ¿Puedes verificarlo?`,
+            question: `El email "${email}" no parece válido. ¿Puedes verificarlo ? `,
             reason: "invalid_contact_data",
           },
           screenshots,
@@ -2776,7 +2794,7 @@ RULES:
           data: {
             status: "needs_user_input",
             missingFields: ["contactPhone"],
-            question: `El teléfono "${phone}" parece incompleto. ¿Puedes verificarlo?`,
+            question: `El teléfono "${phone}" parece incompleto. ¿Puedes verificarlo ? `,
             reason: "invalid_contact_data",
           },
           screenshots,
@@ -2786,7 +2804,7 @@ RULES:
       ensureBudget();
       await quickType("#user_first_name", firstName);
       await quickType("#user_last_name", lastName || firstName);
-      await quickType("#user_name", `${firstName} ${lastName || firstName}`.trim());
+      await quickType("#user_name", `${firstName} ${lastName || firstName} `.trim());
       await quickType("#user_email", email);
       await quickType("#user_email2", email);
       await quickType("#user_phone", phone);
@@ -2883,7 +2901,7 @@ RULES:
               data: {
                 status: "needs_user_input",
                 missingFields: missingByValidation,
-                question: `El formulario de Cala sigue marcando datos inválidos: ${missingByValidation.join(", ")}. ¿Puedes confirmarlos exactamente?`,
+                question: `El formulario de Cala sigue marcando datos inválidos: ${missingByValidation.join(", ")}. ¿Puedes confirmarlos exactamente ? `,
                 reason: "step2_validation_block",
                 finalUrl: page.url(),
               },
@@ -3058,13 +3076,13 @@ RULES:
       };
     } catch (error: any) {
       const errMsg = error?.message || "unknown error";
-      steps.push(`Error: ${errMsg}`);
+      steps.push(`Error: ${errMsg} `);
       // Classify error for better user-facing messages
       const isTimeout = /timeout|exceeded.*runtime.*budget/i.test(errMsg);
       const isNavigation = /navigation|net::|ERR_/i.test(errMsg);
       const isClosed = /closed|destroyed|disposed|target.*closed/i.test(errMsg);
       let reason = "unknown_error";
-      let question = `Ocurrió un error durante la automatización: ${errMsg}`;
+      let question = `Ocurrió un error durante la automatización: ${errMsg} `;
       if (isTimeout) {
         reason = "runtime_timeout";
         question = "El proceso de reserva tardó más de lo esperado. ¿Quieres que lo intente de nuevo?";
@@ -3108,13 +3126,13 @@ RULES:
 
   getSessionContext(sessionId: string): BrowserContext {
     const session = this.sessions.get(sessionId);
-    if (!session) throw new Error(`Session not found: ${sessionId}`);
+    if (!session) throw new Error(`Session not found: ${sessionId} `);
     return session.context;
   }
 
   getActivePage(sessionId: string, tabId?: string): Page {
     const session = this.sessions.get(sessionId);
-    if (!session) throw new Error(`Session not found: ${sessionId}`);
+    if (!session) throw new Error(`Session not found: ${sessionId} `);
 
     const id = tabId || session.activeTabId;
     const tab = id ? session.tabs.get(id) : undefined;
@@ -3126,8 +3144,8 @@ RULES:
     if (recovered) return recovered;
 
     if (!id) throw new Error("No active tab");
-    if (!tab) throw new Error(`Tab not found: ${id}`);
-    throw new Error(`Active tab is closed: ${id}`);
+    if (!tab) throw new Error(`Tab not found: ${id} `);
+    throw new Error(`Active tab is closed: ${id} `);
   }
 
   private recoverActivePage(sessionId: string): Page | null {
@@ -3183,15 +3201,15 @@ RULES:
       // Try by text content
       const textMatch = originalSelector.match(/[.#]?[\w-]+/);
       if (textMatch) {
-        alternatives.push(`text="${textMatch[0]}"`);
-        alternatives.push(`[aria-label*="${textMatch[0]}"]`);
-        alternatives.push(`[title*="${textMatch[0]}"]`);
-        alternatives.push(`[placeholder*="${textMatch[0]}"]`);
+        alternatives.push(`text = "${textMatch[0]}"`);
+        alternatives.push(`[aria - label*= "${textMatch[0]}"]`);
+        alternatives.push(`[title *= "${textMatch[0]}"]`);
+        alternatives.push(`[placeholder *= "${textMatch[0]}"]`);
       }
 
       // Try by role
-      alternatives.push(`[role="button"]`);
-      alternatives.push(`[role="link"]`);
+      alternatives.push(`[role = "button"]`);
+      alternatives.push(`[role = "link"]`);
     } catch {
       // Ignore
     }
@@ -3213,7 +3231,7 @@ RULES:
 
   private resolveTemplate(template: string, variables: Record<string, any>): string {
     return template.replace(/\{\{(\w+)\}\}/g, (_, name) => {
-      return variables[name] !== undefined ? String(variables[name]) : `{{${name}}}`;
+      return variables[name] !== undefined ? String(variables[name]) : `{ {${name} } } `;
     });
   }
 

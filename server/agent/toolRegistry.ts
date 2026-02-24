@@ -12,6 +12,7 @@ import {
 } from "../services/documentGeneration";
 import fs from "fs/promises";
 import path from "path";
+import os from "os";
 import { libraryService } from "../services/libraryService";
 import { executionEngine, type ExecutionOptions } from "./executionEngine";
 import { policyEngine, type PolicyContext } from "./policyEngine";
@@ -26,6 +27,44 @@ import { getUserPrivacySettings } from "../services/privacyService";
 
 const AGENT_WORKSPACE_ROOT = process.env.AGENT_WORKSPACE_ROOT || "/tmp/agent-workspace";
 const getRunWorkspaceDir = (runId: string) => path.resolve(AGENT_WORKSPACE_ROOT, runId);
+const AGENT_LOCAL_FS_ROOT = process.env.AGENT_LOCAL_FS_ROOT
+  ? path.resolve(process.env.AGENT_LOCAL_FS_ROOT)
+  : path.resolve(os.homedir());
+
+function isPathInside(rootPath: string, candidatePath: string): boolean {
+  const rel = path.relative(rootPath, candidatePath);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+function expandHomePath(inputPath: string): string {
+  if (inputPath === "~") return AGENT_LOCAL_FS_ROOT;
+  if (inputPath.startsWith("~/")) return path.join(AGENT_LOCAL_FS_ROOT, inputPath.slice(2));
+  return inputPath;
+}
+
+function resolveAccessibleReadPath(runId: string, requestedPath: string): {
+  resolvedPath: string;
+  scope: "workspace" | "local_home";
+} {
+  const workspaceDir = getRunWorkspaceDir(runId);
+  const rawPath = String(requestedPath || ".").trim();
+  const expanded = expandHomePath(rawPath);
+  const isAbsoluteLike = expanded.startsWith("/");
+  const resolvedPath = isAbsoluteLike
+    ? path.resolve(expanded)
+    : path.resolve(workspaceDir, expanded);
+
+  if (isPathInside(workspaceDir, resolvedPath)) {
+    return { resolvedPath, scope: "workspace" };
+  }
+  if (isPathInside(AGENT_LOCAL_FS_ROOT, resolvedPath)) {
+    return { resolvedPath, scope: "local_home" };
+  }
+
+  throw new Error(
+    `Access denied: read path must stay inside workspace (${workspaceDir}) or local home (${AGENT_LOCAL_FS_ROOT})`,
+  );
+}
 
 type AutoConfirmPolicy = "always" | "ask" | "never";
 
@@ -103,6 +142,9 @@ export const ToolDefinitionSchema = z.object({
     message: "inputSchema must be a valid Zod schema",
   }),
   capabilities: z.array(ToolCapabilitySchema).optional(),
+  safetyPolicy: z.enum(["safe", "requires_confirmation", "dangerous"]).default("safe"),
+  timeoutMs: z.number().int().positive().default(30000),
+  estimatedCostUsd: z.number().nonnegative().optional(),
   execute: z.custom<(input: any, context: ToolContext) => Promise<ToolResult>>(
     (val) => typeof val === "function",
     { message: "execute must be a function" }
@@ -197,6 +239,9 @@ export interface ToolDefinition {
   description: string;
   inputSchema: z.ZodSchema;
   capabilities?: ToolCapability[];
+  safetyPolicy?: "safe" | "requires_confirmation" | "dangerous";
+  timeoutMs?: number;
+  estimatedCostUsd?: number;
   execute: (input: any, context: ToolContext) => Promise<ToolResult>;
 }
 
@@ -310,6 +355,7 @@ export class ToolRegistry {
 
           // Best-effort gap tracking: if the tool was requested but does not exist, log it as a capability gap.
           if (params.status === "not_found") {
+            // @ts-ignore - Drizzle generated type might be missing userId temporarily
             await storage.createAgentGapLog({
               userId: safeUserId,
               userPrompt: `Missing tool: ${name}`,
@@ -932,10 +978,13 @@ export class ToolRegistry {
 
       const executionResult = await executionEngine.execute(
         name,
-        () => tool.execute(validatedInput, effectiveContext),
+        () => tool!.execute(validatedInput, effectiveContext),
         {
           maxRetries: policyCheck.policy.maxRetries,
-          timeoutMs: policyCheck.policy.maxExecutionTimeMs,
+          timeoutMs: Math.min(
+            tool!.timeoutMs ?? 30000,
+            policyCheck.policy.maxExecutionTimeMs
+          ),
         },
         {
           runId: context.runId,
@@ -1652,27 +1701,29 @@ const generateDocumentTool: ToolDefinition = {
 };
 
 const readFileSchema = z.object({
-  filepath: z.string().describe("Path to file in workspace"),
+  filepath: z.string().describe("Path to file. Relative paths resolve inside run workspace; absolute/~/ paths resolve inside local home."),
 });
 
 const readFileTool: ToolDefinition = {
   name: "read_file",
-  description: "Read contents of a file from the agent's workspace.",
+  description: "Read file contents from workspace or local home (read-only).",
   inputSchema: readFileSchema,
   capabilities: ["reads_files"],
   execute: async (input, context): Promise<ToolResult> => {
     const startTime = Date.now();
     try {
       const fs = await import('fs/promises');
-      const path = await import('path');
-      const safePath = path.resolve(getRunWorkspaceDir(context.runId), input.filepath);
-      if (!safePath.startsWith(getRunWorkspaceDir(context.runId))) {
-        throw new Error('Access denied: path outside workspace');
-      }
-      const content = await fs.readFile(safePath, 'utf-8');
+      const { resolvedPath, scope } = resolveAccessibleReadPath(context.runId, input.filepath);
+      const content = await fs.readFile(resolvedPath, 'utf-8');
       return {
         success: true,
-        output: { filepath: input.filepath, content, size: content.length },
+        output: {
+          filepath: input.filepath,
+          resolvedPath,
+          scope,
+          content,
+          size: content.length,
+        },
         artifacts: [],
         previews: [{ type: "text", content: content.slice(0, 1000), title: input.filepath }],
         logs: [],
@@ -2199,30 +2250,37 @@ const shellCommandTool: ToolDefinition = {
 };
 
 const listFilesSchema = z.object({
-  directory: z.string().default(".").describe("Directory path in workspace"),
+  directory: z.string().default(".").describe("Directory path. Relative paths resolve inside run workspace; absolute/~/ paths resolve inside local home."),
+  maxEntries: z.number().int().min(1).max(1000).optional().default(200).describe("Maximum number of entries to return."),
 });
 
 const listFilesTool: ToolDefinition = {
   name: "list_files",
-  description: "List files and directories in the agent's workspace.",
+  description: "List files and directories from workspace or local home (read-only).",
   inputSchema: listFilesSchema,
   capabilities: ["reads_files"],
   execute: async (input, context): Promise<ToolResult> => {
     const startTime = Date.now();
     try {
       const fs = await import('fs/promises');
-      const path = await import('path');
       const workspaceDir = getRunWorkspaceDir(context.runId);
       await fs.mkdir(workspaceDir, { recursive: true });
-      const targetDir = path.resolve(workspaceDir, input.directory);
-      if (!targetDir.startsWith(workspaceDir)) {
-        throw new Error('Access denied: path outside workspace');
-      }
-      const entries = await fs.readdir(targetDir, { withFileTypes: true });
-      const files = entries.map(e => ({ name: e.name, type: e.isDirectory() ? 'directory' : 'file' }));
+      const { resolvedPath, scope } = resolveAccessibleReadPath(context.runId, input.directory);
+      const entries = await fs.readdir(resolvedPath, { withFileTypes: true });
+      const files = entries
+        .slice(0, input.maxEntries)
+        .map((entry) => ({ name: entry.name, type: entry.isDirectory() ? 'directory' : 'file' }));
       return {
         success: true,
-        output: { directory: input.directory, files, count: files.length },
+        output: {
+          directory: input.directory,
+          resolvedPath,
+          scope,
+          files,
+          count: files.length,
+          truncated: entries.length > files.length,
+          totalDetected: entries.length,
+        },
         artifacts: [],
         previews: [{ type: "text", content: files.map(f => `${f.type === 'directory' ? '[D]' : '[F]'} ${f.name}`).join('\n'), title: "Files" }],
         logs: [],
@@ -2242,7 +2300,29 @@ const listFilesTool: ToolDefinition = {
   },
 };
 
+import { initializeClawiSkills } from "../openclaw/skills/clawiSkillAdapter";
+import { createAgenticTools } from "../openclaw/tools/agenticTools";
+import { createClawiRuntimeTools } from "../openclaw/tools/clawiRuntimeTools";
+import { spawnSubagentTool } from "./tools/spawn_subagent";
+import { memorySearchTool } from "./tools/memory_search";
+
+initializeClawiSkills().catch(e => console.error("Failed to init Clawi skills", e));
+
 export const toolRegistry = new ToolRegistry();
+toolRegistry.register(spawnSubagentTool);
+toolRegistry.register(memorySearchTool);
+for (const tool of createAgenticTools()) {
+  if (!toolRegistry.get(tool.name)) {
+    toolRegistry.register(tool);
+  }
+}
+for (const tool of createClawiRuntimeTools()) {
+  if (!toolRegistry.get(tool.name)) {
+    toolRegistry.register(tool);
+  }
+}
+
+
 
 toolRegistry.register(analyzeSpreadsheetTool);
 toolRegistry.register(webSearchTool);
@@ -2258,13 +2338,15 @@ import { browseAndActTool } from "./tools/browseAndActTool";
 import {
   createPresentationTool,
   createDocumentTool,
-  createSpreadsheetTool
+  createSpreadsheetTool,
+  createPdfTool
 } from "./tools/artifactTools";
 
 toolRegistry.register(browseAndActTool);
 toolRegistry.register(createPresentationTool);
 toolRegistry.register(createDocumentTool);
 toolRegistry.register(createSpreadsheetTool);
+toolRegistry.register(createPdfTool);
 
 // Register extended tools
 import { extendedTools } from "./extendedTools";

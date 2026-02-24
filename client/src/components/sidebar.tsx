@@ -620,17 +620,20 @@ export function Sidebar({
 
   return (
     <nav
-      className={cn("flex h-screen w-[280px] flex-col liquid-sidebar-light dark:liquid-sidebar text-sidebar-foreground", className)}
+      className={cn("flex h-screen w-[280px] flex-col bg-background/80 backdrop-blur-xl border-r border-border/50 shadow-[4px_0_24px_-12px_rgba(0,0,0,0.1)] text-sidebar-foreground transition-all duration-300", className)}
       aria-label="Navegación principal y chats"
       role="navigation"
     >
-      <div className="flex h-14 items-center justify-between px-4 py-2">
-        <div className="flex items-center gap-2">
-          <IliaGPTLogo size={32} />
+      <div className="flex h-16 items-center justify-between px-5 py-3 border-b border-border/40 bg-gradient-to-b from-background to-background/50">
+        <div className="flex items-center gap-3">
+          <div className="relative group">
+            <div className="absolute -inset-1 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-lg blur opacity-0 group-hover:opacity-100 transition duration-500"></div>
+            <IliaGPTLogo size={34} className="drop-shadow-sm relative z-10" />
+          </div>
           <div className="flex flex-col min-w-0">
-            <span className="text-sm font-semibold leading-none liquid-text-gradient">{appName}</span>
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="text-[10px] text-muted-foreground truncate">{appDescription}</span>
+            <span className="text-sm font-bold tracking-tight leading-none bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">{appName}</span>
+            <div className="flex items-center gap-2 min-w-0 mt-0.5">
+              <span className="text-[10px] text-muted-foreground font-medium truncate">{appDescription}</span>
               {isAdmin && platformSettings.maintenance_mode ? (
                 <span className="shrink-0 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 px-2 py-0.5 text-[10px] font-medium">
                   Mantenimiento
@@ -639,8 +642,8 @@ export function Sidebar({
             </div>
           </div>
         </div>
-        <Button variant="ghost" size="icon" className="h-8 w-8 liquid-button" onClick={onToggle}>
-          <svg className="h-5 w-5 text-muted-foreground" viewBox="0 0 24 24" fill="none">
+        <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-muted/80 rounded-lg transition-all" onClick={onToggle}>
+          <svg className="h-5 w-5 text-muted-foreground group-hover:text-foreground transition-colors" viewBox="0 0 24 24" fill="none">
             <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" strokeWidth="1.5" />
             <line x1="9" y1="3" x2="9" y2="21" stroke="currentColor" strokeWidth="1.5" />
             <path d="M14 9L17 12L14 15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -654,85 +657,98 @@ export function Sidebar({
         <button
           ref={searchButtonRef}
           onClick={() => setIsSearchModalOpen(true)}
-          className="w-full mt-1 mb-1 group flex items-center justify-between gap-2 px-3 py-2 text-sm text-muted-foreground bg-muted/40 hover:bg-[#A5A0FF]/10 border border-transparent hover:border-[#A5A0FF]/30 rounded-lg transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-[#A5A0FF]/50"
+          className="w-full mt-2 mb-2 group flex items-center justify-between gap-2 px-3 py-2.5 text-sm text-muted-foreground bg-muted/30 hover:bg-muted/60 border border-border/40 hover:border-border/80 rounded-xl transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-[#A5A0FF]/50 hover:shadow-sm"
           data-testid="button-search-chats"
         >
           <div className="flex items-center gap-2 font-medium">
-            <Search className="h-4 w-4" />
-            <span>Buscar chats...</span>
+            <Search className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+            <span className="group-hover:text-foreground transition-colors">Buscar chats...</span>
           </div>
-          <kbd className="hidden lg:inline-flex h-5 items-center gap-1 rounded border bg-background/50 px-1.5 font-mono text-[10px] font-medium text-muted-foreground group-hover:bg-background transition-colors shadow-sm">
+          <kbd className="hidden lg:inline-flex h-5 items-center gap-1 rounded-md border border-border/50 bg-background/50 px-1.5 font-mono text-[10px] font-medium text-muted-foreground group-hover:bg-background group-hover:text-foreground transition-all shadow-sm">
             <span className="text-xs">⌘</span>K
           </kbd>
         </button>
 
-        <Button
-          variant="ghost"
-          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button hover:bg-[#A5A0FF]/10 hover:text-primary transition-all duration-300"
-          onClick={onOpenLibrary}
-          data-testid="button-library"
-        >
-          <PremiumIcons.Library className="h-[18px] w-[18px] opacity-80" />
-          Biblioteca
-        </Button>
-        <Button
-          variant="ghost"
-          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button hover:bg-[#A5A0FF]/10 hover:text-primary transition-all duration-300"
-          onClick={onOpenGpts}
-          data-testid="button-gpts"
-        >
-          <PremiumIcons.Gpt className="h-[18px] w-[18px] opacity-80" />
-          GPTs
-        </Button>
-        <Button
-          variant="ghost"
-          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button hover:bg-[#A5A0FF]/10 hover:text-primary transition-all duration-300"
-          onClick={onOpenSkills}
-          data-testid="button-skills"
-        >
-          <PremiumIcons.Skills className="h-[18px] w-[18px] shrink-0 opacity-80" />
-          <span className="flex flex-col items-start leading-tight">
-            <span>Skills</span>
-            <span className="text-[10px] font-normal text-muted-foreground">Capacidades modulares de IliaGPT</span>
-          </span>
-        </Button>
-        <Button
-          variant="ghost"
-          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button hover:bg-[#A5A0FF]/10 hover:text-primary transition-all duration-300"
-          onClick={onOpenApps}
-          data-testid="button-apps"
-        >
-          <PremiumIcons.Apps className="h-[18px] w-[18px] opacity-80" />
-          Aplicaciones
-        </Button>
-        <Button
-          variant="ghost"
-          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button hover:bg-[#A5A0FF]/10 hover:text-primary transition-all duration-300"
-          onClick={onOpenWhatsAppConnect}
-          data-testid="button-whatsapp-connect"
-        >
-          <PremiumIcons.ChatQr className="h-[18px] w-[18px] opacity-80" />
-          <span className="flex-1 text-left">AppsWebChat (QR)</span>
-          <span
-            className={cn(
-              "h-2.5 w-2.5 rounded-full",
-              waStatus.state === 'connected' && 'bg-green-500',
-              (waStatus.state === 'connecting' || waStatus.state === 'qr' || waStatus.state === 'pairing_code') && 'bg-amber-500',
-              waStatus.state === 'disconnected' && 'bg-red-500'
-            )}
-            title={`Canales: ${waStatus.state}`}
-          />
-        </Button>
-
-        <Button
-          variant="ghost"
-          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button text-blue-500 hover:text-blue-600 hover:bg-blue-50/50"
-          onClick={onOpenCodex}
-          data-testid="button-codex"
-        >
-          <PremiumIcons.Code className="h-[18px] w-[18px] opacity-80" />
-          Codex
-        </Button>
+        <div className="space-y-1 mt-2">
+          <Button
+            variant="ghost"
+            className="w-full justify-start gap-3 px-3 py-5 text-sm font-medium rounded-xl hover:bg-muted/60 hover:shadow-sm hover:-translate-y-0.5 transition-all duration-300 group"
+            onClick={onOpenLibrary}
+            data-testid="button-library"
+          >
+            <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-500 group-hover:bg-blue-500 group-hover:text-white transition-colors">
+              <PremiumIcons.Library className="h-4 w-4" />
+            </div>
+            Biblioteca
+          </Button>
+          <Button
+            variant="ghost"
+            className="w-full justify-start gap-3 px-3 py-5 text-sm font-medium rounded-xl hover:bg-muted/60 hover:shadow-sm hover:-translate-y-0.5 transition-all duration-300 group"
+            onClick={onOpenGpts}
+            data-testid="button-gpts"
+          >
+            <div className="p-1.5 rounded-lg bg-purple-500/10 text-purple-500 group-hover:bg-purple-500 group-hover:text-white transition-colors">
+              <PremiumIcons.Gpt className="h-4 w-4" />
+            </div>
+            GPTs
+          </Button>
+          <Button
+            variant="ghost"
+            className="w-full justify-start gap-3 px-3 py-5 text-sm font-medium rounded-xl hover:bg-muted/60 hover:shadow-sm hover:-translate-y-0.5 transition-all duration-300 group h-auto"
+            onClick={onOpenSkills}
+            data-testid="button-skills"
+          >
+            <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-500 group-hover:bg-amber-500 group-hover:text-white transition-colors mt-0.5 shrink-0">
+              <PremiumIcons.Skills className="h-4 w-4" />
+            </div>
+            <span className="flex flex-col items-start leading-tight">
+              <span>Skills</span>
+              <span className="text-[10px] font-normal text-muted-foreground group-hover:text-muted-foreground/80 transition-colors">Capacidades modulares</span>
+            </span>
+          </Button>
+          <Button
+            variant="ghost"
+            className="w-full justify-start gap-3 px-3 py-5 text-sm font-medium rounded-xl hover:bg-muted/60 hover:shadow-sm hover:-translate-y-0.5 transition-all duration-300 group"
+            onClick={onOpenApps}
+            data-testid="button-apps"
+          >
+            <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500 group-hover:bg-emerald-500 group-hover:text-white transition-colors">
+              <PremiumIcons.Apps className="h-4 w-4" />
+            </div>
+            Aplicaciones
+          </Button>
+          <Button
+            variant="ghost"
+            className="w-full justify-start gap-3 px-3 py-5 text-sm font-medium rounded-xl hover:bg-muted/60 hover:shadow-sm hover:-translate-y-0.5 transition-all duration-300 group"
+            onClick={onOpenWhatsAppConnect}
+            data-testid="button-whatsapp-connect"
+          >
+            <div className="p-1.5 rounded-lg bg-green-500/10 text-green-500 group-hover:bg-green-500 group-hover:text-white transition-colors">
+              <PremiumIcons.ChatQr className="h-4 w-4" />
+            </div>
+            <span className="flex-1 text-left">AppsWebChat (QR)</span>
+            <span
+              className={cn(
+                "h-2 w-2 rounded-full ring-2 ring-background shadow-sm",
+                waStatus.state === 'connected' && 'bg-green-500',
+                (waStatus.state === 'connecting' || waStatus.state === 'qr' || waStatus.state === 'pairing_code') && 'bg-amber-500 animate-pulse',
+                waStatus.state === 'disconnected' && 'bg-red-500'
+              )}
+              title={`Canales: ${waStatus.state}`}
+            />
+          </Button>
+          <Button
+            variant="ghost"
+            className="w-full justify-start gap-3 px-3 py-5 text-sm font-medium rounded-xl hover:bg-blue-50/80 dark:hover:bg-blue-500/10 hover:shadow-sm hover:-translate-y-0.5 transition-all duration-300 group text-blue-600 dark:text-blue-400 mt-1"
+            onClick={onOpenCodex}
+            data-testid="button-codex"
+          >
+            <div className="p-1.5 rounded-lg bg-blue-600/10 dark:bg-blue-400/10 text-blue-600 dark:text-blue-400 group-hover:bg-blue-600 dark:group-hover:bg-blue-400 group-hover:text-white dark:group-hover:text-neutral-900 transition-colors">
+              <PremiumIcons.Code className="h-4 w-4" />
+            </div>
+            Codex
+          </Button>
+        </div>
       </div>
 
       <Separator className="mx-4 my-2 w-auto" />

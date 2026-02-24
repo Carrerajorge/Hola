@@ -56,6 +56,9 @@ export interface Task {
     toolName?: string;
     toolParams?: Record<string, any>;
     agentId?: string;
+    canRunParallel?: boolean; // If false, task runs isolated from others
+    compensationTool?: string; // Tool to call if plan fails after this task completes
+    compensationParams?: Record<string, any>;
 
     // Runtime state
     status: TaskStatus;
@@ -110,6 +113,7 @@ export interface ExecutionResult {
     results: Map<string, any>;
     failedTasks: Task[];
     completedTasks: Task[];
+    compensatedTasks: Task[];
     executionTime: number;
 }
 
@@ -697,8 +701,22 @@ export class HTNPlanner extends EventEmitter {
                 break;
             }
 
+            // Enforce sequential isolation constraint
+            // If any executable task requires isolation (!canRunParallel), we run it alone.
+            let batchToExecute = executableTasks;
+            const isolatedTask = executableTasks.find(t => t.canRunParallel === false);
+            if (isolatedTask) {
+                batchToExecute = [isolatedTask]; // Only run this one in this tick
+            }
+
+            // Mark these as processed so we don't pick them up again
+            for (const task of batchToExecute) {
+                processedTaskIds.add(task.id);
+                pendingTaskIds.delete(task.id);
+            }
+
             // 2. Execute parallel batch
-            const executionPromises = executableTasks.map(async (task) => {
+            const executionPromises = batchToExecute.map(async (task) => {
                 task.status = 'executing';
                 task.startTime = new Date();
                 this.emit("task:start", { planId, taskId: task.id, taskName: task.name });
@@ -712,8 +730,6 @@ export class HTNPlanner extends EventEmitter {
                     results.set(task.id, result);
                     completedTasks.push(task);
 
-                    // Apply effects (Race condition on state? JS is single threaded, but we might overwrite)
-                    // We apply effects immediately upon completion.
                     this.applyAllEffects(task.effects);
 
                     plan.metadata.completedTasks++;
@@ -722,12 +738,6 @@ export class HTNPlanner extends EventEmitter {
                 } catch (error) {
                     task.retryCount++;
                     if (task.retryCount < task.maxRetries) {
-                        // Logic for retry in parallel execution is tricky.
-                        // Simplest: Add back to pending?
-                        // But for now, let's just fail to match original logic or implement retry later.
-                        // Original logic re-added to executionOrder. 
-                        // We can remove from processedTaskIds and keep in pending?
-                        // Actually, let's just fail for MVP of parallel, or implementing a simple retry here.
                         task.status = 'failed';
                         task.error = (error as Error).message;
                         task.endTime = new Date();
@@ -745,29 +755,48 @@ export class HTNPlanner extends EventEmitter {
                 }
             });
 
-            // Mark these as processed so we don't pick them up again
-            for (const task of executableTasks) {
-                processedTaskIds.add(task.id);
-                pendingTaskIds.delete(task.id);
-            }
-
             await Promise.all(executionPromises);
-
-            // Check for replanning triggers if huge failures? 
-            // For now, continue to drain the queue.
         }
 
-        plan.status = failedTasks.length === 0 ? 'completed' : 'failed';
+        const success = failedTasks.length === 0;
+        const compensatedTasks: Task[] = [];
+
+        // 3. Rollback (Compensation) phase if plan failed
+        if (!success && completedTasks.length > 0) {
+            this.emit("plan:rollback_started", { planId, reason: failedTasks[0]?.error });
+
+            // Execute rollback in reverse order of completion
+            for (let i = completedTasks.length - 1; i >= 0; i--) {
+                const task = completedTasks[i];
+                if (task.compensationTool) {
+                    this.emit("task:compensating", { planId, taskId: task.id, tool: task.compensationTool });
+                    try {
+                        // Dummy task for compensation executor
+                        await taskExecutor({
+                            ...task,
+                            toolName: task.compensationTool,
+                            toolParams: task.compensationParams || {}
+                        });
+                        compensatedTasks.push(task);
+                    } catch (compErr) {
+                        this.emit("task:compensation_failed", { planId, taskId: task.id, error: (compErr as Error).message });
+                    }
+                }
+            }
+        }
+
+        plan.status = success ? 'completed' : 'failed';
         plan.metadata.updatedAt = new Date();
 
         const executionTime = Date.now() - startTime;
-        this.emit("execution:complete", { planId, success: failedTasks.length === 0, executionTime });
+        this.emit("execution:complete", { planId, success, executionTime });
 
         return {
-            success: failedTasks.length === 0,
+            success,
             results,
             failedTasks,
             completedTasks,
+            compensatedTasks,
             executionTime
         };
     }

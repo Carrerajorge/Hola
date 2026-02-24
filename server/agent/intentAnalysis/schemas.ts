@@ -14,6 +14,8 @@ export const LlmIntentClassificationSchema = z.object({
   requiresDocumentGeneration: z.boolean(),
   requiresBrowserAutomation: z.boolean(),
   ambiguities: z.array(z.string()).default([]),
+  riskLevel: z.enum(["low", "medium", "high", "critical"]).default("low"),
+  extractedEntities: z.record(z.any()).default({}),
 });
 export type LlmIntentClassification = z.infer<typeof LlmIntentClassificationSchema>;
 
@@ -28,6 +30,8 @@ export const IntentAnalysisResultSchema = z.object({
   escalationReason: z.string().optional(),
   llmClassification: LlmIntentClassificationSchema.nullable().default(null),
   latencyMs: z.number().nonnegative(),
+  riskLevel: z.enum(["low", "medium", "high", "critical"]).default("low"),
+  extractedEntities: z.record(z.any()).default({}),
 });
 export type IntentAnalysisResult = z.infer<typeof IntentAnalysisResultSchema>;
 

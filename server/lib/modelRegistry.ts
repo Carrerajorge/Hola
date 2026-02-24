@@ -27,6 +27,15 @@ export const XAI_MODELS = {
 } as const;
 
 // ============================================================================
+// Local Models (Ollama, LM Studio)
+// ============================================================================
+
+export const LOCAL_MODELS = {
+  LLAMA3: "llama3-8b",
+  MISTRAL: "mistral",
+} as const;
+
+// ============================================================================
 // Gemini Models
 // ============================================================================
 
@@ -81,6 +90,11 @@ export const DEFAULT_VISION_MODEL = DEFAULT_GEMINI_VISION_MODEL;
 /** All xAI model IDs that the gateway should recognise. */
 export const KNOWN_XAI_MODEL_IDS: ReadonlySet<string> = new Set(
   Object.values(XAI_MODELS).map((id) => id.toLowerCase()),
+);
+
+/** All Local model IDs that the gateway should recognise. */
+export const KNOWN_LOCAL_MODEL_IDS: ReadonlySet<string> = new Set(
+  Object.values(LOCAL_MODELS).map((id) => id.toLowerCase()),
 );
 
 /** All Gemini model IDs that the gateway should recognise. */
@@ -138,6 +152,10 @@ export interface ModelPricingEntry {
 }
 
 export const MODEL_PRICING_REGISTRY: Readonly<Record<string, ModelPricingEntry>> = {
+  // Local (Off-Grid - Free)
+  [LOCAL_MODELS.LLAMA3]: { inputPerMillion: 0.00, outputPerMillion: 0.00 },
+  [LOCAL_MODELS.MISTRAL]: { inputPerMillion: 0.00, outputPerMillion: 0.00 },
+
   // Grok 4.1
   [XAI_MODELS.GROK_4_1_FAST]: { inputPerMillion: 0.50, outputPerMillion: 2.00 },
   [XAI_MODELS.GROK_4_1_FAST_REASONING]: { inputPerMillion: 1.00, outputPerMillion: 4.00 },
@@ -165,7 +183,5 @@ export const MODEL_PRICING_REGISTRY: Readonly<Record<string, ModelPricingEntry>>
   [GEMINI_MODELS_REGISTRY.FLASH_25]: { inputPerMillion: 0.075, outputPerMillion: 0.30 },
   [GEMINI_MODELS_REGISTRY.FLASH_20]: { inputPerMillion: 0.10, outputPerMillion: 0.40 },
   [GEMINI_MODELS_REGISTRY.FLASH_PREVIEW]: { inputPerMillion: 0.10, outputPerMillion: 0.40 },
-  [GEMINI_MODELS_REGISTRY.PRO_31]: { inputPerMillion: 1.25, outputPerMillion: 5.00 },
   "gemini-3.1-pro-preview": { inputPerMillion: 1.25, outputPerMillion: 5.00 },
-  [GEMINI_MODELS_REGISTRY.FLASH_31]: { inputPerMillion: 0.075, outputPerMillion: 0.30 },
 };

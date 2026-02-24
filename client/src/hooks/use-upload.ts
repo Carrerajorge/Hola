@@ -2,7 +2,7 @@ import { useState, useCallback } from "react";
 import type { UppyFile } from "@uppy/core";
 import { apiFetch } from "@/lib/apiClient";
 import { normalizeFileForUpload } from "@/lib/attachmentIngest";
-import { ensureCsrfToken, uploadBlobWithProgress } from "@/lib/uploadTransport";
+import { ensureCsrfToken, resolveUploadUrlForResponse, uploadBlobWithProgress } from "@/lib/uploadTransport";
 import type { UploadResponse } from "@shared/uploadContracts";
 
 interface UseUploadOptions {
@@ -114,7 +114,11 @@ export function useUpload(options: UseUploadOptions = {}) {
         throw new Error(errorData.error || "Failed to get upload URL");
       }
 
-      return response.json();
+      const payload = await response.json() as UploadResponse;
+      if (payload?.uploadURL) {
+        payload.uploadURL = resolveUploadUrlForResponse(payload.uploadURL, response.url);
+      }
+      return payload;
     },
     [buildUploadId, options.conversationId]
   );
@@ -223,7 +227,7 @@ export function useUpload(options: UseUploadOptions = {}) {
       const data = await response.json();
       return {
         method: "PUT",
-        url: data.uploadURL,
+        url: resolveUploadUrlForResponse(data.uploadURL, response.url),
         headers: {},
       };
     },

@@ -139,6 +139,22 @@ export const PlanPhaseSchema = z.object({
 });
 export type PlanPhase = z.infer<typeof PlanPhaseSchema>;
 
+export const AgentTaskSchema = z.object({
+  id: z.string().uuid().optional(),
+  goal: z.string().min(1).describe("The primary objective the agent needs to achieve"),
+  constraints: z.array(z.string()).default([]).describe("Rules, boundaries, or limitations the agent must strictly follow"),
+  context: z.record(z.any()).default({}).describe("Background information, entity data, or environment state relevant to the task"),
+  artifacts: z.array(
+    z.object({
+      name: z.string(),
+      description: z.string(),
+      required: z.boolean().default(true),
+    })
+  ).default([]).describe("Expected files, documents, or data payloads the agent must produce"),
+  done_definition: z.string().describe("Clear criteria to determine if the goal has been successfully met"),
+});
+export type AgentTask = z.infer<typeof AgentTaskSchema>;
+
 export const AgentPlanSchema = z.object({
   objective: z.string().min(1),
   steps: z.array(PlanStepSchema).min(1).max(20),
@@ -228,6 +244,7 @@ export const CreateRunRequestSchema = z.object({
   chatId: z.string().min(1),
   messageId: z.string().optional(),
   message: z.string().min(1),
+  model: z.string().optional(),
   attachments: z.array(z.any()).optional(),
   idempotencyKey: z.string().optional(),
 });
@@ -350,7 +367,7 @@ export function validateAgentEvent(data: unknown): AgentEvent {
 
 export function safeValidateRun(data: unknown): { success: true; data: Run } | { success: false; error: z.ZodError } {
   const result = RunSchema.safeParse(data);
-  return result.success 
+  return result.success
     ? { success: true, data: result.data }
     : { success: false, error: result.error };
 }
@@ -374,3 +391,8 @@ export function validateRoleTransition(data: unknown): RoleTransition {
 export function validateCancellationToken(data: unknown): CancellationToken {
   return CancellationTokenSchema.parse(data);
 }
+
+export function validateAgentTask(data: unknown): AgentTask {
+  return AgentTaskSchema.parse(data);
+}
+

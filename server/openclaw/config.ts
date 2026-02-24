@@ -1,3 +1,6 @@
+import path from 'path';
+import os from 'os';
+
 export interface OpenClawConfig {
   gateway: { enabled: boolean; path: string };
   tools: {
@@ -8,7 +11,15 @@ export interface OpenClawConfig {
     execSecurity: 'ask' | 'warn' | 'allow';
   };
   plugins: { enabled: boolean; directory: string };
-  skills: { enabled: boolean; directory: string };
+  skills: {
+    enabled: boolean;
+    directory: string;
+    extraDirectories: string[];
+    workspaceDirectory: string;
+    includeBuiltins: boolean;
+    autoImportClawi: boolean;
+    maxSkillFileBytes: number;
+  };
   streaming: {
     enabled: boolean;
     blockMinChars: number;
@@ -26,6 +37,12 @@ const DEFAULT_SAFE_BINS = [
 ];
 
 export function getOpenClawConfig(): OpenClawConfig {
+  const workspaceDirectory = process.env.OPENCLAW_WORKSPACE_DIR
+    ? path.resolve(process.env.OPENCLAW_WORKSPACE_DIR)
+    : process.cwd();
+  const defaultSkillsDir = path.join(workspaceDirectory, 'server', 'openclaw', 'skills');
+  const legacyHomeSkillsDir = path.join(os.homedir(), '.iliagpt', 'skills');
+
   return {
     gateway: {
       enabled: process.env.ENABLE_OPENCLAW_GATEWAY === 'true',
@@ -46,7 +63,16 @@ export function getOpenClawConfig(): OpenClawConfig {
     },
     skills: {
       enabled: process.env.ENABLE_OPENCLAW_SKILLS === 'true',
-      directory: process.env.OPENCLAW_SKILLS_DIR || '~/.iliagpt/skills',
+      directory: process.env.OPENCLAW_SKILLS_DIR
+        ? path.resolve(process.env.OPENCLAW_SKILLS_DIR)
+        : defaultSkillsDir,
+      extraDirectories: process.env.OPENCLAW_SKILLS_EXTRA_DIRS
+        ? process.env.OPENCLAW_SKILLS_EXTRA_DIRS.split(',').map(s => s.trim()).filter(Boolean)
+        : [legacyHomeSkillsDir],
+      workspaceDirectory,
+      includeBuiltins: process.env.OPENCLAW_SKILLS_INCLUDE_BUILTINS !== 'false',
+      autoImportClawi: process.env.OPENCLAW_SKILLS_AUTO_IMPORT_CLAWI !== 'false',
+      maxSkillFileBytes: Number(process.env.OPENCLAW_SKILL_MAX_BYTES) || 256_000,
     },
     streaming: {
       enabled: process.env.ENABLE_OPENCLAW_STREAMING === 'true',

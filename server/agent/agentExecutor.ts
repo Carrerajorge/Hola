@@ -36,41 +36,102 @@ const dynamicSkillTools: FunctionDeclaration[] = BUNDLED_SKILL_TOOLS.map(t => {
   };
 });
 
-const ALL_AGENT_TOOLS = [...AGENT_TOOLS, ...dynamicSkillTools];
+const LOCAL_FILESYSTEM_SIGNAL_REGEX =
+  /\b(?:carpetas?|caprteas?|careptas?|carpteas?|folders?|directorios?|directories?|archivos?|files?)\b.*\b(?:mac|computadora|pc|laptop|sistema|escritorio|desktop|descargas|downloads|documentos|documents|home|disco)\b|\b(?:analiza|explora|listar|list|revisa|cuenta|count|cu[aá]ntas?)\b.*\b(?:mi\s+(?:mac|computadora|pc)|desktop|escritorio|home)\b|\b(?:cu[aá]ntas?|how\s+many|cantidad(?:\s+de)?|n[uú]mero(?:\s+de)?)\s+(?:carpetas?|caprteas?|careptas?|carpteas?|folders?|directorios?|directories?|archivos?|files?)\b/i;
+const SKILL_SIGNAL_REGEX = /\b(skill|skills|habilidad|habilidades)\b|\$[a-z0-9_-]{2,80}/i;
 
-function getToolsForIntent(intent: string, accessLevel: 'owner' | 'trusted' | 'unknown' = 'owner'): FunctionDeclaration[] {
-  let matchedTools = ALL_AGENT_TOOLS;
+function tokenizePrompt(rawPrompt: string): string[] {
+  return String(rawPrompt || "")
+    .toLowerCase()
+    .split(/[^a-z0-9áéíóúñ_-]+/i)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3);
+}
+
+function getRelevantDynamicSkillTools(rawPrompt: string, maxTools = 8): FunctionDeclaration[] {
+  if (!SKILL_SIGNAL_REGEX.test(rawPrompt)) {
+    return [];
+  }
+  const tokens = tokenizePrompt(rawPrompt);
+  if (tokens.length === 0) {
+    return dynamicSkillTools.slice(0, maxTools);
+  }
+
+  const scored = dynamicSkillTools
+    .map((tool) => {
+      const haystack = `${tool.name} ${tool.description || ""}`.toLowerCase();
+      let score = 0;
+      for (const token of tokens) {
+        if (haystack.includes(token)) {
+          score += 1;
+        }
+      }
+      return { tool, score };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  return scored.slice(0, maxTools).map((entry) => entry.tool);
+}
+
+function withToolSubset(tools: FunctionDeclaration[], names: string[]): FunctionDeclaration[] {
+  const allowed = new Set(names);
+  return tools.filter((tool) => allowed.has(tool.name));
+}
+
+function getToolsForIntent(
+  intent: string,
+  accessLevel: 'owner' | 'trusted' | 'unknown' = 'owner',
+  rawPrompt = "",
+): FunctionDeclaration[] {
+  const toolPool = [...AGENT_TOOLS, ...getRelevantDynamicSkillTools(rawPrompt)];
+  let matchedTools = toolPool;
 
   switch (intent) {
     case "research":
-      matchedTools = AGENT_TOOLS.filter(t => ["web_search", "fetch_url"].includes(t.name));
+      matchedTools = withToolSubset(toolPool, ["web_search", "fetch_url", "memory_search", "openclaw_rag_search"]);
       break;
     case "presentation_creation":
-      matchedTools = AGENT_TOOLS.filter(t => ["create_presentation", "web_search"].includes(t.name));
+      matchedTools = withToolSubset(toolPool, ["create_presentation", "web_search", "fetch_url"]);
       break;
     case "document_generation":
-      matchedTools = AGENT_TOOLS.filter(t => ["create_document", "web_search"].includes(t.name));
+      matchedTools = withToolSubset(toolPool, ["create_document", "web_search", "fetch_url", "memory_search"]);
       break;
     case "spreadsheet_creation":
-      matchedTools = AGENT_TOOLS.filter(t => ["create_spreadsheet", "analyze_data"].includes(t.name));
+      matchedTools = withToolSubset(toolPool, ["create_spreadsheet", "analyze_data", "generate_chart"]);
       break;
     case "data_analysis":
-      matchedTools = AGENT_TOOLS.filter(t => ["analyze_data", "generate_chart", "create_spreadsheet"].includes(t.name));
+      matchedTools = withToolSubset(toolPool, ["analyze_data", "generate_chart", "create_spreadsheet", "read_file"]);
       break;
     case "web_automation":
-      matchedTools = AGENT_TOOLS.filter(t => ["web_search", "fetch_url", "browse_and_act"].includes(t.name));
+      matchedTools = withToolSubset(toolPool, ["web_search", "fetch_url", "browse_and_act"]);
       break;
+    default:
+      matchedTools = toolPool;
+      break;
+  }
+
+  // For local computer/folder requests, force local read-only tools into the set.
+  if (LOCAL_FILESYSTEM_SIGNAL_REGEX.test(rawPrompt)) {
+    const mustHave = new Set(["list_files", "read_file", "memory_search", "openclaw_clawi_status"]);
+    const byName = new Map(matchedTools.map((tool) => [tool.name, tool]));
+    for (const tool of AGENT_TOOLS) {
+      if (mustHave.has(tool.name)) {
+        byName.set(tool.name, tool);
+      }
+    }
+    matchedTools = Array.from(byName.values());
   }
 
   // Filter out sensitive tools if user is not the owner
   if (accessLevel !== 'owner') {
-    const sensitiveToolPatterns = ["browse_and_act", "skill_shell", "skill_run_command", "skill_system", "skill_file"];
+    const sensitiveToolPatterns = ["browse_and_act", "skill_shell", "skill_run_command", "skill_system", "skill_file", "openclaw_clawi_exec"];
     matchedTools = matchedTools.filter(t => !sensitiveToolPatterns.some(pattern => t.name.includes(pattern)));
   }
 
   // Restrict completely unknown users to safe, read-only tools
   if (accessLevel === 'unknown') {
-    const safeToolPatterns = ["web_search", "fetch_url", "analyze_data"];
+    const safeToolPatterns = ["web_search", "fetch_url", "analyze_data", "list_files", "read_file", "memory_search"];
     matchedTools = matchedTools.filter(t => safeToolPatterns.some(pattern => t.name.includes(pattern)));
   }
 
@@ -278,6 +339,33 @@ function collectRecentUserText(messages: Array<{ role: string; content: string }
     .join(" ");
 }
 
+function extractExplicitPath(rawText: string): string | null {
+  const text = String(rawText || "");
+  const absolutePath = text.match(/(\/[^\s"'`]+)/);
+  if (absolutePath?.[1]) {
+    return absolutePath[1];
+  }
+  const homePath = text.match(/(~\/[^\s"'`]+)/);
+  if (homePath?.[1]) {
+    return homePath[1];
+  }
+  return null;
+}
+
+function inferLocalDirectoryFromPrompt(rawText: string): string {
+  const explicit = extractExplicitPath(rawText);
+  if (explicit) return explicit;
+
+  const lower = String(rawText || "").toLowerCase();
+  if (/\b(escritorio|desktop)\b/i.test(lower)) return "~/Desktop";
+  if (/\b(descargas|downloads)\b/i.test(lower)) return "~/Downloads";
+  if (/\b(documentos|documents)\b/i.test(lower)) return "~/Documents";
+  if (/\b(im[aá]genes|pictures|fotos|photos)\b/i.test(lower)) return "~/Pictures";
+  if (/\b(m[uú]sica|music)\b/i.test(lower)) return "~/Music";
+  if (/\b(videos|movies)\b/i.test(lower)) return "~/Movies";
+  return "~";
+}
+
 export async function executeAgentLoop(
   messages: Array<{ role: string; content: string }>,
   res: Response,
@@ -286,7 +374,33 @@ export async function executeAgentLoop(
   const ai = getGeminiClientOrThrow();
   const { runId, userId, chatId, requestSpec, maxIterations = 10, accessLevel = 'owner' } = options;
 
-  const tools = getToolsForIntent(requestSpec.intent, accessLevel);
+  const writeSse = (event: string, payload: Record<string, unknown>) => {
+    try {
+      const r = res as any;
+      if (r.writableEnded || r.destroyed) return false;
+      res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+      if (typeof r.flush === "function") r.flush();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const sse = {
+    write: (event: string, payload: Record<string, unknown>) => writeSse(event, payload),
+    end: () => {
+      try {
+        const r = res as any;
+        if (!r.writableEnded && !r.destroyed) {
+          res.end();
+        }
+      } catch {
+        // ignore
+      }
+    },
+  };
+
+  const tools = getToolsForIntent(requestSpec.intent, accessLevel, requestSpec.rawMessage || "");
   const toolContext: ToolContext = { userId, chatId, runId };
 
   const artifacts: Array<{ type: string; url: string; name: string }> = [];
@@ -295,6 +409,7 @@ export async function executeAgentLoop(
   let fullResponse = "";
 
   const recentUserText = collectRecentUserText(messages) || requestSpec.rawMessage || "";
+  const isLocalFsRequest = LOCAL_FILESYSTEM_SIGNAL_REGEX.test(recentUserText || requestSpec.rawMessage || "");
 
   // Request understanding brief is best-effort: if the planner LLM is unavailable
   // or the call fails for any reason, we continue without the brief rather than
@@ -444,6 +559,22 @@ MANDATORY RULES:
 8. For reservations, only claim success if a real confirmation page or confirmation code is visible.
 
 DO NOT respond with text. CALL browse_and_act NOW.${reservationHint}`
+    });
+  }
+
+  if (isLocalFsRequest) {
+    const inferredDirectory = inferLocalDirectoryFromPrompt(recentUserText || requestSpec.rawMessage || "");
+    conversationHistory.unshift({
+      role: "system",
+      content: `YOU ARE A LOCAL FILESYSTEM ANALYST.
+You MUST inspect the user's local folders by calling tools, not by asking the user to run commands.
+
+MANDATORY RULES:
+1) Your first action should call "list_files".
+2) If the user did not provide a path, start with directory="${inferredDirectory}".
+3) Use additional list_files calls for key folders when useful (Desktop/Downloads/Documents).
+4) Summarize findings clearly with concrete paths and counts.
+5) NEVER tell the user to run /local or terminal commands manually.`,
     });
   }
 
@@ -716,6 +847,25 @@ DO NOT respond with text. CALL browse_and_act NOW.${reservationHint}`
             conversationHistory.push({
               role: "user",
               content: `IMPORTANT: Do NOT respond with text. You MUST call the "browse_and_act" function right now to open a real browser and complete the task. Call browse_and_act with url="https://www.mesa247.pe" and goal containing all the details from the user's request. Do it NOW.`
+            });
+            textContent = "";
+            fullResponse = "";
+            continue; // retry the iteration
+          }
+
+          const alreadyUsedListFiles = conversationHistory.some((m) =>
+            m.content.includes("[Called tool: list_files]"),
+          );
+          if (isLocalFsRequest && iteration <= 2 && !alreadyUsedListFiles) {
+            const inferredDirectory = inferLocalDirectoryFromPrompt(recentUserText || requestSpec.rawMessage || "");
+            console.log(`[AgentExecutor] local_fs: LLM returned text instead of tool call on iteration ${iteration}, forcing list_files(${inferredDirectory})...`);
+            conversationHistory.push({
+              role: "assistant",
+              content: textContent,
+            });
+            conversationHistory.push({
+              role: "user",
+              content: `IMPORTANT: do not ask the user to run commands. Call list_files now with {"directory":"${inferredDirectory}","maxEntries":200}. After that, summarize findings with concrete paths and counts.`,
             });
             textContent = "";
             fullResponse = "";

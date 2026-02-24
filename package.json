@@ -1,7 +1,7 @@
 {
   "name": "iliagpt",
   "version": "2.1.0",
-  "description": "Plataforma de IA Aut\u00f3noma Desktop V2",
+  "description": "Plataforma de IA Autónoma Desktop V2",
   "author": "ILIA",
   "main": "dist-desktop/main.js",
   "type": "module",
@@ -10,7 +10,7 @@
     "lint": "eslint .",
     "daemon": "node --import tsx server/daemon/desktopDaemon.ts",
     "dev:client": "vite dev --port 5050",
-    "dev": "node scripts/with-env.cjs NODE_ENV=development -- node --import tsx server/index.ts",
+    "dev": "node scripts/with-env.cjs NODE_ENV=development PORT=5000 -- node --import tsx server/index.ts",
     "dev:desktop": "concurrently \"npm run dev\" \"npm run dev:client\" \"wait-on http://localhost:5050 && electron .\"",
     "build": "node scripts/with-env.cjs NODE_ENV=production -- node --import tsx script/build.ts",
     "build:desktop:mac": "npm run build && tsc -p desktop/tsconfig.json && npx electron-builder --mac",
@@ -23,6 +23,7 @@
     "check": "node scripts/with-env.cjs NODE_OPTIONS=--max-old-space-size=8192 -- tsc",
     "type-check": "node scripts/with-env.cjs NODE_OPTIONS=--max-old-space-size=8192 -- tsc -p tsconfig.ci.json",
     "type-check:app": "node scripts/with-env.cjs NODE_OPTIONS=--max-old-space-size=8192 -- tsc -p tsconfig.ci.json",
+    "prepare": "husky",
     "db:push": "drizzle-kit push",
     "db:ensure-extensions": "node --import tsx scripts/db/ensure-extensions.ts",
     "db:migrate": "drizzle-kit migrate",
@@ -215,6 +216,7 @@
     "fuse.js": "^7.1.0",
     "google-auth-library": "^10.5.0",
     "googleapis": "^148.0.0",
+    "grammy": "^1.40.0",
     "handsontable": "^16.2.0",
     "helmet": "^8.1.0",
     "hpp": "^0.2.3",
@@ -314,6 +316,8 @@
     "zustand": "^5.0.11"
   },
   "devDependencies": {
+    "@commitlint/cli": "^20.4.2",
+    "@commitlint/config-conventional": "^20.4.2",
     "@eslint/js": "^9.39.0",
     "@playwright/test": "^1.58.2",
     "@replit/vite-plugin-cartographer": "^0.4.4",
@@ -435,5 +439,10 @@
       "owner": "Carrerajorge",
       "repo": "Hola"
     }
+  },
+  "lint-staged": {
+    "*.{js,ts,tsx}": [
+      "eslint --fix"
+    ]
   }
 }

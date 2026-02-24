@@ -142,5 +142,121 @@ export const AGENT_TOOLS: FunctionDeclaration[] = [
             },
             required: ["chartType", "data"]
         }
+    },
+    {
+        name: "list_files",
+        description: "List files and directories from workspace or local home directory. Use this for folder/computer analysis tasks.",
+        parameters: {
+            type: "object",
+            properties: {
+                directory: { type: "string", description: "Directory path. Use '~' for home or '~/Desktop' for Desktop." },
+                maxEntries: { type: "number", description: "Maximum entries to return (default 200)." }
+            }
+        }
+    },
+    {
+        name: "read_file",
+        description: "Read a text file from workspace or local home directory.",
+        parameters: {
+            type: "object",
+            properties: {
+                filepath: { type: "string", description: "Path to the file to read." }
+            },
+            required: ["filepath"]
+        }
+    },
+    {
+        name: "memory_search",
+        description: "Search semantic memory from prior sessions and context.",
+        parameters: {
+            type: "object",
+            properties: {
+                query: { type: "string", description: "Search query for memory retrieval." },
+                limit: { type: "number", description: "Maximum results (1-20)." },
+                hybridSearch: { type: "boolean", description: "Use semantic + keyword hybrid search." }
+            },
+            required: ["query"]
+        }
+    },
+    {
+        name: "openclaw_rag_search",
+        description: "Run native OpenClaw/Clawi RAG search over user memory/context.",
+        parameters: {
+            type: "object",
+            properties: {
+                query: { type: "string", description: "Search query." },
+                limit: { type: "number", description: "Maximum results (1-20)." },
+                minScore: { type: "number", description: "Minimum semantic score (0-1)." },
+                chatId: { type: "string", description: "Optional chat scope filter." }
+            },
+            required: ["query"]
+        }
+    },
+    {
+        name: "openclaw_spawn_subagent",
+        description: "Spawn a delegated subagent for parallel/background execution.",
+        parameters: {
+            type: "object",
+            properties: {
+                objective: { type: "string", description: "Objective for the subagent." },
+                planHint: { type: "array", items: { type: "string" }, description: "Optional execution hints." },
+                parentRunId: { type: "string", description: "Optional parent run id." }
+            },
+            required: ["objective"]
+        }
+    },
+    {
+        name: "openclaw_subagent_status",
+        description: "Get the current status/result of a subagent run.",
+        parameters: {
+            type: "object",
+            properties: {
+                runId: { type: "string", description: "Subagent run identifier." }
+            },
+            required: ["runId"]
+        }
+    },
+    {
+        name: "openclaw_subagent_list",
+        description: "List recent subagent runs for this user.",
+        parameters: {
+            type: "object",
+            properties: {
+                parentRunId: { type: "string", description: "Optional parent run filter." },
+                status: { type: "string", description: "Optional status filter." },
+                limit: { type: "number", description: "Maximum items to return." }
+            }
+        }
+    },
+    {
+        name: "openclaw_subagent_cancel",
+        description: "Cancel an in-flight subagent run.",
+        parameters: {
+            type: "object",
+            properties: {
+                runId: { type: "string", description: "Subagent run identifier." }
+            },
+            required: ["runId"]
+        }
+    },
+    {
+        name: "openclaw_clawi_status",
+        description: "Inspect local Clawi/OpenClaw fusion status and capability catalog.",
+        parameters: {
+            type: "object",
+            properties: {}
+        }
+    },
+    {
+        name: "openclaw_clawi_exec",
+        description: "Execute native Clawi/OpenClaw CLI commands locally (no external API).",
+        parameters: {
+            type: "object",
+            properties: {
+                args: { type: "array", items: { type: "string" }, description: "CLI args, e.g. ['--help'] or ['agent','--mode','rpc']." },
+                timeoutMs: { type: "number", description: "Timeout in milliseconds." }
+            },
+            required: ["args"]
+        }
     }
 ];

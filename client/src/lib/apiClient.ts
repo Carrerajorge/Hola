@@ -14,6 +14,66 @@ function resolveSafeUrl(url: string): string {
   return target.toString();
 }
 
+function isLocalHostname(hostname: string): boolean {
+  const host = (hostname || "").toLowerCase();
+  if (host === "localhost" || host === "127.0.0.1") {
+    return true;
+  }
+  const ipv4Match = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!ipv4Match) {
+    return false;
+  }
+  const a = Number(ipv4Match[1]);
+  const b = Number(ipv4Match[2]);
+  if (a === 10) return true;
+  if (a === 127) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 169 && b === 254) return true;
+  return false;
+}
+
+function isLikelyNetworkFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || "");
+  if (error instanceof TypeError) {
+    return true;
+  }
+  return /failed to fetch|networkerror|load failed|request timeout|network request failed/i.test(message);
+}
+
+function buildDevApiFallbackUrls(safeUrl: string): string[] {
+  if (typeof window === "undefined" || !import.meta.env.DEV) {
+    return [];
+  }
+
+  const parsed = new URL(safeUrl);
+  if (!parsed.pathname.startsWith("/api/")) {
+    return [];
+  }
+
+  const current = new URL(window.location.href);
+  if (!isLocalHostname(current.hostname)) {
+    return [];
+  }
+
+  const defaultPort = current.protocol === "https:" ? "443" : "80";
+  const currentPort = current.port || defaultPort;
+  const pathWithQuery = `${parsed.pathname}${parsed.search}`;
+  const ports = ["5000", "5002", "5050"];
+  const hosts = Array.from(new Set([current.hostname, "localhost", "127.0.0.1"]));
+
+  const urls: string[] = [];
+  for (const host of hosts) {
+    for (const port of ports) {
+      if (host === current.hostname && port === currentPort) {
+        continue;
+      }
+      urls.push(`${current.protocol}//${host}:${port}${pathWithQuery}`);
+    }
+  }
+  return urls;
+}
+
 function generateRequestId(): string {
   const now = Date.now().toString(36);
   const random = Math.random().toString(36).slice(2, 10);
@@ -64,27 +124,52 @@ export async function apiFetch(url: string, options: RequestInit & { timeoutMs?:
     headers,
     credentials: "include",
   };
-
-  if (timeoutMs && timeoutMs > 0) {
-    if ('timeout' in AbortSignal) {
-      finalOptions.signal = AbortSignal.timeout(timeoutMs);
-    } else {
-      const controller = new AbortController();
-      setTimeout(() => controller.abort(new Error("Request timeout")), timeoutMs);
-      finalOptions.signal = controller.signal;
+  const fallbackUrls = buildDevApiFallbackUrls(safeUrl);
+  const runFetch = async (targetUrl: string): Promise<Response> => {
+    const fetchPromise = fetch(targetUrl, finalOptions);
+    if (timeoutMs && timeoutMs > 0) {
+      const timeoutPromise = new Promise<Response>((_, reject) => {
+        setTimeout(() => reject(new Error("Request timeout")), timeoutMs);
+      });
+      return Promise.race([fetchPromise, timeoutPromise]);
     }
+    return fetchPromise;
+  };
+
+  try {
+    const primaryResponse = await runFetch(safeUrl);
+    const shouldRetryGatewayResponse =
+      fallbackUrls.length > 0 &&
+      import.meta.env.DEV &&
+      primaryResponse.status >= 500;
+    if (!shouldRetryGatewayResponse) {
+      return primaryResponse;
+    }
+
+    for (const fallbackUrl of fallbackUrls) {
+      try {
+        return await runFetch(fallbackUrl);
+      } catch {
+        // Continue trying fallback candidates.
+      }
+    }
+
+    return primaryResponse;
+  } catch (primaryError) {
+    if (!isLikelyNetworkFailure(primaryError) || fallbackUrls.length === 0) {
+      throw primaryError;
+    }
+
+    let lastError: unknown = primaryError;
+    for (const fallbackUrl of fallbackUrls) {
+      try {
+        return await runFetch(fallbackUrl);
+      } catch (fallbackError) {
+        lastError = fallbackError;
+      }
+    }
+    throw lastError;
   }
-
-  const fetchPromise = fetch(safeUrl, finalOptions);
-
-  if (timeoutMs && timeoutMs > 0) {
-    const timeoutPromise = new Promise<Response>((_, reject) => {
-      setTimeout(() => reject(new Error("Request timeout")), timeoutMs);
-    });
-    return Promise.race([fetchPromise, timeoutPromise]);
-  }
-
-  return fetchPromise;
 }
 
 export function getAnonUserIdHeader(): Record<string, string> {

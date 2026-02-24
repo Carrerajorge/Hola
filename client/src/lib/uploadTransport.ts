@@ -1,4 +1,5 @@
 import type { UploadSecurityContract } from "@shared/uploadContracts";
+import { apiFetch } from "@/lib/apiClient";
 
 type UploadHeaders = Record<string, string>;
 
@@ -20,6 +21,27 @@ let uploadSecurityContractCache:
   | { fetchedAt: number; csrfRequired: boolean }
   | null = null;
 let uploadSecurityContractInFlight: Promise<{ fetchedAt: number; csrfRequired: boolean } | null> | null = null;
+
+export function resolveUploadUrlForResponse(uploadUrl: string, responseUrl?: string): string {
+  if (!uploadUrl || !responseUrl || typeof window === "undefined") {
+    return uploadUrl;
+  }
+
+  const isAbsolute = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(uploadUrl);
+  if (isAbsolute) {
+    return uploadUrl;
+  }
+
+  try {
+    const responseOrigin = new URL(responseUrl, window.location.href).origin;
+    if (!responseOrigin || responseOrigin === window.location.origin) {
+      return uploadUrl;
+    }
+    return new URL(uploadUrl, responseOrigin).toString();
+  } catch {
+    return uploadUrl;
+  }
+}
 
 function isToken(value: unknown): value is string {
   return typeof value === "string" && CSRF_TOKEN_PATTERN.test(value);
@@ -115,9 +137,8 @@ async function fetchUploadSecurityContract(): Promise<{ fetchedAt: number; csrfR
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
     try {
-      const response = await fetch("/api/objects/security-contract", {
+      const response = await apiFetch("/api/objects/security-contract", {
         method: "GET",
-        credentials: "include",
         cache: "no-store",
         signal: controller.signal,
       });
@@ -176,9 +197,8 @@ export async function ensureCsrfToken(): Promise<void> {
             abortController.abort(new DOMException("CSRF refresh timeout", "TimeoutError"));
           }, CSRF_REFRESH_TIMEOUT_MS);
           try {
-            const response = await fetch("/api/csrf/token?rotate=1", {
+            const response = await apiFetch("/api/csrf/token?rotate=1", {
               method: "GET",
-              credentials: "include",
               cache: "no-store",
               signal: abortController.signal,
             });

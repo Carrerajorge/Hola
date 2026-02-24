@@ -2,6 +2,7 @@ import { toolRegistry } from '../../agent/toolRegistry';
 import type { OpenClawConfig } from '../config';
 import { createExecTool } from './execTool';
 import { createFsTools } from './fsTool';
+import { createAgenticTools } from './agenticTools';
 import { ToolPolicyEngine } from './toolPolicies';
 import { Logger } from '../../lib/logger';
 
@@ -24,5 +25,12 @@ export function registerOpenClawTools(config: OpenClawConfig): void {
     Logger.info(`[OpenClaw:Tools] Registered tool: ${tool.name}`);
   }
 
-  Logger.info(`[OpenClaw:Tools] ${1 + fsTools.length} tools registered`);
+  // Register agentic tools (subagents + RAG bridge)
+  const agenticTools = createAgenticTools();
+  for (const tool of agenticTools) {
+    toolRegistry.register(tool);
+    Logger.info(`[OpenClaw:Tools] Registered tool: ${tool.name}`);
+  }
+
+  Logger.info(`[OpenClaw:Tools] ${1 + fsTools.length + agenticTools.length} tools registered`);
 }

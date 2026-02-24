@@ -1,4 +1,6 @@
 import { Logger } from "../lib/logger";
+import { storage } from "../storage";
+import { type InsertAuditLog } from "@shared/schema";
 
 export enum AuditAction {
     USER_LOGIN = "USER_LOGIN",
@@ -43,9 +45,16 @@ export class AuditService {
         // Log to standard security logger (which redacts sensitive info)
         Logger.security(`[Audit] ${action} by ${userId}`, entry);
 
-        // NOTE: For production environments, consider augmenting with:
-        // - External audit service (AWS CloudTrail, Datadog Audit, etc.)
-        // - Tamper-proof database table with immutable writes
-        // Current implementation: Structured logging ensures ingestion by observability stack
+        // Save immutably to Database
+        storage.createAuditLog({
+            userId: userId === "system" ? null : userId,
+            action,
+            resource: "system",
+            details,
+            ipAddress: req?.ip,
+            userAgent: req?.headers?.["user-agent"],
+        }).catch(err => {
+            console.error(`[AuditService] Failed to persist audit log:`, err);
+        });
     }
 }

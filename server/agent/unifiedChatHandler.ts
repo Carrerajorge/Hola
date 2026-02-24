@@ -4,6 +4,7 @@ import { eq, and, desc } from "drizzle-orm";
 import { agentEventBus } from "./eventBus";
 import { createRequestSpec, detectIntent, AttachmentSpecSchema, SessionStateSchema, RequestSpecSchema } from "./requestSpec";
 import type { z } from "zod";
+import { AgentTask } from "./contracts";
 
 type RequestSpec = z.infer<typeof RequestSpecSchema>;
 type AttachmentSpec = z.infer<typeof AttachmentSpecSchema>;
@@ -15,6 +16,8 @@ import { llmGateway } from "../lib/llmGateway";
 import type { TraceEventType } from "@shared/schema";
 import { executeAgentLoop } from "./agentExecutor";
 import { agentManager } from "./agentOrchestrator";
+import { routeAgentRequest } from "./agentRouter";
+import { buildNativeAgenticFusion, hasNativeAgenticSignal } from "./nativeAgenticFusion";
 
 // ============================================================================
 // Latency Mode types
@@ -31,6 +34,7 @@ export interface UnifiedChatRequest {
   sessionState?: SessionState;
   latencyMode?: LatencyMode;
   accessLevel?: 'owner' | 'trusted' | 'unknown';
+  agentTask?: AgentTask; // Opcional: inyección estricta del contrato de tarea
 }
 
 export interface UnifiedChatContext {
@@ -41,6 +45,7 @@ export interface UnifiedChatContext {
   latencyMode: LatencyMode;
   resolvedLane: 'fast' | 'deep';
   accessLevel: 'owner' | 'trusted' | 'unknown';
+  agentTask?: AgentTask;
 }
 
 // ============================================================================
@@ -347,85 +352,38 @@ export async function createUnifiedRun(
   const isUuid = (value?: string) => !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
   const normalizedMessageId = isUuid(request.messageId) ? request.messageId : undefined;
 
-  // ── Intent Analysis: regex fast-path + LLM escalation for ambiguous cases ──
-  // Done in a best-effort way; on any error we fall back to regex-only detectIntent().
-  let analysisResult: import("./intentAnalysis").IntentAnalysisResult | null = null;
-  try {
-    const { analyzeIntent } = await import("./intentAnalysis");
-    analysisResult = await analyzeIntent({
-      rawMessage: lastUserMessage,
-      attachments: request.attachments,
-      sessionState,
-      conversationHistory: request.messages,
-      userId: request.userId,
-      chatId: request.chatId,
-      generateBrief: false,
-    });
-    console.log(
-      `[UnifiedChat] Intent analysis: ${analysisResult.source} -> ${analysisResult.intent} (${analysisResult.confidence.toFixed(2)}) [${analysisResult.latencyMs.toFixed(0)}ms]`,
-    );
-  } catch (err) {
-    console.error("[UnifiedChat] Intent analysis failed, falling back to regex-only:", (err as Error).message);
-  }
-
-  const requestSpec = createRequestSpec({
-    chatId: request.chatId,
-    messageId: normalizedMessageId,
-    userId: request.userId,
+  const requestSpec = await routeAgentRequest({
     rawMessage: lastUserMessage,
     attachments: request.attachments,
     sessionState,
-    intentOverride: analysisResult?.intent,
-    confidenceOverride: analysisResult?.confidence,
+    conversationHistory: request.messages,
+    userId: request.userId,
+    chatId: request.chatId,
+    messageId: normalizedMessageId,
   });
-
-  // ── Reservation follow-up detection ────────────────────────────────
-  // When the user provides contact details in a follow-up message after
-  // our reservation clarification, the current message alone may not match
-  // web_automation patterns. Detect the previous assistant asking for
-  // reservation details and override the intent.
-  if (requestSpec.intent !== "web_automation") {
-    const lastAssistantMsg =
-      [...request.messages].reverse().find((m) => m.role === "assistant")?.content || "";
-    const isReservationFollowUp =
-      /para completar la reserva/i.test(lastAssistantMsg) ||
-      /datos detectados.*restaurante/is.test(lastAssistantMsg) ||
-      /necesito estos datos/i.test(lastAssistantMsg);
-    if (isReservationFollowUp) {
-      const hasContactInfo =
-        /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/.test(lastUserMessage) ||
-        /\b\d{6,15}\b/.test(lastUserMessage) ||
-        /\b(nombre|name|llamo|soy)\b/i.test(lastUserMessage) ||
-        /\b(tel[eé]fono|phone|cel|movil|móvil|whatsapp)\b/i.test(lastUserMessage);
-      if (hasContactInfo) {
-        console.log(
-          `[UnifiedChat] Reservation follow-up detected - overriding intent from "${requestSpec.intent}" to "web_automation"`,
-        );
-        (requestSpec as any).intent = "web_automation";
-        (requestSpec as any).intentConfidence = 0.9;
-        (requestSpec as any).primaryAgent = "browser";
-        (requestSpec as any).targetAgents = ["browser", "research"];
-      }
-    }
-  }
 
   const runId = request.runId || randomUUID();
 
   const latencyMode: LatencyMode = request.latencyMode || 'auto';
 
   const hasAttachments = !!(request.attachments && request.attachments.length > 0);
+  const hasAgenticSignal = hasNativeAgenticSignal(lastUserMessage);
   const isAgenticMode: boolean =
     latencyMode !== 'fast' && (
       requestSpec.intent !== 'chat' ||
       requestSpec.intentConfidence > 0.7 ||
-      hasAttachments
+      hasAttachments ||
+      hasAgenticSignal
     );
 
-  const resolvedLane = resolveLatencyLane(
+  let resolvedLane = resolveLatencyLane(
     latencyMode,
     requestSpec,
     hasAttachments,
   );
+  if (latencyMode === "auto" && hasAgenticSignal) {
+    resolvedLane = "deep";
+  }
 
   try {
     // Ensure the chat exists before persisting agent runs (FK: agent_mode_runs.chat_id -> chats.id).
@@ -449,16 +407,19 @@ export async function createUnifiedRun(
     console.error('[UnifiedChat] Failed to persist run:', error);
   }
 
-  console.log(`[UnifiedChat] Created run ${runId} - intent: ${requestSpec.intent}, agentic: ${isAgenticMode}, lane: ${resolvedLane}`);
+  console.log(
+    `[UnifiedChat] Created run ${runId} - intent: ${requestSpec.intent}, agentic: ${isAgenticMode}, lane: ${resolvedLane}, nativeSignal: ${hasAgenticSignal}`,
+  );
 
   return {
     requestSpec,
     runId,
     startTime,
     isAgenticMode,
-    latencyMode,
+    latencyMode: resolvedLane,
     resolvedLane,
     accessLevel: request.accessLevel || 'owner',
+    agentTask: request.agentTask,
   };
 }
 
@@ -586,7 +547,28 @@ export async function executeUnifiedChat(
   let activeWriter: SseBufferedWriter | null = null;
 
   try {
-    const systemContent = options.systemPrompt || buildSystemPrompt(requestSpec);
+    const nativeFusion = await buildNativeAgenticFusion({
+      userId: request.userId,
+      chatId: request.chatId,
+      message: lastUserMessage,
+    });
+    if (nativeFusion.appliedModules.length > 0) {
+      writeSse(res, "thinking", {
+        step: "native_agentic_fusion",
+        message: `Fusion nativa activa: ${nativeFusion.appliedModules.join(", ")}`,
+        runId,
+        timestamp: Date.now(),
+      });
+
+      await emitTraceEvent(runId, "thinking", {
+        content: "Native agentic fusion context attached",
+        phase: "fusion",
+        modules: nativeFusion.appliedModules,
+      });
+    }
+
+    const systemContent =
+      (options.systemPrompt || buildSystemPrompt(requestSpec)) + nativeFusion.promptAddendum;
 
     // In fast lane, cap maxTokens for quick responses
     const fastLaneMaxTokens = resolvedLane === 'fast' ? 400 : undefined;

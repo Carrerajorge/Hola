@@ -31,7 +31,7 @@ describe('Tool Adapter', () => {
     };
     registerOpenClawTools(config);
 
-    // Should have registered exec + 4 fs tools = 5 tools
+    // Should have registered exec + fs tools + agentic tools
     expect((toolRegistry.register as any).mock.calls.length).toBeGreaterThanOrEqual(5);
   });
 
@@ -44,5 +44,7 @@ describe('Tool Adapter', () => {
     expect(registeredNames).toContain('openclaw_write');
     expect(registeredNames).toContain('openclaw_edit');
     expect(registeredNames).toContain('openclaw_list');
+    expect(registeredNames).toContain('openclaw_spawn_subagent');
+    expect(registeredNames).toContain('openclaw_rag_search');
   });
 });

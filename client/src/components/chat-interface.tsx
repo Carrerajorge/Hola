@@ -5,7 +5,7 @@ import { useStreamingTransition } from "@/hooks/use-streaming-transition";
 import { useStreamChat } from "@/hooks/use-stream-chat";
 import { apiFetch, getAnonUserIdHeader } from "@/lib/apiClient";
 import { getFileUploader } from "@/lib/fileUploader";
-import { ensureCsrfToken, uploadBlobWithProgress } from "@/lib/uploadTransport";
+import { ensureCsrfToken, resolveUploadUrlForResponse, uploadBlobWithProgress } from "@/lib/uploadTransport";
 import { WelcomeAnimation } from "@/components/welcome-animation-simple";
 import { WelcomeExplosion, useFirstVisit } from "@/components/welcome-explosion";
 import {
@@ -3075,8 +3075,9 @@ export function ChatInterface({
           }
           const { uploadURL, storagePath } = urlData || {};
           if (!uploadURL || !storagePath) throw new Error("No upload URL received");
+          const effectiveUploadUrl = resolveUploadUrlForResponse(uploadURL, urlRes.url);
 
-          await retryUpload(() => uploadBlobWithProgress(uploadURL, file, undefined, {
+          await retryUpload(() => uploadBlobWithProgress(effectiveUploadUrl, file, undefined, {
             timeoutMs: 120000,
             skipContentType: true,
           }));
@@ -7186,54 +7187,66 @@ IMPORTANTE:
                   </div>
                 ) : (
                   /* Welcome Screen */
-                  <>
+                  <div className="relative w-full max-w-4xl flex flex-col items-center justify-center pt-8 pb-12">
+                    {/* Ambient Glow */}
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[400px] bg-gradient-to-br from-blue-500/10 via-purple-500/10 to-pink-500/10 blur-[100px] rounded-full pointer-events-none" />
+                    
                     <motion.div
-                      initial={{ scale: 0.8, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      transition={{ duration: 0.5, ease: "easeOut" }}
-                      className="mb-8"
+                      initial={{ scale: 0.9, opacity: 0, y: 10 }}
+                      animate={{ scale: 1, opacity: 1, y: 0 }}
+                      transition={{ type: "spring", stiffness: 200, damping: 20 }}
+                      className="mb-8 relative z-10"
                     >
                       {activeGpt?.avatar ? (
-                        <AvatarWithFallback
-                          src={activeGpt.avatar}
-                          alt={activeGpt.name}
-                          fallback={<Bot className="h-10 w-10 text-white" />}
-                        />
+                        <div className="relative group">
+                          <div className="absolute -inset-1 bg-gradient-to-r from-blue-500 to-purple-500 rounded-[28px] blur opacity-25 group-hover:opacity-60 transition duration-500"></div>
+                          <AvatarWithFallback
+                            src={activeGpt.avatar}
+                            alt={activeGpt.name}
+                            fallback={<Bot className="h-10 w-10 text-white" />}
+                          />
+                        </div>
                       ) : (
-                        <IliaGPTLogo size={80} />
+                        <div className="relative group p-1 flex items-center justify-center">
+                          <div className="absolute -inset-3 bg-gradient-to-r from-blue-500/30 via-purple-500/30 to-pink-500/30 rounded-full blur-xl opacity-0 group-hover:opacity-100 transition duration-700"></div>
+                          <IliaGPTLogo size={88} className="drop-shadow-xl" />
+                        </div>
                       )}
                     </motion.div>
+
                     <motion.h1
                       initial={{ y: 20, opacity: 0 }}
                       animate={{ y: 0, opacity: 1 }}
-                      transition={{ duration: 0.5, delay: 0.2 }}
-                      className="text-4xl font-bold text-center mb-3 bg-gradient-to-r from-foreground via-foreground/90 to-foreground/70 bg-clip-text"
+                      transition={{ duration: 0.5, delay: 0.1, ease: "easeOut" }}
+                      className="text-4xl sm:text-5xl font-extrabold text-center mb-5 tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-foreground via-foreground/90 to-muted-foreground relative z-10"
                     >
                       {activeGpt ? activeGpt.name : "¿En qué puedo ayudarte?"}
                     </motion.h1>
+
                     <motion.p
                       initial={{ y: 20, opacity: 0 }}
                       animate={{ y: 0, opacity: 1 }}
-                      transition={{ duration: 0.5, delay: 0.3 }}
-                      className="text-muted-foreground text-center max-w-md text-base"
+                      transition={{ duration: 0.5, delay: 0.2, ease: "easeOut" }}
+                      className="text-muted-foreground text-center max-w-lg text-base sm:text-lg mb-10 leading-relaxed relative z-10 font-medium"
                     >
                       {activeGpt
                         ? (activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?")
                         : selectedProject
                           ? (
                             <span>
-                              <span className="font-semibold text-foreground">{selectedProject.name}</span> lista para empezar a chartear con esa carpeta y sirven para organizar conversaciones y proyectos por tema, mantener contexto, usar archivos e instrucciones específicas, y trabajar de forma ordenada sin mezclar información entre distintos objetivos.
+                              <span className="font-semibold text-foreground">{selectedProject.name}</span> lista para empezar a chartear con esta carpeta. Sirven para organizar proyectos, mantener contexto, usar archivos específicos y trabajar de forma ordenada.
                             </span>
                           )
-                          : "Soy ILIAGPT, tu asistente de IA. Puedo responder preguntas, generar documentos, analizar archivos y mucho más."
+                          : "Soy ILIAGPT, tu asistente de IA. Explora capacidades avanzadas como generación de código, diseño, análisis de documentos y control autónomo."
                       }
                     </motion.p>
+
                     {activeGpt?.conversationStarters && activeGpt.conversationStarters.length > 0 && (
                       <motion.div
                         initial={{ y: 20, opacity: 0 }}
                         animate={{ y: 0, opacity: 1 }}
-                        transition={{ duration: 0.5, delay: 0.4 }}
-                        className="flex flex-wrap gap-2 mt-6 justify-center max-w-xl"
+                        transition={{ duration: 0.5, delay: 0.3 }}
+                        className="flex flex-wrap gap-3 justify-center max-w-3xl relative z-10"
                       >
                         {activeGpt.conversationStarters
                           .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
@@ -7241,7 +7254,7 @@ IMPORTANTE:
                             <button
                               key={idx}
                               onClick={() => setInput(starter)}
-                              className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50 transition-colors text-left"
+                              className="px-5 py-3 text-sm border border-border/40 bg-background/60 backdrop-blur-md rounded-2xl hover:bg-muted/80 hover:border-primary/30 hover:shadow-lg transition-all duration-300 text-left font-medium text-foreground/80 hover:text-foreground hover:-translate-y-1 shadow-sm"
                               data-testid={`button-starter-${idx}`}
                             >
                               {starter}
@@ -7249,15 +7262,23 @@ IMPORTANTE:
                           ))}
                       </motion.div>
                     )}
+
                     {/* Show PromptSuggestions when no conversation starters available */}
                     {(!activeGpt?.conversationStarters || activeGpt.conversationStarters.length === 0) && (
-                      <PromptSuggestions
-                        onSelect={(action) => setInput(action)}
-                        hasAttachment={uploadedFiles.length > 0}
-                        className="mt-6 justify-center max-w-xl"
-                      />
+                      <motion.div
+                        initial={{ y: 20, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        transition={{ duration: 0.5, delay: 0.3 }}
+                        className="w-full relative z-10"
+                      >
+                        <PromptSuggestions
+                          onSelect={(action) => setInput(action)}
+                          hasAttachment={uploadedFiles.length > 0}
+                          className="justify-center max-w-3xl mx-auto"
+                        />
+                      </motion.div>
                     )}
-                  </>
+                  </div>
                 )}
               </div>
             )}

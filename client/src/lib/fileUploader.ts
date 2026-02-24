@@ -1,6 +1,6 @@
 import { normalizeFileForUpload } from "@/lib/attachmentIngest";
 import { apiFetch } from "@/lib/apiClient";
-import { ensureCsrfToken, uploadBlobWithProgress } from "@/lib/uploadTransport";
+import { ensureCsrfToken, resolveUploadUrlForResponse, uploadBlobWithProgress } from "@/lib/uploadTransport";
 import type { FileStatusResponse } from "@shared/uploadContracts";
 
 export interface ValidationResult {
@@ -363,7 +363,7 @@ export class ChunkedFileUploader {
     }
 
     // Get upload URL with retry
-    const { uploadURL, storagePath } = await retryWithBackoff(async () => {
+    const { uploadURL, storagePath, responseUrl } = await retryWithBackoff(async () => {
       await ensureCsrfToken();
       const response = await apiFetch('/api/objects/upload', {
         method: 'POST',
@@ -384,12 +384,13 @@ export class ChunkedFileUploader {
       if (!data.uploadURL || !data.storagePath) {
         throw new Error('Server returned invalid upload configuration');
       }
-      return data;
+      return { ...data, responseUrl: response.url };
     }, 2, RETRY_BASE_DELAY_MS, this.abortController?.signal);
+    const effectiveUploadUrl = resolveUploadUrlForResponse(uploadURL, responseUrl);
 
     // Upload file with retry
     await retryWithBackoff(
-      () => uploadBlobWithProgress(uploadURL, file, onProgress, {
+      () => uploadBlobWithProgress(effectiveUploadUrl, file, onProgress, {
         timeoutMs: 90_000,
         skipContentType: true,
       }),
@@ -467,8 +468,9 @@ export class ChunkedFileUploader {
         }
 
         const { signedUrl } = await signResponse.json();
+        const effectiveSignedUrl = resolveUploadUrlForResponse(signedUrl, signResponse.url);
 
-        await uploadBlobWithProgress(signedUrl, chunk, () => {}, {
+        await uploadBlobWithProgress(effectiveSignedUrl, chunk, () => {}, {
           timeoutMs: 90_000,
           skipContentType: true,
         });

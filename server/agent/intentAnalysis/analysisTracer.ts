@@ -9,7 +9,7 @@
 import { Logger } from "../../lib/logger";
 import type { AnalysisState } from "./analysisGraph";
 
-const logger = new Logger("AnalysisTracer");
+const LOG_COMPONENT = "AnalysisTracer";
 
 // Try to load OpenTelemetry (graceful fallback if not configured)
 let tracer: any = null;
@@ -20,7 +20,7 @@ try {
   tracer = otelApi.trace.getTracer("intent-analysis", "1.0.0");
   SpanStatusCode = otelApi.SpanStatusCode;
 } catch {
-  logger.debug("OpenTelemetry not available, tracing disabled");
+  Logger.debug("OpenTelemetry not available, tracing disabled", { component: LOG_COMPONENT });
 }
 
 /**

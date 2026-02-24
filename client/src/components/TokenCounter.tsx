@@ -15,6 +15,8 @@ import {
 
 // Model pricing (per 1M tokens)
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+    'llama3-8b': { input: 0.00, output: 0.00 },
+    'mistral': { input: 0.00, output: 0.00 },
     'grok-3': { input: 3.00, output: 15.00 },
     'grok-3-fast': { input: 5.00, output: 15.00 },
     'grok-3-mini': { input: 0.30, output: 0.50 },

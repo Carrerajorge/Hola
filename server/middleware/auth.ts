@@ -5,6 +5,14 @@ import { getSecureUserId } from "../lib/anonUserHelper";
 import { is2FAEnabled } from "../services/twoFactorAuth";
 import { getSettingValue } from "../services/settingsConfigService";
 
+export function requireAuth(req: Request, res: Response, next: NextFunction) {
+    const userId = getSecureUserId(req);
+    if (!userId || String(userId).startsWith("anon_")) {
+        return res.status(401).json({ error: "Unauthorized" });
+    }
+    next();
+}
+
 /**
  * Middleware to require 2FA verification for accessing sensitive routes.
  * If the user has 2FA enabled in the database, they must have a valid 2FA session.
@@ -59,18 +67,6 @@ export async function require2FA(req: Request, res: Response, next: NextFunction
         console.error("[AuthMiddleware] 2FA check error:", error);
         res.status(500).json({ error: "Internal Server Error during security check" });
     }
-}
-
-/**
- * Basic authentication middleware — rejects unauthenticated / anonymous users.
- * Used by feature routers (finops, SRE, etc.) that require a logged-in user.
- */
-export function requireAuth(req: Request, res: Response, next: NextFunction) {
-    const userId = getSecureUserId(req);
-    if (!userId || String(userId).startsWith("anon_")) {
-        return res.status(401).json({ error: "Unauthorized" });
-    }
-    next();
 }
 
 export type RBACRole = "USER" | "MOD" | "ADMIN" | "SYSTEM_AGENT";

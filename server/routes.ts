@@ -838,7 +838,7 @@ export async function registerRoutes(
 
   app.use("/api/workflows", createWorkflowRouter());
 
-  // ===== OpenClaw 500 Capabilities Verification =====
+  // OpenClaw runtime capabilities are fused directly into the native agent pipeline.
   app.use("/api/openclaw", openClawRouter);
 
   // ===== Run Detail Endpoints =====

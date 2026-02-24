@@ -66,6 +66,26 @@ describe('RPC Handlers', () => {
     expect(res.payload).toHaveProperty('skills');
   });
 
+  it('handles skills.prompt', async () => {
+    const res = await handleRpc(
+      { type: 'req', id: 'r4b', method: 'skills.prompt', params: { skillIds: [] } },
+      { userId: 'test' },
+    );
+    expect(res.ok).toBe(true);
+    expect(res.payload).toHaveProperty('prompt');
+    expect(res.payload).toHaveProperty('tools');
+  });
+
+  it('handles subagents.list', async () => {
+    const res = await handleRpc(
+      { type: 'req', id: 'r4c', method: 'subagents.list' },
+      { userId: 'test' },
+    );
+    expect(res.ok).toBe(true);
+    expect(res.payload).toHaveProperty('runs');
+    expect(Array.isArray(res.payload.runs)).toBe(true);
+  });
+
   it('returns error for unknown methods', async () => {
     const res = await handleRpc(
       { type: 'req', id: 'r5', method: 'nonexistent' },
@@ -78,6 +98,42 @@ describe('RPC Handlers', () => {
   it('handles tools.invoke with missing params', async () => {
     const res = await handleRpc(
       { type: 'req', id: 'r6', method: 'tools.invoke', params: {} },
+      { userId: 'test' },
+    );
+    expect(res.ok).toBe(false);
+    expect(res.error.code).toBe('INVALID_PARAMS');
+  });
+
+  it('returns INVALID_PARAMS for subagents.spawn without objective', async () => {
+    const res = await handleRpc(
+      { type: 'req', id: 'r7', method: 'subagents.spawn', params: {} },
+      { userId: 'test' },
+    );
+    expect(res.ok).toBe(false);
+    expect(res.error.code).toBe('INVALID_PARAMS');
+  });
+
+  it('returns NOT_FOUND for missing subagent run', async () => {
+    const res = await handleRpc(
+      { type: 'req', id: 'r8', method: 'subagents.get', params: { runId: 'missing' } },
+      { userId: 'test' },
+    );
+    expect(res.ok).toBe(false);
+    expect(res.error.code).toBe('NOT_FOUND');
+  });
+
+  it('returns INVALID_PARAMS for rag.search without query', async () => {
+    const res = await handleRpc(
+      { type: 'req', id: 'r9', method: 'rag.search', params: {} },
+      { userId: 'test' },
+    );
+    expect(res.ok).toBe(false);
+    expect(res.error.code).toBe('INVALID_PARAMS');
+  });
+
+  it('returns INVALID_PARAMS for orchestrator.run without objective', async () => {
+    const res = await handleRpc(
+      { type: 'req', id: 'r10', method: 'orchestrator.run', params: {} },
       { userId: 'test' },
     );
     expect(res.ok).toBe(false);

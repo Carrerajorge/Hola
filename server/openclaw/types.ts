@@ -85,4 +85,8 @@ export interface Skill {
   prompt: string;
   tools: string[];
   bootstrap?: Record<string, string>;
+  source?: 'builtin' | 'filesystem';
+  filePath?: string;
+  metadata?: Record<string, unknown>;
+  updatedAt?: number;
 }

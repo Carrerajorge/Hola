@@ -2,6 +2,8 @@
  * T21: Security & Rate Limiting (Token Bucket Algorithm)
  * Protege al Daemon hipervisor y al EventBus de saturaciones (Flood / DDoS preventions).
  */
+import type { Request, Response, NextFunction } from "express";
+
 export class RateLimiter {
     private requests = new Map<string, { tokens: number; lastRefill: number }>();
     private REFILL_RATE: number; // tokens per millisecond
@@ -38,50 +40,82 @@ export class RateLimiter {
 
 export const rpcRateLimiter = new RateLimiter(100, 20); // RPC permite alta frecuencia
 export const httpRateLimiter = new RateLimiter(30, 2);  // HTTP (A11y dumps) es estricto
-// Express middleware wrapper — routes use `rateLimiter` as (req, res, next) middleware.
-// Identifies clients by IP and returns 429 when the token bucket is exhausted.
-export function rateLimiter(req: any, res: any, next: any) {
-  const clientId = req.ip || req.connection?.remoteAddress || 'unknown';
-  if (httpRateLimiter.checkLimit(clientId)) {
-    return next();
+
+export function rateLimiter(req: Request, res: Response, next: NextFunction): void {
+  const actor =
+    ((req as any)?.user?.claims?.sub as string | undefined) ||
+    ((req as any)?.user?.id as string | undefined) ||
+    req.ip ||
+    req.socket?.remoteAddress ||
+    "unknown";
+
+  if (!httpRateLimiter.checkLimit(actor)) {
+    res.status(429).json({ message: "Too many requests" });
+    return;
   }
-  return res.status(429).json({ error: 'Too many requests. Please try again later.' });
+  next();
 }
 
-/**
- * Create an Express middleware rate-limiter.
- * Accepts either positional args (capacity, refillRate) for simple use,
- * or an options object { windowMs, maxRequests, keyPrefix, message } for express-rate-limit style.
- */
-export function createCustomRateLimiter(
-  optsOrCapacity: number | { windowMs?: number; maxRequests?: number; keyPrefix?: string; message?: string } = 30,
-  refillRatePerSec = 2
-) {
-  let limiter: RateLimiter;
-  let msg = 'Too many requests. Please try again later.';
+type CustomRateLimiterOptions = {
+  windowMs: number;
+  maxRequests: number;
+  keyPrefix?: string;
+  message?: string;
+};
 
-  if (typeof optsOrCapacity === 'object') {
-    const { maxRequests = 30, windowMs = 60000, message } = optsOrCapacity;
-    // Convert window-based rate to token-bucket refill rate
-    const refillRate = maxRequests / (windowMs / 1000);
-    limiter = new RateLimiter(maxRequests, refillRate);
-    if (message) msg = message;
-  } else {
-    limiter = new RateLimiter(optsOrCapacity, refillRatePerSec);
-  }
+const customRateWindows = new Map<string, { count: number; resetAt: number }>();
 
-  return function rateLimitMiddleware(req: any, res: any, next: any) {
-    const clientId = req.ip || req.connection?.remoteAddress || 'unknown';
-    if (limiter.checkLimit(clientId)) {
-      return next();
+export function createCustomRateLimiter(options: CustomRateLimiterOptions) {
+  const {
+    windowMs,
+    maxRequests,
+    keyPrefix = "rate-limit",
+    message = "Rate limit exceeded",
+  } = options;
+
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const ip = req.ip || req.socket?.remoteAddress || "unknown";
+    const actor =
+      ((req as any)?.user?.claims?.sub as string | undefined) ||
+      ((req as any)?.user?.id as string | undefined) ||
+      ip;
+
+    const key = `${keyPrefix}:${actor}`;
+    const now = Date.now();
+    const current = customRateWindows.get(key);
+
+    if (!current || now >= current.resetAt) {
+      customRateWindows.set(key, {
+        count: 1,
+        resetAt: now + windowMs,
+      });
+      next();
+      return;
     }
-    return res.status(429).json({ error: msg });
+
+    if (current.count >= maxRequests) {
+      const retryAfterSec = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
+      res.setHeader("Retry-After", String(retryAfterSec));
+      res.status(429).json({ error: message });
+      return;
+    }
+
+    current.count += 1;
+    customRateWindows.set(key, current);
+    next();
   };
 }
 
-export function getRateLimitStats() {
+export function getRateLimitStats(): {
+  rpcTrackedClients: number;
+  httpTrackedClients: number;
+  customTrackedKeys: number;
+} {
+  const rpcTrackedClients = (rpcRateLimiter as any)?.requests?.size ?? 0;
+  const httpTrackedClients = (httpRateLimiter as any)?.requests?.size ?? 0;
   return {
-    rpc: { capacity: 100, refillRatePerSec: 20 },
-    http: { capacity: 30, refillRatePerSec: 2 }
+    rpcTrackedClients,
+    httpTrackedClients,
+    customTrackedKeys: customRateWindows.size,
   };
 }

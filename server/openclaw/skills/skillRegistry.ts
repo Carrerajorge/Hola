@@ -7,6 +7,12 @@ export class SkillRegistry {
     this.skills.set(skill.id, skill);
   }
 
+  registerMany(skills: Skill[]): void {
+    for (const skill of skills) {
+      this.register(skill);
+    }
+  }
+
   get(id: string): Skill | undefined {
     return this.skills.get(id);
   }
@@ -39,6 +45,22 @@ export class SkillRegistry {
 
   remove(id: string): boolean {
     return this.skills.delete(id);
+  }
+
+  clear(): void {
+    this.skills.clear();
+  }
+
+  resolve(skillIds?: string[]): { skills: Skill[]; prompt: string; tools: string[] } {
+    const selected = skillIds?.length
+      ? skillIds.map(id => this.skills.get(id)).filter(Boolean) as Skill[]
+      : this.list();
+
+    return {
+      skills: selected,
+      prompt: this.getPromptForSkills(selected.map(s => s.id)),
+      tools: Array.from(new Set(selected.flatMap(s => s.tools || []))),
+    };
   }
 }
 

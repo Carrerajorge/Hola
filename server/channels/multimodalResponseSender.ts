@@ -1,8 +1,10 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { WhatsAppWebManager } from '../integrations/whatsappWeb';
+import { WhatsAppIntegration } from '../integrations/whatsappWeb';
 import { ttsService } from '../services/voiceAudioService';
 import { telegramSendMessage, telegramSendPhoto, telegramSendVoice, telegramSendVideo, telegramSendDocument } from './telegram/telegramApi';
+import { filterContent } from '../services/contentModerationService';
+import { Logger } from '../lib/logger';
 
 export interface AgentOutput {
     text: string;
@@ -17,15 +19,15 @@ export interface AgentOutput {
 }
 
 export interface SendTarget {
-    channel: 'whatsapp_web' | 'whatsapp_cloud' | 'telegram' | 'messenger' | 'wechat';
+    channel: 'whatsapp_web' | 'whatsapp_cloud' | 'telegram' | 'messenger' | 'wechat' | 'slack';
     userId: string;
-    recipientId: string;  // JID para WhatsApp, chat_id para Telegram, etc.
+    recipientId: string;  // JID para WhatsApp, chat_id para Telegram, channel para Slack
+    slackToken?: string;  // Bot token para Slack (si aplica)
 }
 
 export class MultimodalResponseSender {
-    constructor(
-        private whatsappManager: WhatsAppWebManager,
-    ) { }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    constructor(private whatsappManager: any) { }
 
     private async delay(ms: number) {
         return new Promise((resolve) => setTimeout(resolve, ms));
@@ -49,12 +51,30 @@ export class MultimodalResponseSender {
     }
 
     async send(target: SendTarget, output: AgentOutput): Promise<void> {
+        // Moderar contenido antes de enviarlo a cualquier canal
+        const safeText = filterContent(output.text || '', { plan: 'pro', channel: target.channel });
+        if (safeText === null) {
+            Logger.warn('[MultimodalSender] Content blocked by moderation', { channel: target.channel, userId: target.userId });
+            const blockedOutput: AgentOutput = {
+                ...output,
+                text: '⚠️ El contenido de esta respuesta fue bloqueado por las políticas de moderación.',
+                generatedFiles: [],
+                screenshot: undefined,
+            };
+            output = blockedOutput;
+        } else if (safeText !== output.text) {
+            output = { ...output, text: safeText };
+        }
+
         switch (target.channel) {
             case 'whatsapp_web':
                 await this.sendViaWhatsApp(target, output);
                 break;
             case 'telegram':
                 await this.sendViaTelegram(target, output);
+                break;
+            case 'slack':
+                await this.sendViaSlack(target, output);
                 break;
             case 'messenger':
                 await this.sendViaMessenger(target, output);
@@ -199,5 +219,96 @@ export class MultimodalResponseSender {
 
     private async sendViaWeChat(target: SendTarget, output: AgentOutput): Promise<void> {
         console.log('[MultimodalSender] WeChat not fully implemented yet');
+    }
+
+    /** 
+     * Slack: usa la API de Slack Web para enviar mensajes y archivos.
+     * Requiere que el token de bot tenga permisos: chat:write, files:upload
+     */
+    private async sendViaSlack(target: SendTarget, output: AgentOutput): Promise<void> {
+        const token = target.slackToken || process.env.SLACK_BOT_TOKEN;
+        if (!token) {
+            Logger.warn('[MultimodalSender] No Slack bot token configured');
+            return;
+        }
+
+        const channelId = target.recipientId;
+        const baseHeaders = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+        };
+
+        // 1. Enviar texto usando Slack Block Kit
+        if (output.text) {
+            const chunks = this.chunkText(output.text, 3000); // Slack limit: 3001 chars per block
+            for (const chunk of chunks) {
+                await fetch('https://slack.com/api/chat.postMessage', {
+                    method: 'POST',
+                    headers: baseHeaders,
+                    body: JSON.stringify({
+                        channel: channelId,
+                        text: chunk,
+                        blocks: [
+                            { type: 'section', text: { type: 'mrkdwn', text: chunk.slice(0, 3000) } },
+                        ],
+                    }),
+                });
+                await this.delay(300);
+            }
+        }
+
+        // 2. Enviar screenshot
+        if (output.screenshot) {
+            await this.slackUploadFile(token, channelId, output.screenshot, 'screenshot.png', 'image/png', output.screenshotCaption || '📸 Screenshot');
+            await this.delay(300);
+        }
+
+        // 3. Enviar archivos generados
+        if (output.generatedFiles?.length) {
+            for (const file of output.generatedFiles) {
+                try {
+                    const buffer = await fs.readFile(file.path);
+                    await this.slackUploadFile(token, channelId, buffer, file.name, file.mimetype);
+                    await this.delay(500);
+                } catch (err: any) {
+                    Logger.error(`[MultimodalSender] Failed to upload file to Slack: ${file.path}`, err);
+                }
+            }
+        }
+    }
+
+    private async slackUploadFile(
+        token: string,
+        channelId: string,
+        buffer: Buffer,
+        filename: string,
+        mimeType: string,
+        title?: string,
+    ): Promise<void> {
+        // Paso 1: Obtener URL de upload
+        const getUrlRes = await fetch('https://slack.com/api/files.getUploadURLExternal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ filename, length: buffer.length }),
+        });
+        const urlData = await getUrlRes.json() as Record<string, unknown>;
+        if (!urlData.ok) return;
+
+        // Paso 2: Subir el archivo
+        await fetch(urlData.upload_url as string, {
+            method: 'POST',
+            headers: { 'Content-Type': mimeType },
+            body: new Uint8Array(buffer),
+        });
+
+        // Paso 3: Completar el upload y publicar en el canal
+        await fetch('https://slack.com/api/files.completeUploadExternal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({
+                files: [{ id: urlData.file_id, title: title || filename }],
+                channel_id: channelId,
+            }),
+        });
     }
 }

@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
 import { SkillRegistry } from '../skills/skillRegistry';
+import { skillRegistry } from '../skills/skillRegistry';
+import { initSkills } from '../skills/skillLoader';
+import { getOpenClawConfig } from '../config';
 
 describe('Skill Registry', () => {
   it('registers and retrieves skills', () => {
@@ -58,5 +64,51 @@ describe('Skill Registry', () => {
 
     registry.remove('removable');
     expect(registry.get('removable')).toBeUndefined();
+  });
+
+  it('loads SKILL.md files from filesystem and resolves prompt/tools', async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openclaw-skills-'));
+    const skillDir = path.join(tmpRoot, 'my-custom-skill');
+    await fs.mkdir(skillDir, { recursive: true });
+    await fs.writeFile(
+      path.join(skillDir, 'SKILL.md'),
+      `---
+name: my-custom-skill
+description: Custom skill loaded from file
+tools: [openclaw_exec, openclaw_read]
+---
+
+# My Custom Skill
+
+Use this for local workflow automation.`,
+      'utf-8',
+    );
+
+    const baseConfig = getOpenClawConfig();
+    await initSkills({
+      ...baseConfig,
+      skills: {
+        ...baseConfig.skills,
+        enabled: true,
+        includeBuiltins: false,
+        autoImportClawi: false,
+        directory: tmpRoot,
+        extraDirectories: [],
+        workspaceDirectory: tmpRoot,
+      },
+    });
+
+    const loaded = skillRegistry.get('my-custom-skill');
+    expect(loaded).toBeTruthy();
+    expect(loaded?.source).toBe('filesystem');
+    expect(loaded?.tools).toEqual(['openclaw_exec', 'openclaw_read']);
+
+    const resolved = skillRegistry.resolve(['my-custom-skill']);
+    expect(resolved.prompt).toContain('local workflow automation');
+    expect(resolved.tools).toContain('openclaw_exec');
+    expect(resolved.tools).toContain('openclaw_read');
+
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+    skillRegistry.clear();
   });
 });
