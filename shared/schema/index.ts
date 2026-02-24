@@ -4,6 +4,7 @@ export * from "./common"; export * from "./auth"; export * from "./admin"; expor
     from "./billingCredits"; export * from "./rag"; export * from "./packageManager"; export * from "./telemetry";
 export * from "./iam";
 export * from "./finops";
+export * from "./agentOrchestration";
 // Selective re-exports from schema.bak — only symbols NOT already defined in individual schema files.
 // schema.bak.ts is the legacy monolithic schema; these tables/types haven't been migrated yet.
 export {
