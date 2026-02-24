@@ -1,6 +1,4 @@
-import { JSDOM } from "jsdom";
-import { Readability } from "@mozilla/readability";
-import { HTTP_HEADERS, TIMEOUTS, LIMITS } from "../lib/constants";
+import { JSDOM } from "jsdom"; import { Readability } from "@mozilla/readability"; import { HTTP_HEADERS, TIMEOUTS, LIMITS } from "../lib/constants";
 
 export interface SearchResult {
   title: string;
@@ -279,6 +277,7 @@ function sanitizeWebQuery(raw: string): string {
   if (!raw || typeof raw !== "string") return "";
   let q = raw;
   q = q.replace(/<[^>]*>/g, "");
+  // eslint-disable-next-line no-control-regex 
   q = q.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
   q = q.normalize("NFC");
   q = q.replace(/\s+/g, " ").trim();
@@ -448,7 +447,9 @@ export async function searchWeb(query: string, maxResults: number = LIMITS.MAX_S
           publishedDate: page.publishedDate
         });
       }
-    } catch { }
+    } catch {
+      // intentionally ignored (best-effort)
+    }
   });
 
   // Phase 2: Fetch metadata-only for remaining results (fast, for UI enrichment)
@@ -471,7 +472,9 @@ export async function searchWeb(query: string, maxResults: number = LIMITS.MAX_S
           publishedDate: metadata.publishedDate
         });
       }
-    } catch { }
+    } catch { 
+      // intentionally ignored (best-effort)
+    }
   });
 
   // Race all fetches against timeout

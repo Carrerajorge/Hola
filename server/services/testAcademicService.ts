@@ -1,4 +1,4 @@
-
+import fs from "node:fs";
 import { academicSearchService } from "./academicSearchService";
 
 async function test() {
@@ -11,8 +11,6 @@ async function test() {
         console.log("File Path:", result.filePath);
 
         // Check if file exists
-        // import fs
-        const fs = require('fs');
         if (fs.existsSync(result.filePath)) {
             console.log("File created successfully.");
             // console.log(fs.readFileSync(result.filePath, 'utf-8').substring(0, 200) + "...");
