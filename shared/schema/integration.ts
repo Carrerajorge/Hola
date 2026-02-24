@@ -184,3 +184,37 @@ export const insertConnectorUsageHourlySchema = createInsertSchema(connectorUsag
 
 export type InsertConnectorUsageHourly = z.infer<typeof insertConnectorUsageHourlySchema>;
 export type ConnectorUsageHourly = typeof connectorUsageHourly.$inferSelect;
+
+// =============================================================================
+// Tool Call Logs — migrated from schema.bak.ts
+// =============================================================================
+
+export const toolCallLogs = pgTable("tool_call_logs", {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").references(() => users.id),
+    chatId: varchar("chat_id"),
+    runId: varchar("run_id"),
+    toolId: varchar("tool_id").notNull(),
+    providerId: varchar("provider_id").notNull(),
+    accountId: varchar("account_id").references(() => integrationAccounts.id),
+    inputRedacted: jsonb("input_redacted"),
+    outputRedacted: jsonb("output_redacted"),
+    status: text("status").notNull(),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    latencyMs: integer("latency_ms"),
+    idempotencyKey: text("idempotency_key"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table: any) => [
+    index("tool_call_logs_user_id_idx").on(table.userId),
+    index("tool_call_logs_tool_id_idx").on(table.toolId),
+    index("tool_call_logs_created_at_idx").on(table.createdAt),
+    index("tool_call_logs_run_created_idx").on(table.runId, table.createdAt),
+]);
+
+export const insertToolCallLogSchema = createInsertSchema(toolCallLogs).omit({
+    id: true,
+    createdAt: true,
+});
+export type InsertToolCallLog = z.infer<typeof insertToolCallLogSchema>;
+export type ToolCallLog = typeof toolCallLogs.$inferSelect;
