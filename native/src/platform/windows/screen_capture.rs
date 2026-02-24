@@ -24,7 +24,7 @@ pub fn capture_screen() -> Result<Buffer> {
             return Err(Error::new(Status::GenericFailure, "Invalid screen metrics".to_string()));
         }
 
-        let hdc_screen = GetDC(HWND(std::ptr::null_mut()));
+        let hdc_screen = GetDC(HWND(0 as isize));
         let hdc_mem = CreateCompatibleDC(hdc_screen);
         let hbm_screen = CreateCompatibleBitmap(hdc_screen, width, height);
 
@@ -67,8 +67,7 @@ pub fn capture_screen() -> Result<Buffer> {
         // Libera Handles de GDI de Inmediato
         SelectObject(hdc_mem, hbm_old);
         DeleteObject(hbm_screen);
-        DeleteDC(hdc_mem);
-        ReleaseDC(HWND(std::ptr::null_mut()), hdc_screen);
+        let _ = ReleaseDC(HWND(0 as isize), hdc_screen);
 
         if res == 0 {
             return Err(Error::new(Status::GenericFailure, "GetDIBits falló".to_string()));

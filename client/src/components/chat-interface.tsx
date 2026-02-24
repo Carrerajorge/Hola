@@ -3162,9 +3162,22 @@ export function ChatInterface({
             prev.map((f: any) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, spreadsheetData } : f)
           );
 
-          // Await polling so pendingUploadsRef tracks the full lifecycle
-          // (upload + processing → ready/error) instead of resolving prematurely.
-          await pollFileStatusFast(registeredFile.id, tempId);
+          // FAST PATH for images: The client already has the dataUrl preview, and the server marks
+          // images as 'ready' via a fire-and-forget processFileAsync call. There is a race condition
+          // where the client polls before processFileAsync finishes updating the DB. For images,
+          // skip the server poll — mark as ready immediately so attachments work without delay.
+          if (isImage) {
+            setUploadedFiles((prev: any[]) =>
+              prev.map((f: any) => (f.id === registeredFile.id || f.id === tempId
+                ? { ...f, id: registeredFile.id, status: "ready" }
+                : f))
+            );
+          } else {
+            // Start content polling in background. Upload is already persisted and sendable.
+            void pollFileStatusFast(registeredFile.id, tempId).catch((pollError) => {
+              console.warn("Background file status polling failed:", pollError);
+            });
+          }
 
           if (isAnalyzableFile(file.name) && !isExcel) {
             triggerDocumentAnalysis(registeredFile.id, file.name, (analysisId) => {
@@ -3173,6 +3186,7 @@ export function ChatInterface({
               );
             });
           }
+
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           console.error("File upload error:", error);
@@ -3305,6 +3319,34 @@ export function ChatInterface({
         cleanup();
         pollFileStatusFastPolling(fileId, trackingId).then(resolve);
       };
+
+      // AGGRESSIVE SPEED OPTIMIZATION: Check immediately to skip the 2s WS wait if the backend fast-paths the 'ready' state.
+      // We parse the JSON body here so we can directly transition the file to 'ready' without an extra round-trip.
+      apiFetch(`/api/files/${fileId}/content`, { timeoutMs: 5000 }).then(async contentRes => {
+        if (settled) return;
+        try {
+          if (contentRes.status === 200) {
+            const contentData = await contentRes.json().catch(() => null);
+            if (contentData?.status === "ready") {
+              setUploadedFiles((prev: UploadedFile[]) =>
+                prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId
+                  ? { ...f, id: fileId, status: "ready", content: contentData.content }
+                  : f))
+              );
+              done();
+              return;
+            }
+            // File exists but not flagged 'ready' yet — hand off to polling
+            fallback();
+          } else if (contentRes.status !== 202) {
+            // Non-202 non-200 is an error state
+            fallback();
+          }
+          // 202 = still processing, let WS/polling handle it
+        } catch {
+          // ignore parse error, let WS/polling handle it
+        }
+      }).catch(() => { });
 
       // Periodic safety poll every 2 seconds in case WS event drops
       const safetyPollInterval = setInterval(async () => {
@@ -3702,6 +3744,22 @@ export function ChatInterface({
     return (bytes / (1024 * 1024)).toFixed(1) + " MB";
   };
 
+  const isFileUploadBlockingSend = (file: UploadedFile): boolean => {
+    const status = (file?.status || "").toLowerCase();
+    if (status === "error") return false;
+    if (status === "uploading") return true;
+    if (status !== "processing") return false;
+    const hasStableFileId =
+      typeof file.id === "string" &&
+      file.id.length > 0 &&
+      !file.id.startsWith("temp-");
+    const hasStoragePath =
+      typeof file.storagePath === "string" &&
+      file.storagePath.trim().length > 0;
+    // "processing" is sendable once the file is persisted.
+    return !hasStableFileId && !hasStoragePath;
+  };
+
   const adjustTextareaHeight = () => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
@@ -3820,15 +3878,42 @@ export function ChatInterface({
         chatLogger.debug("handleSubmit called", { inputLength: input.length, selectedTool });
       }
 
-      // Allow submit if: there's input text, OR there are files, OR there's selected doc text with instruction
+      // Allow submit if: there's input text, OR there are sendable files, OR there's selected doc text with instruction
       const hasInput = input.trim().length > 0;
-      const hasFiles = uploadedFilesRef.current.length > 0;
+      const filesAtSubmit = [...uploadedFilesRef.current];
+      const failedFilesAtSubmit = filesAtSubmit.filter((f: UploadedFile) => f?.status === "error");
+      const attachableFilesAtSubmit = filesAtSubmit.filter((f: UploadedFile) => f?.status !== "error");
+      const blockingFilesAtSubmit = attachableFilesAtSubmit.filter(isFileUploadBlockingSend);
+      const hasFiles = attachableFilesAtSubmit.length > 0;
       const hasSelectionWithInstruction = selectedDocText && input.trim();
 
       if (import.meta.env.DEV) {
-        chatLogger.debug("handleSubmit content check", { hasInput, hasFiles });
+        chatLogger.debug("handleSubmit content check", {
+          hasInput,
+          hasFiles,
+          totalFiles: filesAtSubmit.length,
+          attachableFiles: attachableFilesAtSubmit.length,
+          failedFiles: failedFilesAtSubmit.length,
+          blockingFiles: blockingFilesAtSubmit.length,
+        });
+      }
+      if (blockingFilesAtSubmit.length > 0) {
+        toast({
+          title: "Subida en progreso",
+          description: "Espera un momento a que termine la carga del archivo para enviarlo.",
+          duration: 3000,
+        });
+        return;
       }
       if (!hasInput && !hasFiles && !hasSelectionWithInstruction) {
+        if (failedFilesAtSubmit.length > 0) {
+          toast({
+            title: "No se pudo adjuntar el archivo",
+            description: "La carga falló. Elimina el archivo y vuelve a subirlo para enviarlo.",
+            variant: "destructive",
+            duration: 4000,
+          });
+        }
         if (import.meta.env.DEV) {
           chatLogger.debug("handleSubmit no content, returning");
         }
@@ -5144,7 +5229,7 @@ export function ChatInterface({
       let currentUploadedFiles = [...uploadedFilesRef.current];
       const userMsgId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const hasUnsettledUploadsAtSubmit = currentUploadedFiles.some(
-        (f: any) => f?.status === "uploading" || f?.status === "processing"
+        (f: UploadedFile) => isFileUploadBlockingSend(f)
       );
       const hadPendingUploadsAtSubmit =
         pendingUploadsRef.current.size > 0 || hasUnsettledUploadsAtSubmit;
@@ -5157,8 +5242,16 @@ export function ChatInterface({
       // If uploads are still in flight, don't clear the composer file list yet or we lose upload progress updates.
       // We'll clear once uploads settle (after optimistic message is already on screen).
       if (!hadPendingUploadsAtSubmit) {
-        // Clear successful uploads immediately; keep only errored ones so user can retry/remove them.
-        setUploadedFiles(failedUploadsAtSubmit);
+        // Clear all files from composer immediately after send to avoid stuck attachments.
+        setUploadedFiles([]);
+        if (failedUploadsAtSubmit.length > 0) {
+          toast({
+            title: "Archivo no adjuntado",
+            description: `${failedUploadsAtSubmit.length} archivo(s) fallaron al subir y no se incluyeron en el mensaje.`,
+            variant: "destructive",
+            duration: 4500,
+          });
+        }
       }
 
       // Process attachments for message construction
@@ -5273,7 +5366,7 @@ export function ChatInterface({
         hasDocumentAttachments = attachments.some((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
         documentAttachmentsForAnalysis = attachments.filter((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
       } else {
-        // If there were no pending uploads at submit, we already cleared them from the UI (lines ~4746).
+        // If there were no pending uploads at submit, files are already cleared from the UI.
         // Update savedMainFiles to empty so if standard chat streaming 
         // fails later, we don't accidentally restore files.
         savedMainFiles = [];
@@ -6905,7 +6998,7 @@ IMPORTANTE:
                   selectedDocText={selectedDocText}
                   handleDocTextDeselect={handleDocTextDeselect}
                   onTextareaFocus={handleCloseModelSelector}
-                  isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
+                  isFilesLoading={uploadedFiles.some((f: UploadedFile) => isFileUploadBlockingSend(f))}
                   latencyMode={latencyMode}
                   setLatencyMode={setLatencyMode}
                 />
@@ -7228,7 +7321,7 @@ IMPORTANTE:
               isGoogleFormsActive={isGoogleFormsActive}
               setIsGoogleFormsActive={setIsGoogleFormsActive}
               onTextareaFocus={handleCloseModelSelector}
-              isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
+              isFilesLoading={uploadedFiles.some((f: UploadedFile) => isFileUploadBlockingSend(f))}
               latencyMode={latencyMode}
               setLatencyMode={setLatencyMode}
             />

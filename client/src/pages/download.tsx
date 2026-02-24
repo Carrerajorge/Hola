@@ -4,8 +4,10 @@ import { ChevronLeft, Download, Apple, Monitor, Terminal, Check, ExternalLink, L
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 
+import packageJson from "../../../package.json";
+
 const GITHUB_RELEASE_URL = "https://github.com/Carrerajorge/Hola/releases/latest";
-const FALLBACK_VERSION = "v2.1.0";
+const FALLBACK_VERSION = `v${packageJson.version}`;
 
 type AppRelease = {
   id: string;

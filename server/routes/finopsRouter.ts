@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db } from "../../db";
+import { db } from "../db";
 import { pricingCatalog, tokenLedgerUsage } from "@shared/schema/finops";
 import { sum, eq, sql } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";

@@ -4,8 +4,8 @@ use napi::Result;
 use crate::types::{UIElement, Rect, Point, UIRole};
 use std::collections::HashMap;
 
-use windows::Win32::UI::Accessibility::{IUIAutomation, CUIAutomation, TreeScope_Children};
-use windows::core::{Interface, BSTR};
+use windows::Win32::UI::Accessibility::{IUIAutomation, CUIAutomation};
+use windows::core::BSTR;
 use windows::Win32::System::Com::{CoInitializeEx, CoCreateInstance, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
 
 #[napi]
@@ -81,8 +81,6 @@ fn traverse_element(
     elements: &mut Vec<UIElement>,
     depth: i32
 ) {
-    if depth > 10 || elements.len() > 1000 { return; } // Safety bound
-
     unsafe {
         if let Ok(name) = element.CurrentName() {
             let n = name.to_string();
@@ -110,6 +108,9 @@ fn traverse_element(
                 });
             }
         }
+        
+        if depth > 5 || elements.len() > 500 { return; } // Reduced safety bound for real-world performance
+
 
         let mut child = walker.GetFirstChildElement(&element).ok();
         while let Some(c) = child {
@@ -126,7 +127,7 @@ pub fn get_element_tree(_hwnd: i64) -> Result<Vec<UIElement>> {
       let automation: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
           .map_err(|_| napi::Error::from_reason("COM Error"))?;
           
-      let root = automation.GetRootElement().map_err(|_| napi::Error::from_reason("No Root"))?;
+      let root = automation.ElementFromHandle(windows::Win32::Foundation::HWND(_hwnd as isize)).map_err(|_| napi::Error::from_reason("Failed to get element from HWND"))?;
       let walker = automation.ControlViewWalker().map_err(|_| napi::Error::from_reason("No Walker"))?;
       
       let mut elements = Vec::new();

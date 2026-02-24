@@ -13,7 +13,7 @@ const MAX_ARRAY_ITEMS = 200;
 
 const DEFAULT_MAX_BODY_BYTES = 1 * 1024 * 1024;
 const CHAT_STREAM_MAX_BODY_BYTES = 10 * 1024 * 1024;
-const DEFAULT_MAX_MULTIPART_BYTES = 25 * 1024 * 1024;
+const DEFAULT_MAX_MULTIPART_BYTES = 100 * 1024 * 1024;
 const MAX_MULTIPART_BYTES = Number(process.env.MAX_MULTIPART_BYTES || DEFAULT_MAX_MULTIPART_BYTES);
 
 const KNOWN_SAFE_PATH_PATTERNS = [
@@ -30,6 +30,9 @@ const MAX_BYTES_BY_ROUTE: ReadonlyArray<{ pattern: RegExp; maxBytes: number }> =
   { pattern: /^\/api\/chat\/stream(?:\/|$)/, maxBytes: CHAT_STREAM_MAX_BODY_BYTES },
   { pattern: /^\/api\/chats(?:\/|$)/, maxBytes: CHAT_STREAM_MAX_BODY_BYTES },
   { pattern: /^\/api\/files(?:\/|$)/, maxBytes: MAX_MULTIPART_BYTES },
+  { pattern: /^\/api\/local-upload(?:\/|$)/, maxBytes: MAX_MULTIPART_BYTES },
+  { pattern: /^\/api\/objects\/upload(?:\/|$)/, maxBytes: MAX_MULTIPART_BYTES },
+  { pattern: /^\/api\/spreadsheet\/upload(?:\/|$)/, maxBytes: MAX_MULTIPART_BYTES },
 ];
 
 const DISALLOWED_PATH_SEGMENTS = /(^|\/)(?:\.\.)(?=\/|$|%2e%2e|%2E%2E|..|%2e|%2E|\x00)/i;
@@ -208,7 +211,7 @@ function validatePath(req: Request): { ok: boolean; status: number; message: str
     }
   }
 
-  const knownSafePath = KNOWN_SAFE_PATH_PATTERNS.some((pattern) => pattern.test(req.path));
+  const knownSafePath = KNOWN_SAFE_PATH_PATTERNS.some((pattern) => pattern.test(req.originalUrl || req.path));
   if (!knownSafePath && req.path.includes("//")) {
     return { ok: false, status: 400, message: "Invalid path normalization" };
   }
@@ -288,7 +291,7 @@ function validateMethodPayload(req: Request): { ok: boolean; status: number; mes
     return { ok: false, status: 400, message: "Invalid content-length header" };
   }
 
-  const maxBytes = getMaxBodyBytes(req.path);
+  const maxBytes = getMaxBodyBytes(req.originalUrl || req.path);
   if (contentLength !== undefined && Number.isFinite(contentLength) && contentLength > maxBytes) {
     return { ok: false, status: 413, message: `Payload too large (${contentLength} > ${maxBytes})` };
   }

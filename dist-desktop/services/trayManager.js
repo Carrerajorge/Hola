@@ -48,7 +48,8 @@ function setupTray() {
         icon = electron_1.nativeImage.createEmpty();
     }
     const tray = new electron_1.Tray(icon);
-    tray.setToolTip('ILIAGPT v2.1.0 — Agente Autónomo');
+    const version = electron_1.app.getVersion();
+    tray.setToolTip(`ILIAGPT v${version} — Agente Autónomo`);
     const contextMenu = electron_1.Menu.buildFromTemplate([
         {
             label: '🧠 Abrir Panel Administrativo',
@@ -102,7 +103,7 @@ function setupTray() {
         },
         { type: 'separator' },
         {
-            label: 'ILIAGPT v2.1.0',
+            label: `ILIAGPT v${electron_1.app.getVersion()}`,
             enabled: false
         },
         {
