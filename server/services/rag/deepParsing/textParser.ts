@@ -1,13 +1,18 @@
 import type { ParsedStructure } from "./types";
-import { detectDocumentType } from "./types";
+import { parseStructuredText } from "./parsingUtils";
 
-export async function parseText(buffer: Buffer, _mimeType: string, fileName: string): Promise<ParsedStructure> {
-    const text = buffer.toString("utf-8");
-    return {
-        sections: [{ title: fileName, level: 1, content: text, pageNumber: 1, children: [], type: "paragraph" }],
-        tables: [],
-        figures: [],
-        rawText: text,
-        metadata: { documentType: detectDocumentType(text), language: "es", pageCount: 1, hasImages: false, hasTables: false, wordCount: text.split(/\s+/).length },
-    };
+/**
+ * Text / Markdown parser.
+ *
+ * Delegates all structural parsing (heading detection, section tree building,
+ * table extraction, figure detection, language detection, document type
+ * classification) to the shared `parseStructuredText` utility.
+ */
+export async function parseText(
+    buffer: Buffer,
+    _mimeType: string,
+    fileName: string,
+): Promise<ParsedStructure> {
+    const rawText = buffer.toString("utf-8");
+    return parseStructuredText(rawText, fileName);
 }
