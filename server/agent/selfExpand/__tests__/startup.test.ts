@@ -2,9 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { init } from "../capabilityExpander";
 
 describe("selfExpand startup integration", () => {
-  it("init() returns 0 when fused/ has no capabilities", async () => {
+  it("init() restores fused capabilities from disk", async () => {
     const count = await init();
-    expect(count).toBe(0);
+    // At least langchain-chains exists in fused/
+    expect(count).toBeGreaterThanOrEqual(1);
   });
 
   it("init() is a function that can be called without errors", async () => {
