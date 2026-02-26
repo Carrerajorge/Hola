@@ -31,6 +31,17 @@ export async function initializeOpenClaw(httpServer: HttpServer): Promise<void> 
     enabledModules.push('skills');
   }
 
+  // Self-expand: restore previously fused capabilities from disk
+  try {
+    const { init: initSelfExpand } = await import('../agent/selfExpand/capabilityExpander');
+    const restoredCount = await initSelfExpand();
+    if (restoredCount > 0) {
+      enabledModules.push(`selfExpand(${restoredCount} restored)`);
+    }
+  } catch (err: any) {
+    Logger.warn(`[OpenClaw] selfExpand init failed: ${err?.message || err}`);
+  }
+
   if (config.streaming.enabled) {
     const { initStreaming } = await import('./streaming/adapter');
     initStreaming(config);
