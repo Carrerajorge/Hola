@@ -6354,8 +6354,7 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
           maxTokens: laneMaxTokens,
         };
         
-        const streamGenerator = llmGateway.streamChat.call(
-          llmGateway,
+        const streamGenerator = llmGateway.streamChat(
           modelMessages,
           streamLlmOptions,
         );
@@ -7300,7 +7299,7 @@ ${documentText}`;
         const user = (req as AuthenticatedRequest).user;
         const userId = user?.claims?.sub;
 
-        const streamGenerator = llmGateway.streamChat.call(llmGateway, llmMessages, {
+        const streamGenerator = llmGateway.streamChat(llmMessages, {
           userId: userId || conversationId || "anonymous",
           requestId,
           disableImageGeneration: true,  // HARD BLOCK
