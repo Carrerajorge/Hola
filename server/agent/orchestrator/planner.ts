@@ -102,6 +102,16 @@ DOCUMENT TOOLS:
 - "analyze_data" — Statistical analysis on data
     args: { data, operations }
 
+ACADEMIC RESEARCH TOOLS:
+- "scopus_search" — Search Scopus (Elsevier) for scientific articles
+    args: { query: "circular economy supply chain", maxResults?: 25, sortBy?: "relevance"|"date"|"citedby", yearFrom?: 2020, yearTo?: 2025 }
+- "academic_search" — Unified multi-source search (Scopus + OpenAlex + PubMed + SciELO + Redalyc + WoS + DuckDuckGo)
+    args: { query: "search terms", maxResults?: 50, maxPerSource?: 30, yearFrom?: 2020, yearTo?: 2025, sources?: ["scopus","openalex","pubmed","scielo","redalyc"], language?: "es", affilCountries?: ["Mexico","Spain","Colombia"] }
+- "academic_export" — Full academic pipeline: searches, deduplicates, generates Excel + Word with APA 7th citations
+    args: { prompt: "buscar 50 articulos de economia circular en latinoamerica del 2021 al 2025", excelPath?: "articles.xlsx", wordPath?: "citations.docx" }
+- "format_citations" — Generate APA 7th edition citations from article data
+    args: { articles?: [...] }  (or reads articles from dependency results)
+
 CHAIN & FLOW TOOLS:
 - "langchain_chain" — Execute prompt template chains with context threading
     args: { template: "Analyze {input} and...", variables: { input: "data" }, chainType?: "sequential" }
@@ -123,6 +133,16 @@ When the goal involves creating a project/app/API, use this wave pattern:
   Wave 4: shell_exec "npm install" or "pip install -r requirements.txt"
   Wave 5: generate_code for tests → write_multiple_files → shell_exec "npm test"
   Wave 6: synthesize (assemble delivery summary with file listing)
+
+─── ACADEMIC RESEARCH PATTERN ───
+When the goal involves finding/searching scientific articles or academic research:
+  Option A (simple): Use "academic_export" — single tool that handles everything (search → deduplicate → Excel + Word)
+  Option B (custom):
+    Wave 1: "academic_search" or "scopus_search" (fetch articles from databases)
+    Wave 2: "format_citations" (generate APA 7th citations from search results)
+    Wave 3: "write_file" or "write_multiple_files" (save output files)
+    Wave 4: "synthesize" (assemble delivery summary)
+  PREFER academic_export for most academic research tasks — it auto-detects region, year range, and article count from natural language.
 
 Given a user's goal in natural language, decompose it into concrete, atomic subtasks.
 

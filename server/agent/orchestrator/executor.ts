@@ -384,6 +384,126 @@ async function executeBuiltinTool(
           };
     }
 
+    // ── Scopus: direct Scopus API search ──────────────────────
+    case "scopus_search": {
+      const { searchScopus, isScopusConfigured } = await import("../../services/scopusSearch");
+      if (!isScopusConfigured()) {
+        return { error: "Scopus API key not configured. Set SCOPUS_API_KEY in environment.", configured: false };
+      }
+      const result = await searchScopus(args.query, {
+        maxResults: args.maxResults || args.count || 25,
+        sortBy: args.sortBy || "relevance",
+        yearFrom: args.yearFrom,
+        yearTo: args.yearTo,
+      });
+
+      emitSSE(opts.sseRes, "scopus_search", {
+        query: args.query,
+        totalResults: result.totalResults,
+        returned: result.articles.length,
+      });
+
+      return {
+        articles: result.articles,
+        totalResults: result.totalResults,
+        query: result.query,
+      };
+    }
+
+    // ── Academic search: unified multi-source search ─────────
+    case "academic_search": {
+      const { searchAllSources } = await import("../superAgent/unifiedArticleSearch");
+      const result = await searchAllSources(args.query, {
+        maxResults: args.maxResults || args.count || 50,
+        maxPerSource: args.maxPerSource || 30,
+        startYear: args.yearFrom || args.startYear,
+        endYear: args.yearTo || args.endYear,
+        sources: args.sources || ["scopus", "openalex", "pubmed", "scielo", "redalyc"],
+        language: args.language,
+        affilCountries: args.affilCountries || args.countries,
+      });
+
+      emitSSE(opts.sseRes, "academic_search", {
+        query: args.query,
+        totalArticles: result.articles.length,
+        bySource: result.totalBySource,
+        errors: result.errors,
+      });
+
+      return {
+        articles: result.articles,
+        totalBySource: result.totalBySource,
+        searchTime: result.searchTime,
+        errors: result.errors,
+      };
+    }
+
+    // ── Academic export: full pipeline (search → Excel + Word) ─
+    case "academic_export": {
+      const { exportAcademicArticlesFromPrompt } = await import("../../services/academicArticlesExport");
+
+      // Build a natural language prompt from args
+      const prompt = args.prompt || args.query || args.description || "";
+      const result = await exportAcademicArticlesFromPrompt(prompt);
+
+      // Write Excel and Word files to workspace
+      const workspace = await getOrCreateWorkspace(opts.runId);
+      const excelPath = args.excelPath || "academic_articles.xlsx";
+      const wordPath = args.wordPath || "citations_apa7.docx";
+
+      await execWorkspaceTool(workspace, "openclaw_write", {
+        path: excelPath,
+        content: result.excelBuffer.toString("base64"),
+        encoding: "base64",
+      });
+      await execWorkspaceTool(workspace, "openclaw_write", {
+        path: wordPath,
+        content: result.wordBuffer.toString("base64"),
+        encoding: "base64",
+      });
+
+      emitSSE(opts.sseRes, "academic_export", {
+        articlesCount: result.articles.length,
+        excelPath,
+        wordPath,
+        stats: result.stats,
+      });
+
+      return {
+        articlesCount: result.articles.length,
+        excelPath,
+        wordPath,
+        stats: result.stats,
+        plan: result.plan,
+        articles: result.articles.map((a) => ({
+          title: a.title,
+          authors: a.authors,
+          year: a.year,
+          journal: a.journal,
+          doi: a.doi,
+          source: a.source,
+          country: a.country,
+        })),
+      };
+    }
+
+    // ── Format APA citations from article data ───────────────
+    case "format_citations": {
+      const { generateAPACitationsList } = await import("../superAgent/unifiedArticleSearch");
+      // Articles can come from args directly or from dependency results
+      let articles = args.articles || [];
+      if (articles.length === 0 && args._dependencyResults) {
+        for (const depResult of Object.values(args._dependencyResults)) {
+          if (depResult && typeof depResult === "object" && Array.isArray((depResult as any).articles)) {
+            articles = (depResult as any).articles;
+            break;
+          }
+        }
+      }
+      const citationsText = generateAPACitationsList(articles);
+      return { citations: citationsText, articleCount: articles.length };
+    }
+
     // ── Fused module: langchain-chains (prompt chaining) ──────
     case "langchain_chain": {
       try {
