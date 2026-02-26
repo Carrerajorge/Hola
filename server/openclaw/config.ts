@@ -45,11 +45,11 @@ export function getOpenClawConfig(): OpenClawConfig {
 
   return {
     gateway: {
-      enabled: process.env.ENABLE_OPENCLAW_GATEWAY === 'true',
+      enabled: true,
       path: process.env.OPENCLAW_WS_PATH || '/ws/openclaw',
     },
     tools: {
-      enabled: process.env.ENABLE_OPENCLAW_TOOLS === 'true',
+      enabled: true,
       safeBins: process.env.OPENCLAW_SAFE_BINS
         ? process.env.OPENCLAW_SAFE_BINS.split(',').map(s => s.trim())
         : DEFAULT_SAFE_BINS,
@@ -58,11 +58,11 @@ export function getOpenClawConfig(): OpenClawConfig {
       execSecurity: (process.env.OPENCLAW_EXEC_SECURITY as any) || 'warn',
     },
     plugins: {
-      enabled: process.env.ENABLE_OPENCLAW_PLUGINS === 'true',
+      enabled: true,
       directory: process.env.OPENCLAW_PLUGINS_DIR || '~/.iliagpt/plugins',
     },
     skills: {
-      enabled: process.env.ENABLE_OPENCLAW_SKILLS === 'true',
+      enabled: true,
       directory: process.env.OPENCLAW_SKILLS_DIR
         ? path.resolve(process.env.OPENCLAW_SKILLS_DIR)
         : defaultSkillsDir,
@@ -75,7 +75,7 @@ export function getOpenClawConfig(): OpenClawConfig {
       maxSkillFileBytes: Number(process.env.OPENCLAW_SKILL_MAX_BYTES) || 256_000,
     },
     streaming: {
-      enabled: process.env.ENABLE_OPENCLAW_STREAMING === 'true',
+      enabled: true,
       blockMinChars: Number(process.env.OPENCLAW_BLOCK_MIN_CHARS) || 50,
       blockMaxChars: Number(process.env.OPENCLAW_BLOCK_MAX_CHARS) || 500,
       previewMode: (process.env.OPENCLAW_PREVIEW_MODE as any) || 'partial',

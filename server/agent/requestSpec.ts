@@ -286,10 +286,16 @@ export function detectIntent(message: string, attachments: AttachmentSpec[] = []
     }
   }
   
+  // File path detection: messages containing explicit file paths force multi_step_task
+  // to ensure tool execution (read_file, write_file, list_files) is triggered.
+  if (/\/[a-zA-Z].*\.[a-z]+/.test(message)) {
+    return { intent: "multi_step_task", confidence: 0.85 };
+  }
+
   if (message.length < 50 && !message.includes("?")) {
     return { intent: "chat", confidence: 0.6 };
   }
-  
+
   return { intent: "chat", confidence: 0.5 };
 }
 
