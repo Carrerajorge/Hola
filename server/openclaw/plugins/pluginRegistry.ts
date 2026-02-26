@@ -1,4 +1,4 @@
-import type { OpenClawPlugin } from '../types';
+import type { OpenClawPlugin, HookPoint } from '../types';
 import { hookSystem } from './hookSystem';
 import { Logger } from '../../lib/logger';
 
@@ -15,7 +15,7 @@ class PluginRegistry {
     if (plugin.hooks) {
       for (const [point, handler] of Object.entries(plugin.hooks)) {
         if (handler) {
-          hookSystem.register(point as any, handler);
+          hookSystem.register(point as HookPoint, handler);
         }
       }
     }

@@ -9,6 +9,7 @@ import { getGeminiClientOrThrow } from "../lib/gemini";
 import { requestUnderstandingAgent } from "./requestUnderstanding";
 import { expandAndExecute } from './selfExpand/capabilityExpander';
 import { orchestrate } from './orchestrator/executor';
+import { injectMemoryContext } from "../openclaw/memory/agentMemoryBridge";
 
 export interface AgentExecutorOptions {
   maxIterations?: number;
@@ -1182,6 +1183,13 @@ MANDATORY RULES:
 4) Summarize findings clearly with concrete paths and counts.
 5) NEVER tell the user to run /local or terminal commands manually.`,
     });
+  }
+
+  // OpenClaw: Inject memory/RAG context if enabled (non-blocking)
+  try {
+    conversationHistory = await injectMemoryContext(conversationHistory, recentUserText);
+  } catch (_memErr) {
+    // Memory injection is best-effort; continue without it
   }
 
   console.log(`[AgentExecutor] Starting loop: intent=${requestSpec.intent}, tools=[${tools.map(t => t.name).join(', ')}], messages=${conversationHistory.length}, systemMsgs=${conversationHistory.filter(m => m.role === 'system').length}, toolDeclarations=${tools.length}`);

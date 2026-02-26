@@ -26,6 +26,40 @@ export interface OpenClawConfig {
     blockMaxChars: number;
     previewMode: 'off' | 'partial' | 'block' | 'progress';
   };
+  memory: {
+    enabled: boolean;
+    embeddingProvider: string;
+    embeddingModel: string;
+    chunkSize: number;
+    chunkOverlap: number;
+    hybridSearch: boolean;
+    vectorWeight: number;
+    textWeight: number;
+    mmrEnabled: boolean;
+    mmrLambda: number;
+    temporalDecayEnabled: boolean;
+    temporalDecayHalfLifeDays: number;
+    maxResults: number;
+    minScore: number;
+  };
+  modelFallback: {
+    enabled: boolean;
+    cooldownMs: number;
+    maxAttempts: number;
+  };
+  routing: {
+    enabled: boolean;
+    agentsConfigPath: string;
+  };
+  workspace: {
+    enabled: boolean;
+    directory: string;
+  };
+  sessions: {
+    enabled: boolean;
+    directory: string;
+    compactionDays: number;
+  };
 }
 
 const DEFAULT_SAFE_BINS = [
@@ -35,6 +69,16 @@ const DEFAULT_SAFE_BINS = [
   'sort', 'uniq', 'diff', 'tar', 'gzip', 'gunzip', 'zip', 'unzip',
   'docker', 'docker-compose', 'make', 'cmake',
 ];
+
+function toExecSecurity(val: string | undefined): 'ask' | 'warn' | 'allow' | undefined {
+  if (val === 'ask' || val === 'warn' || val === 'allow') return val;
+  return undefined;
+}
+
+function toPreviewMode(val: string | undefined): 'off' | 'partial' | 'block' | 'progress' | undefined {
+  if (val === 'off' || val === 'partial' || val === 'block' || val === 'progress') return val;
+  return undefined;
+}
 
 export function getOpenClawConfig(): OpenClawConfig {
   const workspaceDirectory = process.env.OPENCLAW_WORKSPACE_DIR
@@ -55,7 +99,7 @@ export function getOpenClawConfig(): OpenClawConfig {
         : DEFAULT_SAFE_BINS,
       workspaceRoot: process.env.OPENCLAW_WORKSPACE_ROOT || '/tmp/openclaw-workspaces',
       execTimeout: Number(process.env.OPENCLAW_EXEC_TIMEOUT) || 120_000,
-      execSecurity: (process.env.OPENCLAW_EXEC_SECURITY as any) || 'warn',
+      execSecurity: toExecSecurity(process.env.OPENCLAW_EXEC_SECURITY) ?? 'warn',
     },
     plugins: {
       enabled: true,
@@ -78,7 +122,41 @@ export function getOpenClawConfig(): OpenClawConfig {
       enabled: true,
       blockMinChars: Number(process.env.OPENCLAW_BLOCK_MIN_CHARS) || 50,
       blockMaxChars: Number(process.env.OPENCLAW_BLOCK_MAX_CHARS) || 500,
-      previewMode: (process.env.OPENCLAW_PREVIEW_MODE as any) || 'partial',
+      previewMode: toPreviewMode(process.env.OPENCLAW_PREVIEW_MODE) ?? 'partial',
+    },
+    memory: {
+      enabled: process.env.OPENCLAW_MEMORY_ENABLED === 'true',
+      embeddingProvider: process.env.OPENCLAW_EMBEDDING_PROVIDER || 'gemini',
+      embeddingModel: process.env.OPENCLAW_EMBEDDING_MODEL || 'text-embedding-004',
+      chunkSize: Number(process.env.OPENCLAW_MEMORY_CHUNK_SIZE) || 512,
+      chunkOverlap: Number(process.env.OPENCLAW_MEMORY_CHUNK_OVERLAP) || 64,
+      hybridSearch: process.env.OPENCLAW_HYBRID_SEARCH !== 'false',
+      vectorWeight: Number(process.env.OPENCLAW_VECTOR_WEIGHT) || 0.7,
+      textWeight: Number(process.env.OPENCLAW_TEXT_WEIGHT) || 0.3,
+      mmrEnabled: process.env.OPENCLAW_MMR_ENABLED !== 'false',
+      mmrLambda: Number(process.env.OPENCLAW_MMR_LAMBDA) || 0.5,
+      temporalDecayEnabled: process.env.OPENCLAW_TEMPORAL_DECAY === 'true',
+      temporalDecayHalfLifeDays: Number(process.env.OPENCLAW_TEMPORAL_DECAY_DAYS) || 30,
+      maxResults: Number(process.env.OPENCLAW_MEMORY_MAX_RESULTS) || 10,
+      minScore: Number(process.env.OPENCLAW_MEMORY_MIN_SCORE) || 0.1,
+    },
+    modelFallback: {
+      enabled: process.env.OPENCLAW_MODEL_FALLBACK !== 'false',
+      cooldownMs: Number(process.env.OPENCLAW_FALLBACK_COOLDOWN) || 300_000,
+      maxAttempts: Number(process.env.OPENCLAW_FALLBACK_MAX_ATTEMPTS) || 3,
+    },
+    routing: {
+      enabled: process.env.OPENCLAW_ROUTING_ENABLED === 'true',
+      agentsConfigPath: process.env.OPENCLAW_AGENTS_CONFIG || '~/.iliagpt/agents.yaml',
+    },
+    workspace: {
+      enabled: process.env.OPENCLAW_WORKSPACES_ENABLED === 'true',
+      directory: process.env.OPENCLAW_WORKSPACES_DIR || '~/.iliagpt/workspaces',
+    },
+    sessions: {
+      enabled: process.env.OPENCLAW_SESSIONS_ENABLED === 'true',
+      directory: process.env.OPENCLAW_SESSIONS_DIR || '~/.iliagpt/sessions',
+      compactionDays: Number(process.env.OPENCLAW_SESSIONS_COMPACTION_DAYS) || 30,
     },
   };
 }
