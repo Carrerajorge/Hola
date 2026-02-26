@@ -1,14 +1,7 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { SkeletonChatMessages } from "@/components/skeletons";
-import { useDraft } from "@/hooks/use-draft";
-import { useStreamingTransition } from "@/hooks/use-streaming-transition";
-import { useStreamChat } from "@/hooks/use-stream-chat";
-import { apiFetch, getAnonUserIdHeader } from "@/lib/apiClient";
-import { getFileUploader } from "@/lib/fileUploader";
-import { ensureCsrfToken, resolveUploadUrlForResponse, uploadBlobWithProgress } from "@/lib/uploadTransport";
-import { WelcomeAnimation } from "@/components/welcome-animation-simple";
-import { WelcomeExplosion, useFirstVisit } from "@/components/welcome-explosion";
-import {
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react"; import { SkeletonChatMessages } from "@/components/skeletons"; import { useDraft } from "@/hooks/use-draft"; import { 
+useStreamingTransition } from "@/hooks/use-streaming-transition"; import { useStreamChat } from "@/hooks/use-stream-chat"; import { apiFetch, getAnonUserIdHeader } from "@/lib/apiClient"; import { 
+getFileUploader } from "@/lib/fileUploader"; import { ensureCsrfToken, uploadBlobWithProgress } from "@/lib/uploadTransport"; import { WelcomeAnimation } from "@/components/welcome-animation-simple"; 
+import { WelcomeExplosion, useFirstVisit } from "@/components/welcome-explosion"; import {
   Plus,
   ArrowUp,
   Mic,
@@ -382,13 +375,26 @@ function isSubmitLocked(): boolean {
     const ts = sessionStorage.getItem("__sira_submit_lock");
     if (!ts) return false;
     return Date.now() - Number(ts) < 10_000;
-  } catch { return false; }
+  } catch {
+    // sessionStorage may be unavailable (privacy mode / quota / blocked)
+    return false;
+  }
 }
+
 function setSubmitLock(): void {
-  try { sessionStorage.setItem("__sira_submit_lock", String(Date.now())); } catch { }
+  try {
+    sessionStorage.setItem("__sira_submit_lock", String(Date.now()));
+  } catch {
+    // intentionally ignore: sessionStorage may be unavailable
+  }
 }
+
 function clearSubmitLock(): void {
-  try { sessionStorage.removeItem("__sira_submit_lock"); } catch { }
+  try {
+    sessionStorage.removeItem("__sira_submit_lock");
+  } catch {
+    // intentionally ignore: sessionStorage may be unavailable
+  }
 }
 
 export function ChatInterface({
@@ -3075,9 +3081,8 @@ export function ChatInterface({
           }
           const { uploadURL, storagePath } = urlData || {};
           if (!uploadURL || !storagePath) throw new Error("No upload URL received");
-          const effectiveUploadUrl = resolveUploadUrlForResponse(uploadURL, urlRes.url);
 
-          await retryUpload(() => uploadBlobWithProgress(effectiveUploadUrl, file, undefined, {
+          await retryUpload(() => uploadBlobWithProgress(uploadURL, file, undefined, {
             timeoutMs: 120000,
             skipContentType: true,
           }));
@@ -3938,7 +3943,8 @@ export function ChatInterface({
         if (isLocalFolderIntent) {
           const cleanName = (raw: string): string => {
             return raw.trim()
-              .replace(/^[\s("'`\[{]+/, "").replace(/[\s)"'`\]},]+$/, "")
+              // eslint-disable-next-line no-useless-escape
+              .replace(/^[\[\s("'`{]+/, "").replace(/[\s)"'`\]},]+$/, "")
               .replace(/\s+en\s+(?:(?:mi|el|la|tu|su)\s+)?(?:escritorio|excritorio|desktop|mac)\b.*$/i, "")
               .replace(/\s+on\s+(?:(?:my|the)\s+)?(?:desktop|mac)\b.*$/i, "")
               .replace(/\s+(?:por\s+favor|gracias|please|thanks)\b.*$/i, "")
@@ -4084,7 +4090,7 @@ export function ChatInterface({
         if (!isLocalExecIntent && /\b(?:en\s+(?:la\s+)?terminal|in\s+(?:the\s+)?terminal)\b/i.test(userText2)) {
           isLocalExecIntent = true;
         }
-        if (!isLocalExecIntent && /\b(?:en\s+)?(?:bash|shell|terminal|consola)\s*[:\-]/i.test(userText2)) {
+        if (!isLocalExecIntent && /\b(?:en\s+)?(?:bash|shell|terminal|consola)\s*[:-]/i.test(userText2)) {
           isLocalExecIntent = true;
         }
 
@@ -4103,7 +4109,7 @@ export function ChatInterface({
         if (!isLocalExecIntent && /\b(?:crea|crear|make|create|genera)\s+(?:un\s+)?(?:archivo|file)\s+.+(?:con\s+(?:el\s+)?(?:contenido|texto|content)|que\s+(?:contenga|diga|tenga))\b/i.test(userText2)) {
           isLocalExecIntent = true;
         }
-        if (!isLocalExecIntent && /\b(?:escribe|escribir|guarda|guardar|write|save)\s+(?:en\s+)?(?:el\s+)?(?:archivo)?\b/i.test(userText2) && /[:\-]/i.test(userText2)) {
+        if (!isLocalExecIntent && /\b(?:escribe|escribir|guarda|guardar|write|save)\s+(?:en\s+)?(?:el\s+)?(?:archivo)?\b/i.test(userText2) && /[:-]/i.test(userText2)) {
           isLocalExecIntent = true;
         }
 
@@ -4174,7 +4180,7 @@ export function ChatInterface({
         }
 
         // 16. Python/Node inline: "python: print(2+2)" / "node: console.log(2)"
-        if (!isLocalExecIntent && /^(?:python3?|py|node|js)\s*[:\-]\s*.+/i.test(userText2)) {
+        if (!isLocalExecIntent && /^(?:python3?|py|node|js)\s*[:-]\s*.+/i.test(userText2)) {
           isLocalExecIntent = true;
         }
 
@@ -4973,14 +4979,15 @@ export function ChatInterface({
                     let updates: Partial<SuperAgentState> = {};
 
                     switch (eventType) {
-                      case "contract":
+                      case "contract": {
                         updates = {
                           contract: eventData,
                           sourcesTarget: eventData.requirements?.min_sources || 100,
                           phase: "planning",
                         };
                         break;
-                      case "production_start":
+                      }
+                      case "production_start": {
                         updates = {
                           phase: "planning",
                           contract: {
@@ -5014,13 +5021,15 @@ export function ChatInterface({
                           }
                         }
                         break;
-                      case "progress":
+                      }
+                      case "progress": {
                         updates = {
                           phase: eventData.phase || currentState.phase,
                           progress: eventData,
                         };
                         break;
-                      case "production_event":
+                      }
+                      case "production_event": {
                         const stageMap: Record<string, any> = {
                           init: "planning",
                           blueprint: "planning",
@@ -5062,7 +5071,8 @@ export function ChatInterface({
                           }));
                         }
                         break;
-                      case "source_signal":
+                      }
+                      case "source_signal": {
                         const existingIdx = currentState.sources.findIndex((s: any) => s.id === eventData.id);
                         if (existingIdx >= 0) {
                           const newSources = [...currentState.sources];
@@ -5072,7 +5082,8 @@ export function ChatInterface({
                           updates = { sources: [...currentState.sources, eventData] };
                         }
                         break;
-                      case "source_deep":
+                      }
+                      case "source_deep": {
                         const deepIdx = currentState.sources.findIndex((s: any) => s.id === eventData.id);
                         if (deepIdx >= 0) {
                           const newSources = [...currentState.sources];
@@ -5080,7 +5091,8 @@ export function ChatInterface({
                           updates = { sources: newSources };
                         }
                         break;
-                      case "artifact":
+                      }
+                      case "artifact": {
                         const artifactObj = {
                           id: eventData.id || `art_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                           type: eventData.type,
@@ -5109,10 +5121,12 @@ export function ChatInterface({
                           });
                         }
                         break;
-                      case "verify":
+                      }
+                      case "verify": {
                         updates = { verify: eventData, phase: "verifying" };
                         break;
-                      case "final":
+                      }
+                      case "final": {
                         finalResult = eventData;
                         updates = {
                           final: eventData,
@@ -5120,7 +5134,8 @@ export function ChatInterface({
                           isRunning: false,
                         };
                         break;
-                      case "production_complete":
+                      }
+                      case "production_complete": {
                         const finalObj = {
                           response: eventData.summary,
                           sources_count: 0,
@@ -5135,20 +5150,23 @@ export function ChatInterface({
                           isRunning: false
                         };
                         break;
-                      case "error":
+                      }
+                      case "error": {
                         updates = {
                           error: eventData.message || "Error en Super Agent",
                           phase: "error",
                           isRunning: false,
                         };
                         break;
-                      case "production_error":
+                      }
+                      case "production_error": {
                         updates = {
                           error: eventData.error,
                           phase: "error",
                           isRunning: false
                         };
                         break;
+                      }
                     }
 
                     if (Object.keys(updates).length > 0) {
@@ -5732,7 +5750,7 @@ export function ChatInterface({
             new Promise<boolean | null>((resolve) => setTimeout(() => resolve(null), IMAGE_DETECT_TIMEOUT_MS)),
           ]);
           const imageDetectTimedOut = detectResult === null;
-          let shouldGenerateImage = detectResult ?? false;
+          const shouldGenerateImage = detectResult ?? false;
           if (imageDetectTimedOut) {
             imageDetectController?.abort();
             console.debug("[Perf] image_detect_timeout_ms", IMAGE_DETECT_TIMEOUT_MS);
@@ -5978,9 +5996,7 @@ IMPORTANTE:
                 return s;
               }), effectiveStreamChatId);
 
-              let fullContent = "";
-              let sseError: Error | null = null;
-
+              
               // Build attachments array for streaming endpoint
               // FIX: Normalize type to match backend schema: "document" | "image" | "file"
               console.log("[handleSubmit] currentUploadedFiles:", currentUploadedFiles.map(f => ({
@@ -7187,66 +7203,54 @@ IMPORTANTE:
                   </div>
                 ) : (
                   /* Welcome Screen */
-                  <div className="relative w-full max-w-4xl flex flex-col items-center justify-center pt-8 pb-12">
-                    {/* Ambient Glow */}
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[400px] bg-gradient-to-br from-blue-500/10 via-purple-500/10 to-pink-500/10 blur-[100px] rounded-full pointer-events-none" />
-                    
+                  <>
                     <motion.div
-                      initial={{ scale: 0.9, opacity: 0, y: 10 }}
-                      animate={{ scale: 1, opacity: 1, y: 0 }}
-                      transition={{ type: "spring", stiffness: 200, damping: 20 }}
-                      className="mb-8 relative z-10"
+                      initial={{ scale: 0.8, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{ duration: 0.5, ease: "easeOut" }}
+                      className="mb-8"
                     >
                       {activeGpt?.avatar ? (
-                        <div className="relative group">
-                          <div className="absolute -inset-1 bg-gradient-to-r from-blue-500 to-purple-500 rounded-[28px] blur opacity-25 group-hover:opacity-60 transition duration-500"></div>
-                          <AvatarWithFallback
-                            src={activeGpt.avatar}
-                            alt={activeGpt.name}
-                            fallback={<Bot className="h-10 w-10 text-white" />}
-                          />
-                        </div>
+                        <AvatarWithFallback
+                          src={activeGpt.avatar}
+                          alt={activeGpt.name}
+                          fallback={<Bot className="h-10 w-10 text-white" />}
+                        />
                       ) : (
-                        <div className="relative group p-1 flex items-center justify-center">
-                          <div className="absolute -inset-3 bg-gradient-to-r from-blue-500/30 via-purple-500/30 to-pink-500/30 rounded-full blur-xl opacity-0 group-hover:opacity-100 transition duration-700"></div>
-                          <IliaGPTLogo size={88} className="drop-shadow-xl" />
-                        </div>
+                        <IliaGPTLogo size={80} />
                       )}
                     </motion.div>
-
                     <motion.h1
                       initial={{ y: 20, opacity: 0 }}
                       animate={{ y: 0, opacity: 1 }}
-                      transition={{ duration: 0.5, delay: 0.1, ease: "easeOut" }}
-                      className="text-4xl sm:text-5xl font-extrabold text-center mb-5 tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-foreground via-foreground/90 to-muted-foreground relative z-10"
+                      transition={{ duration: 0.5, delay: 0.2 }}
+                      className="text-4xl font-bold text-center mb-3 bg-gradient-to-r from-foreground via-foreground/90 to-foreground/70 bg-clip-text"
                     >
                       {activeGpt ? activeGpt.name : "¿En qué puedo ayudarte?"}
                     </motion.h1>
-
                     <motion.p
                       initial={{ y: 20, opacity: 0 }}
                       animate={{ y: 0, opacity: 1 }}
-                      transition={{ duration: 0.5, delay: 0.2, ease: "easeOut" }}
-                      className="text-muted-foreground text-center max-w-lg text-base sm:text-lg mb-10 leading-relaxed relative z-10 font-medium"
+                      transition={{ duration: 0.5, delay: 0.3 }}
+                      className="text-muted-foreground text-center max-w-md text-base"
                     >
                       {activeGpt
                         ? (activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?")
                         : selectedProject
                           ? (
                             <span>
-                              <span className="font-semibold text-foreground">{selectedProject.name}</span> lista para empezar a chartear con esta carpeta. Sirven para organizar proyectos, mantener contexto, usar archivos específicos y trabajar de forma ordenada.
+                              <span className="font-semibold text-foreground">{selectedProject.name}</span> lista para empezar a chartear con esa carpeta y sirven para organizar conversaciones y proyectos por tema, mantener contexto, usar archivos e instrucciones específicas, y trabajar de forma ordenada sin mezclar información entre distintos objetivos.
                             </span>
                           )
-                          : "Soy ILIAGPT, tu asistente de IA. Explora capacidades avanzadas como generación de código, diseño, análisis de documentos y control autónomo."
+                          : "Soy ILIAGPT, tu asistente de IA. Puedo responder preguntas, generar documentos, analizar archivos y mucho más."
                       }
                     </motion.p>
-
                     {activeGpt?.conversationStarters && activeGpt.conversationStarters.length > 0 && (
                       <motion.div
                         initial={{ y: 20, opacity: 0 }}
                         animate={{ y: 0, opacity: 1 }}
-                        transition={{ duration: 0.5, delay: 0.3 }}
-                        className="flex flex-wrap gap-3 justify-center max-w-3xl relative z-10"
+                        transition={{ duration: 0.5, delay: 0.4 }}
+                        className="flex flex-wrap gap-2 mt-6 justify-center max-w-xl"
                       >
                         {activeGpt.conversationStarters
                           .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
@@ -7254,7 +7258,7 @@ IMPORTANTE:
                             <button
                               key={idx}
                               onClick={() => setInput(starter)}
-                              className="px-5 py-3 text-sm border border-border/40 bg-background/60 backdrop-blur-md rounded-2xl hover:bg-muted/80 hover:border-primary/30 hover:shadow-lg transition-all duration-300 text-left font-medium text-foreground/80 hover:text-foreground hover:-translate-y-1 shadow-sm"
+                              className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50 transition-colors text-left"
                               data-testid={`button-starter-${idx}`}
                             >
                               {starter}
@@ -7262,23 +7266,15 @@ IMPORTANTE:
                           ))}
                       </motion.div>
                     )}
-
                     {/* Show PromptSuggestions when no conversation starters available */}
                     {(!activeGpt?.conversationStarters || activeGpt.conversationStarters.length === 0) && (
-                      <motion.div
-                        initial={{ y: 20, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ duration: 0.5, delay: 0.3 }}
-                        className="w-full relative z-10"
-                      >
-                        <PromptSuggestions
-                          onSelect={(action) => setInput(action)}
-                          hasAttachment={uploadedFiles.length > 0}
-                          className="justify-center max-w-3xl mx-auto"
-                        />
-                      </motion.div>
+                      <PromptSuggestions
+                        onSelect={(action) => setInput(action)}
+                        hasAttachment={uploadedFiles.length > 0}
+                        className="mt-6 justify-center max-w-xl"
+                      />
                     )}
-                  </div>
+                  </>
                 )}
               </div>
             )}

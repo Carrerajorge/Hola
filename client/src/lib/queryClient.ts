@@ -84,9 +84,10 @@ export async function apiRequestWithRetry(
         throw new Error('offline: No internet connection');
       }
       
+      const baseHeaders: Record<string, string> = data ? { "Content-Type": "application/json" } : {};
       const res = await fetch(url, {
         method,
-        headers: data ? { "Content-Type": "application/json" } : {},
+        headers: withCsrfHeaders(method, baseHeaders),
         body: data ? JSON.stringify(data) : undefined,
         credentials: "include",
       });
@@ -118,14 +119,30 @@ export async function apiRequestWithRetry(
   throw lastError;
 }
 
+function getCookie(name: string): string | undefined {
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&")}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+function withCsrfHeaders(method: string, headers: Record<string, string>) {
+  const m = method.toUpperCase();
+  if (m === "GET" || m === "HEAD" || m === "OPTIONS") return headers;
+
+  const token = getCookie("XSRF-TOKEN");
+  if (token) headers["X-CSRF-Token"] = token;
+
+  return headers;
+}
+
 export async function apiRequest(
   method: string,
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
+  const baseHeaders: Record<string, string> = data ? { "Content-Type": "application/json" } : {};
   const res = await fetch(url, {
     method,
-    headers: data ? { "Content-Type": "application/json" } : {},
+    headers: withCsrfHeaders(method, baseHeaders),
     body: data ? JSON.stringify(data) : undefined,
     credentials: "include",
   });

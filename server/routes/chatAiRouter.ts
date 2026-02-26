@@ -6383,6 +6383,7 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
           disableImageGeneration: hasAttachments,
           maxTokens: laneMaxTokens,
         };
+        
         const streamGenerator = llmGateway.streamChat(
           modelMessages,
           streamLlmOptions,
@@ -7332,7 +7333,7 @@ ${documentText}`;
           userId: userId || conversationId || "anonymous",
           requestId,
           disableImageGeneration: true,  // HARD BLOCK
-        });
+        });        
 
         let answerText = "";
         for await (const chunk of streamGenerator) {

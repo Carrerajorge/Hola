@@ -8,8 +8,8 @@
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const webPush: any = (() => {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    return require('web-push');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require("web-push");
   } catch {
     return null;
   }

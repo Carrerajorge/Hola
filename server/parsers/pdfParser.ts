@@ -2,7 +2,6 @@ import type { FileParser, ParsedResult, DetectedFileType } from "./base";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { PDFParse } = require("pdf-parse");
 
 // Security limits
 const PDF_MAX_FILE_SIZE = 200 * 1024 * 1024; // 200MB
@@ -63,7 +62,8 @@ export class PdfParser implements FileParser {
   }
 
   private async parsePdf(content: Buffer): Promise<ParsedResult> {
-    const parser = new PDFParse({ data: content });
+      const { PDFParse } = require("pdf-parse");
+      const parser = new PDFParse({ data: content });
     const data = await parser.getText();
     
     // Security: limit extracted text size

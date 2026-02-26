@@ -579,6 +579,62 @@ slot() {
     docker compose -p "hola-${slot_name}" -f "${SLOT_COMPOSE}" "$@"
 }
 
+
+run_sql_migrations() {
+
+  local db_container="hola-postgres"
+
+  local db_name="iliagpt"
+
+  local migrations_dir="${DEPLOY_PATH}/migrations"
+
+
+
+  if [ ! -d "${migrations_dir}" ]; then
+
+    logw "No migrations directory found at ${migrations_dir} (skipping SQL migrations)."
+
+    return 0
+
+  fi
+
+
+
+  local files
+
+  files="$(ls -1 "${migrations_dir}"/*.sql 2>/dev/null | sort || true)"
+
+  if [ -z "${files}" ]; then
+
+    log "  No SQL migration files found in ${migrations_dir}."
+
+    return 0
+
+  fi
+
+
+
+  log "  Applying SQL migrations from ${migrations_dir}..."
+
+  while IFS= read -r f; do
+
+    [ -z "${f}" ] && continue
+
+    log "    -> $(basename "${f}")"
+
+    docker exec -i "${db_container}" psql -U postgres -d "${db_name}" -v ON_ERROR_STOP=1 < "${f}"
+
+  done <<< "${files}"
+
+
+
+  logok "SQL migrations applied."
+
+}
+
+
+
+
 free_target_port_if_safe() {
   local target_port="$1"
   local occupied
@@ -725,6 +781,20 @@ echo ""
 
 # ── Step 4: Run database migrations (with timeout + backup) ──
 log "[4/14] Running database migrations (timeout: ${MIGRATION_TIMEOUT}s)..."
+
+
+  # Apply SQL migrations (idempotent)
+
+  if ! timeout "${MIGRATION_TIMEOUT}" bash -lc "$(declare -f run_sql_migrations); run_sql_migrations"; then
+
+    loge "SQL migrations failed or timed out."
+
+    exit 1
+
+  fi
+
+
+
 
 # Create a pre-migration DB snapshot marker
 docker exec hola-postgres psql -U postgres -d iliagpt -c \

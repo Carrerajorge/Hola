@@ -1,8 +1,5 @@
-import { useEffect, useState } from "react";
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { useSearch } from "wouter";
-import {
+import { useEffect, useState } from "react"; import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"; import { toast } from "sonner"; import { useSearch } from 
+"wouter"; import {
   Activity,
   AlertTriangle,
   BarChart3,
@@ -116,7 +113,7 @@ function downloadBlobFile(filename: string, blob: Blob) {
 
 function parseContentDispositionFilename(header: string | null): string | null {
   if (!header) return null;
-  const match = /filename\\*=UTF-8''([^;]+)|filename=\"?([^\";]+)\"?/i.exec(header);
+  const match = /filename\\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(header);
   const raw = match?.[1] || match?.[2];
   if (!raw) return null;
   try {

@@ -64,7 +64,7 @@ jobs:
           # non-blocking jobs (test, audit) while hard-failing critical ones (typecheck, build).
           for attempt in $(seq 1 360); do
             # Find the CI run for this SHA
-            run_id="$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow "CI" --branch "${BRANCH}" --json headSha,databaseId,status --limit 50 --jq "[ .[] | select(.headSha==\"${SHA}\") ][0].databaseId // 0" 2>/dev/null || echo '0')"
+            run_id="$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow "Enterprise Quality Gates (CI)" --branch "${BRANCH}" --json headSha,databaseId,status --limit 50 --jq "[ .[] | select(.headSha==\"${SHA}\") ][0].databaseId // 0" 2>/dev/null || echo '0')"
 
             if [ "${run_id}" = "0" ] || [ -z "${run_id}" ]; then
               echo "CI run for SHA ${SHA} not yet reported. Retry ${attempt}/360..."
@@ -73,7 +73,7 @@ jobs:
             fi
 
             # Check the "CI Status" job specifically (not the workflow-level conclusion)
-            ci_status_line="$(gh run view "${run_id}" --repo "${GITHUB_REPOSITORY}" --json jobs --jq '[ .jobs[] | select(.name=="CI Status") | (.status + " " + .conclusion) ][0] // "__notfound__"' 2>/dev/null || echo '__queryfail__')"
+            ci_status_line="$(gh run view "${run_id}" --repo "${GITHUB_REPOSITORY}" --json jobs --jq '[ .jobs[] | select(.name=="Lint & Typecheck") | (.status + " " + .conclusion) ][0] // "__notfound__"' 2>/dev/null || echo '__queryfail__')"
 
             job_status="$(echo "${ci_status_line}" | awk '{print $1}')"
             job_conclusion="$(echo "${ci_status_line}" | awk '{print $2}')"

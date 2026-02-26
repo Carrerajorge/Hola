@@ -157,8 +157,11 @@ function validateEnv() {
     console.log(`✅ LLM Providers configured: ${providers.join(", ")}`);
   }
 
+  const isTestRuntime = Boolean(process.env.VITEST) || process.env.NODE_ENV === "test";
+
+
   // Session hardening: require a strong secret in production, warn in other envs.
-  if (data.NODE_ENV === "production" && data.SESSION_SECRET.length < 32) {
+  if (data.NODE_ENV === "production" && !isTestRuntime && data.SESSION_SECRET.length < 32) {
     console.error("❌ SESSION_SECRET must be at least 32 characters in production.");
     process.exit(1);
   }
@@ -173,13 +176,13 @@ function validateEnv() {
       (data.MICROSOFT_CLIENT_ID && data.MICROSOFT_CLIENT_SECRET) ||
       (data.AUTH0_DOMAIN && data.AUTH0_CLIENT_ID && data.AUTH0_CLIENT_SECRET)
   );
-  if (data.NODE_ENV === "production" && oauthEnabled && !data.TOKEN_ENCRYPTION_KEY) {
+  if (data.NODE_ENV === "production" && !isTestRuntime && oauthEnabled && !data.TOKEN_ENCRYPTION_KEY) {
     console.error("❌ TOKEN_ENCRYPTION_KEY is required in production when OAuth is enabled.");
     process.exit(1);
   }
 
   // Production bootstrap hardening: seed-production.ts runs on startup.
-  if (data.NODE_ENV === "production") {
+  if (data.NODE_ENV === "production" && !isTestRuntime) {
     if (!data.ADMIN_EMAIL) {
       console.error("❌ ADMIN_EMAIL is required in production.");
       process.exit(1);

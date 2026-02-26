@@ -1743,7 +1743,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
 
     let output = "";
     let lastSeq = -1;
-    const stream = llmGateway.streamChat(llmMessages, {
+    const stream = llmGateway.streamChat(llmMessages, {	
       userId: conversation.userId || account.userId,
       requestId: safeRunId,
       timeout: timeoutMsForChannel(jobChannel),

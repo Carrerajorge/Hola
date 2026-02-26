@@ -1,12 +1,9 @@
-/**
- * Virtualized Message List Component
- * Renders large message lists efficiently using react-window
- */
+/** * Virtualized Message List Component * Renders large message lists efficiently using react-window */
 
 import React, { useCallback, useRef, useEffect, useMemo } from 'react';
-// @ts-ignore - react-window v2 types
+// @ts-expect-error reason: react-window v2 types
 import { VariableSizeList as List } from 'react-window';
-// @ts-ignore - types may not exist
+// @ts-expect-error reason: types may not exist
 import AutoSizer from 'react-virtualized-auto-sizer';
 
 interface ListChildComponentProps {

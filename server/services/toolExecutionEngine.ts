@@ -188,6 +188,7 @@ function sanitizeToolValue(value: unknown, depth: number, seen: WeakSet<object>)
   if (typeof value === "string") {
     const cleaned = value
       .normalize("NFKC")
+      // eslint-disable-next-line no-control-regex
       .replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
     return cleaned.length > TOOL_STRING_MAX_LENGTH ? cleaned.slice(0, TOOL_STRING_MAX_LENGTH) : cleaned;
   }

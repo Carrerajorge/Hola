@@ -1,20 +1,7 @@
-/**
- * Academic Search v3.0 - 100 Improvements Implemented
- * 
- * IMPROVEMENTS:
- * 1-10: Query Processing (normalization, synonyms, spelling)
- * 11-20: Relevance Scoring (citations, impact, recency)
- * 21-25: Advanced Filtering (year, type, language)
- * 26-35: Caching (Redis, compression, metrics)
- * 36-45: Parallelization (timeout, retry, circuit breaker)
- * 46-50: Network Optimization (pooling, compression)
- * 51-60: Deduplication (DOI, Levenshtein, fingerprint)
- * 61-70: Enrichment (abstract, DOI resolve, keywords)
- * 71-75: Ranking (PageRank, h-index, trending)
- * 76-85: Citation Formats (APA, MLA, Chicago, IEEE, BibTeX)
- * 86-90: Presentation (highlight, badges, preview)
- * 91-100: Monitoring & Resilience (logging, fallback, health)
- */
+/** * Academic Search v3.0 - 100 Improvements Implemented * * IMPROVEMENTS: * 1-10: Query Processing (normalization, synonyms, spelling) * 11-20: Relevance Scoring (citations, impact, recency) * 
+ 21-25: Advanced Filtering (year, type, language) * 26-35: Caching (Redis, compression, metrics) * 36-45: Parallelization (timeout, retry, circuit breaker) * 46-50: Network Optimization (pooling, 
+ compression) * 51-60: Deduplication (DOI, Levenshtein, fingerprint) * 61-70: Enrichment (abstract, DOI resolve, keywords) * 71-75: Ranking (PageRank, h-index, trending) * 76-85: Citation Formats 
+ (APA, MLA, Chicago, IEEE, BibTeX) * 86-90: Presentation (highlight, badges, preview) * 91-100: Monitoring & Resilience (logging, fallback, health) */
 
 import { JSDOM } from "jsdom";
 import { createClient, RedisClientType } from "redis";
@@ -275,7 +262,9 @@ async function setCache(key: string, data: any, ttl = CACHE_TTL): Promise<void> 
     const redis = await getRedis();
     if (!redis) return;
     await redis.setEx(key, ttl, JSON.stringify(data));
-  } catch {}
+  } catch {
+    // intentionally ignored (best-effort)
+  }
 }
 
 // ============================================
@@ -475,9 +464,16 @@ export function formatCitation(result: AcademicResult, style: CitationStyle = "a
     case "harvard": // 81
       return `${authorsFormatted} (${year || "n.d."}) '${title}', ${journal || ""}.${linkEmoji}`;
 
-    case "bibtex": // 82
+    case "bibtex": { // 82
       const key = `${(authors.split(/[,\s]/)[0] || "unknown").toLowerCase()}${year || "nd"}`;
-      return `@article{${key},\n  title={${title}},\n  author={${authors}},\n  journal={${journal || ""}},\n  year={${year || ""}},\n  doi={${doi || ""}}\n}`;
+      return `@article{${key},
+    title={${title}},
+    author={${authors}},
+    journal={${journal || ""}},
+    year={${year || ""}},
+    doi={${doi || ""}}
+    }`;
+    }
 
     case "ris": // 83
       return `TY  - JOUR\nTI  - ${title}\nAU  - ${authors}\nPY  - ${year || ""}\nJO  - ${journal || ""}\nDO  - ${doi || ""}\nER  - `;
@@ -1008,7 +1004,7 @@ export async function searchAllSources(query: string, options: UnifiedSearchOpti
   const allResultArrays = await Promise.allSettled(searchPromises);
   
   // Collect results
-  let allResults: AcademicResult[] = [];
+  const allResults: AcademicResult[] = [];
   
   for (const result of allResultArrays) {
     if (result.status === "fulfilled") {

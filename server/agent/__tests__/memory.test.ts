@@ -1,11 +1,12 @@
 import { agentMemory } from '../memory';
+import { vi } from 'vitest';
 import { db } from '../../db';
 
 // Mocks para evitar I/O real contra PostgreSQL durante TDD
-jest.mock('../../db', () => ({
+vi.mock('../../db', () => ({
     db: {
-        insert: jest.fn().mockReturnThis(),
-        values: jest.fn().mockResolvedValue(true)
+        insert: vi.fn().mockReturnThis(),
+        values: vi.fn().mockResolvedValue(true)
     }
 }));
 
@@ -15,7 +16,7 @@ describe('CognitiveMemorySystem (T09-003)', () => {
         // Reset state internals using ts-ignore for private access during tests
         // @ts-ignore
         agentMemory.shortTermBuffer = [];
-        jest.clearAllMocks();
+        vi.clearAllMocks();
     });
 
     test('Short Term Memory respects capacity and evicts properly', () => {
