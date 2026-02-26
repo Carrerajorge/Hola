@@ -296,7 +296,11 @@ function validateMethodPayload(req: Request): { ok: boolean; status: number; mes
     return { ok: false, status: 413, message: `Payload too large (${contentLength} > ${maxBytes})` };
   }
 
-  if (req.path.startsWith("/api/") && contentType && !isJsonOrFormRequest(contentType)) {
+  // Binary upload endpoints (local-upload, objects) legitimately receive
+  // application/octet-stream — skip the JSON/form content-type gate for them.
+  const isBinaryUploadPath =
+    req.path.startsWith("/api/local-upload/") || req.path.startsWith("/api/objects/");
+  if (req.path.startsWith("/api/") && contentType && !isBinaryUploadPath && !isJsonOrFormRequest(contentType)) {
     return { ok: false, status: 415, message: "Unsupported content type" };
   }
 

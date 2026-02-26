@@ -1,4 +1,4 @@
-import { broadcastEvent } from '../gateway/wsServer';
+import { broadcastToSubscribed } from '../gateway/wsServer';
 
 export type PreviewMode = 'off' | 'partial' | 'block' | 'progress';
 
@@ -19,21 +19,21 @@ export class PreviewStream {
 
     if (this.mode === 'partial') {
       // Send full accumulated text (client replaces content)
-      broadcastEvent('chat.preview', {
+      broadcastToSubscribed('chat.preview', {
         runId: this.runId,
         mode: 'replace',
         content: this.accumulated,
       });
     } else if (this.mode === 'block') {
       // Send only the delta (client appends)
-      broadcastEvent('chat.preview', {
+      broadcastToSubscribed('chat.preview', {
         runId: this.runId,
         mode: 'append',
         content: delta,
       });
     } else if (this.mode === 'progress') {
       // Send progress indicator
-      broadcastEvent('chat.preview', {
+      broadcastToSubscribed('chat.preview', {
         runId: this.runId,
         mode: 'progress',
         chars: this.accumulated.length,
@@ -43,7 +43,7 @@ export class PreviewStream {
 
   end(): void {
     if (this.mode === 'off') return;
-    broadcastEvent('chat.preview', {
+    broadcastToSubscribed('chat.preview', {
       runId: this.runId,
       mode: 'done',
       content: this.accumulated,

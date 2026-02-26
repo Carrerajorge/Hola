@@ -1,5 +1,41 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BlockStreamAccumulator } from '../streaming/blockStreaming';
+
+// ── Mock wsServer so we can inspect broadcast calls ───────────────────────
+const broadcastToSubscribed = vi.fn();
+const broadcastEvent = vi.fn();
+vi.mock('../gateway/wsServer', () => ({
+  broadcastToSubscribed,
+  broadcastEvent,
+}));
+
+// Mock streamingSeq (adapter imports it)
+vi.mock('../../lib/streamingSeq', () => ({
+  saveStreamingProgress: vi.fn().mockResolvedValue(undefined),
+  getStreamingProgress: vi.fn().mockResolvedValue(null),
+}));
+
+// Mock openclawEventBus — capture registered listeners so we can fire them manually
+const listeners = new Map<string, Function[]>();
+vi.mock('../events', () => ({
+  openclawEventBus: {
+    on: vi.fn((event: string, handler: Function) => {
+      const existing = listeners.get(event) || [];
+      existing.push(handler);
+      listeners.set(event, existing);
+    }),
+    emit: vi.fn(),
+    removeAllListeners: vi.fn(),
+  },
+}));
+
+vi.mock('../../lib/logger', () => ({
+  Logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
+// ══════════════════════════════════════════════════════════════════════════
+// Part 1: Block Streaming (existing tests, preserved)
+// ══════════════════════════════════════════════════════════════════════════
 
 describe('Block Streaming', () => {
   it('accumulates text and emits blocks when threshold is reached', () => {
@@ -80,5 +116,197 @@ describe('Block Streaming', () => {
 
     acc.end();
     expect(acc.bufferedLength).toBe(0);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// Part 2: PreviewStream
+// ══════════════════════════════════════════════════════════════════════════
+
+describe('PreviewStream', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('does nothing in "off" mode', async () => {
+    const { PreviewStream } = await import('../streaming/previewStreaming');
+    const ps = new PreviewStream('run-off', 'off');
+
+    ps.push('hello');
+    ps.push(' world');
+    ps.end();
+
+    expect(broadcastToSubscribed).not.toHaveBeenCalled();
+  });
+
+  it('sends full accumulated text in "partial" mode', async () => {
+    const { PreviewStream } = await import('../streaming/previewStreaming');
+    const ps = new PreviewStream('run-partial', 'partial');
+
+    ps.push('hello');
+    expect(broadcastToSubscribed).toHaveBeenCalledWith('chat.preview', expect.objectContaining({
+      runId: 'run-partial',
+      mode: 'replace',
+      content: 'hello',
+    }));
+
+    ps.push(' world');
+    expect(broadcastToSubscribed).toHaveBeenCalledWith('chat.preview', expect.objectContaining({
+      mode: 'replace',
+      content: 'hello world',
+    }));
+  });
+
+  it('sends only delta in "block" mode', async () => {
+    const { PreviewStream } = await import('../streaming/previewStreaming');
+    const ps = new PreviewStream('run-block', 'block');
+
+    ps.push('hello');
+    expect(broadcastToSubscribed).toHaveBeenCalledWith('chat.preview', expect.objectContaining({
+      mode: 'append',
+      content: 'hello',
+    }));
+
+    ps.push(' world');
+    expect(broadcastToSubscribed).toHaveBeenCalledWith('chat.preview', expect.objectContaining({
+      mode: 'append',
+      content: ' world',
+    }));
+  });
+
+  it('sends char count in "progress" mode', async () => {
+    const { PreviewStream } = await import('../streaming/previewStreaming');
+    const ps = new PreviewStream('run-progress', 'progress');
+
+    ps.push('hello');
+    expect(broadcastToSubscribed).toHaveBeenCalledWith('chat.preview', expect.objectContaining({
+      mode: 'progress',
+      chars: 5,
+    }));
+  });
+
+  it('sends "done" event on end()', async () => {
+    const { PreviewStream } = await import('../streaming/previewStreaming');
+    const ps = new PreviewStream('run-end', 'partial');
+
+    ps.push('text');
+    vi.clearAllMocks();
+
+    ps.end();
+    expect(broadcastToSubscribed).toHaveBeenCalledWith('chat.preview', expect.objectContaining({
+      runId: 'run-end',
+      mode: 'done',
+      content: 'text',
+    }));
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// Part 3: Adapter — eventBus bridge
+// ══════════════════════════════════════════════════════════════════════════
+
+describe('Streaming Adapter', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    listeners.clear();
+  });
+
+  it('registers event listeners on init', async () => {
+    const { initStreaming } = await import('../streaming/adapter');
+
+    initStreaming({
+      streaming: { enabled: true, blockMinChars: 10, blockMaxChars: 100, previewMode: 'off' },
+    } as any);
+
+    expect(listeners.has('stream:delta')).toBe(true);
+    expect(listeners.has('stream:end')).toBe(true);
+    expect(listeners.has('stream:error')).toBe(true);
+    expect(listeners.has('tool:start')).toBe(true);
+    expect(listeners.has('tool:end')).toBe(true);
+    expect(listeners.has('tool:result')).toBe(true);
+    expect(listeners.has('agent:status')).toBe(true);
+  });
+
+  it('broadcasts tool.start and tool.end via broadcastToSubscribed', async () => {
+    const { initStreaming } = await import('../streaming/adapter');
+    initStreaming({
+      streaming: { enabled: true, blockMinChars: 10, blockMaxChars: 100, previewMode: 'off' },
+    } as any);
+
+    // Fire tool:start
+    const startHandlers = listeners.get('tool:start') || [];
+    for (const h of startHandlers) {
+      h({ runId: 'run-tool', toolName: 'search' });
+    }
+
+    expect(broadcastToSubscribed).toHaveBeenCalledWith('tool.start', expect.objectContaining({
+      runId: 'run-tool',
+      tool: 'search',
+    }));
+
+    // Fire tool:end
+    const endHandlers = listeners.get('tool:end') || [];
+    for (const h of endHandlers) {
+      h({ runId: 'run-tool', toolName: 'search', success: true });
+    }
+
+    expect(broadcastToSubscribed).toHaveBeenCalledWith('tool.end', expect.objectContaining({
+      runId: 'run-tool',
+      tool: 'search',
+      success: true,
+    }));
+  });
+
+  it('chunks large tool results into multiple frames', async () => {
+    const { initStreaming } = await import('../streaming/adapter');
+    initStreaming({
+      streaming: { enabled: true, blockMinChars: 10, blockMaxChars: 100, previewMode: 'off' },
+    } as any);
+
+    // Create a result larger than TOOL_RESULT_CHUNK_SIZE (8192)
+    const bigResult = 'x'.repeat(20_000);
+    const resultHandlers = listeners.get('tool:result') || [];
+    for (const h of resultHandlers) {
+      h({ runId: 'run-chunk', toolName: 'bigTool', result: bigResult });
+    }
+
+    // Should have been called multiple times
+    const toolResultCalls = broadcastToSubscribed.mock.calls.filter(
+      (c: any) => c[0] === 'tool.result',
+    );
+    expect(toolResultCalls.length).toBeGreaterThan(1);
+
+    // Only the last chunk should have final: true
+    const lastCall = toolResultCalls[toolResultCalls.length - 1];
+    expect(lastCall[1].final).toBe(true);
+
+    // All non-final chunks should have final: false
+    for (let i = 0; i < toolResultCalls.length - 1; i++) {
+      expect(toolResultCalls[i][1].final).toBe(false);
+    }
+
+    // Concatenated chunks should equal original
+    const reassembled = toolResultCalls.map((c: any) => c[1].chunk).join('');
+    expect(reassembled).toBe(bigResult);
+  });
+
+  it('sends small tool results in a single frame', async () => {
+    const { initStreaming } = await import('../streaming/adapter');
+    initStreaming({
+      streaming: { enabled: true, blockMinChars: 10, blockMaxChars: 100, previewMode: 'off' },
+    } as any);
+
+    const resultHandlers = listeners.get('tool:result') || [];
+    vi.clearAllMocks();
+    for (const h of resultHandlers) {
+      h({ runId: 'run-small', toolName: 'smallTool', result: 'done' });
+    }
+
+    const toolResultCalls = broadcastToSubscribed.mock.calls.filter(
+      (c: any) => c[0] === 'tool.result',
+    );
+    expect(toolResultCalls.length).toBe(1);
+    expect(toolResultCalls[0][1].final).toBe(true);
+    expect(toolResultCalls[0][1].chunk).toBe('done');
   });
 });

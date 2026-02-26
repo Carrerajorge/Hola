@@ -31,10 +31,46 @@ export async function initializeOpenClaw(httpServer: HttpServer): Promise<void> 
     enabledModules.push('skills');
   }
 
+  if (config.commands.enabled) {
+    const { registerBuiltinCommands } = await import('./commands/builtinCommands');
+    registerBuiltinCommands();
+    enabledModules.push('commands');
+  }
+
   if (config.streaming.enabled) {
     const { initStreaming } = await import('./streaming/adapter');
     initStreaming(config);
     enabledModules.push('streaming');
+  }
+
+  if (config.sandbox.enabled) {
+    const { initSandbox } = await import('./sandbox/index');
+    initSandbox(config);
+    enabledModules.push('sandbox');
+  }
+
+  if (config.advancedMemory.enabled) {
+    const { initAdvancedMemory } = await import('./memory/index');
+    await initAdvancedMemory(config);
+    enabledModules.push('advancedMemory');
+  }
+
+  if (config.media.enabled) {
+    const { initMedia } = await import('./media/index');
+    initMedia(config);
+    enabledModules.push('media');
+  }
+
+  if (config.mediaUnderstanding.enabled) {
+    const { initMediaUnderstanding } = await import('./mediaUnderstanding/index');
+    initMediaUnderstanding(config);
+    enabledModules.push('mediaUnderstanding');
+  }
+
+  if (config.authProfiles.enabled) {
+    const { initAuthProfiles } = await import('./authProfiles/index');
+    await initAuthProfiles(config);
+    enabledModules.push('authProfiles');
   }
 
   if (enabledModules.length > 0) {

@@ -161,11 +161,38 @@ export function createAgenticTools(): ToolDefinition[] {
     },
   };
 
+  const awaitSubagents: ToolDefinition = {
+    name: 'openclaw_await_subagents',
+    description:
+      'Wait for all child subagents of the current run to complete, then return their aggregated results and shared context. ' +
+      'Use after spawning multiple parallel subagents to collect their outputs.',
+    inputSchema: z.object({
+      parentRunId: z.string().optional().describe('Parent run to await children for. Defaults to the current runId.'),
+      timeoutMs: z.number().int().min(1000).max(300_000).optional().default(120_000),
+    }),
+    capabilities: ['long_running'],
+    execute: async (input: any, context: ToolContext): Promise<ToolResult> => {
+      const parentId = input.parentRunId || context.runId;
+      if (!parentId) {
+        return fail('INVALID_PARAMS', 'No parentRunId or runId available', false);
+      }
+      try {
+        const result = await openclawSubagentService.awaitChildren(parentId, {
+          timeoutMs: input.timeoutMs,
+        });
+        return ok(result);
+      } catch (error: any) {
+        return fail('AWAIT_ERROR', error?.message || 'Failed to await subagents', true);
+      }
+    },
+  };
+
   return [
     spawnSubagent,
     subagentStatus,
     subagentList,
     subagentCancel,
+    awaitSubagents,
     ragSearch,
     ragContext,
   ];

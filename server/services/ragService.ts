@@ -112,6 +112,32 @@ export class RAGService {
   }
 
   /**
+   * Index a pre-chunked, pre-embedded document chunk for retrieval.
+   * Used by the OpenClaw document ingest pipeline.
+   */
+  async indexChunk(
+    userId: string,
+    chunk: {
+      content: string;
+      embedding: number[];
+      metadata: Record<string, any>;
+    },
+  ): Promise<void> {
+    const chatId = chunk.metadata?.chatId || null;
+    await db.execute(sql`
+      INSERT INTO rag_documents (user_id, chat_id, content, content_type, embedding, metadata)
+      VALUES (
+        ${userId},
+        ${chatId},
+        ${chunk.content.substring(0, 5000)},
+        'document_chunk',
+        ${JSON.stringify(chunk.embedding)},
+        ${JSON.stringify(chunk.metadata)}
+      )
+    `);
+  }
+
+  /**
    * Search for relevant context
    */
   async search(
