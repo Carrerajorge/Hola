@@ -1,9 +1,3 @@
-<<<<<<< HEAD
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react"; import { SkeletonChatMessages } from "@/components/skeletons"; import { useDraft } from "@/hooks/use-draft"; import { 
-useStreamingTransition } from "@/hooks/use-streaming-transition"; import { useStreamChat } from "@/hooks/use-stream-chat"; import { apiFetch, getAnonUserIdHeader } from "@/lib/apiClient"; import { 
-getFileUploader } from "@/lib/fileUploader"; import { ensureCsrfToken, uploadBlobWithProgress } from "@/lib/uploadTransport"; import { WelcomeAnimation } from "@/components/welcome-animation-simple"; 
-import { WelcomeExplosion, useFirstVisit } from "@/components/welcome-explosion"; import {
-=======
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { SkeletonChatMessages } from "@/components/skeletons";
 import { useDraft } from "@/hooks/use-draft";
@@ -15,7 +9,6 @@ import { ensureCsrfToken, resolveUploadUrlForResponse, uploadBlobWithProgress } 
 import { WelcomeAnimation } from "@/components/welcome-animation-simple";
 import { WelcomeExplosion, useFirstVisit } from "@/components/welcome-explosion";
 import {
->>>>>>> 75be0339 (chore: subir proyecto prueba-subida-)
   Plus,
   ArrowUp,
   Mic,
@@ -6011,7 +6004,7 @@ IMPORTANTE:
                 return s;
               }), effectiveStreamChatId);
 
-              
+
               // Build attachments array for streaming endpoint
               // FIX: Normalize type to match backend schema: "document" | "image" | "file"
               console.log("[handleSubmit] currentUploadedFiles:", currentUploadedFiles.map(f => ({
@@ -7221,7 +7214,7 @@ IMPORTANTE:
                   <div className="relative w-full max-w-4xl flex flex-col items-center justify-center pt-8 pb-12">
                     {/* Ambient Glow */}
                     <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[400px] bg-gradient-to-br from-blue-500/10 via-purple-500/10 to-pink-500/10 blur-[100px] rounded-full pointer-events-none" />
-                    
+
                     <motion.div
                       initial={{ scale: 0.9, opacity: 0, y: 10 }}
                       animate={{ scale: 1, opacity: 1, y: 0 }}
