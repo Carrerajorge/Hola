@@ -1,0 +1,11 @@
+{
+  "capabilityId": "flowise-nodes",
+  "sourceName": "Flowise",
+  "sourceGit": "https://github.com/FlowiseAI/Flowise.git",
+  "sourceCommitSha": "wave1-concept-port",
+  "extractedFiles": ["packages/server/src/utils/", "packages/components/nodes/"],
+  "portStrategy": "port-concept",
+  "fusedAt": "2026-02-26T00:00:00.000Z",
+  "registeredTools": ["flowise_nodes"],
+  "totalPortedLines": 220
+}
