@@ -81,6 +81,18 @@
       ]
     },
     {
+      "id": "markdown-html",
+      "tags": ["markdown", "html", "convert", "marked", "document"],
+      "repos": [
+        {
+          "name": "marked",
+          "git": "https://github.com/markedjs/marked.git",
+          "extractPaths": ["lib/", "src/"],
+          "language": "javascript"
+        }
+      ]
+    },
+    {
       "id": "dom-scraping",
       "tags": ["html", "dom", "scrape", "parse", "cheerio", "selector"],
       "repos": [
