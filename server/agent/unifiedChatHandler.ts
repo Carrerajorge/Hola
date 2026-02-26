@@ -632,7 +632,7 @@ export async function executeUnifiedChat(
       const writer = new SseBufferedWriter(res, runId);
       activeWriter = writer;
 
-      const streamGenerator = llmGateway.streamChat(formattedMessages, {
+      const streamGenerator = llmGateway.streamChat.call(llmGateway, formattedMessages, {
         userId: request.userId,
         requestId: runId,
         disableImageGeneration: options.disableImageGeneration,

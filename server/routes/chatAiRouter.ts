@@ -6353,7 +6353,9 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
           disableImageGeneration: hasAttachments,
           maxTokens: laneMaxTokens,
         };
-        const streamGenerator = llmGateway.streamChat(
+        
+        const streamGenerator = llmGateway.streamChat.call(
+          llmGateway,
           modelMessages,
           streamLlmOptions,
         );
@@ -7298,11 +7300,11 @@ ${documentText}`;
         const user = (req as AuthenticatedRequest).user;
         const userId = user?.claims?.sub;
 
-        const streamGenerator = llmGateway.streamChat(llmMessages, {
+        const streamGenerator = llmGateway.streamChat.call(llmGateway, llmMessages, {
           userId: userId || conversationId || "anonymous",
           requestId,
           disableImageGeneration: true,  // HARD BLOCK
-        });
+        });        
 
         let answerText = "";
         for await (const chunk of streamGenerator) {

@@ -570,7 +570,7 @@ export class DeterministicChatPipeline extends EventEmitter {
 
       watchdog.startStage("generation");
 
-      for await (const chunk of llmGateway.streamChat(messages, {
+      for await (const chunk of llmGateway.streamChat.call(llmGateway, messages, {
         model: context.model || this.config.defaultModel,
         temperature: context.temperature ?? 0.7,
         timeout: watchdog.getRemainingBudget()
