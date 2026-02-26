@@ -246,6 +246,9 @@ class LLMGateway {
       },
     };
 
+    // Bind methods to preserve `this` when passed around (prevents runtime TypeError)
+    this.streamChat = this.streamChat.bind(this);
+
     // Cleanup intervals — store refs to prevent memory leaks on destroy
     this.cleanupIntervals.push(
       setInterval(() => this.cleanupCache(), 60000),
