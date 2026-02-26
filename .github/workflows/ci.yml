@@ -25,7 +25,7 @@ jobs:
       - name: Run ESLint
         run: npm run lint
       - name: Run TypeScript Compiler Check
-        run: npx tsc --noEmit
+        run: npx tsc -p tsconfig.ci.json --noEmit
 
   security-sast:
     name: Security Scan (SAST)
