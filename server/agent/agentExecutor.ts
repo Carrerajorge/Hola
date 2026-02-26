@@ -7,6 +7,7 @@ import type { RequestSpec } from "./requestSpec";
 import { randomUUID } from "crypto";
 import { getGeminiClientOrThrow } from "../lib/gemini";
 import { requestUnderstandingAgent } from "./requestUnderstanding";
+import { expandAndExecute } from './selfExpand/capabilityExpander';
 
 export interface AgentExecutorOptions {
   maxIterations?: number;
@@ -293,7 +294,20 @@ async function executeToolCall(
 
       default: {
         const toolResult = await toolRegistry.execute(toolName, args, context);
-        result = toolResult.success ? toolResult.output : { error: toolResult.error?.message };
+        if (toolResult.success) {
+          result = toolResult.output;
+        } else if (toolResult.error?.code === 'NOT_FOUND_ERROR') {
+          // Self-expand: attempt to discover, fuse, and execute the missing capability
+          const expanded = await expandAndExecute(toolName, args, context, runId, sseRes);
+          if (expanded) {
+            result = expanded.result;
+            if (expanded.artifact) artifact = expanded.artifact;
+          } else {
+            result = { error: toolResult.error?.message };
+          }
+        } else {
+          result = { error: toolResult.error?.message };
+        }
       }
     }
 
@@ -366,13 +380,214 @@ function inferLocalDirectoryFromPrompt(rawText: string): string {
   return "~";
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// Deterministic Offline Fallback — no LLM, regex-parsed intent → native tools
+// ══════════════════════════════════════════════════════════════════════════════
+const DETERMINISTIC_INTENT_PATTERNS = {
+  web_search: /\b(busca|buscar|search|investiga|investigar|find|google|web)\b/i,
+  write_file: /\b(escribe|escribir|crea|crear|genera|generar|write|create|save|guardar?)\b.*\b(archivo|file|documento|document|txt|json|csv|md)\b/i,
+  read_file: /\b(lee|leer|read|abre|abrir|open|muestra|mostrar|show|cat|contenido|content)\b.*\b(archivo|file|documento|document)\b/i,
+  list_files: /\b(lista|listar|list|carpeta|folder|directorio|directory|archivos|files|ls)\b/i,
+} as const;
+
+interface DeterministicAction {
+  tool: string;
+  args: Record<string, any>;
+}
+
+function parseDeterministicIntent(rawMessage: string): DeterministicAction[] {
+  const actions: DeterministicAction[] = [];
+  const msg = rawMessage.trim();
+
+  // Extract file paths from the message
+  const filePathMatch = msg.match(/((?:~\/|\.\/|\/)[^\s"'`]+)/);
+  const filePath = filePathMatch?.[1] || null;
+
+  // Check for write_file intent (must come before read_file since "crea archivo" matches both)
+  if (DETERMINISTIC_INTENT_PATTERNS.write_file.test(msg)) {
+    // Try to extract filename and content from the message
+    const filenameMatch = msg.match(/(?:archivo|file|documento|document)\s+(?:llamado|named|called)?\s*["""]?([^\s""",]+)["""]?/i)
+      || msg.match(/([^\s]+\.(?:txt|json|csv|md|html|js|ts|py))/i);
+    const contentMatch = msg.match(/(?:con(?:tenido)?|with|content|que diga|saying|texto|text)\s*[:=]?\s*["""]?(.+?)(?:["""]|$)/is);
+
+    actions.push({
+      tool: "write_file",
+      args: {
+        filepath: filenameMatch?.[1] || filePath || "output.txt",
+        content: contentMatch?.[1]?.trim() || msg,
+      },
+    });
+  }
+
+  // Check for read_file intent
+  if (DETERMINISTIC_INTENT_PATTERNS.read_file.test(msg) && filePath) {
+    actions.push({
+      tool: "read_file",
+      args: { filepath: filePath },
+    });
+  }
+
+  // Check for list_files intent
+  if (DETERMINISTIC_INTENT_PATTERNS.list_files.test(msg)) {
+    const dirMatch = msg.match(/((?:~\/|\.\/|\/)[^\s"'`]+)/) || msg.match(/(?:carpeta|folder|directorio|directory|en)\s+["""]?([^\s""",]+)["""]?/i);
+    actions.push({
+      tool: "list_files",
+      args: {
+        directory: dirMatch?.[1] || filePath || "~",
+        maxEntries: 100,
+      },
+    });
+  }
+
+  // Check for web_search intent
+  if (DETERMINISTIC_INTENT_PATTERNS.web_search.test(msg)) {
+    // Extract the search query: everything after the search verb
+    const queryMatch = msg.match(/\b(?:busca|buscar|search|investiga|investigar|find|google)\b\s+(.+)/i);
+    actions.push({
+      tool: "web_search",
+      args: {
+        query: queryMatch?.[1]?.trim() || msg,
+        maxResults: 5,
+      },
+    });
+  }
+
+  // If nothing matched, try web_search as a generic fallback for questions
+  if (actions.length === 0 && msg.includes("?")) {
+    actions.push({
+      tool: "web_search",
+      args: { query: msg, maxResults: 5 },
+    });
+  }
+
+  return actions;
+}
+
+async function executeDeterministicFallback(
+  messages: Array<{ role: string; content: string }>,
+  res: Response,
+  options: AgentExecutorOptions,
+): Promise<string> {
+  const { runId, userId, chatId, requestSpec } = options;
+  const rawMessage = requestSpec.rawMessage || messages.filter(m => m.role === "user").pop()?.content || "";
+
+  const writeSse = (event: string, payload: Record<string, unknown>) => {
+    try {
+      const r = res as any;
+      if (r.writableEnded || r.destroyed) return;
+      res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+      if (typeof r.flush === "function") r.flush();
+    } catch { /* ignore */ }
+  };
+
+  const toolContext: ToolContext = { userId, chatId, runId };
+  const actions = parseDeterministicIntent(rawMessage);
+
+  console.log(`[AgentExecutor] Deterministic fallback: ${actions.length} action(s) parsed from: "${rawMessage.slice(0, 120)}"`);
+
+  writeSse("intent", {
+    runId,
+    mode: "deterministic_offline",
+    parsedActions: actions.map(a => a.tool),
+    rawMessage: rawMessage.slice(0, 200),
+  });
+
+  await emitTraceEvent(runId, "thinking", {
+    content: `Deterministic mode: executing ${actions.length} tool(s) without LLM`,
+    phase: "deterministic",
+  });
+
+  const results: Array<{ tool: string; output: any }> = [];
+
+  for (const action of actions) {
+    writeSse("tool_start", { runId, toolName: action.tool, args: action.args, iteration: 0 });
+
+    const startTime = Date.now();
+    try {
+      const { result } = await executeToolCall(action.tool, action.args, toolContext, runId, res);
+      const durationMs = Date.now() - startTime;
+
+      results.push({ tool: action.tool, output: result });
+
+      writeSse("tool_result", {
+        runId,
+        toolName: action.tool,
+        result,
+        iteration: 0,
+        durationMs,
+      });
+
+      console.log(`[AgentExecutor] Deterministic tool ${action.tool} completed in ${durationMs}ms`);
+    } catch (err: any) {
+      const durationMs = Date.now() - startTime;
+      const errResult = { error: err.message };
+      results.push({ tool: action.tool, output: errResult });
+
+      writeSse("tool_result", {
+        runId,
+        toolName: action.tool,
+        result: errResult,
+        iteration: 0,
+        durationMs,
+      });
+
+      console.error(`[AgentExecutor] Deterministic tool ${action.tool} failed:`, err.message);
+    }
+  }
+
+  // Build a plain-text summary of all tool results
+  let summary: string;
+  if (results.length === 0) {
+    summary = `No pude determinar qué herramienta ejecutar para: "${rawMessage.slice(0, 150)}". Disponibles: web_search, write_file, read_file, list_files.`;
+  } else {
+    const parts = results.map(r => {
+      const output = typeof r.output === "string" ? r.output : JSON.stringify(r.output, null, 2);
+      const truncated = output.length > 2000 ? output.slice(0, 2000) + "\n... [truncado]" : output;
+      return `**${r.tool}**:\n${truncated}`;
+    });
+    summary = `Modo offline (sin LLM). Resultados:\n\n${parts.join("\n\n---\n\n")}`;
+  }
+
+  // Stream the summary via SSE chunks
+  const chunks = summary.match(/.{1,200}/g) || [summary];
+  for (let i = 0; i < chunks.length; i++) {
+    writeSse("chunk", { content: chunks[i], sequence: i + 1, runId });
+  }
+
+  await emitTraceEvent(runId, "agent_completed", {
+    agent: { name: "deterministic_fallback", role: "primary", status: "completed" },
+    iterations: 1,
+    artifactsGenerated: 0,
+    mode: "offline",
+  });
+
+  writeSse("done", { runId, status: "completed", mode: "deterministic_offline" });
+  try {
+    const r = res as any;
+    if (!r.writableEnded && !r.destroyed) res.end();
+  } catch { /* ignore */ }
+
+  return summary;
+}
+
 export async function executeAgentLoop(
   messages: Array<{ role: string; content: string }>,
   res: Response,
   options: AgentExecutorOptions
 ): Promise<string> {
-  const ai = getGeminiClientOrThrow();
   const { runId, userId, chatId, requestSpec, maxIterations = 10, accessLevel = 'owner' } = options;
+
+  // ── Deterministic fallback: try Gemini, fall back to offline tool execution ──
+  let ai: ReturnType<typeof getGeminiClientOrThrow> | null = null;
+  try {
+    ai = getGeminiClientOrThrow();
+  } catch {
+    console.log(`[AgentExecutor] No Gemini API key — entering deterministic offline mode`);
+  }
+
+  if (!ai) {
+    return executeDeterministicFallback(messages, res, options);
+  }
 
   const writeSse = (event: string, payload: Record<string, unknown>) => {
     try {
