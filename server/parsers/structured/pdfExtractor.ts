@@ -4,9 +4,9 @@ import { createRequire } from "node:module";
 // Use createRequire to load pdf-parse via CommonJS — dynamic import() causes
 // an API/Worker version mismatch ("4.10.38" vs "5.4.296") at runtime.
 const require = createRequire(import.meta.url);
-const { PDFParse } = require("pdf-parse");
 
 async function parsePdfBuffer(buffer: Buffer): Promise<{ text: string; numpages: number; info: Record<string, unknown> }> {
+  const { PDFParse } = require("pdf-parse");
   if (!PDFParse) {
     throw new Error('pdf-parse module did not export PDFParse class');
   }
