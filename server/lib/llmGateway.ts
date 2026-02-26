@@ -1,12 +1,7 @@
-import OpenAI from "openai";
-import type { ChatCompletionMessageParam, ChatCompletionChunk } from "openai/resources/chat/completions";
-import Anthropic from "@anthropic-ai/sdk";
-import { MODELS } from "./openai";
-import { geminiChat, geminiStreamChat, GEMINI_MODELS, type GeminiChatMessage } from "./gemini";
-import {
-  KNOWN_XAI_MODEL_IDS,
-  KNOWN_GEMINI_MODEL_IDS,
-  XAI_MODELS,
+import OpenAI from "openai"; import type { ChatCompletionMessageParam, ChatCompletionChunk } from "openai/resources/chat/completions"; import Anthropic from "@anthropic-ai/sdk"; import { MODELS } 
+from "./openai"; import { geminiChat, geminiStreamChat, GEMINI_MODELS, type GeminiChatMessage } from "./gemini"; import {
+
+  KNOWN_XAI_MODEL_IDS, KNOWN_GEMINI_MODEL_IDS, XAI_MODELS,
 } from "./modelRegistry";
 import crypto from "crypto";
 import { analyzeResponseQuality, calculateQualityScore } from "../services/responseQuality";
@@ -1471,8 +1466,13 @@ class LLMGateway {
     };
   }
 
+  streamChat = (
+    messages: ChatCompletionMessageParam[],
+    options: LLMRequestOptions = {},
+  ) => this._streamChat(messages, options);
+
   // ===== Streaming with Checkpoints =====
-  async * streamChat(
+  async * _streamChat(
     messages: ChatCompletionMessageParam[],
     options: LLMRequestOptions = {}
   ): AsyncGenerator<StreamChunk, void, unknown> {
@@ -2129,7 +2129,6 @@ class LLMGateway {
 }
 
 export const llmGateway = new LLMGateway();
-// Ensure methods keep the right `this` even if imported/destructured elsewhere
-llmGateway.streamChat = llmGateway.streamChat.bind(llmGateway);
 
 export type { LLMRequestOptions, LLMResponse, StreamChunk, StreamCheckpoint, TokenUsageRecord };
+
