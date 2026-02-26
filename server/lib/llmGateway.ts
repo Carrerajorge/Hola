@@ -2129,4 +2129,7 @@ class LLMGateway {
 }
 
 export const llmGateway = new LLMGateway();
+// Ensure methods keep the right `this` even if imported/destructured elsewhere
+llmGateway.streamChat = llmGateway.streamChat.bind(llmGateway);
+
 export type { LLMRequestOptions, LLMResponse, StreamChunk, StreamCheckpoint, TokenUsageRecord };
