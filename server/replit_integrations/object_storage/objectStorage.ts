@@ -1,7 +1,9 @@
-import { Storage, File } from "@google-cloud/storage";
-import { Response } from "express";
-import { randomUUID } from "crypto";
-import {
+import { S3Client, HeadObjectCommand, GetObjectCommand, DeleteObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { Readable } from "stream";
+
+
+import { Storage, File } from "@google-cloud/storage"; import { Response } from "express"; import { randomUUID } from "crypto"; import {
   ObjectAclPolicy,
   ObjectPermission,
   canAccessObject,
@@ -10,6 +12,41 @@ import {
 } from "./objectAcl";
 
 const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
+
+function isS3Provider() {
+  return String(process.env.OBJECT_STORAGE_PROVIDER || "").toLowerCase() === "s3";
+}
+
+function getS3Config() {
+  const endpoint = process.env.S3_ENDPOINT;
+  const region = process.env.S3_REGION || "auto";
+  const bucket = process.env.S3_BUCKET;
+  const accessKeyId = process.env.S3_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY;
+  const prefix = (process.env.S3_PRIVATE_PREFIX || "iliagpt/private").replace(/^\/+|\/+$/g, "");
+
+  if (!endpoint || !bucket || !accessKeyId || !secretAccessKey) {
+    throw new Error("S3 config missing: set S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY (and optionally S3_PRIVATE_PREFIX)");
+  }
+
+  return { endpoint, region, bucket, accessKeyId, secretAccessKey, prefix };
+}
+
+function getS3Client() {
+  const { endpoint, region, accessKeyId, secretAccessKey } = getS3Config();
+  return new S3Client({
+    region,
+    endpoint,
+    credentials: { accessKeyId, secretAccessKey },
+    forcePathStyle: true,
+  });
+}
+
+function toS3Key(prefix: string, objectName: string) {
+  const p = prefix.replace(/^\/+|\/+$/g, "");
+  const o = objectName.replace(/^\/+/, "");
+  return p ? `${p}/${o}` : o;
+}
 
 // The object storage client is used to interact with the object storage service.
 export const objectStorageClient = new Storage({
@@ -42,8 +79,14 @@ export class ObjectNotFoundError extends Error {
 export class ObjectStorageService {
   constructor() {}
 
-  // Gets the public object search paths.
   getPublicObjectSearchPaths(): Array<string> {
+    if (String(process.env.OBJECT_STORAGE_PROVIDER || "").toLowerCase() === "s3") {
+      const bucket = process.env.S3_BUCKET || "";
+      const prefix = (process.env.S3_PRIVATE_PREFIX || "iliagpt/private").replace(/^\/+|\/+$/g, "");
+      if (!bucket) throw new Error("S3_BUCKET not set");
+      return [`/${bucket}/${prefix}`];
+    }
+
     const pathsStr = process.env.PUBLIC_OBJECT_SEARCH_PATHS || "";
     const paths = Array.from(
       new Set(
@@ -60,10 +103,16 @@ export class ObjectStorageService {
       );
     }
     return paths;
-  }
+  }  
 
-  // Gets the private object directory.
   getPrivateObjectDir(): string {
+    if (String(process.env.OBJECT_STORAGE_PROVIDER || "").toLowerCase() === "s3") {
+      const bucket = process.env.S3_BUCKET || "";
+      const prefix = (process.env.S3_PRIVATE_PREFIX || "iliagpt/private").replace(/^\/+|\/+$/g, "");
+      if (!bucket) throw new Error("S3_BUCKET not set");
+      return `/${bucket}/${prefix}`;
+    }
+
     const dir = process.env.PRIVATE_OBJECT_DIR || "";
     if (!dir) {
       throw new Error(
@@ -188,27 +237,36 @@ export class ObjectStorageService {
     return content;
   }
 
-  normalizeObjectEntityPath(
-    rawPath: string,
-  ): string {
+  normalizeObjectEntityPath(rawPath: string): string {
+    if (isS3Provider()) {
+      // Con forcePathStyle:true, la URL suele ser: https://<endpoint>/<bucket>/<key>?X-Amz-...
+      const url = new URL(rawPath);
+      const parts = url.pathname.split("/").filter(Boolean);
+
+      // parts[0] = bucket, el resto = key
+      if (parts.length >= 2) {
+        const key = parts.slice(1).join("/");
+        return `/objects/${key}`;
+      }
+      return rawPath;
+    }
+
     if (!rawPath.startsWith("https://storage.googleapis.com/")) {
       return rawPath;
     }
-  
-    // Extract the path from the URL by removing query parameters and domain
+
     const url = new URL(rawPath);
     const rawObjectPath = url.pathname;
-  
+
     let objectEntityDir = this.getPrivateObjectDir();
     if (!objectEntityDir.endsWith("/")) {
       objectEntityDir = `${objectEntityDir}/`;
     }
-  
+
     if (!rawObjectPath.startsWith(objectEntityDir)) {
       return rawObjectPath;
     }
-  
-    // Extract the entity ID from the path
+
     const entityId = rawObjectPath.slice(objectEntityDir.length);
     return `/objects/${entityId}`;
   }
@@ -278,30 +336,45 @@ async function signObjectURL({
   method: "GET" | "PUT" | "DELETE" | "HEAD";
   ttlSec: number;
 }): Promise<string> {
+  if (isS3Provider()) {
+    const s3 = getS3Client();
+
+    if (method !== "PUT") {
+      throw new Error(`S3 signing not implemented for method ${method}`);
+    }
+
+    const cmd = new PutObjectCommand({
+      Bucket: bucketName,
+      Key: objectName,
+      ContentType: "application/octet-stream",
+    });
+
+    return await getSignedUrl(s3, cmd, { expiresIn: ttlSec });
+  }
+
+  // ---- Replit sidecar (original) ----
   const request = {
     bucket_name: bucketName,
     object_name: objectName,
     method,
     expires_at: new Date(Date.now() + ttlSec * 1000).toISOString(),
   };
+
   const response = await fetch(
     `${REPLIT_SIDECAR_ENDPOINT}/object-storage/signed-object-url`,
     {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
     }
   );
+
   if (!response.ok) {
     throw new Error(
-      `Failed to sign object URL, errorcode: ${response.status}, ` +
-        `make sure you're running on Replit`
+      `Failed to sign object URL, errorcode: ${response.status}, make sure you're running on Replit`
     );
   }
 
   const { signed_url: signedURL } = await response.json();
   return signedURL;
 }
-
