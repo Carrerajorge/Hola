@@ -2614,7 +2614,7 @@ export const TraceEventSchema = z.object({
   runId: z.string(),
   stepId: z.string().optional(),
   stepIndex: z.number().optional(),
-  phase: z.enum(['planning', 'executing', 'verifying', 'completed', 'failed', 'cancelled']).optional(),
+  phase: z.enum(['planning', 'executing', 'execution', 'verifying', 'completed', 'failed', 'cancelled']).optional(),
   status: z.enum(['pending', 'running', 'completed', 'failed', 'cancelled', 'retrying']).optional(),
   tool_name: z.string().optional(),
   tool_input: z.record(z.any()).optional(),

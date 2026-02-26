@@ -150,7 +150,7 @@ export default defineConfig(async () => {
       },
       proxy: {
         "/api": {
-          target: process.env.VITE_API_URL || "http://localhost:5001",
+          target: process.env.VITE_API_URL || "http://localhost:5050",
           changeOrigin: true,
           secure: false,
           // Suppress noisy EPIPE/ECONNRESET errors that happen when the API
@@ -169,7 +169,7 @@ export default defineConfig(async () => {
           },
         },
         "/ws": {
-          target: process.env.VITE_WS_URL || "ws://localhost:5001",
+          target: process.env.VITE_WS_URL || "ws://localhost:5050",
           ws: true,
         },
       },

@@ -24,30 +24,32 @@ const MODEL = 'grok-4-1-fast-non-reasoning';
 // Schemas
 // ============================================================================
 
+const KNOWN_SECTION_TYPES = [
+    'executive_summary',
+    'introduction',
+    'methodology',
+    'context',
+    'analysis',
+    'findings',
+    'results',
+    'discussion',
+    'conclusions',
+    'recommendations',
+    'appendix',
+    'bibliography',
+    'custom'
+] as const;
+
 export const SectionSchema = z.object({
-    id: z.string(),
+    id: z.string().catch('s0'),
     title: z.string(),
-    level: z.number().min(1).max(4),
-    type: z.enum([
-        'executive_summary',
-        'introduction',
-        'methodology',
-        'context',
-        'analysis',
-        'findings',
-        'results',
-        'discussion',
-        'conclusions',
-        'recommendations',
-        'appendix',
-        'bibliography',
-        'custom'
-    ]),
-    objective: z.string(),
-    targetWordCount: z.number(),
-    requiresResearch: z.boolean(),
-    requiresData: z.boolean(),
-    children: z.array(z.lazy(() => SectionSchema)).optional(),
+    level: z.coerce.number().min(1).max(4).catch(1),
+    type: z.enum(KNOWN_SECTION_TYPES).catch('custom'),
+    objective: z.string().catch(''),
+    targetWordCount: z.coerce.number().catch(500),
+    requiresResearch: z.coerce.boolean().catch(false),
+    requiresData: z.coerce.boolean().catch(false),
+    children: z.array(z.lazy(() => SectionSchema)).optional().catch(undefined),
 });
 export type Section = z.infer<typeof SectionSchema>;
 
@@ -55,75 +57,75 @@ export const OutlineSpecSchema = z.object({
     title: z.string(),
     subtitle: z.string().optional(),
     abstract: z.string().optional(),
-    sections: z.array(SectionSchema),
-    totalTargetWords: z.number(),
-    estimatedPages: z.number(),
+    sections: z.array(SectionSchema).catch([]),
+    totalTargetWords: z.coerce.number().catch(3000),
+    estimatedPages: z.coerce.number().catch(8),
 });
 export type OutlineSpec = z.infer<typeof OutlineSpecSchema>;
 
 export const ResearchQuerySchema = z.object({
-    id: z.string(),
+    id: z.string().catch('q0'),
     query: z.string(),
-    purpose: z.string(),
-    targetSections: z.array(z.string()),
-    sourceType: z.enum(['web', 'internal', 'academic', 'any']),
-    priority: z.enum(['critical', 'important', 'optional']),
+    purpose: z.string().catch(''),
+    targetSections: z.array(z.string()).catch([]),
+    sourceType: z.enum(['web', 'internal', 'academic', 'any']).catch('any'),
+    priority: z.enum(['critical', 'important', 'optional']).catch('optional'),
 });
 export type ResearchQuery = z.infer<typeof ResearchQuerySchema>;
 
 export const ResearchPlanSchema = z.object({
-    queries: z.array(ResearchQuerySchema),
-    expectedSources: z.number(),
-    researchScope: z.string(),
-    limitations: z.array(z.string()),
+    queries: z.array(ResearchQuerySchema).catch([]),
+    expectedSources: z.coerce.number().catch(0),
+    researchScope: z.string().catch(''),
+    limitations: z.array(z.string()).catch([]),
 });
 export type ResearchPlan = z.infer<typeof ResearchPlanSchema>;
 
 export const QACriterionSchema = z.object({
-    id: z.string(),
+    id: z.string().catch('c0'),
     name: z.string(),
-    description: z.string(),
-    weight: z.number().min(0).max(1),
-    checkType: z.enum(['automated', 'llm', 'manual']),
-    threshold: z.number().min(0).max(100),
+    description: z.string().catch(''),
+    weight: z.coerce.number().min(0).max(1).catch(0.5),
+    checkType: z.enum(['automated', 'llm', 'manual']).catch('llm'),
+    threshold: z.coerce.number().min(0).max(100).catch(70),
 });
 export type QACriterion = z.infer<typeof QACriterionSchema>;
 
 export const QARubricSchema = z.object({
-    criteria: z.array(QACriterionSchema),
-    passingScore: z.number(),
-    criticalCriteria: z.array(z.string()),
+    criteria: z.array(QACriterionSchema).catch([]),
+    passingScore: z.coerce.number().catch(70),
+    criticalCriteria: z.array(z.string()).catch([]),
 });
 export type QARubric = z.infer<typeof QARubricSchema>;
 
 export const DeliverableItemSchema = z.object({
     sectionId: z.string(),
-    includeInWord: z.boolean(),
-    includeInPpt: z.boolean(),
-    includeInPptAs: z.enum(['slide', 'bullet', 'skip']).optional(),
-    includeInExcel: z.boolean(),
-    excelSheetName: z.string().optional(),
+    includeInWord: z.coerce.boolean().catch(true),
+    includeInPpt: z.coerce.boolean().catch(false),
+    includeInPptAs: z.enum(['slide', 'bullet', 'skip']).optional().catch(undefined),
+    includeInExcel: z.coerce.boolean().catch(false),
+    excelSheetName: z.string().optional().catch(undefined),
 });
 export type DeliverableItem = z.infer<typeof DeliverableItemSchema>;
 
 export const DeliverableMapSchema = z.object({
-    items: z.array(DeliverableItemSchema),
+    items: z.array(DeliverableItemSchema).catch([]),
     wordConfig: z.object({
-        includeToc: z.boolean(),
-        includeExecutiveSummary: z.boolean(),
-        includeBibliography: z.boolean(),
-    }),
+        includeToc: z.coerce.boolean().catch(true),
+        includeExecutiveSummary: z.coerce.boolean().catch(true),
+        includeBibliography: z.coerce.boolean().catch(true),
+    }).catch({ includeToc: true, includeExecutiveSummary: true, includeBibliography: true }),
     pptConfig: z.object({
-        totalSlides: z.number(),
-        includeAgenda: z.boolean(),
-        includeConclusion: z.boolean(),
-        storyArc: z.array(z.string()),
-    }),
+        totalSlides: z.coerce.number().catch(10),
+        includeAgenda: z.coerce.boolean().catch(true),
+        includeConclusion: z.coerce.boolean().catch(true),
+        storyArc: z.array(z.string()).catch([]),
+    }).catch({ totalSlides: 10, includeAgenda: true, includeConclusion: true, storyArc: [] }),
     excelConfig: z.object({
-        sheets: z.array(z.string()),
-        includeDataDictionary: z.boolean(),
-        includeCharts: z.boolean(),
-    }),
+        sheets: z.array(z.string()).catch([]),
+        includeDataDictionary: z.coerce.boolean().catch(false),
+        includeCharts: z.coerce.boolean().catch(false),
+    }).catch({ sheets: [], includeDataDictionary: false, includeCharts: false }),
 });
 export type DeliverableMap = z.infer<typeof DeliverableMapSchema>;
 

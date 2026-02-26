@@ -69,7 +69,7 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
       isEnabled: "true",
       enabledAt: new Date().toISOString(),
       enabledByAdminId: "system",
-      displayOrder: -1,
+      displayOrder: 999,
       icon: null,
       modelType: "chat",
       contextWindow: 128000
@@ -124,10 +124,17 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
   }, [enabledModels, selectedModelId, toast]);
 
   // Initialize selected model from Settings -> Default Model.
+  // IMPORTANT: We must wait for API (cloud) models to be available before
+  // committing to a fallback. The previous guard only checked `isLoading`,
+  // but React Query sets `isLoading = false` when the query ERRORS too,
+  // which caused the local Llama3 model to be auto-selected as default
+  // when the backend wasn't ready yet. Now we simply NEVER auto-select a
+  // local-only model — the user can still pick one manually.
   useEffect(() => {
     if (selectedModelId) return;
 
-    const legacyDefaultModelIds = new Set(["gemini-2.5-flash"]);
+    const LOCAL_ONLY_IDS = new Set(["llama3-8b"]);
+    const legacyDefaultModelIds = new Set(["gemini-2.5-flash", "llama3-8b"]);
 
     const findEnabled = (id: string) =>
       enabledModels.find((m) => m.modelId === id || m.id === id);
@@ -142,14 +149,29 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
 
     const target = (primary ? findEnabled(primary) : undefined) || (secondary ? findEnabled(secondary) : undefined);
     if (target) {
+      // If the resolved target is a local-only model, don't commit to it
+      // until cloud models have actually loaded. Otherwise we'd select
+      // Llama3 during the brief window before the API query returns, and
+      // the `if (selectedModelId) return` guard above would prevent
+      // re-initialization when the real cloud models arrive.
+      if (LOCAL_ONLY_IDS.has(target.id)) {
+        const hasApiModels = enabledModels.some((m) => !LOCAL_ONLY_IDS.has(m.id));
+        if (!hasApiModels) return; // wait for cloud models before committing
+      }
       setSelectedModelIdState(target.id);
       return;
     }
-    if (enabledModels[0]) {
-      // Fall back to the first enabled model so the rest of the app has a stable selection.
-      setSelectedModelIdState(enabledModels[0].id);
+
+    // Neither default was found — wait for cloud models to arrive.
+    const hasApiModels = enabledModels.some((m) => !LOCAL_ONLY_IDS.has(m.id));
+    if (!hasApiModels) return;
+
+    // Cloud models are loaded but neither default matched — pick the first one.
+    const firstCloudModel = enabledModels.find((m) => !LOCAL_ONLY_IDS.has(m.id));
+    if (firstCloudModel) {
+      setSelectedModelIdState(firstCloudModel.id);
     }
-  }, [enabledModels, selectedModelId, settings.defaultModel, platformSettings.default_model]);
+  }, [enabledModels, isLoading, selectedModelId, settings.defaultModel, platformSettings.default_model]);
 
   // Keep Settings -> Default Model in sync with the selector.
   useEffect(() => {

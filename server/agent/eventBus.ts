@@ -157,12 +157,11 @@ class AgentEventBus extends EventEmitter {
         timestamp: new Date(event.timestamp),
       });
     } catch (error: any) {
-      // Silently ignore FK constraint errors (run not persisted yet) and NOT NULL errors
-      // These are non-critical for the agent workflow to complete
-      if (error?.code === '23503' || error?.code === '23502') {
-        // FK or NOT NULL constraint - run might not be persisted, skip silently
-        return;
-      }
+      // Silently ignore FK constraint errors (run not persisted yet), NOT NULL errors,
+      // and TypeErrors from DB not being ready (e.g. session undefined during startup).
+      // These are non-critical for the agent workflow to complete.
+      if (error?.code === '23503' || error?.code === '23502') return;
+      if (error instanceof TypeError) return; // DB pool not ready
       console.error(`[EventBus] Persist error:`, error);
     }
   }
