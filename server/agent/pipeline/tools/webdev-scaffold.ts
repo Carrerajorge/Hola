@@ -341,7 +341,7 @@ if __name__ == "__main__":
   }
 };
 
-const TEMPLATES: Record<string, ScaffoldTemplate> = {
+export const TEMPLATES: Record<string, ScaffoldTemplate> = {
   init_react: REACT_TEMPLATE,
   init_vue: VUE_TEMPLATE,
   init_nextjs: NEXTJS_TEMPLATE,

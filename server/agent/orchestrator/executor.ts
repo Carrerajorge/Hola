@@ -3,11 +3,22 @@
 // SuperPlanner Executor — the brain that coordinates everything.
 //
 // orchestrate(goal, opts) → plans → schedules → executes → recovers → delivers
+//
+// Routes subtasks to REAL tools: file I/O, shell exec, code generation,
+// scaffolding, fused modules (langchain-chains, flowise-nodes), and LLM.
 // ---------------------------------------------------------------------------
 
 import { randomUUID } from "crypto";
+import path from "path";
 import { decompose } from "./planner";
 import { buildWaves, rebuildWaves, shouldReplan, skipDependents } from "./scheduler";
+import {
+  getOrCreateWorkspace,
+  cleanupWorkspace,
+  execWorkspaceTool,
+  listWorkspaceFiles,
+} from "./workspaceManager";
+import { geminiCodeGen } from "./geminiCodeGen";
 import type {
   SubTask,
   ExecutionPlan,
@@ -69,12 +80,12 @@ async function executeSubTask(
     }
   }
 
-  // Inject dependency results into args if referenced
-  const enrichedArgs = { ...args, _dependencyResults: depContext };
+  // Inject dependency results and full memory into args for tool context
+  const enrichedArgs = { ...args, _dependencyResults: depContext, _completedResults: memory.completedResults };
 
-  // 3. Try built-in tools first (web_search, fetch_url, etc.)
+  // 3. Try built-in tools first (workspace tools, code gen, web search, etc.)
   try {
-    const builtinResult = await executeBuiltinTool(toolHint, enrichedArgs);
+    const builtinResult = await executeBuiltinTool(toolHint, enrichedArgs, opts);
     if (builtinResult !== null) return builtinResult;
   } catch (err: any) {
     // Built-in failed — continue to other backends
@@ -128,13 +139,16 @@ async function executeSubTask(
 
 // ---------------------------------------------------------------------------
 // Built-in tool execution (direct imports, no registry)
+// Now includes workspace tools, code gen, scaffolding, fused modules.
 // ---------------------------------------------------------------------------
 
 async function executeBuiltinTool(
   toolName: string,
   args: Record<string, any>,
+  opts: OrchestratorOptions,
 ): Promise<any | null> {
   switch (toolName) {
+    // ── Web tools ──────────────────────────────────────────────
     case "web_search": {
       const { searchWeb } = await import("../../services/webSearch");
       const result = await searchWeb(args.query, args.maxResults || 5);
@@ -155,13 +169,14 @@ async function executeBuiltinTool(
       });
     }
 
+    // ── Office document tools (fall through to registry) ──────
     case "create_document":
     case "create_presentation":
     case "create_spreadsheet": {
-      // These use the toolRegistry directly — return null to fall through
       return null;
     }
 
+    // ── Data analysis ─────────────────────────────────────────
     case "analyze_data": {
       const ss = await import("simple-statistics");
       let data: any[] = [];
@@ -194,9 +209,274 @@ async function executeBuiltinTool(
       };
     }
 
+    // ── Scaffold: project boilerplate from templates ──────────
+    case "scaffold_project": {
+      const { TEMPLATES } = await import("../pipeline/tools/webdev-scaffold");
+      const templateKey = args.template || args.action || "init_express";
+      const template = TEMPLATES[templateKey];
+      if (!template) {
+        return { error: `Unknown template: ${templateKey}`, available: Object.keys(TEMPLATES) };
+      }
+
+      const workspace = await getOrCreateWorkspace(opts.runId);
+      const projectName = args.projectName || "my-app";
+      const projectRoot = projectName;
+
+      // Create directories
+      for (const dir of template.directories) {
+        await execWorkspaceTool(workspace, "openclaw_write", {
+          path: path.join(projectRoot, dir, ".gitkeep"),
+          content: "",
+        });
+      }
+
+      // Write all template files
+      const createdFiles: string[] = [];
+      for (const [filePath, content] of Object.entries(template.files)) {
+        const result = await execWorkspaceTool(workspace, "openclaw_write", {
+          path: path.join(projectRoot, filePath),
+          content,
+        });
+        if (result.success) createdFiles.push(filePath);
+      }
+
+      emitSSE(opts.sseRes, "scaffold_complete", {
+        template: templateKey,
+        projectName,
+        fileCount: createdFiles.length,
+      });
+
+      return {
+        scaffolded: true,
+        template: templateKey,
+        projectPath: projectRoot,
+        files: createdFiles,
+        directories: template.directories,
+      };
+    }
+
+    // ── Code generation via Gemini ────────────────────────────
+    case "generate_code": {
+      const result = await geminiCodeGen({
+        description: args.description || args.task,
+        language: args.language,
+        framework: args.framework,
+        context: args.context,
+        existingFiles: args.existingFiles || args._dependencyResults
+          ? extractExistingFiles(args._dependencyResults)
+          : undefined,
+      });
+
+      emitSSE(opts.sseRes, "code_generated", {
+        fileCount: result.files.length,
+        dependencies: result.dependencies,
+      });
+
+      return result;
+    }
+
+    // ── Write single file to workspace ────────────────────────
+    case "write_file": {
+      const workspace = await getOrCreateWorkspace(opts.runId);
+      const result = await execWorkspaceTool(workspace, "openclaw_write", {
+        path: args.path || args.filePath,
+        content: args.content,
+      });
+      return result.success
+        ? { written: true, path: args.path || args.filePath }
+        : { error: result.error?.message };
+    }
+
+    // ── Write multiple files (from generate_code output) ──────
+    case "write_multiple_files": {
+      const workspace = await getOrCreateWorkspace(opts.runId);
+
+      // Files come from dependency results (generate_code output) or direct args
+      let files: Array<{ path: string; content: string }> = args.files || [];
+      if (files.length === 0 && args._dependencyResults) {
+        // Collect files from ALL dependency results (not just the first)
+        for (const depResult of Object.values(args._dependencyResults)) {
+          if (depResult && typeof depResult === "object" && Array.isArray((depResult as any).files)) {
+            files = files.concat((depResult as any).files);
+          }
+        }
+      }
+
+      const results: string[] = [];
+
+      // Infer baseDir from args, dependency results, or any prior scaffold result
+      let baseDir = args.baseDir || args.projectPath || "";
+      if (!baseDir) {
+        // Check direct dependency results first
+        const searchSources = [args._dependencyResults, args._completedResults];
+        for (const source of searchSources) {
+          if (baseDir) break;
+          if (!source) continue;
+          for (const depResult of Object.values(source)) {
+            if (depResult && typeof depResult === "object" && (depResult as any).projectPath) {
+              baseDir = (depResult as any).projectPath;
+              break;
+            }
+          }
+        }
+      }
+
+      for (const file of files) {
+        const filePath = baseDir ? path.join(baseDir, file.path) : file.path;
+        const writeResult = await execWorkspaceTool(workspace, "openclaw_write", {
+          path: filePath,
+          content: file.content,
+        });
+        if (writeResult.success) results.push(filePath);
+      }
+
+      emitSSE(opts.sseRes, "files_written", { count: results.length, files: results });
+      return { written: results.length, files: results };
+    }
+
+    // ── Read file from workspace ──────────────────────────────
+    case "read_file": {
+      const workspace = await getOrCreateWorkspace(opts.runId);
+      const result = await execWorkspaceTool(workspace, "openclaw_read", {
+        path: args.path || args.filePath,
+        offset: args.offset,
+        limit: args.limit,
+      });
+      return result.success ? result.output : { error: result.error?.message };
+    }
+
+    // ── List files in workspace ───────────────────────────────
+    case "list_files": {
+      const workspace = await getOrCreateWorkspace(opts.runId);
+      if (args.recursive) {
+        return await listWorkspaceFiles(workspace);
+      }
+      const result = await execWorkspaceTool(workspace, "openclaw_list", {
+        path: args.path || ".",
+        recursive: args.recursive || false,
+      });
+      return result.success ? result.output : { error: result.error?.message };
+    }
+
+    // ── Shell execution in workspace ──────────────────────────
+    case "shell_exec": {
+      const workspace = await getOrCreateWorkspace(opts.runId);
+      const result = await execWorkspaceTool(workspace, "openclaw_exec", {
+        command: args.command,
+        cwd: args.cwd,
+        timeout: args.timeout,
+        env: args.env,
+      });
+
+      emitSSE(opts.sseRes, "shell_exec", {
+        command: args.command,
+        success: result.success,
+        exitCode: result.error?.details?.exitCode,
+      });
+
+      return result.success
+        ? { output: result.output, success: true }
+        : {
+            output: result.output,
+            success: false,
+            error: result.error?.message,
+            stderr: result.error?.details?.stderr,
+          };
+    }
+
+    // ── Fused module: langchain-chains (prompt chaining) ──────
+    case "langchain_chain": {
+      try {
+        const chains = await import("../selfExpand/fused/langchain-chains/index");
+        const template = args.template || args.prompt;
+        const variables = args.variables || args.inputs || {};
+
+        // Build and execute the chain
+        const prompt = chains.createPrompt(template);
+        const formatted = chains.formatPrompt(prompt, variables);
+
+        if (args.steps && Array.isArray(args.steps)) {
+          // Multi-step chain: each step feeds into the next
+          const chainResult = await chains.executeChain(
+            args.steps.map((s: any) => ({
+              prompt: chains.createPrompt(s.template || s.prompt),
+              variables: s.variables || {},
+            })),
+            variables,
+          );
+          return chainResult;
+        }
+
+        return { formatted, template, variables };
+      } catch (err: any) {
+        return null; // Fall through to other backends
+      }
+    }
+
+    // ── Fused module: flowise-nodes (data flow graphs) ────────
+    case "flowise_flow": {
+      try {
+        const flowise = await import("../selfExpand/fused/flowise-nodes/index");
+        const flowDef = args.flow || args.definition;
+
+        if (flowDef) {
+          const result = await flowise.executeFlow(flowDef);
+          return result;
+        }
+
+        // Build a flow from description
+        if (args.nodes && args.edges) {
+          const builder = new flowise.FlowBuilder();
+          for (const node of args.nodes) {
+            builder.addNode(node);
+          }
+          for (const edge of args.edges) {
+            builder.addEdge(edge);
+          }
+          const flow = builder.build();
+          return await flowise.executeFlow(flow);
+        }
+
+        return null;
+      } catch (err: any) {
+        return null; // Fall through
+      }
+    }
+
     default:
       return null; // Not a known built-in
   }
+}
+
+// ---------------------------------------------------------------------------
+// Helper: extract existing files from dependency results for code gen context
+// ---------------------------------------------------------------------------
+
+function extractExistingFiles(
+  depResults: Record<string, any> | undefined,
+): Array<{ path: string; content: string }> | undefined {
+  if (!depResults) return undefined;
+  const files: Array<{ path: string; content: string }> = [];
+
+  for (const result of Object.values(depResults)) {
+    if (!result || typeof result !== "object") continue;
+
+    // From scaffold_project result
+    if ((result as any).scaffolded && (result as any).files) {
+      for (const f of (result as any).files) {
+        files.push({ path: f, content: `(scaffolded file: ${f})` });
+      }
+    }
+
+    // From generate_code result
+    if (Array.isArray((result as any).files)) {
+      for (const f of (result as any).files) {
+        if (f.path && f.content) files.push(f);
+      }
+    }
+  }
+
+  return files.length > 0 ? files : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -266,7 +546,7 @@ If the task asks you to combine results — integrate ALL available data.`;
  * 2. Schedules execution waves (Scheduler)
  * 3. Executes each subtask with routing, retry, and selfExpand
  * 4. Handles errors with retry → alternate strategy → replan
- * 5. Delivers the assembled final result
+ * 5. Delivers the assembled final result with workspace artifacts
  */
 export async function orchestrate(
   goal: string,
@@ -473,6 +753,16 @@ export async function orchestrate(
         ? "partial"
         : "failed";
 
+  // ── Collect workspace artifacts ──
+  let artifacts: OrchestratorResult["artifacts"] = undefined;
+  try {
+    const workspace = await getOrCreateWorkspace(opts.runId);
+    const files = await listWorkspaceFiles(workspace);
+    if (files.length > 0) {
+      artifacts = { workspacePath: workspace.root, files };
+    }
+  } catch { /* no workspace created for this run */ }
+
   const orchestratorResult: OrchestratorResult = {
     planId,
     status: resultStatus,
@@ -488,6 +778,7 @@ export async function orchestrate(
       replanned: replanCount,
       totalDurationMs: Date.now() - startTime,
     },
+    artifacts,
   };
 
   logEvent(
@@ -500,11 +791,15 @@ export async function orchestrate(
     planId,
     status: resultStatus,
     stats: orchestratorResult.stats,
+    artifacts: artifacts ? { path: artifacts.workspacePath, fileCount: artifacts.files.length } : null,
     finalOutputPreview:
       typeof finalOutput === "string"
         ? finalOutput.slice(0, 500)
         : JSON.stringify(finalOutput).slice(0, 500),
   });
+
+  // Cleanup workspace after a delay (keep for debugging)
+  setTimeout(() => cleanupWorkspace(opts.runId).catch(() => {}), 300_000);
 
   return orchestratorResult;
 }

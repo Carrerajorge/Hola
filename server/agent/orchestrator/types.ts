@@ -72,6 +72,7 @@ export interface OrchestratorOptions {
   maxRetries?: number;
   maxReplanAttempts?: number;
   timeout?: number;
+  workspaceRoot?: string;
 }
 
 export interface OrchestratorResult {
@@ -88,5 +89,9 @@ export interface OrchestratorResult {
     selfExpanded: number;
     replanned: number;
     totalDurationMs: number;
+  };
+  artifacts?: {
+    workspacePath: string;
+    files: string[];
   };
 }

@@ -68,19 +68,61 @@ function buildSystemPrompt(tools: string[]): string {
 
 AVAILABLE TOOLS: [${tools.join(", ")}]
 
-SPECIAL TOOLS:
-- "synthesize" = use LLM reasoning to analyze/combine/summarize results from previous subtasks
-- "web_search" = search the web for information
-- "fetch_url" = fetch and extract text from a URL
-- "create_document" = generate a DOCX document
-- "create_presentation" = generate a PPTX presentation
-- "create_spreadsheet" = generate an XLSX spreadsheet
-- "analyze_data" = perform statistical analysis on data
-- "generate_chart" = generate chart configurations
-- "browse_and_act" = automate a real browser to interact with websites
+─── TOOL CATALOG (use these toolHint values and args) ───
+
+FILE & PROJECT TOOLS:
+- "scaffold_project" — Create project boilerplate
+    args: { action: "init_react"|"init_vue"|"init_nextjs"|"init_express"|"init_fastapi", projectName: "my-app" }
+- "generate_code" — AI-powered code generation (Gemini)
+    args: { description: "what to generate", language?: "typescript", framework?: "express", context?: "extra context" }
+- "write_file" — Write a single file to workspace
+    args: { path: "relative/path.ts", content: "file content" }
+- "write_multiple_files" — Batch-write files (usually from generate_code output)
+    args: { files?: [{ path, content }] }  (or reads files from dependency results)
+- "read_file" — Read a file from workspace
+    args: { path: "relative/path.ts" }
+- "list_files" — List files in workspace
+    args: { directory?: "src", recursive?: true }
+- "shell_exec" — Run shell commands (npm install, npm test, git, etc.)
+    args: { command: "npm install", cwd?: ".", timeout?: 30000 }
+
+RESEARCH TOOLS:
+- "web_search" — Search the web for information
+    args: { query: "search terms" }
+- "fetch_url" — Fetch and extract text from a URL
+    args: { url: "https://..." }
+
+DOCUMENT TOOLS:
+- "create_document" — Generate a DOCX document
+    args: { title, sections, content }
+- "create_presentation" — Generate a PPTX presentation
+    args: { title, slides }
+- "create_spreadsheet" — Generate an XLSX spreadsheet
+    args: { title, sheets }
+- "analyze_data" — Statistical analysis on data
+    args: { data, operations }
+
+CHAIN & FLOW TOOLS:
+- "langchain_chain" — Execute prompt template chains with context threading
+    args: { template: "Analyze {input} and...", variables: { input: "data" }, chainType?: "sequential" }
+- "flowise_flow" — Execute data flow graphs
+    args: { nodes: [...], edges: [...] }
+
+META TOOLS:
+- "synthesize" — LLM reasoning to analyze/combine/summarize results from previous subtasks
+    args: { task: "what to synthesize", format?: "markdown" }
 
 IMPORTANT: You can also suggest tools that don't exist yet — if a tool is missing,
 the system will auto-expand by discovering and fusing open-source code at runtime.
+
+─── PROJECT CREATION PATTERN ───
+When the goal involves creating a project/app/API, use this wave pattern:
+  Wave 1: scaffold_project (create boilerplate)
+  Wave 2: generate_code for each component (parallel — models, routes, auth, etc.)
+  Wave 3: write_multiple_files (writes generated code to workspace)
+  Wave 4: shell_exec "npm install" or "pip install -r requirements.txt"
+  Wave 5: generate_code for tests → write_multiple_files → shell_exec "npm test"
+  Wave 6: synthesize (assemble delivery summary with file listing)
 
 Given a user's goal in natural language, decompose it into concrete, atomic subtasks.
 
@@ -94,6 +136,8 @@ RULES:
 7. The LAST subtask should typically be "synthesize" to assemble the final deliverable
 8. Generate between 3 and 12 subtasks depending on complexity
 9. Each subtask's args should contain the specific parameters for its tool
+10. PREFER real tools (scaffold, generate_code, write_file, shell_exec) over synthesize.
+    Only use synthesize for reasoning/combining — NEVER for tasks a real tool can handle.
 
 Return ONLY valid JSON matching this exact schema:
 {
