@@ -664,6 +664,11 @@ class LLMGateway {
     return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
   }
 
+  private getConfiguredProvidersInOrder(): LLMProvider[] {
+    const order: LLMProvider[] = ["xai", "gemini", "openai", "anthropic", "deepseek"];
+    return order.filter((p) => this.isProviderConfigured(p));
+  }
+
   private isProviderConfigured(provider: LLMProvider): boolean {
     switch (provider) {
       case "xai":
