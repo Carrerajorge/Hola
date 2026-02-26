@@ -8,6 +8,7 @@ import { randomUUID } from "crypto";
 import { getGeminiClientOrThrow } from "../lib/gemini";
 import { requestUnderstandingAgent } from "./requestUnderstanding";
 import { expandAndExecute } from './selfExpand/capabilityExpander';
+import { orchestrate } from './orchestrator/executor';
 
 export interface AgentExecutorOptions {
   maxIterations?: number;
@@ -705,6 +706,61 @@ export async function executeAgentLoop(
     });
   } catch (briefErr: any) {
     console.warn(`[AgentLoop] requestUnderstanding.buildBrief failed (non-fatal):`, briefErr?.message || briefErr);
+  }
+
+  // ── SuperPlanner Orchestrator intercept ──
+  // Route complex multi-step tasks to the intelligent orchestrator instead of
+  // the flat reactive loop. Triggers when intent is multi_step_task OR the
+  // requestBrief has 3+ subtasks.
+  const briefSubtaskCount = requestBrief?.subtasks?.length ?? 0;
+  const shouldOrchestrate =
+    requestSpec.intent === "multi_step_task" ||
+    briefSubtaskCount >= 3;
+
+  if (shouldOrchestrate) {
+    console.log(`[AgentExecutor] Routing to SuperPlanner orchestrator (intent=${requestSpec.intent}, subtasks=${briefSubtaskCount})`);
+
+    writeSse("thinking", {
+      runId,
+      content: "Analyzing task complexity — routing to SuperPlanner for autonomous multi-step execution...",
+    });
+
+    try {
+      const orchResult = await orchestrate(
+        recentUserText || requestSpec.rawMessage,
+        { runId, userId, chatId, sseRes: res, maxRetries: 2, maxReplanAttempts: 2 },
+      );
+
+      // Stream the final output as chunks
+      const finalText =
+        typeof orchResult.finalOutput === "string"
+          ? orchResult.finalOutput
+          : JSON.stringify(orchResult.finalOutput, null, 2);
+
+      const chunks = finalText.match(/.{1,200}/g) || [finalText];
+      for (let i = 0; i < chunks.length; i++) {
+        writeSse("chunk", { content: chunks[i], sequence: i + 1, runId });
+        await new Promise((r) => setTimeout(r, 5));
+      }
+
+      fullResponse = finalText;
+
+      await emitTraceEvent(runId, "agent_completed", {
+        agent: { name: "SuperPlanner", role: "orchestrator", status: orchResult.status },
+        iterations: orchResult.stats.totalSubtasks,
+        artifactsGenerated: 0,
+        orchestratorStats: orchResult.stats,
+      });
+
+      return fullResponse;
+    } catch (orchErr: any) {
+      console.warn(`[AgentExecutor] SuperPlanner failed, falling back to reactive loop:`, orchErr?.message);
+      writeSse("thinking", {
+        runId,
+        content: "SuperPlanner encountered an error — falling back to standard execution...",
+      });
+      // Fall through to the standard reactive loop below
+    }
   }
 
   const isReservationRequest =
