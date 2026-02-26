@@ -217,6 +217,10 @@ function getAvailableToolDescriptions() {
     { name: "list_files", description: "List files and directories.", inputSchema: "{ directory? }" },
   ];
 
+  // Merge: legacy → sandbox → toolRegistry (latest wins)
+  const toolMap = new Map<string, { name: string; description: string; inputSchema: string }>();
+  for (const tool of legacyTools) toolMap.set(tool.name, tool);
+
   // Add sandbox tools (lazy access to avoid circular deps)
   try {
     const sandboxTools = sandboxToolRegistry.listToolsWithInfo().map(t => ({
@@ -224,17 +228,34 @@ function getAvailableToolDescriptions() {
       description: t.description,
       inputSchema: `{ params specific to ${t.name} }`,
     }));
-
-    // Merge, preferring sandbox tools for same-name entries
-    const toolMap = new Map<string, { name: string; description: string; inputSchema: string }>();
-    for (const tool of legacyTools) toolMap.set(tool.name, tool);
     for (const tool of sandboxTools) toolMap.set(tool.name, tool);
-
-    _cachedTools = Array.from(toolMap.values());
   } catch {
-    _cachedTools = legacyTools;
+    // sandbox not available
   }
 
+  // Add toolRegistry tools (includes all OpenClaw agentic tools)
+  try {
+    const registryTools = toolRegistry.list().map(t => {
+      // Extract a human-readable schema summary from Zod inputSchema
+      let schemaStr = '{}';
+      try {
+        if (t.inputSchema && typeof (t.inputSchema as any).shape === 'object') {
+          const keys = Object.keys((t.inputSchema as any).shape);
+          schemaStr = `{ ${keys.join(', ')} }`;
+        }
+      } catch { /* fallback to {} */ }
+      return {
+        name: t.name,
+        description: t.description,
+        inputSchema: schemaStr,
+      };
+    });
+    for (const tool of registryTools) toolMap.set(tool.name, tool);
+  } catch {
+    // toolRegistry not available
+  }
+
+  _cachedTools = Array.from(toolMap.values());
   return _cachedTools;
 }
 

@@ -4691,12 +4691,15 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         res.setHeader("X-Latency-Mode", latencyMode);
         res.flushHeaders();
 
-        // Immediately send a start-handshake so the client knows the stream is alive
+        // Immediately send a start-handshake so the client knows the stream is alive.
+        // Include conversationId so the client's correlation filter accepts this event.
         writeSse(res, 'start', {
+          conversationId: streamConversationId,
           requestId,
           latencyMode,
           timestamp: Date.now(),
         });
+        console.log(`[SSE] ✅ Start event sent: conversationId=${streamConversationId}, requestId=${requestId}`);
 
         // Register connection-close handler as early as possible so every
         // subsequent writeSse can be guarded by isConnectionClosed.
@@ -4709,6 +4712,29 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           console.log("[SSE] Connection closed (early handler)", { requestId });
         });
 
+      }
+
+      // Start heartbeat immediately after SSE is open — BEFORE intent routing
+      // and production handler. Without this, production requests (which return
+      // early) never got a heartbeat, causing proxy timeouts on slow pipelines.
+      if (!heartbeatInterval) {
+        heartbeatInterval = setInterval(() => {
+          const r = res as any;
+          if (!isConnectionClosed && !r.writableEnded && !r.destroyed) {
+            try {
+              res.write(`:heartbeat\n\n`);
+              if (typeof (r as { flush?: Function }).flush === "function") {
+                r.flush();
+              } else if (res.socket && typeof res.socket.write === "function") {
+                res.socket.write("");
+              }
+              resetIdleTimeout();
+            } catch {
+              isConnectionClosed = true;
+              if (heartbeatInterval) clearInterval(heartbeatInterval);
+            }
+          }
+        }, 10000); // 10s heartbeat for production pipeline keepalive
       }
 
       let fullContent = "";
@@ -5221,6 +5247,15 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       let intentResult: IntentResult | null = null;
       if (userMessageText) {
         try {
+          // Send immediate thinking event so the client sees progress during
+          // intent routing (which can take 40s+ on cold start due to embedding index)
+          writeSse(res, 'thinking', {
+            step: 'intent_routing',
+            message: 'Analizando tu solicitud...',
+            conversationId: streamConversationId,
+            requestId,
+          });
+
           intentResult = await routeIntent(userMessageText);
           console.log(`[Stream] IntentRouter: intent=${intentResult.intent}, confidence=${intentResult.confidence.toFixed(2)}, format=${intentResult.output_format || 'none'}`);
 
@@ -5245,6 +5280,17 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
                 },
                 res
               );
+
+              // Mark run as successfully completed BEFORE returning, so the
+              // finally block's orphan-cleanup doesn't override with "failed".
+              if (claimedRun) {
+                try {
+                  await storage.updateChatRunStatus(claimedRun.id, 'done');
+                  runFinalized = true;
+                } catch (updateErr) {
+                  console.warn('[Stream] Failed to mark production run as done:', updateErr);
+                }
+              }
 
               // Production handler completed, exit early
               return;
@@ -5486,10 +5532,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         }
 
         // PRODUCTION MODE INTERCEPT: Handle document creation requests
-        // Debug log to trace production mode evaluation
-        console.log(`\n\n🔥🔥🔥 [Stream] PRODUCTION CHECK START 🔥🔥🔥`);
-        console.log(`[Stream] PRODUCTION CHECK: intent=${intentResult.intent}, confidence=${intentResult.confidence.toFixed(2)}, isProductionIntent=${isProductionIntent(intentResult, userMessageText)}`);
-        console.log(`🔥🔥🔥 [Stream] PRODUCTION CHECK END 🔥🔥🔥\n\n`);
+        console.log(`[Stream] Production check: intent=${intentResult.intent}, confidence=${intentResult.confidence.toFixed(2)}, eligible=${isProductionIntent(intentResult, userMessageText)}`);
 
         // Pass userMessageText to detect if user wants to search for articles first
         if (featureFlags.canvasEnabled && isProductionIntent(intentResult, userMessageText) && intentResult.confidence >= 0.5) {
@@ -5511,6 +5554,16 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
               },
               res
             );
+
+            // Mark run as successfully completed BEFORE returning
+            if (claimedRun) {
+              try {
+                await storage.updateChatRunStatus(claimedRun.id, 'done');
+                runFinalized = true;
+              } catch (updateErr) {
+                console.warn('[Stream] Failed to mark production run as done:', updateErr);
+              }
+            }
 
             // Production handler takes over response, we're done
             if (heartbeatInterval) clearInterval(heartbeatInterval);
@@ -5536,26 +5589,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         });
       }
 
-      heartbeatInterval = setInterval(() => {
-        const r = res as any;
-        if (!isConnectionClosed && !r.writableEnded && !r.destroyed) {
-          try {
-            res.write(`:heartbeat\n\n`);
-            if (typeof (res as unknown as { flush?: Function }).flush === "function") {
-              (res as unknown as { flush: Function }).flush();
-            } else if (res.socket && typeof res.socket.write === "function") {
-              res.socket.write("");
-            }
-
-            // Heartbeats count as stream activity; keep the server-side idle timer from firing.
-            resetIdleTimeout();
-          } catch {
-            // Connection gone — stop heartbeat
-            isConnectionClosed = true;
-            if (heartbeatInterval) clearInterval(heartbeatInterval);
-          }
-        }
-      }, 15000);
+      // Heartbeat already started in early SSE setup above — no duplicate needed.
 
       // Process attachments using DocumentBatchProcessor for atomic batch handling
       let attachmentContext = "";
@@ -6187,7 +6221,7 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
         const assistantMessage = await storage.createChatMessage({
           chatId: effectiveChatIdForPersistence,
           role: 'assistant',
-          content: '', // Will be updated during streaming
+          content: '…', // Non-empty placeholder; updated during streaming (empty violates content_check)
           status: 'pending',
           runId: claimedRun?.id,
           userMessageId: claimedRun?.userMessageId || persistedUserMessageId || undefined,

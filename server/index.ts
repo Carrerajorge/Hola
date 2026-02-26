@@ -422,6 +422,18 @@ export function log(message: string, source = "express") {
       runCleanup().catch(err => log(`[Cleanup Error] ${err.message}`));
     }, 60 * 1000);
 
+    // Sync AI model catalog on startup (ensures platform default model is available)
+    setTimeout(async () => {
+      try {
+        const { syncAllProviders } = await import("./services/aiModelSyncService");
+        const results = await syncAllProviders();
+        const summary = Object.entries(results).map(([p, r]) => `${p}:+${r.added}~${r.updated}`).join(", ");
+        log(`[ModelSync] ${summary}`);
+      } catch (err: any) {
+        log(`[ModelSync] Failed: ${err?.message || err}`);
+      }
+    }, 3000);
+
     const tracingStatus = getTracingMetrics();
     log(
       `OpenTelemetry: initialized=${tracingStatus.isInitialized}, sampleRate=${tracingStatus.sampleRate * 100}%`,

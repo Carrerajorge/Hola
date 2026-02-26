@@ -237,6 +237,13 @@ class KnowledgeBaseService {
 
     async createNode(userId: string, payload: InsertKnowledgeNode): Promise<KnowledgeNode> {
         await this.initialize();
+
+        // Ensure the user row exists so the FK constraint doesn't fail for anon users.
+        if (userId) {
+            const { ensureUserRowExists } = await import("../lib/ensureUserRowExists");
+            await ensureUserRowExists(userId);
+        }
+
         const now = new Date();
         const normalizedSourceId = this.normalizeSourceId(payload.sourceId);
         const contentHash = this.buildContentHash(`${payload.title}\n${payload.content}`);

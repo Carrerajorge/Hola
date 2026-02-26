@@ -136,6 +136,13 @@ export default defineConfig(async () => {
       allowedHosts: true,
       fs: {
         strict: true,
+        // Allow serving from the real node_modules when running in a git worktree
+        // (worktree symlinks node_modules → parent repo's node_modules)
+        allow: [
+          path.resolve(import.meta.dirname),           // worktree root
+          path.resolve(import.meta.dirname, ".."),      // parent of worktree (for traversals)
+          "/Users/luis/Desktop/Hola/node_modules",      // real node_modules location
+        ],
         deny: ["**/.*"],
       },
       watch: {
@@ -143,12 +150,26 @@ export default defineConfig(async () => {
       },
       proxy: {
         "/api": {
-          target: process.env.VITE_API_URL || "http://localhost:5000",
+          target: process.env.VITE_API_URL || "http://localhost:5050",
           changeOrigin: true,
           secure: false,
+          // Suppress noisy EPIPE/ECONNRESET errors that happen when the API
+          // server responds early (e.g. 403/413) while the client is still
+          // streaming a request body. These are expected and not actionable.
+          configure: (proxy) => {
+            proxy.on("error", (err, _req, res) => {
+              const code = (err as NodeJS.ErrnoException).code;
+              if (code === "EPIPE" || code === "ECONNRESET") return;
+              // For real errors, send a 502 if headers haven't been sent yet
+              if (res && "writeHead" in res && !res.headersSent) {
+                (res as import("http").ServerResponse).writeHead(502, { "Content-Type": "text/plain" });
+                (res as import("http").ServerResponse).end("Proxy error");
+              }
+            });
+          },
         },
         "/ws": {
-          target: process.env.VITE_WS_URL || "ws://localhost:5000",
+          target: process.env.VITE_WS_URL || "ws://localhost:5050",
           ws: true,
         },
       },

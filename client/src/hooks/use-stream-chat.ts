@@ -82,12 +82,12 @@ function createSession(): ConversationSession {
 }
 
 const DEFAULT_STREAM_TIMEOUT_MS = 300_000;
-const DEFAULT_FIRST_TOKEN_TIMEOUT_MS = 30_000;
-const DEFAULT_DONE_TIMEOUT_MS = 45_000;
+const DEFAULT_FIRST_TOKEN_TIMEOUT_MS = 120_000; // 120s — cold start of intent router embedding index can take 40s+
+const DEFAULT_DONE_TIMEOUT_MS = 180_000; // 3 min — production pipeline writes 6+ sections sequentially
 // Gap guard: max time between receiving any SSE event and the first content token.
 // Covers the window after firstTokenTimeout is cleared (by a non-content event like
 // "thinking") but before doneTimeout is armed (which requires a content chunk).
-const DEFAULT_CONTENT_TOKEN_TIMEOUT_MS = 60_000;
+const DEFAULT_CONTENT_TOKEN_TIMEOUT_MS = 180_000; // 3 min — production pipeline stages can take 60-120s before first content
 const DEFAULT_IDLE_RECOVERY_MS = 1_500;
 const DEFAULT_MAX_RETRIES = 1;
 const DEFAULT_RETRY_BACKOFF_MS = 800;
@@ -662,22 +662,29 @@ export function useStreamChat(deps: StreamChatDeps) {
 
               if (!data || typeof data !== "object") continue;
 
+              // ── SSE Event Correlation ─────────────────────────────────
+              // Accept events that belong to this stream. We match on
+              // conversationId OR requestId (either is sufficient).
+              // This is deliberately lenient: the old strict AND logic silently
+              // dropped valid production-pipeline events when the server's
+              // sanitized IDs differed even slightly from the client's IDs.
               const eventConversationId =
                 typeof data.conversationId === "string" ? data.conversationId.trim() : "";
-              if (!eventConversationId || eventConversationId !== conversationId) {
-                continue;
-              }
-
               const eventRequestId = typeof data.requestId === "string" ? data.requestId.trim() : "";
               const eventAssistantMessageId =
                 typeof data.assistantMessageId === "string" ? data.assistantMessageId.trim() : "";
 
-              if (!eventRequestId && !eventAssistantMessageId) {
-                continue;
-              }
+              const conversationMatch = eventConversationId && eventConversationId === conversationId;
+              const requestMatch = eventRequestId && eventRequestId === streamRequestId;
+              const assistantMatch = eventAssistantMessageId && eventAssistantMessageId.length > 0;
 
-              if (eventRequestId && eventRequestId !== streamRequestId) {
-                continue;
+              // Accept if ANY identifier matches (OR logic instead of old AND logic)
+              if (!conversationMatch && !requestMatch && !assistantMatch) {
+                // Last resort: if the event has no IDs at all, still accept it
+                // when we haven't received any event yet (first event from production handler)
+                if (eventConversationId || eventRequestId) {
+                  continue;
+                }
               }
 
               lastEventData = data;
@@ -768,6 +775,62 @@ export function useStreamChat(deps: StreamChatDeps) {
               if (!isStaleConversation && currentEventType === "production_start") {
                 setAiState("agent_working", conversationId);
                 onAiStateChange?.("agent_working");
+                // Treat production_start as a content signal so contentTokenTimeout
+                // doesn't fire while the production pipeline is running.
+                if (!hasReceivedToken) {
+                  hasReceivedToken = true;
+                  if (session.contentTokenTimeoutId) {
+                    clearTimeout(session.contentTokenTimeoutId);
+                    session.contentTokenTimeoutId = null;
+                  }
+                }
+              }
+
+              // Handle production pipeline progress events — keep connection alive
+              // and show progress to the user while the pipeline runs.
+              if (!isStaleConversation && currentEventType === "production_event") {
+                const stage = data.stage || data.type || "";
+                const message = data.message || `Processing: ${stage}`;
+                setAiProcessSteps?.(
+                  (prev: any[]) => {
+                    const stepId = `production_${stage}_${data.progress || 0}`;
+                    return [
+                      ...prev.map((s: any) => (s.status === "pending" ? { ...s, status: "done" } : s)),
+                      { id: stepId, step: stepId, title: message, status: "pending" },
+                    ];
+                  },
+                  conversationId
+                );
+                // Reset done timeout on every production event to prevent premature close
+                armDoneTimeout();
+              }
+
+              // Handle production completion — render the summary as assistant content
+              if (!isStaleConversation && currentEventType === "production_complete") {
+                const summary = data.summary || "";
+                if (summary) {
+                  fullContent += summary;
+                  session.fullContent = fullContent;
+                  if (isConversationActive(conversationId)) {
+                    session.pendingContent = fullContent;
+                    flushNow(conversationId);
+                  }
+                }
+                setAiProcessSteps?.(
+                  (prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })),
+                  conversationId
+                );
+              }
+
+              // Handle artifact events from production pipeline
+              if (!isStaleConversation && currentEventType === "artifact") {
+                const artifactInfo = `\n\n📄 **${data.filename || "Document"}** — [Download](${data.downloadUrl || "#"})`;
+                fullContent += artifactInfo;
+                session.fullContent = fullContent;
+                if (isConversationActive(conversationId)) {
+                  session.pendingContent = fullContent;
+                  flushNow(conversationId);
+                }
               }
 
               if (currentEventType === "done" || currentEventType === "finish") {

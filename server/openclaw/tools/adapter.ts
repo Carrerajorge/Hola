@@ -3,6 +3,15 @@ import type { OpenClawConfig } from '../config';
 import { createExecTool } from './execTool';
 import { createFsTools } from './fsTool';
 import { createAgenticTools } from './agenticTools';
+import { createDocumentIngestTool, createDocumentBatchIngestTool } from './documentIngestTool';
+import { createBrowserTools } from './browserTool';
+import { createCronTool } from './cronTool';
+import { createMemoryTool } from './memoryTool';
+import { createSessionTools } from './sessionTools';
+import { createMessageRoutingTool } from './messageRoutingTool';
+import { createAdvancedMemoryTools } from './advancedMemoryTools';
+import { createMediaUnderstandingTools } from './mediaUnderstandingTools';
+import { createAuthProfileTools } from './authProfileTools';
 import { ToolPolicyEngine } from './toolPolicies';
 import { Logger } from '../../lib/logger';
 
@@ -13,24 +22,72 @@ export function registerOpenClawTools(config: OpenClawConfig): void {
     timeout: config.tools.execTimeout,
   });
 
-  // Register exec tool
-  const execTool = createExecTool(policy, config.tools.workspaceRoot);
-  toolRegistry.register(execTool);
-  Logger.info(`[OpenClaw:Tools] Registered tool: ${execTool.name}`);
+  let registered = 0;
 
-  // Register FS tools
-  const fsTools = createFsTools(config.tools.workspaceRoot, true);
-  for (const tool of fsTools) {
-    toolRegistry.register(tool);
-    Logger.info(`[OpenClaw:Tools] Registered tool: ${tool.name}`);
+  const safeRegister = (tool: any) => {
+    try {
+      toolRegistry.register(tool);
+      registered++;
+      Logger.info(`[OpenClaw:Tools] Registered: ${tool.name}`);
+    } catch (err) {
+      Logger.warn(`[OpenClaw:Tools] Failed to register ${tool.name}: ${(err as Error).message}`);
+    }
+  };
+
+  // Core: exec + filesystem
+  safeRegister(createExecTool(policy, config.tools.workspaceRoot));
+  for (const tool of createFsTools(config.tools.workspaceRoot, true)) {
+    safeRegister(tool);
   }
 
-  // Register agentic tools (subagents + RAG bridge)
-  const agenticTools = createAgenticTools();
-  for (const tool of agenticTools) {
-    toolRegistry.register(tool);
-    Logger.info(`[OpenClaw:Tools] Registered tool: ${tool.name}`);
+  // Agentic: subagents + RAG bridge
+  for (const tool of createAgenticTools()) {
+    safeRegister(tool);
   }
 
-  Logger.info(`[OpenClaw:Tools] ${1 + fsTools.length + agenticTools.length} tools registered`);
+  // Document ingestion (single + batch)
+  safeRegister(createDocumentIngestTool());
+  safeRegister(createDocumentBatchIngestTool());
+
+  // Browser automation
+  for (const tool of createBrowserTools()) {
+    safeRegister(tool);
+  }
+
+  // Cron/Scheduling
+  safeRegister(createCronTool());
+
+  // Persistent Memory
+  safeRegister(createMemoryTool());
+
+  // Session Management (list, spawn, send, history)
+  for (const tool of createSessionTools()) {
+    safeRegister(tool);
+  }
+
+  // Message Routing (channel-agnostic)
+  safeRegister(createMessageRoutingTool());
+
+  // Advanced Memory (hybrid vector+FTS search, indexing, stats)
+  if (config.advancedMemory.enabled) {
+    for (const tool of createAdvancedMemoryTools()) {
+      safeRegister(tool);
+    }
+  }
+
+  // Media Understanding (image description, audio transcription, video description)
+  if (config.mediaUnderstanding.enabled) {
+    for (const tool of createMediaUnderstandingTools()) {
+      safeRegister(tool);
+    }
+  }
+
+  // Auth Profiles (credential rotation, cooldown management)
+  if (config.authProfiles.enabled) {
+    for (const tool of createAuthProfileTools()) {
+      safeRegister(tool);
+    }
+  }
+
+  Logger.info(`[OpenClaw:Tools] ${registered} tools registered successfully`);
 }

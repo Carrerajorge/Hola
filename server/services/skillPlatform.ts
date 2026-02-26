@@ -2889,6 +2889,11 @@ export class SkillPlatformService {
     };
 
     try {
+      // Ensure the owner user row exists so the FK constraint doesn't fail.
+      if (request.userId) {
+        const { ensureUserRowExists } = await import("../lib/ensureUserRowExists");
+        await ensureUserRowExists(request.userId);
+      }
       await db.insert(skillCatalog).values(catalogRow as any);
       await db.insert(skillCatalogVersions).values(versionRow as any);
       this.emitTrace(request, {
@@ -2905,7 +2910,9 @@ export class SkillPlatformService {
         message: "Auto skill persistence failed",
         details: { reason: message },
       });
-      throw new Error(`Auto skill persistence failed: ${message}`);
+      // Non-critical: skill still works in-memory. Don't throw — this would
+      // propagate up and potentially crash the chat flow.
+      console.warn(`[SkillPlatform] Auto skill persistence failed (non-critical): ${message}`);
     }
 
     const runtime: RuntimeSkill = {

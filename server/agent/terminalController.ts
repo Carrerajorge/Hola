@@ -1284,16 +1284,46 @@ export class TerminalController extends EventEmitter {
     const fullCommand = buildCommandLine(command, args);
     const cmd = args.length ? [command, ...args] : [command]; // CMD format for Docker
 
-    // Prepare Env
+    // Prepare Env — with sandbox sanitization when module is active
     const env = resolveCommandEnvironment(session.env, request.env);
-    const envVars = Object.entries(env).map(([k, v]) => `${k}=${v}`);
+    let envVars: string[];
+    try {
+        const { getSandboxConfig, sanitizeEnvVars, envToDockerFormat } = await import('../openclaw/sandbox/index');
+        const sandboxCfg = getSandboxConfig();
+        if (sandboxCfg?.blockApiKeyLeak) {
+            const result = sanitizeEnvVars(env);
+            if (result.blocked.length > 0) {
+                Logger.info(`[Docker] Sandbox stripped ${result.blocked.length} env vars: ${result.blocked.join(', ')}`);
+            }
+            for (const warn of result.warnings) {
+                Logger.warn(`[Docker] Env warning: ${warn}`);
+            }
+            envVars = envToDockerFormat(result.allowed);
+        } else {
+            envVars = Object.entries(env).map(([k, v]) => `${k}=${v}`);
+        }
+    } catch {
+        // Sandbox module not available — use raw env
+        envVars = Object.entries(env).map(([k, v]) => `${k}=${v}`);
+    }
 
     let stdout = "";
     let stderr = "";
     let container: Docker.Container | null = null;
 
     try {
-        // 1. Create Container
+        // 1. Create Container (with sandbox-aware config)
+        let networkMode: string = "none";
+        let readonlyRootfs = false;
+        try {
+            const { getSandboxConfig } = await import('../openclaw/sandbox/index');
+            const sandboxCfg = getSandboxConfig();
+            if (sandboxCfg) {
+                networkMode = sandboxCfg.docker.networkMode;
+                readonlyRootfs = sandboxCfg.docker.readonlyRootfs;
+            }
+        } catch { /* sandbox module not loaded */ }
+
         container = await docker.createContainer({
             Image: image,
             Cmd: cmd,
@@ -1307,8 +1337,8 @@ export class TerminalController extends EventEmitter {
                 Privileged: false,
                 SecurityOpt: ["no-new-privileges"], // Hardening: Prevent privilege escalation
                 CapDrop: ["ALL"], // Drop all capabilities
-                NetworkMode: "none", // Default to no network for safety
-                ReadonlyRootfs: false, // Allow writing to tmp/app for now
+                NetworkMode: networkMode,
+                ReadonlyRootfs: readonlyRootfs,
             }
         });
 

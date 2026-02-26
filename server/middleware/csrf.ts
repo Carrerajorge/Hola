@@ -162,6 +162,13 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         return next();
     }
 
+    // Local file uploads use intent-based auth (consumeLocalUploadIntent) which
+    // already prevents CSRF — the client must first obtain a one-time upload
+    // intent via an authenticated POST, then PUT the binary body to this URL.
+    if (req.path.startsWith("/api/local-upload/") || req.originalUrl.startsWith("/api/local-upload/")) {
+        return next();
+    }
+
     if (req.headers.origin || req.headers.referer) {
       const origin = req.headers.origin ? String(req.headers.origin) : undefined;
       const referer = req.headers.referer ? String(req.headers.referer) : undefined;

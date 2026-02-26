@@ -112,12 +112,13 @@ const KNOWN_MODELS: Readonly<Record<string, readonly KnownModel[]>> = deepFreeze
   // XAI GROK MODELS
   // ========================================
   xai: [
-    // Grok 4 Series (Latest)
-    { modelId: "grok-4.1-fast", name: "Grok 4.1 Fast", contextWindow: 2000000, maxOutput: 16384, type: "TEXT", inputCost: "0.0005", outputCost: "0.002", description: "Fast inference with 2M context" },
-    { modelId: "grok-4.1-fast-reasoning", name: "Grok 4.1 Fast Reasoning", contextWindow: 2000000, maxOutput: 16384, type: "TEXT", inputCost: "0.001", outputCost: "0.004", description: "Fast with reasoning capabilities" },
-    { modelId: "grok-4", name: "Grok 4", contextWindow: 256000, maxOutput: 16384, type: "MULTIMODAL", inputCost: "0.003", outputCost: "0.015", description: "Most intelligent xAI model" },
-    { modelId: "grok-4-fast", name: "Grok 4 Fast", contextWindow: 2000000, maxOutput: 16384, type: "TEXT", inputCost: "0.0005", outputCost: "0.002", description: "Cost-efficient intelligence" },
-    { modelId: "grok-4-fast-reasoning", name: "Grok 4 Fast Reasoning", contextWindow: 2000000, maxOutput: 16384, type: "TEXT", inputCost: "0.001", outputCost: "0.004", description: "Fast reasoning variant" },
+    // Grok 4.1 Series (Latest — IDs must match xAI API exactly)
+    { modelId: "grok-4-1-fast-non-reasoning", name: "Grok 4.1 Fast", contextWindow: 2000000, maxOutput: 16384, type: "TEXT", inputCost: "0.0005", outputCost: "0.002", description: "Respuestas rápidas con 2M de contexto" },
+    { modelId: "grok-4-1-fast-reasoning", name: "Grok 4.1 Fast Reasoning", contextWindow: 2000000, maxOutput: 16384, type: "TEXT", inputCost: "0.001", outputCost: "0.004", description: "Razonamiento avanzado con 2M de contexto" },
+    // Grok 4 Series
+    { modelId: "grok-4-0709", name: "Grok 4 Premium", contextWindow: 256000, maxOutput: 16384, type: "MULTIMODAL", inputCost: "0.003", outputCost: "0.015", description: "Modelo premium de alta calidad" },
+    { modelId: "grok-4-fast-non-reasoning", name: "Grok 4 Fast", contextWindow: 2000000, maxOutput: 16384, type: "TEXT", inputCost: "0.0005", outputCost: "0.002", description: "Modelo rápido y eficiente" },
+    { modelId: "grok-4-fast-reasoning", name: "Grok 4 Fast Reasoning", contextWindow: 2000000, maxOutput: 16384, type: "TEXT", inputCost: "0.001", outputCost: "0.004", description: "Razonamiento paso a paso" },
 
     // Grok 3 Series
     { modelId: "grok-3", name: "Grok 3", contextWindow: 131072, maxOutput: 16384, type: "TEXT", inputCost: "0.003", outputCost: "0.015", description: "xAI flagship model" },
@@ -361,7 +362,43 @@ export async function syncAllProviders(): Promise<Record<string, SyncResult>> {
     }
   }
 
+  // Auto-enable critical models that match the platform default
+  await ensurePlatformDefaultEnabled();
+
   return results;
+}
+
+/**
+ * Ensures that the platform default model (and a small set of essential models)
+ * are enabled after sync. This prevents the UI from falling back to Ollama
+ * when no cloud models are enabled.
+ */
+async function ensurePlatformDefaultEnabled(): Promise<void> {
+  const ESSENTIAL_MODEL_IDS = [
+    "grok-4-1-fast-non-reasoning",  // Platform default
+    "grok-4-1-fast-reasoning",      // Reasoning variant
+    "grok-3",                        // Fallback
+  ];
+
+  try {
+    const allModels = await storage.getAiModels();
+
+    for (const modelId of ESSENTIAL_MODEL_IDS) {
+      const model = allModels.find(m => m.modelId === modelId);
+      if (model && model.isEnabled !== "true") {
+        await storage.updateAiModel(model.id, {
+          isEnabled: "true",
+          status: "active",
+          enabledAt: new Date(),
+          enabledByAdminId: "system-auto",
+          displayOrder: modelId === "grok-4-1-fast-non-reasoning" ? 1 : 2,
+        });
+        logSync("info", `Auto-enabled essential model: ${modelId}`);
+      }
+    }
+  } catch (err) {
+    logSync("warn", `ensurePlatformDefaultEnabled failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 export function getModelStats(): { totalKnown: number; byProvider: Record<string, number>; byType: Record<string, number> } {
