@@ -85,6 +85,92 @@ function defaultTools(): string[] {
   ];
 }
 
+function detectDeliverableFormat(text: string): string {
+  const lower = text.toLowerCase();
+  const wantsDocx = /\b(docx|word|resumen|informe|reporte)\b/i.test(lower);
+  const wantsXlsx = /\b(xlsx|excel|tabla|hoja\s+de\s+c[aá]lculo)\b/i.test(lower);
+  const wantsPptx = /\b(pptx|ppt|presentaci[oó]n|slides)\b/i.test(lower);
+  if (wantsDocx && wantsXlsx && wantsPptx) return "multiple";
+  if (wantsDocx && wantsXlsx) return "multiple";
+  if (wantsPptx) return "pptx";
+  if (wantsXlsx) return "xlsx";
+  if (wantsDocx) return "docx";
+  return "text";
+}
+
+function buildFallbackBrief(input: RequestUnderstandingInput, reason: string): RequestBrief {
+  const text = normalizeText(input.text);
+  const format = detectDeliverableFormat(text);
+  const intent =
+    /\b(investiga|investigar|research|art[ií]culos|bibliograf[ií]a|fuentes)\b/i.test(text)
+      ? "research"
+      : "task";
+
+  const suggestedTools = new Set<string>();
+  if (format === "docx" || format === "multiple") suggestedTools.add("create_document");
+  if (format === "xlsx" || format === "multiple") suggestedTools.add("create_spreadsheet");
+  if (format === "pptx") suggestedTools.add("create_presentation");
+  if (/\b(grafica|chart|visualizaci[oó]n|an[aá]lisis)\b/i.test(text)) {
+    suggestedTools.add("analyze_data");
+    suggestedTools.add("generate_chart");
+  }
+  suggestedTools.add("web_search");
+  suggestedTools.add("fetch_url");
+
+  return RequestBriefSchema.parse({
+    intent: { primary_intent: intent, confidence: 0.4 },
+    objective: text || "Resolver la solicitud del usuario",
+    scope: { in_scope: [], out_of_scope: [] },
+    subtasks: [
+      { title: "Recolectar fuentes", description: "Buscar y validar fuentes relevantes", priority: "high" },
+      { title: "Sintetizar y entregar", description: "Organizar resultados y generar entregables", priority: "high" },
+    ],
+    deliverable: {
+      description: format === "multiple" ? "Entregables combinados" : `Entrega en formato ${format}`,
+      format,
+    },
+    audience: { audience: "general", tone: "directo", language: "es" },
+    restrictions: [],
+    data_provided: [],
+    assumptions: reason ? [`fallback_reason:${reason}`] : [],
+    required_inputs: [],
+    expected_output: {
+      description: format === "multiple" ? "Documentos y tablas generadas" : `Archivo ${format}`,
+      format,
+      structure: [],
+    },
+    validations: [],
+    success_criteria: ["Entregables generados y ordenados"],
+    definition_of_done: ["Resultados completos y verificados"],
+    risks: [],
+    ambiguities: [],
+    tool_routing: {
+      suggested_tools: Array.from(suggestedTools),
+      blocked_tools: [],
+      rationale: "Fallback heuristic routing",
+    },
+    guardrails: {
+      policy_ok: true,
+      privacy_ok: true,
+      security_ok: true,
+      pii_detected: false,
+      flags: [],
+    },
+    self_check: {
+      passed: true,
+      score: 0.5,
+      issues: [],
+    },
+    trace: {
+      planner_model: "heuristic",
+      planner_mode: "heuristic",
+      total_duration_ms: 0,
+      stages: [],
+    },
+    blocker: { is_blocked: false },
+  });
+}
+
 function buildPlannerSystemPrompt(): string {
   return `You are an Intent & Requirement Planner.
 You MUST produce a structured brief with:
@@ -413,7 +499,12 @@ async function callPlannerWithFunctionCalling(
   }
 
   const rawBrief = args.brief ?? args;
-  return coercePlannerBrief(rawBrief);
+  try {
+    return coercePlannerBrief(rawBrief);
+  } catch (err: any) {
+    Logger.warn(`[RequestUnderstanding] function_calling brief invalid: ${err?.message || err}`);
+    return null;
+  }
 }
 
 async function callPlannerWithJsonFallback(
@@ -454,7 +545,8 @@ async function callPlannerWithJsonFallback(
     }
   }
 
-  throw lastErr;
+  Logger.warn(`[RequestUnderstanding] json planner failed; using heuristic fallback: ${lastErr?.message || lastErr}`);
+  return buildFallbackBrief(input, "json_fallback_failed");
 }
 
 function hardSecurityFlagsFromText(text: string): string[] {
@@ -658,7 +750,9 @@ export class RequestUnderstandingAgent {
     });
 
     if (!brief) {
-      throw new Error("Planner failed to produce a brief");
+      state.plannerMode = "heuristic";
+      state.plannerModel = "heuristic";
+      brief = buildFallbackBrief(input, "planner_failed");
     }
 
     await runStage("guardrails", async () => {

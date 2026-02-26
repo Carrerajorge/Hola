@@ -190,10 +190,32 @@ router.post("/super/analyze", async (req: Request, res: Response) => {
 const activeAbortControllers = new Map<string, AbortController>();
 
 router.post("/super/stream", async (req: Request, res: Response) => {
+  let sessionId = randomUUID();
+  let runId = `run_${randomUUID()}`;
+  let sendSSE = (event: SSEEvent) => {
+    res.write(`id: ${event.event_id}\n`);
+    res.write(`event: ${event.event_type}\n`);
+    res.write(`data: ${JSON.stringify(event.data)}\n\n`);
+  };
+
   try {
     const { prompt, messages: clientMessages, chat_id, session_id, run_id, options } = ChatRequestSchema.parse(req.body);
-    const sessionId = session_id || randomUUID();
-    const runId = run_id || `run_${randomUUID()}`;
+    sessionId = session_id || sessionId;
+    runId = run_id || runId;
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Session-ID", sessionId);
+    res.setHeader("X-Run-ID", runId);
+    res.setHeader("Access-Control-Expose-Headers", "X-Run-ID, X-Session-ID");
+    res.flushHeaders();
+
+    sendSSE = (event: SSEEvent) => {
+      res.write(`id: ${event.event_id}\n`);
+      res.write(`event: ${event.event_type}\n`);
+      res.write(`data: ${JSON.stringify(event.data)}\n\n`);
+    };
 
     // CONTEXT FIX: Augment client messages with server-side history
     const conversationHistory = await conversationMemoryManager.augmentWithHistory(
@@ -223,20 +245,6 @@ router.post("/super/stream", async (req: Request, res: Response) => {
     gateway.registerRun(runId, traceBus);
 
     console.log(`[SuperAgent] Registered run ${runId} with StreamGateway`);
-
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Session-ID", sessionId);
-    res.setHeader("X-Run-ID", runId);
-    res.setHeader("Access-Control-Expose-Headers", "X-Run-ID, X-Session-ID");
-    res.flushHeaders();
-
-    const sendSSE = (event: SSEEvent) => {
-      res.write(`id: ${event.event_id}\n`);
-      res.write(`event: ${event.event_type}\n`);
-      res.write(`data: ${JSON.stringify(event.data)}\n\n`);
-    };
 
     let redisClient: ReturnType<typeof createClient> | null = null;
 
@@ -456,9 +464,22 @@ router.post("/super/stream", async (req: Request, res: Response) => {
     res.end();
 
   } catch (error: any) {
-    if (!res.headersSent) {
-      res.status(400).json({ error: error.message });
+    const message = error?.message || "SuperAgent stream failed";
+    if (res.headersSent) {
+      try {
+        sendSSE({
+          event_id: `error_${Date.now()}`,
+          event_type: "error",
+          data: { error: message },
+        });
+      } catch {
+        // ignore SSE write errors
+      }
+      res.end();
+    } else {
+      res.status(500).json({ error: message });
     }
+    console.error(`[SuperAgent] /super/stream failed: ${message}`);
   }
 });
 

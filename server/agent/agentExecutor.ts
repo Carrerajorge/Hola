@@ -41,6 +41,336 @@ const dynamicSkillTools: FunctionDeclaration[] = BUNDLED_SKILL_TOOLS.map(t => {
 const LOCAL_FILESYSTEM_SIGNAL_REGEX =
   /\b(?:carpetas?|caprteas?|careptas?|carpteas?|folders?|directorios?|directories?|archivos?|files?)\b.*\b(?:mac|computadora|pc|laptop|sistema|escritorio|desktop|descargas|downloads|documentos|documents|home|disco)\b|\b(?:analiza|explora|listar|list|revisa|cuenta|count|cu[aá]ntas?)\b.*\b(?:mi\s+(?:mac|computadora|pc)|desktop|escritorio|home)\b|\b(?:cu[aá]ntas?|how\s+many|cantidad(?:\s+de)?|n[uú]mero(?:\s+de)?)\s+(?:carpetas?|caprteas?|careptas?|carpteas?|folders?|directorios?|directories?|archivos?|files?)\b/i;
 const SKILL_SIGNAL_REGEX = /\b(skill|skills|habilidad|habilidades)\b|\$[a-z0-9_-]{2,80}/i;
+const LANDING_PAGE_SIGNAL_REGEX =
+  /\b(landing\s+page|p[aá]gina\s+de\s+aterrizaje|p[aá]gina\s+web|sitio\s+web|website|landing)\b/i;
+
+function extractBusinessLabel(raw: string): string {
+  const cleaned = normalizeSpaces(String(raw || ""));
+  const match =
+    cleaned.match(/\b(?:para|de)\s+mi\s+(?:negocio|empresa|proyecto|marca)?\s*(?:de|sobre)?\s*([a-z0-9áéíóúñ\s-]{3,80})/i) ||
+    cleaned.match(/\b(?:para|de)\s+una?\s+([a-z0-9áéíóúñ\s-]{3,80})/i);
+  const label = match?.[1]?.trim();
+  return label && label.length >= 3 ? label.slice(0, 60) : "tu negocio";
+}
+
+function buildLandingPageAssets(businessLabel: string): { html: string; css: string; readme: string } {
+  const title = `Servicios ${businessLabel}`;
+  const html = `<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${title}</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <nav class="nav">
+        <div class="logo">${businessLabel.toUpperCase()}</div>
+        <div class="cta">
+          <a href="#contacto" class="btn ghost">Agenda una llamada</a>
+        </div>
+      </nav>
+      <div class="hero-content">
+        <div>
+          <p class="kicker">Servicios académicos premium</p>
+          <h1>Transformamos tu investigación en entregables impecables</h1>
+          <p class="lead">
+            Acompañamiento experto en tesis, papers, revisión bibliográfica, asesorías
+            y gestión completa de proyectos académicos.
+          </p>
+          <div class="hero-actions">
+            <a href="#servicios" class="btn">Ver servicios</a>
+            <a href="#casos" class="btn ghost">Casos de éxito</a>
+          </div>
+        </div>
+        <div class="hero-card">
+          <h3>¿Qué obtienes?</h3>
+          <ul>
+            <li>Plan de trabajo con hitos semanales</li>
+            <li>Rigor metodológico y referencias verificadas</li>
+            <li>Entrega lista para comité y publicación</li>
+          </ul>
+          <div class="badge">24-72h para avances clave</div>
+        </div>
+      </div>
+    </header>
+
+    <section id="servicios" class="section">
+      <h2>Servicios especializados</h2>
+      <div class="grid">
+        <article>
+          <h3>Tesis & disertaciones</h3>
+          <p>Diseño, metodología, análisis y redacción completa con estándares académicos.</p>
+        </article>
+        <article>
+          <h3>Revisión sistemática</h3>
+          <p>Búsqueda, filtrado y síntesis de literatura con trazabilidad.</p>
+        </article>
+        <article>
+          <h3>Asesoría express</h3>
+          <p>Sesiones 1:1 para destrabar problemas críticos y planificar entregas.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="casos" class="section alt">
+      <h2>Resultados comprobables</h2>
+      <div class="stats">
+        <div><span>+120</span><p>proyectos entregados</p></div>
+        <div><span>98%</span><p>satisfacción de clientes</p></div>
+        <div><span>15</span><p>áreas de especialización</p></div>
+      </div>
+    </section>
+
+    <section id="contacto" class="section">
+      <h2>Agenda tu diagnóstico</h2>
+      <p class="lead">Cuéntanos tu objetivo y recibe un plan de trabajo en 24 horas.</p>
+      <form class="contact-form">
+        <input type="text" placeholder="Nombre" />
+        <input type="email" placeholder="Correo" />
+        <input type="text" placeholder="Universidad / Programa" />
+        <textarea rows="4" placeholder="Resumen de tu proyecto"></textarea>
+        <button type="submit" class="btn">Quiero empezar</button>
+      </form>
+    </section>
+
+    <footer class="footer">
+      <p>${businessLabel} · Confidencialidad garantizada · Atención LATAM y España</p>
+    </footer>
+  </body>
+</html>`;
+
+  const css = `:root {
+  --bg: #f8f4ee;
+  --ink: #1f1d1a;
+  --accent: #c86b30;
+  --accent-dark: #9a4f22;
+  --muted: #7c756a;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Georgia", "Times New Roman", serif;
+  color: var(--ink);
+  background: radial-gradient(circle at top left, #fff6e6 0%, #f8f4ee 45%, #f0ebe4 100%);
+}
+
+.hero {
+  padding: 2.5rem 6vw 4rem;
+  background: linear-gradient(120deg, #fff6e6 0%, #f4e6d2 60%, #ecd8c0 100%);
+}
+
+.nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 3rem;
+}
+
+.logo {
+  font-weight: bold;
+  letter-spacing: 0.2rem;
+  font-size: 1.1rem;
+}
+
+.btn {
+  display: inline-block;
+  padding: 0.75rem 1.5rem;
+  border-radius: 999px;
+  border: none;
+  text-decoration: none;
+  color: #fff;
+  background: var(--accent);
+  font-weight: 600;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.btn.ghost {
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent-dark);
+}
+
+.btn:hover { transform: translateY(-2px); box-shadow: 0 12px 24px rgba(0,0,0,0.12); }
+
+.hero-content {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 2rem;
+  align-items: center;
+}
+
+.kicker {
+  text-transform: uppercase;
+  font-size: 0.8rem;
+  letter-spacing: 0.3rem;
+  color: var(--accent-dark);
+}
+
+h1 { font-size: clamp(2rem, 4vw, 3.5rem); margin: 1rem 0; }
+.lead { font-size: 1.1rem; color: var(--muted); max-width: 540px; }
+
+.hero-card {
+  background: #fff;
+  padding: 1.8rem;
+  border-radius: 24px;
+  box-shadow: 0 30px 60px rgba(0,0,0,0.12);
+}
+
+.hero-card ul { padding-left: 1.2rem; color: var(--muted); }
+.hero-card .badge {
+  margin-top: 1.5rem;
+  display: inline-block;
+  padding: 0.4rem 0.9rem;
+  background: #fdf3e4;
+  border-radius: 999px;
+  color: var(--accent-dark);
+  font-size: 0.85rem;
+}
+
+.section {
+  padding: 4rem 6vw;
+}
+.section.alt {
+  background: #fff;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1.5rem;
+  margin-top: 2rem;
+}
+
+.grid article {
+  padding: 1.5rem;
+  border-radius: 18px;
+  background: #fff9f2;
+  box-shadow: 0 18px 40px rgba(0,0,0,0.08);
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1.5rem;
+  text-align: center;
+  margin-top: 2rem;
+}
+
+.stats span {
+  font-size: 2rem;
+  font-weight: bold;
+  color: var(--accent);
+}
+
+.contact-form {
+  display: grid;
+  gap: 1rem;
+  max-width: 520px;
+  margin-top: 2rem;
+}
+
+.contact-form input,
+.contact-form textarea {
+  padding: 0.8rem 1rem;
+  border-radius: 12px;
+  border: 1px solid #e1d7c7;
+  font-family: inherit;
+}
+
+.footer {
+  padding: 2rem 6vw 3rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+`;
+
+  const readme = `Landing page generada automáticamente para ${businessLabel}.
+
+Archivos:
+- index.html
+- styles.css
+
+Para previsualizar abre index.html en un navegador o sirve la carpeta con un servidor estático.`;
+
+  return { html, css, readme };
+}
+
+async function runLandingPageFastpath(
+  messages: Array<{ role: string; content: string }>,
+  res: Response,
+  options: AgentExecutorOptions,
+): Promise<string | null> {
+  const { runId, userId, chatId, requestSpec } = options;
+  const rawMessage = requestSpec.rawMessage || messages.filter(m => m.role === "user").pop()?.content || "";
+  if (!LANDING_PAGE_SIGNAL_REGEX.test(rawMessage)) return null;
+
+  const businessLabel = extractBusinessLabel(rawMessage);
+  const assets = buildLandingPageAssets(businessLabel);
+  const baseDir = `artifacts/landing-${runId}`;
+  const toolContext: ToolContext = { userId, chatId, runId };
+
+  const writeSse = (event: string, payload: Record<string, unknown>) => {
+    try {
+      const r = res as any;
+      if (r.writableEnded || r.destroyed) return;
+      res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+      if (typeof r.flush === "function") r.flush();
+    } catch { /* ignore */ }
+  };
+
+  writeSse("intent", {
+    runId,
+    mode: "landing_fastpath",
+    parsedActions: ["write_file"],
+    rawMessage: rawMessage.slice(0, 200),
+  });
+
+  const files = [
+    { filepath: `${baseDir}/index.html`, content: assets.html },
+    { filepath: `${baseDir}/styles.css`, content: assets.css },
+    { filepath: `${baseDir}/README.md`, content: assets.readme },
+  ];
+
+  for (const file of files) {
+    writeSse("tool_start", { runId, toolName: "write_file", args: { filepath: file.filepath }, iteration: 0 });
+    const startTime = Date.now();
+    const { result } = await executeToolCall("write_file", { filepath: file.filepath, content: file.content }, toolContext, runId, res);
+    writeSse("tool_result", {
+      runId,
+      toolName: "write_file",
+      result,
+      iteration: 0,
+      durationMs: Date.now() - startTime,
+    });
+  }
+
+  const summary =
+    `Landing page generada en ${baseDir}.\n` +
+    `Archivos creados: index.html, styles.css, README.md.`;
+
+  const chunks = summary.match(/.{1,200}/g) || [summary];
+  for (let i = 0; i < chunks.length; i++) {
+    writeSse("chunk", { content: chunks[i], sequence: i + 1, runId });
+  }
+
+  await emitTraceEvent(runId, "agent_completed", {
+    agent: { name: "landing_fastpath", role: "primary", status: "completed" },
+    iterations: 1,
+    artifactsGenerated: files.length,
+  });
+
+  writeSse("done", { runId, status: "completed", mode: "landing_fastpath" });
+  try {
+    const r = res as any;
+    if (!r.writableEnded && !r.destroyed) res.end();
+  } catch { /* ignore */ }
+
+  return summary;
+}
 
 function tokenizePrompt(rawPrompt: string): string[] {
   return String(rawPrompt || "")
@@ -577,6 +907,11 @@ export async function executeAgentLoop(
   options: AgentExecutorOptions
 ): Promise<string> {
   const { runId, userId, chatId, requestSpec, maxIterations = 10, accessLevel = 'owner' } = options;
+
+  const landingFastpathResult = await runLandingPageFastpath(messages, res, options);
+  if (landingFastpathResult) {
+    return landingFastpathResult;
+  }
 
   // ── Deterministic fallback: try Gemini, fall back to offline tool execution ──
   let ai: ReturnType<typeof getGeminiClientOrThrow> | null = null;
