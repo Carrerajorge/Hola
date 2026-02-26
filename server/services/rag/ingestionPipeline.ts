@@ -11,6 +11,9 @@ import { ragChunks, type InsertRagChunk } from "@shared/schema/rag";
 import { eq, and, sql } from "drizzle-orm";
 import { getEmbedding } from "../embeddings";
 import { chunkDocument, type SemanticChunk, type ChunkingOptions } from "../semanticChunker";
+import { deepParse } from "./deepParsing";
+import { hierarchicalChunk } from "./chunking";
+import { EmbeddingProviderFactory } from "./embeddings/embeddingProvider";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,6 +48,12 @@ export interface IngestionResult {
     totalTokensEstimated: number;
     processingTimeMs: number;
     chunkIds: string[];
+}
+
+export interface DocumentIngestionInput {
+    buffer: Buffer;
+    mimeType: string;
+    fileName: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -246,6 +255,137 @@ export async function ingest(
 }
 
 // ---------------------------------------------------------------------------
+// Document ingestion — deep parsing + hierarchical chunking pipeline
+// ---------------------------------------------------------------------------
+
+export async function ingestDocument(
+    input: DocumentIngestionInput,
+    options: IngestionOptions,
+): Promise<IngestionResult> {
+    const startTime = Date.now();
+
+    // 1. Deep parse the document buffer
+    let parsedStructure;
+    try {
+        parsedStructure = await deepParse(input.buffer, input.mimeType, input.fileName);
+    } catch (err) {
+        throw new Error(
+            `Deep parsing failed for "${input.fileName}" (${input.mimeType}): ${err instanceof Error ? err.message : String(err)}`,
+        );
+    }
+
+    // 2. Hierarchical chunking
+    const enhancedChunks = hierarchicalChunk(parsedStructure);
+
+    // Early return for empty documents
+    if (enhancedChunks.length === 0) {
+        return {
+            chunksCreated: 0,
+            chunksSkipped: 0,
+            totalTokensEstimated: 0,
+            processingTimeMs: Date.now() - startTime,
+            chunkIds: [],
+        };
+    }
+
+    // 3. Generate embeddings via the new provider system
+    const provider = EmbeddingProviderFactory.getProvider();
+    let embeddings: number[][];
+    try {
+        embeddings = await provider.embedBatch(enhancedChunks.map((c) => c.content));
+    } catch (err) {
+        throw new Error(
+            `Embedding generation failed for "${input.fileName}" (${enhancedChunks.length} chunks): ${err instanceof Error ? err.message : String(err)}`,
+        );
+    }
+
+    // 4. Persist — skip duplicates by content hash
+    let created = 0;
+    let skipped = 0;
+    let totalTokens = 0;
+    const chunkIds: string[] = [];
+
+    const docTitle = parsedStructure.metadata.title || input.fileName;
+    const docLanguage = parsedStructure.metadata.language;
+
+    for (let i = 0; i < enhancedChunks.length; i++) {
+        const chunk = enhancedChunks[i];
+        const hash = contentHash(chunk.content);
+        totalTokens += estimateTokens(chunk.content);
+
+        // Dedup check
+        if (options.skipDuplicates !== false) {
+            const existing = await db
+                .select({ id: ragChunks.id })
+                .from(ragChunks)
+                .where(and(eq(ragChunks.userId, options.userId), eq(ragChunks.contentHash, hash)))
+                .limit(1);
+
+            if (existing.length > 0) {
+                skipped++;
+                chunkIds.push(existing[0].id);
+                continue;
+            }
+        }
+
+        // Map EnhancedChunk → InsertRagChunk
+        // Earlier content (position 0) → importance 1.0; end (position 1) → 0.5
+        const importance = 1 - chunk.metadata.documentPosition * 0.5;
+
+        const row: InsertRagChunk = {
+            tenantId: options.tenantId,
+            userId: options.userId,
+            conversationId: options.conversationId,
+            threadId: options.threadId,
+            source: "document",
+            content: chunk.content,
+            contentHash: hash,
+            embedding: embeddings[i] ?? undefined,
+            chunkIndex: i,
+            totalChunks: enhancedChunks.length,
+            title: docTitle,
+            mimeType: input.mimeType,
+            language: docLanguage,
+            pageNumber: chunk.metadata.pageNumber,
+            sectionTitle: chunk.metadata.headerChain.join(" > "),
+            chunkType: chunk.metadata.sectionType,
+            importance,
+            aclTags: options.aclTags ?? [],
+            tags: [...chunk.metadata.extractedKeywords, ...(options.tags ?? [])],
+            metadata: {
+                documentType: chunk.metadata.documentType,
+                chunkStrategy: chunk.metadata.chunkStrategy,
+                headerChain: chunk.metadata.headerChain,
+                documentPosition: chunk.metadata.documentPosition,
+            },
+            isActive: true,
+        };
+
+        const [inserted] = await db.insert(ragChunks).values(row).returning({ id: ragChunks.id });
+        chunkIds.push(inserted.id);
+        created++;
+    }
+
+    // 5. Update tsvector via raw SQL
+    if (chunkIds.length > 0) {
+        await db.execute(sql`
+            UPDATE rag_chunks
+            SET search_vector = to_tsvector('spanish', coalesce(title,'') || ' ' || content)
+            WHERE id = ANY(${chunkIds})
+              AND search_vector IS NULL
+        `);
+    }
+
+    return {
+        chunksCreated: created,
+        chunksSkipped: skipped,
+        totalTokensEstimated: totalTokens,
+        processingTimeMs: Date.now() - startTime,
+        chunkIds,
+    };
+}
+
+// ---------------------------------------------------------------------------
 // Bulk delete by source
 // ---------------------------------------------------------------------------
 
@@ -271,6 +411,7 @@ export async function deleteBySource(
 
 export const ingestionPipeline = {
     ingest,
+    ingestDocument,
     deleteBySource,
     normalizeText,
     contentHash,

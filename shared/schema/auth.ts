@@ -226,3 +226,17 @@ export const consentLogs = pgTable("consent_logs", {
 ]);
 
 export type ConsentLog = typeof consentLogs.$inferSelect;
+
+// =============================================================================
+// Break Glass Accounts — emergency access
+// =============================================================================
+
+export const breakGlassAccounts = pgTable("break_glass_accounts", {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull(),
+    reason: text("reason"),
+    grantedBy: varchar("granted_by"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    isActive: boolean("is_active").default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});

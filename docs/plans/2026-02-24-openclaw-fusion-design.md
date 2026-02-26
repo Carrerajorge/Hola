@@ -1,199 +1,453 @@
-# OpenClaw Agentic Fusion Design
-
-**Date:** 2026-02-24
-**Status:** Approved
-**Approach:** Hybrid Adaptive Fusion
+# OpenClaw-ILIAGPT Agentic Fusion Design
 
 ## Goal
 
-Fuse all agentic functionality from OpenClaw (clawi) into ILIAGPT without adding UI elements, without API connections — direct code fusion into existing architecture.
+Fuse OpenClaw's agentic capabilities (multi-agent routing, skill discovery, tool policy, hook system, session management, enhanced execution) into ILIAGPT's existing architecture. ILIAGPT remains the base; OpenClaw is the "logic donor." No API bridges — all code is fused directly.
 
-## Architecture Principle
+## Architecture
 
-ILIAGPT's `agentOrchestrator` remains the brain. OpenClaw modules become services the orchestrator consumes. No parallel runtime.
+ILIAGPT has a mature PARE orchestrator, tool registry, and agent runner. OpenClaw has sophisticated multi-agent routing, skill discovery, tool policies, and execution patterns. We port OpenClaw's loosely-coupled logic as new modules under `server/services/agentOrchestration/` that plug into ILIAGPT's existing extension points.
 
-## Modules to Fuse
+## Tech Stack
 
-### 1. Memory/RAG Hybrid (`server/openclaw/memory/`)
+- TypeScript (Express.js server)
+- PostgreSQL + Drizzle ORM
+- Vitest for testing
+- Existing ILIAGPT patterns (services, schemas, routes)
 
-**New files:**
-- `indexManager.ts` — Coordinates RAG system. Uses PostgreSQL + pgvector (already enabled). Manages embedding providers, vector + keyword indexing.
-- `hybridSearch.ts` — BM25 keyword search + vector similarity merge. Configurable weights.
-- `embeddings.ts` — Multi-provider factory: OpenAI, Gemini, Voyage, Mistral, local. Batch processing with retry. Fallback chain.
-- `queryExpansion.ts` — Expands user queries with synonyms/keywords for better recall.
-- `mmr.ts` — Maximal Marginal Relevance for result diversity.
-- `temporalDecay.ts` — Recent documents ranked higher via configurable decay function.
-- `chunker.ts` — Split documents into chunks with configurable size + overlap.
-- `sessionMemory.ts` — Auto-indexes session transcripts for future retrieval.
-- `types.ts` — Shared interfaces (MemorySearchResult, MemorySource, ProviderStatus).
+---
 
-**Integration point:** `agentExecutor.ts` calls `indexManager.search()` before each response to inject RAG context into the system prompt.
+## Layer 1: Multi-Agent Router
 
-**Search flow:**
-```
-Query → queryExpansion → [BM25, Vector] → hybridMerge → temporalDecay → MMR → Top-K
-```
+**New file**: `server/services/agentOrchestration/multiAgentRouter.ts`
+**New schema**: `shared/schema/agentOrchestration.ts` (agentBindings, agentToolPolicies tables)
 
-### 2. Dynamic Skills (`server/openclaw/skills/`)
+### Purpose
 
-**Enhanced files:**
-- `skillLoader.ts` — Load from disk + plugins + bundled. Scan `~/.iliagpt/skills/` for `.md` files.
-- `skillRegistry.ts` — Frontmatter support, eligibility checks, skill snapshots for prompts.
+Route incoming requests to the appropriate agent based on configurable bindings. Sits between PARE (which classifies intent) and agent execution.
 
-**New files:**
-- `workspace.ts` — Scan filesystem for skill files, multi-source loading.
-- `frontmatter.ts` — Parse YAML frontmatter from skill markdown files.
-- `eligibility.ts` — Check OS, binaries, env vars for skill availability.
-- `filter.ts` — Per-agent skill allowlist/denylist filtering.
-
-**Skill format:** Markdown files with YAML frontmatter containing metadata (install specs, requirements, emoji, homepage).
-
-### 3. Model Selection + Fallback (`server/openclaw/modelFallback/`)
-
-**New files:**
-- `selection.ts` — Model alias resolution (e.g., "best" → most capable available model).
-- `fallback.ts` — Chain execution: primary → fallback1 → fallback2. Cooldown per-provider (skip for N minutes after repeated failures).
-- `catalog.ts` — Model metadata: context window, pricing, capabilities.
-- `authProfiles.ts` — API key rotation, OAuth refresh, cooldown tracking.
-
-**Integration point:** Wraps `llmGateway.ts` calls with automatic fallback and retry.
-
-### 4. Multi-Agent Routing (`server/openclaw/routing/`)
-
-**New files:**
-- `sessionKey.ts` — Hierarchical session keys: `agent:<id>:main:<key>` or `agent:<id>:peer:<kind>:<peerId>`.
-- `resolver.ts` — Route resolution: (channel, accountId, peer, roles) → agentId + sessionKey.
-- `agentScope.ts` — Agent configuration resolution from config. Multi-agent support.
-
-**Enables:** Multiple agents with distinct roles, routing by context, sub-agent spawning with depth limits.
-
-### 5. Agent Workspace (`server/openclaw/workspace/`)
-
-**New files:**
-- `bootstrap.ts` — Load SOUL/IDENTITY/TOOLS/MEMORY bootstrap files from workspace directory.
-- `fileCache.ts` — mtime-based file cache with invalidation.
-- `manager.ts` — Workspace lifecycle: create, ensure, clean.
-
-**Each agent gets:** Isolated workspace at `~/.iliagpt/workspace-<agentId>/` with bootstrap files defining personality, tools, memory.
-
-### 6. Tool Policy Pipeline (`server/openclaw/tools/`)
-
-**New files:**
-- `policyPipeline.ts` — Compose multiple policy layers: owner-only → profile → global → agent-specific → group.
-- `toolProfiles.ts` — Predefined profiles: minimal, coding, messaging, full.
-
-**Enhanced:** `toolPolicies.ts` — More dangerous patterns, better binary detection.
-
-### 7. Advanced Plugin System (`server/openclaw/plugins/`)
-
-**Enhanced files:**
-- `hookSystem.ts` — 12 hook points + filesystem loading.
-- `pluginLoader.ts` — Load plugins from `~/.iliagpt/plugins/`.
-- `pluginRegistry.ts` — Full lifecycle (setup → run → shutdown).
-
-**New files:**
-- `pluginSDK.ts` — Public API for creating plugins (tool registration, hook registration, HTTP endpoints).
-- `internalHooks.ts` — Built-in hooks: session memory sync, command logger, bootstrap.
-
-### 8. Session Persistence (`server/openclaw/sessions/`)
-
-**New files:**
-- `persistence.ts` — Transcript storage to disk: `~/.iliagpt/sessions/<agent>/<channel>/<key>.json`.
-- `overrides.ts` — Per-session model and logging overrides.
-- `compaction.ts` — Automatic cleanup of old sessions.
-- `labels.ts` — Human-readable session labels.
-
-### 9. Enhanced Config (`server/openclaw/config.ts`)
-
-**New environment variables:**
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `OPENCLAW_MEMORY_ENABLED` | `false` | Enable RAG/Memory |
-| `OPENCLAW_MEMORY_PROVIDER` | `pgvector` | Memory backend |
-| `OPENCLAW_EMBEDDING_PROVIDER` | `gemini` | Embedding provider |
-| `OPENCLAW_EMBEDDING_MODEL` | `text-embedding-004` | Embedding model |
-| `OPENCLAW_MEMORY_CHUNK_SIZE` | `512` | Chunk size (tokens) |
-| `OPENCLAW_MEMORY_CHUNK_OVERLAP` | `64` | Chunk overlap |
-| `OPENCLAW_AGENTS_CONFIG` | `~/.iliagpt/agents.yaml` | Multi-agent config |
-| `OPENCLAW_WORKSPACES_DIR` | `~/.iliagpt/workspaces` | Workspace root |
-| `OPENCLAW_SESSIONS_DIR` | `~/.iliagpt/sessions` | Session storage |
-| `OPENCLAW_MODEL_FALLBACK` | `true` | Enable fallback chain |
-| `OPENCLAW_FALLBACK_COOLDOWN` | `300000` | Provider cooldown (ms) |
-
-## What Does NOT Change
-
-- **Frontend:** Zero UI modifications. No new buttons or panels.
-- **agentOrchestrator.ts:** Remains the brain — only receives new service injections.
-- **Routes/Middleware:** No changes to HTTP API surface.
-- **Database schema:** Only uses existing pgvector extension.
-- **Existing integrations:** Slack, GitHub, Notion connectors untouched.
-
-## File Structure After Fusion
+### Design
 
 ```
-server/openclaw/
-├── index.ts                    # (enhanced: init new modules)
-├── config.ts                   # (enhanced: new env vars)
-├── types.ts                    # (enhanced: new interfaces)
-├── gateway/                    # (existing, no changes)
-├── tools/                      # (enhanced: policy pipeline + profiles)
-│   ├── adapter.ts
-│   ├── execTool.ts
-│   ├── fsTool.ts
-│   ├── toolPolicies.ts
-│   ├── policyPipeline.ts       # NEW
-│   └── toolProfiles.ts         # NEW
-├── plugins/                    # (enhanced: SDK + internal hooks)
-│   ├── hookSystem.ts
-│   ├── pluginLoader.ts
-│   ├── pluginRegistry.ts
-│   ├── pluginSDK.ts            # NEW
-│   └── internalHooks.ts        # NEW
-├── skills/                     # (enhanced: dynamic loading)
-│   ├── skillLoader.ts
-│   ├── skillRegistry.ts
-│   ├── workspace.ts            # NEW
-│   ├── frontmatter.ts          # NEW
-│   ├── eligibility.ts          # NEW
-│   └── filter.ts               # NEW
-├── memory/                     # NEW MODULE
-│   ├── indexManager.ts
-│   ├── hybridSearch.ts
-│   ├── embeddings.ts
-│   ├── queryExpansion.ts
-│   ├── mmr.ts
-│   ├── temporalDecay.ts
-│   ├── chunker.ts
-│   ├── sessionMemory.ts
-│   └── types.ts
-├── modelFallback/              # NEW MODULE
-│   ├── selection.ts
-│   ├── fallback.ts
-│   ├── catalog.ts
-│   └── authProfiles.ts
-├── routing/                    # NEW MODULE
-│   ├── sessionKey.ts
-│   ├── resolver.ts
-│   └── agentScope.ts
-├── workspace/                  # NEW MODULE
-│   ├── bootstrap.ts
-│   ├── fileCache.ts
-│   └── manager.ts
-├── sessions/                   # NEW MODULE
-│   ├── persistence.ts
-│   ├── overrides.ts
-│   ├── compaction.ts
-│   └── labels.ts
-├── streaming/                  # (existing, no changes)
-└── __tests__/                  # (enhanced: tests for new modules)
+User Request → PARE (intent) → MultiAgentRouter → Selected Agent + Session Key
 ```
 
-## Integration Wiring
+**Ported from OpenClaw** (`resolve-route.ts`, `bindings.ts`, `session-key.ts`):
+- Binding-based matching with priority tiers: user-specific > intent-specific > source-specific > default
+- Session key construction: `agent:{agentId}:{scope}:{identifier}`
+- Identity linking: map multiple user identities to one canonical session
+- Binding cache with size limit (prevent memory leaks)
 
-1. `server/openclaw/index.ts` initializes all modules based on feature flags
-2. `agentOrchestrator.ts` receives memory, skills, model-fallback services via dependency injection
-3. `agentExecutor.ts` calls memory search before prompt construction
-4. `toolRegistry.ts` receives policy pipeline for tool access control
-5. Hook system fires at orchestrator lifecycle points
-6. Routing resolves agent + session before orchestrator call
+**Adapted for ILIAGPT**:
+- Bindings stored in PostgreSQL (`agentBindings` table) instead of YAML config
+- "Channels" are request sources: `web`, `api`, `whatsapp`, `email`, `internal`
+- "Peers" are user IDs from our auth system
+- Integrates with PARE's `RobustRouteResult` for intent-aware routing
+
+### Key Types
+
+```typescript
+interface AgentBinding {
+  id: string;
+  agentId: string;
+  priority: number;
+  match: {
+    source?: string;         // web, api, whatsapp, email
+    userId?: string;         // specific user
+    intentCategory?: string; // from PARE classification
+    tags?: string[];         // custom matching tags
+  };
+}
+
+interface AgentRoute {
+  agentId: string;
+  sessionKey: string;
+  matchedBy: string;       // binding tier that matched
+  agentConfig: AgentConfig;
+}
+
+interface AgentConfig {
+  id: string;
+  name: string;
+  modelPrimary: string;
+  modelFallbacks: string[];
+  skills: string[];         // skill allowlist
+  toolPolicy: { allow?: string[]; deny?: string[] };
+  maxRetries: number;
+  timeoutMs: number;
+}
+```
+
+---
+
+## Layer 2: Enhanced Agent Execution Engine
+
+**New file**: `server/services/agentOrchestration/enhancedExecutor.ts`
+
+### Purpose
+
+Wrap individual tool/LLM calls with production-grade execution patterns ported from OpenClaw's `run.ts`.
+
+### Design
+
+```
+OrchestrationEngine (parallel waves) → EnhancedExecutor (retry, failover, compaction) → LLM/Tool
+```
+
+**Ported from OpenClaw** (`pi-embedded-runner/run.ts`):
+1. **Retry with backoff** — Up to 8 retries per auth profile, error classification (context_overflow, auth_error, rate_limit, timeout, unknown)
+2. **Model failover** — Primary → fallback chain (e.g., Grok → Gemini → OpenAI)
+3. **Session compaction** — When context exceeds token limit, compress old messages keeping recent + summary
+4. **Tool result truncation** — Binary search for max prefix that fits context budget
+5. **Usage accumulator** — Track total + last-call token usage separately
+
+**Adapted for ILIAGPT**:
+- Uses ILIAGPT's `llmGateway` for model calls (not Pi-agent)
+- Error classification maps to our LLM providers (xAI, Gemini, Anthropic)
+- Compaction stores compressed context in `agentContext` table
+- Integrates with `OrchestrationEngine.executeSubtask()` as the execution backend
+
+### Key Types
+
+```typescript
+interface ExecutionAttempt {
+  provider: string;
+  model: string;
+  retryCount: number;
+  error?: { kind: ErrorKind; message: string };
+  usage?: TokenUsage;
+  durationMs: number;
+}
+
+type ErrorKind = 'context_overflow' | 'auth_error' | 'rate_limit' | 'timeout' | 'model_error' | 'unknown';
+
+interface ExecutionResult {
+  success: boolean;
+  output: string;
+  attempts: ExecutionAttempt[];
+  totalUsage: TokenUsage;
+  modelUsed: string;
+  compactionCount: number;
+}
+
+interface CompactionResult {
+  originalTokens: number;
+  compactedTokens: number;
+  messagesRemoved: number;
+  summaryAdded: boolean;
+}
+```
+
+---
+
+## Layer 3: Unified Skill Discovery
+
+**New file**: `server/services/agentOrchestration/skillDiscovery.ts`
+
+### Purpose
+
+Discover and register skills from multiple sources with eligibility checking. Bridge between OpenClaw's skill format and ILIAGPT's CustomSkills DB.
+
+### Design
+
+**Sources** (in precedence order, later wins):
+1. Bundled skills (shipped with ILIAGPT)
+2. Workspace skills (`.md` files in workspace directory, like OpenClaw)
+3. DB CustomSkills (user-created via UI)
+
+**Ported from OpenClaw** (`skills/workspace.ts`, `skills/config.ts`, `skills/types.ts`):
+- `shouldIncludeSkill()` eligibility checker (OS, binaries, env vars, API keys)
+- Skill precedence resolution (later sources override earlier)
+- Limits enforcement: max 150 skills in prompt, max 30KB skill descriptions
+- Skill→Tool bridge: each eligible skill registers as a callable tool
+
+**Adapted for ILIAGPT**:
+- DB CustomSkills are first-class citizens (highest precedence)
+- Bundled skills stored in `server/skills/` directory
+- Integration with ToolRegistry for tool execution
+
+### Key Types
+
+```typescript
+interface SkillEntry {
+  id: string;
+  name: string;
+  description: string;
+  source: 'bundled' | 'workspace' | 'custom';
+  enabled: boolean;
+  requires?: {
+    bins?: string[];     // required system binaries
+    env?: string[];      // required environment variables
+    apis?: string[];     // required API keys
+  };
+  parameters?: SkillParameter[];
+  actions?: SkillAction[];
+}
+
+interface SkillSnapshot {
+  skills: SkillEntry[];
+  prompt: string;           // formatted skill descriptions for LLM
+  totalChars: number;
+  filteredCount: number;    // skills excluded by eligibility
+}
+
+interface SkillEligibilityContext {
+  platform: string;         // darwin, linux, win32
+  availableBins: string[];
+  availableEnvVars: string[];
+  availableApiKeys: string[];
+}
+```
+
+---
+
+## Layer 4: Tool Policy Layer
+
+**New file**: `server/services/agentOrchestration/toolPolicy.ts`
+**New schema extension**: `agentToolPolicies` table in `shared/schema/agentOrchestration.ts`
+
+### Purpose
+
+Per-agent tool access control combining OpenClaw's allow/deny lists with ILIAGPT's circuit breaker.
+
+### Design
+
+```
+Tool Request → Policy Check (allow/deny) → Circuit Breaker → Cache Check → Execute → Metrics
+```
+
+**Ported from OpenClaw** (`tool-policy.ts`):
+- Allow/deny list evaluation with wildcard support
+- Owner-only tool enforcement (certain tools restricted to admin users)
+- Group expansion (e.g., `@admin-tools` expands to specific tool list)
+
+**Combined with ILIAGPT**:
+- Circuit breaker from existing `ToolExecutionEngine`
+- Execution caching (TTL: 5 minutes)
+- Health metrics per tool
+
+### Key Types
+
+```typescript
+interface ToolPolicy {
+  agentId: string;
+  allow?: string[];    // wildcards supported: "web_*", "@search-tools"
+  deny?: string[];
+  ownerOnlyTools?: string[];
+}
+
+interface ToolPolicyResult {
+  allowed: boolean;
+  reason?: string;     // 'denied_by_policy' | 'owner_only' | 'circuit_open'
+  toolName: string;
+}
+```
+
+---
+
+## Layer 5: Hook/Lifecycle System
+
+**New file**: `server/services/agentOrchestration/hookSystem.ts`
+
+### Purpose
+
+Event-driven lifecycle hooks for agent execution. Allows intercepting and modifying behavior at key points.
+
+### Design
+
+**Ported from OpenClaw** (`hooks/types.ts`, `plugins/hook-runner-global.ts`):
+- Event-based hook registration
+- Hook metadata with eligibility context
+- Ordered execution (priority-based)
+
+**Events**:
+| Event | Timing | Can Modify |
+|-------|--------|------------|
+| `before_route` | Before agent selection | Route decision |
+| `before_agent_start` | Before execution | Model selection |
+| `before_tool_call` | Before tool runs | Tool input, can block |
+| `after_tool_call` | After tool completes | Logging only |
+| `after_agent_complete` | After run finishes | Logging, feedback |
+
+### Key Types
+
+```typescript
+type HookEvent = 'before_route' | 'before_agent_start' | 'before_tool_call' | 'after_tool_call' | 'after_agent_complete';
+
+interface Hook {
+  id: string;
+  name: string;
+  event: HookEvent;
+  priority: number;       // lower = runs first
+  handler: HookHandler;
+  enabled: boolean;
+}
+
+type HookHandler = (context: HookContext) => Promise<HookResult>;
+
+interface HookContext {
+  event: HookEvent;
+  agentId: string;
+  sessionKey: string;
+  userId: string;
+  data: Record<string, unknown>;  // event-specific data
+}
+
+interface HookResult {
+  modified: boolean;
+  overrides?: Record<string, unknown>;  // fields to override
+  abort?: boolean;                      // stop execution
+  abortReason?: string;
+}
+```
+
+---
+
+## Layer 6: Session Manager
+
+**New file**: `server/services/agentOrchestration/sessionManager.ts`
+
+### Purpose
+
+Manage agent sessions with multi-dimensional keys, lane concurrency control, and automatic compaction.
+
+### Design
+
+**Ported from OpenClaw** (`session-key.ts`, `session-key-utils.ts`, `server-lanes.ts`):
+- Session key format: `agent:{agentId}:{scope}:{identifier}`
+- Lane concurrency: one active execution per session (queue others)
+- Compaction: compress when history exceeds token limit
+- Identity linking: map multiple user accounts to one session
+
+**Adapted for ILIAGPT**:
+- Session state stored in `agentSessionState` table (existing, extended)
+- Compaction persists to `agentContext` table
+- Lane state is in-memory (Map<sessionKey, Promise>)
+
+### Key Types
+
+```typescript
+interface SessionKey {
+  agentId: string;
+  scope: 'direct' | 'group' | 'channel' | 'api';
+  identifier: string;       // userId or channelId
+}
+
+interface SessionState {
+  key: string;
+  agentId: string;
+  history: SessionMessage[];
+  tokenCount: number;
+  maxTokens: number;
+  compactionCount: number;
+  lastActivity: Date;
+}
+
+interface SessionMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string;
+  timestamp: Date;
+  metadata?: Record<string, unknown>;
+}
+```
+
+---
+
+## Barrel Export
+
+**New file**: `server/services/agentOrchestration/index.ts`
+
+Re-exports all layers:
+```typescript
+export { MultiAgentRouter, resolveAgentRoute } from './multiAgentRouter';
+export { EnhancedExecutor, executeWithRetry } from './enhancedExecutor';
+export { SkillDiscovery, discoverSkills } from './skillDiscovery';
+export { ToolPolicyEngine, evaluateToolPolicy } from './toolPolicy';
+export { HookSystem, registerHook, emitHookEvent } from './hookSystem';
+export { SessionManager, buildSessionKey } from './sessionManager';
+```
+
+---
+
+## Database Schema Extensions
+
+**New file additions to**: `shared/schema/agentOrchestration.ts`
+
+```sql
+-- Agent bindings for multi-agent routing
+CREATE TABLE agent_bindings (
+  id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_id VARCHAR NOT NULL,
+  priority INTEGER DEFAULT 0,
+  match_source VARCHAR,
+  match_user_id VARCHAR,
+  match_intent VARCHAR,
+  match_tags TEXT[],
+  agent_config JSONB NOT NULL,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Tool policies per agent
+CREATE TABLE agent_tool_policies (
+  id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_id VARCHAR NOT NULL,
+  allow_tools TEXT[],
+  deny_tools TEXT[],
+  owner_only_tools TEXT[],
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Hooks registry
+CREATE TABLE agent_hooks (
+  id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR NOT NULL,
+  event VARCHAR NOT NULL,
+  priority INTEGER DEFAULT 100,
+  handler_path TEXT NOT NULL,
+  enabled BOOLEAN DEFAULT true,
+  metadata JSONB DEFAULT '{}',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+---
+
+## Integration Points (How Layers Connect to ILIAGPT)
+
+1. **PARE → MultiAgentRouter**: After PARE classifies intent, pass result to router for agent selection
+2. **OrchestrationEngine → EnhancedExecutor**: Replace direct tool calls with retry-aware execution
+3. **ToolRegistry → SkillDiscovery**: Skills register themselves as tools at startup
+4. **ToolExecutionEngine → ToolPolicy**: Policy check before circuit breaker
+5. **Agent Routes → HookSystem**: Emit events at run lifecycle points
+6. **AgentSessionState → SessionManager**: Session manager wraps the existing table
+
+---
+
+## Testing Strategy
+
+Each layer gets its own test file:
+- `server/services/agentOrchestration/__tests__/multiAgentRouter.test.ts`
+- `server/services/agentOrchestration/__tests__/enhancedExecutor.test.ts`
+- `server/services/agentOrchestration/__tests__/skillDiscovery.test.ts`
+- `server/services/agentOrchestration/__tests__/toolPolicy.test.ts`
+- `server/services/agentOrchestration/__tests__/hookSystem.test.ts`
+- `server/services/agentOrchestration/__tests__/sessionManager.test.ts`
+
+Plus 6 integration tests covering cross-layer flows.
+
+## Files Summary
+
+| File | Type | Purpose |
+|------|------|---------|
+| `server/services/agentOrchestration/multiAgentRouter.ts` | New | Multi-agent routing with bindings |
+| `server/services/agentOrchestration/enhancedExecutor.ts` | New | Retry, failover, compaction |
+| `server/services/agentOrchestration/skillDiscovery.ts` | New | Unified skill loading + eligibility |
+| `server/services/agentOrchestration/toolPolicy.ts` | New | Allow/deny + circuit breaker |
+| `server/services/agentOrchestration/hookSystem.ts` | New | Lifecycle hooks |
+| `server/services/agentOrchestration/sessionManager.ts` | New | Session keys + compaction + lanes |
+| `server/services/agentOrchestration/index.ts` | New | Barrel exports |
+| `shared/schema/agentOrchestration.ts` | New | DB tables for bindings, policies, hooks |
+| 6 test files | New | Unit tests per layer |
+| 6 integration tests | New | Cross-layer tests |

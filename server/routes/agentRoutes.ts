@@ -1,15 +1,20 @@
-import { Router, Request, Response, NextFunction } from "express"; import { AuthenticatedRequest } from "../types/express"; import { db } from "../db"; import {
-  agentModeRuns, agentModeSteps,
-  agentModeEvents
-} from "@shared/schema"; import { agentManager, AgentPlan } from "../agent/agentOrchestrator"; import { agentEventBus } from "../agent/eventBus"; import {
-  activityStreamPublisher,
-  agentLoopFacade
-} from "../agent/orchestration"; import { eq, desc, asc, and, gte, lt, count } from "drizzle-orm"; import { randomUUID } from "crypto"; import {
-  CreateRunRequestSchema,
-  RunResponseSchema, StepsArrayResponseSchema
-} from "../agent/contracts"; import { validateOrThrow, ValidationError } from "../agent/validation"; import { checkIdempotency } from
-  "../agent/idempotency"; import { updateRunWithLock } from "../agent/dbTransactions"; import { toolRegistry, TOOL_CATEGORIES } from "../agent/registry/toolRegistry"; import { ToolArtifact } from
-  "../agent/toolRegistry"; import { agentRegistry } from "../agent/registry/agentRegistry";
+import { Router, Request, Response, NextFunction } from "express";
+import { AuthenticatedRequest } from "../types/express";
+import { db } from "../db";
+import { agentModeRuns, agentModeSteps, agentModeEvents } from "@shared/schema";
+import { agentManager, AgentPlan } from "../agent/agentOrchestrator";
+import { agentEventBus } from "../agent/eventBus";
+import { activityStreamPublisher, agentLoopFacade } from "../agent/orchestration";
+import { eq, desc, asc, and, gte, lt, count } from "drizzle-orm";
+import { randomUUID } from "crypto";
+import { CreateRunRequestSchema, RunResponseSchema, StepsArrayResponseSchema } from "../agent/contracts";
+import { validateOrThrow, ValidationError } from "../agent/validation";
+import { checkIdempotency } from "../agent/idempotency";
+import { updateRunWithLock } from "../agent/dbTransactions";
+import { toolRegistry, TOOL_CATEGORIES } from "../agent/registry/toolRegistry";
+import { ToolArtifact } from "../agent/toolRegistry";
+import { agentRegistry } from "../agent/registry/agentRegistry";
+import { hookSystem } from "../services/agentOrchestration";
 
 
 
@@ -118,6 +123,9 @@ export function createAgentModeRouter() {
         idempotencyKey: idempotencyKey || null,
       }).returning();
 
+      // Emit hook: agent run created (fire-and-forget, no listeners required yet)
+      hookSystem.emit('agent:beforePlan', { runId, userId: userId || 'anonymous', metadata: { chatId, message } }).catch(() => {});
+
       (async () => {
         let currentStatus = "queued";
         try {
@@ -166,11 +174,17 @@ export function createAgentModeRouter() {
 
                 const summary = await orchestrator.generateSummary();
                 updateData.summary = summary;
+
+                // Emit hook: agent run completed (fire-and-forget)
+                hookSystem.emit('agent:afterExec', { runId, userId: userId || 'anonymous', metadata: { status: 'completed', summary } }).catch(() => {});
               }
 
               if (progress.status === "failed") {
                 updateData.completedAt = new Date();
                 updateData.error = progress.error || "Unknown error";
+
+                // Emit hook: agent run failed (fire-and-forget)
+                hookSystem.emit('agent:onError', { runId, userId: userId || 'anonymous', metadata: { status: 'failed', error: progress.error } }).catch(() => {});
               }
 
               if (progress.status === "cancelled") {
