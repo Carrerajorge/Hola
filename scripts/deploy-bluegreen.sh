@@ -785,7 +785,7 @@ log "[4/14] Running database migrations (timeout: ${MIGRATION_TIMEOUT}s)..."
 
   # Apply SQL migrations (idempotent)
 
-  if ! timeout "${MIGRATION_TIMEOUT}" bash -lc "run_sql_migrations"; then
+  if ! timeout "${MIGRATION_TIMEOUT}" bash -lc "$(declare -f run_sql_migrations); run_sql_migrations"; then
 
     loge "SQL migrations failed or timed out."
 
