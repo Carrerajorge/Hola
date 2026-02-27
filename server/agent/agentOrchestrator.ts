@@ -1286,7 +1286,7 @@ Respond with ONLY valid JSON in this exact format:
       if (opts?.isConfirmed !== true && result?.error?.code === "REQUIRES_CONFIRMATION") {
         this.status = "awaiting_confirmation" as any;
 
-        (this as any).pendingConfirmation = {
+        this.pendingConfirmation = {
           stepIndex,
           toolName: step.toolName,
           toolInput: step.input,
