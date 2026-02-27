@@ -18,6 +18,7 @@ function clearOpenClawEnv() {
     'OPENCLAW_BLOCK_MIN_CHARS',
     'OPENCLAW_BLOCK_MAX_CHARS',
     'OPENCLAW_PREVIEW_MODE',
+    'OPENCLAW_ENABLED',
   ];
   for (const k of keys) delete process.env[k];
 }
