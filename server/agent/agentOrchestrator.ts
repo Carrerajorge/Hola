@@ -14,6 +14,7 @@ import { getUserSettingsCached } from "../services/userSettingsCache";
 import { policyEngine } from "./policyEngine";
 import { hookSystem } from "../openclaw/plugins/hookSystem";
 import { detectToolCallLoop, hashToolCall } from "./toolLoopDetection";
+import { hashToolOutcome } from "./toolLoopDetection";
 
 // Agentic orchestrator bridge
 import {
@@ -1231,7 +1232,6 @@ Respond with ONLY valid JSON in this exact format:
       const completedAt = Date.now();
 
       // Record outcome for loop detection
-      const { hashToolOutcome } = require("./toolLoopDetection");
       currentCallRecord.resultHash = hashToolOutcome(result.output, result.error);
 
       const stepResult: StepResult = {
@@ -1282,6 +1282,29 @@ Respond with ONLY valid JSON in this exact format:
         toolName: step.toolName,
         toolResult: result,
       });
+
+      if (opts?.isConfirmed !== true && result?.error?.code === "REQUIRES_CONFIRMATION") {
+        this.status = "awaiting_confirmation" as any;
+
+        (this as any).pendingConfirmation = {
+          stepIndex,
+          toolName: step.toolName,
+          toolInput: step.input,
+          reason: result.error?.message || "Requires confirmation",
+          requestedAt: Date.now(),
+        };
+
+        await this.emitTraceEvent("step_failed", {
+          stepIndex,
+          stepId: `step-${stepIndex}`,
+          status: "awaiting_confirmation",
+          tool_name: step.toolName,
+          error: { message: result.error?.message || "Requires confirmation", retryable: false },
+        });
+
+        this.emitProgress();
+        return result;
+      }
 
       if (result.success) {
         await this.emitTraceEvent('step_completed', {
