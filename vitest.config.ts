@@ -7,6 +7,11 @@ export default defineConfig({
     environment: "node",
     testTimeout: 15000,
     include: ["tests/**/*.test.ts", "server/**/*.test.ts"],
+    exclude: [
+      "**/server/openclaw/vendor/**",
+      "**/dist/**",
+      "**/node_modules/**",
+    ],
     setupFiles: ["./tests/setup.ts"],
     coverage: {
       provider: "v8",
@@ -15,7 +20,7 @@ export default defineConfig({
       reporter: ["text", "json", "json-summary", "html"],
       all: true,
       include: ["server/core/**/*.ts"],
-      exclude: ["**/*.test.ts", "**/__tests__/**", "**/node_modules/**", "**/dist/**"],
+      exclude: ["**/*.test.ts", "**/__tests__/**", "**/node_modules/**", "**/server/openclaw/vendor/**/**", "**/server/openclaw/vendor/**", "**/dist/**"],
       thresholds: {
         lines: 90,
         functions: 90,

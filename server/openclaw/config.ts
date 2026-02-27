@@ -28,6 +28,8 @@ export interface OpenClawConfig {
   };
 }
 
+const openclawEnabled = process.env.OPENCLAW_ENABLED === 'true';
+
 const DEFAULT_SAFE_BINS = [
   'python', 'python3', 'node', 'npm', 'npx', 'pnpm', 'yarn', 'bun',
   'git', 'curl', 'wget', 'jq', 'cat', 'ls', 'find', 'grep', 'sed', 'awk',
@@ -37,6 +39,7 @@ const DEFAULT_SAFE_BINS = [
 ];
 
 export function getOpenClawConfig(): OpenClawConfig {
+  const openclawEnabled = process.env.OPENCLAW_ENABLED === 'true';
   const workspaceDirectory = process.env.OPENCLAW_WORKSPACE_DIR
     ? path.resolve(process.env.OPENCLAW_WORKSPACE_DIR)
     : process.cwd();
@@ -45,11 +48,11 @@ export function getOpenClawConfig(): OpenClawConfig {
 
   return {
     gateway: {
-      enabled: true,
+      enabled: openclawEnabled,
       path: process.env.OPENCLAW_WS_PATH || '/ws/openclaw',
     },
     tools: {
-      enabled: true,
+      enabled: openclawEnabled,
       safeBins: process.env.OPENCLAW_SAFE_BINS
         ? process.env.OPENCLAW_SAFE_BINS.split(',').map(s => s.trim())
         : DEFAULT_SAFE_BINS,
@@ -58,11 +61,11 @@ export function getOpenClawConfig(): OpenClawConfig {
       execSecurity: (process.env.OPENCLAW_EXEC_SECURITY as any) || 'warn',
     },
     plugins: {
-      enabled: true,
+      enabled: openclawEnabled,
       directory: process.env.OPENCLAW_PLUGINS_DIR || '~/.iliagpt/plugins',
     },
     skills: {
-      enabled: true,
+      enabled: openclawEnabled,
       directory: process.env.OPENCLAW_SKILLS_DIR
         ? path.resolve(process.env.OPENCLAW_SKILLS_DIR)
         : defaultSkillsDir,
@@ -75,7 +78,7 @@ export function getOpenClawConfig(): OpenClawConfig {
       maxSkillFileBytes: Number(process.env.OPENCLAW_SKILL_MAX_BYTES) || 256_000,
     },
     streaming: {
-      enabled: true,
+      enabled: openclawEnabled,
       blockMinChars: Number(process.env.OPENCLAW_BLOCK_MIN_CHARS) || 50,
       blockMaxChars: Number(process.env.OPENCLAW_BLOCK_MAX_CHARS) || 500,
       previewMode: (process.env.OPENCLAW_PREVIEW_MODE as any) || 'partial',
