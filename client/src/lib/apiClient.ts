@@ -124,7 +124,9 @@ export async function apiFetch(url: string, options: RequestInit & { timeoutMs?:
     headers,
     credentials: "include",
   };
-  const fallbackUrls = buildDevApiFallbackUrls(safeUrl);
+  const requestMethod = String(finalOptions.method || "GET").toUpperCase();
+  const allowDevFallback = requestMethod === "GET" || requestMethod === "HEAD" || requestMethod === "OPTIONS";
+  const fallbackUrls = allowDevFallback ? buildDevApiFallbackUrls(safeUrl) : [];
   const runFetch = async (targetUrl: string): Promise<Response> => {
     const fetchPromise = fetch(targetUrl, finalOptions);
     if (timeoutMs && timeoutMs > 0) {

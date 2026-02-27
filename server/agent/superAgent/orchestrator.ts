@@ -300,7 +300,19 @@ export class SuperAgentOrchestrator extends EventEmitter {
       });
       this.emitSSE("brief", brief);
 
-      if (brief.blocker?.is_blocked) {
+      const guardrailFlags = brief.guardrails?.flags || [];
+      const hasCriticalSecurityFlag = guardrailFlags.some((flag) =>
+        /exfiltration|prompt_injection|destructive/i.test(flag)
+      );
+      const requiresHardStop =
+        Boolean(brief.blocker?.is_blocked) &&
+        (
+          !brief.guardrails?.privacy_ok ||
+          !brief.guardrails?.security_ok ||
+          hasCriticalSecurityFlag
+        );
+
+      if (requiresHardStop) {
         const question = (brief.blocker.question || "").trim() || "¿Puede aclarar el punto bloqueador para poder completar el encargo?";
         // Return immediately with a single clarification question
         this.state = ExecutionStateSchema.parse({
@@ -339,6 +351,14 @@ export class SuperAgentOrchestrator extends EventEmitter {
         });
 
         return this.state;
+      }
+
+      if (brief.blocker?.is_blocked) {
+        // For non-critical blockers (typically quality/policy-fit ambiguities), continue with best-effort execution.
+        // This avoids dead-ends where the user must confirm trivial routing/tooling decisions.
+        this.emitThought(
+          `Se detectó un bloqueo no crítico en el brief (${brief.blocker.question || "sin detalle"}). Continuando en modo best-effort.`
+        );
       }
 
       console.log("[SuperAgent] Orchestrator using PromptUnderstanding for:", prompt.substring(0, 50));

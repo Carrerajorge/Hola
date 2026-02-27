@@ -926,6 +926,107 @@ async function signObjectURLForMultipart({
 
 import { getUploadQueue } from "../services/uploadQueue";
 
+function isQueueUnavailableError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return /queue is disabled|redis not configured|no redis url/i.test(message);
+}
+
+async function readFileBufferFromStoragePath(storagePath: string): Promise<Buffer> {
+  const objectStorageService = new ObjectStorageService();
+
+  try {
+    const objectFile = await objectStorageService.getObjectEntityFile(storagePath);
+    const content = await objectStorageService.getFileContent(objectFile);
+    if (content && content.length > 0) {
+      return content;
+    }
+  } catch {
+    // Fall through to local file lookup.
+  }
+
+  const fs = await import("fs/promises");
+  const pathMod = await import("path");
+  const uploadsDir = pathMod.default.resolve(process.cwd(), "uploads");
+  const candidates: string[] = [];
+
+  if (storagePath.startsWith("/objects/uploads/")) {
+    candidates.push(pathMod.default.join(uploadsDir, storagePath.replace("/objects/uploads/", "")));
+  }
+  if (storagePath.startsWith("/objects/")) {
+    candidates.push(pathMod.default.join(uploadsDir, storagePath.replace("/objects/", "")));
+  }
+
+  for (const localPath of candidates) {
+    const resolved = pathMod.default.resolve(localPath);
+    const safePrefix = uploadsDir + pathMod.default.sep;
+    if (!resolved.startsWith(safePrefix) && resolved !== uploadsDir) {
+      continue;
+    }
+
+    try {
+      const stat = await fs.stat(resolved);
+      if (stat.size <= 0) continue;
+      return await fs.readFile(resolved);
+    } catch {
+      // try next candidate
+    }
+  }
+
+  throw new Error(`File content not found for storagePath: ${storagePath}`);
+}
+
+async function processFileInlineFallback(fileId: string, storagePath: string, mimeType: string, filename?: string): Promise<void> {
+  try {
+    await storage.updateFileStatus(fileId, "processing");
+
+    const existingChunks = await storage.getFileChunks(fileId);
+    if (existingChunks.length > 0) {
+      await storage.updateFileStatus(fileId, "ready");
+      return;
+    }
+
+    const content = await readFileBufferFromStoragePath(storagePath);
+    const parsed = await processDocument(content, mimeType, filename);
+    const text = String(parsed.text || "").trim();
+
+    if (!text) {
+      await storage.updateFileStatus(fileId, "ready");
+      return;
+    }
+
+    const chunks = chunkText(text, 1500, 150);
+    const chunksWithoutEmbeddings = chunks.map((chunk) => ({
+      fileId,
+      content: chunk.content,
+      embedding: null,
+      chunkIndex: chunk.chunkIndex,
+      pageNumber: chunk.pageNumber || null,
+      metadata: null,
+    }));
+
+    await storage.createFileChunks(chunksWithoutEmbeddings);
+    await storage.updateFileStatus(fileId, "ready");
+
+    try {
+      const texts = chunks.map((c) => c.content);
+      const embeddings = await generateEmbeddingsBatch(texts);
+      for (let i = 0; i < chunks.length; i++) {
+        await storage.updateFileChunkEmbedding(fileId, chunks[i].chunkIndex, embeddings[i]);
+      }
+    } catch (embeddingError) {
+      console.warn(`[processFileAsync] Embeddings fallback failed for file ${fileId}:`, embeddingError);
+    }
+  } catch (error) {
+    // Keep file usable in chat attachments even if background extraction fails.
+    console.warn(`[processFileAsync] Inline fallback failed for file ${fileId}:`, error);
+    try {
+      await storage.updateFileStatus(fileId, "ready");
+    } catch {
+      // ignore
+    }
+  }
+}
+
 async function processFileAsync(fileId: string, storagePath: string, mimeType: string, filename?: string) {
   try {
     console.log(`[processFileAsync] Enqueuing processing job for file ${fileId}, storagePath: ${storagePath}`);
@@ -935,32 +1036,41 @@ async function processFileAsync(fileId: string, storagePath: string, mimeType: s
 
     // Queue the heavy OCR, chunking, and embedding generation to the background worker
     const queue = getUploadQueue();
-    const result = await queue.add(
-      "system", // userId (system handles analysis)
-      "none", // chatId not strictly needed for the raw file parsing
-      {
-        id: fileId,
-        name: filename || "upload",
-        type: mimeType,
-        size: -1,
-        storagePath: storagePath
-      },
-      { priority: "high" }
-    );
+    try {
+      const result = await queue.add(
+        "system", // userId (system handles analysis)
+        "none", // chatId not strictly needed for the raw file parsing
+        {
+          id: fileId,
+          name: filename || "upload",
+          type: mimeType,
+          size: -1,
+          storagePath: storagePath
+        },
+        { priority: "high" }
+      );
 
-    if ('error' in result) {
-      console.error(`[processFileAsync] Queue rejection for file ${fileId}: ${result.error}`);
-      await storage.updateFileStatus(fileId, "error");
-    } else {
-      console.log(`[processFileAsync] Job ${result.jobId} enqueued for file ${fileId}`);
+      if ('error' in result) {
+        console.warn(`[processFileAsync] Queue rejection for file ${fileId}: ${result.error}. Falling back to in-process parsing.`);
+        void processFileInlineFallback(fileId, storagePath, mimeType, filename);
+      } else {
+        console.log(`[processFileAsync] Job ${result.jobId} enqueued for file ${fileId}`);
+      }
+    } catch (queueError: any) {
+      if (!isQueueUnavailableError(queueError)) {
+        console.warn(`[processFileAsync] Queue enqueue failed for file ${fileId}, using fallback:`, queueError?.message || queueError);
+      } else {
+        console.log(`[processFileAsync] Queue unavailable, using in-process parsing fallback for ${fileId}`);
+      }
+      void processFileInlineFallback(fileId, storagePath, mimeType, filename);
     }
 
   } catch (error: any) {
-    console.error(`[processFileAsync] Error enqueuing file ${fileId}:`, error.message || error);
+    console.error(`[processFileAsync] Unexpected processing error for file ${fileId}:`, error.message || error);
     try {
-      await storage.updateFileStatus(fileId, "error");
+      await storage.updateFileStatus(fileId, "ready");
     } catch (updateError) {
-      console.error(`[processFileAsync] Failed to update file status to error:`, updateError);
+      console.error(`[processFileAsync] Failed to restore file status for ${fileId}:`, updateError);
     }
   }
 }

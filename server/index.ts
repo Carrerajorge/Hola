@@ -274,6 +274,32 @@ export function log(message: string, source = "express") {
     app.use("/api", validateApiKey);
     app.use("/api", (req, res, next) => {
       if (req.path.startsWith("/packages")) return next(); // /api/packages/*
+      // Local/dev fast-path: file uploads must remain operational even when
+      // browser/session CSRF state is temporarily out of sync.
+      if (process.env.NODE_ENV !== "production") {
+        const csrfUploadExempt = [
+          "/objects/upload",
+          "/objects/multipart/create",
+          "/objects/multipart/sign-part",
+          "/objects/multipart/complete",
+          "/objects/multipart/abort",
+          "/local-upload",
+          "/files",
+          "/spreadsheet/upload",
+        ];
+        const requestPaths = [req.path || "", req.originalUrl || ""];
+        const isCsrfExemptUploadRoute = requestPaths.some((pathValue) =>
+          csrfUploadExempt.some((prefix) =>
+            pathValue === prefix ||
+            pathValue.startsWith(`${prefix}/`) ||
+            pathValue === `/api${prefix}` ||
+            pathValue.startsWith(`/api${prefix}/`)
+          )
+        );
+        if (isCsrfExemptUploadRoute) {
+          return next();
+        }
+      }
       return csrfProtection(req, res, next);
     });
   } else {

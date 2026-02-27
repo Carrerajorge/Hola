@@ -1228,7 +1228,7 @@ export function Composer({
               {/* Character counter */}
               {input.length > 0 && (
                 <span className="text-[11px] text-muted-foreground tabular-nums" data-testid="char-counter">
-                  {input.length.toLocaleString('es-ES')} / 10.000
+                  {input.length.toLocaleString('es-ES')} / ∞
                 </span>
               )}
 

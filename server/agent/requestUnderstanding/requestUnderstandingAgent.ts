@@ -301,8 +301,118 @@ function dedupeStrings(items: string[]): string[] {
   return out;
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function normalizeSubtasks(rawSubtasks: unknown): Array<{ title: string; description: string; priority: "high" | "medium" | "low" }> {
+  const incoming = Array.isArray(rawSubtasks) ? rawSubtasks : [];
+  const normalized = incoming
+    .map((item, index) => {
+      if (typeof item === "string") {
+        const title = normalizeText(item) || `Subtarea ${index + 1}`;
+        return { title, description: "", priority: "medium" as const };
+      }
+
+      const record = asRecord(item);
+      const title = normalizeText(String(record.title ?? record.name ?? record.task ?? ""));
+      const description = normalizeText(String(record.description ?? record.details ?? ""));
+      const priorityCandidate = normalizeText(String(record.priority ?? "medium")).toLowerCase();
+      const priority = priorityCandidate === "high" || priorityCandidate === "medium" || priorityCandidate === "low"
+        ? (priorityCandidate as "high" | "medium" | "low")
+        : "medium";
+
+      if (!title && !description) return null;
+      return {
+        title: title || `Subtarea ${index + 1}`,
+        description,
+        priority,
+      };
+    })
+    .filter((item): item is { title: string; description: string; priority: "high" | "medium" | "low" } => item !== null);
+
+  if (normalized.length >= 2) {
+    return normalized.slice(0, 5);
+  }
+
+  const fallback = [...normalized];
+  while (fallback.length < 2) {
+    const idx = fallback.length + 1;
+    fallback.push({
+      title: idx === 1 ? "Entender requerimiento" : "Ejecutar entrega",
+      description: idx === 1
+        ? "Analizar intención, alcance y restricciones"
+        : "Producir resultado alineado al objetivo",
+      priority: "high",
+    });
+  }
+
+  return fallback.slice(0, 5);
+}
+
 function coercePlannerBrief(raw: unknown): RequestBrief {
-  const parsed = RequestBriefSchema.parse(raw);
+  const rawRecord = asRecord(raw);
+  const intentRecord = asRecord(rawRecord.intent);
+  const deliverableRecord = asRecord(rawRecord.deliverable);
+  const expectedOutputRecord = asRecord(rawRecord.expected_output);
+  const audienceRecord = asRecord(rawRecord.audience);
+
+  const inferredIntent = normalizeText(
+    typeof rawRecord.intent === "string"
+      ? rawRecord.intent
+      : String(rawRecord.objective ?? deliverableRecord.description ?? expectedOutputRecord.description ?? "task")
+  ) || "task";
+
+  const confidenceRaw = typeof intentRecord.confidence === "number"
+    ? intentRecord.confidence
+    : Number(intentRecord.confidence);
+  const confidence = Number.isFinite(confidenceRaw)
+    ? Math.min(1, Math.max(0, confidenceRaw))
+    : 0.4;
+
+  const objectiveSeed = normalizeText(String(rawRecord.objective ?? inferredIntent));
+  const deliverableDescription = normalizeText(
+    String(deliverableRecord.description ?? expectedOutputRecord.description ?? objectiveSeed ?? "Entrega solicitada")
+  ) || "Entrega solicitada";
+  const deliverableFormat = normalizeText(
+    String(deliverableRecord.format ?? expectedOutputRecord.format ?? detectDeliverableFormat(objectiveSeed || inferredIntent))
+  ) || "text";
+
+  const structure = Array.isArray(expectedOutputRecord.structure)
+    ? expectedOutputRecord.structure
+      .map((item) => normalizeText(String(item ?? "")))
+      .filter(Boolean)
+    : [];
+
+  const normalizedPayload = {
+    ...rawRecord,
+    intent: {
+      primary_intent: normalizeText(String(intentRecord.primary_intent ?? inferredIntent)) || "task",
+      confidence,
+    },
+    subtasks: normalizeSubtasks(rawRecord.subtasks),
+    deliverable: {
+      ...deliverableRecord,
+      description: deliverableDescription,
+      format: deliverableFormat,
+    },
+    audience: {
+      ...audienceRecord,
+      audience: normalizeText(String(audienceRecord.audience ?? "general")) || "general",
+      tone: normalizeText(String(audienceRecord.tone ?? "directo")) || "directo",
+      language: normalizeText(String(audienceRecord.language ?? "es")) || "es",
+    },
+    expected_output: {
+      ...expectedOutputRecord,
+      description: normalizeText(String(expectedOutputRecord.description ?? deliverableDescription)) || deliverableDescription,
+      format: normalizeText(String(expectedOutputRecord.format ?? deliverableFormat)) || deliverableFormat,
+      structure,
+    },
+  };
+
+  const parsed = RequestBriefSchema.parse(normalizedPayload);
 
   parsed.objective = normalizeText(parsed.objective || parsed.intent.primary_intent || "Resolver solicitud");
 
@@ -561,6 +671,19 @@ function hardSecurityFlagsFromText(text: string): string[] {
   return flags;
 }
 
+function canonicalizeToolForPolicy(toolName: string): string {
+  const normalized = normalizeText(toolName).toLowerCase();
+  const aliases: Record<string, string> = {
+    create_document: "generate_document",
+    create_spreadsheet: "analyze_spreadsheet",
+    create_presentation: "slides",
+    fetch_url: "browse_url",
+    analyze_data: "analyze_spreadsheet",
+    generate_chart: "analyze_spreadsheet",
+  };
+  return aliases[normalized] || normalized;
+}
+
 function applyToolPolicyChecks(
   brief: RequestBrief,
   input: RequestUnderstandingInput
@@ -570,7 +693,15 @@ function applyToolPolicyChecks(
   const userPlan: KnownUserPlan = input.userPlan || "free";
   const userId = input.userId || "anonymous";
 
-  for (const toolName of brief.tool_routing.suggested_tools) {
+  for (const originalToolName of brief.tool_routing.suggested_tools) {
+    const toolName = canonicalizeToolForPolicy(originalToolName);
+    const policy = policyEngine.getPolicy(toolName);
+    if (!policy) {
+      // Planner often emits aliases; unknown tools should not hard-block execution.
+      flags.push(`policy_unknown_tool:${originalToolName}`);
+      continue;
+    }
+
     const check = policyEngine.checkAccess({
       toolName,
       userPlan,
@@ -578,8 +709,8 @@ function applyToolPolicyChecks(
       isConfirmed: false,
     });
     if (!check.allowed && !check.requiresConfirmation) {
-      blockedTools.push(toolName);
-      flags.push(`policy_block:${toolName}:${check.reason}`);
+      blockedTools.push(originalToolName);
+      flags.push(`policy_block:${originalToolName}:${check.reason}`);
     }
   }
 
@@ -839,14 +970,25 @@ export class RequestUnderstandingAgent {
         throw new Error("Request text is required for request understanding");
       }
 
-      const { brief, state } = await this.runPlannerGraph(normalizedInput);
+      let brief: RequestBrief;
+      let state: PlannerExecutionState | null = null;
+      try {
+        const result = await this.runPlannerGraph(normalizedInput);
+        brief = result.brief;
+        state = result.state;
+      } catch (err: any) {
+        const reason = normalizeText(err?.message || "unknown_error").slice(0, 180);
+        Logger.warn(`[RequestUnderstanding] buildBrief failed; using fallback: ${reason}`);
+        brief = buildFallbackBrief(normalizedInput, `build_brief_failed:${reason || "unknown_error"}`);
+      }
+
       await persistPlanningMemory(normalizedInput, brief);
 
       span.setAttribute("ru.intent", brief.intent.primary_intent);
       span.setAttribute("ru.intent_confidence", brief.intent.confidence);
       span.setAttribute("ru.blocked", brief.blocker.is_blocked);
-      span.setAttribute("ru.planner_mode", state.plannerMode);
-      span.setAttribute("ru.stage_count", state.stages.length);
+      span.setAttribute("ru.planner_mode", state?.plannerMode || "heuristic");
+      span.setAttribute("ru.stage_count", state?.stages.length || 0);
       span.setAttribute("ru.total_duration_ms", Date.now() - startedAt);
 
       return brief;

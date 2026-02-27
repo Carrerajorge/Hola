@@ -7,6 +7,7 @@ import { JSDOM } from "jsdom";
 import { createClient, RedisClientType } from "redis";
 import crypto from "crypto";
 import { sanitizeSearchQuery } from "../lib/textSanitizers";
+import { checkScopusQuotaGate, getScopusQuotaGuardState, updateScopusQuotaFromHeaders } from "./scopusQuotaGuard";
 
 // ============================================
 // TYPES
@@ -488,6 +489,16 @@ export function formatCitation(result: AcademicResult, style: CitationStyle = "a
 // ============================================
 
 const SCOPUS_API_KEY = process.env.SCOPUS_API_KEY || "";
+const SCOPUS_INSTTOKEN = process.env.SCOPUS_INSTTOKEN || "";
+
+function buildScopusHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    "X-ELS-APIKey": SCOPUS_API_KEY,
+    "Accept": "application/json",
+  };
+  if (SCOPUS_INSTTOKEN) headers["X-ELS-Insttoken"] = SCOPUS_INSTTOKEN;
+  return headers;
+}
 
 export async function searchScopus(query: string, options: SearchOptions = {}): Promise<AcademicResult[]> {
   const { maxResults = 10, timeout = 8000 } = options;
@@ -497,6 +508,11 @@ export async function searchScopus(query: string, options: SearchOptions = {}): 
   const clampedMax = Math.max(1, Math.min(25, maxResults));
 
   if (!SCOPUS_API_KEY || isCircuitOpen(source)) return [];
+  const gate = checkScopusQuotaGate();
+  if (!gate.allowed) {
+    console.warn("[scopus] Blocked by quota guard:", gate.reason);
+    return [];
+  }
 
   const cacheKey = getCacheKey(source, sanitized, options);
   const cached = await getCached<AcademicResult[]>(cacheKey);
@@ -512,9 +528,10 @@ export async function searchScopus(query: string, options: SearchOptions = {}): 
 
     const response = await fetchWithRetry(
       `https://api.elsevier.com/content/search/scopus?${params}`,
-      { headers: { "X-ELS-APIKey": SCOPUS_API_KEY, "Accept": "application/json" } },
+      { headers: buildScopusHeaders() },
       timeout
     );
+    updateScopusQuotaFromHeaders(response.headers, response.status);
 
     if (!response.ok) {
       recordFailure(source);
@@ -958,7 +975,7 @@ export async function searchAllSources(query: string, options: UnifiedSearchOpti
   const searchFunctions: Array<{ source: string; fn: () => Promise<AcademicResult[]> }> = [];
 
   // Build parallel search array
-  if (sources.includes("scopus") && SCOPUS_API_KEY) {
+  if (sources.includes("scopus") && SCOPUS_API_KEY && checkScopusQuotaGate().allowed) {
     enabledSources.scopus = true;
     searchFunctions.push({ source: "scopus", fn: () => searchScopus(normalizedQuery, { ...options, maxResults: perSource }) });
   }
@@ -1058,13 +1075,18 @@ export async function searchAllSources(query: string, options: UnifiedSearchOpti
 // SOURCE STATUS
 // ============================================
 
-export function getSourcesStatus(): Record<string, { available: boolean; name: string; description: string; requiresKey: boolean }> {
+export function getSourcesStatus(): Record<string, { available: boolean; name: string; description: string; requiresKey: boolean; note?: string }> {
+  const scopusGate = checkScopusQuotaGate();
+  const scopusState = getScopusQuotaGuardState();
+  const pausedUntil = scopusState.pausedUntilMs ? new Date(scopusState.pausedUntilMs).toISOString() : undefined;
+
   return {
     scopus: {
-      available: !!SCOPUS_API_KEY && !isCircuitOpen("scopus"),
+      available: !!SCOPUS_API_KEY && !isCircuitOpen("scopus") && scopusGate.allowed,
       name: "Scopus (Elsevier)",
       description: "Base de datos académica con +80M de registros científicos",
-      requiresKey: true
+      requiresKey: true,
+      note: scopusGate.allowed ? undefined : `Pausado automáticamente por cuota hasta ${pausedUntil || "nuevo intento automático"}.`
     },
     pubmed: {
       available: !isCircuitOpen("pubmed"),

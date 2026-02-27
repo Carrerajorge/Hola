@@ -466,6 +466,39 @@ export function ChatInterface({
     return getProject(selectedProjectId) || projects.find((p: any) => p.id === selectedProjectId);
   }, [selectedProjectId, projects, getProject]);
 
+  const activeGptConversationStarters = useMemo(() => {
+    const rawStarters = (activeGpt as any)?.conversationStarters;
+
+    if (Array.isArray(rawStarters)) {
+      return rawStarters
+        .filter((value): value is string => typeof value === "string")
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0);
+    }
+
+    // Backward compatibility: some legacy payloads serialize the array as JSON string.
+    if (typeof rawStarters === "string") {
+      const rawText = rawStarters.trim();
+      if (rawText.length === 0) return [];
+
+      try {
+        const parsed = JSON.parse(rawText);
+        if (Array.isArray(parsed)) {
+          return parsed
+            .filter((value): value is string => typeof value === "string")
+            .map((value) => value.trim())
+            .filter((value) => value.length > 0);
+        }
+      } catch {
+        // If parsing fails, treat the raw string as a single starter instead of crashing the UI.
+      }
+
+      return [rawText];
+    }
+
+    return [];
+  }, [activeGpt]);
+
   const { user } = useAuth();
   const { toast } = useToast();
 
@@ -3097,59 +3130,6 @@ export function ChatInterface({
 
           let spreadsheetData: UploadedFile['spreadsheetData'] | undefined;
 
-          if (isExcel) {
-            try {
-              const formData = new FormData();
-              formData.append('file', file);
-
-              await ensureCsrfToken();
-              const spreadsheetRes = await apiFetch('/api/spreadsheet/upload', {
-                method: 'POST',
-                headers: multipartHeaders,
-                body: formData,
-                timeoutMs: 30000,
-              });
-
-              if (spreadsheetRes.ok) {
-                const spreadsheetResult = await safeJson(spreadsheetRes);
-                if (!spreadsheetResult) {
-                  throw new Error("Invalid spreadsheet response");
-                }
-                const uploadId = spreadsheetResult.id;
-                const sheetDetails = spreadsheetResult.sheetDetails || [];
-                const sheets = sheetDetails.map((s: any) => ({
-                  name: s.name,
-                  rowCount: s.rowCount,
-                  columnCount: s.columnCount,
-                }));
-
-                spreadsheetData = {
-                  uploadId,
-                  sheets,
-                };
-
-                if (spreadsheetResult.firstSheetPreview) {
-                  spreadsheetData.previewData = {
-                    headers: spreadsheetResult.firstSheetPreview.headers || [],
-                    data: spreadsheetResult.firstSheetPreview.data || [],
-                  };
-                }
-
-                triggerDocumentAnalysis(uploadId, file.name, (analysisId) => {
-                  setUploadedFiles((prev: any[]) =>
-                    prev.map((f: any) => f.id === tempId ? { ...f, analysisId } : f)
-                  );
-                });
-              }
-            } catch (spreadsheetError) {
-              console.warn("Failed to parse spreadsheet:", spreadsheetError);
-            }
-          }
-
-          setUploadedFiles((prev: any[]) =>
-            prev.map((f: any) => f.id === tempId ? { ...f, status: "processing", spreadsheetData } : f)
-          );
-
           await ensureCsrfToken();
           const registerRes = await apiFetch("/api/files", {
             method: "POST",
@@ -3172,25 +3152,82 @@ export function ChatInterface({
             throw new Error("Server returned invalid file registration response");
           }
 
+          // UX fast-path: once file bytes are persisted and registered, expose it as ready immediately.
+          // Backend extraction/analysis continues asynchronously in background.
           setUploadedFiles((prev: any[]) =>
-            prev.map((f: any) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, spreadsheetData } : f)
+            prev.map((f: any) => f.id === tempId
+              ? { ...f, id: registeredFile.id, storagePath, status: "ready", spreadsheetData }
+              : f)
           );
 
-          // FAST PATH for images: The client already has the dataUrl preview, and the server marks
-          // images as 'ready' via a fire-and-forget processFileAsync call. There is a race condition
-          // where the client polls before processFileAsync finishes updating the DB. For images,
-          // skip the server poll — mark as ready immediately so attachments work without delay.
-          if (isImage) {
-            setUploadedFiles((prev: any[]) =>
-              prev.map((f: any) => (f.id === registeredFile.id || f.id === tempId
-                ? { ...f, id: registeredFile.id, status: "ready" }
-                : f))
-            );
-          } else {
-            // Start content polling in background. Upload is already persisted and sendable.
+          if (!isImage) {
+            // Keep background extraction for richer context without blocking upload readiness.
             void pollFileStatusFast(registeredFile.id, tempId).catch((pollError) => {
               console.warn("Background file status polling failed:", pollError);
             });
+          }
+
+          if (isExcel) {
+            // Parse spreadsheet metadata in background so upload remains instant from user perspective.
+            void (async () => {
+              try {
+                const formData = new FormData();
+                formData.append('file', file);
+
+                await ensureCsrfToken();
+                const spreadsheetRes = await apiFetch('/api/spreadsheet/upload', {
+                  method: 'POST',
+                  headers: multipartHeaders,
+                  body: formData,
+                  timeoutMs: 30000,
+                });
+
+                if (!spreadsheetRes.ok) {
+                  return;
+                }
+
+                const spreadsheetResult = await safeJson(spreadsheetRes);
+                if (!spreadsheetResult) {
+                  return;
+                }
+
+                const spreadsheetUploadId = spreadsheetResult.id;
+                const sheetDetails = spreadsheetResult.sheetDetails || [];
+                const sheets = sheetDetails.map((s: any) => ({
+                  name: s.name,
+                  rowCount: s.rowCount,
+                  columnCount: s.columnCount,
+                }));
+
+                spreadsheetData = {
+                  uploadId: spreadsheetUploadId,
+                  sheets,
+                };
+
+                if (spreadsheetResult.firstSheetPreview) {
+                  spreadsheetData.previewData = {
+                    headers: spreadsheetResult.firstSheetPreview.headers || [],
+                    data: spreadsheetResult.firstSheetPreview.data || [],
+                  };
+                }
+
+                setUploadedFiles((prev: any[]) =>
+                  prev.map((f: any) => (f.id === registeredFile.id || f.id === tempId)
+                    ? { ...f, spreadsheetData }
+                    : f)
+                );
+
+                triggerDocumentAnalysis(spreadsheetUploadId, file.name, (analysisId) => {
+                  setUploadedFiles((prev: any[]) =>
+                    prev.map((f: any) => (f.id === registeredFile.id || f.id === tempId)
+                      ? { ...f, analysisId }
+                      : f)
+                  );
+                });
+              } catch (spreadsheetError) {
+                console.warn("Failed to parse spreadsheet:", spreadsheetError);
+              }
+            })();
           }
 
           if (isAnalyzableFile(file.name) && !isExcel) {
@@ -3452,7 +3489,11 @@ export function ChatInterface({
 
           // pending/processing: reflect state (best-effort)
           setUploadedFiles((prev: UploadedFile[]) =>
-            prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "processing" } : f))
+            prev.map((f: UploadedFile) => {
+              if (f.id !== fileId && f.id !== trackingId) return f;
+              const nextStatus = f.status === "ready" ? "ready" : "processing";
+              return { ...f, id: fileId, status: nextStatus };
+            })
           );
         });
 
@@ -4949,7 +4990,26 @@ export function ChatInterface({
 
           if (!response.ok) {
             setActiveRunId(null);
-            throw new Error(`Super Agent request failed: ${response.status}`);
+            let errorDetail = "";
+            try {
+              const rawError = await response.text();
+              if (rawError) {
+                try {
+                  const parsedError = JSON.parse(rawError);
+                  errorDetail = String(parsedError?.error || parsedError?.message || "").trim();
+                } catch {
+                  errorDetail = rawError.trim();
+                }
+              }
+            } catch {
+              // Ignore parsing errors and keep status-only message.
+            }
+            const compactDetail = errorDetail ? errorDetail.slice(0, 240) : "";
+            throw new Error(
+              compactDetail
+                ? `Super Agent request failed: ${response.status} (${compactDetail})`
+                : `Super Agent request failed: ${response.status}`
+            );
           }
 
           const reader = response.body?.getReader();
@@ -6957,9 +7017,9 @@ IMPORTANTE:
                         </div>
                         <h2 className="text-xl font-semibold">{activeGpt.name}</h2>
                         <p className="text-muted-foreground max-w-md">{activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?"}</p>
-                        {activeGpt.conversationStarters && activeGpt.conversationStarters.length > 0 && (
+                        {activeGptConversationStarters.length > 0 && (
                           <div className="flex flex-wrap gap-2 mt-4 justify-center max-w-xl">
-                            {activeGpt.conversationStarters.filter(s => s).map((starter, idx) => (
+                            {activeGptConversationStarters.map((starter, idx) => (
                               <button
                                 key={idx}
                                 onClick={() => setInput(starter)}
@@ -7265,16 +7325,14 @@ IMPORTANTE:
                       }
                     </motion.p>
 
-                    {activeGpt?.conversationStarters && activeGpt.conversationStarters.length > 0 && (
+                    {activeGptConversationStarters.length > 0 && (
                       <motion.div
                         initial={{ y: 20, opacity: 0 }}
                         animate={{ y: 0, opacity: 1 }}
                         transition={{ duration: 0.5, delay: 0.3 }}
                         className="flex flex-wrap gap-3 justify-center max-w-3xl relative z-10"
                       >
-                        {activeGpt.conversationStarters
-                          .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
-                          .map((starter, idx) => (
+                        {activeGptConversationStarters.map((starter, idx) => (
                             <button
                               key={idx}
                               onClick={() => setInput(starter)}
@@ -7288,7 +7346,7 @@ IMPORTANTE:
                     )}
 
                     {/* Show PromptSuggestions when no conversation starters available */}
-                    {(!activeGpt?.conversationStarters || activeGpt.conversationStarters.length === 0) && (
+                    {activeGptConversationStarters.length === 0 && (
                       <motion.div
                         initial={{ y: 20, opacity: 0 }}
                         animate={{ y: 0, opacity: 1 }}

@@ -138,9 +138,10 @@ async function acquireConcurrencySlot(
 export const ToolDefinitionSchema = z.object({
   name: z.string().min(1, "Tool name is required"),
   description: z.string().min(1, "Tool description is required"),
-  inputSchema: z.custom<z.ZodSchema>((val) => val instanceof z.ZodType, {
-    message: "inputSchema must be a valid Zod schema",
-  }),
+  inputSchema: z.custom<z.ZodSchema>(
+    (val) => typeof (val as any)?.safeParse === "function",
+    { message: "inputSchema must be a valid Zod schema" }
+  ),
   capabilities: z.array(ToolCapabilitySchema).optional(),
   safetyPolicy: z.enum(["safe", "requires_confirmation", "dangerous"]).default("safe"),
   timeoutMs: z.number().int().positive().default(30000),

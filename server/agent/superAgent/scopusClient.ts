@@ -1,6 +1,7 @@
 import { SourceSignal } from "./contracts";
 import { franc } from "franc";
 import { sanitizePlainText } from "../../lib/textSanitizers";
+import { checkScopusQuotaGate, updateScopusQuotaFromHeaders } from "../../services/scopusQuotaGuard";
 
 // =============================================================================
 // Types
@@ -59,6 +60,16 @@ const MAX_PAGE_SIZE = 25;
 
 let lastRequestTime = 0;
 
+function buildScopusHeaders(apiKey: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    "X-ELS-APIKey": apiKey,
+    "Accept": "application/json",
+  };
+  const insttoken = process.env.SCOPUS_INSTTOKEN;
+  if (insttoken) headers["X-ELS-Insttoken"] = insttoken;
+  return headers;
+}
+
 // =============================================================================
 // Rate Limiting & Retry Infrastructure
 // =============================================================================
@@ -82,6 +93,12 @@ async function fetchWithRetry(
   for (let attempt = 0; attempt <= retries; attempt++) {
     attempts++;
     try {
+      const gate = checkScopusQuotaGate();
+      if (!gate.allowed) {
+        console.warn(`[Scopus] Blocked by quota guard: ${gate.reason}`);
+        return { response: null, attempts };
+      }
+
       await rateLimit();
 
       const controller = new AbortController();
@@ -93,6 +110,7 @@ async function fetchWithRetry(
       });
 
       clearTimeout(timeout);
+      updateScopusQuotaFromHeaders(response.headers, response.status);
 
       if (response.ok) return { response, attempts };
 
@@ -1126,10 +1144,7 @@ export async function searchScopus(
     if (clause) finalQuery += ` AND (${clause})`;
   }
 
-  const headers = {
-    "X-ELS-APIKey": apiKey,
-    "Accept": "application/json",
-  };
+  const headers = buildScopusHeaders(apiKey);
 
   // Phase 1: Primary strict query
   let rawArticles: ScopusArticle[] = [];
@@ -1336,10 +1351,7 @@ export async function fetchAbstract(scopusId: string): Promise<string> {
   const apiKey = process.env.SCOPUS_API_KEY;
   if (!apiKey || !scopusId) return "";
 
-  const headers = {
-    "X-ELS-APIKey": apiKey,
-    "Accept": "application/json",
-  };
+  const headers = buildScopusHeaders(apiKey);
 
   const result = await fetchWithRetry(`${SCOPUS_ABSTRACT_BASE}/${encodeURIComponent(scopusId)}`, headers, 2);
 

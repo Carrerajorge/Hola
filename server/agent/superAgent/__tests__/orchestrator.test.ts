@@ -135,4 +135,51 @@ describe('SuperAgentOrchestrator', () => {
         await expect(orchestrator.execute('Test prompt', abortController.signal))
             .rejects.toThrow('Ejecución cancelada por el usuario');
     });
+
+    it('should continue execution when blocker is non-critical', async () => {
+        const { requestUnderstandingAgent } = await import('../../requestUnderstanding');
+        (requestUnderstandingAgent.buildBrief as any).mockResolvedValueOnce({
+            intent: { primary_intent: 'investigar', confidence: 0.8 },
+            guardrails: { privacy_ok: true, security_ok: true, flags: [] },
+            blocker: { is_blocked: true, question: 'Necesito confirmar formato' },
+        });
+
+        const sseSpy = vi.fn();
+        orchestrator.on('sse', sseSpy);
+
+        await orchestrator.execute('Busca artículos sobre economía circular');
+
+        const events = sseSpy.mock.calls.map(c => c[0]);
+        const thoughtEvents = events.filter((e: any) => e.event_type === 'thought');
+        const hasBestEffortThought = thoughtEvents.some((e: any) =>
+            String(e.data?.content || '').includes('Continuando en modo best-effort')
+        );
+        const contractEvent = events.find((e: any) => e.event_type === 'contract');
+
+        expect(hasBestEffortThought).toBe(true);
+        expect(contractEvent).toBeDefined();
+    });
+
+    it('should stop execution when blocker is critical', async () => {
+        const { requestUnderstandingAgent } = await import('../../requestUnderstanding');
+        (requestUnderstandingAgent.buildBrief as any).mockResolvedValueOnce({
+            intent: { primary_intent: 'investigar', confidence: 0.8 },
+            guardrails: { privacy_ok: false, security_ok: true, flags: ['pii_email'] },
+            blocker: { is_blocked: true, question: 'Falta autorización para datos sensibles' },
+        });
+
+        const sseSpy = vi.fn();
+        orchestrator.on('sse', sseSpy);
+
+        const state = await orchestrator.execute('Busca artículos sobre economía circular');
+
+        const events = sseSpy.mock.calls.map(c => c[0]);
+        const finalEvent = events.find((e: any) => e.event_type === 'final');
+        const contractEvent = events.find((e: any) => e.event_type === 'contract');
+
+        expect(contractEvent).toBeUndefined();
+        expect(finalEvent).toBeDefined();
+        expect(String(finalEvent.data?.response || '')).toContain('autorización');
+        expect(state.final_response).toContain('autorización');
+    });
 });

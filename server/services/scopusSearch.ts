@@ -7,9 +7,20 @@
  */
 
 import { SearchResult } from "./webSearch";
+import { checkScopusQuotaGate, updateScopusQuotaFromHeaders } from "./scopusQuotaGuard";
 
 const SCOPUS_API_KEY = process.env.SCOPUS_API_KEY || "";
+const SCOPUS_INSTTOKEN = process.env.SCOPUS_INSTTOKEN || "";
 const SCOPUS_BASE_URL = "https://api.elsevier.com/content/search/scopus";
+
+function buildScopusHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    "X-ELS-APIKey": SCOPUS_API_KEY,
+    "Accept": "application/json",
+  };
+  if (SCOPUS_INSTTOKEN) headers["X-ELS-Insttoken"] = SCOPUS_INSTTOKEN;
+  return headers;
+}
 
 export interface ScopusArticle {
   title: string;
@@ -55,6 +66,12 @@ export async function searchScopus(
     return { query, totalResults: 0, articles: [] };
   }
 
+  const gate = checkScopusQuotaGate();
+  if (!gate.allowed) {
+    console.warn("[Scopus] Request skipped by quota guard:", gate.reason);
+    return { query, totalResults: 0, articles: [] };
+  }
+
   try {
     // Build query with date range if specified
     let searchQuery = query;
@@ -74,13 +91,11 @@ export async function searchScopus(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15000);
     const response = await fetch(`${SCOPUS_BASE_URL}?${params}`, {
-      headers: {
-        "X-ELS-APIKey": SCOPUS_API_KEY,
-        "Accept": "application/json"
-      },
+      headers: buildScopusHeaders(),
       signal: controller.signal,
     });
     clearTimeout(timer);
+    updateScopusQuotaFromHeaders(response.headers, response.status);
 
     if (!response.ok) {
       const error = await response.text();
@@ -209,6 +224,11 @@ export async function searchAcademicSources(
  */
 export async function getScopusArticleByDoi(doi: string): Promise<ScopusArticle | null> {
   if (!SCOPUS_API_KEY) return null;
+  const gate = checkScopusQuotaGate();
+  if (!gate.allowed) {
+    console.warn("[Scopus] DOI request skipped by quota guard:", gate.reason);
+    return null;
+  }
 
   try {
     const doiController = new AbortController();
@@ -216,14 +236,12 @@ export async function getScopusArticleByDoi(doi: string): Promise<ScopusArticle 
     const response = await fetch(
       `https://api.elsevier.com/content/abstract/doi/${encodeURIComponent(doi)}`,
       {
-        headers: {
-          "X-ELS-APIKey": SCOPUS_API_KEY,
-          "Accept": "application/json"
-        },
+        headers: buildScopusHeaders(),
         signal: doiController.signal,
       }
     );
     clearTimeout(doiTimer);
+    updateScopusQuotaFromHeaders(response.headers, response.status);
 
     if (!response.ok) return null;
 

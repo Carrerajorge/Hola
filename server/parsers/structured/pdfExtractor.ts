@@ -5,6 +5,28 @@ import { createRequire } from "node:module";
 // an API/Worker version mismatch ("4.10.38" vs "5.4.296") at runtime.
 const require = createRequire(import.meta.url);
 
+const PDF_OCR_DEFAULT_MAX_PAGES = 2;
+const PDF_OCR_DEFAULT_SCALE = 2;
+const PDF_OCR_DEFAULT_LANGUAGES = "spa+eng";
+
+function resolvePdfPageCount(result: any): number {
+  const fromNumPages = Number(result?.numpages);
+  if (Number.isFinite(fromNumPages) && fromNumPages > 0) {
+    return fromNumPages;
+  }
+
+  if (Array.isArray(result?.pages) && result.pages.length > 0) {
+    return result.pages.length;
+  }
+
+  const fromTotal = Number(result?.total);
+  if (Number.isFinite(fromTotal) && fromTotal > 0) {
+    return fromTotal;
+  }
+
+  return 1;
+}
+
 async function parsePdfBuffer(buffer: Buffer): Promise<{ text: string; numpages: number; info: Record<string, unknown> }> {
   const { PDFParse } = require("pdf-parse");
   if (!PDFParse) {
@@ -25,7 +47,7 @@ async function parsePdfBuffer(buffer: Buffer): Promise<{ text: string; numpages:
 
   return {
     text: result.text || "",
-    numpages: result.pages?.length || 1,
+    numpages: resolvePdfPageCount(result),
     info
   };
 }
@@ -301,24 +323,85 @@ async function performOcr(
 ): Promise<{ text: string; confidence: number; language: string }> {
   console.log("[pdfExtractor] Performing OCR with tesseract.js...");
 
-  // Tesseract cannot read PDF buffers directly - only image formats
-  // Check for PDF magic bytes and skip OCR if detected
+  const languages = (process.env.PDF_OCR_LANGUAGES || PDF_OCR_DEFAULT_LANGUAGES).trim() || PDF_OCR_DEFAULT_LANGUAGES;
+  const maxPagesEnv = Number(process.env.PDF_OCR_MAX_PAGES || PDF_OCR_DEFAULT_MAX_PAGES);
+  const scaleEnv = Number(process.env.PDF_OCR_SCALE || PDF_OCR_DEFAULT_SCALE);
+  const maxPages = Number.isFinite(maxPagesEnv) && maxPagesEnv > 0
+    ? Math.min(Math.floor(maxPagesEnv), 5)
+    : PDF_OCR_DEFAULT_MAX_PAGES;
+  const scale = Number.isFinite(scaleEnv) && scaleEnv > 0
+    ? Math.min(Math.max(scaleEnv, 1), 3)
+    : PDF_OCR_DEFAULT_SCALE;
+
   const isPdfBuffer = buffer.length >= 4 && 
     buffer[0] === 0x25 && buffer[1] === 0x50 && 
     buffer[2] === 0x44 && buffer[3] === 0x46; // %PDF
 
   if (isPdfBuffer) {
-    console.log("[pdfExtractor] Cannot perform OCR on PDF buffer directly - Tesseract requires image input");
-    return {
-      text: "",
-      confidence: 0,
-      language: "spa+eng",
-    };
+    let worker: Tesseract.Worker | null = null;
+    let pdf: any = null;
+
+    try {
+      const { PDFParse } = require("pdf-parse");
+      pdf = new PDFParse({ data: buffer });
+      await pdf.load();
+      const screenshotResult = await pdf.getScreenshot({
+        first: 1,
+        last: maxPages,
+        scale,
+      });
+      const renderedPages = Array.isArray(screenshotResult?.pages) ? screenshotResult.pages : [];
+      if (renderedPages.length === 0) {
+        return { text: "", confidence: 0, language: languages };
+      }
+
+      worker = await Tesseract.createWorker(languages);
+      const pageTexts: string[] = [];
+      let confidenceSum = 0;
+      let confidenceCount = 0;
+
+      for (let i = 0; i < renderedPages.length; i++) {
+        const pageBuffer = Buffer.from(renderedPages[i]?.data || []);
+        if (pageBuffer.length === 0) continue;
+
+        const result = await worker.recognize(pageBuffer);
+        const pageText = normalizeText(String(result?.data?.text || ""));
+        if (pageText.trim().length > 0) {
+          pageTexts.push(`=== OCR Page ${i + 1} ===\n${pageText}`);
+        }
+
+        const confidence = Number(result?.data?.confidence);
+        if (Number.isFinite(confidence)) {
+          confidenceSum += confidence;
+          confidenceCount += 1;
+        }
+      }
+
+      return {
+        text: pageTexts.join("\n\n").trim(),
+        confidence: confidenceCount > 0 ? confidenceSum / confidenceCount : 0,
+        language: languages,
+      };
+    } catch (error: any) {
+      console.error("[pdfExtractor] OCR failed:", error?.message || error);
+      return {
+        text: "",
+        confidence: 0,
+        language: languages,
+      };
+    } finally {
+      if (worker) {
+        try { await worker.terminate(); } catch { /* ignore */ }
+      }
+      if (pdf) {
+        try { await pdf.destroy(); } catch { /* ignore */ }
+      }
+    }
   }
 
   let worker: Tesseract.Worker | null = null;
   try {
-    worker = await Tesseract.createWorker("spa+eng");
+    worker = await Tesseract.createWorker(languages);
     
     const {
       data: { text, confidence },
@@ -330,7 +413,7 @@ async function performOcr(
     return {
       text: normalizeText(text),
       confidence: confidence || 0,
-      language: "spa+eng",
+      language: languages,
     };
   } catch (error: any) {
     console.error("[pdfExtractor] OCR failed:", error?.message || error);
@@ -341,7 +424,7 @@ async function performOcr(
     return {
       text: "",
       confidence: 0,
-      language: "spa+eng",
+      language: languages,
     };
   }
 }
@@ -408,11 +491,13 @@ export async function extractPDF(
 
       try {
         const ocrResult = await performOcr(buffer);
-        extractedText = ocrResult.text;
+        if (ocrResult.text && ocrResult.text.length > extractedText.length) {
+          extractedText = ocrResult.text;
+          ocrApplied = true;
+        }
         ocrConfidence = ocrResult.confidence;
-        ocrApplied = true;
 
-        if (ocrConfidence < OCR_CONFIDENCE_THRESHOLD) {
+        if (ocrApplied && ocrConfidence < OCR_CONFIDENCE_THRESHOLD) {
           warnings.push(
             `OCR confidence is low (${ocrConfidence.toFixed(1)}%). Text extraction may be incomplete or inaccurate.`
           );
@@ -430,7 +515,7 @@ export async function extractPDF(
     try {
       console.log("[pdfExtractor] Attempting OCR as fallback...");
       const ocrResult = await performOcr(buffer);
-      extractedText = ocrResult.text;
+      extractedText = ocrResult.text || extractedText;
       ocrConfidence = ocrResult.confidence;
       ocrApplied = true;
       pageCount = 1;

@@ -14,6 +14,7 @@ import { conversationMemoryManager } from "../services/conversationMemory";
 import { buildOpenClaw1000CapabilityProfile } from "../services/openClaw1000CapabilityProfiler";
 
 const router = Router();
+const MAX_SUPER_PROMPT_LEN = 10000;
 
 type IntentCategory = "academic_search" | "document_creation" | "data_analysis" | "general_chat";
 
@@ -132,11 +133,11 @@ function extractTargetCount(prompt: string): number {
 const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
 
 const ChatRequestSchema = z.object({
-  prompt: z.string().min(1).max(10000),
+  prompt: z.unknown().optional(),
   messages: z.array(z.object({
-    role: z.string(),
-    content: z.string()
-  })).optional(), // CONTEXT FIX: Accept full conversation history
+    role: z.string().optional(),
+    content: z.unknown().optional(),
+  })).optional(), // Keep permissive: content may be multimodal payloads
   session_id: z.string().optional(),
   run_id: z.string().optional(),
   chat_id: z.string().optional(), // For context augmentation
@@ -146,9 +147,62 @@ const ChatRequestSchema = z.object({
   }).optional(),
 });
 
+function normalizePromptText(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (Array.isArray(value)) {
+    return value
+      .map((part) => normalizePromptText(part))
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (typeof record.text === "string") return record.text.trim();
+    if (Array.isArray(record.parts)) {
+      return record.parts
+        .map((part) => normalizePromptText(part))
+        .filter(Boolean)
+        .join(" ")
+        .trim();
+    }
+    if (Array.isArray(record.content)) {
+      return record.content
+        .map((part) => normalizePromptText(part))
+        .filter(Boolean)
+        .join(" ")
+        .trim();
+    }
+  }
+  return "";
+}
+
+function derivePrompt(promptRaw: unknown, messages: Array<{ role?: string; content?: unknown }> | undefined): string {
+  const fromPrompt = normalizePromptText(promptRaw);
+  if (fromPrompt) return fromPrompt.slice(0, MAX_SUPER_PROMPT_LEN);
+
+  const latestUser = [...(messages || [])]
+    .reverse()
+    .find((message) => (message?.role || "").toLowerCase() === "user");
+  const fromMessages = normalizePromptText(latestUser?.content);
+  return fromMessages.slice(0, MAX_SUPER_PROMPT_LEN);
+}
+
 router.post("/super/analyze", async (req: Request, res: Response) => {
   try {
-    const { prompt, options } = ChatRequestSchema.parse(req.body);
+    const parsed = ChatRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: "Invalid /api/super/analyze payload",
+        details: parsed.error.flatten(),
+      });
+    }
+
+    const prompt = derivePrompt(parsed.data.prompt, parsed.data.messages);
+    if (!prompt) {
+      return res.status(400).json({ error: "Prompt is required" });
+    }
+    const { options } = parsed.data;
 
     const contract = parsePromptToContract(prompt, {
       enforceMinSources: options?.enforce_min_sources ?? true,
@@ -199,7 +253,22 @@ router.post("/super/stream", async (req: Request, res: Response) => {
   };
 
   try {
-    const { prompt, messages: clientMessages, chat_id, session_id, run_id, options } = ChatRequestSchema.parse(req.body);
+    const parsed = ChatRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: "Invalid /api/super/stream payload",
+        details: parsed.error.flatten(),
+      });
+    }
+
+    const { messages: clientMessages, chat_id, session_id, run_id, options } = parsed.data;
+    const prompt = derivePrompt(parsed.data.prompt, clientMessages);
+    if (!prompt) {
+      return res.status(400).json({
+        error: "Prompt is required",
+      });
+    }
+
     sessionId = session_id || sessionId;
     runId = run_id || runId;
 
@@ -464,6 +533,13 @@ router.post("/super/stream", async (req: Request, res: Response) => {
     res.end();
 
   } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        error: "Invalid /api/super/stream payload",
+        details: error.flatten(),
+      });
+    }
+
     const message = error?.message || "SuperAgent stream failed";
     if (res.headersSent) {
       try {
@@ -479,7 +555,10 @@ router.post("/super/stream", async (req: Request, res: Response) => {
     } else {
       res.status(500).json({ error: message });
     }
-    console.error(`[SuperAgent] /super/stream failed: ${message}`);
+    console.error(`[SuperAgent] /super/stream failed: ${message}`, {
+      bodyKeys: req?.body && typeof req.body === "object" ? Object.keys(req.body) : [],
+      stack: error?.stack,
+    });
   }
 });
 
