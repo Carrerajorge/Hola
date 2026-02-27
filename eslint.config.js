@@ -43,7 +43,7 @@ export default ts.config(
 
       "iliagpt_skills_push/**",
 
-
+      "server/openclaw/src/canvas-host/a2ui/a2ui.bundle.js",
 
       // Public/vendor assets (minified/third-party):
 
