@@ -15,7 +15,7 @@ export default defineConfig({
       reporter: ["text", "json", "json-summary", "html"],
       all: true,
       include: ["server/core/**/*.ts"],
-      exclude: ["**/*.test.ts", "**/__tests__/**", "**/node_modules/**", "**/dist/**"],
+      exclude: ["**/*.test.ts", "**/__tests__/**", "server/openclaw/vendor/**", "**/node_modules/**", "**/dist/**"],
       thresholds: {
         lines: 90,
         functions: 90,
