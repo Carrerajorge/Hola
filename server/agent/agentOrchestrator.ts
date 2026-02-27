@@ -1,3 +1,4 @@
+import { detectToolCallLoop, hashToolCall } from "./toolLoopDetection";
 import { toolRegistry, type ToolResult, type ToolArtifact } from "./toolRegistry";
 import { llmGateway } from "../lib/llmGateway";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
@@ -12,6 +13,7 @@ import { eq } from "drizzle-orm";
 import { getUserSettingsCached } from "../services/userSettingsCache";
 import { policyEngine } from "./policyEngine";
 import { hookSystem } from "../openclaw/plugins/hookSystem";
+import { detectToolCallLoop, hashToolCall } from "./toolLoopDetection";
 
 // Agentic orchestrator bridge
 import {
@@ -1128,7 +1130,6 @@ Respond with ONLY valid JSON in this exact format:
     });
 
     // --- CLAWI TOOL LOOP DETECTION ---
-    const { detectToolCallLoop, hashToolCall } = require("./toolLoopDetection");
     (this as any).toolCallHistory = (this as any).toolCallHistory || [];
     const loopStatus = detectToolCallLoop((this as any).toolCallHistory, step.toolName, step.input);
 

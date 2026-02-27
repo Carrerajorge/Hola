@@ -31,7 +31,9 @@ export default ts.config(
 
       "hola-infra/**",
 
+      "server/openclaw/dist/**",
 
+      "server/capabilities/generated/**",
 
       // Duplicated/legacy trees in this repo:
 

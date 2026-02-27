@@ -73,12 +73,19 @@ export function createExecTool(
           cwd: effectiveCwd,
           env: { ...process.env, ...extraEnv, HOME: workspaceRoot },
           signal: context.signal,
+          detached: true,
         });
-
+      
         const timer = setTimeout(() => {
           killed = true;
-          proc.kill('SIGKILL');
-        }, effectiveTimeout);
+          try {
+            if (proc.pid) process.kill(-proc.pid, 'SIGKILL'); // kill process group
+            else proc.kill('SIGKILL');
+          } catch {
+            try { proc.kill('SIGKILL'); } catch {}
+          }
+        }, effectiveTimeout);        
+        timer.unref?.();
 
         proc.stdout.on('data', (chunk: Buffer) => {
           stdout.push(chunk);
