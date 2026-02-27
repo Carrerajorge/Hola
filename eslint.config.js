@@ -35,6 +35,8 @@ export default ts.config(
 
       "server/capabilities/generated/**",
 
+      "server/openclaw/vendor/**",
+
       // Duplicated/legacy trees in this repo:
 
       "Hola/**",
