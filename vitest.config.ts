@@ -7,6 +7,11 @@ export default defineConfig({
     environment: "node",
     testTimeout: 15000,
     include: ["tests/**/*.test.ts", "server/**/*.test.ts"],
+    exclude: [
+      "**/server/openclaw/vendor/**",
+      "**/dist/**",
+      "**/node_modules/**",
+    ],
     setupFiles: ["./tests/setup.ts"],
     coverage: {
       provider: "v8",
