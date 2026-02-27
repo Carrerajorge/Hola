@@ -97,6 +97,7 @@ import { useBrowserSession, globalStartSseSession, globalUpdateFromSseStep } fro
 import { AgentObserver } from "@/components/agent-observer";
 import { VirtualComputer } from "@/components/virtual-computer";
 import { EnhancedDocumentEditorLazy, SpreadsheetEditorLazy, PPTEditorShellLazy } from "@/lib/lazyComponents";
+const PdfPreviewLazy = React.lazy(() => import("@/components/PdfPreview"));
 import { usePptStreaming } from "@/hooks/usePptStreaming";
 import { PPT_STREAMING_SYSTEM_PROMPT } from "@/lib/pptPrompts";
 import { ETLDialog } from "@/components/etl-dialog";
@@ -2416,17 +2417,44 @@ export function ChatInterface({
     imageUrl?: string;
     storagePath?: string;
     fileId?: string;
+    content?: string;
+    documentType?: string;
+    title?: string;
   }) => {
+    // Images: open lightbox
     if (att.type === "image" && att.imageUrl) {
       setLightboxImage(att.imageUrl);
       return;
     }
-
     if (att.type === "image" && att.storagePath) {
       setLightboxImage(att.storagePath);
       return;
     }
 
+    // If content is already available in the attachment, show it immediately
+    if (att.content) {
+      setPreviewFileAttachment({
+        ...att,
+        isLoading: false,
+        isProcessing: false,
+        content: att.content,
+      });
+      return;
+    }
+
+    // For PDFs with storagePath, show PDF viewer directly (no need to fetch text content)
+    const isPdf = att.type === "pdf" || att.documentType === "pdf" || att.mimeType === "application/pdf" || att.name?.toLowerCase().endsWith(".pdf");
+    if (isPdf && att.storagePath) {
+      setPreviewFileAttachment({
+        ...att,
+        isLoading: false,
+        isProcessing: false,
+        content: undefined,
+      });
+      return;
+    }
+
+    // Set loading state while we fetch content
     setPreviewFileAttachment({
       ...att,
       isLoading: true,
@@ -2434,6 +2462,7 @@ export function ChatInterface({
       content: undefined,
     });
 
+    // Try to fetch content from API
     if (att.fileId) {
       try {
         const response = await apiFetch(`/api/files/${att.fileId}/content`);
@@ -2462,11 +2491,12 @@ export function ChatInterface({
       }
     }
 
+    // For files with storagePath but no extracted content, still show the modal (allows download/PDF view)
     setPreviewFileAttachment((prev: any) => prev ? {
       ...prev,
       isLoading: false,
       isProcessing: false,
-      content: "No se pudo cargar el contenido del archivo.",
+      content: prev.storagePath ? undefined : "No se pudo cargar el contenido del archivo.",
     } : null);
   }, []);
 
@@ -7661,6 +7691,20 @@ IMPORTANTE:
                       </div>
                     </div>
                   </motion.div>
+                ) : (previewFileAttachment.type === "pdf" || previewFileAttachment.mimeType === "application/pdf" || previewFileAttachment.name?.toLowerCase().endsWith(".pdf")) && previewFileAttachment.storagePath ? (
+                  <React.Suspense fallback={
+                    <div className="flex items-center justify-center h-64">
+                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    </div>
+                  }>
+                    <PdfPreviewLazy
+                      url={previewFileAttachment.storagePath}
+                      title={previewFileAttachment.name}
+                      embedded
+                      showToolbar
+                      onClose={() => setPreviewFileAttachment(null)}
+                    />
+                  </React.Suspense>
                 ) : previewFileAttachment.content ? (
                   <motion.div
                     initial={{ opacity: 0, y: 10 }}
@@ -7674,6 +7718,26 @@ IMPORTANTE:
                       </MarkdownErrorBoundary>
                     </div>
                   </motion.div>
+                ) : previewFileAttachment.storagePath ? (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.3 }}
+                    className="flex flex-col items-center justify-center h-64 text-center"
+                  >
+                    <FileText className="h-16 w-16 text-muted-foreground/50 mb-4" />
+                    <p className="text-muted-foreground mb-2">
+                      Vista previa no disponible para este tipo de archivo.
+                    </p>
+                    <Button
+                      variant="outline"
+                      className="mt-4"
+                      onClick={handleDownloadFileAttachment}
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      Descargar archivo
+                    </Button>
+                  </motion.div>
                 ) : (
                   <motion.div
                     initial={{ opacity: 0, scale: 0.95 }}
@@ -7685,16 +7749,6 @@ IMPORTANTE:
                     <p className="text-muted-foreground">
                       La vista previa no está disponible para este tipo de archivo.
                     </p>
-                    {previewFileAttachment.storagePath && (
-                      <Button
-                        variant="outline"
-                        className="mt-4"
-                        onClick={handleDownloadFileAttachment}
-                      >
-                        <Download className="h-4 w-4 mr-2" />
-                        Descargar archivo
-                      </Button>
-                    )}
                   </motion.div>
                 )}
               </div>

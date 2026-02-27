@@ -574,11 +574,7 @@ export const AttachmentList = memo(function AttachmentList({
                         className={cn(
                             "flex items-center gap-2 px-3 py-2 rounded-xl text-sm border bg-card border-border cursor-pointer hover:bg-accent transition-colors"
                         )}
-                        onClick={() => onReopenDocument?.({
-                            type: att.documentType as "word" | "excel" | "ppt",
-                            title: att.title || att.name,
-                            content: att.content || ""
-                        })}
+                        onClick={() => onOpenPreview?.(att)}
                         data-testid={`attachment-document-${i}`}
                     >
                         <div
@@ -599,7 +595,7 @@ export const AttachmentList = memo(function AttachmentList({
                                 {att.title || att.name}
                             </span>
                             <span className="text-xs text-muted-foreground">
-                                Documento guardado - Clic para abrir
+                                Clic para ver contenido
                             </span>
                         </div>
                     </div>
@@ -663,9 +659,14 @@ export const AttachmentList = memo(function AttachmentList({
                                         {attTheme.icon}
                                     </span>
                                 </div>
-                                <span className="max-w-[200px] truncate font-medium">
-                                    {att.name}
-                                </span>
+                                <div className="flex flex-col min-w-0">
+                                    <span className="max-w-[200px] truncate font-medium">
+                                        {att.name}
+                                    </span>
+                                    <span className="text-xs text-muted-foreground">
+                                        Clic para ver contenido
+                                    </span>
+                                </div>
                             </div>
                         );
                     })()
