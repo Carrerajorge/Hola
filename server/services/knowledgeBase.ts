@@ -183,7 +183,7 @@ class KnowledgeBaseService {
         }
         if (refs.size === 0) return;
 
-        for (const label of refs) {
+        for (const label of Array.from(refs)) {
             const [target] = await dbRead.select()
                 .from(knowledgeNodes)
                 .where(and(

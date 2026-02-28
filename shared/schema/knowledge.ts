@@ -77,7 +77,7 @@ export const insertKnowledgeNodeSchema = createInsertSchema(knowledgeNodes).omit
     metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
-export type InsertKnowledgeNode = z.infer<typeof insertKnowledgeNodeSchema>;
+export type InsertKnowledgeNode = typeof knowledgeNodes.$inferInsert;
 export type KnowledgeNode = typeof knowledgeNodes.$inferSelect;
 
 export const knowledgeEdges = pgTable("knowledge_edges", {
@@ -104,5 +104,5 @@ export const insertKnowledgeEdgeSchema = createInsertSchema(knowledgeEdges).omit
     metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
-export type InsertKnowledgeEdge = z.infer<typeof insertKnowledgeEdgeSchema>;
+export type InsertKnowledgeEdge = typeof knowledgeEdges.$inferInsert;
 export type KnowledgeEdge = typeof knowledgeEdges.$inferSelect;

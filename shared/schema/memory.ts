@@ -105,7 +105,7 @@ export const conversationStates = pgTable("conversation_states", {
 
 export const insertConversationStateSchema = createInsertSchema(conversationStates);
 
-export type InsertConversationState = z.infer<typeof insertConversationStateSchema>;
+export type InsertConversationState = typeof conversationStates.$inferInsert;
 export type ConversationState = typeof conversationStates.$inferSelect;
 
 // Versioned snapshots for rollback
@@ -124,7 +124,7 @@ export const conversationStateVersions = pgTable("conversation_state_versions", 
 
 export const insertConversationStateVersionSchema = createInsertSchema(conversationStateVersions);
 
-export type InsertConversationStateVersion = z.infer<typeof insertConversationStateVersionSchema>;
+export type InsertConversationStateVersion = typeof conversationStateVersions.$inferInsert;
 export type ConversationStateVersion = typeof conversationStateVersions.$inferSelect;
 
 // Messages within conversation state
@@ -150,7 +150,7 @@ export const conversationMessages = pgTable("conversation_messages", {
 
 export const insertConversationMessageSchema = createInsertSchema(conversationMessages);
 
-export type InsertConversationMessage = z.infer<typeof insertConversationMessageSchema>;
+export type InsertConversationMessage = typeof conversationMessages.$inferInsert;
 export type ConversationMessage = typeof conversationMessages.$inferSelect;
 
 // Artifacts (uploaded files: doc/pdf/img/etc)
@@ -177,7 +177,7 @@ export const conversationArtifacts = pgTable("conversation_artifacts", {
 
 export const insertConversationArtifactSchema = createInsertSchema(conversationArtifacts);
 
-export type InsertConversationArtifact = z.infer<typeof insertConversationArtifactSchema>;
+export type InsertConversationArtifact = typeof conversationArtifacts.$inferInsert;
 export type ConversationArtifact = typeof conversationArtifacts.$inferSelect;
 
 // Generated images with edit history chain
@@ -206,7 +206,7 @@ export const conversationImages = pgTable("conversation_images", {
 
 export const insertConversationImageSchema = createInsertSchema(conversationImages);
 
-export type InsertConversationImage = z.infer<typeof insertConversationImageSchema>;
+export type InsertConversationImage = typeof conversationImages.$inferInsert;
 export type ConversationImage = typeof conversationImages.$inferSelect;
 
 // Context (summary, entities, user preferences)
@@ -227,7 +227,7 @@ export const conversationContexts = pgTable("conversation_contexts", {
 
 export const insertConversationContextSchema = createInsertSchema(conversationContexts);
 
-export type InsertConversationContext = z.infer<typeof insertConversationContextSchema>;
+export type InsertConversationContext = typeof conversationContexts.$inferInsert;
 export type ConversationContext = typeof conversationContexts.$inferSelect;
 
 // Memory facts table - stores persistent facts about user preferences, decisions, entities
@@ -249,7 +249,7 @@ export const memoryFacts = pgTable("memory_facts", {
 
 export const insertMemoryFactSchema = createInsertSchema(memoryFacts);
 
-export type InsertMemoryFact = z.infer<typeof insertMemoryFactSchema>;
+export type InsertMemoryFact = typeof memoryFacts.$inferInsert;
 export type MemoryFact = typeof memoryFacts.$inferSelect;
 
 // Running summary table - stores progressive conversation summary
@@ -267,7 +267,7 @@ export const runningSummaries = pgTable("running_summaries", {
 
 export const insertRunningSummarySchema = createInsertSchema(runningSummaries);
 
-export type InsertRunningSummary = z.infer<typeof insertRunningSummarySchema>;
+export type InsertRunningSummary = typeof runningSummarys.$inferInsert;
 export type RunningSummary = typeof runningSummaries.$inferSelect;
 
 // Processed requests table for idempotency
@@ -284,7 +284,7 @@ export const processedRequests = pgTable("processed_requests", {
 
 export const insertProcessedRequestSchema = createInsertSchema(processedRequests);
 
-export type InsertProcessedRequest = z.infer<typeof insertProcessedRequestSchema>;
+export type InsertProcessedRequest = typeof processedRequests.$inferInsert;
 export type ProcessedRequest = typeof processedRequests.$inferSelect;
 
 // Full hydrated state type for API responses
@@ -368,7 +368,7 @@ export const retrievalTelemetry = pgTable("retrieval_telemetry", {
 
 export const insertRetrievalTelemetrySchema = createInsertSchema(retrievalTelemetry);
 
-export type InsertRetrievalTelemetry = z.infer<typeof insertRetrievalTelemetrySchema>;
+export type InsertRetrievalTelemetry = typeof retrievalTelemetrys.$inferInsert;
 export type RetrievalTelemetry = typeof retrievalTelemetry.$inferSelect;
 
 // Semantic Memory Chunks - stores user memories with vector embeddings
@@ -393,5 +393,5 @@ export const semanticMemoryChunks = pgTable("semantic_memory_chunks", {
 
 export const insertSemanticMemoryChunkSchema = createInsertSchema(semanticMemoryChunks);
 
-export type InsertSemanticMemoryChunk = z.infer<typeof insertSemanticMemoryChunkSchema>;
+export type InsertSemanticMemoryChunk = typeof semanticMemoryChunks.$inferInsert;
 export type SemanticMemoryChunk = typeof semanticMemoryChunks.$inferSelect;

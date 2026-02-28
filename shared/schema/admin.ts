@@ -39,7 +39,7 @@ export const aiModels = pgTable("ai_models", {
 
 export const insertAiModelSchema = createInsertSchema(aiModels);
 
-export type InsertAiModel = z.infer<typeof insertAiModelSchema>;
+export type InsertAiModel = typeof aiModels.$inferInsert;
 export type AiModel = typeof aiModels.$inferSelect;
 
 // Payments
@@ -73,7 +73,7 @@ export const payments = pgTable("payments", {
 
 export const insertPaymentSchema = createInsertSchema(payments);
 
-export type InsertPayment = z.infer<typeof insertPaymentSchema>;
+export type InsertPayment = typeof payments.$inferInsert;
 export type Payment = typeof payments.$inferSelect;
 
 // Invoices
@@ -104,7 +104,7 @@ export const invoices = pgTable("invoices", {
 
 export const insertInvoiceSchema = createInsertSchema(invoices);
 
-export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
+export type InsertInvoice = typeof invoices.$inferInsert;
 export type Invoice = typeof invoices.$inferSelect;
 
 // Platform Settings
@@ -119,7 +119,7 @@ export const platformSettings = pgTable("platform_settings", {
 
 export const insertPlatformSettingSchema = createInsertSchema(platformSettings);
 
-export type InsertPlatformSetting = z.infer<typeof insertPlatformSettingSchema>;
+export type InsertPlatformSetting = typeof platformSettings.$inferInsert;
 export type PlatformSetting = typeof platformSettings.$inferSelect;
 
 // Audit Logs
@@ -140,7 +140,7 @@ export const auditLogs = pgTable("audit_logs", {
 
 export const insertAuditLogSchema = createInsertSchema(auditLogs);
 
-export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
+export type InsertAuditLog = typeof auditLogs.$inferInsert;
 export type AuditLog = typeof auditLogs.$inferSelect;
 
 // Analytics Snapshots
@@ -159,7 +159,7 @@ export const analyticsSnapshots = pgTable("analytics_snapshots", {
 
 export const insertAnalyticsSnapshotSchema = createInsertSchema(analyticsSnapshots);
 
-export type InsertAnalyticsSnapshot = z.infer<typeof insertAnalyticsSnapshotSchema>;
+export type InsertAnalyticsSnapshot = typeof analyticsSnapshots.$inferInsert;
 export type AnalyticsSnapshot = typeof analyticsSnapshots.$inferSelect;
 
 // Admin Audit Logs - Track all admin actions
@@ -181,7 +181,7 @@ export const adminAuditLogs = pgTable("admin_audit_logs", {
 
 export const insertAdminAuditLogSchema = createInsertSchema(adminAuditLogs);
 
-export type InsertAdminAuditLog = z.infer<typeof insertAdminAuditLogSchema>;
+export type InsertAdminAuditLog = typeof adminAuditLogs.$inferInsert;
 export type AdminAuditLog = typeof adminAuditLogs.$inferSelect;
 
 // AI Model Usage - Track token consumption per model
@@ -207,7 +207,7 @@ export const aiModelUsage = pgTable("ai_model_usage", {
 
 export const insertAiModelUsageSchema = createInsertSchema(aiModelUsage);
 
-export type InsertAiModelUsage = z.infer<typeof insertAiModelUsageSchema>;
+export type InsertAiModelUsage = typeof aiModelUsage.$inferInsert;
 export type AiModelUsage = typeof aiModelUsage.$inferSelect;
 
 // Security Events - Track security-related events
@@ -232,7 +232,7 @@ export const securityEvents = pgTable("security_events", {
 
 export const insertSecurityEventSchema = createInsertSchema(securityEvents);
 
-export type InsertSecurityEvent = z.infer<typeof insertSecurityEventSchema>;
+export type InsertSecurityEvent = typeof securityEvents.$inferInsert;
 export type SecurityEvent = typeof securityEvents.$inferSelect;
 
 // Admin Reports - Generated reports
@@ -257,7 +257,7 @@ export const adminReports = pgTable("admin_reports", {
 
 export const insertAdminReportSchema = createInsertSchema(adminReports);
 
-export type InsertAdminReport = z.infer<typeof insertAdminReportSchema>;
+export type InsertAdminReport = typeof adminReports.$inferInsert;
 export type AdminReport = typeof adminReports.$inferSelect;
 
 // Aliases for compatibility with server/storage.ts
@@ -286,7 +286,7 @@ export const scheduledReports = pgTable("scheduled_reports", {
 
 export const insertScheduledReportSchema = createInsertSchema(scheduledReports);
 
-export type InsertScheduledReport = z.infer<typeof insertScheduledReportSchema>;
+export type InsertScheduledReport = typeof scheduledReports.$inferInsert;
 export type ScheduledReport = typeof scheduledReports.$inferSelect;
 
 // IP Blocklist - Blocked IP addresses
@@ -304,7 +304,7 @@ export const ipBlocklist = pgTable("ip_blocklist", {
 
 export const insertIpBlocklistSchema = createInsertSchema(ipBlocklist);
 
-export type InsertIpBlocklist = z.infer<typeof insertIpBlocklistSchema>;
+export type InsertIpBlocklist = typeof ipBlocklist.$inferInsert;
 export type IpBlocklist = typeof ipBlocklist.$inferSelect;
 
 // Analytics Events - User behavior tracking
@@ -329,7 +329,7 @@ export const analyticsEvents = pgTable("analytics_events", {
 
 export const insertAnalyticsEventSchema = createInsertSchema(analyticsEvents);
 
-export type InsertAnalyticsEvent = z.infer<typeof insertAnalyticsEventSchema>;
+export type InsertAnalyticsEvent = typeof analyticsEvents.$inferInsert;
 export type AnalyticsEvent = typeof analyticsEvents.$inferSelect;
 
 // Provider Metrics - Performance tracking per AI provider
@@ -356,7 +356,7 @@ export const providerMetrics = pgTable("provider_metrics", {
 
 export const insertProviderMetricsSchema = createInsertSchema(providerMetrics);
 
-export type InsertProviderMetrics = z.infer<typeof insertProviderMetricsSchema>;
+export type InsertProviderMetrics = typeof providerMetricss.$inferInsert;
 export type ProviderMetrics = typeof providerMetrics.$inferSelect;
 
 // Cost Budgets - Budget tracking and alerts per provider
@@ -376,7 +376,7 @@ export const costBudgets = pgTable("cost_budgets", {
 
 export const insertCostBudgetSchema = createInsertSchema(costBudgets);
 
-export type InsertCostBudget = z.infer<typeof insertCostBudgetSchema>;
+export type InsertCostBudget = typeof costBudgets.$inferInsert;
 export type CostBudget = typeof costBudgets.$inferSelect;
 
 // Remote shell targets
@@ -403,7 +403,7 @@ export const remoteShellTargets = pgTable("remote_shell_targets", {
 
 export const insertRemoteShellTargetSchema = createInsertSchema(remoteShellTargets);
 
-export type InsertRemoteShellTarget = z.infer<typeof insertRemoteShellTargetSchema>;
+export type InsertRemoteShellTarget = typeof remoteShellTargets.$inferInsert;
 export type RemoteShellTarget = typeof remoteShellTargets.$inferSelect;
 
 // API Logs - Detailed request/response logging
@@ -435,7 +435,7 @@ export const apiLogs = pgTable("api_logs", {
 
 export const insertApiLogSchema = createInsertSchema(apiLogs);
 
-export type InsertApiLog = z.infer<typeof insertApiLogSchema>;
+export type InsertApiLog = typeof apiLogs.$inferInsert;
 export type ApiLog = typeof apiLogs.$inferSelect;
 
 // Real-time KPI Snapshots - For dashboard metrics
@@ -454,7 +454,7 @@ export const kpiSnapshots = pgTable("kpi_snapshots", {
 
 export const insertKpiSnapshotSchema = createInsertSchema(kpiSnapshots);
 
-export type InsertKpiSnapshot = z.infer<typeof insertKpiSnapshotSchema>;
+export type InsertKpiSnapshot = typeof kpiSnapshots.$inferInsert;
 export type KpiSnapshot = typeof kpiSnapshots.$inferSelect;
 
 // Security Center - Enterprise Security Policies
@@ -477,7 +477,7 @@ export const securityPolicies = pgTable("security_policies", {
 
 export const insertSecurityPolicySchema = createInsertSchema(securityPolicies);
 
-export type InsertSecurityPolicy = z.infer<typeof insertSecurityPolicySchema>;
+export type InsertSecurityPolicy = typeof securityPolicys.$inferInsert;
 export type SecurityPolicy = typeof securityPolicies.$inferSelect;
 
 // Reports Center - Templates and Generated Reports
@@ -499,7 +499,7 @@ export const reportTemplates = pgTable("report_templates", {
 
 export const insertReportTemplateSchema = createInsertSchema(reportTemplates);
 
-export type InsertReportTemplate = z.infer<typeof insertReportTemplateSchema>;
+export type InsertReportTemplate = typeof reportTemplates.$inferInsert;
 export type ReportTemplate = typeof reportTemplates.$inferSelect;
 
 // Generated Reports
@@ -523,7 +523,7 @@ export const generatedReports = pgTable("generated_reports", {
 
 export const insertGeneratedReportSchema = createInsertSchema(generatedReports);
 
-export type InsertGeneratedReport = z.infer<typeof insertGeneratedReportSchema>;
+export type InsertGeneratedReport = typeof generatedReports.$inferInsert;
 export type GeneratedReport = typeof generatedReports.$inferSelect;
 
 // Settings Configuration
@@ -544,7 +544,7 @@ export const settingsConfig = pgTable("settings_config", {
 
 export const insertSettingsConfigSchema = createInsertSchema(settingsConfig);
 
-export type InsertSettingsConfig = z.infer<typeof insertSettingsConfigSchema>;
+export type InsertSettingsConfig = typeof settingsConfigs.$inferInsert;
 export type SettingsConfig = typeof settingsConfig.$inferSelect;
 
 // Notification Preferences System
@@ -563,7 +563,7 @@ export const notificationEventTypes = pgTable("notification_event_types", {
 });
 
 export const insertNotificationEventTypeSchema = createInsertSchema(notificationEventTypes);
-export type InsertNotificationEventType = z.infer<typeof insertNotificationEventTypeSchema>;
+export type InsertNotificationEventType = typeof notificationEventTypes.$inferInsert;
 export type NotificationEventType = typeof notificationEventTypes.$inferSelect;
 
 // User Notification Preferences
@@ -584,7 +584,7 @@ export const notificationPreferences = pgTable("notification_preferences", {
 
 export const insertNotificationPreferenceSchema = createInsertSchema(notificationPreferences);
 
-export type InsertNotificationPreference = z.infer<typeof insertNotificationPreferenceSchema>;
+export type InsertNotificationPreference = typeof notificationPreferences.$inferInsert;
 export type NotificationPreference = typeof notificationPreferences.$inferSelect;
 
 // Notification Delivery Log
@@ -609,7 +609,7 @@ export const notificationLogs = pgTable("notification_logs", {
 
 export const insertNotificationLogSchema = createInsertSchema(notificationLogs);
 
-export type InsertNotificationLog = z.infer<typeof insertNotificationLogSchema>;
+export type InsertNotificationLog = typeof notificationLogs.$inferInsert;
 export type NotificationLog = typeof notificationLogs.$inferSelect;
 
 // App Releases (Desktop Native Binarles)
@@ -629,5 +629,5 @@ export const appReleases = pgTable("app_releases", {
 });
 
 export const insertAppReleaseSchema = createInsertSchema(appReleases);
-export type InsertAppRelease = z.infer<typeof insertAppReleaseSchema>;
+export type InsertAppRelease = typeof appReleases.$inferInsert;
 export type AppRelease = typeof appReleases.$inferSelect;

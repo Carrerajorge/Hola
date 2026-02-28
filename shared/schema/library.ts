@@ -25,7 +25,7 @@ export const libraryItems = pgTable("library_items", {
 
 export const insertLibraryItemSchema = createInsertSchema(libraryItems);
 
-export type InsertLibraryItem = z.infer<typeof insertLibraryItemSchema>;
+export type InsertLibraryItem = typeof libraryItems.$inferInsert;
 export type LibraryItem = typeof libraryItems.$inferSelect;
 
 // Enhanced Multimedia Library System
@@ -60,7 +60,7 @@ export const libraryFolders = pgTable('library_folders', {
 
 export const insertLibraryFolderSchema = createInsertSchema(libraryFolders);
 
-export type InsertLibraryFolder = z.infer<typeof insertLibraryFolderSchema>;
+export type InsertLibraryFolder = typeof libraryFolders.$inferInsert;
 export type LibraryFolder = typeof libraryFolders.$inferSelect;
 
 export const libraryFiles = pgTable('library_files', {
@@ -105,7 +105,7 @@ export const libraryFiles = pgTable('library_files', {
 
 export const insertLibraryFileSchema = createInsertSchema(libraryFiles);
 
-export type InsertLibraryFile = z.infer<typeof insertLibraryFileSchema>;
+export type InsertLibraryFile = typeof libraryFiles.$inferInsert;
 export type LibraryFile = typeof libraryFiles.$inferSelect;
 
 export const smartRulesSchema = z.object({
@@ -135,7 +135,7 @@ export const libraryCollections = pgTable('library_collections', {
 
 export const insertLibraryCollectionSchema = createInsertSchema(libraryCollections);
 
-export type InsertLibraryCollection = z.infer<typeof insertLibraryCollectionSchema>;
+export type InsertLibraryCollection = typeof libraryCollections.$inferInsert;
 export type LibraryCollection = typeof libraryCollections.$inferSelect;
 
 export const libraryFileCollections = pgTable('library_file_collections', {
@@ -213,7 +213,7 @@ export const spreadsheetUploads = pgTable('spreadsheet_uploads', {
 
 export const insertSpreadsheetUploadSchema = createInsertSchema(spreadsheetUploads);
 
-export type InsertSpreadsheetUpload = z.infer<typeof insertSpreadsheetUploadSchema>;
+export type InsertSpreadsheetUpload = typeof spreadsheetUploads.$inferInsert;
 export type SpreadsheetUpload = typeof spreadsheetUploads.$inferSelect;
 
 export const columnTypeSchema = z.object({
@@ -240,7 +240,7 @@ export const spreadsheetSheets = pgTable('spreadsheet_sheets', {
 
 export const insertSpreadsheetSheetSchema = createInsertSchema(spreadsheetSheets);
 
-export type InsertSpreadsheetSheet = z.infer<typeof insertSpreadsheetSheetSchema>;
+export type InsertSpreadsheetSheet = typeof spreadsheetSheets.$inferInsert;
 export type SpreadsheetSheet = typeof spreadsheetSheets.$inferSelect;
 
 export const analysisStatusEnum = ['pending', 'generating_code', 'executing', 'succeeded', 'failed'] as const;
@@ -285,7 +285,7 @@ export const spreadsheetAnalysisSessions = pgTable('spreadsheet_analysis_session
 
 export const insertSpreadsheetAnalysisSessionSchema = createInsertSchema(spreadsheetAnalysisSessions);
 
-export type InsertSpreadsheetAnalysisSession = z.infer<typeof insertSpreadsheetAnalysisSessionSchema>;
+export type InsertSpreadsheetAnalysisSession = typeof spreadsheetAnalysisSessions.$inferInsert;
 export type SpreadsheetAnalysisSession = typeof spreadsheetAnalysisSessions.$inferSelect;
 
 export const analysisJobStatusEnum = ['queued', 'running', 'done', 'failed'] as const;
@@ -308,7 +308,7 @@ export const spreadsheetAnalysisJobs = pgTable('spreadsheet_analysis_jobs', {
 
 export const insertSpreadsheetAnalysisJobSchema = createInsertSchema(spreadsheetAnalysisJobs);
 
-export type InsertSpreadsheetAnalysisJob = z.infer<typeof insertSpreadsheetAnalysisJobSchema>;
+export type InsertSpreadsheetAnalysisJob = typeof spreadsheetAnalysisJobs.$inferInsert;
 export type SpreadsheetAnalysisJob = typeof spreadsheetAnalysisJobs.$inferSelect;
 
 export const outputTypeEnum = ['table', 'metric', 'chart', 'log', 'error', 'summary'] as const;
@@ -328,7 +328,7 @@ export const spreadsheetAnalysisOutputs = pgTable('spreadsheet_analysis_outputs'
 
 export const insertSpreadsheetAnalysisOutputSchema = createInsertSchema(spreadsheetAnalysisOutputs);
 
-export type InsertSpreadsheetAnalysisOutput = z.infer<typeof insertSpreadsheetAnalysisOutputSchema>;
+export type InsertSpreadsheetAnalysisOutput = typeof spreadsheetAnalysisOutputs.$inferInsert;
 export type SpreadsheetAnalysisOutput = typeof spreadsheetAnalysisOutputs.$inferSelect;
 
 // Chat Message Analysis - Links chat messages with document analysis sessions
@@ -352,7 +352,7 @@ export const chatMessageAnalysis = pgTable('chat_message_analysis', {
 
 export const insertChatMessageAnalysisSchema = createInsertSchema(chatMessageAnalysis);
 
-export type InsertChatMessageAnalysis = z.infer<typeof insertChatMessageAnalysisSchema>;
+export type InsertChatMessageAnalysis = typeof chatMessageAnalysiss.$inferInsert;
 export type ChatMessageAnalysis = typeof chatMessageAnalysis.$inferSelect;
 
 // Excel Documents (Legacy/Alternative)
@@ -377,7 +377,7 @@ export const excelDocuments = pgTable('excel_documents', {
 
 export const insertExcelDocumentSchema = createInsertSchema(excelDocuments);
 
-export type InsertExcelDocument = z.infer<typeof insertExcelDocumentSchema>;
+export type InsertExcelDocument = typeof excelDocuments.$inferInsert;
 export type ExcelDocument = typeof excelDocuments.$inferSelect;
 
 // Company Knowledge Base
@@ -398,5 +398,5 @@ export const companyKnowledge = pgTable("company_knowledge", {
 
 export const insertCompanyKnowledgeSchema = createInsertSchema(companyKnowledge);
 
-export type InsertCompanyKnowledge = z.infer<typeof insertCompanyKnowledgeSchema>;
+export type InsertCompanyKnowledge = typeof companyKnowledges.$inferInsert;
 export type CompanyKnowledge = typeof companyKnowledge.$inferSelect;

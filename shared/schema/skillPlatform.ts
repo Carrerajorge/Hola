@@ -125,7 +125,7 @@ export const skillCatalog = pgTable("skill_catalog", {
 ]);
 
 export const insertSkillCatalogSchema = createInsertSchema(skillCatalog);
-export type InsertSkillCatalog = z.infer<typeof insertSkillCatalogSchema>;
+export type InsertSkillCatalog = typeof skillCatalogs.$inferInsert;
 export type SkillCatalog = typeof skillCatalog.$inferSelect;
 
 export const skillCatalogVersions = pgTable("skill_catalog_versions", {
@@ -157,7 +157,7 @@ export const skillCatalogVersions = pgTable("skill_catalog_versions", {
 ]);
 
 export const insertSkillCatalogVersionSchema = createInsertSchema(skillCatalogVersions);
-export type InsertSkillCatalogVersion = z.infer<typeof insertSkillCatalogVersionSchema>;
+export type InsertSkillCatalogVersion = typeof skillCatalogVersions.$inferInsert;
 export type SkillCatalogVersion = typeof skillCatalogVersions.$inferSelect;
 
 export const skillExecutionRuns = pgTable("skill_execution_runs", {
@@ -187,5 +187,5 @@ export const skillExecutionRuns = pgTable("skill_execution_runs", {
 ]);
 
 export const insertSkillExecutionRunsSchema = createInsertSchema(skillExecutionRuns);
-export type InsertSkillExecutionRun = z.infer<typeof insertSkillExecutionRunsSchema>;
+export type InsertSkillExecutionRun = typeof skillExecutionRuns.$inferInsert;
 export type SkillExecutionRun = typeof skillExecutionRuns.$inferSelect;

@@ -117,9 +117,9 @@ export class CacheService {
         try {
             await this.redis.del(key);
             // Remove from tag index
-            for (const [, keys] of this.tagIndex) {
+            this.tagIndex.forEach((keys) => {
                 keys.delete(key);
-            }
+            });
         } catch (error) {
             Logger.warn(`[Cache] Delete error for key ${key}`, error);
         }
