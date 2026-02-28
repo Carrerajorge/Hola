@@ -554,6 +554,8 @@ export async function registerRoutes(
   app.use(createFigmaRouter());
   app.use(createLibraryRouter());
   app.use(createWorkspaceRouter());
+  const { createNodesRouter } = await import("./routes/nodesRouter");
+  app.use(createNodesRouter());
   app.use(createCodeRouter());
   app.use(createUserRouter());
   app.use("/api", createChatAiRouter(broadcastAgentUpdate));

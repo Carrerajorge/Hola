@@ -1,0 +1,39 @@
+name: iliagpt-node publish (npm)
+
+on:
+  push:
+    tags:
+      - "iliagpt-node-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build iliagpt-node bundle
+        run: node scripts/build-iliagpt-node.mjs
+
+      - name: Publish to npm
+        working-directory: packages/iliagpt-node
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "NPM_TOKEN missing; skipping publish."
+            exit 0
+          fi
+          npm publish --access public
