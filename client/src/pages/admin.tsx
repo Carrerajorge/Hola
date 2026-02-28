@@ -86,11 +86,12 @@ import { AdminNotificationsPopover } from "@/components/admin/NotificationsPopov
 import { TerminalPanel } from "@/components/terminal-panel";
 import ReleasesManager from "./admin/ReleasesManager";
 
-type AdminSection = "dashboard" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings" | "agentic" | "excel" | "terminal" | "monitoring" | "releases";
+type AdminSection = "dashboard" | "monitoring" | "nodes" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings" | "agentic" | "excel" | "terminal" | "releases";
 
 const navItems: { id: AdminSection; label: string; icon: React.ElementType }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "monitoring", label: "Monitoring", icon: Server },
+  { id: "nodes", label: "Devices", icon: Network },
   { id: "users", label: "Users", icon: Users },
   { id: "conversations", label: "Conversations", icon: MessageSquare },
   { id: "ai-models", label: "AI Models", icon: Bot },
@@ -379,6 +380,202 @@ function MonitoringSection() {
           Si el iframe no carga, usa “Abrir Grafana”. (Grafana ya tiene allow embedding habilitado).
         </p>
       </div>
+    </div>
+  );
+}
+
+function NodesSection() {
+  const queryClient = useQueryClient();
+  const [pairOpen, setPairOpen] = useState(false);
+  const [pairInfo, setPairInfo] = useState<{ code: string; expiresAt: string } | null>(null);
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["/api/workspace/nodes"],
+    queryFn: async () => {
+      const res = await apiFetch("/api/workspace/nodes", { credentials: "include" });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+      return res.json();
+    },
+    retry: false,
+  });
+
+  const pairMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiFetch("/api/workspace/nodes/pair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+        credentials: "include",
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
+      return json as { success: true; code: string; expiresAt: string };
+    },
+    onSuccess: (r) => {
+      setPairInfo({ code: r.code, expiresAt: r.expiresAt });
+      setPairOpen(true);
+      queryClient.invalidateQueries({ queryKey: ["/api/workspace/nodes"] });
+    },
+  });
+
+  const revokeMutation = useMutation({
+    mutationFn: async (nodeId: string) => {
+      const res = await apiFetch(`/api/workspace/nodes/${encodeURIComponent(nodeId)}/revoke`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/workspace/nodes"] });
+      toast.success("Node revocado");
+    },
+    onError: (e: any) => toast.error(e?.message || "No se pudo revocar"),
+  });
+
+  const nodes = (data?.nodes || []) as any[];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-medium">Devices</h2>
+          <p className="text-sm text-muted-foreground">
+            Dispositivos/agentes emparejados con tu workspace. (UI inicial)
+          </p>
+        </div>
+
+        <Dialog open={pairOpen} onOpenChange={setPairOpen}>
+          <DialogTrigger asChild>
+            <Button
+              onClick={() => pairMutation.mutate()}
+              disabled={pairMutation.isPending}
+              className="gap-2"
+            >
+              {pairMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              Pair device
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Pair device</DialogTitle>
+            </DialogHeader>
+            {!pairInfo ? (
+              <div className="text-sm text-muted-foreground">Generando código…</div>
+            ) : (
+              <div className="space-y-3">
+                <div>
+                  <Label>Código</Label>
+                  <div className="mt-1 flex items-center gap-2">
+                    <Input readOnly value={pairInfo.code} className="font-mono tracking-widest" />
+                    <Button
+                      variant="outline"
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(pairInfo.code);
+                        toast.success("Copiado");
+                      }}
+                    >
+                      Copiar
+                    </Button>
+                  </div>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Expira: {pairInfo.expiresAt}
+                </div>
+                <Separator />
+                <div className="text-sm">
+                  En el dispositivo/node, usa este código para confirmar pairing (endpoint: <span className="font-mono">/api/nodes/pair/confirm</span>).
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {isLoading ? (
+        <TableSkeleton />
+      ) : error ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">No se pudo cargar</CardTitle>
+            <CardDescription>
+              {(error as any)?.message?.includes("401") || String((error as any)?.message || "").includes("Unauthorized")
+                ? "Debes iniciar sesión para ver tus devices."
+                : String((error as any)?.message || error)}
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      ) : (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Devices emparejados</CardTitle>
+            <CardDescription>{nodes.length} total</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-muted-foreground">
+                    <th className="py-2">Nombre</th>
+                    <th className="py-2">Plataforma</th>
+                    <th className="py-2">Versión</th>
+                    <th className="py-2">Last seen</th>
+                    <th className="py-2">Estado</th>
+                    <th className="py-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {nodes.map((n) => {
+                    const revoked = Boolean(n.revokedAt);
+                    return (
+                      <tr key={n.id} className="border-t">
+                        <td className="py-2 font-medium">{n.name}</td>
+                        <td className="py-2">{n.platform || "—"}</td>
+                        <td className="py-2">{n.agentVersion || "—"}</td>
+                        <td className="py-2">{n.lastSeenAt ? new Date(n.lastSeenAt).toLocaleString() : "—"}</td>
+                        <td className="py-2">
+                          {revoked ? <Badge variant="destructive">Revoked</Badge> : <Badge variant="secondary">Active</Badge>}
+                        </td>
+                        <td className="py-2 text-right">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={revoked || revokeMutation.isPending}
+                            onClick={() => revokeMutation.mutate(String(n.id))}
+                          >
+                            Revoke
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {nodes.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-6 text-center text-muted-foreground">
+                        No hay devices aún. Usa “Pair device” para generar un código.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Siguiente</CardTitle>
+          <CardDescription>
+            Esta pantalla es solo el “front inicial”. Luego implementamos: ver jobs por node, enviar jobs (jobs/poll/result) e integración real con OpenClaw.
+          </CardDescription>
+        </CardHeader>
+      </Card>
     </div>
   );
 }
@@ -6289,6 +6486,8 @@ export default function AdminPage() {
         );
       case "monitoring":
         return <MonitoringSection />;
+      case "nodes":
+        return <NodesSection />;
       case "releases":
         return <ReleasesManager />;
       default:
