@@ -49,6 +49,7 @@
     "test:emaiti": "node scripts/run-emaiti-capabilities.cjs",
     "generate:openclaw1000": "node scripts/generate-openclaw1000.cjs /Users/ale/Downloads/Iliagpt_1000_Implementaciones_Limpio.txt /Users/ale/Desktop/ILIACODEX/Hola",
     "test:openclaw1000": "vitest run tests/unit/openclaw1000-service.test.ts tests/unit/openclaw1000-capability-profiler.test.ts",
+    "workflow:repro": "node --import tsx scripts/repro-workflow-run.mjs",
     "tool-runner:capabilities": "node --import tsx server/toolRunner/cli.ts --capabilities",
     "tool-runner:health": "node --import tsx server/toolRunner/cli.ts --healthcheck",
     "tool-runner:test": "npm run test:run -- server/toolRunner/cli.contract.test.ts server/toolRunner/orchestrator.golden.test.ts",
