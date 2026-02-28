@@ -2395,6 +2395,10 @@ class AgentManager {
     return this.activeRuns.size;
   }
 
+  removeRun(runId: string): boolean {
+    return this.activeRuns.delete(runId);
+  }
+
   listActiveRuns(): string[] {
     return Array.from(this.activeRuns.keys());
   }

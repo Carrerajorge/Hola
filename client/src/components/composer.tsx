@@ -126,6 +126,14 @@ export interface ComposerProps {
   handleDocTextDeselect?: () => void;
   onCloseSidebar?: () => void;
   setPreviewUploadedImage?: (value: { name: string; dataUrl: string } | null) => void;
+  onPreviewAttachment?: (attachment: {
+    type: string;
+    name: string;
+    mimeType?: string;
+    imageUrl?: string;
+    storagePath?: string;
+    fileId?: string;
+  }) => void;
   isFigmaConnected?: boolean;
   isFigmaConnecting?: boolean;
   handleFigmaConnect?: () => void;
@@ -195,6 +203,7 @@ export function Composer({
   handleDocTextDeselect,
   onCloseSidebar,
   setPreviewUploadedImage,
+  onPreviewAttachment,
   isFigmaConnected,
   isFigmaConnecting,
   handleFigmaConnect,
@@ -292,6 +301,44 @@ export function Composer({
 
   const { connectedSources, getSourceActive, setSourceActive } = useConnectedSources();
   const { addToHistory, navigateUp, navigateDown, resetNavigation } = useCommandHistory();
+
+  const openUploadedFilePreview = useCallback((file: UploadedFile) => {
+    if (file.status === "error") return;
+    const mimeType = file.mimeType || file.type || "application/octet-stream";
+    const isImage = mimeType.startsWith("image/");
+
+    if (isImage && file.dataUrl && setPreviewUploadedImage) {
+      setPreviewUploadedImage({ name: file.name, dataUrl: file.dataUrl });
+      return;
+    }
+
+    if (!onPreviewAttachment) return;
+
+    onPreviewAttachment({
+      type: isImage ? "image" : "document",
+      name: file.name,
+      mimeType,
+      imageUrl: isImage ? (file.storagePath || file.dataUrl) : undefined,
+      storagePath: file.storagePath,
+      fileId: file.id,
+    });
+  }, [onPreviewAttachment, setPreviewUploadedImage]);
+
+  const isPreviewableFile = useCallback((file: UploadedFile) => {
+    if (file.status === "error") return false;
+    const mimeType = file.mimeType || file.type || "";
+    const isImage = mimeType.startsWith("image/");
+    if (isImage && file.dataUrl && setPreviewUploadedImage) {
+      return true;
+    }
+    return Boolean(onPreviewAttachment);
+  }, [onPreviewAttachment, setPreviewUploadedImage]);
+
+  const handlePreviewKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>, file: UploadedFile) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    openUploadedFilePreview(file);
+  }, [openUploadedFilePreview]);
 
   const mentionSources = connectedSources.map((source: any) => ({
     ...source,
@@ -410,20 +457,28 @@ export function Composer({
       return (
         <div className="flex flex-wrap gap-2 mb-2 px-1" data-testid="inline-attachments-container">
           {uploadedFiles.map((file, index) => (
-            <div
-              key={file.id || index}
-              className={cn(
-                "relative group rounded-lg overflow-hidden",
-                SILVER_HAIRLINE,
-                file.status === "error"
-                  ? "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800"
-                  : cn("bg-card", "border-[#c7c7c7]/45 dark:border-white/10", SILVER_HOVER_BORDER_SOFT)
-              )}
-              data-testid={`inline-file-${index}`}
-            >
+            (() => {
+              const previewable = isPreviewableFile(file);
+              return (
+                <div
+                  key={file.id || index}
+                  className={cn(
+                    "relative group rounded-lg overflow-hidden",
+                    SILVER_HAIRLINE,
+                    previewable ? "cursor-pointer" : "cursor-default",
+                    file.status === "error"
+                      ? "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800"
+                      : cn("bg-card", "border-[#c7c7c7]/45 dark:border-white/10", SILVER_HOVER_BORDER_SOFT)
+                  )}
+                  onClick={() => previewable && openUploadedFilePreview(file)}
+                  onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => previewable && handlePreviewKeyDown(e, file)}
+                  role={previewable ? "button" : undefined}
+                  tabIndex={previewable ? 0 : undefined}
+                  data-testid={`inline-file-${index}`}
+                >
               <button
                 className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 rounded-full p-0.5 text-white z-10 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-white/50"
-                onClick={() => removeFile(index)}
+                onClick={(e: React.MouseEvent) => { e.stopPropagation(); removeFile(index); }}
                 aria-label={`Remove file ${file.name}`}
                 title={`Remove file ${file.name}`}
                 data-testid={`button-remove-file-${index}`}
@@ -483,7 +538,9 @@ export function Composer({
                   )}
                 </div>
               )}
-            </div>
+                </div>
+              );
+            })()
           ))}
         </div>
       );
@@ -494,19 +551,24 @@ export function Composer({
         {uploadedFiles.map((file, index) => {
           const theme = getFileTheme(file.name, file.mimeType);
           const isImage = file.type?.startsWith("image/") || file.mimeType?.startsWith("image/");
+          const previewable = isPreviewableFile(file);
 
           if (isImage && file.dataUrl) {
             return (
               <div key={file.id} className="relative group">
                 <div
                   className={cn(
-                    "relative w-12 h-12 rounded-lg overflow-hidden cursor-pointer",
+                    "relative w-12 h-12 rounded-lg overflow-hidden",
                     SILVER_HAIRLINE,
                     "border-[#c7c7c7]/55 dark:border-white/10",
                     SILVER_HOVER_BORDER_SOFT,
                     "transition-colors duration-150"
                   )}
-                  onClick={() => setPreviewUploadedImage?.({ name: file.name, dataUrl: file.dataUrl! })}
+                  onClick={() => previewable && openUploadedFilePreview(file)}
+                  onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => previewable && handlePreviewKeyDown(e, file)}
+                  role={previewable ? "button" : undefined}
+                  tabIndex={previewable ? 0 : undefined}
+                  aria-label={previewable ? `Vista previa de ${file.name}` : undefined}
                   data-testid={`preview-image-${index}`}
                 >
                   <img
@@ -540,7 +602,8 @@ export function Composer({
                 <TooltipTrigger asChild>
                   <div
                     className={cn(
-                      "relative group flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs transition-all duration-200 cursor-pointer",
+                      "relative group flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs transition-all duration-200",
+                      previewable ? "cursor-pointer" : "cursor-default",
                       file.status === "uploading" && "bg-blue-50 dark:bg-blue-950/30 border-[0.5px] border-blue-200 dark:border-blue-800",
                       file.status === "processing" && "bg-yellow-50 dark:bg-yellow-950/30 border-[0.5px] border-yellow-200 dark:border-yellow-800",
                       file.status === "ready" && cn(
@@ -551,6 +614,11 @@ export function Composer({
                       ),
                       file.status === "error" && "bg-red-50 dark:bg-red-950/30 border-[0.5px] border-red-200 dark:border-red-800"
                     )}
+                    onClick={() => previewable && openUploadedFilePreview(file)}
+                    onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => previewable && handlePreviewKeyDown(e, file)}
+                    role={previewable ? "button" : undefined}
+                    tabIndex={previewable ? 0 : undefined}
+                    aria-label={previewable ? `Vista previa de ${file.name}` : undefined}
                   >
                     <div className={cn(
                       "flex items-center justify-center w-6 h-6 rounded shrink-0",
