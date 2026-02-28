@@ -28,6 +28,7 @@ COPY . .
 ARG APP_VERSION=dev
 ENV NODE_ENV=production
 ENV VITE_APP_VERSION=$APP_VERSION
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 RUN npm run build
 
 # Convert to production-only deps for runtime images
