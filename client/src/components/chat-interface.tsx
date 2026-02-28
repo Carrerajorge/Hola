@@ -7083,7 +7083,6 @@ IMPORTANTE:
                   selectedDocText={selectedDocText}
                   handleDocTextDeselect={handleDocTextDeselect}
                   onTextareaFocus={handleCloseModelSelector}
-                  onPreviewAttachment={handleOpenFileAttachmentPreview}
                   isFilesLoading={uploadedFiles.some((f: UploadedFile) => isFileUploadBlockingSend(f))}
                   latencyMode={latencyMode}
                   setLatencyMode={setLatencyMode}
@@ -7416,7 +7415,6 @@ IMPORTANTE:
               placeholder="Escribe tu mensaje aquí..."
               onCloseSidebar={onCloseSidebar}
               setPreviewUploadedImage={setPreviewUploadedImage}
-              onPreviewAttachment={handleOpenFileAttachmentPreview}
               isFigmaConnected={isFigmaConnected}
               isFigmaConnecting={isFigmaConnecting}
               handleFigmaConnect={handleFigmaConnect}

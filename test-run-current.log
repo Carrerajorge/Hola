@@ -1,0 +1,1535 @@
+
+ RUN  v4.0.18 /Users/luis/Desktop/Hola
+
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner.run-embedded-pi-agent.auth-profile-rotation.test.ts (13 tests | 13 skipped) 116ms
+     ↓ rotates for auto-pinned profiles across retryable stream failures
+     ↓ rotates on timeout without cooling down the timed-out profile
+     ↓ does not rotate for compaction timeouts
+     ↓ does not rotate for user-pinned profiles
+     ↓ honors user-pinned profiles even when in cooldown
+     ↓ ignores user-locked profile when provider mismatches
+     ↓ skips profiles in cooldown during initial selection
+     ↓ fails over when all profiles are in cooldown and fallbacks are configured
+     ↓ treats agent-level fallbacks as configured when defaults have none
+     ↓ fails over with disabled reason when all profiles are unavailable
+     ↓ fails over when auth is unavailable and fallbacks are configured
+     ↓ uses the active erroring model in billing failover errors
+     ↓ skips profiles in cooldown when rotating after failure
+ ❯ server/services/superIntelligence/agents/bash-tools.exec.approval-id.test.ts (8 tests | 8 skipped) 185ms
+     ↓ reuses approval id as the node runId
+     ↓ skips approval when node allowlist is satisfied
+     ↓ honors ask=off for elevated gateway exec without prompting
+     ↓ requires approval for elevated ask when allowlist misses
+     ↓ waits for approval registration before returning approval-pending
+     ↓ fails fast when approval registration fails
+     ↓ denies node obfuscated command when approval request times out
+     ↓ denies gateway obfuscated command when approval request times out
+ ❯ server/services/superIntelligence/agents/sandbox-agent-config.agent-specific-sandbox-config.test.ts (9 tests | 9 skipped) 115ms
+     ↓ should use agent-specific workspaceRoot
+     ↓ should prefer agent config over global for multiple agents
+     ↓ should prefer agent-specific sandbox tool policy
+     ↓ should use global sandbox config when no agent-specific config exists
+     ↓ should resolve setupCommand overrides based on sandbox scope
+     ↓ should allow agent-specific docker settings beyond setupCommand
+     ↓ should honor agent-specific sandbox mode overrides
+     ↓ should use agent-specific scope
+     ↓ enforces required allowlist tools in default and explicit sandbox configs
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner.test.ts (3 tests | 3 skipped) 298ms
+     ↓ handles prompt error paths without dropping user state
+     ↓ appends new user + assistant after existing transcript entries
+     ↓ repairs orphaned user messages and continues
+ ❯ server/services/superIntelligence/agents/cli-credentials.test.ts (7 tests | 7 skipped) 441ms
+     ↓ updates the Claude Code keychain item in place
+     ↓ prevents shell injection via untrusted token payload values
+     ↓ falls back to the file store when the keychain update fails
+     ↓ caches Claude Code CLI credentials within the TTL window
+     ↓ refreshes Claude Code CLI credentials after the TTL window
+     ↓ reads Codex credentials from keychain when available
+     ↓ falls back to Codex auth.json when keychain is unavailable
+ ❯ server/services/superIntelligence/agents/skills/refresh.test.ts (1 test | 1 failed) 485ms
+     × ignores node_modules, dist, .git, and Python venvs by default 482ms
+ ❯ server/services/superIntelligence/agents/tools/web-fetch-visibility.test.ts (41 tests | 26 failed) 767ms
+     × strips display:none elements 33ms
+     × strips visibility:hidden elements 10ms
+     × strips opacity:0 elements 11ms
+     × strips font-size:0 elements 13ms
+     × strips text-indent far-offscreen elements 15ms
+     × strips color:transparent elements 274ms
+     × strips color:rgba with zero alpha elements 71ms
+     × strips color:rgba with zero decimal alpha elements 28ms
+     × strips color:hsla with zero alpha elements 10ms
+     × strips transform:scale(0) elements 10ms
+     × strips transform:translateX far-offscreen elements 14ms
+     × strips width:0 height:0 overflow:hidden elements 31ms
+     × strips left far-offscreen positioned elements 138ms
+     × strips clip-path:inset(100%) elements 19ms
+     × strips clip-path:inset(50%) elements 2ms
+     ✓ does not strip clip-path:inset(0%) elements 5ms
+     × strips sr-only class elements 2ms
+     × strips visually-hidden class elements 24ms
+     × strips d-none class elements 2ms
+     × strips hidden class elements 2ms
+     ✓ does not strip elements with hidden as substring of class name 3ms
+     × strips aria-hidden=true elements 3ms
+     × strips elements with hidden attribute 3ms
+     × strips input type=hidden 3ms
+     ✓ strips HTML comments 3ms
+     × strips meta tags 2ms
+     × strips template tags 2ms
+     × strips iframe tags 2ms
+     ✓ preserves visible content 3ms
+     × handles nested hidden elements without removing visible siblings 2ms
+     ✓ handles malformed HTML gracefully 2ms
+     ✓ strips zero-width space 0ms
+     ✓ strips zero-width non-joiner 0ms
+     ✓ strips zero-width joiner 0ms
+     ✓ strips left-to-right mark 0ms
+     ✓ strips right-to-left mark 0ms
+     ✓ strips directional overrides (LRO, RLO, PDF, etc.) 0ms
+     ✓ strips word joiner and other formatting chars 0ms
+     ✓ preserves normal text unchanged 0ms
+     ✓ strips multiple invisible chars in a row 0ms
+     ✓ handles empty string 0ms
+ ❯ server/services/superIntelligence/agents/bedrock-discovery.test.ts (5 tests | 5 failed) 37ms
+     × filters to active streaming text models and maps modalities 36ms
+     × applies provider filter 0ms
+     × uses configured defaults for context and max tokens 0ms
+     × caches results when refreshInterval is enabled 0ms
+     × skips cache when refreshInterval is 0 0ms
+ ❯ server/services/superIntelligence/agents/subagent-registry.announce-loop-guard.test.ts (4 tests | 4 skipped) 52ms
+     ↓ SubagentRunRecord has announceRetryCount and lastAnnounceRetryAt fields
+     ↓ 'expired entries with high retry count…'
+     ↓ 'entries over retry budget are marked …'
+     ↓ announce rejection resets cleanupHandled so retries can resume
+ ❯ server/services/superIntelligence/agents/subagent-registry.steer-restart.test.ts (10 tests | 10 skipped) 23ms
+     ↓ suppresses announce for interrupted runs and only announces the replacement run
+     ↓ defers subagent_ended hook for completion-mode runs until announce delivery resolves
+     ↓ does not emit subagent_ended on completion for persistent session-mode runs
+     ↓ clears announce retry state when replacing after steer restart
+     ↓ clears terminal lifecycle state when replacing after steer restart
+     ↓ restores announce for a finished run when steer replacement dispatch fails
+     ↓ marks killed runs terminated and inactive
+     ↓ retries deferred parent cleanup after a descendant announces
+     ↓ retries completion-mode announce delivery with backoff and then gives up after retry limit
+     ↓ emits subagent_ended when completion cleanup expires with active descendants
+ ❯ server/services/superIntelligence/agents/subagent-registry.archive.test.ts (2 tests | 2 skipped) 13ms
+     ↓ does not set archiveAtMs for persistent session-mode runs
+     ↓ keeps archiveAtMs unset when replacing a session-mode run after steer restart
+ ❯ server/services/superIntelligence/agents/subagent-registry.nested.test.ts (4 tests | 4 skipped) 116ms
+     ↓ listSubagentRunsForRequester returns children of the requesting session
+     ↓ announce uses requesterSessionKey to route to the correct parent
+     ↓ countActiveRunsForSession only counts active children of the specific session
+     ↓ countActiveDescendantRuns traverses through ended parents
+ ❯ server/services/superIntelligence/agents.add.test.ts (0 test)
+ ✓ server/agent/capabilities/tests/e2e_capabilities.test.ts (2 tests) 3ms
+ ❯ server/services/superIntelligence/agents.identity.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/agent-paths.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents.test.ts (0 test)
+[18:33:00] [32mINFO[39m: [36m[Cache] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+ ❯ server/services/superIntelligence/agents/agent-scope.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/auth-health.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/auth-profiles.chutes.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/auth-profiles.cooldown-auto-expiry.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/apply-patch.test.ts (0 test)
+ ✓ server/agent/__tests__/memory.test.ts (3 tests) 7ms
+ ❯ server/services/superIntelligence/agents/auth-profiles.ensureauthprofilestore.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/auth-profiles.getsoonestcooldownexpiry.test.ts (0 test)
+ ✓ tests/unit/agent-trace-events.test.ts (39 tests) 176ms
+ ❯ server/services/superIntelligence/agents/auth-profiles.markauthprofilefailure.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/auth-profiles.resolve-auth-profile-order.does-not-prioritize-lastgood-round-robin-ordering.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/auth-profiles.resolve-auth-profile-order.normalizes-z-ai-aliases-auth-order.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/anthropic.setup-token.live.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/auth-profiles.resolve-auth-profile-order.orders-by-lastused-no-explicit-order-exists.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/auth-profiles.resolve-auth-profile-order.uses-stored-profiles-no-config-exists.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/bash-tools.build-docker-exec-args.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/bash-tools.exec-approval-request.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/bash-tools.exec.path.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/bash-tools.exec.background-abort.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/bash-tools.exec.pty-fallback-failure.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/bash-tools.exec.pty-cleanup.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/bash-tools.exec.pty-fallback.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/bash-tools.process.send-keys.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/bash-tools.exec.pty.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/bash-tools.process.poll-timeout.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/bash-tools.exec.script-preflight.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/bash-tools.process.supervisor.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/bash-tools.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/bootstrap-files.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/bootstrap-hooks.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/cache-trace.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/channel-tools.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/chutes-oauth.flow.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/cli-runner.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/claude-cli-runner.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/cli-backends.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/context.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/failover-error.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/byteplus.live.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/huggingface-models.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/identity-avatar.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/google-gemini-switch.live.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/identity-file.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/identity.per-channel-prefix.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/identity.human-delay.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/compaction.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/identity.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/compaction.retry.test.ts (0 test)
+ ✓ tests/unit/agent-confirmation-flow.test.ts (2 tests) 77ms
+ ❯ server/services/superIntelligence/agents/memory-search.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/compaction.token-sanitize.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/minimax-vlm.normalizes-api-key.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/compaction.tool-result-details.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/model-auth.profiles.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/model-catalog.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/model-fallback.probe.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/model-fallback.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/model-compat.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/model-scan.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/model-selection.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/models-config.auto-injects-github-copilot-provider-token-is.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/minimax.live.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/models-config.falls-back-default-baseurl-token-exchange-fails.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/models-config.fills-missing-provider-apikey-from-env-var.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/models-config.normalizes-gemini-3-ids-preview-google-providers.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/model-auth.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/models-config.preserves-explicit-reasoning-override.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/models-config.providers.kilocode.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/models-config.providers.kimi-coding.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/models-config.providers.nvidia.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/models-config.providers.qianfan.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/models-config.providers.volcengine-byteplus.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/models-config.providers.ollama.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/models-config.skips-writing-models-json-no-env-token.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/models-config.uses-first-github-copilot-profile-env-tokens.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/openclaw-gateway-tool.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/openclaw-tools.camera.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/openclaw-tools.agents.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/openclaw-tools.session-status.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/openclaw-tools.sessions-visibility.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/openclaw-tools.sessions.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/moonshot.live.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/openclaw-tools.subagents.sessions-spawn-applies-thinking-default.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/openclaw-tools.subagents.sessions-spawn-default-timeout-absent.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/openclaw-tools.subagents.sessions-spawn-depth-limits.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/models.profiles.live.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/openclaw-tools.subagents.sessions-spawn-default-timeout.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/ollama-stream.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/openclaw-tools.subagents.sessions-spawn.lifecycle.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/openclaw-tools.subagents.sessions-spawn.allowlist.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/openclaw-tools.subagents.sessions-spawn.model.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/opencode-zen-models.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/openclaw-tools.subagents.steer-failure-clears-suppression.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-helpers.formatassistanterrortext.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-helpers.isbillingerrormessage.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-helpers.sanitize-session-messages-images.removes-empty-assistant-text-blocks-but-preserves.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-helpers.buildbootstrapcontextfiles.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-auth-json.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-block-chunker.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-helpers.sanitizeuserfacingtext.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-helpers.validate-turns.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner.compaction-safety-timeout.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner-extraparams.live.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner.get-dm-history-limit-from-session-key.falls-back-provider-default-per-dm-not.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner.createsystempromptoverride.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner.buildembeddedsandboxinfo.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner.applygoogleturnorderingfix.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner.get-dm-history-limit-from-session-key.returns-undefined-sessionkey-is-undefined.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner-extraparams.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner.guard.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner.guard.waitforidle-before-flush.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner.resolvesessionagentids.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner.openai-tool-id-preservation.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner.sanitize-session-history.policy.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner.sanitize-session-history.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.code-span-awareness.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.handlers.tools.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.handlers.lifecycle.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.handlers.messages.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.handlers.tools.media.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner.history-limit-from-session-key.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.lifecycle-billing-error.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.reply-tags.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.subscribe-embedded-pi-session.calls-onblockreplyflush-before-tool-execution-start-preserve.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.subscribe-embedded-pi-session.does-not-append-text-end-content-is.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.subscribe-embedded-pi-session.does-not-call-onblockreplyflush-callback-is-not.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.subscribe-embedded-pi-session.does-not-duplicate-text-end-repeats-full.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.subscribe-embedded-pi-session.emits-block-replies-text-end-does-not.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.subscribe-embedded-pi-session.does-not-emit-duplicate-block-replies-text.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.subscribe-embedded-pi-session.includes-canvas-action-metadata-tool-summaries.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.subscribe-embedded-pi-session.emits-reasoning-as-separate-message-enabled.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.subscribe-embedded-pi-session.keeps-indented-fenced-blocks-intact.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.subscribe-embedded-pi-session.filters-final-suppresses-output-without-start-tag.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.subscribe-embedded-pi-session.splits-long-single-line-fenced-blocks-reopen.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.subscribe-embedded-pi-session.keeps-assistanttexts-final-answer-block-replies-are.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.subscribe-embedded-pi-session.reopens-fenced-blocks-splitting-inside-them.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner.limithistoryturns.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.subscribe-embedded-pi-session.streams-soft-chunks-paragraph-preference.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.subscribe-embedded-pi-session.waits-multiple-compaction-retries-before-resolving.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.tools.extract.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.subscribe-embedded-pi-session.suppresses-message-end-block-replies-message-tool.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.subscribe-embedded-pi-session.subscribeembeddedpisession.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.tools.media.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner.splitsdktools.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-subscribe.tools.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-utils.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-tools.before-tool-call.integration.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-tool-definition-adapter.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-tools.before-tool-call.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-tool-definition-adapter.after-tool-call.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-tools.create-openclaw-coding-tools.adds-claude-style-aliases-schemas-without-dropping.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-tools.policy.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-tools.safe-bins.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-tools-agent-config.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-tools.create-openclaw-coding-tools.adds-claude-style-aliases-schemas-without-dropping-d.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-tools.create-openclaw-coding-tools.adds-claude-style-aliases-schemas-without-dropping-b.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-tools.create-openclaw-coding-tools.adds-claude-style-aliases-schemas-without-dropping-f.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/sandbox-create-args.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-tools.message-provider-policy.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pty-keys.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/sandbox-explain.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/sandbox-merge.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-tools.read.workspace-root-guard.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/sandbox-paths.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/sandbox-skills.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-tools.sandbox-mounted-paths.workspace-only.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/sandbox.resolveSandboxContext.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/sanitize-for-prompt.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-tools.workspace-paths.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-tools.whatsapp-login-gating.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/shell-utils.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/sessions-spawn-hooks.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/sessions-spawn-threadid.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/skills-install-fallback.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/session-write-lock.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/skills-install.download.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/skills-install.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/skills-status.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/skills.agents-skills-directory.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/skills.build-workspace-skills-prompt.syncs-merged-skills-into-target-workspace.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/skills.build-workspace-skills-prompt.prefers-workspace-skills-managed-skills.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/skills.build-workspace-skills-prompt.applies-bundled-allowlist-without-affecting-workspace-skills.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/skills.buildworkspaceskillsnapshot.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/skills.compact-skill-paths.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/skills.buildworkspaceskillstatus.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/skills.loadworkspaceskillentries.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/skills.resolveskillspromptforrun.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/skills.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/skills.summarize-skill-description.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/subagent-announce.timeout.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/subagent-announce.format.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/subagent-depth.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/subagent-announce-queue.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/session-tool-result-guard.tool-result-persist-hook.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/session-tool-result-guard.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/subagent-registry.persistence.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/system-prompt-params.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/system-prompt-stability.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/system-prompt.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tool-display.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tool-fs-policy.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tool-images.log.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tool-images.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tool-policy.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tool-policy-pipeline.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tool-loop-detection.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/transcript-policy.policy.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/transcript-policy.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/workspace-run.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/workspace-templates.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/workspace.load-extra-bootstrap-files.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/workspace.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/workspace.defaults.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/workspace.bootstrap-cache.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/auth-profiles/oauth.fallback-to-main-agent.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/auth-profiles/usage.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner/extra-params.zai-tool-stream.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/auth-profiles/session-override.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner/google.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner/model.forward-compat.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner/model.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner/run.overflow-compaction.loop.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner/run.overflow-compaction.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/zai.live.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/auth-profiles/oauth.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner/system-prompt.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-extensions/context-pruning.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner/extra-params.openrouter-cache-control.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner/usage-reporting.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-extensions/compaction-safeguard.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/sandbox/context.user-fallback.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/sandbox/browser.create.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner/extra-params.cache-retention-default.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/sandbox/fs-bridge.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/sandbox/docker.config-hash-recreate.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/sandbox/fs-paths.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/sandbox/registry.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/skills/bundled-dir.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/sandbox/validate-sandbox-security.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/skills/frontmatter.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/agent-step.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/common.params.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/common.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/browser-tool.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner/sanitize-session-history.tool-result-details.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner/tool-result-truncation.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/discord-actions-presence.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/cron-tool.flat-params.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/discord-actions-moderation.authz.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/discord-actions.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/cron-tool.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/gateway.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/image-tool.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/memory-tool.citations.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/sessions-resolution.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/message-tool.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/sessions.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/sessions-access.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/memory-tool.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/slack-actions.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/telegram-actions.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/web-search.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/tts-tool.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/web-fetch.cf-markdown.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/web-fetch.ssrf.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/web-tools.enabled-defaults.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/whatsapp-actions.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/web-search.redirect.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/web-tools.fetch.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/tools/web-tools.readability.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner/run/images.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner/run/payloads.errors.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner/run/payloads.test.ts (0 test)
+ ❯ server/services/superIntelligence/agents/pi-embedded-runner/run/attempt.test.ts (0 test)
+ ✓ server/__tests__/maintenanceMode.test.ts (4 tests) 3938ms
+     ✓ blocks non-admin API routes with 503  2156ms
+     ✓ allows exempt auth prefixes  477ms
+     ✓ allows non-API routes (SPA) even during maintenance  707ms
+     ✓ allows admin requests through  597ms
+[18:33:50] [32mINFO[39m: [36m[Cache] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+ ✓ server/agent/superAgent/__tests__/orchestrator.test.ts (2 tests) 9605ms
+     ✓ should verify thought emission flow during execution  9556ms
+ ✓ server/agent/__tests__/webtool.test.ts (170 tests) 9420ms
+       ✓ should retry on retryable errors  3048ms
+       ✓ should fail after max retries  3055ms
+       ✓ should complete full retrieval pipeline  730ms
+       ✓ should include timing breakdown  443ms
+       ✓ should handle null gracefully  302ms
+ ✓ tests/unit/token-counter.test.ts (23 tests) 14583ms
+       ✓ returns a positive number for non-empty text  723ms
+       ✓ handles empty string  677ms
+       ✓ returns reasonable count for English text  844ms
+       ✓ handles CJK text  833ms
+       ✓ handles mixed content  897ms
+       ✓ accepts model parameter  1073ms
+       ✓ returns same result as countAccurate  2428ms
+       ✓ populates cache on first call  901ms
+       ✓ returns cached value on second call  1709ms
+       ✓ different models produce different cache entries  2507ms
+       ✓ resets cache size to 0  1981ms
+[18:34:01] [32mINFO[39m: [36m[RedisCacheService] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+[18:34:01] [32mINFO[39m: [36m[RedisCacheService] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+ ✓ server/__tests__/router.test.ts (33 tests) 8093ms
+     ✓ should include run_id in result  7881ms
+ ✓ server/__tests__/sandboxLimits.test.ts (10 tests) 5211ms
+       ✓ should terminate long-running processes  5149ms
+ ✓ server/__tests__/stressTest.test.ts (9 tests) 18961ms
+     ✓ should parse 10k row Excel file within timeout  3405ms
+     ✓ should correctly count rows in SalesData sheet  3460ms
+     ✓ should correctly read column headers  2220ms
+     ✓ should support virtualized row access (random access pattern)  1942ms
+     ✓ should extract preview data (first N rows) efficiently  2516ms
+     ✓ should handle memory efficiently for large datasets  3362ms
+     ✓ should generate correct summary metrics format  2013ms
+ ✓ server/tests/advancedSecurity.test.ts (68 tests) 7830ms
+         ✓ should reset after window  1117ms
+         ✓ should hash passwords consistently with same salt  486ms
+         ✓ should generate different hashes with different salts  1446ms
+         ✓ should verify correct passwords  516ms
+       ✓ should hash 100 passwords in under 5s  3270ms
+ ✓ tests/unit/document-compiler.test.ts (107 tests) 15651ms
+       ✓ produces valid PPTX buffer  559ms
+       ✓ produces valid DOCX buffer  1134ms
+       ✓ produces valid XLSX buffer  810ms
+     ✓ slide hard limit at 200 causes validation error  2281ms
+     ✓ XLSX workbook memory limit prevents OOM  9554ms
+     ✓ sanitizeFilename handles UTF-8 chars  390ms
+[18:34:23] [32mINFO[39m: [36m[Cache] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+ ✓ server/agent/__tests__/shellCommandRunnerMode.test.ts (1 test) 38679ms
+     ✓ should stream via runner when SHELL_COMMAND_SANDBOX_MODE=runner  38667ms
+ ✓ server/__tests__/skillsRouter.test.ts (11 tests) 5862ms
+     ✓ GET /api/skills returns skills (including triggers conversion)  5824ms
+ ✓ server/__tests__/require2FA.test.ts (4 tests) 6836ms
+     ✓ blocks admins when require_2fa_admins=true and 2FA is not enabled  6821ms
+[18:34:30] [32mINFO[39m: [36m[Cache] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+[18:34:30] [33mWARN[39m: [36mgpt-action.response_parse_malformed[39m
+    env: "test"
+    component: "gpt-action-runtime"
+    preview: "\"ok\""
+[18:34:30] [34mDEBUG[39m: [36mConnector cb:__legacy__:gpt_action_action-2_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 69
+    success: true
+    totalCalls: 1
+[18:34:30] [34mDEBUG[39m: [36mConnector gpt_action_action-2_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 74
+    success: true
+    totalCalls: 1
+[18:34:30] [34mDEBUG[39m: [36mConnector cb:__legacy__:gpt_action_action-3_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 1
+    success: false
+    totalCalls: 1
+[18:34:30] [34mDEBUG[39m: [36mConnector gpt_action_action-3_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 1
+    success: false
+    totalCalls: 1
+[18:34:30] [31mERROR[39m: [36mService call failed: GET https://example.com/api[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    latencyMs: 1
+    retryCount: 0
+    error: "Execution failed with status 400"
+[18:34:30] [34mDEBUG[39m: [36mConnector cb:__legacy__:gpt_action_action-4b_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 1
+    success: false
+    totalCalls: 1
+[18:34:30] [34mDEBUG[39m: [36mConnector gpt_action_action-4b_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 1
+    success: false
+    totalCalls: 1
+[18:34:30] [31mERROR[39m: [36mService call failed: GET https://example.com/api[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    latencyMs: 1
+    retryCount: 0
+    error: "Execution failed with status 503"
+[18:34:30] [34mDEBUG[39m: [36mConnector cb:__legacy__:gpt_action_action-4c_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 0
+    success: false
+    totalCalls: 1
+[18:34:30] [34mDEBUG[39m: [36mConnector gpt_action_action-4c_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 0
+    success: false
+    totalCalls: 1
+[18:34:30] [31mERROR[39m: [36mService call failed: GET https://example.com/api[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    latencyMs: 0
+    retryCount: 0
+    error: "Execution failed with status 400"
+[18:34:30] [34mDEBUG[39m: [36mConnector cb:__legacy__:gpt_action_action-4d_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 1
+    success: false
+    totalCalls: 1
+[18:34:30] [34mDEBUG[39m: [36mConnector gpt_action_action-4d_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 1
+    success: false
+    totalCalls: 1
+[18:34:30] [31mERROR[39m: [36mService call failed: GET https://example.com/api[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    latencyMs: 1
+    retryCount: 0
+    error: "Execution failed with status 400"
+[18:34:30] [34mDEBUG[39m: [36mConnector cb:__legacy__:gpt_action_action-4_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 1
+    success: false
+    totalCalls: 1
+[18:34:30] [34mDEBUG[39m: [36mConnector gpt_action_action-4_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 1
+    success: false
+    totalCalls: 1
+[18:34:30] [31mERROR[39m: [36mService call failed: GET https://example.com/api[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    latencyMs: 1
+    retryCount: 0
+    error: "Execution failed with status 503"
+[18:34:30] [33mWARN[39m: [36mgpt-action.retry[39m
+    env: "test"
+    component: "gpt-action-runtime"
+    actionId: "action-4"
+    attempt: 0
+    retryable: true
+    code: "execution_retryable"
+    error: "Execution failed with status 503"
+[18:34:30] [32mINFO[39m: [36mTool runner generation completed[39m
+    env: "test"
+    component: "document-cli-tool-runner"
+    requestHash: "f8467934645286382909f0204aa40d2fe0ec9e0304e7629f10b3d06e212ae87f"
+    documentType: "docx"
+    usedFallback: false
+    durationMs: 42145
+[18:34:30] [32mINFO[39m: [36mTool runner cache hit[39m
+    env: "test"
+    component: "document-cli-tool-runner"
+    requestHash: "f8467934645286382909f0204aa40d2fe0ec9e0304e7629f10b3d06e212ae87f"
+    documentType: "docx"
+ ✓ tests/pare-phase2-security.test.ts (57 tests) 3797ms
+       ✓ should allow test request in half-open state  369ms
+       ✓ should close circuit breaker after 2 successes in half-open state  393ms
+       ✓ should submit and execute a task  937ms
+       ✓ should track active workers and queued tasks  367ms
+       ✓ should shutdown gracefully  460ms
+[18:34:31] [34mDEBUG[39m: [36mConnector cb:__legacy__:gpt_action_action-4_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 0
+    success: false
+    totalCalls: 2
+[18:34:31] [34mDEBUG[39m: [36mConnector gpt_action_action-4_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 0
+    success: false
+    totalCalls: 2
+[18:34:31] [31mERROR[39m: [36mService call failed: GET https://example.com/api[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    latencyMs: 0
+    retryCount: 0
+    error: "Execution failed with status 503"
+[18:34:31] [34mDEBUG[39m: [36mConnector cb:__legacy__:gpt_action_action-5_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 0
+    success: false
+    totalCalls: 1
+[18:34:31] [34mDEBUG[39m: [36mConnector gpt_action_action-5_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 0
+    success: false
+    totalCalls: 1
+[18:34:31] [31mERROR[39m: [36mService call failed: GET https://example.com/api[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    latencyMs: 0
+    retryCount: 0
+    error: "Execution failed with status 503"
+[18:34:31] [33mWARN[39m: [36mgpt-action.retry[39m
+    env: "test"
+    component: "gpt-action-runtime"
+    actionId: "action-5"
+    attempt: 0
+    retryable: true
+    code: "execution_retryable"
+    error: "Execution failed with status 503"
+[18:34:31] [34mDEBUG[39m: [36mConnector cb:__legacy__:gpt_action_action-5_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 0
+    success: false
+    totalCalls: 2
+[18:34:31] [34mDEBUG[39m: [36mConnector gpt_action_action-5_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 1
+    success: false
+    totalCalls: 2
+[18:34:31] [31mERROR[39m: [36mService call failed: GET https://example.com/api[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    latencyMs: 1
+    retryCount: 0
+    error: "Execution failed with status 503"
+[18:34:31] [33mWARN[39m: [36mgpt-action.retry[39m
+    env: "test"
+    component: "gpt-action-runtime"
+    actionId: "action-5"
+    attempt: 1
+    retryable: true
+    code: "execution_retryable"
+    error: "Execution failed with status 503"
+ ✓ server/__tests__/adminModels.test.ts (7 tests) 4689ms
+     ✓ blocks enabling when model status is inactive  4666ms
+[18:34:32] [34mDEBUG[39m: [36mConnector cb:__legacy__:gpt_action_action-5_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 1
+    success: false
+    totalCalls: 3
+[18:34:32] [34mDEBUG[39m: [36mConnector gpt_action_action-5_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 1
+    success: false
+    totalCalls: 3
+[18:34:32] [31mERROR[39m: [36mService call failed: GET https://example.com/api[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    latencyMs: 1
+    retryCount: 0
+    error: "Execution failed with status 503"
+[18:34:32] [33mWARN[39m: [36mgpt-action.retry[39m
+    env: "test"
+    component: "gpt-action-runtime"
+    actionId: "action-5"
+    attempt: 2
+    retryable: true
+    code: "execution_retryable"
+    error: "Execution failed with status 503"
+[18:34:32] [32mINFO[39m: [36m[Cache] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+[18:34:33] [32mINFO[39m: [36m[Cache] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+ ✓ server/__tests__/academicArticlesExport.integration.test.ts (1 test) 2383ms
+     ✓ returns 100 articles with strict geo filtering, enriches missing fields, and writes Excel+Word outputs  2382ms
+[18:34:34] [34mDEBUG[39m: [36mConnector cb:__legacy__:gpt_action_action-5_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 31
+    success: false
+    totalCalls: 4
+[18:34:34] [34mDEBUG[39m: [36mConnector gpt_action_action-5_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 32
+    success: false
+    totalCalls: 4
+[18:34:34] [31mERROR[39m: [36mService call failed: GET https://example.com/api[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    latencyMs: 32
+    retryCount: 0
+    error: "Execution failed with status 503"
+[18:34:34] [34mDEBUG[39m: [36mConnector cb:__legacy__:gpt_action_action-6_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 5
+    success: false
+    totalCalls: 1
+[18:34:34] [34mDEBUG[39m: [36mConnector gpt_action_action-6_conv-1 usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 5
+    success: false
+    totalCalls: 1
+[18:34:34] [31mERROR[39m: [36mService call failed: GET https://example.com/api[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    latencyMs: 5
+    retryCount: 0
+    error: "Execution failed with status 503"
+ ✓ server/services/gptActionRuntime.test.ts (54 tests) 4729ms
+       ✓ retries transient 5xx response and exhausts at configured retry limit  518ms
+       ✓ uses default retry budget when maxRetries is omitted  3148ms
+ ✓ tests/pare-file-security.test.ts (35 tests) 1130ms
+       ✓ should use checkPathTraversalInZip for quick path check  320ms
+       ✓ should block archives with too many files  415ms
+ ✓ server/__tests__/chatStreamIsolation.test.ts (2 tests) 53869ms
+     ✓ keeps SSE metadata isolated across concurrent conversations  50387ms
+     ✓ rejects a second stream for the same conversation when queueMode=reject  3477ms
+ ✓ server/toolRunner/cli.contract.test.ts (6 tests) 54125ms
+     ✓ exposes global capabilities  4476ms
+     ✓ exposes command-scoped capabilities  7603ms
+     ✓ rejects unknown command capabilities  13150ms
+     ✓ returns healthcheck snapshot  12537ms
+     ✓ rejects unknown command healthcheck  7667ms
+     ✓ returns stable exit code for invalid args  8687ms
+[18:34:38] [32mINFO[39m: [36m[RedisCacheService] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+[18:34:38] [32mINFO[39m: [36m[RedisCacheService] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+ ✓ server/__tests__/chatSkillsIntegration.test.ts (2 tests) 55172ms
+     ✓ injects skill context into /api/chat request pipeline  49920ms
+     ✓ injects skill context into /api/chat/stream fast-path system prompt  5237ms
+ ❯ server/tests/advancedPerformance.test.ts (51 tests | 1 failed) 2375ms
+       ✓ 203. should create hierarchical cache 8ms
+       ✓ 203. should set and get from L1 cache 3ms
+       ✓ 205. should track cache stats 13ms
+       ✓ 208. should support tags for cache entries 0ms
+       ✓ 211. should handle dynamic TTL 0ms
+       ✓ should enable and disable cache 0ms
+       ✓ 221. should create worker pool 0ms
+       ✓ 222. should add tasks with priorities 233ms
+       ✓ 230. should coalesce duplicate requests 67ms
+       ✓ 234. should parallel deduplicate 2ms
+       ✓ 234. should handle empty array 0ms
+       ✓ 234. should handle large arrays efficiently 5ms
+       ✓ 242. should analyze queries 0ms
+       ✓ 242. should detect missing WHERE clause 1ms
+       ✓ 242. should detect leading wildcard 0ms
+       ✓ 252. should cache query results 1ms
+       ✓ 252. should return null for uncached queries 0ms
+       ✓ 263. should create request pipeline 0ms
+       ✓ 263. should batch requests 0ms
+         ✓ should create bloom filter 0ms
+         ✓ should add and check items 0ms
+         ✓ should return false for items never added 0ms
+         ✓ should clear filter 0ms
+         ✓ should handle large number of items 7ms
+         ✓ should create trie 1ms
+         ✓ should insert and search 4ms
+         ✓ should return results sorted by count 0ms
+         ✓ should respect limit 0ms
+         ✓ should return empty for no match 0ms
+         ✓ should select top k elements 0ms
+         ✓ should handle k larger than array 0ms
+         ✓ should handle objects 1ms
+         ✓ should compute rolling hashes 0ms
+         ✓ should return empty for short text 0ms
+         ✓ should produce consistent hashes 0ms
+         ✓ should compute minhash signature 1ms
+         ✓ should produce similar signatures for similar text 0ms
+         ✓ should produce different signatures for different text 0ms
+         ✓ should compute simhash 0ms
+         ✓ should produce similar hashes for similar text 0ms
+         ✓ should produce different hashes for different text 0ms
+         ✓ should calculate hamming distance 0ms
+         ✓ should create circuit breaker 0ms
+         ✓ should start closed 0ms
+         ✓ should open after failures 0ms
+         ✓ should close after successes 175ms
+         ✓ should get status 0ms
+       × should handle 10000 cache operations in under 100ms 1141ms
+       ✓ should handle 10000 bloom filter operations in a reasonable time 67ms
+       ✓ should handle 10000 trie operations in under 100ms  483ms
+       ✓ should compute 1000 simhashes in under 500ms 147ms
+ ✓ server/agent/registry/__tests__/registry.test.ts (56 tests) 2036ms
+       ✓ should return VALIDATION_ERROR for invalid input  308ms
+       ✓ should generate a complete capabilities report  908ms
+ ✓ server/__tests__/intent-engine/intentRouter.test.ts (48 tests) 3854ms
+     ✓ should pass easy examples with high accuracy  1411ms
+     ✓ should handle Spanish examples  499ms
+     ✓ should always return valid intent type  504ms
+ ✓ server/agent/__tests__/webtool-retrieval.test.ts (54 tests) 688ms
+ ✓ server/lib/__tests__/largeDocumentProcessor.test.ts (26 tests) 1338ms
+       ✓ should yield control to event loop regularly  576ms
+       ✓ should limit concurrent processing  370ms
+[18:34:43] [32mINFO[39m: [36m[RedisCacheService] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+ ✓ server/agent/__tests__/e2e.test.ts (11 tests) 1226ms
+       ✓ should handle timeout errors  603ms
+[18:34:44] [33mWARN[39m: [36mCircuit OPENED[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    tenantId: "tenant-1"
+    provider: "provider-a"
+    failures: 3
+[18:34:44] [33mWARN[39m: [36mCircuit OPENED[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    tenantId: "tenant-1"
+    provider: "provider-a"
+    failures: 3
+[18:34:44] [32mINFO[39m: [36mCircuit HALF_OPEN[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    tenantId: "tenant-1"
+    provider: "provider-a"
+[18:34:44] [33mWARN[39m: [36mCircuit OPENED[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    tenantId: "tenant-1"
+    provider: "provider-a"
+    failures: 3
+[18:34:45] [32mINFO[39m: [36mCircuit HALF_OPEN[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    tenantId: "tenant-1"
+    provider: "provider-a"
+[18:34:45] [32mINFO[39m: [36mCircuit CLOSED[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    tenantId: "tenant-1"
+    provider: "provider-a"
+[18:34:45] [33mWARN[39m: [36mCircuit OPENED[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    tenantId: "tenant-1"
+    provider: "provider-a"
+    failures: 3
+[18:34:45] [32mINFO[39m: [36mCircuit HALF_OPEN[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    tenantId: "tenant-1"
+    provider: "provider-a"
+[18:34:45] [33mWARN[39m: [36mCircuit OPENED[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    tenantId: "tenant-1"
+    provider: "provider-a"
+    failures: 4
+[18:34:45] [34mDEBUG[39m: [36mConnector cb:tenant-1:provider-a usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 0
+    success: true
+    totalCalls: 1
+[18:34:45] [33mWARN[39m: [36mCircuit OPENED[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    tenantId: "tenant-1"
+    provider: "provider-a"
+    failures: 3
+[18:34:45] [34mDEBUG[39m: [36mConnector cb:tenant-1:provider-a usage recorded[39m
+    env: "test"
+    component: "connector-metrics"
+    latencyMs: 0
+    success: false
+    totalCalls: 2
+[18:34:45] [33mWARN[39m: [36mCircuit OPENED[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    tenantId: "tenant-1"
+    provider: "provider-a"
+    failures: 0
+[18:34:45] [33mWARN[39m: [36mCircuit OPENED[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    tenantId: "tenant-1"
+    provider: "provider-a"
+    failures: 0
+[18:34:45] [32mINFO[39m: [36mCircuit CLOSED[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    tenantId: "tenant-1"
+    provider: "provider-a"
+[18:34:45] [33mWARN[39m: [36mCircuit OPENED[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    tenantId: "tenant-1"
+    provider: "provider-a"
+    failures: 3
+[18:34:45] [32mINFO[39m: [36mCircuit CLOSED[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    tenantId: "tenant-1"
+    provider: "provider-a"
+[18:34:45] [33mWARN[39m: [36mCircuit OPENED[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    tenantId: "t1"
+    provider: "p1"
+    failures: 0
+[18:34:45] [32mINFO[39m: [36mCircuit CLOSED[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+    tenantId: "t1"
+    provider: "p1"
+[18:34:45] [32mINFO[39m: [36mReset all 1 breakers[39m
+    env: "test"
+    component: "tenant-circuit-breaker"
+ ✓ server/lib/circuitBreaker.test.ts (25 tests) 1196ms
+     ✓ should transition from OPEN to HALF_OPEN after timeout elapses  331ms
+     ✓ should transition from HALF_OPEN to CLOSED after consecutive successes  343ms
+ ✓ tests/unit/agentEcosystemService.test.ts (12 tests) 2417ms
+     ✓ executes a guarded command inside a cloned ecosystem repo  1352ms
+     ✓ reads a repo file with traversal safeguards  314ms
+ ✓ server/__tests__/preExecutionIntentGuard.rigorous.test.ts (261 tests) 1284ms
+[18:34:46] [32mINFO[39m: [36mPARE_REQUEST_RECEIVED[39m
+    env: "test"
+    component: "pare-request-contract"
+    requestId: "86cb457f-0acd-4b69-a999-38f6eaca814e"
+    userId: null
+    event: "PARE_REQUEST_RECEIVED"
+    idempotencyKey: "[REDACTED]"
+    isDataMode: true
+    attachmentsCount: 1
+    clientIp: "127.0.0.1"
+    method: "POST"
+    path: "/api/analyze"
+[18:34:47] [32mINFO[39m: [36mPARE_REQUEST_RECEIVED[39m
+    env: "test"
+    component: "pare-request-contract"
+    requestId: "c763ab51-371b-4b0b-afab-06d38fc0fd98"
+    userId: null
+    event: "PARE_REQUEST_RECEIVED"
+    idempotencyKey: "[REDACTED]"
+    isDataMode: true
+    attachmentsCount: 1
+    clientIp: "127.0.0.1"
+    method: "POST"
+    path: "/api/analyze"
+[18:34:47] [32mINFO[39m: [36mPARE_REQUEST_RECEIVED[39m
+    env: "test"
+    component: "pare-request-contract"
+    requestId: "5e10ef2d-66d8-4ac4-997c-95d56350ce25"
+    userId: null
+    event: "PARE_REQUEST_RECEIVED"
+    idempotencyKey: "[REDACTED]"
+    isDataMode: true
+    attachmentsCount: 1
+    clientIp: "127.0.0.1"
+    method: "POST"
+    path: "/api/analyze"
+[18:34:47] [32mINFO[39m: [36mPARE_REQUEST_RECEIVED[39m
+    env: "test"
+    component: "pare-request-contract"
+    requestId: "13724095-9fd2-476f-abf6-05fe73882e34"
+    userId: null
+    event: "PARE_REQUEST_RECEIVED"
+    idempotencyKey: "[REDACTED]"
+    isDataMode: true
+    attachmentsCount: 1
+    clientIp: "127.0.0.1"
+    method: "POST"
+    path: "/api/analyze"
+[18:34:47] [32mINFO[39m: [36mPARE_REQUEST_RECEIVED[39m
+    env: "test"
+    component: "pare-request-contract"
+    requestId: "36dc6dd3-7687-4647-892c-828088b2ef28"
+    userId: null
+    event: "PARE_REQUEST_RECEIVED"
+    idempotencyKey: "[REDACTED]"
+    isDataMode: true
+    attachmentsCount: 1
+    clientIp: "127.0.0.1"
+    method: "POST"
+    path: "/api/analyze"
+[18:34:47] [32mINFO[39m: [36mPARE_REQUEST_RECEIVED[39m
+    env: "test"
+    component: "pare-request-contract"
+    requestId: "8dd1cdb0-9d27-47ff-b43d-c7a087114446"
+    userId: null
+    event: "PARE_REQUEST_RECEIVED"
+    idempotencyKey: "[REDACTED]"
+    isDataMode: true
+    attachmentsCount: 1
+    clientIp: "127.0.0.1"
+    method: "POST"
+    path: "/api/analyze"
+[18:34:47] [32mINFO[39m: [36mPARE_REQUEST_RECEIVED[39m
+    env: "test"
+    component: "pare-request-contract"
+    requestId: "5ec59a9f-0e8f-4d7f-9b7c-a7d7b70d3a63"
+    userId: null
+    event: "PARE_REQUEST_RECEIVED"
+    idempotencyKey: "[REDACTED]"
+    isDataMode: true
+    attachmentsCount: 2
+    clientIp: "127.0.0.1"
+    method: "POST"
+    path: "/api/analyze"
+[18:34:47] [32mINFO[39m: [36mPARE_REQUEST_RECEIVED[39m
+    env: "test"
+    component: "pare-request-contract"
+    requestId: "c88a3159-8a91-4e69-b713-7377f0cc30ac"
+    userId: null
+    event: "PARE_REQUEST_RECEIVED"
+    idempotencyKey: "[REDACTED]"
+    isDataMode: true
+    attachmentsCount: 2
+    clientIp: "127.0.0.1"
+    method: "POST"
+    path: "/api/analyze"
+ ✓ tests/pare-e2e-real-files.test.ts (14 tests) 2418ms
+       ✓ should analyze PDF and return progressReport with PdfParser  459ms
+       ✓ should analyze XLSX and return progressReport with XlsxParser  339ms
+       ✓ should return 400 when no attachments provided  304ms
+[18:34:47] [32mINFO[39m: [36mPARE_REQUEST_RECEIVED[39m
+    env: "test"
+    component: "pare-request-contract"
+    requestId: "92760b07-8c5d-4622-94db-a8893b4018d5"
+    userId: null
+    event: "PARE_REQUEST_RECEIVED"
+    idempotencyKey: "[REDACTED]"
+    isDataMode: false
+    attachmentsCount: 0
+    clientIp: "127.0.0.1"
+    method: "POST"
+    path: "/api/analyze"
+[18:34:48] [32mINFO[39m: [36mPARE_REQUEST_RECEIVED[39m
+    env: "test"
+    component: "pare-request-contract"
+    requestId: "daa62b78-ce9c-41a2-8ebb-278222868c85"
+    userId: null
+    event: "PARE_REQUEST_RECEIVED"
+    idempotencyKey: "[REDACTED]"
+    isDataMode: false
+    attachmentsCount: 0
+    clientIp: "127.0.0.1"
+    method: "POST"
+    path: "/api/analyze"
+[18:34:48] [32mINFO[39m: [36mPARE_REQUEST_RECEIVED[39m
+    env: "test"
+    component: "pare-request-contract"
+    requestId: "bbf49932-fee6-4966-8a91-3e84d0b2aae4"
+    userId: null
+    event: "PARE_REQUEST_RECEIVED"
+    idempotencyKey: "[REDACTED]"
+    isDataMode: false
+    attachmentsCount: 0
+    clientIp: "127.0.0.1"
+    method: "POST"
+    path: "/api/analyze"
+[18:34:48] [32mINFO[39m: [36mPARE_REQUEST_RECEIVED[39m
+    env: "test"
+    component: "pare-request-contract"
+    requestId: "4e27fc17-4b99-4165-a406-0ed09e7d55bc"
+    userId: null
+    event: "PARE_REQUEST_RECEIVED"
+    idempotencyKey: "[REDACTED]"
+    isDataMode: true
+    attachmentsCount: 1
+    clientIp: "127.0.0.1"
+    method: "POST"
+    path: "/api/analyze"
+[18:34:48] [32mINFO[39m: [36mPARE_REQUEST_RECEIVED[39m
+    env: "test"
+    component: "pare-request-contract"
+    requestId: "550e8400-e29b-41d4-a716-446655440000"
+    userId: null
+    event: "PARE_REQUEST_RECEIVED"
+    idempotencyKey: "[REDACTED]"
+    isDataMode: true
+    attachmentsCount: 1
+    clientIp: "127.0.0.1"
+    method: "POST"
+    path: "/api/analyze"
+[18:34:48] [32mINFO[39m: [36mPARE_REQUEST_RECEIVED[39m
+    env: "test"
+    component: "pare-request-contract"
+    requestId: "16aedac4-603d-4133-a913-301ddb4ef9dd"
+    userId: null
+    event: "PARE_REQUEST_RECEIVED"
+    idempotencyKey: "[REDACTED]"
+    isDataMode: true
+    attachmentsCount: 1
+    clientIp: "127.0.0.1"
+    method: "POST"
+    path: "/api/analyze"
+ ✓ server/__tests__/pythonTools.test.ts (19 tests) 404ms
+ ✓ server/services/__tests__/superAgentCoverage.test.ts (2 tests) 17121ms
+     ✓ should return a 100-capability report for combined  17084ms
+ ✓ tests/unit/prompt-integrity-props.test.ts (10 tests) 333ms
+ ✓ server/__tests__/localControlRouter.test.ts (8 tests) 203ms
+ ✓ tests/unit/prompt-adversarial.test.ts (27 tests) 1940ms
+     ✓ handles single message exceeding budget  1696ms
+ ✓ server/lib/agentTimeouts.test.ts (7 tests) 622ms
+     ✓ uses default context in error message  397ms
+ ✓ server/lib/agentToolsGenerator.test.ts (2 tests) 1387ms
+     ✓ generates a non-empty XLSX buffer  1383ms
+ ✓ server/tests/advancedQueryProcessor.test.ts (85 tests) 372ms
+ ✓ server/__tests__/openclawRuntimeRouter.test.ts (1 test) 371ms
+     ✓ executes objective -> plan -> subagents -> consolidated response  369ms
+[18:34:56] [32mINFO[39m: [36m[Cache] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+ ✓ server/tests/advancedPrecision.test.ts (66 tests) 39ms
+ ✓ tests/hooks/use-user-skills.test.ts (3 tests) 538ms
+[18:35:03] [32mINFO[39m: [36m[Cache] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+[18:35:04] [32mINFO[39m: [36m[Cache] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+ ✓ tests/unit/openclaw1000-service.test.ts (16 tests) 504ms
+     ✓ ensures each capability has 20 EMAITI checks  425ms
+ ✓ server/agent/__tests__/webtool-chaos.test.ts (33 tests) 271ms
+ ✓ server/lib/markdownSanitizer.test.ts (25 tests) 371ms
+ ✓ server/lib/requestDedup.test.ts (27 tests) 138ms
+[18:35:08] [32mINFO[39m: [36mTool runner generation completed[39m
+    env: "test"
+    component: "document-cli-tool-runner"
+    requestHash: "86e9bfea460c5539c9eb1f37778f42609084c4fa8a66cf9f37ba4197e297fb47"
+    documentType: "xlsx"
+    usedFallback: false
+    durationMs: 37462
+[18:35:08] [32mINFO[39m: [36mTool runner cache hit[39m
+    env: "test"
+    component: "document-cli-tool-runner"
+    requestHash: "86e9bfea460c5539c9eb1f37778f42609084c4fa8a66cf9f37ba4197e297fb47"
+    documentType: "xlsx"
+ ✓ tests/unit/error-handling.test.ts (39 tests) 292ms
+ ✓ tests/unit/fetchWithRetry.test.ts (18 tests) 153ms
+ ✓ tests/unit/analysisContract.test.ts (46 tests) 270ms
+[18:35:09] [32mINFO[39m: [36m[Cache] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+[18:35:09] [32mINFO[39m: [36m[Cache] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+ ✓ server/agent/requestUnderstanding/__tests__/requestUnderstandingGate.test.ts (5 tests) 764ms
+     ✓ 100 schema validations (stress)  710ms
+ ✓ server/agent/__tests__/webtool-cache-isolation.test.ts (26 tests) 133ms
+ ✓ server/tests/advancedTesting.test.ts (45 tests) 197ms
+ ✓ server/services/chatScheduleUtils.test.ts (8 tests) 152ms
+[18:35:17] [33mWARN[39m: [36mInvalid request body[39m
+    env: "test"
+    component: "documents-router"
+    context: "generate"
+    issues: [
+      "Expected string, received number"
+    ]
+[18:35:17] [33mWARN[39m: [36mInvalid request body[39m
+    env: "test"
+    component: "documents-router"
+    context: "generate"
+    issues: [
+      "String must contain at most 500 character(s)"
+    ]
+[18:35:17] [33mWARN[39m: [36mInvalid request body[39m
+    env: "test"
+    component: "documents-router"
+    context: "generate"
+    issues: [
+      "String must contain at least 1 character(s)"
+    ]
+ ✓ tests/documentsRouter.tool-runner.test.ts (22 tests) 3702ms
+     ✓ returns health snapshots with optional command filter  362ms
+     ✓ forwards tool-runner output into generate response headers  1134ms
+     ✓ forwards tool-runner output into generate headers for excel  532ms
+ ✓ tests/unit/skillPlatformRouter.test.ts (6 tests) 492ms
+     ✓ rejects execute requests without a valid request id header  353ms
+ ✓ server/agent/__tests__/htnPlanner.test.ts (2 tests) 107ms
+ ✓ server/agent/__tests__/roles.test.ts (42 tests) 132ms
+ ✓ server/services/__tests__/documentGeneration.ppt.test.ts (1 test) 64ms
+ ✓ server/services/superIntelligence/agents/session-file-repair.test.ts (4 tests) 277ms
+ ✓ tests/agentic/orchestrator-state-graph.test.ts (56 tests) 65ms
+ ✓ server/lib/retryUtility.test.ts (14 tests) 278ms
+ ✓ server/tests/enterpriseDocument.test.ts (100 tests) 153ms
+ ✓ server/agent/__tests__/chaos.test.ts (39 tests) 633ms
+[18:35:24] [32mINFO[39m: [36m[Cache] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+ ✓ server/lib/safeError.test.ts (4 tests) 197ms
+ ✓ tests/unit/chat.test.ts (22 tests) 617ms
+       ✓ should generate default title if not provided  476ms
+ ✓ server/agent/__tests__/shellCommandTool.test.ts (3 tests) 410ms
+ ✓ server/lib/envValidator.test.ts (23 tests) 495ms
+ ✓ tests/pare-metrics-pipeline.test.ts (65 tests) 417ms
+ ✓ server/tests/advancedFormat.test.ts (49 tests) 108ms
+ ✓ server/__tests__/academicArticlesExport.test.ts (2 tests) 740ms
+     ✓ generates Excel with the required header order  722ms
+ ✓ server/tests/academicResearchEngineV3.test.ts (119 tests) 718ms
+       ✓ 200. should complete ultra-robust search simulation  459ms
+ ✓ server/agent/promptUnderstanding/__tests__/stress.test.ts (100 tests) 186ms
+ ✓ server/services/superIntelligence/agents/skills.e2e-test-helpers.test.ts (3 tests) 78ms
+ ✓ server/tests/nativePDF.test.ts (100 tests) 164ms
+ ❯ server/tests/stripeIntegration.test.ts (110 tests | 1 failed) 585ms
+       ✓ 1. should validate customer ID format 1ms
+       ✓ 2. should validate subscription ID format 0ms
+       ✓ 3. should validate price ID format 0ms
+       ✓ 4. should validate product ID format 1ms
+       ✓ 5. should validate checkout session ID 0ms
+       ✓ 6. should validate payment intent ID 0ms
+       ✓ 7. should reject invalid customer ID 0ms
+       ✓ 8. should reject wrong prefix 0ms
+       ✓ 9. should reject empty ID 0ms
+       ✓ 10. should reject ID with only prefix 0ms
+       ✓ 11. should validate invoice ID 0ms
+       ✓ 12. should validate event ID 0ms
+       ✓ 13. should handle special characters in ID 0ms
+       ✓ 14. should validate charge ID 0ms
+       ✓ 15. should validate refund ID 0ms
+       ✓ 16. should reject null ID 0ms
+       ✓ 17. should validate webhook endpoint ID 0ms
+       ✓ 18. should validate setup intent ID 0ms
+       ✓ 19. should validate payment method ID 0ms
+       ✓ 20. should validate coupon ID 1ms
+       ✓ 21. should validate webhook signature format 0ms
+       ✓ 22. should reject empty signature 0ms
+       ✓ 23. should reject empty secret 0ms
+       ✓ 24. should reject empty payload 0ms
+       ✓ 25. should parse webhook timestamp 0ms
+       ✓ 26. should return null for invalid timestamp 0ms
+       ✓ 27. should detect expired webhook 0ms
+       ✓ 28. should accept recent webhook 0ms
+       ✓ 29. should handle webhook event types 0ms
+       ✓ 30. should create valid webhook event structure 0ms
+       ✓ 31. should validate checkout.session.completed event 0ms
+       ✓ 32. should validate subscription events 0ms
+       ✓ 33. should handle subscription deletion event 0ms
+       ✓ 34. should validate invoice payment succeeded 0ms
+       ✓ 35. should validate invoice payment failed 0ms
+       ✓ 36. should reject signature without timestamp 0ms
+       ✓ 37. should handle future timestamp gracefully 0ms
+       ✓ 38. should validate event ID format 0ms
+       ✓ 39. should handle customer.created event 0ms
+       ✓ 40. should validate event created timestamp 0ms
+       ✓ 41. should create valid checkout session 0ms
+       ✓ 42. should validate success URL 0ms
+       ✓ 43. should validate cancel URL 0ms
+       ✓ 44. should reject invalid URL 0ms
+       ✓ 45. should require HTTPS in production 0ms
+       ✓ 46. should allow HTTP for localhost 0ms
+       ✓ 47. should include user metadata 0ms
+       ✓ 48. should link to subscription 0ms
+       ✓ 49. should link to customer 0ms
+       ✓ 50. should track payment status 0ms
+       ✓ 51. should handle unpaid sessions 0ms
+       ✓ 52. should sanitize metadata 0ms
+       ✓ 53. should limit metadata value length 1ms
+       ✓ 54. should filter non-string metadata 0ms
+       ✓ 55. should handle empty metadata 3ms
+       ✓ 56. should preserve valid metadata 1ms
+       ✓ 57. should validate checkout session ID format 0ms
+       ✓ 58. should generate unique session IDs 0ms
+       ✓ 59. should handle session with no subscription (one-time) 0ms
+       ✓ 60. should validate customer exists for session 0ms
+       ✓ 61. should create valid subscription 0ms
+       ✓ 62. should detect active subscription 0ms
+       ✓ 63. should detect trialing as active 0ms
+       ✓ 64. should detect canceled subscription 0ms
+       ✓ 65. should detect past_due subscription 0ms
+       ✓ 66. should calculate subscription end date 18ms
+       ✓ 67. should get plan from Go amount 0ms
+       ✓ 68. should get plan from Plus amount 0ms
+       ✓ 69. should get plan from Pro amount 0ms
+       ✓ 70. should get plan from Business amount 0ms
+       ✓ 71. should return unknown for invalid amount 0ms
+       ✓ 72. should extract price from subscription 0ms
+       ✓ 73. should extract plan from subscription 0ms
+       ✓ 74. should link subscription to customer 0ms
+       ✓ 75. should include user metadata 0ms
+       ✓ 76. should format price correctly 0ms
+       ✓ 77. should format large price correctly 0ms
+       ✓ 78. should format price with EUR 0ms
+       ✓ 79. should handle zero amount 0ms
+       ✓ 80. should validate subscription items exist 1ms
+       ✓ 81. should create valid customer 0ms
+       ✓ 82. should validate customer email 0ms
+       ✓ 83. should reject invalid email 0ms
+       ✓ 84. should reject email without domain 0ms
+       ✓ 85. should reject email without @ 0ms
+       ✓ 86. should accept email with subdomain 0ms
+       ✓ 87. should accept email with plus sign 0ms
+       ✓ 88. should include customer metadata 0ms
+       ✓ 89. should generate unique customer IDs 0ms
+       ✓ 90. should handle empty metadata 0ms
+       ✓ 91. should validate admin email 0ms
+       ✓ 92. should handle international email domains 0ms
+       ✓ 93. should reject email with spaces 0ms
+       ✓ 94. should handle long email addresses 0ms
+       ✓ 95. should handle numeric email prefix 10ms
+       ✓ 96. should handle dots in email prefix 0ms
+       ✓ 97. should handle underscores in email 0ms
+       ✓ 98. should handle hyphens in domain 0ms
+       ✓ 99. should reject double dots in email 0ms
+       ✓ 100. should handle customer with all fields 1ms
+       ✓ 101. should handle complete checkout flow 0ms
+       ✓ 102. should handle subscription upgrade 0ms
+       ✓ 103. should handle subscription cancellation 0ms
+       × 104. should process 100 events quickly 506ms
+       ✓ 105. should validate all plan amounts 0ms
+       ✓ 106. should handle concurrent customer creation 2ms
+       ✓ 107. should validate subscription lifecycle 17ms
+       ✓ 108. should handle webhook retry logic 1ms
+       ✓ 109. should format all plan prices correctly 0ms
+       ✓ 110. should handle complete payment notification flow 1ms
+[18:35:34] [32mINFO[39m: [36m[Cache] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+ ✓ server/__tests__/toolExecutionEngine.test.ts (3 tests) 344ms
+ ✓ server/agent/__tests__/agent.test.ts (82 tests) 370ms
+ ✓ tests/security/contactAdmin.test.ts (3 tests) 307ms
+ ✓ server/services/superIntelligence/agents/bash-process-registry.test.ts (5 tests) 3ms
+ ✓ tests/pare-schema-validation.test.ts (55 tests) 67ms
+ ✓ tests/documentBatchProcessor.test.ts (19 tests) 109ms
+ ✓ server/lib/factExtractor.test.ts (23 tests) 25ms
+ ✓ server/lib/pareTypeLimits.test.ts (17 tests) 299ms
+ ✓ server/services/superIntelligence/agents/pi-embedded-runner/run/compaction-timeout.test.ts (4 tests) 4ms
+ ✓ server/agent/__tests__/integration.test.ts (13 tests) 251ms
+ ✓ server/__tests__/requestTracerCorrelation.test.ts (1 test) 192ms
+ ✓ tests/unit/uploadContracts.test.ts (30 tests) 5ms
+ ✓ tests/billing/workspaceDeactivationBanner.test.ts (133 tests) 38ms
+ ✓ server/services/superIntelligence/agents/context-window-guard.test.ts (9 tests) 10ms
+ ✓ tests/unit/context-window-manager.test.ts (16 tests) 18ms
+ ✓ server/services/analyticsTracker.test.ts (22 tests) 32ms
+ ✓ server/lib/persistentJsonCache.test.ts (21 tests) 185ms
+ ✓ server/services/superIntelligence/agents/pi-settings.test.ts (8 tests) 12ms
+ ✓ tests/pare-response-contract.test.ts (48 tests) 39ms
+ ✓ server/lib/securityUtils.test.ts (35 tests) 9ms
+ ✓ server/lib/dataModeValidator.test.ts (18 tests) 81ms
+ ✓ server/services/apaCitationFormatter.test.ts (43 tests) 33ms
+ ✓ tests/network-access/networkAccessPolicyLogic.test.ts (124 tests) 26ms
+ ✓ server/middleware/canonicalUrl.test.ts (5 tests) 166ms
+ ✓ tests/unit/auth.test.ts (23 tests) 89ms
+ ✓ server/lib/backtracking.test.ts (45 tests) 97ms
+ ✓ tests/unit/agent-cancellation.test.ts (25 tests) 58ms
+ ✓ tests/hooks/use-voice-mode.test.ts (5 tests) 57ms
+ ✓ server/tests/academicResearchEngine.test.ts (100 tests) 44ms
+ ✓ server/lib/dynamicRateLimiting.test.ts (23 tests) 50ms
+[18:35:43] [32mINFO[39m: [36m[Cache] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+ ✓ server/__tests__/channels/channelIngestService.runtime.test.ts (4 tests) 71ms
+ ✓ server/tests/subscriptionSecurity.test.ts (110 tests) 30ms
+ ✓ server/services/superIntelligence/agents/sandbox/config-hash.test.ts (9 tests) 316ms
+ ✓ server/lib/zipBombGuard.test.ts (14 tests) 358ms
+ ✓ server/lib/memoryCache.test.ts (23 tests) 11ms
+ ✓ tests/pare-phase3-observability.test.ts (39 tests) 62ms
+ ✓ tests/unit/intentAnalysis/regressionSuite.test.ts (10 tests) 271ms
+ ✓ server/core/errors/application/clientErrorService.test.ts (3 tests) 32ms
+ ✓ server/lib/outputSanitizer.test.ts (18 tests) 11ms
+ ✓ tests/pare-phase1-contract.test.ts (28 tests) 136ms
+ ✓ server/services/__tests__/conversationStateService.test.ts (10 tests) 158ms
+ ✓ tests/unit/formIntentDetector.test.ts (26 tests) 11ms
+[18:35:47] [32mINFO[39m: [36mTool runner generation completed[39m
+    env: "test"
+    component: "document-cli-tool-runner"
+    requestHash: "40e6284869b38f289f18c936fbc1b73535d27a44ed6bfe0854bb3c4949e41391"
+    documentType: "pptx"
+    usedFallback: false
+    durationMs: 39731
+[18:35:48] [32mINFO[39m: [36mTool runner cache hit[39m
+    env: "test"
+    component: "document-cli-tool-runner"
+    requestHash: "40e6284869b38f289f18c936fbc1b73535d27a44ed6bfe0854bb3c4949e41391"
+    documentType: "pptx"
+ ✓ server/toolRunner/orchestrator.golden.test.ts (3 tests) 119461ms
+     ✓ matches golden contract for docx and enforces idempotent cache  42173ms
+     ✓ matches golden contract for xlsx and enforces idempotent cache  37509ms
+     ✓ matches golden contract for pptx and enforces idempotent cache  39772ms
+ ✓ server/lib/mimeDetector.test.ts (39 tests) 14ms
+ ✓ tests/unit/intentAnalysis/intentAccuracy.test.ts (38 tests) 60ms
+ ✓ tests/unit/visualizationSchemas.test.ts (42 tests) 220ms
+ ✓ server/services/intent-engine/__tests__/compoundIntentPlanner.test.ts (21 tests) 18ms
+ ✓ server/lib/excelStyles.test.ts (23 tests) 13ms
+ ✓ server/lib/qualityMetrics.test.ts (11 tests) 8ms
+ ✓ server/lib/pareSecurityGuard.test.ts (20 tests) 274ms
+ ✓ tests/unit/routing-integrity.test.ts (1 test) 7ms
+ ✓ server/agent/promptUnderstanding/__tests__/adversarial.test.ts (34 tests) 21ms
+ ✓ server/lib/pareResponseContract.test.ts (17 tests) 136ms
+ ✓ server/services/agentKPIs.test.ts (32 tests) 16ms
+ ✓ server/__tests__/preExecutionIntentGuard.test.ts (4 tests) 209ms
+ ✓ server/lib/fastPathRouter.test.ts (37 tests) 15ms
+ ✓ server/services/intent-engine/__tests__/ruleMatcher.test.ts (5 tests) 19ms
+ ✓ tests/unit/prompt-preprocessor.test.ts (32 tests) 22ms
+ ✓ server/agent/promptUnderstanding/__tests__/property.test.ts (5 tests) 14ms
+ ✓ tests/unit/intentSchemas.test.ts (45 tests) 241ms
+ ✓ server/lib/contextCompressor.test.ts (22 tests) 20ms
+ ✓ server/tests/advancedInfrastructure.test.ts (27 tests) 10ms
+ ✓ server/lib/idempotencyStore.test.ts (19 tests) 221ms
+ ✓ server/tests/advancedUX.test.ts (39 tests) 41ms
+ ✓ server/tests/advancedIntegrations.test.ts (55 tests) 124ms
+ ✓ server/middleware/requestIntegrity.test.ts (19 tests) 100ms
+ ✓ server/middleware/strictValidation.test.ts (12 tests) 46ms
+ ✓ tests/unit/executionProtocol.test.ts (19 tests) 19ms
+ ✓ tests/unit/requestSpec-multistep.test.ts (3 tests) 14ms
+ ✓ server/__tests__/documentAnalysis.test.ts (38 tests) 44ms
+ ✓ server/lib/streamingSeq.test.ts (21 tests) 8ms
+ ✓ tests/pare-torture-fixtures.test.ts (17 tests | 10 skipped) 9ms
+ ✓ tests/workspace/workspaceNameValidation.test.ts (134 tests) 44ms
+ ✓ tests/unit/richTextTypes.test.ts (28 tests) 8ms
+ ✓ server/tests/upgradePrompt.test.ts (100 tests) 24ms
+ ✓ server/tests/professionalPresentations.test.ts (100 tests) 22ms
+ ✓ server/services/superIntelligence/agents/tool-call-id.test.ts (8 tests) 22ms
+ ✓ server/lib/keywordExtractor.test.ts (23 tests) 107ms
+ ✓ server/agent/__tests__/restaurantReservation.test.ts (64 tests) 31ms
+ ✓ tests/security/hardening.test.ts (6 tests) 92ms
+ ✓ server/middleware/securityHeaders.test.ts (16 tests) 8ms
+ ✓ server/services/__tests__/modelIntegration.test.ts (5 tests) 12ms
+ ✓ server/services/superIntelligence/agents/owner-display.test.ts (5 tests) 4ms
+ ✓ tests/unit/whatsapp-web-autoreply.test.ts (3 tests) 104ms
+ ✓ tests/unit/excel-normalization.test.ts (4 tests) 9ms
+ ✓ tests/unit/documentSpecs.test.ts (25 tests) 15ms
+ ✓ server/services/superIntelligence/agents/content-blocks.test.ts (2 tests) 6ms
+[18:35:59] [32mINFO[39m: [36m[Cache] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+ ✓ server/services/superIntelligence/agents/usage.test.ts (17 tests) 37ms
+ ✓ tests/unit/sanitizer.test.ts (51 tests) 20ms
+ ✓ server/services/superIntelligence/agents/openai-responses.reasoning-replay.test.ts (2 tests) 339ms
+ ✓ tests/unit/openclaw1000-capability-profiler.test.ts (3 tests) 22ms
+ ✓ tests/unit/llm-gateway-truncation.test.ts (19 tests) 25ms
+ ✓ server/lib/mathExpressionEvaluator.test.ts (23 tests) 15ms
+ ✓ server/services/superIntelligence/agents/subagent-announce-dispatch.test.ts (9 tests) 8ms
+ ✓ server/lib/logoutMarker.test.ts (10 tests) 59ms
+ ✓ server/services/superIntelligence/agents/pi-embedded-runner/tool-result-context-guard.test.ts (8 tests) 45ms
+ ✓ server/lib/pareSchemas.test.ts (50 tests) 244ms
+ ✓ server/middleware/hostValidation.test.ts (10 tests) 4ms
+ ✓ tests/unit/academic-search-fallback.test.ts (3 tests) 41ms
+ ✓ server/__tests__/channels/channelIngestQueue.runtime.test.ts (1 test) 28ms
+ ✓ server/services/superIntelligence/agents/command-poll-backoff.test.ts (14 tests) 24ms
+ ✓ server/lib/anonUserHelper.test.ts (19 tests) 3ms
+ ✓ server/agent/promptUnderstanding/__tests__/extraction.test.ts (5 tests) 10ms
+ ✓ server/services/answerFirstEnforcer.test.ts (32 tests) 11ms
+[18:36:04] [32mINFO[39m: [36m[Cache] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+ ✓ server/services/superIntelligence/agents/session-transcript-repair.test.ts (13 tests) 225ms
+ ✓ tests/unit/prompt-integrity.test.ts (17 tests) 12ms
+ ✓ server/lib/languageDetector.test.ts (19 tests) 297ms
+ ✓ server/core/errors/domain/clientErrorLog.test.ts (7 tests) 6ms
+ ✓ tests/unit/admin.test.ts (27 tests) 76ms
+ ✓ server/middleware/correlationId.test.ts (9 tests) 99ms
+ ✓ server/middleware/maintenanceMode.test.ts (17 tests) 8ms
+ ✓ server/__tests__/channels/whatsappPolicy.test.ts (5 tests) 7ms
+ ✓ server/middleware/responseBudget.test.ts (8 tests) 13ms
+ ✓ server/services/__tests__/productionHandler.test.ts (3 tests) 136ms
+ ✓ server/lib/textSanitizers.test.ts (38 tests) 33ms
+ ✓ tests/unit/agent-event-mapper.test.ts (11 tests) 7ms
+ ✓ server/agent/__tests__/components.test.ts (27 tests) 36ms
+ ✓ server/services/superIntelligence/agents/sandbox/sanitize-env-vars.test.ts (4 tests) 11ms
+ ✓ server/services/superIntelligence/agents/sandbox/browser.novnc-url.test.ts (4 tests) 4ms
+ ✓ server/__tests__/publicSettings.test.ts (1 test) 12ms
+ ✓ server/lib/__tests__/pareSchemas.test.ts (2 tests) 5ms
+ ✓ server/lib/anonToken.test.ts (9 tests) 6ms
+ ✓ server/lib/modelRegistry.test.ts (28 tests) 48ms
+ ✓ server/__tests__/uploadIdConsistency.test.ts (4 tests) 4ms
+ ✓ server/__tests__/skillContextResolver.test.ts (4 tests) 28ms
+ ✓ server/services/superIntelligence/agents/tool-mutation.test.ts (5 tests) 4ms
+ ✓ server/lib/constants.test.ts (13 tests) 4ms
+ ✓ server/services/finops/__tests__/costEngine.test.ts (4 tests) 13ms
+ ✓ server/lib/sessionIdentity.test.ts (10 tests) 89ms
+ ✓ server/agent/__tests__/nativeAgenticFusion.test.ts (2 tests) 6ms
+ ✓ server/services/superIntelligence/agents/session-slug.test.ts (3 tests) 7ms
+ ✓ server/services/superIntelligence/agents/pi-embedded-runner/thinking.test.ts (4 tests) 5ms
+ ✓ server/services/superIntelligence/agents/sandbox/host-paths.test.ts (3 tests) 4ms
+ ✓ server/services/superIntelligence/agents/sandbox/bind-spec.test.ts (3 tests) 7ms
+ ✓ server/services/superIntelligence/agents/image-sanitization.test.ts (2 tests) 5ms
+ ✓ server/services/superIntelligence/agents/chutes-oauth.test.ts (6 tests) 15ms
+ ✓ server/services/superIntelligence/agents/bootstrap-cache.test.ts (5 tests) 6ms
+ ✓ tests/unit/plan-utils.test.ts (5 tests) 6ms
+ ✓ server/services/superIntelligence/agents/skills/filter.test.ts (4 tests) 128ms
+ ✓ server/services/superIntelligence/agents/pi-embedded-runner/kilocode.test.ts (4 tests) 3ms
+ ✓ server/middleware/correlationContext.test.ts (17 tests) 67ms
+ ✓ server/services/superIntelligence/agents/test-helpers/pi-tools-sandbox-context.test.ts (2 tests) 8ms
+ ✓ tests/unit/production-infer-sources.test.ts (1 test) 13ms
+ ✓ server/services/superIntelligence/agents/subagent-registry-completion.test.ts (6 tests) 7ms
+ ✓ server/services/superIntelligence/agents/system-prompt-report.test.ts (6 tests) 13ms
+ ✓ server/lib/emailCanon.test.ts (22 tests) 15ms
+ ✓ server/middleware/sessionTimeout.test.ts (14 tests) 12ms
+ ✓ tests/unit/attachment-ingest-normalize-file.test.ts (5 tests) 155ms
+ ✓ server/lib/requestValidator.test.ts (10 tests) 9ms
+ ✓ server/services/superIntelligence/agents/tool-policy.plugin-only-allowlist.test.ts (6 tests) 7ms
+ ✓ server/services/superIntelligence/agents/usage.normalization.test.ts (7 tests) 3ms
+ ✓ server/lib/__tests__/math-utils.test.ts (3 tests) 2ms
+ ✓ server/services/superIntelligence/agents/pi-embedded-runner/cache-ttl.test.ts (5 tests) 6ms
+[18:36:20] [32mINFO[39m: [36m[Cache] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+ ✓ server/agent/__tests__/agentExecutor.tools.test.ts (5 tests) 133ms
+ ✓ server/__tests__/skillSystemPrompt.test.ts (2 tests) 3ms
+ ↓ tests/pare-document-analysis.test.ts (15 tests | 15 skipped)
+ ↓ tests/pare-observability.test.ts (22 tests | 22 skipped)
+ ↓ tests/agentic/complexity.test.ts (5 tests | 5 skipped)
+ ↓ tests/agentic/orchestration.test.ts (3 tests | 3 skipped)
+ ↓ tests/agentic/health.test.ts (9 tests | 9 skipped)
+ ↓ tests/agentic/memory.test.ts (2 tests | 2 skipped)
+ ↓ tests/agentic/tools.test.ts (4 tests | 4 skipped)
+ ✓ server/services/paymentIngestionService.test.ts (14 tests) 16ms
+ ↓ tests/pare-idempotency.test.ts (16 tests | 16 skipped)
+[18:36:25] [32mINFO[39m: [36m[RedisCacheService] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+ ↓ tests/pare-concurrency.test.ts (15 tests | 15 skipped)
+ ✓ server/__tests__/uploadIntentMetadata.test.ts (9 tests) 4ms
+[18:36:26] [32mINFO[39m: [36m[Cache] Redis disabled in test env (set REDIS_ENABLE_IN_TESTS=1 to enable)[39m
+    env: "test"
+ ↓ server/agent/__tests__/benchmarks.test.ts (5 tests | 5 skipped)
+
+ Test Files  289 failed | 233 passed | 10 skipped (532)
+      Tests  34 failed | 5832 passed | 166 skipped (6032)
+   Start at  13:32:57
+   Duration  214.59s (transform 129.97s, setup 182.36s, import 569.49s, tests 512.70s, environment 6.91s)
+

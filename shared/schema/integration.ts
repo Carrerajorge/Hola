@@ -23,7 +23,7 @@ export const integrationProviders = pgTable("integration_providers", {
 
 export const insertIntegrationProviderSchema = createInsertSchema(integrationProviders);
 
-export type InsertIntegrationProvider = z.infer<typeof insertIntegrationProviderSchema>;
+export type InsertIntegrationProvider = typeof integrationProviders.$inferInsert;
 export type IntegrationProvider = typeof integrationProviders.$inferSelect;
 
 // Integration Accounts - User's connected accounts per provider
@@ -51,7 +51,7 @@ export const integrationAccounts = pgTable("integration_accounts", {
 
 export const insertIntegrationAccountSchema = createInsertSchema(integrationAccounts);
 
-export type InsertIntegrationAccount = z.infer<typeof insertIntegrationAccountSchema>;
+export type InsertIntegrationAccount = typeof integrationAccounts.$inferInsert;
 export type IntegrationAccount = typeof integrationAccounts.$inferSelect;
 
 // Integration Tools - Available tools/actions per provider
@@ -72,7 +72,7 @@ export const integrationTools = pgTable("integration_tools", {
 
 export const insertIntegrationToolSchema = createInsertSchema(integrationTools);
 
-export type InsertIntegrationTool = z.infer<typeof insertIntegrationToolSchema>;
+export type InsertIntegrationTool = typeof integrationTools.$inferInsert;
 export type IntegrationTool = typeof integrationTools.$inferSelect;
 
 // Integration Policies - User preferences for enabled apps/tools
@@ -94,7 +94,7 @@ export const integrationPolicies = pgTable("integration_policies", {
 
 export const insertIntegrationPolicySchema = createInsertSchema(integrationPolicies);
 
-export type InsertIntegrationPolicy = z.infer<typeof insertIntegrationPolicySchema>;
+export type InsertIntegrationPolicy = typeof integrationPolicys.$inferInsert;
 export type IntegrationPolicy = typeof integrationPolicies.$inferSelect;
 
 // Shared Links - For sharing resources with external users
@@ -119,7 +119,7 @@ export const sharedLinks = pgTable("shared_links", {
 
 export const insertSharedLinkSchema = createInsertSchema(sharedLinks);
 
-export type InsertSharedLink = z.infer<typeof insertSharedLinkSchema>;
+export type InsertSharedLink = typeof sharedLinks.$inferInsert;
 export type SharedLink = typeof sharedLinks.$inferSelect;
 
 // Gmail OAuth Tokens (Custom MCP Integration)
@@ -140,7 +140,7 @@ export const gmailOAuthTokens = pgTable("gmail_oauth_tokens", {
 
 export const insertGmailOAuthTokenSchema = createInsertSchema(gmailOAuthTokens);
 
-export type InsertGmailOAuthToken = z.infer<typeof insertGmailOAuthTokenSchema>;
+export type InsertGmailOAuthToken = typeof gmailOAuthTokens.$inferInsert;
 export type GmailOAuthToken = typeof gmailOAuthTokens.$inferSelect;
 
 // PARE Idempotency System - Phase 2
@@ -162,7 +162,7 @@ export const pareIdempotencyKeys = pgTable("pare_idempotency_keys", {
 
 export const insertPareIdempotencyKeySchema = createInsertSchema(pareIdempotencyKeys);
 
-export type InsertPareIdempotencyKey = z.infer<typeof insertPareIdempotencyKeySchema>;
+export type InsertPareIdempotencyKey = typeof pareIdempotencyKeys.$inferInsert;
 export type PareIdempotencyKey = typeof pareIdempotencyKeys.$inferSelect;
 
 // Connector Usage Hourly (Enterprise Metrics)
@@ -182,5 +182,5 @@ export const connectorUsageHourly = pgTable("connector_usage_hourly", {
 
 export const insertConnectorUsageHourlySchema = createInsertSchema(connectorUsageHourly);
 
-export type InsertConnectorUsageHourly = z.infer<typeof insertConnectorUsageHourlySchema>;
+export type InsertConnectorUsageHourly = typeof connectorUsageHourlys.$inferInsert;
 export type ConnectorUsageHourly = typeof connectorUsageHourly.$inferSelect;

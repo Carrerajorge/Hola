@@ -142,10 +142,6 @@ import { createRunRouter } from "./routes/runRouter";
 import { createBrowserControlRouter } from "./routes/browserControlRouter";
 import { createTerminalControlRouter, terminalClients } from "./routes/terminalControlRouter";
 import { createWorkflowRouter } from "./routes/workflowRouter";
-import { createWorkflowTraceRouter } from "./routes/workflowTraceRoutes";
-import { WorkflowStore } from "./workflow/store";
-import { getWorkflowTraceStreamHub } from "./workflow/streaming";
-import { ensureWorkflowTraceSchema } from "./workflow/schemaSetup";
 import { createDeviceControlRouter } from "./routes/deviceControlRouter";
 import openClawRouter from "./routes/openClawRouter";
 import { createSkillPlatformRouter } from "./routes/skillPlatformRouter";
@@ -843,8 +839,6 @@ export async function registerRoutes(
   app.use("/api/analytics", requireAdminMiddleware, createAnalyticsRouter());
 
   app.use("/api/workflows", createWorkflowRouter());
-  await ensureWorkflowTraceSchema();
-  app.use("/api/run-traces", createWorkflowTraceRouter());
 
   // OpenClaw runtime capabilities are fused directly into the native agent pipeline.
   app.use("/api/openclaw", openClawRouter);
@@ -1733,14 +1727,6 @@ export async function registerRoutes(
       }
     });
   });
-
-  const workflowTraceWss = new WebSocketServer({ server: httpServer, path: "/ws/run-traces" });
-  const workflowTraceRequireAuth = !(
-    process.env.WORKFLOW_REPRO === "1" &&
-    (process.env.NODE_ENV === "test" || process.env.NODE_ENV === "development")
-  );
-  const workflowTraceHub = getWorkflowTraceStreamHub(new WorkflowStore());
-  await workflowTraceHub.registerWebSocket(workflowTraceWss, workflowTraceRequireAuth);
 
   const browserWss = new WebSocketServer({ server: httpServer, path: "/ws/browser" });
 

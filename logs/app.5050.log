@@ -1,0 +1,1 @@
+{"level":50,"time":1772299678062,"env":"production","msg":"[Cache] REDIS_URL must be defined in production. In-memory cache fallback is disabled for clustering compatibility."}

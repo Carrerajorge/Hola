@@ -1,0 +1,19 @@
+import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+// Some dependencies still reference CommonJS globals (module/exports) even when bundled.
+// When output format is ESM, these are not defined by Node.
+// Provide a minimal shim to avoid runtime crashes like:
+//   ReferenceError: module is not defined in ES module scope
+const module = { exports: {} };
+const exports = module.exports;
+
+const require = createRequire(import.meta.url);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+import{c as n}from"./chunk-FT6OIE44.mjs";import"./chunk-FS223YZ4.mjs";import"./chunk-62BGFGIM.mjs";import"./chunk-WCIRVKJN.mjs";import"./chunk-4JWTKVM3.mjs";import"./chunk-WRSRS3UV.mjs";import"./chunk-WSNG5WO6.mjs";import"./chunk-X7MS7TM4.mjs";import"./chunk-YQXQUKB3.mjs";import"./chunk-W7KNROZK.mjs";import"./chunk-5JBUO3EL.mjs";import"./chunk-FH7SSPHR.mjs";import"./chunk-KCR6A6FV.mjs";import"./chunk-IR4R2SCF.mjs";import"./chunk-TFKEBOLV.mjs";import"./chunk-DJCA23M6.mjs";import"./chunk-727B7WSG.mjs";import"./chunk-K5UZFPVK.mjs";import"./chunk-NCWOPIES.mjs";import"./chunk-AKX5KR4K.mjs";import"./chunk-HX7KPIND.mjs";import"./chunk-NV6BNJ64.mjs";import"./chunk-KRFCN6YW.mjs";import"./chunk-Q245SVP2.mjs";import"./chunk-EHTWEZTA.mjs";import"./chunk-WP3AAAKC.mjs";import"./chunk-RFZBR23N.mjs";import"./chunk-OQFD36C4.mjs";import"./chunk-E4MBEG5H.mjs";import"./chunk-WKASVOUS.mjs";import"./chunk-5B23YN35.mjs";import"./chunk-23TNEANO.mjs";import"./chunk-PNGSAWMQ.mjs";import"./chunk-JAI7YO2C.mjs";import{a as f}from"./chunk-F7574FHZ.mjs";import"./chunk-VLL76GHB.mjs";import"./chunk-UWSZBHDA.mjs";import"./chunk-6EWVFNKC.mjs";import"./chunk-JL5GVIQJ.mjs";var a=class{constructor(e){this.buffer="";this.blockIndex=0;this.config=e}push(e){this.buffer+=e,this.tryEmit()}end(){this.buffer.length>0&&(this.config.onBlock(this.buffer,this.blockIndex++),this.buffer="")}tryEmit(){for(;this.buffer.length>=this.config.minChars;){let e=this.findBreakPoint();if(e<=0)break;let t=this.buffer.slice(0,e);this.buffer=this.buffer.slice(e),this.config.onBlock(t,this.blockIndex++)}if(this.buffer.length>=this.config.maxChars){let e=this.buffer.slice(0,this.config.maxChars);this.buffer=this.buffer.slice(this.config.maxChars),this.config.onBlock(e,this.blockIndex++)}}findBreakPoint(){let e=[". ","! ","? ",`.
+`,`!
+`,`?
+`],t=-1;for(let i of e){let o=this.buffer.indexOf(i,this.config.minChars-i.length);o>=0&&o+i.length<=this.config.maxChars&&(t=Math.max(t,o+i.length))}if(t>0)return t;let s=this.buffer.indexOf(`
+`,this.config.minChars);if(s>=0&&s<this.config.maxChars)return s+1;if(this.buffer.length>=this.config.maxChars){let i=this.buffer.lastIndexOf(" ",this.config.maxChars);return i>this.config.minChars?i+1:this.config.maxChars}return-1}get bufferedLength(){return this.buffer.length}};var h=class{constructor(e,t){this.accumulated="";this.runId=e,this.mode=t}push(e){this.mode!=="off"&&(this.accumulated+=e,this.mode==="partial"?n("chat.preview",{runId:this.runId,mode:"replace",content:this.accumulated}):this.mode==="block"?n("chat.preview",{runId:this.runId,mode:"append",content:e}):this.mode==="progress"&&n("chat.preview",{runId:this.runId,mode:"progress",chars:this.accumulated.length}))}end(){this.mode!=="off"&&n("chat.preview",{runId:this.runId,mode:"done",content:this.accumulated})}get totalChars(){return this.accumulated.length}};function b(r){f.info(`[OpenClaw:Streaming] Initialized: block(${r.streaming.blockMinChars}-${r.streaming.blockMaxChars}), preview(${r.streaming.previewMode})`)}function k(r,e){let t=new h(r,e.streaming.previewMode);return{block:new a({minChars:e.streaming.blockMinChars,maxChars:e.streaming.blockMaxChars,onBlock:(i,o)=>{n("chat.delta",{runId:r,blockIndex:o,content:i,timestamp:Date.now()})}}),preview:t}}export{k as createStreamingPair,b as initStreaming};

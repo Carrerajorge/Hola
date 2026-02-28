@@ -1,0 +1,26 @@
+{
+  "name": "@iliagpt/local-runner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "bin": {
+    "iliagpt-run": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "iliagpt-run:repro": "mkdir -p workspace && npm run build && node dist/cli.js --plan examples/plan.min.json --workspace ./workspace --stream --yes",
+    "test": "vitest run -c vitest.config.ts"
+  },
+  "dependencies": {
+    "fs-extra": "^11.1.1",
+    "yargs": "^17.7.2"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "^20.19.33",
+    "@types/yargs": "^17.0.33",
+    "ts-node": "^10.9.2",
+    "typescript": "5.9.3",
+    "vitest": "^4.0.16"
+  }
+}

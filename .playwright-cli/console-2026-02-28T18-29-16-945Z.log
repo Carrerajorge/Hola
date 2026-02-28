@@ -1,0 +1,111 @@
+[   36849ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:5050/api/user/preferences:0
+[   36940ms] [WARNING] [i18n] Missing literal key "Saltar al contenido principal" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   36940ms] [WARNING] [i18n] Missing literal key "Ir al chat" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   36940ms] [WARNING] [i18n] Missing literal key "Notifications (F8)" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   36940ms] [WARNING] [i18n] Missing literal key "Notifications alt+T" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   36940ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:5050/api/user/preferences:0
+[   36943ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:5050/api/auth/user:0
+[   37233ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:5050/api/workspace/analytics/track:0
+[   37234ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:5050/api/user/preferences:0
+[   38794ms] [WARNING] [i18n] Missing literal key "ILIAGPT" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38794ms] [WARNING] [i18n] Missing literal key "AI Platform" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38794ms] [WARNING] [i18n] Missing literal key "⌘N" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38794ms] [WARNING] [i18n] Missing literal key "Buscar chats..." for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38794ms] [WARNING] [i18n] Missing literal key "K" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38794ms] [WARNING] [i18n] Missing literal key "Biblioteca" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38794ms] [WARNING] [i18n] Missing literal key "GPTs" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38794ms] [WARNING] [i18n] Missing literal key "Skills" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38794ms] [WARNING] [i18n] Missing literal key "Capacidades modulares" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38794ms] [WARNING] [i18n] Missing literal key "AppsWebChat (QR)" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38794ms] [WARNING] [i18n] Missing literal key "Codex" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38794ms] [WARNING] [i18n] Missing literal key "Nueva Carpeta" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38794ms] [WARNING] [i18n] Missing literal key "U" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38794ms] [WARNING] [i18n] Missing literal key "Usuario" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Cuenta personal" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Bienvenido" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Un asistente de IA premium para trabajo serio y creativo." for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "IA Confiable" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Respuesta Ágil" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Flujo Continuo" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Detalles Premium" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Comenzar" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Llama 3 (Máquina Local / Ollama)" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Grok 4 Fast" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Grok 4" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Grok 4.1 Fast Reasoning" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Grok 4.1 Fast" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Grok Code Fast" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Grok Beta" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Grok 2 Vision" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Grok 2" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Grok 3 Mini Fast" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Grok 3 Mini" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Grok 3 Fast" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Grok 4 Fast Reasoning" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Grok 4 Premium" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Grok 3" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "GPT-OSS 20B" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "GPT-OSS 120B" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "o1 Mini" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "o1 Pro" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "o1" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "o4 Mini High" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "o4 Mini" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "o3 Mini" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "o3 Pro" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "o3" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "GPT-4o" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "GPT-4.1 Nano" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "GPT-4.1 Mini" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "GPT-4.1" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "GPT-5 Nano" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "GPT-5 Mini" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "GPT-5.1 Codex Max" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "GPT-5.1" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "GPT-5.2 Codex" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "GPT-5.2" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "GPT-5" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "GPT-4o Mini" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Gemini 1.5 Flash" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Gemini 1.5 Pro" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Gemini 2.0 Flash Exp" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Gemini 2.0 Flash" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Gemini 2.5 Flash-Lite" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38795ms] [WARNING] [i18n] Missing literal key "Gemini 3 Deep Think" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38796ms] [WARNING] [i18n] Missing literal key "Gemini 3 Pro Image" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38796ms] [WARNING] [i18n] Missing literal key "Gemini 3 Pro" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38796ms] [WARNING] [i18n] Missing literal key "Gemini 3.1 Pro (Preview)" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38796ms] [WARNING] [i18n] Missing literal key "Gemini 3 Flash (Preview)" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38796ms] [WARNING] [i18n] Missing literal key "Gemini 2.5 Pro" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38796ms] [WARNING] [i18n] Missing literal key "Gemini 2.5 Flash" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38796ms] [WARNING] [i18n] Missing literal key "Mejorar el plan a Go" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38796ms] [WARNING] [i18n] Missing literal key "Go" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38796ms] [WARNING] [i18n] Missing literal key "¿En qué puedo ayudarte?" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38796ms] [WARNING] [i18n] Missing literal key "Soy ILIAGPT, tu asistente de IA. Explora capacidades avanzadas como generación de código, diseño y análisis." for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38796ms] [WARNING] [i18n] Missing literal key "Resumir documento" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38796ms] [WARNING] [i18n] Missing literal key "Analizar datos" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38796ms] [WARNING] [i18n] Missing literal key "Extraer puntos clave" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38796ms] [WARNING] [i18n] Missing literal key "Buscar información" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38796ms] [WARNING] [i18n] Missing literal key "Crear presentación" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38796ms] [WARNING] [i18n] Missing literal key "Traducir" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38796ms] [WARNING] [i18n] Missing literal key "⌘K" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38796ms] [WARNING] [i18n] Missing literal key "comandos" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38796ms] [WARNING] [i18n] Missing literal key "Local" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38796ms] [WARNING] [i18n] Missing literal key "Full access" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38796ms] [WARNING] [i18n] Missing literal key "main" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38796ms] [WARNING] [i18n] Missing literal key "Press Enter to send, Shift+Enter for new line, or Cmd+Enter to send quickly." for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38796ms] [WARNING] [i18n] Missing literal key "ILIAGPT puede cometer errores. Verifica la información importante." for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38797ms] [WARNING] [i18n] Missing literal key "Navegación principal y chats" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38797ms] [WARNING] [i18n] Missing literal key "IliaGPT Logo" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38797ms] [WARNING] [i18n] Missing literal key "Nuevo chat (Ctrl+N)" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38797ms] [WARNING] [i18n] Missing literal key "Canales: disconnected" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38797ms] [WARNING] [i18n] Missing literal key "En línea" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38797ms] [WARNING] [i18n] Missing literal key "Seleccionar modelo" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38797ms] [WARNING] [i18n] Missing literal key "Selector de modelo" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38797ms] [WARNING] [i18n] Missing literal key "Envía un mensaje para poder compartir este chat" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38797ms] [WARNING] [i18n] Missing literal key "Subir archivos" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38797ms] [WARNING] [i18n] Missing literal key "Open tools menu" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38797ms] [WARNING] [i18n] Missing literal key "Start voice dictation" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   38797ms] [WARNING] [i18n] Missing literal key "Start voice conversation mode" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20
+[   39816ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:5050/api/user/usage:0
+[   48098ms] [WARNING] [i18n] Missing literal key "¡Creado!" for locale "es". Fallback chain: es -> en @ http://localhost:5050/dev-error-suppression.js:20

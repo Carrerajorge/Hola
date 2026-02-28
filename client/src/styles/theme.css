@@ -70,15 +70,22 @@
 
   --radius: 0.5rem;
 
-  /* Sidebar - Futuristic */
-  --sidebar: 0 0% 98%;
-  --sidebar-foreground: 0 0% 20%;
-  --sidebar-primary: 0 0% 0%;
-  --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 0 0% 94%;
-  --sidebar-accent-foreground: 0 0% 10%;
-  --sidebar-border: 0 0% 90%;
-  --sidebar-ring: 0 0% 30%;
+  /* Sidebar - Futuristic Glassmorphism */
+  --sidebar: 220 40% 6%;
+  --sidebar-foreground: 210 20% 90%;
+  --sidebar-primary: 195 100% 50%;
+  --sidebar-primary-foreground: 220 40% 4%;
+  --sidebar-accent: 195 80% 50% / 0.12;
+  --sidebar-accent-foreground: 195 100% 70%;
+  --sidebar-border: 195 60% 50% / 0.15;
+  --sidebar-ring: 195 100% 50%;
+
+  /* Futuristic cyan tokens */
+  --sidebar-cyan: 195 100% 50%;
+  --sidebar-cyan-glow: 195 100% 50% / 0.3;
+  --sidebar-glass-bg: 220 40% 8% / 0.85;
+  --sidebar-glass-border: 195 60% 50% / 0.12;
+  --sidebar-section-line: 195 60% 50% / 0.2;
 
   --bg-surface-1: 0 0% 100%;
   --bg-surface-2: 0 0% 98%;
@@ -135,14 +142,21 @@
   --input: 0 0% 18%;
   --ring: 0 0% 80%;
 
-  --sidebar: 0 0% 6%;
-  --sidebar-foreground: 0 0% 95%;
-  --sidebar-primary: 0 0% 100%;
-  --sidebar-primary-foreground: 0 0% 4%;
-  --sidebar-accent: 0 0% 14%;
-  --sidebar-accent-foreground: 0 0% 95%;
-  --sidebar-border: 0 0% 18%;
-  --sidebar-ring: 0 0% 60%;
+  --sidebar: 220 40% 4%;
+  --sidebar-foreground: 210 20% 92%;
+  --sidebar-primary: 195 100% 50%;
+  --sidebar-primary-foreground: 220 40% 4%;
+  --sidebar-accent: 195 80% 50% / 0.12;
+  --sidebar-accent-foreground: 195 100% 70%;
+  --sidebar-border: 195 60% 50% / 0.15;
+  --sidebar-ring: 195 100% 50%;
+
+  /* Futuristic cyan tokens (dark) */
+  --sidebar-cyan: 195 100% 50%;
+  --sidebar-cyan-glow: 195 100% 50% / 0.3;
+  --sidebar-glass-bg: 220 40% 6% / 0.85;
+  --sidebar-glass-border: 195 60% 50% / 0.12;
+  --sidebar-section-line: 195 60% 50% / 0.25;
 
   --bg-surface-1: 0 0% 6%;
   --bg-surface-2: 0 0% 10%;

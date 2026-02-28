@@ -28,5 +28,5 @@ export const telemetryEvents = pgTable("telemetry_events", {
 
 export const insertTelemetryEventSchema = createInsertSchema(telemetryEvents);
 
-export type InsertTelemetryEvent = z.infer<typeof insertTelemetryEventSchema>;
+export type InsertTelemetryEvent = typeof telemetryEvents.$inferInsert;
 export type TelemetryEvent = typeof telemetryEvents.$inferSelect;

@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "updatedAt": "2026-02-26T18:24:01.398Z",
+  "capabilities": {
+    "escape_string_regexp": {
+      "toolName": "escape_string_regexp",
+      "capability": "escape_string_regexp",
+      "description": "Escape strings for safe RegExp usage.",
+      "entryPath": "external/self_expand/merged/escape_string_regexp/index.js",
+      "status": "active",
+      "createdAt": "2026-02-26T18:24:01.398Z",
+      "updatedAt": "2026-02-26T18:24:01.398Z",
+      "source": {
+        "provider": "github",
+        "name": "sindresorhus/escape-string-regexp",
+        "url": "https://github.com/sindresorhus/escape-string-regexp.git"
+      }
+    }
+  }
+}

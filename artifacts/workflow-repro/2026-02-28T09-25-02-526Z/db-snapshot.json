@@ -1,0 +1,530 @@
+{
+  "run": {
+    "id": "201ff418-df22-4855-839b-70fd37aa86f6",
+    "chatId": "workflow-repro-chat-2026-02-28T09-25-02-526Z",
+    "messageId": null,
+    "userId": null,
+    "status": "completed",
+    "plan": {
+      "steps": [
+        {
+          "id": "prepare",
+          "name": "Prepare context",
+          "input": {
+            "delayMs": 80
+          },
+          "toolName": "noop",
+          "executorKey": "noop",
+          "retryPolicy": {
+            "attempts": 1,
+            "backoffMs": 0
+          }
+        },
+        {
+          "id": "unstable",
+          "name": "Retry flaky step",
+          "input": {
+            "delayMs": 40,
+            "failTimes": 1
+          },
+          "toolName": "flaky",
+          "executorKey": "flaky",
+          "retryPolicy": {
+            "attempts": 3,
+            "backoffMs": 100,
+            "maxBackoffMs": 200
+          },
+          "dependencies": [
+            "prepare"
+          ]
+        },
+        {
+          "id": "publish",
+          "name": "Emit artifact",
+          "input": {
+            "name": "result.json",
+            "type": "application/json",
+            "content": "{\"ok\":true}"
+          },
+          "toolName": "artifact",
+          "executorKey": "artifact",
+          "retryPolicy": {
+            "attempts": 1,
+            "backoffMs": 0
+          },
+          "dependencies": [
+            "unstable"
+          ]
+        }
+      ],
+      "objective": "workflow run-traces deterministic reproduction",
+      "concurrency": 1
+    },
+    "artifacts": null,
+    "summary": null,
+    "error": null,
+    "totalSteps": 3,
+    "completedSteps": 3,
+    "currentStepIndex": 3,
+    "startedAt": "2026-02-28T09:25:02.647Z",
+    "completedAt": "2026-02-28T09:25:02.920Z",
+    "createdAt": "2026-02-28T09:25:02.610Z",
+    "idempotencyKey": "workflow-repro-2026-02-28T09-25-02-526Z"
+  },
+  "steps": [
+    {
+      "id": "bbffb0b1-ff1c-4572-8491-5a4d203cb1fc",
+      "runId": "201ff418-df22-4855-839b-70fd37aa86f6",
+      "stepIndex": 0,
+      "toolName": "noop",
+      "toolInput": {
+        "delayMs": 80
+      },
+      "toolOutput": {
+        "stepId": "prepare",
+        "attempt": 1,
+        "toolName": "noop"
+      },
+      "status": "succeeded",
+      "error": null,
+      "retryCount": 0,
+      "startedAt": "2026-02-28T09:25:02.652Z",
+      "completedAt": "2026-02-28T09:25:02.740Z",
+      "createdAt": "2026-02-28T09:25:02.625Z"
+    },
+    {
+      "id": "22cd3e93-1d96-4626-aa3d-a23146f73609",
+      "runId": "201ff418-df22-4855-839b-70fd37aa86f6",
+      "stepIndex": 1,
+      "toolName": "flaky",
+      "toolInput": {
+        "delayMs": 40,
+        "failTimes": 1
+      },
+      "toolOutput": {
+        "recoveredAfter": 1
+      },
+      "status": "succeeded",
+      "error": null,
+      "retryCount": 1,
+      "startedAt": "2026-02-28T09:25:02.880Z",
+      "completedAt": "2026-02-28T09:25:02.888Z",
+      "createdAt": "2026-02-28T09:25:02.625Z"
+    },
+    {
+      "id": "0ef11d3f-12f5-429d-b162-498dc0830588",
+      "runId": "201ff418-df22-4855-839b-70fd37aa86f6",
+      "stepIndex": 2,
+      "toolName": "artifact",
+      "toolInput": {
+        "name": "result.json",
+        "type": "application/json",
+        "content": "{\"ok\":true}"
+      },
+      "toolOutput": {
+        "artifactName": "result.json"
+      },
+      "status": "succeeded",
+      "error": null,
+      "retryCount": 0,
+      "startedAt": "2026-02-28T09:25:02.906Z",
+      "completedAt": "2026-02-28T09:25:02.913Z",
+      "createdAt": "2026-02-28T09:25:02.625Z"
+    }
+  ],
+  "events": [
+    {
+      "id": "6bed6bc9-20bf-42d0-a07e-b4142d5d20be",
+      "runId": "201ff418-df22-4855-839b-70fd37aa86f6",
+      "stepIndex": null,
+      "stepId": null,
+      "eventSeq": 1,
+      "correlationId": "201ff418-df22-4855-839b-70fd37aa86f6:1:run_created",
+      "traceId": "00000000000000000000000000000000",
+      "spanId": "0000000000000000",
+      "severity": "info",
+      "eventType": "run_created",
+      "payload": {
+        "status": "pending",
+        "summary": "workflow run-traces deterministic reproduction",
+        "metadata": {
+          "totalSteps": 3,
+          "concurrency": 1
+        }
+      },
+      "metadata": {
+        "span_id": "0000000000000000",
+        "severity": "info",
+        "trace_id": "00000000000000000000000000000000",
+        "event_seq": 1,
+        "totalSteps": 3,
+        "concurrency": 1,
+        "correlation_id": "201ff418-df22-4855-839b-70fd37aa86f6:1:run_created"
+      },
+      "timestamp": "2026-02-28T09:25:02.633Z"
+    },
+    {
+      "id": "2a52b726-ee80-43bc-bfa7-e33c63a571db",
+      "runId": "201ff418-df22-4855-839b-70fd37aa86f6",
+      "stepIndex": 0,
+      "stepId": "bbffb0b1-ff1c-4572-8491-5a4d203cb1fc",
+      "eventSeq": 2,
+      "correlationId": "201ff418-df22-4855-839b-70fd37aa86f6:2:step_started",
+      "traceId": "00000000000000000000000000000000",
+      "spanId": "0000000000000000",
+      "severity": "info",
+      "eventType": "step_started",
+      "payload": {
+        "status": "running",
+        "stepId": "bbffb0b1-ff1c-4572-8491-5a4d203cb1fc",
+        "metadata": {
+          "attempt": 1
+        },
+        "stepIndex": 0,
+        "tool_name": "noop"
+      },
+      "metadata": {
+        "attempt": 1,
+        "span_id": "0000000000000000",
+        "severity": "info",
+        "trace_id": "00000000000000000000000000000000",
+        "event_seq": 2,
+        "correlation_id": "201ff418-df22-4855-839b-70fd37aa86f6:2:step_started"
+      },
+      "timestamp": "2026-02-28T09:25:02.649Z"
+    },
+    {
+      "id": "6decb7fe-bbc1-4624-bec9-0e07c1cb0883",
+      "runId": "201ff418-df22-4855-839b-70fd37aa86f6",
+      "stepIndex": 0,
+      "stepId": "bbffb0b1-ff1c-4572-8491-5a4d203cb1fc",
+      "eventSeq": 3,
+      "correlationId": "201ff418-df22-4855-839b-70fd37aa86f6:3:step_completed",
+      "traceId": "00000000000000000000000000000000",
+      "spanId": "0000000000000000",
+      "severity": "info",
+      "eventType": "step_completed",
+      "payload": {
+        "status": "completed",
+        "stepId": "bbffb0b1-ff1c-4572-8491-5a4d203cb1fc",
+        "summary": "Prepare context completado",
+        "metadata": {
+          "attempt": 1,
+          "artifacts": []
+        },
+        "stepIndex": 0
+      },
+      "metadata": {
+        "attempt": 1,
+        "span_id": "0000000000000000",
+        "severity": "info",
+        "trace_id": "00000000000000000000000000000000",
+        "artifacts": [],
+        "event_seq": 3,
+        "correlation_id": "201ff418-df22-4855-839b-70fd37aa86f6:3:step_completed"
+      },
+      "timestamp": "2026-02-28T09:25:02.742Z"
+    },
+    {
+      "id": "fd3c5581-8ece-4991-bbe6-62624114fda8",
+      "runId": "201ff418-df22-4855-839b-70fd37aa86f6",
+      "stepIndex": 0,
+      "stepId": "bbffb0b1-ff1c-4572-8491-5a4d203cb1fc",
+      "eventSeq": 4,
+      "correlationId": "201ff418-df22-4855-839b-70fd37aa86f6:4:step_log",
+      "traceId": "00000000000000000000000000000000",
+      "spanId": "0000000000000000",
+      "severity": "info",
+      "eventType": "step_log",
+      "payload": {
+        "stepId": "bbffb0b1-ff1c-4572-8491-5a4d203cb1fc",
+        "metadata": {
+          "level": "info",
+          "message": "step prepare completed",
+          "timestamp": 1772270702740
+        },
+        "stepIndex": 0
+      },
+      "metadata": {
+        "level": "info",
+        "message": "step prepare completed",
+        "span_id": "0000000000000000",
+        "severity": "info",
+        "trace_id": "00000000000000000000000000000000",
+        "event_seq": 4,
+        "timestamp": 1772270702740,
+        "correlation_id": "201ff418-df22-4855-839b-70fd37aa86f6:4:step_log"
+      },
+      "timestamp": "2026-02-28T09:25:02.746Z"
+    },
+    {
+      "id": "ddd151eb-5366-403d-a4c5-54d7cf236ad7",
+      "runId": "201ff418-df22-4855-839b-70fd37aa86f6",
+      "stepIndex": 1,
+      "stepId": "22cd3e93-1d96-4626-aa3d-a23146f73609",
+      "eventSeq": 5,
+      "correlationId": "201ff418-df22-4855-839b-70fd37aa86f6:5:step_started",
+      "traceId": "00000000000000000000000000000000",
+      "spanId": "0000000000000000",
+      "severity": "info",
+      "eventType": "step_started",
+      "payload": {
+        "status": "running",
+        "stepId": "22cd3e93-1d96-4626-aa3d-a23146f73609",
+        "metadata": {
+          "attempt": 1
+        },
+        "stepIndex": 1,
+        "tool_name": "flaky"
+      },
+      "metadata": {
+        "attempt": 1,
+        "span_id": "0000000000000000",
+        "severity": "info",
+        "trace_id": "00000000000000000000000000000000",
+        "event_seq": 5,
+        "correlation_id": "201ff418-df22-4855-839b-70fd37aa86f6:5:step_started"
+      },
+      "timestamp": "2026-02-28T09:25:02.754Z"
+    },
+    {
+      "id": "54dbc37d-ecf4-491d-bf69-0594506b1a44",
+      "runId": "201ff418-df22-4855-839b-70fd37aa86f6",
+      "stepIndex": 1,
+      "stepId": "22cd3e93-1d96-4626-aa3d-a23146f73609",
+      "eventSeq": 6,
+      "correlationId": "201ff418-df22-4855-839b-70fd37aa86f6:6:step_retried",
+      "traceId": "00000000000000000000000000000000",
+      "spanId": "0000000000000000",
+      "severity": "warning",
+      "eventType": "step_retried",
+      "payload": {
+        "error": {
+          "message": "flaky failure 1/1",
+          "retryable": true
+        },
+        "status": "retrying",
+        "stepId": "22cd3e93-1d96-4626-aa3d-a23146f73609",
+        "summary": "flaky failure 1/1",
+        "metadata": {
+          "attempt": 1,
+          "retryable": true
+        },
+        "stepIndex": 1
+      },
+      "metadata": {
+        "attempt": 1,
+        "span_id": "0000000000000000",
+        "severity": "warning",
+        "trace_id": "00000000000000000000000000000000",
+        "event_seq": 6,
+        "retryable": true,
+        "correlation_id": "201ff418-df22-4855-839b-70fd37aa86f6:6:step_retried"
+      },
+      "timestamp": "2026-02-28T09:25:02.766Z"
+    },
+    {
+      "id": "4921a152-3cf3-4b7d-ae4d-10ff4ce49ea9",
+      "runId": "201ff418-df22-4855-839b-70fd37aa86f6",
+      "stepIndex": 1,
+      "stepId": "22cd3e93-1d96-4626-aa3d-a23146f73609",
+      "eventSeq": 7,
+      "correlationId": "201ff418-df22-4855-839b-70fd37aa86f6:7:step_started",
+      "traceId": "00000000000000000000000000000000",
+      "spanId": "0000000000000000",
+      "severity": "info",
+      "eventType": "step_started",
+      "payload": {
+        "status": "running",
+        "stepId": "22cd3e93-1d96-4626-aa3d-a23146f73609",
+        "metadata": {
+          "attempt": 2
+        },
+        "stepIndex": 1,
+        "tool_name": "flaky"
+      },
+      "metadata": {
+        "attempt": 2,
+        "span_id": "0000000000000000",
+        "severity": "info",
+        "trace_id": "00000000000000000000000000000000",
+        "event_seq": 7,
+        "correlation_id": "201ff418-df22-4855-839b-70fd37aa86f6:7:step_started"
+      },
+      "timestamp": "2026-02-28T09:25:02.871Z"
+    },
+    {
+      "id": "87155f8e-4adf-43c5-94cb-3f8303a75a8d",
+      "runId": "201ff418-df22-4855-839b-70fd37aa86f6",
+      "stepIndex": 1,
+      "stepId": "22cd3e93-1d96-4626-aa3d-a23146f73609",
+      "eventSeq": 8,
+      "correlationId": "201ff418-df22-4855-839b-70fd37aa86f6:8:step_completed",
+      "traceId": "00000000000000000000000000000000",
+      "spanId": "0000000000000000",
+      "severity": "info",
+      "eventType": "step_completed",
+      "payload": {
+        "status": "completed",
+        "stepId": "22cd3e93-1d96-4626-aa3d-a23146f73609",
+        "summary": "Retry flaky step completado",
+        "metadata": {
+          "attempt": 2,
+          "artifacts": []
+        },
+        "stepIndex": 1
+      },
+      "metadata": {
+        "attempt": 2,
+        "span_id": "0000000000000000",
+        "severity": "info",
+        "trace_id": "00000000000000000000000000000000",
+        "artifacts": [],
+        "event_seq": 8,
+        "correlation_id": "201ff418-df22-4855-839b-70fd37aa86f6:8:step_completed"
+      },
+      "timestamp": "2026-02-28T09:25:02.889Z"
+    },
+    {
+      "id": "ae3631ab-1a17-4f66-a3ad-c845b16aa021",
+      "runId": "201ff418-df22-4855-839b-70fd37aa86f6",
+      "stepIndex": 2,
+      "stepId": "0ef11d3f-12f5-429d-b162-498dc0830588",
+      "eventSeq": 9,
+      "correlationId": "201ff418-df22-4855-839b-70fd37aa86f6:9:step_started",
+      "traceId": "00000000000000000000000000000000",
+      "spanId": "0000000000000000",
+      "severity": "info",
+      "eventType": "step_started",
+      "payload": {
+        "status": "running",
+        "stepId": "0ef11d3f-12f5-429d-b162-498dc0830588",
+        "metadata": {
+          "attempt": 1
+        },
+        "stepIndex": 2,
+        "tool_name": "artifact"
+      },
+      "metadata": {
+        "attempt": 1,
+        "span_id": "0000000000000000",
+        "severity": "info",
+        "trace_id": "00000000000000000000000000000000",
+        "event_seq": 9,
+        "correlation_id": "201ff418-df22-4855-839b-70fd37aa86f6:9:step_started"
+      },
+      "timestamp": "2026-02-28T09:25:02.894Z"
+    },
+    {
+      "id": "71b76c3a-9110-4246-9977-df4df8eef2e5",
+      "runId": "201ff418-df22-4855-839b-70fd37aa86f6",
+      "stepIndex": 2,
+      "stepId": "0ef11d3f-12f5-429d-b162-498dc0830588",
+      "eventSeq": 10,
+      "correlationId": "201ff418-df22-4855-839b-70fd37aa86f6:10:step_completed",
+      "traceId": "00000000000000000000000000000000",
+      "spanId": "0000000000000000",
+      "severity": "info",
+      "eventType": "step_completed",
+      "payload": {
+        "status": "completed",
+        "stepId": "0ef11d3f-12f5-429d-b162-498dc0830588",
+        "summary": "Emit artifact completado",
+        "metadata": {
+          "attempt": 1,
+          "artifacts": [
+            {
+              "key": "publish:result.json",
+              "name": "result.json",
+              "type": "application/json",
+              "payload": {
+                "attempt": 1,
+                "content": "{\"ok\":true}"
+              },
+              "metadata": {
+                "tool": "artifact",
+                "stepId": "publish"
+              }
+            }
+          ]
+        },
+        "stepIndex": 2
+      },
+      "metadata": {
+        "attempt": 1,
+        "span_id": "0000000000000000",
+        "severity": "info",
+        "trace_id": "00000000000000000000000000000000",
+        "artifacts": [
+          {
+            "key": "publish:result.json",
+            "name": "result.json",
+            "type": "application/json",
+            "payload": {
+              "attempt": 1,
+              "content": "{\"ok\":true}"
+            },
+            "metadata": {
+              "tool": "artifact",
+              "stepId": "publish"
+            }
+          }
+        ],
+        "event_seq": 10,
+        "correlation_id": "201ff418-df22-4855-839b-70fd37aa86f6:10:step_completed"
+      },
+      "timestamp": "2026-02-28T09:25:02.916Z"
+    },
+    {
+      "id": "65bc256c-ae58-4d7a-af3e-3743dc19fe26",
+      "runId": "201ff418-df22-4855-839b-70fd37aa86f6",
+      "stepIndex": null,
+      "stepId": null,
+      "eventSeq": 11,
+      "correlationId": "201ff418-df22-4855-839b-70fd37aa86f6:11:run_completed",
+      "traceId": "00000000000000000000000000000000",
+      "spanId": "0000000000000000",
+      "severity": "info",
+      "eventType": "run_completed",
+      "payload": {
+        "status": "completed",
+        "metadata": {
+          "totalSteps": 3,
+          "completedSteps": 3
+        }
+      },
+      "metadata": {
+        "span_id": "0000000000000000",
+        "severity": "info",
+        "trace_id": "00000000000000000000000000000000",
+        "event_seq": 11,
+        "totalSteps": 3,
+        "completedSteps": 3,
+        "correlation_id": "201ff418-df22-4855-839b-70fd37aa86f6:11:run_completed"
+      },
+      "timestamp": "2026-02-28T09:25:02.930Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "0d1d88ee-2ca6-467f-818d-d991685bfbd9",
+      "runId": "201ff418-df22-4855-839b-70fd37aa86f6",
+      "stepId": "0ef11d3f-12f5-429d-b162-498dc0830588",
+      "stepIndex": 2,
+      "artifactKey": "publish:result.json",
+      "type": "application/json",
+      "name": "result.json",
+      "url": null,
+      "payload": {
+        "attempt": 1,
+        "content": "{\"ok\":true}"
+      },
+      "metadata": {
+        "tool": "artifact",
+        "stepId": "publish"
+      },
+      "createdAt": "2026-02-28T09:25:02.914Z",
+      "updatedAt": "2026-02-28T09:25:02.914Z"
+    }
+  ]
+}

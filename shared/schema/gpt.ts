@@ -17,7 +17,7 @@ export const gptCategories = pgTable("gpt_categories", {
 
 export const insertGptCategorySchema = createInsertSchema(gptCategories);
 
-export type InsertGptCategory = z.infer<typeof insertGptCategorySchema>;
+export type InsertGptCategory = typeof gptCategorys.$inferInsert;
 export type GptCategory = typeof gptCategories.$inferSelect;
 
 // GPT Visibility Schema
@@ -32,6 +32,9 @@ export const gptCapabilitiesSchema = z.object({
     fileUpload: z.boolean().default(false),
     dataAnalysis: z.boolean().default(false),
     canvas: z.boolean().default(false), // New canvas feature
+    wordCreation: z.boolean().default(false),
+    excelCreation: z.boolean().default(false),
+    pptCreation: z.boolean().default(false),
 });
 
 // GPT Runtime Policy Schema
@@ -85,6 +88,9 @@ export const gptDefinitionSchema = z.object({
         fileUpload: false,
         dataAnalysis: false,
         canvas: false,
+        wordCreation: false,
+        excelCreation: false,
+        pptCreation: false,
     }),
     knowledgeSources: z.array(gptKnowledgeSourceSchema).default([]),
     actions: z.array(z.string()).default([]),
@@ -138,7 +144,7 @@ export const insertGptSchema = createInsertSchema(gpts).extend({
     definition: gptDefinitionSchema.optional(),
 });
 
-export type InsertGpt = z.infer<typeof insertGptSchema>;
+export type InsertGpt = typeof gpts.$inferInsert;
 export type Gpt = typeof gpts.$inferSelect;
 
 // GPT Versions for version control
@@ -160,7 +166,7 @@ export const gptVersions = pgTable("gpt_versions", {
 
 export const insertGptVersionSchema = createInsertSchema(gptVersions);
 
-export type InsertGptVersion = z.infer<typeof insertGptVersionSchema>;
+export type InsertGptVersion = typeof gptVersions.$inferInsert;
 export type GptVersion = typeof gptVersions.$inferSelect;
 
 // GPT Knowledge Base - files and documents attached to GPTs
@@ -186,7 +192,7 @@ export const gptKnowledge = pgTable("gpt_knowledge", {
 
 export const insertGptKnowledgeSchema = createInsertSchema(gptKnowledge);
 
-export type InsertGptKnowledge = z.infer<typeof insertGptKnowledgeSchema>;
+export type InsertGptKnowledge = typeof gptKnowledges.$inferInsert;
 export type GptKnowledge = typeof gptKnowledge.$inferSelect;
 
 // GPT Actions - custom API integrations for GPTs
@@ -269,7 +275,7 @@ export const gptActionCreateSchema = insertGptActionSchema.extend({
 
 export const gptActionUpdateSchema = insertGptActionSchema.partial().omit({
     gptId: true,
-}).strict();
+} as any).strict();
 
 export const gptActionUseSchema = z.object({
     conversationId: z.string().trim().min(1).max(120).regex(/^[a-zA-Z0-9._-]+$/),
@@ -286,7 +292,7 @@ export const gptActionUseSchema = z.object({
 export type GptActionCreateInput = z.infer<typeof gptActionCreateSchema>;
 export type GptActionUpdateInput = z.infer<typeof gptActionUpdateSchema>;
 
-export type InsertGptAction = z.infer<typeof insertGptActionSchema>;
+export type InsertGptAction = typeof gptActions.$inferInsert;
 export type GptAction = typeof gptActions.$inferSelect;
 
 // Sidebar Pinned GPTs - user preferences for GPTs shown in sidebar
@@ -303,7 +309,7 @@ export const sidebarPinnedGpts = pgTable("sidebar_pinned_gpts", {
 
 export const insertSidebarPinnedGptSchema = createInsertSchema(sidebarPinnedGpts);
 
-export type InsertSidebarPinnedGpt = z.infer<typeof insertSidebarPinnedGptSchema>;
+export type InsertSidebarPinnedGpt = typeof sidebarPinnedGpts.$inferInsert;
 export type SidebarPinnedGpt = typeof sidebarPinnedGpts.$inferSelect;
 
 // GPT Sessions - Immutable session contracts with frozen config
@@ -332,5 +338,5 @@ export const insertGptSessionSchema = createInsertSchema(gptSessions).extend({
     knowledgeContextIds: z.array(z.string()).optional(),
 });
 
-export type InsertGptSession = z.infer<typeof insertGptSessionSchema>;
+export type InsertGptSession = typeof gptSessions.$inferInsert;
 export type GptSession = typeof gptSessions.$inferSelect;

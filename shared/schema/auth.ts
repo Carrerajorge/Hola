@@ -143,7 +143,7 @@ export const insertUserSchema = createInsertSchema(users).pick({
     password: true,
 });
 
-export type InsertUser = z.infer<typeof insertUserSchema>;
+export type InsertUser = typeof users.$inferInsert;
 export type User = typeof users.$inferSelect;
 
 // User Settings table - one settings record per user
@@ -207,7 +207,7 @@ export const insertUserSettingsSchema = createInsertSchema(userSettings).omit({
     privacySettings: privacySettingsSchema.optional(),
 });
 
-export type InsertUserSettings = z.infer<typeof insertUserSettingsSchema>;
+export type InsertUserSettings = typeof userSettingss.$inferInsert;
 export type UserSettings = typeof userSettings.$inferSelect;
 
 // Consent Logs - Audit trail for privacy consent changes

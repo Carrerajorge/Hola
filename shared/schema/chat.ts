@@ -40,7 +40,7 @@ export const chats = pgTable("chats", {
 
 export const insertChatSchema = createInsertSchema(chats);
 
-export type InsertChat = z.infer<typeof insertChatSchema>;
+export type InsertChat = typeof chats.$inferInsert;
 export type Chat = typeof chats.$inferSelect;
 
 export const chatMessages = pgTable("chat_messages", {
@@ -78,7 +78,7 @@ export const chatMessages = pgTable("chat_messages", {
 
 export const insertChatMessageSchema = createInsertSchema(chatMessages);
 
-export type InsertChatMessage = z.infer<typeof insertChatMessageSchema>;
+export type InsertChatMessage = typeof chatMessages.$inferInsert;
 export type ChatMessage = typeof chatMessages.$inferSelect;
 
 // Chat Runs - Each user submission creates an idempotent "run"
@@ -105,7 +105,7 @@ export const chatRuns = pgTable("chat_runs", {
 
 export const insertChatRunSchema = createInsertSchema(chatRuns);
 
-export type InsertChatRun = z.infer<typeof insertChatRunSchema>;
+export type InsertChatRun = typeof chatRuns.$inferInsert;
 export type ChatRun = typeof chatRuns.$inferSelect;
 
 // Tool Invocations - Track tool calls within a run for idempotency
@@ -129,7 +129,7 @@ export const toolInvocations = pgTable("tool_invocations", {
 
 export const insertToolInvocationSchema = createInsertSchema(toolInvocations);
 
-export type InsertToolInvocation = z.infer<typeof insertToolInvocationSchema>;
+export type InsertToolInvocation = typeof toolInvocations.$inferInsert;
 export type ToolInvocation = typeof toolInvocations.$inferSelect;
 
 // Chat sharing - participantes con acceso a chats específicos
@@ -151,7 +151,7 @@ export const chatShares = pgTable("chat_shares", {
 
 export const insertChatShareSchema = createInsertSchema(chatShares);
 
-export type InsertChatShare = z.infer<typeof insertChatShareSchema>;
+export type InsertChatShare = typeof chatShares.$inferInsert;
 export type ChatShare = typeof chatShares.$inferSelect;
 
 // Chat sharing to workspace groups - grants access to all current/future members of a group
@@ -174,7 +174,7 @@ export const chatGroupShares = pgTable(
 
 export const insertChatGroupShareSchema = createInsertSchema(chatGroupShares);
 
-export type InsertChatGroupShare = z.infer<typeof insertChatGroupShareSchema>;
+export type InsertChatGroupShare = typeof chatGroupShares.$inferInsert;
 export type ChatGroupShare = typeof chatGroupShares.$inferSelect;
 
 // Chat Participants for sharing chats
@@ -194,7 +194,7 @@ export const chatParticipants = pgTable("chat_participants", {
 
 export const insertChatParticipantSchema = createInsertSchema(chatParticipants);
 
-export type InsertChatParticipant = z.infer<typeof insertChatParticipantSchema>;
+export type InsertChatParticipant = typeof chatParticipants.$inferInsert;
 export type ChatParticipant = typeof chatParticipants.$inferSelect;
 
 // Response Quality Metrics
@@ -213,7 +213,7 @@ export const responseQualityMetrics = pgTable("response_quality_metrics", {
 
 export const insertResponseQualityMetricSchema = createInsertSchema(responseQualityMetrics);
 
-export type InsertResponseQualityMetric = z.infer<typeof insertResponseQualityMetricSchema>;
+export type InsertResponseQualityMetric = typeof responseQualityMetrics.$inferInsert;
 export type ResponseQualityMetric = typeof responseQualityMetrics.$inferSelect;
 
 // Offline Message Queue
@@ -233,7 +233,7 @@ export const offlineMessageQueue = pgTable("offline_message_queue", {
 
 export const insertOfflineMessageQueueSchema = createInsertSchema(offlineMessageQueue);
 
-export type InsertOfflineMessageQueue = z.infer<typeof insertOfflineMessageQueueSchema>;
+export type InsertOfflineMessageQueue = typeof offlineMessageQueues.$inferInsert;
 export type OfflineMessageQueue = typeof offlineMessageQueue.$inferSelect;
 
 // ── Prompt Integrity Audit Trail ───────────────────────────
@@ -261,7 +261,7 @@ export const promptIntegrityChecks = pgTable("prompt_integrity_checks", {
 ]);
 
 export const insertPromptIntegrityCheckSchema = createInsertSchema(promptIntegrityChecks);
-export type InsertPromptIntegrityCheck = z.infer<typeof insertPromptIntegrityCheckSchema>;
+export type InsertPromptIntegrityCheck = typeof promptIntegrityChecks.$inferInsert;
 export type PromptIntegrityCheck = typeof promptIntegrityChecks.$inferSelect;
 
 /** Stores PromptUnderstanding analysis results for each processed prompt. */
@@ -287,7 +287,7 @@ export const promptAnalysisResults = pgTable("prompt_analysis_results", {
 ]);
 
 export const insertPromptAnalysisResultSchema = createInsertSchema(promptAnalysisResults);
-export type InsertPromptAnalysisResult = z.infer<typeof insertPromptAnalysisResultSchema>;
+export type InsertPromptAnalysisResult = typeof promptAnalysisResults.$inferInsert;
 export type PromptAnalysisResult = typeof promptAnalysisResults.$inferSelect;
 
 /** Logs every transformation applied to a prompt through the processing pipeline. */

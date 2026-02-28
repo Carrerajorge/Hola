@@ -1,0 +1,10 @@
+{
+  "startedAt": "2026-02-28T09:29:01.967Z",
+  "postStartedAt": "2026-02-28T09:29:02.030Z",
+  "postCompletedAt": "2026-02-28T09:29:02.082Z",
+  "firstEventAt": "2026-02-28T09:29:02.113Z",
+  "terminalEventAt": "2026-02-28T09:29:02.403Z",
+  "reconnectStartedAt": "2026-02-28T09:29:02.406Z",
+  "reconnectCompletedAt": "2026-02-28T09:29:10.409Z",
+  "finishedAt": "2026-02-28T09:29:10.431Z"
+}

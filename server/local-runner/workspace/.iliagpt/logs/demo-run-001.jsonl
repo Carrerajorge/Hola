@@ -1,0 +1,7 @@
+{"ts":"2026-02-28T08:55:54.022Z","level":"info","event":"run.started","runId":"demo-run-001","workspace":"/Users/luis/Desktop/Hola/server/local-runner/workspace","dryRun":false,"stream":true,"planPath":"/Users/luis/Desktop/Hola/server/local-runner/examples/plan.min.json"}
+{"ts":"2026-02-28T08:55:54.026Z","level":"info","event":"step.completed","runId":"demo-run-001","stepId":"write-hello","status":"ok"}
+{"ts":"2026-02-28T08:55:54.027Z","level":"info","event":"step.completed","runId":"demo-run-001","stepId":"list-notes","status":"ok"}
+{"ts":"2026-02-28T08:55:54.028Z","level":"info","event":"step.completed","runId":"demo-run-001","stepId":"read-hello","status":"ok"}
+{"ts":"2026-02-28T08:55:54.040Z","level":"info","event":"step.completed","runId":"demo-run-001","stepId":"pwd","status":"ok"}
+{"ts":"2026-02-28T08:55:54.043Z","level":"info","event":"step.completed","runId":"demo-run-001","stepId":"cache-hello","status":"ok"}
+{"ts":"2026-02-28T08:55:54.044Z","level":"info","event":"run.finished","runId":"demo-run-001","ok":5,"errors":0,"dryRun":0,"total":5,"logPath":"/Users/luis/Desktop/Hola/server/local-runner/workspace/.iliagpt/logs/demo-run-001.jsonl"}

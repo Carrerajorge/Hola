@@ -1,0 +1,12 @@
+
+> iliagpt@2.1.0 dev:client
+> vite dev --port 5050
+
+
+  VITE v7.3.1  ready in 232 ms
+
+  ➜  Local:   http://localhost:5050/
+  ➜  Network: http://192.168.1.37:5050/
+  ➜  Network: http://169.254.153.183:5050/
+  ➜  Network: http://192.168.64.1:5050/
+  ➜  Network: http://169.254.151.94:5050/

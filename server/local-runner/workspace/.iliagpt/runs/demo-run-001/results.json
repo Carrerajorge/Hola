@@ -1,0 +1,78 @@
+{
+  "steps": {
+    "write-hello": {
+      "result": {
+        "stepId": "write-hello",
+        "status": "ok",
+        "output": {
+          "path": "notes/hello.txt",
+          "bytes": 22
+        },
+        "meta": {
+          "attempt": 1
+        }
+      },
+      "updatedAt": "2026-02-28T08:55:54.026Z"
+    },
+    "list-notes": {
+      "result": {
+        "stepId": "list-notes",
+        "status": "ok",
+        "output": [
+          {
+            "name": "hello.txt",
+            "type": "file"
+          }
+        ],
+        "meta": {
+          "attempt": 1
+        }
+      },
+      "updatedAt": "2026-02-28T08:55:54.027Z"
+    },
+    "read-hello": {
+      "result": {
+        "stepId": "read-hello",
+        "status": "ok",
+        "output": "Hola desde iliagpt-run",
+        "meta": {
+          "bytes": 22,
+          "truncated": false,
+          "attempt": 1
+        }
+      },
+      "updatedAt": "2026-02-28T08:55:54.032Z"
+    },
+    "pwd": {
+      "result": {
+        "stepId": "pwd",
+        "status": "ok",
+        "output": "/Users/luis/Desktop/Hola/server/local-runner/workspace\n",
+        "meta": {
+          "code": 0,
+          "timedOut": false,
+          "truncated": false,
+          "timeoutMs": 30000,
+          "maxOutputBytes": 65536,
+          "attempt": 1
+        }
+      },
+      "updatedAt": "2026-02-28T08:55:54.041Z"
+    },
+    "cache-hello": {
+      "result": {
+        "stepId": "cache-hello",
+        "status": "ok",
+        "output": {
+          "cachedPath": "/Users/luis/Desktop/Hola/server/local-runner/workspace/.iliagpt/artifacts/hello.txt",
+          "uploaded": false,
+          "url": null
+        },
+        "meta": {
+          "attempt": 1
+        }
+      },
+      "updatedAt": "2026-02-28T08:55:54.043Z"
+    }
+  }
+}

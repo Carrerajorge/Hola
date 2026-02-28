@@ -1,0 +1,9 @@
+
+> iliagpt@2.1.0 start
+> node scripts/with-env.cjs NODE_ENV=production -- node dist/index.cjs
+
+[Wrapper] Starting application...
+[Wrapper] Loading ESM module from: /Users/luis/Desktop/Hola/dist/index.mjs
+[dotenv@17.3.1] injecting env (51) from .env -- tip: ⚡️ secrets for agents: https://dotenvx.com/as2
+✅ LLM Providers configured: xAI, Gemini, OpenAI
+[Router] Initialized with threshold=0.65, dynamicEscalation=true

@@ -47,7 +47,7 @@ export const channelConversations = pgTable(
 );
 
 export const insertChannelConversationSchema = createInsertSchema(channelConversations);
-export type InsertChannelConversation = z.infer<typeof insertChannelConversationSchema>;
+export type InsertChannelConversation = typeof channelConversations.$inferInsert;
 export type ChannelConversation = typeof channelConversations.$inferSelect;
 
 // One-time pairing codes used to link an external channel identity to a user account.
@@ -75,6 +75,6 @@ export const channelPairingCodes = pgTable(
 );
 
 export const insertChannelPairingCodeSchema = createInsertSchema(channelPairingCodes);
-export type InsertChannelPairingCode = z.infer<typeof insertChannelPairingCodeSchema>;
+export type InsertChannelPairingCode = typeof channelPairingCodes.$inferInsert;
 export type ChannelPairingCode = typeof channelPairingCodes.$inferSelect;
 

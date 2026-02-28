@@ -156,6 +156,322 @@
   border-right: 1px solid hsl(var(--sidebar-border));
 }
 
+/* ========================================
+   FUTURISTIC GLASSMORPHISM SIDEBAR
+======================================== */
+
+.futuristic-sidebar {
+  background: hsl(var(--sidebar-glass-bg));
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border-right: 1px solid hsl(var(--sidebar-glass-border));
+  box-shadow:
+    4px 0 32px -8px hsl(var(--sidebar-cyan-glow)),
+    inset 0 0 80px -40px hsl(var(--sidebar-cyan) / 0.03);
+}
+
+/* Animated top edge glow */
+.futuristic-sidebar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    hsl(var(--sidebar-cyan) / 0.4) 20%,
+    hsl(var(--sidebar-cyan) / 0.8) 50%,
+    hsl(var(--sidebar-cyan) / 0.4) 80%,
+    transparent 100%
+  );
+  z-index: 10;
+}
+
+/* Section label with gradient line */
+.futuristic-section-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: hsl(var(--sidebar-cyan) / 0.7);
+}
+
+.futuristic-section-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    hsl(var(--sidebar-section-line)),
+    transparent
+  );
+}
+
+/* Glass nav item */
+.futuristic-nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: hsl(var(--sidebar-foreground));
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.futuristic-nav-item:hover {
+  background: hsl(var(--sidebar-cyan) / 0.08);
+  border-color: hsl(var(--sidebar-cyan) / 0.15);
+  color: hsl(var(--sidebar-cyan));
+  transform: translateX(2px);
+}
+
+.futuristic-nav-item:hover .futuristic-nav-icon {
+  color: hsl(var(--sidebar-cyan));
+  filter: drop-shadow(0 0 6px hsl(var(--sidebar-cyan) / 0.5));
+}
+
+.futuristic-nav-item.active {
+  background: hsl(var(--sidebar-cyan) / 0.1);
+  border-color: hsl(var(--sidebar-cyan) / 0.25);
+  border-left: 2px solid hsl(var(--sidebar-cyan));
+  color: hsl(var(--sidebar-cyan));
+}
+
+/* Nav item icon */
+.futuristic-nav-icon {
+  width: 18px;
+  height: 18px;
+  color: hsl(var(--sidebar-foreground) / 0.6);
+  transition: all 0.3s ease;
+  flex-shrink: 0;
+}
+
+/* Glass button (New Chat, Search) */
+.futuristic-glass-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 16px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: hsl(var(--sidebar-cyan));
+  background: hsl(var(--sidebar-cyan) / 0.06);
+  border: 1px solid hsl(var(--sidebar-cyan) / 0.2);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.futuristic-glass-btn:hover {
+  background: hsl(var(--sidebar-cyan) / 0.12);
+  border-color: hsl(var(--sidebar-cyan) / 0.4);
+  box-shadow: 0 0 20px -4px hsl(var(--sidebar-cyan) / 0.3);
+  transform: translateY(-1px);
+}
+
+/* Animated border for new chat button */
+.futuristic-glass-btn-animated {
+  position: relative;
+  overflow: hidden;
+}
+
+.futuristic-glass-btn-animated::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 12px;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--border-angle, 0deg),
+    transparent 40%,
+    hsl(var(--sidebar-cyan) / 0.6) 50%,
+    transparent 60%
+  );
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  -webkit-mask-composite: xor;
+  animation: rotate-border 4s linear infinite;
+}
+
+@keyframes rotate-border {
+  to { --border-angle: 360deg; }
+}
+
+@property --border-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+/* Glass search input */
+.futuristic-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  color: hsl(var(--sidebar-foreground) / 0.5);
+  background: hsl(var(--sidebar-cyan) / 0.04);
+  border: 1px solid hsl(var(--sidebar-glass-border));
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+.futuristic-search:hover {
+  border-color: hsl(var(--sidebar-cyan) / 0.25);
+  background: hsl(var(--sidebar-cyan) / 0.06);
+  color: hsl(var(--sidebar-foreground) / 0.7);
+}
+
+.futuristic-search:focus-within {
+  border-color: hsl(var(--sidebar-cyan) / 0.4);
+  box-shadow: 0 0 12px -4px hsl(var(--sidebar-cyan) / 0.2);
+}
+
+/* Glass chat item */
+.futuristic-chat-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  color: hsl(var(--sidebar-foreground) / 0.8);
+  transition: all 0.25s ease;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.futuristic-chat-item:hover {
+  background: hsl(var(--sidebar-cyan) / 0.06);
+  border-color: hsl(var(--sidebar-cyan) / 0.1);
+  color: hsl(var(--sidebar-foreground));
+}
+
+.futuristic-chat-item.active {
+  background: hsl(var(--sidebar-cyan) / 0.1);
+  border-color: hsl(var(--sidebar-cyan) / 0.2);
+  border-left: 2px solid hsl(var(--sidebar-cyan));
+  color: hsl(var(--sidebar-cyan));
+}
+
+/* Futuristic scrollbar */
+.futuristic-sidebar ::-webkit-scrollbar {
+  width: 4px;
+}
+
+.futuristic-sidebar ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.futuristic-sidebar ::-webkit-scrollbar-thumb {
+  background: hsl(var(--sidebar-cyan) / 0.2);
+  border-radius: 4px;
+}
+
+.futuristic-sidebar ::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--sidebar-cyan) / 0.4);
+}
+
+/* Futuristic header */
+.futuristic-header {
+  border-bottom: 1px solid hsl(var(--sidebar-glass-border));
+  background: linear-gradient(
+    180deg,
+    hsl(var(--sidebar-cyan) / 0.04) 0%,
+    transparent 100%
+  );
+}
+
+/* Futuristic user footer */
+.futuristic-footer {
+  border-top: 1px solid hsl(var(--sidebar-glass-border));
+  background: linear-gradient(
+    0deg,
+    hsl(var(--sidebar-cyan) / 0.03) 0%,
+    transparent 100%
+  );
+}
+
+/* Logo glow effect */
+.futuristic-logo-glow {
+  filter: drop-shadow(0 0 8px hsl(var(--sidebar-cyan) / 0.4));
+  transition: filter 0.3s ease;
+}
+
+.futuristic-logo-glow:hover {
+  filter: drop-shadow(0 0 12px hsl(var(--sidebar-cyan) / 0.6));
+}
+
+/* Separator with gradient */
+.futuristic-separator {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    hsl(var(--sidebar-section-line)),
+    transparent
+  );
+  margin: 8px 16px;
+}
+
+/* Kbd shortcut tag */
+.futuristic-kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-family: monospace;
+  color: hsl(var(--sidebar-cyan) / 0.6);
+  background: hsl(var(--sidebar-cyan) / 0.06);
+  border: 1px solid hsl(var(--sidebar-cyan) / 0.15);
+}
+
+/* Status dot with glow */
+.futuristic-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: 0 0 8px currentColor;
+}
+
+/* WhatsApp status indicator variants */
+.futuristic-status-dot.connected {
+  background-color: hsl(160, 100%, 50%);
+  box-shadow: 0 0 8px hsl(160, 100%, 50% / 0.5);
+}
+
+.futuristic-status-dot.connecting {
+  background-color: hsl(45, 100%, 55%);
+  box-shadow: 0 0 8px hsl(45, 100%, 55% / 0.5);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.futuristic-status-dot.disconnected {
+  background-color: hsl(0, 100%, 60%);
+  box-shadow: 0 0 8px hsl(0, 100%, 60% / 0.5);
+}
+
 /* Hidden Blob Elements */
 .liquid-blob {
   display: none;

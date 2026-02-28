@@ -1,0 +1,4 @@
+/Users/luis/Desktop/Hola_wt_baseline/server/agent/__tests__/memory.test.ts
+/Users/luis/Desktop/Hola_wt_baseline/server/agent/capabilities/tests/e2e_capabilities.test.ts
+/Users/luis/Desktop/Hola_wt_baseline/tests/unit/agent-confirmation-flow.test.ts
+/Users/luis/Desktop/Hola_wt_baseline/tests/unit/agent-trace-events.test.ts

@@ -1,20 +1,15 @@
 import { EventEmitter } from "events";
 import type { Response } from "express";
-import { randomUUID } from "crypto";
-
 import { createTraceEvent, type TraceEvent, type TraceEventType } from "@shared/schema";
 import { db } from "../db";
 import { agentModeEvents } from "@shared/schema";
+import { randomUUID } from "crypto";
 
 interface SSEClient {
   id: string;
   res: Response;
   runId: string;
   connectedAt: number;
-}
-
-interface EmitOptions {
-  persist?: boolean;
 }
 
 class AgentEventBus extends EventEmitter {
@@ -25,11 +20,12 @@ class AgentEventBus extends EventEmitter {
 
   constructor() {
     super();
-    this.setMaxListeners(200);
+    this.setMaxListeners(100);
     this.startHeartbeat();
   }
 
-  public override on(event: "trace", listener: (event: TraceEvent) => void): this;
+  // Type-safe event listener overloads
+  public override on(event: 'trace', listener: (event: TraceEvent) => void): this;
   public override on(event: TraceEventType, listener: (event: TraceEvent) => void): this;
   public override on(event: string | symbol, listener: (...args: any[]) => void): this {
     return super.on(event, listener);
@@ -39,23 +35,24 @@ class AgentEventBus extends EventEmitter {
     this.heartbeatInterval = setInterval(() => {
       for (const [clientId, client] of this.clients) {
         try {
-          const heartbeat = createTraceEvent("heartbeat", client.runId);
+          const heartbeat = createTraceEvent('heartbeat', client.runId);
           this.sendToClient(client, heartbeat);
-        } catch {
+        } catch (error) {
+          console.log(`[EventBus] Removing dead client ${clientId}`);
           this.removeClient(clientId);
         }
       }
-    }, 30_000);
+    }, 30000);
   }
 
   subscribe(runId: string, res: Response): string {
     const clientId = randomUUID();
 
     res.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
     });
 
     const client: SSEClient = {
@@ -66,13 +63,14 @@ class AgentEventBus extends EventEmitter {
     };
 
     this.clients.set(clientId, client);
+    console.log(`[EventBus] Client ${clientId} subscribed to run ${runId}`);
 
     const history = this.eventHistory.get(runId) || [];
     for (const event of history) {
       this.sendToClient(client, event);
     }
 
-    res.on("close", () => {
+    res.on('close', () => {
       this.removeClient(clientId);
     });
 
@@ -83,33 +81,26 @@ class AgentEventBus extends EventEmitter {
     const client = this.clients.get(clientId);
     if (client) {
       this.clients.delete(clientId);
+      console.log(`[EventBus] Client ${clientId} disconnected from run ${client.runId}`);
     }
   }
 
   private sendToClient(client: SSEClient, event: TraceEvent): void {
-    const data = JSON.stringify(event);
-    const eventId = typeof event.event_seq === "number" ? event.event_seq : undefined;
-
-    if (typeof eventId === "number") {
-      client.res.write(`id: ${eventId}\n`);
+    try {
+      const data = JSON.stringify(event);
+      client.res.write(`event: ${event.event_type}\n`);
+      client.res.write(`data: ${data}\n\n`);
+    } catch (error) {
+      console.error(`[EventBus] Failed to send to client ${client.id}:`, error);
     }
-
-    client.res.write(`event: ${event.event_type}\n`);
-    client.res.write(`data: ${data}\n\n`);
   }
 
-  async emit(
-    runId: string,
-    eventType: TraceEventType,
-    options?: Partial<Omit<TraceEvent, "event_type" | "runId" | "timestamp">>,
-    emitOptions: EmitOptions = { persist: true },
-  ): Promise<TraceEvent> {
+  async emit(runId: string, eventType: TraceEventType, options?: Partial<Omit<TraceEvent, 'event_type' | 'runId' | 'timestamp'>>): Promise<TraceEvent> {
     const event = createTraceEvent(eventType, runId, options);
 
     if (!this.eventHistory.has(runId)) {
       this.eventHistory.set(runId, []);
     }
-
     const history = this.eventHistory.get(runId)!;
     history.push(event);
     if (history.length > this.maxHistoryPerRun) {
@@ -122,32 +113,31 @@ class AgentEventBus extends EventEmitter {
       }
     }
 
-    super.emit("trace", event);
+    super.emit('trace', event);
     super.emit(eventType, event);
 
-    if (emitOptions.persist !== false) {
-      this.persistEvent(event).catch((err) => {
-        console.error("[EventBus] Failed to persist event:", err);
-      });
-    }
+    this.persistEvent(event).catch(err => {
+      console.error(`[EventBus] Failed to persist event:`, err);
+    });
 
     return event;
   }
 
   private async persistEvent(event: TraceEvent): Promise<void> {
-    try {
-      const correlationId = event.correlation_id || event.stepId || `${event.runId}:${event.event_type}:${event.timestamp}`;
+    const insert = (db as any)?.insert;
+    if (typeof insert !== "function") {
+      return;
+    }
 
-      await db.insert(agentModeEvents).values({
+    try {
+      // Generate correlationId if not provided (required by DB schema)
+      const correlationId = event.stepId || randomUUID();
+
+      await insert(agentModeEvents).values({
         id: randomUUID(),
         runId: event.runId,
-        eventSeq: event.event_seq ?? null,
-        stepId: event.stepId ?? null,
         stepIndex: event.stepIndex ?? null,
         correlationId,
-        traceId: event.trace_id ?? null,
-        spanId: event.span_id ?? null,
-        severity: event.severity ?? "info",
         eventType: event.event_type,
         payload: {
           phase: event.phase,
@@ -167,11 +157,13 @@ class AgentEventBus extends EventEmitter {
         timestamp: new Date(event.timestamp),
       });
     } catch (error: any) {
-      // Best-effort persistence for non-workflow events.
-      if (error?.code === "23503" || error?.code === "23502") {
+      // Silently ignore FK constraint errors (run not persisted yet) and NOT NULL errors
+      // These are non-critical for the agent workflow to complete
+      if (error?.code === '23503' || error?.code === '23502') {
+        // FK or NOT NULL constraint - run might not be persisted, skip silently
         return;
       }
-      console.error("[EventBus] Persist error:", error);
+      console.error(`[EventBus] Persist error:`, error);
     }
   }
 
@@ -185,7 +177,7 @@ class AgentEventBus extends EventEmitter {
 
   getClientCount(runId?: string): number {
     if (runId) {
-      return Array.from(this.clients.values()).filter((c) => c.runId === runId).length;
+      return Array.from(this.clients.values()).filter(c => c.runId === runId).length;
     }
     return this.clients.size;
   }
@@ -194,15 +186,11 @@ class AgentEventBus extends EventEmitter {
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
     }
-
     for (const client of this.clients.values()) {
       try {
         client.res.end();
-      } catch {
-        // ignore
-      }
+      } catch { }
     }
-
     this.clients.clear();
     this.eventHistory.clear();
   }

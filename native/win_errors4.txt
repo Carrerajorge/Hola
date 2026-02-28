@@ -1,0 +1,71 @@
+    Checking iliagpt-native v0.1.0 (/Users/ale/Desktop/ILIACODEX V2/native)
+warning: unused import: `TreeScope_Children`
+ --> src/platform/windows/uiautomation.rs:7:71
+  |
+7 | ...UIAutomation, CUIAutomation, TreeScope_Children};
+  |                                 ^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `INPUT_0`
+ --> src/platform/windows/input.rs:5:23
+  |
+5 |     SendInput, INPUT, INPUT_0, INPUT_MOUSE, INPUT_KEYBOARD,
+  |                       ^^^^^^^
+
+warning: unused import: `Interface`
+ --> src/platform/windows/uiautomation.rs:8:21
+  |
+8 | use windows::core::{Interface, BSTR};
+  |                     ^^^^^^^^^
+
+warning: unused variable: `x`
+  --> src/platform/windows/input.rs:17:20
+   |
+17 | pub fn mouse_click(x: f64, y: f64, button: i32) -> Result<()> {
+   |                    ^ help: if this is intentional, prefix it with an underscore: `_x`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `y`
+  --> src/platform/windows/input.rs:17:28
+   |
+17 | pub fn mouse_click(x: f64, y: f64, button: i32) -> Result<()> {
+   |                            ^ help: if this is intentional, prefix it with an underscore: `_y`
+
+warning: unused `BOOL` that must be used
+  --> src/platform/windows/screen_capture.rs:69:9
+   |
+69 |         DeleteObject(hbm_screen);
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_must_use)]` (part of `#[warn(unused)]`) on by default
+help: use `let _ = ...` to ignore the resulting value
+   |
+69 |         let _ = DeleteObject(hbm_screen);
+   |         +++++++
+
+warning: unused `BOOL` that must be used
+  --> src/platform/windows/screen_capture.rs:70:9
+   |
+70 |         DeleteDC(hdc_mem);
+   |         ^^^^^^^^^^^^^^^^^
+   |
+help: use `let _ = ...` to ignore the resulting value
+   |
+70 |         let _ = DeleteDC(hdc_mem);
+   |         +++++++
+
+warning: unused `BOOL` that must be used
+  --> src/platform/windows/window_manager.rs:84:9
+   |
+84 |         SetForegroundWindow(HWND(hwnd as *mut _));
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+help: use `let _ = ...` to ignore the resulting value
+   |
+84 |         let _ = SetForegroundWindow(HWND(hwnd as *mut _));
+   |         +++++++
+
+warning: `iliagpt-native` (lib) generated 8 warnings (run `cargo fix --lib -p iliagpt-native` to apply 4 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.91s

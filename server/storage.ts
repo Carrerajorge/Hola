@@ -875,8 +875,56 @@ export class MemStorage implements IStorage {
 
   // Chat Run operations (for idempotent message processing)
   async createChatRun(run: InsertChatRun): Promise<ChatRun> {
-    const [result] = await db.insert(chatRuns).values(run).returning();
-    return result;
+    try {
+      const { id, chatId, clientRequestId, userMessageId, assistantMessageId, status, lastSeq, error, metadata } = run;
+      const runId = id || randomUUID();
+
+      const res = await db.execute(sql`
+        INSERT INTO chat_runs (
+          id, chat_id, client_request_id, user_message_id, 
+          assistant_message_id, status, last_seq, error, metadata,
+          created_at, started_at, completed_at
+        ) VALUES (
+          ${runId}::varchar,
+          ${chatId}::varchar,
+          ${clientRequestId}::text,
+          ${userMessageId ? sql`${userMessageId}::varchar` : sql`NULL`},
+          ${assistantMessageId ? sql`${assistantMessageId}::varchar` : sql`NULL`},
+          ${status || 'pending'}::text,
+          ${lastSeq || 0}::integer,
+          ${error ? sql`${error}::text` : sql`NULL`},
+          ${metadata ? sql`${JSON.stringify(metadata)}::jsonb` : sql`NULL`},
+          DEFAULT, NULL, NULL
+        )
+        ON CONFLICT (chat_id, client_request_id)
+        DO UPDATE SET status = EXCLUDED.status
+        RETURNING *
+      `);
+
+      if (!res.rows || res.rows.length === 0) {
+        throw new Error("Failed to insert or update chat_run: no rows returned.");
+      }
+
+      // Map snake_case DB fields back to camelCase ChatRun model
+      const row = res.rows[0] as any;
+      return {
+        id: row.id,
+        chatId: row.chat_id,
+        clientRequestId: row.client_request_id,
+        userMessageId: row.user_message_id,
+        assistantMessageId: row.assistant_message_id,
+        status: row.status,
+        lastSeq: row.last_seq,
+        error: row.error,
+        metadata: row.metadata,
+        createdAt: row.created_at,
+        startedAt: row.started_at,
+        completedAt: row.completed_at
+      } as ChatRun;
+    } catch (err: any) {
+      console.error(`[Storage] Failed raw SQL insert for createChatRun: ${err?.message || err}`, { stack: err?.stack, code: err?.code });
+      throw err;
+    }
   }
 
   async getChatRun(id: string): Promise<ChatRun | undefined> {
@@ -956,38 +1004,79 @@ export class MemStorage implements IStorage {
     const messageId = message.id || randomUUID();
     const runId = randomUUID();
 
+    const ObjectValues = Object.values;
     const messageToInsert: InsertChatMessage = {
       ...message,
       id: messageId,
       runId,
     };
 
-    const runToInsert: InsertChatRun = {
-      id: runId,
-      chatId,
-      clientRequestId,
-      userMessageId: messageId,
-      status: "pending",
-    };
+    try {
+      const result = await db.transaction(async (tx) => {
+        const [savedMessage] = await tx.insert(chatMessages).values(messageToInsert).returning();
 
-    const result = await db.transaction(async (tx) => {
-      const [savedMessage] = await tx.insert(chatMessages).values(messageToInsert).returning();
-      const [run] = await tx.insert(chatRuns).values(runToInsert).returning();
-      return { message: savedMessage, run };
-    });
+        const res = await tx.execute(sql`
+          INSERT INTO chat_runs (
+            id, chat_id, client_request_id, user_message_id, 
+            assistant_message_id, status, last_seq, error, metadata,
+            created_at, started_at, completed_at
+          ) VALUES (
+            ${runId}::varchar,
+            ${chatId}::varchar,
+            ${clientRequestId}::text,
+            ${messageId}::varchar,
+            NULL,
+            'pending'::text,
+            0::integer,
+            NULL,
+            NULL,
+            DEFAULT, NULL, NULL
+          )
+          ON CONFLICT (chat_id, client_request_id)
+          DO UPDATE SET status = EXCLUDED.status
+          RETURNING *
+        `);
 
-    // Best-effort: bump chat updatedAt without blocking the user's round trip.
-    queueMicrotask(() => {
-      db.update(chats)
-        .set({ updatedAt: new Date() })
-        .where(eq(chats.id, chatId))
-        .catch((err) => {
-          console.warn("[Chats] Failed to update updatedAt after message+run create:", err?.message || err);
-        });
-    });
+        if (!res.rows || res.rows.length === 0) {
+          throw new Error("Failed to insert or update chat_run in transaction: no rows returned.");
+        }
 
-    return result;
+        const row = res.rows[0] as any;
+        const run: ChatRun = {
+          id: row.id,
+          chatId: row.chat_id,
+          clientRequestId: row.client_request_id,
+          userMessageId: row.user_message_id,
+          assistantMessageId: row.assistant_message_id,
+          status: row.status,
+          lastSeq: row.last_seq,
+          error: row.error,
+          metadata: row.metadata,
+          createdAt: row.created_at,
+          startedAt: row.started_at,
+          completedAt: row.completed_at
+        };
+
+        return { message: savedMessage, run };
+      });
+
+      // Best-effort: bump chat updatedAt without blocking the user's round trip.
+      queueMicrotask(() => {
+        db.update(chats)
+          .set({ updatedAt: new Date() })
+          .where(eq(chats.id, chatId))
+          .catch((err) => {
+            console.warn("[Chats] Failed to update updatedAt after message+run create:", err?.message || err);
+          });
+      });
+
+      return result;
+    } catch (err: any) {
+      console.error(`[Storage] Failed raw SQL insert for createUserMessageAndRun: ${err?.message || err}`, { stack: err?.stack, code: err?.code });
+      throw err;
+    }
   }
+
 
   // Tool Invocation operations
   async createToolInvocation(invocation: InsertToolInvocation): Promise<ToolInvocation> {

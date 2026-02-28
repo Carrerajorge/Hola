@@ -1540,6 +1540,16 @@ Respond with ONLY valid JSON in this exact format:
       signal: this.abortController.signal,
       maxWorkers: graph.maxConcurrency,
       emitTraceEvent: async (eventType, options) => {
+        if (eventType === "skill_load_started" || eventType === "task_created") {
+          this.status = "planning";
+          this.emitProgress();
+        } else if (eventType === "task_started" || eventType === "tool_call_started" || eventType === "tool_call_delta") {
+          this.status = "running";
+          this.emitProgress();
+        } else if (eventType === "validation_passed" || eventType === "validation_failed") {
+          this.status = "verifying";
+          this.emitProgress();
+        }
         await this.emitTraceEvent(eventType as TraceEventType, options as any);
       },
       executeTool: async (toolName, input, context) => {
@@ -2393,10 +2403,6 @@ class AgentManager {
 
   getActiveRunCount(): number {
     return this.activeRuns.size;
-  }
-
-  removeRun(runId: string): boolean {
-    return this.activeRuns.delete(runId);
   }
 
   listActiveRuns(): string[] {

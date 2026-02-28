@@ -37,7 +37,7 @@ const DEFAULT_OPTIONS: PollingManagerOptions = {
   sseReconnectBaseDelay: 1000,
 };
 
-const TERMINAL_EVENT_TYPES = ["done", "cancelled", "error", "final_ready"];
+const TERMINAL_EVENT_TYPES = ['final_ready', 'done', 'cancelled', 'error'];
 
 class PollingManager {
   private instances: Map<string, StreamingInstance> = new Map();
@@ -166,41 +166,18 @@ class PollingManager {
       };
 
       const eventTypes = [
-        "task_start",
-        "plan_created",
-        "plan_step",
-        "skill_load_started",
-        "skill_load_done",
-        "task_created",
-        "task_started",
-        "step_started",
-        "tool_call",
-        "tool_call_started",
-        "tool_call_delta",
-        "tool_call_done",
-        "tool_output",
-        "tool_chunk",
-        "observation",
-        "verification",
-        "validation_passed",
-        "validation_failed",
-        "step_completed",
-        "step_failed",
-        "step_retried",
-        "retry_scheduled",
-        "replan",
-        "thinking",
-        "shell_output",
-        "shell_chunk",
-        "shell_exit",
-        "artifact_created",
-        "artifact_written",
-        "progress_update",
-        "final_ready",
-        "error",
-        "done",
-        "cancelled",
-        "heartbeat",
+        'task_start', 'plan_created', 'plan_step', 'step_started',
+        'skill_load_started', 'skill_load_done',
+        'task_created', 'task_started',
+        'tool_call', 'tool_output', 'tool_chunk', 'observation',
+        'tool_call_started', 'tool_call_delta', 'tool_call_done',
+        'artifact_written',
+        'validation_passed', 'validation_failed',
+        'retry_scheduled',
+        'verification', 'step_completed', 'step_failed', 'step_retried',
+        'replan', 'thinking', 'shell_output', 'shell_chunk', 'shell_exit', 'artifact_created',
+        'final_ready',
+        'error', 'done', 'cancelled', 'heartbeat'
       ];
 
       // Store handlers for cleanup
@@ -224,9 +201,9 @@ class PollingManager {
 
     try {
       const data = JSON.parse(event.data);
-      const effectiveEventType = String(eventType || data.event_type || "").toLowerCase();
+      const effectiveEventType = eventType || data.event_type;
       
-      if (effectiveEventType === "heartbeat") {
+      if (effectiveEventType === 'heartbeat') {
         return;
       }
 
@@ -238,7 +215,7 @@ class PollingManager {
       const agentEvent = this.mapSSEDataToAgentEvent(data, effectiveEventType);
       const newEventStream = [...existingEventStream, agentEvent];
       
-      const updates = this.mapEventToStoreUpdate(data, effectiveEventType);
+      const updates = this.mapEventToStoreUpdate(data);
       updates.eventStream = newEventStream;
       
       const updatedSteps = this.updateStepsFromEvent(existingSteps, data, effectiveEventType);
@@ -249,7 +226,7 @@ class PollingManager {
       store.updateRun(instance.messageId, updates);
 
       if (TERMINAL_EVENT_TYPES.includes(effectiveEventType)) {
-        this.handleTerminalEvent(instance, data, effectiveEventType);
+        this.handleTerminalEvent(instance, data);
       }
 
     } catch (error) {
@@ -260,20 +237,11 @@ class PollingManager {
   private mapSSEDataToAgentEvent(data: any, eventType: string): { type: 'action' | 'observation' | 'error' | 'thinking'; content: any; timestamp: number } {
     let type: 'action' | 'observation' | 'error' | 'thinking' = 'observation';
     
-    if ([
-      "tool_call",
-      "tool_call_started",
-      "tool_call_delta",
-      "step_started",
-      "task_started",
-      "task_start",
-      "shell_output",
-      "shell_chunk",
-    ].includes(eventType)) {
+    if (['tool_call', 'step_started', 'task_start', 'task_started', 'task_created', 'skill_load_started', 'tool_call_started'].includes(eventType)) {
       type = 'action';
-    } else if (["error", "step_failed", "validation_failed"].includes(eventType)) {
+    } else if (['error', 'step_failed', 'validation_failed'].includes(eventType)) {
       type = 'error';
-    } else if (["thinking", "plan_created", "task_created", "skill_load_started", "skill_load_done", "replan"].includes(eventType)) {
+    } else if (['thinking', 'plan_created', 'replan', 'skill_load_done'].includes(eventType)) {
       type = 'thinking';
     }
     
@@ -287,9 +255,8 @@ class PollingManager {
     };
   }
 
-  private mapEventToStoreUpdate(event: any, eventType?: string): Record<string, any> {
+  private mapEventToStoreUpdate(event: any): Record<string, any> {
     const updates: Record<string, any> = {};
-    const effectiveEventType = String(eventType || event.event_type || "").toLowerCase();
 
     if (event.phase) {
       const statusMap: Record<string, string> = {
@@ -305,74 +272,71 @@ class PollingManager {
       }
     }
 
-    switch (effectiveEventType) {
-      case "task_start":
-      case "skill_load_started":
-      case "skill_load_done":
-      case "task_created":
-        updates.status = "planning";
+    switch (event.event_type) {
+      case 'task_start':
+        updates.status = 'planning';
         break;
         
-      case "plan_created":
-      case "task_started":
-      case "step_started":
-      case "tool_call":
-      case "tool_call_started":
-      case "tool_call_delta":
-      case "retry_scheduled":
-      case "step_retried":
-        updates.status = "running";
+      case 'plan_created':
+        updates.status = 'running';
         break;
-
-      case "verification":
-      case "validation_passed":
-      case "validation_failed":
-        updates.status = "verifying";
+      case 'task_created':
+        updates.status = 'planning';
         break;
-
-      case "step_completed":
-      case "tool_call_done":
-      case "artifact_written":
-      case "artifact_created":
+      case 'task_started':
+        updates.status = 'running';
         break;
-
-      case "step_failed":
+        
+      case 'step_started':
+        updates.status = 'running';
+        break;
+      case 'tool_call_started':
+      case 'tool_call_delta':
+        updates.status = 'running';
+        break;
+        
+      case 'step_completed':
+        break;
+        
+      case 'step_failed':
         if (event.error) {
-          updates.error = typeof event.error === "string" ? event.error : event.error.message || "Step failed";
+          updates.error = typeof event.error === 'string' ? event.error : event.error.message || 'Step failed';
         }
         break;
-
-      case "final_ready":
-      case "done":
-        updates.status = "completed";
+        
+      case 'done':
+      case 'final_ready':
+        updates.status = 'completed';
         if (event.summary) {
           updates.summary = event.summary;
-        } else if (event?.metadata?.summary) {
-          updates.summary = event.metadata.summary;
-        } else if (effectiveEventType === "final_ready") {
-          updates.summary = "Resultado final listo.";
         }
         break;
-
-      case "error":
-        updates.status = "failed";
+        
+      case 'error':
+        updates.status = 'failed';
         if (event.error) {
-          updates.error = typeof event.error === "string" ? event.error : event.error.message || "Unknown error";
-        } else if (event.summary) {
+          updates.error = typeof event.error === 'string' ? event.error : event.error.message || 'Unknown error';
+        }
+        break;
+        
+      case 'cancelled':
+        updates.status = 'cancelled';
+        break;
+        
+      case 'replan':
+        updates.status = 'planning';
+        break;
+        
+      case 'verification':
+      case 'validation_passed':
+        updates.status = 'verifying';
+        break;
+
+      case 'validation_failed':
+        updates.status = 'failed';
+        if (event.summary) {
           updates.error = event.summary;
         }
-        break;
-
-      case "cancelled":
-        updates.status = "cancelled";
-        break;
-
-      case "replan":
-        updates.status = "planning";
-        break;
-
-      case "confirmation_required":
-        updates.status = "paused";
         break;
     }
 
@@ -384,36 +348,13 @@ class PollingManager {
     event: any,
     eventType: string
   ): Array<{ stepIndex: number; toolName: string; status: string; output?: any; error?: string; startedAt?: string; completedAt?: string }> | null {
-    const rawStepIndex = event.stepIndex ?? event.step_index;
-    const stepIndex = typeof rawStepIndex === "number" ? rawStepIndex : Number(rawStepIndex);
+    const stepIndex = event.stepIndex ?? event.step_index;
     const toolName = event.toolName ?? event.tool_name ?? event.tool ?? '';
 
     switch (eventType) {
-      case "task_created": {
-        if (!Number.isFinite(stepIndex)) return null;
-        const existingIndex = existingSteps.findIndex(s => s.stepIndex === stepIndex);
-        if (existingIndex >= 0) {
-          const updatedSteps = [...existingSteps];
-          updatedSteps[existingIndex] = {
-            ...updatedSteps[existingIndex],
-            toolName: toolName || updatedSteps[existingIndex].toolName,
-            status: updatedSteps[existingIndex].status === "succeeded" ? "succeeded" : "pending",
-          };
-          return updatedSteps;
-        }
-        return [
-          ...existingSteps,
-          {
-            stepIndex,
-            toolName: toolName || `task_${stepIndex + 1}`,
-            status: "pending",
-          },
-        ];
-      }
-
-      case "task_started":
+      case 'task_started':
       case 'step_started': {
-        if (!Number.isFinite(stepIndex)) return null;
+        if (stepIndex === undefined) return null;
         const existingIndex = existingSteps.findIndex(s => s.stepIndex === stepIndex);
         if (existingIndex >= 0) {
           const updatedSteps = [...existingSteps];
@@ -437,54 +378,9 @@ class PollingManager {
         }
       }
 
-      case "tool_call_started":
-      case "tool_call_delta":
-        if (!Number.isFinite(stepIndex)) return null;
-        return this.updateStepsFromEvent(existingSteps, { ...event, stepIndex }, "step_started");
-
-      case "tool_call_done": {
-        if (!Number.isFinite(stepIndex)) return null;
-        const statusFromEvent = String(event.status || "").toLowerCase();
-        const success = statusFromEvent === "completed" || statusFromEvent === "succeeded" || (!event.error && statusFromEvent !== "failed");
-        const existingIndex = existingSteps.findIndex(s => s.stepIndex === stepIndex);
-        const nextStep = {
-          stepIndex,
-          toolName,
-          status: success ? "succeeded" : "failed",
-          output: event.output ?? event.result,
-          error: success
-            ? undefined
-            : (typeof event.error === "string" ? event.error : event.error?.message || "Tool call failed"),
-          completedAt: event.timestamp ? new Date(event.timestamp).toISOString() : new Date().toISOString(),
-        } as { stepIndex: number; toolName: string; status: string; output?: any; error?: string; completedAt?: string };
-
-        if (existingIndex >= 0) {
-          const updatedSteps = [...existingSteps];
-          updatedSteps[existingIndex] = {
-            ...updatedSteps[existingIndex],
-            ...nextStep,
-            toolName: toolName || updatedSteps[existingIndex].toolName,
-            startedAt: updatedSteps[existingIndex].startedAt || (event.timestamp ? new Date(event.timestamp).toISOString() : new Date().toISOString()),
-          };
-          return updatedSteps;
-        }
-
-        return [
-          ...existingSteps,
-          {
-            ...nextStep,
-            toolName: toolName || `task_${stepIndex + 1}`,
-            startedAt: event.timestamp ? new Date(event.timestamp).toISOString() : new Date().toISOString(),
-          },
-        ];
-      }
-
-      case "retry_scheduled":
-        if (!Number.isFinite(stepIndex)) return null;
-        return this.updateStepsFromEvent(existingSteps, { ...event, stepIndex }, "step_started");
-
+      case 'tool_call_done':
       case 'step_completed': {
-        if (!Number.isFinite(stepIndex)) return null;
+        if (stepIndex === undefined) return null;
         const existingIndex = existingSteps.findIndex(s => s.stepIndex === stepIndex);
         if (existingIndex >= 0) {
           const updatedSteps = [...existingSteps];
@@ -509,8 +405,9 @@ class PollingManager {
         }
       }
 
+      case 'validation_failed':
       case 'step_failed': {
-        if (!Number.isFinite(stepIndex)) return null;
+        if (stepIndex === undefined) return null;
         const errorMessage = typeof event.error === 'string' 
           ? event.error 
           : event.error?.message || 'Step failed';
@@ -543,26 +440,31 @@ class PollingManager {
     }
   }
 
-  private handleTerminalEvent(instance: StreamingInstance, data: any, eventType: string): void {
+  private handleTerminalEvent(instance: StreamingInstance, data: any): void {
     const store = useAgentStore.getState();
     
-    switch (eventType) {
-      case "final_ready":
-      case "done":
+    switch (data.event_type) {
+      case 'final_ready':
         store.updateRun(instance.messageId, {
-          status: "completed",
-          summary: data.summary || data?.metadata?.summary || "",
+          status: 'completed',
+          summary: data.summary || '',
         });
         break;
-      case "error":
+      case 'done':
         store.updateRun(instance.messageId, {
-          status: "failed",
-          error: data.error?.message || data.summary || "Unknown error",
+          status: 'completed',
+          summary: data.summary || '',
         });
         break;
-      case "cancelled":
+      case 'error':
         store.updateRun(instance.messageId, {
-          status: "cancelled",
+          status: 'failed',
+          error: data.error?.message || 'Unknown error',
+        });
+        break;
+      case 'cancelled':
+        store.updateRun(instance.messageId, {
+          status: 'cancelled',
         });
         break;
     }

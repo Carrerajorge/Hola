@@ -6334,7 +6334,9 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
           });
 
           // Use the real response from the agent loop (not a placeholder)
-          // The agent loop already wrote chunk SSE events — fullContent is used for DB persistence
+          // The agent loop already wrote chunk SSE events — fullContent is used for DB persistence.
+          // The agent loop's writeSse now enriches events with conversationId/requestId
+          // from streamMeta, so the client can properly receive and filter them.
           fullContent = agentResponse || "He procesado tu solicitud de automatización web.";
           if (fullContent.trim()) {
             markFirstToken();

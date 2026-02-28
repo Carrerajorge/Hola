@@ -317,7 +317,20 @@ async function runLandingPageFastpath(
     try {
       const r = res as any;
       if (r.writableEnded || r.destroyed) return;
-      res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+      const streamMeta = r?.locals?.streamMeta;
+      const enriched: Record<string, unknown> = { ...payload };
+      if (!enriched.conversationId && streamMeta?.conversationId) {
+        enriched.conversationId = streamMeta.conversationId;
+      }
+      if (!enriched.requestId && streamMeta?.requestId) {
+        enriched.requestId = streamMeta.requestId;
+      }
+      if (!enriched.assistantMessageId) {
+        const amid = streamMeta?.assistantMessageId ||
+          (typeof streamMeta?.getAssistantMessageId === "function" ? streamMeta.getAssistantMessageId() : undefined);
+        if (amid) enriched.assistantMessageId = amid;
+      }
+      res.write(`event: ${event}\ndata: ${JSON.stringify(enriched)}\n\n`);
       if (typeof r.flush === "function") r.flush();
     } catch { /* ignore */ }
   };
@@ -806,7 +819,20 @@ async function executeDeterministicFallback(
     try {
       const r = res as any;
       if (r.writableEnded || r.destroyed) return;
-      res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+      const streamMeta = r?.locals?.streamMeta;
+      const enriched: Record<string, unknown> = { ...payload };
+      if (!enriched.conversationId && streamMeta?.conversationId) {
+        enriched.conversationId = streamMeta.conversationId;
+      }
+      if (!enriched.requestId && streamMeta?.requestId) {
+        enriched.requestId = streamMeta.requestId;
+      }
+      if (!enriched.assistantMessageId) {
+        const amid = streamMeta?.assistantMessageId ||
+          (typeof streamMeta?.getAssistantMessageId === "function" ? streamMeta.getAssistantMessageId() : undefined);
+        if (amid) enriched.assistantMessageId = amid;
+      }
+      res.write(`event: ${event}\ndata: ${JSON.stringify(enriched)}\n\n`);
       if (typeof r.flush === "function") r.flush();
     } catch { /* ignore */ }
   };
@@ -929,7 +955,26 @@ export async function executeAgentLoop(
     try {
       const r = res as any;
       if (r.writableEnded || r.destroyed) return false;
-      res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+      // Enrich with conversationId/requestId from streamMeta so client-side
+      // event filtering (which requires matching conversationId) does not
+      // silently discard agent-loop events.
+      const streamMeta = r?.locals?.streamMeta;
+      const enriched: Record<string, unknown> = { ...payload };
+      if (!enriched.conversationId && streamMeta?.conversationId) {
+        enriched.conversationId = streamMeta.conversationId;
+      }
+      if (!enriched.requestId && streamMeta?.requestId) {
+        enriched.requestId = streamMeta.requestId;
+      }
+      const assistantMessageId =
+        streamMeta?.assistantMessageId ||
+        (typeof streamMeta?.getAssistantMessageId === "function"
+          ? streamMeta.getAssistantMessageId()
+          : undefined);
+      if (!enriched.assistantMessageId && assistantMessageId) {
+        enriched.assistantMessageId = assistantMessageId;
+      }
+      res.write(`event: ${event}\ndata: ${JSON.stringify(enriched)}\n\n`);
       if (typeof r.flush === "function") r.flush();
       return true;
     } catch {
@@ -980,7 +1025,7 @@ export async function executeAgentLoop(
       userPlan: "free",
     });
 
-    writeSse(res, "brief", {
+    writeSse("brief", {
       runId,
       brief: requestBrief,
     });
@@ -991,7 +1036,7 @@ export async function executeAgentLoop(
         "Necesito una aclaración para ejecutar la solicitud con seguridad.";
       fullResponse = question;
 
-      writeSse(res, "clarification", {
+      writeSse("clarification", {
         runId,
         question,
         blocker: "intent_requirements",
@@ -999,7 +1044,7 @@ export async function executeAgentLoop(
 
       const chunks = question.match(/.{1,100}/g) || [question];
       for (let i = 0; i < chunks.length; i++) {
-        writeSse(res, "chunk", {
+        writeSse("chunk", {
           content: chunks[i],
           sequence: i + 1,
           runId,
@@ -1107,14 +1152,14 @@ export async function executeAgentLoop(
     if (missingFields.length > 0) {
       const clarificationQuestion = buildReservationClarificationQuestion(reservationDetails, missingFields);
       fullResponse = clarificationQuestion;
-      writeSse(res, "clarification", {
+      writeSse("clarification", {
         runId,
         question: clarificationQuestion,
         missingFields,
       });
       const chunks = clarificationQuestion.match(/.{1,100}/g) || [clarificationQuestion];
       for (let i = 0; i < chunks.length; i++) {
-        writeSse(res, "chunk", {
+        writeSse("chunk", {
           content: chunks[i],
           sequence: i + 1,
           runId

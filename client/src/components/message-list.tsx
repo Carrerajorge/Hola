@@ -1045,8 +1045,6 @@ interface AgentRunContentProps {
 const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRetry, onPause, onResume, onArtifactPreview, onOpenLightbox }: AgentRunContentProps) {
   const [isExpanded, setIsExpanded] = useState(true);
   const [showAllEvents, setShowAllEvents] = useState(false);
-  const [isSlowConnection, setIsSlowConnection] = useState(false);
-  const [waitingSeconds, setWaitingSeconds] = useState(0);
   const [viewMode, setViewMode] = useState<"steps" | "plan">("steps");
   const eventsEndRef = useRef<HTMLDivElement>(null);
 
@@ -1054,33 +1052,13 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
   const isActive = ["starting", "running", "queued", "planning", "verifying", "cancelling", "replanning"].includes(agentRun.status);
   const isPaused = agentRun.status === "paused";
   const isCancelling = agentRun.status === "cancelling";
-  const isWaitingForResponse = agentRun.status === "starting" || agentRun.status === "queued";
+  const showObjective = false;
 
   useEffect(() => {
     if (isActive && eventsEndRef.current) {
       eventsEndRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
   }, [agentRun.eventStream?.length, isActive]);
-
-  useEffect(() => {
-    if (!isWaitingForResponse) {
-      setIsSlowConnection(false);
-      setWaitingSeconds(0);
-      return;
-    }
-
-    const interval = setInterval(() => {
-      setWaitingSeconds(prev => {
-        const newVal = prev + 1;
-        if (newVal >= 10) {
-          setIsSlowConnection(true);
-        }
-        return newVal;
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [isWaitingForResponse]);
 
   const getStatusIcon = () => {
     switch (agentRun.status) {
@@ -1176,7 +1154,6 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
     );
     return planEvent?.content?.plan?.objective || planEvent?.content?.objective || agentRun.userMessage || null;
   }, [agentRun.eventStream, agentRun.userMessage]);
-  const showObjective = Boolean(objective) && ["planning", "running", "verifying", "replanning"].includes(agentRun.status);
 
   // Count completed vs total steps
   const stepProgress = useMemo(() => {
@@ -1191,18 +1168,18 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
       <div className="flex items-start gap-2">
         <button
           onClick={() => setIsExpanded(!isExpanded)}
-          className="flex-1 flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-background hover:bg-muted/40 transition-colors text-left"
+          className="flex-1 flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-purple-500/10 to-blue-500/10 rounded-lg border border-purple-500/20 hover:border-purple-500/40 transition-all text-left"
         >
-          <Bot className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm font-medium text-foreground">Modo Agente</span>
+          <Bot className="h-5 w-5 text-purple-500" />
+          <span className="text-sm font-medium text-purple-700 dark:text-purple-300">Modo Agente</span>
           <div className="flex-1" />
           {agentRun.runId && (
-            <div className="flex bg-muted/40 rounded-md p-0.5 mr-2" onClick={(e) => e.stopPropagation()}>
+            <div className="flex bg-background/50 rounded-md p-0.5 mr-2" onClick={(e) => e.stopPropagation()}>
               <button
                 onClick={() => setViewMode("steps")}
                 className={cn(
                   "px-2 py-0.5 text-xs rounded transition-colors",
-                  viewMode === "steps" ? "bg-background shadow-sm font-medium" : "text-muted-foreground hover:bg-background/70"
+                  viewMode === "steps" ? "bg-white dark:bg-zinc-700 shadow-sm font-medium" : "text-muted-foreground hover:bg-white/50 dark:hover:bg-zinc-700/50"
                 )}
               >
                 Pasos
@@ -1211,7 +1188,7 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
                 onClick={() => setViewMode("plan")}
                 className={cn(
                   "px-2 py-0.5 text-xs rounded transition-colors",
-                  viewMode === "plan" ? "bg-background shadow-sm font-medium" : "text-muted-foreground hover:bg-background/70"
+                  viewMode === "plan" ? "bg-white dark:bg-zinc-700 shadow-sm font-medium" : "text-muted-foreground hover:bg-white/50 dark:hover:bg-zinc-700/50"
                 )}
               >
                 Plan
@@ -1258,17 +1235,17 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
 
       {/* Objective display - show what the agent is working on */}
       {objective && showObjective && (
-        <div className="px-3 py-2 rounded-md border border-border bg-muted/20">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
+        <div className="px-3 py-2 bg-purple-500/5 rounded-lg border border-purple-500/10">
+          <div className="flex items-center gap-2 text-xs text-purple-600 dark:text-purple-400 font-medium uppercase tracking-wide mb-1">
             <Target className="h-3 w-3" />
             Objetivo
           </div>
           <p className="text-sm text-foreground line-clamp-2">{objective}</p>
           {stepProgress.total > 0 && (
             <div className="mt-2 flex items-center gap-2">
-              <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+              <div className="flex-1 h-1.5 bg-purple-500/20 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-foreground/70 transition-all duration-500"
+                  className="h-full bg-gradient-to-r from-purple-500 to-blue-500 transition-all duration-500"
                   style={{ width: `${Math.min(100, (stepProgress.completed / stepProgress.total) * 100)}%` }}
                 />
               </div>
@@ -1352,14 +1329,14 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
               {hiddenEventsCount > 0 && !showAllEvents && (
                 <button
                   onClick={() => setShowAllEvents(true)}
-                  className="text-xs text-muted-foreground hover:text-foreground mb-2 flex items-center gap-1"
+                  className="text-xs text-purple-500 hover:text-purple-600 mb-2 flex items-center gap-1"
                   data-testid="button-show-all-events"
                 >
                   <ChevronDown className="h-3 w-3" />
                   Ver {hiddenEventsCount} eventos anteriores
                 </button>
               )}
-              <div className="space-y-1.5 pl-3 border-l border-border">
+              <div className="space-y-1.5 pl-3 border-l-2 border-purple-500/30">
                 {visibleEvents.map((event, idx) => {
                   const isLast = idx === visibleEvents.length - 1;
                   const showDetails = hasPayloadDetails(event);
@@ -1368,7 +1345,7 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
                       key={event.id}
                       className={cn(
                         "flex items-start gap-2 text-sm py-1.5 px-2 rounded-md transition-all",
-                        isLast && isActive && "bg-muted/40 -ml-[11px] pl-[11px]"
+                        isLast && isActive && "bg-purple-500/5 border-l-2 border-purple-500 -ml-[11px] pl-[9px]"
                       )}
                       data-testid={`agent-event-${event.kind}-${event.status}`}
                     >
@@ -1383,6 +1360,16 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
                           <span className={cn("text-xs font-semibold uppercase tracking-wide", event.ui.labelColor)}>
                             {event.ui.label}
                           </span>
+                          {event.status === 'ok' && event.kind !== 'action' && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-600 dark:text-green-400 text-[10px] font-medium">
+                              ✓
+                            </span>
+                          )}
+                          {event.status === 'warn' && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 text-[10px] font-medium">
+                              ⚠
+                            </span>
+                          )}
                           {event.confidence !== undefined && (
                             <span className="text-[10px] text-muted-foreground">
                               {Math.round(event.confidence * 100)}%
@@ -1455,22 +1442,27 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
 
           {/* Loading skeleton for starting state */}
           {isActive && (!agentRun.eventStream || agentRun.eventStream.length === 0) && (!agentRun.steps || agentRun.steps.length === 0) && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground px-2 py-1.5">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>
-                {agentRun.status === "starting" && "Iniciando agente..."}
-                {agentRun.status === "queued" && "Esperando turno..."}
-                {agentRun.status === "planning" && "Planificando tareas..."}
-                {agentRun.status === "running" && "Ejecutando tareas..."}
-                {agentRun.status === "verifying" && "Verificando DoD..."}
-                {agentRun.status === "replanning" && "Ajustando plan..."}
-                {!["starting", "queued", "planning", "running", "verifying", "replanning"].includes(agentRun.status) && "Procesando..."}
-              </span>
-              {isSlowConnection && (
-                <span className="text-xs text-yellow-600 dark:text-yellow-400">
-                  ({waitingSeconds}s)
+            <div className="space-y-2 animate-pulse">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-full bg-purple-500/20" />
+                <div className="h-4 w-32 bg-muted rounded" />
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-full bg-blue-500/20" />
+                <div className="h-4 w-48 bg-muted rounded" />
+              </div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>
+                  {agentRun.status === "starting" && "Conectando con IA..."}
+                  {agentRun.status === "queued" && "En cola de procesamiento..."}
+                  {agentRun.status === "planning" && "Planificando pasos..."}
+                  {agentRun.status === "running" && "Ejecutando..."}
+                  {agentRun.status === "verifying" && "Verificando resultados..."}
+                  {agentRun.status === "replanning" && "Ajustando plan..."}
+                  {!["starting", "queued", "planning", "running", "verifying", "replanning"].includes(agentRun.status) && "Procesando tu solicitud..."}
                 </span>
-              )}
+              </div>
             </div>
           )}
 

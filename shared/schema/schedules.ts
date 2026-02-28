@@ -58,6 +58,6 @@ export const chatSchedules = pgTable(
 
 export const insertChatScheduleSchema = createInsertSchema(chatSchedules);
 
-export type InsertChatSchedule = z.infer<typeof insertChatScheduleSchema>;
+export type InsertChatSchedule = typeof chatSchedules.$inferInsert;
 export type ChatSchedule = typeof chatSchedules.$inferSelect;
 

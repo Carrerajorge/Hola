@@ -36,7 +36,7 @@ export const insertFileSchema = createInsertSchema(files).omit({
     uploadedChunks: z.number().optional(),
 });
 
-export type InsertFile = z.infer<typeof insertFileSchema>;
+export type InsertFile = typeof files.$inferInsert;
 export type File = typeof files.$inferSelect;
 
 export const fileJobs = pgTable("file_jobs", {
@@ -58,7 +58,7 @@ export const insertFileJobSchema = createInsertSchema(fileJobs).omit({
     createdAt: true,
 });
 
-export type InsertFileJob = z.infer<typeof insertFileJobSchema>;
+export type InsertFileJob = typeof fileJobs.$inferInsert;
 export type FileJob = typeof fileJobs.$inferSelect;
 
 export const fileChunks = pgTable("file_chunks", {
@@ -80,7 +80,7 @@ export const insertFileChunkSchema = createInsertSchema(fileChunks).omit({
     embedding: z.array(z.number()).nullish(),
 });
 
-export type InsertFileChunk = z.infer<typeof insertFileChunkSchema>;
+export type InsertFileChunk = typeof fileChunks.$inferInsert;
 export type FileChunk = typeof fileChunks.$inferSelect;
 
 // Conversation Documents - Persistent document context for chat conversations
@@ -106,5 +106,5 @@ export const insertConversationDocumentSchema = createInsertSchema(conversationD
     createdAt: true,
 });
 
-export type InsertConversationDocument = z.infer<typeof insertConversationDocumentSchema>;
+export type InsertConversationDocument = typeof conversationDocuments.$inferInsert;
 export type ConversationDocument = typeof conversationDocuments.$inferSelect;

@@ -1,0 +1,87 @@
+{
+  "requestedLastEventId": 9,
+  "response": {
+    "status": 200,
+    "headers": {
+      "cache-control": "no-cache, no-transform",
+      "connection": "keep-alive",
+      "content-type": "text/event-stream",
+      "date": "Sat, 28 Feb 2026 09:25:02 GMT",
+      "transfer-encoding": "chunked",
+      "x-accel-buffering": "no",
+      "x-powered-by": "Express"
+    },
+    "events": [
+      {
+        "id": 10,
+        "event": "step_completed",
+        "data": {
+          "status": "completed",
+          "stepId": "0ef11d3f-12f5-429d-b162-498dc0830588",
+          "summary": "Emit artifact completado",
+          "metadata": {
+            "attempt": 1,
+            "artifacts": [
+              {
+                "key": "publish:result.json",
+                "name": "result.json",
+                "type": "application/json",
+                "payload": {
+                  "attempt": 1,
+                  "content": "{\"ok\":true}"
+                },
+                "metadata": {
+                  "tool": "artifact",
+                  "stepId": "publish"
+                }
+              }
+            ],
+            "span_id": "0000000000000000",
+            "severity": "info",
+            "trace_id": "00000000000000000000000000000000",
+            "event_seq": 10,
+            "correlation_id": "201ff418-df22-4855-839b-70fd37aa86f6:10:step_completed"
+          },
+          "stepIndex": 2,
+          "event_type": "step_completed",
+          "runId": "201ff418-df22-4855-839b-70fd37aa86f6",
+          "event_seq": 10,
+          "correlation_id": "201ff418-df22-4855-839b-70fd37aa86f6:10:step_completed",
+          "trace_id": "00000000000000000000000000000000",
+          "span_id": "0000000000000000",
+          "severity": "info",
+          "timestamp": 1772270702916
+        },
+        "rawData": "{\"status\":\"completed\",\"stepId\":\"0ef11d3f-12f5-429d-b162-498dc0830588\",\"summary\":\"Emit artifact completado\",\"metadata\":{\"attempt\":1,\"artifacts\":[{\"key\":\"publish:result.json\",\"name\":\"result.json\",\"type\":\"application/json\",\"payload\":{\"attempt\":1,\"content\":\"{\\\"ok\\\":true}\"},\"metadata\":{\"tool\":\"artifact\",\"stepId\":\"publish\"}}],\"span_id\":\"0000000000000000\",\"severity\":\"info\",\"trace_id\":\"00000000000000000000000000000000\",\"event_seq\":10,\"correlation_id\":\"201ff418-df22-4855-839b-70fd37aa86f6:10:step_completed\"},\"stepIndex\":2,\"event_type\":\"step_completed\",\"runId\":\"201ff418-df22-4855-839b-70fd37aa86f6\",\"event_seq\":10,\"correlation_id\":\"201ff418-df22-4855-839b-70fd37aa86f6:10:step_completed\",\"trace_id\":\"00000000000000000000000000000000\",\"span_id\":\"0000000000000000\",\"severity\":\"info\",\"timestamp\":1772270702916}",
+        "receivedAt": "2026-02-28T09:25:02.945Z"
+      },
+      {
+        "id": 11,
+        "event": "run_completed",
+        "data": {
+          "status": "completed",
+          "metadata": {
+            "totalSteps": 3,
+            "completedSteps": 3,
+            "span_id": "0000000000000000",
+            "severity": "info",
+            "trace_id": "00000000000000000000000000000000",
+            "event_seq": 11,
+            "correlation_id": "201ff418-df22-4855-839b-70fd37aa86f6:11:run_completed"
+          },
+          "event_type": "run_completed",
+          "runId": "201ff418-df22-4855-839b-70fd37aa86f6",
+          "event_seq": 11,
+          "correlation_id": "201ff418-df22-4855-839b-70fd37aa86f6:11:run_completed",
+          "trace_id": "00000000000000000000000000000000",
+          "span_id": "0000000000000000",
+          "severity": "info",
+          "timestamp": 1772270702930
+        },
+        "rawData": "{\"status\":\"completed\",\"metadata\":{\"totalSteps\":3,\"completedSteps\":3,\"span_id\":\"0000000000000000\",\"severity\":\"info\",\"trace_id\":\"00000000000000000000000000000000\",\"event_seq\":11,\"correlation_id\":\"201ff418-df22-4855-839b-70fd37aa86f6:11:run_completed\"},\"event_type\":\"run_completed\",\"runId\":\"201ff418-df22-4855-839b-70fd37aa86f6\",\"event_seq\":11,\"correlation_id\":\"201ff418-df22-4855-839b-70fd37aa86f6:11:run_completed\",\"trace_id\":\"00000000000000000000000000000000\",\"span_id\":\"0000000000000000\",\"severity\":\"info\",\"timestamp\":1772270702930}",
+        "receivedAt": "2026-02-28T09:25:02.945Z"
+      }
+    ],
+    "lastEventId": 11
+  }
+}

@@ -572,7 +572,20 @@ export async function init(): Promise<number> {
 function emitSSE(res: any, event: string, data: any): void {
   if (!res || typeof res.write !== "function") return;
   try {
-    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    const streamMeta = res?.locals?.streamMeta;
+    const enriched: Record<string, unknown> = typeof data === "object" && data !== null ? { ...data } : { value: data };
+    if (!enriched.conversationId && streamMeta?.conversationId) {
+      enriched.conversationId = streamMeta.conversationId;
+    }
+    if (!enriched.requestId && streamMeta?.requestId) {
+      enriched.requestId = streamMeta.requestId;
+    }
+    if (!enriched.assistantMessageId) {
+      const amid = streamMeta?.assistantMessageId ||
+        (typeof streamMeta?.getAssistantMessageId === "function" ? streamMeta.getAssistantMessageId() : undefined);
+      if (amid) enriched.assistantMessageId = amid;
+    }
+    res.write(`event: ${event}\ndata: ${JSON.stringify(enriched)}\n\n`);
   } catch {
     /* SSE write failed, non-fatal */
   }

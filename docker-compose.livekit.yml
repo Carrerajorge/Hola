@@ -1,0 +1,24 @@
+# LiveKit Local Environment config
+# This runs the official LiveKit Server with an internal redis instance for signaling.
+services:
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --config /etc/livekit.yaml
+    ports:
+      - "7880:7880"   # HTTP/WebSocket
+      - "7881:7881"   # RTP/RTCP
+      - "7882:7882/udp" # WebRTC UDP
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml
+    environment:
+      - LIVEKIT_KEYS=livekit_api_key:livekit_api_secret_very_secure_string_do_not_share
+
+  livekit-redis:
+    image: redis:alpine
+    ports:
+      - "6380:6379" # Using 6380 to avoid clashing with Hola's main redis on 6379 if it was exposed
+    volumes:
+      - livekit_redis_data:/data
+
+volumes:
+  livekit_redis_data:

@@ -131,7 +131,7 @@ export function createAgentModeRouter() {
           }
           currentStatus = "planning";
 
-          const orchestrator = await agentManager.createRun(
+          const orchestrator = await agentManager.startRun(
             runId,
             chatId,
             userId || "anonymous",
@@ -217,8 +217,6 @@ export function createAgentModeRouter() {
               console.error(`[AgentRoutes] Error updating run ${runId} progress:`, err);
             }
           });
-
-          await agentManager.executeRun(runId);
 
         } catch (err: any) {
           console.error(`[AgentRoutes] Error starting run ${runId}:`, err);
@@ -1000,9 +998,7 @@ export function createAgentModeRouter() {
         (async () => {
           let currentStatus = "running";
           try {
-            agentManager.removeRun(id);
-
-            const orchestrator = await agentManager.createRun(
+            const orchestrator = await agentManager.startRun(
               id,
               run.chatId,
               userId || "anonymous",
@@ -1046,8 +1042,6 @@ export function createAgentModeRouter() {
                 console.error(`[AgentRoutes] Error updating retry run ${id}:`, err);
               }
             });
-
-            await agentManager.executeRun(id);
           } catch (err: any) {
             console.error(`[AgentRoutes] Error retrying run ${id}:`, err);
             await updateRunWithLock(id, currentStatus, {

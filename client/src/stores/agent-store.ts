@@ -65,7 +65,7 @@ export const useAgentStore = create<AgentStore>()(
 
       getRunByChatId: (chatId: string) => {
         const runs = Object.values(get().runs);
-        return runs.find(r => r.chatId === chatId && ['starting', 'queued', 'planning', 'running'].includes(r.status)) || null;
+        return runs.find(r => r.chatId === chatId && ['starting', 'queued', 'planning', 'running', 'verifying', 'replanning'].includes(r.status)) || null;
       },
 
       getRunByRunId: (runId: string) => {
@@ -219,7 +219,7 @@ export const useAgentStore = create<AgentStore>()(
             }
 
             Object.entries(state.runs).forEach(([messageId, run]) => {
-              if (run.runId && ['starting', 'queued', 'planning', 'running'].includes(run.status)) {
+              if (run.runId && ['starting', 'queued', 'planning', 'running', 'verifying', 'replanning'].includes(run.status)) {
                 pollingManager.handleHydratedRun(messageId, run.runId, run.status);
               }
             });

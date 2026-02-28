@@ -72,7 +72,7 @@ export const insertRagChunkSchema = createInsertSchema(ragChunks).omit({
     metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
-export type InsertRagChunk = z.infer<typeof insertRagChunkSchema>;
+export type InsertRagChunk = typeof ragChunks.$inferInsert;
 export type RagChunk = typeof ragChunks.$inferSelect;
 
 // =============================================================================
@@ -100,7 +100,7 @@ export const insertRagKvSchema = createInsertSchema(ragKvStore).omit({
     id: true, createdAt: true, updatedAt: true,
 });
 
-export type InsertRagKv = z.infer<typeof insertRagKvSchema>;
+export type InsertRagKv = typeof ragKvs.$inferInsert;
 export type RagKv = typeof ragKvStore.$inferSelect;
 
 // =============================================================================
@@ -168,7 +168,7 @@ export const insertUserMemorySchema = createInsertSchema(userMemories).omit({
     metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
-export type InsertUserMemory = z.infer<typeof insertUserMemorySchema>;
+export type InsertUserMemory = typeof userMemorys.$inferInsert;
 export type UserMemory = typeof userMemories.$inferSelect;
 
 // =============================================================================
@@ -206,7 +206,7 @@ export const insertEpisodicSummarySchema = createInsertSchema(episodicSummaries)
     metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
-export type InsertEpisodicSummary = z.infer<typeof insertEpisodicSummarySchema>;
+export type InsertEpisodicSummary = typeof episodicSummarys.$inferInsert;
 export type EpisodicSummary = typeof episodicSummaries.$inferSelect;
 
 // =============================================================================
@@ -241,7 +241,7 @@ export const insertRagAuditLogSchema = createInsertSchema(ragAuditLog).omit({
     id: true, createdAt: true,
 });
 
-export type InsertRagAuditLog = z.infer<typeof insertRagAuditLogSchema>;
+export type InsertRagAuditLog = typeof ragAuditLogs.$inferInsert;
 export type RagAuditLog = typeof ragAuditLog.$inferSelect;
 
 // =============================================================================
@@ -281,5 +281,5 @@ export const insertRagEvalResultSchema = createInsertSchema(ragEvalResults).omit
     id: true, createdAt: true,
 });
 
-export type InsertRagEvalResult = z.infer<typeof insertRagEvalResultSchema>;
+export type InsertRagEvalResult = typeof ragEvalResults.$inferInsert;
 export type RagEvalResult = typeof ragEvalResults.$inferSelect;
