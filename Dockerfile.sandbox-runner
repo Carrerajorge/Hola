@@ -2,7 +2,7 @@
 # Builds sandbox-runner deterministically without relying on host `dist/`
 # (which is excluded by .dockerignore in this repo).
 
-FROM node:20-alpine AS builder
+FROM node:25-alpine AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -62,7 +62,7 @@ NODE
 
 RUN npm prune --omit=dev
 
-FROM node:20-alpine
+FROM node:25-alpine
 WORKDIR /app
 
 # docker CLI
