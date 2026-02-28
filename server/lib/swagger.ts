@@ -271,7 +271,7 @@ const options: swaggerJsdoc.Options = {
               description: "WebSocket upgrade",
             },
           },
-          x-websocket: {
+          "x-websocket": {
             subscribeMessage: {
               type: "object",
               required: ["type", "runId"],
