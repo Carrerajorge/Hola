@@ -217,11 +217,17 @@ export function createNodesRouter(): Router {
       return res.status(400).json({ success: false, error: "Invalid or expired pairing code", code: "PAIRING_INVALID" });
     }
 
-    // Consume pairing code
-    await db
+    // Consume pairing code (atomic: only one request can consume it)
+    const consumed = await db
       .update(nodePairings)
       .set({ consumedAt: now })
-      .where(eq(nodePairings.id, (pairing as any).id));
+      .where(and(eq(nodePairings.id, (pairing as any).id), isNull(nodePairings.consumedAt)))
+      .returning({ id: nodePairings.id });
+
+    if (consumed.length === 0) {
+      return res.status(409).json({ success: false, error: "Pairing code already consumed", code: "PAIRING_CONSUMED" });
+    }
+
 
     const token = newNodeToken();
     const tokenHash = sha256Base64Url(token);
