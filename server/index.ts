@@ -274,6 +274,8 @@ export function log(message: string, source = "express") {
     app.use("/api", validateApiKey);
     app.use("/api", (req, res, next) => {
       if (req.path.startsWith("/packages")) return next(); // /api/packages/*
+      // Node-to-server endpoints (devices) are token-based and not cookie-session CSRF.
+      if (req.path === "/nodes" || req.path.startsWith("/nodes/")) return next(); // /api/nodes/*
       // Local/dev fast-path: file uploads must remain operational even when
       // browser/session CSRF state is temporarily out of sync.
       if (process.env.NODE_ENV !== "production") {
