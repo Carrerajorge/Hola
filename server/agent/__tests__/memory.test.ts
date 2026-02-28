@@ -1,5 +1,5 @@
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { agentMemory } from '../memory';
-import { vi } from 'vitest';
 import { db } from '../../db';
 
 // Mocks para evitar I/O real contra PostgreSQL durante TDD

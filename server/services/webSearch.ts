@@ -289,6 +289,9 @@ export async function searchWeb(query: string, maxResults: number = LIMITS.MAX_S
   const sanitized = sanitizeWebQuery(query);
   if (!sanitized) return { query, results: [], contents: [] };
   const results: SearchResult[] = [];
+  const isPeruCompanyQuery = /\b(?:empresa|empresas|ruc|raz[oó]n\s+social|per[uú]|compan(?:y|ies)|business)\b/i.test(
+    sanitized
+  );
   const domainCounts = new Map<string, number>();
   const seenUrls = new Set<string>();
   const MAX_PER_DOMAIN = 5; // Allow up to 5 results per domain for more coverage
@@ -300,6 +303,19 @@ export async function searchWeb(query: string, maxResults: number = LIMITS.MAX_S
     } catch {
       return url.split("/")[2]?.replace(/^www\./, "") || "";
     }
+  };
+
+  const pushResult = (candidate: SearchResult): void => {
+    if (!candidate.url || results.length >= maxResults) return;
+    if (candidate.url.includes("duckduckgo.com") || seenUrls.has(candidate.url)) return;
+
+    const domain = extractDomain(candidate.url);
+    const count = domainCounts.get(domain) || 0;
+    if (count >= MAX_PER_DOMAIN) return;
+
+    domainCounts.set(domain, count + 1);
+    seenUrls.add(candidate.url);
+    results.push(candidate);
   };
 
   // Parse results from a DuckDuckGo HTML page
@@ -322,22 +338,60 @@ export async function searchWeb(query: string, maxResults: number = LIMITS.MAX_S
           if (match) url = decodeURIComponent(match[1]);
         }
 
-        if (url && !url.includes("duckduckgo.com") && !seenUrls.has(url)) {
-          const domain = extractDomain(url);
-
-          // Allow up to MAX_PER_DOMAIN results per domain for broader coverage
-          const count = domainCounts.get(domain) || 0;
-          if (count >= MAX_PER_DOMAIN) continue;
-          domainCounts.set(domain, count + 1);
-          seenUrls.add(url);
-
-          results.push({
-            title: titleEl.textContent?.trim() || "",
-            url,
-            snippet: snippetEl?.textContent?.trim() || ""
-          });
-        }
+        pushResult({
+          title: titleEl.textContent?.trim() || "",
+          url,
+          snippet: snippetEl?.textContent?.trim() || ""
+        });
       }
+    }
+  };
+
+  const parseUniversidadPeruDirectory = (html: string): void => {
+    const dom = new JSDOM(html, { url: "https://www.universidadperu.com/empresas/" });
+    const doc = dom.window.document;
+    const tokens = sanitized
+      .toLowerCase()
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 3)
+      .slice(0, 6);
+    let relaxedAdds = 0;
+
+    for (const anchor of Array.from(doc.querySelectorAll("a[href*=\"/empresas/\"]"))) {
+      if (results.length >= maxResults) break;
+      const href = anchor.getAttribute("href") || "";
+      if (!href) continue;
+
+      let url = "";
+      try {
+        url = new URL(href, "https://www.universidadperu.com").href;
+      } catch {
+        continue;
+      }
+
+      const normalized = url.toLowerCase();
+      if (normalized.endsWith("/empresas/") || normalized.endsWith("/empresas")) continue;
+
+      const title = anchor.textContent?.replace(/\s+/g, " ").trim() || "";
+      if (!title) continue;
+
+      const contextText = (anchor.closest("article, li, tr, div")?.textContent || title)
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 220);
+      const searchableText = `${title} ${contextText}`.toLowerCase();
+      const hasTokenMatch = tokens.length === 0 || tokens.some((token) => searchableText.includes(token));
+      if (!hasTokenMatch) {
+        if (!isPeruCompanyQuery || relaxedAdds >= 8) continue;
+        relaxedAdds += 1;
+      }
+
+      pushResult({
+        title,
+        url,
+        snippet: contextText || "Perfil empresarial en UniversidadPeru.",
+      });
     }
   };
 
@@ -365,6 +419,30 @@ export async function searchWeb(query: string, maxResults: number = LIMITS.MAX_S
     const page1Html = await fetchDDGPage(baseUrl);
     if (page1Html) {
       parseDDGPage(page1Html);
+    }
+
+    // Targeted source enrichment for Peruvian company profiles.
+    // This helps queries about companies in Peru consistently include universidadperu.com data.
+    const universidadPeruQuery = `site:universidadperu.com/empresas ${sanitized}`;
+    const universidadPeruHtml = await fetchDDGPage(
+      `https://html.duckduckgo.com/html/?q=${encodeURIComponent(universidadPeruQuery)}`,
+      3500
+    );
+    if (universidadPeruHtml) {
+      parseDDGPage(universidadPeruHtml);
+    }
+
+    // Direct fallback scraper for UniversidadPeru company directory.
+    // Ensures domain coverage even when DuckDuckGo ranking is sparse.
+    const hasUniversidadPeruResult = results.some((r) => r.url.includes("universidadperu.com/empresas/"));
+    if ((isPeruCompanyQuery || !hasUniversidadPeruResult) && results.length < maxResults) {
+      const universidadPeruDirectoryHtml = await fetchDDGPage(
+        "https://www.universidadperu.com/empresas/",
+        3500
+      );
+      if (universidadPeruDirectoryHtml) {
+        parseUniversidadPeruDirectory(universidadPeruDirectoryHtml);
+      }
     }
 
     // Pages 2+ : DuckDuckGo HTML paginates via POST with form data (s=offset, dc=offset+1)

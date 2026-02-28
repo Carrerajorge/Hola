@@ -158,6 +158,7 @@ import { useChats } from "@/hooks/use-chats";
 import { useChatFolders, type Folder as FolderType } from "@/hooks/use-chat-folders";
 import { useProjects } from "@/hooks/use-projects";
 import { usePinnedGpts } from "@/hooks/use-pinned-gpts";
+import { DEFAULT_UI_GPT_CAPABILITIES, normalizeUiGptCapabilities } from "@/lib/gptCapabilities";
 import { UniversalExecutionConsole } from "./universal-execution-console";
 import { ExecutionStreamClient, FlatRunState } from "@/lib/executionStreamClient";
 import { LiveExecutionConsole } from "./live-execution-console";
@@ -255,6 +256,18 @@ function detectUncertainty(content: string): { confidence: 'high' | 'medium' | '
 
 type AiState = AIState;
 
+type CodingAgentProfile = "coder" | "reviewer" | "improver";
+
+interface WorkspaceContextPayload {
+  projectId?: string;
+  projectName?: string;
+  repositoryPath: string;
+  selectedFolder: string;
+  codingAgents: CodingAgentProfile[];
+  runtimeTarget: string;
+  executionAccess: string;
+  branch?: string;
+}
 
 interface ChatInterfaceProps {
   messages: Message[];
@@ -270,13 +283,14 @@ interface ChatInterfaceProps {
   aiProcessSteps: AiProcessStep[];
   setAiProcessSteps: React.Dispatch<React.SetStateAction<AiProcessStep[]>>;
   chatId?: string | null;
+  chatGptId?: string | null;
   chatTitle?: string | null;
   onOpenApps?: () => void;
   onUpdateMessageAttachments?: (chatId: string, messageId: string, attachments: Message['attachments'], newMessage?: Message) => void;
   onEditMessageAndTruncate?: (chatId: string, messageId: string, newContent: string, messageIndex: number) => void;
   onTruncateAndReplaceMessage?: (chatId: string, messageIndex: number, newMessage: Message) => void;
   onTruncateMessagesAt?: (chatId: string, messageIndex: number) => void;
-  onNewChat?: () => void;
+  onNewChat?: (options?: { preserveGpt?: boolean }) => void;
   onEditGpt?: (gpt: ActiveGpt) => void;
   onHideGptFromSidebar?: (gptId: string) => void;
   onPinGptToSidebar?: (gptId: string) => void;
@@ -330,9 +344,11 @@ interface UploadedFile {
   mimeType?: string;
   size: number;
   dataUrl?: string;
+  localUrl?: string;
   storagePath?: string;
   status?: string;
   content?: string;
+  error?: string;
   analysisId?: string;
   spreadsheetData?: {
     uploadId: string;
@@ -344,6 +360,14 @@ interface UploadedFile {
 function isAnalyzableFile(filename: string): boolean {
   const ext = filename.toLowerCase().split('.').pop();
   return ['xlsx', 'xls', 'csv', 'pdf', 'doc', 'docx'].includes(ext || '');
+}
+
+function isPdfFile(mimeType?: string, fileName?: string): boolean {
+  const normalizedMime = (mimeType || "").toLowerCase();
+  if (normalizedMime.includes("pdf")) {
+    return true;
+  }
+  return (fileName || "").toLowerCase().endsWith(".pdf");
 }
 
 async function triggerDocumentAnalysis(
@@ -418,6 +442,7 @@ export function ChatInterface({
   aiProcessSteps,
   setAiProcessSteps,
   chatId,
+  chatGptId,
   chatTitle,
   onOpenApps,
   onUpdateMessageAttachments,
@@ -458,7 +483,8 @@ export function ChatInterface({
   const { settings } = useSettingsContext();
   const {
     projects,
-    getProject
+    getProject,
+    updateProject,
   } = useProjects();
 
   const selectedProject = useMemo(() => {
@@ -501,6 +527,227 @@ export function ChatInterface({
 
   const { user } = useAuth();
   const { toast } = useToast();
+  const [runtimeTarget, setRuntimeTarget] = useState("Local");
+  const [executionAccess, setExecutionAccess] = useState("Full access");
+  const [repoFolders, setRepoFolders] = useState<string[]>([]);
+  const [repoBranches, setRepoBranches] = useState<string[]>(["main"]);
+  const [activeRepoBranch, setActiveRepoBranch] = useState("main");
+  const [selectedRepoFolder, setSelectedRepoFolder] = useState<string>(".");
+  const [selectedCodingAgents, setSelectedCodingAgents] = useState<CodingAgentProfile[]>(["coder"]);
+
+  const refreshRepositoryWorkspace = useCallback(
+    async (repositoryPath: string, preferredFolder?: string) => {
+      const rootPath = String(repositoryPath || "").trim();
+      if (!rootPath) {
+        setRepoFolders([]);
+        setRepoBranches(["main"]);
+        setActiveRepoBranch("main");
+        return;
+      }
+
+      try {
+        const foldersParams = new URLSearchParams({
+          rootPath,
+          maxDepth: "4",
+          maxEntries: "800",
+        });
+        const branchesParams = new URLSearchParams({ rootPath });
+
+        const [foldersRes, branchesRes] = await Promise.all([
+          apiFetch(`/api/local/repo/folders?${foldersParams.toString()}`, {
+            method: "GET",
+            credentials: "include",
+          }),
+          apiFetch(`/api/local/repo/branches?${branchesParams.toString()}`, {
+            method: "GET",
+            credentials: "include",
+          }),
+        ]);
+
+        if (foldersRes.ok) {
+          const foldersData = await foldersRes.json();
+          const folders = Array.isArray(foldersData?.folders)
+            ? foldersData.folders.filter((item: unknown): item is string => typeof item === "string" && item.length > 0)
+            : [];
+          setRepoFolders(folders);
+          setSelectedRepoFolder((prev) => {
+            const candidate = preferredFolder || prev || ".";
+            if (candidate === "." || folders.includes(candidate)) return candidate;
+            return ".";
+          });
+        } else {
+          setRepoFolders([]);
+        }
+
+        if (branchesRes.ok) {
+          const branchesData = await branchesRes.json();
+          const branches = Array.isArray(branchesData?.branches)
+            ? branchesData.branches.filter((item: unknown): item is string => typeof item === "string" && item.length > 0)
+            : [];
+          const normalizedBranches = branches.length > 0 ? branches : ["main"];
+          setRepoBranches(normalizedBranches);
+          setActiveRepoBranch((prev) => {
+            if (branchesData?.current && normalizedBranches.includes(branchesData.current)) {
+              return branchesData.current;
+            }
+            if (normalizedBranches.includes(prev)) return prev;
+            return normalizedBranches[0] || "main";
+          });
+        } else {
+          setRepoBranches(["main"]);
+          setActiveRepoBranch("main");
+        }
+      } catch (error: any) {
+        console.warn("[ChatInterface] Failed to refresh repository workspace:", error?.message || error);
+        setRepoFolders([]);
+        setRepoBranches(["main"]);
+        setActiveRepoBranch("main");
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!selectedProject?.repositoryPath) {
+      setRepoFolders([]);
+      setRepoBranches(["main"]);
+      setActiveRepoBranch("main");
+      setSelectedRepoFolder(".");
+      setSelectedCodingAgents(["coder"]);
+      return;
+    }
+
+    const normalizedDefaultFolder = selectedProject.defaultCodeFolder?.trim() || ".";
+    setSelectedRepoFolder(normalizedDefaultFolder);
+    setSelectedCodingAgents(
+      Array.isArray(selectedProject.codingAgents) && selectedProject.codingAgents.length > 0
+        ? selectedProject.codingAgents
+        : ["coder"]
+    );
+    void refreshRepositoryWorkspace(selectedProject.repositoryPath, normalizedDefaultFolder);
+  }, [
+    refreshRepositoryWorkspace,
+    selectedProject?.codingAgents,
+    selectedProject?.defaultCodeFolder,
+    selectedProject?.id,
+    selectedProject?.repositoryPath,
+  ]);
+
+  const handleSelectRepoFolder = useCallback((folder: string) => {
+    const normalizedFolder = String(folder || ".").trim() || ".";
+    setSelectedRepoFolder(normalizedFolder);
+    if (selectedProject?.id) {
+      updateProject(selectedProject.id, {
+        defaultCodeFolder: normalizedFolder === "." ? null : normalizedFolder,
+      });
+    }
+  }, [selectedProject?.id, updateProject]);
+
+  const handleCreateRepoFolder = useCallback(async (folderName: string) => {
+    const rootPath = selectedProject?.repositoryPath?.trim();
+    if (!rootPath) {
+      toast({
+        title: "Workspace no configurado",
+        description: "Este proyecto no tiene una ruta de repositorio.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const normalizedName = String(folderName || "")
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "");
+
+    if (!normalizedName || normalizedName.includes("..")) {
+      toast({
+        title: "Nombre inválido",
+        description: "La carpeta no puede estar vacía ni contener '..'.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const targetFolder = selectedRepoFolder && selectedRepoFolder !== "."
+      ? `${selectedRepoFolder}/${normalizedName}`
+      : normalizedName;
+
+    try {
+      const response = await apiFetch("/api/local/repo/folders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+        credentials: "include",
+        body: JSON.stringify({ rootPath, folderPath: targetFolder }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload?.error || "No se pudo crear la carpeta");
+      }
+
+      await refreshRepositoryWorkspace(rootPath, targetFolder);
+      handleSelectRepoFolder(targetFolder);
+      toast({
+        title: "Carpeta creada",
+        description: targetFolder,
+        duration: 2200,
+      });
+    } catch (error: any) {
+      toast({
+        title: "No se pudo crear la carpeta",
+        description: error?.message || "Error desconocido",
+        variant: "destructive",
+      });
+    }
+  }, [
+    handleSelectRepoFolder,
+    refreshRepositoryWorkspace,
+    selectedProject?.repositoryPath,
+    selectedRepoFolder,
+    toast,
+  ]);
+
+  const handleToggleCodingAgent = useCallback((agent: CodingAgentProfile) => {
+    setSelectedCodingAgents((prev) => {
+      const exists = prev.includes(agent);
+      const next = exists ? prev.filter((item) => item !== agent) : [...prev, agent];
+      const normalized = next.length > 0 ? next : ["coder"];
+      if (selectedProject?.id) {
+        updateProject(selectedProject.id, { codingAgents: normalized });
+      }
+      return normalized;
+    });
+  }, [selectedProject?.id, updateProject]);
+
+  const workspaceContext = useMemo<WorkspaceContextPayload | undefined>(() => {
+    const repositoryPath = selectedProject?.repositoryPath?.trim();
+    if (!repositoryPath) return undefined;
+    return {
+      projectId: selectedProject.id,
+      projectName: selectedProject.name,
+      repositoryPath,
+      selectedFolder: selectedRepoFolder || ".",
+      codingAgents: selectedCodingAgents,
+      runtimeTarget,
+      executionAccess,
+      branch: activeRepoBranch || undefined,
+    };
+  }, [
+    activeRepoBranch,
+    executionAccess,
+    runtimeTarget,
+    selectedCodingAgents,
+    selectedProject?.id,
+    selectedProject?.name,
+    selectedProject?.repositoryPath,
+    selectedRepoFolder,
+  ]);
+
+  const withWorkspaceContext = useCallback((body: Record<string, any>) => {
+    if (!workspaceContext) return body;
+    return { ...body, workspaceContext };
+  }, [workspaceContext]);
 
   // First visit explosion
   const { showExplosion, completeWelcome } = useFirstVisit();
@@ -592,6 +839,24 @@ export function ChatInterface({
   const [editContent, setEditContent] = useState("");
   const [regeneratingMsgIndex, setRegeneratingMsgIndex] = useState<number | null>(null);
   const [gptSessionId, setGptSessionId] = useState<string | null>(null);
+  const activeGptId = useMemo(() => {
+    const rawId = activeGpt?.id;
+    const fallbackId = typeof chatGptId === "string" ? chatGptId.trim() : "";
+    const normalized = typeof rawId === "string" && rawId.trim().length > 0 ? rawId.trim() : fallbackId;
+    if (!normalized || normalized === "default") return null;
+    return normalized;
+  }, [activeGpt?.id, chatGptId]);
+  const gptSessionPayload = useMemo(() => {
+    const payload: { gptId?: string; session_id?: string } = {};
+    if (activeGptId) payload.gptId = activeGptId;
+    if (gptSessionId) payload.session_id = gptSessionId;
+    return payload;
+  }, [activeGptId, gptSessionId]);
+  const syncGptSessionFromEvent = useCallback((data: any) => {
+    const sessionFromEvent = typeof data?.session_id === "string" ? data.session_id.trim() : "";
+    if (!sessionFromEvent) return;
+    setGptSessionId((prev) => (prev === sessionFromEvent ? prev : sessionFromEvent));
+  }, []);
   const [messageFeedback, setMessageFeedback] = useState<Record<string, "up" | "down" | null>>({});
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -639,13 +904,52 @@ export function ChatInterface({
   const [userPlanState, setUserPlanState] = useState<{ plan: string; isAdmin?: boolean; isPaid?: boolean } | null>(null);
   // isAgentPanelOpen removed - agent progress is shown inline in chat
   const modelSelectorRef = useRef<HTMLDivElement>(null);
+  const gptCapabilities = activeGpt?.capabilities;
+  const gptCapabilityFlags = useMemo(
+    () => normalizeUiGptCapabilities(gptCapabilities, DEFAULT_UI_GPT_CAPABILITIES),
+    [gptCapabilities]
+  );
+
+  // For custom GPTs, canvas capability should not be turned off by global user settings.
+  const canvasEnabledForActiveContext = activeGpt ? gptCapabilityFlags.canvas : settings.canvas;
 
   // Keep UI state consistent with Settings toggles (disable features when turned off).
   useEffect(() => {
-    if (!settings.webSearch && selectedTool === "web") {
+    if (!activeGpt && !settings.webSearch && selectedTool === "web") {
       setSelectedTool(null);
     }
-  }, [settings.webSearch, selectedTool]);
+    if (selectedTool === "web" && !gptCapabilityFlags.webBrowsing) {
+      setSelectedTool(null);
+    }
+    if (selectedTool === "image" && !gptCapabilityFlags.imageGeneration) {
+      setSelectedTool(null);
+    }
+  }, [
+    activeGpt,
+    settings.webSearch,
+    selectedTool,
+    gptCapabilityFlags.webBrowsing,
+    gptCapabilityFlags.imageGeneration,
+  ]);
+
+  useEffect(() => {
+    if (!selectedDocTool) return;
+    const disabledByGpt =
+      (selectedDocTool === "figma" && !gptCapabilityFlags.canvas) ||
+      (selectedDocTool === "word" && (!gptCapabilityFlags.canvas || !gptCapabilityFlags.wordCreation)) ||
+      (selectedDocTool === "excel" && (!gptCapabilityFlags.canvas || !gptCapabilityFlags.excelCreation)) ||
+      (selectedDocTool === "ppt" && (!gptCapabilityFlags.canvas || !gptCapabilityFlags.pptCreation));
+    if (disabledByGpt) {
+      setSelectedDocTool(null);
+    }
+  }, [
+    selectedDocTool,
+    setSelectedDocTool,
+    gptCapabilityFlags.canvas,
+    gptCapabilityFlags.wordCreation,
+    gptCapabilityFlags.excelCreation,
+    gptCapabilityFlags.pptCreation,
+  ]);
 
   // Auto-open editor when a document tool is selected (Word/Excel/PPT)
   // This ensures the editor is visible and docInsertContentRef is registered
@@ -674,7 +978,7 @@ export function ChatInterface({
   }, [settings.voiceMode]);
 
   useEffect(() => {
-    if (!settings.canvas) {
+    if (!canvasEnabledForActiveContext) {
       if (activeDocEditor) {
         void closeDocEditor();
       } else if (selectedDocTool) {
@@ -683,7 +987,7 @@ export function ChatInterface({
       if (minimizedDocument) setMinimizedDocument(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.canvas]);
+  }, [canvasEnabledForActiveContext]);
 
   useEffect(() => {
     const fetchUserPlanInfo = async () => {
@@ -849,54 +1153,72 @@ export function ChatInterface({
 
     // Merge agent runs from the store into messages (use reactive allAgentRuns)
     Object.entries(allAgentRuns).forEach(([messageId, runState]: [string, any]) => {
-      // Only include runs for the current chat
-      if (runState.chatId === chatId || (!chatId && runState.chatId)) {
-        const existingMsg = msgMap.get(messageId);
-        if (existingMsg) {
-          // Update existing message with agent run data
-          msgMap.set(messageId, {
-            ...existingMsg,
-            agentRun: {
-              runId: runState.runId,
-              status: runState.status,
-              userMessage: runState.userMessage,
-              steps: runState.steps,
-              eventStream: runState.eventStream,
-              summary: runState.summary,
-              error: runState.error,
-            }
-          });
-        } else {
-          // Create new message for agent run
-          msgMap.set(messageId, {
-            id: messageId,
-            role: "assistant" as const,
-            content: "",
-            timestamp: new Date(runState.createdAt),
-            agentRun: {
-              runId: runState.runId,
-              status: runState.status,
-              userMessage: runState.userMessage,
-              steps: runState.steps,
-              eventStream: runState.eventStream,
-              summary: runState.summary,
-              error: runState.error,
-            }
-          });
-        }
+      const hasVisibleMessage = msgMap.has(messageId);
+      const matchesCurrentChat = !!chatId && runState.chatId === chatId;
+      const isCurrentActiveRun = !!currentAgentMessageId && messageId === currentAgentMessageId;
+      const includeRun =
+        hasVisibleMessage ||
+        matchesCurrentChat ||
+        isCurrentActiveRun;
+
+      if (!includeRun) return;
+
+      const existingMsg = msgMap.get(messageId);
+      if (existingMsg) {
+        // Update existing message with agent run data
+        msgMap.set(messageId, {
+          ...existingMsg,
+          agentRun: {
+            runId: runState.runId,
+            status: runState.status,
+            userMessage: runState.userMessage,
+            steps: runState.steps,
+            eventStream: runState.eventStream,
+            summary: runState.summary,
+            error: runState.error,
+          }
+        });
+      } else {
+        // Create new message for agent run
+        msgMap.set(messageId, {
+          id: messageId,
+          role: "assistant" as const,
+          content: "",
+          timestamp: new Date(runState.createdAt),
+          agentRun: {
+            runId: runState.runId,
+            status: runState.status,
+            userMessage: runState.userMessage,
+            steps: runState.steps,
+            eventStream: runState.eventStream,
+            summary: runState.summary,
+            error: runState.error,
+          }
+        });
       }
     });
 
     return Array.from(msgMap.values()).sort((a: any, b: any) =>
       new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
-  }, [messages, optimisticMessages, allAgentRuns, chatId]);
+  }, [messages, optimisticMessages, allAgentRuns, chatId, currentAgentMessageId]);
 
   // Reset current agent message ID when chatId changes - polling auto-starts via useAgentPolling
   useEffect(() => {
+    const isActiveAgentStatus = (status: string) =>
+      ['starting', 'queued', 'planning', 'running', 'verifying', 'replanning'].includes(status);
+
+    // Keep tracking the already-active run even if chatId is still "pending-*".
+    if (currentAgentMessageId) {
+      const currentRun = allAgentRuns[currentAgentMessageId];
+      if (currentRun && isActiveAgentStatus(String(currentRun.status || ""))) {
+        return;
+      }
+    }
+
     // Find if there's an active run for this chat
     const matchingRun = Object.entries(allAgentRuns).find(
-      ([_, run]: [string, any]) => run.chatId === chatId && ['starting', 'queued', 'planning', 'running'].includes(run.status)
+      ([_, run]: [string, any]) => run.chatId === chatId && isActiveAgentStatus(String(run.status || ""))
     );
 
     if (matchingRun) {
@@ -906,7 +1228,7 @@ export function ChatInterface({
     } else {
       setCurrentAgentMessageId(null);
     }
-  }, [chatId, allAgentRuns]);
+  }, [chatId, allAgentRuns, currentAgentMessageId]);
 
   // Toast notifications for agent mode
   const prevAgentStatusRef = useRef<string | null>(null);
@@ -918,35 +1240,12 @@ export function ChatInterface({
 
     // Only trigger toasts on status changes
     if (currentStatus && currentStatus !== prevStatus) {
-      switch (currentStatus) {
-        case 'running':
-        case 'planning':
-          if (prevStatus === 'starting' || prevStatus === 'queued' || prevStatus === null) {
-            toast({
-              description: "Agente iniciado",
-              duration: 3000,
-            });
-          }
-          break;
-        case 'completed':
-          toast({
-            description: "Agente completó la tarea",
-            duration: 3000,
-          });
-          break;
-        case 'failed':
-          toast({
-            variant: "destructive",
-            description: `Error: ${activeAgentRun?.error || 'Error desconocido'}`,
-            duration: 5000,
-          });
-          break;
-        case 'cancelled':
-          toast({
-            description: "Ejecución cancelada",
-            duration: 3000,
-          });
-          break;
+      if (currentStatus === 'failed') {
+        toast({
+          variant: "destructive",
+          description: `Error: ${activeAgentRun?.error || 'Error desconocido'}`,
+          duration: 5000,
+        });
       }
     }
 
@@ -1026,6 +1325,7 @@ export function ChatInterface({
     type: string;
     mimeType?: string;
     imageUrl?: string;
+    localUrl?: string;
     storagePath?: string;
     fileId?: string;
     content?: string;
@@ -1036,6 +1336,7 @@ export function ChatInterface({
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const latestGeneratedImageRef = useRef<{ messageId: string; imageData: string } | null>(null);
   const dragCounterRef = useRef(0);
+  const generatedAttachmentPreviewUrlRef = useRef<string | null>(null);
   const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string; showInstructions?: boolean } | null>(null);
   const previewDocumentRef = useRef<DocumentBlock | null>(null);
   const orchestratorRef = useRef<{ runOrchestrator: (prompt: string) => Promise<void> } | null>(null);
@@ -1051,6 +1352,33 @@ export function ChatInterface({
   useEffect(() => {
     editedDocumentContentRef.current = editedDocumentContent;
   }, [editedDocumentContent]);
+
+  const releaseGeneratedAttachmentPreviewUrl = useCallback(() => {
+    const url = generatedAttachmentPreviewUrlRef.current;
+    if (!url) return;
+    try {
+      URL.revokeObjectURL(url);
+    } catch { }
+    generatedAttachmentPreviewUrlRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      uploadedFilesRef.current.forEach((file) => {
+        if (file.localUrl) {
+          try {
+            URL.revokeObjectURL(file.localUrl);
+          } catch { }
+        }
+      });
+      releaseGeneratedAttachmentPreviewUrl();
+    };
+  }, [releaseGeneratedAttachmentPreviewUrl]);
+
+  useEffect(() => {
+    if (previewFileAttachment) return;
+    releaseGeneratedAttachmentPreviewUrl();
+  }, [previewFileAttachment, releaseGeneratedAttachmentPreviewUrl]);
 
   useEffect(() => {
     chatIdRef.current = chatId || null;
@@ -1532,7 +1860,7 @@ export function ChatInterface({
   };
 
   // Handle new chat - reset all document state before calling parent handler
-  const handleNewChat = useCallback(() => {
+  const handleNewChat = useCallback((options?: { preserveGpt?: boolean }) => {
     // Reset document tool selection
     setSelectedDocTool(null);
     setActiveDocEditor(null);
@@ -1548,7 +1876,7 @@ export function ChatInterface({
       fileSize: null
     });
     // Call original onNewChat
-    onNewChat?.();
+    onNewChat?.(options);
   }, [onNewChat]);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1721,6 +2049,64 @@ export function ChatInterface({
       fileId: rest.fileId || rest.id,
     };
   };
+
+  const normalizeLocalExecArtifact = useCallback((rawArtifact: any, rawPayload?: any): Message["artifact"] | undefined => {
+    const source = rawArtifact && typeof rawArtifact === "object"
+      ? rawArtifact
+      : rawPayload && typeof rawPayload === "object"
+        ? rawPayload
+        : null;
+    if (!source) return undefined;
+
+    const localPath = typeof source.path === "string" ? source.path.trim() : "";
+    const directDownloadUrl = typeof source.downloadUrl === "string" ? source.downloadUrl.trim() : "";
+    const downloadUrl = directDownloadUrl || (localPath ? `/api/local/file?path=${encodeURIComponent(localPath)}` : "");
+    if (!downloadUrl) return undefined;
+
+    const mimeType = typeof source.mimeType === "string" && source.mimeType.trim()
+      ? source.mimeType.trim()
+      : "application/octet-stream";
+    const filename = typeof source.filename === "string" && source.filename.trim()
+      ? source.filename.trim()
+      : typeof source.fileName === "string" && source.fileName.trim()
+        ? source.fileName.trim()
+        : localPath
+          ? localPath.split("/").pop() || "archivo_local"
+          : "archivo_local";
+
+    const rawType = typeof source.type === "string" ? source.type.toLowerCase() : "";
+    const resolvedType: Message["artifact"]["type"] =
+      rawType === "image" || mimeType.startsWith("image/")
+        ? "image"
+        : rawType === "spreadsheet" || mimeType.includes("spreadsheet") || mimeType.includes("excel") || mimeType.includes("csv")
+          ? "spreadsheet"
+          : rawType === "presentation" || mimeType.includes("presentation") || mimeType.includes("powerpoint")
+            ? "presentation"
+            : rawType === "pdf" || mimeType === "application/pdf"
+              ? "pdf"
+              : "document";
+
+    return {
+      artifactId: typeof source.artifactId === "string" && source.artifactId.trim()
+        ? source.artifactId.trim()
+        : `local_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+      type: resolvedType,
+      mimeType,
+      sizeBytes: typeof source.sizeBytes === "number" && Number.isFinite(source.sizeBytes)
+        ? source.sizeBytes
+        : typeof source.bytes === "number" && Number.isFinite(source.bytes)
+          ? source.bytes
+          : undefined,
+      downloadUrl,
+      previewUrl: resolvedType === "image"
+        ? (
+          typeof source.previewUrl === "string" && source.previewUrl.trim()
+            ? source.previewUrl.trim()
+            : downloadUrl
+        )
+        : undefined,
+    };
+  }, []);
 
   const markMessageDeliveryError = useCallback((messageKey: string, errorMessage: string) => {
     setOptimisticMessages((prev) => prev.map((m: Message) =>
@@ -1902,6 +2288,35 @@ export function ChatInterface({
     aiStateRef.current = aiState;
   }, [aiState]);
 
+  // If we already rendered an assistant response and no stream is active,
+  // clear stale thinking state that can be left behind by race conditions.
+  useEffect(() => {
+    if (streamingContent || streamingContentRef.current) return;
+    if (uiPhase === "console") return;
+
+    const activeAgentStatuses = new Set(["starting", "queued", "planning", "running", "replanning", "verifying"]);
+    if (activeAgentRun?.status && activeAgentStatuses.has(activeAgentRun.status)) return;
+
+    const lastMessage = displayMessages[displayMessages.length - 1];
+    if (!lastMessage || lastMessage.role !== "assistant") return;
+    if (aiStateRef.current === "idle") return;
+
+    setAiStateForChat("idle", chatId || "default");
+    setAiProcessStepsForChat([], chatId || "default");
+    if (uiPhase !== "idle") {
+      setUiPhase("idle");
+    }
+  }, [
+    displayMessages,
+    streamingContent,
+    uiPhase,
+    activeAgentRun?.status,
+    chatId,
+    setAiStateForChat,
+    setAiProcessStepsForChat,
+    setUiPhase,
+  ]);
+
   // Announce AI state changes for screen readers
   useEffect(() => {
     if (aiState === "thinking") {
@@ -2077,7 +2492,7 @@ export function ChatInterface({
 
     const result = await streamChat.stream("/api/chat/stream", {
       chatId: stableChatId,
-      body: {
+      body: withWorkspaceContext({
         messages: history,
         conversationId: stableChatId,
         chatId: stableChatId,
@@ -2089,6 +2504,10 @@ export function ChatInterface({
         provider: selectedProvider,
         model: selectedModel,
         latencyMode,
+        ...gptSessionPayload,
+      }),
+      onEvent: (_eventType, data) => {
+        syncGptSessionFromEvent(data);
       },
       buildFinalMessage: (fullContent, data, messageId) => ({
         id: messageId || `assistant-${Date.now()}`,
@@ -2123,8 +2542,11 @@ export function ChatInterface({
     selectedDocTool,
     selectedModel,
     selectedProvider,
+    gptSessionPayload,
+    syncGptSessionFromEvent,
     streamChat,
     toast,
+    withWorkspaceContext,
   ]);
 
   const startVoiceRecording = () => {
@@ -2409,57 +2831,143 @@ export function ChatInterface({
     document.body.removeChild(link);
   }, []);
 
+  const resolveAttachmentStorageUrl = useCallback((storagePath?: string): string | undefined => {
+    if (!storagePath) return undefined;
+    const trimmedPath = storagePath.trim();
+    if (/^(blob:|data:|https?:\/\/)/i.test(trimmedPath)) {
+      return trimmedPath;
+    }
+
+    const normalizedPath = trimmedPath.startsWith("/") ? trimmedPath : `/${trimmedPath}`;
+
+    if (
+      typeof window !== "undefined" &&
+      window.location.port === "5050" &&
+      (normalizedPath.startsWith("/objects/") || normalizedPath.startsWith("/api/"))
+    ) {
+      // In Vite dev, keep same-origin URLs so /objects and /api go through proxy.
+      // This avoids cross-origin iframe blocks for inline PDF previews.
+      return normalizedPath;
+    }
+
+    const configuredApiBase = String(import.meta.env.VITE_API_URL || "").trim();
+    if (configuredApiBase && normalizedPath.startsWith("/")) {
+      try {
+        return new URL(normalizedPath, configuredApiBase).toString();
+      } catch {
+        // Fall through to local dev fallback.
+      }
+    }
+
+    return normalizedPath;
+  }, []);
+
   const handleOpenFileAttachmentPreview = useCallback(async (att: {
     type: string;
     name: string;
     mimeType?: string;
     imageUrl?: string;
+    localUrl?: string;
     storagePath?: string;
     fileId?: string;
+    id?: string;
+    content?: string;
+    documentType?: string;
   }) => {
     if (att.type === "image" && att.imageUrl) {
+      releaseGeneratedAttachmentPreviewUrl();
       setLightboxImage(att.imageUrl);
       return;
     }
 
     if (att.type === "image" && att.storagePath) {
-      setLightboxImage(att.storagePath);
+      releaseGeneratedAttachmentPreviewUrl();
+      setLightboxImage(resolveAttachmentStorageUrl(att.storagePath) || att.storagePath);
       return;
     }
 
+    const attachmentName = (att.name || (att as any).title || "Documento").trim();
+    const resolvedStoragePath = resolveAttachmentStorageUrl(att.storagePath) || att.storagePath;
+    const inlineContent = typeof att.content === "string" && att.content.trim().length > 0
+      ? att.content
+      : undefined;
+    const isPdfAttachment =
+      isPdfFile(att.mimeType || (att.documentType === "pdf" ? "application/pdf" : undefined), attachmentName) ||
+      att.documentType === "pdf";
+
+    releaseGeneratedAttachmentPreviewUrl();
+
+    if (inlineContent) {
+      setPreviewFileAttachment({
+        ...att,
+        name: attachmentName,
+        storagePath: resolvedStoragePath,
+        content: inlineContent,
+        isLoading: false,
+        isProcessing: false,
+      });
+      return;
+    }
+
+    const effectiveFileId = att.fileId || att.id;
     setPreviewFileAttachment({
       ...att,
-      isLoading: true,
-      isProcessing: false,
+      name: attachmentName,
+      storagePath: resolvedStoragePath,
+      isLoading: Boolean(effectiveFileId),
+      isProcessing: !effectiveFileId && !isPdfAttachment,
       content: undefined,
     });
 
-    if (att.fileId) {
+    if (isPdfAttachment && !att.localUrl && resolvedStoragePath) {
       try {
-        const response = await apiFetch(`/api/files/${att.fileId}/content`);
-        if (response.ok) {
-          const data = await response.json();
-          if (data.status === "ready" && data.content) {
-            setPreviewFileAttachment((prev: any) => prev ? {
-              ...prev,
-              content: data.content,
-              isLoading: false,
-              isProcessing: false,
-            } : null);
-            return;
-          } else if (data.status === "processing" || data.status === "queued") {
-            setPreviewFileAttachment((prev: any) => prev ? {
-              ...prev,
-              isLoading: false,
-              isProcessing: true,
-              content: undefined,
-            } : null);
-            return;
-          }
+        const pdfResponse = await fetch(resolvedStoragePath, { credentials: "include" });
+        if (pdfResponse.ok) {
+          const fetchedBlob = await pdfResponse.blob();
+          const normalizedPdfBlob = fetchedBlob.type.toLowerCase().includes("pdf")
+            ? fetchedBlob
+            : new Blob([await fetchedBlob.arrayBuffer()], { type: "application/pdf" });
+          const objectUrl = URL.createObjectURL(normalizedPdfBlob);
+          generatedAttachmentPreviewUrlRef.current = objectUrl;
+          setPreviewFileAttachment((prev: any) => prev ? {
+            ...prev,
+            localUrl: objectUrl,
+          } : null);
         }
       } catch (error) {
-        console.error("Error fetching file content:", error);
+        console.warn("Error creating inline PDF preview URL:", error);
       }
+    }
+
+    if (!effectiveFileId) {
+      return;
+    }
+
+    try {
+      const response = await apiFetch(`/api/files/${effectiveFileId}/content`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.status === "ready" && data.content) {
+          setPreviewFileAttachment((prev: any) => prev ? {
+            ...prev,
+            fileId: effectiveFileId,
+            content: data.content,
+            isLoading: false,
+            isProcessing: false,
+          } : null);
+          return;
+        } else if (data.status === "processing" || data.status === "queued") {
+          setPreviewFileAttachment((prev: any) => prev ? {
+            ...prev,
+            isLoading: false,
+            isProcessing: true,
+            content: undefined,
+          } : null);
+          return;
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching file content:", error);
     }
 
     setPreviewFileAttachment((prev: any) => prev ? {
@@ -2468,7 +2976,78 @@ export function ChatInterface({
       isProcessing: false,
       content: "No se pudo cargar el contenido del archivo.",
     } : null);
+  }, [releaseGeneratedAttachmentPreviewUrl, resolveAttachmentStorageUrl]);
+
+  const isTemporaryUploadId = useCallback((fileId?: string) => {
+    if (!fileId) return true;
+    return fileId.startsWith("temp-") || fileId.startsWith("temp-url-");
   }, []);
+
+  const handlePreviewUploadedFile = useCallback((file: UploadedFile) => {
+    const mimeType = file.mimeType || file.type || "application/octet-stream";
+    const hasInlineContent = typeof file.content === "string" && file.content.trim().length > 0;
+    const isStillUploading = file.status === "uploading" || file.status === "processing";
+    const isUploadError = file.status === "error";
+    const hasStableFileId = !isTemporaryUploadId(file.id);
+
+    if (hasInlineContent) {
+      setPreviewFileAttachment({
+        type: file.type || "file",
+        name: file.name,
+        mimeType,
+        localUrl: file.localUrl,
+        storagePath: file.storagePath,
+        fileId: file.id,
+        content: file.content,
+        isLoading: false,
+        isProcessing: false,
+      });
+      return;
+    }
+
+    if (isUploadError) {
+      const detail = typeof file.error === "string" && file.error.trim().length > 0
+        ? `\n\nDetalle: ${file.error.trim()}`
+        : "";
+      setPreviewFileAttachment({
+        type: file.type || "file",
+        name: file.name,
+        mimeType,
+        localUrl: file.localUrl,
+        storagePath: file.storagePath,
+        fileId: hasStableFileId ? file.id : undefined,
+        content: `No se pudo procesar este archivo.${detail}`,
+        isLoading: false,
+        isProcessing: false,
+      });
+      return;
+    }
+
+    if (isStillUploading || !hasStableFileId) {
+      setPreviewFileAttachment({
+        type: file.type || "file",
+        name: file.name,
+        mimeType,
+        localUrl: file.localUrl,
+        storagePath: file.storagePath,
+        fileId: hasStableFileId ? file.id : undefined,
+        content: undefined,
+        isLoading: false,
+        isProcessing: true,
+      });
+      return;
+    }
+
+    void handleOpenFileAttachmentPreview({
+      type: file.type || "file",
+      name: file.name,
+      mimeType,
+      localUrl: file.localUrl,
+      storagePath: file.storagePath,
+      fileId: file.id,
+      content: file.content,
+    });
+  }, [handleOpenFileAttachmentPreview, isTemporaryUploadId]);
 
   const handleCopyAttachmentContent = async () => {
     if (previewFileAttachment?.content) {
@@ -2481,7 +3060,11 @@ export function ChatInterface({
   const handleDownloadFileAttachment = async () => {
     if (!previewFileAttachment?.storagePath) return;
     try {
-      const response = await apiFetch(previewFileAttachment.storagePath);
+      const targetUrl = resolveAttachmentStorageUrl(previewFileAttachment.storagePath) || previewFileAttachment.storagePath;
+      const response = await fetch(targetUrl, { credentials: "include" });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -2577,15 +3160,17 @@ export function ChatInterface({
 
     await streamChat.stream("/api/chat/stream", {
       chatId: regenerateChatId,
-      body: {
+      body: withWorkspaceContext({
         messages: chatHistory,
         chatId: regenerateChatId,
         conversationId: regenerateChatId,
         provider: selectedProvider,
         model: selectedModel,
         latencyMode,
-      },
+        ...gptSessionPayload,
+      }),
       onEvent: (eventType, data) => {
+        syncGptSessionFromEvent(data);
         if (eventType === "production_start") {
           setAiStateForRegenerate("agent_working");
           setAiProcessStepsForRegenerate([{
@@ -2650,7 +3235,7 @@ export function ChatInterface({
         requestId: generateRequestId(),
       }),
     });
-  }, [messages, chatId, onTruncateMessagesAt, selectedProvider, selectedModel]);
+  }, [messages, chatId, onTruncateMessagesAt, selectedProvider, selectedModel, latencyMode, withWorkspaceContext, gptSessionPayload, syncGptSessionFromEvent]);
 
   const handleAgentCancel = useCallback(async (messageId: string, runId: string) => {
     try {
@@ -2932,7 +3517,15 @@ export function ChatInterface({
   };
 
   const removeFile = (index: number) => {
-    setUploadedFiles((prev: any[]) => prev.filter((_: any, i: number) => i !== index));
+    setUploadedFiles((prev: UploadedFile[]) => {
+      const removed = prev[index];
+      if (removed?.localUrl) {
+        try {
+          URL.revokeObjectURL(removed.localUrl);
+        } catch { }
+      }
+      return prev.filter((_, i: number) => i !== index);
+    });
   };
 
   const ALLOWED_TYPES = [
@@ -3011,6 +3604,7 @@ export function ChatInterface({
     for (const file of validFiles) {
       const tempId = `temp-${Date.now()}-${Math.random().toString(36).substring(2)}`;
       const isImage = file.type.startsWith("image/");
+      const isPdf = isPdfFile(file.type, file.name);
       const isExcel = [
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'application/vnd.ms-excel',
@@ -3031,6 +3625,56 @@ export function ChatInterface({
         }
       }
 
+      let localUrl: string | undefined;
+      let content: string | undefined;
+
+      if (isPdf) {
+        try {
+          localUrl = URL.createObjectURL(file);
+        } catch {
+          localUrl = undefined;
+        }
+      }
+
+      if (file.size <= 5 * 1024 * 1024) {
+        const isTextFile = file.type.startsWith("text/") ||
+          ["application/json", "application/javascript"].includes(file.type) ||
+          !!file.name.match(/\.(txt|md|csv|json|js|jsx|ts|tsx)$/i);
+
+        if (isTextFile) {
+          try {
+            content = await new Promise<string>((resolve) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result as string || "");
+              reader.readAsText(file);
+            });
+          } catch (e) {
+            console.warn("Failed to read text locally", e);
+          }
+        } else if (file.name.match(/\.(docx)$/i)) {
+          try {
+            const buffer = await file.arrayBuffer();
+            const mammoth = await import("mammoth");
+            const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
+            content = result.value;
+          } catch (e) {
+            console.warn("Failed to read docx locally", e);
+          }
+        } else if (isExcel) {
+          try {
+            const buffer = await file.arrayBuffer();
+            const XLSX = await import("xlsx");
+            const workbook = XLSX.read(buffer, { type: "array" });
+            const sheetName = workbook.SheetNames[0];
+            if (sheetName) {
+              content = XLSX.utils.sheet_to_csv(workbook.Sheets[sheetName]);
+            }
+          } catch (e) {
+            console.warn("Failed to read excel locally", e);
+          }
+        }
+      }
+
       const tempFile: UploadedFile = {
         id: tempId,
         name: file.name,
@@ -3039,6 +3683,8 @@ export function ChatInterface({
         size: file.size,
         status: "uploading",
         dataUrl,
+        localUrl,
+        content,
       };
       setUploadedFiles((prev: any) => [...prev, tempFile]);
 
@@ -3874,14 +4520,16 @@ export function ChatInterface({
 
         const emergencyResult = await streamChat.stream("/api/chat/stream", {
           chatId: effectiveChatIdForStream,
-          body: {
+          body: withWorkspaceContext({
             messages: [{ role: "user", content: cleanInput }],
             chatId: effectiveChatIdForStream,
             conversationId: effectiveChatIdForStream,
             model: selectedModel || "grok-3",
             latencyMode,
-          },
+            ...gptSessionPayload,
+          }),
           onEvent: (eventType, data) => {
+            syncGptSessionFromEvent(data);
             if (eventType === "tool_start" && data.toolName === "browse_and_act") {
               setAiStateForChat("agent_working", effectiveChatIdForStream);
               globalStartSseSession(data.args?.goal || "Automatización web");
@@ -4287,12 +4935,19 @@ export function ChatInterface({
               body: JSON.stringify({ prompt: userText2, confirm: true }),
             });
             const data = await res.json();
+            const localArtifact = normalizeLocalExecArtifact(data?.artifact, data?.payload);
             const assistantMsg: Message = {
               id: `assistant-${Date.now()}`,
               role: "assistant",
               content: data?.message || (data?.success ? "Listo." : `Error: ${data?.error || "error desconocido"}`),
               timestamp: new Date(),
               requestId: generateRequestId(),
+              artifact: localArtifact,
+              metadata: {
+                localControl: true,
+                code: data?.code || null,
+                payload: data?.payload || null,
+              },
             };
             onSendMessage(assistantMsg);
           } catch (error: any) {
@@ -4365,7 +5020,7 @@ export function ChatInterface({
 
         const streamResult = await streamChat.stream("/api/chat/stream", {
           chatId: effectiveChatIdForStream,
-          body: {
+          body: withWorkspaceContext({
             messages: [{ role: "user", content: cleanInput }],
             chatId: effectiveChatIdForStream,
             conversationId: effectiveChatIdForStream,
@@ -4373,8 +5028,10 @@ export function ChatInterface({
             forceWebSearch: isWebSearch,
             webSearchAuto: isWebSearch,
             latencyMode,
-          },
+            ...gptSessionPayload,
+          }),
           onEvent: (eventType, data) => {
+            syncGptSessionFromEvent(data);
             // Handle browser automation events from agent loop
             if (eventType === "tool_start" && data.toolName === "browse_and_act") {
               setAiStateForChat("agent_working", effectiveChatIdForStream);
@@ -4619,10 +5276,34 @@ export function ChatInterface({
       const isGenerationRequest = generationPatterns.some(p => p.test(input));
       const hasEditPattern = imageEditPatterns.some(p => p.test(input));
 
+      const inferDocToolFromPrompt = (prompt: string): "word" | "excel" | "ppt" | null => {
+        const normalized = String(prompt || "").trim();
+        if (!normalized) return null;
+        if (/\b(excel|hoja de cálculo|spreadsheet|xlsx|tabla de datos)\b/i.test(normalized)) {
+          return gptCapabilityFlags.canvas && gptCapabilityFlags.excelCreation ? "excel" : null;
+        }
+        if (/\b(presentación|presentation|ppt|powerpoint|slides|diapositivas)\b/i.test(normalized)) {
+          return gptCapabilityFlags.canvas && gptCapabilityFlags.pptCreation ? "ppt" : null;
+        }
+        if (/\b(documento|document|word|docx|informe|reporte|ensayo|tesis)\b/i.test(normalized)) {
+          return gptCapabilityFlags.canvas && gptCapabilityFlags.wordCreation ? "word" : null;
+        }
+        return null;
+      };
+
+      const explicitDocToolSelected = selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)
+        ? (selectedDocTool as "word" | "excel" | "ppt")
+        : null;
+      const inferredDocToolForPrompt = explicitDocToolSelected ? null : inferDocToolFromPrompt(input);
+      const docToolForRequest: "word" | "excel" | "ppt" | null = explicitDocToolSelected || inferredDocToolForPrompt;
+      if (!explicitDocToolSelected && inferredDocToolForPrompt && !activeDocEditorRef.current) {
+        openBlankDocEditor(inferredDocToolForPrompt);
+      }
+
       // IMPORTANT: When a doc tool is explicitly selected (Word/Excel/PPT), we bypass the legacy
       // generation pattern detection and use the new /api/chat/stream flow with docTool parameter,
       // which triggers production mode directly on the backend
-      const hasDocToolSelected = selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool);
+      const hasDocToolSelected = !!docToolForRequest;
 
       // When document files are attached, skip generation pattern detection entirely
       // to let the document analysis path (DATA_MODE / /api/analyze) handle them.
@@ -4789,7 +5470,7 @@ export function ChatInterface({
             const generationResult = await streamChat.stream("/api/chat/stream", {
               chatId: effectiveChatIdForStream,
               signal: abortControllerRef.current.signal,
-              body: {
+              body: withWorkspaceContext({
                 messages: [...messages.map(m => ({ role: m.role, content: m.content })), { role: "user", content: generationInput }],
                 chatId: effectiveChatIdForStream,
                 conversationId: effectiveChatIdForStream,
@@ -4801,12 +5482,14 @@ export function ChatInterface({
                 lastImageBase64,
                 lastImageId,
                 latencyMode,
+                ...gptSessionPayload,
                 // Prompt integrity metadata
                 clientPromptLen: (userMsg as any).clientPromptLen,
                 clientPromptHash: (userMsg as any).clientPromptHash,
                 promptMessageId: (userMsg as any).promptMessageId,
-              },
+              }),
               onEvent: (eventType, data) => {
+                syncGptSessionFromEvent(data);
                 if (eventType === "tool_start" && data.toolName === "browse_and_act") {
                   setAiStateForChat("agent_working", effectiveChatIdForStream);
                   setAiProcessStepsForChat([{
@@ -5520,12 +6203,6 @@ export function ChatInterface({
           );
 
           if (result) {
-            toast({
-              title: "Modo Agente activado",
-              description: complexityCheck.agent_reason || "Tarea compleja detectada",
-              duration: 4000,
-            });
-
             // Optimistic message already added above! just notify parent/server if needed
             onSendMessage({ ...userMsg, skipRun: true });
 
@@ -5818,7 +6495,7 @@ export function ChatInterface({
             new Promise<boolean | null>((resolve) => setTimeout(() => resolve(null), IMAGE_DETECT_TIMEOUT_MS)),
           ]);
           const imageDetectTimedOut = detectResult === null;
-          const shouldGenerateImage = detectResult ?? false;
+          const shouldGenerateImage = (detectResult ?? false) && gptCapabilityFlags.imageGeneration;
           if (imageDetectTimedOut) {
             imageDetectController?.abort();
             console.debug("[Perf] image_detect_timeout_ms", IMAGE_DETECT_TIMEOUT_MS);
@@ -5946,8 +6623,9 @@ export function ChatInterface({
 
             // Determine if we're in document mode for special AI behavior
             // Check both activeDocEditor and previewDocument for Excel mode
-            const isDocumentMode = !!activeDocEditorRef.current || !!previewDocumentRef.current;
-            const documentType = activeDocEditorRef.current?.type || previewDocumentRef.current?.type || null;
+            const forcedDocType = docToolForRequest;
+            const isDocumentMode = !!activeDocEditorRef.current || !!previewDocumentRef.current || !!forcedDocType;
+            const documentType = activeDocEditorRef.current?.type || previewDocumentRef.current?.type || forcedDocType || null;
             const isFigmaMode = selectedDocTool === "figma";
             const isPptMode = documentType === "ppt";
             const isWordMode = documentType === "word";
@@ -6092,7 +6770,7 @@ IMPORTANTE:
               }
 
               if (import.meta.env.DEV) {
-                chatLogger.debug("handleSubmit docTool", { selectedDocTool, isWordMode });
+                chatLogger.debug("handleSubmit docTool", { selectedDocTool: docToolForRequest, isWordMode });
               }
 
               // NOTE: Previously there was a redundant raw `apiFetch("/api/chat/stream")` here
@@ -6133,11 +6811,15 @@ IMPORTANTE:
                 setAiStateForChat(value, effectiveStreamChatId);
               const setAiProcessStepsForStream = (value: React.SetStateAction<AiProcessStep[]>) =>
                 setAiProcessStepsForChat(value, effectiveStreamChatId);
+              const forceWebSearch = selectedTool === "web";
+              // For custom GPTs, honor the GPT capability as an auto-search hint.
+              // Server-side heuristics decide whether a web call is actually needed.
+              const webSearchAuto = forceWebSearch || (!!activeGptId && gptCapabilityFlags.webBrowsing);
 
               const streamResult = await streamChat.stream("/api/chat/stream", {
                 chatId: effectiveStreamChatId,
                 signal: abortControllerRef.current?.signal,
-                body: {
+                body: withWorkspaceContext({
                   messages: finalChatHistory,
                   conversationId: effectiveStreamChatId,
                   chatId: effectiveStreamChatId,
@@ -6147,17 +6829,21 @@ IMPORTANTE:
                   attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
                   // Send image base64 directly for vision fallback if storagePath resolution fails
                   lastImageBase64: firstImageDataUrl,
-                  docTool: selectedDocTool || null,
+                  docTool: docToolForRequest,
+                  forceWebSearch,
+                  webSearchAuto,
                   provider: selectedProvider,
                   model: selectedModel,
                   latencyMode,
+                  ...gptSessionPayload,
                   // Prompt integrity metadata for server-side verification
                   clientPromptLen: (userMsg as any).clientPromptLen,
                   clientPromptHash: (userMsg as any).clientPromptHash,
                   promptMessageId: (userMsg as any).promptMessageId,
-                },
+                }),
                 onAiStateChange: (nextState) => setAiStateForStream(nextState),
                 onEvent: (eventType, data) => {
+                  syncGptSessionFromEvent(data);
                   // Handle context truncation/compression notices
                   if (eventType === "notice" && data?.type === "context_truncated") {
                     setContextNotice({
@@ -6184,7 +6870,7 @@ IMPORTANTE:
                   if (eventType === "production_start") {
                     isProductionStream = true;
                     setAiStateForStream("agent_working");
-                    if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)) {
+                    if (docToolForRequest) {
                       setDocGenerationState({
                         status: 'generating',
                         progress: 0,
@@ -6199,7 +6885,7 @@ IMPORTANTE:
                   }
 
                   if (eventType === "production_event") {
-                    if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)) {
+                    if (docToolForRequest) {
                       const stageLabels: Record<string, string> = {
                         intake: "Procesando solicitud...",
                         blueprint: "Diseñando estructura...",
@@ -6244,10 +6930,10 @@ IMPORTANTE:
                     if (data?.type) {
                       streamArtifactMimeTypes.set(String(data.type), artifactMimeTypeMap[data.type] || data?.mimeType || "application/octet-stream");
                     }
-                    if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)) {
+                    if (docToolForRequest) {
                       const docTypeMap: Record<string, string> = { word: 'word', excel: 'excel', ppt: 'ppt', xlsx: 'excel', docx: 'word', pptx: 'ppt' };
                       const artifactDocType = docTypeMap[data?.type] || String(data?.type || "");
-                      const selectedDocTypeNorm = docTypeMap[selectedDocTool] || selectedDocTool;
+                      const selectedDocTypeNorm = docTypeMap[docToolForRequest] || docToolForRequest;
                       if (artifactDocType === selectedDocTypeNorm) {
                         setDocGenerationState({
                           status: 'ready',
@@ -6364,7 +7050,7 @@ IMPORTANTE:
                     const primaryArtifact = productionArtifacts[0];
                     const type = artifactTypeMap[primaryArtifact.type] || primaryArtifact.type || "document";
                     const typeConfirm: Record<string, string> = { word: 'Documento generado correctamente', excel: 'Hoja de cálculo generada correctamente', presentation: 'Presentación generada correctamente', ppt: 'Presentación generada correctamente', doc: 'Documento generado correctamente', spreadsheet: 'Hoja de cálculo generada correctamente' };
-                    const friendlyType = selectedDocTool || 'word';
+                    const friendlyType = docToolForRequest || selectedDocTool || 'word';
                     const messageContent = `✓ ${typeConfirm[friendlyType] || 'Documento generado correctamente'}`;
                     const artifactMimeType = primaryArtifact.type ? (artifactMimeTypeMap[primaryArtifact.type] || streamArtifactMimeTypes.get(primaryArtifact.type) || "application/octet-stream") : "application/octet-stream";
                     const artifactName = primaryArtifact.filename || `${friendlyType}.${friendlyType === "word" ? "docx" : friendlyType === "excel" ? "xlsx" : friendlyType === "ppt" ? "pptx" : "bin"}`;
@@ -6450,6 +7136,7 @@ IMPORTANTE:
                     userMessageId: userMsgId,
                     confidence: uncertainty?.confidence,
                     uncertaintyReason: uncertainty?.reason,
+                    artifact: data?.artifact || undefined,
                     webSources: data?.webSources || streamWebSources,
                   };
                 },
@@ -6498,8 +7185,7 @@ IMPORTANTE:
                   provider: selectedProvider,
                   model: selectedModel,
                   attachments: attachments.length > 0 ? attachments : undefined,
-                  gptId: activeGpt?.id,
-                  session_id: gptSessionId
+                  ...gptSessionPayload,
                 }),
                 signal: abortControllerRef.current?.signal
               });
@@ -6783,7 +7469,7 @@ IMPORTANTE:
           isArchived={isArchived}
           isSidebarOpen={isSidebarOpen}
           onToggleSidebar={onToggleSidebar || (() => { })}
-          onNewChat={onNewChat}
+          onNewChat={handleNewChat}
           onEditGpt={onEditGpt}
           onHideGptFromSidebar={onHideGptFromSidebar}
           onPinGptToSidebar={onPinGptToSidebar}
@@ -7057,6 +7743,7 @@ IMPORTANTE:
                   setSelectedTool={setSelectedTool}
                   selectedDocTool={selectedDocTool}
                   setSelectedDocTool={setSelectedDocTool}
+                  gptCapabilities={activeGpt?.capabilities || null}
                   closeDocEditor={closeDocEditor}
                   openBlankDocEditor={openBlankDocEditor}
                   aiState={aiState}
@@ -7082,10 +7769,25 @@ IMPORTANTE:
                   placeholder={selectedDocText ? "Escribe cómo mejorar el texto..." : "Type your message here..."}
                   selectedDocText={selectedDocText}
                   handleDocTextDeselect={handleDocTextDeselect}
+                  onPreviewUploadedFile={handlePreviewUploadedFile}
                   onTextareaFocus={handleCloseModelSelector}
                   isFilesLoading={uploadedFiles.some((f: UploadedFile) => isFileUploadBlockingSend(f))}
                   latencyMode={latencyMode}
                   setLatencyMode={setLatencyMode}
+                  runtimeTarget={runtimeTarget}
+                  onRuntimeTargetChange={setRuntimeTarget}
+                  executionAccess={executionAccess}
+                  onExecutionAccessChange={setExecutionAccess}
+                  activeBranch={activeRepoBranch}
+                  branchOptions={repoBranches}
+                  onSelectBranch={setActiveRepoBranch}
+                  repositoryPath={selectedProject?.repositoryPath || null}
+                  repoFolders={repoFolders}
+                  selectedRepoFolder={selectedRepoFolder}
+                  onSelectRepoFolder={handleSelectRepoFolder}
+                  onCreateRepoFolder={handleCreateRepoFolder}
+                  selectedCodingAgents={selectedCodingAgents}
+                  onToggleCodingAgent={handleToggleCodingAgent}
                 />
               </div>
             </Panel>
@@ -7302,7 +8004,7 @@ IMPORTANTE:
                       initial={{ y: 20, opacity: 0 }}
                       animate={{ y: 0, opacity: 1 }}
                       transition={{ duration: 0.5, delay: 0.1, ease: "easeOut" }}
-                      className="text-4xl sm:text-5xl font-extrabold text-center mb-5 tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-foreground via-foreground/90 to-muted-foreground relative z-10"
+                      className="text-3xl sm:text-4xl font-semibold text-center mb-4 tracking-tight text-foreground relative z-10"
                     >
                       {activeGpt ? activeGpt.name : "¿En qué puedo ayudarte?"}
                     </motion.h1>
@@ -7311,17 +8013,17 @@ IMPORTANTE:
                       initial={{ y: 20, opacity: 0 }}
                       animate={{ y: 0, opacity: 1 }}
                       transition={{ duration: 0.5, delay: 0.2, ease: "easeOut" }}
-                      className="text-muted-foreground text-center max-w-lg text-base sm:text-lg mb-10 leading-relaxed relative z-10 font-medium"
+                      className="text-muted-foreground text-center max-w-lg text-sm sm:text-base mb-10 leading-relaxed relative z-10 font-normal"
                     >
                       {activeGpt
                         ? (activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?")
                         : selectedProject
                           ? (
                             <span>
-                              <span className="font-semibold text-foreground">{selectedProject.name}</span> lista para empezar a chartear con esta carpeta. Sirven para organizar proyectos, mantener contexto, usar archivos específicos y trabajar de forma ordenada.
+                              <span className="font-semibold text-foreground">{selectedProject.name}</span> lista para chartear con esta carpeta. Manten el contexto al alcance.
                             </span>
                           )
-                          : "Soy ILIAGPT, tu asistente de IA. Explora capacidades avanzadas como generación de código, diseño, análisis de documentos y control autónomo."
+                          : "Soy ILIAGPT, tu asistente de IA. Explora capacidades avanzadas como generación de código, diseño y análisis."
                       }
                     </motion.p>
 
@@ -7330,18 +8032,18 @@ IMPORTANTE:
                         initial={{ y: 20, opacity: 0 }}
                         animate={{ y: 0, opacity: 1 }}
                         transition={{ duration: 0.5, delay: 0.3 }}
-                        className="flex flex-wrap gap-3 justify-center max-w-3xl relative z-10"
+                        className="flex flex-wrap gap-2.5 justify-center max-w-3xl relative z-10"
                       >
                         {activeGptConversationStarters.map((starter, idx) => (
-                            <button
-                              key={idx}
-                              onClick={() => setInput(starter)}
-                              className="px-5 py-3 text-sm border border-border/40 bg-background/60 backdrop-blur-md rounded-2xl hover:bg-muted/80 hover:border-primary/30 hover:shadow-lg transition-all duration-300 text-left font-medium text-foreground/80 hover:text-foreground hover:-translate-y-1 shadow-sm"
-                              data-testid={`button-starter-${idx}`}
-                            >
-                              {starter}
-                            </button>
-                          ))}
+                          <button
+                            key={idx}
+                            onClick={() => setInput(starter)}
+                            className="px-4 py-2.5 text-[13px] rounded-full bg-black/[0.03] dark:bg-white/[0.03] hover:bg-black/[0.08] dark:hover:bg-white/[0.08] transition-all duration-300 text-center font-medium text-foreground/70 hover:text-foreground active:scale-95"
+                            data-testid={`button-starter-${idx}`}
+                          >
+                            {starter}
+                          </button>
+                        ))}
                       </motion.div>
                     )}
 
@@ -7390,6 +8092,7 @@ IMPORTANTE:
               setSelectedTool={setSelectedTool}
               selectedDocTool={selectedDocTool}
               setSelectedDocTool={setSelectedDocTool}
+              gptCapabilities={activeGpt?.capabilities || null}
               closeDocEditor={closeDocEditor}
               openBlankDocEditor={openBlankDocEditor}
               aiState={aiState}
@@ -7415,6 +8118,7 @@ IMPORTANTE:
               placeholder="Escribe tu mensaje aquí..."
               onCloseSidebar={onCloseSidebar}
               setPreviewUploadedImage={setPreviewUploadedImage}
+              onPreviewUploadedFile={handlePreviewUploadedFile}
               isFigmaConnected={isFigmaConnected}
               isFigmaConnecting={isFigmaConnecting}
               handleFigmaConnect={handleFigmaConnect}
@@ -7427,6 +8131,20 @@ IMPORTANTE:
               isFilesLoading={uploadedFiles.some((f: UploadedFile) => isFileUploadBlockingSend(f))}
               latencyMode={latencyMode}
               setLatencyMode={setLatencyMode}
+              runtimeTarget={runtimeTarget}
+              onRuntimeTargetChange={setRuntimeTarget}
+              executionAccess={executionAccess}
+              onExecutionAccessChange={setExecutionAccess}
+              activeBranch={activeRepoBranch}
+              branchOptions={repoBranches}
+              onSelectBranch={setActiveRepoBranch}
+              repositoryPath={selectedProject?.repositoryPath || null}
+              repoFolders={repoFolders}
+              selectedRepoFolder={selectedRepoFolder}
+              onSelectRepoFolder={handleSelectRepoFolder}
+              onCreateRepoFolder={handleCreateRepoFolder}
+              selectedCodingAgents={selectedCodingAgents}
+              onToggleCodingAgent={handleToggleCodingAgent}
             />
           </div>
         )}
@@ -7633,6 +8351,26 @@ IMPORTANTE:
                       >
                         Cargando contenido...
                       </motion.p>
+                    </div>
+                  </motion.div>
+                ) : isPdfFile(previewFileAttachment.mimeType, previewFileAttachment.name) && (previewFileAttachment.localUrl || previewFileAttachment.storagePath) ? (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="space-y-3"
+                  >
+                    {previewFileAttachment.isProcessing && (
+                      <div className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md px-3 py-2">
+                        Mostrando PDF original. El texto extraído se sigue procesando en segundo plano.
+                      </div>
+                    )}
+                    <div className="rounded-lg overflow-hidden border border-border bg-background h-[65vh] min-h-[420px]">
+                      <iframe
+                        src={previewFileAttachment.localUrl || resolveAttachmentStorageUrl(previewFileAttachment.storagePath)}
+                        title={previewFileAttachment.name}
+                        className="w-full h-full"
+                      />
                     </div>
                   </motion.div>
                 ) : previewFileAttachment.isProcessing ? (

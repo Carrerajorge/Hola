@@ -2,7 +2,7 @@ import JSZip from "jszip";
 import type { FileParser, ParsedResult, DetectedFileType } from "./base";
 
 // Security limits
-const PPTX_MAX_FILE_SIZE = 200 * 1024 * 1024; // 200MB
+const PPTX_MAX_FILE_SIZE = Number(process.env.PPTX_MAX_FILE_SIZE_MB || process.env.MAX_FILE_SIZE_MB || "2048") * 1024 * 1024;
 const PPTX_MAX_SLIDES = 500;
 const PPTX_MAX_TEXT_PER_SLIDE = 500_000; // 500KB per slide text
 const PPTX_MAX_METADATA_VALUE_LENGTH = 1000;

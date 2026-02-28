@@ -3,13 +3,10 @@ import Foundation
 import OpenClawKit
 import UIKit
 
-typealias OpenClawCameraSnapResult = (format: String, base64: String, width: Int, height: Int)
-typealias OpenClawCameraClipResult = (format: String, base64: String, durationMs: Int, hasAudio: Bool)
-
 protocol CameraServicing: Sendable {
     func listDevices() async -> [CameraController.CameraDeviceInfo]
-    func snap(params: OpenClawCameraSnapParams) async throws -> OpenClawCameraSnapResult
-    func clip(params: OpenClawCameraClipParams) async throws -> OpenClawCameraClipResult
+    func snap(params: OpenClawCameraSnapParams) async throws -> (format: String, base64: String, width: Int, height: Int)
+    func clip(params: OpenClawCameraClipParams) async throws -> (format: String, base64: String, durationMs: Int, hasAudio: Bool)
 }
 
 protocol ScreenRecordingServicing: Sendable {

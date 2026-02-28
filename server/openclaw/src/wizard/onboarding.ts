@@ -367,7 +367,6 @@ export async function runOnboardingWizard(
       prompter,
       runtime,
       config: nextConfig,
-      secretInputMode: opts.secretInputMode,
     });
     nextConfig = customResult.config;
   } else {

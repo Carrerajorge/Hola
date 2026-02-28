@@ -14,6 +14,9 @@ export interface Project {
     color: string;
     backgroundImage: string | null;
     systemPrompt: string;
+    repositoryPath?: string | null;
+    defaultCodeFolder?: string | null;
+    codingAgents?: Array<"coder" | "reviewer" | "improver">;
     files: ProjectFile[];
     chatIds: string[];
     createdAt: number;
@@ -59,6 +62,9 @@ export function useProjects() {
             color: data.color,
             backgroundImage: data.backgroundImage,
             systemPrompt: data.systemPrompt,
+            repositoryPath: data.repositoryPath || null,
+            defaultCodeFolder: data.defaultCodeFolder || null,
+            codingAgents: Array.isArray(data.codingAgents) ? data.codingAgents : ["coder"],
             files: data.files,
             chatIds: [],
             createdAt: now,

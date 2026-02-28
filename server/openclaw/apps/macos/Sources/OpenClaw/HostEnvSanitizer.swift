@@ -1,11 +1,36 @@
 import Foundation
 
 enum HostEnvSanitizer {
-    /// Generated from src/infra/host-env-security-policy.json via scripts/generate-host-env-security-policy-swift.mjs.
+    /// Keep in sync with src/infra/host-env-security-policy.json.
     /// Parity is validated by src/infra/host-env-security.policy-parity.test.ts.
-    private static let blockedKeys = HostEnvSecurityPolicy.blockedKeys
-    private static let blockedPrefixes = HostEnvSecurityPolicy.blockedPrefixes
-    private static let blockedOverrideKeys = HostEnvSecurityPolicy.blockedOverrideKeys
+    private static let blockedKeys: Set<String> = [
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "PYTHONHOME",
+        "PYTHONPATH",
+        "PERL5LIB",
+        "PERL5OPT",
+        "RUBYLIB",
+        "RUBYOPT",
+        "BASH_ENV",
+        "ENV",
+        "SHELL",
+        "SHELLOPTS",
+        "PS4",
+        "GCONV_PATH",
+        "IFS",
+        "SSLKEYLOGFILE",
+    ]
+
+    private static let blockedPrefixes: [String] = [
+        "DYLD_",
+        "LD_",
+        "BASH_FUNC_",
+    ]
+    private static let blockedOverrideKeys: Set<String> = [
+        "HOME",
+        "ZDOTDIR",
+    ]
     private static let shellWrapperAllowedOverrideKeys: Set<String> = [
         "TERM",
         "LANG",

@@ -10,7 +10,7 @@
     "lint": "eslint server client shared tests scripts",
     "daemon": "node --import tsx server/daemon/desktopDaemon.ts",
     "dev:client": "vite dev --port 5050",
-    "dev": "node scripts/with-env.cjs NODE_ENV=development PORT=5001 -- node --import tsx server/index.ts",
+    "dev": "node scripts/with-env.cjs NODE_ENV=development PORT=5000 -- node --import tsx server/index.ts",
     "dev:desktop": "concurrently \"npm run dev\" \"npm run dev:client\" \"wait-on http://localhost:5050 && electron .\"",
     "build": "node scripts/with-env.cjs NODE_ENV=production -- node --import tsx script/build.ts",
     "build:desktop:mac": "npm run build && tsc -p desktop/tsconfig.json && npx electron-builder --mac",

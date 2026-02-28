@@ -18,6 +18,8 @@ export interface RealtimeMetrics {
     xai: boolean;
     gemini: boolean;
     openai: boolean;
+    anthropic?: boolean;
+    deepseek?: boolean;
     database: boolean;
   };
   recentActivity: {
@@ -35,6 +37,8 @@ const CACHE_TTL_MS = 30000; // 30 seconds
 
 export async function getRealtimeMetrics(): Promise<RealtimeMetrics> {
   const now = Date.now();
+  const hasAnthropic = !!(process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.trim());
+  const hasDeepSeek = !!(process.env.DEEPSEEK_API_KEY && process.env.DEEPSEEK_API_KEY.trim());
   
   // Return cached if still valid
   if (cachedMetrics && (now - lastMetricsUpdate) < CACHE_TTL_MS) {
@@ -52,7 +56,13 @@ export async function getRealtimeMetrics(): Promise<RealtimeMetrics> {
       storage.getUserStats(),
       storage.getLatestKpiSnapshot().catch(() => null),
       storage.getAuditLogs(10),
-      llmGateway.healthCheck().catch(() => ({ xai: { available: false }, gemini: { available: false }, openai: { available: false } }))
+      llmGateway.healthCheck().catch(() => ({
+        xai: { available: false },
+        gemini: { available: false },
+        openai: { available: false },
+        anthropic: { available: false },
+        deepseek: { available: false },
+      }))
     ]);
     
     // Calculate active users (active in last 24 hours)
@@ -91,6 +101,8 @@ export async function getRealtimeMetrics(): Promise<RealtimeMetrics> {
         xai: (healthStatus as any)?.xai?.available ?? false,
         gemini: (healthStatus as any)?.gemini?.available ?? false,
         openai: (healthStatus as any)?.openai?.available ?? false,
+        ...(hasAnthropic ? { anthropic: (healthStatus as any)?.anthropic?.available ?? false } : {}),
+        ...(hasDeepSeek ? { deepseek: (healthStatus as any)?.deepseek?.available ?? false } : {}),
         database: true // Assume healthy if we got here
       },
       recentActivity
@@ -114,6 +126,8 @@ export async function getRealtimeMetrics(): Promise<RealtimeMetrics> {
         xai: false,
         gemini: false,
         openai: false,
+        ...(hasAnthropic ? { anthropic: false } : {}),
+        ...(hasDeepSeek ? { deepseek: false } : {}),
         database: false
       },
       recentActivity: []

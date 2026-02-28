@@ -99,7 +99,7 @@ export function PromptSuggestions({
 
     return (
         <div className={cn(
-            "flex flex-wrap gap-3 justify-center p-3 animate-in fade-in-50 duration-300",
+            "flex flex-wrap gap-2.5 justify-center p-3 animate-in fade-in-50 duration-500",
             className
         )}>
             {suggestions.map((suggestion, index) => (
@@ -107,23 +107,19 @@ export function PromptSuggestions({
                     key={index}
                     onClick={() => onSelect(suggestion.action)}
                     className={cn(
-                        "group flex items-center gap-3 px-5 py-3 rounded-2xl",
-                        "text-sm font-medium transition-all duration-300",
-                        "bg-background/60 backdrop-blur-md border border-border/40 shadow-sm",
-                        "hover:border-primary/30 hover:shadow-lg hover:-translate-y-1 text-foreground/80 hover:text-foreground",
-                        "active:scale-95",
-                        suggestion.category === "analyze" && "hover:bg-blue-500/5 dark:hover:bg-blue-400/10 hover:border-blue-500/30",
-                        suggestion.category === "create" && "hover:bg-green-500/5 dark:hover:bg-green-400/10 hover:border-green-500/30",
-                        suggestion.category === "search" && "hover:bg-purple-500/5 dark:hover:bg-purple-400/10 hover:border-purple-500/30",
-                        suggestion.category === "general" && "hover:bg-muted/80"
+                        "group flex items-center gap-3 px-4 py-2.5 rounded-full",
+                        "text-[13px] font-medium transition-all duration-300",
+                        "bg-black/[0.03] dark:bg-white/[0.03] hover:bg-black/[0.08] dark:hover:bg-white/[0.08]",
+                        "text-foreground/70 hover:text-foreground",
+                        "active:scale-95"
                     )}
                 >
                     <span className={cn(
-                        "p-1.5 rounded-lg transition-colors duration-300 bg-muted/60 text-muted-foreground",
-                        suggestion.category === "analyze" && "group-hover:bg-blue-500/10 group-hover:text-blue-500 dark:group-hover:text-blue-400",
-                        suggestion.category === "create" && "group-hover:bg-green-500/10 group-hover:text-green-500 dark:group-hover:text-green-400",
-                        suggestion.category === "search" && "group-hover:bg-purple-500/10 group-hover:text-purple-500 dark:group-hover:text-purple-400",
-                        suggestion.category === "general" && "group-hover:bg-foreground/10 group-hover:text-foreground"
+                        "transition-colors duration-300 text-muted-foreground",
+                        suggestion.category === "analyze" && "group-hover:text-blue-500 dark:group-hover:text-blue-400",
+                        suggestion.category === "create" && "group-hover:text-green-500 dark:group-hover:text-green-400",
+                        suggestion.category === "search" && "group-hover:text-purple-500 dark:group-hover:text-purple-400",
+                        suggestion.category === "general" && "group-hover:text-foreground"
                     )}>
                         {suggestion.icon}
                     </span>

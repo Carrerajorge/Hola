@@ -1,3 +1,4 @@
+import { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
@@ -28,9 +29,8 @@ import {
 import { loadConfig, writeConfigFile } from "../../config/config.js";
 import { resolveSessionTranscriptsDirForAgent } from "../../config/sessions/paths.js";
 import { sameFileIdentity } from "../../infra/file-identity.js";
-import { SafeOpenError, readLocalFileSafely, writeFileWithinRoot } from "../../infra/fs-safe.js";
-import { assertNoPathAliasEscape } from "../../infra/path-alias-guards.js";
-import { isNotFoundPathError } from "../../infra/path-guards.js";
+import { SafeOpenError, readLocalFileSafely } from "../../infra/fs-safe.js";
+import { isNotFoundPathError, isPathInside } from "../../infra/path-guards.js";
 import { DEFAULT_AGENT_ID, normalizeAgentId } from "../../routing/session-key.js";
 import { resolveUserPath } from "../../utils.js";
 import {
@@ -120,6 +120,13 @@ type ResolvedAgentWorkspaceFilePath =
       reason: string;
     };
 
+const SUPPORTS_NOFOLLOW = process.platform !== "win32" && "O_NOFOLLOW" in fsConstants;
+const OPEN_WRITE_FLAGS =
+  fsConstants.O_WRONLY |
+  fsConstants.O_CREAT |
+  fsConstants.O_TRUNC |
+  (SUPPORTS_NOFOLLOW ? fsConstants.O_NOFOLLOW : 0);
+
 async function resolveWorkspaceRealPath(workspaceDir: string): Promise<string> {
   try {
     return await fs.realpath(workspaceDir);
@@ -136,19 +143,8 @@ async function resolveAgentWorkspaceFilePath(params: {
   const requestPath = path.join(params.workspaceDir, params.name);
   const workspaceReal = await resolveWorkspaceRealPath(params.workspaceDir);
   const candidatePath = path.resolve(workspaceReal, params.name);
-
-  try {
-    await assertNoPathAliasEscape({
-      absolutePath: candidatePath,
-      rootPath: workspaceReal,
-      boundaryLabel: "workspace root",
-    });
-  } catch (error) {
-    return {
-      kind: "invalid",
-      requestPath,
-      reason: error instanceof Error ? error.message : "path escapes workspace root",
-    };
+  if (!isPathInside(workspaceReal, candidatePath)) {
+    return { kind: "invalid", requestPath, reason: "path escapes workspace root" };
   }
 
   let candidateLstat: Awaited<ReturnType<typeof fs.lstat>>;
@@ -173,27 +169,23 @@ async function resolveAgentWorkspaceFilePath(params: {
         if (params.allowMissing) {
           return { kind: "missing", requestPath, ioPath: candidatePath, workspaceReal };
         }
-        return { kind: "invalid", requestPath, reason: "file not found" };
+        return { kind: "invalid", requestPath, reason: "symlink target not found" };
       }
       throw err;
     }
-    let targetStat: Awaited<ReturnType<typeof fs.stat>>;
+    if (!isPathInside(workspaceReal, targetReal)) {
+      return { kind: "invalid", requestPath, reason: "symlink target escapes workspace root" };
+    }
     try {
-      targetStat = await fs.stat(targetReal);
+      const targetStat = await fs.stat(targetReal);
+      if (!targetStat.isFile()) {
+        return { kind: "invalid", requestPath, reason: "symlink target is not a file" };
+      }
     } catch (err) {
-      if (isNotFoundPathError(err)) {
-        if (params.allowMissing) {
-          return { kind: "missing", requestPath, ioPath: targetReal, workspaceReal };
-        }
-        return { kind: "invalid", requestPath, reason: "file not found" };
+      if (isNotFoundPathError(err) && params.allowMissing) {
+        return { kind: "missing", requestPath, ioPath: targetReal, workspaceReal };
       }
       throw err;
-    }
-    if (!targetStat.isFile()) {
-      return { kind: "invalid", requestPath, reason: "path is not a regular file" };
-    }
-    if (targetStat.nlink > 1) {
-      return { kind: "invalid", requestPath, reason: "hardlinked file path not allowed" };
     }
     return { kind: "ready", requestPath, ioPath: targetReal, workspaceReal };
   }
@@ -201,21 +193,18 @@ async function resolveAgentWorkspaceFilePath(params: {
   if (!candidateLstat.isFile()) {
     return { kind: "invalid", requestPath, reason: "path is not a regular file" };
   }
-  if (candidateLstat.nlink > 1) {
-    return { kind: "invalid", requestPath, reason: "hardlinked file path not allowed" };
-  }
 
-  const targetReal = await fs.realpath(candidatePath).catch(() => candidatePath);
-  return { kind: "ready", requestPath, ioPath: targetReal, workspaceReal };
+  const candidateReal = await fs.realpath(candidatePath).catch(() => candidatePath);
+  if (!isPathInside(workspaceReal, candidateReal)) {
+    return { kind: "invalid", requestPath, reason: "resolved file escapes workspace root" };
+  }
+  return { kind: "ready", requestPath, ioPath: candidateReal, workspaceReal };
 }
 
 async function statFileSafely(filePath: string): Promise<FileMeta | null> {
   try {
     const [stat, lstat] = await Promise.all([fs.stat(filePath), fs.lstat(filePath)]);
     if (lstat.isSymbolicLink() || !stat.isFile()) {
-      return null;
-    }
-    if (stat.nlink > 1) {
       return null;
     }
     if (!sameFileIdentity(stat, lstat)) {
@@ -227,6 +216,22 @@ async function statFileSafely(filePath: string): Promise<FileMeta | null> {
     };
   } catch {
     return null;
+  }
+}
+
+async function writeFileSafely(filePath: string, content: string): Promise<void> {
+  const handle = await fs.open(filePath, OPEN_WRITE_FLAGS, 0o600);
+  try {
+    const [stat, lstat] = await Promise.all([handle.stat(), fs.lstat(filePath)]);
+    if (lstat.isSymbolicLink() || !stat.isFile()) {
+      throw new Error("unsafe file path");
+    }
+    if (!sameFileIdentity(stat, lstat)) {
+      throw new Error("path changed during write");
+    }
+    await handle.writeFile(content, "utf-8");
+  } finally {
+    await handle.close().catch(() => {});
   }
 }
 
@@ -702,12 +707,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
     }
     const content = String(params.content ?? "");
     try {
-      await writeFileWithinRoot({
-        rootDir: workspaceDir,
-        relativePath: name,
-        data: content,
-        encoding: "utf8",
-      });
+      await writeFileSafely(resolvedPath.ioPath, content);
     } catch {
       respond(
         false,

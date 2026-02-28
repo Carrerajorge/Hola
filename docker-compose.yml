@@ -7,8 +7,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-iliagpt}
     # SECURITY: Ports removed to prevent external access. Only accessible within Docker network.
-    # ports:
-    #   - "5432:5432"
+    ports:
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     # Add healthcheck for better container orchestration
@@ -62,8 +62,118 @@ services:
     environment:
       CLICKHOUSE_DB: iliagpt_telemetry
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: hola-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: hola-open-webui
+    restart: unless-stopped
+    ports:
+      - "3003:8080"
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      WEBUI_AUTH: "False"
+    depends_on:
+      - ollama
+    volumes:
+      - open_webui_data:/app/backend/data
+
+  langfuse-db:
+    image: postgres:16
+    container_name: hola-langfuse-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: langfuse
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+    volumes:
+      - langfuse_db_data:/var/lib/postgresql/data
+
+  langfuse-redis:
+    image: redis:7-alpine
+    container_name: hola-langfuse-redis
+    restart: unless-stopped
+
+  langfuse:
+    image: ghcr.io/langfuse/langfuse:2
+    container_name: hola-langfuse
+    restart: unless-stopped
+    depends_on:
+      - langfuse-db
+      - langfuse-redis
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
+      REDIS_HOST: langfuse-redis
+      REDIS_PORT: "6379"
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: replace-me-before-production
+      SALT: replace-me-before-production
+      TELEMETRY_ENABLED: "false"
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: hola-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: hola-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      N8N_HOST: localhost
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: http
+      N8N_SECURE_COOKIE: "false"
+      GENERIC_TIMEZONE: America/New_York
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+  flowise:
+    image: flowiseai/flowise:latest
+    container_name: hola-flowise
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      PORT: "3000"
+    volumes:
+      - flowise_data:/root/.flowise
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: hola-searxng
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    environment:
+      SEARXNG_BASE_URL: http://localhost:8081/
+      UWSGI_WORKERS: "2"
+      UWSGI_THREADS: "4"
+
 volumes:
   postgres_data:
   redis_data:
   meili_data:
   clickhouse_data:
+  ollama_data:
+  open_webui_data:
+  langfuse_db_data:
+  qdrant_data:
+  n8n_data:
+  flowise_data:

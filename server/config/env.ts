@@ -1,4 +1,4 @@
-import dotenv from "dotenv";
+import * as dotenv from "dotenv";
 import { z } from "zod";
 
 const nodeEnv = process.env.NODE_ENV || "development";
@@ -173,8 +173,8 @@ function validateEnv() {
   // TokenManager falls back to a default key if unset, which is not acceptable for production.
   const oauthEnabled = Boolean(
     (data.GOOGLE_CLIENT_ID && data.GOOGLE_CLIENT_SECRET) ||
-      (data.MICROSOFT_CLIENT_ID && data.MICROSOFT_CLIENT_SECRET) ||
-      (data.AUTH0_DOMAIN && data.AUTH0_CLIENT_ID && data.AUTH0_CLIENT_SECRET)
+    (data.MICROSOFT_CLIENT_ID && data.MICROSOFT_CLIENT_SECRET) ||
+    (data.AUTH0_DOMAIN && data.AUTH0_CLIENT_ID && data.AUTH0_CLIENT_SECRET)
   );
   if (data.NODE_ENV === "production" && !isTestRuntime && oauthEnabled && !data.TOKEN_ENCRYPTION_KEY) {
     console.error("❌ TOKEN_ENCRYPTION_KEY is required in production when OAuth is enabled.");

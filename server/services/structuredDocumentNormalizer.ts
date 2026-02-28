@@ -8,6 +8,7 @@ import { extractExcel } from "../parsers/structured/excelExtractor";
 import { extractCSV } from "../parsers/structured/csvExtractor";
 import { extractWord } from "../parsers/structured/wordExtractor";
 import { extractPDF } from "../parsers/structured/pdfExtractor";
+import { processDocument } from "./documentProcessing";
 
 const MAGIC_BYTES = {
   ZIP: [0x50, 0x4b, 0x03, 0x04],
@@ -29,6 +30,32 @@ const MIME_TYPES = {
 
 function generateId(): string {
   return Math.random().toString(36).substring(2, 10);
+}
+
+function countWords(text: string): number {
+  return text
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((word) => word.length > 0).length;
+}
+
+function isLowSignalExtractedText(text: string): boolean {
+  const clean = String(text || "").replace(/\s+/g, " ").trim();
+  if (!clean) return true;
+
+  if (/--\s*\d+\s*of\s*\d+\s*--/i.test(clean)) return true;
+  if (/^page\s+\d+$/i.test(clean)) return true;
+  if (clean.length < 80) return true;
+
+  const words = countWords(clean);
+  if (words < 16) return true;
+
+  const alnumCount = (clean.match(/[A-Za-z0-9ÁÉÍÓÚÜÑáéíóúüñ]/g) || []).length;
+  const alnumRatio = alnumCount / Math.max(clean.length, 1);
+  if (alnumRatio < 0.2) return true;
+
+  return false;
 }
 
 function matchesMagicBytes(buffer: Buffer, magic: number[]): boolean {
@@ -303,6 +330,54 @@ export async function normalizeDocument(
   insights.forEach((i) => { if (!i.id) i.id = generateId(); });
   sources.forEach((s) => { if (!s.id) s.id = generateId(); });
   suggestedQuestions.forEach((q) => { if (!q.id) q.id = generateId(); });
+
+  const meaningfulTextSections = sections.filter(
+    (section) => typeof section.content === "string" && !isLowSignalExtractedText(section.content)
+  ).length;
+  const hasStructuredContent =
+    meaningfulTextSections > 0 ||
+    tables.length > 0 ||
+    metrics.length > 0 ||
+    (typeof documentMeta.wordCount === "number" && documentMeta.wordCount > 20);
+
+  if (!hasStructuredContent) {
+    try {
+      const generic = await processDocument(buffer, declaredMimeType || detectedMimeType, fileName);
+      const fallbackText = String(generic.text || "").trim();
+      if (fallbackText.length > 0) {
+        const normalizedText = fallbackText.slice(0, 250_000);
+        sections.push({
+          id: generateId(),
+          type: "paragraph",
+          content: normalizedText,
+          sourceRef: "page:1",
+        });
+
+        if (sources.length === 0) {
+          sources.push({
+            id: generateId(),
+            type: "page",
+            location: storagePath || fileName,
+            pageNumber: 1,
+            previewText: normalizedText.slice(0, 200),
+          });
+        }
+
+        documentMeta.wordCount = Math.max(documentMeta.wordCount || 0, countWords(normalizedText));
+        extractionDiagnostics.parserUsed = `${extractionDiagnostics.parserUsed}+fallback:${generic.parserUsed}`;
+        extractionDiagnostics.chunksGenerated = Math.max(extractionDiagnostics.chunksGenerated || 0, 1);
+        extractionDiagnostics.warnings = [
+          ...(extractionDiagnostics.warnings || []),
+          "Structured extraction was empty; applied generic parser fallback.",
+        ];
+      }
+    } catch (fallbackError) {
+      extractionDiagnostics.warnings = [
+        ...(extractionDiagnostics.warnings || []),
+        `Generic parser fallback failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`,
+      ];
+    }
+  }
   
   const result: DocumentSemanticModel = {
     version: "1.0",

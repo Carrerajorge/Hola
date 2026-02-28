@@ -12,7 +12,6 @@ import {
   type OpenClawConfig,
   type ChannelSetupInput,
 } from "openclaw/plugin-sdk";
-import { waitForAbortSignal } from "../../../src/infra/abort-signal.js";
 import {
   listNextcloudTalkAccountIds,
   resolveDefaultNextcloudTalkAccountId,
@@ -333,9 +332,7 @@ export const nextcloudTalkPlugin: ChannelPlugin<ResolvedNextcloudTalkAccount> = 
         statusSink: (patch) => ctx.setStatus({ accountId: ctx.accountId, ...patch }),
       });
 
-      // Keep webhook channels pending for the account lifecycle.
-      await waitForAbortSignal(ctx.abortSignal);
-      stop();
+      return { stop };
     },
     logoutAccount: async ({ accountId, cfg }) => {
       const nextCfg = { ...cfg } as OpenClawConfig;

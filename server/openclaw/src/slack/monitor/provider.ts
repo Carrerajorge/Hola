@@ -35,7 +35,9 @@ import { createSlackMessageHandler } from "./message-handler.js";
 import { registerSlackMonitorSlashCommands } from "./slash.js";
 import type { MonitorSlackOpts } from "./types.js";
 
-const slackBoltModule = SlackBolt as any;
+const slackBoltModule = SlackBolt as typeof import("@slack/bolt") & {
+  default?: typeof import("@slack/bolt");
+};
 // Bun allows named imports from CJS; Node ESM doesn't. Use default+fallback for compatibility.
 // Fix: Check if module has App property directly (Node 25.x ESM/CJS compat issue)
 const slackBolt =
@@ -65,8 +67,8 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
   const historyLimit = Math.max(
     0,
     account.config.historyLimit ??
-    cfg.messages?.groupChat?.historyLimit ??
-    DEFAULT_GROUP_HISTORY_LIMIT,
+      cfg.messages?.groupChat?.historyLimit ??
+      DEFAULT_GROUP_HISTORY_LIMIT,
   );
 
   const sessionCfg = cfg.session;
@@ -132,46 +134,46 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
   const receiver =
     slackMode === "http"
       ? new HTTPReceiver({
-        signingSecret: signingSecret ?? "",
-        endpoints: slackWebhookPath,
-      })
+          signingSecret: signingSecret ?? "",
+          endpoints: slackWebhookPath,
+        })
       : null;
   const clientOptions = resolveSlackWebClientOptions();
   const app = new App(
     slackMode === "socket"
       ? {
-        token: botToken,
-        appToken,
-        socketMode: true,
-        clientOptions,
-      }
+          token: botToken,
+          appToken,
+          socketMode: true,
+          clientOptions,
+        }
       : {
-        token: botToken,
-        receiver: receiver ?? undefined,
-        clientOptions,
-      },
+          token: botToken,
+          receiver: receiver ?? undefined,
+          clientOptions,
+        },
   );
   const slackHttpHandler =
     slackMode === "http" && receiver
       ? async (req: IncomingMessage, res: ServerResponse) => {
-        const guard = installRequestBodyLimitGuard(req, res, {
-          maxBytes: SLACK_WEBHOOK_MAX_BODY_BYTES,
-          timeoutMs: SLACK_WEBHOOK_BODY_TIMEOUT_MS,
-          responseFormat: "text",
-        });
-        if (guard.isTripped()) {
-          return;
-        }
-        try {
-          await Promise.resolve(receiver.requestListener(req, res));
-        } catch (err) {
-          if (!guard.isTripped()) {
-            throw err;
+          const guard = installRequestBodyLimitGuard(req, res, {
+            maxBytes: SLACK_WEBHOOK_MAX_BODY_BYTES,
+            timeoutMs: SLACK_WEBHOOK_BODY_TIMEOUT_MS,
+            responseFormat: "text",
+          });
+          if (guard.isTripped()) {
+            return;
           }
-        } finally {
-          guard.dispose();
+          try {
+            await Promise.resolve(receiver.requestListener(req, res));
+          } catch (err) {
+            if (!guard.isTripped()) {
+              throw err;
+            }
+          } finally {
+            guard.dispose();
+          }
         }
-      }
       : null;
   let unregisterHttpHandler: (() => void) | null = null;
 

@@ -33,7 +33,6 @@ export {
   // agentModeEvents exists in modular schema; avoid re-exporting duplicate symbol from legacy
   agentMemoryStore,
   type AgentMemoryStore,
-  TraceEventSchema,
   TraceEventTypeSchema,
   type TraceEventType,
   type TraceEvent,
@@ -60,5 +59,3 @@ export {
   type InsertAgentSessionState,
   type AgentSessionState,
 } from "../schema.bak";
-
-export * from "./nodes";

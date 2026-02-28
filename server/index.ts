@@ -56,6 +56,7 @@ initTracing();
 const app = express();
 app.set("trust proxy", 1); // Trust first proxy (critical for rate limiting behind load balancers)
 const httpServer = createServer(app);
+let stopTelegramPollingBridge: (() => void) | null = null;
 
 function clampConfigNumber(value: string | undefined, fallback: number, min: number, max: number): number {
   const parsed = Number(value);
@@ -325,9 +326,14 @@ export function log(message: string, source = "express") {
 
   await registerRoutes(httpServer, app);
 
-  // Initialize OpenClaw agentic integration layer (feature-flagged)
-  const { initializeOpenClaw } = await import("./openclaw/index");
-  await initializeOpenClaw(httpServer);
+  // Initialize OpenClaw agentic integration layer (feature-flagged).
+  // Fail-open: channel mirror/chat must keep working even if OpenClaw has a runtime issue.
+  try {
+    const { initializeOpenClaw } = await import("./openclaw/index");
+    await initializeOpenClaw(httpServer);
+  } catch (error) {
+    log(`[OpenClaw] initialization skipped after error: ${String((error as Error)?.message || error)}`);
+  }
 
   // Ensure unmatched API routes return consistent JSON (instead of Express' default HTML 404).
   // This MUST be registered after all routes, but before the API error handler.
@@ -471,5 +477,24 @@ export function log(message: string, source = "express") {
           .catch((e) => log(`[Telegram] Webhook auto-config failed: ${e?.message || e}`));
       }, 1500);
     }
+
+    // Local/dev fallback: if webhook isn't publicly reachable, consume updates via getUpdates.
+    if (!isProduction) {
+      import("./channels/telegram/telegramPollingBridge")
+        .then(({ startTelegramPollingBridge }) => {
+          stopTelegramPollingBridge = startTelegramPollingBridge();
+        })
+        .catch((error) => {
+          log(`[Telegram] Polling bridge startup failed: ${String((error as Error)?.message || error)}`);
+        });
+    }
+
+    registerCleanup(async () => {
+      if (stopTelegramPollingBridge) {
+        stopTelegramPollingBridge();
+        stopTelegramPollingBridge = null;
+        log("Telegram polling bridge stopped");
+      }
+    });
   });
 })();

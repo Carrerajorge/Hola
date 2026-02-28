@@ -147,6 +147,11 @@ export default defineConfig(async () => {
           changeOrigin: true,
           secure: false,
         },
+        "/objects": {
+          target: process.env.VITE_API_URL || "http://127.0.0.1:5001",
+          changeOrigin: true,
+          secure: false,
+        },
         "/ws": {
           target: process.env.VITE_WS_URL || "ws://127.0.0.1:5001",
           ws: true,

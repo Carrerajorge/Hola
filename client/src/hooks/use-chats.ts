@@ -126,6 +126,7 @@ export interface Chat {
   title: string;
   timestamp: number;
   messages: Message[];
+  gptId?: string | null;
   archived?: boolean;
   hidden?: boolean;
   pinned?: boolean;
@@ -218,6 +219,7 @@ function safeReadLocalChatsFromStorage(storageKey: string): Chat[] {
     const restored: Chat[] = parsed.map((chat: any) => ({
       ...chat,
       stableKey: chat?.stableKey || `stable-${chat?.id}`,
+      gptId: typeof chat?.gptId === "string" && chat.gptId.trim().length > 0 ? chat.gptId.trim() : null,
       messages: Array.isArray(chat?.messages)
         ? chat.messages.map((msg: any) => {
           // Hydrate savedRequestIds from localStorage data (best-effort).
@@ -292,9 +294,16 @@ function mergeServerChatsWithLocal(serverChats: Chat[], localChats: Chat[]): Cha
 
   const mergedServerChats = serverChats.map((serverChat) => {
     const local = localById.get(serverChat.id);
+    const serverGptId = typeof (serverChat as any)?.gptId === "string" && (serverChat as any).gptId.trim().length > 0
+      ? (serverChat as any).gptId.trim()
+      : null;
+    const localGptId = typeof (local as any)?.gptId === "string" && (local as any).gptId.trim().length > 0
+      ? (local as any).gptId.trim()
+      : null;
     return {
       ...serverChat,
       stableKey: local?.stableKey || serverChat.stableKey || `stable-${serverChat.id}`,
+      gptId: serverGptId || localGptId,
       messages: local?.messages?.length ? local.messages : serverChat.messages,
     };
   });
@@ -372,9 +381,26 @@ interface FailedMessageQueueItem {
   content: string;
   requestId: string;
   clientRequestId?: string;
+  gptId?: string;
   attachments?: Message["attachments"];
   localId?: string;
   timestamp: number;
+}
+
+function normalizeOptionalGptId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  if (!normalized || normalized.length > 120) return undefined;
+  return normalized;
+}
+
+function extractMessageGptId(message: Message): string | undefined {
+  const direct = normalizeOptionalGptId((message as any).gptId);
+  if (direct) return direct;
+  const metadata = message.metadata && typeof message.metadata === "object"
+    ? message.metadata as Record<string, unknown>
+    : null;
+  return normalizeOptionalGptId(metadata?.gptId);
 }
 
 function safeReadFailedQueue(): FailedMessageQueueItem[] {
@@ -409,6 +435,7 @@ function enqueueFailedMessageForRecovery(chatId: string, message: Message): void
     content: message.content,
     requestId: message.requestId,
     clientRequestId: message.clientRequestId,
+    gptId: extractMessageGptId(message),
     attachments: sanitizeAttachmentsForServer(message.attachments),
     localId: message.clientTempId || message.id,
     timestamp: Date.now(),
@@ -1154,6 +1181,7 @@ export function useChats() {
         stableKey: `stable-${chat.id}`,
         title: chat.title,
         timestamp: new Date(chat.updatedAt).getTime(),
+        gptId: typeof chat.gptId === "string" && chat.gptId.trim().length > 0 ? chat.gptId.trim() : null,
         archived: chat.archived === "true",
         hidden: chat.hidden === "true",
         pinned: chat.pinned === "true",
@@ -1276,6 +1304,7 @@ export function useChats() {
               content: queued.content,
               requestId: queued.requestId,
               clientRequestId: queued.clientRequestId,
+              gptId: queued.gptId,
               attachments: queued.attachments,
             }),
           }, MESSAGE_SAVE_TIMEOUT_MS);
@@ -1490,18 +1519,23 @@ export function useChats() {
     };
   }, []);
 
-  const createChat = useCallback((): { pendingId: string; stableKey: string } => {
+  const createChat = useCallback((options?: { gptId?: string | null }): { pendingId: string; stableKey: string } => {
     const pendingId = `${PENDING_CHAT_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const provisionalRealId = generateStableServerChatId();
     // Pre-assign a stable server chatId so first-message stream can start immediately.
     pendingToRealIdMap.set(pendingId, provisionalRealId);
     const stableKey = `stable-${Date.now()}`; // Stable key that won't change
+    const normalizedGptId =
+      typeof options?.gptId === "string" && options.gptId.trim().length > 0
+        ? options.gptId.trim()
+        : null;
     const pendingChat: Chat = {
       id: pendingId,
       stableKey,
       title: "Nuevo Chat",
       timestamp: Date.now(),
-      messages: []
+      messages: [],
+      gptId: normalizedGptId,
     };
     setChats(prev => [pendingChat, ...prev]);
     setActiveChatId(pendingId);
@@ -1528,6 +1562,7 @@ export function useChats() {
       deliveryStatus: sanitizedInput.deliveryStatus || (sanitizedInput.role === "user" ? "sending" : sanitizedInput.deliveryStatus),
       deliveryError: sanitizedInput.deliveryStatus === "error" ? sanitizedInput.deliveryError : undefined,
     };
+    const messageGptId = extractMessageGptId(normalizedMessage);
 
     const tempId = normalizedMessage.clientTempId || normalizedMessage.id;
 
@@ -1656,12 +1691,17 @@ export function useChats() {
           messages: [normalizedMessage],
           timestamp: Date.now(),
           stableKey: `stable-${safeChatId}`,
+          gptId: messageGptId || null,
         }];
       }
 
       return prev.map(chat => {
         const matchId = chat.id === safeChatId || chat.id === resolvedChatId;
         if (!matchId) return chat;
+        const currentChatGptId = typeof chat.gptId === "string" && chat.gptId.trim().length > 0
+          ? chat.gptId.trim()
+          : null;
+        const nextChatGptId = currentChatGptId || messageGptId || null;
 
         const maybeMarkDelivered = (msgs: Message[]): Message[] => {
           if (normalizedMessage.role !== "assistant" || !normalizedMessage.userMessageId) return msgs;
@@ -1693,6 +1733,7 @@ export function useChats() {
           );
           return {
             ...chat,
+            gptId: nextChatGptId,
             messages: nextMessages,
           };
         }
@@ -1701,6 +1742,7 @@ export function useChats() {
         const nextMessages = maybeMarkDelivered([...chat.messages, normalizedMessage]);
         return {
           ...chat,
+          gptId: nextChatGptId,
           messages: nextMessages,
           title: isFirstMessage && normalizedMessage.role === "user" ? title : chat.title,
           timestamp: Date.now(),
@@ -1729,6 +1771,7 @@ export function useChats() {
             content: normalizedMessage.content,
             requestId: normalizedMessage.requestId,
             clientRequestId,
+            gptId: messageGptId,
             userMessageId: normalizedMessage.userMessageId,
             attachments: sanitizeAttachmentsForServer(normalizedMessage.attachments),
             sources: normalizedMessage.sources,

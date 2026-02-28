@@ -1,4 +1,10 @@
-import { codingTools, createReadTool, readTool } from "@mariozechner/pi-coding-agent";
+import {
+  codingTools,
+  createEditTool,
+  createReadTool,
+  createWriteTool,
+  readTool,
+} from "@mariozechner/pi-coding-agent";
 import type { OpenClawConfig } from "../config/config.js";
 import type { ToolLoopDetectionConfig } from "../config/types.tools.js";
 import { resolveMergedSafeBinProfileFixtures } from "../infra/exec-safe-bin-runtime-policy.js";
@@ -28,8 +34,7 @@ import {
 } from "./pi-tools.policy.js";
 import {
   assertRequiredParams,
-  createHostWorkspaceEditTool,
-  createHostWorkspaceWriteTool,
+  CLAUDE_PARAM_GROUPS,
   createOpenClawReadTool,
   createSandboxedEditTool,
   createSandboxedReadTool,
@@ -359,14 +364,22 @@ export function createOpenClawCodingTools(options?: {
       if (sandboxRoot) {
         return [];
       }
-      const wrapped = createHostWorkspaceWriteTool(workspaceRoot);
+      // Wrap with param normalization for Claude Code compatibility
+      const wrapped = wrapToolParamNormalization(
+        createWriteTool(workspaceRoot),
+        CLAUDE_PARAM_GROUPS.write,
+      );
       return [workspaceOnly ? wrapToolWorkspaceRootGuard(wrapped, workspaceRoot) : wrapped];
     }
     if (tool.name === "edit") {
       if (sandboxRoot) {
         return [];
       }
-      const wrapped = createHostWorkspaceEditTool(workspaceRoot);
+      // Wrap with param normalization for Claude Code compatibility
+      const wrapped = wrapToolParamNormalization(
+        createEditTool(workspaceRoot),
+        CLAUDE_PARAM_GROUPS.edit,
+      );
       return [workspaceOnly ? wrapToolWorkspaceRootGuard(wrapped, workspaceRoot) : wrapped];
     }
     return [tool];
@@ -388,9 +401,6 @@ export function createOpenClawCodingTools(options?: {
     scopeKey,
     sessionKey: options?.sessionKey,
     messageProvider: options?.messageProvider,
-    currentChannelId: options?.currentChannelId,
-    currentThreadTs: options?.currentThreadTs,
-    accountId: options?.agentAccountId,
     backgroundMs: options?.exec?.backgroundMs ?? execConfig.backgroundMs,
     timeoutSec: options?.exec?.timeoutSec ?? execConfig.timeoutSec,
     approvalRunningNoticeMs:

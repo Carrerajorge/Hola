@@ -33,6 +33,12 @@ export const TIMEOUTS = {
   SEARCH_LLM_TIMEOUT: 12000  // 12s max for search LLM response
 } as const;
 
+const DEFAULT_MAX_FILE_SIZE_MB = 2048; // 2GB default for large document ingestion
+const parsedMaxFileSizeMb = Number(process.env.MAX_FILE_SIZE_MB || DEFAULT_MAX_FILE_SIZE_MB);
+const MAX_FILE_SIZE_MB = Number.isFinite(parsedMaxFileSizeMb) && parsedMaxFileSizeMb > 0
+  ? Math.floor(parsedMaxFileSizeMb)
+  : DEFAULT_MAX_FILE_SIZE_MB;
+
 export const LIMITS = {
   MAX_SEARCH_RESULTS: 50,  // No fixed limit - user decides how many
   MAX_CONTENT_FETCH: 50,  // Fetch as many pages as user requests
@@ -40,8 +46,8 @@ export const LIMITS = {
   MAX_EMBEDDING_INPUT: 8000,
   RAG_SIMILAR_CHUNKS: 3,
   RAG_SIMILARITY_THRESHOLD: 0.5,
-  MAX_FILE_SIZE_MB: 100,
-  MAX_FILE_SIZE_BYTES: 100 * 1024 * 1024
+  MAX_FILE_SIZE_MB,
+  MAX_FILE_SIZE_BYTES: MAX_FILE_SIZE_MB * 1024 * 1024
 } as const;
 
 export const MEMORY_INTENT_KEYWORDS = [

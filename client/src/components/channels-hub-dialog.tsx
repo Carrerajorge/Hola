@@ -22,7 +22,8 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { apiFetch } from "@/lib/apiClient";
 import { useWhatsAppWebStatus } from "@/hooks/use-whatsapp-web";
-import { ArrowLeft, ExternalLink } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
+import QRCode from "qrcode";
 
 const WhatsAppConnectDialogInner = lazy(() =>
   import("@/components/whatsapp-connect-dialog").then((m) => ({
@@ -89,7 +90,7 @@ const CHANNELS: ChannelDef[] = [
   {
     id: "telegram",
     name: "Telegram",
-    description: "Vincula un bot de Telegram usando el token de BotFather.",
+    description: "Activa chat espejo en Telegram con código de vinculación y QR.",
     color: "text-blue-500",
     bgHover: "hover:bg-blue-50 dark:hover:bg-blue-950/20",
     borderColor: "border-blue-200 dark:border-blue-800",
@@ -197,30 +198,111 @@ function ChannelLogo({ id, className }: { id: ChannelId; className?: string }) {
 /* ─── Telegram Config Panel ───────────────────────── */
 
 function TelegramConfigPanel({ onBack, onSaved }: { onBack: () => void; onSaved?: () => void }) {
-  const [botToken, setBotToken] = useState("");
-  const [webhookUrl, setWebhookUrl] = useState("");
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState("");
+  const [pairingCode, setPairingCode] = useState("");
+  const [expiresAt, setExpiresAt] = useState("");
+  const [pairingHint, setPairingHint] = useState("");
+  const [botUsername, setBotUsername] = useState("");
+  const [qrDataUrl, setQrDataUrl] = useState<string>("");
+  const [checkStatus, setCheckStatus] = useState<"idle" | "checking" | "sent" | "error">("idle");
+  const [checkFeedback, setCheckFeedback] = useState("");
+
+  const toFriendlyError = (input: unknown): string => {
+    const raw = String(input || "").trim();
+    if (!raw) return "No se pudo completar la conexión con Telegram.";
+    if (/no hay un bot de telegram|telegram_bot_token|bot de telegram conectado/i.test(raw)) {
+      return "Telegram aún no está habilitado en este servidor. Solicita activación al administrador y vuelve a intentar.";
+    }
+    if (/unauthorized/i.test(raw)) {
+      return "No se pudo autorizar la operación. Recarga la página e inténtalo de nuevo.";
+    }
+    return raw;
+  };
 
   const save = async () => {
-    if (!botToken.trim()) {
-      setError("Ingresa el token del bot");
-      return;
-    }
     setStatus("saving");
     setError("");
+    setCheckStatus("idle");
+    setCheckFeedback("");
     try {
-      const res = await apiFetch("/api/integrations/telegram/config", {
+      const res = await apiFetch("/api/integrations/telegram/pairing-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ botToken: botToken.trim(), webhookUrl: webhookUrl.trim() || undefined }),
+        body: JSON.stringify({ ttlMinutes: 30 }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(toFriendlyError((body && typeof body.error === "string" ? body.error : "") || `HTTP ${res.status}`));
+      }
+
+      const data = await res.json().catch(() => ({}));
+      const code = typeof data?.code === "string" ? data.code.trim() : "";
+      const deeplink = typeof data?.deeplink === "string" ? data.deeplink.trim() : "";
+      const expiresAtIso = typeof data?.expiresAt === "string" ? data.expiresAt : "";
+      const hint = typeof data?.qrHint === "string" ? data.qrHint : "";
+      const botHandle = typeof data?.botUsername === "string" ? data.botUsername : "";
+      const qrPayload = typeof data?.qrPayload === "string" ? data.qrPayload.trim() : "";
+
+      if (!code) {
+        throw new Error("No se recibió el código de vinculación de Telegram.");
+      }
+
+      const qrSource = qrPayload || deeplink || code;
+      let qr = "";
+      if (qrSource) {
+        qr = await QRCode.toDataURL(qrSource, {
+          margin: 1,
+          width: 220,
+          errorCorrectionLevel: "M",
+        });
+      }
+
+      setPairingCode(code);
+      setExpiresAt(expiresAtIso);
+      setPairingHint(hint);
+      setBotUsername(botHandle);
+      setQrDataUrl(qr);
+
+      try {
+        await navigator.clipboard.writeText(code);
+      } catch {
+        // Clipboard can be blocked by browser permissions.
+      }
+
       setStatus("saved");
       onSaved?.();
+
+      window.open(
+        deeplink || "https://web.telegram.org/",
+        "_blank",
+        "noopener,noreferrer"
+      );
     } catch (e: any) {
-      setError(e?.message || "Error al guardar");
+      setError(toFriendlyError(e?.message || "Error al guardar"));
       setStatus("error");
+    }
+  };
+
+  const checkChat = async () => {
+    setCheckStatus("checking");
+    setCheckFeedback("");
+    try {
+      const res = await apiFetch("/api/integrations/telegram/test-message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(toFriendlyError((body && typeof body.error === "string" ? body.error : "") || `HTTP ${res.status}`));
+      }
+      setCheckStatus("sent");
+      setCheckFeedback("Mensaje de ILIA enviado. Ese chat es el que debes usar en Telegram.");
+    } catch (e: any) {
+      setCheckStatus("error");
+      setCheckFeedback(toFriendlyError(e?.message || "No se pudo enviar el mensaje de comprobación."));
     }
   };
 
@@ -238,40 +320,14 @@ function TelegramConfigPanel({ onBack, onSaved }: { onBack: () => void; onSaved?
         <TelegramLogo className="h-10 w-10" />
         <div>
           <h3 className="font-semibold text-lg">Telegram</h3>
-          <p className="text-xs text-muted-foreground">Configura tu bot de Telegram</p>
+          <p className="text-xs text-muted-foreground">Activa chat espejo y continúa desde Telegram.</p>
         </div>
       </div>
 
       <div className="space-y-3">
-        <div>
-          <label className="text-sm font-medium block mb-1">Bot Token</label>
-          <input
-            value={botToken}
-            onChange={(e) => setBotToken(e.target.value)}
-            placeholder="123456789:ABCdefGHIjklMNOpqrSTUVwxyz"
-            className="h-9 w-full rounded-md border bg-background px-3 text-sm font-mono"
-            type="password"
-          />
-          <p className="text-xs text-muted-foreground mt-1">
-            Obtén tu token en{" "}
-            <a href="https://t.me/BotFather" target="_blank" rel="noopener" className="text-blue-500 hover:underline">
-              @BotFather
-            </a>
-          </p>
-        </div>
-
-        <div>
-          <label className="text-sm font-medium block mb-1">Webhook URL (opcional)</label>
-          <input
-            value={webhookUrl}
-            onChange={(e) => setWebhookUrl(e.target.value)}
-            placeholder="https://tudominio.com/webhooks/telegram"
-            className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-          />
-          <p className="text-xs text-muted-foreground mt-1">
-            Si no lo configuras, se usará la URL del servidor automáticamente
-          </p>
-        </div>
+        <p className="text-xs text-muted-foreground">
+          Al continuar, se genera un código de vinculación, QR y se abre Telegram.
+        </p>
 
         {error && (
           <div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/20 rounded-md p-2">
@@ -281,13 +337,51 @@ function TelegramConfigPanel({ onBack, onSaved }: { onBack: () => void; onSaved?
 
         {status === "saved" && (
           <div className="text-sm text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-950/20 rounded-md p-2">
-            ✓ Configuración guardada. Tu bot está activo.
+            ✓ Código generado: <span className="font-mono">{pairingCode}</span>
+            {botUsername ? (
+              <div className="mt-1 text-xs">Bot: {botUsername}</div>
+            ) : null}
+            {expiresAt ? (
+              <div className="mt-1 text-xs">
+                Expira: {new Date(expiresAt).toLocaleString()}
+              </div>
+            ) : null}
+            {pairingHint ? (
+              <div className="mt-1 text-xs">{pairingHint}</div>
+            ) : null}
           </div>
         )}
 
+        {status === "saved" && qrDataUrl ? (
+          <div className="flex justify-center rounded-md border bg-white p-3">
+            <img src={qrDataUrl} alt="Código QR Telegram" className="h-44 w-44" />
+          </div>
+        ) : null}
+
         <Button onClick={save} disabled={status === "saving"} className="w-full bg-blue-500 hover:bg-blue-600 text-white">
-          {status === "saving" ? "Guardando..." : "Conectar Bot"}
+          {status === "saving" ? "Preparando..." : "Continuar con chat"}
         </Button>
+
+        <Button
+          onClick={checkChat}
+          disabled={checkStatus === "checking"}
+          variant="outline"
+          className="w-full"
+        >
+          {checkStatus === "checking" ? "Comprobando..." : "Comprobar chat"}
+        </Button>
+
+        {checkFeedback ? (
+          <div
+            className={
+              checkStatus === "sent"
+                ? "text-sm text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-950/20 rounded-md p-2"
+                : "text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/20 rounded-md p-2"
+            }
+          >
+            {checkFeedback}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -296,39 +390,83 @@ function TelegramConfigPanel({ onBack, onSaved }: { onBack: () => void; onSaved?
 /* ─── Messenger Config Panel ──────────────────────── */
 
 function MessengerConfigPanel({ onBack, onSaved }: { onBack: () => void; onSaved?: () => void }) {
-  const [pageId, setPageId] = useState("");
-  const [accessToken, setAccessToken] = useState("");
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState("");
-
-  const connectFacebook = () => {
-    // In production, this would redirect to Facebook OAuth
-    window.open(
-      "https://developers.facebook.com/apps/",
-      "_blank",
-      "noopener,noreferrer"
-    );
-  };
+  const [pairingCode, setPairingCode] = useState("");
+  const [expiresAt, setExpiresAt] = useState("");
+  const [pairingHint, setPairingHint] = useState("");
+  const [checkStatus, setCheckStatus] = useState<"idle" | "checking" | "sent" | "error">("idle");
+  const [checkFeedback, setCheckFeedback] = useState("");
 
   const save = async () => {
-    if (!pageId.trim() || !accessToken.trim()) {
-      setError("Completa todos los campos");
-      return;
-    }
     setStatus("saving");
     setError("");
+    setCheckStatus("idle");
+    setCheckFeedback("");
     try {
-      const res = await apiFetch("/api/integrations/messenger/config", {
+      const res = await apiFetch("/api/integrations/messenger/pairing-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pageId: pageId.trim(), accessToken: accessToken.trim() }),
+        body: JSON.stringify({ ttlMinutes: 30 }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error((body && typeof body.error === "string" ? body.error : "") || `HTTP ${res.status}`);
+      }
+
+      const data = await res.json().catch(() => ({}));
+      const code = typeof data?.code === "string" ? data.code.trim() : "";
+      const deeplink = typeof data?.deeplink === "string" ? data.deeplink.trim() : "";
+      const expiresAtIso = typeof data?.expiresAt === "string" ? data.expiresAt : "";
+      const hint = typeof data?.qrHint === "string" ? data.qrHint : "";
+
+      if (!code) {
+        throw new Error("No se recibió el código de vinculación de Messenger.");
+      }
+
+      setPairingCode(code);
+      setExpiresAt(expiresAtIso);
+      setPairingHint(hint);
+
+      try {
+        await navigator.clipboard.writeText(code);
+      } catch {
+        // Clipboard may be blocked by browser permissions; non-fatal.
+      }
+
       setStatus("saved");
       onSaved?.();
+
+      window.open(
+        deeplink || "https://www.messenger.com/",
+        "_blank",
+        "noopener,noreferrer"
+      );
     } catch (e: any) {
       setError(e?.message || "Error al guardar");
       setStatus("error");
+    }
+  };
+
+  const checkChat = async () => {
+    setCheckStatus("checking");
+    setCheckFeedback("");
+    try {
+      const res = await apiFetch("/api/integrations/messenger/test-message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error((body && typeof body.error === "string" ? body.error : "") || `HTTP ${res.status}`);
+      }
+      setCheckStatus("sent");
+      setCheckFeedback("Mensaje de ILIA enviado. Ese chat es el que debes usar en Messenger.");
+    } catch (e: any) {
+      setCheckStatus("error");
+      setCheckFeedback(e?.message || "No se pudo enviar el mensaje de comprobación.");
     }
   };
 
@@ -346,40 +484,14 @@ function MessengerConfigPanel({ onBack, onSaved }: { onBack: () => void; onSaved
         <MessengerLogo className="h-10 w-10" />
         <div>
           <h3 className="font-semibold text-lg">Messenger</h3>
-          <p className="text-xs text-muted-foreground">Conecta tu página de Facebook</p>
+          <p className="text-xs text-muted-foreground">Activa chat espejo y continúa desde Messenger.</p>
         </div>
       </div>
 
       <div className="space-y-3">
-        <Button
-          variant="outline"
-          onClick={connectFacebook}
-          className="w-full gap-2"
-        >
-          <ExternalLink className="h-4 w-4" />
-          Abrir Facebook Developers
-        </Button>
-
-        <div>
-          <label className="text-sm font-medium block mb-1">Page ID</label>
-          <input
-            value={pageId}
-            onChange={(e) => setPageId(e.target.value)}
-            placeholder="123456789012345"
-            className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-          />
-        </div>
-
-        <div>
-          <label className="text-sm font-medium block mb-1">Page Access Token</label>
-          <input
-            value={accessToken}
-            onChange={(e) => setAccessToken(e.target.value)}
-            placeholder="EAAx..."
-            className="h-9 w-full rounded-md border bg-background px-3 text-sm font-mono"
-            type="password"
-          />
-        </div>
+        <p className="text-xs text-muted-foreground">
+          Al continuar, se genera un código de vinculación y se abre Messenger.
+        </p>
 
         {error && (
           <div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/20 rounded-md p-2">
@@ -389,13 +501,42 @@ function MessengerConfigPanel({ onBack, onSaved }: { onBack: () => void; onSaved
 
         {status === "saved" && (
           <div className="text-sm text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-950/20 rounded-md p-2">
-            ✓ Messenger conectado exitosamente.
+            ✓ Código generado: <span className="font-mono">{pairingCode}</span>
+            {expiresAt ? (
+              <div className="mt-1 text-xs">
+                Expira: {new Date(expiresAt).toLocaleString()}
+              </div>
+            ) : null}
+            {pairingHint ? (
+              <div className="mt-1 text-xs">{pairingHint}</div>
+            ) : null}
           </div>
         )}
 
         <Button onClick={save} disabled={status === "saving"} className="w-full bg-purple-600 hover:bg-purple-700 text-white">
-          {status === "saving" ? "Guardando..." : "Conectar Messenger"}
+          {status === "saving" ? "Preparando..." : "Continuar con chat"}
         </Button>
+
+        <Button
+          onClick={checkChat}
+          disabled={checkStatus === "checking"}
+          variant="outline"
+          className="w-full"
+        >
+          {checkStatus === "checking" ? "Comprobando..." : "Comprobar chat"}
+        </Button>
+
+        {checkFeedback ? (
+          <div
+            className={
+              checkStatus === "sent"
+                ? "text-sm text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-950/20 rounded-md p-2"
+                : "text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/20 rounded-md p-2"
+            }
+          >
+            {checkFeedback}
+          </div>
+        ) : null}
       </div>
     </div>
   );

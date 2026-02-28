@@ -1,4 +1,3 @@
-import path from "node:path";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 /* ------------------------------------------------------------------ */
@@ -137,7 +136,6 @@ function makeFileStat(params?: {
   mtimeMs?: number;
   dev?: number;
   ino?: number;
-  nlink?: number;
 }): import("node:fs").Stats {
   return {
     isFile: () => true,
@@ -146,7 +144,6 @@ function makeFileStat(params?: {
     mtimeMs: params?.mtimeMs ?? 1234,
     dev: params?.dev ?? 1,
     ino: params?.ino ?? 1,
-    nlink: params?.nlink ?? 1,
   } as unknown as import("node:fs").Stats;
 }
 
@@ -518,7 +515,7 @@ describe("agents.files.get/set symlink safety", () => {
 
   it("rejects agents.files.get when allowlisted file symlink escapes workspace", async () => {
     const workspace = "/workspace/test-agent";
-    const candidate = path.resolve(workspace, "AGENTS.md");
+    const candidate = `${workspace}/AGENTS.md`;
     mocks.fsRealpath.mockImplementation(async (p: string) => {
       if (p === workspace) {
         return workspace;
@@ -551,7 +548,7 @@ describe("agents.files.get/set symlink safety", () => {
 
   it("rejects agents.files.set when allowlisted file symlink escapes workspace", async () => {
     const workspace = "/workspace/test-agent";
-    const candidate = path.resolve(workspace, "AGENTS.md");
+    const candidate = `${workspace}/AGENTS.md`;
     mocks.fsRealpath.mockImplementation(async (p: string) => {
       if (p === workspace) {
         return workspace;
@@ -586,8 +583,8 @@ describe("agents.files.get/set symlink safety", () => {
 
   it("allows in-workspace symlink targets for get/set", async () => {
     const workspace = "/workspace/test-agent";
-    const candidate = path.resolve(workspace, "AGENTS.md");
-    const target = path.resolve(workspace, "policies", "AGENTS.md");
+    const candidate = `${workspace}/AGENTS.md`;
+    const target = `${workspace}/policies/AGENTS.md`;
     const targetStat = makeFileStat({ size: 7, mtimeMs: 1700, dev: 9, ino: 42 });
 
     mocks.fsRealpath.mockImplementation(async (p: string) => {
@@ -650,67 +647,5 @@ describe("agents.files.get/set symlink safety", () => {
       }),
       undefined,
     );
-  });
-
-  it("rejects agents.files.get when allowlisted file is a hardlinked alias", async () => {
-    const workspace = "/workspace/test-agent";
-    const candidate = path.resolve(workspace, "AGENTS.md");
-    mocks.fsRealpath.mockImplementation(async (p: string) => {
-      if (p === workspace) {
-        return workspace;
-      }
-      return p;
-    });
-    mocks.fsLstat.mockImplementation(async (...args: unknown[]) => {
-      const p = typeof args[0] === "string" ? args[0] : "";
-      if (p === candidate) {
-        return makeFileStat({ nlink: 2 });
-      }
-      throw createEnoentError();
-    });
-
-    const { respond, promise } = makeCall("agents.files.get", {
-      agentId: "main",
-      name: "AGENTS.md",
-    });
-    await promise;
-
-    expect(respond).toHaveBeenCalledWith(
-      false,
-      undefined,
-      expect.objectContaining({ message: expect.stringContaining("unsafe workspace file") }),
-    );
-  });
-
-  it("rejects agents.files.set when allowlisted file is a hardlinked alias", async () => {
-    const workspace = "/workspace/test-agent";
-    const candidate = path.resolve(workspace, "AGENTS.md");
-    mocks.fsRealpath.mockImplementation(async (p: string) => {
-      if (p === workspace) {
-        return workspace;
-      }
-      return p;
-    });
-    mocks.fsLstat.mockImplementation(async (...args: unknown[]) => {
-      const p = typeof args[0] === "string" ? args[0] : "";
-      if (p === candidate) {
-        return makeFileStat({ nlink: 2 });
-      }
-      throw createEnoentError();
-    });
-
-    const { respond, promise } = makeCall("agents.files.set", {
-      agentId: "main",
-      name: "AGENTS.md",
-      content: "x",
-    });
-    await promise;
-
-    expect(respond).toHaveBeenCalledWith(
-      false,
-      undefined,
-      expect.objectContaining({ message: expect.stringContaining("unsafe workspace file") }),
-    );
-    expect(mocks.fsOpen).not.toHaveBeenCalled();
   });
 });

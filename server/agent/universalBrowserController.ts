@@ -18,8 +18,8 @@
 import { chromium, firefox, webkit, Browser, Page, BrowserContext, Route, Request as PlaywrightRequest } from "playwright";
 import { randomUUID } from "crypto";
 import { EventEmitter } from "events";
-import fs from "fs/promises";
-import path from "path";
+import { promises as fs } from "fs";
+import * as path from "path";
 import OpenAI from "openai";
 import { getGeminiClientOrThrow } from "../lib/gemini";
 
@@ -227,7 +227,7 @@ export class UniversalBrowserController extends EventEmitter {
 
   private async cleanupStaleSessions(): Promise<void> {
     const now = Date.now();
-    for (const [id, session] of this.sessions) {
+    for (const [id, session] of Array.from(this.sessions)) {
       if (now - session.lastActivity > this.maxSessionAge) {
         await this.closeSession(id).catch(() => { });
       }
@@ -415,7 +415,7 @@ export class UniversalBrowserController extends EventEmitter {
     };
 
     // Deactivate other tabs
-    for (const [, t] of session.tabs) {
+    for (const [, t] of Array.from(session.tabs)) {
       t.active = false;
     }
 
@@ -429,7 +429,7 @@ export class UniversalBrowserController extends EventEmitter {
         const remaining = Array.from(currentSession.tabs.entries()).find(([, t]) => !t.page.isClosed());
         currentSession.activeTabId = remaining ? remaining[0] : null;
         if (remaining) {
-          for (const [, t] of currentSession.tabs) {
+          for (const [, t] of Array.from(currentSession.tabs)) {
             t.active = false;
           }
           remaining[1].active = true;
@@ -447,7 +447,7 @@ export class UniversalBrowserController extends EventEmitter {
     const tab = session.tabs.get(tabId);
     if (!tab) throw new Error(`Tab not found: ${tabId}`);
 
-    for (const [, t] of session.tabs) {
+    for (const [, t] of Array.from(session.tabs)) {
       t.active = false;
     }
     tab.active = true;
@@ -1778,12 +1778,12 @@ RULES:
 
       const es = source.match(/\b\d{1,2}\s+de\s+([a-záéíóúñ]+)\b/i);
       if (es?.[1]) {
-        const key = es[1].normalize("NFD").replace(/\p{Diacritic}/gu, "");
+        const key = es[1].normalize("NFD").replace(/[\u0300-\u036f]/g, "");
         if (monthEs[key] != null) return monthEs[key];
       }
       const en = source.match(/\b([a-z]+)\s+\d{1,2}(?:,\s*\d{4})?\b/i);
       if (en?.[1]) {
-        const key = en[1].normalize("NFD").replace(/\p{Diacritic}/gu, "");
+        const key = en[1].normalize("NFD").replace(/[\u0300-\u036f]/g, "");
         if (monthEn[key] != null) return monthEn[key];
       }
 
@@ -2669,7 +2669,7 @@ RULES:
         // Strategy 3: JS click on element containing the time text
         const jsClicked = await page.evaluate((t) => {
           const regex = new RegExp(`\\b${t} \\b`);
-          for (const el of document.querySelectorAll("button, a, span, div, li")) {
+          for (const el of Array.from(document.querySelectorAll("button, a, span, div, li"))) {
             if (regex.test((el.textContent || "").trim()) && (el as HTMLElement).offsetParent !== null) {
               try {
                 (el as HTMLElement).click();
@@ -3160,7 +3160,7 @@ RULES:
 
     const openTabEntry = Array.from(session.tabs.entries()).find(([, tab]) => !tab.page.isClosed());
     if (openTabEntry) {
-      for (const [, tab] of session.tabs) {
+      for (const [, tab] of Array.from(session.tabs)) {
         tab.active = false;
       }
       openTabEntry[1].active = true;
@@ -3240,7 +3240,7 @@ RULES:
       clearInterval(this.cleanupInterval);
       this.cleanupInterval = null;
     }
-    for (const [id] of this.sessions) {
+    for (const [id] of Array.from(this.sessions)) {
       await this.closeSession(id);
     }
   }

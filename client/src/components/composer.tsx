@@ -24,6 +24,10 @@ import {
   Sparkles,
   Presentation,
   Clock,
+  Laptop,
+  ShieldAlert,
+  GitBranch,
+  Folder,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -62,9 +66,11 @@ interface UploadedFile {
   mimeType?: string;
   size: number;
   dataUrl?: string;
+  localUrl?: string;
   storagePath?: string;
   status?: string;
   content?: string;
+  error?: string;
   spreadsheetData?: {
     uploadId: string;
     sheets: Array<{ name: string; rowCount: number; columnCount: number }>;
@@ -99,6 +105,17 @@ export interface ComposerProps {
   setSelectedTool: (tool: "web" | "agent" | "image" | null) => void;
   selectedDocTool: "word" | "excel" | "ppt" | "figma" | null;
   setSelectedDocTool: (tool: "word" | "excel" | "ppt" | "figma" | null) => void;
+  gptCapabilities?: {
+    webBrowsing?: boolean;
+    codeInterpreter?: boolean;
+    imageGeneration?: boolean;
+    fileUpload?: boolean;
+    dataAnalysis?: boolean;
+    canvas?: boolean;
+    wordCreation?: boolean;
+    excelCreation?: boolean;
+    pptCreation?: boolean;
+  } | null;
   closeDocEditor: () => void;
   openBlankDocEditor: (type: "word" | "excel" | "ppt", options?: { showInstructions?: boolean }) => void;
   aiState: AIState;
@@ -126,6 +143,7 @@ export interface ComposerProps {
   handleDocTextDeselect?: () => void;
   onCloseSidebar?: () => void;
   setPreviewUploadedImage?: (value: { name: string; dataUrl: string } | null) => void;
+  onPreviewUploadedFile?: (file: UploadedFile) => void;
   isFigmaConnected?: boolean;
   isFigmaConnecting?: boolean;
   handleFigmaConnect?: () => void;
@@ -138,6 +156,20 @@ export interface ComposerProps {
   isFilesLoading?: boolean;
   latencyMode?: "fast" | "deep" | "auto";
   setLatencyMode?: (mode: "fast" | "deep" | "auto") => void;
+  runtimeTarget?: string;
+  onRuntimeTargetChange?: (value: string) => void;
+  executionAccess?: string;
+  onExecutionAccessChange?: (value: string) => void;
+  activeBranch?: string;
+  branchOptions?: string[];
+  onSelectBranch?: (branch: string) => void;
+  repositoryPath?: string | null;
+  repoFolders?: string[];
+  selectedRepoFolder?: string;
+  onSelectRepoFolder?: (folder: string) => void;
+  onCreateRepoFolder?: (folderName: string) => void | Promise<void>;
+  selectedCodingAgents?: Array<"coder" | "reviewer" | "improver">;
+  onToggleCodingAgent?: (agent: "coder" | "reviewer" | "improver") => void;
 }
 
 function formatFileSize(bytes: number): string {
@@ -168,6 +200,7 @@ export function Composer({
   setSelectedTool,
   selectedDocTool,
   setSelectedDocTool,
+  gptCapabilities,
   closeDocEditor,
   openBlankDocEditor,
   aiState,
@@ -195,6 +228,7 @@ export function Composer({
   handleDocTextDeselect,
   onCloseSidebar,
   setPreviewUploadedImage,
+  onPreviewUploadedFile,
   isFigmaConnected,
   isFigmaConnecting,
   handleFigmaConnect,
@@ -207,6 +241,20 @@ export function Composer({
   isFilesLoading = false,
   latencyMode = "auto",
   setLatencyMode,
+  runtimeTarget: runtimeTargetProp,
+  onRuntimeTargetChange,
+  executionAccess: executionAccessProp,
+  onExecutionAccessChange,
+  activeBranch: activeBranchProp,
+  branchOptions: branchOptionsProp,
+  onSelectBranch,
+  repositoryPath,
+  repoFolders = [],
+  selectedRepoFolder = ".",
+  onSelectRepoFolder,
+  onCreateRepoFolder,
+  selectedCodingAgents = ["coder"],
+  onToggleCodingAgent,
 }: ComposerProps) {
   const isDocumentMode = variant === "document";
   const hasAttachableFiles = uploadedFiles.some((file) => file.status !== "error");
@@ -214,8 +262,30 @@ export function Composer({
   const { settings } = useSettingsContext();
   const webSearchEnabled = !!settings.webSearch;
   const canvasEnabled = !!settings.canvas;
+  const hasGptCapabilities = !!gptCapabilities;
+  const gptWebBrowsingEnabled = gptCapabilities ? !!gptCapabilities.webBrowsing : true;
+  const gptImageGenerationEnabled = gptCapabilities ? !!gptCapabilities.imageGeneration : true;
+  const gptCanvasEnabled = gptCapabilities ? !!gptCapabilities.canvas : true;
+  const gptWordEnabled = gptCapabilities ? !!gptCapabilities.wordCreation : true;
+  const gptExcelEnabled = gptCapabilities ? !!gptCapabilities.excelCreation : true;
+  const gptPptEnabled = gptCapabilities ? !!gptCapabilities.pptCreation : true;
+  // For custom GPTs, capabilities configured in the GPT are the source of truth.
+  const canUseWebTool = hasGptCapabilities ? gptWebBrowsingEnabled : webSearchEnabled;
+  const canUseImageTool = gptImageGenerationEnabled;
+  const canUseDocumentTools = hasGptCapabilities ? gptCanvasEnabled : canvasEnabled;
+  const canUseWordTool = canUseDocumentTools && gptWordEnabled;
+  const canUseExcelTool = canUseDocumentTools && gptExcelEnabled;
+  const canUsePptTool = canUseDocumentTools && gptPptEnabled;
+  const hasAnyDocumentToolEnabled = canUseWordTool || canUseExcelTool || canUsePptTool;
 
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
+  const [toolsPopoverOpen, setToolsPopoverOpen] = useState(false);
+  const [runtimeTargetState, setRuntimeTargetState] = useState("Local");
+  const [executionAccessState, setExecutionAccessState] = useState("Full access");
+  const [activeBranchState, setActiveBranchState] = useState("main");
+  const runtimeTarget = runtimeTargetProp ?? runtimeTargetState;
+  const executionAccess = executionAccessProp ?? executionAccessState;
+  const activeBranch = activeBranchProp ?? activeBranchState;
 
   const [showMentionPopover, setShowMentionPopover] = useState(false);
   const [mentionSearch, setMentionSearch] = useState("");
@@ -403,6 +473,25 @@ export function Composer({
     }
   };
 
+  const closeToolsPopover = useCallback(() => {
+    setToolsPopoverOpen(false);
+  }, []);
+
+  const handlePopoverFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    closeToolsPopover();
+    handleFileUpload(e);
+  }, [closeToolsPopover, handleFileUpload]);
+
+  const handleAttachmentPreviewClick = useCallback((file: UploadedFile) => {
+    const isImage = file.type?.startsWith("image/") || file.mimeType?.startsWith("image/");
+    if (isImage && file.dataUrl) {
+      setPreviewUploadedImage?.({ name: file.name, dataUrl: file.dataUrl });
+      return;
+    }
+
+    onPreviewUploadedFile?.(file);
+  }, [onPreviewUploadedFile, setPreviewUploadedImage]);
+
   const renderAttachmentPreview = () => {
     if (uploadedFiles.length === 0) return null;
 
@@ -414,16 +503,29 @@ export function Composer({
               key={file.id || index}
               className={cn(
                 "relative group rounded-lg overflow-hidden",
+                "cursor-pointer",
                 SILVER_HAIRLINE,
                 file.status === "error"
                   ? "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800"
                   : cn("bg-card", "border-[#c7c7c7]/45 dark:border-white/10", SILVER_HOVER_BORDER_SOFT)
               )}
+              onClick={() => handleAttachmentPreviewClick(file)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  handleAttachmentPreviewClick(file);
+                }
+              }}
               data-testid={`inline-file-${index}`}
             >
               <button
                 className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 rounded-full p-0.5 text-white z-10 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-white/50"
-                onClick={() => removeFile(index)}
+                onClick={(e: React.MouseEvent) => {
+                  e.stopPropagation();
+                  removeFile(index);
+                }}
                 aria-label={`Remove file ${file.name}`}
                 title={`Remove file ${file.name}`}
                 data-testid={`button-remove-file-${index}`}
@@ -490,14 +592,21 @@ export function Composer({
     }
 
     return (
-      <div className="flex items-center gap-1.5 pl-1">
+      <div
+        className={cn(
+          "mb-1 flex w-full flex-wrap items-center gap-1.5 px-1",
+          "max-h-24 overflow-y-auto overflow-x-hidden"
+        )}
+        data-testid="inline-attachments-container"
+      >
         {uploadedFiles.map((file, index) => {
+          const fileKey = file.id || `${file.name}-${index}`;
           const theme = getFileTheme(file.name, file.mimeType);
           const isImage = file.type?.startsWith("image/") || file.mimeType?.startsWith("image/");
 
           if (isImage && file.dataUrl) {
             return (
-              <div key={file.id} className="relative group">
+              <div key={fileKey} className="relative group">
                 <div
                   className={cn(
                     "relative w-12 h-12 rounded-lg overflow-hidden cursor-pointer",
@@ -535,12 +644,13 @@ export function Composer({
 
 
           return (
-            <TooltipProvider key={file.id}>
+            <TooltipProvider key={fileKey}>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div
                     className={cn(
-                      "relative group flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs transition-all duration-200 cursor-pointer",
+                      "relative group flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs transition-all duration-200",
+                      "cursor-pointer",
                       file.status === "uploading" && "bg-blue-50 dark:bg-blue-950/30 border-[0.5px] border-blue-200 dark:border-blue-800",
                       file.status === "processing" && "bg-yellow-50 dark:bg-yellow-950/30 border-[0.5px] border-yellow-200 dark:border-yellow-800",
                       file.status === "ready" && cn(
@@ -551,6 +661,15 @@ export function Composer({
                       ),
                       file.status === "error" && "bg-red-50 dark:bg-red-950/30 border-[0.5px] border-red-200 dark:border-red-800"
                     )}
+                    onClick={() => handleAttachmentPreviewClick(file)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        handleAttachmentPreviewClick(file);
+                      }
+                    }}
                   >
                     <div className={cn(
                       "flex items-center justify-center w-6 h-6 rounded shrink-0",
@@ -589,7 +708,7 @@ export function Composer({
   };
 
   const renderToolsPopover = () => (
-    <Popover>
+    <Popover open={toolsPopoverOpen} onOpenChange={setToolsPopoverOpen}>
       <PopoverTrigger asChild>
         <Button
           variant="ghost"
@@ -613,7 +732,10 @@ export function Composer({
               <Button
                 variant="ghost"
                 className="justify-start gap-3 text-sm h-10 glass-menu-item"
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => {
+                  closeToolsPopover();
+                  fileInputRef.current?.click();
+                }}
                 data-testid="button-upload-files"
               >
                 <div className="flex items-center justify-center w-6 h-6 rounded-lg bg-muted">
@@ -624,25 +746,44 @@ export function Composer({
               <Button
                 variant="ghost"
                 className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                onClick={() => setIsBrowserOpen(!isBrowserOpen)}
+                onClick={() => {
+                  closeToolsPopover();
+                  setIsBrowserOpen(!isBrowserOpen);
+                }}
                 disabled={!webSearchEnabled}
               >
                 <Search className="h-4 w-4" />
                 Web Search
               </Button>
-              <Button variant="ghost" className="justify-start gap-2 text-sm h-9 glass-menu-item">
+              <Button
+                variant="ghost"
+                className="justify-start gap-2 text-sm h-9 glass-menu-item"
+                onClick={closeToolsPopover}
+              >
                 <Image className="h-4 w-4" />
                 Image Generation
               </Button>
-              <Button variant="ghost" className="justify-start gap-2 text-sm h-9 glass-menu-item">
+              <Button
+                variant="ghost"
+                className="justify-start gap-2 text-sm h-9 glass-menu-item"
+                onClick={closeToolsPopover}
+              >
                 <Video className="h-4 w-4" />
                 Video Generation
               </Button>
-              <Button variant="ghost" className="justify-start gap-2 text-sm h-9 glass-menu-item">
+              <Button
+                variant="ghost"
+                className="justify-start gap-2 text-sm h-9 glass-menu-item"
+                onClick={closeToolsPopover}
+              >
                 <Bot className="h-4 w-4" />
                 Agente
               </Button>
-              <Button variant="ghost" className="justify-start gap-2 text-sm h-9 glass-menu-item">
+              <Button
+                variant="ghost"
+                className="justify-start gap-2 text-sm h-9 glass-menu-item"
+                onClick={closeToolsPopover}
+              >
                 <Plug className="h-4 w-4" />
                 Connectors MPC
               </Button>
@@ -655,7 +796,7 @@ export function Composer({
                   className="hidden"
                   multiple
                   accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv,.json,.html,.htm,.jpg,.jpeg,.png,.gif,.bmp,.webp,.tif,.tiff"
-                  onChange={handleFileUpload}
+                  onChange={handlePopoverFileUpload}
                 />
                 <Button variant="ghost" className="w-full justify-start gap-2 text-sm h-9 glass-menu-item" asChild>
                   <span>
@@ -667,7 +808,15 @@ export function Composer({
               <Button
                 variant="ghost"
                 className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                onClick={() => { try { setShowKnowledgeBase(true); onCloseSidebar?.(); } catch (err) { console.error("[Composer] Error opening knowledge base:", err); } }}
+                onClick={() => {
+                  try {
+                    closeToolsPopover();
+                    setShowKnowledgeBase(true);
+                    onCloseSidebar?.();
+                  } catch (err) {
+                    console.error("[Composer] Error opening knowledge base:", err);
+                  }
+                }}
                 data-testid="button-knowledge-base"
               >
                 <Users className="h-4 w-4" />
@@ -676,10 +825,11 @@ export function Composer({
               <Button
                 variant="ghost"
                 className="justify-start gap-3 text-sm h-10 glass-menu-item"
-                disabled={!webSearchEnabled}
+                disabled={!canUseWebTool}
                 onClick={() => {
                   try {
-                    if (!webSearchEnabled) return;
+                    if (!canUseWebTool) return;
+                    closeToolsPopover();
                     setSelectedTool("web");
                     onCloseSidebar?.();
                   } catch (err) {
@@ -695,14 +845,24 @@ export function Composer({
               <Button
                 variant="ghost"
                 className="justify-start gap-3 text-sm h-10 glass-menu-item"
-                onClick={() => { try { setSelectedTool("image"); onCloseSidebar?.(); } catch (err) { console.error("[Composer] Error selecting image tool:", err); } }}
+                disabled={!canUseImageTool}
+                onClick={() => {
+                  try {
+                    if (!canUseImageTool) return;
+                    closeToolsPopover();
+                    setSelectedTool("image");
+                    onCloseSidebar?.();
+                  } catch (err) {
+                    console.error("[Composer] Error selecting image tool:", err);
+                  }
+                }}
               >
                 <div className="flex items-center justify-center w-6 h-6 rounded-lg bg-pink-100 dark:bg-pink-900/30">
                   <Image className="h-4 w-4 text-pink-600 dark:text-pink-400" />
                 </div>
                 Generar imagen
               </Button>
-              {canvasEnabled ? (
+              {canUseDocumentTools ? (
                 <HoverCard openDelay={100} closeDelay={100}>
                   <HoverCardTrigger asChild>
                     <Button variant="ghost" className="justify-between gap-2 text-sm h-9 w-full glass-menu-item">
@@ -718,7 +878,16 @@ export function Composer({
                       <Button
                         variant="ghost"
                         className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                        onClick={() => { try { openBlankDocEditor("word"); } catch (err) { console.error("[Composer] Error opening Word editor:", err); } }}
+                        disabled={!canUseWordTool}
+                        onClick={() => {
+                          try {
+                            if (!canUseWordTool) return;
+                            closeToolsPopover();
+                            openBlankDocEditor("word");
+                          } catch (err) {
+                            console.error("[Composer] Error opening Word editor:", err);
+                          }
+                        }}
                         data-testid="button-create-word"
                       >
                         <div className="flex items-center justify-center w-5 h-5 rounded bg-blue-600">
@@ -729,7 +898,16 @@ export function Composer({
                       <Button
                         variant="ghost"
                         className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                        onClick={() => { try { openBlankDocEditor("excel"); } catch (err) { console.error("[Composer] Error opening Excel editor:", err); } }}
+                        disabled={!canUseExcelTool}
+                        onClick={() => {
+                          try {
+                            if (!canUseExcelTool) return;
+                            closeToolsPopover();
+                            openBlankDocEditor("excel");
+                          } catch (err) {
+                            console.error("[Composer] Error opening Excel editor:", err);
+                          }
+                        }}
                         data-testid="button-create-excel"
                       >
                         <div className="flex items-center justify-center w-5 h-5 rounded bg-green-600">
@@ -740,7 +918,16 @@ export function Composer({
                       <Button
                         variant="ghost"
                         className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                        onClick={() => { try { openBlankDocEditor("ppt"); } catch (err) { console.error("[Composer] Error opening PPT editor:", err); } }}
+                        disabled={!canUsePptTool}
+                        onClick={() => {
+                          try {
+                            if (!canUsePptTool) return;
+                            closeToolsPopover();
+                            openBlankDocEditor("ppt");
+                          } catch (err) {
+                            console.error("[Composer] Error opening PPT editor:", err);
+                          }
+                        }}
                         data-testid="button-create-ppt"
                       >
                         <div className="flex items-center justify-center w-5 h-5 rounded bg-orange-500">
@@ -751,7 +938,15 @@ export function Composer({
                       <Button
                         variant="ghost"
                         className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                        onClick={() => { try { setSelectedDocTool("figma"); onCloseSidebar?.(); } catch (err) { console.error("[Composer] Error selecting Figma tool:", err); } }}
+                        onClick={() => {
+                          try {
+                            closeToolsPopover();
+                            setSelectedDocTool("figma");
+                            onCloseSidebar?.();
+                          } catch (err) {
+                            console.error("[Composer] Error selecting Figma tool:", err);
+                          }
+                        }}
                       >
                         <div className="flex items-center justify-center w-5 h-5 rounded bg-card border border-border">
                           <svg width="10" height="14" viewBox="0 0 38 57" fill="none">
@@ -765,6 +960,11 @@ export function Composer({
                         Diagrama Figma
                       </Button>
                     </div>
+                    {!hasAnyDocumentToolEnabled && (
+                      <p className="px-2 pt-1 text-xs text-muted-foreground">
+                        Este GPT no tiene Word/Excel/PPT habilitados.
+                      </p>
+                    )}
                   </HoverCardContent>
                 </HoverCard>
               ) : (
@@ -780,7 +980,15 @@ export function Composer({
               <Button
                 variant="ghost"
                 className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                onClick={() => { try { setSelectedTool("agent"); onCloseSidebar?.(); } catch (err) { console.error("[Composer] Error selecting agent tool:", err); } }}
+                onClick={() => {
+                  try {
+                    closeToolsPopover();
+                    setSelectedTool("agent");
+                    onCloseSidebar?.();
+                  } catch (err) {
+                    console.error("[Composer] Error selecting agent tool:", err);
+                  }
+                }}
               >
                 <Bot className="h-4 w-4" />
                 Agente
@@ -791,6 +999,223 @@ export function Composer({
       </PopoverContent>
     </Popover>
   );
+
+  const runtimeTargetOptions = ["Local", "Workspace", "Remote"];
+  const executionAccessOptions = ["Full access", "Workspace write", "Read only"];
+  const branchOptions = (branchOptionsProp && branchOptionsProp.length > 0)
+    ? branchOptionsProp
+    : ["main", "develop", "feature/codex"];
+
+  const renderProgrammingModeBar = () => {
+    if (isDocumentMode) return null;
+
+    return (
+      <div className="mx-auto mt-0.5 flex w-full max-w-3xl items-center justify-between gap-2 px-1 text-[10px] text-zinc-500">
+        <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto">
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="inline-flex h-5 items-center gap-1 rounded-md px-1.5 text-[10px] text-zinc-500 transition-colors hover:bg-zinc-100/60 dark:text-zinc-400 dark:hover:bg-zinc-800/40"
+                data-testid="programming-runtime-selector"
+              >
+                <Laptop className="h-3 w-3" />
+                <span className="whitespace-nowrap">{runtimeTarget}</span>
+                <ChevronDown className="h-3 w-3 opacity-70" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-44 p-1">
+              <div className="grid gap-0.5">
+                {runtimeTargetOptions.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={cn(
+                      "w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800",
+                      runtimeTarget === option && "bg-zinc-100 dark:bg-zinc-800"
+                    )}
+                    onClick={() => {
+                      if (onRuntimeTargetChange) onRuntimeTargetChange(option);
+                      else setRuntimeTargetState(option);
+                    }}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="inline-flex h-5 items-center gap-1 rounded-md px-1.5 text-[10px] text-zinc-500 transition-colors hover:bg-zinc-100/60 dark:text-zinc-400 dark:hover:bg-zinc-800/40"
+                data-testid="programming-access-selector"
+              >
+                <ShieldAlert className="h-3 w-3" />
+                <span className="whitespace-nowrap">{executionAccess}</span>
+                <ChevronDown className="h-3 w-3 opacity-70" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-52 p-1">
+              <div className="grid gap-0.5">
+                {executionAccessOptions.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={cn(
+                      "w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800",
+                      executionAccess === option && "bg-zinc-100 dark:bg-zinc-800"
+                    )}
+                    onClick={() => {
+                      if (onExecutionAccessChange) onExecutionAccessChange(option);
+                      else setExecutionAccessState(option);
+                    }}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {repositoryPath && (
+            <>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex h-5 items-center gap-1 rounded-md px-1.5 text-[10px] text-zinc-500 transition-colors hover:bg-zinc-100/60 dark:text-zinc-400 dark:hover:bg-zinc-800/40"
+                    data-testid="programming-folder-selector"
+                    title={repositoryPath}
+                  >
+                    <Folder className="h-3 w-3" />
+                    <span className="max-w-[120px] truncate whitespace-nowrap">
+                      {selectedRepoFolder && selectedRepoFolder !== "." ? selectedRepoFolder : "/"}
+                    </span>
+                    <ChevronDown className="h-3 w-3 opacity-70" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-64 p-1">
+                  <div className="max-h-56 space-y-0.5 overflow-y-auto">
+                    <button
+                      type="button"
+                      className={cn(
+                        "w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800",
+                        selectedRepoFolder === "." && "bg-zinc-100 dark:bg-zinc-800"
+                      )}
+                      onClick={() => onSelectRepoFolder?.(".")}
+                    >
+                      / (repo root)
+                    </button>
+                    {repoFolders.map((folderPath) => (
+                      <button
+                        key={folderPath}
+                        type="button"
+                        className={cn(
+                          "w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800",
+                          selectedRepoFolder === folderPath && "bg-zinc-100 dark:bg-zinc-800"
+                        )}
+                        onClick={() => onSelectRepoFolder?.(folderPath)}
+                      >
+                        {folderPath}
+                      </button>
+                    ))}
+                    <div className="mt-1 border-t border-border pt-1">
+                      <button
+                        type="button"
+                        className="w-full rounded-md px-2 py-1.5 text-left text-sm text-blue-600 transition-colors hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/30"
+                        onClick={() => {
+                          const folderName = window.prompt("Nombre de la nueva carpeta");
+                          if (!folderName?.trim()) return;
+                          void onCreateRepoFolder?.(folderName.trim());
+                        }}
+                      >
+                        + Nueva carpeta
+                      </button>
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex h-5 items-center gap-1 rounded-md px-1.5 text-[10px] text-zinc-500 transition-colors hover:bg-zinc-100/60 dark:text-zinc-400 dark:hover:bg-zinc-800/40"
+                    data-testid="programming-agents-selector"
+                  >
+                    <Bot className="h-3 w-3" />
+                    <span className="whitespace-nowrap">
+                      {selectedCodingAgents.length > 1
+                        ? `${selectedCodingAgents.length} agents`
+                        : (selectedCodingAgents[0] || "agents")}
+                    </span>
+                    <ChevronDown className="h-3 w-3 opacity-70" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-52 p-1">
+                  <div className="grid gap-0.5">
+                    {(["coder", "reviewer", "improver"] as const).map((agent) => {
+                      const enabled = selectedCodingAgents.includes(agent);
+                      return (
+                        <button
+                          key={agent}
+                          type="button"
+                          className={cn(
+                            "w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800",
+                            enabled && "bg-zinc-100 dark:bg-zinc-800"
+                          )}
+                          onClick={() => onToggleCodingAgent?.(agent)}
+                        >
+                          {enabled ? "✓ " : ""}{agent}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </>
+          )}
+        </div>
+
+        <Popover>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className="inline-flex h-5 shrink-0 items-center gap-1 rounded-md px-1.5 text-[10px] text-zinc-500 transition-colors hover:bg-zinc-100/60 dark:text-zinc-400 dark:hover:bg-zinc-800/40"
+              data-testid="programming-branch-selector"
+            >
+              <GitBranch className="h-3 w-3" />
+              <span className="max-w-[100px] truncate">{activeBranch}</span>
+              <ChevronDown className="h-3 w-3 opacity-70" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-48 p-1">
+            <div className="grid gap-0.5">
+              {branchOptions.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  className={cn(
+                    "w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800",
+                    activeBranch === option && "bg-zinc-100 dark:bg-zinc-800"
+                  )}
+                  onClick={() => {
+                    if (onSelectBranch) onSelectBranch(option);
+                    else setActiveBranchState(option);
+                  }}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          </PopoverContent>
+        </Popover>
+      </div>
+    );
+  };
 
   const renderSelectedToolLogo = () => {
     if (!selectedTool) return null;
@@ -900,7 +1325,7 @@ export function Composer({
       "p-4 sm:p-6 w-full max-w-3xl mx-auto relative bg-background z-10",
       isDraggingOver && cn("ring-2 rounded-2xl", SILVER_RING_SOFT)
     )
-    : "shrink-0 w-full px-4 pb-2.5 pt-1.5 bg-background";
+    : "shrink-0 w-full px-4 pb-0 pt-0.5 bg-background";
 
   const inputContainerClass = cn(
     isDocumentMode
@@ -1295,7 +1720,9 @@ export function Composer({
 
       </div>
 
-      <div id="composer-hint" className="text-center text-[10px] text-zinc-400/50 dark:text-zinc-600/60 mt-2 font-normal tracking-wide select-none">
+      {renderProgrammingModeBar()}
+
+      <div id="composer-hint" className="-mb-0.5 mt-0 text-center text-[9px] text-zinc-400/45 dark:text-zinc-600/55 font-normal tracking-wide leading-none select-none">
         <span className="sr-only">Press Enter to send, Shift+Enter for new line, or Cmd+Enter to send quickly. </span>
         ILIAGPT puede cometer errores. Verifica la información importante.
       </div>

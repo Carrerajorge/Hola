@@ -85,4 +85,20 @@ describe("FinOps CostEngine - Contract Tests", () => {
 
         consoleSpy.mockRestore();
     });
+
+    it("Debe hacer fail-open cuando token_ledger_usage no existe", async () => {
+        const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => { });
+
+        vi.mocked(db.where).mockRejectedValueOnce({
+            message: 'relation "token_ledger_usage" does not exist',
+            code: '42P01',
+        } as any);
+
+        const result = await costEngine.enforceGuardrails("ws_anon", 0.5);
+
+        expect(result).toBe(true);
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("token_ledger_usage not available"));
+
+        consoleSpy.mockRestore();
+    });
 });

@@ -10,7 +10,8 @@ import {
 describe('TraceEvent Contract Tests', () => {
   describe('TraceEventTypeSchema', () => {
     const validEventTypes: TraceEventType[] = [
-      'task_start', 'plan_created', 'plan_step', 'step_started',
+      'task_start', 'run_created', 'run_completed', 'run_failed', 'run_cancelled',
+      'plan_created', 'plan_step', 'step_started', 'step_progress', 'step_log',
       'tool_call', 'tool_output', 'tool_chunk', 'observation',
       'verification', 'step_completed', 'step_failed', 'step_retried',
       'replan', 'thinking', 'shell_output', 'artifact_created',

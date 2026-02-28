@@ -34,21 +34,14 @@ import type {
 function emitSSE(res: any, event: string, data: any): void {
   if (!res || typeof res.write !== "function") return;
   try {
-    // Enrich with conversationId/requestId from streamMeta so client-side
-    // event filtering does not silently discard orchestrator events.
     const streamMeta = res?.locals?.streamMeta;
-    const enriched: Record<string, unknown> = typeof data === "object" && data !== null ? { ...data } : { value: data };
-    if (!enriched.conversationId && streamMeta?.conversationId) {
-      enriched.conversationId = streamMeta.conversationId;
-    }
-    if (!enriched.requestId && streamMeta?.requestId) {
-      enriched.requestId = streamMeta.requestId;
-    }
-    if (!enriched.assistantMessageId) {
-      const amid = streamMeta?.assistantMessageId ||
-        (typeof streamMeta?.getAssistantMessageId === "function" ? streamMeta.getAssistantMessageId() : undefined);
-      if (amid) enriched.assistantMessageId = amid;
-    }
+    const enriched: Record<string, unknown> =
+      typeof data === "object" && data !== null ? { ...data } : { value: data };
+    if (streamMeta?.requestId) enriched.requestId = streamMeta.requestId;
+    if (!enriched.conversationId && streamMeta?.conversationId) enriched.conversationId = streamMeta.conversationId;
+    const amid = streamMeta?.assistantMessageId ||
+      (typeof streamMeta?.getAssistantMessageId === "function" ? streamMeta.getAssistantMessageId() : undefined);
+    if (!enriched.assistantMessageId && amid) enriched.assistantMessageId = amid;
     res.write(`event: ${event}\ndata: ${JSON.stringify(enriched)}\n\n`);
   } catch { /* non-fatal */ }
 }

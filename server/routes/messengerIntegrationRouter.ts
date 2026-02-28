@@ -1,12 +1,16 @@
 import { Router, type Request, type Response } from "express";
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { getUserId } from "../types/express";
-import { integrationAccounts } from "@shared/schema";
+import { channelConversations, integrationAccounts } from "@shared/schema";
 import { createChannelPairingCode } from "../channels/channelStore";
 import { ensureIntegrationCatalogSeeded } from "../services/integrationCatalog";
 import { extractRuntimeSettings, runtimeSettingsUpdateSchema, withRuntimeSettingsMetadata } from "../channels/runtimeConfigHttp";
+import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
+import { ensureUserRowExists } from "../lib/ensureUserRowExists";
+import { messengerSendText } from "../channels/messenger/messengerApi";
+import { env } from "../config/env";
 
 const configSchema = z
   .object({
@@ -18,6 +22,12 @@ const configSchema = z
 const pairingRequestSchema = z
   .object({
     ttlMinutes: z.number().int().min(1).max(60).optional(),
+    pageId: z.string().min(1).optional(),
+  })
+  .strict();
+
+const messengerTestMessageSchema = z
+  .object({
     pageId: z.string().min(1).optional(),
   })
   .strict();
@@ -36,12 +46,140 @@ function messengerPairingPayload(code: string, pageId?: string) {
   };
 }
 
+type MessengerAccountRow = {
+  id: string;
+  accessToken: string;
+  metadata: unknown;
+  updatedAt: Date;
+};
+
+function extractMessengerPageId(metadata: unknown): string {
+  if (!metadata || typeof metadata !== "object") return "";
+  const value = (metadata as any).pageId;
+  return typeof value === "string" ? value.trim() : "";
+}
+
+async function fetchMessengerPageProfile(accessToken: string): Promise<{ pageId: string; name: string } | null> {
+  try {
+    const url = new URL("https://graph.facebook.com/v21.0/me");
+    url.searchParams.set("fields", "id,name");
+    url.searchParams.set("access_token", accessToken);
+    const response = await fetch(url.toString(), { method: "GET" });
+    if (!response.ok) return null;
+    const payload = await response.json().catch(() => null) as any;
+    const pageId = typeof payload?.id === "string" ? payload.id.trim() : "";
+    const name = typeof payload?.name === "string" ? payload.name.trim() : "Messenger";
+    if (!pageId) return null;
+    return { pageId, name: name || "Messenger" };
+  } catch {
+    return null;
+  }
+}
+
 export function createMessengerIntegrationRouter(): Router {
   const router = Router();
 
+  async function resolveUserId(req: Request): Promise<string> {
+    const userId = getUserId(req) || getOrCreateSecureUserId(req);
+    await ensureUserRowExists(userId);
+    return userId;
+  }
+
+  async function findActiveMessengerAccount(userId: string, requestedPageId?: string): Promise<MessengerAccountRow | null> {
+    const predicates = [
+      eq(integrationAccounts.userId, userId),
+      eq(integrationAccounts.providerId, "messenger"),
+      eq(integrationAccounts.status, "active"),
+    ];
+    const safePageId = requestedPageId?.trim();
+    if (safePageId) {
+      predicates.push(sql`${integrationAccounts.metadata} ->> 'pageId' = ${safePageId}`);
+    }
+
+    const [account] = await db
+      .select({
+        id: integrationAccounts.id,
+        accessToken: integrationAccounts.accessToken,
+        metadata: integrationAccounts.metadata,
+        updatedAt: integrationAccounts.updatedAt,
+      })
+      .from(integrationAccounts)
+      .where(and(...predicates))
+      .orderBy(desc(integrationAccounts.updatedAt))
+      .limit(1);
+    return account ?? null;
+  }
+
+  async function ensureMessengerAccountForUser(userId: string, requestedPageId?: string): Promise<MessengerAccountRow | null> {
+    const existing = await findActiveMessengerAccount(userId, requestedPageId);
+    if (existing) return existing;
+
+    const fallbackToken = String(env.MESSENGER_PAGE_ACCESS_TOKEN || "").trim();
+    if (!fallbackToken) return null;
+
+    let pageId = (requestedPageId || "").trim();
+    let displayName = "Messenger";
+
+    if (!pageId) {
+      const envPageId = String(process.env.MESSENGER_PAGE_ID || "").trim();
+      if (envPageId) {
+        pageId = envPageId;
+      } else {
+        const profile = await fetchMessengerPageProfile(fallbackToken);
+        if (profile) {
+          pageId = profile.pageId;
+          displayName = profile.name || "Messenger";
+        }
+      }
+    }
+
+    if (!pageId) return null;
+
+    await ensureIntegrationCatalogSeeded().catch(() => null);
+
+    const [samePageAccount] = await db
+      .select({ id: integrationAccounts.id, metadata: integrationAccounts.metadata })
+      .from(integrationAccounts)
+      .where(
+        and(
+          eq(integrationAccounts.userId, userId),
+          eq(integrationAccounts.providerId, "messenger"),
+          sql`${integrationAccounts.metadata} ->> 'pageId' = ${pageId}`,
+        ),
+      )
+      .limit(1);
+
+    if (samePageAccount) {
+      await db
+        .update(integrationAccounts)
+        .set({
+          accessToken: fallbackToken,
+          status: "active",
+          displayName: displayName || "Messenger",
+          metadata: {
+            ...(samePageAccount.metadata && typeof samePageAccount.metadata === "object" ? samePageAccount.metadata : {}),
+            pageId,
+          },
+          updatedAt: new Date(),
+        })
+        .where(eq(integrationAccounts.id, samePageAccount.id));
+    } else {
+      await db.insert(integrationAccounts).values({
+        userId,
+        providerId: "messenger",
+        displayName: displayName || "Messenger",
+        accessToken: fallbackToken,
+        status: "active",
+        metadata: { pageId },
+        updatedAt: new Date(),
+      });
+    }
+
+    return findActiveMessengerAccount(userId, pageId);
+  }
+
   router.post("/config", async (req: Request, res: Response) => {
-    const userId = getUserId(req);
-    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const userId = await resolveUserId(req);
 
     const parsed = configSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -96,12 +234,20 @@ export function createMessengerIntegrationRouter(): Router {
   });
 
   router.post("/pairing-code", async (req: Request, res: Response) => {
-    const userId = getUserId(req);
-    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const userId = await resolveUserId(req);
 
     const parsed = pairingRequestSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid body", details: parsed.error.message });
+    }
+
+    const account = await ensureMessengerAccountForUser(userId, parsed.data.pageId);
+    const pageId = extractMessengerPageId(account?.metadata);
+    if (!account || !pageId) {
+      return res.status(400).json({
+        error:
+          "No hay una cuenta de Messenger conectada. Configura MESSENGER_PAGE_ACCESS_TOKEN (y opcionalmente MESSENGER_PAGE_ID) o conecta una página primero.",
+      });
     }
 
     const { code, expiresAt } = await createChannelPairingCode({
@@ -109,7 +255,7 @@ export function createMessengerIntegrationRouter(): Router {
       channel: "messenger",
       ttlMinutes: parsed.data.ttlMinutes,
     });
-    const payload = messengerPairingPayload(code, parsed.data.pageId);
+    const payload = messengerPairingPayload(code, pageId);
 
     return res.json({
       success: true,
@@ -122,9 +268,78 @@ export function createMessengerIntegrationRouter(): Router {
     });
   });
 
+  router.post("/test-message", async (req: Request, res: Response) => {
+    const userId = await resolveUserId(req);
+    const parsed = messengerTestMessageSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid body", details: parsed.error.message });
+    }
+
+    const requestedPageId = parsed.data.pageId?.trim();
+    const account = await ensureMessengerAccountForUser(userId, requestedPageId);
+
+    if (!account) {
+      return res.status(404).json({
+        error:
+          "No hay una cuenta de Messenger conectada. Configura MESSENGER_PAGE_ACCESS_TOKEN en el servidor para habilitar envío.",
+      });
+    }
+
+    const accountPageId = extractMessengerPageId(account.metadata) || null;
+
+    const conversationPredicates = [
+      eq(channelConversations.userId, userId),
+      eq(channelConversations.channel, "messenger"),
+      eq(channelConversations.isActive, true),
+    ];
+    if (accountPageId) {
+      conversationPredicates.push(eq(channelConversations.channelKey, accountPageId));
+    }
+
+    const [conversation] = await db
+      .select({
+        id: channelConversations.id,
+        chatId: channelConversations.chatId,
+        channelKey: channelConversations.channelKey,
+        externalConversationId: channelConversations.externalConversationId,
+      })
+      .from(channelConversations)
+      .where(and(...conversationPredicates))
+      .orderBy(desc(channelConversations.updatedAt))
+      .limit(1);
+
+    if (!conversation || !conversation.externalConversationId) {
+      return res.status(404).json({
+        error:
+          "Aún no hay chat vinculado. Abre Messenger, envía el código de vinculación en el chat de tu página y luego pulsa Comprobar.",
+      });
+    }
+
+    const recipientId = String(conversation.externalConversationId).trim();
+    if (!recipientId) {
+      return res.status(400).json({ error: "No se pudo identificar el destinatario del chat vinculado." });
+    }
+
+    const testMessage =
+      "✅ ILIA conectado. Este es tu chat espejo en Messenger. Escríbeme aquí para continuar.";
+    await messengerSendText({
+      recipientId,
+      text: testMessage,
+      accessToken: account.accessToken,
+    });
+
+    return res.json({
+      success: true,
+      pageId: accountPageId || conversation.channelKey,
+      recipientId,
+      chatId: conversation.chatId,
+      message: "Mensaje de prueba enviado a tu chat de Messenger.",
+    });
+  });
+
   router.get("/status", async (req: Request, res: Response) => {
-    const userId = getUserId(req);
-    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const userId = await resolveUserId(req);
+    await ensureMessengerAccountForUser(userId).catch(() => null);
 
     const accounts = await db
       .select({
@@ -143,8 +358,7 @@ export function createMessengerIntegrationRouter(): Router {
   });
 
   router.get("/settings", async (req: Request, res: Response) => {
-    const userId = getUserId(req);
-    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const userId = await resolveUserId(req);
 
     const pageId = typeof req.query.pageId === "string" ? req.query.pageId : "";
     if (!pageId) return res.status(400).json({ error: "pageId is required" });
@@ -163,8 +377,7 @@ export function createMessengerIntegrationRouter(): Router {
   });
 
   router.put("/settings", async (req: Request, res: Response) => {
-    const userId = getUserId(req);
-    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const userId = await resolveUserId(req);
 
     const pageId = typeof req.body?.pageId === "string" ? req.body.pageId : "";
     if (!pageId) return res.status(400).json({ error: "pageId is required" });
@@ -194,8 +407,7 @@ export function createMessengerIntegrationRouter(): Router {
   });
 
   router.post("/disconnect", async (req: Request, res: Response) => {
-    const userId = getUserId(req);
-    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const userId = await resolveUserId(req);
 
     const parsed = z.object({ pageId: z.string().min(1) }).strict().safeParse(req.body);
     if (!parsed.success) {

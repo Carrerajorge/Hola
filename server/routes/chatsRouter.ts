@@ -215,14 +215,21 @@ export function createChatsRouter() {
    */
   router.post("/chats", async (req, res) => {
     try {
-      const { id: rawChatId, title, messages, role } = req.body;
+      const { id: rawChatId, title, messages, role, gptId: rawGptId } = req.body;
       const requestedChatId =
         typeof rawChatId === "string" && rawChatId.trim().length > 0
           ? rawChatId.trim()
           : undefined;
+      const requestedGptId =
+        typeof rawGptId === "string" && rawGptId.trim().length > 0
+          ? rawGptId.trim()
+          : undefined;
 
       if (requestedChatId && !CHAT_ID_REGEX.test(requestedChatId)) {
         return res.status(400).json({ error: "Invalid chat id format" });
+      }
+      if (requestedGptId && requestedGptId.length > 120) {
+        return res.status(400).json({ error: "Invalid gptId" });
       }
 
       const userId = getOrCreateSecureUserId(req);
@@ -294,7 +301,7 @@ export function createChatsRouter() {
 
         // Create chat with messages atomically using transaction
         const result = await storage.createChatWithMessages(
-          { id: requestedChatId, title: titleValue, userId },
+          { id: requestedChatId, title: titleValue, userId, gptId: requestedGptId },
           sanitizedMessages
         );
         if (!chatHistoryEnabled) {
@@ -305,7 +312,7 @@ export function createChatsRouter() {
       }
 
       // Simple chat creation without messages
-      const chat = await storage.createChat({ id: requestedChatId, title: titleValue, userId });
+      const chat = await storage.createChat({ id: requestedChatId, title: titleValue, userId, gptId: requestedGptId });
       if (!chatHistoryEnabled) {
         await storage.softDeleteChat(chat.id);
       }
@@ -709,6 +716,14 @@ export function createChatsRouter() {
 
     try {
       const userId = getSecureUserId(req);
+      const requestedGptId =
+        typeof req.body?.gptId === "string" && req.body.gptId.trim().length > 0
+          ? req.body.gptId.trim()
+          : undefined;
+      if (requestedGptId && requestedGptId.length > 120) {
+        setServerTiming();
+        return res.status(400).json({ error: "Invalid gptId" });
+      }
 
       const tChat = performance.now();
       let chat = await storage.getChat(req.params.id);
@@ -721,6 +736,7 @@ export function createChatsRouter() {
             id: req.params.id,
             title: "New Chat",
             userId,
+            gptId: requestedGptId,
           });
         } catch (chatCreateError: any) {
           // 23505 = duplicate key (race condition with concurrent creators)
@@ -740,6 +756,14 @@ export function createChatsRouter() {
       if (!chat.userId || chat.userId !== userId) {
         setServerTiming();
         return res.status(403).json({ error: "Access denied" });
+      }
+
+      // Best-effort backfill so chats created through this endpoint remain linked
+      // to the selected GPT across refreshes/retries.
+      if (requestedGptId && !chat.gptId) {
+        storage.updateChat(chat.id, { gptId: requestedGptId }).catch((error) => {
+          console.warn(`[Chats] Failed to backfill chat.gptId for ${chat.id}:`, error);
+        });
       }
 
       const {

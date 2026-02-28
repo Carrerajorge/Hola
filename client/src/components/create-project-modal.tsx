@@ -31,6 +31,9 @@ export interface CreateProjectData {
     name: string;
     backgroundImage: string | null;
     systemPrompt: string;
+    repositoryPath?: string | null;
+    defaultCodeFolder?: string | null;
+    codingAgents?: Array<"coder" | "reviewer" | "improver">;
     files: ProjectFile[];
     color: string;
 }
@@ -64,6 +67,8 @@ export function CreateProjectModal({
     const [backgroundImage, setBackgroundImage] = useState<string | null>(null);
     const [selectedFiles, setSelectedFiles] = useState<ProjectFile[]>([]);
     const [selectedColor, setSelectedColor] = useState(PROJECT_COLORS[0]);
+    const [repositoryPath, setRepositoryPath] = useState("");
+    const [defaultCodeFolder, setDefaultCodeFolder] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [showKnowledgeSelector, setShowKnowledgeSelector] = useState(false);
 
@@ -124,6 +129,9 @@ export function CreateProjectModal({
                 name: name.trim(),
                 backgroundImage,
                 systemPrompt,
+                repositoryPath: repositoryPath.trim() || null,
+                defaultCodeFolder: defaultCodeFolder.trim() || null,
+                codingAgents: ["coder"],
                 files: selectedFiles,
                 color: selectedColor
             });
@@ -134,6 +142,8 @@ export function CreateProjectModal({
             setBackgroundImage(null);
             setSelectedFiles([]);
             setSelectedColor(PROJECT_COLORS[0]);
+            setRepositoryPath("");
+            setDefaultCodeFolder("");
             onOpenChange(false);
         } catch (error) {
             console.error("Failed to create project:", error);
@@ -256,6 +266,42 @@ export function CreateProjectModal({
                                 className="min-h-[110px] resize-y rounded-xl bg-neutral-50 border-neutral-200 focus-visible:ring-[#A5A0FF] focus-visible:border-[#A5A0FF] shadow-sm transition-all"
                                 data-testid="textarea-system-prompt"
                             />
+                        </div>
+
+                        {/* Repository Path */}
+                        <div className="space-y-2">
+                            <Label htmlFor="project-repository-path" className="text-sm font-medium">
+                                Repository Path (optional)
+                            </Label>
+                            <Input
+                                id="project-repository-path"
+                                placeholder="/Users/luis/Desktop/Hola"
+                                value={repositoryPath}
+                                onChange={(e) => setRepositoryPath(e.target.value)}
+                                className="h-11 rounded-xl bg-neutral-50 border-neutral-200 focus-visible:ring-[#A5A0FF] focus-visible:border-[#A5A0FF] transition-all shadow-sm"
+                                data-testid="input-project-repository-path"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                Esta ruta se usará como workspace de programación para agentes.
+                            </p>
+                        </div>
+
+                        {/* Default Code Folder */}
+                        <div className="space-y-2">
+                            <Label htmlFor="project-default-code-folder" className="text-sm font-medium">
+                                Default Code Folder (optional)
+                            </Label>
+                            <Input
+                                id="project-default-code-folder"
+                                placeholder="src"
+                                value={defaultCodeFolder}
+                                onChange={(e) => setDefaultCodeFolder(e.target.value)}
+                                className="h-11 rounded-xl bg-neutral-50 border-neutral-200 focus-visible:ring-[#A5A0FF] focus-visible:border-[#A5A0FF] transition-all shadow-sm"
+                                data-testid="input-project-default-code-folder"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                Carpeta relativa dentro del repositorio para enfocar el coding.
+                            </p>
                         </div>
 
                         {/* Files Section */}

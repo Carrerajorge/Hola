@@ -25,6 +25,17 @@ const attachmentSchema = z.object({
     url: z.string().max(2048).optional(),
 }).passthrough(); // allow extra fields from legacy clients
 
+const workspaceContextSchema = z.object({
+    projectId: z.string().max(200).optional(),
+    projectName: z.string().max(200).optional(),
+    repositoryPath: z.string().min(1).max(1024),
+    selectedFolder: z.string().min(1).max(512).optional(),
+    codingAgents: z.array(z.enum(['coder', 'reviewer', 'improver'])).max(8).optional(),
+    runtimeTarget: z.string().max(80).optional(),
+    executionAccess: z.string().max(80).optional(),
+    branch: z.string().max(120).optional(),
+}).strict();
+
 // Chat request body schema
 export const chatRequestSchema = z.object({
     messages: z.array(chatMessageSchema).min(1, 'At least one message is required').max(100, 'Too many messages'),
@@ -38,6 +49,7 @@ export const chatRequestSchema = z.object({
     provider: z.string().max(40).optional().default('gemini'),
     model: z.string().max(160).trim().optional().default('gemini-2.5-flash'),
     attachments: z.array(attachmentSchema).max(20).optional(),
+    workspaceContext: workspaceContextSchema.optional(),
     lastImageBase64: z.string().max(500_000).nullable().optional(),
     lastImageId: z.string().max(200).nullable().optional(),
     session_id: z.string().max(120).optional(),

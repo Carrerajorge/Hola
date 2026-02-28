@@ -14,7 +14,6 @@ import { conversationMemoryManager } from "../services/conversationMemory";
 import { buildOpenClaw1000CapabilityProfile } from "../services/openClaw1000CapabilityProfiler";
 
 const router = Router();
-const MAX_SUPER_PROMPT_LEN = 10000;
 
 type IntentCategory = "academic_search" | "document_creation" | "data_analysis" | "general_chat";
 
@@ -133,11 +132,11 @@ function extractTargetCount(prompt: string): number {
 const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
 
 const ChatRequestSchema = z.object({
-  prompt: z.unknown().optional(),
+  prompt: z.string().min(1).max(10000),
   messages: z.array(z.object({
-    role: z.string().optional(),
-    content: z.unknown().optional(),
-  })).optional(), // Keep permissive: content may be multimodal payloads
+    role: z.string(),
+    content: z.string()
+  })).optional(), // CONTEXT FIX: Accept full conversation history
   session_id: z.string().optional(),
   run_id: z.string().optional(),
   chat_id: z.string().optional(), // For context augmentation
@@ -147,62 +146,9 @@ const ChatRequestSchema = z.object({
   }).optional(),
 });
 
-function normalizePromptText(value: unknown): string {
-  if (typeof value === "string") return value.trim();
-  if (Array.isArray(value)) {
-    return value
-      .map((part) => normalizePromptText(part))
-      .filter(Boolean)
-      .join(" ")
-      .trim();
-  }
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    if (typeof record.text === "string") return record.text.trim();
-    if (Array.isArray(record.parts)) {
-      return record.parts
-        .map((part) => normalizePromptText(part))
-        .filter(Boolean)
-        .join(" ")
-        .trim();
-    }
-    if (Array.isArray(record.content)) {
-      return record.content
-        .map((part) => normalizePromptText(part))
-        .filter(Boolean)
-        .join(" ")
-        .trim();
-    }
-  }
-  return "";
-}
-
-function derivePrompt(promptRaw: unknown, messages: Array<{ role?: string; content?: unknown }> | undefined): string {
-  const fromPrompt = normalizePromptText(promptRaw);
-  if (fromPrompt) return fromPrompt.slice(0, MAX_SUPER_PROMPT_LEN);
-
-  const latestUser = [...(messages || [])]
-    .reverse()
-    .find((message) => (message?.role || "").toLowerCase() === "user");
-  const fromMessages = normalizePromptText(latestUser?.content);
-  return fromMessages.slice(0, MAX_SUPER_PROMPT_LEN);
-}
-
 router.post("/super/analyze", async (req: Request, res: Response) => {
   try {
-    const parsed = ChatRequestSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({
-        error: "Invalid /api/super/analyze payload",
-        details: parsed.error.flatten(),
-      });
-    }
-
-    const prompt = derivePrompt(parsed.data.prompt, parsed.data.messages);
-    if (!prompt) {
-      return res.status(400).json({ error: "Prompt is required" });
-    }
-    const { options } = parsed.data;
+    const { prompt, options } = ChatRequestSchema.parse(req.body);
 
     const contract = parsePromptToContract(prompt, {
       enforceMinSources: options?.enforce_min_sources ?? true,
@@ -244,34 +190,20 @@ router.post("/super/analyze", async (req: Request, res: Response) => {
 const activeAbortControllers = new Map<string, AbortController>();
 
 router.post("/super/stream", async (req: Request, res: Response) => {
-  let sessionId = randomUUID();
-  let runId = `run_${randomUUID()}`;
-  let sendSSE = (event: SSEEvent) => {
+  let sessionId = "";
+  let runId = "";
+  const sendSSE = (event: SSEEvent) => {
     res.write(`id: ${event.event_id}\n`);
     res.write(`event: ${event.event_type}\n`);
     res.write(`data: ${JSON.stringify(event.data)}\n\n`);
   };
 
   try {
-    const parsed = ChatRequestSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({
-        error: "Invalid /api/super/stream payload",
-        details: parsed.error.flatten(),
-      });
-    }
+    const { prompt, messages: clientMessages, chat_id, session_id, run_id, options } = ChatRequestSchema.parse(req.body);
+    sessionId = session_id || randomUUID();
+    runId = run_id || `run_${randomUUID()}`;
 
-    const { messages: clientMessages, chat_id, session_id, run_id, options } = parsed.data;
-    const prompt = derivePrompt(parsed.data.prompt, clientMessages);
-    if (!prompt) {
-      return res.status(400).json({
-        error: "Prompt is required",
-      });
-    }
-
-    sessionId = session_id || sessionId;
-    runId = run_id || runId;
-
+    // Send headers as early as possible to avoid hard 500s for mid-flight failures.
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
@@ -279,12 +211,6 @@ router.post("/super/stream", async (req: Request, res: Response) => {
     res.setHeader("X-Run-ID", runId);
     res.setHeader("Access-Control-Expose-Headers", "X-Run-ID, X-Session-ID");
     res.flushHeaders();
-
-    sendSSE = (event: SSEEvent) => {
-      res.write(`id: ${event.event_id}\n`);
-      res.write(`event: ${event.event_type}\n`);
-      res.write(`data: ${JSON.stringify(event.data)}\n\n`);
-    };
 
     // CONTEXT FIX: Augment client messages with server-side history
     const conversationHistory = await conversationMemoryManager.augmentWithHistory(
@@ -533,32 +459,20 @@ router.post("/super/stream", async (req: Request, res: Response) => {
     res.end();
 
   } catch (error: any) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({
-        error: "Invalid /api/super/stream payload",
-        details: error.flatten(),
-      });
-    }
-
-    const message = error?.message || "SuperAgent stream failed";
+    console.error("[SuperAgent] /super/stream failed:", error);
     if (res.headersSent) {
-      try {
-        sendSSE({
-          event_id: `error_${Date.now()}`,
-          event_type: "error",
-          data: { error: message },
-        });
-      } catch {
-        // ignore SSE write errors
-      }
+      const fallbackSession = sessionId || `session_${Date.now()}`;
+      sendSSE({
+        event_id: `${fallbackSession}_error`,
+        event_type: "error",
+        timestamp: Date.now(),
+        data: { message: error?.message || "SuperAgent failed", recoverable: false },
+        session_id: fallbackSession,
+      });
       res.end();
-    } else {
-      res.status(500).json({ error: message });
+      return;
     }
-    console.error(`[SuperAgent] /super/stream failed: ${message}`, {
-      bodyKeys: req?.body && typeof req.body === "object" ? Object.keys(req.body) : [],
-      stack: error?.stack,
-    });
+    res.status(500).json({ error: error?.message || "SuperAgent failed" });
   }
 });
 

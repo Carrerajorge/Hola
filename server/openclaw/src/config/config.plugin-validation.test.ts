@@ -65,18 +65,17 @@ describe("config plugin validation", () => {
     }
   });
 
-  it("warns for missing plugin ids in entries instead of failing validation", async () => {
+  it("rejects missing plugin ids in entries", async () => {
     const home = await createCaseHome();
     const res = validateInHome(home, {
       agents: { list: [{ id: "pi" }] },
       plugins: { enabled: false, entries: { "missing-plugin": { enabled: true } } },
     });
-    expect(res.ok).toBe(true);
-    if (res.ok) {
-      expect(res.warnings).toContainEqual({
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.issues).toContainEqual({
         path: "plugins.entries.missing-plugin",
-        message:
-          "plugin not found: missing-plugin (stale config entry ignored; remove it from plugins config)",
+        message: "plugin not found: missing-plugin",
       });
     }
   });

@@ -21,6 +21,9 @@ export interface ActiveGpt {
         webBrowsing?: boolean;
         codeInterpreter?: boolean;
         imageGeneration?: boolean;
+        fileUpload?: boolean;
+        dataAnalysis?: boolean;
+        canvas?: boolean;
         wordCreation?: boolean;
         excelCreation?: boolean;
         pptCreation?: boolean;

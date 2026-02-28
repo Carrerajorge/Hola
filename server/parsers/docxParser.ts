@@ -11,7 +11,7 @@ export class DocxParser implements FileParser {
 
   // Avoid top-level constants: some CI bundling paths can concatenate modules
   // without sufficient name mangling, triggering duplicate symbol errors.
-  private static readonly MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024; // 100MB
+  private static readonly MAX_FILE_SIZE_BYTES = Number(process.env.DOCX_MAX_FILE_SIZE_MB || process.env.MAX_FILE_SIZE_MB || "2048") * 1024 * 1024;
   private static readonly MAX_EXTRACTED_TEXT_BYTES = 10 * 1024 * 1024; // 10MB max extracted text
   private static readonly MAX_METADATA_VALUE_LENGTH = 1000;
 

@@ -8,6 +8,7 @@ import {
   type GptSession,
   type InsertGptSession,
 } from "@shared/schema";
+import { DEFAULT_GPT_CAPABILITIES, normalizeGptCapabilities } from "../lib/gptCapabilities";
 
 export interface GptSessionContract {
   sessionId: string;
@@ -22,6 +23,10 @@ export interface GptSessionContract {
     imageGeneration: boolean;
     fileUpload: boolean;
     dataAnalysis: boolean;
+    canvas: boolean;
+    wordCreation: boolean;
+    excelCreation: boolean;
+    pptCreation: boolean;
   };
   toolPermissions: {
     mode: 'allowlist' | 'denylist';
@@ -49,6 +54,10 @@ interface ResolvedGptRuntimeConfig {
     imageGeneration: boolean;
     fileUpload: boolean;
     dataAnalysis: boolean;
+    canvas: boolean;
+    wordCreation: boolean;
+    excelCreation: boolean;
+    pptCreation: boolean;
   };
   toolPermissions: {
     mode: 'allowlist' | 'denylist';
@@ -68,13 +77,7 @@ interface ResolvedGptRuntimeConfig {
   maxTokens: number;
 }
 
-const DEFAULT_CAPABILITIES = {
-  webBrowsing: false,
-  codeInterpreter: false,
-  imageGeneration: false,
-  fileUpload: false,
-  dataAnalysis: false,
-};
+const DEFAULT_CAPABILITIES = DEFAULT_GPT_CAPABILITIES;
 
 const DEFAULT_TOOL_PERMISSIONS = {
   mode: 'allowlist' as const,
@@ -92,6 +95,24 @@ const DEFAULT_MODEL = "grok-4-1-fast-non-reasoning";
 const DEFAULT_TEMPERATURE = 0.7;
 const DEFAULT_TOP_P = 1;
 const DEFAULT_MAX_TOKENS = 4096;
+
+async function resolveGptReference(gptRef: string): Promise<{ id: string; gpt: Gpt }> {
+  const normalizedRef = typeof gptRef === "string" ? gptRef.trim() : "";
+  if (!normalizedRef) {
+    throw new Error("GPT reference is empty");
+  }
+
+  let gpt = await storage.getGpt(normalizedRef);
+  if (!gpt) {
+    gpt = await storage.getGptBySlug(normalizedRef);
+  }
+
+  if (!gpt) {
+    throw new Error(`GPT not found: ${gptRef}`);
+  }
+
+  return { id: gpt.id, gpt };
+}
 
 function parseNumber(value: unknown, fallback: number): number;
 function parseNumber(value: unknown, fallback: undefined): number | undefined;
@@ -128,17 +149,6 @@ function toRecord(value: unknown): Record<string, any> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : null;
 }
 
-function normalizeCapabilities(value: unknown): ResolvedGptRuntimeConfig["capabilities"] {
-  const source = toRecord(value) ?? {};
-  return {
-    webBrowsing: parseBoolean(source.webBrowsing, DEFAULT_CAPABILITIES.webBrowsing),
-    codeInterpreter: parseBoolean(source.codeInterpreter, DEFAULT_CAPABILITIES.codeInterpreter),
-    imageGeneration: parseBoolean(source.imageGeneration, DEFAULT_CAPABILITIES.imageGeneration),
-    fileUpload: parseBoolean(source.fileUpload, DEFAULT_CAPABILITIES.fileUpload),
-    dataAnalysis: parseBoolean(source.dataAnalysis, DEFAULT_CAPABILITIES.dataAnalysis),
-  };
-}
-
 function normalizeToolPermissions(value: unknown): ResolvedGptRuntimeConfig["toolPermissions"] {
   const source = toRecord(value) ?? {};
   return {
@@ -172,15 +182,105 @@ function buildKnowledgeContext(knowledgeItems: GptKnowledge[]): string {
   return contextParts.join("\n\n");
 }
 
+function buildFrozenCapabilities(capabilities: ResolvedGptRuntimeConfig["capabilities"]) {
+  return {
+    webBrowsing: capabilities.webBrowsing ?? false,
+    codeInterpreter: capabilities.codeInterpreter ?? false,
+    imageGeneration: capabilities.imageGeneration ?? false,
+    fileUpload: capabilities.fileUpload ?? false,
+    dataAnalysis: capabilities.dataAnalysis ?? false,
+    canvas: capabilities.canvas ?? false,
+    wordCreation: capabilities.wordCreation ?? false,
+    excelCreation: capabilities.excelCreation ?? false,
+    pptCreation: capabilities.pptCreation ?? false,
+  };
+}
+
+function buildFrozenToolPermissions(toolPermissions: ResolvedGptRuntimeConfig["toolPermissions"]) {
+  return {
+    mode: toolPermissions.mode || "allowlist",
+    tools: toolPermissions.tools || [],
+    actionsEnabled: toolPermissions.actionsEnabled ?? true,
+  };
+}
+
+function buildFrozenRuntimePolicy(runtimePolicy: ResolvedGptRuntimeConfig["runtimePolicy"]) {
+  return {
+    enforceModel: runtimePolicy.enforceModel ?? false,
+    modelFallbacks: runtimePolicy.modelFallbacks || [],
+    maxTokensOverride: runtimePolicy.maxTokensOverride,
+    temperatureOverride: runtimePolicy.temperatureOverride,
+    allowClientOverride: runtimePolicy.allowClientOverride ?? false,
+  };
+}
+
+async function refreshSessionSnapshotIfNeeded(
+  session: GptSession,
+  gpt: Gpt,
+): Promise<{ session: GptSession; runtimeConfig: ResolvedGptRuntimeConfig; knowledgeItems: GptKnowledge[] }> {
+  const latestConfigVersion = parseNumber(gpt.version, session.configVersion) || session.configVersion;
+  const latestRuntimeConfig = await resolveGptRuntimeConfig(gpt, latestConfigVersion);
+  const latestKnowledgeItems = await storage.getGptKnowledge(session.gptId);
+  const latestKnowledgeContextIds = latestKnowledgeItems
+    .filter(k => k.isActive === "true")
+    .map(k => k.id);
+
+  const nextFrozenCapabilities = buildFrozenCapabilities(latestRuntimeConfig.capabilities);
+  const nextFrozenToolPermissions = buildFrozenToolPermissions(latestRuntimeConfig.toolPermissions);
+  const nextFrozenRuntimePolicy = buildFrozenRuntimePolicy(latestRuntimeConfig.runtimePolicy);
+  const currentKnowledgeIdsSorted = [...(session.knowledgeContextIds || [])].sort();
+  const nextKnowledgeIdsSorted = [...latestKnowledgeContextIds].sort();
+  const needsRefresh =
+    latestConfigVersion !== session.configVersion ||
+    session.frozenSystemPrompt !== latestRuntimeConfig.systemPrompt ||
+    JSON.stringify(session.frozenCapabilities || {}) !== JSON.stringify(nextFrozenCapabilities) ||
+    JSON.stringify(session.frozenToolPermissions || {}) !== JSON.stringify(nextFrozenToolPermissions) ||
+    JSON.stringify(session.frozenRuntimePolicy || {}) !== JSON.stringify(nextFrozenRuntimePolicy) ||
+    JSON.stringify(currentKnowledgeIdsSorted) !== JSON.stringify(nextKnowledgeIdsSorted);
+
+  if (!needsRefresh) {
+    return {
+      session,
+      runtimeConfig: latestRuntimeConfig,
+      knowledgeItems: latestKnowledgeItems,
+    };
+  }
+
+  const enforcedModelId =
+    latestRuntimeConfig.runtimePolicy.enforceModel
+      ? (latestRuntimeConfig.preferredModel || latestRuntimeConfig.runtimePolicy.modelFallbacks[0] || DEFAULT_MODEL)
+      : null;
+
+  const [updatedSession] = await db
+    .update(gptSessions)
+    .set({
+      configVersion: latestConfigVersion,
+      frozenSystemPrompt: latestRuntimeConfig.systemPrompt,
+      frozenCapabilities: nextFrozenCapabilities,
+      frozenToolPermissions: nextFrozenToolPermissions,
+      frozenRuntimePolicy: nextFrozenRuntimePolicy,
+      enforcedModelId,
+      knowledgeContextIds: latestKnowledgeContextIds,
+    })
+    .where(eq(gptSessions.id, session.id))
+    .returning();
+
+  return {
+    session: updatedSession ?? session,
+    runtimeConfig: latestRuntimeConfig,
+    knowledgeItems: latestKnowledgeItems,
+  };
+}
+
 async function resolveGptRuntimeConfig(gpt: Gpt, configVersion: number): Promise<ResolvedGptRuntimeConfig> {
   const version = await storage.getGptVersionByNumber(gpt.id, configVersion);
   const definitionSnapshot = toRecord(version?.definitionSnapshot) ?? toRecord(gpt.definition);
 
-  const capabilities = {
-    ...DEFAULT_CAPABILITIES,
-    ...normalizeCapabilities(gpt.capabilities),
-    ...normalizeCapabilities(definitionSnapshot?.capabilities),
-  };
+  const gptCapabilities = normalizeGptCapabilities(gpt.capabilities, DEFAULT_CAPABILITIES);
+  const definitionCapabilities = definitionSnapshot?.capabilities
+    ? normalizeGptCapabilities(definitionSnapshot.capabilities, gptCapabilities)
+    : null;
+  const capabilities = definitionCapabilities || gptCapabilities;
 
   const runtimePolicy = {
     ...DEFAULT_RUNTIME_POLICY,
@@ -233,6 +333,10 @@ function mapDbSessionToContract(session: GptSession, runtimeConfig: ResolvedGptR
       imageGeneration: capabilities.imageGeneration ?? false,
       fileUpload: capabilities.fileUpload ?? false,
       dataAnalysis: capabilities.dataAnalysis ?? false,
+      canvas: capabilities.canvas ?? false,
+      wordCreation: capabilities.wordCreation ?? false,
+      excelCreation: capabilities.excelCreation ?? false,
+      pptCreation: capabilities.pptCreation ?? false,
     },
     toolPermissions: {
       mode: runtimeConfig.toolPermissions.mode || 'allowlist',
@@ -254,12 +358,9 @@ function mapDbSessionToContract(session: GptSession, runtimeConfig: ResolvedGptR
 }
 
 export async function createGptSession(chatId: string | null, gptId: string): Promise<GptSessionContract> {
-  const gpt = await storage.getGpt(gptId);
-  if (!gpt) {
-    throw new Error(`GPT not found: ${gptId}`);
-  }
+  const { id: resolvedGptId, gpt } = await resolveGptReference(gptId);
 
-  const knowledgeItems = await storage.getGptKnowledge(gptId);
+  const knowledgeItems = await storage.getGptKnowledge(resolvedGptId);
   const knowledgeContext = buildKnowledgeContext(knowledgeItems);
   const knowledgeContextIds = knowledgeItems
     .filter(k => k.isActive === "true")
@@ -275,7 +376,7 @@ export async function createGptSession(chatId: string | null, gptId: string): Pr
 
   const sessionData: InsertGptSession = {
     chatId: chatId || null,
-    gptId,
+    gptId: resolvedGptId,
     configVersion,
     frozenSystemPrompt: runtimeConfig.systemPrompt,
     frozenCapabilities: {
@@ -284,6 +385,10 @@ export async function createGptSession(chatId: string | null, gptId: string): Pr
       imageGeneration: runtimeConfig.capabilities.imageGeneration ?? false,
       fileUpload: runtimeConfig.capabilities.fileUpload ?? false,
       dataAnalysis: runtimeConfig.capabilities.dataAnalysis ?? false,
+      canvas: runtimeConfig.capabilities.canvas ?? false,
+      wordCreation: runtimeConfig.capabilities.wordCreation ?? false,
+      excelCreation: runtimeConfig.capabilities.excelCreation ?? false,
+      pptCreation: runtimeConfig.capabilities.pptCreation ?? false,
     },
     frozenToolPermissions: {
       mode: runtimeConfig.toolPermissions.mode || 'allowlist',
@@ -307,30 +412,25 @@ export async function createGptSession(chatId: string | null, gptId: string): Pr
 }
 
 export async function getOrCreateSession(chatId: string, gptId: string): Promise<GptSessionContract> {
+  const { id: resolvedGptId, gpt } = await resolveGptReference(gptId);
+
   if (!chatId || chatId.trim() === "" || chatId.startsWith("pending-")) {
-    return createGptSession(null, gptId);
+    return createGptSession(null, resolvedGptId);
   }
 
   const [existingSession] = await db
     .select()
     .from(gptSessions)
-    .where(and(eq(gptSessions.chatId, chatId), eq(gptSessions.gptId, gptId)));
+    .where(and(eq(gptSessions.chatId, chatId), eq(gptSessions.gptId, resolvedGptId)));
 
   if (existingSession) {
-    const gpt = await storage.getGpt(gptId);
-    if (!gpt) {
-      throw new Error(`GPT not found: ${gptId}`);
-    }
-
-    const knowledgeItems = await storage.getGptKnowledge(gptId);
-    const filteredKnowledgeItems = knowledgeItems.filter(k => existingSession.knowledgeContextIds?.includes(k.id));
+    const refreshed = await refreshSessionSnapshotIfNeeded(existingSession, gpt);
+    const filteredKnowledgeItems = refreshed.knowledgeItems.filter(k => refreshed.session.knowledgeContextIds?.includes(k.id));
     const knowledgeContext = buildKnowledgeContext(filteredKnowledgeItems);
-    const runtimeConfig = await resolveGptRuntimeConfig(gpt, existingSession.configVersion);
-
-    return mapDbSessionToContract(existingSession, runtimeConfig, knowledgeContext);
+    return mapDbSessionToContract(refreshed.session, refreshed.runtimeConfig, knowledgeContext);
   }
 
-  return createGptSession(chatId, gptId);
+  return createGptSession(chatId, resolvedGptId);
 }
 
 export function isToolAllowed(contract: GptSessionContract, toolName: string): boolean {
@@ -403,6 +503,18 @@ export function buildSystemPromptWithContext(contract: GptSessionContract): stri
   if (contract.capabilities.dataAnalysis) {
     enabledCapabilities.push("data analysis");
   }
+  if (contract.capabilities.canvas) {
+    enabledCapabilities.push("interactive canvas");
+  }
+  if (contract.capabilities.wordCreation) {
+    enabledCapabilities.push("word document creation");
+  }
+  if (contract.capabilities.excelCreation) {
+    enabledCapabilities.push("excel spreadsheet creation");
+  }
+  if (contract.capabilities.pptCreation) {
+    enabledCapabilities.push("powerpoint presentation creation");
+  }
 
   if (enabledCapabilities.length > 0) {
     parts.push(`\n\n[Enabled Capabilities: ${enabledCapabilities.join(", ")}]`);
@@ -436,13 +548,12 @@ export async function getSessionById(sessionId: string): Promise<GptSessionContr
   const gpt = await storage.getGpt(session.gptId);
   if (!gpt) return null;
   
-  const knowledgeItems = await storage.getGptKnowledge(session.gptId);
+  const refreshed = await refreshSessionSnapshotIfNeeded(session, gpt);
   const knowledgeContext = buildKnowledgeContext(
-    knowledgeItems.filter(k => session.knowledgeContextIds?.includes(k.id))
+    refreshed.knowledgeItems.filter(k => refreshed.session.knowledgeContextIds?.includes(k.id))
   );
-  const runtimeConfig = await resolveGptRuntimeConfig(gpt, session.configVersion);
 
-  return mapDbSessionToContract(session, runtimeConfig, knowledgeContext);
+  return mapDbSessionToContract(refreshed.session, refreshed.runtimeConfig, knowledgeContext);
 }
 
 export async function deleteSessionByChatId(chatId: string): Promise<void> {

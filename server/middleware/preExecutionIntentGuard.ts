@@ -61,6 +61,11 @@ function resolveGuardMode(): GuardMode {
     return explicitMode;
   }
 
+  // Local/dev should observe and log, but not block product flows.
+  if (process.env.NODE_ENV !== "production") {
+    return "monitor";
+  }
+
   // Default: enforce when system audit mode is enabled, otherwise monitor.
   const systemAuditEnabled = normalizeText(process.env.SYSTEM_AUDIT_MODE).toLowerCase();
   if (systemAuditEnabled === "false" || systemAuditEnabled === "0" || systemAuditEnabled === "disabled") {

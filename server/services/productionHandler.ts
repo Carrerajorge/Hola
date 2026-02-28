@@ -19,6 +19,7 @@ import {
     type DocumentIntent,
 } from '../agent/production';
 import { exportAcademicArticlesFromPrompt } from './academicArticlesExport';
+import { renderDocument } from "./documentService";
 
 // ============================================================================
 // Types
@@ -140,6 +141,16 @@ export function isProductionIntent(intentResult: IntentResult | null, message?: 
     // New rule: only skip production if it's search-first AND user is NOT asking for an output artifact.
     if (message && requiresSearchFirst(message) && !wantsArtifactOutput(message)) {
         console.log(`[ProductionHandler] Search-first detected (no artifact requested), skipping production mode for: "${message.slice(0, 50)}..."`);
+        return false;
+    }
+
+    // Guardrail: many "simple table" prompts are classified as CREATE_SPREADSHEET
+    // by intent routing, but users often expect an inline chat table (not a binary file).
+    // Only force spreadsheet production when the user explicitly requests artifact output.
+    if (message && intentResult.intent === 'CREATE_SPREADSHEET' && !wantsArtifactOutput(message)) {
+        console.log(
+            `[ProductionHandler] CREATE_SPREADSHEET without explicit artifact output, keeping inline chat mode for: "${message.slice(0, 70)}..."`
+        );
         return false;
     }
 
@@ -308,6 +319,177 @@ function writeSse(res: Response, event: string, data: object): void {
     } catch (err) {
         console.error('[ProductionHandler] SSE write failed:', err);
     }
+}
+
+const PRODUCTION_ARTIFACT_FALLBACK_ENABLED =
+    process.env.NODE_ENV !== "test" &&
+    !/^(0|false|no)$/i.test(String(process.env.ILIAGPT_ENABLE_PRODUCTION_ARTIFACT_FALLBACK || "true"));
+
+function buildFallbackTopic(topic: string | undefined, message: string): string {
+    const normalized = String(topic || "").trim();
+    if (normalized) return normalized.slice(0, 120);
+    return String(message || "Documento generado").trim().slice(0, 120) || "Documento generado";
+}
+
+function buildFallbackMarkdown(topic: string, message: string): string {
+    const brief = String(message || "").replace(/\s+/g, " ").trim().slice(0, 400);
+    return [
+        `# ${topic}`,
+        "",
+        "## Resumen Ejecutivo",
+        `Este documento fue generado en modo fallback local para garantizar la entrega del archivo solicitado.`,
+        "",
+        "## Contexto",
+        brief || "No se proporcionaron detalles adicionales en la solicitud.",
+        "",
+        "## Recomendaciones Iniciales",
+        "- Definir objetivos y alcance concretos.",
+        "- Priorizar actividades por impacto y costo.",
+        "- Establecer indicadores de seguimiento semanales.",
+    ].join("\n");
+}
+
+function buildFallbackSlides(topic: string, message: string): Array<{ title: string; content: string[] }> {
+    const brief = String(message || "").replace(/\s+/g, " ").trim().slice(0, 240);
+    return [
+        {
+            title: topic,
+            content: [
+                "Objetivo principal",
+                "Alcance inicial",
+                "Entregable de arranque",
+            ],
+        },
+        {
+            title: "Contexto",
+            content: [
+                brief || "Sin contexto adicional",
+                "Marco operativo actual",
+                "Supuestos de trabajo",
+            ],
+        },
+        {
+            title: "Plan de Acción",
+            content: [
+                "Prioridades por fases",
+                "Riesgos y mitigaciones",
+                "Indicadores de seguimiento",
+            ],
+        },
+    ];
+}
+
+async function buildFallbackArtifacts(params: {
+    topic: string;
+    message: string;
+    deliverables: string[];
+}): Promise<Artifact[]> {
+    const { topic, message, deliverables } = params;
+    const markdown = buildFallbackMarkdown(topic, message);
+    const slides = buildFallbackSlides(topic, message);
+    const wordCount = markdown.split(/\s+/).filter(Boolean).length;
+    const artifacts: Artifact[] = [];
+
+    for (const deliverable of Array.from(new Set(deliverables))) {
+        try {
+            if (deliverable === "word") {
+                const rendered = await renderDocument({
+                    templateId: "report",
+                    type: "docx",
+                    data: {
+                        title: topic,
+                        content: markdown,
+                        author: "ILIAGPT",
+                        date: new Date().toISOString().slice(0, 10),
+                    },
+                });
+                artifacts.push({
+                    type: "word",
+                    filename: rendered.fileName,
+                    buffer: rendered.buffer,
+                    mimeType: rendered.mimeType,
+                    size: rendered.buffer.length,
+                    metadata: { wordCount },
+                });
+                continue;
+            }
+
+            if (deliverable === "ppt") {
+                const rendered = await renderDocument({
+                    templateId: "presentation",
+                    type: "pptx",
+                    data: {
+                        title: topic,
+                        slides,
+                        author: "ILIAGPT",
+                    },
+                });
+                artifacts.push({
+                    type: "ppt",
+                    filename: rendered.fileName,
+                    buffer: rendered.buffer,
+                    mimeType: rendered.mimeType,
+                    size: rendered.buffer.length,
+                    metadata: { slideCount: slides.length },
+                });
+                continue;
+            }
+
+            if (deliverable === "excel") {
+                const rows = [
+                    [topic, "Objetivo", "Establecer base operativa inicial"],
+                    [topic, "Accion", "Definir responsables y cronograma"],
+                    [topic, "Control", "Medir progreso con KPIs semanales"],
+                ];
+                const rendered = await renderDocument({
+                    templateId: "spreadsheet",
+                    type: "xlsx",
+                    data: {
+                        headers: ["Tema", "Categoria", "Detalle"],
+                        rows,
+                        sheetName: "Resumen",
+                    },
+                });
+                artifacts.push({
+                    type: "excel",
+                    filename: rendered.fileName,
+                    buffer: rendered.buffer,
+                    mimeType: rendered.mimeType,
+                    size: rendered.buffer.length,
+                    metadata: { sheetCount: 1 },
+                });
+                continue;
+            }
+
+            if (deliverable === "pdf") {
+                const rendered = await renderDocument({
+                    templateId: "report",
+                    type: "pdf",
+                    data: {
+                        title: topic,
+                        content: markdown,
+                        author: "ILIAGPT",
+                        date: new Date().toISOString().slice(0, 10),
+                    },
+                });
+                artifacts.push({
+                    type: "pdf",
+                    filename: rendered.fileName,
+                    buffer: rendered.buffer,
+                    mimeType: rendered.mimeType,
+                    size: rendered.buffer.length,
+                    metadata: { wordCount },
+                });
+            }
+        } catch (error: any) {
+            console.warn(
+                `[ProductionHandler] Fallback artifact failed for ${deliverable}:`,
+                error?.message || error,
+            );
+        }
+    }
+
+    return artifacts;
 }
 
 // ============================================================================
@@ -519,7 +701,7 @@ export async function handleProductionRequest(
                     : 'report';
 
         // Execute production pipeline
-        const result = await startProductionPipeline(
+        let result = await startProductionPipeline(
             message,
             userId,
             chatId,
@@ -542,6 +724,57 @@ export async function handleProductionRequest(
                 topic: intentResult.slots.topic || message,
             }
         );
+
+        let hasArtifacts = Array.isArray(result.artifacts) && result.artifacts.length > 0;
+        let pipelineSucceeded = result.status === 'success' || result.status === 'partial';
+
+        if ((!pipelineSucceeded || !hasArtifacts) && PRODUCTION_ARTIFACT_FALLBACK_ENABLED) {
+            const fallbackTopic = buildFallbackTopic(intentResult.slots.topic, message);
+            emit('production_event', {
+                type: 'stage_start',
+                stage: 'render',
+                progress: 92,
+                message: 'Activando fallback local para generar entregables mínimos...',
+                timestamp: Date.now(),
+            });
+
+            const fallbackArtifacts = await buildFallbackArtifacts({
+                topic: fallbackTopic,
+                message,
+                deliverables,
+            });
+
+            if (fallbackArtifacts.length > 0) {
+                result = {
+                    ...result,
+                    status: 'partial',
+                    artifacts: fallbackArtifacts,
+                    summary: [
+                        result.summary || "## Producción Completada",
+                        "",
+                        "**Fallback aplicado:** Se generaron entregables locales mínimos para evitar salida vacía.",
+                    ].join("\n"),
+                };
+                hasArtifacts = true;
+                pipelineSucceeded = true;
+                emit('production_event', {
+                    type: 'stage_complete',
+                    stage: 'render',
+                    progress: 100,
+                    message: `Fallback completado: ${fallbackArtifacts.length} entregable(s) generado(s).`,
+                    timestamp: Date.now(),
+                });
+            }
+        }
+
+        if (!pipelineSucceeded || !hasArtifacts) {
+            const details = [
+                `status=${result.status}`,
+                `artifacts=${result.artifacts.length}`,
+                `qa=${typeof result.qaReport?.overallScore === 'number' ? result.qaReport.overallScore : 'n/a'}`,
+            ].join(", ");
+            throw new Error(`La producción documental no generó entregables válidos (${details}).`);
+        }
 
         // Save artifacts and generate download URLs
         const artifactsWithUrls: Array<{ type: string; filename: string; downloadUrl: string; size: number }> = [];
@@ -604,6 +837,8 @@ export async function handleProductionRequest(
         const userMessage =
             rawMessage === 'Message does not require production mode'
                 ? 'Tu solicitud no requiere producción documental. Si necesitas un archivo, especifica el formato (Word/PDF/Excel/PPT) o selecciona la herramienta correspondiente.'
+                : rawMessage.startsWith('La producción documental no generó entregables válidos')
+                    ? 'No se pudieron generar archivos en esta corrida. Reintenta indicando formato y alcance (por ejemplo: "crear PPT de 10 diapositivas sobre ...").'
                 : rawMessage;
 
         emit('production_error', {

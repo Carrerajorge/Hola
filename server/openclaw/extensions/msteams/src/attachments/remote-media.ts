@@ -1,4 +1,3 @@
-import type { SsrFPolicy } from "openclaw/plugin-sdk";
 import { getMSTeamsRuntime } from "../runtime.js";
 import { inferPlaceholder } from "./shared.js";
 import type { MSTeamsInboundMedia } from "./types.js";
@@ -10,7 +9,6 @@ export async function downloadAndStoreMSTeamsRemoteMedia(params: {
   filePathHint: string;
   maxBytes: number;
   fetchImpl?: FetchLike;
-  ssrfPolicy?: SsrFPolicy;
   contentTypeHint?: string;
   placeholder?: string;
   preserveFilenames?: boolean;
@@ -20,7 +18,6 @@ export async function downloadAndStoreMSTeamsRemoteMedia(params: {
     fetchImpl: params.fetchImpl,
     filePathHint: params.filePathHint,
     maxBytes: params.maxBytes,
-    ssrfPolicy: params.ssrfPolicy,
   });
   const mime = await getMSTeamsRuntime().media.detectMime({
     buffer: fetched.buffer,

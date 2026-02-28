@@ -77,11 +77,25 @@ async function buildAll() {
     minify: true,
     splitting: true, // Enable code splitting to share common chunks between server and worker
     // Mark ALL node_modules as external - they're installed at runtime
-    external: [...externals, "./node_modules/*", "fsevents"],
+    external: [...externals, "./node_modules/*", "fsevents", "*.node", "@node-llama-cpp/*", "node-llama-cpp", "reflink", "canvas", "@napi-rs/canvas", "chromium-bidi*", "ffmpeg-static"],
     // Resolve path aliases matching tsconfig.json / vite.config.ts
     alias: {
       "@shared": "./shared",
     },
+    plugins: [
+      {
+        name: "native-modules",
+        setup(build) {
+          // If a resolution ends with .node, mark it as external
+          build.onResolve({ filter: /\.node$/, namespace: "file" }, (args) => {
+            return {
+              path: args.path,
+              external: true,
+            };
+          });
+        },
+      }
+    ],
     define: {
       "process.env.NODE_ENV": '"production"',
       "process.env.APP_VERSION": JSON.stringify(appVersion),

@@ -516,6 +516,31 @@ describe('PolicyEngine', () => {
       expect(result.allowed).toBe(true);
     });
 
+    it("should allow OpenClaw exec/fs policies after fusion registration", () => {
+      const execResult = engine.checkAccess({
+        userId: "user-1",
+        userPlan: "free",
+        toolName: "openclaw_exec",
+      });
+      const readResult = engine.checkAccess({
+        userId: "user-1",
+        userPlan: "free",
+        toolName: "openclaw_read",
+      });
+      const writeResult = engine.checkAccess({
+        userId: "user-1",
+        userPlan: "free",
+        toolName: "openclaw_write",
+      });
+
+      expect(execResult.allowed).toBe(true);
+      expect(readResult.allowed).toBe(true);
+      expect(writeResult.allowed).toBe(true);
+      expect(engine.getCapabilities("openclaw_exec")).toContain("executes_code");
+      expect(engine.getCapabilities("openclaw_read")).toContain("reads_files");
+      expect(engine.getCapabilities("openclaw_write")).toContain("writes_files");
+    });
+
     it('should require confirmation for high-risk tools', () => {
       const result = engine.checkAccess({
         userId: 'user-1',

@@ -31,7 +31,7 @@ const SERVICE_NAME = process.env.OTEL_SERVICE_NAME || "iliagpt-server";
 const SERVICE_VERSION = process.env.npm_package_version || "1.0.0";
 const OTEL_ENDPOINT = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
-const SAMPLE_RATE = IS_PRODUCTION ? 0.1 : 1.0;
+const SAMPLE_RATE = Number(process.env.OTEL_TRACE_SAMPLE_RATE ?? (IS_PRODUCTION ? 0.1 : 0.1));
 
 let tracerProvider: NodeTracerProvider | null = null;
 let tracer: Tracer | null = null;
@@ -155,7 +155,8 @@ export function initTracing(config: TracingConfig = {}): void {
   const environment = config.environment || (IS_PRODUCTION ? "production" : "development");
   const sampleRate = config.sampleRate ?? SAMPLE_RATE;
   const otlpEndpoint = config.otlpEndpoint || OTEL_ENDPOINT;
-  const enableConsoleExporter = config.enableConsoleExporter ?? !IS_PRODUCTION;
+  const enableConsoleExporter = config.enableConsoleExporter
+    ?? String(process.env.OTEL_ENABLE_CONSOLE_EXPORTER ?? "").toLowerCase() === "true";
 
   console.log(`[Tracing] Initializing OpenTelemetry for ${serviceName}@${serviceVersion}`);
   console.log(`[Tracing] Environment: ${environment}, Sample rate: ${sampleRate * 100}%`);

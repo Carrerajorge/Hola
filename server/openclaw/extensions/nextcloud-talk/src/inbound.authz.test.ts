@@ -75,10 +75,7 @@ describe("nextcloud-talk inbound authz", () => {
       } as unknown as RuntimeEnv,
     });
 
-    expect(readAllowFromStore).toHaveBeenCalledWith({
-      channel: "nextcloud-talk",
-      accountId: "default",
-    });
+    expect(readAllowFromStore).toHaveBeenCalledWith("nextcloud-talk");
     expect(buildMentionRegexes).not.toHaveBeenCalled();
   });
 });

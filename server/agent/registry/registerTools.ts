@@ -1,7 +1,16 @@
 import { z } from "zod";
 import crypto from "crypto";
+import fs from "fs/promises";
+import path from "path";
 import { toolRegistry, RegisteredTool, ToolConfig, ToolMetadata, ToolCallTrace, ToolCategory, ToolImplementationStatusType } from "./toolRegistry";
 import { realWebSearch, realBrowseUrl, realDocumentCreate, realPdfGenerate, realDataAnalyze, realHashGenerate } from "./realToolHandlers";
+import { realRagflowSearch, realRagflowUpload, realRagflowCreateDataset } from "../tools/ragflowTools";
+
+import { flowiseEmbeddedRuntime } from "../../services/flowiseEmbeddedRunner";
+import { formatLangChainPrompt } from "../../services/langchainEmbedded";
+import { parseDifyDsl } from "../../services/difyDsl";
+import { listAgentZeroAgents, loadAgentZeroPrompts } from "../../services/agentZeroPromptRegistry";
+import type { IMessage } from "../../../packages/flowise-server/src/Interface";
 
 const DEFAULT_CONFIG: ToolConfig = {
   timeout: 30000,
@@ -121,9 +130,213 @@ export function registerAllTools(): void {
   registerOrchestrationTools();
   registerCommunicationTools();
   registerAdvancedSystemTools();
+  registerFlowiseTools();
+  registerLangChainTools();
+  registerDifyTools();
+  registerAgentZeroTools();
+  registerRAGFlowTools();
 
   const stats = toolRegistry.getStats();
   console.log(`[ToolRegistry] Registered ${stats.totalTools} tools across ${Object.keys(stats.byCategory).length} categories`);
+}
+
+function registerFlowiseTools(): void {
+  const chatMessageSchema = z.object({
+    role: z.string().min(1),
+    content: z.string().min(1),
+  });
+  const flowiseInputSchema = z
+    .object({
+      question: z.string().min(1),
+      flowDefinition: z.string().min(1).optional(),
+      flowPath: z.string().min(1).max(600).optional(),
+      runId: z.string().min(1).max(120).optional(),
+      metadata: z.record(z.unknown()).optional(),
+      chatHistory: z.array(chatMessageSchema).optional(),
+    })
+    .refine((data) => Boolean(data.flowDefinition || data.flowPath), {
+      message: "Provide either flowDefinition or flowPath",
+      path: ["flowDefinition"],
+    });
+
+  toolRegistry.register(
+    createSimpleTool(
+      "flowise_run_flow",
+      "Execute a Flowise flow definition in-memory without HTTP/Docker",
+      "Reasoning",
+      flowiseInputSchema,
+      ToolOutputSchema,
+      async (input) => {
+        const flowPayload = await loadFlowiseDefinition(input.flowPath, input.flowDefinition);
+        const runId = input.runId || `flowise-${crypto.randomUUID()}`;
+        const result = await flowiseEmbeddedRuntime.execute({
+          runId,
+          flow: flowPayload,
+          input: {
+            question: input.question,
+            chatHistory: (input.chatHistory as IMessage[] | undefined) || [],
+          },
+          metadata: input.metadata,
+        });
+        return { success: true, data: { runId, result } };
+      },
+      SLOW_CONFIG,
+    ),
+  );
+}
+
+function registerLangChainTools(): void {
+  toolRegistry.register(
+    createSimpleTool(
+      "langchain_prompt_format",
+      "Format a prompt template using LangChain (offline, no API calls)",
+      "Reasoning",
+      z.object({
+        template: z.string().min(1),
+        variables: z.record(z.unknown()).optional(),
+      }),
+      ToolOutputSchema,
+      async (input) => {
+        const result = await formatLangChainPrompt({
+          template: input.template,
+          variables: input.variables ?? {},
+        });
+        return { success: true, data: result };
+      },
+      FAST_CONFIG,
+    ),
+  );
+}
+
+function registerDifyTools(): void {
+  const difyInputSchema = z
+    .object({
+      dsl: z.string().optional(),
+      dslPath: z.string().optional(),
+      includeGraph: z.boolean().optional().default(false),
+    })
+    .refine((data) => Boolean(data.dsl || data.dslPath), {
+      message: "Provide dsl or dslPath",
+      path: ["dsl"],
+    });
+
+  toolRegistry.register(
+    createSimpleTool(
+      "dify_parse_dsl",
+      "Parse a Dify DSL (YAML/JSON) and return the workflow graph summary",
+      "Orchestration",
+      difyInputSchema,
+      ToolOutputSchema,
+      async (input) => {
+        const result = await parseDifyDsl({
+          dsl: input.dsl,
+          dslPath: input.dslPath,
+          includeGraph: input.includeGraph,
+        });
+        return { success: true, data: result };
+      },
+      DEFAULT_CONFIG,
+    ),
+  );
+}
+
+function registerAgentZeroTools(): void {
+  toolRegistry.register(
+    createSimpleTool(
+      "agent_zero_list_agents",
+      "List Agent-Zero agents available in the embedded repository",
+      "Orchestration",
+      z.object({}),
+      ToolOutputSchema,
+      async () => {
+        const agents = await listAgentZeroAgents();
+        return { success: true, data: { agents } };
+      },
+      DEFAULT_CONFIG,
+    ),
+  );
+
+  toolRegistry.register(
+    createSimpleTool(
+      "agent_zero_load_prompts",
+      "Load Agent-Zero prompt pack for a specific agent (offline)",
+      "Orchestration",
+      z.object({
+        agentName: z.string().min(1),
+        includeBasePrompts: z.boolean().optional().default(true),
+      }),
+      ToolOutputSchema,
+      async (input) => {
+        const result = await loadAgentZeroPrompts({
+          agentName: input.agentName,
+          includeBasePrompts: input.includeBasePrompts,
+        });
+        return { success: true, data: result };
+      },
+      DEFAULT_CONFIG,
+    ),
+  );
+}
+
+async function loadFlowiseDefinition(flowPath?: string, inlineDefinition?: string): Promise<string> {
+  if (inlineDefinition) {
+    return inlineDefinition;
+  }
+  if (!flowPath) {
+    throw new Error("flowPath or flowDefinition required");
+  }
+  const resolved = path.isAbsolute(flowPath) ? flowPath : path.resolve(process.cwd(), flowPath);
+  return fs.readFile(resolved, "utf8");
+}
+
+function registerRAGFlowTools(): void {
+  toolRegistry.register(createSimpleTool(
+    "ragflow_search",
+    "Search inside the RAGFlow knowledge base (datasets)",
+    "Data",
+    z.object({
+      query: z.string().describe("Query to search"),
+      datasetIds: z.array(z.string()).optional().describe("List of dataset IDs to search in"),
+    }),
+    ToolOutputSchema,
+    async (input) => {
+      const result = await realRagflowSearch({ query: input.query, datasetIds: input.datasetIds });
+      return { success: result.success, data: result.data, message: result.message };
+    },
+    EXTERNAL_CONFIG
+  ));
+
+  toolRegistry.register(createSimpleTool(
+    "ragflow_upload_document",
+    "Upload a document from local path to a RAGFlow dataset",
+    "Data",
+    z.object({
+      filePath: z.string().describe("Local file path to upload"),
+      datasetId: z.string().describe("Dataset ID in RAGFlow"),
+    }),
+    ToolOutputSchema,
+    async (input) => {
+      const result = await realRagflowUpload({ filePath: input.filePath, datasetId: input.datasetId });
+      return { success: result.success, data: result.data, message: result.message };
+    },
+    SLOW_CONFIG
+  ));
+
+  toolRegistry.register(createSimpleTool(
+    "ragflow_create_dataset",
+    "Create a new dataset (knowledge base) in RAGFlow",
+    "Data",
+    z.object({
+      name: z.string().describe("Name of the dataset"),
+      description: z.string().optional().describe("Description for the dataset"),
+    }),
+    ToolOutputSchema,
+    async (input) => {
+      const result = await realRagflowCreateDataset({ name: input.name, description: input.description });
+      return { success: result.success, data: result.data, message: result.message };
+    },
+    DEFAULT_CONFIG
+  ));
 }
 
 function registerWebTools(): void {

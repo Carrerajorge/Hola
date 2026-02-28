@@ -79,6 +79,11 @@ Guidelines:
 - Always end with a respond step to deliver results to user
 - Prefer parallel execution where steps have no dependencies
 
+FUSION RULES (MANDATORY):
+- Never propose solutions that call external services or APIs at runtime.
+- If a capability is missing, plan to use self_expand to clone and fuse code into the monolith.
+- All capabilities must execute in-memory within the same process (no HTTP, no Docker, no adapters).
+
 Return a JSON object with this structure:
 {
   "objective": "the original objective",

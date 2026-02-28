@@ -85,22 +85,22 @@ export const RequestSpecSchema = z.object({
   chatId: z.string(),
   messageId: z.string().optional(),
   userId: z.string(),
-  
+
   rawMessage: z.string(),
   intent: IntentTypeSchema,
   intentConfidence: z.number().min(0).max(1),
-  
+
   deliverableType: DeliverableTypeSchema,
   deliverableSpec: z.record(z.any()).optional(),
-  
+
   targetAgents: z.array(SpecializedAgentSchema).min(1),
   primaryAgent: SpecializedAgentSchema,
-  
+
   attachments: z.array(AttachmentSpecSchema).default([]),
   sessionState: SessionStateSchema.optional(),
-  
+
   constraints: QualityConstraintsSchema.default({}),
-  
+
   metadata: z.record(z.any()).optional(),
   createdAt: z.date(),
   validatedAt: z.date().optional()
@@ -233,17 +233,40 @@ export function detectIntent(message: string, attachments: AttachmentSpec[] = []
     return { intent: "web_automation", confidence: 0.9 };
   }
 
+  // Special-case: explicit file path detection forces multi-step tool execution.
+  if (/\/[a-zA-Z].*\.[a-z]+/.test(message)) {
+    return { intent: "multi_step_task", confidence: 0.9 };
+  }
+
   // Special-case: combined research + document deliverable (e.g., "investiga ... y crea un Word")
   // We treat this as a multi-step task so the agent will both research and generate a DOCX artifact.
   const wantsResearch = /\b(investiga|busca|encuentra|search|find|research|look up|investigar)\b/i.test(lowerMessage);
   const wantsWordDoc = /\b(word|docx?|documento|informe|report|whitepaper)\b/i.test(lowerMessage);
   const wantsCreateOrWrite = /\b(crea|create|genera|generate|escribe|write|redacta|draft|prepara|prepare)\b/i.test(lowerMessage);
+  const wantsSaveFile = /\b(guarda|guardar|save|exporta|export)\b/i.test(lowerMessage);
+  const mentionsFile = /\b(archivo|file|txt|documento|report|informe|noticias)\b/i.test(lowerMessage);
+  const mentionsDesktop = /\b(escritorio|desktop)\b/i.test(lowerMessage);
+  if (wantsResearch && (wantsSaveFile || wantsCreateOrWrite) && (mentionsFile || mentionsDesktop)) {
+    return { intent: "multi_step_task", confidence: 0.9 };
+  }
   if (wantsResearch && wantsWordDoc && wantsCreateOrWrite) {
     return { intent: "multi_step_task", confidence: 0.9 };
   }
-  
+
+  // Automatización forzada para paths de archivo
+  if (/\/[a-zA-Z].*\.[a-z]+/.test(lowerMessage)) {
+    return { intent: "multi_step_task", confidence: 1.0 };
+  }
+
+  // Special-case: explicit file path analysis (e.g., "Lee mi archivo server/index.ts")
+  const hasFilePath = /(?:^|\s|["'`])(?:[\w.-]+\/)+[\w.-]+\.(?:ts|js|tsx|jsx|py|java|go|rs|md|txt|json|yml|yaml|csv|sql|html|css)\b|\b[\w.-]+\.(?:ts|js|tsx|jsx|py|java|go|rs|md|txt|json|yml|yaml|csv|sql|html|css)\b/i.test(lowerMessage);
+  const wantsFileReview = /\b(lee|leer|revisa|revisar|analiza|analizar|audita|auditar|resume|resumir|inspecciona|inspeccionar)\b/i.test(lowerMessage);
+  if (hasFilePath && wantsFileReview) {
+    return { intent: "multi_step_task", confidence: 0.88 };
+  }
+
   if (attachments.length > 0) {
-    const hasDocuments = attachments.some(a => 
+    const hasDocuments = attachments.some(a =>
       /\.(pdf|docx?|xlsx?|pptx?|csv|txt)$/i.test(a.name) ||
       a.mimeType.includes("pdf") ||
       a.mimeType.includes("document") ||
@@ -253,7 +276,7 @@ export function detectIntent(message: string, attachments: AttachmentSpec[] = []
       return { intent: "document_analysis", confidence: 0.85 };
     }
   }
-  
+
   // PRIORITY: Check web_automation first — navigation commands should always route to browser,
   // even if they also contain words like "busca" that match research patterns.
   const webAutoPatterns = INTENT_PATTERNS.web_automation || [];
@@ -285,12 +308,6 @@ export function detectIntent(message: string, attachments: AttachmentSpec[] = []
       }
     }
   }
-  
-  // File path detection: messages containing explicit file paths force multi_step_task
-  // to ensure tool execution (read_file, write_file, list_files) is triggered.
-  if (/\/[a-zA-Z].*\.[a-z]+/.test(message)) {
-    return { intent: "multi_step_task", confidence: 0.85 };
-  }
 
   if (message.length < 50 && !message.includes("?")) {
     return { intent: "chat", confidence: 0.6 };
@@ -317,7 +334,7 @@ export function createRequestSpec(params: {
     : detectIntent(params.rawMessage, params.attachments);
   const deliverableType = DELIVERABLE_MAPPING[intent];
   const targetAgents = AGENT_MAPPING[intent];
-  
+
   return {
     id: randomUUID(),
     chatId: params.chatId,

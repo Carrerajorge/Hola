@@ -104,7 +104,6 @@ describe("feishu_doc image fetch hardening", () => {
 
     const feishuDocTool = registerTool.mock.calls
       .map((call) => call[0])
-      .map((tool) => (typeof tool === "function" ? tool({}) : tool))
       .find((tool) => tool.name === "feishu_doc");
     expect(feishuDocTool).toBeDefined();
 

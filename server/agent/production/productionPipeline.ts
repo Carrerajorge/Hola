@@ -211,6 +211,10 @@ export class ProductionPipeline extends EventEmitter {
             // Stage 10: Render
             await this.stageRender();
 
+            if (this.artifacts.length === 0) {
+                throw new Error('Render completed without generating artifacts');
+            }
+
             // Build result
             return this.buildResult('success');
 
@@ -290,7 +294,7 @@ export class ProductionPipeline extends EventEmitter {
     private async stageResearch(): Promise<void> {
         if (this.workOrder.sourcePolicy === 'none') {
             this.updateStage('research', 'skipped', 100, 'Research not required');
-            this.evidencePack = { sources: [], notes: [], dataPoints: [], gaps: [], limitations: ['No research conducted per policy'] };
+            this.evidencePack = { sources: [], notes: [], dataPoints: [], gaps: [], limitations: [] };
             return;
         }
 
@@ -943,15 +947,20 @@ export class ProductionPipeline extends EventEmitter {
     private generateSummary(): string {
         const deliverables = this.artifacts.map(a => a.type).join(', ');
         const sources = this.evidencePack?.sources.length || 0;
-        const qaScore = this.qaReport?.overallScore || 0;
+        const qaScore = typeof this.qaReport?.overallScore === 'number' ? this.qaReport.overallScore : null;
+        const sourcesLabel = this.workOrder.sourcePolicy === 'none'
+            ? `${sources} (no requeridas por política)`
+            : String(sources);
+        const qaLabel = qaScore === null ? 'N/A' : `${qaScore}/100`;
+        const deliverablesLabel = deliverables || 'Ninguno';
 
         return `
 ## Producción Completada
 
 **Tema:** ${this.workOrder.topic}
-**Entregables:** ${deliverables || 'Ninguno'}
-**Fuentes consultadas:** ${sources}
-**Calidad (QA):** ${qaScore}/100
+**Entregables:** ${deliverablesLabel}
+**Fuentes consultadas:** ${sourcesLabel}
+**Calidad (QA):** ${qaLabel}
 
 ${this.evidencePack?.limitations.length ? `**Limitaciones:** ${this.evidencePack.limitations.join(', ')}` : ''}
     `.trim();

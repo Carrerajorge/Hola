@@ -1,9 +1,4 @@
 import type { OpenClawConfig } from "../config/config.js";
-import {
-  NODE_BROWSER_PROXY_COMMAND,
-  NODE_SYSTEM_NOTIFY_COMMAND,
-  NODE_SYSTEM_RUN_COMMANDS,
-} from "../infra/node-commands.js";
 import type { NodeSession } from "./node-registry.js";
 
 const CANVAS_COMMANDS = [
@@ -23,7 +18,6 @@ const CAMERA_DANGEROUS_COMMANDS = ["camera.snap", "camera.clip"];
 const SCREEN_DANGEROUS_COMMANDS = ["screen.record"];
 
 const LOCATION_COMMANDS = ["location.get"];
-const NOTIFICATION_COMMANDS = ["notifications.list"];
 
 const DEVICE_COMMANDS = ["device.info", "device.status"];
 
@@ -43,13 +37,9 @@ const MOTION_COMMANDS = ["motion.activity", "motion.pedometer"];
 const SMS_DANGEROUS_COMMANDS = ["sms.send"];
 
 // iOS nodes don't implement system.run/which, but they do support notifications.
-const IOS_SYSTEM_COMMANDS = [NODE_SYSTEM_NOTIFY_COMMAND];
+const IOS_SYSTEM_COMMANDS = ["system.notify"];
 
-const SYSTEM_COMMANDS = [
-  ...NODE_SYSTEM_RUN_COMMANDS,
-  NODE_SYSTEM_NOTIFY_COMMAND,
-  NODE_BROWSER_PROXY_COMMAND,
-];
+const SYSTEM_COMMANDS = ["system.run", "system.which", "system.notify", "browser.proxy"];
 
 // "High risk" node commands. These can be enabled by explicitly adding them to
 // `gateway.nodes.allowCommands` (and ensuring they're not blocked by denyCommands).
@@ -79,7 +69,6 @@ const PLATFORM_DEFAULTS: Record<string, string[]> = {
     ...CANVAS_COMMANDS,
     ...CAMERA_COMMANDS,
     ...LOCATION_COMMANDS,
-    ...NOTIFICATION_COMMANDS,
     ...DEVICE_COMMANDS,
     ...CONTACTS_COMMANDS,
     ...CALENDAR_COMMANDS,

@@ -393,6 +393,13 @@ function sanitizeStoragePath(rawStoragePath: string | undefined): string | null 
   return normalized;
 }
 
+function shouldServeInlinePreview(contentType: string, fileName: string | null | undefined): boolean {
+  const normalizedType = String(contentType || "").toLowerCase();
+  if (normalizedType.startsWith("image/")) return true;
+  if (normalizedType.includes("pdf")) return true;
+  return String(fileName || "").toLowerCase().endsWith(".pdf");
+}
+
 function buildRegistrationFingerprint(name: string, type: string, size: number, storagePath: string): string {
   return `${name}::${type}::${size}::${storagePath}`;
 }
@@ -2339,6 +2346,20 @@ export function createFilesRouter() {
           return res.sendStatus(404);
         }
 
+        const fileRecord = await storage.getFileByStoragePath(`/objects/uploads/${objectId}`);
+        const inferredMimeType = inferMimeTypeFromFileName(fileRecord?.name);
+        const normalizedStoredType = String(fileRecord?.type || "").trim().toLowerCase();
+        const contentType =
+          normalizedStoredType && normalizedStoredType !== "application/octet-stream"
+            ? normalizedStoredType
+            : inferredMimeType || "application/octet-stream";
+
+        res.setHeader("Content-Type", contentType);
+        if (shouldServeInlinePreview(contentType, fileRecord?.name)) {
+          res.setHeader("Content-Disposition", "inline");
+        } else {
+          res.setHeader("Content-Disposition", "attachment");
+        }
         // Security: set nosniff to prevent MIME confusion attacks
         res.setHeader("X-Content-Type-Options", "nosniff");
         return res.sendFile(localFilePath);
@@ -2483,11 +2504,18 @@ export function createFilesRouter() {
 
       // Try to get the file record for content type
       const file = await storage.getFileByStoragePath(`/objects/uploads/${objectId}`);
-      const contentType = file?.type || "application/octet-stream";
+      const inferredMimeType = inferMimeTypeFromFileName(file?.name);
+      const normalizedStoredType = String(file?.type || "").trim().toLowerCase();
+      const contentType =
+        normalizedStoredType && normalizedStoredType !== "application/octet-stream"
+          ? normalizedStoredType
+          : inferredMimeType || "application/octet-stream";
 
       res.setHeader("Content-Type", contentType);
-      // Security: force download for non-image types to prevent XSS via stored files
-      if (!contentType.startsWith("image/")) {
+      // Allow inline preview only for safe media types (PDF/images). Keep attachment for others.
+      if (shouldServeInlinePreview(contentType, file?.name)) {
+        res.setHeader("Content-Disposition", "inline");
+      } else {
         res.setHeader("Content-Disposition", "attachment");
       }
       res.setHeader("X-Content-Type-Options", "nosniff");
@@ -2527,12 +2555,19 @@ export function createFilesRouter() {
 
       // Try to get the file record for content type
       const file = await storage.getFileByStoragePath(`/objects/uploads/${objectId}`);
-      const contentType = file?.type || "application/octet-stream";
+      const inferredMimeType = inferMimeTypeFromFileName(file?.name);
+      const normalizedStoredType = String(file?.type || "").trim().toLowerCase();
+      const contentType =
+        normalizedStoredType && normalizedStoredType !== "application/octet-stream"
+          ? normalizedStoredType
+          : inferredMimeType || "application/octet-stream";
 
       res.setHeader("Content-Type", contentType);
       res.setHeader("Cache-Control", "private, max-age=3600");
-      // Security: force download for non-image types to prevent XSS via stored files
-      if (!contentType.startsWith("image/")) {
+      // Allow inline preview only for safe media types (PDF/images). Keep attachment for others.
+      if (shouldServeInlinePreview(contentType, file?.name)) {
+        res.setHeader("Content-Disposition", "inline");
+      } else {
         res.setHeader("Content-Disposition", "attachment");
       }
       res.setHeader("X-Content-Type-Options", "nosniff");

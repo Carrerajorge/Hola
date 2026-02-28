@@ -72,6 +72,8 @@ export const AgentRunContent = memo(function AgentRunContent({
 }: AgentRunContentProps) {
     const [isExpanded, setIsExpanded] = useState(true);
     const [showAllEvents, setShowAllEvents] = useState(false);
+    const [isSlowConnection, setIsSlowConnection] = useState(false);
+    const [waitingSeconds, setWaitingSeconds] = useState(0);
     const [viewMode, setViewMode] = useState<"steps" | "plan">("steps");
     const eventsEndRef = useRef<HTMLDivElement>(null);
 
@@ -79,6 +81,8 @@ export const AgentRunContent = memo(function AgentRunContent({
     const isActive = ["starting", "running", "queued", "planning", "verifying", "cancelling", "replanning"].includes(agentRun.status);
     const isPaused = agentRun.status === "paused";
     const isCancelling = agentRun.status === "cancelling";
+    const isWaitingForResponse = agentRun.status === "starting" || agentRun.status === "queued";
+    const showVerboseAgentInternals = false;
 
     useEffect(() => {
         if (isActive && eventsEndRef.current) {
@@ -86,23 +90,43 @@ export const AgentRunContent = memo(function AgentRunContent({
         }
     }, [agentRun.eventStream?.length, isActive]);
 
+    useEffect(() => {
+        if (!isWaitingForResponse) {
+            setIsSlowConnection(false);
+            setWaitingSeconds(0);
+            return;
+        }
+
+        const interval = setInterval(() => {
+            setWaitingSeconds(prev => {
+                const newVal = prev + 1;
+                if (newVal >= 10) {
+                    setIsSlowConnection(true);
+                }
+                return newVal;
+            });
+        }, 1000);
+
+        return () => clearInterval(interval);
+    }, [isWaitingForResponse]);
+
     const getStatusIcon = () => {
         switch (agentRun.status) {
             case "starting":
             case "queued":
-                return <Loader2 className="h-4 w-4 animate-spin text-purple-500" />;
+                return <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />;
             case "planning":
-                return <Sparkles className="h-4 w-4 animate-pulse text-purple-500" />;
+                return <Sparkles className="h-4 w-4 animate-pulse text-muted-foreground" />;
             case "running":
-                return <Loader2 className="h-4 w-4 animate-spin text-blue-500" />;
+                return <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />;
             case "verifying":
-                return <Eye className="h-4 w-4 animate-pulse text-purple-500" />;
+                return <Eye className="h-4 w-4 animate-pulse text-muted-foreground" />;
             case "replanning":
-                return <RefreshCw className="h-4 w-4 animate-spin text-orange-500" />;
+                return <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />;
             case "paused":
-                return <Clock className="h-4 w-4 text-yellow-500" />;
+                return <Clock className="h-4 w-4 text-muted-foreground" />;
             case "cancelling":
-                return <Loader2 className="h-4 w-4 animate-spin text-red-500" />;
+                return <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />;
             case "completed":
                 return <CheckCircle2 className="h-4 w-4 text-green-500" />;
             case "failed":
@@ -188,18 +212,79 @@ export const AgentRunContent = memo(function AgentRunContent({
         return { completed: completedEvents, total: Math.max(totalSteps, completedEvents) };
     }, [mappedEvents, agentRun.steps]);
 
+    const plannedSteps = useMemo(() => {
+        const fromEvents = [...(agentRun.eventStream || [])]
+            .reverse()
+            .find((event: any) => Array.isArray(event?.content?.plan?.steps) || Array.isArray(event?.content?.steps));
+
+        const rawSteps = Array.isArray(fromEvents?.content?.plan?.steps)
+            ? fromEvents?.content?.plan?.steps
+            : Array.isArray(fromEvents?.content?.steps)
+                ? fromEvents?.content?.steps
+                : null;
+
+        if (Array.isArray(rawSteps) && rawSteps.length > 0) {
+            return rawSteps.map((step: any, idx: number) => ({
+                index: typeof step?.index === "number" ? step.index : idx,
+                toolName: String(step?.toolName || step?.tool_name || `step_${idx + 1}`),
+                description: String(step?.description || ""),
+            }));
+        }
+
+        if (Array.isArray(agentRun.steps) && agentRun.steps.length > 0) {
+            return agentRun.steps.map((step, idx) => ({
+                index: typeof step.stepIndex === "number" ? step.stepIndex : idx,
+                toolName: String(step.toolName || `step_${idx + 1}`),
+                description: "",
+            }));
+        }
+
+        return [];
+    }, [agentRun.eventStream, agentRun.steps]);
+
+    const skillLoadSequence = useMemo(() => {
+        const unique = new Set(
+            plannedSteps
+                .map((step) => String(step.toolName || "").trim())
+                .filter(Boolean)
+        );
+        return Array.from(unique).map((tool) => tool.replace(/_/g, "-"));
+    }, [plannedSteps]);
+
+    const stepStatusByIndex = useMemo(() => {
+        const map = new Map<number, string>();
+        for (const step of agentRun.steps || []) {
+            if (typeof step.stepIndex === "number") {
+                map.set(step.stepIndex, String(step.status || ""));
+            }
+        }
+        return map;
+    }, [agentRun.steps]);
+
+    const getPlannedStepVisualState = (stepIndex: number): "done" | "active" | "failed" | "pending" => {
+        const status = (stepStatusByIndex.get(stepIndex) || "").toLowerCase();
+        if (["succeeded", "success", "completed"].includes(status)) return "done";
+        if (["failed", "error"].includes(status)) return "failed";
+        if (["running", "in_progress"].includes(status)) return "active";
+
+        if (isActive && stepIndex === agentRun.steps.find((s) => String(s.status).toLowerCase() === "running")?.stepIndex) {
+            return "active";
+        }
+        return "pending";
+    };
+
     return (
         <div className="flex flex-col gap-2 w-full animate-in fade-in slide-in-from-bottom-2 duration-300" data-testid="agent-run-content">
             {/* Header with cancel button prominently displayed */}
             <div className="flex items-start gap-2">
                 <button
                     onClick={() => setIsExpanded(!isExpanded)}
-                    className="flex-1 flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-purple-500/10 to-blue-500/10 rounded-lg border border-purple-500/20 hover:border-purple-500/40 transition-all text-left"
+                    className="flex-1 flex items-center gap-2 px-3 py-2 rounded-md border border-border/60 bg-background/70 hover:bg-muted/30 transition-all text-left"
                 >
-                    <Bot className="h-5 w-5 text-purple-500" />
-                    <span className="text-sm font-medium text-purple-700 dark:text-purple-300">Modo Agente</span>
+                    <Bot className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm font-medium text-foreground">Modo agente</span>
                     <div className="flex-1" />
-                    {agentRun.runId && (
+                    {showVerboseAgentInternals && agentRun.runId && (
                         <div className="flex bg-background/50 rounded-md p-0.5 mr-2" onClick={(e) => e.stopPropagation()}>
                             <button
                                 onClick={() => setViewMode("steps")}
@@ -237,10 +322,10 @@ export const AgentRunContent = memo(function AgentRunContent({
                         onClick={onCancel}
                         disabled={isCancelling}
                         className={cn(
-                            "shrink-0 h-10 px-3 border",
+                            "shrink-0 h-10 px-3 border border-border/60",
                             isCancelling
-                                ? "text-red-400 border-red-300/50 bg-red-50/50 dark:bg-red-900/20 cursor-not-allowed"
-                                : "text-muted-foreground border-border hover:text-red-500 hover:border-red-300 hover:bg-red-50/50 dark:hover:bg-red-900/20"
+                                ? "text-red-400 bg-red-50/50 dark:bg-red-900/20 cursor-not-allowed"
+                                : "text-muted-foreground hover:text-red-500 hover:bg-red-50/50 dark:hover:bg-red-900/20"
                         )}
                         data-testid="button-cancel-agent-header"
                     >
@@ -260,7 +345,7 @@ export const AgentRunContent = memo(function AgentRunContent({
             </div>
 
             {/* Objective display - show what the agent is working on */}
-            {objective && isActive && (
+            {objective && isActive && showVerboseAgentInternals && (
                 <div className="px-3 py-2 bg-purple-500/5 rounded-lg border border-purple-500/10">
                     <div className="flex items-center gap-2 text-xs text-purple-600 dark:text-purple-400 font-medium uppercase tracking-wide mb-1">
                         <Target className="h-3 w-3" />
@@ -286,7 +371,7 @@ export const AgentRunContent = memo(function AgentRunContent({
             {isExpanded && (
                 <div className="space-y-3">
                     {/* Action buttons for runs */}
-                    {(isCancellable || isPaused) && (
+                    {showVerboseAgentInternals && (isCancellable || isPaused) && (
                         <div className="flex justify-end gap-2">
                             {isPaused && onResume && (
                                 <Button
@@ -342,6 +427,73 @@ export const AgentRunContent = memo(function AgentRunContent({
                         </div>
                     )}
 
+                    {showVerboseAgentInternals && viewMode === "steps" && skillLoadSequence.length > 0 && (
+                        <div className="rounded-lg border border-border/60 bg-background/60 p-3">
+                            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                <Loader2 className={cn("h-3.5 w-3.5", isActive ? "animate-spin text-blue-500" : "text-muted-foreground")} />
+                                Ejecutando tareas en paralelo
+                            </div>
+                            <div className="mt-2 space-y-1.5 border-l border-border/60 pl-3">
+                                {skillLoadSequence.slice(0, 6).map((skill, idx) => {
+                                    const isSkillDone = idx < stepProgress.completed;
+                                    const isSkillActive = idx === stepProgress.completed && isActive;
+                                    return (
+                                        <div key={`${skill}-${idx}`} className="flex items-center gap-2 text-xs">
+                                            {isSkillDone ? (
+                                                <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                                            ) : isSkillActive ? (
+                                                <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
+                                            ) : (
+                                                <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                                            )}
+                                            <span className="text-foreground/85">Loading skill {skill}</span>
+                                        </div>
+                                    );
+                                })}
+                                {skillLoadSequence.length > 6 && (
+                                    <div className="text-[11px] text-muted-foreground">
+                                        +{skillLoadSequence.length - 6} skills más
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {showVerboseAgentInternals && viewMode === "steps" && plannedSteps.length > 0 && (
+                        <div className="rounded-lg border border-border/60 bg-background/60 p-3">
+                            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                <List className="h-3.5 w-3.5 text-indigo-500" />
+                                Configurando lista de tareas
+                            </div>
+                            <div className="mt-2 space-y-1.5 border-l border-border/60 pl-3">
+                                {plannedSteps.slice(0, 10).map((step) => {
+                                    const visualState = getPlannedStepVisualState(step.index);
+                                    return (
+                                        <div key={`${step.index}-${step.toolName}`} className="flex items-center gap-2 text-xs">
+                                            {visualState === "done" ? (
+                                                <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                                            ) : visualState === "active" ? (
+                                                <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
+                                            ) : visualState === "failed" ? (
+                                                <XCircle className="h-3.5 w-3.5 text-red-500" />
+                                            ) : (
+                                                <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                                            )}
+                                            <span className="text-foreground/85 truncate">
+                                                {step.description || getToolDisplayName(step.toolName)}
+                                            </span>
+                                        </div>
+                                    );
+                                })}
+                                {plannedSteps.length > 10 && (
+                                    <div className="text-[11px] text-muted-foreground">
+                                        +{plannedSteps.length - 10} tareas más
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
                     {/* Plan Viewer */}
                     {viewMode === "plan" && agentRun.runId && (
                         <div className="border border-border/50 rounded-lg overflow-hidden">
@@ -355,14 +507,14 @@ export const AgentRunContent = memo(function AgentRunContent({
                             {hiddenEventsCount > 0 && !showAllEvents && (
                                 <button
                                     onClick={() => setShowAllEvents(true)}
-                                    className="text-xs text-purple-500 hover:text-purple-600 mb-2 flex items-center gap-1"
+                                    className="text-xs text-muted-foreground hover:text-foreground mb-2 flex items-center gap-1"
                                     data-testid="button-show-all-events"
                                 >
                                     <ChevronDown className="h-3 w-3" />
                                     Ver {hiddenEventsCount} eventos anteriores
                                 </button>
                             )}
-                            <div className="space-y-1.5 pl-3 border-l-2 border-purple-500/30">
+                            <div className="space-y-1.5 pl-3 border-l border-border/60">
                                 {visibleEvents.map((event, idx) => {
                                     const isLast = idx === visibleEvents.length - 1;
                                     const showDetails = hasPayloadDetails(event);
@@ -371,7 +523,7 @@ export const AgentRunContent = memo(function AgentRunContent({
                                             key={event.id}
                                             className={cn(
                                                 "flex items-start gap-2 text-sm py-1.5 px-2 rounded-md transition-all",
-                                                isLast && isActive && "bg-purple-500/5 border-l-2 border-purple-500 -ml-[11px] pl-[9px]"
+                                                isLast && isActive && "bg-muted/40 -ml-[8px] pl-[8px]"
                                             )}
                                             data-testid={`agent-event-${event.kind}-${event.status}`}
                                         >
@@ -403,9 +555,9 @@ export const AgentRunContent = memo(function AgentRunContent({
                                                         </span>
                                                     )}
                                                     {isLast && isActive && (
-                                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-600 dark:text-purple-400 text-[10px] font-medium">
-                                                            <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" />
-                                                            En proceso
+                                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground text-[10px] font-medium">
+                                                            <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-pulse" />
+                                                            Activo
                                                         </span>
                                                     )}
                                                 </div>
@@ -471,27 +623,22 @@ export const AgentRunContent = memo(function AgentRunContent({
 
                     {/* Loading skeleton for starting state */}
                     {isActive && (!agentRun.eventStream || agentRun.eventStream.length === 0) && (!agentRun.steps || agentRun.steps.length === 0) && (
-                        <div className="space-y-2 animate-pulse">
-                            <div className="flex items-center gap-2">
-                                <div className="w-6 h-6 rounded-full bg-purple-500/20" />
-                                <div className="h-4 w-32 bg-muted rounded" />
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <div className="w-6 h-6 rounded-full bg-blue-500/20" />
-                                <div className="h-4 w-48 bg-muted rounded" />
-                            </div>
-                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                                <span>
-                                    {agentRun.status === "starting" && "Conectando con IA..."}
-                                    {agentRun.status === "queued" && "En cola de procesamiento..."}
-                                    {agentRun.status === "planning" && "Planificando pasos..."}
-                                    {agentRun.status === "running" && "Ejecutando..."}
-                                    {agentRun.status === "verifying" && "Verificando resultados..."}
-                                    {agentRun.status === "replanning" && "Ajustando plan..."}
-                                    {!["starting", "queued", "planning", "running", "verifying", "replanning"].includes(agentRun.status) && "Procesando tu solicitud..."}
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground border border-border/50 rounded-md px-3 py-2 bg-background/70">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            <span>
+                                {agentRun.status === "starting" && "Conectando con IA..."}
+                                {agentRun.status === "queued" && "En cola..."}
+                                {agentRun.status === "planning" && "Planificando..."}
+                                {agentRun.status === "running" && "Ejecutando..."}
+                                {agentRun.status === "verifying" && "Verificando..."}
+                                {agentRun.status === "replanning" && "Ajustando plan..."}
+                                {!["starting", "queued", "planning", "running", "verifying", "replanning"].includes(agentRun.status) && "Procesando..."}
+                            </span>
+                            {isSlowConnection && (
+                                <span className="text-yellow-600 dark:text-yellow-400">
+                                    ({waitingSeconds}s)
                                 </span>
-                            </div>
+                            )}
                         </div>
                     )}
 

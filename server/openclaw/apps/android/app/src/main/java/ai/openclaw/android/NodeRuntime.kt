@@ -92,14 +92,6 @@ class NodeRuntime(context: Context) {
     locationPreciseEnabled = { locationPreciseEnabled.value },
   )
 
-  private val deviceHandler: DeviceHandler = DeviceHandler(
-    appContext = appContext,
-  )
-
-  private val notificationsHandler: NotificationsHandler = NotificationsHandler(
-    appContext = appContext,
-  )
-
   private val screenHandler: ScreenHandler = ScreenHandler(
     screenRecorder = screenRecorder,
     setScreenRecordActive = { _screenRecordActive.value = it },
@@ -131,8 +123,6 @@ class NodeRuntime(context: Context) {
     canvas = canvas,
     cameraHandler = cameraHandler,
     locationHandler = locationHandler,
-    deviceHandler = deviceHandler,
-    notificationsHandler = notificationsHandler,
     screenHandler = screenHandler,
     smsHandler = smsHandlerImpl,
     a2uiHandler = a2uiHandler,
@@ -141,8 +131,6 @@ class NodeRuntime(context: Context) {
     isForeground = { _isForeground.value },
     cameraEnabled = { cameraEnabled.value },
     locationEnabled = { locationMode.value != LocationMode.Off },
-    smsAvailable = { sms.canSendSms() },
-    debugBuild = { BuildConfig.DEBUG },
     onCanvasA2uiPush = {
       _canvasA2uiHydrated.value = true
       _canvasRehydratePending.value = false

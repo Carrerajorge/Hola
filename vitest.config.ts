@@ -5,12 +5,19 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
+    environmentMatchGlobs: [
+      ["**/*.browser.test.ts", "happy-dom"],
+    ],
     testTimeout: 15000,
     include: ["tests/**/*.test.ts", "server/**/*.test.ts"],
     exclude: [
-      "**/server/openclaw/vendor/**",
-      "**/dist/**",
-      "**/node_modules/**",
+      "server/openclaw/**",
+      "dist/**",
+      "node_modules/**",
+      "Hola/**",
+      "Hola_wt_*/**",
+      ".claude/**",
+      ".codex/**",
     ],
     setupFiles: ["./tests/setup.ts"],
     coverage: {
@@ -20,7 +27,7 @@ export default defineConfig({
       reporter: ["text", "json", "json-summary", "html"],
       all: true,
       include: ["server/core/**/*.ts"],
-      exclude: ["**/*.test.ts", "**/__tests__/**", "**/node_modules/**", "**/server/openclaw/vendor/**/**", "**/server/openclaw/vendor/**", "**/dist/**"],
+      exclude: ["**/*.test.ts", "**/__tests__/**", "**/node_modules/**", "**/dist/**"],
       thresholds: {
         lines: 90,
         functions: 90,

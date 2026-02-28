@@ -9,6 +9,8 @@ import { getGeminiClientOrThrow } from "../lib/gemini";
 import { requestUnderstandingAgent } from "./requestUnderstanding";
 import { expandAndExecute } from './selfExpand/capabilityExpander';
 import { orchestrate } from './orchestrator/executor';
+import path from "path";
+import os from "os";
 
 export interface AgentExecutorOptions {
   maxIterations?: number;
@@ -18,12 +20,77 @@ export interface AgentExecutorOptions {
   chatId: string;
   requestSpec: RequestSpec;
   accessLevel?: 'owner' | 'trusted' | 'unknown';
+  workspaceContext?: {
+    projectId?: string;
+    projectName?: string;
+    repositoryPath?: string | null;
+    selectedFolder?: string | null;
+    codingAgents?: Array<"coder" | "reviewer" | "improver">;
+    runtimeTarget?: string;
+    executionAccess?: string;
+    branch?: string | null;
+  };
 }
 
 import { type FunctionDeclaration, AGENT_TOOLS } from "../config/agentTools";
 
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { BUNDLED_SKILL_TOOLS } from "./tools/bundledSkillTools";
+
+type ClientToolDefinition = {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+};
+
+type EmbeddedPiAgentParams = {
+  sessionId: string;
+  sessionKey: string;
+  sessionFile: string;
+  workspaceDir: string;
+  prompt: string;
+  model: string;
+  provider: string;
+  timeoutMs: number;
+  runId: string;
+  /** Optional core tools that run synchronously within the session loop. */
+  customCoreTools?: any[];
+  extraSystemPrompt?: string;
+};
+
+type EmbeddedPiAgentResult = {
+  payloads?: Array<{ text?: string }>;
+  meta: {
+    stopReason?: string;
+    pendingToolCalls?: Array<{ name: string; arguments: string }>;
+    aborted?: boolean;
+  };
+};
+
+let embeddedPiAgentLoader:
+  | ((params: EmbeddedPiAgentParams) => Promise<EmbeddedPiAgentResult>)
+  | null = null;
+let embeddedPiAgentUnavailableLogged = false;
+
+async function runEmbeddedPiAgentSafe(params: EmbeddedPiAgentParams): Promise<EmbeddedPiAgentResult> {
+  if (!embeddedPiAgentLoader) {
+    try {
+      const mod = await import("../openclaw/src/agents/pi-embedded-runner/run");
+      embeddedPiAgentLoader = mod.runEmbeddedPiAgent as unknown as NonNullable<typeof embeddedPiAgentLoader>;
+    } catch (error) {
+      if (!embeddedPiAgentUnavailableLogged) {
+        embeddedPiAgentUnavailableLogged = true;
+        console.error("[AgentExecutor] Embedded Pi runtime unavailable, falling back to standard flow:", error);
+      }
+      throw new Error("Embedded Pi runtime unavailable");
+    }
+  }
+
+  return embeddedPiAgentLoader!(params);
+}
 
 const dynamicSkillTools: FunctionDeclaration[] = BUNDLED_SKILL_TOOLS.map(t => {
   const schema = zodToJsonSchema(t.inputSchema, { target: "jsonSchema7" }) as any;
@@ -43,6 +110,32 @@ const LOCAL_FILESYSTEM_SIGNAL_REGEX =
 const SKILL_SIGNAL_REGEX = /\b(skill|skills|habilidad|habilidades)\b|\$[a-z0-9_-]{2,80}/i;
 const LANDING_PAGE_SIGNAL_REGEX =
   /\b(landing\s+page|p[aá]gina\s+de\s+aterrizaje|p[aá]gina\s+web|sitio\s+web|website|landing)\b/i;
+
+function normalizeWorkspaceSubdir(value: string | null | undefined): string {
+  const raw = String(value || ".").trim().replace(/\\/g, "/");
+  if (!raw || raw === ".") return ".";
+  if (raw.startsWith("/")) return ".";
+  if (raw.includes("..")) return ".";
+  return raw.replace(/^\.\/+/, "");
+}
+
+function buildToolContextFromOptions(options: AgentExecutorOptions): ToolContext {
+  const codingAgents = Array.isArray(options.workspaceContext?.codingAgents) && options.workspaceContext.codingAgents.length > 0
+    ? options.workspaceContext.codingAgents
+    : ["coder"];
+
+  return {
+    userId: options.userId,
+    chatId: options.chatId,
+    runId: options.runId,
+    workspaceRoot: options.workspaceContext?.repositoryPath || os.homedir(),
+    workspaceSubdir: normalizeWorkspaceSubdir(options.workspaceContext?.selectedFolder),
+    workspaceBranch: options.workspaceContext?.branch || undefined,
+    codingAgents: codingAgents as Array<"coder" | "reviewer" | "improver">,
+    runtimeTarget: options.workspaceContext?.runtimeTarget,
+    executionAccess: options.workspaceContext?.executionAccess,
+  };
+}
 
 function extractBusinessLabel(raw: string): string {
   const cleaned = normalizeSpaces(String(raw || ""));
@@ -304,14 +397,14 @@ async function runLandingPageFastpath(
   res: Response,
   options: AgentExecutorOptions,
 ): Promise<string | null> {
-  const { runId, userId, chatId, requestSpec } = options;
+  const { runId, requestSpec } = options;
   const rawMessage = requestSpec.rawMessage || messages.filter(m => m.role === "user").pop()?.content || "";
   if (!LANDING_PAGE_SIGNAL_REGEX.test(rawMessage)) return null;
 
   const businessLabel = extractBusinessLabel(rawMessage);
   const assets = buildLandingPageAssets(businessLabel);
   const baseDir = `artifacts/landing-${runId}`;
-  const toolContext: ToolContext = { userId, chatId, runId };
+  const toolContext: ToolContext = buildToolContextFromOptions(options);
 
   const writeSse = (event: string, payload: Record<string, unknown>) => {
     try {
@@ -319,17 +412,10 @@ async function runLandingPageFastpath(
       if (r.writableEnded || r.destroyed) return;
       const streamMeta = r?.locals?.streamMeta;
       const enriched: Record<string, unknown> = { ...payload };
-      if (!enriched.conversationId && streamMeta?.conversationId) {
-        enriched.conversationId = streamMeta.conversationId;
-      }
-      if (!enriched.requestId && streamMeta?.requestId) {
-        enriched.requestId = streamMeta.requestId;
-      }
-      if (!enriched.assistantMessageId) {
-        const amid = streamMeta?.assistantMessageId ||
-          (typeof streamMeta?.getAssistantMessageId === "function" ? streamMeta.getAssistantMessageId() : undefined);
-        if (amid) enriched.assistantMessageId = amid;
-      }
+      if (streamMeta?.requestId) enriched.requestId = streamMeta.requestId;
+      if (!enriched.conversationId && streamMeta?.conversationId) enriched.conversationId = streamMeta.conversationId;
+      const amid = streamMeta?.assistantMessageId || (typeof streamMeta?.getAssistantMessageId === "function" ? streamMeta.getAssistantMessageId() : undefined);
+      if (!enriched.assistantMessageId && amid) enriched.assistantMessageId = amid;
       res.write(`event: ${event}\ndata: ${JSON.stringify(enriched)}\n\n`);
       if (typeof r.flush === "function") r.flush();
     } catch { /* ignore */ }
@@ -715,13 +801,141 @@ function inferLocalDirectoryFromPrompt(rawText: string): string {
   if (explicit) return explicit;
 
   const lower = String(rawText || "").toLowerCase();
-  if (/\b(escritorio|desktop)\b/i.test(lower)) return "~/Desktop";
-  if (/\b(descargas|downloads)\b/i.test(lower)) return "~/Downloads";
-  if (/\b(documentos|documents)\b/i.test(lower)) return "~/Documents";
-  if (/\b(im[aá]genes|pictures|fotos|photos)\b/i.test(lower)) return "~/Pictures";
-  if (/\b(m[uú]sica|music)\b/i.test(lower)) return "~/Music";
-  if (/\b(videos|movies)\b/i.test(lower)) return "~/Movies";
-  return "~";
+
+  // Determine base directory
+  let baseDir = "~";
+  if (/\b(escritorio|desktop)\b/i.test(lower)) baseDir = "~/Desktop";
+  else if (/\b(descargas|downloads)\b/i.test(lower)) baseDir = "~/Downloads";
+  else if (/\b(documentos|documents)\b/i.test(lower)) baseDir = "~/Documents";
+  else if (/\b(im[aá]genes|pictures|fotos|photos)\b/i.test(lower)) baseDir = "~/Pictures";
+  else if (/\b(m[uú]sica|music)\b/i.test(lower)) baseDir = "~/Music";
+  else if (/\b(videos|movies)\b/i.test(lower)) baseDir = "~/Movies";
+
+  // Extract subfolder name from patterns like "carpeta hola", "folder MyProject", "mi carpeta test"
+  const subfolderPatterns = [
+    /\b(?:carpeta|folder|directorio|directory|proyecto|project)\s+(?:llamad[ao]?\s+)?["""]?([a-z0-9áéíóúñ_. -]{2,60})["""]?/i,
+    /\b(?:mi|the|la)\s+(?:carpeta|folder)\s+["""]?([a-z0-9áéíóúñ_. -]{2,60})["""]?/i,
+  ];
+  for (const pattern of subfolderPatterns) {
+    const match = lower.match(pattern);
+    if (match?.[1]) {
+      const folderName = match[1].trim()
+        .replace(/\s+(en|de|del|on|in|from|que|y|mi|my|the|la|el)\s*$/i, "") // strip trailing prepositions
+        .trim();
+      // Avoid matching generic words that aren't folder names
+      if (folderName && folderName.length >= 2 && !/^(mac|computadora|pc|laptop|sistema|escritorio|desktop|descargas|downloads|documentos|documents|home)$/i.test(folderName)) {
+        return `${baseDir}/${folderName}`;
+      }
+    }
+  }
+
+  return baseDir;
+}
+
+/**
+ * Resolve macOS Desktop path variations:
+ *  - ~/Desktop (standard)
+ *  - ~/Escritorio (Spanish locale)
+ *  - ~/Library/Mobile Documents/com~apple~CloudDocs/Desktop (iCloud Desktop)
+ */
+async function resolveDesktopPath(): Promise<string> {
+  const fs = await import("fs/promises");
+  const home = os.homedir();
+  const candidates = [
+    path.join(home, "Desktop"),
+    path.join(home, "Escritorio"),
+    path.join(home, "Library", "Mobile Documents", "com~apple~CloudDocs", "Desktop"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      const stat = await fs.stat(candidate);
+      if (stat.isDirectory()) return candidate;
+    } catch { /* doesn't exist */ }
+  }
+  return path.join(home, "Desktop"); // fallback
+}
+
+/**
+ * Deterministic filesystem execution — calls tools directly, no LLM.
+ * Returns { evidence, results } with real stdout/stderr-level data.
+ */
+async function executeFsDeterministic(
+  rawMessage: string,
+  toolContext: ToolContext,
+  runId: string,
+  writeSse: (event: string, payload: Record<string, unknown>) => void,
+): Promise<{ evidence: string; results: Array<{ tool: string; args: Record<string, any>; output: any; durationMs: number; success: boolean }> }> {
+  const fs = await import("fs/promises");
+  const results: Array<{ tool: string; args: Record<string, any>; output: any; durationMs: number; success: boolean }> = [];
+  const traceLines: string[] = [];
+
+  const inferredDir = inferLocalDirectoryFromPrompt(rawMessage);
+  traceLines.push(`[fs-deterministic] inferred_dir="${inferredDir}" from message="${rawMessage.slice(0, 100)}"`);
+
+  // Resolve the real path
+  const expandHome = (p: string) => {
+    if (p === "~") return os.homedir();
+    if (p.startsWith("~/")) return path.join(os.homedir(), p.slice(2));
+    return p;
+  };
+
+  let targetPath = expandHome(inferredDir);
+  traceLines.push(`[fs-deterministic] expanded_path="${targetPath}"`);
+
+  // Validate existence with stat
+  let pathExists = false;
+  let pathStat: any = null;
+  try {
+    pathStat = await fs.stat(targetPath);
+    pathExists = true;
+    traceLines.push(`[fs-deterministic] stat OK: isDir=${pathStat.isDirectory()}, size=${pathStat.size}`);
+  } catch (statErr: any) {
+    traceLines.push(`[fs-deterministic] stat FAILED: ${statErr.code} ${statErr.message}`);
+
+    // If Desktop subfolder doesn't exist, try case-insensitive search
+    if (statErr.code === "ENOENT" && inferredDir.startsWith("~/Desktop/")) {
+      const folderName = path.basename(targetPath);
+      const desktopPath = await resolveDesktopPath();
+      traceLines.push(`[fs-deterministic] trying case-insensitive search in ${desktopPath} for "${folderName}"`);
+      try {
+        const entries = await fs.readdir(desktopPath);
+        const match = entries.find(e => e.toLowerCase() === folderName.toLowerCase());
+        if (match) {
+          targetPath = path.join(desktopPath, match);
+          pathStat = await fs.stat(targetPath);
+          pathExists = true;
+          traceLines.push(`[fs-deterministic] case-insensitive match found: "${match}" -> "${targetPath}"`);
+        } else {
+          traceLines.push(`[fs-deterministic] no case-insensitive match. Available: ${entries.slice(0, 20).join(", ")}`);
+        }
+      } catch (e2: any) {
+        traceLines.push(`[fs-deterministic] Desktop readdir failed: ${e2.message}`);
+      }
+    }
+  }
+
+  // Execute list_files with the real path
+  const listArgs = { directory: pathExists ? targetPath : expandHome(inferredDir), maxEntries: 200 };
+  writeSse("tool_start", { runId, toolName: "list_files", args: listArgs, iteration: 0, mode: "deterministic" });
+
+  const startTime = Date.now();
+  try {
+    const { result } = await executeToolCall("list_files", listArgs, toolContext, runId);
+    const dur = Date.now() - startTime;
+    results.push({ tool: "list_files", args: listArgs, output: result, durationMs: dur, success: !result?.error });
+    traceLines.push(`[fs-deterministic] list_files OK: ${dur}ms, files=${result?.count ?? result?.files?.length ?? "unknown"}`);
+    writeSse("tool_result", { runId, toolName: "list_files", result, iteration: 0, durationMs: dur, mode: "deterministic" });
+  } catch (err: any) {
+    const dur = Date.now() - startTime;
+    const errResult = { error: err.message, code: err.code || "UNKNOWN" };
+    results.push({ tool: "list_files", args: listArgs, output: errResult, durationMs: dur, success: false });
+    traceLines.push(`[fs-deterministic] list_files FAILED: ${dur}ms, error=${err.message}`);
+    writeSse("tool_result", { runId, toolName: "list_files", result: errResult, iteration: 0, durationMs: dur, mode: "deterministic" });
+  }
+
+  const evidence = traceLines.join("\n");
+  console.log(`[AgentExecutor] FS Deterministic trace:\n${evidence}`);
+  return { evidence, results };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -812,7 +1026,7 @@ async function executeDeterministicFallback(
   res: Response,
   options: AgentExecutorOptions,
 ): Promise<string> {
-  const { runId, userId, chatId, requestSpec } = options;
+  const { runId, requestSpec } = options;
   const rawMessage = requestSpec.rawMessage || messages.filter(m => m.role === "user").pop()?.content || "";
 
   const writeSse = (event: string, payload: Record<string, unknown>) => {
@@ -821,23 +1035,16 @@ async function executeDeterministicFallback(
       if (r.writableEnded || r.destroyed) return;
       const streamMeta = r?.locals?.streamMeta;
       const enriched: Record<string, unknown> = { ...payload };
-      if (!enriched.conversationId && streamMeta?.conversationId) {
-        enriched.conversationId = streamMeta.conversationId;
-      }
-      if (!enriched.requestId && streamMeta?.requestId) {
-        enriched.requestId = streamMeta.requestId;
-      }
-      if (!enriched.assistantMessageId) {
-        const amid = streamMeta?.assistantMessageId ||
-          (typeof streamMeta?.getAssistantMessageId === "function" ? streamMeta.getAssistantMessageId() : undefined);
-        if (amid) enriched.assistantMessageId = amid;
-      }
+      if (streamMeta?.requestId) enriched.requestId = streamMeta.requestId;
+      if (!enriched.conversationId && streamMeta?.conversationId) enriched.conversationId = streamMeta.conversationId;
+      const amid = streamMeta?.assistantMessageId || (typeof streamMeta?.getAssistantMessageId === "function" ? streamMeta.getAssistantMessageId() : undefined);
+      if (!enriched.assistantMessageId && amid) enriched.assistantMessageId = amid;
       res.write(`event: ${event}\ndata: ${JSON.stringify(enriched)}\n\n`);
       if (typeof r.flush === "function") r.flush();
     } catch { /* ignore */ }
   };
 
-  const toolContext: ToolContext = { userId, chatId, runId };
+  const toolContext: ToolContext = buildToolContextFromOptions(options);
   const actions = parseDeterministicIntent(rawMessage);
 
   console.log(`[AgentExecutor] Deterministic fallback: ${actions.length} action(s) parsed from: "${rawMessage.slice(0, 120)}"`);
@@ -847,6 +1054,13 @@ async function executeDeterministicFallback(
     mode: "deterministic_offline",
     parsedActions: actions.map(a => a.tool),
     rawMessage: rawMessage.slice(0, 200),
+    workspace: options.workspaceContext?.repositoryPath
+      ? {
+        repositoryPath: options.workspaceContext.repositoryPath,
+        selectedFolder: options.workspaceContext.selectedFolder || ".",
+        branch: options.workspaceContext.branch || undefined,
+      }
+      : undefined,
   });
 
   await emitTraceEvent(runId, "thinking", {
@@ -955,17 +1169,23 @@ export async function executeAgentLoop(
     try {
       const r = res as any;
       if (r.writableEnded || r.destroyed) return false;
-      // Enrich with conversationId/requestId from streamMeta so client-side
-      // event filtering (which requires matching conversationId) does not
-      // silently discard agent-loop events.
+
+      // Enrich with conversationId/requestId/assistantMessageId from streamMeta
+      // so client-side event filtering does not silently discard agent-loop events.
       const streamMeta = r?.locals?.streamMeta;
       const enriched: Record<string, unknown> = { ...payload };
+
+      // Use streamMeta.requestId (matches client streamRequestId) instead of runId
+      if (streamMeta?.requestId) {
+        enriched.requestId = streamMeta.requestId;
+      } else if (!enriched.requestId) {
+        enriched.requestId = options.runId;
+      }
+
       if (!enriched.conversationId && streamMeta?.conversationId) {
         enriched.conversationId = streamMeta.conversationId;
       }
-      if (!enriched.requestId && streamMeta?.requestId) {
-        enriched.requestId = streamMeta.requestId;
-      }
+
       const assistantMessageId =
         streamMeta?.assistantMessageId ||
         (typeof streamMeta?.getAssistantMessageId === "function"
@@ -974,7 +1194,13 @@ export async function executeAgentLoop(
       if (!enriched.assistantMessageId && assistantMessageId) {
         enriched.assistantMessageId = assistantMessageId;
       }
+
+      // Keep runId for server-side tracing
+      if (!enriched.runId) enriched.runId = options.runId;
+
+      console.log(`[SSE Debug] Sending event: ${event} payload: ${JSON.stringify(enriched)}`);
       res.write(`event: ${event}\ndata: ${JSON.stringify(enriched)}\n\n`);
+
       if (typeof r.flush === "function") r.flush();
       return true;
     } catch {
@@ -997,7 +1223,13 @@ export async function executeAgentLoop(
   };
 
   const tools = getToolsForIntent(requestSpec.intent, accessLevel, requestSpec.rawMessage || "");
-  const toolContext: ToolContext = { userId, chatId, runId };
+  const toolContext: ToolContext = buildToolContextFromOptions(options);
+
+  if (options.workspaceContext?.repositoryPath) {
+    console.log(
+      `[AgentExecutor] Workspace selected root=${options.workspaceContext.repositoryPath} folder=${toolContext.workspaceSubdir || "."} branch=${options.workspaceContext.branch || "main"} agents=${(toolContext.codingAgents || []).join(",")}`
+    );
+  }
 
   const artifacts: Array<{ type: string; url: string; name: string }> = [];
   let iteration = 0;
@@ -1030,7 +1262,12 @@ export async function executeAgentLoop(
       brief: requestBrief,
     });
 
-    if (requestBrief.blocker?.is_blocked) {
+    console.log(`[AgentLoop DEBUG] recentUserText: "${recentUserText}"`);
+    console.log(`[AgentLoop DEBUG] requestSpec.rawMessage: "${requestSpec.rawMessage}"`);
+    console.log(`[AgentLoop DEBUG] isLocalFsRequest: ${isLocalFsRequest}`);
+    console.log(`[AgentLoop DEBUG] blocker?: ${JSON.stringify(requestBrief.blocker)}`);
+
+    if (requestBrief.blocker?.is_blocked && !isLocalFsRequest) {
       const question =
         normalizeSpaces(requestBrief.blocker.question || "") ||
         "Necesito una aclaración para ejecutar la solicitud con seguridad.";
@@ -1213,19 +1450,59 @@ DO NOT respond with text. CALL browse_and_act NOW.${reservationHint}`
     });
   }
 
+  // ── DETERMINISTIC-FIRST FILESYSTEM EXECUTION ──
+  // For filesystem requests, execute tools DIRECTLY first (no LLM), then feed
+  // real evidence to Gemini for summarization only. This prevents hallucination.
+  let fsEvidence: Awaited<ReturnType<typeof executeFsDeterministic>> | null = null;
   if (isLocalFsRequest) {
-    const inferredDirectory = inferLocalDirectoryFromPrompt(recentUserText || requestSpec.rawMessage || "");
+    console.log(`[AgentExecutor] FS request detected — executing deterministic-first pipeline`);
+    fsEvidence = await executeFsDeterministic(
+      recentUserText || requestSpec.rawMessage || "",
+      toolContext,
+      runId,
+      writeSse,
+    );
+
+    // Build evidence summary from real tool results
+    const evidenceParts: string[] = [];
+    for (const r of fsEvidence.results) {
+      if (r.success && r.output) {
+        const files = r.output.files || r.output;
+        const resolvedPath = r.output.resolvedPath || r.args.directory;
+        const count = Array.isArray(files) ? files.length : (r.output.count ?? "?");
+        evidenceParts.push(`Tool ${r.tool} executed on "${resolvedPath}" → ${count} items found (${r.durationMs}ms)`);
+        if (Array.isArray(files) && files.length > 0) {
+          const listing = files.map((f: any) => `  ${f.type === "directory" ? "[DIR]" : "[FILE]"} ${f.name}`).join("\n");
+          evidenceParts.push(listing);
+        } else if (Array.isArray(files) && files.length === 0) {
+          evidenceParts.push("  (directory is empty)");
+        }
+      } else {
+        evidenceParts.push(`Tool ${r.tool} FAILED on "${r.args.directory}": ${r.output?.error || "unknown error"}`);
+      }
+    }
+
+    const evidenceBlock = evidenceParts.join("\n");
+
     conversationHistory.unshift({
       role: "system",
       content: `YOU ARE A LOCAL FILESYSTEM ANALYST.
-You MUST inspect the user's local folders by calling tools, not by asking the user to run commands.
+The tools have ALREADY been executed. The REAL results are below.
 
-MANDATORY RULES:
-1) Your first action should call "list_files".
-2) If the user did not provide a path, start with directory="${inferredDirectory}".
-3) Use additional list_files calls for key folders when useful (Desktop/Downloads/Documents).
-4) Summarize findings clearly with concrete paths and counts.
-5) NEVER tell the user to run /local or terminal commands manually.`,
+══════ REAL TOOL EXECUTION EVIDENCE ══════
+${evidenceBlock}
+══════ END EVIDENCE ══════
+
+MANDATORY GUARDRAIL RULES:
+1) You MUST base your response ONLY on the evidence above. NEVER invent, guess, or hallucinate file contents or directory listings.
+2) If the evidence shows an error or "FAILED", tell the user exactly what went wrong (permission denied, path not found, etc.).
+3) If the evidence shows 0 files, say the directory is empty — but ONLY if the path was confirmed to exist.
+4) Report concrete paths, file counts, and directory/file names from the evidence.
+5) NEVER tell the user to run terminal commands. The tools already ran on their behalf.
+6) If a tool returned an error like ENOENT, EACCES, or EPERM, explain the error clearly.
+
+Execution trace:
+${fsEvidence.evidence}`,
     });
   }
 
@@ -1248,10 +1525,20 @@ MANDATORY RULES:
     });
 
     try {
-      // Separate system messages from conversation, and build Gemini-compatible messages
-      // Gemini requires alternating user/model roles — merge consecutive same-role messages
+      let currentPrompt = "";
+      if (iteration === 1) {
+        currentPrompt = recentUserText || requestSpec.rawMessage || "";
+      } else {
+        const lastUserMsg = conversationHistory[conversationHistory.length - 1];
+        if (lastUserMsg && lastUserMsg.role === "user") {
+          currentPrompt = lastUserMsg.content;
+        } else {
+          currentPrompt = "Continue execution.";
+        }
+      }
+
       let systemInstruction = "";
-      const nonSystemMessages = conversationHistory.filter(m => {
+      conversationHistory.filter(m => {
         if (m.role === "system") {
           systemInstruction += (systemInstruction ? "\n\n" : "") + m.content;
           return false;
@@ -1259,72 +1546,22 @@ MANDATORY RULES:
         return true;
       });
 
-      const geminiMessages: Array<{ role: string; parts: Array<{ text: string }> }> = [];
-      for (const m of nonSystemMessages) {
-        const role = m.role === "assistant" ? "model" : "user";
-        const last = geminiMessages[geminiMessages.length - 1];
-        if (last && last.role === role) {
-          // Merge into previous message to avoid consecutive same-role
-          last.parts[0].text += "\n\n" + m.content;
-        } else {
-          geminiMessages.push({ role, parts: [{ text: m.content }] });
-        }
-      }
-
-      // Ensure conversation starts with a user message (Gemini requirement)
-      if (geminiMessages.length > 0 && geminiMessages[0].role !== "user") {
-        geminiMessages.unshift({ role: "user", parts: [{ text: "Begin" }] });
-      }
-
-      // Wrap Gemini call with a 60s timeout to prevent hanging
-      const geminiPromise = ai.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: geminiMessages as any,
-        config: {
-          temperature: 0.7,
-          maxOutputTokens: 4096,
-          ...(systemInstruction ? { systemInstruction } : {}),
-          tools: tools.length > 0 ? [{
-            functionDeclarations: tools
-          }] : undefined
-        },
-      } as any);
-
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Gemini API call timed out after 60s")), 60000)
-      );
-
-      const response = await Promise.race([geminiPromise, timeoutPromise]);
-
-      const candidate = response.candidates?.[0];
-      if (!candidate) {
-        throw new Error("No response from model");
-      }
-
-      const parts = candidate.content?.parts || [];
-      let hasToolCall = false;
-      let textContent = "";
-      let shouldExitAgentLoop = false;
-
-      // Debug: log what the LLM returned
-      const partTypes = parts.map((p: any) => p.functionCall ? `functionCall:${p.functionCall.name}` : p.text ? `text:${(p.text as string).slice(0, 80)}...` : 'other');
-      console.log(`[AgentExecutor] Iteration ${iteration}: LLM returned ${parts.length} parts: [${partTypes.join(', ')}]`);
-
-      for (const part of parts) {
-        if (part.functionCall) {
-          hasToolCall = true;
-          const { name, args } = part.functionCall;
-
+      const openclawCustomTools = tools.map((t) => ({
+        name: t.name,
+        description: t.description,
+        parameters: t.parameters as unknown as Record<string, unknown>,
+        execute: async (args: Record<string, unknown>, options: { toolCallId: string }) => {
           sse.write("tool_start", {
             runId,
-            toolName: name!,
+            toolName: t.name,
             args,
             iteration
           });
 
+          // executeToolCall already does self-expansion and trace events
           const { result, artifact } = await executeToolCall(
-            name!,
-            args as Record<string, any>,
+            t.name,
+            args,
             toolContext,
             runId,
             res,
@@ -1337,146 +1574,70 @@ MANDATORY RULES:
 
           sse.write("tool_result", {
             runId,
-            toolName: name,
+            toolName: t.name,
             result,
             artifact,
             iteration
           });
 
-          conversationHistory.push({
-            role: "assistant",
-            content: `[Called tool: ${name}]`
-          });
-
-          // Truncate large tool results (especially browse_and_act with 20+ steps)
-          // to avoid overwhelming the LLM on the next iteration
-          let resultSummary: string;
-          if (name === "browse_and_act") {
+          // FAST EXIT for browse_and_act directly into the chat stream if needed.
+          // Note: OpenClaw will automatically use this result to generate a final response,
+          // but we can stream the clarifying response immediately for better UX.
+          if (t.name === "browse_and_act") {
             const r = result as any;
-            resultSummary = JSON.stringify({
-              success: r.success,
-              stepsCount: r.stepsCount || r.steps?.length || 0,
-              summary: r.data?.summary || r.data?.finalUrl || "Task completed",
-              lastSteps: (r.steps || []).slice(-3).map((s: any) =>
-                typeof s === 'string' ? s.slice(0, 100) : JSON.stringify(s).slice(0, 100)
-              ),
-            });
-          } else {
-            const raw = JSON.stringify(result);
-            resultSummary = raw.length > 2000 ? raw.slice(0, 2000) + "... [truncated]" : raw;
-          }
-
-          conversationHistory.push({
-            role: "user",
-            content: `Tool result for ${name}: ${resultSummary}`
-          });
-
-          // FAST EXIT: After browse_and_act completes, generate an immediate
-          // response instead of making another (slow/failing) LLM call.
-          // The browser automation already took 2-10 minutes; the user doesn't
-          // need to wait for another LLM round-trip just to get a summary.
-          if (name === "browse_and_act") {
-            const r = result as any;
-            const wasSuccessful = r.success === true;
-            const stepsCount = r.stepsCount || r.steps?.length || 0;
-            const lastSteps = (r.steps || []).slice(-3).map((s: any) =>
-              typeof s === 'string' ? s : (s?.action || s?.description || JSON.stringify(s).slice(0, 80))
-            );
             const dataStatus = String(r?.data?.status || "").toLowerCase();
-            const missingFields = Array.isArray(r?.data?.missingFields)
-              ? (r.data.missingFields as string[])
-              : [];
-            const clarificationQuestion = typeof r?.data?.question === "string" ? r.data.question.trim() : "";
-            const confirmationCode =
-              r?.data?.confirmationCode ||
-              r?.data?.reservationCode ||
-              r?.data?.bookingReference ||
-              r?.data?.confirmation;
+            const missingFields = Array.isArray(r?.data?.missingFields) ? (r.data.missingFields as string[]) : [];
             const isNeedsUserInput = dataStatus === "needs_user_input" || missingFields.length > 0;
+            const clarificationQuestion = typeof r?.data?.question === "string" ? r.data.question.trim() : "";
 
-            let summaryText: string;
             if (isNeedsUserInput) {
-              const reason = String(r?.data?.reason || "").toLowerCase();
-              const question =
-                clarificationQuestion ||
-                `Para continuar con la reserva necesito: ${missingFields.join(", ")}.`;
-              // Build rich "needs input" message based on reason
-              if (reason === "no_web_availability" && isReservationRequest) {
-                const rd = reservationDetails;
-                const avail = Array.isArray(r?.data?.availableTimes) ? r.data.availableTimes : [];
-                const availBlock = avail.length > 0 ? `\n\n**Horarios disponibles:** ${avail.join(", ")}` : "";
-                summaryText = `⚠️ **Sin disponibilidad online**\n\n${question}${availBlock}\n\n_Restaurante: ${rd?.restaurant || "—"} · Fecha: ${rd?.date || "—"} · Personas: ${rd?.partySize || "—"}_`;
-              } else if (reason === "past_date" && isReservationRequest) {
-                summaryText = `⚠️ **Fecha pasada**\n\n${question}`;
-              } else if (reason === "duplicate_reservation_detected" && isReservationRequest) {
-                summaryText = `⚠️ **Reserva duplicada**\n\n${question}`;
-              } else if (reason === "restaurant_closed" && isReservationRequest) {
-                summaryText = `⚠️ **Restaurante cerrado**\n\n${question}`;
-              } else if (reason === "runtime_timeout") {
-                summaryText = `⏳ **Tiempo agotado**\n\n${question}`;
-              } else if (reason === "page_navigation_error" || reason === "browser_session_closed") {
-                summaryText = `❌ **Error de conexión**\n\n${question}`;
-              } else if (reason === "invalid_contact_data") {
-                summaryText = `⚠️ **Datos inválidos**\n\n${question}`;
-              } else {
-                summaryText = question;
-              }
+              const question = clarificationQuestion || `Para continuar necesito: ${missingFields.join(", ")}.`;
               sse.write("clarification", {
                 runId,
                 question,
                 missingFields,
               });
-            } else if (isReservationRequest) {
-              const rd = reservationDetails;
-              const checkItems: string[] = [];
-              if (rd?.restaurant) checkItems.push(`- [x] **Restaurante:** ${rd.restaurant}`);
-              if (rd?.date) checkItems.push(`- [x] **Fecha:** ${rd.date}`);
-              if (r?.data?.timeAdjusted && r?.data?.selectedTime) {
-                checkItems.push(`- [x] **Hora:** ${r.data.selectedTime} _(solicitada: ${r.data.requestedTime || rd?.time})_`);
-              } else if (rd?.time) {
-                checkItems.push(`- [x] **Hora:** ${rd.time}`);
-              }
-              if (rd?.partySize) checkItems.push(`- [x] **Personas:** ${rd.partySize}`);
-              if (rd?.contactName) checkItems.push(`- [x] **Nombre:** ${rd.contactName}`);
-              if (rd?.phone) checkItems.push(`- [x] **Teléfono:** ${rd.phone}`);
-              if (rd?.email) checkItems.push(`- [x] **Email:** ${rd.email}`);
-
-              const checklistBlock = checkItems.length > 0 ? `\n\n**Checklist:**\n${checkItems.join("\n")}` : "";
-              if (wasSuccessful && confirmationCode) {
-                summaryText = `✅ **Reserva confirmada en la web**\n\nCódigo/confirmación: ${confirmationCode}${checklistBlock}\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join("\n")}`;
-              } else if (wasSuccessful) {
-                summaryText = `✅ **Automatización web completada exitosamente**${checklistBlock}\n\nRealicé ${stepsCount} acciones en el navegador para completar tu solicitud.\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join("\n")}`;
-              } else {
-                summaryText = `⚠️ **Automatización web finalizada** (${stepsCount} pasos)${checklistBlock}\n\nNavegué por el sitio web y realicé varias acciones, pero no pude confirmar que la tarea se completó al 100%.\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join("\n")}\n\nTe recomiendo verificar directamente en el sitio web.`;
-              }
-            } else if (wasSuccessful && confirmationCode) {
-              summaryText = `✅ **Reserva confirmada en la web**\n\nCódigo/confirmación: ${confirmationCode}\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join("\n")}`;
-            } else if (wasSuccessful) {
-              summaryText = `✅ **Automatización web completada exitosamente**\n\nRealicé ${stepsCount} acciones en el navegador para completar tu solicitud.\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join("\n")}`;
-            } else {
-              summaryText = `⚠️ **Automatización web finalizada** (${stepsCount} pasos)\n\nNavegué por el sitio web y realicé varias acciones, pero no pude confirmar que la tarea se completó al 100%.\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join("\n")}\n\nTe recomiendo verificar directamente en el sitio web.`;
             }
-
-            fullResponse = summaryText;
-            // Send the entire summary as a single chunk to preserve markdown formatting.
-            // Leading \n\n separates it from inline browser_report blockquotes already streamed.
-            sse.write("chunk", {
-              content: "\n\n" + summaryText,
-              sequence: 1,
-              runId,
-            });
-            console.log(`[AgentExecutor] browse_and_act FAST EXIT: success=${wasSuccessful}, steps=${stepsCount}`);
-            shouldExitAgentLoop = true;
-            break;
           }
-        } else if (part.text) {
-          textContent += part.text;
+
+          return result;
+        }
+      }));
+
+      const sessionFile = path.join(os.tmpdir(), `session-${runId}.json`);
+
+      const response = await runEmbeddedPiAgentSafe({
+        sessionId: runId,
+        sessionKey: chatId,
+        sessionFile,
+        workspaceDir: options.workspaceContext?.repositoryPath || process.cwd(),
+        prompt: currentPrompt,
+        model: "gemini-2.0-flash",
+        provider: "google",
+        timeoutMs: options.timeout || 600000, // Increased timeout to 10 mins since tool execution is synchronous inside OpenClaw
+        runId,
+        customCoreTools: openclawCustomTools,
+        extraSystemPrompt: systemInstruction
+      });
+
+      let hasToolCall = false; // With customCoreTools, tools run synchronously inside OpenClaw. OpenClaw returns the final response.
+      let textContent = "";
+
+      if (response.payloads && response.payloads.length > 0) {
+        for (const payload of response.payloads) {
+          if (payload.text) {
+            textContent += payload.text + "\n";
+          }
         }
       }
 
-      if (shouldExitAgentLoop) {
-        break;
+      // If OpenClaw aborted natively due to timeout or other error
+      if (response.meta.stopReason === "error" || response.meta.aborted) {
+        console.warn(`[AgentExecutor] OpenClaw run finished with error/abort.`);
       }
+
+      // Debug: log what the LLM returned
+      console.log(`[AgentExecutor] Iteration ${iteration}: OpenClaw returned final text payload of length ${textContent.length}`);
 
       if (textContent) {
         fullResponse += textContent;
@@ -1504,10 +1665,10 @@ MANDATORY RULES:
             continue; // retry the iteration
           }
 
-          const alreadyUsedListFiles = conversationHistory.some((m) =>
-            m.content.includes("[Called tool: list_files]"),
-          );
-          if (isLocalFsRequest && iteration <= 2 && !alreadyUsedListFiles) {
+          // If we already have deterministic evidence, no need to retry — Gemini
+          // should summarize the evidence we already injected. If it still didn't,
+          // just accept the text (evidence is in the system prompt).
+          if (isLocalFsRequest && !fsEvidence && iteration <= 2) {
             const inferredDirectory = inferLocalDirectoryFromPrompt(recentUserText || requestSpec.rawMessage || "");
             console.log(`[AgentExecutor] local_fs: LLM returned text instead of tool call on iteration ${iteration}, forcing list_files(${inferredDirectory})...`);
             conversationHistory.push({

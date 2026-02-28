@@ -1,4 +1,4 @@
-import { SquarePen, Search, Library, Bot, User } from "lucide-react";
+import { SquarePen, Search, Library, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -21,19 +21,19 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
   return (
     <TooltipProvider delayDuration={100}>
       <div className={cn(
-        "relative flex h-screen w-[60px] flex-col items-center py-3 futuristic-sidebar",
+        "flex h-screen w-[56px] flex-col items-center py-2 bg-[#eef3f4] dark:bg-[#111315] border-r border-black/10 dark:border-white/10",
         className
       )}>
-        <div className="flex flex-col items-center gap-1 mb-4">
+        <div className="flex flex-col items-center gap-1 mb-3">
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-10 w-10 rounded-xl hover:bg-[hsl(var(--sidebar-cyan)/0.1)] transition-all duration-200"
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-9 w-9 rounded-md hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
                 onClick={onExpand}
               >
-                <IliaGPTLogo size={28} className="futuristic-logo-glow" />
+                <IliaGPTLogo size={24} />
               </Button>
             </TooltipTrigger>
             <TooltipContent side="right">
@@ -45,14 +45,14 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
         <div className="flex flex-col items-center gap-1">
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-10 w-10 rounded-xl hover:bg-[hsl(var(--sidebar-cyan)/0.1)] hover:text-[hsl(var(--sidebar-cyan))] text-[hsl(var(--sidebar-foreground)/0.6)] transition-all duration-200"
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-9 w-9 rounded-md hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
                 onClick={onNewChat}
                 data-testid="mini-button-new-chat"
               >
-                <SquarePen className="h-5 w-5" />
+                <SquarePen className="h-4 w-4 text-foreground" />
               </Button>
             </TooltipTrigger>
             <TooltipContent side="right">
@@ -62,13 +62,13 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
 
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-10 w-10 rounded-xl hover:bg-[hsl(var(--sidebar-cyan)/0.1)] hover:text-[hsl(var(--sidebar-cyan))] text-[hsl(var(--sidebar-foreground)/0.6)] transition-all duration-200"
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-9 w-9 rounded-md hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
                 data-testid="mini-button-search"
               >
-                <Search className="h-5 w-5" />
+                <Search className="h-4 w-4 text-foreground" />
               </Button>
             </TooltipTrigger>
             <TooltipContent side="right">
@@ -78,13 +78,13 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
 
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-10 w-10 rounded-xl hover:bg-[hsl(var(--sidebar-cyan)/0.1)] hover:text-[hsl(var(--sidebar-cyan))] text-[hsl(var(--sidebar-foreground)/0.6)] transition-all duration-200"
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-9 w-9 rounded-md hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
                 data-testid="mini-button-library"
               >
-                <Library className="h-5 w-5" />
+                <Library className="h-4 w-4 text-foreground" />
               </Button>
             </TooltipTrigger>
             <TooltipContent side="right">
@@ -94,13 +94,13 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
 
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-10 w-10 rounded-xl hover:bg-[hsl(var(--sidebar-cyan)/0.1)] hover:text-[hsl(var(--sidebar-cyan))] text-[hsl(var(--sidebar-foreground)/0.6)] transition-all duration-200"
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-9 w-9 rounded-md hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
                 data-testid="mini-button-gpts"
               >
-                <Bot className="h-5 w-5" />
+                <Bot className="h-4 w-4 text-foreground" />
               </Button>
             </TooltipTrigger>
             <TooltipContent side="right">
@@ -112,14 +112,14 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
         <div className="mt-auto">
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-10 w-10 rounded-xl hover:bg-[hsl(var(--sidebar-cyan)/0.1)] transition-all duration-200"
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-9 w-9 rounded-md hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
                 data-testid="mini-button-user"
               >
-                <Avatar className="h-8 w-8 ring-1 ring-[hsl(var(--sidebar-cyan)/0.2)]">
-                  <AvatarFallback className="bg-[hsl(var(--sidebar-cyan)/0.1)] text-[hsl(var(--sidebar-cyan))] text-sm">{avatarInitial}</AvatarFallback>
+                <Avatar className="h-7 w-7">
+                  <AvatarFallback className="bg-muted text-muted-foreground text-xs">{avatarInitial}</AvatarFallback>
                 </Avatar>
               </Button>
             </TooltipTrigger>

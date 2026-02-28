@@ -10,6 +10,7 @@ import {
   AGENT_REGISTRY,
   AgentState
 } from "../langgraph/agents/types";
+import { initializeAgents } from "../langgraph/agents";
 import { toolRegistry, ToolExecutionResult } from "../registry/toolRegistry";
 import { activityStreamPublisher } from "./activityStream";
 import { agentEventBus } from "../eventBus";
@@ -175,6 +176,10 @@ Use the Command pattern: each step is a command that can be executed, retried, o
   }
 
   private initializeWorkerAdapters(): void {
+    if (AGENT_REGISTRY.size === 0) {
+      initializeAgents();
+    }
+
     for (const [name, agent] of AGENT_REGISTRY) {
       if (name !== "SupervisorAgent" && name !== "OrchestratorAgent") {
         const adapter: WorkerAdapter = {

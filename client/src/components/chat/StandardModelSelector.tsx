@@ -13,6 +13,12 @@ interface StandardModelSelectorProps {
     modelChangeDisabled?: boolean;
 }
 
+const safeText = (value: unknown, fallback = ""): string => {
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    return fallback;
+};
+
 export function StandardModelSelector({
     availableModels,
     selectedModelId,
@@ -32,9 +38,10 @@ export function StandardModelSelector({
     }, [selectedModelId, availableModels]);
 
     const providerLabel = (provider: string) => {
-        if (provider === "xai") return "xAI";
-        if (provider === "google" || provider === "gemini") return "Google Gemini";
-        return provider;
+        const providerText = safeText(provider, "").trim().toLowerCase();
+        if (providerText === "xai") return "xAI";
+        if (providerText === "google" || providerText === "gemini") return "Google Gemini";
+        return safeText(provider, "Proveedor");
     };
 
     if (!isAnyModelAvailable) {
@@ -83,8 +90,11 @@ export function StandardModelSelector({
                 {Object.entries(modelsByProvider).map(([provider, models]) => (
                     <optgroup key={provider} label={providerLabel(provider)}>
                         {models.map((model) => (
-                            <option key={model.id} value={model.id}>
-                                {model.name}
+                            <option
+                                key={safeText(model.id, model.modelId)}
+                                value={safeText(model.id, model.modelId)}
+                            >
+                                {safeText(model.name, model.modelId)}
                             </option>
                         ))}
                     </optgroup>

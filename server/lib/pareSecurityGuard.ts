@@ -11,6 +11,7 @@
 
 import { detectMime, validateMimeType, detectDangerousFormat, type MimeDetectionResult, type MimeValidationResult } from './mimeDetector';
 import { checkZipBomb, checkPathTraversalInZip, type ZipBombCheckResult, type ZipSecurityViolation, ZipViolationCode } from './zipBombGuard';
+import { LIMITS } from "./constants";
 
 export enum SecurityViolationType {
   MIME_DENIED = 'MIME_DENIED',
@@ -132,12 +133,13 @@ export async function validateAttachmentSecurity(
   let zipCheck: ZipBombCheckResult | undefined;
 
   try {
-    const maxSizeBytes = (options.maxFileSizeMB || 100) * 1024 * 1024;
+    const maxSizeMb = options.maxFileSizeMB || LIMITS.MAX_FILE_SIZE_MB;
+    const maxSizeBytes = maxSizeMb * 1024 * 1024;
     if (attachment.buffer.length > maxSizeBytes) {
       violations.push({
         type: SecurityViolationType.EXCESSIVE_SIZE,
         severity: 'medium',
-        message: `File size ${(attachment.buffer.length / (1024 * 1024)).toFixed(1)}MB exceeds limit of ${options.maxFileSizeMB || 100}MB`,
+        message: `File size ${(attachment.buffer.length / (1024 * 1024)).toFixed(1)}MB exceeds limit of ${maxSizeMb}MB`,
         details: {
           actualSize: attachment.buffer.length,
           limitSize: maxSizeBytes,

@@ -1,34 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { getOpenClawConfig } from '../config';
 
-function clearOpenClawEnv() {
-  const keys = [
-    'OPENCLAW_WORKSPACE_DIR',
-    'OPENCLAW_WS_PATH',
-    'OPENCLAW_SAFE_BINS',
-    'OPENCLAW_WORKSPACE_ROOT',
-    'OPENCLAW_EXEC_TIMEOUT',
-    'OPENCLAW_EXEC_SECURITY',
-    'OPENCLAW_PLUGINS_DIR',
-    'OPENCLAW_SKILLS_DIR',
-    'OPENCLAW_SKILLS_EXTRA_DIRS',
-    'OPENCLAW_SKILLS_INCLUDE_BUILTINS',
-    'OPENCLAW_SKILLS_AUTO_IMPORT_CLAWI',
-    'OPENCLAW_SKILL_MAX_BYTES',
-    'OPENCLAW_BLOCK_MIN_CHARS',
-    'OPENCLAW_BLOCK_MAX_CHARS',
-    'OPENCLAW_PREVIEW_MODE',
-    'OPENCLAW_ENABLED',
-  ];
-  for (const k of keys) delete process.env[k];
-}
-
 describe('OpenClaw Config', () => {
- 
-  beforeEach(() => {
-    clearOpenClawEnv();
-  }); 
-
   it('returns disabled by default when env vars are not set', () => {
     const config = getOpenClawConfig();
     expect(config.gateway.enabled).toBe(false);

@@ -149,7 +149,7 @@ export const AGENT_TOOLS: FunctionDeclaration[] = [
         parameters: {
             type: "object",
             properties: {
-                directory: { type: "string", description: "Directory path. Use '~' for home or '~/Desktop' for Desktop." },
+                directory: { type: "string", description: "Directory path. Use '~' for home, '~/Desktop' for Desktop, or relative paths like 'Desktop/MyFolder'. Defaults to home directory." },
                 maxEntries: { type: "number", description: "Maximum entries to return (default 200)." }
             }
         }
@@ -160,7 +160,7 @@ export const AGENT_TOOLS: FunctionDeclaration[] = [
         parameters: {
             type: "object",
             properties: {
-                filepath: { type: "string", description: "Path to the file to read." }
+                filepath: { type: "string", description: "Path to the file to read. Use '~/' prefix for home-relative paths, e.g. '~/Desktop/file.txt'." }
             },
             required: ["filepath"]
         }

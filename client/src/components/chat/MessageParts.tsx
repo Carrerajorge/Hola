@@ -555,8 +555,7 @@ interface AttachmentListProps {
 export const AttachmentList = memo(function AttachmentList({
     attachments,
     variant,
-    onOpenPreview,
-    onReopenDocument
+    onOpenPreview
 }: AttachmentListProps) {
     if (!attachments || attachments.length === 0) return null;
 
@@ -574,11 +573,17 @@ export const AttachmentList = memo(function AttachmentList({
                         className={cn(
                             "flex items-center gap-2 px-3 py-2 rounded-xl text-sm border bg-card border-border cursor-pointer hover:bg-accent transition-colors"
                         )}
-                        onClick={() => onReopenDocument?.({
-                            type: att.documentType as "word" | "excel" | "ppt",
-                            title: att.title || att.name,
-                            content: att.content || ""
-                        })}
+                        onClick={() => {
+                            const attachmentForPreview = {
+                                ...att,
+                                name: att.name || att.title || "Documento",
+                                mimeType: att.mimeType || (att.documentType === "pdf" ? "application/pdf" : undefined),
+                            } as NonNullable<Message["attachments"]>[0];
+
+                            if (onOpenPreview) {
+                                onOpenPreview(attachmentForPreview);
+                            }
+                        }}
                         data-testid={`attachment-document-${i}`}
                     >
                         <div

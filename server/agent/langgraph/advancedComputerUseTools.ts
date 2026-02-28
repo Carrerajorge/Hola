@@ -16,17 +16,17 @@
 
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import { terminalController } from "../computerUse/terminalController";
-import { universalBrowserController } from "../computerUse/universalBrowserController";
-import { browserEngineExtensions } from "../computerUse/browserEngineExtensions";
-import { workflowEngine } from "../computerUse/workflowEngine";
+import { terminalController } from "../terminalController";
+import { universalBrowserController } from "../universalBrowserController";
+import { browserEngineExtensions } from "../browserEngineExtensions";
+import { workflowEngine } from "../workflowEngine";
 
 // ============================================
 // Terminal: Process Management
 // ============================================
 
 export const terminalProcessManageTool = tool(
-  async (input) => {
+  async (input: any) => {
     try {
       switch (input.action) {
         case "list": {
@@ -67,7 +67,7 @@ export const terminalProcessManageTool = tool(
       filter: z.string().optional().describe("Filter processes by name (for list action)"),
       pid: z.number().optional().describe("Process ID to kill"),
       signal: z.string().optional().default("SIGTERM").describe("Signal: SIGTERM, SIGKILL, SIGHUP"),
-    }),
+    }) as any,
   }
 );
 
@@ -76,7 +76,7 @@ export const terminalProcessManageTool = tool(
 // ============================================
 
 export const terminalScriptExecuteTool = tool(
-  async (input) => {
+  async (input: any) => {
     try {
       const sid = input.sessionId || terminalController.createSession(input.cwd);
       const result = await terminalController.executeScript(sid, input.language, input.code, {
@@ -106,7 +106,7 @@ export const terminalScriptExecuteTool = tool(
       timeout: z.number().optional().default(60000).describe("Timeout in milliseconds"),
       cwd: z.string().optional().describe("Working directory"),
       sessionId: z.string().optional().describe("Reuse existing session"),
-    }),
+    }) as any,
   }
 );
 
@@ -115,7 +115,7 @@ export const terminalScriptExecuteTool = tool(
 // ============================================
 
 export const terminalPackageManageTool = tool(
-  async (input) => {
+  async (input: any) => {
     try {
       const sid = input.sessionId || terminalController.createSession();
       const result = await terminalController.installPackage(sid, input.manager, input.packages);
@@ -139,7 +139,7 @@ export const terminalPackageManageTool = tool(
       manager: z.enum(["npm", "pip", "apt"]).describe("Package manager"),
       packages: z.array(z.string()).describe("Package names to install"),
       sessionId: z.string().optional(),
-    }),
+    }) as any,
   }
 );
 
@@ -148,7 +148,7 @@ export const terminalPackageManageTool = tool(
 // ============================================
 
 export const browserPdfGenerateTool = tool(
-  async (input) => {
+  async (input: any) => {
     try {
       const page = universalBrowserController.getActivePage(input.sessionId);
       const { path: filePath } = await browserEngineExtensions.generatePdf(page, {
@@ -177,7 +177,7 @@ export const browserPdfGenerateTool = tool(
       landscape: z.boolean().optional().default(false),
       printBackground: z.boolean().optional().default(true),
       scale: z.number().optional().default(1).describe("Scale factor (0.1 to 2.0)"),
-    }),
+    }) as any,
   }
 );
 
@@ -186,7 +186,7 @@ export const browserPdfGenerateTool = tool(
 // ============================================
 
 export const browserAccessibilityTool = tool(
-  async (input) => {
+  async (input: any) => {
     try {
       const page = universalBrowserController.getActivePage(input.sessionId);
 
@@ -207,7 +207,7 @@ export const browserAccessibilityTool = tool(
       const tree = await browserEngineExtensions.getAccessibilityTree(page);
       // Flatten to summary
       const flatNodes: any[] = [];
-      function flatten(node: any, depth: number) {
+      const flatten = (node: any, depth: number) => {
         if (depth > 3) return;
         flatNodes.push({
           role: node.role,
@@ -217,7 +217,7 @@ export const browserAccessibilityTool = tool(
         if (node.children) {
           for (const child of node.children) flatten(child, depth + 1);
         }
-      }
+      };
       flatten(tree, 0);
 
       return JSON.stringify({
@@ -235,7 +235,7 @@ export const browserAccessibilityTool = tool(
     schema: z.object({
       sessionId: z.string().describe("Browser session ID"),
       role: z.string().optional().describe("Filter by role: button, link, heading, textbox, checkbox, radio, etc."),
-    }),
+    }) as any,
   }
 );
 
@@ -244,7 +244,7 @@ export const browserAccessibilityTool = tool(
 // ============================================
 
 export const browserPerformanceTool = tool(
-  async (input) => {
+  async (input: any) => {
     try {
       const page = universalBrowserController.getActivePage(input.sessionId);
       const metrics = await browserEngineExtensions.getPerformanceMetrics(page);
@@ -273,7 +273,7 @@ export const browserPerformanceTool = tool(
     description: "Get web performance metrics: load time, FCP, LCP, CLS, DOM nodes, resource count, JS heap size. Useful for performance auditing and optimization.",
     schema: z.object({
       sessionId: z.string().describe("Browser session ID"),
-    }),
+    }) as any,
   }
 );
 
@@ -282,7 +282,7 @@ export const browserPerformanceTool = tool(
 // ============================================
 
 export const browserElementPickerTool = tool(
-  async (input) => {
+  async (input: any) => {
     try {
       const page = universalBrowserController.getActivePage(input.sessionId);
 
@@ -322,7 +322,7 @@ export const browserElementPickerTool = tool(
         label: z.string().optional(),
         color: z.string().optional(),
       })).optional().describe("Elements to highlight"),
-    }),
+    }) as any,
   }
 );
 
@@ -331,7 +331,7 @@ export const browserElementPickerTool = tool(
 // ============================================
 
 export const browserConsoleTool = tool(
-  async (input) => {
+  async (input: any) => {
     try {
       if (input.action === "start") {
         const page = universalBrowserController.getActivePage(input.sessionId);
@@ -373,7 +373,7 @@ export const browserConsoleTool = tool(
       action: z.enum(["start", "get", "clear"]).describe("start: begin capture; get: retrieve logs; clear: reset"),
       filter: z.enum(["log", "error", "warning", "info"]).optional().describe("Filter by console type"),
       limit: z.number().optional().default(50).describe("Max entries to return"),
-    }),
+    }) as any,
   }
 );
 
@@ -382,7 +382,7 @@ export const browserConsoleTool = tool(
 // ============================================
 
 export const browserRecordingTool = tool(
-  async (input) => {
+  async (input: any) => {
     try {
       switch (input.action) {
         case "start": {
@@ -442,7 +442,7 @@ export const browserRecordingTool = tool(
       action: z.enum(["start", "stop", "list", "get"]).describe("Recording action"),
       name: z.string().optional().describe("Recording name (for start)"),
       recordingId: z.string().optional().describe("Recording ID (for get)"),
-    }),
+    }) as any,
   }
 );
 
@@ -451,7 +451,7 @@ export const browserRecordingTool = tool(
 // ============================================
 
 export const workflowExecuteTool = tool(
-  async (input) => {
+  async (input: any) => {
     try {
       if (input.action === "execute") {
         const execution = await workflowEngine.executeWorkflow(
@@ -515,7 +515,7 @@ export const workflowExecuteTool = tool(
       workflow: z.any().optional().describe("Workflow definition with name, steps array, and variables"),
       variables: z.record(z.any()).optional().describe("Input variables for the workflow"),
       executionId: z.string().optional().describe("Execution ID for status/cancel"),
-    }),
+    }) as any,
   }
 );
 
@@ -524,7 +524,7 @@ export const workflowExecuteTool = tool(
 // ============================================
 
 export const scrapingPipelineTool = tool(
-  async (input) => {
+  async (input: any) => {
     try {
       const page = universalBrowserController.getActivePage(input.sessionId);
       const result = await browserEngineExtensions.executeScraping(page, {
@@ -558,24 +558,11 @@ export const scrapingPipelineTool = tool(
       startUrl: z.string().describe("Starting URL"),
       name: z.string().optional(),
       pipelineId: z.string().optional(),
-      steps: z.array(z.object({
-        action: z.enum(["navigate", "click", "paginate", "extract", "wait", "condition"]),
-        selector: z.string().optional(),
-        url: z.string().optional(),
-        extractionRules: z.array(z.object({
-          name: z.string(),
-          selector: z.string(),
-          type: z.enum(["text", "html", "attribute", "list"]),
-          attribute: z.string().optional(),
-        })).optional(),
-        waitMs: z.number().optional(),
-        paginationSelector: z.string().optional(),
-        maxPages: z.number().optional(),
-      })).describe("Pipeline steps"),
+      steps: z.any().describe("Pipeline steps (array of actions)"),
       maxPages: z.number().optional().default(10),
       delay: z.number().optional().default(500),
       variables: z.record(z.any()).optional(),
-    }),
+    }) as any,
   }
 );
 
@@ -584,7 +571,7 @@ export const scrapingPipelineTool = tool(
 // ============================================
 
 export const browserNetworkThrottleTool = tool(
-  async (input) => {
+  async (input: any) => {
     try {
       const context = universalBrowserController.getSessionContext(input.sessionId);
 
@@ -603,7 +590,7 @@ export const browserNetworkThrottleTool = tool(
       }
 
       if (input.action === "list-presets") {
-        const { BrowserEngineExtensions } = await import("../computerUse/browserEngineExtensions");
+        const { BrowserEngineExtensions } = await import("../browserEngineExtensions");
         return JSON.stringify({
           success: true,
           presets: Object.entries(BrowserEngineExtensions.THROTTLE_PRESETS).map(([id, p]) => ({
@@ -628,7 +615,7 @@ export const browserNetworkThrottleTool = tool(
       sessionId: z.string().describe("Browser session ID"),
       action: z.enum(["set", "remove", "list-presets"]).describe("Throttle action"),
       preset: z.enum(["3g", "3g-slow", "4g", "wifi", "dial-up", "offline"]).optional().describe("Network preset"),
-    }),
+    }) as any,
   }
 );
 
@@ -637,13 +624,13 @@ export const browserNetworkThrottleTool = tool(
 // ============================================
 
 export const browserGeolocationTool = tool(
-  async (input) => {
+  async (input: any) => {
     try {
       const context = universalBrowserController.getSessionContext(input.sessionId);
 
       if (input.action === "set") {
         if (input.preset) {
-          const { BrowserEngineExtensions } = await import("../computerUse/browserEngineExtensions");
+          const { BrowserEngineExtensions } = await import("../browserEngineExtensions");
           const loc = BrowserEngineExtensions.LOCATION_PRESETS[input.preset];
           if (!loc) return JSON.stringify({ success: false, error: "Unknown preset" });
           await browserEngineExtensions.setGeolocation(context, loc.latitude, loc.longitude);
@@ -657,7 +644,7 @@ export const browserGeolocationTool = tool(
       }
 
       if (input.action === "list-presets") {
-        const { BrowserEngineExtensions } = await import("../computerUse/browserEngineExtensions");
+        const { BrowserEngineExtensions } = await import("../browserEngineExtensions");
         return JSON.stringify({
           success: true,
           presets: Object.entries(BrowserEngineExtensions.LOCATION_PRESETS).map(([id, l]) => ({
@@ -681,7 +668,7 @@ export const browserGeolocationTool = tool(
       preset: z.string().optional().describe("Location preset name"),
       latitude: z.number().optional().describe("Custom latitude"),
       longitude: z.number().optional().describe("Custom longitude"),
-    }),
+    }) as any,
   }
 );
 
@@ -690,7 +677,7 @@ export const browserGeolocationTool = tool(
 // ============================================
 
 export const browserHarTool = tool(
-  async (input) => {
+  async (input: any) => {
     try {
       if (input.action === "start") {
         const page = universalBrowserController.getActivePage(input.sessionId);
@@ -733,7 +720,7 @@ export const browserHarTool = tool(
     schema: z.object({
       sessionId: z.string().describe("Browser session ID"),
       action: z.enum(["start", "get", "export", "clear"]).describe("HAR action"),
-    }),
+    }) as any,
   }
 );
 
@@ -742,7 +729,7 @@ export const browserHarTool = tool(
 // ============================================
 
 export const browserFormFillTool = tool(
-  async (input) => {
+  async (input: any) => {
     try {
       const page = universalBrowserController.getActivePage(input.sessionId);
 
@@ -793,7 +780,7 @@ export const browserFormFillTool = tool(
       data: z.record(z.string()).optional().describe("Key-value pairs to fill (keys matched to fields automatically)"),
       username: z.string().optional().describe("Username/email for auth flow"),
       password: z.string().optional().describe("Password for auth flow"),
-    }),
+    }) as any,
   }
 );
 
@@ -802,7 +789,7 @@ export const browserFormFillTool = tool(
 // ============================================
 
 export const terminalEnvManageTool = tool(
-  async (input) => {
+  async (input: any) => {
     try {
       switch (input.action) {
         case "get": {
@@ -870,7 +857,7 @@ export const terminalEnvManageTool = tool(
       filter: z.string().optional().describe("Filter env vars by name substring"),
       variables: z.record(z.string()).optional().describe("Variables to set"),
       dotfilePath: z.string().optional().describe("Path to .env or shell config file"),
-    }),
+    }) as any,
   }
 );
 

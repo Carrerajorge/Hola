@@ -83,6 +83,31 @@ function generateRequestId(): string {
   return `req_${now}_${random}`;
 }
 
+function isUnsafeHttpMethod(method: string): boolean {
+  const upper = String(method || "GET").toUpperCase();
+  return upper !== "GET" && upper !== "HEAD" && upper !== "OPTIONS";
+}
+
+async function ensureCsrfTokenForUnsafeApiRequest(method: string, anonUserId: string | null, anonToken: string | null): Promise<string | null> {
+  if (!isUnsafeHttpMethod(method)) return getCookie("XSRF-TOKEN");
+  const existing = getCookie("XSRF-TOKEN");
+  if (existing) return existing;
+
+  try {
+    const headers = new Headers();
+    if (anonUserId) headers.set("X-Anonymous-User-Id", anonUserId);
+    if (anonToken) headers.set("X-Anonymous-Token", anonToken);
+    await fetch("/api/csrf/token?rotate=1", {
+      method: "GET",
+      credentials: "include",
+      headers,
+    });
+  } catch {
+    // Best effort only.
+  }
+  return getCookie("XSRF-TOKEN");
+}
+
 export async function apiFetch(url: string, options: RequestInit & { timeoutMs?: number } = {}): Promise<Response> {
   const safeUrl = resolveSafeUrl(url);
   const anonUserId = getStoredAnonUserId();
@@ -98,8 +123,17 @@ export async function apiFetch(url: string, options: RequestInit & { timeoutMs?:
     headers.set("X-Anonymous-Token", anonToken);
   }
 
-  // FRONTEND FIX #12: Use safer cookie parsing for CSRF token
-  const csrfToken = getCookie("XSRF-TOKEN");
+  const requestMethod = String(fetchOptions.method || "GET").toUpperCase();
+  const shouldEnsureCsrf =
+    isUnsafeHttpMethod(requestMethod) &&
+    new URL(safeUrl).pathname.startsWith("/api/") &&
+    !headers.has("X-CSRF-Token") &&
+    !headers.has("x-csrf-token");
+
+  let csrfToken = getCookie("XSRF-TOKEN");
+  if (!csrfToken && shouldEnsureCsrf) {
+    csrfToken = await ensureCsrfTokenForUnsafeApiRequest(requestMethod, anonUserId, anonToken);
+  }
 
   if (csrfToken) {
     headers.set("X-CSRF-Token", csrfToken);
@@ -124,7 +158,6 @@ export async function apiFetch(url: string, options: RequestInit & { timeoutMs?:
     headers,
     credentials: "include",
   };
-  const requestMethod = String(finalOptions.method || "GET").toUpperCase();
   const allowDevFallback = requestMethod === "GET" || requestMethod === "HEAD" || requestMethod === "OPTIONS";
   const fallbackUrls = allowDevFallback ? buildDevApiFallbackUrls(safeUrl) : [];
   const runFetch = async (targetUrl: string): Promise<Response> => {

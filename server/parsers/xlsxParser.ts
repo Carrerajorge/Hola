@@ -3,7 +3,7 @@ const ExcelJS = (ExcelJSModule as any).default || ExcelJSModule;
 import type { FileParser, ParsedResult, DetectedFileType } from "./base";
 
 // Security limits
-const XLSX_MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+const XLSX_MAX_FILE_SIZE = Number(process.env.XLSX_MAX_FILE_SIZE_MB || process.env.MAX_FILE_SIZE_MB || "2048") * 1024 * 1024;
 const XLSX_MAX_SHEETS = 100;
 const XLSX_MAX_CELL_VALUE_LENGTH = 50_000;
 const XLSX_MAX_METADATA_VALUE_LENGTH = 1000;

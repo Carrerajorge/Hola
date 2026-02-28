@@ -5,10 +5,13 @@ import {
     Send,
     Pencil,
     Copy,
-    CheckCircle2
+    CheckCircle2,
+    Loader2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { motion } from "framer-motion";
+import { cn } from "@/lib/utils";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import { Message } from "@/hooks/use-chats";
 import { AttachmentList, formatMessageTime, DocumentBlock } from "./MessageParts";
@@ -27,6 +30,7 @@ export interface UserMessageProps {
     onOpenPreview: (attachment: NonNullable<Message["attachments"]>[0]) => void;
     onReopenDocument?: (doc: { type: "word" | "excel" | "ppt"; title: string; content: string }) => void;
     onRetrySend?: (msg: Message) => void;
+    documentAnalysisStatus?: { state: "processing" | "error"; text: string };
 }
 
 export const UserMessage = memo(function UserMessage({
@@ -42,9 +46,20 @@ export const UserMessage = memo(function UserMessage({
     onStartEdit,
     onOpenPreview,
     onReopenDocument,
-    onRetrySend
+    onRetrySend,
+    documentAnalysisStatus
 }: UserMessageProps) {
     const { settings: platformSettings } = usePlatformSettings();
+    const hasDocumentAttachments = !!message.attachments?.some((att) => {
+        const attachmentType = (att.type || "").toLowerCase();
+        const attachmentMime = (att.mimeType || "").toLowerCase();
+        const attachmentName = (att.name || "").toLowerCase();
+
+        if (attachmentType && attachmentType !== "image") return true;
+        if (attachmentMime && !attachmentMime.startsWith("image/")) return true;
+        return /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|csv|txt|rtf|odt|ods|odp|json)$/i.test(attachmentName);
+    });
+    const showDocumentAnalysisIndicator = hasDocumentAttachments && documentAnalysisStatus?.state === "processing";
 
     if (variant === "compact") {
         return (
@@ -56,6 +71,9 @@ export const UserMessage = memo(function UserMessage({
                         onOpenPreview={onOpenPreview}
                         onReopenDocument={onReopenDocument}
                     />
+                )}
+                {showDocumentAnalysisIndicator && (
+                    <DocumentAnalysisInlineStatus text={documentAnalysisStatus.text} />
                 )}
                 {message.content && (
                     <div className="bg-primary/10 text-primary-foreground px-3 py-2 rounded-lg max-w-full text-sm">
@@ -108,6 +126,9 @@ export const UserMessage = memo(function UserMessage({
                         onOpenPreview={onOpenPreview}
                         onReopenDocument={onReopenDocument}
                     />
+                    {showDocumentAnalysisIndicator && (
+                        <DocumentAnalysisInlineStatus text={documentAnalysisStatus.text} />
+                    )}
                     {message.content && (
                         <div className="liquid-message-user px-4 py-2.5 text-sm break-words leading-relaxed">
                             {message.content}
@@ -198,6 +219,31 @@ export const UserMessage = memo(function UserMessage({
         prevProps.isEditing === nextProps.isEditing &&
         prevProps.editContent === nextProps.editContent &&
         prevProps.copiedMessageId === nextProps.copiedMessageId &&
-        prevProps.message.attachments === nextProps.message.attachments
+        prevProps.message.attachments === nextProps.message.attachments &&
+        prevProps.documentAnalysisStatus?.state === nextProps.documentAnalysisStatus?.state &&
+        prevProps.documentAnalysisStatus?.text === nextProps.documentAnalysisStatus?.text
+    );
+});
+
+const DocumentAnalysisInlineStatus = memo(function DocumentAnalysisInlineStatus({
+    text,
+}: {
+    text: string;
+}) {
+    return (
+        <div className="mt-1 flex justify-end">
+            <div className="relative overflow-hidden rounded-full border border-cyan-300/40 bg-cyan-50/70 dark:bg-cyan-900/20 px-3 py-1.5 text-[11px] text-cyan-700 dark:text-cyan-200 shadow-sm backdrop-blur-sm">
+                <motion.span
+                    aria-hidden
+                    className="pointer-events-none absolute -inset-y-1 -left-1/2 w-1/2 bg-gradient-to-r from-transparent via-cyan-200/70 to-transparent dark:via-cyan-400/35 blur-[2px]"
+                    animate={{ x: ["-10%", "260%"] }}
+                    transition={{ duration: 1.8, ease: "linear", repeat: Infinity }}
+                />
+                <div className="relative z-10 flex items-center gap-1.5">
+                    <Loader2 className={cn("h-3.5 w-3.5 animate-spin")} />
+                    <span>{text || "Analizando documentos adjuntos..."}</span>
+                </div>
+            </div>
+        </div>
     );
 });

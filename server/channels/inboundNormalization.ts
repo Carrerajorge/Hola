@@ -1,7 +1,9 @@
 import type { ConversationKey, ExternalChannel, MessageEnvelope } from "./types";
 
 const MAX_TEXT_LENGTH = 4000;
-const MAX_ID_LENGTH = 80;
+// Telegram `file_id` values can exceed 80 chars; keep enough room so media IDs
+// are not truncated before `getFile`/download.
+const MAX_ID_LENGTH = 256;
 const MAX_FILE_NAME_LENGTH = 180;
 const MAX_IDENTIFIER_TEXT_LENGTH = 120;
 const MAX_METADATA_TEXT_LENGTH = 280;
@@ -139,13 +141,25 @@ function sanitizeMetadataText(value: unknown): string {
 }
 
 function sanitizeMimeType(messageType: MessageEnvelope["messageType"], value: unknown): string {
-  const normalized = sanitizeOptionalText(value).toLowerCase();
+  const normalizedRaw = sanitizeOptionalText(value).toLowerCase();
+  if (!normalizedRaw) {
+    return messageType === "text" ? "text/plain" : "";
+  }
+
+  const normalized = normalizedRaw.split(";")[0].trim();
   if (!normalized) {
     return messageType === "text" ? "text/plain" : "";
   }
 
   const allowed = ALLOWED_MIME_TYPES[messageType] ?? ALLOWED_MIME_TYPES.unsupported;
   if (!allowed.size || allowed.has(normalized)) return normalized;
+
+  if (messageType === "image" && normalized.startsWith("image/")) return normalized;
+  if (messageType === "audio" && normalized.startsWith("audio/")) return normalized;
+  if (messageType === "document" && (normalized.startsWith("application/") || normalized.startsWith("text/"))) {
+    return normalized;
+  }
+  if (messageType === "document") return "application/octet-stream";
   return messageType === "text" ? "text/plain" : "";
 }
 
@@ -585,7 +599,7 @@ export function normalizeTelegramMessages(payload: any): MessageEnvelope[] {
 
   const text = sanitizeTextForStorage(msg?.text);
   const caption = sanitizeMetadataText(msg?.caption);
-  const chatId = sanitizeChatId(msg?.chat?.id);
+  const chatId = normalizeChatId(msg?.chat?.id);
   const messageId = sanitizeIdentifierStrict(msg?.message_id);
   const from = sanitizeIdentifierStrict(msg?.from?.id);
   if (!chatId || !from || !messageId) return out;
@@ -641,7 +655,7 @@ export function normalizeTelegramMessages(payload: any): MessageEnvelope[] {
   }
 
   if (msg?.voice) {
-    const mimeType = sanitizeMimeType("audio", msg?.voice?.mime_type);
+    const mimeType = sanitizeMimeType("audio", msg?.voice?.mime_type || "audio/ogg");
     if (!mimeType) return out;
     const voiceId = sanitizeIdentifierStrict(msg?.voice?.file_id);
     if (!voiceId) return out;

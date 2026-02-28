@@ -4,6 +4,11 @@ import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { createGptActionRuntime, normalizeGptActionRequestPayload } from "../services/gptActionRuntime";
 import { gptActionCreateSchema, gptActionUpdateSchema, gptActionUseSchema } from "@shared/schema/gpt";
 import { safeErrorMessage } from "../lib/safeError";
+import {
+  DEFAULT_GPT_CAPABILITIES,
+  normalizeGptCapabilities,
+  normalizeGptCapabilitiesPatch,
+} from "../lib/gptCapabilities";
 
 const DEFAULT_GPT_MODEL = "grok-4-1-fast-non-reasoning";
 const DEFAULT_GPT_KNOWLEDGE_SOURCES: Array<Record<string, any>> = [];
@@ -16,6 +21,7 @@ const MAX_GPT_ACTION_REQUEST_DEPTH = 16;
 const MAX_GPT_ACTION_REQUEST_ARRAY = 400;
 const MAX_GPT_ACTION_REQUEST_STRING_BYTES = 10_240;
 const MAX_GPT_ACTION_ERROR_MESSAGE_BYTES = 1_024;
+const MAX_GPT_SLUG_LENGTH = 120;
 const FORBIDDEN_REQUEST_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 
 function asRecord(value: unknown): Record<string, any> | null {
@@ -55,15 +61,7 @@ function asStringArray(value: unknown, fallback: string[] = []): string[] {
 }
 
 function normalizeCapabilities(value: unknown) {
-  const source = asRecord(value) || {};
-  return {
-    webBrowsing: asBoolean(source.webBrowsing, false),
-    codeInterpreter: asBoolean(source.codeInterpreter, false),
-    imageGeneration: asBoolean(source.imageGeneration, false),
-    fileUpload: asBoolean(source.fileUpload, false),
-    dataAnalysis: asBoolean(source.dataAnalysis, false),
-    canvas: asBoolean(source.canvas, false),
-  };
+  return normalizeGptCapabilities(value, DEFAULT_GPT_CAPABILITIES);
 }
 
 function normalizeRuntimePolicy(value: unknown) {
@@ -106,7 +104,7 @@ function definitionFromRequest(body: any) {
     conversationStarters: Array.isArray(definitionBody.conversationStarters)
       ? definitionBody.conversationStarters
       : (Array.isArray(body.conversationStarters) ? body.conversationStarters : undefined),
-    capabilities: capabilities ? normalizeCapabilities(capabilities) : undefined,
+    capabilities: capabilities ? normalizeGptCapabilitiesPatch(capabilities) : undefined,
     knowledgeSources: Array.isArray(knowledgeSources) ? knowledgeSources : undefined,
     actions: Array.isArray(actions) ? actions : undefined,
     policies: policies ? normalizeRuntimePolicy(policies) : undefined,
@@ -149,6 +147,7 @@ function mergeDefinitions(base: any, patch: any) {
   if (patch && Object.prototype.hasOwnProperty.call(patch, "actions")) {
     next.actions = Array.isArray(patch.actions) ? patch.actions : [];
   }
+  next.capabilities = normalizeCapabilities(next.capabilities);
   return next;
 }
 
@@ -172,6 +171,55 @@ function sanitizeTextForRoute(value: string, maxBytes: number): string {
   return normalized.slice(0, maxBytes);
 }
 
+function normalizeSlugPart(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function buildSlugWithSuffix(baseSlug: string, suffix: string): string {
+  const maxBaseLength = Math.max(1, MAX_GPT_SLUG_LENGTH - suffix.length);
+  const trimmedBase = baseSlug.slice(0, maxBaseLength).replace(/-+$/g, "");
+  return `${trimmedBase}${suffix}`;
+}
+
+function normalizeGptSlug(rawSlug: unknown, fallbackName: string): string {
+  const requested = typeof rawSlug === "string" ? rawSlug : "";
+  const requestedNormalized = normalizeSlugPart(requested);
+  if (requestedNormalized) {
+    return requestedNormalized.slice(0, MAX_GPT_SLUG_LENGTH);
+  }
+
+  const fallbackNormalized = normalizeSlugPart(fallbackName);
+  if (fallbackNormalized) {
+    return fallbackNormalized.slice(0, MAX_GPT_SLUG_LENGTH);
+  }
+
+  return "gpt";
+}
+
+async function resolveUniqueGptSlug(baseSlug: string, excludeGptId?: string): Promise<string> {
+  const normalizedBase = normalizeSlugPart(baseSlug) || "gpt";
+  const initialCandidate = normalizedBase.slice(0, MAX_GPT_SLUG_LENGTH);
+  let candidate = initialCandidate;
+
+  for (let index = 0; index < 2000; index += 1) {
+    const existing = await storage.getGptBySlug(candidate);
+    if (!existing || (excludeGptId && existing.id === excludeGptId)) {
+      return candidate;
+    }
+
+    const suffix = `-${index + 2}`;
+    candidate = buildSlugWithSuffix(initialCandidate, suffix);
+  }
+
+  const fallbackSuffix = `-${Date.now().toString(36)}`;
+  return buildSlugWithSuffix(initialCandidate, fallbackSuffix);
+}
+
 function normalizeIdentifier(rawId: unknown): string | null {
   if (typeof rawId !== "string") {
     return null;
@@ -181,6 +229,14 @@ function normalizeIdentifier(rawId: unknown): string | null {
     return null;
   }
   return normalized;
+}
+
+function isGptSlugUniqueViolation(error: any): boolean {
+  if (!error || typeof error !== "object") return false;
+  if (error.code !== "23505") return false;
+  const constraint = typeof error.constraint === "string" ? error.constraint : "";
+  const detail = typeof error.detail === "string" ? error.detail : "";
+  return constraint.includes("slug") || detail.includes("(slug)");
 }
 
 function sanitizeRoutePayloadObject(value: unknown, depth = 0, seen = new WeakSet<object>()): unknown {
@@ -479,47 +535,55 @@ export function createGptRouter() {
           actions: [],
         },
       });
-      const finalDefinition = {
-        ...gptDefinition,
-        ...payload,
-      };
+      const finalDefinition = mergeDefinitions(gptDefinition, payload);
       const canonicalName = finalDefinition.name || name;
 
-      // Get authenticated user ID
-      const session = req.session as any;
-      const userId = (req as any).user?.claims?.sub || (req as any).user?.id || session?.authUserId;
-      const creatorId = userId || null;
+      // Resolve owner for authenticated and anonymous sessions
+      const creatorId = getOrCreateSecureUserId(req);
 
-      if (!canonicalName || !slug) {
-        return res.status(400).json({ error: "El nombre y el slug son requeridos." });
+      if (!canonicalName) {
+        return res.status(400).json({ error: "El nombre es requerido." });
+      }
+      const normalizedSlug = normalizeGptSlug(slug, canonicalName);
+      const uniqueSlug = await resolveUniqueGptSlug(normalizedSlug);
+
+      let gpt: any = null;
+      let candidateSlug = uniqueSlug;
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+          gpt = await storage.createGpt({
+            name: canonicalName,
+            slug: candidateSlug,
+            description: finalDefinition.description || description || null,
+            avatar: finalDefinition.avatar || avatar || null,
+            categoryId: categoryId || null,
+            creatorId: creatorId,
+            visibility: visibility || "private",
+            systemPrompt: finalDefinition.instructions || "",
+            temperature: temperature || "0.7",
+            topP: topP || "1",
+            maxTokens: asNumber(maxTokens, 4096),
+            welcomeMessage: welcomeMessage || null,
+            capabilities: finalDefinition.capabilities,
+            conversationStarters: finalDefinition.conversationStarters || [],
+            recommendedModel: finalDefinition.model || DEFAULT_GPT_MODEL,
+            runtimePolicy: getRuntimePolicyPayload(finalDefinition.policies),
+            toolPermissions: normalizeToolPermissions(req.body.toolPermissions),
+            isPublished: isPublished || "false",
+            version: 1
+          });
+          break;
+        } catch (insertError: any) {
+          if (!isGptSlugUniqueViolation(insertError)) {
+            throw insertError;
+          }
+          candidateSlug = await resolveUniqueGptSlug(`${candidateSlug}-${attempt + 2}`);
+        }
       }
 
-      const existing = await storage.getGptBySlug(slug);
-      if (existing) {
-        return res.status(409).json({ error: "A GPT with this slug already exists" });
+      if (!gpt) {
+        return res.status(500).json({ error: "No se pudo generar un slug único para el GPT." });
       }
-
-      const gpt = await storage.createGpt({
-        name: canonicalName,
-        slug,
-        description: finalDefinition.description || description || null,
-        avatar: finalDefinition.avatar || avatar || null,
-        categoryId: categoryId || null,
-        creatorId: creatorId,
-        visibility: visibility || "private",
-        systemPrompt: finalDefinition.instructions || "",
-        temperature: temperature || "0.7",
-        topP: topP || "1",
-        maxTokens: asNumber(maxTokens, 4096),
-        welcomeMessage: welcomeMessage || null,
-        capabilities: finalDefinition.capabilities,
-        conversationStarters: finalDefinition.conversationStarters || [],
-        recommendedModel: finalDefinition.model || DEFAULT_GPT_MODEL,
-        runtimePolicy: getRuntimePolicyPayload(finalDefinition.policies),
-        toolPermissions: normalizeToolPermissions(req.body.toolPermissions),
-        isPublished: isPublished || "false",
-        version: 1
-      });
 
       await storage.createGptVersion({
         gptId: gpt.id,
@@ -577,7 +641,12 @@ export function createGptRouter() {
       const nextRuntimePolicy = getRuntimePolicyPayload(mergedDefinition.policies);
       const latestVersion = (await storage.getLatestGptVersion(req.params.id))?.versionNumber ?? 0;
       const requestedSlug = asString(req.body.slug);
-      const nextSlug = requestedSlug && requestedSlug !== currentGpt.slug ? requestedSlug : currentGpt.slug;
+      const desiredSlug = requestedSlug
+        ? normalizeGptSlug(requestedSlug, mergedDefinition.name || currentGpt.name)
+        : currentGpt.slug;
+      const nextSlug = requestedSlug
+        ? await resolveUniqueGptSlug(desiredSlug, req.params.id)
+        : currentGpt.slug;
 
       const nextVersionNumber = latestVersion ? latestVersion + 1 : 1;
       const requestedTemperature = asNumber(req.body.temperature, parseFloat(currentGpt.temperature || "0.7"));
@@ -602,14 +671,6 @@ export function createGptRouter() {
         recommendedModel: mergedDefinition.model || currentGpt.recommendedModel || DEFAULT_GPT_MODEL,
         definition: mergedDefinition,
       };
-
-      // Check for slug collision if slug is being updated
-      if (req.body.slug && req.body.slug !== currentGpt.slug) {
-        const existing = await storage.getGptBySlug(req.body.slug);
-        if (existing && existing.id !== req.params.id) {
-          return res.status(409).json({ error: "Ya existe un GPT con este nombre/slug. Por favor elige otro nombre." });
-        }
-      }
 
       const updatedGpt = await storage.updateGpt(req.params.id, updatePayload as any);
 

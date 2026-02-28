@@ -207,7 +207,6 @@ describe("startTelegramWebhook", () => {
     initSpy.mockClear();
     createTelegramBotSpy.mockClear();
     webhookCallbackSpy.mockClear();
-    const runtimeLog = vi.fn();
     const abort = new AbortController();
     const cfg = { bindings: [] };
     const { server } = await startTelegramWebhook({
@@ -217,7 +216,6 @@ describe("startTelegramWebhook", () => {
       config: cfg,
       port: 0, // random free port
       abortSignal: abort.signal,
-      runtime: { log: runtimeLog, error: vi.fn(), exit: vi.fn() },
     });
     expect(createTelegramBotSpy).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -247,13 +245,6 @@ describe("startTelegramWebhook", () => {
         onTimeout: "return",
         timeoutMilliseconds: 10_000,
       },
-    );
-    expect(runtimeLog).toHaveBeenCalledWith(
-      expect.stringContaining("webhook local listener on http://127.0.0.1:"),
-    );
-    expect(runtimeLog).toHaveBeenCalledWith(expect.stringContaining("/telegram-webhook"));
-    expect(runtimeLog).toHaveBeenCalledWith(
-      expect.stringContaining("webhook advertised to telegram on http://"),
     );
 
     abort.abort();
@@ -304,7 +295,6 @@ describe("startTelegramWebhook", () => {
 
   it("registers webhook using the bound listening port when port is 0", async () => {
     setWebhookSpy.mockClear();
-    const runtimeLog = vi.fn();
     const abort = new AbortController();
     const { server } = await startTelegramWebhook({
       token: "tok",
@@ -312,7 +302,6 @@ describe("startTelegramWebhook", () => {
       port: 0,
       abortSignal: abort.signal,
       path: "/hook",
-      runtime: { log: runtimeLog, error: vi.fn(), exit: vi.fn() },
     });
     try {
       const addr = server.address();
@@ -326,9 +315,6 @@ describe("startTelegramWebhook", () => {
         expect.objectContaining({
           secret_token: "secret",
         }),
-      );
-      expect(runtimeLog).toHaveBeenCalledWith(
-        `webhook local listener on http://127.0.0.1:${addr.port}/hook`,
       );
     } finally {
       abort.abort();

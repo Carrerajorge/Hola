@@ -6,6 +6,7 @@
 import path from 'path';
 import crypto from 'crypto';
 import { Request, Response, NextFunction } from 'express';
+import { LIMITS } from '../lib/constants';
 
 // Allowed file types with their MIME types and magic bytes
 const ALLOWED_FILE_TYPES: Record<string, {
@@ -44,7 +45,7 @@ const ALLOWED_FILE_TYPES: Record<string, {
             [0x50, 0x4B, 0x03, 0x04], // ZIP-based (DOCX, XLSX, PPTX)
             [0xD0, 0xCF, 0x11, 0xE0], // Legacy Office (DOC, XLS, PPT)
         ],
-        maxSize: 50 * 1024 * 1024, // 50MB
+        maxSize: LIMITS.MAX_FILE_SIZE_BYTES,
     },
     audio: {
         mimeTypes: ['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/webm'],

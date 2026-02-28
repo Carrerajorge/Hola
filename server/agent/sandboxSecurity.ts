@@ -36,6 +36,7 @@ const WEBTOOL_CONFIG: SandboxConfig = {
     "*.google.com",
     "*.bing.com", 
     "*.duckduckgo.com",
+    "*.universidadperu.com",
     "*.wikipedia.org",
     "*.github.com",
     "*.stackoverflow.com",

@@ -34,7 +34,11 @@ const DEFAULT_ACCEPTED_TYPES = [
     '.csv', '.json',
 ];
 
-const MAX_FILE_SIZE_MB = 500;
+const DEFAULT_FILE_SIZE_FLOOR_MB = 2048;
+const parsedEnvMaxFileSizeMb = Number(import.meta.env.VITE_MAX_FILE_SIZE_MB);
+const MAX_FILE_SIZE_MB = Number.isFinite(parsedEnvMaxFileSizeMb) && parsedEnvMaxFileSizeMb > 0
+    ? Math.max(parsedEnvMaxFileSizeMb, DEFAULT_FILE_SIZE_FLOOR_MB)
+    : DEFAULT_FILE_SIZE_FLOOR_MB;
 
 export function FileDropZone({
     onFilesDropped,

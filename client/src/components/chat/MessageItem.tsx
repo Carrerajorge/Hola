@@ -48,6 +48,10 @@ export interface MessageItemProps {
     onUserRetrySend?: (message: Message) => void;
     onToolConfirm?: (messageId: string, toolName: string, stepIndex: number) => void;
     onToolDeny?: (messageId: string, toolName: string, stepIndex: number) => void;
+    documentAnalysisStatus?: {
+        state: "processing" | "error";
+        text: string;
+    };
 }
 
 export const MessageItem = memo(function MessageItem({
@@ -89,7 +93,8 @@ export const MessageItem = memo(function MessageItem({
     onQuestionClick,
     onUserRetrySend,
     onToolConfirm,
-    onToolDeny
+    onToolDeny,
+    documentAnalysisStatus
 }: MessageItemProps) {
     return (
         <div
@@ -128,12 +133,14 @@ export const MessageItem = memo(function MessageItem({
                         onOpenPreview={handleOpenFileAttachmentPreview}
                         onReopenDocument={handleReopenDocument}
                         onRetrySend={onUserRetrySend}
+                        documentAnalysisStatus={documentAnalysisStatus}
                     />
                 ) : message.role === "system" && message.attachments?.some(a => a.type === "document") ? (
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                         <AttachmentList
                             attachments={message.attachments}
                             variant={variant}
+                            onOpenPreview={handleOpenFileAttachmentPreview}
                             onReopenDocument={handleReopenDocument}
                         />
                     </div>
@@ -157,6 +164,7 @@ export const MessageItem = memo(function MessageItem({
                         onShare={handleShare}
                         onReadAloud={handleReadAloud}
                         onOpenDocumentPreview={handleOpenDocumentPreview}
+                        onOpenFileAttachmentPreview={handleOpenFileAttachmentPreview}
                         onDownloadImage={handleDownloadImage}
                         onOpenLightbox={setLightboxImage}
                         onReopenDocument={handleReopenDocument}
@@ -198,6 +206,8 @@ export const MessageItem = memo(function MessageItem({
         prevProps.pendingGeneratedImage === nextProps.pendingGeneratedImage &&
         prevProps.aiState === nextProps.aiState &&
         prevProps.regeneratingMsgIndex === nextProps.regeneratingMsgIndex &&
-        prevProps.minimizedDocument === nextProps.minimizedDocument
+        prevProps.minimizedDocument === nextProps.minimizedDocument &&
+        prevProps.documentAnalysisStatus?.state === nextProps.documentAnalysisStatus?.state &&
+        prevProps.documentAnalysisStatus?.text === nextProps.documentAnalysisStatus?.text
     );
 });

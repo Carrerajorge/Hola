@@ -1,5 +1,5 @@
 import { env } from "../config/env";
-import crypto from "crypto";
+import * as crypto from "crypto";
 
 export class SecretManager {
     /**

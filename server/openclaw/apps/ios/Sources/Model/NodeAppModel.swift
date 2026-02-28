@@ -46,7 +46,6 @@ private enum IOSDeepLinkAgentPolicy {
 
 @MainActor
 @Observable
-// swiftlint:disable type_body_length file_length
 final class NodeAppModel {
     struct AgentDeepLinkPrompt: Identifiable, Equatable {
         let id: String
@@ -415,10 +414,8 @@ final class NodeAppModel {
         }
         let wasSuppressed = self.backgroundReconnectSuppressed
         self.backgroundReconnectSuppressed = false
-        let leaseLogMessage =
-            "Background reconnect lease reason=\(reason) "
-            + "seconds=\(leaseSeconds) wasSuppressed=\(wasSuppressed)"
-        self.pushWakeLogger.info("\(leaseLogMessage, privacy: .public)")
+        self.pushWakeLogger.info(
+            "Background reconnect lease reason=\(reason, privacy: .public) seconds=\(leaseSeconds, privacy: .public) wasSuppressed=\(wasSuppressed, privacy: .public)")
     }
 
     private func suppressBackgroundReconnect(reason: String, disconnectIfNeeded: Bool) {
@@ -428,10 +425,8 @@ final class NodeAppModel {
         self.backgroundReconnectLeaseUntil = nil
         self.backgroundReconnectSuppressed = true
         guard changed else { return }
-        let suppressLogMessage =
-            "Background reconnect suppressed reason=\(reason) "
-            + "disconnect=\(disconnectIfNeeded)"
-        self.pushWakeLogger.info("\(suppressLogMessage, privacy: .public)")
+        self.pushWakeLogger.info(
+            "Background reconnect suppressed reason=\(reason, privacy: .public) disconnect=\(disconnectIfNeeded, privacy: .public)")
         guard disconnectIfNeeded else { return }
         Task { [weak self] in
             guard let self else { return }
@@ -612,7 +607,7 @@ final class NodeAppModel {
         self.voiceWakeSyncTask = Task { [weak self] in
             guard let self else { return }
 
-            if !self.isGatewayHealthMonitorDisabled() {
+            if !(await self.isGatewayHealthMonitorDisabled()) {
                 await self.refreshWakeWordsFromGateway()
             }
 
@@ -667,13 +662,9 @@ final class NodeAppModel {
         self.gatewayHealthMonitor.start(
             check: { [weak self] in
                 guard let self else { return false }
-                if await MainActor.run(body: { self.isGatewayHealthMonitorDisabled() }) { return true }
+                if await self.isGatewayHealthMonitorDisabled() { return true }
                 do {
-                    let data = try await self.operatorGateway.request(
-                        method: "health",
-                        paramsJSON: nil,
-                        timeoutSeconds: 6
-                    )
+                    let data = try await self.operatorGateway.request(method: "health", paramsJSON: nil, timeoutSeconds: 6)
                     guard let decoded = try? JSONDecoder().decode(OpenClawGatewayHealthOK.self, from: data) else {
                         return false
                     }
@@ -1774,10 +1765,7 @@ private extension NodeAppModel {
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
                     continue
                 }
-                if self.shouldPauseReconnectLoopInBackground(source: "operator_loop") {
-                    try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    continue
-                }
+                if self.shouldPauseReconnectLoopInBackground(source: "operator_loop") { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
                 if await self.isOperatorConnected() {
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
                     continue
@@ -1842,8 +1830,6 @@ private extension NodeAppModel {
         }
     }
 
-    // Legacy reconnect state machine; follow-up refactor needed to split into helpers.
-    // swiftlint:disable:next function_body_length
     func startNodeGatewayLoop(
         url: URL,
         stableID: String,
@@ -1868,10 +1854,7 @@ private extension NodeAppModel {
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
                     continue
                 }
-                if self.shouldPauseReconnectLoopInBackground(source: "node_loop") {
-                    try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    continue
-                }
+                if self.shouldPauseReconnectLoopInBackground(source: "node_loop") { try? await Task.sleep(nanoseconds: 2_000_000_000); continue }
                 if await self.isGatewayConnected() {
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
                     continue
@@ -1915,10 +1898,7 @@ private extension NodeAppModel {
                                     sessionKey: relayData.sessionKey,
                                     deliveryChannel: relayData.deliveryChannel,
                                     deliveryTo: relayData.deliveryTo))
-                            GatewayDiagnostics.log(
-                                "gateway connected host=\(url.host ?? "?") "
-                                    + "scheme=\(url.scheme ?? "?")"
-                            )
+                            GatewayDiagnostics.log("gateway connected host=\(url.host ?? "?") scheme=\(url.scheme ?? "?")")
                             if let addr = await self.nodeGateway.currentRemoteAddress() {
                                 await MainActor.run { self.gatewayRemoteAddress = addr }
                             }
@@ -2013,11 +1993,9 @@ private extension NodeAppModel {
                             self.gatewayPairingRequestId = requestId
                             if let requestId, !requestId.isEmpty {
                                 self.gatewayStatusText =
-                                    "Pairing required (requestId: \(requestId)). "
-                                        + "Approve on gateway and return to OpenClaw."
+                                    "Pairing required (requestId: \(requestId)). Approve on gateway and return to OpenClaw."
                             } else {
-                                self.gatewayStatusText =
-                                    "Pairing required. Approve on gateway and return to OpenClaw."
+                                self.gatewayStatusText = "Pairing required. Approve on gateway and return to OpenClaw."
                             }
                         }
                         // Hard stop the underlying WebSocket watchdog reconnects so the UI stays stable and
@@ -2235,16 +2213,12 @@ extension NodeAppModel {
             key: event.replyId)
         do {
             try await self.sendAgentRequest(link: link)
-            let forwardedMessage =
-                "watch reply forwarded replyId=\(event.replyId) "
-                + "action=\(event.actionId)"
-            self.watchReplyLogger.info("\(forwardedMessage, privacy: .public)")
+            self.watchReplyLogger.info(
+                "watch reply forwarded replyId=\(event.replyId, privacy: .public) action=\(event.actionId, privacy: .public)")
             self.openChatRequestID &+= 1
         } catch {
-            let failedMessage =
-                "watch reply forwarding failed replyId=\(event.replyId) "
-                + "error=\(error.localizedDescription)"
-            self.watchReplyLogger.error("\(failedMessage, privacy: .public)")
+            self.watchReplyLogger.error(
+                "watch reply forwarding failed replyId=\(event.replyId, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
             self.queuedWatchReplies.insert(event, at: 0)
         }
     }
@@ -2278,37 +2252,21 @@ extension NodeAppModel {
             return false
         }
         let pushKind = Self.openclawPushKind(userInfo)
-        let receivedMessage =
-            "Silent push received wakeId=\(wakeId) "
-            + "kind=\(pushKind) "
-            + "backgrounded=\(self.isBackgrounded) "
-            + "autoReconnect=\(self.gatewayAutoReconnectEnabled)"
-        self.pushWakeLogger.info("\(receivedMessage, privacy: .public)")
+        self.pushWakeLogger.info(
+            "Silent push received wakeId=\(wakeId, privacy: .public) kind=\(pushKind, privacy: .public) backgrounded=\(self.isBackgrounded, privacy: .public) autoReconnect=\(self.gatewayAutoReconnectEnabled, privacy: .public)")
         let result = await self.reconnectGatewaySessionsForSilentPushIfNeeded(wakeId: wakeId)
-        let outcomeMessage =
-            "Silent push outcome wakeId=\(wakeId) "
-            + "applied=\(result.applied) "
-            + "reason=\(result.reason) "
-            + "durationMs=\(result.durationMs)"
-        self.pushWakeLogger.info("\(outcomeMessage, privacy: .public)")
+        self.pushWakeLogger.info(
+            "Silent push outcome wakeId=\(wakeId, privacy: .public) applied=\(result.applied, privacy: .public) reason=\(result.reason, privacy: .public) durationMs=\(result.durationMs, privacy: .public)")
         return result.applied
     }
 
     func handleBackgroundRefreshWake(trigger: String = "bg_app_refresh") async -> Bool {
         let wakeId = Self.makePushWakeAttemptID()
-        let receivedMessage =
-            "Background refresh wake received wakeId=\(wakeId) "
-            + "trigger=\(trigger) "
-            + "backgrounded=\(self.isBackgrounded) "
-            + "autoReconnect=\(self.gatewayAutoReconnectEnabled)"
-        self.pushWakeLogger.info("\(receivedMessage, privacy: .public)")
+        self.pushWakeLogger.info(
+            "Background refresh wake received wakeId=\(wakeId, privacy: .public) trigger=\(trigger, privacy: .public) backgrounded=\(self.isBackgrounded, privacy: .public) autoReconnect=\(self.gatewayAutoReconnectEnabled, privacy: .public)")
         let result = await self.reconnectGatewaySessionsForSilentPushIfNeeded(wakeId: wakeId)
-        let outcomeMessage =
-            "Background refresh wake outcome wakeId=\(wakeId) "
-            + "applied=\(result.applied) "
-            + "reason=\(result.reason) "
-            + "durationMs=\(result.durationMs)"
-        self.pushWakeLogger.info("\(outcomeMessage, privacy: .public)")
+        self.pushWakeLogger.info(
+            "Background refresh wake outcome wakeId=\(wakeId, privacy: .public) applied=\(result.applied, privacy: .public) reason=\(result.reason, privacy: .public) durationMs=\(result.durationMs, privacy: .public)")
         return result.applied
     }
 
@@ -2325,26 +2283,17 @@ extension NodeAppModel {
         if let last = self.lastSignificantLocationWakeAt,
            now.timeIntervalSince(last) < throttleWindowSeconds
         {
-            let throttledMessage =
-                "Location wake throttled wakeId=\(wakeId) "
-                + "elapsedSec=\(now.timeIntervalSince(last))"
-            self.locationWakeLogger.info("\(throttledMessage, privacy: .public)")
+            self.locationWakeLogger.info(
+                "Location wake throttled wakeId=\(wakeId, privacy: .public) elapsedSec=\(now.timeIntervalSince(last), privacy: .public)")
             return
         }
         self.lastSignificantLocationWakeAt = now
 
-        let beginMessage =
-            "Location wake begin wakeId=\(wakeId) "
-            + "backgrounded=\(self.isBackgrounded) "
-            + "autoReconnect=\(self.gatewayAutoReconnectEnabled)"
-        self.locationWakeLogger.info("\(beginMessage, privacy: .public)")
+        self.locationWakeLogger.info(
+            "Location wake begin wakeId=\(wakeId, privacy: .public) backgrounded=\(self.isBackgrounded, privacy: .public) autoReconnect=\(self.gatewayAutoReconnectEnabled, privacy: .public)")
         let result = await self.reconnectGatewaySessionsForSilentPushIfNeeded(wakeId: wakeId)
-        let triggerMessage =
-            "Location wake trigger wakeId=\(wakeId) "
-            + "applied=\(result.applied) "
-            + "reason=\(result.reason) "
-            + "durationMs=\(result.durationMs)"
-        self.locationWakeLogger.info("\(triggerMessage, privacy: .public)")
+        self.locationWakeLogger.info(
+            "Location wake trigger wakeId=\(wakeId, privacy: .public) applied=\(result.applied, privacy: .public) reason=\(result.reason, privacy: .public) durationMs=\(result.durationMs, privacy: .public)")
 
         guard result.applied else { return }
         let connected = await self.waitForGatewayConnection(timeoutMs: 5000, pollMs: 250)
@@ -2502,18 +2451,14 @@ extension NodeAppModel {
 extension NodeAppModel {
     private func refreshWakeWordsFromGateway() async {
         do {
-            let data = try await self.operatorGateway.request(
-                method: "voicewake.get",
-                paramsJSON: "{}",
-                timeoutSeconds: 8
-            )
+            let data = try await self.operatorGateway.request(method: "voicewake.get", paramsJSON: "{}", timeoutSeconds: 8)
             guard let triggers = VoiceWakePreferences.decodeGatewayTriggers(from: data) else { return }
             VoiceWakePreferences.saveTriggerWords(triggers)
         } catch {
             if let gatewayError = error as? GatewayResponseError {
                 let lower = gatewayError.message.lowercased()
                 if lower.contains("unauthorized role") || lower.contains("missing scope") {
-                    self.setGatewayHealthMonitorDisabled(true)
+                    await self.setGatewayHealthMonitorDisabled(true)
                     return
                 }
             }
@@ -2568,8 +2513,7 @@ extension NodeAppModel {
         )
 
         if message.count > IOSDeepLinkAgentPolicy.maxMessageChars {
-            self.screen.errorText = "Deep link too large (message exceeds "
-                + "\(IOSDeepLinkAgentPolicy.maxMessageChars) characters)."
+            self.screen.errorText = "Deep link too large (message exceeds \(IOSDeepLinkAgentPolicy.maxMessageChars) characters)."
             self.recordShareEvent("Rejected: message too large (\(message.count) chars).")
             return
         }
@@ -2784,4 +2728,3 @@ extension NodeAppModel {
     }
 }
 #endif
-// swiftlint:enable type_body_length file_length

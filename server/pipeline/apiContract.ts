@@ -73,7 +73,7 @@ export const ChatResponseSchema = z.object({
   sources: z.array(SourceSchema).optional(),
   latency_ms: LatencyBreakdownSchema,
   model_version: z.string(),
-  provider: z.enum(["xai", "gemini", "anthropic"]).optional(),
+  provider: z.enum(["xai", "gemini", "openai", "anthropic", "deepseek"]).optional(),
   error_code: ErrorCodeSchema,
   retryable: z.boolean(),
   metadata: z.object({
@@ -166,7 +166,7 @@ export class ChatResponseBuilder {
     return this;
   }
 
-  setModel(version: string, provider?: "xai" | "gemini" | "anthropic"): this {
+  setModel(version: string, provider?: "xai" | "gemini" | "openai" | "anthropic" | "deepseek"): this {
     this.response.model_version = version;
     if (provider) this.response.provider = provider;
     return this;

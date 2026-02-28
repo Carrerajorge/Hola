@@ -86,12 +86,11 @@ import { AdminNotificationsPopover } from "@/components/admin/NotificationsPopov
 import { TerminalPanel } from "@/components/terminal-panel";
 import ReleasesManager from "./admin/ReleasesManager";
 
-type AdminSection = "dashboard" | "monitoring" | "nodes" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings" | "agentic" | "excel" | "terminal" | "releases";
+type AdminSection = "dashboard" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings" | "agentic" | "excel" | "terminal" | "monitoring" | "releases";
 
 const navItems: { id: AdminSection; label: string; icon: React.ElementType }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "monitoring", label: "Monitoring", icon: Server },
-  { id: "nodes", label: "Devices", icon: Network },
   { id: "users", label: "Users", icon: Users },
   { id: "conversations", label: "Conversations", icon: MessageSquare },
   { id: "ai-models", label: "AI Models", icon: Bot },
@@ -156,7 +155,7 @@ function DashboardSection() {
             <span className="text-sm font-medium">AI Models</span>
           </div>
           <p className="text-2xl font-bold">{d.aiModels?.active || 0}<span className="text-sm font-normal text-muted-foreground">/{d.aiModels?.total || 0}</span></p>
-          <div className="flex items-center gap-2 mt-2">
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
             <span className={cn("inline-flex items-center gap-1 text-xs", d.systemHealth?.xai ? "text-green-600" : "text-red-500")}>
               <span className={cn("w-1.5 h-1.5 rounded-full", d.systemHealth?.xai ? "bg-green-500" : "bg-red-500")} />
               xAI
@@ -164,6 +163,18 @@ function DashboardSection() {
             <span className={cn("inline-flex items-center gap-1 text-xs", d.systemHealth?.gemini ? "text-green-600" : "text-red-500")}>
               <span className={cn("w-1.5 h-1.5 rounded-full", d.systemHealth?.gemini ? "bg-green-500" : "bg-red-500")} />
               Gemini
+            </span>
+            <span className={cn("inline-flex items-center gap-1 text-xs", d.systemHealth?.openai ? "text-green-600" : "text-red-500")}>
+              <span className={cn("w-1.5 h-1.5 rounded-full", d.systemHealth?.openai ? "bg-green-500" : "bg-red-500")} />
+              OpenAI
+            </span>
+            <span className={cn("inline-flex items-center gap-1 text-xs", d.systemHealth?.anthropic ? "text-green-600" : "text-red-500")}>
+              <span className={cn("w-1.5 h-1.5 rounded-full", d.systemHealth?.anthropic ? "bg-green-500" : "bg-red-500")} />
+              Anthropic
+            </span>
+            <span className={cn("inline-flex items-center gap-1 text-xs", d.systemHealth?.deepseek ? "text-green-600" : "text-red-500")}>
+              <span className={cn("w-1.5 h-1.5 rounded-full", d.systemHealth?.deepseek ? "bg-green-500" : "bg-red-500")} />
+              DeepSeek
             </span>
           </div>
         </div>
@@ -288,6 +299,24 @@ function DashboardSection() {
               </Badge>
             </div>
             <div className="flex items-center justify-between">
+              <span className="text-sm">OpenAI</span>
+              <Badge variant={d.systemHealth?.openai ? "default" : "destructive"} className="text-xs">
+                {d.systemHealth?.openai ? "Online" : "Offline"}
+              </Badge>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm">Anthropic Claude</span>
+              <Badge variant={d.systemHealth?.anthropic ? "default" : "destructive"} className="text-xs">
+                {d.systemHealth?.anthropic ? "Online" : "Offline"}
+              </Badge>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm">DeepSeek</span>
+              <Badge variant={d.systemHealth?.deepseek ? "default" : "destructive"} className="text-xs">
+                {d.systemHealth?.deepseek ? "Online" : "Offline"}
+              </Badge>
+            </div>
+            <div className="flex items-center justify-between">
               <span className="text-sm">Database</span>
               <Badge variant={d.database?.status === "healthy" ? "default" : "destructive"} className="text-xs">
                 {d.database?.status === "healthy" ? "Healthy" : "Error"}
@@ -380,360 +409,6 @@ function MonitoringSection() {
           Si el iframe no carga, usa “Abrir Grafana”. (Grafana ya tiene allow embedding habilitado).
         </p>
       </div>
-    </div>
-  );
-}
-
-function NodesSection() {
-  const queryClient = useQueryClient();
-  const [pairOpen, setPairOpen] = useState(false);
-  const [pairInfo, setPairInfo] = useState<{ code: string; expiresAt: string } | null>(null);
-
-  // For demo/testing: allow confirming pairing and running node calls from the UI.
-  // NOTE: nodeToken is a secret; do not use this UI flow for untrusted users.
-  const [confirmForm, setConfirmForm] = useState({
-    name: "VPS Test Node",
-    platform: "linux",
-    agentVersion: "0.1",
-  });
-  const [confirmedNode, setConfirmedNode] = useState<{ nodeId: string; nodeToken: string } | null>(null);
-  const [nodeTokens, setNodeTokens] = useState<Record<string, string>>(() => {
-    try {
-      return JSON.parse(localStorage.getItem("iliagpt.nodeTokens") || "{}");
-    } catch {
-      return {};
-    }
-  });
-
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["/api/workspace/nodes"],
-    queryFn: async () => {
-      const res = await apiFetch("/api/workspace/nodes", { credentials: "include" });
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(text || `HTTP ${res.status}`);
-      }
-      return res.json();
-    },
-    retry: false,
-  });
-
-  async function getCsrfToken(): Promise<string> {
-    const res = await apiFetch("/api/csrf/token", { credentials: "include" });
-    const json = await res.json().catch(() => null);
-    const token = json?.csrfToken;
-    if (!token) throw new Error("Missing CSRF token");
-    return String(token);
-  }
-
-  const confirmPairMutation = useMutation({
-    mutationFn: async ({ code, name, platform, agentVersion }: { code: string; name: string; platform?: string; agentVersion?: string }) => {
-      const res = await fetch("/api/nodes/pair/confirm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          code,
-          name,
-          platform,
-          agentVersion,
-          capabilities: { uiConfirm: true },
-        }),
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
-      return json as { success: true; nodeId: string; nodeToken: string };
-    },
-    onSuccess: (r) => {
-      setConfirmedNode({ nodeId: r.nodeId, nodeToken: r.nodeToken });
-      setNodeTokens((prev) => {
-        const next = { ...prev, [r.nodeId]: r.nodeToken };
-        localStorage.setItem("iliagpt.nodeTokens", JSON.stringify(next));
-        return next;
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/workspace/nodes"] });
-      toast.success("Device paired");
-    },
-    onError: (e: any) => toast.error(e?.message || "Pairing failed"),
-  });
-
-  const pairMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiFetch("/api/workspace/nodes/pair", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-        credentials: "include",
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
-      return json as { success: true; code: string; expiresAt: string };
-    },
-    onSuccess: (r) => {
-      setPairInfo({ code: r.code, expiresAt: r.expiresAt });
-      setPairOpen(true);
-      queryClient.invalidateQueries({ queryKey: ["/api/workspace/nodes"] });
-    },
-  });
-
-  const sendTestJobMutation = useMutation({
-    mutationFn: async ({ nodeId }: { nodeId: string }) => {
-      const csrfToken = await getCsrfToken();
-      const res = await apiFetch("/api/workspace/nodes/jobs", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-CSRF-Token": csrfToken,
-        },
-        body: JSON.stringify({
-          nodeId,
-          kind: "ping",
-          payload: { ts: new Date().toISOString() },
-        }),
-        credentials: "include",
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
-      return json as { success: true; jobId: string };
-    },
-    onSuccess: (r) => toast.success(`Job queued: ${r.jobId}`),
-    onError: (e: any) => toast.error(e?.message || "Failed to create job"),
-  });
-
-  const pollJobsMutation = useMutation({
-    mutationFn: async ({ nodeId }: { nodeId: string }) => {
-      const token = nodeTokens[nodeId];
-      if (!token) throw new Error("Missing node token for this device (pair it via the UI confirm step). ");
-      const res = await fetch("/api/nodes/jobs/poll", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
-      return json;
-    },
-    onSuccess: (json: any) => {
-      const job = json?.job;
-      if (!job) return toast.info("No jobs");
-      toast.success(`Received job: ${job.id} (${job.kind})`);
-    },
-    onError: (e: any) => toast.error(e?.message || "Poll failed"),
-  });
-
-  const revokeMutation = useMutation({
-    mutationFn: async (nodeId: string) => {
-      const res = await apiFetch(`/api/workspace/nodes/${encodeURIComponent(nodeId)}/revoke`, {
-        method: "POST",
-        credentials: "include",
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
-      return json;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/workspace/nodes"] });
-      toast.success("Node revocado");
-    },
-    onError: (e: any) => toast.error(e?.message || "No se pudo revocar"),
-  });
-
-  const nodes = (data?.nodes || []) as any[];
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-medium">Devices</h2>
-          <p className="text-sm text-muted-foreground">
-            Dispositivos/agentes emparejados con tu workspace. (UI inicial)
-          </p>
-        </div>
-
-        <Dialog open={pairOpen} onOpenChange={setPairOpen}>
-          <DialogTrigger asChild>
-            <Button
-              onClick={() => pairMutation.mutate()}
-              disabled={pairMutation.isPending}
-              className="gap-2"
-            >
-              {pairMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-              Pair device
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Pair device</DialogTitle>
-            </DialogHeader>
-            {!pairInfo ? (
-              <div className="text-sm text-muted-foreground">Generando código…</div>
-            ) : (
-              <div className="space-y-4">
-                <div>
-                  <Label>Code</Label>
-                  <div className="mt-1 flex items-center gap-2">
-                    <Input readOnly value={pairInfo.code} className="font-mono tracking-widest" />
-                    <Button
-                      variant="outline"
-                      onClick={async () => {
-                        await navigator.clipboard.writeText(pairInfo.code);
-                        toast.success("Copied");
-                      }}
-                    >
-                      Copy
-                    </Button>
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-1">Expires: {pairInfo.expiresAt}</div>
-                </div>
-
-                <Separator />
-
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">Confirm pairing (UI demo)</div>
-                  <div className="text-xs text-muted-foreground">
-                    This will call <span className="font-mono">/api/nodes/pair/confirm</span> from the browser and will expose a node token in the UI.
-                    Use only for testing.
-                  </div>
-                  <div className="grid grid-cols-1 gap-2">
-                    <div>
-                      <Label>Name</Label>
-                      <Input value={confirmForm.name} onChange={(e) => setConfirmForm((p) => ({ ...p, name: e.target.value }))} />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <Label>Platform</Label>
-                        <Input value={confirmForm.platform} onChange={(e) => setConfirmForm((p) => ({ ...p, platform: e.target.value }))} />
-                      </div>
-                      <div>
-                        <Label>Agent version</Label>
-                        <Input value={confirmForm.agentVersion} onChange={(e) => setConfirmForm((p) => ({ ...p, agentVersion: e.target.value }))} />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Button
-                      onClick={() => confirmPairMutation.mutate({ code: pairInfo.code, name: confirmForm.name, platform: confirmForm.platform, agentVersion: confirmForm.agentVersion })}
-                      disabled={confirmPairMutation.isPending}
-                      className="gap-2"
-                    >
-                      {confirmPairMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                      Confirm pairing
-                    </Button>
-                    {confirmedNode ? (
-                      <Badge variant="secondary">Paired</Badge>
-                    ) : null}
-                  </div>
-
-                  {confirmedNode ? (
-                    <div className="space-y-1">
-                      <div className="text-xs text-muted-foreground">nodeId</div>
-                      <Input readOnly value={confirmedNode.nodeId} className="font-mono" />
-                      <div className="text-xs text-muted-foreground">nodeToken</div>
-                      <Input readOnly value={confirmedNode.nodeToken} className="font-mono" />
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
-      </div>
-
-      {isLoading ? (
-        <TableSkeleton />
-      ) : error ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">No se pudo cargar</CardTitle>
-            <CardDescription>
-              {(error as any)?.message?.includes("401") || String((error as any)?.message || "").includes("Unauthorized")
-                ? "Debes iniciar sesión para ver tus devices."
-                : String((error as any)?.message || error)}
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Devices emparejados</CardTitle>
-            <CardDescription>{nodes.length} total</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-muted-foreground">
-                    <th className="py-2">Nombre</th>
-                    <th className="py-2">Plataforma</th>
-                    <th className="py-2">Versión</th>
-                    <th className="py-2">Last seen</th>
-                    <th className="py-2">Estado</th>
-                    <th className="py-2">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {nodes.map((n) => {
-                    const revoked = Boolean(n.revokedAt);
-                    return (
-                      <tr key={n.id} className="border-t">
-                        <td className="py-2 font-medium">{n.name}</td>
-                        <td className="py-2">{n.platform || "—"}</td>
-                        <td className="py-2">{n.agentVersion || "—"}</td>
-                        <td className="py-2">{n.lastSeenAt ? new Date(n.lastSeenAt).toLocaleString() : "—"}</td>
-                        <td className="py-2">
-                          {revoked ? <Badge variant="destructive">Revoked</Badge> : <Badge variant="secondary">Active</Badge>}
-                        </td>
-                        <td className="py-2 text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={revoked || sendTestJobMutation.isPending}
-                              onClick={() => sendTestJobMutation.mutate({ nodeId: String(n.id) })}
-                            >
-                              Send test job
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={revoked || pollJobsMutation.isPending}
-                              onClick={() => pollJobsMutation.mutate({ nodeId: String(n.id) })}
-                            >
-                              Poll
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={revoked || revokeMutation.isPending}
-                              onClick={() => revokeMutation.mutate(String(n.id))}
-                            >
-                              Revoke
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {nodes.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="py-6 text-center text-muted-foreground">
-                        No hay devices aún. Usa “Pair device” para generar un código.
-                      </td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Siguiente</CardTitle>
-          <CardDescription>
-            Esta pantalla es solo el “front inicial”. Luego implementamos: ver jobs por node, enviar jobs (jobs/poll/result) e integración real con OpenClaw.
-          </CardDescription>
-        </CardHeader>
-      </Card>
     </div>
   );
 }
@@ -6644,8 +6319,6 @@ export default function AdminPage() {
         );
       case "monitoring":
         return <MonitoringSection />;
-      case "nodes":
-        return <NodesSection />;
       case "releases":
         return <ReleasesManager />;
       default:

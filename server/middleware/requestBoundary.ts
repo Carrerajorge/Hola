@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response } from "express";
 import { validateJSONDepth } from "../services/advancedSecurity";
+import { LIMITS } from "../lib/constants";
 
 const MAX_PATH_LENGTH = 2048;
 const MAX_JSON_DEPTH = 12;
@@ -13,7 +14,7 @@ const MAX_ARRAY_ITEMS = 200;
 
 const DEFAULT_MAX_BODY_BYTES = 1 * 1024 * 1024;
 const CHAT_STREAM_MAX_BODY_BYTES = 10 * 1024 * 1024;
-const DEFAULT_MAX_MULTIPART_BYTES = 100 * 1024 * 1024;
+const DEFAULT_MAX_MULTIPART_BYTES = LIMITS.MAX_FILE_SIZE_BYTES;
 const MAX_MULTIPART_BYTES = Number(process.env.MAX_MULTIPART_BYTES || DEFAULT_MAX_MULTIPART_BYTES);
 
 const KNOWN_SAFE_PATH_PATTERNS = [
@@ -122,6 +123,10 @@ function isJsonOrFormRequest(contentType: string): boolean {
     baseType.endsWith("+json") ||
     baseType.startsWith("multipart/")
   );
+}
+
+function isBinaryUploadRoute(pathname: string): boolean {
+  return /^\/api\/local-upload(?:\/|$)/.test(pathname) || /^\/api\/files(?:\/|$)/.test(pathname);
 }
 
 function hasValidCharset(contentType: string): boolean {
@@ -297,7 +302,11 @@ function validateMethodPayload(req: Request): { ok: boolean; status: number; mes
   }
 
   if (req.path.startsWith("/api/") && contentType && !isJsonOrFormRequest(contentType)) {
-    return { ok: false, status: 415, message: "Unsupported content type" };
+    const baseType = parseContentTypeBase(contentType);
+    const allowBinaryUpload = baseType === "application/octet-stream" && isBinaryUploadRoute(req.path);
+    if (!allowBinaryUpload) {
+      return { ok: false, status: 415, message: "Unsupported content type" };
+    }
   }
 
   if (contentType && !hasValidCharset(contentType)) {

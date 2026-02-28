@@ -4,7 +4,6 @@ import type {
   InitiateCallResult,
   PlayTtsInput,
   ProviderName,
-  WebhookParseOptions,
   ProviderWebhookParseResult,
   StartListeningInput,
   StopListeningInput,
@@ -37,7 +36,7 @@ export interface VoiceCallProvider {
    * Parse provider-specific webhook payload into normalized events.
    * Returns events and optional response to send back to provider.
    */
-  parseWebhookEvent(ctx: WebhookContext, options?: WebhookParseOptions): ProviderWebhookParseResult;
+  parseWebhookEvent(ctx: WebhookContext): ProviderWebhookParseResult;
 
   /**
    * Initiate an outbound call.

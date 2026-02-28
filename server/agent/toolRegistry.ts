@@ -30,6 +30,13 @@ const getRunWorkspaceDir = (runId: string) => path.resolve(AGENT_WORKSPACE_ROOT,
 const AGENT_LOCAL_FS_ROOT = process.env.AGENT_LOCAL_FS_ROOT
   ? path.resolve(process.env.AGENT_LOCAL_FS_ROOT)
   : path.resolve(os.homedir());
+const AGENT_ALLOWED_WORKSPACE_ROOTS = Array.from(
+  new Set([
+    AGENT_LOCAL_FS_ROOT,
+    path.resolve(process.cwd()),
+    path.resolve(AGENT_WORKSPACE_ROOT),
+  ])
+);
 
 function isPathInside(rootPath: string, candidatePath: string): boolean {
   const rel = path.relative(rootPath, candidatePath);
@@ -42,11 +49,48 @@ function expandHomePath(inputPath: string): string {
   return inputPath;
 }
 
-function resolveAccessibleReadPath(runId: string, requestedPath: string): {
+function normalizeWorkspaceSubdir(value: unknown): string {
+  const raw = String(value ?? "").trim().replace(/\\/g, "/");
+  if (!raw || raw === ".") return ".";
+  if (raw.startsWith("/")) return ".";
+  if (raw.includes("..")) return ".";
+  return raw.replace(/^\.\/+/, "");
+}
+
+function resolveWorkspaceRoot(context: ToolContext): string {
+  const fallback = getRunWorkspaceDir(context.runId);
+  const raw = typeof context.workspaceRoot === "string" ? context.workspaceRoot.trim() : "";
+  if (!raw) return fallback;
+
+  const expanded = expandHomePath(raw);
+  const resolved = path.resolve(expanded);
+  const allowed = AGENT_ALLOWED_WORKSPACE_ROOTS.some((root) => isPathInside(root, resolved));
+  if (!allowed) {
+    console.warn(
+      `[toolRegistry] workspaceRoot rejected (outside allowed roots): ${resolved}. Falling back to run workspace.`
+    );
+    return fallback;
+  }
+  return resolved;
+}
+
+function resolveWorkspaceDir(context: ToolContext): string {
+  const root = resolveWorkspaceRoot(context);
+  const subdir = normalizeWorkspaceSubdir(context.workspaceSubdir);
+  if (subdir === ".") return root;
+
+  const resolved = path.resolve(root, subdir);
+  if (!isPathInside(root, resolved)) {
+    return root;
+  }
+  return resolved;
+}
+
+function resolveAccessibleReadPath(context: ToolContext, requestedPath: string): {
   resolvedPath: string;
   scope: "workspace" | "local_home";
 } {
-  const workspaceDir = getRunWorkspaceDir(runId);
+  const workspaceDir = resolveWorkspaceDir(context);
   const rawPath = String(requestedPath || ".").trim();
   const expanded = expandHomePath(rawPath);
   const isAbsoluteLike = expanded.startsWith("/");
@@ -82,6 +126,16 @@ const normalizeAutoConfirmPolicy = (value: unknown): AutoConfirmPolicy => {
   if (v === "always" || v === "ask" || v === "never") return v;
   return "ask";
 };
+
+const TOOL_NAME_ALIASES: Record<string, string> = {
+  search_web: "web_search",
+};
+
+function resolveToolAlias(name: string): string {
+  const normalized = String(name || "").trim();
+  if (!normalized) return normalized;
+  return TOOL_NAME_ALIASES[normalized] || normalized;
+}
 
 async function acquireConcurrencySlot(
   key: string,
@@ -158,6 +212,12 @@ export interface ToolContext {
   userId: string;
   chatId: string;
   runId: string;
+  workspaceRoot?: string;
+  workspaceSubdir?: string;
+  workspaceBranch?: string;
+  codingAgents?: Array<"coder" | "reviewer" | "improver">;
+  executionAccess?: string;
+  runtimeTarget?: string;
   correlationId?: string;
   stepIndex?: number;
   userPlan?: "free" | "pro" | "admin";
@@ -277,6 +337,10 @@ export class ToolRegistry {
   }
 
   async execute(name: string, input: any, context: ToolContext): Promise<ToolResult> {
+    const requestedToolName = String(name || "").trim();
+    const resolvedToolName = resolveToolAlias(requestedToolName);
+    name = resolvedToolName;
+
     let tool = this.tools.get(name);
     const startTime = Date.now();
     const logs: ToolLog[] = [];
@@ -284,6 +348,10 @@ export class ToolRegistry {
     const addLog = (level: ToolLog["level"], message: string, data?: any) => {
       logs.push({ level, message, timestamp: new Date(), data });
     };
+
+    if (requestedToolName && requestedToolName !== resolvedToolName) {
+      addLog("info", `Resolved tool alias "${requestedToolName}" -> "${resolvedToolName}"`);
+    }
 
     const redactForLog = (value: any): any => {
       const seen = new WeakSet();
@@ -1702,7 +1770,7 @@ const generateDocumentTool: ToolDefinition = {
 };
 
 const readFileSchema = z.object({
-  filepath: z.string().describe("Path to file. Relative paths resolve inside run workspace; absolute/~/ paths resolve inside local home."),
+  filepath: z.string().describe("Path to file. Relative paths resolve inside selected workspace folder; absolute/~/ paths resolve inside local home."),
 });
 
 const readFileTool: ToolDefinition = {
@@ -1714,7 +1782,7 @@ const readFileTool: ToolDefinition = {
     const startTime = Date.now();
     try {
       const fs = await import('fs/promises');
-      const { resolvedPath, scope } = resolveAccessibleReadPath(context.runId, input.filepath);
+      const { resolvedPath, scope } = resolveAccessibleReadPath(context, input.filepath);
       const content = await fs.readFile(resolvedPath, 'utf-8');
       return {
         success: true,
@@ -1759,10 +1827,10 @@ const writeFileTool: ToolDefinition = {
     try {
       const fs = await import('fs/promises');
       const path = await import('path');
-      const workspaceDir = getRunWorkspaceDir(context.runId);
+      const workspaceDir = resolveWorkspaceDir(context);
       await fs.mkdir(workspaceDir, { recursive: true });
       const safePath = path.resolve(workspaceDir, input.filepath);
-      if (!safePath.startsWith(workspaceDir)) {
+      if (!isPathInside(workspaceDir, safePath)) {
         throw new Error('Access denied: path outside workspace');
       }
       await fs.mkdir(path.dirname(safePath), { recursive: true });
@@ -1805,7 +1873,7 @@ const shellCommandTool: ToolDefinition = {
     // Ensure workspace exists
     const fs = await import("fs/promises");
     const path = await import("path");
-    const workspaceDir = getRunWorkspaceDir(context.runId);
+    const workspaceDir = resolveWorkspaceDir(context);
     await fs.mkdir(workspaceDir, { recursive: true });
 
     const cmd = String(input.command ?? "").trim();
@@ -2251,7 +2319,7 @@ const shellCommandTool: ToolDefinition = {
 };
 
 const listFilesSchema = z.object({
-  directory: z.string().default(".").describe("Directory path. Relative paths resolve inside run workspace; absolute/~/ paths resolve inside local home."),
+  directory: z.string().default(".").describe("Directory path. Relative paths resolve inside selected workspace folder; absolute/~/ paths resolve inside local home."),
   maxEntries: z.number().int().min(1).max(1000).optional().default(200).describe("Maximum number of entries to return."),
 });
 
@@ -2264,10 +2332,13 @@ const listFilesTool: ToolDefinition = {
     const startTime = Date.now();
     try {
       const fs = await import('fs/promises');
-      const workspaceDir = getRunWorkspaceDir(context.runId);
+      const workspaceDir = resolveWorkspaceDir(context);
+      console.log(`[list_files] input.directory="${input.directory}" workspaceRoot="${context.workspaceRoot}" workspaceDir="${workspaceDir}"`);
       await fs.mkdir(workspaceDir, { recursive: true });
-      const { resolvedPath, scope } = resolveAccessibleReadPath(context.runId, input.directory);
+      const { resolvedPath, scope } = resolveAccessibleReadPath(context, input.directory);
+      console.log(`[list_files] resolvedPath="${resolvedPath}" scope="${scope}"`);
       const entries = await fs.readdir(resolvedPath, { withFileTypes: true });
+      console.log(`[list_files] readdir OK: ${entries.length} entries in "${resolvedPath}"`);
       const files = entries
         .slice(0, input.maxEntries)
         .map((entry) => ({ name: entry.name, type: entry.isDirectory() ? 'directory' : 'file' }));

@@ -143,13 +143,13 @@ const TOOL_INPUT_MAX_ARRAY_LENGTH = 500;
 const TOOL_KEY_MAX_LENGTH = 120;
 const TOOL_STRING_MAX_LENGTH = 2_000;
 const TOOL_TIMEOUT_MIN_MS = 250;
-const TOOL_TIMEOUT_MAX_MS = 120_000;
-const TOOL_MAX_RETRIES = 4;
-const TOOL_HISTORY_PAYLOAD_BYTES = 12_000;
+const TOOL_TIMEOUT_MAX_MS = 300_000;
+const TOOL_MAX_RETRIES = 2;
+const TOOL_HISTORY_PAYLOAD_BYTES = 4_000;
 const TOOL_IDEMPOTENCY_KEY_RE = /^[a-zA-Z0-9._-]{6,140}$/;
 const TOOL_IDEMPOTENCY_TTL_MS = 5 * 60_000;
-const TOOL_IDEMPOTENCY_MAX_ENTRIES = 300;
-const TOOL_MAX_CONCURRENT_EXECUTIONS = 64;
+const TOOL_IDEMPOTENCY_MAX_ENTRIES = 100;
+const TOOL_MAX_CONCURRENT_EXECUTIONS = 8;
 
 const TOOL_EXECUTION_OVERLOADED_MESSAGE = "Tool execution concurrency limit exceeded";
 
@@ -188,7 +188,6 @@ function sanitizeToolValue(value: unknown, depth: number, seen: WeakSet<object>)
   if (typeof value === "string") {
     const cleaned = value
       .normalize("NFKC")
-      // eslint-disable-next-line no-control-regex
       .replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
     return cleaned.length > TOOL_STRING_MAX_LENGTH ? cleaned.slice(0, TOOL_STRING_MAX_LENGTH) : cleaned;
   }

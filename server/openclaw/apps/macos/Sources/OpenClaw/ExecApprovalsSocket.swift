@@ -355,9 +355,9 @@ private enum ExecHostExecutor {
     static func handle(_ request: ExecHostRequest) async -> ExecHostResponse {
         let validatedRequest: ExecHostValidatedRequest
         switch ExecHostRequestEvaluator.validateRequest(request) {
-        case let .success(request):
+        case .success(let request):
             validatedRequest = request
-        case let .failure(error):
+        case .failure(let error):
             return self.errorResponse(error)
         }
 
@@ -370,7 +370,7 @@ private enum ExecHostExecutor {
             context: context,
             approvalDecision: request.approvalDecision)
         {
-        case let .deny(error):
+        case .deny(let error):
             return self.errorResponse(error)
         case .allow:
             break
@@ -401,7 +401,7 @@ private enum ExecHostExecutor {
                 context: context,
                 approvalDecision: followupDecision)
             {
-            case let .deny(error):
+            case .deny(let error):
                 return self.errorResponse(error)
             case .allow:
                 break

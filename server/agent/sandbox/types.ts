@@ -71,7 +71,7 @@ export const FileOperationResultSchema = z.object({
   success: z.boolean(),
   operation: z.string(),
   path: z.string(),
-  message: z.string().default(""),
+  message: z.string().optional(),
   data: z.any().optional(),
   error: z.string().optional(),
 });

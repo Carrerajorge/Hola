@@ -54,12 +54,7 @@ struct IOSGatewayChatTransport: OpenClawChatTransport, Sendable {
         idempotencyKey: String,
         attachments: [OpenClawChatAttachmentPayload]) async throws -> OpenClawChatSendResponse
     {
-        let startLogMessage =
-            "chat.send start sessionKey=\(sessionKey) "
-            + "len=\(message.count) attachments=\(attachments.count)"
-        Self.logger.info(
-            "\(startLogMessage, privacy: .public)"
-        )
+        Self.logger.info("chat.send start sessionKey=\(sessionKey, privacy: .public) len=\(message.count, privacy: .public) attachments=\(attachments.count, privacy: .public)")
         struct Params: Codable {
             var sessionKey: String
             var message: String

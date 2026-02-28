@@ -26,7 +26,6 @@ Sandboxing details: [Sandboxing](/gateway/sandboxing)
 ## Requirements
 
 - Docker Desktop (or Docker Engine) + Docker Compose v2
-- At least 2 GB RAM for image build (`pnpm install` may be OOM-killed on 1 GB hosts with exit 137)
 - Enough disk for images + logs
 
 ## Containerized Gateway (Docker Compose)

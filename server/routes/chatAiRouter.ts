@@ -2,7 +2,7 @@ import { Router } from "express";
 import { storage } from "../storage";
 import { chatService, AVAILABLE_MODELS, DEFAULT_PROVIDER, DEFAULT_MODEL } from "../services/ChatServiceV2";
 import { llmGateway } from "../lib/llmGateway";
-import { getOrCreateSession, getEnforcedModel, getSessionById, type GptSessionContract } from "../services/gptSessionService";
+import { buildSystemPromptWithContext, getOrCreateSession, getEnforcedModel, getSessionByChatId, getSessionById, type GptSessionContract } from "../services/gptSessionService";
 import { generateImage, detectImageRequest, extractImagePrompt } from "../services/imageGeneration";
 import { runETLAgent, getAvailableCountries, getAvailableIndicators } from "../etl";
 import { extractAllAttachmentsContent, extractAttachmentContent, formatAttachmentsAsContext, type Attachment } from "../services/attachmentService";
@@ -10,8 +10,6 @@ import { pareOrchestrator, type RobustRouteResult, type SimpleAttachment } from 
 import { DocumentBatchProcessor, type BatchProcessingResult, type SimpleAttachment as BatchAttachment } from "../services/documentBatchProcessor";
 import { pareRequestContract, pareRateLimiter, pareQuotaGuard, requirePareContext, pareIdempotencyGuard, pareAnalyzeSchemaValidator } from "../middleware";
 import { completeIdempotencyKey, failIdempotencyKey } from "../lib/idempotencyStore";
-import { createPareLogger, type PareLogger } from "../lib/pareLogger";
-import { pareMetrics } from "../lib/pareMetrics";
 import { AuditTrailCollector, type AuditBatchSummary } from "../lib/pareAuditTrail";
 import { createChunkStore } from "../lib/pareChunkStore";
 import { normalizeDocument } from "../services/structuredDocumentNormalizer";
@@ -43,11 +41,24 @@ import { terminalController } from "../agent/terminalController";
 import type { CommandRequest, CommandResult, ProcessInfo } from "../agent/terminalController";
 
 type AttachmentSpec = z.infer<typeof AttachmentSpecSchema>;
+type CodingAgentProfile = "coder" | "reviewer" | "improver";
+
+interface WorkspaceContextInput {
+  projectId?: string;
+  projectName?: string;
+  repositoryPath: string;
+  selectedFolder: string;
+  codingAgents: CodingAgentProfile[];
+  runtimeTarget: string;
+  executionAccess: string;
+  branch?: string;
+}
 
 import { v4 as uuidv4 } from "uuid";
 import type { Response } from "express";
 import type { AuthenticatedRequest } from "../types/express";
 import { auditLog } from "../services/auditLogger";
+import { DEFAULT_GPT_CAPABILITIES, normalizeGptCapabilities } from "../lib/gptCapabilities";
 import { usageQuotaService, type UsageCheckResult } from "../services/usageQuotaService";
 import { conversationMemoryManager } from "../services/conversationMemory";
 import { conversationStateService } from "../services/conversationStateService";
@@ -60,6 +71,8 @@ import { promptPreProcessor } from "../lib/promptPreProcessor";
 import { promptAuditStore } from "../lib/promptAuditStore";
 import { promptAnalysisService } from "../services/promptAnalysisService";
 import * as macos from "../lib/macos";
+import { browserAdapter } from "../agent/webtool/browserAdapter";
+import { browserWorker } from "../agent/browser-worker";
 
 type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
 const isDebugLogEnabled = process.env.DEBUG === "true";
@@ -108,9 +121,127 @@ function extractUserText(content: unknown): string {
   }
   return String(content || "").trim();
 }
-const LOCAL_DESKTOP_ACTIONS_ENABLED =
-  process.env.ILIAGPT_ENABLE_LOCAL_DESKTOP_ACTIONS === "true" ||
-  process.env.NODE_ENV !== "production";
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function parseBooleanFlag(value: unknown, fallback = false): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+  return fallback;
+}
+
+function parseNumberFlag(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
+function buildFallbackKnowledgeContext(items: Array<{ isActive?: string; fileName?: string; extractedText?: string | null }>): string {
+  const active = items.filter((item) => item.isActive === "true" && item.extractedText);
+  if (active.length === 0) return "";
+  return active
+    .map((item) => `=== Knowledge: ${item.fileName || "source"} ===\n${item.extractedText || ""}`)
+    .join("\n\n");
+}
+
+function buildFallbackGptSessionContract(
+  gpt: any,
+  requestId: string,
+  knowledgeContext: string
+): GptSessionContract {
+  const definition = asRecord(gpt?.definition);
+  const definitionCapabilities = asRecord(definition?.capabilities);
+  const gptCapabilities = asRecord(gpt?.capabilities);
+  const runtimePolicySource = asRecord(gpt?.runtimePolicy);
+  const definitionPolicySource = asRecord(definition?.policies);
+  const toolPermissionsSource = asRecord(gpt?.toolPermissions);
+
+  const modelFromDefinition = typeof definition?.model === "string" && definition.model.trim()
+    ? definition.model.trim()
+    : "";
+  const modelFromGpt = typeof gpt?.recommendedModel === "string" && gpt.recommendedModel.trim()
+    ? gpt.recommendedModel.trim()
+    : "";
+  const preferredModel = modelFromDefinition || modelFromGpt || DEFAULT_MODEL;
+
+  const modelFallbacksRaw = Array.isArray(runtimePolicySource?.modelFallbacks)
+    ? runtimePolicySource?.modelFallbacks
+    : Array.isArray(definitionPolicySource?.modelFallbacks)
+      ? definitionPolicySource?.modelFallbacks
+      : [];
+  const modelFallbacks = modelFallbacksRaw
+    .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    .map((entry) => entry.trim());
+
+  const mergedCapabilities = normalizeGptCapabilities(
+    {
+      ...(gptCapabilities || {}),
+      ...(definitionCapabilities || {}),
+    },
+    DEFAULT_GPT_CAPABILITIES,
+  );
+
+  return {
+    sessionId: `fallback_${requestId}`,
+    gptId: String(gpt?.id || "").trim() || "unknown_gpt",
+    configVersion: Number.isFinite(Number(gpt?.version)) ? Number(gpt.version) : 1,
+    systemPrompt:
+      (typeof definition?.instructions === "string" && definition.instructions.length > 0
+        ? definition.instructions
+        : String(gpt?.systemPrompt || "")),
+    enforcedModelId: parseBooleanFlag(
+      runtimePolicySource?.enforceModel,
+      parseBooleanFlag(definitionPolicySource?.enforceModel, false)
+    )
+      ? preferredModel
+      : null,
+    modelFallbacks,
+    capabilities: mergedCapabilities,
+    toolPermissions: {
+      mode: toolPermissionsSource?.mode === "denylist" ? "denylist" : "allowlist",
+      allowedTools: Array.isArray(toolPermissionsSource?.tools)
+        ? toolPermissionsSource.tools.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+        : [],
+      actionsEnabled: parseBooleanFlag(toolPermissionsSource?.actionsEnabled, true),
+    },
+    runtimePolicy: {
+      enforceModel: parseBooleanFlag(
+        runtimePolicySource?.enforceModel,
+        parseBooleanFlag(definitionPolicySource?.enforceModel, false)
+      ),
+      modelFallbacks,
+      maxTokensOverride: Number.isFinite(Number(runtimePolicySource?.maxTokensOverride))
+        ? Number(runtimePolicySource?.maxTokensOverride)
+        : undefined,
+      temperatureOverride: Number.isFinite(Number(runtimePolicySource?.temperatureOverride))
+        ? Number(runtimePolicySource?.temperatureOverride)
+        : undefined,
+      allowClientOverride: parseBooleanFlag(
+        runtimePolicySource?.allowClientOverride,
+        parseBooleanFlag(definitionPolicySource?.allowClientOverride, false)
+      ),
+    },
+    knowledgeContext,
+    temperature: parseNumberFlag(gpt?.temperature, 0.7),
+    topP: parseNumberFlag(gpt?.topP, 1),
+    maxTokens: parseNumberFlag(gpt?.maxTokens, 4096),
+  };
+}
+
+function isLocalDesktopActionsEnabled() {
+  return process.env.ILIAGPT_ENABLE_LOCAL_DESKTOP_ACTIONS === "true" ||
+    process.env.NODE_ENV !== "production";
+}
 
 // ── PER-USER SSE CONNECTION LIMITER ────────────────────────────
 const MAX_SSE_CONNECTIONS_PER_USER = 5;
@@ -259,6 +390,49 @@ function looksLikeDesktopFolderIntent(input: string): boolean {
   return hasCreateVerb && hasFolderWord && hasDesktopContext;
 }
 
+function normalizeWorkspaceContext(input: unknown): WorkspaceContextInput | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const source = input as Record<string, unknown>;
+
+  const repositoryPath = typeof source.repositoryPath === "string"
+    ? source.repositoryPath.trim()
+    : "";
+  if (!repositoryPath) return undefined;
+
+  const rawFolder = typeof source.selectedFolder === "string" ? source.selectedFolder.trim() : ".";
+  let selectedFolder = rawFolder || ".";
+  selectedFolder = selectedFolder.replace(/\\/g, "/").replace(/^\.\/+/, "");
+  if (!selectedFolder || selectedFolder === ".") selectedFolder = ".";
+  if (selectedFolder.startsWith("/") || selectedFolder.includes("..")) selectedFolder = ".";
+
+  const codingAgents = Array.isArray(source.codingAgents)
+    ? source.codingAgents.filter((value): value is CodingAgentProfile =>
+      value === "coder" || value === "reviewer" || value === "improver"
+    )
+    : [];
+
+  const runtimeTarget = typeof source.runtimeTarget === "string" && source.runtimeTarget.trim()
+    ? source.runtimeTarget.trim()
+    : "Local";
+  const executionAccess = typeof source.executionAccess === "string" && source.executionAccess.trim()
+    ? source.executionAccess.trim()
+    : "Full access";
+  const branch = typeof source.branch === "string" && source.branch.trim()
+    ? source.branch.trim()
+    : undefined;
+
+  return {
+    projectId: typeof source.projectId === "string" ? source.projectId : undefined,
+    projectName: typeof source.projectName === "string" ? source.projectName : undefined,
+    repositoryPath,
+    selectedFolder,
+    codingAgents: codingAgents.length > 0 ? codingAgents : ["coder"],
+    runtimeTarget,
+    executionAccess,
+    branch,
+  };
+}
+
 // ── Natural language intent extractors for all local control commands ──
 
 function extractNaturalRmIntent(input: string): string | null {
@@ -351,6 +525,59 @@ function extractNaturalWriteIntent(input: string): { path: string; content: stri
   return null;
 }
 
+function extractNaturalAppWriteIntent(input: string): { appName: string; text: string; pressEnter: boolean } | null {
+  const prompt = String(input || "").trim();
+  if (!prompt) return null;
+
+  const patterns = [
+    /\b(?:escribe|escribir|teclea|teclear|write|type)\s+en\s+(?:(?:la|el)\s+)?(?:(?:app|aplicaci[oó]n)\s+)?(?:de\s+)?([a-z0-9áéíóúüñ ._\-]{2,60}?)\s+(?:que|:)\s+([\s\S]{1,2500})$/i,
+    /\b(?:en|in)\s+(?:(?:la|el)\s+)?(?:(?:app|aplicaci[oó]n)\s+)?(?:de\s+)?([a-z0-9áéíóúüñ ._\-]{2,60}?)\s+(?:escribe|escribir|teclea|teclear|write|type)\s+(?:que|:)?\s*([\s\S]{1,2500})$/i,
+  ];
+
+  for (const re of patterns) {
+    const match = prompt.match(re);
+    if (!match?.[1] || !match?.[2]) continue;
+
+    const appName = normalizeLocalAppName(match[1]);
+    if (!appName) continue;
+
+    let text = String(match[2] || "").trim();
+    if (!text) continue;
+    if (/[.,;:!?]+$/.test(text)) {
+      text = text.replace(/[.,;:!?]+$/g, "").trim();
+    }
+    if (!text) continue;
+
+    const pressEnter = /\s+(?:--enter|enter|enviar|send)$/i.test(text);
+    text = text.replace(/\s+(?:--enter|enter|enviar|send)$/i, "").trim();
+    if (!text) continue;
+
+    return { appName, text, pressEnter };
+  }
+
+  return null;
+}
+
+function extractNaturalSendFileIntent(input: string): string | null {
+  const prompt = String(input || "").trim();
+  if (!prompt) return null;
+
+  const sendVerb = /\b(?:manda(?:me)?|env[ií]a(?:me)?|send)\b/i;
+  const fileHint = /\b(?:archivo|documento|file|doc|pdf|imagen|foto|captura)\b/i;
+  if (!sendVerb.test(prompt) || !fileHint.test(prompt)) return null;
+
+  const quotedPath = prompt.match(/["']((?:~|\/|desktop:|downloads:|documents:)[^"']+)["']/i)?.[1];
+  if (quotedPath) return quotedPath.trim();
+
+  const pathLike = prompt.match(/\b((?:~|\/|desktop:|downloads:|documents:)[^\s,;]+)\b/i)?.[1];
+  if (pathLike) return pathLike.trim();
+
+  const fileName = prompt.match(/\b([a-z0-9._-]+\.(?:pdf|docx?|xlsx?|pptx?|txt|csv|json|zip|png|jpe?g|webp|gif))\b/i)?.[1];
+  if (fileName) return fileName.trim();
+
+  return null;
+}
+
 function extractNaturalLsIntent(input: string): string | null {
   const prompt = String(input || "").trim();
   const normalizeTarget = (rawTarget: string): string => {
@@ -390,6 +617,105 @@ function extractNaturalLsIntent(input: string): string | null {
   }
 
   return null;
+}
+
+function sanitizeDetectedUrlCandidate(value: string): string {
+  return String(value || "")
+    .trim()
+    .replace(/[)\].,!?;:]+$/g, "");
+}
+
+function extractNaturalScreenshotIntent(input: string): { url?: string } | null {
+  const prompt = String(input || "").trim();
+  if (!prompt) return null;
+
+  const hasScreenshotKeyword = /\b(?:screenshot|captura(?:\s+de\s+pantalla)?|pantallazo|screen\s?shot|foto\s+de\s+pantalla)\b/i.test(prompt);
+  if (!hasScreenshotKeyword) return null;
+
+  const explicitUrlMatch = prompt.match(/\b((?:https?:\/\/|www\.)[^\s<>"']+)/i);
+  if (explicitUrlMatch?.[1]) {
+    return { url: sanitizeDetectedUrlCandidate(explicitUrlMatch[1]) };
+  }
+
+  const domainUrlMatch = prompt.match(/\b([a-z0-9][a-z0-9.-]+\.[a-z]{2,}(?:\/[^\s<>"']*)?)/i);
+  if (domainUrlMatch?.[1]) {
+    return { url: sanitizeDetectedUrlCandidate(domainUrlMatch[1]) };
+  }
+
+  return {};
+}
+
+function extractNaturalWindowshotIntent(input: string): { appName: string } | null {
+  const prompt = String(input || "").trim();
+  if (!prompt) return null;
+
+  const hasScreenshotKeyword = /\b(?:screenshot|captura(?:\s+de\s+pantalla)?|pantallazo|screen\s?shot|foto\s+de\s+pantalla)\b/i.test(prompt);
+  if (!hasScreenshotKeyword) return null;
+
+  if (/\b((?:https?:\/\/|www\.)[^\s<>"']+)\b/i.test(prompt)) {
+    return null;
+  }
+  if (/\b[a-z0-9][a-z0-9.-]+\.[a-z]{2,}(?:\/[^\s<>"']*)?\b/i.test(prompt)) {
+    return null;
+  }
+
+  const patterns = [
+    /\b(?:captura|screenshot|pantallazo|foto\s+de\s+pantalla)\s+(?:de|del|de\s+la|de\s+el)\s+(?:la\s+app\s+|app\s+|aplicaci[oó]n\s+)?([a-z0-9áéíóúüñ ._\-]{2,80})$/i,
+    /\b(?:de|del)\s+(?:la\s+app\s+|app\s+|aplicaci[oó]n\s+)?([a-z0-9áéíóúüñ ._\-]{2,80})\s+(?:captura|screenshot|pantallazo)\b/i,
+  ];
+
+  for (const re of patterns) {
+    const match = prompt.match(re);
+    if (!match?.[1]) continue;
+    const candidateRaw = String(match[1] || "")
+      .replace(/\b(?:por\s+favor|please|ahora|ya|mismo)\b/gi, "")
+      .trim();
+    const candidate = normalizeLocalAppName(candidateRaw);
+    if (!candidate) continue;
+    if (/^(?:pantalla|escritorio|desktop|mac|computadora|pc)$/i.test(candidate)) continue;
+    return { appName: candidate };
+  }
+
+  return null;
+}
+
+function inferDocToolFromPrompt(promptInput: string): "word" | "excel" | "ppt" | null {
+  const prompt = String(promptInput || "").normalize("NFKC").trim();
+  if (!prompt) return null;
+
+  if (/\b(excel|hoja de cálculo|spreadsheet|xlsx|tabla de datos)\b/i.test(prompt)) {
+    return "excel";
+  }
+  if (/\b(presentación|presentation|ppt|powerpoint|slides|diapositivas)\b/i.test(prompt)) {
+    return "ppt";
+  }
+  if (/\b(documento|document|word|docx|informe|reporte|ensayo|tesis)\b/i.test(prompt)) {
+    return "word";
+  }
+  return null;
+}
+
+type DesktopOrganizationMode = "files" | "folders" | "all";
+
+function extractNaturalOrganizeDesktopIntent(input: string): { mode: DesktopOrganizationMode } | null {
+  const prompt = String(input || "").trim();
+  if (!prompt) return null;
+
+  const hasOrganizerVerb = /\b(?:organiza|organizar|ordena|ordenar|clasifica|clasificar|acomoda|acomodar|arregla|sort|organize|tidy)\b/i.test(prompt);
+  const hasDesktopContext = /\b(?:escritorio|desktop|mi\s+mac|my\s+desktop)\b/i.test(prompt);
+  if (!hasOrganizerVerb || !hasDesktopContext) return null;
+
+  const mentionsFiles = /\b(?:archivos?|files?)\b/i.test(prompt);
+  const mentionsFolders = /\b(?:carpetas?|folders?|directorios?|directories?)\b/i.test(prompt);
+
+  let mode: DesktopOrganizationMode = "all";
+  if (mentionsFolders && !mentionsFiles) {
+    mode = "folders";
+  } else if (mentionsFiles && !mentionsFolders) {
+    mode = "files";
+  }
+
+  return { mode };
 }
 
 // ── New natural language extractors for expanded commands ──
@@ -634,35 +960,25 @@ function isCapabilityQuery(input: string): boolean {
 }
 
 function buildCapabilityResponse(): string {
-  return `**Sí, tengo acceso completo a tu computadora.** Aquí están mis capacidades:
+  if (!isLocalDesktopActionsEnabled()) {
+    return `**No tengo acceso a tu computadora en este entorno.** Mis acciones locales y herramientas del sistema están deshabilitadas por seguridad o configuración del sistema.
 
-🖥️ **Terminal**: Puedo ejecutar cualquier comando en tu terminal (bash, zsh, etc.)
-📂 **Archivos**: Crear, leer, escribir, copiar, mover, eliminar archivos y carpetas
-🔍 **Búsqueda**: Buscar archivos por nombre, buscar texto dentro de archivos (+ Spotlight)
-💻 **Código**: Ejecutar Python, Node.js, scripts de cualquier lenguaje
-📊 **Sistema**: Ver procesos, puertos, CPU, RAM, disco, info del sistema
-📦 **Paquetes**: npm, pip, brew — instalar, listar, actualizar
-🔧 **Git**: status, commit, push, pull, diff, log, branch
-🐳 **Docker**: containers, images, run, stop
-📱 **Apps**: Abrir, cerrar, enfocar aplicaciones — gestión de ventanas
-🍎 **macOS Nativo**:
-  - 🔊 Volumen y brillo
-  - 📶 WiFi y Bluetooth
-  - 🌙 Dark mode y No Molestar
-  - 🔒 Bloquear pantalla / suspender
-  - 📸 Screenshots nativos
-  - 📋 Clipboard (copiar/pegar)
-  - 🔔 Notificaciones del sistema
-  - 🗣️ Text-to-Speech (decir texto en voz alta)
-  - 📅 Calendario, Contactos, Recordatorios
-  - 🎵 Control de Music/Spotify
-  - 🔎 Búsqueda Spotlight
-  - ⚡ Ejecutar Shortcuts de macOS
-  - 📁 Control de Finder
-  - 🪟 Gestión de ventanas (mover, redimensionar, minimizar)
-  - 🍏 AppleScript/JXA directo
+Mis capacidades actuales se limitan a:
+💬 **Asistencia**: Responder preguntas, brindar explicaciones y redactar textos.
+💻 **Código**: Escribir, analizar código fuente, leer archivos de proyectos (si se me da acceso explicitamente)
+🌐 **Búsqueda**: Consultar información en la web y resumir enlaces.
+`;
+  }
 
-**Pruébame:** Dime qué necesitas y lo ejecuto directamente.`;
+  return `**Sí, tengo capacidades de acceso a tu computadora.** (Solo disponible si tienes rol de administrador o propietario). Aquí están mis capacidades cuando están habilitadas:
+
+🖥️ **Terminal**: Puedo ejecutar comandos en tu terminal de manera segura
+📂 **Archivos**: Leer, escribir, explorar tu escritorio, documentos y espacios de trabajo
+🔍 **Búsqueda**: Buscar archivos en tu entorno local y analizarlos
+💻 **Código**: Ejecutar scripts y comandos de desarrollo en entornos aislados
+📊 **Sistema**: Ver estado del sistema de forma limitada y segura
+🌐 **Navegador**: Automatizar tareas en la web de forma local
+`;
 }
 
 type LocalControlCommand =
@@ -684,6 +1000,7 @@ type LocalControlCommand =
   | "sysinfo"
   | "shell"
   | "cp"
+  | "organize_desktop"
   // ── New commands (Phase 1 expansion) ──
   | "ps"
   | "kill"
@@ -706,10 +1023,12 @@ type LocalControlCommand =
   | "history"
   | "monitor"
   | "open"
+  | "appwrite"
   | "env"
   | "top"
   | "du"
   | "which"
+  | "sendfile"
   | "capabilities"
   // ── macOS native commands ──
   | "volume"
@@ -720,6 +1039,8 @@ type LocalControlCommand =
   | "battery"
   | "lock"
   | "screenshot"
+  | "windowshot"
+  | "webshot"
   | "clipboard"
   | "notify"
   | "say"
@@ -776,6 +1097,89 @@ const LOCAL_FULL_SHELL_ENABLED =
 const LOCAL_CONFIRM_RE = /\b(?:confirmar|confirm|--confirm)\b/i;
 const LOCAL_TOKEN_RE = /(?:^|\s)token=([^\s]+)/i;
 const LOCAL_SHELL_TIMEOUT_MS = 45_000;
+const LOCAL_WEBSHOT_HOST_SUFFIX_BLOCKLIST = [".local", ".localhost", ".internal", ".lan"];
+
+function isPrivateIpv4Address(hostname: string): boolean {
+  const parts = hostname.split(".");
+  if (parts.length !== 4 || parts.some((part) => !/^\d+$/.test(part))) return false;
+  const nums = parts.map((part) => Number(part));
+  if (nums.some((value) => Number.isNaN(value) || value < 0 || value > 255)) return false;
+
+  if (nums[0] === 10) return true;
+  if (nums[0] === 127) return true;
+  if (nums[0] === 0) return true;
+  if (nums[0] === 192 && nums[1] === 168) return true;
+  if (nums[0] === 172 && nums[1] >= 16 && nums[1] <= 31) return true;
+  if (nums[0] === 169 && nums[1] === 254) return true;
+  return false;
+}
+
+function isPrivateIpv6Address(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  if (!normalized.includes(":")) return false;
+  if (normalized === "::1") return true;
+  if (normalized.startsWith("fe80:")) return true; // link-local
+  if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true; // unique local
+  return false;
+}
+
+function isBlockedWebshotHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (!normalized) return true;
+  if (normalized === "localhost" || normalized === "0.0.0.0") return true;
+  if (LOCAL_WEBSHOT_HOST_SUFFIX_BLOCKLIST.some((suffix) => normalized.endsWith(suffix))) return true;
+  if (isPrivateIpv4Address(normalized)) return true;
+  if (isPrivateIpv6Address(normalized)) return true;
+  return false;
+}
+
+function shouldInjectLocalControlPrompt(userMessage: string): boolean {
+  const normalized = String(userMessage || "").normalize("NFKC").trim();
+  if (!normalized) return false;
+
+  // Reuse parser first: if a concrete local-control intent was detected,
+  // include full local-control system context.
+  if (parseLocalControlRequest(normalized)) return true;
+
+  // Soft fallback for capability queries that might not map to a concrete
+  // executable command in the parser but still need an accurate answer.
+  return /\b(?:acceso|control|terminal|shell|archivo|archivos|carpeta|carpetas|computadora|sistema|captura|screenshot)\b/i.test(
+    normalized
+  );
+}
+
+async function captureWebshotWithoutSandbox(url: string): Promise<{
+  buffer: Buffer | null;
+  finalUrl?: string;
+  title?: string;
+  error?: string;
+}> {
+  let sessionId: string | null = null;
+  try {
+    sessionId = await browserWorker.createSession();
+    const result = await browserWorker.navigate(sessionId, url, true);
+    if (!result.success || !result.screenshot) {
+      return {
+        buffer: null,
+        error: result.error || "No se pudo navegar al sitio para capturar la imagen.",
+      };
+    }
+    return {
+      buffer: result.screenshot,
+      finalUrl: result.url,
+      title: result.title,
+    };
+  } catch (error) {
+    return {
+      buffer: null,
+      error: String((error as Error)?.message || error),
+    };
+  } finally {
+    if (sessionId) {
+      await browserWorker.destroySession(sessionId).catch(() => undefined);
+    }
+  }
+}
 const LOCAL_SHELL_MAX_STDOUT_CHARS = 24_000;
 const LOCAL_SHELL_MAX_STDERR_CHARS = 8_000;
 const LOCAL_SHELL_MAX_BUFFER_BYTES = 8 * 1024 * 1024;
@@ -1046,6 +1450,45 @@ function resolveLocalPath(rawPath: string | undefined, basePath: string = LOCAL_
 const LOCAL_FILE_READ_MAX_BYTES = 120_000;
 const LOCAL_FILE_READ_MAX_CHARS = 16_000;
 const LOCAL_FILE_WRITE_MAX_CHARS = 200_000;
+const DESKTOP_FILE_CATEGORY_EXTENSIONS: Record<string, Set<string>> = {
+  Documentos: new Set([
+    ".pdf", ".doc", ".docx", ".rtf", ".odt", ".txt", ".md", ".markdown", ".pages", ".tex", ".ppt", ".pptx",
+  ]),
+  Datos: new Set([
+    ".xls", ".xlsx", ".csv", ".tsv", ".ods", ".json", ".xml", ".yaml", ".yml", ".sql",
+  ]),
+  Imagenes: new Set([
+    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".svg", ".heic", ".tif", ".tiff", ".ico",
+  ]),
+  Videos: new Set([
+    ".mp4", ".mov", ".mkv", ".avi", ".webm", ".flv", ".wmv", ".m4v",
+  ]),
+  Audio: new Set([
+    ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".aiff",
+  ]),
+  Comprimidos: new Set([
+    ".zip", ".rar", ".7z", ".tar", ".gz", ".tgz", ".bz2", ".xz",
+  ]),
+  Codigo: new Set([
+    ".js", ".jsx", ".ts", ".tsx", ".py", ".java", ".c", ".h", ".cpp", ".hpp", ".go", ".rs",
+    ".php", ".rb", ".swift", ".kt", ".m", ".mm", ".cs", ".sh", ".bash", ".zsh", ".ps1",
+  ]),
+  Instaladores: new Set([
+    ".dmg", ".pkg", ".msi", ".exe", ".appimage", ".deb", ".rpm", ".apk",
+  ]),
+};
+const DESKTOP_ORGANIZE_ROOT_FOLDERS = new Set([
+  "Documentos",
+  "Datos",
+  "Imagenes",
+  "Videos",
+  "Audio",
+  "Comprimidos",
+  "Codigo",
+  "Instaladores",
+  "Otros",
+  "Carpetas",
+]);
 
 function formatLocalBytes(value: number): string {
   if (!Number.isFinite(value) || value < 0) return "0 B";
@@ -1058,6 +1501,96 @@ function formatLocalBytes(value: number): string {
   }
   const rounded = size >= 10 || unitIdx === 0 ? size.toFixed(0) : size.toFixed(1);
   return `${rounded} ${units[unitIdx]}`;
+}
+
+const LOCAL_APP_ALIASES: Record<string, string> = {
+  codex: "Antigravity",
+  "códex": "Antigravity",
+  antigravity: "Antigravity",
+  antigravit: "Antigravity",
+  whatsapp: "WhatsApp",
+  telegram: "Telegram",
+  chrome: "Google Chrome",
+  "google chrome": "Google Chrome",
+  safari: "Safari",
+  vscode: "Visual Studio Code",
+  "visual studio code": "Visual Studio Code",
+};
+
+function normalizeLocalAppName(raw: string): string {
+  const normalized = String(raw || "")
+    .normalize("NFKC")
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/[.,;:!?]+$/g, "")
+    .slice(0, 80);
+  if (!normalized) return "";
+  const mapped = LOCAL_APP_ALIASES[normalized.toLowerCase()];
+  return mapped || normalized;
+}
+
+function escapeAppleScriptStringLiteral(raw: string): string {
+  return String(raw || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\r?\n/g, " ");
+}
+
+function inferLocalMimeTypeFromPath(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === ".png") return "image/png";
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".webp") return "image/webp";
+  if (ext === ".gif") return "image/gif";
+  if (ext === ".bmp") return "image/bmp";
+  if (ext === ".heic") return "image/heic";
+  if (ext === ".pdf") return "application/pdf";
+  if (ext === ".txt" || ext === ".md") return "text/plain";
+  if (ext === ".json") return "application/json";
+  if (ext === ".csv") return "text/csv";
+  if (ext === ".doc") return "application/msword";
+  if (ext === ".docx") return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (ext === ".xls") return "application/vnd.ms-excel";
+  if (ext === ".xlsx") return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  if (ext === ".ppt") return "application/vnd.ms-powerpoint";
+  if (ext === ".pptx") return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+  if (ext === ".zip") return "application/zip";
+  return "application/octet-stream";
+}
+
+function inferLocalArtifactTypeFromMime(mimeType: string): "image" | "document" | "spreadsheet" | "presentation" | "pdf" {
+  const normalized = String(mimeType || "").toLowerCase();
+  if (normalized.startsWith("image/")) return "image";
+  if (normalized === "application/pdf") return "pdf";
+  if (normalized.includes("spreadsheet") || normalized.includes("excel") || normalized.includes("csv")) return "spreadsheet";
+  if (normalized.includes("presentation") || normalized.includes("powerpoint")) return "presentation";
+  return "document";
+}
+
+function buildLocalActionArtifact(payload?: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const localPath = typeof payload.path === "string" ? payload.path.trim() : "";
+  if (!localPath) return undefined;
+
+  const mimeTypeRaw = typeof payload.mimeType === "string" ? payload.mimeType.trim() : "";
+  const mimeType = mimeTypeRaw || inferLocalMimeTypeFromPath(localPath);
+  const fileNameRaw = typeof payload.fileName === "string" ? payload.fileName.trim() : "";
+  const fileName = fileNameRaw || path.basename(localPath);
+  const artifactType = inferLocalArtifactTypeFromMime(mimeType);
+  const localDownloadUrl = `/api/local/file?path=${encodeURIComponent(localPath)}`;
+
+  return {
+    artifactId: `local_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+    type: artifactType,
+    mimeType,
+    name: fileName,
+    filename: fileName,
+    downloadUrl: localDownloadUrl,
+    previewUrl: artifactType === "image" ? localDownloadUrl : undefined,
+    path: localPath,
+    sizeBytes: typeof payload.bytes === "number" ? payload.bytes : undefined,
+    localControl: true,
+  };
 }
 
 function isLikelyTextBuffer(buffer: Buffer): boolean {
@@ -1075,6 +1608,54 @@ function isLikelyTextBuffer(buffer: Buffer): boolean {
 function isProtectedLocalRootPath(targetPath: string, allowedRoots: string[]): boolean {
   const resolvedTarget = path.resolve(targetPath);
   return allowedRoots.some((rootPath) => path.resolve(rootPath) === resolvedTarget);
+}
+
+function classifyDesktopFileCategory(fileName: string): string {
+  const ext = path.extname(fileName).toLowerCase();
+  if (!ext) return "Otros";
+  for (const [category, extensions] of Object.entries(DESKTOP_FILE_CATEGORY_EXTENSIONS)) {
+    if (extensions.has(ext)) return category;
+  }
+  return "Otros";
+}
+
+function getDesktopFolderBucket(folderName: string): string {
+  const first = folderName.trim().charAt(0);
+  if (!first) return "_";
+  const normalized = first.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+  return /^[A-Z]$/.test(normalized) ? normalized : "_";
+}
+
+async function resolveUniqueLocalDestinationPath(targetPath: string): Promise<string> {
+  const directory = path.dirname(targetPath);
+  const extension = path.extname(targetPath);
+  const baseName = path.basename(targetPath, extension);
+  let attempt = 0;
+  while (attempt < 5000) {
+    const candidate = attempt === 0
+      ? targetPath
+      : path.join(directory, `${baseName} (${attempt})${extension}`);
+    try {
+      await fs.stat(candidate);
+      attempt += 1;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException)?.code;
+      if (code === "ENOENT") return candidate;
+      throw error;
+    }
+  }
+  return path.join(directory, `${baseName}-${Date.now()}${extension}`);
+}
+
+async function moveLocalPathSafe(sourcePath: string, destinationPath: string): Promise<void> {
+  try {
+    await fs.rename(sourcePath, destinationPath);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code;
+    if (code !== "EXDEV") throw error;
+    await fs.cp(sourcePath, destinationPath, { recursive: true });
+    await fs.rm(sourcePath, { recursive: true, force: false });
+  }
 }
 
 async function readLocalControlState(): Promise<LocalControlState> {
@@ -1122,26 +1703,82 @@ async function appendLocalControlAudit(event: string, payload: Record<string, un
   }
 }
 
+async function readLocalControlAuditTail(limit = 30): Promise<Array<Record<string, unknown>>> {
+  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(200, limit)) : 30;
+  let stat;
+  try {
+    stat = await fs.stat(LOCAL_ACTION_AUDIT_LOG_PATH);
+  } catch {
+    return [];
+  }
+  if (!stat.isFile() || stat.size <= 0) return [];
+
+  const maxBytes = Math.min(Number(stat.size), 900_000);
+  const start = Math.max(0, Number(stat.size) - maxBytes);
+  const handle = await fs.open(LOCAL_ACTION_AUDIT_LOG_PATH, "r");
+  try {
+    const buffer = Buffer.alloc(maxBytes);
+    const { bytesRead } = await handle.read(buffer, 0, maxBytes, start);
+    const text = buffer.subarray(0, bytesRead).toString("utf-8");
+    const lines = text
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const parsed = lines
+      .map((line) => {
+        try {
+          return JSON.parse(line) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .filter((entry): entry is Record<string, unknown> => !!entry);
+    return parsed.slice(-safeLimit);
+  } finally {
+    await handle.close();
+  }
+}
+
+function formatLocalControlAuditLine(entry: Record<string, unknown>, idx: number): string {
+  const ts = String(entry.ts || "").trim() || "sin-fecha";
+  const event = String(entry.event || "evento").trim();
+  const interesting = [
+    entry.command,
+    entry.tool,
+    entry.appName,
+    entry.targetPath,
+    entry.path,
+    entry.cwd,
+    entry.fileName,
+    entry.url,
+  ].find((value) => typeof value === "string" && String(value).trim().length > 0);
+  const detail = interesting ? ` · ${String(interesting).slice(0, 180)}` : "";
+  return `${idx + 1}. [${ts}] ${event}${detail}`;
+}
+
 function buildLocalHelpText(): string {
   const tokenHint = LOCAL_ACTION_ADMIN_TOKEN
     ? "Incluye token=<tu_token> en comandos de ejecucion."
     : "Tip: configura ILIAGPT_LOCAL_ACTION_TOKEN para requerir token admin.";
   return [
-    "=== Control Local ILIAGPT — 42 Comandos ===\n",
+    "=== Control Local ILIAGPT — 47 Comandos ===\n",
     "📂 Archivos:",
     "  ls [ruta] • mkdir <ruta> • touch <archivo> • read <archivo>",
     "  write <archivo> \"contenido\" • append <archivo> \"contenido\"",
     "  replace <archivo> \"buscar\" \"reemplazo\" confirmar",
     "  mv <origen> <destino> • rename <origen> <nuevo> • rm <ruta> confirmar",
     "  cp <origen> <destino> • stat <ruta> • find <patron> [ruta]",
-    "  grep <patron> <archivo|ruta> • tree [ruta] • chmod <permisos> <ruta>",
-    "  diff <archivo1> <archivo2>\n",
+    "  grep <patron> <archivo|ruta> • tree [ruta] • chmod <permisos> <ruta> • organize_desktop [all|files|folders]",
+    "  diff <archivo1> <archivo2> • sendfile <archivo>\n",
     "💻 Terminal:",
     "  shell <comando> • cd <ruta> • pwd • history",
+    "  history audit [n] (registro de acciones locales + shell)",
     "  python <codigo|archivo> • node <codigo|archivo> • script <archivo>",
-    "  open <app|archivo> • env [VAR=valor] • which <programa>\n",
+    "  open <app|archivo> • appwrite <app> <texto> [--enter] • env [VAR=valor] • which <programa>\n",
     "📊 Sistema:",
     "  sysinfo • ps • kill <PID> • ports • top • du <ruta> • monitor\n",
+    "🌐 Capturas:",
+    "  screenshot • windowshot <app> [indice] • webshot <url>\n",
     "📦 Paquetes:",
     "  npm <subcomando> • pip <subcomando> • brew <subcomando>\n",
     "🔧 Git:",
@@ -1204,10 +1841,29 @@ function parseLocalControlRequest(input: string): LocalControlRequest | null {
       return { command: "mkdir", args: [folderName], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
     }
 
+    // 1.5 organize_desktop — "ordena/organiza mi escritorio"
+    const organizeDesktopIntent = extractNaturalOrganizeDesktopIntent(raw);
+    if (organizeDesktopIntent) {
+      return {
+        command: "organize_desktop",
+        args: [organizeDesktopIntent.mode],
+        token: tokenFromRaw,
+        confirm: confirmFromRaw,
+        raw,
+        source: "natural",
+      };
+    }
+
     // 2. rm — "elimina/borra/delete la carpeta/archivo X"
     const rmIntent = extractNaturalRmIntent(raw);
     if (rmIntent) {
       return { command: "rm", args: [rmIntent], token: tokenFromRaw, confirm: true, raw, source: "natural" };
+    }
+
+    // 2.5 sendfile — "mándame/envíame el archivo X"
+    const sendFileIntent = extractNaturalSendFileIntent(raw);
+    if (sendFileIntent) {
+      return { command: "sendfile", args: [sendFileIntent], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
     }
 
     // 3. read — "lee/muéstrame/abre el archivo X" / "qué contiene X"
@@ -1219,6 +1875,41 @@ function parseLocalControlRequest(input: string): LocalControlRequest | null {
     // 3.5 Capability query — MUST be checked BEFORE shell intent to avoid "puedes ejecutar comandos" matching shell
     if (isCapabilityQuery(raw)) {
       return { command: "capabilities" as LocalControlCommand, args: [], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
+    }
+
+    // 3.6 appwrite — "escribe en codex ..."
+    const appWriteIntent = extractNaturalAppWriteIntent(raw);
+    if (appWriteIntent) {
+      return {
+        command: "appwrite",
+        args: [appWriteIntent.appName, appWriteIntent.text, appWriteIntent.pressEnter ? "--enter" : ""].filter(Boolean),
+        token: tokenFromRaw,
+        confirm: confirmFromRaw,
+        raw,
+        source: "natural",
+      };
+    }
+
+    // 3.7 windowshot — "captura de WhatsApp"
+    const windowshotIntent = extractNaturalWindowshotIntent(raw);
+    if (windowshotIntent) {
+      return {
+        command: "windowshot",
+        args: [windowshotIntent.appName],
+        token: tokenFromRaw,
+        confirm: confirmFromRaw,
+        raw,
+        source: "natural",
+      };
+    }
+
+    // 3.8 screenshot/webshot — "haz una captura", "captura ejemplo.com"
+    const screenshotIntent = extractNaturalScreenshotIntent(raw);
+    if (screenshotIntent) {
+      if (screenshotIntent.url) {
+        return { command: "webshot", args: [screenshotIntent.url], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
+      }
+      return { command: "screenshot", args: [], token: tokenFromRaw, confirm: confirmFromRaw, raw, source: "natural" };
     }
 
     // 4. shell — "ejecuta/corre/run el comando X" / "en la terminal haz X"
@@ -1406,6 +2097,16 @@ function parseLocalControlRequest(input: string): LocalControlRequest | null {
     copy: "cp",
     copiar: "cp",
     copia: "cp",
+    organize: "organize_desktop",
+    organize_desktop: "organize_desktop",
+    organizar: "organize_desktop",
+    organiza: "organize_desktop",
+    ordenar: "organize_desktop",
+    ordena: "organize_desktop",
+    clasificar: "organize_desktop",
+    clasifica: "organize_desktop",
+    "ordenar-escritorio": "organize_desktop",
+    "organizar-escritorio": "organize_desktop",
     // ── New commands ──
     ps: "ps",
     procesos: "ps",
@@ -1460,6 +2161,11 @@ function parseLocalControlRequest(input: string): LocalControlRequest | null {
     open: "open",
     abrir: "open",
     "abrir-app": "open",
+    appwrite: "appwrite",
+    escribir_app: "appwrite",
+    "escribir-app": "appwrite",
+    teclear: "appwrite",
+    type: "appwrite",
     env: "env",
     variables: "env",
     entorno: "env",
@@ -1503,6 +2209,19 @@ function parseLocalControlRequest(input: string): LocalControlRequest | null {
     captura: "screenshot",
     "captura-pantalla": "screenshot",
     pantallazo: "screenshot",
+    foto: "screenshot",
+    fotografia: "screenshot",
+    fotografía: "screenshot",
+    webshot: "webshot",
+    "web-shot": "webshot",
+    screenshot_web: "webshot",
+    "captura-web": "webshot",
+    capturaweb: "webshot",
+    windowshot: "windowshot",
+    "window-shot": "windowshot",
+    "captura-app": "windowshot",
+    capturaapp: "windowshot",
+    appshot: "windowshot",
     clipboard: "clipboard",
     portapapeles: "clipboard",
     copiar_clipboard: "clipboard",
@@ -1538,6 +2257,10 @@ function parseLocalControlRequest(input: string): LocalControlRequest | null {
     windows: "windows",
     ventanas: "windows",
     finder: "finder",
+    sendfile: "sendfile",
+    "send-file": "sendfile",
+    "enviar-archivo": "sendfile",
+    "mandar-archivo": "sendfile",
     osascript: "osascript",
     applescript: "osascript",
   };
@@ -1591,7 +2314,7 @@ export async function executeLocalControlRequest(
     return { handled: false };
   }
 
-  if (!LOCAL_DESKTOP_ACTIONS_ENABLED) {
+  if (!isLocalDesktopActionsEnabled()) {
     return localErrorResult(
       403,
       "LOCAL_ACTIONS_DISABLED",
@@ -1760,6 +2483,112 @@ export async function executeLocalControlRequest(
         command: parsed.command,
         path: targetPath,
         total: sorted.length,
+      });
+    }
+
+    if (parsed.command === "organize_desktop") {
+      const modeRaw = String(parsed.args[0] || "all").trim().toLowerCase();
+      const mode: DesktopOrganizationMode =
+        modeRaw === "files" || modeRaw === "folders" || modeRaw === "all"
+          ? modeRaw
+          : "all";
+      const desktopPath = LOCAL_ACTIONS_DEFAULT_ROOT;
+      if (!isAllowedLocalPath(desktopPath, allowedRoots)) {
+        return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "El escritorio no esta dentro de las rutas permitidas.");
+      }
+
+      const desktopStat = await fs.stat(desktopPath).catch((error) => {
+        const code = (error as NodeJS.ErrnoException)?.code;
+        if (code === "ENOENT") return null;
+        throw error;
+      });
+      if (!desktopStat || !desktopStat.isDirectory()) {
+        return localErrorResult(404, "LOCAL_DESKTOP_NOT_FOUND", "No se encontro la carpeta de escritorio.");
+      }
+
+      const entries = await fs.readdir(desktopPath, { withFileTypes: true });
+      const shouldMoveFiles = mode === "all" || mode === "files";
+      const shouldMoveFolders = mode === "all" || mode === "folders";
+      const createdDirectories = new Set<string>();
+      const movedItems: Array<{ kind: "file" | "folder"; name: string; from: string; to: string }> = [];
+      let skippedCount = 0;
+
+      for (const entry of entries) {
+        if (entry.name.startsWith(".")) {
+          skippedCount += 1;
+          continue;
+        }
+
+        const sourcePath = path.join(desktopPath, entry.name);
+        if (entry.isDirectory()) {
+          if (!shouldMoveFolders || DESKTOP_ORGANIZE_ROOT_FOLDERS.has(entry.name)) continue;
+          const bucket = getDesktopFolderBucket(entry.name);
+          const destinationDirectory = path.join(desktopPath, "Carpetas", bucket);
+          await fs.mkdir(destinationDirectory, { recursive: true });
+          createdDirectories.add(destinationDirectory);
+          const destinationPath = await resolveUniqueLocalDestinationPath(path.join(destinationDirectory, entry.name));
+          await moveLocalPathSafe(sourcePath, destinationPath);
+          movedItems.push({ kind: "folder", name: entry.name, from: sourcePath, to: destinationPath });
+          continue;
+        }
+
+        if (entry.isFile()) {
+          if (!shouldMoveFiles) continue;
+          const category = classifyDesktopFileCategory(entry.name);
+          const destinationDirectory = path.join(desktopPath, category);
+          await fs.mkdir(destinationDirectory, { recursive: true });
+          createdDirectories.add(destinationDirectory);
+          const destinationPath = await resolveUniqueLocalDestinationPath(path.join(destinationDirectory, entry.name));
+          await moveLocalPathSafe(sourcePath, destinationPath);
+          movedItems.push({ kind: "file", name: entry.name, from: sourcePath, to: destinationPath });
+          continue;
+        }
+
+        skippedCount += 1;
+      }
+
+      const movedFiles = movedItems.filter((item) => item.kind === "file").length;
+      const movedFolders = movedItems.length - movedFiles;
+      const movedPreview = movedItems
+        .slice(0, 20)
+        .map((item) => {
+          const relativeTo = path.relative(desktopPath, item.to) || item.to;
+          return `• ${item.name} -> ${relativeTo}`;
+        })
+        .join("\n");
+      const overflow = movedItems.length > 20 ? `\n... y ${movedItems.length - 20} elemento(s) mas.` : "";
+      const summary = movedItems.length
+        ? [
+          `Escritorio organizado (${mode}).`,
+          `Movidos: ${movedItems.length} elemento(s) (${movedFiles} archivos, ${movedFolders} carpetas).`,
+          `Directorios creados: ${createdDirectories.size}.`,
+          skippedCount > 0 ? `Ignorados: ${skippedCount} elemento(s).` : "",
+          "",
+          movedPreview + overflow,
+        ].filter(Boolean).join("\n")
+        : `No habia elementos para reorganizar en ${desktopPath}.`;
+
+      await appendLocalControlAudit("local_control_organize_desktop", {
+        requestId: context.requestId,
+        userId: actor,
+        path: desktopPath,
+        mode,
+        movedFiles,
+        movedFolders,
+        movedTotal: movedItems.length,
+        createdDirectories: createdDirectories.size,
+        skippedCount,
+      });
+
+      return localSuccessResult("LOCAL_ORGANIZE_DESKTOP_OK", summary, {
+        command: parsed.command,
+        path: desktopPath,
+        mode,
+        movedFiles,
+        movedFolders,
+        movedTotal: movedItems.length,
+        createdDirectories: createdDirectories.size,
+        skippedCount,
       });
     }
 
@@ -1957,6 +2786,111 @@ export async function executeLocalControlRequest(
           path: targetPath,
           size: targetStat.size,
           truncated: wasByteTruncated || wasCharTruncated,
+        }
+      );
+    }
+
+    if (parsed.command === "sendfile") {
+      const targetRaw = parsed.args.join(" ").trim();
+      if (!targetRaw) {
+        return localErrorResult(400, "LOCAL_SENDFILE_USAGE", "Uso: /local sendfile <ruta_archivo>");
+      }
+      const isPathLike =
+        /^[~/]/.test(targetRaw) ||
+        /^(?:desktop|downloads|documents|project):/i.test(targetRaw) ||
+        /[\\/]/.test(targetRaw);
+
+      let targetPath = resolveLocalPath(targetRaw, ensureLocalCwd(allowedRoots));
+      let fileStat: Awaited<ReturnType<typeof fs.stat>> | null = null;
+      let resolvedViaSpotlight = false;
+
+      const tryResolveAsDirectPath = async (): Promise<void> => {
+        if (!isAllowedLocalPath(targetPath, allowedRoots)) {
+          throw new Error("LOCAL_PATH_NOT_ALLOWED");
+        }
+        const stat = await fs.stat(targetPath);
+        if (!stat.isFile()) {
+          throw new Error("LOCAL_NOT_FILE");
+        }
+        fileStat = stat;
+      };
+
+      try {
+        await tryResolveAsDirectPath();
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException)?.code;
+        const reason = (error as Error)?.message || "";
+        const canFallbackToSearch = !isPathLike && (code === "ENOENT" || reason === "LOCAL_NOT_FILE" || reason === "LOCAL_PATH_NOT_ALLOWED");
+        if (!canFallbackToSearch) {
+          if (reason === "LOCAL_PATH_NOT_ALLOWED") {
+            return localErrorResult(403, "LOCAL_PATH_NOT_ALLOWED", "Ruta fuera de las carpetas permitidas.");
+          }
+          if (reason === "LOCAL_NOT_FILE") {
+            return localErrorResult(400, "LOCAL_NOT_FILE", "La ruta indicada no es un archivo.");
+          }
+          if (code === "ENOENT") {
+            return localErrorResult(404, "LOCAL_NOT_FOUND", "El archivo no existe.");
+          }
+          throw error;
+        }
+
+        const spotlightMatches = await macos.spotlightSearch(targetRaw, { limit: 30 });
+        const normalizedTarget = targetRaw.toLowerCase();
+        const allowedMatches = spotlightMatches
+          .map((entry) => path.resolve(entry.path))
+          .filter((entryPath) => isAllowedLocalPath(entryPath, allowedRoots))
+          .filter((entryPath) => path.basename(entryPath).toLowerCase() === normalizedTarget || path.basename(entryPath).toLowerCase().includes(normalizedTarget));
+
+        if (allowedMatches.length === 0) {
+          return localErrorResult(
+            404,
+            "LOCAL_NOT_FOUND",
+            `No encontré "${targetRaw}" en las rutas permitidas. Usa ruta completa o nombre exacto con extensión.`
+          );
+        }
+
+        if (allowedMatches.length > 1) {
+          const preview = allowedMatches.slice(0, 5).map((entryPath) => `• ${entryPath}`).join("\n");
+          return localErrorResult(
+            409,
+            "LOCAL_SENDFILE_AMBIGUOUS",
+            `Encontré varios archivos llamados similar a "${targetRaw}". Envia la ruta exacta:\n${preview}${allowedMatches.length > 5 ? `\n... y ${allowedMatches.length - 5} más.` : ""}`
+          );
+        }
+
+        targetPath = allowedMatches[0];
+        fileStat = await fs.stat(targetPath);
+        if (!fileStat.isFile()) {
+          return localErrorResult(400, "LOCAL_NOT_FILE", "La coincidencia encontrada no es un archivo.");
+        }
+        resolvedViaSpotlight = true;
+      }
+
+      if (!fileStat) {
+        return localErrorResult(500, "LOCAL_ACTION_FAILED", "No pude resolver el archivo solicitado.");
+      }
+
+      const fileName = path.basename(targetPath);
+      const mimeType = inferLocalMimeTypeFromPath(targetPath);
+      await appendLocalControlAudit("local_control_sendfile", {
+        requestId: context.requestId,
+        userId: actor,
+        targetPath,
+        fileName,
+        mimeType,
+        bytes: fileStat.size,
+        resolvedViaSpotlight,
+      });
+      return localSuccessResult(
+        "LOCAL_SENDFILE_OK",
+        `📎 Archivo listo para envío: ${targetPath} (${formatLocalBytes(fileStat.size)}).`,
+        {
+          command: "sendfile",
+          path: targetPath,
+          fileName,
+          mimeType,
+          bytes: fileStat.size,
+          resolvedViaSpotlight,
         }
       );
     }
@@ -2253,17 +3187,47 @@ export async function executeLocalControlRequest(
     }
 
     if (parsed.command === "history") {
-      const requestedLimit = Number.parseInt(parsed.args[0] || "20", 10);
+      const modeRaw = String(parsed.args[0] || "").trim().toLowerCase();
+      const isAuditMode = ["audit", "acciones", "actions", "registro", "log", "logs", "todo"].includes(modeRaw);
+      const limitRaw = isAuditMode ? parsed.args[1] : parsed.args[0];
+      const requestedLimit = Number.parseInt(limitRaw || "20", 10);
       const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(100, requestedLimit)) : 20;
-      const recent = _localCommandHistory.slice(-limit);
-      const lines = recent.length
-        ? recent.map((entry, idx) => `${idx + 1}. [${entry.ts}] (${entry.exitCode ?? "?"}) ${entry.command}`)
-        : ["(sin historial todavia)"];
-      return localSuccessResult("LOCAL_HISTORY_OK", lines.join("\n"), {
-        command: "history",
-        total: _localCommandHistory.length,
-        shown: recent.length,
-      });
+
+      const shellRecent = _localCommandHistory.slice(-limit);
+      const shellLines = shellRecent.length
+        ? shellRecent.map((entry, idx) => `${idx + 1}. [${entry.ts}] (${entry.exitCode ?? "?"}) ${entry.command}`)
+        : ["(sin historial de shell todavía)"];
+
+      if (!isAuditMode) {
+        return localSuccessResult("LOCAL_HISTORY_OK", shellLines.join("\n"), {
+          command: "history",
+          mode: "shell",
+          total: _localCommandHistory.length,
+          shown: shellRecent.length,
+        });
+      }
+
+      const auditEntries = await readLocalControlAuditTail(limit);
+      const auditLines = auditEntries.length
+        ? auditEntries.map((entry, idx) => formatLocalControlAuditLine(entry, idx))
+        : ["(sin registro de acciones todavía)"];
+
+      return localSuccessResult(
+        "LOCAL_HISTORY_AUDIT_OK",
+        [
+          "=== Registro de acciones locales ===",
+          ...auditLines,
+          "",
+          "=== Historial shell ===",
+          ...shellLines,
+        ].join("\n"),
+        {
+          command: "history",
+          mode: "audit",
+          auditShown: auditEntries.length,
+          shellShown: shellRecent.length,
+        }
+      );
     }
 
     if (parsed.command === "env") {
@@ -2745,6 +3709,65 @@ export async function executeLocalControlRequest(
       );
     }
 
+    if (parsed.command === "appwrite") {
+      const appNameRaw = String(parsed.args[0] || "").trim();
+      if (!appNameRaw) {
+        return localErrorResult(400, "MACOS_APPWRITE_USAGE", "Uso: /local appwrite <app> <texto> [--enter]");
+      }
+
+      const appName = normalizeLocalAppName(appNameRaw);
+      let text = parsed.args.slice(1).join(" ").trim();
+      const pressEnter = /(?:^|\s)--enter(?:\s|$)/i.test(text);
+      text = text.replace(/(?:^|\s)--enter(?:\s|$)/gi, " ").trim();
+      if (!text) {
+        return localErrorResult(400, "MACOS_APPWRITE_USAGE", "Falta texto. Uso: /local appwrite <app> <texto> [--enter]");
+      }
+
+      if (text.length > 2500) {
+        text = text.slice(0, 2500);
+      }
+
+      const scriptLines = [
+        `tell application "${escapeAppleScriptStringLiteral(appName)}" to activate`,
+        "delay 0.35",
+        'tell application "System Events"',
+        `  keystroke "${escapeAppleScriptStringLiteral(text)}"`,
+      ];
+      if (pressEnter) {
+        scriptLines.push("  key code 36");
+      }
+      scriptLines.push("end tell");
+
+      const script = scriptLines.join("\n");
+      const result = await macos.runOsascript(script, { timeout: 15_000 });
+      await appendLocalControlAudit("local_control_appwrite", {
+        requestId: context.requestId,
+        userId: actor,
+        appName,
+        textLength: text.length,
+        pressEnter,
+        success: result.success,
+      });
+      if (!result.success) {
+        return localErrorResult(
+          500,
+          "MACOS_APPWRITE_FAIL",
+          `No pude escribir en ${appName}. Revisa permisos de Accesibilidad en macOS. Detalle: ${result.error || "error desconocido"}`
+        );
+      }
+
+      return localSuccessResult(
+        "MACOS_APPWRITE_OK",
+        `⌨️ Texto escrito en ${appName}${pressEnter ? " (con Enter)" : ""}.`,
+        {
+          command: "appwrite",
+          appName,
+          textLength: text.length,
+          pressEnter,
+        }
+      );
+    }
+
     if (parsed.command === "open") {
       const targetRaw = parsed.args.join(" ").trim();
       if (!targetRaw) {
@@ -3017,12 +4040,128 @@ export async function executeLocalControlRequest(
       return localSuccessResult("MACOS_LOCK", "🔒 Pantalla bloqueada.");
     }
 
+    if (parsed.command === "windowshot") {
+      const appNameRaw = String(parsed.args[0] || "").trim();
+      if (!appNameRaw) {
+        return localErrorResult(400, "MACOS_WINDOWSHOT_USAGE", "Uso: /local windowshot <app> [indice_ventana]");
+      }
+      const appName = normalizeLocalAppName(appNameRaw);
+      const requestedIndex = Number.parseInt(String(parsed.args[1] || "1"), 10);
+      const windowIndex = Number.isFinite(requestedIndex) ? Math.max(1, Math.min(20, requestedIndex)) : 1;
+
+      const result = await macos.takeWindowScreenshot(appName, windowIndex - 1);
+      if (!result.success) {
+        return localErrorResult(500, "MACOS_WINDOWSHOT_FAIL", result.error || `No pude capturar la ventana de ${appName}.`);
+      }
+
+      return localSuccessResult("MACOS_WINDOWSHOT_OK", `📸 Captura de ${appName} guardada: ${result.path}`, {
+        appName,
+        windowIndex,
+        path: result.path,
+        fileName: path.basename(result.path),
+        mimeType: inferLocalMimeTypeFromPath(result.path),
+        hasBase64: !!result.base64,
+      });
+    }
+
     if (parsed.command === "screenshot") {
       const r = await macos.takeScreenshot({ shadow: false });
       if (!r.success) return localErrorResult(500, "MACOS_SCREENSHOT_FAIL", r.error || "Error al tomar screenshot");
+      let screenshotBytes: number | undefined;
+      try {
+        const stat = await fs.stat(r.path);
+        if (stat.isFile()) {
+          screenshotBytes = stat.size;
+        }
+      } catch {
+        screenshotBytes = undefined;
+      }
       return localSuccessResult("MACOS_SCREENSHOT", `📸 Screenshot guardado: ${r.path}`, {
         path: r.path,
+        fileName: path.basename(r.path),
+        mimeType: inferLocalMimeTypeFromPath(r.path),
+        bytes: screenshotBytes,
         hasBase64: !!r.base64,
+      });
+    }
+
+    if (parsed.command === "webshot") {
+      const urlInput = String(parsed.args[0] || "").trim();
+      if (!urlInput) {
+        return localErrorResult(400, "MACOS_WEBSHOT_USAGE", "Uso: /local webshot <url>");
+      }
+
+      const normalizedUrl = /^https?:\/\//i.test(urlInput) ? urlInput : `https://${urlInput}`;
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(normalizedUrl);
+      } catch {
+        return localErrorResult(400, "MACOS_WEBSHOT_INVALID_URL", "URL inválida para captura web.");
+      }
+
+      if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+        return localErrorResult(400, "MACOS_WEBSHOT_INVALID_URL", "Solo se permiten URLs http/https.");
+      }
+
+      if (isBlockedWebshotHostname(parsedUrl.hostname)) {
+        return localErrorResult(403, "MACOS_WEBSHOT_BLOCKED", "Host bloqueado por seguridad (loopback/red privada).");
+      }
+
+      let captureMode: "sandbox" | "direct" = "sandbox";
+      let captureFinalUrl: string | undefined;
+      let captureTitle: string | undefined;
+      let screenshotBuffer: Buffer | null = null;
+
+      if (browserAdapter.isUrlAllowed(parsedUrl.toString())) {
+        screenshotBuffer = await browserAdapter.screenshot(parsedUrl.toString());
+      }
+
+      if (!screenshotBuffer) {
+        captureMode = "direct";
+        const fallbackCapture = await captureWebshotWithoutSandbox(parsedUrl.toString());
+        screenshotBuffer = fallbackCapture.buffer;
+        captureFinalUrl = fallbackCapture.finalUrl;
+        captureTitle = fallbackCapture.title;
+
+        if (!screenshotBuffer) {
+          return localErrorResult(
+            500,
+            "MACOS_WEBSHOT_FAIL",
+            `No se pudo capturar el sitio web. ${fallbackCapture.error || "Error desconocido."}`
+          );
+        }
+      }
+
+      if (!screenshotBuffer || screenshotBuffer.length === 0) {
+        return localErrorResult(500, "MACOS_WEBSHOT_FAIL", "No se pudo capturar el sitio web.");
+      }
+
+      const safeHost = parsedUrl.hostname.replace(/[^a-zA-Z0-9.-]/g, "_").slice(0, 80) || "site";
+      const fileName = `webshot-${safeHost}-${Date.now()}.png`;
+      const outputDir = path.join(os.tmpdir(), "iliagpt-webshots");
+      await fs.mkdir(outputDir, { recursive: true });
+      const filePath = path.join(outputDir, fileName);
+      await fs.writeFile(filePath, screenshotBuffer);
+
+      await appendLocalControlAudit("local_control_webshot", {
+        requestId: context.requestId,
+        userId: actor,
+        url: parsedUrl.toString(),
+        filePath,
+        bytes: screenshotBuffer.length,
+        captureMode,
+        captureFinalUrl,
+      });
+
+      return localSuccessResult("MACOS_WEBSHOT_OK", `🌐📸 Screenshot web guardado: ${filePath}`, {
+        url: parsedUrl.toString(),
+        finalUrl: captureFinalUrl || parsedUrl.toString(),
+        title: captureTitle,
+        path: filePath,
+        fileName,
+        mimeType: "image/png",
+        bytes: screenshotBuffer.length,
+        captureMode,
       });
     }
 
@@ -3522,7 +4661,7 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
 
   router.post("/chat", async (req, res) => {
     try {
-      const { messages: clientMessages, useRag = true, conversationId, images, gptConfig, gptId, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachments, lastImageBase64, lastImageId, session_id, skillId, skill } = req.body;
+      const { messages: clientMessages, useRag = true, conversationId, images, gptConfig, gptId: rawGptId, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachments, lastImageBase64, lastImageId, session_id: rawSessionId, skillId, skill } = req.body;
 
       if (!clientMessages || !Array.isArray(clientMessages)) {
         return res.status(400).json({ error: "Messages array is required" });
@@ -3542,11 +4681,13 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         userId,
       });
       if (localControlResult.handled) {
+        const localActionArtifact = buildLocalActionArtifact(localControlResult.payload || {});
         if (!localControlResult.ok) {
           return res.status(localControlResult.statusCode).json({
             error: localControlResult.message,
             code: localControlResult.code,
             localAction: localControlResult.payload || null,
+            artifact: localActionArtifact || null,
           });
         }
         return res.status(200).json({
@@ -3559,6 +4700,7 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
             code: localControlResult.code,
             ...(localControlResult.payload || {}),
           },
+          artifact: localActionArtifact || null,
         });
       }
 
@@ -3607,6 +4749,14 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
       let gptSessionContract: GptSessionContract | null = null;
       let effectiveModel = model;
       let serverSessionId: string | null = null;
+      let effectiveSessionId = typeof rawSessionId === "string" ? rawSessionId.trim() : "";
+      if (!effectiveSessionId) {
+        effectiveSessionId = "";
+      }
+      let effectiveGptId = typeof rawGptId === "string" ? rawGptId.trim() : "";
+      if (effectiveGptId === "default") {
+        effectiveGptId = "";
+      }
 
       // Helper to determine if conversationId is valid for session lookup
       const isValidConversationId = (id?: string): boolean => {
@@ -3616,46 +4766,96 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         return true;
       };
 
-      // First, try to retrieve existing session by session_id
-      if (session_id) {
+      // If gptId wasn't provided by the client, recover it from chat metadata.
+      // This keeps GPT behavior stable on reloads and in partial client states.
+      if (!effectiveGptId && isValidConversationId(conversationId)) {
         try {
-          gptSessionContract = await getSessionById(session_id);
+          const existingChat = await storage.getChat(conversationId);
+          const chatGptId = typeof existingChat?.gptId === "string" ? existingChat.gptId.trim() : "";
+          if (chatGptId) {
+            effectiveGptId = chatGptId;
+          }
+        } catch (chatLookupError) {
+          console.warn("[Chat API] Failed to recover gptId from chat metadata:", chatLookupError);
+        }
+      }
+
+      // Recover session from existing chat if client didn't send session_id.
+      if (!effectiveSessionId && isValidConversationId(conversationId)) {
+        try {
+          const chatSession = await getSessionByChatId(conversationId);
+          if (chatSession?.id) {
+            effectiveSessionId = chatSession.id;
+          }
+        } catch (chatSessionError) {
+          console.warn("[Chat API] Failed to recover session from chat metadata:", chatSessionError);
+        }
+      }
+
+      // First, try to retrieve existing session by session_id
+      if (effectiveSessionId) {
+        try {
+          gptSessionContract = await getSessionById(effectiveSessionId);
           if (gptSessionContract) {
-            serverSessionId = gptSessionContract.sessionId;
-            effectiveModel = getEnforcedModel(gptSessionContract, model);
-            console.log(`[Chat API] Reusing existing session: session_id=${session_id}, gptId=${gptSessionContract.gptId}, configVersion=${gptSessionContract.configVersion}`);
+            const requestedGptId = typeof effectiveGptId === "string" ? effectiveGptId.trim() : "";
+            if (requestedGptId && requestedGptId !== gptSessionContract.gptId) {
+              console.warn(
+                `[Chat API] session_id ${effectiveSessionId} belongs to gptId=${gptSessionContract.gptId}, but request asked for gptId=${requestedGptId}. Creating a new matching session.`
+              );
+              gptSessionContract = null;
+              serverSessionId = null;
+            } else {
+              serverSessionId = gptSessionContract.sessionId;
+              effectiveModel = getEnforcedModel(gptSessionContract, model);
+              effectiveGptId = gptSessionContract.gptId;
+              console.log(`[Chat API] Reusing existing session: session_id=${effectiveSessionId}, gptId=${gptSessionContract.gptId}, configVersion=${gptSessionContract.configVersion}`);
+            }
           } else {
-            console.log(`[Chat API] Session not found: session_id=${session_id}, will create new if gptId provided`);
+            console.log(`[Chat API] Session not found: session_id=${effectiveSessionId}, will create new if gptId provided`);
           }
         } catch (sessionError) {
-          console.error(`[Chat API] Error retrieving session ${session_id}:`, sessionError);
+          console.error(`[Chat API] Error retrieving session ${effectiveSessionId}:`, sessionError);
         }
       }
 
       // If no session from session_id, try to create/get one via gptId
-      if (!gptSessionContract && gptId) {
+      if (!gptSessionContract && effectiveGptId) {
         try {
           if (isValidConversationId(conversationId)) {
             // Valid conversationId - use it for session lookup
-            gptSessionContract = await getOrCreateSession(conversationId, gptId);
-            console.log(`[Chat API] GPT Session created/retrieved: gptId=${gptId}, configVersion=${gptSessionContract.configVersion}`);
+            gptSessionContract = await getOrCreateSession(conversationId, effectiveGptId);
+            console.log(`[Chat API] GPT Session created/retrieved: gptId=${effectiveGptId}, configVersion=${gptSessionContract.configVersion}`);
           } else {
             // No valid conversationId - create session with null chatId (still persisted)
-            gptSessionContract = await getOrCreateSession("", gptId);
-            console.log(`[Chat API] New GPT Session created: gptId=${gptId}, sessionId=${gptSessionContract.sessionId}, configVersion=${gptSessionContract.configVersion}`);
+            gptSessionContract = await getOrCreateSession("", effectiveGptId);
+            console.log(`[Chat API] New GPT Session created: gptId=${effectiveGptId}, sessionId=${gptSessionContract.sessionId}, configVersion=${gptSessionContract.configVersion}`);
           }
           serverSessionId = gptSessionContract.sessionId;
           effectiveModel = getEnforcedModel(gptSessionContract, model);
+          effectiveGptId = gptSessionContract.gptId;
         } catch (sessionError) {
-          console.error(`[Chat API] Error creating GPT session for gptId=${gptId}:`, sessionError);
+          console.error(`[Chat API] Error creating GPT session for gptId=${effectiveGptId}:`, sessionError);
           // Fall back to legacy gptConfig if session creation fails
         }
       }
 
+      // If the request explicitly targets a GPT, never continue without a valid session contract.
+      if (effectiveGptId && !gptSessionContract) {
+        return res.status(424).json({
+          error: `No se pudo cargar la configuracion del GPT (${effectiveGptId}).`,
+          code: "GPT_SESSION_UNAVAILABLE",
+        });
+      }
+
       // Track GPT Usage (Fire-and-forget)
-      const usageGptId = gptSessionContract?.gptId || gptId;
+      const usageGptId = gptSessionContract?.gptId || effectiveGptId;
       if (usageGptId) {
         storage.incrementGptUsage(usageGptId).catch(e => console.error(`[Chat API] Failed to increment GPT usage for ${usageGptId}:`, e));
+      }
+      if (gptSessionContract && isValidConversationId(conversationId)) {
+        storage.updateChat(conversationId, { gptId: gptSessionContract.gptId }).catch((e) => {
+          console.warn(`[Chat API] Failed to persist chat.gptId for ${conversationId}:`, e);
+        });
       }
 
       // DATA_MODE ENFORCEMENT: Reject document attachments - must use /analyze endpoint
@@ -4181,14 +5381,15 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         clientRequestId: rawClientRequestId,
         userRequestId: rawUserRequestId,
         attachments,
-        gptId,
+        gptId: rawGptId,
         model,
         provider: rawProvider,
-        session_id,
-        docTool,
+        session_id: rawSessionId,
+        docTool: rawDocTool,
         forceWebSearch,
         webSearchAuto,
         latencyMode: rawLatencyMode,
+        workspaceContext: rawWorkspaceContext,
         lastImageBase64,
         lastImageId,
         skillId,
@@ -4196,6 +5397,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         skillScopes
       } = req.body;
       let latencyMode: LatencyMode = ['fast', 'deep', 'auto'].includes(rawLatencyMode) ? rawLatencyMode : 'auto';
+      const workspaceContext = normalizeWorkspaceContext(rawWorkspaceContext);
       const effectiveUserId = getOrCreateSecureUserId(req);
       const streamConversationId = sanitizeStreamIdentifier(
         typeof conversationId === "string" && conversationId.trim().length > 0
@@ -4205,6 +5407,47 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
             : `chat_${requestId}`),
         "chat_stream"
       );
+      let effectiveSessionId = typeof rawSessionId === "string" ? rawSessionId.trim() : "";
+      if (!effectiveSessionId) {
+        effectiveSessionId = "";
+      }
+      let effectiveGptId = typeof rawGptId === "string" ? rawGptId.trim() : "";
+      if (effectiveGptId === "default") {
+        effectiveGptId = "";
+      }
+
+      if (!effectiveGptId) {
+        const lookupChatId =
+          (typeof chatId === "string" && chatId.trim().length > 0 ? chatId.trim() : "") ||
+          (typeof conversationId === "string" && conversationId.trim().length > 0 ? conversationId.trim() : "");
+        if (lookupChatId) {
+          try {
+            const existingChat = await storage.getChat(lookupChatId);
+            const chatGptId = typeof existingChat?.gptId === "string" ? existingChat.gptId.trim() : "";
+            if (chatGptId) {
+              effectiveGptId = chatGptId;
+            }
+          } catch (chatLookupError) {
+            console.warn("[Stream] Failed to recover gptId from chat metadata:", chatLookupError);
+          }
+        }
+      }
+
+      if (!effectiveSessionId) {
+        const lookupChatId =
+          (typeof chatId === "string" && chatId.trim().length > 0 ? chatId.trim() : "") ||
+          (typeof conversationId === "string" && conversationId.trim().length > 0 ? conversationId.trim() : "");
+        if (lookupChatId) {
+          try {
+            const chatSession = await getSessionByChatId(lookupChatId);
+            if (chatSession?.id) {
+              effectiveSessionId = chatSession.id;
+            }
+          } catch (chatSessionError) {
+            console.warn("[Stream] Failed to recover session from chat metadata:", chatSessionError);
+          }
+        }
+      }
 
       cleanConversationStreamLocks();
       const queueMode = (req.body as any)?.queueMode === "reject" ? "reject" : "replace";
@@ -4261,6 +5504,13 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       resetIdleTimeout();
 
       const parsedSkillScopes = normalizeStreamSkillScopes(skillScopes);
+      let docTool: "word" | "excel" | "ppt" | "figma" | null = null;
+      if (typeof rawDocTool === "string") {
+        const normalizedDocTool = rawDocTool.trim().toLowerCase();
+        if (normalizedDocTool === "word" || normalizedDocTool === "excel" || normalizedDocTool === "ppt" || normalizedDocTool === "figma") {
+          docTool = normalizedDocTool;
+        }
+      }
 
       if (isDebugLogEnabled) {
         // DEBUG: Log attachments received from frontend
@@ -4280,6 +5530,14 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         // Avoid externally-controlled format strings: don't interpolate user-controlled values into
         // the first console argument (console uses util.format semantics).
         console.log("[Stream] REQUEST RECEIVED", { docTool, chatId, runId, forceWebSearch });
+        if (workspaceContext) {
+          console.log("[Stream] Workspace context", {
+            repositoryPath: workspaceContext.repositoryPath,
+            selectedFolder: workspaceContext.selectedFolder,
+            branch: workspaceContext.branch,
+            codingAgents: workspaceContext.codingAgents,
+          });
+        }
       }
 
       if (!clientMessages || !Array.isArray(clientMessages)) {
@@ -4402,6 +5660,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       });
       console.log("[LocalControl] Stream interception result:", earlyLocalControlResult.handled ? `HANDLED (${(earlyLocalControlResult as any).code})` : "NOT handled — passing to LLM");
       if (earlyLocalControlResult.handled) {
+        const localActionPayload = earlyLocalControlResult.payload || {};
+        const localActionArtifact = buildLocalActionArtifact(localActionPayload);
         if (!res.headersSent) {
           res.setHeader("Content-Type", "text/event-stream");
           res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
@@ -4422,10 +5682,15 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
             timestamp: Date.now(),
             localAction: {
               code: earlyLocalControlResult.code,
-              ...(earlyLocalControlResult.payload || {}),
+              ...localActionPayload,
             },
+            ...(localActionArtifact ? { artifact: localActionArtifact } : {}),
           });
-          writeSse(res, "done", { requestId, timestamp: Date.now() });
+          writeSse(res, "done", {
+            requestId,
+            timestamp: Date.now(),
+            ...(localActionArtifact ? { artifact: localActionArtifact } : {}),
+          });
           return res.end();
         }
 
@@ -4520,6 +5785,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
                     id: chatId,
                     title: "New Chat",
                     userId: effectiveUserId || undefined,
+                    gptId: effectiveGptId || undefined,
                   });
                 } catch (chatCreateError: any) {
                   if (chatCreateError?.code !== "23505") {
@@ -4917,8 +6183,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         !forceWebSearch &&
         !webSearchAuto &&
         !runId &&
-        !gptId &&
-        !session_id &&
+        !effectiveGptId &&
+        !effectiveSessionId &&
         clientMessages.length <= 2 &&
         !isConnectionClosed &&
         !skipSkillShortcuts
@@ -4992,6 +6258,170 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         connectorSearchAuto: userSettings?.featureFlags?.connectorSearchAuto ?? false,
       };
 
+      const userId = effectiveUserId;
+
+      // GPT Session Contract Resolution for streaming
+      // Priority: session_id (reuse existing) > gptId (create new)
+      let gptSessionContract: GptSessionContract | null = null;
+      let effectiveModel = model || DEFAULT_MODEL;
+      let serverSessionId: string | null = null;
+      const effectiveProvider = provider || DEFAULT_PROVIDER;
+
+      const isValidConversationIdForStream = (id?: string): boolean => {
+        if (!id) return false;
+        if (id.startsWith('pending-')) return false;
+        if (id.trim() === '') return false;
+        return true;
+      };
+
+      // First, try to retrieve existing session by session_id
+      if (effectiveSessionId) {
+        try {
+          gptSessionContract = await getSessionById(effectiveSessionId);
+          if (gptSessionContract) {
+            const requestedGptId = typeof effectiveGptId === "string" ? effectiveGptId.trim() : "";
+            if (requestedGptId && requestedGptId !== gptSessionContract.gptId) {
+              console.warn(
+                `[Stream] session_id ${effectiveSessionId} belongs to gptId=${gptSessionContract.gptId}, but request asked for gptId=${requestedGptId}. Creating a new matching session.`
+              );
+              gptSessionContract = null;
+              serverSessionId = null;
+            } else {
+              serverSessionId = gptSessionContract.sessionId;
+              effectiveModel = getEnforcedModel(gptSessionContract, model);
+              effectiveGptId = gptSessionContract.gptId;
+              console.log(`[Stream] Reusing existing session: session_id=${effectiveSessionId}, gptId=${gptSessionContract.gptId}, configVersion=${gptSessionContract.configVersion}`);
+            }
+          } else {
+            console.log(`[Stream] Session not found: session_id=${effectiveSessionId}, will create new if gptId provided`);
+          }
+        } catch (sessionError) {
+          console.error(`[Stream] Error retrieving session ${effectiveSessionId}:`, sessionError);
+        }
+      }
+
+      // If no session from session_id, try to create/get one via gptId
+      if (!gptSessionContract && effectiveGptId) {
+        try {
+          const effectiveChatIdForSession = chatId || conversationId || streamConversationId;
+          if (isValidConversationIdForStream(effectiveChatIdForSession)) {
+            gptSessionContract = await getOrCreateSession(effectiveChatIdForSession, effectiveGptId);
+            console.log(`[Stream] GPT Session created/retrieved: gptId=${effectiveGptId}, configVersion=${gptSessionContract.configVersion}`);
+          } else {
+            gptSessionContract = await getOrCreateSession("", effectiveGptId);
+            console.log(`[Stream] New GPT Session created: gptId=${effectiveGptId}, sessionId=${gptSessionContract.sessionId}`);
+          }
+          serverSessionId = gptSessionContract.sessionId;
+          effectiveModel = getEnforcedModel(gptSessionContract, model);
+          effectiveGptId = gptSessionContract.gptId;
+        } catch (sessionError) {
+          console.error(`[Stream] Error creating GPT session for gptId=${effectiveGptId}:`, sessionError);
+        }
+      }
+
+      // If the stream explicitly targets a GPT and session resolution fails,
+      // build a direct fallback contract from GPT storage to avoid hard UI failure.
+      if (effectiveGptId && !gptSessionContract) {
+        try {
+          const fallbackGpt = await storage.getGpt(effectiveGptId) || await storage.getGptBySlug(effectiveGptId);
+          if (fallbackGpt) {
+            const fallbackKnowledgeItems = await storage.getGptKnowledge(fallbackGpt.id).catch(() => []);
+            const fallbackKnowledgeContext = buildFallbackKnowledgeContext(fallbackKnowledgeItems as any[]);
+            gptSessionContract = buildFallbackGptSessionContract(fallbackGpt, requestId, fallbackKnowledgeContext);
+            effectiveModel = getEnforcedModel(gptSessionContract, model);
+            effectiveGptId = gptSessionContract.gptId;
+            serverSessionId = gptSessionContract.sessionId;
+            writeSse(res, "notice", {
+              type: "gpt_session_fallback",
+              gptId: gptSessionContract.gptId,
+              message: "Se activó recuperación de sesión GPT con configuración persistida.",
+              requestId,
+              timestamp: Date.now(),
+            });
+            console.warn(`[Stream] GPT fallback contract activated for gptId=${gptSessionContract.gptId}`);
+          }
+        } catch (fallbackError) {
+          console.error(`[Stream] GPT fallback contract failed for gptId=${effectiveGptId}:`, fallbackError);
+        }
+      }
+
+      if (effectiveGptId && !gptSessionContract) {
+        return res.status(424).json({
+          error: `No se pudo cargar la configuracion del GPT (${effectiveGptId}).`,
+          code: "GPT_SESSION_UNAVAILABLE",
+        });
+      }
+
+      // Track GPT Usage (Fire-and-forget)
+      const streamUsageGptId = gptSessionContract?.gptId || effectiveGptId;
+      if (streamUsageGptId) {
+        storage.incrementGptUsage(streamUsageGptId).catch(e => console.error(`[Stream] Failed to increment GPT usage for ${streamUsageGptId}:`, e));
+      }
+
+      // Session metadata for SSE events
+      const sessionMetadata = gptSessionContract ? {
+        gpt_id: gptSessionContract.gptId,
+        config_version: gptSessionContract.configVersion,
+        tool_permissions: gptSessionContract.toolPermissions,
+        session_id: serverSessionId || gptSessionContract.sessionId,
+      } : null;
+
+      const gptCapabilityFlags = {
+        webBrowsing: gptSessionContract ? (gptSessionContract.capabilities.webBrowsing ?? false) : true,
+        codeInterpreter: gptSessionContract ? (gptSessionContract.capabilities.codeInterpreter ?? false) : true,
+        imageGeneration: gptSessionContract ? (gptSessionContract.capabilities.imageGeneration ?? false) : true,
+        canvas: gptSessionContract ? (gptSessionContract.capabilities.canvas ?? false) : true,
+        wordCreation: gptSessionContract ? (gptSessionContract.capabilities.wordCreation ?? false) : true,
+        excelCreation: gptSessionContract ? (gptSessionContract.capabilities.excelCreation ?? false) : true,
+        pptCreation: gptSessionContract ? (gptSessionContract.capabilities.pptCreation ?? false) : true,
+      };
+
+      if (!docTool) {
+        const inferredDocTool = inferDocToolFromPrompt(userQuery || "");
+        if (inferredDocTool) {
+          const inferredAllowed = inferredDocTool === "word"
+            ? gptCapabilityFlags.canvas && gptCapabilityFlags.wordCreation
+            : inferredDocTool === "excel"
+              ? gptCapabilityFlags.canvas && gptCapabilityFlags.excelCreation
+              : gptCapabilityFlags.canvas && gptCapabilityFlags.pptCreation;
+          if (inferredAllowed) {
+            docTool = inferredDocTool;
+            writeSse(res, "notice", {
+              type: "doc_tool_inferred",
+              docTool,
+              message: `Se activó automáticamente ${docTool.toUpperCase()} según tu solicitud.`,
+              requestId,
+              timestamp: Date.now(),
+            });
+          }
+        }
+      }
+
+      if (docTool) {
+        const docToolAllowed = docTool === "word"
+          ? gptCapabilityFlags.canvas && gptCapabilityFlags.wordCreation
+          : docTool === "excel"
+            ? gptCapabilityFlags.canvas && gptCapabilityFlags.excelCreation
+            : docTool === "ppt"
+              ? gptCapabilityFlags.canvas && gptCapabilityFlags.pptCreation
+              : gptCapabilityFlags.canvas;
+
+        if (!docToolAllowed) {
+          writeSse(res, "notice", {
+            type: "capability_disabled",
+            capability: docTool,
+            message: `La capacidad ${docTool} no está habilitada para este GPT.`,
+            requestId,
+            timestamp: Date.now(),
+          });
+          docTool = null;
+        }
+      }
+
+      const canvasEnabledForRun = gptSessionContract ? gptCapabilityFlags.canvas : featureFlags.canvasEnabled;
+      const webSearchAutoEnabledForRun = gptSessionContract ? gptCapabilityFlags.webBrowsing : featureFlags.webSearchAuto;
+      const codeInterpreterEnabledForRun = gptSessionContract ? gptCapabilityFlags.codeInterpreter : featureFlags.codeInterpreterEnabled;
+
       const responseStyle = userSettings?.responsePreferences?.responseStyle || "default";
       const customInstructions = userSettings?.responsePreferences?.customInstructions || "";
       const userProfile = userSettings?.userProfile || null;
@@ -4999,8 +6429,13 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       let detectedWebSources: any[] = [];
       let webSearchContextForLLM = ""; // Will be injected into system prompt
 
-      const requestedWebSearch = !!forceWebSearch || !!webSearchAuto;
-      const allowAutoSearch = featureFlags.webSearchAuto && !requestedWebSearch && !hasAnyAttachments;
+      const requestedWebSearch = gptCapabilityFlags.webBrowsing && !!forceWebSearch;
+      const autoSearchRequestedByClient = gptCapabilityFlags.webBrowsing && !!webSearchAuto;
+      const allowAutoSearch =
+        gptCapabilityFlags.webBrowsing &&
+        (webSearchAutoEnabledForRun || autoSearchRequestedByClient) &&
+        !requestedWebSearch &&
+        !hasAnyAttachments;
       // Allow web search in ALL latency lanes when auto-search is enabled
       // Previously fast lane blocked auto-search, but this prevented news/current-event queries from working
       const shouldSearch = requestedWebSearch || allowAutoSearch;
@@ -5020,7 +6455,17 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           const { academicEngineV3, generateAPACitation } = await import('../services/academicResearchEngineV3');
 
           const doAcademic = needsAcademicSearch(userQuery);
-          const doWeb = requestedWebSearch ? !doAcademic : needsWebSearch(userQuery);
+          // If a custom GPT explicitly has web browsing enabled, treat auto-search
+          // as a strong signal instead of relying only on regex heuristics.
+          const forceWebByCapability =
+            !requestedWebSearch &&
+            !!gptSessionContract &&
+            allowAutoSearch;
+          const doWeb = requestedWebSearch
+            ? !doAcademic
+            : forceWebByCapability
+              ? !doAcademic
+              : needsWebSearch(userQuery);
 
           if (doAcademic) {
             console.log("[Stream] Academic search", {
@@ -5148,69 +6593,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         });
       }
 
-      const userId = effectiveUserId;
 
-      // GPT Session Contract Resolution for streaming
-      // Priority: session_id (reuse existing) > gptId (create new)
-      let gptSessionContract: GptSessionContract | null = null;
-      let effectiveModel = model || DEFAULT_MODEL;
-      let serverSessionId: string | null = null;
-      const effectiveProvider = provider || DEFAULT_PROVIDER;
-
-      const isValidConversationIdForStream = (id?: string): boolean => {
-        if (!id) return false;
-        if (id.startsWith('pending-')) return false;
-        if (id.trim() === '') return false;
-        return true;
-      };
-
-      // First, try to retrieve existing session by session_id
-      if (session_id) {
-        try {
-          gptSessionContract = await getSessionById(session_id);
-          if (gptSessionContract) {
-            serverSessionId = gptSessionContract.sessionId;
-            effectiveModel = getEnforcedModel(gptSessionContract, model);
-            console.log(`[Stream] Reusing existing session: session_id=${session_id}, gptId=${gptSessionContract.gptId}, configVersion=${gptSessionContract.configVersion}`);
-          } else {
-            console.log(`[Stream] Session not found: session_id=${session_id}, will create new if gptId provided`);
-          }
-        } catch (sessionError) {
-          console.error(`[Stream] Error retrieving session ${session_id}:`, sessionError);
-        }
-      }
-
-      // If no session from session_id, try to create/get one via gptId
-      if (!gptSessionContract && gptId) {
-        try {
-          const effectiveChatIdForSession = chatId || conversationId || streamConversationId;
-          if (isValidConversationIdForStream(effectiveChatIdForSession)) {
-            gptSessionContract = await getOrCreateSession(effectiveChatIdForSession, gptId);
-            console.log(`[Stream] GPT Session created/retrieved: gptId=${gptId}, configVersion=${gptSessionContract.configVersion}`);
-          } else {
-            gptSessionContract = await getOrCreateSession("", gptId);
-            console.log(`[Stream] New GPT Session created: gptId=${gptId}, sessionId=${gptSessionContract.sessionId}`);
-          }
-          serverSessionId = gptSessionContract.sessionId;
-          effectiveModel = getEnforcedModel(gptSessionContract, model);
-        } catch (sessionError) {
-          console.error(`[Stream] Error creating GPT session for gptId=${gptId}:`, sessionError);
-        }
-      }
-
-      // Track GPT Usage (Fire-and-forget)
-      const streamUsageGptId = gptSessionContract?.gptId || gptId;
-      if (streamUsageGptId) {
-        storage.incrementGptUsage(streamUsageGptId).catch(e => console.error(`[Stream] Failed to increment GPT usage for ${streamUsageGptId}:`, e));
-      }
-
-      // Session metadata for SSE events
-      const sessionMetadata = gptSessionContract ? {
-        gpt_id: gptSessionContract.gptId,
-        config_version: gptSessionContract.configVersion,
-        tool_permissions: gptSessionContract.toolPermissions,
-        session_id: serverSessionId || gptSessionContract.sessionId,
-      } : null;
 
       // Get the last user message for PARE routing
       const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
@@ -5225,7 +6608,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
           // PRODUCTION MODE INTERCEPT - Check immediately after intent detection
           // Pass userMessageText to detect if user wants to search for articles first
-          if (featureFlags.canvasEnabled && isProductionIntent(intentResult, userMessageText) && intentResult.confidence >= 0.5) {
+          if (!docTool && canvasEnabledForRun && isProductionIntent(intentResult, userMessageText) && intentResult.confidence >= 0.5) {
             console.log(`[Stream] 🚀 PRODUCTION MODE ACTIVATED: intent=${intentResult.intent}, topic=${intentResult.slots.topic}`);
 
             try {
@@ -5327,6 +6710,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           messageId: `msg_${Date.now()}`,
           attachments: attachmentSpecs,
           latencyMode,
+          workspaceContext,
         });
         console.log(`[Stream] UnifiedContext created - intent: ${unifiedContext.requestSpec.intent}, confidence: ${unifiedContext.requestSpec.intentConfidence.toFixed(2)}, lane: ${unifiedContext.resolvedLane}, primaryAgent: ${unifiedContext.requestSpec.primaryAgent}`);
       } catch (contextError) {
@@ -5491,7 +6875,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         console.log(`🔥🔥🔥 [Stream] PRODUCTION CHECK END 🔥🔥🔥\n\n`);
 
         // Pass userMessageText to detect if user wants to search for articles first
-        if (featureFlags.canvasEnabled && isProductionIntent(intentResult, userMessageText) && intentResult.confidence >= 0.5) {
+        if (!docTool && canvasEnabledForRun && isProductionIntent(intentResult, userMessageText) && intentResult.confidence >= 0.5) {
           const effectiveChatId = chatId || conversationId || streamConversationId;
 
           console.log(`[Stream] 🚀 PRODUCTION MODE ACTIVATED: intent=${intentResult.intent}, topic=${intentResult.slots.topic}`);
@@ -5824,7 +7208,14 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         attachmentContext
       );
 
-      let systemContent = answerFirstPrompt.fullPrompt;
+      const gptSystemContext = gptSessionContract
+        ? buildSystemPromptWithContext(gptSessionContract).trim()
+        : "";
+      let systemContent = gptSystemContext || answerFirstPrompt.fullPrompt;
+      if (gptSystemContext) {
+        // Keep a light "answer first" nudge, but GPT style instructions must remain dominant.
+        systemContent += "\n\n[PREFERENCIA DE RESPUESTA]\nResponde de forma directa sin romper el formato, tono y estructura definidos por este GPT.";
+      }
 
       if (shouldRunModel && skillSeedForModel) {
         systemContent += `\n\n[CONTEXTO SKILL] Ya existe una respuesta parcial: "${skillSeedForModel.slice(0, 2200)}".\n` +
@@ -5915,7 +7306,7 @@ ${attachmentContext}`;
 
       // If code interpreter is enabled and the user is asking for a chart, force python output.
       const wantsChart = /\b(gr[aá]fic[oa]|chart|plot|visualiz|histograma|diagrama de barras|pie chart|scatter|l[ií]nea|barras)\b/i.test(userMessageText || "");
-      const codeInterpreterPrompt = (wantsChart && featureFlags.codeInterpreterEnabled)
+      const codeInterpreterPrompt = (wantsChart && codeInterpreterEnabledForRun && gptCapabilityFlags.codeInterpreter)
         ? `\n\n⚠️ CODE INTERPRETER ACTIVO ⚠️\nEl usuario ha solicitado una gráfica/visualización. Responde con un bloque \`\`\`python\`\`\` ejecutable (matplotlib) y NO con una descripción en texto.`
         : '';
 
@@ -5923,8 +7314,11 @@ ${attachmentContext}`;
       const now = new Date();
       const currentDateTimeContext = `\n\nFECHA Y HORA ACTUAL:\n- ISO: ${now.toISOString()}`;
 
-      // ── LOCAL CONTROL: Inform the LLM about its local system capabilities ──
-      const localControlSystemPrompt = LOCAL_DESKTOP_ACTIONS_ENABLED ? `
+      // ── LOCAL CONTROL: inject full local-control context only when relevant ──
+      // Avoid overshadowing GPT-specific writing instructions on regular chats.
+      const includeLocalControlPrompt =
+        isLocalDesktopActionsEnabled() && shouldInjectLocalControlPrompt(userMessageText || "");
+      const localControlSystemPrompt = includeLocalControlPrompt ? `
 
 [CAPACIDADES DE CONTROL LOCAL — IMPORTANTES]
 Tienes acceso COMPLETO a la computadora del usuario a través del sistema de control local. Esto incluye:
@@ -5968,7 +7362,19 @@ IMPORTANTE: NUNCA digas que no tienes acceso a la terminal, archivos, o sistema 
 Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, confirma que SÍ y explica brevemente tus capacidades.
 ` : '';
 
-      systemContent += `${currentDateTimeContext}${localControlSystemPrompt}${userProfileContext}${customInstructionsSection}${responseStyleModifier}${semanticMemoryContext ? `\n\n${semanticMemoryContext}` : ''}${codeInterpreterPrompt}${webSearchContextForLLM}${skillSystemSection}`;
+      const workspaceSystemPrompt = workspaceContext
+        ? `\n\n[WORKSPACE DE PROGRAMACION ACTIVO]
+- Proyecto: ${workspaceContext.projectName || workspaceContext.projectId || "workspace"}
+- Repositorio: ${workspaceContext.repositoryPath}
+- Carpeta objetivo: ${workspaceContext.selectedFolder || "."}
+- Rama activa: ${workspaceContext.branch || "main"}
+- Perfiles de agente: ${(workspaceContext.codingAgents || ["coder"]).join(", ")}
+- Runtime: ${workspaceContext.runtimeTarget || "Local"}
+- Acceso: ${workspaceContext.executionAccess || "Full access"}
+INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directamente en esta carpeta objetivo usando herramientas nativas.`
+        : "";
+
+      systemContent += `${currentDateTimeContext}${localControlSystemPrompt}${workspaceSystemPrompt}${userProfileContext}${customInstructionsSection}${responseStyleModifier}${semanticMemoryContext ? `\n\n${semanticMemoryContext}` : ''}${codeInterpreterPrompt}${webSearchContextForLLM}${skillSystemSection}`;
 
       // DOC TOOL: Add format-specific system prompt so the LLM outputs structured content
       // that the client-side editors can render (markdown for Word, CSV for Excel, JSON for PPT)
@@ -6000,6 +7406,7 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
             id: effectiveChatIdForPersistence,
             title: "New Chat",
             userId: userId || undefined,
+            gptId: gptSessionContract?.gptId || effectiveGptId || undefined,
           });
         }
       } catch (e) {
@@ -6007,6 +7414,12 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
         console.warn('[Stream] Failed to ensure chat exists for persistence:', e);
       } finally {
         recordStage("ensure_chat_ms", ensureChatStageStart);
+      }
+
+      if (gptSessionContract) {
+        storage.updateChat(effectiveChatIdForPersistence, { gptId: gptSessionContract.gptId }).catch((e) => {
+          console.warn(`[Stream] Failed to persist chat.gptId for ${effectiveChatIdForPersistence}:`, e);
+        });
       }
 
       // Persist the latest user message (best-effort). Without this, server-side memory is empty.
@@ -6186,7 +7599,7 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
         const assistantMessage = await storage.createChatMessage({
           chatId: effectiveChatIdForPersistence,
           role: 'assistant',
-          content: '', // Will be updated during streaming
+          content: '…', // Placeholder updated during streaming
           status: 'pending',
           runId: claimedRun?.id,
           userMessageId: claimedRun?.userMessageId || persistedUserMessageId || undefined,
@@ -6223,6 +7636,14 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
           primaryAgent: unifiedContext?.requestSpec?.primaryAgent ?? null,
           targetAgents: unifiedContext?.requestSpec?.targetAgents ?? [],
           isAgenticMode: unifiedContext?.isAgenticMode ?? false,
+          workspaceContext: workspaceContext
+            ? {
+              repositoryPath: workspaceContext.repositoryPath,
+              selectedFolder: workspaceContext.selectedFolder,
+              branch: workspaceContext.branch,
+              codingAgents: workspaceContext.codingAgents,
+            }
+            : undefined,
           webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
           timestamp: Date.now(),
           ...sessionMetadata
@@ -6238,7 +7659,10 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
           intentConfidence: unifiedContext?.requestSpec.intentConfidence,
           deliverableType: unifiedContext?.requestSpec.deliverableType,
           attachmentsCount: attachmentsCount,
-          isAgenticMode: unifiedContext?.isAgenticMode
+          isAgenticMode: unifiedContext?.isAgenticMode,
+          workspaceRepository: workspaceContext?.repositoryPath,
+          workspaceFolder: workspaceContext?.selectedFolder,
+          workspaceBranch: workspaceContext?.branch,
         }
       }).catch(() => { });
 
@@ -6307,13 +7731,28 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
         /\b(?:carpetas?|caprteas?|careptas?|carpteas?|folders?|directorios?|directories?|archivos?|files?)\b.*\b(?:mac|computadora|pc|laptop|sistema|escritorio|desktop|descargas|downloads|documentos|documents|home|disco)\b|\b(?:analiza|explora|listar|list|revisa|cuenta|count|cu[aá]ntas?)\b.*\b(?:mi\s+(?:mac|computadora|pc)|desktop|escritorio|home)\b/i.test(
           userMessageText || "",
         );
-      const agentLoopIntents = new Set(["web_automation", "multi_step_task", "research", "data_analysis", "document_analysis"]);
+      const agentLoopIntents = new Set([
+        "web_automation",
+        "multi_step_task",
+        "research",
+        "data_analysis",
+        "document_analysis",
+        "code_generation",
+        "document_generation",
+      ]);
+      const workspaceCodeIntent =
+        Boolean(workspaceContext?.repositoryPath) &&
+        (
+          unifiedContext?.requestSpec.intent === "code_generation" ||
+          /\b(c[oó]digo|code|refactor|implementa|fix|bug|archivo|file|repo|repositorio)\b/i.test(userMessageText || "")
+        );
       const shouldRouteThroughAgentLoop =
         shouldRunModel &&
         Boolean(unifiedContext?.isAgenticMode) &&
         (
           agentLoopIntents.has(unifiedContext!.requestSpec.intent) ||
-          localFsSignal
+          localFsSignal ||
+          workspaceCodeIntent
         );
 
       if (shouldRouteThroughAgentLoop) {
@@ -6330,13 +7769,12 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
             userId: userId || streamConversationId || "anonymous",
             chatId: effectiveChatIdForPersistence,
             requestSpec: unifiedContext.requestSpec,
-            maxIterations: 10
+            maxIterations: 10,
+            workspaceContext,
           });
 
           // Use the real response from the agent loop (not a placeholder)
-          // The agent loop already wrote chunk SSE events — fullContent is used for DB persistence.
-          // The agent loop's writeSse now enriches events with conversationId/requestId
-          // from streamMeta, so the client can properly receive and filter them.
+          // The agent loop already wrote chunk SSE events — fullContent is used for DB persistence
           fullContent = agentResponse || "He procesado tu solicitud de automatización web.";
           if (fullContent.trim()) {
             markFirstToken();
@@ -6385,7 +7823,7 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
           disableImageGeneration: hasAttachments,
           maxTokens: laneMaxTokens,
         };
-        
+
         const streamGenerator = llmGateway.streamChat(
           modelMessages,
           streamLlmOptions,
@@ -7335,7 +8773,7 @@ ${documentText}`;
           userId: userId || conversationId || "anonymous",
           requestId,
           disableImageGeneration: true,  // HARD BLOCK
-        });        
+        });
 
         let answerText = "";
         for await (const chunk of streamGenerator) {

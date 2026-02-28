@@ -17,6 +17,7 @@ class AgentEventBus extends EventEmitter {
   private eventHistory: Map<string, TraceEvent[]> = new Map();
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private readonly maxHistoryPerRun = 500;
+  private dbUnavailableLogged = false;
 
   constructor() {
     super();
@@ -124,8 +125,8 @@ class AgentEventBus extends EventEmitter {
   }
 
   private async persistEvent(event: TraceEvent): Promise<void> {
-    const insert = (db as any)?.insert;
-    if (typeof insert !== "function") {
+    const drizzleDb: any = db as any;
+    if (typeof drizzleDb?.insert !== "function" || !drizzleDb?.session) {
       return;
     }
 
@@ -133,7 +134,7 @@ class AgentEventBus extends EventEmitter {
       // Generate correlationId if not provided (required by DB schema)
       const correlationId = event.stepId || randomUUID();
 
-      await insert(agentModeEvents).values({
+      await drizzleDb.insert(agentModeEvents).values({
         id: randomUUID(),
         runId: event.runId,
         stepIndex: event.stepIndex ?? null,
@@ -161,6 +162,15 @@ class AgentEventBus extends EventEmitter {
       // These are non-critical for the agent workflow to complete
       if (error?.code === '23503' || error?.code === '23502') {
         // FK or NOT NULL constraint - run might not be persisted, skip silently
+        return;
+      }
+      const code = error?.code || error?.cause?.code;
+      const message = String(error?.message || error?.cause?.message || "");
+      if (code === "ECONNREFUSED" || code === "ECONNRESET" || code === "ETIMEDOUT" || code === "ENOTFOUND" || /ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND/i.test(message)) {
+        if (!this.dbUnavailableLogged) {
+          this.dbUnavailableLogged = true;
+          console.warn("[EventBus] DB unavailable, skipping event persistence");
+        }
         return;
       }
       console.error(`[EventBus] Persist error:`, error);

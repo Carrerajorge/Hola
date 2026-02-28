@@ -14,7 +14,7 @@ export interface CSVParseResult extends ParsedResult {
 }
 
 // CSV Security Limits
-const CSV_MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+const CSV_MAX_FILE_SIZE = Number(process.env.CSV_MAX_FILE_SIZE_MB || process.env.MAX_FILE_SIZE_MB || "2048") * 1024 * 1024;
 const CSV_MAX_ROWS = 1_000_000;
 const CSV_MAX_COLUMNS = 1_000;
 const CSV_MAX_CELL_LENGTH = 100_000; // 100KB per cell

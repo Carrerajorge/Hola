@@ -123,7 +123,12 @@ export default function Home() {
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [editingGpt, setEditingGpt] = useState<Gpt | null>(null);
   const [activeGpt, setActiveGpt] = useState<Gpt | null>(null);
+  const gptCacheRef = useRef<Map<string, Gpt>>(new Map());
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const activeGptId = useMemo(() => {
+    const raw = typeof activeGpt?.id === "string" ? activeGpt.id.trim() : "";
+    return raw.length > 0 ? raw : null;
+  }, [activeGpt?.id]);
 
   const { favorites, addFavorite, removeFavorite, isFavorite } = useFavorites();
   const { templates, addTemplate, removeTemplate, updateTemplate, incrementUsage, categories } = usePromptTemplates();
@@ -150,6 +155,49 @@ export default function Home() {
     truncateMessagesAt,
     isLoading: isChatsLoading
   } = useChats();
+
+  const activeChatGptId = useMemo(() => {
+    const raw = typeof (activeChat as any)?.gptId === "string" ? (activeChat as any).gptId.trim() : "";
+    return raw.length > 0 ? raw : null;
+  }, [activeChat]);
+
+  useEffect(() => {
+    const currentChatId = activeChat?.id;
+    if (!currentChatId) return;
+
+    if (!activeChatGptId) {
+      setActiveGpt((prev) => (prev ? null : prev));
+      return;
+    }
+
+    if (activeGpt?.id === activeChatGptId) {
+      return;
+    }
+
+    const cached = gptCacheRef.current.get(activeChatGptId);
+    if (cached) {
+      setActiveGpt(cached);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await apiFetch(`/api/gpts/${activeChatGptId}`);
+        if (!response.ok) return;
+        const gpt = await response.json();
+        if (cancelled || !gpt?.id) return;
+        gptCacheRef.current.set(gpt.id, gpt);
+        setActiveGpt(gpt);
+      } catch (error) {
+        console.warn("[home] Failed to recover GPT context from active chat:", error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeChat?.id, activeChatGptId, activeGpt?.id]);
 
   const {
     folders,
@@ -481,13 +529,22 @@ export default function Home() {
   }, [setActiveChatId]);
 
   const handleSendNewChatMessage = useCallback(async (message: Message) => {
-    const { pendingId, stableKey } = createChat();
+    const messageWithGptContext: Message = activeGptId && message.role === "user"
+      ? {
+        ...message,
+        metadata: {
+          ...(message.metadata || {}),
+          gptId: activeGptId,
+        },
+      }
+      : message;
+    const { pendingId, stableKey } = createChat({ gptId: activeGptId });
     moveConversationUiState(newChatStableKey, pendingId);
     ensureConversationUiState(pendingId);
     pendingChatIdRef.current = pendingId;
     setNewChatStableKey(stableKey);
     setIsNewChatMode(false);
-    const result = await addMessage(pendingId, message);
+    const result = await addMessage(pendingId, messageWithGptContext);
     const realId = result?.run?.chatId || (result ? resolveRealChatId(pendingId) : null);
     if (realId && !realId.startsWith("pending-")) {
       moveConversationUiState(pendingId, realId);
@@ -503,7 +560,7 @@ export default function Home() {
       window.history.replaceState(null, "", `/chat/${realId}`);
     }
     return result;
-  }, [addMessage, createChat, ensureConversationUiState, moveConversationUiState, newChatStableKey, setActiveChatId]);
+  }, [activeGptId, addMessage, createChat, ensureConversationUiState, moveConversationUiState, newChatStableKey, setActiveChatId]);
 
   // Stable message sender that uses the correct chat ID
   const handleSendMessage = useCallback(async (message: Message) => {
@@ -524,7 +581,7 @@ export default function Home() {
       let chatId = targetChatId;
 
       if (!chatId) {
-        const { pendingId, stableKey } = createChat();
+        const { pendingId, stableKey } = createChat({ gptId: activeGptId });
         pendingChatIdRef.current = pendingId;
         setNewChatStableKey(stableKey);
         setIsNewChatMode(false);
@@ -532,7 +589,16 @@ export default function Home() {
       }
 
       // Add user message
-      await addMessage(chatId!, message);
+      const planUserMessage: Message = activeGptId && message.role === "user"
+        ? {
+          ...message,
+          metadata: {
+            ...(message.metadata || {}),
+            gptId: activeGptId,
+          },
+        }
+        : message;
+      await addMessage(chatId!, planUserMessage);
 
       // 2. Call Preview API
       try {
@@ -585,13 +651,22 @@ export default function Home() {
     }
 
     const targetChatId = activeChat?.id || pendingChatIdRef.current;
+    const messageWithGptContext: Message = activeGptId && message.role === "user"
+      ? {
+        ...message,
+        metadata: {
+          ...(message.metadata || {}),
+          gptId: activeGptId,
+        },
+      }
+      : message;
     if (targetChatId) {
-      return await addMessage(targetChatId, message);
+      return await addMessage(targetChatId, messageWithGptContext);
     } else {
       // Fallback: create new chat
-      return await handleSendNewChatMessage(message);
+      return await handleSendNewChatMessage(messageWithGptContext);
     }
-  }, [activeChat?.id, addMessage, handleSendNewChatMessage, createChat, addMessage]);
+  }, [activeChat?.id, activeGptId, addMessage, handleSendNewChatMessage, createChat, addMessage]);
 
   // Get messages from either activeChat or pending chat
   const currentMessages = useMemo(() => {
@@ -642,10 +717,23 @@ export default function Home() {
     setIsGptBuilderOpen(true);
   };
 
-  const handleEditGptFromChat = useCallback((gpt: { id: string; name: string; description: string | null; systemPrompt: string }) => {
-    if (activeGpt) {
-      setEditingGpt(activeGpt);
-      setIsGptBuilderOpen(true);
+  const handleEditGpt = useCallback(async (gptLike?: { id: string } | null) => {
+    const targetId = gptLike?.id || activeGpt?.id;
+    if (!targetId) return;
+
+    try {
+      const res = await apiFetch(`/api/gpts/${targetId}`);
+      if (res.ok) {
+        const fullGpt = await res.json();
+        setEditingGpt(fullGpt);
+        setIsGptBuilderOpen(true);
+        return;
+      }
+      const payload = await res.json().catch(() => ({}));
+      throw new Error(payload?.error || "No se pudo cargar el GPT");
+    } catch (error) {
+      console.error("Error fetching GPT for edit:", error);
+      toast.error("No se pudo abrir el editor del GPT");
     }
   }, [activeGpt]);
 
@@ -874,14 +962,15 @@ export default function Home() {
             aiStateChatId={aiStateChatId}
             aiProcessSteps={aiProcessSteps}
             setAiProcessSteps={setAiProcessSteps}
-            chatId={activeChat?.id || pendingChatIdRef.current || null}
-            onOpenApps={handleOpenApps}
+              chatId={activeChat?.id || pendingChatIdRef.current || null}
+              chatGptId={activeChatGptId}
+              onOpenApps={handleOpenApps}
             onUpdateMessageAttachments={updateMessageAttachments}
             onEditMessageAndTruncate={editMessageAndTruncate}
             onTruncateAndReplaceMessage={truncateAndReplaceMessage}
             onTruncateMessagesAt={truncateMessagesAt}
             onNewChat={handleNewChat}
-            onEditGpt={handleEditGptFromChat}
+            onEditGpt={handleEditGpt}
             onHideGptFromSidebar={handleHideGptFromSidebar}
             onPinGptToSidebar={handlePinGptToSidebar}
             isGptPinned={isPinned}
@@ -921,6 +1010,7 @@ export default function Home() {
             onOpenChange={setIsGptExplorerOpen}
             onSelectGpt={handleSelectGpt}
             onCreateGpt={handleCreateGpt}
+            onEditGpt={handleEditGpt}
           />
         ) : null}
       </Suspense>
@@ -946,11 +1036,8 @@ export default function Home() {
               }
             }}
             onEditGpt={() => {
-              if (activeGpt) {
-                setAboutGptId(null);
-                setEditingGpt(activeGpt);
-                setIsGptBuilderOpen(true);
-              }
+              setAboutGptId(null);
+              handleEditGpt(activeGpt);
             }}
             onCopyLink={() => {
               if (aboutGptId) {

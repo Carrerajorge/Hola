@@ -212,7 +212,7 @@ final class GatewayConnectionController {
             await self.connectManual(host: host, port: port, useTLS: useTLS)
         case let .discovered(stableID, _):
             guard let gateway = self.gateways.first(where: { $0.stableID == stableID }) else { return }
-            _ = await self.connectDiscoveredGateway(gateway)
+            await self.connectDiscoveredGateway(gateway)
         }
     }
 
@@ -399,7 +399,7 @@ final class GatewayConnectionController {
             self.didAutoConnect = true
             Task { [weak self] in
                 guard let self else { return }
-                _ = await self.connectDiscoveredGateway(target)
+                await self.connectDiscoveredGateway(target)
             }
             return
         }
@@ -411,7 +411,7 @@ final class GatewayConnectionController {
             self.didAutoConnect = true
             Task { [weak self] in
                 guard let self else { return }
-                _ = await self.connectDiscoveredGateway(gateway)
+                await self.connectDiscoveredGateway(gateway)
             }
             return
         }
@@ -632,8 +632,7 @@ final class GatewayConnectionController {
                             0,
                             NI_NUMERICHOST)
                         guard rc == 0 else { return nil }
-                        let bytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
-                        return String(bytes: bytes, encoding: .utf8)
+                        return String(cString: buffer)
                     }
 
                     if let host, !host.isEmpty {
@@ -890,9 +889,11 @@ final class GatewayConnectionController {
         permissions["contacts"] = contactsStatus == .authorized || contactsStatus == .limited
 
         let calendarStatus = EKEventStore.authorizationStatus(for: .event)
-        permissions["calendar"] = Self.hasEventKitAccess(calendarStatus)
+        permissions["calendar"] =
+            calendarStatus == .authorized || calendarStatus == .fullAccess || calendarStatus == .writeOnly
         let remindersStatus = EKEventStore.authorizationStatus(for: .reminder)
-        permissions["reminders"] = Self.hasEventKitAccess(remindersStatus)
+        permissions["reminders"] =
+            remindersStatus == .authorized || remindersStatus == .fullAccess || remindersStatus == .writeOnly
 
         let motionStatus = CMMotionActivityManager.authorizationStatus()
         let pedometerStatus = CMPedometer.authorizationStatus()
@@ -910,15 +911,11 @@ final class GatewayConnectionController {
 
     private static func isLocationAuthorized(status: CLAuthorizationStatus) -> Bool {
         switch status {
-        case .authorizedAlways, .authorizedWhenInUse:
+        case .authorizedAlways, .authorizedWhenInUse, .authorized:
             return true
         default:
             return false
         }
-    }
-
-    private static func hasEventKitAccess(_ status: EKAuthorizationStatus) -> Bool {
-        status == .fullAccess || status == .writeOnly
     }
 
     private static func motionAvailable() -> Bool {
@@ -989,7 +986,7 @@ extension GatewayConnectionController {
 }
 #endif
 
-private final class GatewayTLSFingerprintProbe: NSObject, URLSessionDelegate, @unchecked Sendable {
+private final class GatewayTLSFingerprintProbe: NSObject, URLSessionDelegate {
     private let url: URL
     private let timeoutSeconds: Double
     private let onComplete: (String?) -> Void

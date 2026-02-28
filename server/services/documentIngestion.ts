@@ -5,12 +5,13 @@ import { createRequire } from "module";
 import officeParser from "officeparser";
 import { performOCR } from "./ocrService";
 import * as XLSX from "xlsx";
+import { LIMITS } from "../lib/constants";
 
 // pdf-parse is CommonJS, use createRequire for ESM compatibility
 const require = createRequire(import.meta.url);
 const pdfParse = require("pdf-parse");
 
-const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
+const MAX_FILE_SIZE = LIMITS.MAX_FILE_SIZE_BYTES;
 const PREVIEW_ROW_LIMIT = 100;
 
 // ============================================

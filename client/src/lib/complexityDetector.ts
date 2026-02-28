@@ -63,23 +63,33 @@ const TRIVIAL_PATTERNS = [
 export function checkComplexityLocally(message: string, hasAttachments: boolean = false): ComplexityCheckResult {
   const trimmed = message.trim();
 
-  // 1. Trivial checks still apply (to quick-return false)
-  if (trimmed.length < 10 || TRIVIAL_PATTERNS.some(p => p.test(trimmed))) {
+  // 1) Keep trivial greetings/acknowledgements in normal chat mode.
+  if (!trimmed || TRIVIAL_PATTERNS.some(p => p.test(trimmed))) {
     return { agent_required: false, confidence: 'high' };
   }
 
-  // 2. Check ONLY for explicit patterns
+  // 2) Explicit user request still has priority reasoning.
   for (const { pattern, reason, confidence } of AGENT_PATTERNS) {
     if (pattern.test(message)) {
       return { agent_required: true, agent_reason: reason, confidence };
     }
   }
 
-  // 3. REMOVED: Heuristics based on word count, multi-step, action verbs, or attachments.
-  // The user requested that long/complex texts should NOT automatically trigger agent mode.
-  // They prefer the standard chat flow unless explicitly requested.
+  // 3) Global policy: default to agent mode for all non-trivial user prompts.
+  // This enables the full "agentic" execution UX (plan + steps + tools) by default.
+  if (hasAttachments) {
+    return {
+      agent_required: true,
+      agent_reason: "Modo agente por adjuntos",
+      confidence: "high",
+    };
+  }
 
-  return { agent_required: false, confidence: 'low' };
+  return {
+    agent_required: true,
+    agent_reason: "Modo agente activado por defecto",
+    confidence: "high",
+  };
 }
 
 export async function checkComplexityWithApi(message: string, hasAttachments: boolean = false): Promise<ComplexityCheckResult> {

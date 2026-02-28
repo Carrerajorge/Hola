@@ -71,6 +71,7 @@ export interface AssistantMessageProps {
     onShare: (content: string) => void;
     onReadAloud: (id: string, content: string) => void;
     onOpenDocumentPreview: (doc: DocumentBlock) => void;
+    onOpenFileAttachmentPreview?: (attachment: NonNullable<Message["attachments"]>[0]) => void;
     onDownloadImage: (imageData: string) => void;
     onOpenLightbox: (imageData: string | null) => void;
     onReopenDocument?: (doc: { type: "word" | "excel" | "ppt"; title: string; content: string }) => void;
@@ -105,6 +106,7 @@ export const AssistantMessage = memo(function AssistantMessage({
     onShare,
     onReadAloud,
     onOpenDocumentPreview,
+    onOpenFileAttachmentPreview,
     onDownloadImage,
     onOpenLightbox,
     onReopenDocument,
@@ -531,6 +533,7 @@ export const AssistantMessage = memo(function AssistantMessage({
                     <AttachmentList
                         attachments={message.attachments}
                         variant={variant}
+                        onOpenPreview={onOpenFileAttachmentPreview}
                         onReopenDocument={onReopenDocument}
                     />
                 </div>

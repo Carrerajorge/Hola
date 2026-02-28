@@ -20,6 +20,41 @@ export interface AvailableModel {
   contextWindow: number | null;
 }
 
+function toSafeString(value: unknown, fallback = ""): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return fallback;
+}
+
+function normalizeAvailableModel(raw: unknown, index: number): AvailableModel | null {
+  if (!raw || typeof raw !== "object") return null;
+  const source = raw as Record<string, unknown>;
+
+  const provider = toSafeString(source.provider, "").trim().toLowerCase();
+  const modelId = toSafeString(source.modelId, "").trim();
+  const id = toSafeString(source.id, "").trim() || `${provider || "model"}-${modelId || index}`;
+  const name = toSafeString(source.name, "").trim() || modelId || id;
+
+  if (!provider || !modelId) return null;
+
+  return {
+    id,
+    name,
+    provider,
+    modelId,
+    description: typeof source.description === "string" ? source.description : null,
+    isEnabled: source.isEnabled === "true" || source.isEnabled === true ? "true" : "false",
+    enabledAt: typeof source.enabledAt === "string" ? source.enabledAt : null,
+    enabledByAdminId: typeof source.enabledByAdminId === "string" ? source.enabledByAdminId : null,
+    displayOrder: typeof source.displayOrder === "number" && Number.isFinite(source.displayOrder) ? source.displayOrder : 0,
+    icon: typeof source.icon === "string" ? source.icon : null,
+    modelType: typeof source.modelType === "string" ? source.modelType : "TEXT",
+    contextWindow: typeof source.contextWindow === "number" && Number.isFinite(source.contextWindow)
+      ? source.contextWindow
+      : null,
+  };
+}
+
 interface ModelAvailabilityContextType {
   availableModels: AvailableModel[];
   allModels: AvailableModel[];
@@ -76,7 +111,15 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
     }
   ];
 
-  const allModels = [...localMockModels, ...(modelsData?.models || [])];
+  const remoteModels = (modelsData?.models || [])
+    .map((model, index) => normalizeAvailableModel(model, index))
+    .filter((model): model is AvailableModel => model !== null);
+
+  const dedupedRemoteModels = Array.from(
+    new Map(remoteModels.map((model) => [model.id, model])).values()
+  );
+
+  const allModels = [...localMockModels, ...dedupedRemoteModels];
   const enabledModels = allModels
     .filter((m) => m.isEnabled === "true")
     .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
@@ -100,7 +143,8 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
   const isAnyModelAvailable = availableModels.length > 0;
 
   const setSelectedModelId = useCallback((id: string | null) => {
-    if (id && !enabledModels.find(m => m.id === id || m.modelId === id)) {
+    const normalizedId = typeof id === "string" && id.trim().length > 0 ? id : null;
+    if (normalizedId && !enabledModels.find(m => m.id === normalizedId || m.modelId === normalizedId)) {
       toast({
         title: "Modelo no disponible",
         description: "El modelo seleccionado ya no está disponible",
@@ -109,7 +153,7 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
       setSelectedModelIdState(null);
       return;
     }
-    setSelectedModelIdState(id);
+    setSelectedModelIdState(normalizedId);
   }, [enabledModels, toast]);
 
   useEffect(() => {

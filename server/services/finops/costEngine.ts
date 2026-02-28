@@ -16,6 +16,15 @@ export interface TokenUsagePayload {
     metadata?: any;
 }
 
+function isMissingRelationError(error: unknown, relationName: string): boolean {
+    const asAny = error as any;
+    const code = asAny?.code || asAny?.cause?.code;
+    const message = String(asAny?.message || "");
+    const causeMessage = String(asAny?.cause?.message || "");
+    if (code === '42P01') return true;
+    return message.includes(relationName) || causeMessage.includes(relationName);
+}
+
 export class CostEngine {
 
     /**
@@ -26,13 +35,24 @@ export class CostEngine {
         // T100-8.1: Multi-tenant Isolation (Quotas por Tenant probadas).
         // Fetch consumed budget from Ledger sum.
 
-        const result = await db.select({
-            totalConsumed: sql<number>`COALESCE(SUM(${tokenLedgerUsage.totalCalculatedCost}), 0)`
-        })
-            .from(tokenLedgerUsage)
-            .where(eq(tokenLedgerUsage.workspaceId, workspaceId));
+        let currentConsumption = 0;
+        try {
+            const result = await db.select({
+                totalConsumed: sql<number>`COALESCE(SUM(${tokenLedgerUsage.totalCalculatedCost}), 0)`
+            })
+                .from(tokenLedgerUsage)
+                .where(eq(tokenLedgerUsage.workspaceId, workspaceId));
 
-        const currentConsumption = result[0]?.totalConsumed || 0;
+            currentConsumption = result[0]?.totalConsumed || 0;
+        } catch (error) {
+            // In dev or partially migrated environments this table may not exist yet.
+            // Fail-open to avoid blocking chat traffic due to accounting schema drift.
+            if (isMissingRelationError(error, 'token_ledger_usage')) {
+                console.warn(`[FinOps] token_ledger_usage not available. Skipping guardrail check for workspace ${workspaceId}.`);
+                return true;
+            }
+            throw error;
+        }
 
         // Fetch soft/hard limits from workspace config (En un futuro desde workspaces table)
         // Por ahora, Hard Limit = $10.00 USD global por tenant en Fase Beta

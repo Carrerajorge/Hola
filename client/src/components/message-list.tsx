@@ -472,8 +472,7 @@ interface AttachmentListProps {
 const AttachmentList = memo(function AttachmentList({
   attachments,
   variant,
-  onOpenPreview,
-  onReopenDocument
+  onOpenPreview
 }: AttachmentListProps) {
   if (!attachments || attachments.length === 0) return null;
 
@@ -491,11 +490,17 @@ const AttachmentList = memo(function AttachmentList({
             className={cn(
               "flex items-center gap-2 px-3 py-2 rounded-xl text-sm border bg-card border-border cursor-pointer hover:bg-accent transition-colors"
             )}
-            onClick={() => onReopenDocument?.({
-              type: att.documentType as "word" | "excel" | "ppt",
-              title: att.title || att.name,
-              content: att.content || ""
-            })}
+            onClick={() => {
+              const attachmentForPreview = {
+                ...att,
+                name: att.name || att.title || "Documento",
+                mimeType: att.mimeType || (att.documentType === "pdf" ? "application/pdf" : undefined),
+              } as NonNullable<Message["attachments"]>[0];
+
+              if (onOpenPreview) {
+                onOpenPreview(attachmentForPreview);
+              }
+            }}
             data-testid={`attachment-document-${i}`}
           >
             <div
@@ -1045,6 +1050,8 @@ interface AgentRunContentProps {
 const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRetry, onPause, onResume, onArtifactPreview, onOpenLightbox }: AgentRunContentProps) {
   const [isExpanded, setIsExpanded] = useState(true);
   const [showAllEvents, setShowAllEvents] = useState(false);
+  const [isSlowConnection, setIsSlowConnection] = useState(false);
+  const [waitingSeconds, setWaitingSeconds] = useState(0);
   const [viewMode, setViewMode] = useState<"steps" | "plan">("steps");
   const eventsEndRef = useRef<HTMLDivElement>(null);
 
@@ -1052,13 +1059,46 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
   const isActive = ["starting", "running", "queued", "planning", "verifying", "cancelling", "replanning"].includes(agentRun.status);
   const isPaused = agentRun.status === "paused";
   const isCancelling = agentRun.status === "cancelling";
-  const showObjective = false;
+  const isWaitingForResponse = agentRun.status === "starting" || agentRun.status === "queued";
+  const showObjective = [
+    "starting",
+    "queued",
+    "planning",
+    "running",
+    "verifying",
+    "replanning",
+    "paused",
+    "cancelling",
+    "completed",
+    "failed",
+    "cancelled",
+  ].includes(agentRun.status);
 
   useEffect(() => {
     if (isActive && eventsEndRef.current) {
       eventsEndRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
   }, [agentRun.eventStream?.length, isActive]);
+
+  useEffect(() => {
+    if (!isWaitingForResponse) {
+      setIsSlowConnection(false);
+      setWaitingSeconds(0);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setWaitingSeconds(prev => {
+        const newVal = prev + 1;
+        if (newVal >= 10) {
+          setIsSlowConnection(true);
+        }
+        return newVal;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isWaitingForResponse]);
 
   const getStatusIcon = () => {
     switch (agentRun.status) {
@@ -1463,6 +1503,12 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
                   {!["starting", "queued", "planning", "running", "verifying", "replanning"].includes(agentRun.status) && "Procesando tu solicitud..."}
                 </span>
               </div>
+              {isSlowConnection && (
+                <div className="flex items-center gap-2 text-sm text-yellow-600 dark:text-yellow-400 mt-2 p-2 bg-yellow-500/10 rounded-lg border border-yellow-500/20">
+                  <AlertCircle className="h-4 w-4" />
+                  <span>La conexión está tardando más de lo esperado ({waitingSeconds}s). Por favor, espera un momento...</span>
+                </div>
+              )}
             </div>
           )}
 

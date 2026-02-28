@@ -51,7 +51,7 @@ export function useAgentPolling(messageId: string | null) {
 }
 
 export function useStartAgentRun() {
-  const { createRun, setRunId, failRun, cancelRun } = useAgentStore();
+  const { createRun, setRunId, clearRun } = useAgentStore();
   
   const startRun = useCallback(async (
     chatId: string,
@@ -103,8 +103,29 @@ export function useStartAgentRun() {
           attachments
         })
       });
-      
-      if (!runRes.ok) throw new Error('Error al iniciar el agente');
+
+      let runErrorBody: any = null;
+      if (!runRes.ok) {
+        try {
+          runErrorBody = await runRes.json();
+        } catch {
+          runErrorBody = null;
+        }
+
+        // Guard blocks are expected in some flows; fallback to normal chat without noisy failed runs.
+        if (runRes.status === 409 && runErrorBody?.error === 'EXECUTION_BLOCKED_BY_INTENT_GUARD') {
+          clearRun(messageId);
+          pendingAgentStartControllers.delete(messageId);
+          return null;
+        }
+
+        const message =
+          runErrorBody?.message ||
+          runErrorBody?.error ||
+          `Error al iniciar el agente (HTTP ${runRes.status})`;
+        throw new Error(message);
+      }
+
       const runData = await runRes.json();
       
       // Check again if cancelled while waiting for API response
@@ -138,13 +159,13 @@ export function useStartAgentRun() {
       pendingAgentStartControllers.delete(messageId);
       // Handle abort errors gracefully - don't fail the run, it was user-initiated
       if (error.name === 'AbortError') {
-        cancelRun(messageId);
+        clearRun(messageId);
         return null;
       }
-      failRun(messageId, error.message);
+      clearRun(messageId);
       return null;
     }
-  }, [createRun, setRunId, failRun, cancelRun]);
+  }, [createRun, setRunId, clearRun]);
   
   return { startRun };
 }

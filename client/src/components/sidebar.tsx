@@ -7,12 +7,10 @@ import {
   Search,
   Library,
   Bot,
-  Plus,
   Code,
   MessageSquare,
   MoreHorizontal,
   Settings,
-  PanelLeftClose,
   ChevronDown,
   ChevronRight,
   User,
@@ -27,12 +25,9 @@ import {
   Check,
   X,
   Monitor,
-  LayoutGrid,
   FolderPlus,
   Folder,
   FolderOpen,
-  Zap,
-  SquarePen,
   Pin,
   Download,
   MoveRight,
@@ -42,7 +37,7 @@ import {
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { cn } from "@/lib/utils";
 import { isAdminUser } from "@/lib/admin";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -108,8 +103,6 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/component
 import { NewChatButton } from "@/components/chat/NewChatButton";
 import { useProcessingChatIds, useChatStreamContent } from "@/stores/streamingStore";
 import { CreateProjectModal, type CreateProjectData } from "@/components/create-project-modal";
-import { useUserSkills } from "@/hooks/use-user-skills";
-import { BUNDLED_SKILLS } from "@/data/bundledSkills";
 import { EditProjectModal } from "@/components/edit-project-modal";
 import { ProjectMemoriesModal } from "@/components/project-memories-modal";
 import { ShareProjectModal } from "@/components/share-project-modal";
@@ -392,8 +385,8 @@ export function Sidebar({
     <div
       key={chat.id}
       className={cn(
-        "group relative flex w-full items-center futuristic-chat-item",
-        activeChatId === chat.id && "active",
+        "group relative flex w-full items-center px-2 py-2 rounded-lg cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-all duration-300 liquid-button",
+        activeChatId === chat.id && "bg-gradient-to-r from-primary/10 to-transparent border-l-2 border-primary text-foreground shadow-sm",
         chat.archived && "opacity-70",
         indented && "ml-4"
       )}
@@ -618,115 +611,151 @@ export function Sidebar({
     if (!groupOrder.includes(key)) groupOrder.push(key);
   });
 
+  const minimalSectionButtonClass =
+    "w-full justify-start gap-2.5 px-2.5 py-2 text-sm font-normal rounded-lg hover:bg-black/5 dark:hover:bg-white/10 hover:shadow-sm transition-all duration-300 liquid-button";
+  const minimalIconChipClass =
+    "p-1 rounded-md bg-transparent text-muted-foreground transition-all duration-300 group-hover:scale-110 group-hover:text-foreground group-hover:drop-shadow-[0_0_8px_currentColor]";
+
   return (
     <nav
-      className={cn("relative flex h-screen w-[280px] flex-col futuristic-sidebar text-[hsl(var(--sidebar-foreground))] transition-all duration-300", className)}
+      className={cn("flex h-screen w-[280px] flex-col bg-black/5 dark:bg-black/50 backdrop-blur-3xl border-r border-black/5 dark:border-white/10 text-sidebar-foreground transition-all duration-300", className)}
       aria-label="Navegación principal y chats"
       role="navigation"
     >
-      {/* Header with futuristic glass effect */}
-      <div className="futuristic-header flex h-16 items-center justify-between px-5 py-3">
-        <div className="flex items-center gap-3">
-          <div className="relative group">
-            <IliaGPTLogo size={34} className="futuristic-logo-glow relative z-10" />
-          </div>
+      <div className="flex h-14 items-center justify-between px-4 py-2 border-b border-black/10 dark:border-white/10">
+        <div className="flex items-center gap-3 group cursor-pointer transition-all duration-300 hover:drop-shadow-[0_0_10px_currentColor]">
+          <IliaGPTLogo size={30} />
           <div className="flex flex-col min-w-0">
-            <span className="text-sm font-bold tracking-tight leading-none text-[hsl(var(--sidebar-cyan))]">{appName}</span>
+            <span className="text-sm font-semibold tracking-tight leading-none">{appName}</span>
             <div className="flex items-center gap-2 min-w-0 mt-0.5">
-              <span className="text-[10px] text-[hsl(var(--sidebar-foreground)/0.5)] font-medium truncate">{appDescription}</span>
+              <span className="text-[10px] text-muted-foreground truncate">{appDescription}</span>
               {isAdmin && platformSettings.maintenance_mode ? (
-                <span className="shrink-0 rounded-full bg-amber-500/15 text-amber-300 px-2 py-0.5 text-[10px] font-medium">
+                <span className="shrink-0 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 px-2 py-0.5 text-[10px] font-medium">
                   Mantenimiento
                 </span>
               ) : null}
             </div>
           </div>
         </div>
-        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg transition-all hover:bg-[hsl(var(--sidebar-cyan)/0.1)] text-[hsl(var(--sidebar-foreground)/0.5)] hover:text-[hsl(var(--sidebar-cyan))]" onClick={onToggle}>
-          <PanelLeftClose className="h-5 w-5" />
+        <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-black/[0.04] dark:hover:bg-white/[0.06] rounded-md" onClick={onToggle}>
+          <svg className="h-4 w-4 text-muted-foreground" viewBox="0 0 24 24" fill="none">
+            <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" strokeWidth="1.5" />
+            <line x1="9" y1="3" x2="9" y2="21" stroke="currentColor" strokeWidth="1.5" />
+            <path d="M14 9L17 12L14 15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
         </Button>
       </div>
 
-      {/* Action buttons */}
-      <div className="px-3 py-3 flex flex-col gap-2">
-        <button
-          onClick={onNewChat}
-          className="futuristic-glass-btn futuristic-glass-btn-animated"
-          data-testid="button-new-chat"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Nuevo Chat</span>
-        </button>
+      <div className="px-3 py-3 flex flex-col gap-1.5">
+        <NewChatButton onNewChat={onNewChat} variant="full" showTooltip={false} />
 
         <button
           ref={searchButtonRef}
           onClick={() => setIsSearchModalOpen(true)}
-          className="futuristic-search"
+          className="w-full mt-1 mb-2 group flex items-center justify-between gap-2 px-4 py-2 text-sm text-muted-foreground bg-white/50 dark:bg-black/50 hover:bg-white/80 dark:hover:bg-black/80 backdrop-blur-md shadow-inner border border-white/20 dark:border-white/10 rounded-full transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-primary/20 liquid-button"
           data-testid="button-search-chats"
         >
-          <Search className="h-4 w-4 flex-shrink-0" />
-          <span className="flex-1 text-left">Buscar chats...</span>
-          <kbd className="futuristic-kbd hidden lg:inline-flex">
-            <span className="text-xs">⌘</span>K
+          <div className="flex items-center gap-2">
+            <Search className="h-4 w-4 text-muted-foreground/70" />
+            <span className="font-medium text-[13px]">Buscar chats...</span>
+          </div>
+          <kbd className="hidden lg:inline-flex h-5 items-center gap-1 rounded bg-black/5 dark:bg-white/10 px-1.5 font-mono text-[10px] text-muted-foreground">
+            <span className="text-[10px]">⌘</span>K
           </kbd>
         </button>
-      </div>
 
-      {/* Navigation sections */}
-      <div className="px-3 flex flex-col gap-1">
-        {/* ASISTENTES section */}
-        <div className="futuristic-section-label mt-1">Asistentes</div>
-        <div className="flex flex-col gap-0.5">
-          <div className="futuristic-nav-item" onClick={onOpenGpts} data-testid="button-gpts">
-            <PremiumIcons.Gpt className="futuristic-nav-icon" />
-            <span>GPTs</span>
-          </div>
-          <div className="futuristic-nav-item" onClick={onOpenSkills} data-testid="button-skills">
-            <PremiumIcons.Skills className="futuristic-nav-icon" />
-            <span>Skills</span>
-          </div>
-          <div className="futuristic-nav-item" onClick={onOpenCodex} data-testid="button-codex">
-            <PremiumIcons.Code className="futuristic-nav-icon" />
-            <span>Codex</span>
-          </div>
-        </div>
-
-        {/* HERRAMIENTAS section */}
-        <div className="futuristic-section-label mt-2">Herramientas</div>
-        <div className="flex flex-col gap-0.5">
-          <div className="futuristic-nav-item" onClick={onOpenLibrary} data-testid="button-library">
-            <PremiumIcons.Library className="futuristic-nav-icon" />
-            <span>Biblioteca</span>
-          </div>
-          <div className="futuristic-nav-item" onClick={onOpenApps} data-testid="button-apps">
-            <PremiumIcons.Apps className="futuristic-nav-icon" />
-            <span>Aplicaciones</span>
-          </div>
-          <div className="futuristic-nav-item" onClick={onOpenWhatsAppConnect} data-testid="button-whatsapp-connect">
-            <PremiumIcons.ChatQr className="futuristic-nav-icon" />
-            <span className="flex-1">WebChat</span>
+        <div className="space-y-0.5 mt-1">
+          <Button
+            variant="ghost"
+            className={cn(minimalSectionButtonClass, "group")}
+            onClick={onOpenLibrary}
+            data-testid="button-library"
+          >
+            <div className={minimalIconChipClass}>
+              <PremiumIcons.Library className="h-4 w-4" />
+            </div>
+            Biblioteca
+          </Button>
+          <Button
+            variant="ghost"
+            className={cn(minimalSectionButtonClass, "group")}
+            onClick={onOpenGpts}
+            data-testid="button-gpts"
+          >
+            <div className={minimalIconChipClass}>
+              <PremiumIcons.Gpt className="h-4 w-4" />
+            </div>
+            GPTs
+          </Button>
+          <Button
+            variant="ghost"
+            className={cn(minimalSectionButtonClass, "group h-auto")}
+            onClick={onOpenSkills}
+            data-testid="button-skills"
+          >
+            <div className={cn(minimalIconChipClass, "mt-0.5 shrink-0")}>
+              <PremiumIcons.Skills className="h-4 w-4" />
+            </div>
+            <span className="flex flex-col items-start leading-tight">
+              <span>Skills</span>
+              <span className="text-[10px] font-normal text-muted-foreground/70">Capacidades modulares</span>
+            </span>
+          </Button>
+          <Button
+            variant="ghost"
+            className={cn(minimalSectionButtonClass, "group")}
+            onClick={onOpenApps}
+            data-testid="button-apps"
+          >
+            <div className={minimalIconChipClass}>
+              <PremiumIcons.Apps className="h-4 w-4" />
+            </div>
+            Aplicaciones
+          </Button>
+          <Button
+            variant="ghost"
+            className={cn(minimalSectionButtonClass, "group")}
+            onClick={onOpenWhatsAppConnect}
+            data-testid="button-whatsapp-connect"
+          >
+            <div className={minimalIconChipClass}>
+              <PremiumIcons.ChatQr className="h-4 w-4" />
+            </div>
+            <span className="flex-1 text-left">AppsWebChat (QR)</span>
             <span
               className={cn(
-                "futuristic-status-dot",
-                waStatus.state === 'connected' && 'connected',
-                (waStatus.state === 'connecting' || waStatus.state === 'qr' || waStatus.state === 'pairing_code') && 'connecting',
-                waStatus.state === 'disconnected' && 'disconnected'
+                "h-2 w-2 rounded-full ring-2 ring-[#eef3f4] dark:ring-[#111315] shadow-sm",
+                waStatus.state === 'connected' && 'bg-green-500',
+                (waStatus.state === 'connecting' || waStatus.state === 'qr' || waStatus.state === 'pairing_code') && 'bg-amber-500 animate-pulse',
+                waStatus.state === 'disconnected' && 'bg-red-500'
               )}
               title={`Canales: ${waStatus.state}`}
             />
-          </div>
+          </Button>
+          <Button
+            variant="ghost"
+            className={cn(minimalSectionButtonClass, "group mt-1")}
+            onClick={onOpenCodex}
+            data-testid="button-codex"
+          >
+            <div className={minimalIconChipClass}>
+              <PremiumIcons.Code className="h-4 w-4" />
+            </div>
+            Codex
+          </Button>
         </div>
       </div>
 
-      {/* Separator */}
-      <div className="futuristic-separator" />
+      <Separator className="mx-4 my-2 w-auto" />
 
-      <ScrollArea className="flex-1 px-2">
+      <ScrollArea className="flex-1 px-2 liquid-scroll [&_[data-radix-scroll-area-viewport]]:scrollbar-thin [&_[data-radix-scroll-area-viewport]]:scrollbar-thumb-muted-foreground/30 [&_[data-radix-scroll-area-viewport]]:scrollbar-track-transparent hover:[&_[data-radix-scroll-area-viewport]]:scrollbar-thumb-muted-foreground/50">
         <div className="flex flex-col gap-4 pb-4">
 
           {folders.length > 0 && (
             <div className="flex flex-col gap-0.5">
-              <div className="futuristic-section-label">Carpetas</div>
+              <div className="px-2 py-1.5">
+                <h3 className="text-xs font-medium text-muted-foreground">Carpetas</h3>
+              </div>
               {folders.map((folder) => {
                 const folderChats = chats.filter(chat => folder.chatIds.includes(chat.id));
                 const isExpanded = expandedFolders.has(folder.id);
@@ -734,7 +763,7 @@ export function Sidebar({
                   <Collapsible key={folder.id} open={isExpanded} onOpenChange={() => toggleFolder(folder.id)}>
                     <CollapsibleTrigger asChild>
                       <div
-                        className="flex items-center gap-2 px-2 py-2 rounded-xl cursor-pointer hover:bg-[hsl(var(--sidebar-cyan)/0.06)] transition-all duration-300"
+                        className="flex items-center gap-2 px-2 py-2 rounded-lg cursor-pointer hover:bg-black/5 dark:hover:bg-white/10 transition-all duration-300 liquid-button"
                         data-testid={`folder - ${folder.id} `}
                       >
                         {isExpanded ? (
@@ -834,7 +863,7 @@ export function Sidebar({
                     const isExpanded = expandedFolders.has(project.id);
                     return (
                       <Collapsible key={project.id} open={isExpanded} onOpenChange={() => toggleFolder(project.id)}>
-                        <div className="group flex items-center gap-1 px-2 py-2 rounded-xl hover:bg-[hsl(var(--sidebar-cyan)/0.06)] transition-all duration-300">
+                        <div className="group flex items-center gap-1 px-2 py-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 transition-all duration-300 liquid-button">
                           <CollapsibleTrigger asChild>
                             <button
                               aria-label="Expand project"
@@ -986,9 +1015,11 @@ export function Sidebar({
           {/* Pinned Chats Section */}
           {pinnedChats.length > 0 && (
             <div className="flex flex-col gap-0.5">
-              <div className="futuristic-section-label">
-                <Pin className="h-3 w-3" />
-                Fijados
+              <div className="px-2 py-1.5">
+                <h3 className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                  <Pin className="h-3 w-3" />
+                  Fijados
+                </h3>
               </div>
               {pinnedChats.map((chat) => renderChatItem(chat))}
             </div>
@@ -997,11 +1028,13 @@ export function Sidebar({
           {/* Pinned GPTs Section */}
           {pinnedGpts.length > 0 && (
             <div className="flex flex-col gap-0.5">
-              <div className="futuristic-section-label">GPTs</div>
+              <div className="px-2 py-1.5">
+                <h3 className="text-xs font-medium text-muted-foreground">GPTs</h3>
+              </div>
               {pinnedGpts.map((pinned) => (
                 <div
                   key={pinned.gptId}
-                  className="group flex w-full items-center justify-between futuristic-chat-item"
+                  className="group flex w-full items-center justify-between px-2 py-2 rounded-lg cursor-pointer hover:bg-black/5 dark:hover:bg-white/10 transition-all duration-300 liquid-button"
                   onClick={() => setLocation(`/ gpts / ${pinned.gpt.slug || pinned.gptId} `)}
                   data-testid={`pinned - gpt - ${pinned.gptId} `}
                 >
@@ -1055,7 +1088,9 @@ export function Sidebar({
 
             return (
               <div key={group} className="flex flex-col gap-0.5">
-                <div className="futuristic-section-label">{group}</div>
+                <div className="px-2 py-1.5">
+                  <h3 className="text-xs font-medium text-muted-foreground">{group}</h3>
+                </div>
                 {groupChats.map((chat) => renderChatItem(chat))}
               </div>
             );
@@ -1066,10 +1101,10 @@ export function Sidebar({
       {/* Hidden Chats Section */}
       {
         hiddenChats.length > 0 && (
-          <div className="px-2 border-t border-[hsl(var(--sidebar-glass-border))]">
+          <div className="px-2 border-t">
             <Button
               variant="ghost"
-              className="w-full justify-between px-2 py-2 text-sm font-medium text-[hsl(var(--sidebar-foreground)/0.5)] hover:text-[hsl(var(--sidebar-cyan))] hover:bg-[hsl(var(--sidebar-cyan)/0.06)]"
+              className="w-full justify-between px-2 py-2 text-sm font-medium text-muted-foreground liquid-button"
               onClick={() => setShowHidden(!showHidden)}
               data-testid="button-toggle-hidden"
             >
@@ -1084,7 +1119,7 @@ export function Sidebar({
                 {hiddenChats.map((chat) => (
                   <div
                     key={chat.id}
-                    className="group flex w-full items-center justify-between futuristic-chat-item opacity-70"
+                    className="group flex w-full items-center justify-between px-2 py-2 rounded-md cursor-pointer hover:bg-accent transition-colors opacity-70"
                     onClick={() => onSelectChat(chat.id)}
                     data-testid={`hidden - chat - item - ${chat.id} `}
                   >
@@ -1111,26 +1146,27 @@ export function Sidebar({
         )
       }
 
-      <div className="mt-auto futuristic-footer p-4">
-        <div className="flex w-full items-center gap-3 rounded-lg p-2">
+      <div className="mt-auto border-t border-black/10 dark:border-white/10 p-3">
+        <div className="flex w-full items-center gap-2 rounded-md p-1">
           <Popover open={isUserMenuOpen} onOpenChange={setIsUserMenuOpen}>
             <PopoverTrigger asChild>
-              <button className="flex flex-1 items-center gap-3 cursor-pointer transition-all hover:opacity-80" data-testid="button-user-menu">
+              <button className="flex flex-1 items-center gap-2 cursor-pointer rounded-lg px-2 py-1.5 hover:bg-white/60 dark:hover:bg-white/10 backdrop-blur-md border border-transparent hover:border-white/20 dark:hover:border-white/10 shadow-sm transition-all duration-300 liquid-button" data-testid="button-user-menu">
                 <div className="relative">
-                  <Avatar className="h-10 w-10 ring-1 ring-[hsl(var(--sidebar-cyan)/0.2)]">
-                    <AvatarFallback className="bg-[hsl(var(--sidebar-cyan)/0.1)] text-[hsl(var(--sidebar-cyan))]">
+                  <Avatar className="h-8 w-8">
+                    <AvatarFallback className="bg-muted text-muted-foreground">
                       {isAdmin ? "A" : (user?.firstName?.[0] || user?.email?.[0] || "U").toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
                   {/* Online status indicator */}
-                  <span className="absolute bottom-0 right-0 block h-2.5 w-2.5 rounded-full bg-[hsl(160,100%,50%)] ring-2 ring-[hsl(var(--sidebar))] shadow-[0_0_6px_hsl(160,100%,50%/0.5)]" title="En línea" />
+                  <span className="absolute bottom-0 right-0 block h-2 w-2 rounded-full bg-green-500 ring-2 ring-[#eef3f4] dark:ring-[#111315]" title="En línea" />
                 </div>
                 <div className="flex flex-1 flex-col overflow-hidden text-left">
-                  <span className="truncate text-sm font-medium text-[hsl(var(--sidebar-foreground))]">
+                  <span className="truncate text-sm font-medium leading-tight">
                     {isAdmin ? "Admin" : (user?.firstName || user?.email?.split("@")[0] || "Usuario")}
                   </span>
-                  <span className="truncate text-xs text-[hsl(var(--sidebar-foreground)/0.4)]">
+                  <span className="truncate text-[11px] text-muted-foreground">
                     {(() => {
+                      // Avoid hardcoding plan by email. Use server-provided plan when available.
                       const plan = ((user as any)?.plan || "free").toString().toLowerCase();
                       return plan === "free" ? "Cuenta personal" : plan.toUpperCase();
                     })()}
@@ -1138,7 +1174,7 @@ export function Sidebar({
                 </div>
               </button>
             </PopoverTrigger>
-            <PopoverContent className="w-auto min-w-56 p-2" align="start" side="top">
+            <PopoverContent className="w-auto min-w-56 p-2 bg-white/80 dark:bg-black/80 backdrop-blur-xl border border-white/20 dark:border-white/10 shadow-lg" align="start" side="top">
               <div className="flex flex-col">
                 {/* Profile section */}
                 <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/profile"); }} data-testid="button-profile">

@@ -212,16 +212,22 @@ export const DocTableSchema = z.object({
 });
 export type DocTable = z.infer<typeof DocTableSchema>;
 
-export const DocSectionSchema = z.object({
+const BaseDocSectionSchema = z.object({
   id: z.string().default(() => randomUUID()),
   heading: z.string().min(1).max(500),
   level: HeadingLevelSchema.default("h2"),
   paragraphs: z.array(ParagraphSchema).default([]),
   images: z.array(DocImageSchema).default([]),
   tables: z.array(DocTableSchema).default([]),
+});
+
+export type DocSection = z.infer<typeof BaseDocSectionSchema> & {
+  subsections?: DocSection[];
+};
+
+export const DocSectionSchema: z.ZodType<DocSection> = BaseDocSectionSchema.extend({
   subsections: z.lazy(() => z.array(DocSectionSchema)).optional(),
 });
-export type DocSection = z.infer<typeof DocSectionSchema>;
 
 export const DocMetadataSchema = z.object({
   author: z.string().optional(),

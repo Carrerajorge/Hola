@@ -85,13 +85,9 @@ export async function takeScreenshot(options: ScreenshotOptions = {}): Promise<S
 }
 
 export async function takeWindowScreenshot(appName: string, windowIndex = 0): Promise<ScreenshotResult> {
-  // First get the window ID
-  const { execFile: ef } = require("child_process");
-  const execAsync = promisify(ef);
-
   try {
     // Get window list with IDs
-    const { stdout } = await execAsync("/usr/bin/osascript", [
+    const { stdout } = await execFileAsync("/usr/bin/osascript", [
       "-e", `tell application "System Events" to tell process "${appName.replace(/"/g, '')}"
         set wid to id of window ${windowIndex + 1}
         return wid

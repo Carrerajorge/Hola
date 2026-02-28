@@ -56,8 +56,8 @@ describe("LIMITS", () => {
     expect(LIMITS.MAX_CONTENT_FETCH).toBeGreaterThan(0);
   });
   it("has valid file size limits", () => {
-    expect(LIMITS.MAX_FILE_SIZE_MB).toBe(100);
-    expect(LIMITS.MAX_FILE_SIZE_BYTES).toBe(100 * 1024 * 1024);
+    expect(LIMITS.MAX_FILE_SIZE_MB).toBe(2048);
+    expect(LIMITS.MAX_FILE_SIZE_BYTES).toBe(2048 * 1024 * 1024);
   });
   it("has valid RAG limits", () => {
     expect(LIMITS.RAG_SIMILAR_CHUNKS).toBeGreaterThan(0);

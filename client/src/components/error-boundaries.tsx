@@ -134,6 +134,11 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
                             <p className="text-sm text-muted-foreground">
                                 No se pudo cargar este contenido.
                             </p>
+                            {import.meta.env.DEV && error?.message ? (
+                                <p className="text-xs text-destructive/80 break-words">
+                                    {error.message}
+                                </p>
+                            ) : null}
                         </div>
                         <button
                             onClick={this.handleRetry}

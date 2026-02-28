@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-/* eslint-disable no-console */
-
 // Copies MathJax runtime assets into Vite's `public/` folder so MathJax can be
 // loaded locally (offline-friendly) without relying on a CDN.
 
@@ -78,4 +76,3 @@ function main() {
 }
 
 main();
-

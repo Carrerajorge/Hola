@@ -551,12 +551,26 @@ export function createAgentModeRouter() {
         return res.status(404).json({ error: "Run not found" });
       }
 
+      const limitRaw = parseInt((req.query.limit as string) || "100", 10);
+      const pageRaw = parseInt((req.query.page as string) || "1", 10);
+      const sortOrder = (req.query.order as string)?.toLowerCase() === "desc" ? "desc" : "asc";
+      const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 1000) : 100;
+      const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+      const offset = (page - 1) * limit;
+
+      const totalResult = await db.select({ total: count() })
+        .from(agentModeEvents)
+        .where(eq(agentModeEvents.runId, id));
+      const totalEvents = Number(totalResult[0]?.total ?? 0);
+
       const events = await db.select()
         .from(agentModeEvents)
         .where(eq(agentModeEvents.runId, id))
-        .orderBy(asc(agentModeEvents.timestamp));
+        .orderBy(sortOrder === "asc" ? asc(agentModeEvents.timestamp) : desc(agentModeEvents.timestamp))
+        .limit(limit)
+        .offset(offset);
 
-      const response = events.map(e => ({
+      const responseData = events.map(e => ({
         id: e.id,
         runId: e.runId,
         stepIndex: e.stepIndex,
@@ -567,7 +581,14 @@ export function createAgentModeRouter() {
         timestamp: e.timestamp,
       }));
 
-      res.json(response);
+      res.json({
+        runId: id,
+        page,
+        limit,
+        order: sortOrder,
+        total: totalEvents,
+        events: responseData,
+      });
     } catch (error: any) {
       console.error("[AgentRoutes] Error getting events:", error);
       res.status(500).json({ error: "Failed to get agent run events" });
@@ -1091,7 +1112,7 @@ export function createAgentModeRouter() {
       };
 
       const popularTools = new Set([
-        "search_web", "generate_image", "doc_create", "spreadsheet_create",
+        "web_search", "generate_image", "doc_create", "spreadsheet_create",
         "code_generate", "data_analyze", "pdf_manipulate", "slides_create",
         "browser_navigate", "fetch_url"
       ]);

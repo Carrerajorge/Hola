@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
 import type { TwilioConfig, WebhookSecurityConfig } from "../config.js";
-import { getHeader } from "../http-headers.js";
 import type { MediaStreamHandler } from "../media-stream.js";
 import { chunkAudio } from "../telephony-audio.js";
 import type { TelephonyTtsProvider } from "../telephony-tts.js";
@@ -14,7 +13,6 @@ import type {
   StartListeningInput,
   StopListeningInput,
   WebhookContext,
-  WebhookParseOptions,
   WebhookVerificationResult,
 } from "../types.js";
 import { escapeXml, mapVoiceToPolly } from "../voice-mapping.js";
@@ -22,24 +20,30 @@ import type { VoiceCallProvider } from "./base.js";
 import { twilioApiRequest } from "./twilio/api.js";
 import { verifyTwilioProviderWebhook } from "./twilio/webhook.js";
 
-function createTwilioRequestDedupeKey(ctx: WebhookContext, verifiedRequestKey?: string): string {
-  if (verifiedRequestKey) {
-    return verifiedRequestKey;
+function getHeader(
+  headers: Record<string, string | string[] | undefined>,
+  name: string,
+): string | undefined {
+  const value = headers[name.toLowerCase()];
+  if (Array.isArray(value)) {
+    return value[0];
+  }
+  return value;
+}
+
+function createTwilioRequestDedupeKey(ctx: WebhookContext): string {
+  const idempotencyToken = getHeader(ctx.headers, "i-twilio-idempotency-token");
+  if (idempotencyToken) {
+    return `twilio:idempotency:${idempotencyToken}`;
   }
 
   const signature = getHeader(ctx.headers, "x-twilio-signature") ?? "";
-  const params = new URLSearchParams(ctx.rawBody);
-  const callSid = params.get("CallSid") ?? "";
-  const callStatus = params.get("CallStatus") ?? "";
-  const direction = params.get("Direction") ?? "";
   const callId = typeof ctx.query?.callId === "string" ? ctx.query.callId.trim() : "";
   const flow = typeof ctx.query?.flow === "string" ? ctx.query.flow.trim() : "";
   const turnToken = typeof ctx.query?.turnToken === "string" ? ctx.query.turnToken.trim() : "";
   return `twilio:fallback:${crypto
     .createHash("sha256")
-    .update(
-      `${signature}\n${callSid}\n${callStatus}\n${direction}\n${callId}\n${flow}\n${turnToken}\n${ctx.rawBody}`,
-    )
+    .update(`${signature}\n${callId}\n${flow}\n${turnToken}\n${ctx.rawBody}`)
     .digest("hex")}`;
 }
 
@@ -228,10 +232,7 @@ export class TwilioProvider implements VoiceCallProvider {
   /**
    * Parse Twilio webhook event into normalized format.
    */
-  parseWebhookEvent(
-    ctx: WebhookContext,
-    options?: WebhookParseOptions,
-  ): ProviderWebhookParseResult {
+  parseWebhookEvent(ctx: WebhookContext): ProviderWebhookParseResult {
     try {
       const params = new URLSearchParams(ctx.rawBody);
       const callIdFromQuery =
@@ -242,7 +243,7 @@ export class TwilioProvider implements VoiceCallProvider {
         typeof ctx.query?.turnToken === "string" && ctx.query.turnToken.trim()
           ? ctx.query.turnToken.trim()
           : undefined;
-      const dedupeKey = createTwilioRequestDedupeKey(ctx, options?.verifiedRequestKey);
+      const dedupeKey = createTwilioRequestDedupeKey(ctx);
       const event = this.normalizeEvent(params, {
         callIdOverride: callIdFromQuery,
         dedupeKey,

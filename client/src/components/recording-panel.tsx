@@ -1,7 +1,7 @@
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { Trash2, Pause, Play, ArrowUp, Mic, Square, AudioLines } from "lucide-react";
+import { Trash2, Pause, Play, ArrowUp, Mic, Square, AudioLines, Headphones } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   SILVER_ICON_BUTTON_BASE,
@@ -23,6 +23,7 @@ interface RecordingPanelProps {
   onSend: () => void;
   onToggleRecording: () => void;
   onOpenVoiceChat: () => void;
+  onOpenLivekitRoom?: () => void;
   onStopChat: () => void;
   onSubmit: () => void;
   aiState: AIState;
@@ -49,13 +50,14 @@ export function RecordingPanel({
   onSend,
   onToggleRecording,
   onOpenVoiceChat,
+  onOpenLivekitRoom,
   onStopChat,
   onSubmit,
   aiState,
   hasContent,
   isAgentRunning,
   onAgentStop,
-  isFilesLoading = false,
+  isFilesLoading: _isFilesLoading = false,
 }: RecordingPanelProps) {
   const { settings } = useSettingsContext();
   const voiceEnabled = !!settings.voiceMode;
@@ -231,15 +233,12 @@ export function RecordingPanel({
           <Button
             onClick={onSubmit}
             size="icon"
-            disabled={isFilesLoading}
             className={cn(
               "h-9 w-9 sm:h-8 sm:w-8",
               SILVER_ICON_BUTTON_BASE,
-              isFilesLoading
-                ? SILVER_ICON_BUTTON_DISABLED_TONE
-                : SILVER_ICON_BUTTON_TONE
+              SILVER_ICON_BUTTON_TONE
             )}
-            aria-label={isFilesLoading ? "Uploading files..." : "Send message (Cmd+Enter)"}
+            aria-label="Send message (Cmd+Enter)"
             data-testid="button-send-message"
           >
             <ArrowUp className="h-4 w-4" aria-hidden="true" />
@@ -247,24 +246,47 @@ export function RecordingPanel({
         </motion.div>
       ) : (
         voiceEnabled ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                onClick={onOpenVoiceChat}
-                size="icon"
-                className={cn(
-                  "h-9 w-9 sm:h-8 sm:w-8",
-                  SILVER_ICON_BUTTON_BASE,
-                  SILVER_ICON_BUTTON_TONE
-                )}
-                aria-label="Start voice conversation mode"
-                data-testid="button-voice-chat-mode"
-              >
-                <AudioLines className="h-4 w-4" aria-hidden="true" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Modo conversación por voz</TooltipContent>
-          </Tooltip>
+          <div className="flex items-center gap-1">
+            {onOpenLivekitRoom && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={onOpenLivekitRoom}
+                    size="icon"
+                    className={cn(
+                      "h-9 w-9 sm:h-8 sm:w-8",
+                      SILVER_ICON_BUTTON_BASE,
+                      SILVER_ICON_BUTTON_TONE,
+                      "text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300"
+                    )}
+                    aria-label="Llamada en vivo (LiveKit)"
+                    data-testid="button-livekit-room"
+                  >
+                    <Headphones className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Llamada en vivo (LiveKit)</TooltipContent>
+              </Tooltip>
+            )}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={onOpenVoiceChat}
+                  size="icon"
+                  className={cn(
+                    "h-9 w-9 sm:h-8 sm:w-8",
+                    SILVER_ICON_BUTTON_BASE,
+                    SILVER_ICON_BUTTON_TONE
+                  )}
+                  aria-label="Start voice conversation mode"
+                  data-testid="button-voice-chat-mode"
+                >
+                  <AudioLines className="h-4 w-4" aria-hidden="true" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Modo conversación por voz</TooltipContent>
+            </Tooltip>
+          </div>
         ) : null
       )}
     </>

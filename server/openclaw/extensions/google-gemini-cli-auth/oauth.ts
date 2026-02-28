@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { createServer } from "node:http";
 import { delimiter, dirname, join } from "node:path";
-import { fetchWithSsrFGuard, isWSL2Sync } from "openclaw/plugin-sdk";
+import { isWSL2Sync } from "openclaw/plugin-sdk";
 
 const CLIENT_ID_KEYS = ["OPENCLAW_GEMINI_OAUTH_CLIENT_ID", "GEMINI_CLI_OAUTH_CLIENT_ID"];
 const CLIENT_SECRET_KEYS = [
@@ -13,15 +13,7 @@ const REDIRECT_URI = "http://localhost:8085/oauth2callback";
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const USERINFO_URL = "https://www.googleapis.com/oauth2/v1/userinfo?alt=json";
-const CODE_ASSIST_ENDPOINT_PROD = "https://cloudcode-pa.googleapis.com";
-const CODE_ASSIST_ENDPOINT_DAILY = "https://daily-cloudcode-pa.sandbox.googleapis.com";
-const CODE_ASSIST_ENDPOINT_AUTOPUSH = "https://autopush-cloudcode-pa.sandbox.googleapis.com";
-const LOAD_CODE_ASSIST_ENDPOINTS = [
-  CODE_ASSIST_ENDPOINT_PROD,
-  CODE_ASSIST_ENDPOINT_DAILY,
-  CODE_ASSIST_ENDPOINT_AUTOPUSH,
-];
-const DEFAULT_FETCH_TIMEOUT_MS = 10_000;
+const CODE_ASSIST_ENDPOINT = "https://cloudcode-pa.googleapis.com";
 const SCOPES = [
   "https://www.googleapis.com/auth/cloud-platform",
   "https://www.googleapis.com/auth/userinfo.email",
@@ -79,45 +71,41 @@ export function extractGeminiCliCredentials(): { clientId: string; clientSecret:
     }
 
     const resolvedPath = realpathSync(geminiPath);
-    const geminiCliDirs = resolveGeminiCliDirs(geminiPath, resolvedPath);
+    const geminiCliDir = dirname(dirname(resolvedPath));
+
+    const searchPaths = [
+      join(
+        geminiCliDir,
+        "node_modules",
+        "@google",
+        "gemini-cli-core",
+        "dist",
+        "src",
+        "code_assist",
+        "oauth2.js",
+      ),
+      join(
+        geminiCliDir,
+        "node_modules",
+        "@google",
+        "gemini-cli-core",
+        "dist",
+        "code_assist",
+        "oauth2.js",
+      ),
+    ];
 
     let content: string | null = null;
-    for (const geminiCliDir of geminiCliDirs) {
-      const searchPaths = [
-        join(
-          geminiCliDir,
-          "node_modules",
-          "@google",
-          "gemini-cli-core",
-          "dist",
-          "src",
-          "code_assist",
-          "oauth2.js",
-        ),
-        join(
-          geminiCliDir,
-          "node_modules",
-          "@google",
-          "gemini-cli-core",
-          "dist",
-          "code_assist",
-          "oauth2.js",
-        ),
-      ];
-
-      for (const p of searchPaths) {
-        if (existsSync(p)) {
-          content = readFileSync(p, "utf8");
-          break;
-        }
-      }
-      if (content) {
+    for (const p of searchPaths) {
+      if (existsSync(p)) {
+        content = readFileSync(p, "utf8");
         break;
       }
+    }
+    if (!content) {
       const found = findFile(geminiCliDir, "oauth2.js", 10);
       if (found) {
         content = readFileSync(found, "utf8");
-        break;
       }
     }
     if (!content) {
@@ -134,30 +122,6 @@ export function extractGeminiCliCredentials(): { clientId: string; clientSecret:
     // Gemini CLI not installed or extraction failed
   }
   return null;
-}
-
-function resolveGeminiCliDirs(geminiPath: string, resolvedPath: string): string[] {
-  const binDir = dirname(geminiPath);
-  const candidates = [
-    dirname(dirname(resolvedPath)),
-    join(dirname(resolvedPath), "node_modules", "@google", "gemini-cli"),
-    join(binDir, "node_modules", "@google", "gemini-cli"),
-    join(dirname(binDir), "node_modules", "@google", "gemini-cli"),
-    join(dirname(binDir), "lib", "node_modules", "@google", "gemini-cli"),
-  ];
-
-  const deduped: string[] = [];
-  const seen = new Set<string>();
-  for (const candidate of candidates) {
-    const key =
-      process.platform === "win32" ? candidate.replace(/\\/g, "/").toLowerCase() : candidate;
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    deduped.push(candidate);
-  }
-  return deduped;
 }
 
 function findInPath(name: string): string | null {
@@ -222,38 +186,6 @@ function generatePkce(): { verifier: string; challenge: string } {
   const verifier = randomBytes(32).toString("hex");
   const challenge = createHash("sha256").update(verifier).digest("base64url");
   return { verifier, challenge };
-}
-
-function resolvePlatform(): "WINDOWS" | "MACOS" | "LINUX" {
-  if (process.platform === "win32") {
-    return "WINDOWS";
-  }
-  if (process.platform === "linux") {
-    return "LINUX";
-  }
-  return "MACOS";
-}
-
-async function fetchWithTimeout(
-  url: string,
-  init: RequestInit,
-  timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
-): Promise<Response> {
-  const { response, release } = await fetchWithSsrFGuard({
-    url,
-    init,
-    timeoutMs,
-  });
-  try {
-    const body = await response.arrayBuffer();
-    return new Response(body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: response.headers,
-    });
-  } finally {
-    await release();
-  }
 }
 
 function buildAuthUrl(challenge: string, verifier: string): string {
@@ -409,13 +341,9 @@ async function exchangeCodeForTokens(
     body.set("client_secret", clientSecret);
   }
 
-  const response = await fetchWithTimeout(TOKEN_URL, {
+  const response = await fetch(TOKEN_URL, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-      Accept: "*/*",
-      "User-Agent": "google-api-nodejs-client/9.15.1",
-    },
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
 
@@ -449,7 +377,7 @@ async function exchangeCodeForTokens(
 
 async function getUserEmail(accessToken: string): Promise<string | undefined> {
   try {
-    const response = await fetchWithTimeout(USERINFO_URL, {
+    const response = await fetch(USERINFO_URL, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (response.ok) {
@@ -464,25 +392,20 @@ async function getUserEmail(accessToken: string): Promise<string | undefined> {
 
 async function discoverProject(accessToken: string): Promise<string> {
   const envProject = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID;
-  const platform = resolvePlatform();
-  const metadata = {
-    ideType: "ANTIGRAVITY",
-    platform,
-    pluginType: "GEMINI",
-  };
   const headers = {
     Authorization: `Bearer ${accessToken}`,
     "Content-Type": "application/json",
     "User-Agent": "google-api-nodejs-client/9.15.1",
-    "X-Goog-Api-Client": `gl-node/${process.versions.node}`,
-    "Client-Metadata": JSON.stringify(metadata),
+    "X-Goog-Api-Client": "gl-node/openclaw",
   };
 
   const loadBody = {
-    ...(envProject ? { cloudaicompanionProject: envProject } : {}),
+    cloudaicompanionProject: envProject,
     metadata: {
-      ...metadata,
-      ...(envProject ? { duetProject: envProject } : {}),
+      ideType: "IDE_UNSPECIFIED",
+      platform: "PLATFORM_UNSPECIFIED",
+      pluginType: "GEMINI",
+      duetProject: envProject,
     },
   };
 
@@ -491,46 +414,29 @@ async function discoverProject(accessToken: string): Promise<string> {
     cloudaicompanionProject?: string | { id?: string };
     allowedTiers?: Array<{ id?: string; isDefault?: boolean }>;
   } = {};
-  let activeEndpoint = CODE_ASSIST_ENDPOINT_PROD;
-  let loadError: Error | undefined;
-  for (const endpoint of LOAD_CODE_ASSIST_ENDPOINTS) {
-    try {
-      const response = await fetchWithTimeout(`${endpoint}/v1internal:loadCodeAssist`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(loadBody),
-      });
 
-      if (!response.ok) {
-        const errorPayload = await response.json().catch(() => null);
-        if (isVpcScAffected(errorPayload)) {
-          data = { currentTier: { id: TIER_STANDARD } };
-          activeEndpoint = endpoint;
-          loadError = undefined;
-          break;
-        }
-        loadError = new Error(`loadCodeAssist failed: ${response.status} ${response.statusText}`);
-        continue;
+  try {
+    const response = await fetch(`${CODE_ASSIST_ENDPOINT}/v1internal:loadCodeAssist`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(loadBody),
+    });
+
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => null);
+      if (isVpcScAffected(errorPayload)) {
+        data = { currentTier: { id: TIER_STANDARD } };
+      } else {
+        throw new Error(`loadCodeAssist failed: ${response.status} ${response.statusText}`);
       }
-
+    } else {
       data = (await response.json()) as typeof data;
-      activeEndpoint = endpoint;
-      loadError = undefined;
-      break;
-    } catch (err) {
-      loadError = err instanceof Error ? err : new Error("loadCodeAssist failed", { cause: err });
     }
-  }
-
-  const hasLoadCodeAssistData =
-    Boolean(data.currentTier) ||
-    Boolean(data.cloudaicompanionProject) ||
-    Boolean(data.allowedTiers?.length);
-  if (!hasLoadCodeAssistData && loadError) {
-    if (envProject) {
-      return envProject;
+  } catch (err) {
+    if (err instanceof Error) {
+      throw err;
     }
-    throw loadError;
+    throw new Error("loadCodeAssist failed", { cause: err });
   }
 
   if (data.currentTier) {
@@ -560,7 +466,9 @@ async function discoverProject(accessToken: string): Promise<string> {
   const onboardBody: Record<string, unknown> = {
     tierId,
     metadata: {
-      ...metadata,
+      ideType: "IDE_UNSPECIFIED",
+      platform: "PLATFORM_UNSPECIFIED",
+      pluginType: "GEMINI",
     },
   };
   if (tierId !== TIER_FREE && envProject) {
@@ -568,7 +476,7 @@ async function discoverProject(accessToken: string): Promise<string> {
     (onboardBody.metadata as Record<string, unknown>).duetProject = envProject;
   }
 
-  const onboardResponse = await fetchWithTimeout(`${activeEndpoint}/v1internal:onboardUser`, {
+  const onboardResponse = await fetch(`${CODE_ASSIST_ENDPOINT}/v1internal:onboardUser`, {
     method: "POST",
     headers,
     body: JSON.stringify(onboardBody),
@@ -585,7 +493,7 @@ async function discoverProject(accessToken: string): Promise<string> {
   };
 
   if (!lro.done && lro.name) {
-    lro = await pollOperation(activeEndpoint, lro.name, headers);
+    lro = await pollOperation(lro.name, headers);
   }
 
   const projectId = lro.response?.cloudaicompanionProject?.id;
@@ -631,13 +539,12 @@ function getDefaultTier(
 }
 
 async function pollOperation(
-  endpoint: string,
   operationName: string,
   headers: Record<string, string>,
 ): Promise<{ done?: boolean; response?: { cloudaicompanionProject?: { id?: string } } }> {
   for (let attempt = 0; attempt < 24; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 5000));
-    const response = await fetchWithTimeout(`${endpoint}/v1internal/${operationName}`, {
+    const response = await fetch(`${CODE_ASSIST_ENDPOINT}/v1internal/${operationName}`, {
       headers,
     });
     if (!response.ok) {

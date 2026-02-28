@@ -49,7 +49,7 @@ interface ChatHeaderProps {
     isSidebarOpen: boolean;
     onToggleSidebar: () => void;
     // Callback props for actions
-    onNewChat?: () => void;
+    onNewChat?: (options?: { preserveGpt?: boolean }) => void;
     onEditGpt?: (gpt: ActiveGpt) => void;
     onHideGptFromSidebar?: (id: string) => void;
     onPinGptToSidebar?: (id: string) => void;
@@ -96,8 +96,19 @@ export function ChatHeader({
     const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
     const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
     const currentInput = useChatStore((s) => s.input);
-    const { availableModels, isAnyModelAvailable, selectedModelId, setSelectedModelId } = useModelAvailability();
+    const { availableModels, selectedModelId, setSelectedModelId } = useModelAvailability();
     const isChatProcessing = useChatIsProcessing(chatId);
+
+    const firstMessageSnippet = useMemo(() => {
+        const raw = (messages?.[0] as { content?: unknown } | undefined)?.content;
+        if (typeof raw === "string") return raw;
+        if (raw === null || raw === undefined) return "";
+        try {
+            return JSON.stringify(raw);
+        } catch {
+            return String(raw);
+        }
+    }, [messages]);
 
     const handleModelChange = (id: string) => {
         if (isChatProcessing) {
@@ -112,27 +123,25 @@ export function ChatHeader({
 
     // Model grouping logic
     const modelsByProvider = useMemo(() => {
-        const grouped: Record<string, AvailableModel[]> = {};
+        const grouped: Record<string, AvailableModel[]> = Object.create(null);
         availableModels.forEach(model => {
-            if (!grouped[model.provider]) {
-                grouped[model.provider] = [];
+            const providerKey = typeof model?.provider === "string" && model.provider.trim().length > 0
+                ? model.provider
+                : "other";
+            if (!grouped[providerKey]) {
+                grouped[providerKey] = [];
             }
-            grouped[model.provider].push(model);
+            grouped[providerKey].push(model);
         });
         return grouped;
     }, [availableModels]);
 
     const isCustomGpt = useMemo(() => {
-        // Strict Check: Valid context requires explicit userId presence.
-        // System models / Standard chat usually lack userId or have specific system IDs.
-
-        // SPECIAL CASE: 'ILIAGPT' is the default system app wrapper, treat as Standard Chat.
-        // This prevents the GPT Actions menu from appearing in the main chat interface.
-        if (activeGpt?.name === 'ILIAGPT') return false;
-
-        const isCustom = activeGpt && !!activeGpt.userId && !!activeGpt.id;
-
-        return isCustom;
+        // Treat as custom GPT whenever it has a non-default id and isn't the system wrapper.
+        if (!activeGpt) return false;
+        if (activeGpt.name === "ILIAGPT") return false;
+        if (activeGpt.id === "default") return false;
+        return true;
     }, [activeGpt]);
 
 
@@ -201,7 +210,7 @@ export function ChatHeader({
                 )}
 
                 {chatId && !chatId.startsWith("pending-") ? (
-                    <ShareChatDialog chatId={chatId} chatTitle={messages[0]?.content?.slice(0, 30) || "Chat"}>
+                    <ShareChatDialog chatId={chatId} chatTitle={firstMessageSnippet.slice(0, 30) || "Chat"}>
                         <Button variant="ghost" size="icon" data-testid="button-share-chat">
                             <ShareIcon size={20} />
                         </Button>
@@ -236,7 +245,7 @@ export function ChatHeader({
                         <DropdownMenuItem
                             onClick={() => {
                                 if (chatId && onEditChatTitle) {
-                                    const newTitle = prompt("Nuevo título del chat:", messages[0]?.content?.slice(0, 50) || "Chat");
+                                    const newTitle = prompt("Nuevo título del chat:", firstMessageSnippet.slice(0, 50) || "Chat");
                                     if (newTitle && newTitle.trim()) {
                                         onEditChatTitle(chatId, newTitle.trim());
                                     }

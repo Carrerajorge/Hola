@@ -1,6 +1,8 @@
-import fs from "node:fs";
-import { openBoundaryFile } from "../../infra/boundary-file-read.js";
-import { PATH_ALIAS_POLICIES, type PathAliasPolicy } from "../../infra/path-alias-guards.js";
+import {
+  assertNoPathAliasEscape,
+  PATH_ALIAS_POLICIES,
+  type PathAliasPolicy,
+} from "../../infra/path-alias-guards.js";
 import { execDockerRaw, type ExecDockerRawResult } from "./docker.js";
 import {
   buildSandboxFsMounts,
@@ -22,7 +24,6 @@ type PathSafetyOptions = {
   action: string;
   aliasPolicy?: PathAliasPolicy;
   requireWritable?: boolean;
-  allowMissingTarget?: boolean;
 };
 
 export type SandboxResolvedPath = {
@@ -253,23 +254,12 @@ class SandboxFsBridgeImpl implements SandboxFsBridge {
       );
     }
 
-    const guarded = await openBoundaryFile({
+    await assertNoPathAliasEscape({
       absolutePath: target.hostPath,
       rootPath: lexicalMount.hostRoot,
       boundaryLabel: "sandbox mount root",
-      aliasPolicy: options.aliasPolicy,
+      policy: options.aliasPolicy,
     });
-    if (!guarded.ok) {
-      if (guarded.reason !== "path" || options.allowMissingTarget === false) {
-        throw guarded.error instanceof Error
-          ? guarded.error
-          : new Error(
-              `Sandbox boundary checks failed; cannot ${options.action}: ${target.containerPath}`,
-            );
-      }
-    } else {
-      fs.closeSync(guarded.fd);
-    }
 
     const canonicalContainerPath = await this.resolveCanonicalContainerPath({
       containerPath: target.containerPath,

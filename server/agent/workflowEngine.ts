@@ -360,7 +360,7 @@ export class WorkflowEngine extends EventEmitter {
           case "navigate": return universalBrowserController.navigate(sid, params.url, params.options);
           case "click": return universalBrowserController.click(sid, params.selector, params.options);
           case "type": return universalBrowserController.type(sid, params.selector, params.text, params.options);
-          case "scroll": return universalBrowserController.scroll(sid, params);
+          case "scroll": return universalBrowserController.scroll(sid, params as any);
           case "select": return universalBrowserController.select(sid, params.selector, params.values);
           case "extract": return universalBrowserController.extract(sid, params.rules);
           case "extractStructured": return universalBrowserController.extractStructured(sid, params.description);
@@ -385,7 +385,7 @@ export class WorkflowEngine extends EventEmitter {
         switch (action) {
           case "execute": return terminalController.executeCommand(sid, { command: params.command, timeout: params.timeout });
           case "script": return terminalController.executeScript(sid, params.language, params.code, params.options);
-          case "fileOp": return terminalController.fileOperation(sid, params);
+          case "fileOp": return terminalController.fileOperation(sid, params as any);
           case "systemInfo": return terminalController.getSystemInfo();
           case "processes": return terminalController.listProcesses(params.filter);
           case "ports": return terminalController.listPorts();

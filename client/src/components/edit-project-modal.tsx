@@ -43,6 +43,9 @@ export function EditProjectModal({
     const [systemPrompt, setSystemPrompt] = useState("");
     const [backgroundImage, setBackgroundImage] = useState<string | null>(null);
     const [selectedColor, setSelectedColor] = useState(PROJECT_COLORS[0]);
+    const [repositoryPath, setRepositoryPath] = useState("");
+    const [defaultCodeFolder, setDefaultCodeFolder] = useState("");
+    const [codingAgents, setCodingAgents] = useState<Array<"coder" | "reviewer" | "improver">>(["coder"]);
     const [files, setFiles] = useState<ProjectFile[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -56,6 +59,13 @@ export function EditProjectModal({
             setSystemPrompt(project.systemPrompt || "");
             setBackgroundImage(project.backgroundImage);
             setSelectedColor(project.color);
+            setRepositoryPath(project.repositoryPath || "");
+            setDefaultCodeFolder(project.defaultCodeFolder || "");
+            setCodingAgents(
+                Array.isArray(project.codingAgents) && project.codingAgents.length > 0
+                    ? project.codingAgents
+                    : ["coder"]
+            );
             setFiles(project.files || []);
         }
     }, [project]);
@@ -101,6 +111,9 @@ export function EditProjectModal({
                 name: name.trim(),
                 backgroundImage,
                 systemPrompt,
+                repositoryPath: repositoryPath.trim() || null,
+                defaultCodeFolder: defaultCodeFolder.trim() || null,
+                codingAgents,
                 color: selectedColor,
                 files
             });
@@ -208,6 +221,59 @@ export function EditProjectModal({
                                 onChange={(e) => setSystemPrompt(e.target.value)}
                                 className="min-h-[80px]"
                             />
+                        </div>
+
+                        {/* Repository Path */}
+                        <div className="space-y-2">
+                            <Label htmlFor="edit-project-repository-path">Repository Path</Label>
+                            <Input
+                                id="edit-project-repository-path"
+                                placeholder="/Users/luis/Desktop/Hola"
+                                value={repositoryPath}
+                                onChange={(e) => setRepositoryPath(e.target.value)}
+                                data-testid="input-edit-project-repository-path"
+                            />
+                        </div>
+
+                        {/* Default Code Folder */}
+                        <div className="space-y-2">
+                            <Label htmlFor="edit-project-default-code-folder">Default Code Folder</Label>
+                            <Input
+                                id="edit-project-default-code-folder"
+                                placeholder="src"
+                                value={defaultCodeFolder}
+                                onChange={(e) => setDefaultCodeFolder(e.target.value)}
+                                data-testid="input-edit-project-default-code-folder"
+                            />
+                        </div>
+
+                        {/* Coding Agents */}
+                        <div className="space-y-2">
+                            <Label>Coding Agents</Label>
+                            <div className="flex flex-wrap gap-2">
+                                {(["coder", "reviewer", "improver"] as const).map((agent) => {
+                                    const active = codingAgents.includes(agent);
+                                    return (
+                                        <Button
+                                            key={agent}
+                                            type="button"
+                                            variant={active ? "default" : "outline"}
+                                            size="sm"
+                                            onClick={() => {
+                                                setCodingAgents((prev) => {
+                                                    if (prev.includes(agent)) {
+                                                        const next = prev.filter((item) => item !== agent);
+                                                        return next.length > 0 ? next : ["coder"];
+                                                    }
+                                                    return [...prev, agent];
+                                                });
+                                            }}
+                                        >
+                                            {agent}
+                                        </Button>
+                                    );
+                                })}
+                            </div>
                         </div>
 
                         {/* Files */}

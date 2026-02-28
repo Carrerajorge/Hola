@@ -14,7 +14,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: 'html',
   use: {
-    baseURL: 'http://localhost:5000',
+    baseURL: 'http://localhost:5050',
     trace: 'on-first-retry',
   },
   projects: [
@@ -24,9 +24,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "bash -lc 'set -a; source .env.localtest; set +a; NODE_ENV=production PORT=5000 node --import tsx server/index.ts'",
-    url: 'http://localhost:5000',
-    reuseExistingServer: true,
-    timeout: 300 * 1000,
+    command: 'npm run dev:test-web',
+    url: 'http://localhost:5050',
+    reuseExistingServer: !process.env.CI,
+    timeout: 120 * 1000,
   },
 });

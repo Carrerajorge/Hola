@@ -6,7 +6,6 @@ import type {
   InitiateCallResult,
   NormalizedEvent,
   PlayTtsInput,
-  WebhookParseOptions,
   ProviderWebhookParseResult,
   StartListeningInput,
   StopListeningInput,
@@ -29,10 +28,7 @@ export class MockProvider implements VoiceCallProvider {
     return { ok: true };
   }
 
-  parseWebhookEvent(
-    ctx: WebhookContext,
-    _options?: WebhookParseOptions,
-  ): ProviderWebhookParseResult {
+  parseWebhookEvent(ctx: WebhookContext): ProviderWebhookParseResult {
     try {
       const payload = JSON.parse(ctx.rawBody);
       const events: NormalizedEvent[] = [];

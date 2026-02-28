@@ -4,13 +4,17 @@ import { llmGateway } from "../lib/llmGateway";
 import { geminiChat, geminiStreamChat, GEMINI_MODELS, GeminiChatMessage } from "../lib/gemini";
 import { LIMITS, MEMORY_INTENT_KEYWORDS } from "../lib/constants";
 import {
-  DEFAULT_TEXT_MODEL as REGISTRY_DEFAULT_MODEL,
-  DEFAULT_PROVIDER as REGISTRY_DEFAULT_PROVIDER,
+    DEFAULT_TEXT_MODEL as REGISTRY_DEFAULT_MODEL,
+    DEFAULT_PROVIDER as REGISTRY_DEFAULT_PROVIDER,
 } from "../lib/modelRegistry";
 import { storage } from "../storage";
 import { generateEmbedding } from "../embeddingService";
 import { searchWeb, searchScholar, needsWebSearch, needsAcademicSearch } from "./webSearch";
-import { routeMessage, runPipeline, ProgressUpdate, checkDomainPolicy, checkRateLimit, sanitizeUrl, isValidObjective, multiIntentManager, multiIntentPipeline } from "../agent";
+import { routeMessage } from "../agent/router";
+import { runPipeline } from "../agent/pipeline/engine";
+import { ProgressUpdate } from "../agent/pipeline/types";
+import { checkDomainPolicy, checkRateLimit, sanitizeUrl, isValidObjective } from "../agent/security";
+import { multiIntentManager, multiIntentPipeline } from "../agent/pipeline";
 import type { PipelineResponse } from "../../shared/schemas/multiIntent";
 import { checkToolPolicy, logToolCall } from "./integrationPolicyService";
 import { detectEmailIntent, handleEmailChatRequest } from "./gmailChatIntegration";

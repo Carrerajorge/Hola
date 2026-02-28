@@ -10,6 +10,15 @@ import {
   getAllResilienceMetrics,
 } from "./resilience";
 
+const isDbConnectionError = (err: any): boolean => {
+  const code = err?.code || err?.cause?.code;
+  if (code === "ECONNREFUSED" || code === "ECONNRESET" || code === "ETIMEDOUT" || code === "ENOTFOUND") {
+    return true;
+  }
+  const message = String(err?.message || err?.cause?.message || "");
+  return /ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND/i.test(message);
+};
+
 export interface StrictE2EResult {
   toolName: string;
   input: unknown;
@@ -338,6 +347,7 @@ class ToolRegistry {
             idempotencyKey: finalTrace.requestId,
           });
         } catch (err: any) {
+          if (isDbConnectionError(err)) return;
           console.warn("[RegistryToolRegistry] Failed to persist tool_call_logs:", err?.message || err);
         }
       })();

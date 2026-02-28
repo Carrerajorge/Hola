@@ -45,6 +45,7 @@ import { apiFetch } from "@/lib/apiClient";
 import { useToast } from "@/hooks/use-toast";
 import { useUpload } from "@/hooks/use-upload";
 import { useModelAvailability } from "@/contexts/ModelAvailabilityContext";
+import { DEFAULT_UI_GPT_CAPABILITIES, normalizeUiGptCapabilities } from "@/lib/gptCapabilities";
 import type { Gpt } from "./gpt-explorer";
 import type { GptKnowledge, GptAction } from "@shared/schema";
 
@@ -90,6 +91,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [savedGptData, setSavedGptData] = useState<Gpt | null>(null);
+  const [currentGpt, setCurrentGpt] = useState<Gpt | null>(editingGpt || null);
 
   const [formData, setFormData] = useState({
     name: "",
@@ -103,19 +105,12 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
     visibility: "private" as "private" | "team" | "public",
     conversationStarters: [""],
     recommendedModel: "",
-    capabilities: {
-      webBrowsing: true,
-      canvas: true,
-      imageGeneration: true,
-      codeInterpreter: false,
-      wordCreation: true,
-      excelCreation: true,
-      pptCreation: true
-    }
+    capabilities: { ...DEFAULT_UI_GPT_CAPABILITIES }
   });
 
   useEffect(() => {
     if (editingGpt) {
+      setCurrentGpt(editingGpt);
       setFormData({
         name: editingGpt.name,
         slug: editingGpt.slug,
@@ -130,19 +125,15 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
           ? editingGpt.conversationStarters
           : [""],
         recommendedModel: "",
-        capabilities: editingGpt.capabilities || {
-          webBrowsing: true,
-          canvas: true,
-          imageGeneration: true,
-          codeInterpreter: false,
-          wordCreation: true,
-          excelCreation: true,
-          pptCreation: true
-        }
+        capabilities: normalizeUiGptCapabilities(
+          editingGpt.capabilities,
+          DEFAULT_UI_GPT_CAPABILITIES
+        )
       });
       loadKnowledgeAndActions(editingGpt.id);
       setAvatarPreview(editingGpt.avatar || null);
     } else {
+      setCurrentGpt(null);
       setFormData({
         name: "",
         slug: "",
@@ -155,15 +146,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
         visibility: "private",
         conversationStarters: [""],
         recommendedModel: "",
-        capabilities: {
-          webBrowsing: true,
-          canvas: true,
-          imageGeneration: true,
-          codeInterpreter: false,
-          wordCreation: true,
-          excelCreation: true,
-          pptCreation: true
-        }
+        capabilities: { ...DEFAULT_UI_GPT_CAPABILITIES }
       });
       setKnowledgeFiles([]);
       setActions([]);
@@ -230,6 +213,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
     setSaving(true);
     try {
       const slug = formData.slug || generateSlug(formData.name);
+      const targetGpt = currentGpt;
       const payload = {
         name: formData.name,
         slug,
@@ -242,12 +226,12 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
         maxTokens: formData.maxTokens,
         visibility: formData.visibility,
         conversationStarters: formData.conversationStarters.filter(s => s.trim()),
-        capabilities: formData.capabilities,
+        capabilities: normalizeUiGptCapabilities(formData.capabilities, DEFAULT_UI_GPT_CAPABILITIES),
         recommendedModel: formData.recommendedModel || null
       };
 
-      const url = editingGpt ? `/api/gpts/${editingGpt.id}` : "/api/gpts";
-      const method = editingGpt ? "PATCH" : "POST";
+      const url = targetGpt ? `/api/gpts/${targetGpt.id}` : "/api/gpts";
+      const method = targetGpt ? "PATCH" : "POST";
 
       const response = await apiFetch(url, {
         method,
@@ -257,6 +241,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
 
       if (response.ok) {
         const savedGpt = await response.json();
+        setCurrentGpt(savedGpt);
         setSavedGptData(savedGpt);
         // Sync all formData with server response without marking dirty
         syncFormData({
@@ -285,11 +270,11 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
   };
 
   const { uploadFile, isUploading: isHookUploading, progress: uploadProgress } = useUpload({
-    uploadIdPrefix: `gpt-knowledge-${editingGpt?.id || 'new'}`,
+    uploadIdPrefix: `gpt-knowledge-${currentGpt?.id || 'new'}`,
   });
 
   const handleFileUpload = async (files: FileList) => {
-    if (!editingGpt) {
+    if (!currentGpt) {
       toast({
         title: "Guarda primero",
         description: "Guarda el GPT antes de subir archivos",
@@ -306,7 +291,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
         const uploadRes = await uploadFile(file);
 
         if (uploadRes && uploadRes.storagePath) {
-          const response = await apiFetch(`/api/gpts/${editingGpt.id}/knowledge`, {
+          const response = await apiFetch(`/api/gpts/${currentGpt.id}/knowledge`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -338,9 +323,9 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
   };
 
   const handleDeleteKnowledge = async (id: string) => {
-    if (!editingGpt) return;
+    if (!currentGpt) return;
     try {
-      await apiFetch(`/api/gpts/${editingGpt.id}/knowledge/${id}`, { method: "DELETE" });
+      await apiFetch(`/api/gpts/${currentGpt.id}/knowledge/${id}`, { method: "DELETE" });
       setKnowledgeFiles(prev => prev.filter(k => k.id !== id));
     } catch (error) {
       console.error("Error deleting knowledge:", error);
@@ -348,11 +333,11 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
   };
 
   const handleDeleteGpt = async () => {
-    if (!editingGpt) return;
+    if (!currentGpt) return;
     if (!confirm("¿Estás seguro de que quieres eliminar este GPT?")) return;
 
     try {
-      const response = await apiFetch(`/api/gpts/${editingGpt.id}`, { method: "DELETE" });
+      const response = await apiFetch(`/api/gpts/${currentGpt.id}`, { method: "DELETE" });
       if (response.ok) {
         toast({ title: "GPT eliminado" });
         onOpenChange(false);
@@ -367,7 +352,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
   };
 
   const handleDuplicateGpt = async () => {
-    if (!editingGpt) return;
+    if (!currentGpt) return;
     try {
       const response = await apiFetch("/api/gpts", {
         method: "POST",
@@ -384,7 +369,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
           maxTokens: formData.maxTokens,
           visibility: formData.visibility,
           conversationStarters: formData.conversationStarters.filter(s => s.trim()),
-          capabilities: formData.capabilities,
+          capabilities: normalizeUiGptCapabilities(formData.capabilities, DEFAULT_UI_GPT_CAPABILITIES),
           recommendedModel: formData.recommendedModel || null
         })
       });
@@ -425,7 +410,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
   };
 
   const handleCreateAction = () => {
-    if (!editingGpt) {
+    if (!currentGpt) {
       toast({
         title: "Guarda primero",
         description: "Guarda el GPT antes de crear acciones",
@@ -439,7 +424,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
   };
 
   const saveAction = async () => {
-    if (!editingGpt || !actionForm.name.trim() || !actionForm.endpoint.trim()) {
+    if (!currentGpt || !actionForm.name.trim() || !actionForm.endpoint.trim()) {
       toast({
         title: "Error",
         description: "Nombre y endpoint son requeridos",
@@ -457,7 +442,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
       };
 
       if (editingAction) {
-        const response = await apiFetch(`/api/gpts/${editingGpt.id}/actions/${editingAction.id}`, {
+        const response = await apiFetch(`/api/gpts/${currentGpt.id}/actions/${editingAction.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
@@ -468,7 +453,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
           toast({ title: "Acción actualizada" });
         }
       } else {
-        const response = await apiFetch(`/api/gpts/${editingGpt.id}/actions`, {
+        const response = await apiFetch(`/api/gpts/${currentGpt.id}/actions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
@@ -586,8 +571,8 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem onClick={() => {
-                    if (editingGpt) {
-                      navigator.clipboard.writeText(`${window.location.origin}/gpt/${editingGpt.slug}`);
+                    if (currentGpt) {
+                      navigator.clipboard.writeText(`${window.location.origin}/gpt/${currentGpt.slug}`);
                       toast({ title: "Enlace copiado" });
                     }
                   }}>
@@ -618,8 +603,8 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                 size="sm"
                 data-testid="button-share"
                 onClick={() => {
-                  if (editingGpt) {
-                    setSavedGptData(editingGpt);
+                  if (currentGpt) {
+                    setSavedGptData(currentGpt);
                     setShowUpdateModal(true);
                   } else {
                     toast({
@@ -776,7 +761,9 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                           <div className="space-y-2">
                             <Label htmlFor="instructions" className="flex justify-between">
                               <span>System Prompt</span>
-                              <span className="text-xs font-normal text-muted-foreground">{formData.systemPrompt.length}/8,000</span>
+                              <span className="text-xs font-normal text-muted-foreground">
+                                {formData.systemPrompt.length.toLocaleString("es-ES")} caracteres
+                              </span>
                             </Label>
                             <Textarea
                               id="instructions"
@@ -784,9 +771,11 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                               value={formData.systemPrompt}
                               onChange={(e) => handleFormChange({ systemPrompt: e.target.value })}
                               className="min-h-[200px] max-h-[400px] resize-y font-mono text-sm leading-relaxed bg-muted/30"
-                              maxLength={8000}
                               data-testid="input-gpt-instructions"
                             />
+                            <p className="text-xs text-muted-foreground">
+                              Sin límite fijo en el editor. El límite efectivo depende del contexto máximo del modelo activo.
+                            </p>
                           </div>
 
                           <div className="space-y-3">

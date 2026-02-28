@@ -47,7 +47,13 @@ dashboardRouter.get("/", async (req, res) => {
             storage.getReports(),
             storage.getSettings(),
             storage.getAllUsers(),
-            llmGateway.healthCheck().catch(() => ({ xai: { available: false }, gemini: { available: false } }))
+            llmGateway.healthCheck().catch(() => ({
+                xai: { available: false },
+                gemini: { available: false },
+                openai: { available: false },
+                anthropic: { available: false },
+                deepseek: { available: false },
+            }))
         ]);
 
         const totalQueries = allUsers.reduce((sum, u) => sum + (u.queryCount || 0), 0);
@@ -102,6 +108,9 @@ dashboardRouter.get("/", async (req, res) => {
             systemHealth: {
                 xai: (healthStatus as any)?.xai?.available ?? false,
                 gemini: (healthStatus as any)?.gemini?.available ?? false,
+                openai: (healthStatus as any)?.openai?.available ?? false,
+                anthropic: (healthStatus as any)?.anthropic?.available ?? false,
+                deepseek: (healthStatus as any)?.deepseek?.available ?? false,
                 uptime: 99.9
             },
             recentActivity: auditLogs.slice(0, 5)

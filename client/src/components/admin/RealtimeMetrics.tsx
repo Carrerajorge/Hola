@@ -25,6 +25,8 @@ interface RealtimeMetrics {
     xai: boolean;
     gemini: boolean;
     openai: boolean;
+    anthropic?: boolean;
+    deepseek?: boolean;
     database: boolean;
   };
 }
@@ -196,6 +198,12 @@ export function RealtimeMetricsPanel() {
               <HealthIndicator name="xAI" healthy={data.systemHealth.xai} />
               <HealthIndicator name="Gemini" healthy={data.systemHealth.gemini} />
               <HealthIndicator name="OpenAI" healthy={data.systemHealth.openai} />
+              {typeof data.systemHealth.anthropic === "boolean" && (
+                <HealthIndicator name="Anthropic" healthy={data.systemHealth.anthropic} />
+              )}
+              {typeof data.systemHealth.deepseek === "boolean" && (
+                <HealthIndicator name="DeepSeek" healthy={data.systemHealth.deepseek} />
+              )}
               <HealthIndicator name="Database" healthy={data.systemHealth.database} />
             </div>
           </div>

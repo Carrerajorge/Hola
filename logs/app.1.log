@@ -6,3 +6,4 @@
 {"level":30,"time":1771705625853,"env":"production","msg":"[DB Write] New client connected to pool"}
 {"level":30,"time":1771705793221,"env":"production","msg":"[DB Write] New client connected to pool"}
 {"level":30,"time":1771705956495,"env":"production","msg":"[DB Write] New client connected to pool"}
+{"level":50,"time":1772238892095,"env":"production","msg":"[Cache] REDIS_URL must be defined in production. In-memory cache fallback is disabled for clustering compatibility."}

@@ -7,21 +7,21 @@
 
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import { computerUseEngine } from "../computerUse/computerUseEngine";
-import { universalBrowserController } from "../computerUse/universalBrowserController";
-import { perfectPptGenerator } from "../computerUse/perfectPptGenerator";
-import { perfectDocumentGenerator } from "../computerUse/perfectDocumentGenerator";
-import { perfectExcelGenerator } from "../computerUse/perfectExcelGenerator";
-import { terminalController } from "../computerUse/terminalController";
-import { visionPipeline } from "../computerUse/visionPipeline";
-import { autonomousAgentBrain } from "../computerUse/autonomousAgentBrain";
+import { computerUseEngine } from "../computerUseEngine";
+import { universalBrowserController } from "../universalBrowserController";
+import { perfectPptGenerator } from "../perfectPptGenerator";
+import { perfectDocumentGenerator } from "../perfectDocumentGenerator";
+import { perfectExcelGenerator } from "../perfectExcelGenerator";
+import { terminalController } from "../terminalController";
+import { visionPipeline } from "../visionPipeline";
+import { autonomousAgentBrain } from "../autonomousAgentBrain";
 
 // ============================================
 // Browser Control Tools
 // ============================================
 
 export const computerUseSessionTool = tool(
-  async (input) => {
+  async (input: any) => {
     try {
       const { action, sessionId, mode, profileId, url, viewport } = input;
 
@@ -37,7 +37,7 @@ export const computerUseSessionTool = tool(
         case "close": {
           if (sessionId) {
             await computerUseEngine.closeSession(sessionId);
-            await universalBrowserController.closeSession(sessionId).catch(() => {});
+            await universalBrowserController.closeSession(sessionId).catch(() => { });
           }
           return JSON.stringify({ success: true });
         }
@@ -64,12 +64,12 @@ export const computerUseSessionTool = tool(
       profileId: z.string().optional().describe("Browser profile: chrome-desktop, firefox-desktop, safari-desktop, mobile-iphone, mobile-android"),
       url: z.string().optional().describe("Initial URL to navigate to"),
       viewport: z.object({ width: z.number(), height: z.number() }).optional().describe("Viewport size"),
-    }),
+    }) as any,
   }
 );
 
 export const computerUseNavigateTool = tool(
-  async (input) => {
+  async (input: any) => {
     const { sessionId, url, waitUntil, screenshot: takeScreenshot } = input;
 
     try {
@@ -118,12 +118,12 @@ export const computerUseNavigateTool = tool(
       url: z.string().url().describe("URL to navigate to"),
       waitUntil: z.enum(["load", "domcontentloaded", "networkidle"]).optional().default("domcontentloaded"),
       screenshot: z.boolean().optional().default(false).describe("Take screenshot after navigation"),
-    }),
+    }) as any,
   }
 );
 
 export const computerUseInteractTool = tool(
-  async (input) => {
+  async (input: any) => {
     const { sessionId, action, selector, value, coordinates } = input;
 
     try {
@@ -194,12 +194,12 @@ export const computerUseInteractTool = tool(
       selector: z.string().optional().describe("CSS selector for the element"),
       value: z.string().optional().describe("Text to type, key to press, or option to select"),
       coordinates: z.object({ x: z.number(), y: z.number() }).optional().describe("Screen coordinates for click/scroll"),
-    }),
+    }) as any,
   }
 );
 
 export const computerUseScreenshotTool = tool(
-  async (input) => {
+  async (input: any) => {
     const { sessionId, fullPage, analyze, query } = input;
 
     try {
@@ -239,12 +239,12 @@ export const computerUseScreenshotTool = tool(
       fullPage: z.boolean().optional().default(false).describe("Capture full page"),
       analyze: z.boolean().optional().default(true).describe("Analyze screenshot with AI vision"),
       query: z.string().optional().describe("Specific question about the screenshot"),
-    }),
+    }) as any,
   }
 );
 
 export const computerUseExtractTool = tool(
-  async (input) => {
+  async (input: any) => {
     const { sessionId, description, rules } = input;
 
     try {
@@ -288,12 +288,12 @@ export const computerUseExtractTool = tool(
         type: z.enum(["text", "html", "attribute", "list", "table"]),
         attribute: z.string().optional(),
       })).optional().describe("Rule-based extraction: CSS selector rules"),
-    }),
+    }) as any,
   }
 );
 
 export const computerUseAgenticTool = tool(
-  async (input) => {
+  async (input: any) => {
     const { sessionId, goal, maxSteps } = input;
 
     try {
@@ -316,7 +316,7 @@ export const computerUseAgenticTool = tool(
       sessionId: z.string().describe("Browser session ID"),
       goal: z.string().describe("What to accomplish (e.g., 'search for AI news on Google and extract top 5 results')"),
       maxSteps: z.number().optional().default(15).describe("Maximum steps the agent can take"),
-    }),
+    }) as any,
   }
 );
 
@@ -325,7 +325,7 @@ export const computerUseAgenticTool = tool(
 // ============================================
 
 export const generatePresentationTool = tool(
-  async (input) => {
+  async (input: any) => {
     try {
       const result = await perfectPptGenerator.generate({
         topic: input.topic,
@@ -366,12 +366,12 @@ export const generatePresentationTool = tool(
       purpose: z.string().optional().describe("Purpose: inform, persuade, educate, pitch, report"),
       includeCharts: z.boolean().optional().default(true),
       customInstructions: z.string().optional().describe("Additional instructions for content generation"),
-    }),
+    }) as any,
   }
 );
 
 export const generateDocumentTool = tool(
-  async (input) => {
+  async (input: any) => {
     try {
       const result = await perfectDocumentGenerator.generate({
         topic: input.topic,
@@ -414,12 +414,12 @@ export const generateDocumentTool = tool(
       referenceStyle: z.enum(["APA", "MLA", "Chicago", "IEEE"]).optional(),
       author: z.string().optional(),
       customInstructions: z.string().optional(),
-    }),
+    }) as any,
   }
 );
 
 export const generateExcelTool = tool(
-  async (input) => {
+  async (input: any) => {
     try {
       const result = await perfectExcelGenerator.generate({
         topic: input.topic,
@@ -461,7 +461,7 @@ export const generateExcelTool = tool(
       includeConditionalFormatting: z.boolean().optional().default(true),
       includePivotSummary: z.boolean().optional().default(true),
       customInstructions: z.string().optional(),
-    }),
+    }) as any,
   }
 );
 
@@ -470,7 +470,7 @@ export const generateExcelTool = tool(
 // ============================================
 
 export const terminalExecuteTool = tool(
-  async (input) => {
+  async (input: any) => {
     const { command, cwd, timeout, sessionId: existingSessionId } = input;
 
     try {
@@ -497,12 +497,12 @@ export const terminalExecuteTool = tool(
       cwd: z.string().optional().describe("Working directory"),
       timeout: z.number().optional().default(30000).describe("Timeout in milliseconds"),
       sessionId: z.string().optional().describe("Reuse existing terminal session"),
-    }),
+    }) as any,
   }
 );
 
 export const terminalSystemInfoTool = tool(
-  async () => {
+  async (input: any) => {
     try {
       const info = await terminalController.getSystemInfo();
       return JSON.stringify({
@@ -524,12 +524,12 @@ export const terminalSystemInfoTool = tool(
   {
     name: "terminal_system_info",
     description: "Get system information: OS, CPU, memory, disk, network. Useful for understanding the computer's capabilities and current state.",
-    schema: z.object({}),
+    schema: z.object({}) as any,
   }
 );
 
 export const terminalFileOpTool = tool(
-  async (input) => {
+  async (input: any) => {
     const { operation, path: filePath, destination, content, pattern, recursive, sessionId: existingSessionId } = input;
 
     try {
@@ -559,7 +559,7 @@ export const terminalFileOpTool = tool(
       pattern: z.string().optional().describe("Pattern for search"),
       recursive: z.boolean().optional().default(false),
       sessionId: z.string().optional(),
-    }),
+    }) as any,
   }
 );
 
@@ -568,7 +568,7 @@ export const terminalFileOpTool = tool(
 // ============================================
 
 export const visionAnalyzeTool = tool(
-  async (input) => {
+  async (input: any) => {
     const { sessionId, query, mode } = input;
 
     try {
@@ -598,7 +598,7 @@ export const visionAnalyzeTool = tool(
       sessionId: z.string().describe("Session ID for screenshot capture"),
       query: z.string().optional().describe("What to analyze or look for"),
       mode: z.enum(["analyze", "ocr", "detect_elements", "accessibility"]).optional().default("analyze"),
-    }),
+    }) as any,
   }
 );
 

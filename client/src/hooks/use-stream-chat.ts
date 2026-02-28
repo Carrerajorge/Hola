@@ -662,22 +662,34 @@ export function useStreamChat(deps: StreamChatDeps) {
 
               if (!data || typeof data !== "object") continue;
 
-              const eventConversationId =
+              const eventConversationIdRaw =
                 typeof data.conversationId === "string" ? data.conversationId.trim() : "";
-              if (!eventConversationId || eventConversationId !== conversationId) {
+              const eventChatIdRaw =
+                typeof data.chatId === "string" ? data.chatId.trim() : "";
+              const effectiveEventConversationId =
+                eventConversationIdRaw || eventChatIdRaw || conversationId;
+
+              // Be tolerant with stream metadata: some backend paths can emit
+              // events without conversationId/chatId. In that case, bind the
+              // event to the current stream conversation.
+              if (effectiveEventConversationId !== conversationId) {
                 continue;
+              }
+              if (!eventConversationIdRaw) {
+                data.conversationId = conversationId;
               }
 
               const eventRequestId = typeof data.requestId === "string" ? data.requestId.trim() : "";
-              const eventAssistantMessageId =
-                typeof data.assistantMessageId === "string" ? data.assistantMessageId.trim() : "";
-
-              if (!eventRequestId && !eventAssistantMessageId) {
-                continue;
-              }
-
-              if (eventRequestId && eventRequestId !== streamRequestId) {
-                continue;
+              if (eventRequestId) {
+                const normalizeRetrySuffix = (value: string) => value.replace(/_retry\d+$/i, "");
+                const normalizedEventRequestId = normalizeRetrySuffix(eventRequestId);
+                const normalizedStreamRequestId = normalizeRetrySuffix(streamRequestId);
+                if (
+                  eventRequestId !== streamRequestId &&
+                  normalizedEventRequestId !== normalizedStreamRequestId
+                ) {
+                  continue;
+                }
               }
 
               lastEventData = data;
@@ -775,14 +787,15 @@ export function useStreamChat(deps: StreamChatDeps) {
                 streamDone = true;
                 flushNow(conversationId);
 
-                const msg = buildFinalMessage?.(fullContent, data, messageId) ?? {
+                const finalEventData = { ...(lastEventData || {}), ...(data || {}) };
+                const msg = buildFinalMessage?.(fullContent, finalEventData, messageId) ?? {
                   id: messageId,
                   role: "assistant" as const,
                   content: fullContent,
                   timestamp: new Date(),
-                  requestId: data.requestId || streamRequestId,
-                  artifact: data.artifact,
-                  webSources: data.webSources,
+                  requestId: finalEventData.requestId || streamRequestId,
+                  artifact: finalEventData.artifact,
+                  webSources: finalEventData.webSources,
                 };
 
                 finalize(msg, conversationId, "done");

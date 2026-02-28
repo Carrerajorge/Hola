@@ -35,6 +35,16 @@ export interface UnifiedChatRequest {
   latencyMode?: LatencyMode;
   accessLevel?: 'owner' | 'trusted' | 'unknown';
   agentTask?: AgentTask; // Opcional: inyección estricta del contrato de tarea
+  workspaceContext?: {
+    projectId?: string;
+    projectName?: string;
+    repositoryPath?: string | null;
+    selectedFolder?: string | null;
+    codingAgents?: Array<"coder" | "reviewer" | "improver">;
+    runtimeTarget?: string;
+    executionAccess?: string;
+    branch?: string | null;
+  };
 }
 
 export interface UnifiedChatContext {
@@ -586,7 +596,8 @@ export async function executeUnifiedChat(
         chatId: request.chatId,
         requestSpec,
         maxIterations: 10,
-        accessLevel: context.accessLevel
+        accessLevel: context.accessLevel,
+        workspaceContext: request.workspaceContext,
       });
 
       await emitTraceEvent(runId, 'done', {

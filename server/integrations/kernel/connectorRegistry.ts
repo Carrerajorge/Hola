@@ -16,6 +16,8 @@ import type {
   ConnectorOperationResult,
   JSONSchema7,
 } from "./types";
+import type { ToolDefinition, ToolContext } from "../../agent/toolRegistry";
+import type { ToolCapability } from "../../agent/contracts";
 
 // ─── Interfaces for dependency injection (no circular imports) ──────
 
@@ -250,7 +252,7 @@ export class ConnectorRegistry {
         description: cap.description,
         inputSchema: zodSchema,
         capabilities: buildToolCapabilities(cap),
-        execute: async (input: unknown, context: ToolExecutionContext): Promise<ToolExecutionResult> => {
+        execute: async (input: unknown, context: ToolContext) => {
           const startTime = Date.now();
 
           // Check confirmation for write ops
@@ -353,10 +355,10 @@ function jsonSchemaToZodLazy(schema: JSONSchema7): import("zod").ZodSchema {
   return z.any();
 }
 
-function buildToolCapabilities(cap: ConnectorCapability): string[] {
+function buildToolCapabilities(cap: ConnectorCapability): ToolCapability[] {
   // IMPORTANT: These values must match server/agent/contracts ToolCapabilitySchema.
   // Keep this list minimal and map connector semantics into existing agent capabilities.
-  const caps: string[] = ["requires_network", "accesses_external_api"];
+  const caps: ToolCapability[] = ["requires_network", "accesses_external_api"];
 
   // Treat write/admin access (or explicit confirmation requirement) as high-risk.
   if (
@@ -368,35 +370,6 @@ function buildToolCapabilities(cap: ConnectorCapability): string[] {
   }
 
   return caps;
-}
-
-// ─── Types imported from ToolRegistry to avoid circular dep ─────────
-
-interface ToolDefinition {
-  name: string;
-  description: string;
-  inputSchema: import("zod").ZodSchema;
-  capabilities?: string[];
-  execute: (input: unknown, context: ToolExecutionContext) => Promise<ToolExecutionResult>;
-}
-
-interface ToolExecutionContext {
-  userId: string;
-  chatId: string;
-  runId: string;
-  isConfirmed?: boolean;
-  signal?: AbortSignal;
-  [key: string]: unknown;
-}
-
-interface ToolExecutionResult {
-  success: boolean;
-  output: unknown;
-  error?: { code: string; message: string; retryable: boolean; details?: unknown };
-  metrics?: { durationMs: number; apiCalls?: number };
-  artifacts?: unknown[];
-  previews?: unknown[];
-  logs?: unknown[];
 }
 
 export type ConnectorHandlerFactory = {

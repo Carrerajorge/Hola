@@ -79,19 +79,35 @@ export function isSenderAllowedByPolicy(config: ReturnType<typeof resolveRuntime
   return true;
 }
 
+function buildChannelFormattingGuidelines(channelLabel: string): string {
+  const channel = safeRuntimeText(channelLabel).toLowerCase();
+  if (channel !== "telegram") return "";
+
+  return [
+    "Formato obligatorio para Telegram:",
+    "- Entrega texto limpio y bien estructurado por líneas cortas.",
+    "- Matemáticas en forma legible lineal: usa símbolos Unicode (ej: h = (SA - 2s²) / (4s)).",
+    "- Evita LaTeX con $...$ salvo que el usuario lo pida explícitamente.",
+    "- Si incluyes código, usa bloques con triple backticks y lenguaje.",
+    "- No dejes markdown incompleto o mal cerrado.",
+  ].join("\n");
+}
+
 export function buildResponseStyleSystemPrompt(config: ReturnType<typeof resolveRuntimeConfig>, channelLabel: string): string | null {
+  const channelGuidelines = buildChannelFormattingGuidelines(channelLabel);
+
   if (config.response_style === "custom" && config.custom_prompt?.trim()) {
-    return config.custom_prompt.trim();
+    return `${config.custom_prompt.trim()}\n\n${channelGuidelines}`.trim();
   }
 
   switch (config.response_style) {
     case "concise":
-      return `Responde de forma muy breve y clara por ${channelLabel}.`;
+      return `Responde de forma muy breve y clara por ${channelLabel}.\n${channelGuidelines}`.trim();
     case "friendly":
-      return `Responde de forma cálida y amigable por ${channelLabel}, sin perder precisión.`;
+      return `Responde de forma cálida y amigable por ${channelLabel}, sin perder precisión.\n${channelGuidelines}`.trim();
     case "professional":
-      return `Responde con tono profesional y directo por ${channelLabel}.`;
+      return `Responde con tono profesional y directo por ${channelLabel}.\n${channelGuidelines}`.trim();
     default:
-      return null;
+      return channelGuidelines || null;
   }
 }

@@ -20,9 +20,9 @@
 import { spawn, ChildProcess } from "child_process";
 import { EventEmitter } from "events";
 import { randomUUID } from "crypto";
-import path from "path";
-import fs from "fs/promises";
-import os from "os";
+import * as path from "path";
+import { promises as fs } from "fs";
+import * as os from "os";
 import * as pty from "node-pty";
 import Docker from "dockerode";
 
@@ -585,7 +585,7 @@ function terminateChildProcess(proc: ChildProcess): void {
     if (proc.exitCode === null && !proc.killed) {
       try {
         proc.kill("SIGKILL");
-      } catch {}
+      } catch { }
     }
   }, 250).unref?.();
 }
@@ -600,7 +600,7 @@ function terminatePtyProcess(proc: pty.IPty): void {
   setTimeout(() => {
     try {
       proc.kill("SIGKILL" as any);
-    } catch {}
+    } catch { }
   }, 250).unref?.();
 }
 
@@ -778,7 +778,7 @@ export class TerminalController extends EventEmitter {
 
   private pruneExpiredIdempotentCommands(session: TerminalSession): void {
     const now = Date.now();
-    for (const [key, entry] of session.idempotentCommands.entries()) {
+    for (const [key, entry] of Array.from(session.idempotentCommands.entries())) {
       if (now - entry.createdAt > MAX_IDEMPOTENCY_TTL_MS) {
         session.idempotentCommands.delete(key);
       }
@@ -961,106 +961,106 @@ export class TerminalController extends EventEmitter {
 
     const fullCommand = buildCommandLine(command, args);
     const executeFlow = async (): Promise<CommandResult> => {
-    if (request.inDocker) {
-      return this.executeDockerCommand(sessionId, commandId, normalizedRequest, startTime);
-    }
+      if (request.inDocker) {
+        return this.executeDockerCommand(sessionId, commandId, normalizedRequest, startTime);
+      }
 
-    if (request.interactive) {
-      return this.executePtyCommand(sessionId, commandId, normalizedRequest, startTime);
-    }
+      if (request.interactive) {
+        return this.executePtyCommand(sessionId, commandId, normalizedRequest, startTime);
+      }
 
-    // Standard execution
-    // Handle cd command specially
-    if (fullCommand.trim().startsWith("cd ")) {
-      return (async () => {
-        const targetDir = fullCommand.trim().slice(3).trim().replace(/^["']|["']$/g, "");
-        let resolvedPath: string;
-        try {
-          resolvedPath = resolveSessionCwd(session, targetDir);
-        } catch (error: any) {
-          return {
-            id: commandId,
-            command: fullCommand,
-            exitCode: 1,
-            stdout: "",
-            stderr: error.message,
-            duration: Date.now() - startTime,
-            killed: false,
-            signal: null,
-            success: false,
-          };
-        }
-        if (!isPathInsideBase(session.baseCwd, resolvedPath)) {
-          return {
-            id: commandId,
-            command: fullCommand,
-            exitCode: 1,
-            stdout: "",
-            stderr: "Cwd transition denied: outside session root",
-            duration: Date.now() - startTime,
-            killed: false,
-            signal: null,
-            success: false,
-          };
-        }
-
-        try {
-          await fs.access(resolvedPath);
-          const stat = await fs.stat(resolvedPath);
-          if (!stat.isDirectory()) {
-            throw new Error(`Not a directory: ${resolvedPath}`);
+      // Standard execution
+      // Handle cd command specially
+      if (fullCommand.trim().startsWith("cd ")) {
+        return (async () => {
+          const targetDir = fullCommand.trim().slice(3).trim().replace(/^["']|["']$/g, "");
+          let resolvedPath: string;
+          try {
+            resolvedPath = resolveSessionCwd(session, targetDir);
+          } catch (error: any) {
+            return {
+              id: commandId,
+              command: fullCommand,
+              exitCode: 1,
+              stdout: "",
+              stderr: error.message,
+              duration: Date.now() - startTime,
+              killed: false,
+              signal: null,
+              success: false,
+            };
           }
-          session.cwd = resolvedPath;
-          return {
-            id: commandId,
-            command: fullCommand,
-            exitCode: 0,
-            stdout: resolvedPath,
-            stderr: "",
-            duration: Date.now() - startTime,
-            killed: false,
-            signal: null,
-            success: true,
-          };
-        } catch (error: any) {
-          return {
-            id: commandId,
-            command: fullCommand,
-            exitCode: 1,
-            stdout: "",
-            stderr: error.message,
-            duration: Date.now() - startTime,
-            killed: false,
-            signal: null,
-            success: false,
-          };
-        }
-      })();
-    }
+          if (!isPathInsideBase(session.baseCwd, resolvedPath)) {
+            return {
+              id: commandId,
+              command: fullCommand,
+              exitCode: 1,
+              stdout: "",
+              stderr: "Cwd transition denied: outside session root",
+              duration: Date.now() - startTime,
+              killed: false,
+              signal: null,
+              success: false,
+            };
+          }
 
-    return new Promise<CommandResult>((resolve) => {
-      const shell = request.shell || "bash";
-      const timeout = resolveExecutionTimeout(request.timeout, this.defaultTimeout);
+          try {
+            await fs.access(resolvedPath);
+            const stat = await fs.stat(resolvedPath);
+            if (!stat.isDirectory()) {
+              throw new Error(`Not a directory: ${resolvedPath}`);
+            }
+            session.cwd = resolvedPath;
+            return {
+              id: commandId,
+              command: fullCommand,
+              exitCode: 0,
+              stdout: resolvedPath,
+              stderr: "",
+              duration: Date.now() - startTime,
+              killed: false,
+              signal: null,
+              success: true,
+            };
+          } catch (error: any) {
+            return {
+              id: commandId,
+              command: fullCommand,
+              exitCode: 1,
+              stdout: "",
+              stderr: error.message,
+              duration: Date.now() - startTime,
+              killed: false,
+              signal: null,
+              success: false,
+            };
+          }
+        })();
+      }
 
-      const env = resolveCommandEnvironment(session.env, request.env);
-      const cwd = resolveSessionCwd(session, request.cwd);
-      // Always use spawn with explicit args array and shell: false to prevent
-      // command injection (CodeQL: uncontrolled-command-line).
-      // Only fall back to shell -c when the command itself contains spaces
-      // (e.g. a path with spaces), and in that case args are shell-escaped.
-      const canDirectSpawn =
-        command.length > 0 &&
-        !/\s/.test(command);
+      return new Promise<CommandResult>((resolve) => {
+        const shell = request.shell || "bash";
+        const timeout = resolveExecutionTimeout(request.timeout, this.defaultTimeout);
 
-      const proc = canDirectSpawn
-        ? spawn(command, args, {
+        const env = resolveCommandEnvironment(session.env, request.env);
+        const cwd = resolveSessionCwd(session, request.cwd);
+        // Always use spawn with explicit args array and shell: false to prevent
+        // command injection (CodeQL: uncontrolled-command-line).
+        // Only fall back to shell -c when the command itself contains spaces
+        // (e.g. a path with spaces), and in that case args are shell-escaped.
+        const canDirectSpawn =
+          command.length > 0 &&
+          !/\s/.test(command);
+
+        const proc = canDirectSpawn
+          ? spawn(command, args, {
             cwd,
             env,
             timeout,
             stdio: ["pipe", "pipe", "pipe"],
             shell: false,
           })
-        : spawn(shell, ["-c", buildCommandLine(command, args)], {
+          : spawn(shell, ["-c", buildCommandLine(command, args)], {
             cwd,
             env,
             timeout,
@@ -1068,80 +1068,80 @@ export class TerminalController extends EventEmitter {
             shell: false,
           });
 
-      let stdout = "";
-      let stderr = "";
-      let stdoutBytes = 0;
-      let stderrBytes = 0;
-      let killed = false;
+        let stdout = "";
+        let stderr = "";
+        let stdoutBytes = 0;
+        let stderrBytes = 0;
+        let killed = false;
 
-      session.activeProcesses.set(commandId, proc);
+        session.activeProcesses.set(commandId, proc);
 
-      proc.stdout?.on("data", (data: Buffer) => {
-        const appended = appendLimitedOutput(stdout, stdoutBytes, data, MAX_ACTIVE_OUTPUT_BYTES);
-        stdout = appended.output;
-        stdoutBytes = appended.bytes;
-        if (request.stream) {
-          this.emit("command:output", { sessionId, commandId, stream: "stdout", chunk: data });
-        }
+        proc.stdout?.on("data", (data: Buffer) => {
+          const appended = appendLimitedOutput(stdout, stdoutBytes, data, MAX_ACTIVE_OUTPUT_BYTES);
+          stdout = appended.output;
+          stdoutBytes = appended.bytes;
+          if (request.stream) {
+            this.emit("command:output", { sessionId, commandId, stream: "stdout", chunk: data });
+          }
+        });
+
+        proc.stderr?.on("data", (data: Buffer) => {
+          const appended = appendLimitedOutput(stderr, stderrBytes, data, MAX_ACTIVE_OUTPUT_BYTES);
+          stderr = appended.output;
+          stderrBytes = appended.bytes;
+          if (request.stream) {
+            this.emit("command:output", { sessionId, commandId, stream: "stderr", chunk: data });
+          }
+        });
+
+        const timer = setTimeout(() => {
+          killed = true;
+          terminateChildProcess(proc);
+        }, timeout);
+
+        proc.on("close", (exitCode, signal) => {
+          clearTimeout(timer);
+          session.activeProcesses.delete(commandId);
+
+          const result: CommandResult = {
+            id: commandId,
+            command: fullCommand,
+            exitCode,
+            stdout: stdout.slice(0, this.maxOutputSize),
+            stderr: stderr.slice(0, this.maxOutputSize),
+            duration: Date.now() - startTime,
+            killed,
+            signal: signal || null,
+            success: exitCode === 0,
+          };
+
+          this.appendHistory(session, result);
+          session.lastActivity = Date.now();
+
+          this.emit("command:complete", { sessionId, commandId, result });
+          resolve(result);
+        });
+
+        proc.on("error", (error) => {
+          clearTimeout(timer);
+          session.activeProcesses.delete(commandId);
+
+          const result: CommandResult = {
+            id: commandId,
+            command: fullCommand,
+            exitCode: 1,
+            stdout,
+            stderr: error.message,
+            duration: Date.now() - startTime,
+            killed: false,
+            signal: null,
+            success: false,
+          };
+
+          this.appendHistory(session, result);
+          resolve(result);
+        });
       });
-
-      proc.stderr?.on("data", (data: Buffer) => {
-        const appended = appendLimitedOutput(stderr, stderrBytes, data, MAX_ACTIVE_OUTPUT_BYTES);
-        stderr = appended.output;
-        stderrBytes = appended.bytes;
-        if (request.stream) {
-          this.emit("command:output", { sessionId, commandId, stream: "stderr", chunk: data });
-        }
-      });
-
-      const timer = setTimeout(() => {
-        killed = true;
-        terminateChildProcess(proc);
-      }, timeout);
-
-      proc.on("close", (exitCode, signal) => {
-        clearTimeout(timer);
-        session.activeProcesses.delete(commandId);
-
-        const result: CommandResult = {
-          id: commandId,
-          command: fullCommand,
-          exitCode,
-          stdout: stdout.slice(0, this.maxOutputSize),
-          stderr: stderr.slice(0, this.maxOutputSize),
-          duration: Date.now() - startTime,
-          killed,
-          signal: signal || null,
-          success: exitCode === 0,
-        };
-
-        this.appendHistory(session, result);
-        session.lastActivity = Date.now();
-
-        this.emit("command:complete", { sessionId, commandId, result });
-        resolve(result);
-      });
-
-      proc.on("error", (error) => {
-        clearTimeout(timer);
-        session.activeProcesses.delete(commandId);
-
-        const result: CommandResult = {
-          id: commandId,
-          command: fullCommand,
-          exitCode: 1,
-          stdout,
-          stderr: error.message,
-          duration: Date.now() - startTime,
-          killed: false,
-          signal: null,
-          success: false,
-        };
-
-        this.appendHistory(session, result);
-        resolve(result);
-      });
-    });
     };
 
     const commandSlot = this.tryAcquireCommandSlot(session);
@@ -1207,67 +1207,67 @@ export class TerminalController extends EventEmitter {
     const cwd = resolveSessionCwd(session, request.cwd);
 
     return new Promise((resolve) => {
-        const shell = request.shell || "bash";
-        const ptyProc = pty.spawn(shell, [], {
-            name: 'xterm-color',
-            cols: 80,
-            rows: 30,
-            cwd,
-            env: resolveCommandEnvironment(session.env, request.env),
-        });
+      const shell = request.shell || "bash";
+      const ptyProc = pty.spawn(shell, [], {
+        name: 'xterm-color',
+        cols: 80,
+        rows: 30,
+        cwd,
+        env: resolveCommandEnvironment(session.env, request.env),
+      });
 
-        let output = "";
-        let outputBytes = 0;
-        let killed = false;
+      let output = "";
+      let outputBytes = 0;
+      let killed = false;
 
-        session.activeProcesses.set(commandId, ptyProc);
+      session.activeProcesses.set(commandId, ptyProc);
 
-        ptyProc.onData((data) => {
-            const appended = appendLimitedOutput(output, outputBytes, data, MAX_ACTIVE_OUTPUT_BYTES);
-            output = appended.output;
-            outputBytes = appended.bytes;
-            if (request.stream) {
-                this.emit("command:output", { sessionId, commandId, stream: "stdout", chunk: data });
-            }
-        });
+      ptyProc.onData((data) => {
+        const appended = appendLimitedOutput(output, outputBytes, data, MAX_ACTIVE_OUTPUT_BYTES);
+        output = appended.output;
+        outputBytes = appended.bytes;
+        if (request.stream) {
+          this.emit("command:output", { sessionId, commandId, stream: "stdout", chunk: data });
+        }
+      });
 
-        // Send command — use shell-escaped args to prevent PTY injection
-        // (CodeQL: code-injection via PTY write).
-        // Strip ANSI escape sequences from the command to prevent terminal escape injection.
-        const fullCommand = buildCommandLine(command, args);
-        const sanitizedCommand = fullCommand.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
-        ptyProc.write(`${sanitizedCommand}\r`);
-        
-        // If not a long-running interactive session, we might want to exit after command
-        // For now, we assume simple execution in PTY
-        // ptyProc.write("exit\r"); // Only if we want to close immediately
+      // Send command — use shell-escaped args to prevent PTY injection
+      // (CodeQL: code-injection via PTY write).
+      // Strip ANSI escape sequences from the command to prevent terminal escape injection.
+      const fullCommand = buildCommandLine(command, args);
+      const sanitizedCommand = fullCommand.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
+      ptyProc.write(`${sanitizedCommand}\r`);
 
-        const timeout = resolveExecutionTimeout(request.timeout, this.defaultTimeout);
-        const timer = setTimeout(() => {
-            killed = true;
-            terminatePtyProcess(ptyProc);
-        }, timeout);
+      // If not a long-running interactive session, we might want to exit after command
+      // For now, we assume simple execution in PTY
+      // ptyProc.write("exit\r"); // Only if we want to close immediately
 
-        ptyProc.onExit(({ exitCode, signal }) => {
-            clearTimeout(timer);
-            session.activeProcesses.delete(commandId);
+      const timeout = resolveExecutionTimeout(request.timeout, this.defaultTimeout);
+      const timer = setTimeout(() => {
+        killed = true;
+        terminatePtyProcess(ptyProc);
+      }, timeout);
 
-            const result: CommandResult = {
-                id: commandId,
-                command: fullCommand,
-                exitCode,
-                stdout: output,
-                stderr: "", // PTY merges stdout/stderr
-                duration: Date.now() - startTime,
-                killed,
-                signal: signal ? String(signal) : null,
-                success: exitCode === 0
-            };
-            
-            this.appendHistory(session, result);
-            this.emit("command:complete", { sessionId, commandId, result });
-            resolve(result);
-        });
+      ptyProc.onExit(({ exitCode, signal }) => {
+        clearTimeout(timer);
+        session.activeProcesses.delete(commandId);
+
+        const result: CommandResult = {
+          id: commandId,
+          command: fullCommand,
+          exitCode,
+          stdout: output,
+          stderr: "", // PTY merges stdout/stderr
+          duration: Date.now() - startTime,
+          killed,
+          signal: signal ? String(signal) : null,
+          success: exitCode === 0
+        };
+
+        this.appendHistory(session, result);
+        this.emit("command:complete", { sessionId, commandId, result });
+        resolve(result);
+      });
     });
   }
 
@@ -1293,90 +1293,90 @@ export class TerminalController extends EventEmitter {
     let container: Docker.Container | null = null;
 
     try {
-        // 1. Create Container
-        container = await docker.createContainer({
-            Image: image,
-            Cmd: cmd,
-            Env: envVars,
-            Tty: false,
-            WorkingDir: "/app", // Standard working dir
-            HostConfig: {
-                AutoRemove: false, // We remove manually to get logs/exit code first
-                Memory: 512 * 1024 * 1024, // 512MB RAM limit
-                CpuShares: 512, // 0.5 CPU shares relative weight
-                Privileged: false,
-                SecurityOpt: ["no-new-privileges"], // Hardening: Prevent privilege escalation
-                CapDrop: ["ALL"], // Drop all capabilities
-                NetworkMode: "none", // Default to no network for safety
-                ReadonlyRootfs: false, // Allow writing to tmp/app for now
-            }
-        });
-
-        await container.start();
-
-        // 4. Wait for finish
-        const waitPromise = container.wait();
-        
-        // Timeout handling
-        const timeout = resolveExecutionTimeout(request.timeout, this.defaultTimeout);
-        const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error("Timeout")), timeout)
-        );
-
-        const result: any = await Promise.race([waitPromise, timeoutPromise]);
-        const exitCode = result.StatusCode;
-
-        // 5. Get Logs (safest way to get stdout/stderr separated correctly)
-        // Note: logs() returns Buffer if not encoding specified
-        const stdoutBuffer = await container.logs({ stdout: true, stderr: false });
-        const stderrBuffer = await container.logs({ stdout: false, stderr: true });
-
-        stdout = sanitizeCommandOutput(stdoutBuffer.toString()); // Basic sanitization of control bytes
-        stderr = sanitizeCommandOutput(stderrBuffer.toString());
-
-        if (request.stream) {
-             this.emit("command:output", { sessionId, commandId, stream: "stdout", chunk: stdout });
-             if (stderr) this.emit("command:output", { sessionId, commandId, stream: "stderr", chunk: stderr });
+      // 1. Create Container
+      container = await docker.createContainer({
+        Image: image,
+        Cmd: cmd,
+        Env: envVars,
+        Tty: false,
+        WorkingDir: "/app", // Standard working dir
+        HostConfig: {
+          AutoRemove: false, // We remove manually to get logs/exit code first
+          Memory: 512 * 1024 * 1024, // 512MB RAM limit
+          CpuShares: 512, // 0.5 CPU shares relative weight
+          Privileged: false,
+          SecurityOpt: ["no-new-privileges"], // Hardening: Prevent privilege escalation
+          CapDrop: ["ALL"], // Drop all capabilities
+          NetworkMode: "none", // Default to no network for safety
+          ReadonlyRootfs: false, // Allow writing to tmp/app for now
         }
+      });
 
-        // 6. Cleanup
-        await container.remove({ force: true });
+      await container.start();
 
-        const cmdResult: CommandResult = {
-            id: commandId,
-            command: fullCommand,
-            exitCode,
-            stdout,
-            stderr,
-            duration: Date.now() - startTime,
-            killed: false,
-            signal: null,
-            success: exitCode === 0,
-            containerId: container.id
-        };
+      // 4. Wait for finish
+      const waitPromise = container.wait();
 
-        this.appendHistory(session, cmdResult);
-        this.emit("command:complete", { sessionId, commandId, result: cmdResult });
-        return cmdResult;
+      // Timeout handling
+      const timeout = resolveExecutionTimeout(request.timeout, this.defaultTimeout);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Timeout")), timeout)
+      );
+
+      const result: any = await Promise.race([waitPromise, timeoutPromise]);
+      const exitCode = result.StatusCode;
+
+      // 5. Get Logs (safest way to get stdout/stderr separated correctly)
+      // Note: logs() returns Buffer if not encoding specified
+      const stdoutBuffer = await container.logs({ stdout: true, stderr: false });
+      const stderrBuffer = await container.logs({ stdout: false, stderr: true });
+
+      stdout = sanitizeCommandOutput(stdoutBuffer.toString()); // Basic sanitization of control bytes
+      stderr = sanitizeCommandOutput(stderrBuffer.toString());
+
+      if (request.stream) {
+        this.emit("command:output", { sessionId, commandId, stream: "stdout", chunk: stdout });
+        if (stderr) this.emit("command:output", { sessionId, commandId, stream: "stderr", chunk: stderr });
+      }
+
+      // 6. Cleanup
+      await container.remove({ force: true });
+
+      const cmdResult: CommandResult = {
+        id: commandId,
+        command: fullCommand,
+        exitCode,
+        stdout,
+        stderr,
+        duration: Date.now() - startTime,
+        killed: false,
+        signal: null,
+        success: exitCode === 0,
+        containerId: container.id
+      };
+
+      this.appendHistory(session, cmdResult);
+      this.emit("command:complete", { sessionId, commandId, result: cmdResult });
+      return cmdResult;
 
     } catch (error: any) {
-        if (container) {
-            try { await container.remove({ force: true }); } catch {}
-        }
+      if (container) {
+        try { await container.remove({ force: true }); } catch { }
+      }
 
-        const isTimeout = error.message === "Timeout";
-        
-        return {
-            id: commandId,
-            command: fullCommand,
-            exitCode: isTimeout ? null : 1,
-            stdout,
-            stderr: error.message,
-            duration: Date.now() - startTime,
-            killed: isTimeout,
-            signal: isTimeout ? "SIGKILL" : null,
-            success: false
-        };
+      const isTimeout = error.message === "Timeout";
+
+      return {
+        id: commandId,
+        command: fullCommand,
+        exitCode: isTimeout ? null : 1,
+        stdout,
+        stderr: error.message,
+        duration: Date.now() - startTime,
+        killed: isTimeout,
+        signal: isTimeout ? "SIGKILL" : null,
+        success: false
+      };
     }
   }
 
@@ -1482,9 +1482,7 @@ export class TerminalController extends EventEmitter {
           }));
           return {
             success: true,
-            data: items,
-            truncated: entries.length > MAX_LIST_ENTRIES,
-            total: entries.length,
+            data: { items, truncated: entries.length > MAX_LIST_ENTRIES, total: entries.length },
           };
         }
 
@@ -1831,7 +1829,7 @@ export class TerminalController extends EventEmitter {
       });
     } finally {
       if (createdTempDir) {
-        await fs.rm(createdTempDir, { recursive: true, force: true }).catch(() => {});
+        await fs.rm(createdTempDir, { recursive: true, force: true }).catch(() => { });
       }
     }
   }

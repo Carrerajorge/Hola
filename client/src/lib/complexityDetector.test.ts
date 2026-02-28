@@ -42,16 +42,19 @@ describe("checkComplexityLocally", () => {
     expect(result.agent_required).toBe(true);
   });
 
-  it("returns not required for long non-agent messages", () => {
+  it("returns required for long non-agent messages (default agent policy)", () => {
     const result = checkComplexityLocally(
       "Explícame detalladamente cómo funciona la fotosíntesis y cuáles son las etapas principales del proceso bioquímico"
     );
-    expect(result.agent_required).toBe(false);
+    expect(result.agent_required).toBe(true);
+    expect(result.agent_reason).toBe("Modo agente activado por defecto");
+    expect(result.confidence).toBe("high");
   });
 
-  it("returns low confidence for ambiguous non-agent messages", () => {
+  it("returns high confidence for non-trivial messages", () => {
     const result = checkComplexityLocally("Cuáles son los mejores restaurantes en Madrid");
-    expect(result.confidence).toBe("low");
+    expect(result.agent_required).toBe(true);
+    expect(result.confidence).toBe("high");
   });
 
   it("handles empty string", () => {
@@ -63,7 +66,9 @@ describe("checkComplexityLocally", () => {
   it("handles attachments parameter without changing result", () => {
     const withAttach = checkComplexityLocally("Analiza este archivo", true);
     const withoutAttach = checkComplexityLocally("Analiza este archivo", false);
-    expect(withAttach.agent_required).toBe(withoutAttach.agent_required);
+    expect(withAttach.agent_required).toBe(true);
+    expect(withAttach.agent_reason).toBe("Modo agente por adjuntos");
+    expect(withoutAttach.agent_required).toBe(true);
   });
 });
 

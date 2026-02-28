@@ -2,9 +2,13 @@ import { Router, Request, Response } from "express";
 import { randomUUID } from "crypto";
 import fs from "fs";
 import path from "path";
+import { Transform } from "stream";
+import { pipeline } from "stream/promises";
+import { LIMITS } from "../lib/constants";
 
 const UPLOADS_DIR = path.join(process.cwd(), "uploads");
-const MAX_UPLOAD_SIZE = 100 * 1024 * 1024; // 100MB hard limit
+const MAX_UPLOAD_SIZE = LIMITS.MAX_FILE_SIZE_BYTES;
+const LOCAL_UPLOAD_TIMEOUT_MS = Number(process.env.LOCAL_UPLOAD_TIMEOUT_MS || "600000");
 
 // UUID v4 pattern — strict validation to prevent path traversal
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -54,56 +58,68 @@ export function createLocalStorageRouter() {
             const filePath = validation.filePath;
             const tmpPath = filePath + ".tmp"; // Atomic write: write to tmp, rename
 
-            const chunks: Buffer[] = [];
             let totalSize = 0;
             let aborted = false;
 
             // Idle timeout to prevent hung uploads from dropping connections
-            req.setTimeout(30000, () => {
+            req.setTimeout(LOCAL_UPLOAD_TIMEOUT_MS, () => {
                 if (aborted) return;
                 aborted = true;
                 console.warn(`[LocalStorage] Upload timeout for ${objectId}`);
                 req.destroy(new Error("Upload timeout"));
             });
 
-            req.on("data", (chunk: Buffer) => {
-                if (aborted) return;
-                totalSize += chunk.length;
-                if (totalSize > MAX_UPLOAD_SIZE) {
-                    aborted = true;
-                    if (!res.headersSent) res.status(413).json({ error: "File too large" });
-                    req.destroy();
+            const sizeLimiter = new Transform({
+                transform(chunk: Buffer, _encoding, callback) {
+                    if (aborted) return callback(new Error("Upload aborted"));
+                    totalSize += chunk.length;
+                    if (totalSize > MAX_UPLOAD_SIZE) {
+                        const error: NodeJS.ErrnoException = new Error("File too large");
+                        error.code = "FILE_TOO_LARGE";
+                        return callback(error);
+                    }
+                    callback(null, chunk);
+                }
+            });
+
+            try {
+                await pipeline(
+                    req,
+                    sizeLimiter,
+                    fs.createWriteStream(tmpPath, { mode: 0o640 })
+                );
+
+                if (aborted) {
+                    await fs.promises.unlink(tmpPath).catch(() => { });
+                    if (!res.headersSent) res.status(408).json({ error: "Upload timeout" });
                     return;
                 }
-                chunks.push(chunk);
-            });
-            req.on("end", async () => {
-                if (aborted) return;
-                try {
-                    const buffer = Buffer.concat(chunks);
-                    // Write to tmp first, then atomic rename (prevents partial reads)
-                    await fs.promises.writeFile(tmpPath, buffer, { mode: 0o640 });
-                    await fs.promises.rename(tmpPath, filePath);
-                    console.log(`[LocalStorage] File saved: ${objectId} (${buffer.length} bytes)`);
-                    // Don't leak filesystem path in response
-                    res.status(200).json({ success: true, storagePath: `/objects/uploads/${objectId}` });
-                } catch (writeErr: any) {
-                    // Cleanup tmp file on any write error
-                    await fs.promises.unlink(tmpPath).catch(() => { });
-                    if (writeErr?.code === "ENOSPC") {
-                        if (!res.headersSent) return res.status(507).json({ error: "Insufficient disk space" });
-                        return;
-                    }
-                    console.error("Error writing upload:", writeErr instanceof Error ? writeErr.message : String(writeErr));
-                    if (!res.headersSent) res.status(500).json({ error: "Upload failed" });
+
+                // Atomic promote after successful stream write
+                await fs.promises.rename(tmpPath, filePath);
+                console.log(`[LocalStorage] File saved: ${objectId} (${totalSize} bytes)`);
+                res.status(200).json({ success: true, storagePath: `/objects/uploads/${objectId}` });
+            } catch (error: any) {
+                await fs.promises.unlink(tmpPath).catch(() => { });
+
+                if (error?.code === "FILE_TOO_LARGE") {
+                    if (!res.headersSent) return res.status(413).json({ error: "File too large" });
+                    return;
                 }
-            });
-            req.on("error", (error) => {
-                // Cleanup tmp file on stream error
-                fs.promises.unlink(tmpPath).catch(() => { });
+
+                if (error?.message?.includes("timeout")) {
+                    if (!res.headersSent) return res.status(408).json({ error: "Upload timeout" });
+                    return;
+                }
+
+                if (error?.code === "ENOSPC") {
+                    if (!res.headersSent) return res.status(507).json({ error: "Insufficient disk space" });
+                    return;
+                }
+
                 console.error("Upload stream error:", error instanceof Error ? error.message : String(error));
                 if (!res.headersSent) res.status(500).json({ error: "Upload failed" });
-            });
+            }
         } catch (error: any) {
             console.error("Error handling local upload:", error instanceof Error ? error.message : String(error));
             if (!res.headersSent) res.status(500).json({ error: "Upload failed" });

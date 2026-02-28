@@ -150,6 +150,7 @@ const SkillsPage = lazyWithRetry(() => import("@/pages/skills"));
 const CodexPage = lazyWithRetry(() => import("@/pages/codex"));
 const SpreadsheetAnalyzerPage = lazyWithRetry(() => import("@/pages/SpreadsheetAnalyzer"));
 const MonitoringDashboard = lazyWithRetry(() => import("@/pages/MonitoringDashboard"));
+const RunProgressPage = lazyWithRetry(() => import("@/pages/run-progress"));
 const AboutPage = lazyWithRetry(() => import("@/pages/about"));
 const LearnPage = lazyWithRetry(() => import("@/pages/learn"));
 const PricingPage = lazyWithRetry(() => import("@/pages/pricing"));
@@ -171,6 +172,7 @@ const ProtectedCodexPage = requireAuth(CodexPage);
 const ProtectedMemoryPage = requireAuth(MemoryPage);
 const ProtectedSpreadsheetAnalyzerPage = requireAuth(SpreadsheetAnalyzerPage);
 const ProtectedMonitoringDashboard = requireAuth(MonitoringDashboard);
+const ProtectedRunProgressPage = requireAuth(RunProgressPage);
 
 function GlobalKeyboardShortcuts() {
   const [, setLocation] = useLocation();
@@ -312,6 +314,7 @@ function Router() {
             <Route path="/memory" component={ProtectedMemoryPage} />
             <Route path="/spreadsheet-analyzer" component={ProtectedSpreadsheetAnalyzerPage} />
             <Route path="/monitoring" component={ProtectedMonitoringDashboard} />
+            <Route path="/runs/:id/progress" component={ProtectedRunProgressPage} />
             <Route path="/about" component={AboutPage} />
             <Route path="/learn" component={LearnPage} />
             <Route path="/pricing" component={PricingPage} />

@@ -38,6 +38,7 @@ export class EventLogger {
   private flushInterval: NodeJS.Timeout | null = null;
   private readonly bufferSize: number;
   private readonly flushIntervalMs: number;
+  private dbUnavailableLogged = false;
 
   constructor(bufferSize: number = 10, flushIntervalMs: number = 1000) {
     this.bufferSize = bufferSize;
@@ -78,7 +79,16 @@ export class EventLogger {
       
       console.log(`[EventLogger] ${params.eventType} logged for run ${params.runId}`);
       return eventId;
-    } catch (error) {
+    } catch (error: any) {
+      const code = error?.code || error?.cause?.code;
+      const message = String(error?.message || error?.cause?.message || "");
+      if (code === "ECONNREFUSED" || code === "ECONNRESET" || code === "ETIMEDOUT" || code === "ENOTFOUND" || /ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND/i.test(message)) {
+        if (!this.dbUnavailableLogged) {
+          this.dbUnavailableLogged = true;
+          console.warn("[EventLogger] DB unavailable, skipping event log");
+        }
+        return eventId;
+      }
       console.error("[EventLogger] Failed to log event:", error);
       throw error;
     }
@@ -110,6 +120,15 @@ export class EventLogger {
       // In this case, don't re-buffer as it will keep failing
       if (error?.code === '23503' && error?.constraint?.includes('agent_mode_runs')) {
         console.warn(`[EventLogger] Discarding ${eventsToFlush.length} events - run not persisted to database (local-only mode)`);
+        return;
+      }
+      const code = error?.code || error?.cause?.code;
+      const message = String(error?.message || error?.cause?.message || "");
+      if (code === "ECONNREFUSED" || code === "ECONNRESET" || code === "ETIMEDOUT" || code === "ENOTFOUND" || /ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND/i.test(message)) {
+        if (!this.dbUnavailableLogged) {
+          this.dbUnavailableLogged = true;
+          console.warn("[EventLogger] DB unavailable, dropping buffered events");
+        }
         return;
       }
       console.error("[EventLogger] Flush failed, re-buffering events:", error);

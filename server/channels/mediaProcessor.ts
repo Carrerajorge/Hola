@@ -22,6 +22,7 @@ export async function processInboundMedia(
     switch (media.type) {
         case 'image': {
             const b64 = media.buffer.toString('base64');
+            const promptText = resolveMediaPrompt(text, 'Analiza esta imagen y dime qué ves.');
             messages.push({
                 role: 'user',
                 content: [
@@ -34,7 +35,7 @@ export async function processInboundMedia(
                     },
                     {
                         type: 'text',
-                        text: text || 'Analiza esta imagen y dime qué ves.',
+                        text: promptText,
                     },
                 ],
             });
@@ -50,10 +51,11 @@ export async function processInboundMedia(
             const audioContext = transcription.success
                 ? `[Mensaje de voz transcrito]:\n"${transcription.text}"`
                 : `[Mensaje de voz recibido, no se pudo transcribir]`;
+            const promptText = resolveMediaPrompt(text, '');
 
             messages.push({
                 role: 'user',
-                content: `${audioContext}\n\n${text || ''}`.trim(),
+                content: `${audioContext}\n\n${promptText}`.trim(),
             });
 
             return { messages, transcription: transcription.success ? transcription.text : undefined };
@@ -68,19 +70,21 @@ export async function processInboundMedia(
                 frameAnalyses.push(analysis);
             }
 
+            const promptText = resolveMediaPrompt(text, 'Analiza este video.');
             messages.push({
                 role: 'user',
-                content: `[Video recibido - análisis de frames]:\n${frameAnalyses.map((a, i) => `Frame ${i + 1}: ${a}`).join('\n')}\n\n${text || 'Analiza este video.'}`,
+                content: `[Video recibido - análisis de frames]:\n${frameAnalyses.map((a, i) => `Frame ${i + 1}: ${a}`).join('\n')}\n\n${promptText}`,
             });
             break;
         }
 
         case 'document': {
             const docText = await extractDocumentText(media.localPath, media.mimetype);
+            const promptText = resolveMediaPrompt(text, 'Analiza este documento.');
 
             messages.push({
                 role: 'user',
-                content: `[Documento recibido: "${media.fileName}" (${media.mimetype})]:\n\n${docText.slice(0, 15000)}\n\n${text || 'Analiza este documento.'}`,
+                content: `[Documento recibido: "${media.fileName}" (${media.mimetype})]:\n\n${docText.slice(0, 15000)}\n\n${promptText}`,
             });
 
             return { messages, extractedText: docText };
@@ -88,6 +92,7 @@ export async function processInboundMedia(
 
         case 'sticker': {
             const b64 = media.buffer.toString('base64');
+            const promptText = resolveMediaPrompt(text, '¿Qué sticker es este?');
             messages.push({
                 role: 'user',
                 content: [
@@ -99,7 +104,7 @@ export async function processInboundMedia(
                     },
                     {
                         type: 'text',
-                        text: text || '¿Qué sticker es este?',
+                        text: promptText,
                     },
                 ],
             });
@@ -108,6 +113,30 @@ export async function processInboundMedia(
     }
 
     return { messages };
+}
+
+function resolveMediaPrompt(rawText: string, fallback: string): string {
+    const cleaned = String(rawText ?? '').trim();
+    if (!cleaned) return fallback;
+
+    const normalized = cleaned
+        .normalize('NFKC')
+        .replace(/[\[\]()]/g, '')
+        .toLowerCase();
+
+    // Ignore boilerplate placeholders injected by channel normalizers.
+    if (
+        normalized.includes('imagen recibida') ||
+        normalized.includes('audio recibido') ||
+        normalized.includes('mensaje de voz recibido') ||
+        normalized.includes('transcripción no disponible') ||
+        normalized.includes('transcripcion no disponible') ||
+        normalized.includes('documento recibido')
+    ) {
+        return fallback;
+    }
+
+    return cleaned;
 }
 
 

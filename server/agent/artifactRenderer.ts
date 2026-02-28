@@ -21,7 +21,7 @@ import {
   PageOrientation,
   convertInchesToTwip,
 } from "docx";
-import ExcelJS from "exceljs";
+import * as ExcelJS from "exceljs";
 import {
   ArtifactSpec,
   PresentationSpec,
@@ -161,17 +161,18 @@ export async function renderPresentation(
     pptx.layout = "LAYOUT_16x9";
     pptx.title = safeTitle;
     if (safeAuthor) pptx.author = safeAuthor;
-    if (safeLanguage) pptx.lang = safeLanguage;
+    if (safeLanguage) (pptx as any).lang = safeLanguage;
     defineCorporateMaster(pptx);
 
-    const safeSlides = spec.slides.length > 0
+    const safeSlides: SlideSpec[] = spec.slides.length > 0
       ? spec.slides
-      : [{
-          title: safeTitle,
-          layout: "title",
-          subtitle: "Sin contenido",
-          elements: [],
-        }];
+      : ([{
+        id: randomUUID(),
+        title: safeTitle,
+        layout: "title" as const,
+        subtitle: "Sin contenido",
+        elements: [],
+      }] as unknown as SlideSpec[]);
 
     for (const slideSpec of safeSlides) {
       const slide = pptx.addSlide({ masterName: CORPORATE_PPT_MASTER_NAME });
@@ -240,7 +241,7 @@ export async function renderPresentation(
           valign: "top",
         });
       }
-      
+
       // Apply background overrides
       if (slideSpec.background) {
         if (slideSpec.background.image) {
@@ -261,22 +262,22 @@ export async function renderPresentation(
           cover: "cover",
           uncover: "cover",
         };
-        slide.transition = {
+        (slide as any).transition = {
           type: transitionMap[slideSpec.transition.type] || "fade",
           speed: slideSpec.transition.duration < 500 ? "fast" : slideSpec.transition.duration > 1000 ? "slow" : "med",
         };
       }
-      if (slideSpec.notes) {
-        slide.addNotes(slideSpec.notes);
+      if ((slideSpec as any).notes) {
+        slide.addNotes((slideSpec as any).notes);
       }
     }
 
     // Generate buffer
     const data = await pptx.write({ outputType: "nodebuffer" });
     const buffer = Buffer.from(data as ArrayBuffer);
-    
+
     const filename = sanitizeFilename(safeTitle) + ".pptx";
-    
+
     return { buffer, filename };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -319,7 +320,7 @@ function convertCoordinate(
   isWidth: boolean = true
 ): number {
   const effectiveUnit = unit || (value > 100 ? "px" : "percent");
-  
+
   switch (effectiveUnit) {
     case "inches":
       return value;
@@ -524,8 +525,8 @@ export async function renderDocument(
           properties: {
             page: {
               size: {
-                orientation: spec.pageSettings?.orientation === "landscape" 
-                  ? PageOrientation.LANDSCAPE 
+                orientation: spec.pageSettings?.orientation === "landscape"
+                  ? PageOrientation.LANDSCAPE
                   : PageOrientation.PORTRAIT,
               },
               margin: {
@@ -600,7 +601,7 @@ async function processDocSection(
 
 function createDocxParagraph(para: Paragraph): DocxParagraph {
   const textRuns: TextRun[] = [];
-  
+
   const textRun = new TextRun({
     text: para.text,
     bold: para.formatting?.bold,
@@ -646,7 +647,7 @@ function createDocxTable(table: DocTable): Table {
       children: table.headers.map(
         (header, idx) =>
           new TableCell({
-            children: [new DocxParagraph({ text: header, bold: true })],
+            children: [new DocxParagraph({ children: [new TextRun({ text: header, bold: true })] })],
             width: table.columnWidths?.[idx]
               ? { size: table.columnWidths[idx] * 100, type: WidthType.DXA }
               : { size: 100 / table.headers.length, type: WidthType.PERCENTAGE },
@@ -711,7 +712,7 @@ async function createDocxImage(image: DocImage): Promise<DocxParagraph | null> {
     if (image.src.startsWith("data:image")) {
       const base64Data = image.src.split(",")[1];
       const imageBuffer = Buffer.from(base64Data, "base64");
-      
+
       return new DocxParagraph({
         children: [
           new ImageRun({
@@ -748,7 +749,7 @@ export async function renderSpreadsheet(
 ): Promise<{ buffer: Buffer; filename: string }> {
   try {
     const workbook = new ExcelJS.Workbook();
-    
+
     // Set workbook properties
     workbook.creator = spec.metadata?.author || "ArtifactRenderer";
     workbook.created = spec.metadata?.createdAt || new Date();
@@ -965,18 +966,18 @@ function convertBorderStyle(border: { width?: number; color?: string; style?: st
     dashed: "dashed",
     dotted: "dotted",
     double: "double",
-    none: "none",
+    none: "none" as any,
   };
 
   return {
     style: styleMap[border.style || "solid"] || "thin",
-    color: border.color ? { argb: "FF" + border.color.replace("#", "") } : undefined,
+    color: border.color ? ({ argb: "FF" + border.color.replace("#", "") } as any) : undefined,
   };
 }
 
 function applyConditionalFormat(
   workbook: ExcelJS.Workbook,
-  format: { range: string; type: string; rule: Record<string, unknown>; style?: unknown }
+  format: any
 ): void {
   // ExcelJS has limited conditional formatting support
   // Log for documentation purposes
@@ -1014,12 +1015,15 @@ export async function renderArtifact(
   const effectiveRunId = runId || randomUUID();
 
   const validation = validateForRendering(artifact);
-  
+
   if (!validation.valid) {
-    await agentEventBus.emit(effectiveRunId, "artifact_validation_failed", {
-      errors: validation.errors,
-      warnings: validation.warnings,
-      metadata: { artifactType: artifact.type },
+    await agentEventBus.emit(effectiveRunId, "verification_failed", {
+      error: { message: `Validation failed with ${validation.errors.length} errors` },
+      metadata: {
+        artifactType: artifact.type,
+        validationErrors: validation.errors,
+        validationWarnings: validation.warnings
+      },
     });
     throw new ArtifactValidationError(
       `Artifact validation failed: ${validation.errors.join("; ")}`,
@@ -1029,7 +1033,7 @@ export async function renderArtifact(
   }
 
   try {
-    await agentEventBus.emit(effectiveRunId, "tool_start", {
+    await agentEventBus.emit(effectiveRunId, "tool_call_started", {
       tool_name: "artifact_renderer",
       command: `Rendering ${artifact.type} artifact`,
       metadata: { artifactType: artifact.type },
@@ -1073,8 +1077,8 @@ export async function renderArtifact(
     await agentEventBus.emit(effectiveRunId, "artifact_ready", {
       artifact: {
         type: artifact.type,
-        path: result.filename,
-        data: result.filename,
+        name: result.filename,
+        url: result.filename,
       },
       metadata: {
         size: result.buffer.length,
@@ -1084,7 +1088,7 @@ export async function renderArtifact(
     });
 
     // Emit completion event
-    await agentEventBus.emit(effectiveRunId, "tool_end", {
+    await agentEventBus.emit(effectiveRunId, "tool_call_succeeded", {
       tool_name: "artifact_renderer",
       output_snippet: `Successfully rendered ${artifact.type}: ${result.filename} (${formatBytes(result.buffer.length)})`,
       metadata: {
@@ -1101,9 +1105,9 @@ export async function renderArtifact(
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    
+
     await agentEventBus.emit(effectiveRunId, "error", {
-      error: errorMessage,
+      error: { message: errorMessage },
       metadata: { artifactType: artifact.type },
     });
 

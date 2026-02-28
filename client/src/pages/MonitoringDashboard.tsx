@@ -382,6 +382,24 @@ export default function MonitoringDashboard() {
                       {observabilityHealth?.status || 'Unknown'}
                     </Badge>
                   </div>
+                  <div className="flex items-center justify-between" data-testid="llm-provider-openai">
+                    <span className="font-medium">OpenAI</span>
+                    <Badge variant={observabilityHealth?.status === 'healthy' ? 'success' : 'secondary'}>
+                      {observabilityHealth?.status || 'Unknown'}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between" data-testid="llm-provider-anthropic">
+                    <span className="font-medium">Anthropic</span>
+                    <Badge variant={observabilityHealth?.status === 'healthy' ? 'success' : 'secondary'}>
+                      {observabilityHealth?.status || 'Unknown'}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between" data-testid="llm-provider-deepseek">
+                    <span className="font-medium">DeepSeek</span>
+                    <Badge variant={observabilityHealth?.status === 'healthy' ? 'success' : 'secondary'}>
+                      {observabilityHealth?.status || 'Unknown'}
+                    </Badge>
+                  </div>
                 </>
               )}
 

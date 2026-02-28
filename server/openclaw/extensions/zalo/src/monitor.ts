@@ -1,7 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { MarkdownTableMode, OpenClawConfig, OutboundReplyPayload } from "openclaw/plugin-sdk";
 import {
-  createScopedPairingAccess,
   createReplyPrefixOptions,
   resolveSenderCommandAuthorization,
   resolveOutboundMediaUrls,
@@ -304,11 +303,6 @@ async function processMessageWithPipeline(params: {
     statusSink,
     fetcher,
   } = params;
-  const pairing = createScopedPairingAccess({
-    core,
-    channel: "zalo",
-    accountId: account.accountId,
-  });
   const { from, chat, message_id, date } = message;
 
   const isGroup = chat.chat_type === "GROUP";
@@ -361,10 +355,9 @@ async function processMessageWithPipeline(params: {
     isGroup,
     dmPolicy,
     configuredAllowFrom: configAllowFrom,
-    configuredGroupAllowFrom: groupAllowFrom,
     senderId,
     isSenderAllowed: isZaloSenderAllowed,
-    readAllowFromStore: pairing.readAllowFromStore,
+    readAllowFromStore: () => core.channel.pairing.readAllowFromStore("zalo"),
     shouldComputeCommandAuthorized: (body, cfg) =>
       core.channel.commands.shouldComputeCommandAuthorized(body, cfg),
     resolveCommandAuthorizedFromAuthorizers: (params) =>
@@ -382,7 +375,8 @@ async function processMessageWithPipeline(params: {
 
       if (!allowed) {
         if (dmPolicy === "pairing") {
-          const { code, created } = await pairing.upsertPairingRequest({
+          const { code, created } = await core.channel.pairing.upsertPairingRequest({
+            channel: "zalo",
             id: senderId,
             meta: { name: senderName ?? undefined },
           });

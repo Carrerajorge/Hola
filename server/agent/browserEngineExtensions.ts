@@ -9,9 +9,9 @@
 import { Page, BrowserContext, ConsoleMessage, Dialog } from "playwright";
 import { EventEmitter } from "events";
 import { randomUUID } from "crypto";
-import fs from "fs/promises";
-import path from "path";
-import os from "os";
+import { promises as fs } from "fs";
+import * as path from "path";
+import * as os from "os";
 
 // ============================================
 // Types
@@ -235,7 +235,7 @@ export class BrowserEngineExtensions extends EventEmitter {
   // ============================================
 
   async getAccessibilityTree(page: Page): Promise<AccessibilityNode> {
-    const snapshot = await page.accessibility.snapshot();
+    const snapshot = await (page as any).accessibility.snapshot();
     return this.normalizeAccessibilityNode(snapshot);
   }
 
@@ -518,7 +518,8 @@ export class BrowserEngineExtensions extends EventEmitter {
 
       const rect = el.getBoundingClientRect();
       const attrs: Record<string, string> = {};
-      for (const attr of el.attributes) {
+      for (let i = 0; i < el.attributes.length; i++) {
+        const attr = el.attributes[i];
         attrs[attr.name] = attr.value;
       }
 
@@ -631,7 +632,7 @@ export class BrowserEngineExtensions extends EventEmitter {
             case "click":
               if (step.selector) {
                 await page.click(step.selector, { timeout: 10000 });
-                await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
+                await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => { });
               }
               break;
 
@@ -677,7 +678,7 @@ export class BrowserEngineExtensions extends EventEmitter {
                     if (!hasNext) break;
 
                     await page.click(step.paginationSelector, { timeout: 5000 });
-                    await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+                    await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => { });
                     await page.waitForTimeout(pipeline.delay || 500);
 
                     pagesScraped++;
@@ -857,56 +858,56 @@ export class BrowserEngineExtensions extends EventEmitter {
     isMobile: boolean;
     hasTouch: boolean;
   }> = {
-    "iphone-15": {
-      viewport: { width: 393, height: 852 },
-      userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-      deviceScaleFactor: 3,
-      isMobile: true,
-      hasTouch: true,
-    },
-    "iphone-se": {
-      viewport: { width: 375, height: 667 },
-      userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-      deviceScaleFactor: 2,
-      isMobile: true,
-      hasTouch: true,
-    },
-    "ipad-pro": {
-      viewport: { width: 1024, height: 1366 },
-      userAgent: "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-      deviceScaleFactor: 2,
-      isMobile: true,
-      hasTouch: true,
-    },
-    "pixel-8": {
-      viewport: { width: 412, height: 915 },
-      userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36",
-      deviceScaleFactor: 2.625,
-      isMobile: true,
-      hasTouch: true,
-    },
-    "galaxy-s24": {
-      viewport: { width: 360, height: 780 },
-      userAgent: "Mozilla/5.0 (Linux; Android 14; SM-S921B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36",
-      deviceScaleFactor: 3,
-      isMobile: true,
-      hasTouch: true,
-    },
-    "macbook-pro": {
-      viewport: { width: 1440, height: 900 },
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
-      deviceScaleFactor: 2,
-      isMobile: false,
-      hasTouch: false,
-    },
-    "desktop-4k": {
-      viewport: { width: 3840, height: 2160 },
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-      deviceScaleFactor: 1.5,
-      isMobile: false,
-      hasTouch: false,
-    },
-  };
+      "iphone-15": {
+        viewport: { width: 393, height: 852 },
+        userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+        deviceScaleFactor: 3,
+        isMobile: true,
+        hasTouch: true,
+      },
+      "iphone-se": {
+        viewport: { width: 375, height: 667 },
+        userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+        deviceScaleFactor: 2,
+        isMobile: true,
+        hasTouch: true,
+      },
+      "ipad-pro": {
+        viewport: { width: 1024, height: 1366 },
+        userAgent: "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+        deviceScaleFactor: 2,
+        isMobile: true,
+        hasTouch: true,
+      },
+      "pixel-8": {
+        viewport: { width: 412, height: 915 },
+        userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36",
+        deviceScaleFactor: 2.625,
+        isMobile: true,
+        hasTouch: true,
+      },
+      "galaxy-s24": {
+        viewport: { width: 360, height: 780 },
+        userAgent: "Mozilla/5.0 (Linux; Android 14; SM-S921B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36",
+        deviceScaleFactor: 3,
+        isMobile: true,
+        hasTouch: true,
+      },
+      "macbook-pro": {
+        viewport: { width: 1440, height: 900 },
+        userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+        deviceScaleFactor: 2,
+        isMobile: false,
+        hasTouch: false,
+      },
+      "desktop-4k": {
+        viewport: { width: 3840, height: 2160 },
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        deviceScaleFactor: 1.5,
+        isMobile: false,
+        hasTouch: false,
+      },
+    };
 
   // ============================================
   // HAR Export
@@ -1082,12 +1083,12 @@ export class BrowserEngineExtensions extends EventEmitter {
         const l = field.label.toLowerCase();
         const p = field.placeholder.toLowerCase();
         return n.includes(k) || l.includes(k) || p.includes(k) ||
-               k.includes(n) || k.includes(l) ||
-               (k === "email" && field.type === "email") ||
-               (k === "password" && field.type === "password") ||
-               (k === "phone" && field.type === "tel") ||
-               (k === "name" && (n === "name" || l.includes("name"))) ||
-               (k === "username" && (n.includes("user") || l.includes("user")));
+          k.includes(n) || k.includes(l) ||
+          (k === "email" && field.type === "email") ||
+          (k === "password" && field.type === "password") ||
+          (k === "phone" && field.type === "tel") ||
+          (k === "name" && (n === "name" || l.includes("name"))) ||
+          (k === "username" && (n.includes("user") || l.includes("user")));
       });
 
       if (matchKey && data[matchKey]) {
@@ -1214,7 +1215,7 @@ export class BrowserEngineExtensions extends EventEmitter {
       if (options?.submitAfterFill !== false && formInfo.submitEl) {
         if (options?.waitForNavigation) {
           await Promise.all([
-            page.waitForNavigation({ timeout: 15000 }).catch(() => {}),
+            page.waitForNavigation({ timeout: 15000 }).catch(() => { }),
             page.click(formInfo.submitEl),
           ]);
         } else {

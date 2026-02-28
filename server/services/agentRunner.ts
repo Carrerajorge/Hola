@@ -129,7 +129,7 @@ export class AgentRunner extends EventEmitter {
     this.consecutiveFailures = 0;
     this.lastFailedTool = "";
     this.abortController = new AbortController();
-    
+
     this.state = {
       objective,
       plan: planHint.length > 0 ? planHint : await this.generatePlan(objective),
@@ -152,7 +152,7 @@ export class AgentRunner extends EventEmitter {
         }
 
         const stepResult = await this.executeStep();
-        
+
         if (stepResult.tool === "final_answer") {
           this.state.status = "completed";
           await this.persistRun("completed", stepResult.output);
@@ -174,11 +174,11 @@ export class AgentRunner extends EventEmitter {
             this.state.status = "failed";
             await this.persistRun("failed", null, errorMsg);
             this.emit("failed", { run_id: this.runId, error: errorMsg, state: this.state });
-            return { 
-              success: false, 
-              result: { error: errorMsg, partial_observations: this.state.observations }, 
+            return {
+              success: false,
+              result: { error: errorMsg, partial_observations: this.state.observations },
               state: this.state,
-              run_id: this.runId 
+              run_id: this.runId
             };
           }
         } else {
@@ -271,12 +271,12 @@ export class AgentRunner extends EventEmitter {
     const stepIndex = this.state!.currentStep;
 
     const nextAction = await this.decideNextAction();
-    
+
     this.logStructured("debug", "step_started", { run_id: this.runId, stepIndex, tool: nextAction.tool, input: nextAction.input });
     this.emit("step_started", { stepIndex, action: nextAction });
 
     let result: ToolResult;
-    
+
     try {
       result = await this.executeTool(nextAction.tool, nextAction.input);
     } catch (error: any) {
@@ -296,14 +296,14 @@ export class AgentRunner extends EventEmitter {
     };
 
     this.state!.history.push(step);
-    
+
     if (!this.state!.toolsUsed.includes(nextAction.tool)) {
       this.state!.toolsUsed.push(nextAction.tool);
     }
 
     if (result.success && result.data) {
-      const observation = typeof result.data === "string" 
-        ? result.data.slice(0, 2000) 
+      const observation = typeof result.data === "string"
+        ? result.data.slice(0, 2000)
         : JSON.stringify(result.data).slice(0, 2000);
       this.state!.observations.push(observation);
     }
@@ -344,7 +344,7 @@ export class AgentRunner extends EventEmitter {
 
       // Lightweight summary of older steps to maintain context without token bloat
       const olderHistory = this.state!.history.slice(0, -3);
-      const contextSummary = olderHistory.length > 0 
+      const contextSummary = olderHistory.length > 0
         ? "Resumen de pasos anteriores (ya ejecutados):\n" + olderHistory.map(s => `- [Paso ${s.stepIndex}] ${s.tool}: ${s.success ? "Éxito" : "Fallo"}`).join("\n")
         : "";
 
@@ -383,7 +383,7 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
       const result = await withTimeout(
         geminiChat(
           [{ role: "user", parts: [{ text: prompt }] }],
-          { model: "gemini-2.0-flash", maxOutputTokens: 300, temperature: 0.2 }
+          { model: "gemini-2.5-flash", maxOutputTokens: 300, temperature: 0.2 }
         ),
         DEFAULT_LLM_TIMEOUT_MS,
         "geminiChat(decideNextAction)"
@@ -391,7 +391,7 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
 
       const responseText = result.content?.trim() || "";
       const jsonMatch = responseText.match(/\{[\s\S]*?\}/);
-      
+
       if (!jsonMatch) {
         this.logStructured("debug", "llm_parse_failed", { run_id: this.runId, reason: "No valid JSON in response", fallback: "heuristic" });
         return this.heuristicNextAction();
@@ -421,7 +421,7 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
       const slideCountMatch = originalObjective.match(/(\d+)\s*(?:slides?|diapositivas)/i);
       const slideCount = slideCountMatch ? parseInt(slideCountMatch[1]) : 3;
       const topic = titleMatch ? titleMatch[1].trim() : originalObjective.replace(/crea|genera|haz|make|create|una|presentaci[oó]n|sobre|de|slides/gi, "").trim();
-      
+
       const slides = [];
       for (let i = 0; i < slideCount; i++) {
         slides.push({
@@ -429,11 +429,11 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
           content: `Contenido sobre ${topic}`
         });
       }
-      
-      return { 
-        action: "Create presentation", 
-        tool: "slides", 
-        input: { title: `Presentación sobre ${topic}`, slides, theme: "modern" } 
+
+      return {
+        action: "Create presentation",
+        tool: "slides",
+        input: { title: `Presentación sobre ${topic}`, slides, theme: "modern" }
       };
     }
 
@@ -441,39 +441,39 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
     if (/documento|document|docx|word|informe|report|carta|letter/i.test(objective) && !this.state!.toolsUsed.includes("document")) {
       const titleMatch = originalObjective.match(/(?:sobre|titled?|llamad[oa]?)\s+["']?(.+?)["']?(?:\s+con|\.|$)/i);
       const topic = titleMatch ? titleMatch[1].trim() : "Documento";
-      
-      return { 
-        action: "Create document", 
-        tool: "document", 
-        input: { type: "docx", title: topic, content: `Este es un documento sobre ${topic}.` } 
+
+      return {
+        action: "Create document",
+        tool: "document",
+        input: { type: "docx", title: topic, content: `Este es un documento sobre ${topic}.` }
       };
     }
 
     // Check for file listing request
     if (/lista.*archivos|list.*files|directorio|directory|ls\b|mostrar archivos/i.test(objective) && !this.state!.toolsUsed.includes("file")) {
-      return { 
-        action: "List files in directory", 
-        tool: "file", 
-        input: { operation: "list", path: "." } 
+      return {
+        action: "List files in directory",
+        tool: "file",
+        input: { operation: "list", path: "." }
       };
     }
 
     // Check for shell command request
     if (/ejecut[ae]|run|comando|command|shell|terminal/i.test(objective) && !this.state!.toolsUsed.includes("shell")) {
       const cmdMatch = originalObjective.match(/["'`](.+?)["'`]/);
-      return { 
-        action: "Execute shell command", 
-        tool: "shell", 
-        input: { command: cmdMatch ? cmdMatch[1] : "echo 'Hello World'" } 
+      return {
+        action: "Execute shell command",
+        tool: "shell",
+        input: { command: cmdMatch ? cmdMatch[1] : "echo 'Hello World'" }
       };
     }
 
     // If we have observations and enough steps, generate final answer
     if (hasObservations && currentStep >= 2) {
-      return { 
-        action: "Generate final answer from observations", 
-        tool: "final_answer", 
-        input: { answer: this.state!.observations.join("\n\n") } 
+      return {
+        action: "Generate final answer from observations",
+        tool: "final_answer",
+        input: { answer: this.state!.observations.join("\n\n") }
       };
     }
 
@@ -489,10 +489,10 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
       return { action: "Search for information", tool: "search", input: { query: searchQuery || objective.slice(0, 100), mode: "quick" } };
     }
 
-    return { 
-      action: "Complete task", 
-      tool: "final_answer", 
-      input: { answer: hasObservations ? this.state!.observations.join("\n\n") : "No se encontró información relevante." } 
+    return {
+      action: "Complete task",
+      tool: "final_answer",
+      input: { answer: hasObservations ? this.state!.observations.join("\n\n") : "No se encontró información relevante." }
     };
   }
 
@@ -555,21 +555,21 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
     // Check if tool exists in sandbox registry
     if (defaultToolRegistry.has(actualToolName)) {
       this.logStructured("info", "sandbox_tool_executing", { run_id: this.runId, tool: actualToolName, originalTool: toolName });
-      
+
       try {
         // Adapt input for specific tools
         let adaptedInput = { ...input };
-        
+
         // Adapt web_search to search tool format
         if (toolName === "web_search" && input.query) {
           adaptedInput = { query: input.query, mode: "quick" };
         }
-        
+
         // Adapt open_url to browser tool format
         if (toolName === "open_url" && input.url) {
           adaptedInput = { url: input.url, action: "extract" };
         }
-        
+
         // Adapt file operations
         if (toolName === "read_file") {
           adaptedInput = { operation: "read", path: input.path || input.file };
@@ -582,7 +582,7 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
         }
 
         const result: SandboxToolResult = await defaultToolRegistry.execute(actualToolName, adaptedInput);
-        
+
         return {
           success: result.success,
           data: result.data,
@@ -598,13 +598,13 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
     switch (toolName) {
       case "web_search":
         return this.toolWebSearch(input.query);
-      
+
       case "open_url":
         return this.toolOpenUrl(input.url);
-      
+
       case "extract_text":
         return this.toolExtractText(input.content || input.html || input.markdown);
-      
+
       default:
         return { success: false, error: `Unknown tool: ${toolName}. Available tools: ${defaultToolRegistry.listTools().join(", ")}` };
     }
@@ -614,7 +614,7 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
     try {
       const { searchAdapter } = await import("../agent/webtool/searchAdapter");
       const results = await searchAdapter.search(query, { maxResults: 5 });
-      
+
       return {
         success: true,
         data: results.map(r => ({
@@ -632,13 +632,13 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
     try {
       const { fetchAdapter } = await import("../agent/webtool/fetchAdapter");
       const result = await fetchAdapter.fetch(url);
-      
+
       if (!result.success) {
         return { success: false, error: result.error || "Failed to fetch URL" };
       }
 
       const content = result.html?.slice(0, 10000) || result.text?.slice(0, 10000) || "";
-      
+
       return {
         success: true,
         data: {
@@ -680,11 +680,11 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
 
     try {
       const { geminiChat } = await import("../lib/gemini");
-      
+
       const result = await withTimeout(
         geminiChat(
           [{ role: "user", parts: [{ text: `Genera un plan de 3-5 pasos para: "${objective}". Responde SOLO con JSON: {"steps":["paso1","paso2"]}` }] }],
-          { model: "gemini-2.0-flash", maxOutputTokens: 150, temperature: 0.3 }
+          { model: "gemini-2.5-flash", maxOutputTokens: 150, temperature: 0.3 }
         ),
         DEFAULT_LLM_TIMEOUT_MS,
         "geminiChat(generatePlan)"
@@ -706,37 +706,37 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
 
   private heuristicPlan(objective: string): string[] {
     const lower = objective.toLowerCase();
-    
+
     if (/presentaci[oó]n|slides?|pptx|powerpoint|diapositivas/.test(lower)) {
       return ["Analizar tema de la presentación", "Crear estructura de slides", "Generar archivo PPTX", "Entregar resultado"];
     }
-    
+
     if (/documento|document|docx|word|informe|report/.test(lower)) {
       return ["Analizar contenido requerido", "Estructurar documento", "Generar archivo DOCX", "Entregar resultado"];
     }
-    
+
     if (/lista.*archivos|list.*files|directorio|directory/.test(lower)) {
       return ["Listar archivos del directorio", "Formatear resultado", "Entregar lista"];
     }
-    
+
     if (/https?:\/\//.test(objective)) {
       return ["Navegar a la URL", "Extraer contenido", "Analizar información", "Generar respuesta"];
     }
-    
+
     if (/busca|search|investiga|research|encuentra|find|informaci[oó]n/.test(lower)) {
       return ["Buscar información en la web", "Analizar resultados", "Generar respuesta"];
     }
-    
+
     if (/analiza|analyze|procesa|process|codigo|code/.test(lower)) {
       return ["Obtener datos", "Procesar información", "Generar análisis"];
     }
-    
+
     return ["Analizar objetivo", "Buscar información relevante", "Generar respuesta final"];
   }
 
   private async generateSummary(): Promise<string> {
     const observations = this.state!.observations.join("\n---\n");
-    
+
     if (!observations) {
       return "No se pudo obtener información para completar la tarea.";
     }
@@ -748,11 +748,11 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
 
     try {
       const { geminiChat } = await import("../lib/gemini");
-      
+
       const result = await withTimeout(
         geminiChat(
           [{ role: "user", parts: [{ text: `Objetivo: ${this.state!.objective}\n\nInformación recopilada:\n${observations}\n\nGenera una respuesta coherente y útil basada en esta información.` }] }],
-          { model: "gemini-2.0-flash", maxOutputTokens: 1000, temperature: 0.3 }
+          { model: "gemini-2.5-flash", maxOutputTokens: 1000, temperature: 0.3 }
         ),
         DEFAULT_LLM_TIMEOUT_MS,
         "geminiChat(generateSummary)"

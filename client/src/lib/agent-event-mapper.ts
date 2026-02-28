@@ -148,38 +148,27 @@ function mapLegacyType(type: string | undefined, event?: any): AgentEventKind {
     case "task_start":
     case "plan_created":
     case "plan_step":
-    case "task_created":
-    case "skill_load_started":
-    case "skill_load_done":
     case "replan":
       return "plan";
-    case "task_started":
     case "step_started":
     case "tool_call":
     case "tool_call_started":
-    case "tool_call_delta":
     case "shell_output":
     case "shell_chunk":
       return "action";
     case "verification":
     case "verification_passed":
     case "verification_failed":
-    case "validation_passed":
-    case "validation_failed":
       return "verification";
     case "step_completed":
-    case "tool_call_done":
     case "tool_output":
     case "tool_call_succeeded":
     case "artifact_created":
-    case "artifact_written":
     case "artifact_ready":
-    case "final_ready":
     case "done":
       return "result";
     case "step_failed":
     case "tool_call_failed":
-    case "retry_scheduled":
     case "error":
       return "error";
     case "thinking":
@@ -213,17 +202,8 @@ function inferStatusFromEvent(event: any, kind: AgentEventKind): AgentEventStatu
     return 'fail';
   }
   
-  const traceType = getTraceType(event);
   const content = event.content || event.payload || {};
-
-  if (["validation_failed", "step_failed", "tool_call_failed", "error"].includes(traceType)) {
-    return "fail";
-  }
-
-  if (["retry_scheduled"].includes(traceType)) {
-    return "warn";
-  }
-
+  
   if (content.success === true || content.status === 'completed' || content.status === 'succeeded') {
     return 'ok';
   }
@@ -251,22 +231,6 @@ function formatLegacyTitle(event: any, kind: AgentEventKind): string {
     return "Plan creado";
   }
 
-  if (traceType === "task_created") {
-    return "Tarea creada";
-  }
-
-  if (traceType === "task_started") {
-    return "Tarea en ejecución";
-  }
-
-  if (traceType === "skill_load_started") {
-    return "Cargando skill";
-  }
-
-  if (traceType === "skill_load_done") {
-    return "Skill listo";
-  }
-
   if (traceType === "step_started" || traceType === "tool_call_started") {
     const tool = content.tool_name || content.toolName || content.tool;
     if (typeof tool === "string" && tool.trim().length > 0) {
@@ -275,28 +239,16 @@ function formatLegacyTitle(event: any, kind: AgentEventKind): string {
     return "Ejecutando paso";
   }
 
-  if (traceType === "tool_call_delta") {
-    return "Ejecutando herramienta";
+  if (traceType === "verification") {
+    return "Verificando resultados";
   }
 
-  if (traceType === "validation_passed") {
-    return "Validación aprobada";
+  if (traceType === "done") {
+    return "Ejecución completada";
   }
 
-  if (traceType === "validation_failed") {
-    return "Validación fallida";
-  }
-
-  if (traceType === "artifact_written") {
-    return "Artefacto generado";
-  }
-
-  if (traceType === "retry_scheduled") {
-    return "Reintento programado";
-  }
-
-  if (traceType === "final_ready") {
-    return "Resultado final listo";
+  if (traceType === "error") {
+    return "Error en ejecución";
   }
   
   if (content.toolName) {
@@ -341,58 +293,36 @@ function formatLegacySummary(event: any): string | undefined {
       : Array.isArray(content?.steps)
         ? content.steps
         : [];
-    if (planSteps.length > 0) {
-      return `Se definieron ${planSteps.length} paso(s).`;
+
+    const total = planSteps.length;
+    if (total > 0) {
+      return `Se definieron ${total} paso(s).`;
     }
     return "Plan preparado para esta solicitud.";
   }
 
-  if (traceType === "skill_load_started") {
-    const skill = content?.metadata?.skill || content?.tool_name;
-    return skill ? `Loading skill ${skill}` : "Cargando skill...";
-  }
-
-  if (traceType === "skill_load_done") {
-    const skill = content?.metadata?.skill || content?.tool_name;
-    return skill ? `Skill listo: ${skill}` : "Skill cargado.";
-  }
-
-  if (traceType === "task_created") {
-    const deps = Array.isArray(content?.metadata?.dependencies) ? content.metadata.dependencies : [];
-    return deps.length > 0
-      ? `Depende de: ${deps.join(", ")}`
-      : "Tarea agregada al DAG.";
-  }
-
-  if (traceType === "task_started" || traceType === "step_started") {
+  if (traceType === "step_started") {
     if (content?.stepIndex !== undefined) {
       return `Paso ${Number(content.stepIndex) + 1} en ejecución.`;
     }
-    return "Ejecutando tarea.";
+    return "Ejecutando paso del plan.";
   }
 
-  if (traceType === "retry_scheduled") {
-    const delay = content?.metadata?.delayMs;
-    if (typeof delay === "number") {
-      return `Se reintentará en ${delay} ms.`;
-    }
-    return "Se programó un reintento.";
-  }
-
-  if (traceType === "final_ready") {
+  if (traceType === "done") {
     if (typeof content?.summary === "string" && content.summary.trim().length > 0) {
       return content.summary;
     }
-    return "DoD validado y pack de entrega listo.";
+    return "Ejecución finalizada correctamente.";
   }
 
-  if (traceType === "validation_passed" || traceType === "validation_failed") {
-    if (typeof content?.summary === "string" && content.summary.trim().length > 0) {
-      return content.summary;
+  if (traceType === "error") {
+    if (typeof content?.error?.message === "string" && content.error.message.trim().length > 0) {
+      return content.error.message;
     }
-    return traceType === "validation_passed"
-      ? "Validación completada correctamente."
-      : "La validación no pasó.";
+    if (typeof content?.message === "string" && content.message.trim().length > 0) {
+      return content.message;
+    }
+    return "Se produjo un error durante la ejecución.";
   }
   
   if (content.feedback && typeof content.feedback === 'string') {
@@ -425,17 +355,6 @@ function getToolDisplayName(toolName: string): string {
     write_file: 'Escribiendo archivo',
     shell_command: 'Ejecutando comando',
     list_files: 'Listando archivos',
-    task_created: 'Tarea creada',
-    task_started: 'Tarea en ejecución',
-    skill_load_started: 'Cargando skill',
-    skill_load_done: 'Skill listo',
-    tool_call_delta: 'Streaming de herramienta',
-    tool_call_done: 'Herramienta completada',
-    validation_passed: 'Validación aprobada',
-    validation_failed: 'Validación fallida',
-    retry_scheduled: 'Reintento programado',
-    artifact_written: 'Artefacto generado',
-    final_ready: 'Resultado final listo',
     plan_created: 'Plan creado',
     step_started: 'Iniciando paso',
     step_completed: 'Paso completado',

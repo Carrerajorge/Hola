@@ -10,6 +10,9 @@
 
 import type { Request, Response, NextFunction } from 'express';
 import { z, ZodSchema, ZodError } from 'zod';
+
+const REQUEST_VALIDATOR_MAX_FILE_SIZE_BYTES =
+  Number(process.env.MAX_FILE_SIZE_MB || "2048") * 1024 * 1024;
 import { ValidationError } from './errorHandler';
 
 interface ValidationSchemas {
@@ -144,7 +147,7 @@ export const commonSchemas = {
     fileUpload: z.object({
         filename: z.string().min(1).max(255),
         mimeType: z.string(),
-        size: z.number().max(100 * 1024 * 1024), // 100MB max
+        size: z.number().max(REQUEST_VALIDATOR_MAX_FILE_SIZE_BYTES),
         chatId: z.string().uuid().optional(),
     }),
 };

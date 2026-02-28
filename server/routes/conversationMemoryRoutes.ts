@@ -69,7 +69,7 @@ router.get("/chats/:chatId/state", async (req: Request, res: Response, next: Nex
     const state = forceRefresh
       ? await conversationStateService.getOrCreateState(chatId, userId)
       : (await conversationStateService.hydrateState(chatId, userId, { forceRefresh })) ||
-        (await conversationStateService.getOrCreateState(chatId, userId));
+      (await conversationStateService.getOrCreateState(chatId, userId));
 
     res.json(state);
   } catch (error: any) {
@@ -367,15 +367,7 @@ const processTurnSchema = z.object({
 
 const retrieveContextSchema = z.object({
   query: z.string().min(1),
-  intent: z.object({
-    type: z.string().optional(),
-    confidence: z.number().optional(),
-    requiresRAG: z.boolean().optional(),
-    ragQuery: z.string().nullable().optional(),
-    artifactReferences: z.array(z.any()).optional(),
-    imageReferences: z.array(z.any()).optional(),
-    imageEditParams: z.any().nullable().optional(),
-  }).optional(),
+  intent: z.any().optional(),
   config: z.object({
     ragTopK: z.number().optional(),
     ragMinScore: z.number().optional(),

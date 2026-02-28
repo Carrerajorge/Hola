@@ -2,7 +2,7 @@
  * macOS Clipboard
  */
 
-import { execFile } from "child_process";
+import { execFile, spawn } from "child_process";
 import { promisify } from "util";
 
 const execFileAsync = promisify(execFile);
@@ -18,7 +18,7 @@ export async function getClipboard(): Promise<string> {
 
 export async function setClipboard(text: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const proc = require("child_process").spawn("pbcopy", [], { timeout: 5000 });
+    const proc = spawn("pbcopy", [], { timeout: 5000 });
     proc.stdin.write(text);
     proc.stdin.end();
     proc.on("close", (code: number) => resolve(code === 0));

@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import type { PareContext } from "./pareRequestContract";
+import { LIMITS } from "../lib/constants";
 
 export interface QuotaConfig {
   maxFileSizeBytes: number;
@@ -20,10 +21,10 @@ export interface QuotaViolation {
 const MB = 1024 * 1024;
 
 const DEFAULT_QUOTA_CONFIG: QuotaConfig = {
-  maxFileSizeBytes: parseInt(process.env.PARE_MAX_FILE_SIZE_MB || "50", 10) * MB,
-  maxTotalSizeBytes: parseInt(process.env.PARE_MAX_TOTAL_SIZE_MB || "100", 10) * MB,
+  maxFileSizeBytes: parseInt(process.env.PARE_MAX_FILE_SIZE_MB || String(LIMITS.MAX_FILE_SIZE_MB), 10) * MB,
+  maxTotalSizeBytes: parseInt(process.env.PARE_MAX_TOTAL_SIZE_MB || String(Math.max(LIMITS.MAX_FILE_SIZE_MB * 4, LIMITS.MAX_FILE_SIZE_MB)), 10) * MB,
   maxFilesPerRequest: parseInt(process.env.PARE_MAX_FILES || "20", 10),
-  maxPagesEstimate: parseInt(process.env.PARE_MAX_PAGES || "500", 10),
+  maxPagesEstimate: parseInt(process.env.PARE_MAX_PAGES || "100000", 10),
   bytesPerPageEstimate: parseInt(process.env.PARE_BYTES_PER_PAGE || "3000", 10),
 };
 

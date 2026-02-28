@@ -19,6 +19,25 @@ import { AgentArtifact } from "@/components/agent-steps-display";
 // so the streaming message and the finalized message share the SAME key,
 // preventing Virtuoso from unmounting/remounting the DOM node.
 const STREAMING_MSG_ID_FALLBACK = "__streaming__";
+const DOC_ANALYSIS_PLACEHOLDER_RE = /^analizando documentos adjuntos[.…\.\s]*$/i;
+
+type DocumentAnalysisIndicatorState = {
+    state: "processing" | "error";
+    text: string;
+    timestampMs: number;
+};
+
+function isDocumentAnalysisPlaceholder(msg: Message): boolean {
+    if (msg.role !== "assistant") return false;
+
+    const normalizedContent = (msg.content || "").trim();
+    if (DOC_ANALYSIS_PLACEHOLDER_RE.test(normalizedContent)) return true;
+
+    // Fallback for legacy placeholders that may change punctuation/content slightly.
+    const hasAnalysisPrefix = String(msg.id || "").startsWith("analysis-") || String(msg.clientTempId || "").startsWith("analysis-");
+    const isTransientStatus = msg.deliveryStatus === "sending" || msg.deliveryStatus === "error";
+    return !!msg.userMessageId && hasAnalysisPrefix && isTransientStatus;
+}
 
 export interface ChatMessageListProps {
     messages: Message[];
@@ -139,14 +158,62 @@ export function ChatMessageList({
         });
     }, [messages.length, aiState, variant, streamingContent]);
 
-    const lastAssistantMessage = useMemo(() => {
-        return messages.filter(m => m.role === "assistant").pop();
+    const documentAnalysisStatusByUserMessageId = useMemo<Record<string, DocumentAnalysisIndicatorState>>(() => {
+        const statusMap: Record<string, DocumentAnalysisIndicatorState> = {};
+
+        for (let index = 0; index < messages.length; index += 1) {
+            const msg = messages[index];
+            if (!msg.userMessageId) continue;
+            if (!isDocumentAnalysisPlaceholder(msg)) continue;
+
+            const parsedTimestamp = new Date(msg.timestamp).getTime();
+            const currentTimestamp = Number.isFinite(parsedTimestamp) ? parsedTimestamp : index;
+            const existing = statusMap[msg.userMessageId];
+            if (existing && existing.timestampMs > currentTimestamp) continue;
+
+            statusMap[msg.userMessageId] = {
+                state: msg.deliveryStatus === "error" ? "error" : "processing",
+                text: msg.content || "Analizando documentos adjuntos...",
+                timestampMs: currentTimestamp,
+            };
+        }
+
+        return statusMap;
     }, [messages]);
 
-    const detectedIntent = useMemo(() => {
-        const lastUserMsg = messages.filter(m => m.role === "user").pop();
-        return lastUserMsg ? detectClientIntent(lastUserMsg.content) : undefined;
+    const activeDocumentAnalysisUserMessageId = useMemo<string | null>(() => {
+        let activeUserMessageId: string | null = null;
+        let latestTimestamp = -Infinity;
+
+        for (const [userMessageId, entry] of Object.entries(documentAnalysisStatusByUserMessageId)) {
+            if (entry.state !== "processing") continue;
+            if (entry.timestampMs > latestTimestamp) {
+                latestTimestamp = entry.timestampMs;
+                activeUserMessageId = userMessageId;
+            }
+        }
+
+        return activeUserMessageId;
+    }, [documentAnalysisStatusByUserMessageId]);
+
+    const hasDocumentAnalysisProcessing = useMemo(() => {
+        return !!activeDocumentAnalysisUserMessageId;
+    }, [activeDocumentAnalysisUserMessageId]);
+
+    const visibleMessages = useMemo(() => {
+        return messages.filter((msg) => {
+            return !isDocumentAnalysisPlaceholder(msg);
+        });
     }, [messages]);
+
+    const lastAssistantMessage = useMemo(() => {
+        return visibleMessages.filter(m => m.role === "assistant").pop();
+    }, [visibleMessages]);
+
+    const detectedIntent = useMemo(() => {
+        const lastUserMsg = visibleMessages.filter(m => m.role === "user").pop();
+        return lastUserMsg ? detectClientIntent(lastUserMsg.content) : undefined;
+    }, [visibleMessages]);
 
     const realTimePhase = useMemo(() => {
         if (!aiProcessSteps.length) return undefined;
@@ -179,10 +246,10 @@ export function ChatMessageList({
                 content: streamingContent,
                 timestamp: new Date(),
             };
-            return [...messages, streamingMsg];
+            return [...visibleMessages, streamingMsg];
         }
-        return messages;
-    }, [messages, streamingContent, variant, effectiveStreamingId]);
+        return visibleMessages;
+    }, [visibleMessages, streamingContent, variant, effectiveStreamingId]);
 
     const isLastMessageAssistant = mergedMessages.length > 0 && mergedMessages[mergedMessages.length - 1].role === "assistant";
     const isIdleLike = aiState === "idle" || aiState === "done";
@@ -226,7 +293,7 @@ export function ChatMessageList({
                     </motion.div>
                 )}
 
-                {isAiBusyState(aiState) && !streamingContent && variant === "default" && uiPhase !== 'console' && (
+                {isAiBusyState(aiState) && !streamingContent && variant === "default" && uiPhase !== 'console' && !hasDocumentAnalysisProcessing && (
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
@@ -242,7 +309,7 @@ export function ChatMessageList({
                 )}
             </>
         );
-    }, [showSuggestedReplies, suggestions, onSelectSuggestedReply, uiPhase, activeRunId, onRunComplete, aiState, streamingContent, variant, realTimePhase, detectedIntent]);
+    }, [showSuggestedReplies, suggestions, onSelectSuggestedReply, uiPhase, activeRunId, onRunComplete, aiState, streamingContent, variant, realTimePhase, detectedIntent, hasDocumentAnalysisProcessing]);
 
     // Stable key function.
     // For optimistic messages, `id` is replaced after server ACK; use `clientTempId`
@@ -273,6 +340,23 @@ export function ChatMessageList({
                 </div>
             );
         }
+
+        const documentAnalysisIndicator =
+            msg.role === "user"
+                ? (() => {
+                    if (!activeDocumentAnalysisUserMessageId) return undefined;
+                    const isActiveMessage =
+                        msg.id === activeDocumentAnalysisUserMessageId ||
+                        msg.clientTempId === activeDocumentAnalysisUserMessageId;
+                    if (!isActiveMessage) return undefined;
+
+                    return (
+                        documentAnalysisStatusByUserMessageId[activeDocumentAnalysisUserMessageId] ||
+                        documentAnalysisStatusByUserMessageId[msg.id] ||
+                        (msg.clientTempId ? documentAnalysisStatusByUserMessageId[msg.clientTempId] : undefined)
+                    );
+                })()
+                : undefined;
 
         // Regular message
         return (
@@ -317,6 +401,11 @@ export function ChatMessageList({
                     onQuestionClick={onQuestionClick}
                     onToolConfirm={onToolConfirm}
                     onToolDeny={onToolDeny}
+                    documentAnalysisStatus={
+                        documentAnalysisIndicator
+                            ? { state: documentAnalysisIndicator.state, text: documentAnalysisIndicator.text }
+                            : undefined
+                    }
                 />
             </div>
         );
@@ -331,7 +420,8 @@ export function ChatMessageList({
         minimizedDocument, onRestoreDocument, setEditContent,
         onAgentCancel, onAgentRetry, onAgentArtifactPreview,
         onSuperAgentCancel, onSuperAgentRetry, onQuestionClick,
-        effectiveStreamingId, streamingContent, onUserRetrySend
+        effectiveStreamingId, streamingContent, onUserRetrySend,
+        documentAnalysisStatusByUserMessageId, activeDocumentAnalysisUserMessageId
     ]);
 
     return (
