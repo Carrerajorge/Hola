@@ -1,4 +1,4 @@
-import { detectToolCallLoop, hashToolCall } from "./toolLoopDetection";
+import { detectToolCallLoop, hashToolCall, hashToolOutcome } from "./toolLoopDetection";
 import { toolRegistry, type ToolResult, type ToolArtifact } from "./toolRegistry";
 import { llmGateway } from "../lib/llmGateway";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
@@ -13,8 +13,9 @@ import { eq } from "drizzle-orm";
 import { getUserSettingsCached } from "../services/userSettingsCache";
 import { policyEngine } from "./policyEngine";
 import { hookSystem } from "../openclaw/plugins/hookSystem";
-import { detectToolCallLoop, hashToolCall } from "./toolLoopDetection";
-import { hashToolOutcome } from "./toolLoopDetection";
+import { TaskGraphPlanner } from "./runtime/planner";
+import { ConcurrentTaskExecutor } from "./runtime/executor";
+import type { RuntimeSnapshot } from "./runtime/types";
 
 // Agentic orchestrator bridge
 import {
@@ -1430,6 +1431,255 @@ Respond with ONLY valid JSON in this exact format:
     return true;
   }
 
+  private async persistRuntimeSnapshot(snapshot: RuntimeSnapshot): Promise<void> {
+    try {
+      const currentPlan = (this.plan as any) || {};
+      const nextPlan = {
+        ...currentPlan,
+        __runtimeSnapshot: snapshot,
+        __runtimeSnapshotUpdatedAt: new Date(snapshot.updatedAt).toISOString(),
+      };
+
+      await db.update(agentModeRuns)
+        .set({ plan: nextPlan as any })
+        .where(eq(agentModeRuns.id, this.runId));
+    } catch (error: any) {
+      console.warn(`[AgentOrchestrator] Snapshot persistence skipped: ${error?.message || error}`);
+    }
+  }
+
+  private async runWithTaskGraphRuntime(): Promise<void> {
+    if (!this.plan) {
+      throw new Error("No plan available for runtime execution.");
+    }
+
+    const planner = new TaskGraphPlanner();
+    const graph = planner.build({
+      objective: this.plan.objective,
+      userMessage: this.userMessage || this.plan.objective,
+      steps: this.plan.steps.map((step, index) => ({
+        index,
+        toolName: step.toolName,
+        description: step.description,
+        input: step.input,
+        expectedOutput: step.expectedOutput,
+      })),
+      attachments: this.attachments,
+    });
+
+    this.plan = {
+      objective: graph.objective,
+      estimatedTime: this.plan.estimatedTime || `${Math.max(1, graph.tasks.length)} minute(s)`,
+      steps: graph.tasks.map((task) => ({
+        index: task.index,
+        toolName: task.toolName,
+        description: task.description,
+        input: task.input,
+        expectedOutput: task.successCriteria.join("; "),
+      })),
+    };
+
+    this.todoList = graph.tasks.map((task, idx) => ({
+      id: task.id,
+      task: task.description,
+      status: idx === 0 ? "in_progress" : "pending",
+      stepIndex: task.index,
+      attempts: 0,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }));
+    this.updateWorkspaceFile("todo.md", this.generateTodoMarkdown());
+
+    await this.emitTraceEvent("task_start", {
+      phase: "planning",
+      status: "running",
+      summary: graph.objective,
+      metadata: {
+        runtime: "planner_executor",
+        graphId: graph.graphId,
+      },
+    });
+
+    await this.emitTraceEvent("plan_created", {
+      phase: "planning",
+      status: "completed",
+      plan: {
+        objective: graph.objective,
+        steps: graph.tasks.map((task) => ({
+          index: task.index,
+          toolName: task.toolName,
+          description: task.description,
+        })),
+        estimatedTime: this.plan.estimatedTime,
+      },
+      summary: "TaskGraph/DAG prepared",
+      metadata: {
+        graphId: graph.graphId,
+        maxConcurrency: graph.maxConcurrency,
+        globalValidations: graph.globalValidations,
+      },
+    });
+
+    this.status = "running";
+    this.emitProgress();
+
+    const upsertStepResult = (stepResult: StepResult) => {
+      const idx = this.stepResults.findIndex((item) => item.stepIndex === stepResult.stepIndex);
+      if (idx >= 0) {
+        this.stepResults[idx] = stepResult;
+      } else {
+        this.stepResults.push(stepResult);
+      }
+    };
+
+    const executor = new ConcurrentTaskExecutor({
+      runId: this.runId,
+      chatId: this.chatId,
+      userId: this.userId,
+      userPlan: this.userPlan,
+      signal: this.abortController.signal,
+      maxWorkers: graph.maxConcurrency,
+      emitTraceEvent: async (eventType, options) => {
+        await this.emitTraceEvent(eventType as TraceEventType, options as any);
+      },
+      executeTool: async (toolName, input, context) => {
+        return toolRegistry.execute(toolName, input, {
+          userId: this.userId,
+          chatId: this.chatId,
+          runId: this.runId,
+          userPlan: this.userPlan,
+          signal: this.abortController.signal,
+          stepIndex: context.stepIndex,
+          correlationId: context.correlationId,
+          onStream: context.onStream,
+          onExit: context.onExit,
+        });
+      },
+      onTransition: (transition) => {
+        const now = Date.now();
+
+        if (transition.to === "running") {
+          this.currentStepIndex = transition.taskIndex;
+          this.status = "running";
+          this.updateTodoList(transition.taskIndex, "in_progress");
+          this.emitProgress();
+          return;
+        }
+
+        if (transition.to === "retry_scheduled") {
+          this.logEvent("progress", {
+            type: "retry_scheduled",
+            stepIndex: transition.taskIndex,
+            attempt: transition.attempt,
+            reason: transition.error,
+          }, transition.taskIndex);
+          this.emitProgress();
+          return;
+        }
+
+        if (transition.to === "completed") {
+          const toolName = this.plan?.steps[transition.taskIndex]?.toolName || "unknown";
+          const completedAt = now;
+          const startedAt = completedAt - (transition.result?.metrics?.durationMs || 0);
+          const stepResult: StepResult = {
+            stepIndex: transition.taskIndex,
+            toolName,
+            success: true,
+            output: transition.result?.output,
+            artifacts: transition.result?.artifacts || [],
+            startedAt,
+            completedAt,
+          };
+          upsertStepResult(stepResult);
+          if (transition.result?.artifacts?.length) {
+            this.artifacts.push(...transition.result.artifacts);
+          }
+          this.updateTodoList(transition.taskIndex, "completed");
+          this.emitProgress();
+          return;
+        }
+
+        if (transition.to === "failed" || transition.to === "cancelled") {
+          const toolName = this.plan?.steps[transition.taskIndex]?.toolName || "unknown";
+          const completedAt = now;
+          const startedAt = completedAt - (transition.result?.metrics?.durationMs || 0);
+          const stepResult: StepResult = {
+            stepIndex: transition.taskIndex,
+            toolName,
+            success: false,
+            output: transition.result?.output ?? null,
+            artifacts: transition.result?.artifacts || [],
+            error: transition.error || transition.result?.error?.message || "Task failed",
+            startedAt,
+            completedAt,
+          };
+          upsertStepResult(stepResult);
+          this.updateTodoList(transition.taskIndex, "failed", stepResult.error || "Task failed");
+          this.emitProgress();
+          return;
+        }
+
+        if (transition.to === "skipped") {
+          this.updateTodoList(transition.taskIndex, "skipped");
+          this.emitProgress();
+        }
+      },
+      persistSnapshot: async (snapshot) => {
+        await this.persistRuntimeSnapshot(snapshot);
+      },
+    });
+
+    const runtimeResult = await executor.execute(graph);
+
+    if (!runtimeResult.success) {
+      this.status = runtimeResult.status === "cancelled" ? "cancelled" : "failed";
+      const errorMessage = runtimeResult.error || "Runtime execution failed";
+      this.logEvent("error", {
+        type: "runtime_failed",
+        error: errorMessage,
+        validations: runtimeResult.validations,
+      });
+      await this.emitTraceEvent("error", {
+        phase: this.status === "cancelled" ? "cancelled" : "failed",
+        status: this.status === "cancelled" ? "cancelled" : "failed",
+        error: {
+          message: errorMessage,
+          retryable: false,
+        },
+        metadata: {
+          validations: runtimeResult.validations,
+          deliveryPack: runtimeResult.deliveryPack,
+        },
+      });
+      this.emitProgress();
+      throw new Error(errorMessage);
+    }
+
+    this.status = "completed";
+    this.summary = runtimeResult.summary;
+    this.artifacts = runtimeResult.artifacts;
+
+    this.logEvent("observation", {
+      type: "runtime_completed",
+      summary: runtimeResult.summary,
+      validations: runtimeResult.validations,
+      deliveryPack: runtimeResult.deliveryPack,
+    });
+
+    await this.emitTraceEvent("done", {
+      phase: "completed",
+      status: "completed",
+      summary: runtimeResult.summary,
+      metadata: {
+        deliveryPack: runtimeResult.deliveryPack,
+        validations: runtimeResult.validations,
+        totalTasks: graph.tasks.length,
+      },
+    });
+
+    this.emitProgress();
+  }
+
   async run(): Promise<void> {
     const isResume = this.status === "running" || this.status === "awaiting_confirmation";
     if (!isResume && this.status !== "queued" && this.status !== "planning") {
@@ -1439,6 +1689,12 @@ Respond with ONLY valid JSON in this exact format:
     try {
       if (!this.plan) {
         throw new Error("No plan available. Call generatePlan first.");
+      }
+
+      // New runtime path: typed Planner + concurrent Executor with event-sourcing.
+      if (!isResume) {
+        await this.runWithTaskGraphRuntime();
+        return;
       }
 
       // Initialize state graph for this run
