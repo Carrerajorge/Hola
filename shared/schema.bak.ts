@@ -2576,9 +2576,15 @@ export function createAgentEvent(
 
 export const TraceEventTypeSchema = z.enum([
   'task_start',
+  'run_created',
+  'run_completed',
+  'run_failed',
+  'run_cancelled',
   'plan_created',
   'plan_step',
   'step_started',
+  'step_progress',
+  'step_log',
   'tool_call',
   'tool_call_started',
   'tool_call_succeeded',
@@ -2612,6 +2618,11 @@ export const TraceEventTypeSchema = z.enum([
 export const TraceEventSchema = z.object({
   event_type: TraceEventTypeSchema,
   runId: z.string(),
+  event_seq: z.number().int().positive().optional(),
+  correlation_id: z.string().optional(),
+  trace_id: z.string().optional(),
+  span_id: z.string().optional(),
+  severity: z.enum(["info", "warning", "error"]).optional(),
   stepId: z.string().optional(),
   stepIndex: z.number().optional(),
   phase: z.enum(['planning', 'executing', 'verifying', 'completed', 'failed', 'cancelled']).optional(),
