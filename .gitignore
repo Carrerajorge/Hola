@@ -125,3 +125,5 @@ audit.json
 # local secrets
 monitoring/alertmanager/secrets/
 *.log
+node_modules
+node_modules
