@@ -290,32 +290,47 @@ export function createNodesRouter(): Router {
     requireNodeAuth,
     validateBody(z.object({ status: z.enum(["succeeded", "failed"]), result: z.any().optional(), error: z.string().optional() })),
     async (req, res) => {
-      const node = getNode(req);
-      if (!node) return res.status(401).json({ success: false, error: "Unauthorized" });
+      const requestId = (req as any).correlationId || (req as any).requestId || (req.headers["x-request-id"] as string) || null;
+      try {
+        const node = getNode(req);
+        if (!node) return res.status(401).json({ success: false, error: "Unauthorized" });
 
-      const jobId = String((req.params as any).jobId || "").trim();
-      if (!jobId) return res.status(400).json({ success: false, error: "jobId required" });
+        const jobId = String((req.params as any).jobId || "").trim();
+        if (!jobId) return res.status(400).json({ success: false, error: "jobId required" });
 
-      // Ensure job belongs to node
-      const [job] = await db
-        .select({ id: nodeJobs.id })
-        .from(nodeJobs)
-        .where(and(eq(nodeJobs.id, jobId), eq(nodeJobs.nodeId, node.id), eq(nodeJobs.orgId, node.orgId)))
-        .limit(1);
-      if (!job) return res.status(404).json({ success: false, error: "Job not found" });
+        // Ensure job belongs to node
+        const [job] = await db
+          .select({ id: nodeJobs.id })
+          .from(nodeJobs)
+          .where(and(eq(nodeJobs.id, jobId), eq(nodeJobs.nodeId, node.id), eq(nodeJobs.orgId, node.orgId)))
+          .limit(1);
+        if (!job) return res.status(404).json({ success: false, error: "Job not found" });
 
-      const { status, result, error } = req.body as any;
-      await db
-        .update(nodeJobs)
-        .set({
-          status,
-          result: result ?? null,
-          error: error ?? null,
-          finishedAt: new Date(),
-        })
-        .where(eq(nodeJobs.id, jobId));
+        const { status, result, error } = req.body as any;
+        await db
+          .update(nodeJobs)
+          .set({
+            status,
+            result: result ?? null,
+            error: error ?? null,
+            finishedAt: new Date(),
+          })
+          .where(eq(nodeJobs.id, jobId));
 
-      res.json({ success: true });
+        return res.json({ success: true });
+      } catch (e: any) {
+        // Some environments don't emit stack traces to container logs unless explicitly printed.
+        console.error(
+          `[nodes] job result failed requestId=${requestId || "unknown"} nodeId=${(getNode(req) as any)?.id || "unknown"} jobId=${(req.params as any)?.jobId || ""} error=${e?.message || e}`,
+          e?.stack
+        );
+        return res.status(500).json({
+          success: false,
+          error: "Internal error",
+          code: "NODES_JOB_RESULT_INTERNAL",
+          requestId: requestId || undefined,
+        });
+      }
     }
   );
 
