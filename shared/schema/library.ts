@@ -352,7 +352,7 @@ export const chatMessageAnalysis = pgTable('chat_message_analysis', {
 
 export const insertChatMessageAnalysisSchema = createInsertSchema(chatMessageAnalysis);
 
-export type InsertChatMessageAnalysis = typeof chatMessageAnalysiss.$inferInsert;
+export type InsertChatMessageAnalysis = typeof chatMessageAnalysis.$inferInsert;
 export type ChatMessageAnalysis = typeof chatMessageAnalysis.$inferSelect;
 
 // Excel Documents (Legacy/Alternative)
@@ -398,5 +398,5 @@ export const companyKnowledge = pgTable("company_knowledge", {
 
 export const insertCompanyKnowledgeSchema = createInsertSchema(companyKnowledge);
 
-export type InsertCompanyKnowledge = typeof companyKnowledges.$inferInsert;
+export type InsertCompanyKnowledge = typeof companyKnowledge.$inferInsert;
 export type CompanyKnowledge = typeof companyKnowledge.$inferSelect;
