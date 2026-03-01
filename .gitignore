@@ -125,3 +125,6 @@ audit.json
 # local secrets
 monitoring/alertmanager/secrets/
 *.log
+
+# local claude worktrees (do not commit)
+.claude/
