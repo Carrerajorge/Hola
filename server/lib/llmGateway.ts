@@ -1,9 +1,3 @@
-<<<<<<< HEAD
-import OpenAI from "openai"; import type { ChatCompletionMessageParam, ChatCompletionChunk } from "openai/resources/chat/completions"; import Anthropic from "@anthropic-ai/sdk"; import { MODELS } 
-from "./openai"; import { geminiChat, geminiStreamChat, GEMINI_MODELS, type GeminiChatMessage } from "./gemini"; import {
-
-  KNOWN_XAI_MODEL_IDS, KNOWN_GEMINI_MODEL_IDS, XAI_MODELS,
-=======
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam, ChatCompletionChunk } from "openai/resources/chat/completions";
 import Anthropic from "@anthropic-ai/sdk";
@@ -14,7 +8,6 @@ import {
   KNOWN_GEMINI_MODEL_IDS,
   KNOWN_LOCAL_MODEL_IDS,
   XAI_MODELS,
->>>>>>> 75be0339 (chore: subir proyecto prueba-subida-)
 } from "./modelRegistry";
 import crypto from "crypto";
 import { analyzeResponseQuality, calculateQualityScore } from "../services/responseQuality";
