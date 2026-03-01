@@ -128,3 +128,6 @@ monitoring/alertmanager/secrets/
 
 # local claude worktrees (do not commit)
 .claude/
+
+# local temp dirs (do not commit)
+openclaw_temp/
