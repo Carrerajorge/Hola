@@ -31,6 +31,7 @@ export default ts.config(
       "artifacts/**",
       "sandbox_workspace/**",
       "external/agent_ecosystem/**",
+      "client/public/vendor/**",
     ],
   }
 );
