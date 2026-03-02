@@ -1,37 +1,42 @@
 import js from "@eslint/js";
 import globals from "globals";
 import ts from "typescript-eslint";
+import reactHooks from "eslint-plugin-react-hooks";
 
 export default ts.config(
   js.configs.recommended,
   ...ts.configs.recommended,
   {
-    languageOptions: {
-      globals: {
-        ...globals.browser,
-        ...globals.node,
-      },
+  languageOptions: {
+    globals: {
+      ...globals.browser,
+      ...globals.node,
     },
-    rules: {
-      "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
-      "@typescript-eslint/no-explicit-any": "warn",
-    },
-    ignores: [
-      "**/dist/**",
-      "**/node_modules/**",
-      "**/coverage/**",
-      "**/playwright-report/**",
-      "**/test-results/**",
-      "**/hola-infra/**",
-      "**/.claude/**",
-      "**/.codex/**",
-      "**/.git/**",
-      "Hola/**",
-      "Hola_wt_*/**",
-      "artifacts/**",
-      "sandbox_workspace/**",
-      "external/agent_ecosystem/**",
-      "client/public/vendor/**",
-    ],
-  }
+  },
+  plugins: {
+    "react-hooks": reactHooks,
+  },
+  rules: {
+    ...reactHooks.configs.recommended.rules,
+    "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
+    "@typescript-eslint/no-explicit-any": "warn",
+  },
+  ignores: [
+    "**/dist/**",
+    "**/node_modules/**",
+    "**/coverage/**",
+    "**/playwright-report/**",
+    "**/test-results/**",
+    "**/hola-infra/**",
+    "**/.claude/**",
+    "**/.codex/**",
+    "**/.git/**",
+    "Hola/**",
+    "Hola_wt_*/**",
+    "artifacts/**",
+    "sandbox_workspace/**",
+    "external/agent_ecosystem/**",
+    "client/public/vendor/**",
+  ],
+}
 );
