@@ -327,9 +327,8 @@ export async function renderWordFromSpec(spec: DocSpec): Promise<Buffer> {
   }
 
   // Security: sanitize document metadata
-  const safeTitle = (spec.title || "").replace(/[\x00-\x1F\x7F]/g, "").substring(0, 500);
-  const safeAuthor = (spec.author || "").replace(/[\x00-\x1F\x7F]/g, "").substring(0, 200);
-
+  const safeTitle = (spec.title || "").replace(/[\u0000-\u001F\u007F]/g, "").substring(0, 500);
+  const safeAuthor = (spec.author || "").replace(/[\u0000-\u001F\u007F]/g, "").substring(0, 200);
   const doc = new Document({
     title: safeTitle,
     creator: safeAuthor || undefined,
