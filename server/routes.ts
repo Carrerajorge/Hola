@@ -40,6 +40,7 @@ import { createGmailMcpRouter } from "./mcp/gmailMcpServer";
 import healthRouter from "./routes/healthRouter";
 import aiExcelRouter from "./routes/aiExcelRouter";
 import powerRouter from "./routes/powerRouter";
+import { hitlRouter } from "./agent/tenaga/hitl/HitlRouter";
 import multiAgentRouter from "./routes/multiAgentRouter";
 import { metricsHandler, getMetricsJson } from "./lib/parePrometheusMetrics";
 import { createHealthRouter as createPareHealthRouter, getHealthSummary as getPareHealthSummary } from "./lib/pareHealthChecks";

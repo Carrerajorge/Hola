@@ -64,7 +64,7 @@ sync_to_vps() {
 }
 
 run_remote_cmd() {
-  ssh ${SSH_OPTS} "${VPS_USER}@${VPS_HOST}" "bash -lc 'cd ${VPS_DIR} && npm install && npm run build && ( source .env.production 2>/dev/null || true; source .env 2>/dev/null || true; if [ -z \"\${DATABASE_URL:-}\" ]; then echo \"DATABASE_URL not set. Add DATABASE_URL to environment or .env.production/.env before deploy.\" >&2; exit 1; fi; npm run db:push; ) && pm2 restart michat --update-env'"
+  ssh ${SSH_OPTS} "${VPS_USER}@${VPS_HOST}" "bash -lc 'cd ${VPS_DIR} && npm install && (cd server/openclaw && npm install) && npm run build && ( source .env.production 2>/dev/null || true; source .env 2>/dev/null || true; if [ -z \"\${DATABASE_URL:-}\" ]; then echo \"DATABASE_URL not set. Add DATABASE_URL to environment or .env.production/.env before deploy.\" >&2; exit 1; fi; npm run db:push; ) && pm2 restart michat --update-env'"
 }
 
 deploy_on_target() {
