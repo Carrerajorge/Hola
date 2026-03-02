@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../agent/toolRegistry';
 import { openclawSubagentService } from '../agents/subagentService';
+import { createDemoTools } from './demoTool';
 
 type RagServiceLike = {
   search: (
@@ -168,5 +169,6 @@ export function createAgenticTools(): ToolDefinition[] {
     subagentCancel,
     ragSearch,
     ragContext,
+    ...createDemoTools(),
   ];
 }

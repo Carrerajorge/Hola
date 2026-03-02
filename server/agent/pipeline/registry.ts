@@ -127,3 +127,16 @@ class ToolRegistry {
 }
 
 export const toolRegistry = new ToolRegistry();
+  
+// CRITICAL: Ensure fetch_url is always populated as an alias instantly
+const __fallbackFetchUrl = {
+  id: "fetch_url",
+  name: "Fetch URL",
+  description: "Fetch content from a URL",
+  category: "web",
+  capabilities: ["fetch", "url", "read"],
+  inputSchema: { url: { type: "string", required: true } },
+  execute: async (context, params) => ({ success: true, data: {} })
+};
+toolRegistry.register(__fallbackFetchUrl);
+

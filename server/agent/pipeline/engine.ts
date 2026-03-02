@@ -35,12 +35,12 @@ export interface PipelineRunOptions {
 export async function runPipeline(options: PipelineRunOptions): Promise<PipelineResult> {
   const { objective, conversationId, userId, config, onProgress } = options;
   const startTime = Date.now();
-  
-  initializePipeline();
-  
+
   let runId = "";
   
   try {
+    initializePipeline();
+
     const agentRun = await storage.createAgentRun({
       conversationId,
       status: "pending",

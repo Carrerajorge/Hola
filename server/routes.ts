@@ -144,6 +144,7 @@ import { createTerminalControlRouter, terminalClients } from "./routes/terminalC
 import { createWorkflowRouter } from "./routes/workflowRouter";
 import { createDeviceControlRouter } from "./routes/deviceControlRouter";
 import openClawRouter from "./routes/openClawRouter";
+import { createSuperProgrammingAgentRouter } from "./routes/superProgrammingAgentRouter";
 import { createSkillPlatformRouter } from "./routes/skillPlatformRouter";
 import { CSRF_COOKIE_NAME, CSRF_TOKEN_PATTERN, issueCsrfCookie } from "./middleware/csrf";
 import { finopsRouter } from "./routes/finopsRouter";
@@ -764,6 +765,9 @@ export async function registerRoutes(
   });
   app.use("/api/ai", aiExcelRouter);
   app.use("/api/power", powerRouter);
+  // Tenaga HITL Routes
+  app.use("/api/hitl", hitlRouter);
+
   app.use("/api/agents", multiAgentRouter);
   app.use("/api/errors", errorRouter);
   app.use("/api/spreadsheet", createSpreadsheetRouter());
@@ -816,6 +820,7 @@ export async function registerRoutes(
   // SuperIntelligence System
   app.use("/api/audit", createAuditDashboardRouter());
   app.use("/api/super-intelligence", createSuperIntelligenceRouter());
+  app.use("/api/super-programming-agent", createSuperProgrammingAgentRouter());
 
   // ===== Device Control (autonomy primitives: local/remote terminal + browser) =====
   app.use("/api/device-control", createDeviceControlRouter());

@@ -106,7 +106,7 @@ const dynamicSkillTools: FunctionDeclaration[] = BUNDLED_SKILL_TOOLS.map(t => {
 });
 
 const LOCAL_FILESYSTEM_SIGNAL_REGEX =
-  /\b(?:carpetas?|caprteas?|careptas?|carpteas?|folders?|directorios?|directories?|archivos?|files?)\b.*\b(?:mac|computadora|pc|laptop|sistema|escritorio|desktop|descargas|downloads|documentos|documents|home|disco)\b|\b(?:analiza|explora|listar|list|revisa|cuenta|count|cu[aá]ntas?)\b.*\b(?:mi\s+(?:mac|computadora|pc)|desktop|escritorio|home)\b|\b(?:cu[aá]ntas?|how\s+many|cantidad(?:\s+de)?|n[uú]mero(?:\s+de)?)\s+(?:carpetas?|caprteas?|careptas?|carpteas?|folders?|directorios?|directories?|archivos?|files?)\b/i;
+  /\b(?:carpetas?|folders?|directorios?|directories?|archivos?|files?|lee|escribe|crea|modifica|busca|encuentra|abre|leer|escribir|crear|borrar|eliminar|revisar|analizar)\b/i;
 const SKILL_SIGNAL_REGEX = /\b(skill|skills|habilidad|habilidades)\b|\$[a-z0-9_-]{2,80}/i;
 const LANDING_PAGE_SIGNAL_REGEX =
   /\b(landing\s+page|p[aá]gina\s+de\s+aterrizaje|p[aá]gina\s+web|sitio\s+web|website|landing)\b/i;
@@ -544,7 +544,7 @@ function getToolsForIntent(
 
   // For local computer/folder requests, force local read-only tools into the set.
   if (LOCAL_FILESYSTEM_SIGNAL_REGEX.test(rawPrompt)) {
-    const mustHave = new Set(["list_files", "read_file", "memory_search", "openclaw_clawi_status"]);
+    const mustHave = new Set(["list_files", "read_file", "memory_search", "openclaw_clawi_status", "openclaw_read", "openclaw_write", "openclaw_list", "openclaw_exec"]);
     const byName = new Map(matchedTools.map((tool) => [tool.name, tool]));
     for (const tool of AGENT_TOOLS) {
       if (mustHave.has(tool.name)) {

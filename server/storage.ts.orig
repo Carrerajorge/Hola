@@ -722,29 +722,28 @@ export class MemStorage implements IStorage {
 
   async getChatMessages(chatId: string, options?: { limit?: number; offset?: number; before?: Date; orderBy?: 'asc' | 'desc' }): Promise<ChatMessage[]> {
     const { limit, offset, before, orderBy = 'asc' } = options || {};
+    // Cache key includes pagination params
     const cacheKey = `messages:${chatId}:${limit || 'all'}:${offset || 0}:${before?.getTime() || 'now'}:${orderBy}`;
 
     return cache.remember(cacheKey, 10, async () => {
-      let query: any = dbRead.select().from(chatMessages);
-      
-      const conditions = [eq(chatMessages.chatId, chatId)];
+      let q = dbRead.select().from(chatMessages);
       if (before) {
-        conditions.push(sql`${chatMessages.createdAt} < ${before.toISOString()}`);
-      }
-      query = query.where(and(...conditions));
-
-      if (orderBy === 'desc') {
-        query = query.orderBy(desc(chatMessages.createdAt));
+        q = q.where(and(eq(chatMessages.chatId, chatId), sql`${chatMessages.createdAt} < ${before.toISOString()}`));
       } else {
-        query = query.orderBy(chatMessages.createdAt);
+        q = q.where(eq(chatMessages.chatId, chatId));
+      }
+      let query = q;
+        query.orderBy(desc(chatMessages.createdAt));
+      } else {
+        query.orderBy(chatMessages.createdAt);
       }
 
       if (limit) {
-        query = query.limit(limit);
+        query.limit(limit);
       }
 
       if (offset) {
-        query = query.offset(offset);
+        query.offset(offset);
       }
 
       return await query;
@@ -1642,7 +1641,7 @@ export class MemStorage implements IStorage {
 
   // Admin: Audit Logs
   async createAuditLog(log: InsertAuditLog): Promise<AuditLog> {
-    const [result] = await db.insert(auditLogs).values({ ...log, userId: undefined } as any).returning();
+    const [result] = await db.insert(auditLogs).values(log).returning();
     return result;
   }
 
@@ -1973,7 +1972,7 @@ export class MemStorage implements IStorage {
   }
 
   async createToolCallLog(log: InsertToolCallLog): Promise<ToolCallLog> {
-    const [result] = await db.insert(toolCallLogs).values({ ...log, userId: undefined } as any).returning();
+    const [result] = await db.insert(toolCallLogs).values(log).returning();
     return result;
   }
 
@@ -2395,7 +2394,7 @@ export class MemStorage implements IStorage {
 
   // API Logs
   async createApiLog(log: InsertApiLog): Promise<ApiLog> {
-    const [result] = await db.insert(apiLogs).values({ ...log, userId: undefined } as any).returning();
+    const [result] = await db.insert(apiLogs).values(log).returning();
     return result;
   }
 
@@ -2713,7 +2712,7 @@ export class MemStorage implements IStorage {
         and(
           eq(agentGapLogs.gapSignature, signature),
           eq(agentGapLogs.status, 'pending'),
-          sql`1=1` /* no userId */
+          log.userId ? eq(agentGapLogs.userId, log.userId) : isNull(agentGapLogs.userId)
         )
       )
       .limit(1);
@@ -2738,7 +2737,7 @@ export class MemStorage implements IStorage {
   async getAgentGapLogs(status?: string, userId?: string): Promise<AgentGapLog[]> {
     if (status && userId) {
       return dbRead.select().from(agentGapLogs)
-        .where(and(eq(agentGapLogs.status, status), sql`1=1`))
+        .where(and(eq(agentGapLogs.status, status), eq(agentGapLogs.userId, userId)))
         .orderBy(desc(agentGapLogs.createdAt));
     }
     if (status) {
@@ -2748,7 +2747,7 @@ export class MemStorage implements IStorage {
     }
     if (userId) {
       return dbRead.select().from(agentGapLogs)
-        .where(sql`1=1`)
+        .where(eq(agentGapLogs.userId, userId))
         .orderBy(desc(agentGapLogs.createdAt));
     }
     return dbRead.select().from(agentGapLogs).orderBy(desc(agentGapLogs.createdAt));

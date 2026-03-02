@@ -29,21 +29,21 @@ export const respondTool: ToolDefinition = {
   
   async execute(context: ExecutionContext, params: Record<string, any>): Promise<ToolResult> {
     const { objective, context: additionalContext, tone = "professional", language = "auto" } = params;
+    const completedResults = context.previousResults.filter(r => r.status === "completed");
+    const previousData = completedResults
+      .filter(r => r.output?.data)
+      .map(r => {
+        if (r.output?.data?.textContent) {
+          return `[From ${r.toolId}]: ${r.output.data.textContent.slice(0, 5000)}`;
+        }
+        if (r.output?.data?.result) {
+          return `[From ${r.toolId}]: ${JSON.stringify(r.output.data.result).slice(0, 5000)}`;
+        }
+        return `[From ${r.toolId}]: ${JSON.stringify(r.output?.data).slice(0, 3000)}`;
+      })
+      .join("\n\n");
     
     try {
-      const previousData = context.previousResults
-        .filter(r => r.status === "completed" && r.output?.data)
-        .map(r => {
-          if (r.output?.data?.textContent) {
-            return `[From ${r.toolId}]: ${r.output.data.textContent.slice(0, 5000)}`;
-          }
-          if (r.output?.data?.result) {
-            return `[From ${r.toolId}]: ${JSON.stringify(r.output.data.result).slice(0, 5000)}`;
-          }
-          return `[From ${r.toolId}]: ${JSON.stringify(r.output?.data).slice(0, 3000)}`;
-        })
-        .join("\n\n");
-
       const languageInstruction = language === "auto" 
         ? "Respond in the same language as the user's objective."
         : `Respond in ${language}.`;
@@ -83,13 +83,37 @@ Generate a comprehensive response addressing the user's objective.`
         metadata: {
           tone,
           language,
-          previousStepsUsed: context.previousResults.filter(r => r.status === "completed").length
+          previousStepsUsed: completedResults.length
         }
       };
     } catch (error: any) {
+      const searchStep = completedResults.find((result) => result.toolId === "search_web");
+      const searchResults = Array.isArray(searchStep?.output?.data?.results)
+        ? (searchStep?.output?.data?.results as Array<{ title?: string; url?: string; snippet?: string }>)
+        : [];
+
+      const fallbackResponse = searchResults.length > 0
+        ? [
+            `No pude usar el modelo en este momento, pero sí recuperé información para tu objetivo: ${objective}`,
+            "",
+            ...searchResults.slice(0, 5).map((item, index) =>
+              `${index + 1}. ${item.title || "Sin título"}${item.url ? ` (${item.url})` : ""}${item.snippet ? ` - ${item.snippet}` : ""}`
+            ),
+          ].join("\n")
+        : `No pude generar una redacción final con el modelo en este momento. Objetivo: ${objective}. Error del proveedor: ${error.message}`;
+
       return {
-        success: false,
-        error: error.message
+        success: true,
+        data: {
+          response: fallbackResponse,
+        },
+        metadata: {
+          tone,
+          language,
+          previousStepsUsed: completedResults.length,
+          fallback: true,
+          providerError: error.message,
+        },
       };
     }
   }

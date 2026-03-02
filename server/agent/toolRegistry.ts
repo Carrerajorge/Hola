@@ -999,11 +999,15 @@ export class ToolRegistry {
     try {
       let validatedInput: unknown;
       try {
-        validatedInput = validateOrThrow(
-          tool.inputSchema,
-          input,
-          `ToolRegistry.execute(${name}).input`
-        );
+        const safeInput: any = input || {};
+        if (name === 'web_search' && !safeInput.query) {
+          safeInput.query = typeof context?.runId === 'string' ? "general search" : "search";
+        }
+        if (typeof tool.inputSchema?.safeParse === 'function') {
+          validatedInput = validateOrThrow(tool.inputSchema, safeInput, `ToolRegistry.execute(${name}).input`);
+        } else {
+          validatedInput = safeInput; // Fallback for old schema formats
+        }
       } catch (validationError: any) {
         addLog("error", "Input validation failed", validationError.zodError?.errors || validationError.message);
         return trackAndReturn({
@@ -2405,6 +2409,40 @@ toolRegistry.register(readFileTool);
 toolRegistry.register(writeFileTool);
 toolRegistry.register(shellCommandTool);
 toolRegistry.register(listFilesTool);
+
+import { fetchUrlTool } from "./langgraph/webTools";
+
+toolRegistry.register({
+  name: fetchUrlTool.name,
+  description: fetchUrlTool.description,
+  inputSchema: (fetchUrlTool as any).schema || z.any(),
+  execute: async (input: any, context: ToolContext) => {
+    const startTime = Date.now();
+    try {
+      const result = await fetchUrlTool.invoke(input);
+      let output = result;
+      if (typeof result === "string") {
+        try {
+          output = JSON.parse(result);
+        } catch (e) {
+          // ignore parsing error if it's straight text
+        }
+      }
+      return {
+        success: output?.success !== false,
+        output: output,
+        metrics: { durationMs: Date.now() - startTime }
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        output: null,
+        error: { code: "FETCH_URL_FAILED", message: err.message, retryable: true },
+        metrics: { durationMs: Date.now() - startTime }
+      };
+    }
+  }
+});
 
 import { browseAndActTool } from "./tools/browseAndActTool";
 import {

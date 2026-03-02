@@ -501,98 +501,104 @@ export const AgentRunContent = memo(function AgentRunContent({
                         </div>
                     )}
 
-                    {/* Event timeline - Manus style with human-readable cards */}
+                    {/* Event timeline - Claude style with grouped human-readable cards */}
                     {mappedEvents.length > 0 && viewMode === "steps" && (
-                        <div className="relative" data-testid="agent-event-timeline">
-                            {hiddenEventsCount > 0 && !showAllEvents && (
-                                <button
-                                    onClick={() => setShowAllEvents(true)}
-                                    className="text-xs text-muted-foreground hover:text-foreground mb-2 flex items-center gap-1"
-                                    data-testid="button-show-all-events"
-                                >
-                                    <ChevronDown className="h-3 w-3" />
-                                    Ver {hiddenEventsCount} eventos anteriores
-                                </button>
-                            )}
-                            <div className="space-y-1.5 pl-3 border-l border-border/60">
-                                {visibleEvents.map((event, idx) => {
-                                    const isLast = idx === visibleEvents.length - 1;
-                                    const showDetails = hasPayloadDetails(event);
-                                    return (
-                                        <div
-                                            key={event.id}
-                                            className={cn(
-                                                "flex items-start gap-2 text-sm py-1.5 px-2 rounded-md transition-all",
-                                                isLast && isActive && "bg-muted/40 -ml-[8px] pl-[8px]"
-                                            )}
-                                            data-testid={`agent-event-${event.kind}-${event.status}`}
+                        <div className="relative mt-2" data-testid="agent-event-timeline">
+                            <Collapsible defaultOpen={true} className="w-full">
+                                <CollapsibleTrigger className="flex items-center gap-2 text-sm font-medium text-foreground hover:text-foreground/80 transition-colors py-2 w-full text-left group">
+                                    <div className="w-5 h-5 rounded flex items-center justify-center bg-muted/50 text-muted-foreground">
+                                        <List className="h-3.5 w-3.5" />
+                                    </div>
+                                    <span>Ejecutando tareas en paralelo</span>
+                                    <ChevronDown className="h-3.5 w-3.5 ml-1 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+                                </CollapsibleTrigger>
+                                <CollapsibleContent className="data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down overflow-hidden">
+                                    {hiddenEventsCount > 0 && !showAllEvents && (
+                                        <button
+                                            onClick={() => setShowAllEvents(true)}
+                                            className="text-xs text-muted-foreground hover:text-foreground mb-3 ml-7 flex items-center gap-1"
+                                            data-testid="button-show-all-events"
                                         >
-                                            <div className={cn(
-                                                "w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0",
-                                                event.ui.bgColor
-                                            )}>
-                                                {getEventIcon(event)}
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <div className="flex items-center gap-2 flex-wrap">
+                                            <ChevronDown className="h-3 w-3" />
+                                            Ver {hiddenEventsCount} eventos anteriores
+                                        </button>
+                                    )}
+                                    <div className="space-y-2.5 pl-7 ml-2.5 border-l-2 border-border/40 mt-2 pb-2">
+                                        {visibleEvents.map((event, idx) => {
+                                            const isLast = idx === visibleEvents.length - 1;
+                                            const showDetails = hasPayloadDetails(event);
+                                            const isShellCommand = event.payload?.toolName === 'shell_command' || event.payload?.tool === 'shell_command' || event.payload?.type === 'shell_command' || event.title?.toLowerCase().includes('comando');
 
-                                                    <span className={cn("text-xs font-semibold uppercase tracking-wide", event.ui.labelColor)}>
-                                                        {event.ui.label}
-                                                    </span>
-                                                    {event.status === 'ok' && event.kind !== 'action' && (
-                                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-600 dark:text-green-400 text-[10px] font-medium">
-                                                            ✓
-                                                        </span>
+                                            return (
+                                                <div
+                                                    key={event.id}
+                                                    className={cn(
+                                                        "flex items-start gap-3 text-sm py-1 transition-all",
+                                                        isLast && isActive && "opacity-100",
+                                                        !isLast && "opacity-80 hover:opacity-100"
                                                     )}
-                                                    {event.status === 'warn' && (
-                                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 text-[10px] font-medium">
-                                                            ⚠
-                                                        </span>
-                                                    )}
-                                                    {event.confidence !== undefined && (
-                                                        <span className="text-[10px] text-muted-foreground">
-                                                            {Math.round(event.confidence * 100)}%
-                                                        </span>
-                                                    )}
-                                                    {isLast && isActive && (
-                                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground text-[10px] font-medium">
-                                                            <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-pulse" />
-                                                            Activo
-                                                        </span>
-                                                    )}
-                                                </div>
-                                                <p className="text-foreground text-xs mt-0.5 break-words leading-relaxed font-medium">
-                                                    {event.title}
-                                                </p>
-                                                {event.summary && (
-                                                    <p className="text-muted-foreground text-xs mt-0.5 break-words leading-relaxed">
-                                                        {event.summary}
-                                                    </p>
-                                                )}
-                                                {showDetails && (
-                                                    <Collapsible className="mt-1">
-                                                        <CollapsibleTrigger className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1">
-                                                            <ChevronDown className="h-2.5 w-2.5" />
-                                                            Ver detalles
-                                                        </CollapsibleTrigger>
-                                                        <CollapsibleContent>
-                                                            <div className="mt-1">
-                                                                <JsonArgumentsViewer
-                                                                    args={event.payload}
-                                                                    title="Detalles del Evento"
-                                                                    defaultExpanded={true}
-                                                                    className="bg-muted/30 border-none"
-                                                                />
+                                                    data-testid={`agent-event-${event.kind}-${event.status}`}
+                                                >
+                                                    <div className={cn(
+                                                        "w-[18px] h-[18px] mt-0.5 flex items-center justify-center flex-shrink-0",
+                                                        event.ui.iconColor
+                                                    )}>
+                                                        {getEventIcon(event)}
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            <p className="text-foreground text-[13px] break-words leading-relaxed font-medium">
+                                                                {event.title}
+                                                            </p>
+                                                            {event.status === 'ok' && event.kind !== 'action' && (
+                                                                <ChevronDown className="h-3 w-3 text-muted-foreground/60" />
+                                                            )}
+                                                            {isLast && isActive && (
+                                                                <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
+                                                            )}
+                                                        </div>
+                                                        {event.summary && !isShellCommand && (
+                                                            <p className="text-muted-foreground text-xs mt-0.5 break-words leading-relaxed">
+                                                                {event.summary}
+                                                            </p>
+                                                        )}
+
+                                                        {/* Specialized blocks for Shell/Terminal output styled like the UI mockup */}
+                                                        {isShellCommand && event.payload?.command && (
+                                                            <div className="mt-2 text-xs">
+                                                                <span className="text-muted-foreground mb-1 block">Running command:</span>
+                                                                <div className="bg-[#F8F9FA] dark:bg-zinc-900 border border-border/40 rounded-md p-3 font-mono text-xs overflow-x-auto text-foreground/80">
+                                                                    {event.payload.command}
+                                                                </div>
                                                             </div>
-                                                        </CollapsibleContent>
-                                                    </Collapsible>
-                                                )}
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                                <div ref={eventsEndRef} />
-                            </div>
+                                                        )}
+
+                                                        {showDetails && !isShellCommand && (
+                                                            <Collapsible className="mt-1" defaultOpen={isLast && isActive}>
+                                                                <CollapsibleTrigger className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1 py-1">
+                                                                    <ChevronDown className="h-3 w-3" />
+                                                                    Detalles
+                                                                </CollapsibleTrigger>
+                                                                <CollapsibleContent>
+                                                                    <div className="mt-1.5">
+                                                                        <JsonArgumentsViewer
+                                                                            args={event.payload}
+                                                                            title=""
+                                                                            defaultExpanded={true}
+                                                                            className="bg-[#F8F9FA] dark:bg-zinc-900 border border-border/40 shadow-none rounded-md"
+                                                                        />
+                                                                    </div>
+                                                                </CollapsibleContent>
+                                                            </Collapsible>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                        <div ref={eventsEndRef} />
+                                    </div>
+                                </CollapsibleContent>
+                            </Collapsible>
                         </div>
                     )}
 

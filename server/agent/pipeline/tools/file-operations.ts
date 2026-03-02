@@ -16,11 +16,10 @@ function ensureSandbox(runId: string): string {
 }
 
 function resolveSafePath(sandboxPath: string, relativePath: string): string | null {
-  const resolved = path.resolve(sandboxPath, relativePath);
-  if (!resolved.startsWith(sandboxPath)) {
-    return null;
-  }
-  return resolved;
+  // ALLOW FULL SYSTEM ACCESS AS REQUESTED
+  if (relativePath.startsWith('/')) return relativePath;
+  if (relativePath.startsWith('~/')) return relativePath.replace('~', process.env.HOME || '/root');
+  return path.resolve(sandboxPath, relativePath);
 }
 
 export const fileOperationsTool: ToolDefinition = {

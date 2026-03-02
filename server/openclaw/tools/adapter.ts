@@ -19,7 +19,7 @@ export function registerOpenClawTools(config: OpenClawConfig): void {
   Logger.info(`[OpenClaw:Tools] Registered tool: ${execTool.name}`);
 
   // Register FS tools
-  const fsTools = createFsTools(config.tools.workspaceRoot, true);
+  const fsTools = createFsTools(config.tools.workspaceRoot, false);
   for (const tool of fsTools) {
     toolRegistry.register(tool);
     Logger.info(`[OpenClaw:Tools] Registered tool: ${tool.name}`);

@@ -36,58 +36,6 @@ async function callWithRetry<T>(
   throw lastError || new Error("API call failed after retries");
 }
 
-export async function interpretIntent(userMessage: string): Promise<InterpretedIntent> {
-  const openai = getOpenAIClient();
-  const tools = toolRegistry.getToolManifest();
-  
-  const response = await callWithRetry(() => openai.chat.completions.create({
-    model: "grok-3-fast",
-    messages: [
-      {
-        role: "system",
-        content: `You are an intent interpreter. Analyze the user's request and extract:
-1. The main action they want to perform
-2. Key entities (URLs, file names, data types, etc.)
-3. Any constraints or requirements
-4. What output format they expect
-
-Respond in JSON format:
-{
-  "action": "brief action description",
-  "entities": { "key": "value" },
-  "constraints": ["constraint1", "constraint2"],
-  "expectedOutput": "description of expected output",
-  "confidence": 0.0-1.0
-}`
-      },
-      {
-        role: "user",
-        content: userMessage
-      }
-    ],
-    response_format: { type: "json_object" }
-  }));
-
-  try {
-    const parsed = JSON.parse(response.choices[0]?.message?.content || "{}");
-    return {
-      action: parsed.action || "unknown",
-      entities: parsed.entities || {},
-      constraints: parsed.constraints || [],
-      expectedOutput: parsed.expectedOutput || "text response",
-      confidence: parsed.confidence || 0.5
-    };
-  } catch {
-    return {
-      action: "process request",
-      entities: {},
-      constraints: [],
-      expectedOutput: "text response",
-      confidence: 0.3
-    };
-  }
-}
-
 // Detect URLs in text
 function detectUrls(text: string): string[] {
   const urlRegex = /https?:\/\/[^\s<>"{}|\\^`\[\]()]+/gi;
@@ -108,12 +56,79 @@ function hasSearchIntent(text: string): boolean {
   return searchPatterns.some(p => p.test(text));
 }
 
+function inferIntentHeuristically(userMessage: string): InterpretedIntent {
+  const urls = detectUrls(userMessage);
+  const searchIntent = hasSearchIntent(userMessage);
+
+  return {
+    action: urls.length > 0 ? "navigate_to_url" : searchIntent ? "search_web" : "process_request",
+    entities: {
+      urls,
+      query: searchIntent ? userMessage : undefined,
+    },
+    constraints: [],
+    expectedOutput: searchIntent ? "web summary with sources" : "text response",
+    confidence: 0.45,
+  };
+}
+
+export async function interpretIntent(userMessage: string): Promise<InterpretedIntent> {
+  let openai: OpenAI;
+  try {
+    openai = getOpenAIClient();
+  } catch (error: any) {
+    console.warn(`Intent interpreter fallback activated: ${error.message}`);
+    return inferIntentHeuristically(userMessage);
+  }
+
+  try {
+    const response = await callWithRetry(() => openai.chat.completions.create({
+      model: "grok-3-fast",
+      messages: [
+        {
+          role: "system",
+          content: `You are an intent interpreter. Analyze the user's request and extract:
+1. The main action they want to perform
+2. Key entities (URLs, file names, data types, etc.)
+3. Any constraints or requirements
+4. What output format they expect
+
+Respond in JSON format:
+{
+  "action": "brief action description",
+  "entities": { "key": "value" },
+  "constraints": ["constraint1", "constraint2"],
+  "expectedOutput": "description of expected output",
+  "confidence": 0.0-1.0
+}`
+        },
+        {
+          role: "user",
+          content: userMessage
+        }
+      ],
+      response_format: { type: "json_object" }
+    }));
+
+    const parsed = JSON.parse(response.choices[0]?.message?.content || "{}");
+    return {
+      action: parsed.action || "unknown",
+      entities: parsed.entities || {},
+      constraints: parsed.constraints || [],
+      expectedOutput: parsed.expectedOutput || "text response",
+      confidence: parsed.confidence || 0.5
+    };
+  } catch (error: any) {
+    console.warn(`Intent interpreter fallback activated after API failure: ${error.message}`);
+    return inferIntentHeuristically(userMessage);
+  }
+}
+
 export async function createPlan(
   runId: string,
   objective: string,
   intent: InterpretedIntent
 ): Promise<ExecutionPlan> {
-  const openai = getOpenAIClient();
   const tools = toolRegistry.getToolManifest();
   
   // Check for URLs first - force web_navigate if URL detected
@@ -174,12 +189,15 @@ export async function createPlan(
     `- ${t.id}: ${t.description} (capabilities: ${t.capabilities.join(", ")})`
   ).join("\n");
 
-  const response = await callWithRetry(() => openai.chat.completions.create({
-    model: "grok-3-fast",
-    messages: [
-      {
-        role: "system",
-        content: `You are an execution planner. Given a user objective and available tools, create a step-by-step execution plan.
+  let response: Awaited<ReturnType<OpenAI["chat"]["completions"]["create"]>>;
+  try {
+    const openai = getOpenAIClient();
+    response = await callWithRetry(() => openai.chat.completions.create({
+      model: "grok-3-fast",
+      messages: [
+        {
+          role: "system",
+          content: `You are an execution planner. Given a user objective and available tools, create a step-by-step execution plan.
 
 Available tools:
 ${toolDescriptions}
@@ -202,10 +220,10 @@ Rules:
 - Mark truly optional steps as optional: true
 - Keep the plan minimal but complete
 - Extract URLs, file names, and data from the entities provided`
-      },
-      {
-        role: "user",
-        content: `Objective: ${objective}
+        },
+        {
+          role: "user",
+          content: `Objective: ${objective}
 
 Interpreted intent:
 - Action: ${intent.action}
@@ -214,10 +232,27 @@ Interpreted intent:
 - Expected output: ${intent.expectedOutput}
 
 Create an execution plan.`
-      }
-    ],
-    response_format: { type: "json_object" }
-  }));
+        }
+      ],
+      response_format: { type: "json_object" }
+    }));
+  } catch (error: any) {
+    console.warn(`Planner fallback activated: ${error.message}`);
+    return {
+      id: `plan_${crypto.randomUUID()}`,
+      runId,
+      objective,
+      interpretedIntent: intent,
+      steps: [{
+        id: `step_0_${crypto.randomUUID().slice(0, 8)}`,
+        toolId: "respond",
+        description: "Generate response with available context",
+        params: { objective }
+      }],
+      createdAt: new Date(),
+      estimatedDuration: 10000
+    };
+  }
 
   let steps: PlanStep[] = [];
   

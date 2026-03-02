@@ -53,7 +53,7 @@ No incluyas markdown, solo el JSON puro.
 
         try {
             const response = await this.llm.chat.completions.create({
-                model: "gpt-4o-mini",
+                model: "gemini-2.5-flash",
                 messages: [{ role: "system", content: prompt }],
                 temperature: 0.1
             });

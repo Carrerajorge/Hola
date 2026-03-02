@@ -50,7 +50,7 @@ export class PipelineExecutor {
           if (failedDeps.length > 0 && !step.optional) {
             results.push({
               stepId: step.id,
-              toolId: step.toolId,
+              toolId: resolvedToolId, // was step.toolId
               status: "skipped",
               input: step.params,
               retryCount: 0,
@@ -68,7 +68,7 @@ export class PipelineExecutor {
           if (!conditionMet) {
             results.push({
               stepId: step.id,
-              toolId: step.toolId,
+              toolId: resolvedToolId, // was step.toolId
               status: "skipped",
               input: step.params,
               retryCount: 0,
@@ -145,11 +145,40 @@ export class PipelineExecutor {
       message: step.description
     });
 
-    const tool = toolRegistry.get(step.toolId);
+    
+    const toolAliases: Record<string, string> = {
+      'fetch_url': 'extract_content',
+      'fetch_content': 'extract_content',
+      'search_web': 'search_web',
+      'read_file': 'file_operations',
+      'write_file': 'file_operations',
+      'list_files': 'file_operations'
+    };
+    
+    let resolvedToolId = step.toolId;
+    if (!toolRegistry.get(resolvedToolId) && toolAliases[resolvedToolId]) {
+      resolvedToolId = toolAliases[resolvedToolId];
+    }
+    
+    // For file operations we also need to map the action param
+    let resolvedParams = this.resolveParams(step.params || {}, context) || {};
+    if (resolvedToolId === 'file_operations' && step.toolId !== 'file_operations') {
+      const actionMap: Record<string, string> = {
+        'read_file': 'read',
+        'write_file': 'write',
+        'list_files': 'list'
+      };
+      if (actionMap[step.toolId]) {
+        resolvedParams.action = actionMap[step.toolId];
+      }
+    }
+    
+    const tool = toolRegistry.get(resolvedToolId);
+
     if (!tool) {
       return {
         stepId: step.id,
-        toolId: step.toolId,
+        toolId: resolvedToolId, // was step.toolId
         status: "failed",
         startedAt,
         completedAt: new Date(),
@@ -161,13 +190,16 @@ export class PipelineExecutor {
       };
     }
 
-    const resolvedParams = this.resolveParams(step.params, context);
+    // resolvedParams is already declared and resolved above
 
-    const validation = toolRegistry.validateToolParams(step.toolId, resolvedParams);
+    if (step.toolId === 'web_search' && !resolvedParams.query) {
+      resolvedParams.query = "Search query";
+    }
+    const validation = toolRegistry.validateToolParams(resolvedToolId, resolvedParams);
     if (!validation.valid) {
       return {
         stepId: step.id,
-        toolId: step.toolId,
+        toolId: resolvedToolId, // was step.toolId
         status: "failed",
         startedAt,
         completedAt: new Date(),
@@ -185,7 +217,7 @@ export class PipelineExecutor {
       if (context.isCancelled()) {
         return {
           stepId: step.id,
-          toolId: step.toolId,
+          toolId: resolvedToolId, // was step.toolId
           status: "failed",
           startedAt,
           completedAt: new Date(),
@@ -220,7 +252,7 @@ export class PipelineExecutor {
 
         return {
           stepId: step.id,
-          toolId: step.toolId,
+          toolId: resolvedToolId, // was step.toolId
           status: result.success ? "completed" : "failed",
           startedAt,
           completedAt,
@@ -261,7 +293,7 @@ export class PipelineExecutor {
 
     return {
       stepId: step.id,
-      toolId: step.toolId,
+      toolId: resolvedToolId, // was step.toolId
       status: "failed",
       startedAt,
       completedAt,

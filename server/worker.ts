@@ -26,11 +26,11 @@ createWorker<UploadJobData, any>(QUEUE_NAMES.UPLOAD, async (job) => {
         const { fileId, storagePath, mimeType, fileName } = job.data;
         const fs = await import("fs");
         const pathMod = await import("path");
-        const { storage } = await import("./db/storage");
-        const { ObjectStorageService } = await import("./services/objectStorageService");
-        const { processDocument } = await import("./services/documentProcessingService");
-        const { chunkText } = await import("./services/semanticChunking");
-        const { generateEmbeddingsBatch } = await import("./services/embeddingsService");
+        const { storage } = await import("./storage");
+        const { ObjectStorageService } = await import("./objectStorage");
+        const { processDocument } = await import("./services/documentProcessing");
+        const { chunkText } = await import("./services/semanticChunker");
+        const { generateEmbeddingsBatch } = await import("./services/embeddings");
 
         await storage.updateFileStatus(fileId, "processing");
 
@@ -149,7 +149,7 @@ createWorker<UploadJobData, any>(QUEUE_NAMES.UPLOAD, async (job) => {
     } catch (error: any) {
         Logger.error(`[UploadJob:${job.id}] Failed: ${error.message}`);
         try {
-            const { storage } = await import("./db/storage");
+            const { storage } = await import("./storage");
             await storage.updateFileStatus(job.data.fileId, "error");
         } catch (updateError: any) {
             Logger.error(`[UploadJob:${job.id}] Could not set file status to error: ${updateError.message}`);

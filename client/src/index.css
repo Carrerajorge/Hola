@@ -162,8 +162,8 @@
 
 .futuristic-sidebar {
   background: hsl(var(--sidebar-glass-bg));
-  backdrop-filter: blur(24px) saturate(1.4);
   -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  backdrop-filter: blur(24px) saturate(1.4);
   border-right: 1px solid hsl(var(--sidebar-glass-border));
   box-shadow:
     4px 0 32px -8px hsl(var(--sidebar-cyan-glow)),
@@ -297,8 +297,8 @@
       hsl(var(--sidebar-cyan) / 0.6) 50%,
       transparent 60%);
   mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  mask-composite: exclude;
   -webkit-mask-composite: xor;
+  mask-composite: exclude;
   animation: rotate-border 4s linear infinite;
 }
 

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import fs from 'fs/promises';
 import path from 'path';
+import os from 'os';
 import type { ToolDefinition, ToolContext, ToolResult } from '../../agent/toolRegistry';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -10,6 +11,11 @@ function resolveAndCheck(
   workspaceRoot: string,
   workspaceOnly: boolean,
 ): { resolved: string; allowed: boolean } {
+  // Normalize tilde to user home directory
+  if (filepath.startsWith('~')) {
+    filepath = path.join(os.homedir(), filepath.slice(1));
+  }
+
   const resolved = path.isAbsolute(filepath)
     ? filepath
     : path.resolve(workspaceRoot, filepath);

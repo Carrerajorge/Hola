@@ -198,9 +198,15 @@ export function CreateProjectModal({
                                         type="button"
                                         className={cn(
                                             "h-9 w-9 rounded-full transition-all duration-300 ring-2 ring-offset-2 flex items-center justify-center shadow-sm",
-                                            selectedColor === color ? "ring-[#A5A0FF] scale-110" : "ring-transparent hover:scale-105"
+                                            selectedColor === color ? "ring-[#A5A0FF] scale-110" : "ring-transparent hover:scale-105",
+                                            color === "#3b82f6" ? "bg-blue-500" :
+                                                color === "#22c55e" ? "bg-green-500" :
+                                                    color === "#a855f7" ? "bg-purple-500" :
+                                                        color === "#f97316" ? "bg-orange-500" :
+                                                            color === "#ef4444" ? "bg-red-500" :
+                                                                color === "#ec4899" ? "bg-pink-500" :
+                                                                    color === "#14b8a6" ? "bg-teal-500" : "bg-amber-500"
                                         )}
-                                        style={{ backgroundColor: color }}
                                         onClick={() => setSelectedColor(color)}
                                         data-testid={`color-${color}`}
                                     >
@@ -217,6 +223,9 @@ export function CreateProjectModal({
                                 ref={imageInputRef}
                                 type="file"
                                 accept="image/*"
+                                title="Upload background image"
+                                aria-label="Upload background image"
+                                placeholder="Upload background image"
                                 className="hidden"
                                 onChange={handleBackgroundUpload}
                                 data-testid="input-background-image"
@@ -324,6 +333,9 @@ export function CreateProjectModal({
                                     ref={fileInputRef}
                                     type="file"
                                     multiple
+                                    title="Upload project files"
+                                    aria-label="Upload project files"
+                                    placeholder="Upload project files"
                                     className="hidden"
                                     onChange={handleFileUpload}
                                     data-testid="input-upload-files"
