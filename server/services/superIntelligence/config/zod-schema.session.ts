@@ -11,7 +11,8 @@ import {
   TypingModeSchema,
   TtsConfigSchema,
 } from "./zod-schema.core.js";
-import { sensitive } from "./zod-schema.sensitive.js";
+
+import { registerSensitive } from "./zod-schema.sensitive.js";
 
 const SessionResetConfigSchema = z
   .object({
@@ -201,7 +202,7 @@ export const CommandsSchema = z
     useAccessGroups: z.boolean().optional(),
     ownerAllowFrom: z.array(z.union([z.string(), z.number()])).optional(),
     ownerDisplay: z.enum(["raw", "hash"]).optional().default("raw"),
-    ownerDisplaySecret: z.string().optional().register(sensitive),
+    ownerDisplaySecret: registerSensitive("session.commands.ownerDisplaySecret", z.string().optional()),
     allowFrom: ElevatedAllowFromSchema.optional(),
   })
   .strict()

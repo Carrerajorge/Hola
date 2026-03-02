@@ -1,11 +1,5 @@
-import { z } from "zod";
-import { isSafeScpRemoteHost } from "../infra/scp-host.js";
-import { isValidInboundPathRootPattern } from "../media/inbound-path-policy.js";
-import {
-  resolveDiscordPreviewStreamMode,
-  resolveSlackNativeStreaming,
-  resolveSlackStreamingMode,
-  resolveTelegramPreviewStreamMode,
+import { z } from "zod"; import { isSafeScpRemoteHost } from "../infra/scp-host.js"; import { isValidInboundPathRootPattern } from "../media/inbound-path-policy.js"; import { 
+  resolveDiscordPreviewStreamMode, resolveSlackNativeStreaming, resolveSlackStreamingMode, resolveTelegramPreviewStreamMode,
 } from "./discord-preview-streaming.js";
 import {
   normalizeTelegramCommandDescription,
@@ -30,8 +24,8 @@ import {
   TtsConfigSchema,
   requireOpenAllowFrom,
 } from "./zod-schema.core.js";
-import { sensitive } from "./zod-schema.sensitive.js";
 
+import { registerSensitive } from "./zod-schema.sensitive.js";
 const ToolPolicyBySenderSchema = z.record(z.string(), ToolPolicySchema).optional();
 
 const DiscordIdSchema = z
@@ -135,7 +129,7 @@ export const TelegramAccountSchemaBase = z
     customCommands: z.array(TelegramCustomCommandSchema).optional(),
     configWrites: z.boolean().optional(),
     dmPolicy: DmPolicySchema.optional().default("pairing"),
-    botToken: z.string().optional().register(sensitive),
+    botToken: registerSensitive("providers.telegram.botToken", z.string().optional()),
     tokenFile: z.string().optional(),
     replyToMode: ReplyToModeSchema.optional(),
     groups: z.record(z.string(), TelegramGroupSchema.optional()).optional(),
@@ -166,7 +160,7 @@ export const TelegramAccountSchemaBase = z
       .optional(),
     proxy: z.string().optional(),
     webhookUrl: z.string().optional(),
-    webhookSecret: z.string().optional().register(sensitive),
+    webhookSecret: registerSensitive("providers.telegram.webhookSecret", z.string().optional()),
     webhookPath: z.string().optional(),
     webhookHost: z.string().optional(),
     webhookPort: z.number().int().positive().optional(),
@@ -322,7 +316,7 @@ const DiscordVoiceSchema = z
   .strict()
   .optional();
 
-export const DiscordAccountSchema = z
+export const DiscordAccountSchemaBase = z
   .object({
     name: z.string().optional(),
     capabilities: z.array(z.string()).optional(),
@@ -330,7 +324,7 @@ export const DiscordAccountSchema = z
     enabled: z.boolean().optional(),
     commands: ProviderCommandsSchema,
     configWrites: z.boolean().optional(),
-    token: z.string().optional().register(sensitive),
+    token: registerSensitive("providers.discord.token", z.string().optional()),
     proxy: z.string().optional(),
     allowBots: z.boolean().optional(),
     dangerouslyAllowNameMatching: z.boolean().optional(),
@@ -419,7 +413,7 @@ export const DiscordAccountSchema = z
     pluralkit: z
       .object({
         enabled: z.boolean().optional(),
-        token: z.string().optional().register(sensitive),
+        token: registerSensitive("providers.discord.pluralkit.token", z.string().optional()),
       })
       .strict()
       .optional(),
@@ -432,55 +426,56 @@ export const DiscordAccountSchema = z
       .optional(),
     activityUrl: z.string().url().optional(),
   })
-  .strict()
-  .superRefine((value, ctx) => {
-    normalizeDiscordStreamingConfig(value);
+  .strict();
 
-    const activityText = typeof value.activity === "string" ? value.activity.trim() : "";
-    const hasActivity = Boolean(activityText);
-    const hasActivityType = value.activityType !== undefined;
-    const activityUrl = typeof value.activityUrl === "string" ? value.activityUrl.trim() : "";
-    const hasActivityUrl = Boolean(activityUrl);
+export const DiscordAccountSchema = DiscordAccountSchemaBase.superRefine((value, ctx) => {
+  normalizeDiscordStreamingConfig(value);
 
-    if ((hasActivityType || hasActivityUrl) && !hasActivity) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "channels.discord.activity is required when activityType or activityUrl is set",
-        path: ["activity"],
-      });
-    }
+  const activityText = typeof value.activity === "string" ? value.activity.trim() : "";
+  const hasActivity = Boolean(activityText);
+  const hasActivityType = value.activityType !== undefined;
+  const activityUrl = typeof value.activityUrl === "string" ? value.activityUrl.trim() : "";
+  const hasActivityUrl = Boolean(activityUrl);
 
-    if (value.activityType === 1 && !hasActivityUrl) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "channels.discord.activityUrl is required when activityType is 1 (Streaming)",
-        path: ["activityUrl"],
-      });
-    }
-
-    if (hasActivityUrl && value.activityType !== 1) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "channels.discord.activityType must be 1 (Streaming) when activityUrl is set",
-        path: ["activityType"],
-      });
-    }
-
-    const dmPolicy = value.dmPolicy ?? value.dm?.policy ?? "pairing";
-    const allowFrom = value.allowFrom ?? value.dm?.allowFrom;
-    const allowFromPath =
-      value.allowFrom !== undefined ? (["allowFrom"] as const) : (["dm", "allowFrom"] as const);
-    requireOpenAllowFrom({
-      policy: dmPolicy,
-      allowFrom,
-      ctx,
-      path: [...allowFromPath],
-      message:
-        'channels.discord.dmPolicy="open" requires channels.discord.allowFrom (or channels.discord.dm.allowFrom) to include "*"',
+  if ((hasActivityType || hasActivityUrl) && !hasActivity) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "channels.discord.activity is required when activityType or activityUrl is set",
+      path: ["activity"],
     });
-  });
+  }
 
-export const DiscordConfigSchema = DiscordAccountSchema.extend({
+  if (value.activityType === 1 && !hasActivityUrl) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "channels.discord.activityUrl is required when activityType is 1 (Streaming)",
+      path: ["activityUrl"],
+    });
+  }
+
+  if (hasActivityUrl && value.activityType !== 1) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "channels.discord.activityType must be 1 (Streaming) when activityUrl is set",
+      path: ["activityType"],
+    });
+  }
+
+  const dmPolicy = value.dmPolicy ?? value.dm?.policy ?? "pairing";
+  const allowFrom = value.allowFrom ?? value.dm?.allowFrom;
+  const allowFromPath =
+    value.allowFrom !== undefined ? (["allowFrom"] as const) : (["dm", "allowFrom"] as const);
+  requireOpenAllowFrom({
+    policy: dmPolicy,
+    allowFrom,
+    ctx,
+    path: [...allowFromPath],
+    message:
+      'channels.discord.dmPolicy="open" requires channels.discord.allowFrom (or channels.discord.dm.allowFrom) to include "*"',
+  });
+});
+
+export const DiscordConfigSchema = DiscordAccountSchemaBase.extend({
   accounts: z.record(z.string(), DiscordAccountSchema.optional()).optional(),
 });
 
@@ -600,20 +595,20 @@ const SlackReplyToModeByChatTypeSchema = z
   })
   .strict();
 
-export const SlackAccountSchema = z
+export const SlackAccountSchemaBase = z
   .object({
     name: z.string().optional(),
     mode: z.enum(["socket", "http"]).optional(),
-    signingSecret: z.string().optional().register(sensitive),
+    signingSecret: registerSensitive("providers.slack.signingSecret", z.string().optional()),
     webhookPath: z.string().optional(),
     capabilities: z.array(z.string()).optional(),
     markdown: MarkdownConfigSchema,
     enabled: z.boolean().optional(),
     commands: ProviderCommandsSchema,
     configWrites: z.boolean().optional(),
-    botToken: z.string().optional().register(sensitive),
-    appToken: z.string().optional().register(sensitive),
-    userToken: z.string().optional().register(sensitive),
+    botToken: registerSensitive("providers.slack.botToken", z.string().optional()),
+    appToken: registerSensitive("providers.slack.appToken", z.string().optional()),
+    userToken: registerSensitive("providers.slack.userToken", z.string().optional()),
     userTokenReadOnly: z.boolean().optional().default(true),
     allowBots: z.boolean().optional(),
     dangerouslyAllowNameMatching: z.boolean().optional(),
@@ -668,8 +663,9 @@ export const SlackAccountSchema = z
     responsePrefix: z.string().optional(),
     ackReaction: z.string().optional(),
   })
-  .strict()
-  .superRefine((value, ctx) => {
+  .strict();
+
+export const SlackAccountSchema = SlackAccountSchemaBase.superRefine((value, ctx) => {
     normalizeSlackStreamingConfig(value);
 
     const dmPolicy = value.dmPolicy ?? value.dm?.policy ?? "pairing";
@@ -686,9 +682,9 @@ export const SlackAccountSchema = z
     });
   });
 
-export const SlackConfigSchema = SlackAccountSchema.safeExtend({
+export const SlackConfigSchema = SlackAccountSchemaBase.extend({
   mode: z.enum(["socket", "http"]).optional().default("socket"),
-  signingSecret: z.string().optional().register(sensitive),
+  signingSecret: registerSensitive("providers.slack.signingSecret.2", z.string().optional()),
   webhookPath: z.string().optional().default("/slack/events"),
   groupPolicy: GroupPolicySchema.optional().default("allowlist"),
   accounts: z.record(z.string(), SlackAccountSchema.optional()).optional(),
@@ -810,7 +806,7 @@ export const IrcNickServSchema = z
   .object({
     enabled: z.boolean().optional(),
     service: z.string().optional(),
-    password: z.string().optional().register(sensitive),
+    password: registerSensitive("providers.email.password.1", z.string().optional()),
     passwordFile: z.string().optional(),
     register: z.boolean().optional(),
     registerEmail: z.string().optional(),
@@ -830,7 +826,7 @@ export const IrcAccountSchemaBase = z
     nick: z.string().optional(),
     username: z.string().optional(),
     realname: z.string().optional(),
-    password: z.string().optional().register(sensitive),
+    password: registerSensitive("providers.email.password.2", z.string().optional()),
     passwordFile: z.string().optional(),
     nickserv: IrcNickServSchema.optional(),
     channels: z.array(z.string()).optional(),
@@ -995,7 +991,7 @@ export const BlueBubblesAccountSchemaBase = z
     configWrites: z.boolean().optional(),
     enabled: z.boolean().optional(),
     serverUrl: z.string().optional(),
-    password: z.string().optional().register(sensitive),
+    password: registerSensitive("providers.email.password.3", z.string().optional()),
     webhookPath: z.string().optional(),
     dmPolicy: DmPolicySchema.optional().default("pairing"),
     allowFrom: z.array(BlueBubblesAllowFromEntry).optional(),
@@ -1068,7 +1064,7 @@ export const MSTeamsConfigSchema = z
     markdown: MarkdownConfigSchema,
     configWrites: z.boolean().optional(),
     appId: z.string().optional(),
-    appPassword: z.string().optional().register(sensitive),
+    appPassword: registerSensitive("providers.imessage.appPassword", z.string().optional()),
     tenantId: z.string().optional(),
     webhook: z
       .object({

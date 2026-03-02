@@ -1,3 +1,4 @@
+
 import { z } from "zod";
 import { getBlockedNetworkModeReason } from "../agents/sandbox/network-mode.js";
 import { parseDurationMs } from "../cli/parse-duration.js";
@@ -9,7 +10,8 @@ import {
   ToolsLinksSchema,
   ToolsMediaSchema,
 } from "./zod-schema.core.js";
-import { sensitive } from "./zod-schema.sensitive.js";
+import { sensitive, registerSensitive } from "./zod-schema.sensitive.js";
+import { registerSensitive } from "./zod-schema.sensitive.js";
 
 export const HeartbeatSchema = z
   .object({
@@ -215,6 +217,7 @@ export const SandboxBrowserSchema = z
     autoStartTimeoutMs: z.number().int().positive().optional(),
     binds: z.array(z.string()).optional(),
   })
+  .strict()
   .superRefine((data, ctx) => {
     if (data.network?.trim().toLowerCase() === "host") {
       ctx.addIssue({
@@ -225,7 +228,6 @@ export const SandboxBrowserSchema = z
       });
     }
   })
-  .strict()
   .optional();
 
 export const SandboxPruneSchema = z
@@ -266,13 +268,13 @@ export const ToolsWebSearchSchema = z
         z.literal("kimi"),
       ])
       .optional(),
-    apiKey: z.string().optional().register(sensitive),
+    apiKey: registerSensitive("tools.webSearch.apiKey", z.string().optional()),
     maxResults: z.number().int().positive().optional(),
     timeoutSeconds: z.number().int().positive().optional(),
     cacheTtlMinutes: z.number().nonnegative().optional(),
     perplexity: z
       .object({
-        apiKey: z.string().optional().register(sensitive),
+        apiKey: registerSensitive("tools.webSearch.perplexity.apiKey", z.string().optional()),
         baseUrl: z.string().optional(),
         model: z.string().optional(),
       })
@@ -280,7 +282,7 @@ export const ToolsWebSearchSchema = z
       .optional(),
     grok: z
       .object({
-        apiKey: z.string().optional().register(sensitive),
+        apiKey: registerSensitive("tools.webSearch.grok.apiKey", z.string().optional()),
         model: z.string().optional(),
         inlineCitations: z.boolean().optional(),
       })
@@ -288,14 +290,14 @@ export const ToolsWebSearchSchema = z
       .optional(),
     gemini: z
       .object({
-        apiKey: z.string().optional().register(sensitive),
+        apiKey: registerSensitive("tools.webSearch.gemini.apiKey", z.string().optional()),
         model: z.string().optional(),
       })
       .strict()
       .optional(),
     kimi: z
       .object({
-        apiKey: z.string().optional().register(sensitive),
+        apiKey: registerSensitive("tools.webSearch.kimi.apiKey", z.string().optional()),
         baseUrl: z.string().optional(),
         model: z.string().optional(),
       })
@@ -558,7 +560,7 @@ export const MemorySearchSchema = z
     remote: z
       .object({
         baseUrl: z.string().optional(),
-        apiKey: z.string().optional().register(sensitive),
+        apiKey: registerSensitive("tools.memorySearch.remote.apiKey", z.string().optional()),
         headers: z.record(z.string(), z.string()).optional(),
         batch: z
           .object({

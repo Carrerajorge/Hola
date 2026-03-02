@@ -1,12 +1,4 @@
-{
-  "name": "iliagpt",
-  "version": "2.1.0",
-  "description": "Plataforma de IA Autónoma Desktop V2",
-  "author": "ILIA",
-  "main": "dist-desktop/main.js",
-  "type": "module",
-  "license": "MIT",
-  "scripts": {
+{ "name": "iliagpt", "version": "2.1.0", "description": "Plataforma de IA Autónoma Desktop V2", "author": "ILIA", "main": "dist-desktop/main.js", "type": "module", "license": "MIT", "scripts": {
     "lint": "eslint server client shared tests scripts",
     "daemon": "node --import tsx server/daemon/desktopDaemon.ts",
     "dev:client": "vite dev --port 5050",
@@ -60,6 +52,9 @@
     "build:desktop:all": "npm run build && tsc -p desktop/tsconfig.json && npx electron-builder --mac --win --linux"
   },
   "dependencies": {
+    "@slack/bolt": "^4.6.0",
+    "@slack/web-api": "^7.14.1",
+    "discord.js": "^14.25.1",
     "@aarkue/tiptap-math-extension": "^1.4.0",
     "@anthropic-ai/sdk": "^0.74.0",
     "@aws-sdk/client-bedrock": "^3.1000.0",

@@ -1,9 +1,27 @@
-import { z } from "zod";
-import { createSubsystemLogger } from "../logging/subsystem.js";
-import { FIELD_HELP } from "./schema.help.js";
-import { FIELD_LABELS } from "./schema.labels.js";
-import { applyDerivedTags } from "./schema.tags.js";
-import { sensitive } from "./zod-schema.sensitive.js";
+import { z } from "zod"; import { createSubsystemLogger } from "../logging/subsystem.js"; import { FIELD_HELP } from "./schema.help.js"; import { FIELD_LABELS } from "./schema.labels.js"; import { 
+applyDerivedTags } from "./schema.tags.js"; import { iterSensitiveSchemas } from "./zod-schema.sensitive.js"; function unwrapAll(schema: z.ZodType): z.ZodType {
+  let current = schema;
+  while (isUnwrappable(current)) {
+    current = current.unwrap();
+  }
+  return current;
+}
+
+const SENSITIVE_BASE_SCHEMAS = new WeakSet<z.ZodType>();
+
+function isSensitiveSchema(schema: z.ZodType): boolean {
+  const base = unwrapAll(schema);
+  if (SENSITIVE_BASE_SCHEMAS.has(base)) return true;
+
+  for (const registered of iterSensitiveSchemas()) {
+    const registeredBase = unwrapAll(registered);
+    if (registeredBase === base) {
+      SENSITIVE_BASE_SCHEMAS.add(base);
+      return true;
+    }
+  }
+  return false;
+}
 
 const log = createSubsystemLogger("config/schema");
 
@@ -190,19 +208,45 @@ export function mapSensitivePaths(
 ): ConfigUiHints {
   let next = { ...hints };
   let currentSchema = schema;
-  let isSensitive = sensitive.has(currentSchema);
+  let isSensitive = isSensitiveSchema(currentSchema);
+
+  // Unwrap wrappers that don't expose `.unwrap()`
+  while (currentSchema instanceof z.ZodDefault) {
+    currentSchema = currentSchema._def.innerType as z.ZodType;
+    isSensitive ||= isSensitiveSchema(currentSchema);
+  }
+
+  while (currentSchema instanceof z.ZodCatch) {
+    currentSchema = currentSchema._def.innerType as z.ZodType;
+    isSensitive ||= isSensitiveSchema(currentSchema);
+  }
+
+  if (currentSchema instanceof z.ZodLazy) {
+    currentSchema = currentSchema._def.getter() as z.ZodType;
+    isSensitive ||= isSensitiveSchema(currentSchema);
+  }
+
+  if (currentSchema instanceof z.ZodEffects) {
+    const inner = currentSchema._def.schema as z.ZodType;
+    return mapSensitivePaths(inner, path, next);
+  }
 
   while (isUnwrappable(currentSchema)) {
     currentSchema = currentSchema.unwrap();
-    isSensitive ||= sensitive.has(currentSchema);
+    isSensitive ||= isSensitiveSchema(currentSchema);
   }
 
-  if (isSensitive) {
+  if (isSensitive || isSensitiveConfigPath(path)) {
     next[path] = { ...next[path], sensitive: true };
-  } else if (isSensitiveConfigPath(path) && !next[path]?.sensitive) {
-    log.warn(`possibly sensitive key found: (${path})`);
   }
-
+ 
+  if (currentSchema instanceof z.ZodEffects) {
+    // ZodEffects wraps another schema (refine/superRefine/transform/preprocess).
+    // We need to recurse into the inner schema so we don't lose nested paths.
+    const inner = currentSchema._def.schema as z.ZodType;
+    return mapSensitivePaths(inner, path, next);
+  }
+  
   if (currentSchema instanceof z.ZodObject) {
     const shape = currentSchema.shape;
     for (const key in shape) {

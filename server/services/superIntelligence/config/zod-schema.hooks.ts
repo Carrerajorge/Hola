@@ -1,9 +1,5 @@
-import path from "node:path";
-import { z } from "zod";
-import { InstallRecordShape } from "./zod-schema.installs.js";
-import { sensitive } from "./zod-schema.sensitive.js";
-
-function isSafeRelativeModulePath(raw: string): boolean {
+import path from "node:path"; import { z } from "zod"; import { InstallRecordShape } from "./zod-schema.installs.js"; import { registerSensitive } from "./zod-schema.sensitive.js"; function 
+isSafeRelativeModulePath(raw: string): boolean {
   const value = raw.trim();
   if (!value) {
     return false;
@@ -44,7 +40,7 @@ export const HookMappingSchema = z
     wakeMode: z.union([z.literal("now"), z.literal("next-heartbeat")]).optional(),
     name: z.string().optional(),
     agentId: z.string().optional(),
-    sessionKey: z.string().optional().register(sensitive),
+    sessionKey: registerSensitive("hooks.sessionKey", z.string().optional()),
     messageTemplate: z.string().optional(),
     textTemplate: z.string().optional(),
     deliver: z.boolean().optional(),
@@ -124,7 +120,7 @@ export const HooksGmailSchema = z
     label: z.string().optional(),
     topic: z.string().optional(),
     subscription: z.string().optional(),
-    pushToken: z.string().optional().register(sensitive),
+    pushToken: registerSensitive("hooks.pushToken", z.string().optional()),
     hookUrl: z.string().optional(),
     includeBody: z.boolean().optional(),
     maxBytes: z.number().int().positive().optional(),
