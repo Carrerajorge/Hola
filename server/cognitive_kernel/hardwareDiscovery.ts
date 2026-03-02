@@ -1,5 +1,6 @@
 import os from 'os';
 import { execSync } from 'child_process';
+import { fileURLToPath } from 'url';
 
 export interface HardwareProfile {
     cpu: {
@@ -85,7 +86,7 @@ export function discoverHardware(): HardwareProfile {
     return profile;
 }
 
-if (require.main === module) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.log('--- Hardware Discovery ---');
     console.log(JSON.stringify(discoverHardware(), null, 2));
 }

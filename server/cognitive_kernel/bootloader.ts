@@ -1,4 +1,10 @@
+import { fileURLToPath } from 'url';
 import { discoverHardware, HardwareProfile } from './hardwareDiscovery';
+import { globalBroker } from './messageBroker.js';
+import { globalThreadPool, globalProcessPool } from './executionPools.js';
+import { globalModelManager } from './modelWarmup.js';
+import { initializeKnowledgeGraph } from './knowledgeGraphInit.js';
+import { spawnPerceptionDaemons } from './perceptionDaemons.js';
 
 export class CognitiveKernelBootloader {
     private hwProfile: HardwareProfile | null = null;
@@ -30,27 +36,26 @@ export class CognitiveKernelBootloader {
     private async phase2_InitializeEventLoopAndBrokers() {
         this.currentPhase = 2;
         console.log(`[Phase ${this.currentPhase}] Initializing Event Loop, ZeroMQ ROUTER/DEALER, Redis Streams, Thread/Process Pools...`);
-        // TODO: Init ZMQ sockets
-        // TODO: Init Redis Streams
-        // TODO: Init Piscina or Node worker_threads pool
+        await globalBroker.initialize(5555, 5556);
+        console.log(`[Phase ${this.currentPhase}] Pools ready -> maxThreads: ${globalThreadPool.maxSize}, process pool initialized: ${!!globalProcessPool}`);
     }
 
     private async phase3_WarmUpModels() {
         this.currentPhase = 3;
         console.log(`[Phase ${this.currentPhase}] Warming up Embedded Models (BGE-M3, CLIP, CodeBERT, Whisper) in VRAM...`);
-        // TODO: Pre-load models to MLComputeUnits.all
+        await globalModelManager.warmupAll();
     }
 
     private async phase4_InitializeKnowledgeGraph() {
         this.currentPhase = 4;
         console.log(`[Phase ${this.currentPhase}] Initializing Knowledge Graph on RocksDB with FAISS HNSW M=48...`);
-        // TODO: Initialize graph DB and FAISS
+        await initializeKnowledgeGraph();
     }
 
     private async phase5_SpawnPerceptionDaemons() {
         this.currentPhase = 5;
         console.log(`[Phase ${this.currentPhase}] Spawning supervised Perception Daemons (Screen, Input, FS, Network, Process)...`);
-        // TODO: Spawn independent worker threads for each perception channel
+        await spawnPerceptionDaemons();
     }
 
     private async phase6_BootstrapToolRegistryAndMemory() {
@@ -66,9 +71,12 @@ export class CognitiveKernelBootloader {
     }
 }
 
-if (require.main === module) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const bootloader = new CognitiveKernelBootloader();
-    bootloader.boot().catch(err => {
+    bootloader.boot().then(() => {
+        console.log('[Test] Boot sequence passed.');
+        process.exit(0);
+    }).catch(err => {
         console.error('[CognitiveKernel] FATAL BOOT EXCEPTION:', err);
         process.exit(1);
     });

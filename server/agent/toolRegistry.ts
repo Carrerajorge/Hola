@@ -2376,27 +2376,18 @@ const listFilesTool: ToolDefinition = {
   },
 };
 
-import { initializeClawiSkills } from "../openclaw/skills/clawiSkillAdapter";
-import { createAgenticTools } from "../openclaw/tools/agenticTools";
-import { createClawiRuntimeTools } from "../openclaw/tools/clawiRuntimeTools";
+// import { initializeClawiSkills } from "../openclaw/skills/clawiSkillAdapter";
+// import { createAgenticTools } from "../openclaw/tools/agenticTools";
+// import { createClawiRuntimeTools } from "../openclaw/tools/clawiRuntimeTools";
 import { spawnSubagentTool } from "./tools/spawn_subagent";
 import { memorySearchTool } from "./tools/memory_search";
 
-initializeClawiSkills().catch(e => console.error("Failed to init Clawi skills", e));
+// initializeClawiSkills().catch(e => console.error("Failed to init Clawi skills", e));
 
 export const toolRegistry = new ToolRegistry();
 toolRegistry.register(spawnSubagentTool);
 toolRegistry.register(memorySearchTool);
-for (const tool of createAgenticTools()) {
-  if (!toolRegistry.get(tool.name)) {
-    toolRegistry.register(tool);
-  }
-}
-for (const tool of createClawiRuntimeTools()) {
-  if (!toolRegistry.get(tool.name)) {
-    toolRegistry.register(tool);
-  }
-}
+
 
 
 
