@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import type { Chat, Message } from "@grammyjs/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { escapeRegExp, formatEnvelopeTimestamp } from "../../test/helpers/envelope-timestamp.js";
+import { escapeRegExp, formatEnvelopeTimestamp } from "../../../openclaw/test/helpers/envelope-timestamp";
 import { withEnvAsync } from "../test-utils/env.js";
 import {
   answerCallbackQuerySpy,
