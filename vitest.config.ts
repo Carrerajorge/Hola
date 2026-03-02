@@ -12,12 +12,16 @@ export default defineConfig({
     include: ["tests/**/*.test.ts", "server/**/*.test.ts"],
     exclude: [
       "server/openclaw/**",
+      "**/*.integration.test.ts",
+      "**/*.integration.spec.ts",
       "dist/**",
       "node_modules/**",
       "Hola/**",
       "Hola_wt_*/**",
       ".claude/**",
       ".codex/**",
+      "**/*.e2e.test.ts",
+      "**/*.e2e.spec.ts",
     ],
     setupFiles: ["./tests/setup.ts"],
     coverage: {
