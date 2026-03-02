@@ -188,6 +188,8 @@ export function FileDropZone({
                 className="hidden"
                 accept={acceptedTypes.join(',')}
                 onChange={handleFileInputChange}
+                aria-label="Seleccionar archivos"
+                title="Seleccionar archivos"
             />
 
             {/* Main content */}
@@ -310,6 +312,8 @@ export function FileUploadButton({
                 className="hidden"
                 accept={acceptedTypes.join(',')}
                 onChange={handleChange}
+                aria-label="Subir archivo"
+                title="Subir archivo"
             />
             <Button
                 variant="ghost"
