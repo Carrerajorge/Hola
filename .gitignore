@@ -127,3 +127,6 @@ monitoring/alertmanager/secrets/
 *.log
 node_modules
 node_modules
+
+.claude/
+external/agent_ecosystem/
