@@ -431,11 +431,10 @@ const TOOL_ICONS: Record<string, React.ElementType> = {
   webdev_scaffold: Code,
 };
 
-const TOOL_ICON_BY_NAME: Record<string, React.ComponentType<{ className?: string }>> = TOOL_ICONS as any;
 
 function resolveToolIcon(toolName: string | null | undefined): React.ComponentType<{ className?: string }> {
   const key = String(toolName || "").trim();
-  return TOOL_ICON_BY_NAME[key] ?? Wrench;
+  return ((TOOL_ICONS as any)[key] ?? Wrench) as any;
 }
 
 function getToolDisplayName(toolName: string): string {
