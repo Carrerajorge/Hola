@@ -8,7 +8,7 @@ import { HexColorSchema, ModelsConfigSchema } from "./zod-schema.core.js";
 import { HookMappingSchema, HooksGmailSchema, InternalHooksSchema } from "./zod-schema.hooks.js";
 import { InstallRecordShape } from "./zod-schema.installs.js";
 import { ChannelsSchema } from "./zod-schema.providers.js";
-import { sensitive } from "./zod-schema.sensitive.js";
+import { registerSensitive } from "./zod-schema.sensitive.js";
 import {
   CommandsSchema,
   MessagesSchema,
@@ -339,7 +339,7 @@ export const OpenClawSchema = z
         store: z.string().optional(),
         maxConcurrentRuns: z.number().int().positive().optional(),
         webhook: HttpUrlSchema.optional(),
-        webhookToken: z.string().optional().register(sensitive),
+        webhookToken: registerSensitive("cron.webhookToken", z.string().optional()),
         sessionRetention: z.union([z.string(), z.literal(false)]).optional(),
         runLog: z
           .object({
@@ -379,7 +379,7 @@ export const OpenClawSchema = z
       .object({
         enabled: z.boolean().optional(),
         path: z.string().optional(),
-        token: z.string().optional().register(sensitive),
+        token: registerSensitive("config.token.382", z.string().optional()),
         defaultSessionKey: z.string().optional(),
         allowRequestSessionKey: z.boolean().optional(),
         allowedSessionKeyPrefixes: z.array(z.string()).optional(),
@@ -449,7 +449,7 @@ export const OpenClawSchema = z
                 voiceAliases: z.record(z.string(), z.string()).optional(),
                 modelId: z.string().optional(),
                 outputFormat: z.string().optional(),
-                apiKey: z.string().optional().register(sensitive),
+                apiKey: registerSensitive("config.apiKey.452", z.string().optional()),
               })
               .catchall(z.unknown()),
           )
@@ -458,7 +458,7 @@ export const OpenClawSchema = z
         voiceAliases: z.record(z.string(), z.string()).optional(),
         modelId: z.string().optional(),
         outputFormat: z.string().optional(),
-        apiKey: z.string().optional().register(sensitive),
+        apiKey: registerSensitive("config.apiKey.461", z.string().optional()),
         interruptOnSpeech: z.boolean().optional(),
       })
       .strict()
@@ -499,8 +499,8 @@ export const OpenClawSchema = z
                 z.literal("trusted-proxy"),
               ])
               .optional(),
-            token: z.string().optional().register(sensitive),
-            password: z.string().optional().register(sensitive),
+            token: registerSensitive("config.token.502", z.string().optional()),
+            password: registerSensitive("config.password.503", z.string().optional()),
             allowTailscale: z.boolean().optional(),
             rateLimit: z
               .object({
@@ -543,8 +543,8 @@ export const OpenClawSchema = z
           .object({
             url: z.string().optional(),
             transport: z.union([z.literal("ssh"), z.literal("direct")]).optional(),
-            token: z.string().optional().register(sensitive),
-            password: z.string().optional().register(sensitive),
+            token: registerSensitive("config.token.546", z.string().optional()),
+            password: registerSensitive("config.password.547", z.string().optional()),
             tlsFingerprint: z.string().optional(),
             sshTarget: z.string().optional(),
             sshIdentity: z.string().optional(),
@@ -691,7 +691,7 @@ export const OpenClawSchema = z
             z
               .object({
                 enabled: z.boolean().optional(),
-                apiKey: z.string().optional().register(sensitive),
+                apiKey: registerSensitive("config.apiKey.694", z.string().optional()),
                 env: z.record(z.string(), z.string()).optional(),
                 config: z.record(z.string(), z.unknown()).optional(),
               })
