@@ -9,13 +9,40 @@ import {
 
 describe('TraceEvent Contract Tests', () => {
   describe('TraceEventTypeSchema', () => {
+
     const validEventTypes: TraceEventType[] = [
-      'task_start', 'run_created', 'run_completed', 'run_failed', 'run_cancelled',
-      'plan_created', 'plan_step', 'step_started', 'step_progress', 'step_log',
-      'tool_call', 'tool_output', 'tool_chunk', 'observation',
-      'verification', 'step_completed', 'step_failed', 'step_retried',
-      'replan', 'thinking', 'shell_output', 'artifact_created',
-      'error', 'done', 'cancelled', 'heartbeat'
+      "task_start",
+      "plan_created",
+      "plan_step",
+      "step_started",
+      "tool_call",
+      "tool_call_started",
+      "tool_call_succeeded",
+      "tool_call_failed",
+      "tool_output",
+      "tool_chunk",
+      "observation",
+      "verification",
+      "verification_passed",
+      "verification_failed",
+      "step_completed",
+      "step_failed",
+      "step_retried",
+      "replan",
+      "thinking",
+      "shell_output",
+      "artifact_created",
+      "artifact_ready",
+      "citations_added",
+      "memory_loaded",
+      "memory_saved",
+      "agent_delegated",
+      "agent_completed",
+      "progress_update",
+      "error",
+      "done",
+      "cancelled",
+      "heartbeat",
     ];
 
     it.each(validEventTypes)('should accept valid event type: %s', (eventType) => {

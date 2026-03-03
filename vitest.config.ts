@@ -22,6 +22,9 @@ export default defineConfig({
       ".codex/**",
       "**/*.e2e.test.ts",
       "**/*.e2e.spec.ts",
+      "server/workflow/schemaSetup.ts",
+      "tests/integration/**",
+      "server/workflow/workflowStore.test.ts",
     ],
     setupFiles: ["./tests/setup.ts"],
     coverage: {
