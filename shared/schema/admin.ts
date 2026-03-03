@@ -1,8 +1,5 @@
-import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, customType, serial, boolean, bigint, real, numeric } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod/v4";
-import { users } from "./auth";
+import { sql } from "drizzle-orm"; import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, customType, serial, boolean, bigint, real, numeric } from "drizzle-orm/pg-core"; 
+import { createInsertSchema } from "drizzle-zod"; import { z } from "zod/v4"; import { users } from "./auth";
 
 // AI Models Registry
 export const aiModels = pgTable("ai_models", {
@@ -356,7 +353,7 @@ export const providerMetrics = pgTable("provider_metrics", {
 
 export const insertProviderMetricsSchema = createInsertSchema(providerMetrics);
 
-export type InsertProviderMetrics = typeof providerMetricss.$inferInsert;
+export type InsertProviderMetrics = typeof providerMetrics.$inferInsert;
 export type ProviderMetrics = typeof providerMetrics.$inferSelect;
 
 // Cost Budgets - Budget tracking and alerts per provider
@@ -477,7 +474,7 @@ export const securityPolicies = pgTable("security_policies", {
 
 export const insertSecurityPolicySchema = createInsertSchema(securityPolicies);
 
-export type InsertSecurityPolicy = typeof securityPolicys.$inferInsert;
+export type InsertSecurityPolicy = typeof securityPolicies.$inferInsert;
 export type SecurityPolicy = typeof securityPolicies.$inferSelect;
 
 // Reports Center - Templates and Generated Reports
@@ -544,7 +541,7 @@ export const settingsConfig = pgTable("settings_config", {
 
 export const insertSettingsConfigSchema = createInsertSchema(settingsConfig);
 
-export type InsertSettingsConfig = typeof settingsConfigs.$inferInsert;
+export type InsertSettingsConfig = typeof settingsConfig.$inferInsert;
 export type SettingsConfig = typeof settingsConfig.$inferSelect;
 
 // Notification Preferences System
