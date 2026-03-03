@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import type { App } from "@slack/bolt";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { expectInboundContextContract } from "../../../../../../openclaw/test/helpers/inbound-contract";
+import { expectInboundContextContract } from "../../../../../openclaw/test/helpers/inbound-contract";
 import type { OpenClawConfig } from "../../../config/config.js";
 import { resolveAgentRoute } from "../../../routing/resolve-route.js";
 import { resolveThreadSessionKeys } from "../../../routing/session-key.js";
