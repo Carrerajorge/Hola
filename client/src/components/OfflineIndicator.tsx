@@ -5,12 +5,10 @@ import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 
 export function OfflineIndicator() {
-    const [isOnline, setIsOnline] = useState(true);
+    const [isOnline, setIsOnline] = useState(() => navigator.onLine);
     const [showRestored, setShowRestored] = useState(false);
 
     useEffect(() => {
-        // Initial check
-        setIsOnline(navigator.onLine);
 
         const handleOnline = () => {
             setIsOnline(true);

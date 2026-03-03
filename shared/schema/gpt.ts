@@ -17,7 +17,7 @@ export const gptCategories = pgTable("gpt_categories", {
 
 export const insertGptCategorySchema = createInsertSchema(gptCategories);
 
-export type InsertGptCategory = typeof gptCategorys.$inferInsert;
+export type InsertGptCategory = typeof gptCategories.$inferInsert;
 export type GptCategory = typeof gptCategories.$inferSelect;
 
 // GPT Visibility Schema
@@ -192,7 +192,7 @@ export const gptKnowledge = pgTable("gpt_knowledge", {
 
 export const insertGptKnowledgeSchema = createInsertSchema(gptKnowledge);
 
-export type InsertGptKnowledge = typeof gptKnowledges.$inferInsert;
+export type InsertGptKnowledge = typeof gptKnowledge.$inferInsert;
 export type GptKnowledge = typeof gptKnowledge.$inferSelect;
 
 // GPT Actions - custom API integrations for GPTs

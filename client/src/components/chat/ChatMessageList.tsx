@@ -19,8 +19,7 @@ import { AgentArtifact } from "@/components/agent-steps-display";
 // so the streaming message and the finalized message share the SAME key,
 // preventing Virtuoso from unmounting/remounting the DOM node.
 const STREAMING_MSG_ID_FALLBACK = "__streaming__";
-const DOC_ANALYSIS_PLACEHOLDER_RE = /^analizando documentos adjuntos[.…\.\s]*$/i;
-
+const DOC_ANALYSIS_PLACEHOLDER_RE = /^analizando documentos adjuntos[.…\s]*$/i;
 type DocumentAnalysisIndicatorState = {
     state: "processing" | "error";
     text: string;

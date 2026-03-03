@@ -1,7 +1,5 @@
-import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, customType, serial, boolean, bigint, real, check } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod/v4";
+import { sql } from "drizzle-orm"; import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, customType, serial, boolean, bigint, real, check } from "drizzle-orm/pg-core"; 
+import { createInsertSchema } from "drizzle-zod"; import { z } from "zod/v4";
 
 // Session storage table for Replit Auth
 export const sessions = pgTable(
@@ -207,7 +205,7 @@ export const insertUserSettingsSchema = createInsertSchema(userSettings).omit({
     privacySettings: privacySettingsSchema.optional(),
 });
 
-export type InsertUserSettings = typeof userSettingss.$inferInsert;
+export type InsertUserSettings = typeof userSettings.$inferInsert;
 export type UserSettings = typeof userSettings.$inferSelect;
 
 // Consent Logs - Audit trail for privacy consent changes

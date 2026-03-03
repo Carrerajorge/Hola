@@ -218,7 +218,7 @@ describeIntegration('PARE Observability Phase 3', () => {
     it('should include trace headers in API responses', async () => {
       const response = await fetch(`${API_BASE}/health/pare/live`);
       
-      expect(response.headers.get('x-request-id') || response.headers.get('X-Request-ID')).toBeDefined;
+      expect(response.headers.get('x-request-id') || response.headers.get('X-Request-ID')).toBeDefined();
     });
   });
 });

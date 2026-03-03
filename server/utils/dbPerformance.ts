@@ -252,7 +252,14 @@ export async function* streamQuery<T>(
  * Deferred query execution (for batching)
  */
 class QueryBatcher {
-  private pending: Map<string, { resolve: Function; reject: Function; keys: string[] }[]> = new Map();
+  private pending: Map<
+    string,
+    {
+      resolve: (value: unknown) => void;
+      reject: (reason?: unknown) => void;
+      keys: string[];
+    }[]
+  > = new Map();
   private timeout: NodeJS.Timeout | null = null;
   private readonly batchDelayMs: number = 10;
 

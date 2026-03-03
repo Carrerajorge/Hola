@@ -229,14 +229,13 @@ describeIntegration("PARE Concurrency Tests", () => {
           .post("/api/analyze")
           .set("X-Idempotency-Key", idempotencyKey)
           .send(payload1),
-        new Promise<request.Response>(async (resolve) => {
-          await new Promise(r => setTimeout(r, 20));
-          const res = await request(app)
+        (async () => {
+          await new Promise((r) => setTimeout(r, 20));
+          return request(app)
             .post("/api/analyze")
             .set("X-Idempotency-Key", idempotencyKey)
             .send(payload2);
-          resolve(res);
-        }),
+        })(),
       ]);
       
       const statuses = [response1.status, response2.status];
