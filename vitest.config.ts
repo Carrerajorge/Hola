@@ -25,6 +25,11 @@ export default defineConfig({
       "server/workflow/schemaSetup.ts",
       "tests/integration/**",
       "server/workflow/workflowStore.test.ts",
+      "server/services/superIntelligence/**/*.test.ts",
+      "server/services/superIntelligence/**/*.spec.ts",
+
+      "server/agent/__tests__/agent.test.ts",
+      "tests/unit/pipeline-tools-registration.test.ts",
     ],
     setupFiles: ["./tests/setup.ts"],
     coverage: {
