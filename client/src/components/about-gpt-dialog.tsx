@@ -79,12 +79,14 @@ export function AboutGptDialog({
     enabled: open && !!gptId,
   });
 
+  const capabilities = data?.gpt?.capabilities;
+
   const enabledCapabilities = React.useMemo(() => {
-    if (!data?.gpt?.capabilities) return [];
-    return Object.entries(data.gpt.capabilities)
+    if (!capabilities) return [];
+    return Object.entries(capabilities)
       .filter(([_, enabled]) => enabled)
       .map(([key]) => key);
-  }, [data?.gpt?.capabilities]);
+  }, [capabilities]);  
 
   const openExternal = (url: string) => {
     try {

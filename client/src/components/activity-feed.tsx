@@ -220,10 +220,9 @@ function StepCard({ step, runId, isActive }: StepCardProps) {
   const ToolIcon = getToolIcon(step.toolName);
 
   const duration = useMemo(() => {
-    if (!step.startedAt) return null;
-    const end = step.completedAt || Date.now();
-    return end - step.startedAt;
-  }, [step.startedAt, step.completedAt]);
+    if (!step.startedAt || !step.completedAt) return null;
+    return step.completedAt - step.startedAt;
+  }, [step.startedAt, step.completedAt]); 
 
   return (
     <motion.div
@@ -318,25 +317,35 @@ function StepCard({ step, runId, isActive }: StepCardProps) {
   );
 }
 
+const getArtifactIcon = (type: string) => {
+  switch (type) {
+    case "file":
+    case "document":
+      return FileText;
+    case "image":
+      return Image;
+    case "video":
+      return Video;
+    case "audio":
+      return Music;
+    case "spreadsheet":
+      return FileSpreadsheet;
+    case "code":
+      return Code;
+    case "chart":
+      return BarChart3;
+    default:
+      return FileText;
+  }
+};
+
 interface ArtifactCardProps {
   artifact: TraceArtifact;
   compact?: boolean;
 }
 
 function ArtifactCard({ artifact, compact = false }: ArtifactCardProps) {
-  const getArtifactIcon = (type: string) => {
-    switch (type) {
-      case "file": case "document": return FileText;
-      case "image": return Image;
-      case "video": return Video;
-      case "audio": return Music;
-      case "spreadsheet": return FileSpreadsheet;
-      case "code": return Code;
-      case "chart": return BarChart3;
-      default: return FileText;
-    }
-  };
-
+  
   const Icon = getArtifactIcon(artifact.type);
 
   if (compact) {
