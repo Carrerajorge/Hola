@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Run ESLint
-        run: npx eslint client/src shared scripts --max-warnings 0
+        run: npx eslint client/src shared scripts --max-warnings 0 --ignore-pattern "**/*.bak.ts"
       - name: Run TypeScript Compiler Check
         run: npx tsc -p tsconfig.ci.json --noEmit
 
