@@ -1,9 +1,5 @@
-import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, serial, boolean, bigint } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod/v4";
-import { users } from "./auth";
-import { chatMessages } from "./chat";
+import { sql } from "drizzle-orm"; import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, serial, boolean, bigint } from "drizzle-orm/pg-core"; import { createInsertSchema } 
+from "drizzle-zod"; import { z } from "zod/v4"; import { users } from "./auth"; import { chatMessages } from "./chat";
 
 export const libraryItems = pgTable("library_items", {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -352,7 +348,7 @@ export const chatMessageAnalysis = pgTable('chat_message_analysis', {
 
 export const insertChatMessageAnalysisSchema = createInsertSchema(chatMessageAnalysis);
 
-export type InsertChatMessageAnalysis = typeof chatMessageAnalysiss.$inferInsert;
+export type InsertChatMessageAnalysis = typeof chatMessageAnalysis.$inferInsert;
 export type ChatMessageAnalysis = typeof chatMessageAnalysis.$inferSelect;
 
 // Excel Documents (Legacy/Alternative)
@@ -398,5 +394,5 @@ export const companyKnowledge = pgTable("company_knowledge", {
 
 export const insertCompanyKnowledgeSchema = createInsertSchema(companyKnowledge);
 
-export type InsertCompanyKnowledge = typeof companyKnowledges.$inferInsert;
+export type InsertCompanyKnowledge = typeof companyKnowledge.$inferInsert;
 export type CompanyKnowledge = typeof companyKnowledge.$inferSelect;
