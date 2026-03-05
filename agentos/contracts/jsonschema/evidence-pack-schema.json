@@ -1,0 +1,223 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentos.dev/schemas/evidence-pack.json",
+  "title": "AgentOS Evidence Pack",
+  "description": "A tamper-evident collection of artifacts proving what an agent did during a run",
+  "type": "object",
+  "required": ["runId", "missionId", "agentId", "collectedAt", "items", "verificationHash"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique evidence pack identifier"
+    },
+    "runId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The run that produced this evidence"
+    },
+    "missionId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The mission this evidence relates to"
+    },
+    "agentId": {
+      "type": "string",
+      "description": "The agent that collected this evidence"
+    },
+    "collectedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the evidence pack was finalized"
+    },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/EvidenceItem"
+      },
+      "description": "Ordered list of evidence items"
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "totalSteps": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total agent steps taken"
+        },
+        "totalTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total tokens consumed"
+        },
+        "totalCostUsd": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Total cost in USD"
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total run duration in milliseconds"
+        },
+        "toolsUsed": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of tools invoked"
+        },
+        "domainsAccessed": {
+          "type": "array",
+          "items": { "type": "string", "format": "hostname" },
+          "description": "Web domains accessed"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": ["success", "partial", "failure"],
+          "description": "Overall mission outcome"
+        }
+      },
+      "additionalProperties": false
+    },
+    "traceId": {
+      "type": "string",
+      "description": "Distributed trace ID for full observability"
+    },
+    "verificationHash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$",
+      "description": "SHA-256 hash of all evidence items for tamper detection"
+    },
+    "signature": {
+      "type": "object",
+      "properties": {
+        "algorithm": {
+          "type": "string",
+          "enum": ["ed25519", "ecdsa-p256"],
+          "description": "Signing algorithm"
+        },
+        "publicKey": {
+          "type": "string",
+          "description": "Public key used for signing"
+        },
+        "value": {
+          "type": "string",
+          "description": "Base64-encoded signature"
+        },
+        "signedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["algorithm", "publicKey", "value"],
+      "additionalProperties": false,
+      "description": "Cryptographic signature for non-repudiation"
+    },
+    "chainOfCustody": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["actor", "action", "timestamp"],
+        "properties": {
+          "actor": {
+            "type": "string",
+            "description": "Agent or human who handled the evidence"
+          },
+          "action": {
+            "type": "string",
+            "enum": ["created", "reviewed", "approved", "rejected", "transferred", "archived"],
+            "description": "What was done with the evidence"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "Audit trail of who handled this evidence"
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "maxLength": 50 },
+      "maxItems": 20
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "EvidenceItem": {
+      "type": "object",
+      "required": ["type", "content", "timestamp", "stepIndex"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "screenshot",
+            "api-response",
+            "log",
+            "document",
+            "metric",
+            "assertion",
+            "model-output",
+            "tool-result",
+            "human-feedback",
+            "error"
+          ],
+          "description": "Category of evidence"
+        },
+        "content": {
+          "type": "string",
+          "maxLength": 1000000,
+          "description": "The evidence content (text, base64 for binary, or JSON string)"
+        },
+        "contentType": {
+          "type": "string",
+          "description": "MIME type of the content",
+          "examples": ["text/plain", "image/png", "application/json"]
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Source URL if applicable"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When this evidence was captured"
+        },
+        "stepIndex": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Which agent step produced this evidence"
+        },
+        "spanId": {
+          "type": "string",
+          "description": "Trace span ID for correlation"
+        },
+        "toolName": {
+          "type": "string",
+          "description": "Tool that produced this evidence"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Additional structured metadata"
+        },
+        "hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "description": "Individual item content hash"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

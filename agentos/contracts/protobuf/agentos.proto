@@ -1,0 +1,344 @@
+syntax = "proto3";
+
+package agentos.v1;
+
+option go_package = "github.com/agentos/agentos/gen/go/v1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/duration.proto";
+
+// ═══════════════════════════════════════════════════════════════
+// Mission Service — Control Plane
+// ═══════════════════════════════════════════════════════════════
+
+service MissionService {
+  // Create and start a new mission
+  rpc CreateMission(CreateMissionRequest) returns (MissionRun);
+  // Get mission status
+  rpc GetMission(GetMissionRequest) returns (MissionRun);
+  // Stream mission events in real-time
+  rpc StreamMissionEvents(StreamMissionEventsRequest) returns (stream MissionEvent);
+  // Cancel a running mission
+  rpc CancelMission(CancelMissionRequest) returns (MissionRun);
+  // Respond to an escalation (human-in-the-loop)
+  rpc RespondToEscalation(EscalationResponse) returns (MissionRun);
+  // Get the plan DAG for a mission
+  rpc GetPlanDAG(GetPlanDAGRequest) returns (PlanDAG);
+}
+
+message CreateMissionRequest {
+  string goal = 1;
+  map<string, string> constraints = 2;
+  BudgetLimits budget = 3;
+  repeated string soul_policy_ids = 4;
+  google.protobuf.Struct context = 5;
+}
+
+message GetMissionRequest {
+  string mission_id = 1;
+}
+
+message StreamMissionEventsRequest {
+  string mission_id = 1;
+  // Resume from a specific event sequence number
+  uint64 after_sequence = 2;
+}
+
+message CancelMissionRequest {
+  string mission_id = 1;
+  string reason = 2;
+}
+
+message MissionRun {
+  string id = 1;
+  string goal = 2;
+  MissionStatus status = 3;
+  PlanDAG plan = 4;
+  BudgetUsage budget_usage = 5;
+  EvidencePack evidence = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+  string result_summary = 9;
+}
+
+enum MissionStatus {
+  MISSION_STATUS_UNSPECIFIED = 0;
+  MISSION_STATUS_PLANNING = 1;
+  MISSION_STATUS_EXECUTING = 2;
+  MISSION_STATUS_REVIEWING = 3;
+  MISSION_STATUS_ESCALATED = 4;
+  MISSION_STATUS_COMPLETED = 5;
+  MISSION_STATUS_FAILED = 6;
+  MISSION_STATUS_CANCELLED = 7;
+}
+
+message MissionEvent {
+  string mission_id = 1;
+  uint64 sequence = 2;
+  string event_type = 3;
+  google.protobuf.Timestamp timestamp = 4;
+  google.protobuf.Struct payload = 5;
+}
+
+message EscalationResponse {
+  string mission_id = 1;
+  string escalation_id = 2;
+  EscalationDecision decision = 3;
+  string message = 4;
+  google.protobuf.Struct data = 5;
+}
+
+enum EscalationDecision {
+  ESCALATION_DECISION_UNSPECIFIED = 0;
+  ESCALATION_DECISION_APPROVE = 1;
+  ESCALATION_DECISION_REJECT = 2;
+  ESCALATION_DECISION_MODIFY = 3;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Plan Types
+// ═══════════════════════════════════════════════════════════════
+
+message PlanDAG {
+  repeated PlanNode nodes = 1;
+  repeated PlanEdge edges = 2;
+}
+
+message PlanNode {
+  string id = 1;
+  string label = 2;
+  string description = 3;
+  StepStatus status = 4;
+  google.protobuf.Struct result = 5;
+  google.protobuf.Duration elapsed = 6;
+  uint32 token_usage = 7;
+}
+
+message PlanEdge {
+  string from_node_id = 1;
+  string to_node_id = 2;
+  string relation = 3; // "depends_on", "triggers", "parallel"
+}
+
+message GetPlanDAGRequest {
+  string mission_id = 1;
+}
+
+enum StepStatus {
+  STEP_STATUS_UNSPECIFIED = 0;
+  STEP_STATUS_PENDING = 1;
+  STEP_STATUS_RUNNING = 2;
+  STEP_STATUS_COMPLETED = 3;
+  STEP_STATUS_FAILED = 4;
+  STEP_STATUS_SKIPPED = 5;
+  STEP_STATUS_BLOCKED = 6;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Budget
+// ═══════════════════════════════════════════════════════════════
+
+message BudgetLimits {
+  uint64 max_tokens = 1;
+  double max_cost_usd = 2;
+  uint64 max_latency_ms = 3;
+  uint32 max_api_calls = 4;
+}
+
+message BudgetUsage {
+  uint64 tokens_used = 1;
+  double cost_usd = 2;
+  uint64 latency_ms = 3;
+  uint32 api_calls = 4;
+  double tokens_remaining_pct = 5;
+  double cost_remaining_pct = 6;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Evidence
+// ═══════════════════════════════════════════════════════════════
+
+message EvidencePack {
+  string id = 1;
+  string mission_id = 2;
+  repeated EvidenceItem items = 3;
+  double overall_confidence = 4;
+  google.protobuf.Timestamp assembled_at = 5;
+}
+
+message EvidenceItem {
+  string claim = 1;
+  repeated Citation citations = 2;
+  double confidence = 3;
+  string verification_method = 4;
+}
+
+message Citation {
+  string source_id = 1;
+  string source_type = 2; // "document", "web", "api", "memory"
+  string source_url = 3;
+  string excerpt = 4;
+  google.protobuf.Timestamp retrieved_at = 5;
+  double relevance_score = 6;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Model Routing Service
+// ═══════════════════════════════════════════════════════════════
+
+service ModelRoutingService {
+  rpc RouteRequest(ModelRoutingRequest) returns (ModelRoutingResponse);
+  rpc GetProviderHealth(GetProviderHealthRequest) returns (ProviderHealthReport);
+  rpc GetCostReport(GetCostReportRequest) returns (CostReport);
+}
+
+message ModelRoutingRequest {
+  string task_type = 1;
+  repeated string required_capabilities = 2;
+  string routing_policy = 3;
+  BudgetLimits budget = 4;
+  uint32 max_latency_ms = 5;
+}
+
+message ModelRoutingResponse {
+  string provider_id = 1;
+  string model_id = 2;
+  string routing_reason = 3;
+  double estimated_cost = 4;
+  uint32 estimated_latency_ms = 5;
+}
+
+message GetProviderHealthRequest {}
+
+message ProviderHealthReport {
+  repeated ProviderHealth providers = 1;
+}
+
+message ProviderHealth {
+  string provider_id = 1;
+  bool healthy = 2;
+  double latency_p50_ms = 3;
+  double latency_p99_ms = 4;
+  double error_rate = 5;
+  uint64 requests_total = 6;
+}
+
+message GetCostReportRequest {
+  google.protobuf.Timestamp since = 1;
+}
+
+message CostReport {
+  double total_cost_usd = 1;
+  map<string, double> cost_by_provider = 2;
+  map<string, double> cost_by_model = 3;
+  uint64 total_tokens = 4;
+  uint64 total_requests = 5;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Knowledge Service
+// ═══════════════════════════════════════════════════════════════
+
+service KnowledgeService {
+  rpc Search(SearchRequest) returns (SearchResponse);
+  rpc IngestDocument(IngestDocumentRequest) returns (IngestDocumentResponse);
+  rpc AssembleEvidence(AssembleEvidenceRequest) returns (EvidencePack);
+}
+
+message SearchRequest {
+  string query = 1;
+  uint32 top_k = 2;
+  repeated string filters = 3;
+  bool enable_reranking = 4;
+  bool enable_multi_hop = 5;
+}
+
+message SearchResponse {
+  repeated SearchResult results = 1;
+  string rewritten_query = 2;
+  uint32 total_candidates = 3;
+}
+
+message SearchResult {
+  string chunk_id = 1;
+  string document_id = 2;
+  string content = 3;
+  double score = 4;
+  map<string, string> metadata = 5;
+}
+
+message IngestDocumentRequest {
+  string title = 1;
+  bytes content = 2;
+  string content_type = 3;
+  map<string, string> metadata = 4;
+}
+
+message IngestDocumentResponse {
+  string document_id = 1;
+  uint32 chunks_created = 2;
+}
+
+message AssembleEvidenceRequest {
+  string query = 1;
+  repeated string claims = 2;
+  uint32 min_citations_per_claim = 3;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Plugin Service (SDK)
+// ═══════════════════════════════════════════════════════════════
+
+service PluginService {
+  rpc RegisterPlugin(RegisterPluginRequest) returns (PluginInfo);
+  rpc ListPlugins(ListPluginsRequest) returns (ListPluginsResponse);
+  rpc ExecutePlugin(ExecutePluginRequest) returns (ExecutePluginResponse);
+  rpc UnregisterPlugin(UnregisterPluginRequest) returns (UnregisterPluginResponse);
+}
+
+message RegisterPluginRequest {
+  string name = 1;
+  string version = 2;
+  string type = 3; // "wasm", "grpc", "openapi", "mcp"
+  bytes manifest = 4;
+  string endpoint = 5;
+}
+
+message PluginInfo {
+  string id = 1;
+  string name = 2;
+  string version = 3;
+  string type = 4;
+  repeated string capabilities = 5;
+  string status = 6;
+}
+
+message ListPluginsRequest {
+  string type_filter = 1;
+}
+
+message ListPluginsResponse {
+  repeated PluginInfo plugins = 1;
+}
+
+message ExecutePluginRequest {
+  string plugin_id = 1;
+  string method = 2;
+  google.protobuf.Struct params = 3;
+  google.protobuf.Duration timeout = 4;
+}
+
+message ExecutePluginResponse {
+  google.protobuf.Struct result = 1;
+  string error = 2;
+  google.protobuf.Duration elapsed = 3;
+}
+
+message UnregisterPluginRequest {
+  string plugin_id = 1;
+}
+
+message UnregisterPluginResponse {
+  bool success = 1;
+}

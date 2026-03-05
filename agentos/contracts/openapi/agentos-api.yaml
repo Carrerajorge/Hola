@@ -1,0 +1,692 @@
+openapi: 3.1.0
+info:
+  title: AgentOS API
+  version: 1.0.0
+  description: REST API for AgentOS - autonomous agent orchestration platform
+  contact:
+    name: AgentOS Team
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+servers:
+  - url: https://api.agentos.dev/v1
+    description: Production
+  - url: https://staging-api.agentos.dev/v1
+    description: Staging
+  - url: http://localhost:3000/v1
+    description: Local development
+
+security:
+  - bearerAuth: []
+  - apiKeyAuth: []
+
+tags:
+  - name: Missions
+    description: Create and manage agent missions
+  - name: Runs
+    description: Monitor and control mission execution runs
+  - name: Plans
+    description: View and approve execution plans
+  - name: Evidence
+    description: Evidence packs collected during runs
+  - name: Memory
+    description: Agent memory and knowledge base
+  - name: Models
+    description: Model registry and configuration
+  - name: Plugins
+    description: Plugin management
+
+paths:
+  /missions:
+    get:
+      tags: [Missions]
+      operationId: listMissions
+      summary: List all missions
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, active, paused, completed, failed, cancelled]
+        - name: agentId
+          in: query
+          schema:
+            type: string
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+      responses:
+        '200':
+          description: List of missions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Mission'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Missions]
+      operationId: createMission
+      summary: Create a new mission
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MissionCreate'
+      responses:
+        '201':
+          description: Mission created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mission'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /missions/{missionId}:
+    get:
+      tags: [Missions]
+      operationId: getMission
+      summary: Get mission details
+      parameters:
+        - $ref: '#/components/parameters/missionId'
+      responses:
+        '200':
+          description: Mission details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mission'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /missions/{missionId}/runs:
+    get:
+      tags: [Runs]
+      operationId: listRuns
+      summary: List runs for a mission
+      parameters:
+        - $ref: '#/components/parameters/missionId'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+      responses:
+        '200':
+          description: List of runs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Run'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+    post:
+      tags: [Runs]
+      operationId: startRun
+      summary: Start a new run for a mission
+      parameters:
+        - $ref: '#/components/parameters/missionId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                agentId:
+                  type: string
+                config:
+                  type: object
+                  properties:
+                    maxSteps:
+                      type: integer
+                      default: 50
+                    costBudgetUsd:
+                      type: number
+                      default: 10.0
+                    timeoutMs:
+                      type: integer
+                      default: 300000
+      responses:
+        '201':
+          description: Run started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Run'
+
+  /runs/{runId}:
+    get:
+      tags: [Runs]
+      operationId: getRun
+      summary: Get run details with trace
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          description: Run details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Run'
+    delete:
+      tags: [Runs]
+      operationId: cancelRun
+      summary: Cancel an active run
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          description: Run cancelled
+
+  /runs/{runId}/plan:
+    get:
+      tags: [Plans]
+      operationId: getRunPlan
+      summary: Get the execution plan for a run
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          description: Execution plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+    put:
+      tags: [Plans]
+      operationId: approvePlan
+      summary: Approve or reject the plan
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision:
+                  type: string
+                  enum: [approve, reject, modify]
+                feedback:
+                  type: string
+      responses:
+        '200':
+          description: Plan decision recorded
+
+  /runs/{runId}/evidence:
+    get:
+      tags: [Evidence]
+      operationId: getEvidence
+      summary: Get evidence pack for a run
+      parameters:
+        - $ref: '#/components/parameters/runId'
+      responses:
+        '200':
+          description: Evidence pack
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvidencePack'
+
+  /memory:
+    get:
+      tags: [Memory]
+      operationId: queryMemory
+      summary: Query agent memory
+      parameters:
+        - name: agentId
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: topK
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Memory results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MemoryEntry'
+    post:
+      tags: [Memory]
+      operationId: storeMemory
+      summary: Store a memory entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryEntry'
+      responses:
+        '201':
+          description: Memory stored
+
+  /models:
+    get:
+      tags: [Models]
+      operationId: listModels
+      summary: List available models
+      responses:
+        '200':
+          description: Model list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  models:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ModelConfig'
+
+  /plugins:
+    get:
+      tags: [Plugins]
+      operationId: listPlugins
+      summary: List installed plugins
+      responses:
+        '200':
+          description: Plugin list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plugins:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Plugin'
+    post:
+      tags: [Plugins]
+      operationId: installPlugin
+      summary: Install a plugin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, version]
+              properties:
+                name:
+                  type: string
+                version:
+                  type: string
+                config:
+                  type: object
+      responses:
+        '201':
+          description: Plugin installed
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  parameters:
+    missionId:
+      name: missionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    runId:
+      name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        default: 20
+        maximum: 100
+    offset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        default: 0
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Mission:
+      type: object
+      required: [id, objective, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        objective:
+          type: string
+          maxLength: 2000
+        description:
+          type: string
+        status:
+          type: string
+          enum: [draft, active, paused, completed, failed, cancelled]
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+        constraints:
+          type: object
+          properties:
+            maxCostUsd:
+              type: number
+            maxDurationMs:
+              type: integer
+            allowedTools:
+              type: array
+              items:
+                type: string
+            forbiddenActions:
+              type: array
+              items:
+                type: string
+        successCriteria:
+          type: array
+          items:
+            type: object
+            properties:
+              description:
+                type: string
+              metric:
+                type: string
+              threshold:
+                type: number
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    MissionCreate:
+      type: object
+      required: [objective]
+      properties:
+        objective:
+          type: string
+          maxLength: 2000
+        description:
+          type: string
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+          default: medium
+        constraints:
+          type: object
+          properties:
+            maxCostUsd:
+              type: number
+            maxDurationMs:
+              type: integer
+            allowedTools:
+              type: array
+              items:
+                type: string
+        successCriteria:
+          type: array
+          items:
+            type: object
+            properties:
+              description:
+                type: string
+              metric:
+                type: string
+              threshold:
+                type: number
+
+    Run:
+      type: object
+      required: [id, missionId, status, startedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        missionId:
+          type: string
+          format: uuid
+        agentId:
+          type: string
+        status:
+          type: string
+          enum: [queued, running, paused, completed, failed, cancelled]
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        traceId:
+          type: string
+        stepsCompleted:
+          type: integer
+        totalTokens:
+          type: integer
+        totalCostUsd:
+          type: number
+        result:
+          type: object
+          properties:
+            summary:
+              type: string
+            artifacts:
+              type: array
+              items:
+                type: string
+
+    Plan:
+      type: object
+      properties:
+        runId:
+          type: string
+        steps:
+          type: array
+          items:
+            type: object
+            properties:
+              order:
+                type: integer
+              action:
+                type: string
+              tool:
+                type: string
+              reasoning:
+                type: string
+              estimatedCostUsd:
+                type: number
+              requiresApproval:
+                type: boolean
+        totalEstimatedCostUsd:
+          type: number
+        approved:
+          type: boolean
+
+    EvidencePack:
+      type: object
+      required: [runId, collectedAt, items]
+      properties:
+        runId:
+          type: string
+        missionId:
+          type: string
+        collectedAt:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            type: object
+            required: [type, content, timestamp]
+            properties:
+              type:
+                type: string
+                enum: [screenshot, api-response, log, document, metric, assertion]
+              content:
+                type: string
+              url:
+                type: string
+                format: uri
+              timestamp:
+                type: string
+                format: date-time
+              metadata:
+                type: object
+        verificationHash:
+          type: string
+
+    MemoryEntry:
+      type: object
+      required: [agentId, content, type]
+      properties:
+        id:
+          type: string
+        agentId:
+          type: string
+        content:
+          type: string
+        type:
+          type: string
+          enum: [fact, procedure, episode, reflection]
+        embedding:
+          type: array
+          items:
+            type: number
+        tags:
+          type: array
+          items:
+            type: string
+        relevanceScore:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+
+    ModelConfig:
+      type: object
+      properties:
+        id:
+          type: string
+        provider:
+          type: string
+          enum: [openai, anthropic, google, mistral, local]
+        model:
+          type: string
+        maxTokens:
+          type: integer
+        costPerInputToken:
+          type: number
+        costPerOutputToken:
+          type: number
+        capabilities:
+          type: array
+          items:
+            type: string
+            enum: [text, vision, code, function-calling, streaming]
+        rateLimit:
+          type: object
+          properties:
+            requestsPerMinute:
+              type: integer
+            tokensPerMinute:
+              type: integer
+
+    Plugin:
+      type: object
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        description:
+          type: string
+        enabled:
+          type: boolean
+        capabilities:
+          type: array
+          items:
+            type: string
+        config:
+          type: object
+
+    Pagination:
+      type: object
+      properties:
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object

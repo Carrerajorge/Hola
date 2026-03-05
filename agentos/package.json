@@ -1,0 +1,80 @@
+{
+  "name": "@agentos/core",
+  "version": "0.1.0",
+  "description": "AgentOS-ASI: Distributed Agent Operating System",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./control-plane": {
+      "import": "./dist/control-plane/index.js",
+      "types": "./dist/control-plane/index.d.ts"
+    },
+    "./model-plane": {
+      "import": "./dist/model-plane/index.js",
+      "types": "./dist/model-plane/index.d.ts"
+    },
+    "./data-plane": {
+      "import": "./dist/data-plane/index.js",
+      "types": "./dist/data-plane/index.d.ts"
+    },
+    "./knowledge-plane": {
+      "import": "./dist/knowledge-plane/index.js",
+      "types": "./dist/knowledge-plane/index.d.ts"
+    },
+    "./action-plane": {
+      "import": "./dist/action-plane/index.js",
+      "types": "./dist/action-plane/index.d.ts"
+    },
+    "./memory": {
+      "import": "./dist/memory/index.js",
+      "types": "./dist/memory/index.d.ts"
+    },
+    "./sdk": {
+      "import": "./dist/sdk/index.js",
+      "types": "./dist/sdk/index.d.ts"
+    },
+    "./security": {
+      "import": "./dist/security/index.js",
+      "types": "./dist/security/index.d.ts"
+    },
+    "./observability": {
+      "import": "./dist/observability/index.js",
+      "types": "./dist/observability/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint . --ext .ts,.tsx",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "eventemitter3": "^5.0.0",
+    "uuid": "^9.0.0",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/uuid": "^9.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true },
+    "react-dom": { "optional": true }
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "MIT"
+}

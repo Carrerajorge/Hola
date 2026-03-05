@@ -1,0 +1,263 @@
+name: AgentOS CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ['agentos/**']
+  pull_request:
+    branches: [main]
+    paths: ['agentos/**']
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  security-events: write
+
+env:
+  NODE_VERSION: '20'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/agentos
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-typecheck:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: agentos/package-lock.json
+      - run: npm ci
+        working-directory: agentos
+      - name: ESLint
+        run: npx eslint 'src/**/*.ts' --max-warnings 0
+        working-directory: agentos
+      - name: TypeScript type check
+        run: npx tsc --noEmit --strict
+        working-directory: agentos
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: agentos/package-lock.json
+      - run: npm ci
+        working-directory: agentos
+      - name: Run unit tests with coverage
+        run: npx vitest run --coverage --reporter=junit --outputFile=test-results/unit.xml
+        working-directory: agentos
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: agentos/coverage/
+      - name: Check coverage threshold
+        run: |
+          COVERAGE=$(npx vitest run --coverage --reporter=json | jq '.total.lines.pct')
+          if (( $(echo "$COVERAGE < 80" | bc -l) )); then
+            echo "::error::Coverage ${COVERAGE}% is below 80% threshold"
+            exit 1
+          fi
+        working-directory: agentos
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: agentos_test
+          POSTGRES_USER: agentos
+          POSTGRES_PASSWORD: testpass
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: agentos/package-lock.json
+      - run: npm ci
+        working-directory: agentos
+      - name: Run integration tests
+        run: npx vitest run --config vitest.integration.config.ts --reporter=junit --outputFile=test-results/integration.xml
+        working-directory: agentos
+        env:
+          DATABASE_URL: postgresql://agentos:testpass@localhost:5432/agentos_test
+          REDIS_URL: redis://localhost:6379
+
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trivy vulnerability scan (filesystem)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: agentos/
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: 1
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: Semgrep SAST scan
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/typescript
+            p/jwt
+            p/owasp-top-ten
+            p/secrets
+          generateSarif: true
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+      - name: Gitleaks secret detection
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: npm audit
+        run: npm audit --audit-level=high
+        working-directory: agentos
+
+  sbom-and-signing:
+    name: SBOM & Container Signing
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, security-scan]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push container
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: agentos/
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Generate SBOM with Syft
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.spdx.json
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign container image with Cosign
+        run: |
+          cosign sign --yes \
+            --key env://COSIGN_PRIVATE_KEY \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+
+  eval-runs:
+    name: Evaluation Suite
+    runs-on: ubuntu-latest
+    needs: [unit-tests, security-scan]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: agentos/package-lock.json
+      - run: npm ci
+        working-directory: agentos
+      - name: Run eval suite
+        run: npx tsx scripts/run-evals.ts --suite=ci --output=eval-results.json
+        working-directory: agentos
+        env:
+          EVAL_BUDGET_USD: '5.00'
+          EVAL_TIMEOUT_MS: '120000'
+      - name: Upload eval results
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: agentos/eval-results.json
+      - name: Quality gate check
+        run: |
+          PASS_RATE=$(jq '.qualityGate.passed' agentos/eval-results.json)
+          if [ "$PASS_RATE" != "true" ]; then
+            echo "::error::Eval quality gate failed"
+            jq '.qualityGate.failures[]' agentos/eval-results.json
+            exit 1
+          fi
+
+  quality-gate:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, security-scan, eval-runs]
+    if: always()
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [ "${{ needs.unit-tests.result }}" != "success" ] || \
+             [ "${{ needs.integration-tests.result }}" != "success" ] || \
+             [ "${{ needs.security-scan.result }}" != "success" ] || \
+             [ "${{ needs.eval-runs.result }}" != "success" ]; then
+            echo "::error::Quality gate failed - one or more required jobs did not pass"
+            echo "  unit-tests: ${{ needs.unit-tests.result }}"
+            echo "  integration-tests: ${{ needs.integration-tests.result }}"
+            echo "  security-scan: ${{ needs.security-scan.result }}"
+            echo "  eval-runs: ${{ needs.eval-runs.result }}"
+            exit 1
+          fi
+          echo "All quality gates passed"
