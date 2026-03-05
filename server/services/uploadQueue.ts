@@ -61,6 +61,7 @@ export interface QueueConfig {
 class RateLimiter {
     private requests: Map<string, number[]> = new Map();
     private config: RateLimitConfig;
+    private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
     constructor(config: Partial<RateLimitConfig> = {}) {
         this.config = {
@@ -70,6 +71,28 @@ class RateLimiter {
             maxFileSize: config.maxFileSize ?? 25 * 1024 * 1024, // 25MB
             maxFilesPerBatch: config.maxFilesPerBatch ?? 10,
         };
+        // Periodic cleanup to prevent memory leak from stale user entries
+        this.cleanupInterval = setInterval(() => this.cleanup(), 5 * 60 * 1000);
+    }
+
+    private cleanup(): void {
+        const now = Date.now();
+        const windowMs = 60000;
+        for (const [userId, timestamps] of this.requests) {
+            const recent = timestamps.filter(t => t > now - windowMs);
+            if (recent.length === 0) {
+                this.requests.delete(userId);
+            } else {
+                this.requests.set(userId, recent);
+            }
+        }
+    }
+
+    destroy(): void {
+        if (this.cleanupInterval) {
+            clearInterval(this.cleanupInterval);
+            this.cleanupInterval = null;
+        }
     }
 
     getLimit(userPlan: "free" | "pro" | "admin"): number {
@@ -184,6 +207,7 @@ export class UploadQueue extends EventEmitter {
      * Closes the queue connection
      */
     async stop(): Promise<void> {
+        this.rateLimiter.destroy();
         if (this.queue) await this.queue.close();
         if (this.events) await this.events.close();
         this.emit("stopped");
@@ -279,12 +303,14 @@ export class UploadQueue extends EventEmitter {
     }
 
     /**
-     * Get all jobs for user (Expensive in Redis, simplified for now)
+     * Get all jobs for user
      */
     async getUserJobs(userId: string): Promise<UploadJobData[]> {
-        // limitation: BullMQ doesn't easily query by payload content without extra indexing
-        return [];
-    }
+        const queue = this.getQueueOrThrow();
+        const jobs = await queue.getJobs(['waiting', 'active', 'completed', 'failed'], 0, 100);
+        return jobs
+            .filter(job => job.data?.userId === userId)
+            .map(job => job.data);
 
     /**
      * Cancel job

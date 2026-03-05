@@ -182,13 +182,10 @@ export async function analyzeDocuments(
     const knownFileNames = files.map(f => f.name);
 
     try {
-        // Process all files
-        const fileAnalyses: FileAnalysis[] = [];
-
-        for (const file of files) {
-            const analysis = await processFile(file, options);
-            fileAnalyses.push(analysis);
-        }
+        // Process all files in parallel for better performance
+        const fileAnalyses = await Promise.all(
+            files.map(file => processFile(file, options))
+        );
 
         // Combine content for RAG
         const combinedContent = fileAnalyses
@@ -268,7 +265,13 @@ export async function queueDocuments(
     const result = await queue.addBatch(
         userId,
         chatId,
-        files.map(f => ({ name: f.name, type: f.mimeType, buffer: f.buffer })),
+        files.map(f => ({
+            name: f.name,
+            type: f.mimeType,
+            size: f.buffer.length,
+            id: `file_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            storagePath: '',
+        })),
         { userPlan }
     );
 
@@ -297,8 +300,9 @@ export function checkRateLimit(
     userPlan: "free" | "pro" | "admin" = "free"
 ): { allowed: boolean; remaining: number; resetIn: number } {
     const queue = getUploadQueue();
-    // This would use the rate limiter internally
-    return { allowed: true, remaining: 10, resetIn: 60000 };
+    return (queue as any).rateLimiter
+        ? (queue as any).rateLimiter.check(userId, userPlan)
+        : { allowed: true, remaining: 10, resetIn: 60000 };
 }
 
 export const unifiedDocumentAnalyzer = {

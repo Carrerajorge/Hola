@@ -77,7 +77,13 @@ export async function extractTextSafe(content: Buffer, mimeType: string): Promis
   }
 }
 
+const MAX_BUFFER_SIZE = 100 * 1024 * 1024; // 100MB hard limit
+
 export async function extractText(content: Buffer, mimeType: string): Promise<string> {
+  if (content.length > MAX_BUFFER_SIZE) {
+    throw new Error(`File too large for text extraction (${Math.round(content.length / 1024 / 1024)}MB exceeds ${MAX_BUFFER_SIZE / 1024 / 1024}MB limit)`);
+  }
+
   if (mimeType === "text/plain") {
     return content.toString("utf-8");
   }

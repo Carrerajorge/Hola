@@ -459,7 +459,6 @@ export class ChunkedFileUploader {
           body: JSON.stringify({
             uploadId: session.uploadId,
             partNumber,
-            ...(options.uploadId ? { uploadId: options.uploadId } : {}),
           }),
         });
 

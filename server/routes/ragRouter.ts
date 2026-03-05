@@ -4,17 +4,27 @@ import { ragPipeline } from '../services/ragPipeline';
 import { visualRetrieval } from '../services/visualRetrieval';
 import { advancedRAG } from '../services/advancedRAG';
 import { ragFeedback } from '../services/ragFeedback';
+import { optionalAuth } from '../middleware/optionalAuth';
 import { db } from '../db';
 import { files, fileChunks } from '@shared/schema';
 import { eq, inArray } from 'drizzle-orm';
 
 const router = Router();
-const upload = multer({ 
+const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 }
 });
 
-router.post('/index', upload.single('file'), async (req: Request, res: Response) => {
+/** Sanitize error details - never leak internals to client */
+function safeError(error: unknown): string {
+  if (error instanceof Error) {
+    if (error.message.includes('not found')) return 'Resource not found';
+    if (error.message.includes('timed out')) return 'Operation timed out';
+  }
+  return 'Internal processing error';
+}
+
+router.post('/index', optionalAuth, upload.single('file'), async (req: Request, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file provided' });
@@ -42,7 +52,7 @@ router.post('/index', upload.single('file'), async (req: Request, res: Response)
     console.error('[RAG Router] Index error:', error);
     res.status(500).json({ 
       error: 'Failed to index document',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      details: safeError(error)
     });
   }
 });
@@ -81,7 +91,7 @@ router.post('/query', async (req: Request, res: Response) => {
     console.error('[RAG Router] Query error:', error);
     res.status(500).json({ 
       error: 'Failed to query documents',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      details: safeError(error)
     });
   }
 });
@@ -192,7 +202,7 @@ router.post('/answer', async (req: Request, res: Response) => {
     console.error('[RAG Router] Answer error:', error);
     res.status(500).json({ 
       error: 'Failed to answer query',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      details: safeError(error)
     });
   }
 });
@@ -241,7 +251,7 @@ router.get('/chunks/:fileId', async (req: Request, res: Response) => {
     console.error('[RAG Router] Get chunks error:', error);
     res.status(500).json({ 
       error: 'Failed to get chunks',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      details: safeError(error)
     });
   }
 });
@@ -260,7 +270,7 @@ router.delete('/chunks/:fileId', async (req: Request, res: Response) => {
     console.error('[RAG Router] Delete chunks error:', error);
     res.status(500).json({ 
       error: 'Failed to delete chunks',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      details: safeError(error)
     });
   }
 });
@@ -293,7 +303,7 @@ router.post('/semantic-search', async (req: Request, res: Response) => {
     console.error('[RAG Router] Semantic search error:', error);
     res.status(500).json({ 
       error: 'Failed to perform semantic search',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      details: safeError(error)
     });
   }
 });
@@ -340,7 +350,7 @@ router.post('/analyze-image', upload.single('image'), async (req: Request, res: 
     console.error('[RAG Router] Analyze image error:', error);
     res.status(500).json({ 
       error: 'Failed to analyze image',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      details: safeError(error)
     });
   }
 });
@@ -381,7 +391,7 @@ router.post('/reindex-all', async (req: Request, res: Response) => {
     console.error('[RAG Router] Reindex error:', error);
     res.status(500).json({ 
       error: 'Failed to reindex files',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      details: safeError(error)
     });
   }
 });
@@ -432,7 +442,7 @@ router.post('/advanced/query', async (req: Request, res: Response) => {
     console.error('[RAG Router] Advanced query error:', error);
     res.status(500).json({ 
       error: 'Failed to process advanced query',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      details: safeError(error)
     });
   }
 });
@@ -548,7 +558,7 @@ router.post('/advanced/expand-query', async (req: Request, res: Response) => {
     console.error('[RAG Router] Expand query error:', error);
     res.status(500).json({ 
       error: 'Failed to expand query',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      details: safeError(error)
     });
   }
 });
@@ -581,7 +591,7 @@ router.post('/advanced/multi-hop', async (req: Request, res: Response) => {
     console.error('[RAG Router] Multi-hop error:', error);
     res.status(500).json({ 
       error: 'Failed to perform multi-hop retrieval',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      details: safeError(error)
     });
   }
 });
@@ -610,7 +620,7 @@ router.post('/feedback/signal', async (req: Request, res: Response) => {
     console.error('[RAG Router] Feedback signal error:', error);
     res.status(500).json({ 
       error: 'Failed to record feedback',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      details: safeError(error)
     });
   }
 });
@@ -638,7 +648,7 @@ router.post('/feedback/answer', async (req: Request, res: Response) => {
     console.error('[RAG Router] Answer feedback error:', error);
     res.status(500).json({ 
       error: 'Failed to record answer feedback',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      details: safeError(error)
     });
   }
 });
@@ -651,7 +661,7 @@ router.get('/feedback/stats', async (req: Request, res: Response) => {
     console.error('[RAG Router] Feedback stats error:', error);
     res.status(500).json({ 
       error: 'Failed to get feedback stats',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      details: safeError(error)
     });
   }
 });
@@ -709,7 +719,7 @@ router.post('/advanced/index', upload.single('file'), async (req: Request, res: 
     console.error('[RAG Router] Advanced index error:', error);
     res.status(500).json({ 
       error: 'Failed to index document with advanced chunking',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      details: safeError(error)
     });
   }
 });
