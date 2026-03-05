@@ -157,6 +157,7 @@ const PricingPage = lazyWithRetry(() => import("@/pages/pricing"));
 const BusinessPage = lazyWithRetry(() => import("@/pages/business"));
 const DownloadPage = lazyWithRetry(() => import("@/pages/download"));
 const PowerPage = lazyWithRetry(() => import("@/pages/power"));
+const RenderingShowcasePage = lazyWithRetry(() => import("@/pages/rendering-showcase"));
 const MemoryPage = lazyWithRetry(() => import("@/pages/memory"));
 
 const ProtectedProfilePage = requireAuth(ProfilePage);
@@ -321,6 +322,7 @@ function Router() {
             <Route path="/business" component={BusinessPage} />
             <Route path="/download" component={DownloadPage} />
             <Route path="/power" component={PowerPage} />
+            <Route path="/rendering" component={RenderingShowcasePage} />
             <Route component={NotFound} />
           </Switch>
         </main>
@@ -346,6 +348,7 @@ function AppContent() {
     "/business",
     "/download",
     "/power",
+    "/rendering",
   ];
   const allowDuringMaintenance =
     location === "/" || publicMaintenanceRoutePrefixes.some((route) => location.startsWith(route));

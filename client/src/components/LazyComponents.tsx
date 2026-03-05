@@ -142,6 +142,64 @@ export const LazyCharts = lazyLoad(
 );
 
 // ============================================
+// RENDERING ENGINES (Lazy Loaded)
+// ============================================
+
+// 3D Rendering - React Three Fiber
+export const LazyR3FEngine = lazyLoad(
+    () => import('@/lib/rendering/engines/r3f-engine').then(m => ({ default: m.R3FEngine })),
+    { fallback: <SectionLoading /> }
+);
+
+// 2D WebGL - PixiJS
+export const LazyPixiEngine = lazyLoad(
+    () => import('@/lib/rendering/engines/pixi-engine').then(m => ({ default: m.PixiEngine })),
+    { fallback: <SectionLoading /> }
+);
+
+// Canvas Editor - Fabric.js
+export const LazyFabricEngine = lazyLoad(
+    () => import('@/lib/rendering/engines/fabric-engine').then(m => ({ default: m.FabricEngine })),
+    { fallback: <SectionLoading /> }
+);
+
+// Hand-drawn SVG - Rough.js
+export const LazyRoughEngine = lazyLoad(
+    () => import('@/lib/rendering/engines/rough-engine').then(m => ({ default: m.RoughEngine })),
+    { fallback: <SectionLoading /> }
+);
+
+// Animations - Lottie
+export const LazyLottieEngine = lazyLoad(
+    () => import('@/lib/rendering/engines/lottie-engine').then(m => ({ default: m.LottieEngine })),
+    { fallback: <SectionLoading /> }
+);
+
+// Physics Animations - React Spring
+export const LazySpringEngine = lazyLoad(
+    () => import('@/lib/rendering/engines/spring-engine').then(m => ({ default: m.SpringEngine })),
+    { fallback: <SectionLoading /> }
+);
+
+// Node Diagrams - ReactFlow
+export const LazyReactFlowEngine = lazyLoad(
+    () => import('@/lib/rendering/engines/reactflow-engine').then(m => ({ default: m.ReactFlowEngine })),
+    { fallback: <SectionLoading /> }
+);
+
+// 3D Globe
+export const LazyGlobeEngine = lazyLoad(
+    () => import('@/lib/rendering/engines/globe-engine').then(m => ({ default: m.GlobeEngine })),
+    { fallback: <SectionLoading /> }
+);
+
+// Unified Rendering Orchestrator
+export const LazyRenderingOrchestrator = lazyLoad(
+    () => import('@/lib/rendering/RenderingOrchestrator').then(m => ({ default: m.RenderingOrchestrator })),
+    { fallback: <SectionLoading /> }
+);
+
+// ============================================
 // PRELOAD UTILITIES
 // ============================================
 
@@ -159,6 +217,14 @@ export function preloadComponent(componentName: string) {
         ExcelEditor: () => import('@/components/editors/ExcelEditor'),
         PptEditor: () => import('@/components/editors/PptEditor'),
         PdfPreview: () => import('@/components/PdfPreview'),
+        // Rendering engines
+        R3FEngine: () => import('@/lib/rendering/engines/r3f-engine'),
+        PixiEngine: () => import('@/lib/rendering/engines/pixi-engine'),
+        FabricEngine: () => import('@/lib/rendering/engines/fabric-engine'),
+        RoughEngine: () => import('@/lib/rendering/engines/rough-engine'),
+        LottieEngine: () => import('@/lib/rendering/engines/lottie-engine'),
+        ReactFlowEngine: () => import('@/lib/rendering/engines/reactflow-engine'),
+        GlobeEngine: () => import('@/lib/rendering/engines/globe-engine'),
     };
 
     const importFn = importMap[componentName];

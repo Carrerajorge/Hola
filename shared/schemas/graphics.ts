@@ -3,6 +3,22 @@ import { z } from "zod";
 // Rendering modes
 export type RenderMode = 'svg' | 'canvas2d' | 'webgl' | 'auto';
 
+// Extended rendering engine types (for new rendering library)
+export type RenderEngineType =
+  | 'three-r3f'
+  | 'pixi'
+  | 'fabric'
+  | 'rough'
+  | 'lottie'
+  | 'react-spring'
+  | 'reactflow'
+  | 'globe'
+  | 'd3-enhanced'
+  | 'echarts'
+  | 'recharts'
+  | 'konva'
+  | 'mermaid';
+
 // Capability detection
 export interface GraphicsCapabilities {
   webgl: boolean;
