@@ -18,13 +18,9 @@ permissions:
 
 
 jobs:
-
   build_images:
-
     name: Build & push images to GHCR
-
     uses: ./.github/workflows/build-images.yml
-
+    secrets: inherit
     with:
-
       sha: ${{ github.sha }}
