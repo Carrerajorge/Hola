@@ -1,12 +1,6 @@
-import { Router } from "express";
-import { z } from "zod";
-import crypto from "crypto";
-import { db } from "../db";
-import { nodes, nodePairings, nodeJobs, users } from "@shared/schema";
-import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
-import { validateBody } from "../middleware/validateRequest";
-import { getUserId } from "../types/express";
-import { requireNodeAuth, getNode } from "../middleware/nodeAuth";
+import { Router } from "express"; import { z } from "zod"; import crypto from "crypto"; import { db } from "../db"; import { nodes, nodePairings, nodeJobs, users } from "@shared/schema"; import { 
+and, desc, eq, gt, isNull, sql } from "drizzle-orm"; import { validateBody } from "../middleware/validateRequest"; import { getUserId } from "../types/express"; import { requireNodeAuth, getNode } 
+from "../middleware/nodeAuth";
 
 const PAIRING_TTL_MINUTES = 5;
 
@@ -202,8 +196,8 @@ export function createNodesRouter(): Router {
   // Node side
   // =====================
 
-  // POST /api/nodes/pair/confirm
-  router.post("/api/nodes/pair/confirm", validateBody(confirmSchema), async (req, res) => {
+  // POST /api/nodes/pair/complete
+  router.post("/api/nodes/pair/complete", validateBody(confirmSchema), async (req, res) => {
     const { code, name, platform, agentVersion, capabilities } = req.body as any;
 
     const now = new Date();
@@ -254,6 +248,11 @@ export function createNodesRouter(): Router {
       nodeId: String((created as any).id),
       nodeToken: token,
     });
+  });
+
+  // Backwards-compatible alias. Remove once device-agent uses /complete everywhere.
+  router.post("/api/nodes/pair/confirm", validateBody(confirmSchema), async (req, res) => {
+    return res.redirect(307, "/api/nodes/pair/complete");
   });
 
   // Node polls for queued jobs (MVP; WS comes next)
