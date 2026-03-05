@@ -1,12 +1,8 @@
-import { Router } from "express";
-import { z } from "zod";
-import crypto from "crypto";
-import { db } from "../db";
-import { nodes, nodePairings, nodeJobs, users } from "@shared/schema";
-import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
-import { validateBody } from "../middleware/validateRequest";
-import { getUserId } from "../types/express";
-import { requireNodeAuth, getNode } from "../middleware/nodeAuth";
+import { Router } from "express"; import { z } from "zod"; import crypto from "crypto"; import { db } from "../db"; import { nodes, nodePairings, nodeJobs, users } from "@shared/schema"; 
+
+import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
+import { validateBody } from "../middleware/validateRequest"; import { getUserId } from "../types/express"; import { requireNodeAuth, getNode } 
+from "../middleware/nodeAuth";
 
 const PAIRING_TTL_MINUTES = 5;
 
@@ -202,8 +198,8 @@ export function createNodesRouter(): Router {
   // Node side
   // =====================
 
-  // POST /api/nodes/pair/confirm
-  router.post("/api/nodes/pair/confirm", validateBody(confirmSchema), async (req, res) => {
+  // POST /api/nodes/pair/complete
+  router.post("/api/nodes/pair/complete", validateBody(confirmSchema), async (req, res) => {
     const { code, name, platform, agentVersion, capabilities } = req.body as any;
 
     const now = new Date();
@@ -254,6 +250,11 @@ export function createNodesRouter(): Router {
       nodeId: String((created as any).id),
       nodeToken: token,
     });
+  });
+
+  router.post("/api/nodes/pair/confirm", validateBody(confirmSchema), async (req, res) => {
+    // Backwards-compatible alias. Remove once device-agent uses /complete everywhere.
+    return res.redirect(307, "/api/nodes/pair/complete");
   });
 
   // Node polls for queued jobs (MVP; WS comes next)
@@ -307,23 +308,17 @@ export function createNodesRouter(): Router {
 
       // Move sent/queued -> running
       const [updated] = await db
-        .update(nodeJobs)
-        .set({ status: "running", startedAt: new Date() })
-        .where(
-          and(
-            eq(nodeJobs.id, jobId),
-            eq(nodeJobs.nodeId, node.id),
-            eq(nodeJobs.orgId, node.orgId),
-            // allow ack even if it was still queued (race)
-            // and also if it was sent
-            // (if already running/succeeded/failed, this update won't match)
-            // @ts-ignore - drizzle doesn't have inArray imported here; keep simple OR
-            // we'll do OR using SQL
-            sql`${nodeJobs.status} IN ('queued','sent')`
-          )
+      .update(nodeJobs)
+      .set({ status: "running", startedAt: new Date() })
+      .where(
+        and(
+          eq(nodeJobs.id, jobId),
+          eq(nodeJobs.nodeId, node.id),
+          eq(nodeJobs.orgId, node.orgId),
+          or(eq(nodeJobs.status, "queued"), eq(nodeJobs.status, "sent"))
         )
-        .returning({ id: nodeJobs.id });
-
+      )
+      .returning({ id: nodeJobs.id });
       if (!updated) {
         return res.status(409).json({ success: false, error: `Job is not ackable (status=${String((job as any).status)})` });
       }
