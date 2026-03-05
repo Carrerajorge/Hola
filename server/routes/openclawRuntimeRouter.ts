@@ -7,6 +7,7 @@ import { skillRegistry } from "../openclaw/skills/skillRegistry";
 import { initSkills } from "../openclaw/skills/skillLoader";
 import { RAGService } from "../services/ragService";
 import { orchestrationEngine } from "../services/orchestrationEngine";
+import { createSuperAgentRouter } from "../openclaw/superagent/routes";
 
 const objectiveSchema = z.object({
   objective: z.string().trim().min(1, "objective is required"),
@@ -312,6 +313,9 @@ export function createOpenClawRuntimeRouter(): Router {
       cancelled,
     });
   });
+
+  // Mount SuperAgent routes under /superagent
+  router.use("/superagent", createSuperAgentRouter());
 
   return router;
 }

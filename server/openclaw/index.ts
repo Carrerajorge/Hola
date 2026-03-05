@@ -48,6 +48,16 @@ export async function initializeOpenClaw(httpServer: HttpServer): Promise<void> 
     enabledModules.push('streaming');
   }
 
+  // SuperAgent: multi-model orchestration, background tasks, browser automation,
+  // tool connectors, creation engine, and open source integrations
+  try {
+    const { initSuperAgent } = await import('./superagent');
+    await initSuperAgent();
+    enabledModules.push('superAgent(v2.3.0)');
+  } catch (err: any) {
+    Logger.warn(`[OpenClaw] SuperAgent init failed: ${err?.message || err}`);
+  }
+
   if (enabledModules.length > 0) {
     Logger.info(`[OpenClaw] Initialized: [${enabledModules.join(', ')}]`);
   } else {

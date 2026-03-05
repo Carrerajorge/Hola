@@ -18,7 +18,7 @@ export interface ModelConfig {
   id: string;
   provider: 'anthropic' | 'google' | 'openai' | 'xai' | 'litellm' | 'ollama';
   model: string;
-  role: 'brain' | 'researcher' | 'coder' | 'fast' | 'vision' | 'embedder';
+  role: 'brain' | 'researcher' | 'coder' | 'fast' | 'vision' | 'embedder' | 'image-gen' | 'video-gen' | 'memory';
   maxTokens: number;
   temperature: number;
   costPerMillionTokens: { input: number; output: number };
@@ -28,21 +28,23 @@ export interface ModelConfig {
 }
 
 export const MODEL_REGISTRY: Record<string, ModelConfig> = {
-  // Primary Brain — Claude Opus 4.6 for complex reasoning and orchestration
+  // ═══ PRIMARY BRAIN — Claude Opus 4.6 ═══
+  // Main orchestrator: complex reasoning, planning, decision-making
   'opus-brain': {
     id: 'opus-brain',
     provider: 'anthropic',
-    model: 'claude-opus-4-20250603',
+    model: 'claude-opus-4-6',
     role: 'brain',
     maxTokens: 32768,
     temperature: 0.3,
     costPerMillionTokens: { input: 15, output: 75 },
-    capabilities: ['reasoning', 'planning', 'code-generation', 'analysis', 'orchestration'],
+    capabilities: ['reasoning', 'planning', 'code-generation', 'analysis', 'orchestration', 'multi-agent-coordination'],
     priority: 1,
     fallbackTo: 'sonnet-coder',
   },
 
-  // Deep Research — Gemini 2.5 Pro for comprehensive investigation
+  // ═══ DEEP RESEARCH — Gemini 2.5 Pro ═══
+  // Long-context research, web search, document analysis
   'gemini-research': {
     id: 'gemini-research',
     provider: 'google',
@@ -51,12 +53,13 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     maxTokens: 65536,
     temperature: 0.2,
     costPerMillionTokens: { input: 3.5, output: 10.5 },
-    capabilities: ['research', 'web-search', 'long-context', 'multimodal', 'analysis'],
+    capabilities: ['research', 'web-search', 'long-context', 'multimodal', 'analysis', 'parallel-research'],
     priority: 2,
-    fallbackTo: 'gpt4-vision',
+    fallbackTo: 'chatgpt-memory',
   },
 
-  // Coding Specialist — Claude Sonnet 4.5 for implementation
+  // ═══ CODING SPECIALIST — Claude Sonnet 4.5 ═══
+  // Implementation, debugging, refactoring
   'sonnet-coder': {
     id: 'sonnet-coder',
     provider: 'anthropic',
@@ -65,12 +68,73 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     maxTokens: 16384,
     temperature: 0.1,
     costPerMillionTokens: { input: 3, output: 15 },
-    capabilities: ['code-generation', 'debugging', 'refactoring', 'testing', 'documentation'],
+    capabilities: ['code-generation', 'debugging', 'refactoring', 'testing', 'documentation', 'app-building'],
     priority: 3,
     fallbackTo: 'gpt4-mini',
   },
 
-  // Fast Operations — GPT-4o Mini for quick tasks
+  // ═══ SPEED — Grok 3 for fast responses ═══
+  // Rapid answers, real-time data, speed-critical tasks
+  'grok-fast': {
+    id: 'grok-fast',
+    provider: 'xai',
+    model: 'grok-3',
+    role: 'fast',
+    maxTokens: 32768,
+    temperature: 0.5,
+    costPerMillionTokens: { input: 3, output: 15 },
+    capabilities: ['quick-response', 'real-time-data', 'creative', 'uncensored', 'reasoning', 'speed'],
+    priority: 4,
+    fallbackTo: 'gpt4-mini',
+  },
+
+  // ═══ BROAD SEARCH & LONG-TERM MEMORY — ChatGPT 5.2 ═══
+  // Web browsing, memory persistence, broad knowledge retrieval
+  'chatgpt-memory': {
+    id: 'chatgpt-memory',
+    provider: 'openai',
+    model: 'chatgpt-5.2',
+    role: 'memory',
+    maxTokens: 32768,
+    temperature: 0.3,
+    costPerMillionTokens: { input: 5, output: 15 },
+    capabilities: ['web-search', 'long-term-memory', 'knowledge-retrieval', 'broad-search', 'conversation-memory', 'context-persistence'],
+    priority: 5,
+    fallbackTo: 'gemini-research',
+  },
+
+  // ═══ IMAGE GENERATION — Nano Banana ═══
+  // High-quality image generation, visual content creation
+  'nano-banana-image': {
+    id: 'nano-banana-image',
+    provider: 'litellm',
+    model: 'nano-banana/image-gen-v2',
+    role: 'image-gen',
+    maxTokens: 4096,
+    temperature: 0.7,
+    costPerMillionTokens: { input: 1, output: 5 },
+    capabilities: ['image-generation', 'visual-design', 'art-creation', 'logo-design', 'illustration', 'photo-realistic'],
+    priority: 6,
+    fallbackTo: 'gpt4-vision',
+  },
+
+  // ═══ VIDEO GENERATION — Veo 3.1 ═══
+  // Video creation, animation, motion graphics
+  'veo-video': {
+    id: 'veo-video',
+    provider: 'google',
+    model: 'veo-3.1',
+    role: 'video-gen',
+    maxTokens: 8192,
+    temperature: 0.5,
+    costPerMillionTokens: { input: 10, output: 50 },
+    capabilities: ['video-generation', 'animation', 'motion-graphics', 'video-editing', 'cinematic'],
+    priority: 7,
+    fallbackTo: 'nano-banana-image',
+  },
+
+  // ═══ FAST ROUTING — GPT-4o Mini ═══
+  // Quick classification, routing, summarization
   'gpt4-mini': {
     id: 'gpt4-mini',
     provider: 'openai',
@@ -79,12 +143,13 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     maxTokens: 8192,
     temperature: 0.5,
     costPerMillionTokens: { input: 0.15, output: 0.6 },
-    capabilities: ['summarization', 'classification', 'quick-response', 'routing'],
-    priority: 4,
-    fallbackTo: 'grok-vision',
+    capabilities: ['summarization', 'classification', 'quick-response', 'routing', 'intent-analysis'],
+    priority: 8,
+    fallbackTo: 'grok-fast',
   },
 
-  // Vision & Analysis — GPT-4o for visual tasks
+  // ═══ VISION & ANALYSIS — GPT-4o ═══
+  // Image analysis, OCR, diagram understanding
   'gpt4-vision': {
     id: 'gpt4-vision',
     provider: 'openai',
@@ -94,11 +159,12 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     temperature: 0.3,
     costPerMillionTokens: { input: 2.5, output: 10 },
     capabilities: ['vision', 'image-analysis', 'ocr', 'diagram-understanding'],
-    priority: 5,
+    priority: 9,
     fallbackTo: 'gemini-research',
   },
 
-  // Uncensored Reasoning — Grok 3 for creative/edgy tasks
+  // ═══ CREATIVE VISION — Grok 3 Vision ═══
+  // Creative visual tasks, uncensored reasoning with images
   'grok-vision': {
     id: 'grok-vision',
     provider: 'xai',
@@ -108,7 +174,7 @@ export const MODEL_REGISTRY: Record<string, ModelConfig> = {
     temperature: 0.7,
     costPerMillionTokens: { input: 5, output: 25 },
     capabilities: ['vision', 'creative', 'uncensored', 'reasoning'],
-    priority: 6,
+    priority: 10,
     fallbackTo: 'gpt4-mini',
   },
 };
@@ -301,10 +367,26 @@ export const FEATURE_FLAGS = {
   ENABLE_WEBSOCKET_STREAMING: true,
   ENABLE_FILE_UPLOAD: true,
 
-  // Fusion Features
-  ENABLE_CROSS_SESSION_MEMORY: false,    // Coming in v2.3
-  ENABLE_MULTI_AGENT_COORDINATION: false, // Coming in v2.4
-  ENABLE_AUTONOMOUS_SKILL_CREATION: false, // Experimental
+  // Fusion Features — v2.3.0 Super Agent
+  ENABLE_CROSS_SESSION_MEMORY: true,
+  ENABLE_MULTI_AGENT_COORDINATION: true,
+  ENABLE_AUTONOMOUS_SKILL_CREATION: true,
+
+  // Super Agent Capabilities
+  ENABLE_BACKGROUND_TASKS: true,           // Persistent background task scheduling
+  ENABLE_BROWSER_AUTOMATION: true,         // Parallel web research & browser control
+  ENABLE_TOOL_CONNECTORS: true,            // Gmail, Slack, Notion, Calendar, etc.
+  ENABLE_CREATION_ENGINE: true,            // App/website/report builder
+  ENABLE_MULTI_MODEL_ORCHESTRATION: true,  // Route tasks to best model
+  ENABLE_IMAGE_GENERATION: true,           // Nano Banana image gen
+  ENABLE_VIDEO_GENERATION: true,           // Veo 3.1 video gen
+  ENABLE_LONG_TERM_MEMORY: true,           // ChatGPT 5.2 memory persistence
+
+  // Open Source Integrations
+  ENABLE_COMPOSIO_TOOLS: true,             // 500+ app integrations via Composio
+  ENABLE_LITELLM_PROXY: true,              // Multi-model routing via LiteLLM
+  ENABLE_TRIGGER_DEV_TASKS: true,          // Background task scheduling via Trigger.dev
+  ENABLE_BROWSER_USE_AGENT: true,          // AI browser automation via browser-use
 } as const;
 
 /* ──────────────────────────────────────────────────
@@ -318,7 +400,8 @@ export const OPENCLAW_CONFIG = {
   snapshots: SNAPSHOT_CONFIG,
   iliagpt: ILIAGPT_CONFIG,
   features: FEATURE_FLAGS,
-  version: '2.2.0-fusion',
+  version: '2.3.0-superagent',
+  openclawVersion: '2026.3.2',
   buildDate: new Date('2026-03-05').toISOString(),
 } as const;
 
