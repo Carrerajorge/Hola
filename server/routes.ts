@@ -150,6 +150,8 @@ import { createSuperProgrammingAgentRouter } from "./routes/superProgrammingAgen
 import { createSkillPlatformRouter } from "./routes/skillPlatformRouter";
 import { CSRF_COOKIE_NAME, CSRF_TOKEN_PATTERN, issueCsrfCookie } from "./middleware/csrf";
 import { finopsRouter } from "./routes/finopsRouter";
+import { createFileControlRouter } from "./capabilities/fileControlRouter";
+import { createComputerControlRouter } from "./capabilities/computerControlRouter";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -834,6 +836,12 @@ export async function registerRoutes(
 
   // ===== macOS Native Control (AppleScript, System, Apps, Calendar, etc.) =====
   app.use("/api/macos", requireAdminMiddleware, createMacOSControlRouter());
+
+  // ===== FILE-PLANE: Secure File Gateway + Index Service =====
+  app.use("/api/file-control", createFileControlRouter());
+
+  // ===== COMPUTER-CONTROL-PLANE: Shell + Desktop + Browser (unified) =====
+  app.use("/api/computer-control", createComputerControlRouter());
 
   // ===== Automation Triggers (Cron, File Watch, Webhooks, System Events) =====
   app.use("/api/triggers", requireAdminMiddleware, createAutomationTriggersRouter());
