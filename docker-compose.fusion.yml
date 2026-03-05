@@ -1,0 +1,108 @@
+
+# ──────────────────────────────────────────────
+# ILIAGPT × OpenClaw Fusion — Additional Infrastructure
+# Extends the base docker-compose.yml with fusion-specific services
+# Run with: docker-compose -f docker-compose.yml -f docker-compose.fusion.yml up
+# ──────────────────────────────────────────────
+
+version: '3.9'
+
+services:
+
+  # ── LiteLLM Proxy ──────────────────────────────
+  # Unified API gateway for all AI providers
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: iliagpt_litellm
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm-config.yaml:/app/config.yaml:ro
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GOOGLE_AI_API_KEY=${GOOGLE_AI_API_KEY}
+      - XAI_API_KEY=${XAI_API_KEY}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-fusion-master}
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--detailed_debug"]
+    networks:
+      - iliagpt_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Ollama Local Models ─────────────────────────
+  # Local model inference for privacy-sensitive tasks
+  ollama:
+    image: ollama/ollama:latest
+    container_name: iliagpt_ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_ORIGINS=*
+    networks:
+      - iliagpt_network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # ── Redis for Lane Queue ────────────────────────
+  # High-performance queue for OpenClaw's Lane Queue system
+  redis:
+    image: redis:7-alpine
+    container_name: iliagpt_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    networks:
+      - iliagpt_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Qdrant Vector DB ────────────────────────────
+  # Vector storage for Semantic Snapshots
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: iliagpt_qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - iliagpt_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  ollama_data:
+    driver: local
+  redis_data:
+    driver: local
+  qdrant_data:
+    driver: local
+
+networks:
+  iliagpt_network:
+    external: true
+    name: iliagpt_network
