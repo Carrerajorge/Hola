@@ -14,7 +14,10 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import OpenAI from 'openai';
 import { MODEL_REGISTRY, PIPELINE_STAGES, ModelConfig, PipelineStageConfig } from '../openclaw.config';
 import { storage } from '../storage';
-import { log } from '../vite';
+// Use a local log helper (vite.ts doesn't export log at runtime)
+function log(message: string, source?: string) {
+  console.log(`[${source || 'orchestrator'}] ${message}`);
+}
 
 /* ──────────────────────────────────────────────────
    Type Definitions
