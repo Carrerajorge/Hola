@@ -212,7 +212,9 @@ export class SuperAgentController extends EventEmitter {
         reject(new Error(data?.error || "Orchestrator execution failed"));
       });
 
-      orchestrator.execute(request.message, request.attachments || []).catch(reject);
+      orchestrator.generatePlan(request.message, request.attachments || [])
+        .then(() => orchestrator.run())
+        .catch(reject);
     });
   }
 
@@ -224,12 +226,15 @@ export class SuperAgentController extends EventEmitter {
       const { ComputerUseEngine } = await import("./computerUseEngine");
       const engine = new ComputerUseEngine();
 
-      const result = await engine.executeTask({
-        task: request.message,
-        userId: request.userId,
-        strategy: "auto",
-        maxSteps: 20,
-        screenshotOnEachStep: true,
+      const sessionId = await engine.createSession("browser");
+      const result = await engine.executeTask(sessionId, {
+        description: request.message,
+        steps: [],
+        successCriteria: [],
+        maxAttempts: 3,
+        timeout: 120000,
+      }, (step, screenshot) => {
+        this.emit("agent_progress", { requestId: request.id, step, screenshot });
       });
 
       return { type: "computer_use", ...result };
@@ -261,7 +266,7 @@ export class SuperAgentController extends EventEmitter {
       );
 
       const definition = JSON.parse(typeof response === "string" ? response : response?.content || "{}");
-      const result = await workflowEngine.execute(definition);
+      const result = await workflowEngine.executeWorkflow(definition);
 
       return { type: "workflow", ...result };
     } catch (err: any) {
@@ -275,19 +280,17 @@ export class SuperAgentController extends EventEmitter {
    */
   private async executeResearchPipeline(request: SuperAgentRequest, route: RouteDecision): Promise<any> {
     try {
-      const { orchestrate } = await import("./superAgent/orchestrator");
+      const { createSuperAgent } = await import("./superAgent/orchestrator");
 
-      // Delegate to the academic super agent
-      return new Promise((resolve, reject) => {
-        orchestrate({
-          goal: request.message,
-          userId: request.userId,
-          chatId: request.chatId,
-          onProgress: (progress: any) => {
-            this.emit("research_progress", { requestId: request.id, ...progress });
-          },
-        }).then(resolve).catch(reject);
+      const agent = createSuperAgent(randomUUID(), {
+        maxIterations: 20,
       });
+
+      agent.on("sse", (event: any) => {
+        this.emit("research_progress", { requestId: request.id, ...event });
+      });
+
+      return await agent.execute(request.message);
     } catch (err: any) {
       // Fallback to parallel research
       return this.executeParallelResearch(request, route);

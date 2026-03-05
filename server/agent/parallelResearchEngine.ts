@@ -274,48 +274,53 @@ export class ParallelResearchEngine extends EventEmitter {
   /**
    * Search a specific source type.
    */
+  private makeToolContext(label: string) {
+    return { runId: `research-${label}`, userId: "system", chatId: "research" } as any;
+  }
+
   private async searchSource(type: SourceType, query: string, maxResults: number): Promise<SourceResult[]> {
     try {
       const { toolRegistry } = await import("./toolRegistry");
+      const ctx = this.makeToolContext(type);
 
       switch (type) {
         case "web_search": {
-          const result = await toolRegistry.executeTool("web_search", { query, maxResults });
+          const result = await toolRegistry.execute("web_search", { query, maxResults }, ctx);
           return this.parseWebSearchResults(result, type);
         }
 
         case "academic": {
-          const result = await toolRegistry.executeTool("web_search", { query: `${query} site:scholar.google.com OR site:arxiv.org OR site:pubmed.ncbi.nlm.nih.gov`, maxResults });
+          const result = await toolRegistry.execute("web_search", { query: `${query} site:scholar.google.com OR site:arxiv.org OR site:pubmed.ncbi.nlm.nih.gov`, maxResults }, ctx);
           return this.parseWebSearchResults(result, type);
         }
 
         case "news": {
-          const result = await toolRegistry.executeTool("web_search", { query: `${query} latest news`, maxResults });
+          const result = await toolRegistry.execute("web_search", { query: `${query} latest news`, maxResults }, ctx);
           return this.parseWebSearchResults(result, type);
         }
 
         case "github": {
-          const result = await toolRegistry.executeTool("web_search", { query: `${query} site:github.com`, maxResults });
+          const result = await toolRegistry.execute("web_search", { query: `${query} site:github.com`, maxResults }, ctx);
           return this.parseWebSearchResults(result, type);
         }
 
         case "arxiv": {
-          const result = await toolRegistry.executeTool("web_search", { query: `${query} site:arxiv.org`, maxResults });
+          const result = await toolRegistry.execute("web_search", { query: `${query} site:arxiv.org`, maxResults }, ctx);
           return this.parseWebSearchResults(result, type);
         }
 
         case "wikipedia": {
-          const result = await toolRegistry.executeTool("web_search", { query: `${query} site:wikipedia.org`, maxResults: Math.min(maxResults, 3) });
+          const result = await toolRegistry.execute("web_search", { query: `${query} site:wikipedia.org`, maxResults: Math.min(maxResults, 3) }, ctx);
           return this.parseWebSearchResults(result, type);
         }
 
         case "reddit": {
-          const result = await toolRegistry.executeTool("web_search", { query: `${query} site:reddit.com`, maxResults });
+          const result = await toolRegistry.execute("web_search", { query: `${query} site:reddit.com`, maxResults }, ctx);
           return this.parseWebSearchResults(result, type);
         }
 
         case "youtube": {
-          const result = await toolRegistry.executeTool("web_search", { query: `${query} site:youtube.com`, maxResults });
+          const result = await toolRegistry.execute("web_search", { query: `${query} site:youtube.com`, maxResults }, ctx);
           return this.parseWebSearchResults(result, type);
         }
 
@@ -366,13 +371,15 @@ export class ParallelResearchEngine extends EventEmitter {
 
       try {
         const { toolRegistry } = await import("./toolRegistry");
-        const result = await toolRegistry.executeTool("browse_url", {
+        const ctx = this.makeToolContext("enrich");
+        const result = await toolRegistry.execute("browse_url", {
           url: source.url,
           extractText: true,
-        });
+        }, ctx);
 
-        if (result?.content || result?.text) {
-          source.content = (result.content || result.text || "").substring(0, 5000);
+        const output = result?.output;
+        if (output?.content || output?.text) {
+          source.content = (output.content || output.text || "").substring(0, 5000);
         }
       } catch {
         // Keep original snippet

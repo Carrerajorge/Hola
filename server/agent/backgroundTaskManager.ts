@@ -525,20 +525,22 @@ export class BackgroundTaskManager extends EventEmitter {
 
       case "web_search": {
         const { toolRegistry } = await import("./toolRegistry");
-        const result = await toolRegistry.executeTool("web_search", {
+        const ctx = { runId: `bg-${task.id}`, userId: task.userId };
+        const result = await toolRegistry.execute("web_search", {
           query: action.config.query,
           maxResults: action.config.maxResults || 10,
-        });
+        }, ctx as any);
         return result;
       }
 
       case "web_scrape": {
         const { toolRegistry } = await import("./toolRegistry");
-        const result = await toolRegistry.executeTool("browse_url", {
+        const ctx = { runId: `bg-${task.id}`, userId: task.userId };
+        const result = await toolRegistry.execute("browse_url", {
           url: action.config.url,
           selector: action.config.selector,
           takeScreenshot: action.config.takeScreenshot,
-        });
+        }, ctx as any);
         return result;
       }
 
@@ -565,7 +567,7 @@ export class BackgroundTaskManager extends EventEmitter {
 
       case "workflow": {
         const { workflowEngine } = await import("./workflowEngine");
-        const result = await workflowEngine.execute(action.config.definition);
+        const result = await workflowEngine.executeWorkflow(action.config.definition);
         return result;
       }
 
@@ -581,7 +583,9 @@ export class BackgroundTaskManager extends EventEmitter {
         return new Promise((resolve, reject) => {
           orchestrator.on("completed", (result: any) => resolve(result));
           orchestrator.on("failed", (error: any) => reject(error));
-          orchestrator.execute(action.config.prompt, []).catch(reject);
+          orchestrator.generatePlan(action.config.prompt, [])
+            .then(() => orchestrator.run())
+            .catch(reject);
         });
       }
 

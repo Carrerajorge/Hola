@@ -13,7 +13,6 @@ import { eq } from "drizzle-orm";
 import { getUserSettingsCached } from "../services/userSettingsCache";
 import { policyEngine } from "./policyEngine";
 import { hookSystem } from "../openclaw/plugins/hookSystem";
-import { detectToolCallLoop, hashToolCall } from "./toolLoopDetection";
 import { hashToolOutcome } from "./toolLoopDetection";
 
 // Agentic orchestrator bridge
