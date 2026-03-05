@@ -1,0 +1,375 @@
+# Agentic Engine Documentation
+
+## Overview
+
+The Agentic Engine is an autonomous, intelligent orchestration system that analyzes user prompts, determines complexity, maps intents to tools, and executes multi-step workflows with resilience and error recovery.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      AGENTIC ENGINE                             │
+├─────────────────────────────────────────────────────────────────┤
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
+│  │ Complexity  │  │   Intent    │  │Orchestration│             │
+│  │  Analyzer   │──│   Mapper    │──│   Engine    │             │
+│  │  (1-10)     │  │  (5 langs)  │  │ (parallel)  │             │
+│  └─────────────┘  └─────────────┘  └─────────────┘             │
+│         │                │                │                     │
+│         ▼                ▼                ▼                     │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
+│  │ Compressed  │  │   Error     │  │    Gap      │             │
+│  │   Memory    │  │  Recovery   │  │  Detector   │             │
+│  │  (atoms)    │  │ (circuits)  │  │  (dedupe)   │             │
+│  └─────────────┘  └─────────────┘  └─────────────┘             │
+├─────────────────────────────────────────────────────────────────┤
+│                    TOOL REGISTRY (70 tools)                     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Tool Categories
+
+| Category | Count | Description |
+|----------|-------|-------------|
+| users | 8 | User management: create, update, delete, list, roles, plans, suspension |
+| ai_models | 5 | AI model management: list, enable, disable, stats, configuration |
+| payments | 6 | Payment processing: process, refund, list, invoices |
+| analytics | 5 | Platform analytics: metrics, charts, realtime, comparison, tracking |
+| database | 4 | Database operations: stats, tables, slow queries, backup |
+| security | 6 | Security: audit logs, policies, IP blocking, API keys, scanning |
+| reports | 4 | Report generation: generate, schedule, list, export |
+| settings | 4 | Platform settings: get, update, reset, export |
+| integrations | 7 | Third-party: Slack, Email, Webhooks, Calendar, Drive, SMS, Push |
+| ai_advanced | 6 | Advanced AI: image generation, code review, summarization, translation, sentiment, NER |
+| automation | 5 | Automation: scheduling, batch processing, workflows, backups, cleanup |
+| data | 6 | Data operations: charts, CSV, PDF, Excel export, transform, import |
+| communication | 4 | Communication: templates, broadcasts, notifications, announcements |
+| **Total** | **70** | |
+
+## Configuration
+
+### Environment Variables
+
+```bash
+# Feature Flags
+AGENTIC_CHAT_ENABLED=true          # Enable/disable agentic chat processing
+AGENTIC_AUTONOMOUS_MODE=true       # Enable autonomous mode
+AGENTIC_SUGGESTIONS_ENABLED=true   # Enable agentic suggestions
+
+# Rate Limiting
+RATE_LIMIT_WINDOW_MS=60000         # Rate limit window in milliseconds
+RATE_LIMIT_MAX_REQUESTS=100        # Max requests per window
+
+# Circuit Breaker
+CIRCUIT_BREAKER_THRESHOLD=5        # Failures before opening
+CIRCUIT_BREAKER_TIMEOUT=30000      # Time before half-open (ms)
+
+# Memory
+MEMORY_DECAY_FACTOR=0.95           # Memory decay per tick
+MEMORY_MAX_ATOMS=1000              # Maximum memory atoms
+```
+
+## API Endpoints
+
+### Health
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/health` | Fast API health (version, memory, uptime) |
+| GET | `/api/health/live` | Liveness probe |
+| GET | `/api/health/ready` | Readiness probe (dependency summary) |
+| GET | `/health` | Service health |
+| GET | `/health/detailed` | Detailed health checks (DB/Redis/disk) |
+
+### Agent Mode (Chat Runs)
+
+> Canonical agent-mode API (requires auth): `/api/agent/*`
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/agent/runs` | Create/start an agent run |
+| GET | `/api/agent/runs/chat/:chatId` | Get latest run for a chat |
+| GET | `/api/agent/runs/:id` | Get run state (includes debug fields if run is still active in-memory) |
+| POST | `/api/agent/runs/:id/cancel` | Cancel run |
+| POST | `/api/agent/runs/:id/pause` | Pause run |
+| POST | `/api/agent/runs/:id/resume` | Resume run |
+| POST | `/api/agent/runs/:id/confirm` | Confirm a pending confirmation step |
+| POST | `/api/agent/runs/:id/retry` | Retry run from a step |
+| GET | `/api/agent/runs/:id/events` | List persisted run events |
+| GET | `/api/agent/runs/:id/events/stream` | SSE stream of run events |
+| GET | `/api/agent/runs/:id/stream` | SSE activity stream |
+
+### Legacy Agent API
+
+> Backwards-compatible legacy endpoints (no auth): `/api/agent-legacy/*`
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/agent-legacy/runs` | Start legacy run |
+| GET | `/api/agent-legacy/runs/chat/:chatId` | Get legacy run by chat |
+| GET | `/api/agent-legacy/runs/:id` | Get legacy run |
+| POST | `/api/agent-legacy/runs/:id/cancel` | Cancel legacy run |
+
+### Registry Orchestrator (Tools/Agents Catalog)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/registry/status` | Registry initialization + health |
+| GET | `/api/registry/tools` | List registered tools |
+| GET | `/api/registry/tools/:name` | Get tool metadata |
+| GET | `/api/registry/tools/category/:category` | Filter tools by category |
+| GET | `/api/registry/agents` | List agents |
+| POST | `/api/registry/route` | Route a query to an agent/tools |
+| GET | `/api/registry/stats` | Registry stats (tools/agents/orchestrator) |
+
+### Complexity / Routing (Chat)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/chat/complexity` | Complexity analysis (score/category/signals + recommended path) |
+| POST | `/api/chat/route` | Routing decision (PARE) |
+
+## Usage Examples
+
+### Analyze Prompt Complexity
+
+```bash
+curl -X POST http://localhost:5000/api/chat/complexity \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Create a user and send them a welcome email","hasAttachments":false}'
+```
+
+Response:
+```json
+{
+  "agent_required": true,
+  "agent_reason": "...",
+  "complexity_score": 6,
+  "category": "...",
+  "signals": ["..."],
+  "recommended_path": "...",
+  "estimated_tokens": 1234,
+  "dimensions": { "...": 0 }
+}
+```
+
+### Route a Message (PARE)
+
+```bash
+curl -X POST http://localhost:5000/api/chat/route \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Generate monthly report and email to all admins","hasAttachments":false}'
+```
+
+Response:
+```json
+{
+  "route": "agent",
+  "confidence": 0.9,
+  "reasons": ["..."],
+  "toolNeeds": ["..."],
+  "planHint": ["..."]
+}
+```
+
+### Analyze Intent (Intent Engine)
+
+```bash
+curl -X POST http://localhost:5000/api/chat/intent/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Listar todos los usuarios activos"}'
+```
+
+### Start Agent Run (Agent Mode)
+
+> Requires authentication (session cookie).
+
+```bash
+curl -X POST http://localhost:5000/api/agent/runs \
+  -H "Content-Type: application/json" \
+  -H "Cookie: connect.sid=..." \
+  -d '{"chatId":"chat_123","messageId":"msg_123","message":"Create a report and export it as CSV","idempotencyKey":"run_123"}'
+```
+
+### Get Tool Metadata (Registry)
+
+```bash
+curl http://localhost:5000/api/registry/tools
+curl http://localhost:5000/api/registry/tools/<toolName>
+```
+
+### Store Memory
+
+```bash
+curl -X POST http://localhost:5000/api/memory \
+  -H "Content-Type: application/json" \
+  -H "Cookie: connect.sid=..." \
+  -d '{"type":"preference","content":"Theme: dark; language: es","importance":0.7,"context":"session_123"}'
+```
+
+### List Capability Gaps (Admin)
+
+```bash
+curl "http://localhost:5000/api/admin/agent/gaps?status=open&limit=25"
+```
+
+## Security
+
+### Rate Limiting
+
+The engine implements per-endpoint rate limiting:
+
+| Endpoint Type | Limit | Window |
+|--------------|-------|--------|
+| Analysis | 60/min | 60s |
+| Orchestration | 30/min | 60s |
+| Tool Execution | 100/min | 60s |
+| Memory Operations | 120/min | 60s |
+
+### Circuit Breakers
+
+Circuit breakers protect against cascading failures:
+
+```typescript
+interface CircuitBreakerConfig {
+  threshold: number;      // Failures before open (default: 5)
+  timeout: number;        // Time to half-open in ms (default: 30000)
+  monitorInterval: number; // Check interval in ms (default: 10000)
+}
+```
+
+States:
+- **CLOSED**: Normal operation, requests pass through
+- **OPEN**: Failures exceeded threshold, requests blocked
+- **HALF_OPEN**: Testing recovery, limited requests allowed
+
+### Feature Flags
+
+Runtime control over engine functionality:
+
+```typescript
+{
+  AGENTIC_CHAT_ENABLED: boolean;        // Main engine toggle
+  AGENTIC_AUTONOMOUS_MODE: boolean;     // Autonomous execution
+  AGENTIC_SUGGESTIONS_ENABLED: boolean; // Tool suggestions
+}
+```
+
+### Audit Logging
+
+All operations are logged with:
+- Timestamp
+- User ID
+- Action type
+- Resource affected
+- Request details
+- IP address
+- Result status
+
+### Input Sanitization
+
+All inputs are sanitized to prevent:
+- SQL injection
+- XSS attacks
+- Command injection
+- Path traversal
+
+## Metrics
+
+### Available Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `agentic_tools_total` | Counter | Total tool count |
+| `agentic_tools_enabled` | Gauge | Currently enabled tools |
+| `agentic_requests_total` | Counter | Total requests processed |
+| `agentic_request_duration_ms` | Histogram | Request latency |
+| `agentic_errors_total` | Counter | Total errors by type |
+| `agentic_circuit_breaker_state` | Gauge | Circuit breaker states |
+| `agentic_memory_atoms` | Gauge | Current memory atoms |
+| `agentic_orchestrations_active` | Gauge | Active orchestrations |
+
+### Dashboard
+
+Access the visual dashboard at `/admin/agentic` with 7 tabs:
+1. **Overview** - System health and key metrics
+2. **Tools** - Tool registry and management
+3. **Orchestration** - Active workflows
+4. **Memory** - Compressed memory state
+5. **Gaps** - Detected gaps and resolutions
+6. **Metrics** - Detailed performance metrics
+7. **Settings** - Configuration management
+
+## Troubleshooting
+
+### Common Issues
+
+#### Tool Not Found
+
+```json
+{"error": "Tool not found", "code": "TOOL_NOT_FOUND"}
+```
+**Solution**: Verify tool ID exists using `GET /api/admin/agentic/tools`
+
+#### Circuit Breaker Open
+
+```json
+{"error": "Service temporarily unavailable", "code": "CIRCUIT_OPEN"}
+```
+**Solution**: Wait for circuit timeout or manually reset via dashboard
+
+#### Rate Limit Exceeded
+
+```json
+{"error": "Too many requests", "code": "RATE_LIMITED", "retryAfter": 30}
+```
+**Solution**: Wait for the specified retry time
+
+#### Intent Mapping Failed
+
+```json
+{"error": "Could not map intent", "code": "INTENT_UNMAPPED", "confidence": 0.3}
+```
+**Solution**: Rephrase the prompt or provide more context
+
+#### Memory Limit Reached
+
+```json
+{"error": "Memory limit reached", "code": "MEMORY_FULL"}
+```
+**Solution**: Old atoms will decay automatically, or clear manually
+
+### Health Check Commands
+
+```bash
+# Liveness check
+curl http://localhost:5000/health/live
+
+# Readiness check
+curl http://localhost:5000/health/ready
+
+# Full health status
+curl http://localhost:5000/health
+```
+
+### Log Locations
+
+- Application logs: `stdout/stderr`
+- Audit logs: Database table `audit_logs`
+- Error traces: Structured JSON format
+
+### Debug Mode
+
+Enable detailed logging:
+```bash
+DEBUG=agentic:* npm run dev
+```
+
+## Supported Languages
+
+The IntentMapper supports:
+- English (en)
+- Spanish (es)
+- French (fr)
+- German (de)
+- Portuguese (pt)

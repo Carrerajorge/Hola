@@ -1,0 +1,91 @@
+name: Rollback Production (Blue-Green)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "ROLLBACK" to confirm'
+        required: true
+        default: ''
+        type: string
+      stop_bad_slot:
+        description: 'Also stop the bad slot after rollback?'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
+  VPS_USER: ${{ secrets.VPS_USER || 'root' }}
+  VPS_PORT: ${{ secrets.VPS_PORT || '8022' }}
+  DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/hola' }}
+
+jobs:
+  rollback:
+    name: Rollback to Previous Slot
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: production
+      url: https://iliagpt.com
+
+    steps:
+      - name: Validate confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "ROLLBACK" ]; then
+            echo "::error::Confirmation required. Type ROLLBACK to proceed."
+            exit 1
+          fi
+          echo "Confirmation received. Proceeding with rollback..."
+
+      - name: Setup SSH key
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      - name: Execute rollback
+        run: |
+          set -euo pipefail
+          STOP_FLAG=""
+          if [ "${{ github.event.inputs.stop_bad_slot }}" = "true" ]; then
+            STOP_FLAG="--stop-bad"
+          fi
+
+          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
+            ${{ env.VPS_USER }}@${{ env.VPS_HOST }} \
+            "cd ${{ env.DEPLOY_PATH }} && bash scripts/rollback-bluegreen.sh --force ${STOP_FLAG}"
+
+      - name: Verify rollback
+        run: |
+          sleep 5
+          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=10 \
+            ${{ env.VPS_USER }}@${{ env.VPS_HOST }} \
+            "cat ${{ env.DEPLOY_PATH }}/deploy-state.json 2>/dev/null | python3 -c 'import json,sys; s=json.load(sys.stdin); print(\"Active slot:\", s[\"active_slot\"], \"port\", s[\"active_port\"], \"version:\", s[\"app_version\"])'"
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
+
+      - name: Rollback summary
+        if: always()
+        run: |
+          echo "## Rollback Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Stop bad slot | ${{ github.event.inputs.stop_bad_slot }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| URL | https://iliagpt.com |" >> $GITHUB_STEP_SUMMARY

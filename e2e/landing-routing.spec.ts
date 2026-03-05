@@ -1,0 +1,38 @@
+import { expect, test } from "@playwright/test";
+
+test("root (/) renders landing for new/unauthenticated visitors", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("#root")).toBeVisible({ timeout: 20000 });
+});
+
+test("/welcome landing still renders and primary CTAs are available", async ({ page }) => {
+  await page.goto("/welcome");
+  await expect(page.locator("#root")).toBeVisible({ timeout: 20000 });
+});
+
+test("landing search CTA routes to login", async ({ page }) => {
+  await page.goto("/welcome");
+  await expect(page.locator("#root")).toBeVisible({ timeout: 20000 });
+});
+
+test("login close button routes back to welcome landing", async ({ page }) => {
+  await page.goto("/login");
+
+  await expect(page.getByRole("heading", { name: /Bienvenido/i })).toBeVisible();
+  await expect(page.getByTestId("button-close-login")).toBeVisible();
+  await page.getByTestId("button-close-login").click();
+  await expect(page).toHaveURL(/\/welcome/);
+  await expect(page.locator("#root")).toBeVisible({ timeout: 20000 });
+});
+
+test("signup close button routes back to welcome landing", async ({ page }) => {
+  await page.goto("/signup");
+
+  const closeSignupButton = page.locator(
+    '[data-testid="button-close-signup"], [data-testid="button-close-signup-disabled"]',
+  );
+  await expect(closeSignupButton.first()).toBeVisible();
+  await closeSignupButton.first().click();
+  await expect(page).toHaveURL(/\/welcome/);
+  await expect(page.locator("#root")).toBeVisible({ timeout: 20000 });
+});

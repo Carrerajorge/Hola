@@ -1,0 +1,186 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - link "Saltar al contenido principal" [ref=e4] [cursor=pointer]:
+      - /url: "#main-content"
+    - link "Ir al chat" [ref=e5] [cursor=pointer]:
+      - /url: "#chat-input"
+  - region "Notifications (F8)":
+    - list
+  - region "Notifications alt+T"
+  - main [ref=e6]:
+    - generic [ref=e7]:
+      - navigation "Navegación principal y chats" [ref=e9]:
+        - generic [ref=e10]:
+          - generic [ref=e11]:
+            - img "IliaGPT Logo" [ref=e14]
+            - generic [ref=e15]:
+              - generic [ref=e16]: ILIAGPT
+              - generic [ref=e18]: AI Platform
+          - button [ref=e19]:
+            - img
+        - generic [ref=e20]:
+          - button "New chat ⌘N" [ref=e21]:
+            - generic [ref=e23]:
+              - img
+              - generic [ref=e24]: New chat
+            - generic [ref=e25]: ⌘N
+          - button "Buscar chats... ⌘ K" [active] [ref=e26]:
+            - generic [ref=e27]:
+              - img
+              - generic [ref=e28]: Buscar chats...
+            - generic [ref=e29]:
+              - generic [ref=e30]: ⌘
+              - text: K
+          - generic [ref=e31]:
+            - button "Biblioteca" [ref=e32]:
+              - generic [ref=e33]:
+                - img
+              - text: Biblioteca
+            - button "GPTs" [ref=e34]:
+              - generic [ref=e35]:
+                - img
+              - text: GPTs
+            - button "Skills Capacidades modulares" [ref=e36]:
+              - generic [ref=e37]:
+                - img
+              - generic [ref=e38]:
+                - generic [ref=e39]: Skills
+                - generic [ref=e40]: Capacidades modulares
+            - button "Apps" [ref=e41]:
+              - generic [ref=e42]:
+                - img
+              - text: Apps
+            - 'button "AppsWebChat (QR) Canales: disconnected" [ref=e43]':
+              - generic [ref=e44]:
+                - img
+              - generic [ref=e45]: AppsWebChat (QR)
+              - 'generic "Canales: disconnected" [ref=e46]'
+            - button "Codex" [ref=e47]:
+              - generic [ref=e48]:
+                - img
+              - text: Codex
+        - button "Nueva Carpeta" [ref=e52]:
+          - img
+          - text: Nueva Carpeta
+        - button "U En línea Usuario Cuenta personal" [ref=e55] [cursor=pointer]:
+          - generic [ref=e56]:
+            - generic [ref=e58]: U
+            - generic "En línea" [ref=e59]
+          - generic [ref=e60]:
+            - generic [ref=e61]: Usuario
+            - generic [ref=e62]: Cuenta personal
+      - main [ref=e63]:
+        - generic [ref=e92]:
+          - generic [ref=e93]:
+            - generic "Seleccionar modelo" [ref=e95]:
+              - combobox "Selector de modelo" [ref=e96]:
+                - option "Llama 3 (Máquina Local / Ollama)" [selected]
+                - option "Grok 4 Fast"
+                - option "Grok 4"
+                - option "Grok 4.1 Fast Reasoning"
+                - option "Grok 4.1 Fast"
+                - option "Grok Code Fast"
+                - option "Grok Beta"
+                - option "Grok 2 Vision"
+                - option "Grok 2"
+                - option "Grok 3 Mini Fast"
+                - option "Grok 3 Mini"
+                - option "Grok 3 Fast"
+                - option "Grok 4 Fast Reasoning"
+                - option "Grok 4 Fast"
+                - option "Grok 4 Premium"
+                - option "Grok 4.1 Fast"
+                - option "Grok 4.1 Fast Reasoning"
+                - option "Grok 3"
+                - option "GPT-OSS 20B"
+                - option "GPT-OSS 120B"
+                - option "o1 Mini"
+                - option "o1 Pro"
+                - option "o1"
+                - option "o4 Mini High"
+                - option "o4 Mini"
+                - option "o3 Mini"
+                - option "o3 Pro"
+                - option "o3"
+                - option "GPT-4o"
+                - option "GPT-4.1 Nano"
+                - option "GPT-4.1 Mini"
+                - option "GPT-4.1"
+                - option "GPT-5 Nano"
+                - option "GPT-5 Mini"
+                - option "GPT-5.1 Codex Max"
+                - option "GPT-5.1"
+                - option "GPT-5.2 Codex"
+                - option "GPT-5.2"
+                - option "GPT-5"
+                - option "GPT-4o Mini"
+                - option "Gemini 1.5 Flash"
+                - option "Gemini 1.5 Pro"
+                - option "Gemini 2.0 Flash Exp"
+                - option "Gemini 2.0 Flash"
+                - option "Gemini 2.5 Flash-Lite"
+                - option "Gemini 3 Deep Think"
+                - option "Gemini 3 Pro Image"
+                - option "Gemini 3 Pro"
+                - option "Gemini 3.1 Pro (Preview)"
+                - option "Gemini 3 Flash (Preview)"
+                - option "Gemini 2.5 Pro"
+                - option "Gemini 2.5 Flash"
+              - img
+            - generic [ref=e97]:
+              - button "Mejorar el plan a Go" [ref=e98]:
+                - img
+                - generic [ref=e99]: Mejorar el plan a Go
+              - button "Compartir" [disabled]:
+                - img "Compartir"
+              - button [ref=e100]:
+                - img
+          - generic [ref=e101]:
+            - generic [ref=e103]:
+              - img "IliaGPT Logo" [ref=e107]
+              - heading "¿En qué puedo ayudarte?" [level=1] [ref=e108]
+              - paragraph [ref=e109]: Soy ILIAGPT, tu asistente de IA. Explora capacidades avanzadas como generación de código, diseño, análisis de documentos y control autónomo.
+              - generic [ref=e111]:
+                - button "Resumir documento" [ref=e112]:
+                  - generic [ref=e113]:
+                    - img
+                  - generic [ref=e114]: Resumir documento
+                - button "Analizar datos" [ref=e115]:
+                  - generic [ref=e116]:
+                    - img
+                  - generic [ref=e117]: Analizar datos
+                - button "Extraer puntos clave" [ref=e118]:
+                  - generic [ref=e119]:
+                    - img
+                  - generic [ref=e120]: Extraer puntos clave
+                - button "Buscar información" [ref=e121]:
+                  - generic [ref=e122]:
+                    - img
+                  - generic [ref=e123]: Buscar información
+                - button "Crear presentación" [ref=e124]:
+                  - generic [ref=e125]:
+                    - img
+                  - generic [ref=e126]: Crear presentación
+                - button "Traducir" [ref=e127]:
+                  - generic [ref=e128]:
+                    - img
+                  - generic [ref=e129]: Traducir
+            - generic [ref=e131]:
+              - generic [ref=e133]:
+                - textbox "Message input" [ref=e135]:
+                  - /placeholder: Escribe tu mensaje aquí...
+                - generic [ref=e136]:
+                  - button "Open tools menu" [ref=e138]:
+                    - img
+                  - generic [ref=e139]:
+                    - generic [ref=e140]:
+                      - generic [ref=e141]: ⌘K
+                      - generic [ref=e142]: comandos
+                    - button "Start voice dictation" [ref=e143]:
+                      - img
+                    - button "Start voice conversation mode" [ref=e144]:
+                      - img
+              - generic [ref=e145]:
+                - generic [ref=e146]: Press Enter to send, Shift+Enter for new line, or Cmd+Enter to send quickly.
+                - text: ILIAGPT puede cometer errores. Verifica la información importante.
+          - status [ref=e147]

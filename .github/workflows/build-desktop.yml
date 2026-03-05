@@ -1,0 +1,189 @@
+name: Build Desktop Apps & Publish Release
+
+on:
+  push:
+    tags:
+      - "v*" # Se activa al pushear un tag como v2.1.0
+  workflow_dispatch: # También se puede ejecutar manualmente desde GitHub
+
+permissions:
+  contents: write # Necesario para crear GitHub Releases
+
+jobs:
+  build-macos:
+    runs-on: macos-14 # Apple Silicon runner
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Native Bindings (macOS)
+        run: |
+          cd native
+          npm ci
+          npm run build:native
+
+      - name: Build web + compile desktop TypeScript
+        run: |
+          npm run build
+          npx tsc -p desktop/tsconfig.json
+
+      - name: Build macOS DMG + ZIP
+        run: npx electron-builder --mac --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: |
+            dist/desktop_build/*.dmg
+            dist/desktop_build/*.zip
+            dist/desktop_build/latest-mac.yml
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Native Bindings (Windows)
+        run: |
+          cd native
+          npm ci
+          npm run build:native
+
+      - name: Build web + compile desktop TypeScript
+        run: |
+          npm run build
+          npx tsc -p desktop/tsconfig.json
+
+      - name: Build Windows NSIS + Portable
+        run: npx electron-builder --win --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: |
+            dist/desktop_build/*.exe
+            dist/desktop_build/latest.yml
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential libx11-dev
+
+      - name: Build Native Bindings (Linux)
+        run: |
+          cd native
+          npm ci
+          npm run build:native
+
+      - name: Build web + compile desktop TypeScript
+        run: |
+          npm run build
+          npx tsc -p desktop/tsconfig.json
+
+      - name: Build Linux AppImage + deb
+        run: npx electron-builder --linux --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: |
+            dist/desktop_build/*.AppImage
+            dist/desktop_build/*.deb
+            dist/desktop_build/latest-linux.yml
+
+  publish-release:
+    needs: [build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: List artifacts
+        run: find release-artifacts -type f | sort
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "ILIAGPT Desktop ${{ github.ref_name }}"
+          body: |
+            ## 🧠 ILIAGPT Desktop ${{ github.ref_name }}
+
+            ### Descargas
+
+            | Plataforma | Archivo | Requisitos |
+            |---|---|---|
+            | 🍎 macOS | `.dmg` | macOS 11+ (Big Sur) |
+            | 🪟 Windows | `.exe` (instalador NSIS) | Windows 10+ 64-bit |
+            | 🐧 Linux | `.AppImage` / `.deb` | Ubuntu 20.04+ |
+
+            ### Características
+            - Conectado al panel administrativo de ILIAGPT
+            - Auto-actualizaciones automáticas
+            - Control nativo del SO (teclado, ratón, pantalla)
+            - Overlay HUD para monitoreo del agente
+            - Tray icon con acceso rápido
+
+            ### Verificación
+            Los hashes SHA-512 están en los archivos `latest-*.yml`.
+          files: |
+            release-artifacts/**/*.dmg
+            release-artifacts/**/*.zip
+            release-artifacts/**/*.exe
+            release-artifacts/**/*.AppImage
+            release-artifacts/**/*.deb
+            release-artifacts/**/latest*.yml
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

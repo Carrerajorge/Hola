@@ -1,0 +1,53 @@
+name: Dependency Review
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  dependency-review:
+    name: Review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check dependency graph availability
+        id: dep_graph
+        run: |
+          set -euo pipefail
+          RESPONSE="$(curl -fsSL -H "Authorization: Bearer ${{ github.token }}" \
+            "https://api.github.com/repos/${{ github.repository }}" || echo "{}")"
+          STATUS="$(printf '%s' "$RESPONSE" | jq -r '.security_and_analysis.dependency_graph.status // "disabled"')"
+
+          SNAPSHOT_HTTP_CODE="$(curl -sS -o /tmp/dependency-graph-snapshots.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            "https://api.github.com/repos/${{ github.repository }}/dependency-graph/snapshots" || echo 000)"
+
+          SUPPORTED="false"
+          if [ "$SNAPSHOT_HTTP_CODE" = "200" ] || [ "$SNAPSHOT_HTTP_CODE" = "201" ] || [ "$SNAPSHOT_HTTP_CODE" = "202" ]; then
+            SUPPORTED="true"
+          fi
+
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "supported=$SUPPORTED" >> "$GITHUB_OUTPUT"
+          if [ "$SUPPORTED" != "true" ]; then
+            echo "Dependency graph snapshots endpoint not available (HTTP $SNAPSHOT_HTTP_CODE)."
+          fi
+
+      - name: Dependency review
+        id: dep_review
+        if: ${{ steps.dep_graph.outputs.status == 'enabled' && steps.dep_graph.outputs.supported == 'true' }}
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+
+      - name: Note (Dependency graph not enabled)
+        if: ${{ steps.dep_graph.outputs.status != 'enabled' || steps.dep_graph.outputs.supported != 'true' }}
+        run: |
+          echo "Dependency review skipped. This usually happens when GitHub Dependency graph is unavailable or not enabled for this repo."
+          echo "Enable it in Settings → Security & analysis → Dependency graph (requires admin access)."

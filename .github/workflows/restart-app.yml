@@ -1,0 +1,103 @@
+name: Restart App (Emergency)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "RESTART" to confirm'
+        required: true
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
+  VPS_USER: ${{ secrets.VPS_USER || 'root' }}
+  VPS_PORT: ${{ secrets.VPS_PORT || '8022' }}
+  DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/hola' }}
+
+jobs:
+  restart:
+    name: Restart Active App Slot
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment:
+      name: production
+      url: https://iliagpt.com
+
+    steps:
+      - name: Validate confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "RESTART" ]; then
+            echo "::error::Confirmation required. Type RESTART to proceed."
+            exit 1
+          fi
+
+      - name: Setup SSH key
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      - name: Restart active slot
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=30 \
+            ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << 'ENDSSH'
+          set -euo pipefail
+          DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
+          STATE_FILE="${DEPLOY_PATH}/deploy-state.json"
+          SLOT_COMPOSE="${DEPLOY_PATH}/docker-compose.slot.yml"
+
+          if [ ! -f "${STATE_FILE}" ]; then
+            echo "ERROR: state file not found"
+            exit 1
+          fi
+
+          ACTIVE_SLOT="$(python3 -c "import json; d=json.load(open('${STATE_FILE}')); print(d['active_slot'])")"
+          ACTIVE_PORT="$(python3 -c "import json; d=json.load(open('${STATE_FILE}')); print(d['active_port'])")"
+          IMAGE_TAG="$(python3 -c "import json; d=json.load(open('${STATE_FILE}')); print(d.get('image_tag','latest'))")"
+          APP_VERSION="$(python3 -c "import json; d=json.load(open('${STATE_FILE}')); print(d.get('app_version',''))")"
+
+          echo "Active slot: ${ACTIVE_SLOT} (port ${ACTIVE_PORT})"
+          echo "Restarting app container..."
+
+          cd "${DEPLOY_PATH}"
+          SLOT="${ACTIVE_SLOT}" HOST_PORT="${ACTIVE_PORT}" IMAGE_TAG="${IMAGE_TAG}" APP_VERSION="${APP_VERSION}" \
+            docker compose -p "hola-${ACTIVE_SLOT}" -f "${SLOT_COMPOSE}" restart app || true
+
+          echo "Waiting for health check..."
+          for i in $(seq 1 24); do
+            HTTP_CODE="$(curl -sf -o /dev/null -w '%{http_code}' "http://127.0.0.1:${ACTIVE_PORT}/api/health/ready" 2>/dev/null || echo "000")"
+            if [ "${HTTP_CODE}" = "200" ]; then
+              echo "App is healthy (attempt ${i})"
+              break
+            fi
+            echo "  Attempt ${i}/24 (HTTP ${HTTP_CODE})..."
+            sleep 5
+          done
+
+          echo "Final status:"
+          docker inspect --format='{{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' "hola-${ACTIVE_SLOT}-app" 2>/dev/null || true
+          ENDSSH
+
+      - name: Check production health
+        run: |
+          sleep 3
+          HTTP_CODE="$(curl -sf -o /dev/null -w '%{http_code}' https://iliagpt.com/api/health 2>/dev/null || echo "000")"
+          if [ "${HTTP_CODE}" = "200" ]; then
+            echo "✓ Production is healthy (HTTP ${HTTP_CODE})"
+          else
+            echo "✗ Production health check returned HTTP ${HTTP_CODE}"
+            exit 1
+          fi
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

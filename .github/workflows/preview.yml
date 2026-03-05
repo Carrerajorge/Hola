@@ -1,0 +1,110 @@
+name: Preview Deploy (per PR)
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, closed]
+
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io/carrerajorge
+
+jobs:
+  build_images:
+    name: Build Docker Images (preview)
+    if: ${{ github.event.action != 'closed' }}
+    uses: ./.github/workflows/build-images.yml
+    with:
+      sha: ${{ github.sha }}
+    permissions:
+      contents: read
+      packages: write
+
+  deploy_preview:
+    name: Deploy Preview Slot
+    if: ${{ github.event.action != 'closed' }}
+    runs-on: ubuntu-latest
+    needs: [build_images]
+    timeout-minutes: 25
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
+      VPS_USER: ${{ secrets.VPS_USER || 'root' }}
+      VPS_PORT: ${{ secrets.VPS_PORT || '8022' }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/hola' }}
+      GHCR_USERNAME: ${{ github.actor }}
+      GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PREVIEW_SLUG: pr-${{ github.event.pull_request.number }}
+      IMAGE_TAG: ${{ needs.build_images.outputs.image_tag }}
+      APP_VERSION: ${{ github.sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute host port
+        run: |
+          set -euo pipefail
+          PR_NUM="${{ github.event.pull_request.number }}"
+          HOST_PORT="$((10000 + PR_NUM))"
+          echo "HOST_PORT=${HOST_PORT}" >> "$GITHUB_ENV"
+
+      - name: Setup SSH key
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s' "${{ secrets.VPS_SSH_KEY_B64 }}" | base64 -d > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          wc -c ~/.ssh/deploy_key
+          head -n 1 ~/.ssh/deploy_key
+          ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null
+          ssh-keyscan -p "${VPS_PORT}" -H "${VPS_HOST}" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Deploy preview on VPS
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -p "${VPS_PORT}" -o StrictHostKeyChecking=accept-new "${VPS_USER}@${VPS_HOST}" \
+            "cd '${DEPLOY_PATH}' && PREVIEW_SLUG='${PREVIEW_SLUG}' HOST_PORT='${HOST_PORT}' IMAGE_TAG='${IMAGE_TAG}' APP_VERSION='${APP_VERSION}' GHCR_USERNAME='${GHCR_USERNAME}' GHCR_TOKEN='${GHCR_TOKEN}' bash -s" < scripts/deploy-preview.sh
+
+      - name: Summary
+        run: |
+          echo "Preview deployed: http://${PREVIEW_SLUG}.preview.iliagpt.com" >> $GITHUB_STEP_SUMMARY
+
+  cleanup_preview:
+    name: Cleanup Preview Slot
+    if: ${{ github.event.action == 'closed' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
+      VPS_USER: ${{ secrets.VPS_USER || 'root' }}
+      VPS_PORT: ${{ secrets.VPS_PORT || '8022' }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/hola' }}
+      PREVIEW_SLUG: pr-${{ github.event.pull_request.number }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s' "${{ secrets.VPS_SSH_KEY_B64 }}" | base64 -d > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          wc -c ~/.ssh/deploy_key
+          head -n 1 ~/.ssh/deploy_key
+          ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null
+          ssh-keyscan -p "${VPS_PORT}" -H "${VPS_HOST}" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Cleanup preview on VPS
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -p "${VPS_PORT}" -o StrictHostKeyChecking=accept-new "${VPS_USER}@${VPS_HOST}" \
+            "cd '${DEPLOY_PATH}' && PREVIEW_SLUG='${PREVIEW_SLUG}' bash scripts/cleanup-preview.sh"

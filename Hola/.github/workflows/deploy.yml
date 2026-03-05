@@ -1,0 +1,355 @@
+name: Deploy to Production (Blue-Green)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Override image tag (e.g. sha-abc12345). Leave empty to build from HEAD.'
+        required: false
+        default: ''
+        type: string
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  VPS_HOST: 69.62.98.126
+  VPS_USER: root
+  VPS_PORT: "8022"
+  DEPLOY_PATH: /opt/hola
+  REGISTRY: ghcr.io/carrerajorge
+
+jobs:
+  # ── CI Gate ──────────────────────────────────────────────
+  ci:
+    name: CI Checks
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    uses: ./.github/workflows/ci.yml
+
+  # ── Build & Push Docker Images to GHCR ─────────────────
+  build_images:
+    name: Build Docker Images
+    needs: [ci]
+    if: ${{ needs.ci.result == 'success' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') }}
+    uses: ./.github/workflows/build-images.yml
+    with:
+      sha: ${{ github.sha }}
+      allow_publish: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.ci.result == 'success' }}
+    permissions:
+      contents: read
+      packages: write
+
+  # ── Manual Deploy ───────────────────────────────────────
+  deploy_manual:
+    name: Blue-Green Deploy (Manual)
+    runs-on: ubuntu-latest
+    needs: [ci, build_images]
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      needs.ci.result == 'success' &&
+      needs.build_images.result == 'success'
+    timeout-minutes: 20
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
+      VPS_USER: ${{ secrets.VPS_USER || 'root' }}
+      VPS_PORT: ${{ secrets.VPS_PORT || '8022' }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/hola' }}
+    environment:
+      name: production
+      url: https://iliagpt.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Compute image tag
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ -n "${{ github.event.inputs.image_tag }}" ]; then
+            echo "image_tag=${{ github.event.inputs.image_tag }}" >> "$GITHUB_OUTPUT"
+            echo "app_version=$(echo '${{ github.event.inputs.image_tag }}' | sed 's/sha-//')" >> "$GITHUB_OUTPUT"
+          else
+            SHORT_SHA="${{ github.sha }}"
+            SHORT_SHA="${SHORT_SHA:0:8}"
+            echo "image_tag=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+            echo "app_version=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Preflight target host
+        run: |
+          set -euo pipefail
+          echo "▸ Deploy target: ${{ env.VPS_USER }}@${{ env.VPS_HOST }}:${{ env.VPS_PORT }}"
+          DNS_IP="$(dig +short iliagpt.com | tail -n1 | tr -d '\n')"
+          echo "▸ iliagpt.com resolves to: ${DNS_IP}"
+          echo "▸ Checking TCP connectivity to ${{ env.VPS_HOST }}:${{ env.VPS_PORT }}..."
+          nc -vz -w 5 "${{ env.VPS_HOST }}" "${{ env.VPS_PORT }}" || echo "⚠️ TCP probe failed (continuing to SSH)"
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p ${{ env.VPS_PORT }} -H ${{ env.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Sync deploy scripts to VPS
+        run: |
+          set -euo pipefail
+          scp -i ~/.ssh/deploy_key -P ${{ env.VPS_PORT }} \
+            -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+            docker-compose.infra.yml \
+            docker-compose.slot.yml \
+            nginx.conf \
+            scripts/deploy-bluegreen.sh \
+            scripts/rollback-bluegreen.sh \
+            scripts/health-dashboard.sh \
+            scripts/vps-bootstrap-bluegreen.sh \
+            ${{ env.VPS_USER }}@${{ env.VPS_HOST }}:${{ env.DEPLOY_PATH }}/
+          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} \
+            -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+            ${{ env.VPS_USER }}@${{ env.VPS_HOST }} \
+            "mkdir -p ${{ env.DEPLOY_PATH }}/scripts && \
+             cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
+             cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
+             cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
+             cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
+             chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
+
+      - name: Run blue-green deploy
+        run: |
+          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} \
+            -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ConnectionAttempts=3 \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes \
+            ${{ env.VPS_USER }}@${{ env.VPS_HOST }} \
+            "echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null && \
+             cd ${{ env.DEPLOY_PATH }} && \
+             IMAGE_TAG='${{ steps.tag.outputs.image_tag }}' \
+             APP_VERSION='${{ steps.tag.outputs.app_version }}' \
+             bash scripts/deploy-bluegreen.sh"
+
+      - name: Verify production
+        run: |
+          set -euo pipefail
+          EXPECTED="${{ steps.tag.outputs.app_version }}"
+          echo "▸ Verifying https://iliagpt.com (expecting version ${EXPECTED})..."
+          sleep 5
+          for i in $(seq 1 20); do
+            HEALTH_JSON="$(curl -sf --max-time 10 https://iliagpt.com/api/health 2>/dev/null || echo "{}")"
+            if echo "${HEALTH_JSON}" | grep -q "\"version\":\"${EXPECTED}\""; then
+              echo "✓ Production verified: version ${EXPECTED}"
+              echo "  ${HEALTH_JSON}"
+              break
+            fi
+            if [ "$i" -eq 20 ]; then
+              echo "✗ Production version mismatch (expected ${EXPECTED})"
+              echo "  Last response: ${HEALTH_JSON}"
+              exit 1
+            fi
+            echo "  Attempt $i/20..."
+            sleep 3
+          done
+
+          # Verify sw-cleanup.js version
+          SW_CLEANUP="$(curl -sf --max-time 20 https://iliagpt.com/sw-cleanup.js || echo "")"
+          if [ -n "${SW_CLEANUP}" ]; then
+            if echo "${SW_CLEANUP}" | grep -q "var APP_VERSION = '${EXPECTED}';"; then
+              echo "✓ sw-cleanup.js version matches: ${EXPECTED}"
+            else
+              echo "⚠️ sw-cleanup.js version mismatch (non-fatal)"
+            fi
+          fi
+
+          # Verify health/ready returns 200
+          READY_CODE="$(curl -sf -o /dev/null -w '%{http_code}' --max-time 10 https://iliagpt.com/api/health/ready 2>/dev/null || echo "000")"
+          if [ "${READY_CODE}" = "200" ]; then
+            echo "✓ /api/health/ready → HTTP 200"
+          else
+            echo "⚠️ /api/health/ready → HTTP ${READY_CODE} (non-fatal)"
+          fi
+
+      - name: Deploy summary
+        if: always()
+        run: |
+          echo "## Manual Deploy Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | \`${{ steps.tag.outputs.app_version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image Tag | \`${{ steps.tag.outputs.image_tag }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| URL | https://iliagpt.com |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::Blue-green deployment FAILED. The previous slot should still be serving traffic (automatic rollback)."
+          echo "::error::Check state: ssh -p ${{ env.VPS_PORT }} ${{ env.VPS_USER }}@${{ env.VPS_HOST }} 'cat /opt/hola/deploy-state.json'"
+          echo "::error::Rollback: ssh -p ${{ env.VPS_PORT }} ${{ env.VPS_USER }}@${{ env.VPS_HOST }} 'cd /opt/hola && bash scripts/rollback-bluegreen.sh --force'"
+
+  # ── Auto Deploy (push to main) ──────────────────────────
+  deploy_auto:
+    name: Blue-Green Deploy (Auto)
+    runs-on: ubuntu-latest
+    needs: [ci, build_images]
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      needs.ci.result == 'success' &&
+      needs.build_images.result == 'success'
+    timeout-minutes: 25
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
+      VPS_USER: ${{ secrets.VPS_USER || 'root' }}
+      VPS_PORT: ${{ secrets.VPS_PORT || '8022' }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/hola' }}
+    environment:
+      name: production
+      url: https://iliagpt.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Compute image tag
+        id: tag
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${{ github.sha }}"
+          SHORT_SHA="${SHORT_SHA:0:8}"
+          echo "image_tag=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "app_version=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for Docker images in GHCR
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.tag.outputs.image_tag }}"
+          echo "▸ Waiting for ghcr.io/carrerajorge/iliagpt-app:${TAG}..."
+          for i in $(seq 1 40); do
+            if docker manifest inspect "ghcr.io/carrerajorge/iliagpt-app:${TAG}" > /dev/null 2>&1; then
+              echo "  ✓ Image available after ${i} attempts"
+              break
+            fi
+            if [ "$i" -eq 40 ]; then
+              echo "✗ Images not available in GHCR after 200s"
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Preflight target host
+        run: |
+          set -euo pipefail
+          echo "▸ Deploy target: ${{ env.VPS_USER }}@${{ env.VPS_HOST }}:${{ env.VPS_PORT }}"
+          nc -vz -w 5 "${{ env.VPS_HOST }}" "${{ env.VPS_PORT }}" || echo "⚠️ TCP probe failed (continuing)"
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p ${{ env.VPS_PORT }} -H ${{ env.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Sync deploy scripts to VPS
+        run: |
+          set -euo pipefail
+          scp -i ~/.ssh/deploy_key -P ${{ env.VPS_PORT }} \
+            -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+            docker-compose.infra.yml \
+            docker-compose.slot.yml \
+            nginx.conf \
+            scripts/deploy-bluegreen.sh \
+            scripts/rollback-bluegreen.sh \
+            scripts/health-dashboard.sh \
+            scripts/vps-bootstrap-bluegreen.sh \
+            ${{ env.VPS_USER }}@${{ env.VPS_HOST }}:${{ env.DEPLOY_PATH }}/
+          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} \
+            -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+            ${{ env.VPS_USER }}@${{ env.VPS_HOST }} \
+            "mkdir -p ${{ env.DEPLOY_PATH }}/scripts && \
+             cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
+             cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
+             cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
+             cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
+             chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
+
+      - name: Run blue-green deploy
+        run: |
+          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} \
+            -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ConnectionAttempts=3 \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes \
+            ${{ env.VPS_USER }}@${{ env.VPS_HOST }} \
+            "echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null && \
+             cd ${{ env.DEPLOY_PATH }} && \
+             IMAGE_TAG='${{ steps.tag.outputs.image_tag }}' \
+             APP_VERSION='${{ steps.tag.outputs.app_version }}' \
+             bash scripts/deploy-bluegreen.sh"
+
+      - name: Verify production
+        run: |
+          set -euo pipefail
+          EXPECTED="${{ steps.tag.outputs.app_version }}"
+          echo "▸ Verifying https://iliagpt.com (expecting version ${EXPECTED})..."
+          sleep 5
+          for i in $(seq 1 20); do
+            HEALTH_JSON="$(curl -sf --max-time 10 https://iliagpt.com/api/health 2>/dev/null || echo "{}")"
+            if echo "${HEALTH_JSON}" | grep -q "\"version\":\"${EXPECTED}\""; then
+              echo "✓ Production verified: version ${EXPECTED}"
+              echo "  ${HEALTH_JSON}"
+              break
+            fi
+            if [ "$i" -eq 20 ]; then
+              echo "✗ Production version mismatch (expected ${EXPECTED})"
+              exit 1
+            fi
+            echo "  Attempt $i/20..."
+            sleep 3
+          done
+
+          SW_CLEANUP="$(curl -sf --max-time 20 https://iliagpt.com/sw-cleanup.js || echo "")"
+          if [ -n "${SW_CLEANUP}" ] && echo "${SW_CLEANUP}" | grep -q "var APP_VERSION = '${EXPECTED}';"; then
+            echo "✓ sw-cleanup.js version matches: ${EXPECTED}"
+          fi
+
+          READY_CODE="$(curl -sf -o /dev/null -w '%{http_code}' --max-time 10 https://iliagpt.com/api/health/ready 2>/dev/null || echo "000")"
+          if [ "${READY_CODE}" = "200" ]; then
+            echo "✓ /api/health/ready → HTTP 200"
+          else
+            echo "⚠️ /api/health/ready → HTTP ${READY_CODE} (non-fatal)"
+          fi
+
+      - name: Deploy summary
+        if: always()
+        run: |
+          echo "## Auto Deploy Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | \`${{ steps.tag.outputs.app_version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image Tag | \`${{ steps.tag.outputs.image_tag }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Trigger | push(main) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| URL | https://iliagpt.com |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::Blue-green auto-deployment FAILED. Old slot should still be serving."
+          echo "::error::Check state: ssh -p ${{ env.VPS_PORT }} ${{ env.VPS_USER }}@${{ env.VPS_HOST }} 'cat /opt/hola/deploy-state.json'"
+          echo "::error::Rollback: ssh -p ${{ env.VPS_PORT }} ${{ env.VPS_USER }}@${{ env.VPS_HOST }} 'cd /opt/hola && bash scripts/rollback-bluegreen.sh --force'"

@@ -1,0 +1,80 @@
+# Sandbox Runner Dockerfile
+# Builds sandbox-runner deterministically without relying on host `dist/`
+# (which is excluded by .dockerignore in this repo).
+
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+
+# Install deps without running lifecycle scripts (keeps builds fast + avoids large downloads),
+# then enable only what we need for compilation (esbuild).
+RUN npm ci --ignore-scripts --no-audit --no-fund \
+  && npm rebuild esbuild \
+  && npm cache clean --force
+
+COPY tsconfig.json ./tsconfig.json
+COPY server/agent/sandboxRunner ./server/agent/sandboxRunner
+
+# Compile sandbox runner to dist/agent/sandboxRunner/index.mjs
+RUN node - <<'NODE'
+const esbuild = require("esbuild");
+
+esbuild.build({
+  entryPoints: ["server/agent/sandboxRunner/index.ts"],
+  outdir: "dist",
+  outbase: "server",
+  platform: "node",
+  format: "esm",
+  target: ["node20"],
+  bundle: true,
+  packages: "external",
+  minify: true,
+  sourcemap: false,
+  outExtension: { ".js": ".mjs" },
+  define: {
+    "process.env.NODE_ENV": "\"production\"",
+  },
+  logLevel: "info",
+}).catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
+NODE
+
+# Create a small CJS wrapper for consistent start behavior.
+RUN node - <<'NODE'
+const fs = require("fs");
+fs.writeFileSync(
+  "dist/sandbox-runner.cjs",
+  `#!/usr/bin/env node
+"use strict";
+const { pathToFileURL } = require("url");
+const { join } = require("path");
+import(pathToFileURL(join(__dirname, "agent/sandboxRunner/index.mjs")).href).catch(err => {
+  console.error("Failed to start sandbox runner:", err);
+  process.exit(1);
+});
+`,
+  "utf-8"
+);
+NODE
+
+RUN npm prune --omit=dev
+
+FROM node:20-alpine
+WORKDIR /app
+
+# docker CLI
+RUN apk add --no-cache docker-cli bash
+
+COPY --from=builder /app/package.json /app/package-lock.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+
+ENV NODE_ENV=production
+ENV SANDBOX_RUNNER_PORT=8080
+
+EXPOSE 8080
+
+CMD ["node", "dist/sandbox-runner.cjs"]

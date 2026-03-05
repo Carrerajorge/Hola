@@ -1,0 +1,5 @@
+{
+  "documentType": "docx",
+  "requiredTools": ["theme-apply", "docgen", "mso-validate", "render-preview"],
+  "requiredValidationChecks": ["relationships", "schema", "images"]
+}

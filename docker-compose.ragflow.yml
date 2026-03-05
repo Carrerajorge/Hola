@@ -1,0 +1,80 @@
+version: "3.8"
+
+# Este archivo permite arrancar RAGFlow como un ecosistema adyacente a Hola.
+# Te recomendamos ejecutar esto dentro de la carpeta ragflow original, o copiar aquí sus dependencias.
+# Incluye los servicios base para que RAGFlow funcione independiente.
+
+services:
+  ragflow-server:
+    image: infiniflow/ragflow:v0.24.0
+    ports:
+      - "9380:9380"
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOC_ENGINE=infinity
+      - MYSQL_PASSWORD=infini_rag_flow
+      - MYSQL_HOST=mysql
+      - MYSQL_DBNAME=rag_flow
+      - MINIO_HOST=minio
+      - MINIO_PORT=9000
+      - MINIO_USER=rag_flow
+      - MINIO_PASSWORD=infini_rag_flow
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=infini_rag_flow
+    networks:
+      - ragflow
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.0.39
+    environment:
+      - MYSQL_ROOT_PASSWORD=infini_rag_flow
+      - MYSQL_DATABASE=rag_flow
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - ragflow
+    restart: unless-stopped
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=rag_flow
+      - MINIO_ROOT_PASSWORD=infini_rag_flow
+    volumes:
+      - minio_data:/data
+    networks:
+      - ragflow
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.2.4
+    command: redis-server --requirepass infini_rag_flow
+    volumes:
+      - redis_data:/data
+    networks:
+      - ragflow
+    restart: unless-stopped
+
+  infinity:
+    image: infiniflow/infinity:v0.5.0
+    ports:
+      - "23820:23820"
+    volumes:
+      - infinity_data:/var/infinity
+    networks:
+      - ragflow
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+  minio_data:
+  redis_data:
+  infinity_data:
+
+networks:
+  ragflow:
+    driver: bridge

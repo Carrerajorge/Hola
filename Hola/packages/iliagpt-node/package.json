@@ -1,0 +1,22 @@
+{
+  "name": "@carrerajorge/iliagpt-node",
+  "version": "0.1.0",
+  "description": "ILIAGPT Node agent (laptop/desktop) for pairing with iliagpt.com",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "iliagpt-node": "dist/cli.mjs"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "node --import tsx src/cli.ts",
+    "build": "node ../../scripts/build-iliagpt-node.mjs",
+    "start": "node dist/cli.mjs"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

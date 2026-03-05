@@ -1,0 +1,142 @@
+import { describe, expect, it } from "vitest"; import { z } from "zod"; import { __test__, isSensitiveConfigPath } from "./schema.hints.js"; import { OpenClawSchema } from "./zod-schema.js"; 
+import { zodToJsonSchema } from "zod-to-json-schema";
+import { registerSensitive } from "./zod-schema.sensitive.js";
+
+const { mapSensitivePaths } = __test__;
+
+describe("isSensitiveConfigPath", () => {
+  it("matches whitelist suffixes case-insensitively", () => {
+    const whitelistedPaths = [
+      "maxTokens",
+      "maxOutputTokens",
+      "maxInputTokens",
+      "maxCompletionTokens",
+      "contextTokens",
+      "totalTokens",
+      "tokenCount",
+      "tokenLimit",
+      "tokenBudget",
+      "channels.irc.nickserv.passwordFile",
+    ];
+    for (const path of whitelistedPaths) {
+      expect(isSensitiveConfigPath(path)).toBe(false);
+      expect(isSensitiveConfigPath(path.toUpperCase())).toBe(false);
+    }
+  });
+
+  it("keeps true sensitive keys redacted", () => {
+    expect(isSensitiveConfigPath("channels.slack.token")).toBe(true);
+    expect(isSensitiveConfigPath("models.providers.openai.apiKey")).toBe(true);
+    expect(isSensitiveConfigPath("channels.irc.nickserv.password")).toBe(true);
+  });
+});
+
+describe("mapSensitivePaths", () => {
+  it("should detect sensitive fields nested inside all structural Zod types", () => {
+    const GrandSchema = z.object({
+      simple: registerSensitive("test.hints.simple", z.string()).optional(),
+      simpleReversed: registerSensitive("test.hints.simpleReversed", z.string()).optional(),
+      nested: z.object({
+        nested: registerSensitive("test.hints.nested", z.string()),
+      }),
+      list: z.array(registerSensitive("test.hints.list", z.string())),
+      listOfObjects: z.array(z.object({ nested: registerSensitive("test.hints.listOfObjects.nested", z.string()) })),
+      headers: z.record(z.string(), registerSensitive("test.hints.headers.value", z.string())),
+      headersNested: z.record(
+        z.string(),
+        z.object({ nested: registerSensitive("test.hints.headersNested.nested", z.string()) }),
+      ), 
+      auth: z.union([
+        z.object({ type: z.literal("none") }),
+        z.object({
+          type: z.literal("token"),
+          value: registerSensitive("test.hints.tokenUnion.value", z.string()),
+        }),        
+
+      ]),
+      merged: z
+        .object({ id: z.string() })
+        .and(z.object({ nested: registerSensitive("test.hints.and.nested", z.string()) })),
+    });
+
+    const result = mapSensitivePaths(GrandSchema, "", {});
+
+    expect(result["simple"]?.sensitive).toBe(true);
+    expect(result["simpleReversed"]?.sensitive).toBe(true);
+    expect(result["nested.nested"]?.sensitive).toBe(true);
+    expect(result["list[]"]?.sensitive).toBe(true);
+    expect(result["listOfObjects[].nested"]?.sensitive).toBe(true);
+    expect(result["headers.*"]?.sensitive).toBe(true);
+    expect(result["headersNested.*.nested"]?.sensitive).toBe(true);
+    expect(result["auth.value"]?.sensitive).toBe(true);
+    expect(result["merged.nested"]?.sensitive).toBe(true);
+  });
+
+  it("should not detect non-sensitive fields nested inside all structural Zod types", () => {
+    const GrandSchema = z.object({
+      simple: z.string().optional(),
+      simpleReversed: z.string().optional(),
+      nested: z.object({
+        nested: z.string(),
+      }),
+      list: z.array(z.string()),
+      listOfObjects: z.array(z.object({ nested: z.string() })),
+      headers: z.record(z.string(), z.string()),
+      headersNested: z.record(z.string(), z.object({ nested: z.string() })),
+      auth: z.union([
+        z.object({ type: z.literal("none") }),
+        z.object({ type: z.literal("token"), value: z.string() }),
+      ]),
+      merged: z.object({ id: z.string() }).and(z.object({ nested: z.string() })),
+    });
+
+    const result = mapSensitivePaths(GrandSchema, "", {});
+
+    expect(result["simple"]?.sensitive).toBe(undefined);
+    expect(result["simpleReversed"]?.sensitive).toBe(undefined);
+    expect(result["nested.nested"]?.sensitive).toBe(undefined);
+    expect(result["list[]"]?.sensitive).toBe(undefined);
+    expect(result["listOfObjects[].nested"]?.sensitive).toBe(undefined);
+    expect(result["headers.*"]?.sensitive).toBe(undefined);
+    expect(result["headersNested.*.nested"]?.sensitive).toBe(undefined);
+    expect(result["auth.value"]?.sensitive).toBe(undefined);
+    expect(result["merged.nested"]?.sensitive).toBe(undefined);
+  });
+
+  it("maps sensitive fields nested under object catchall schemas", () => {
+    const schema = z.object({
+      custom: z.object({}).catchall(
+        z.object({
+          apiKey: registerSensitive("test.hints.apiKey", z.string()),
+          label: z.string(),
+        }),
+      ),
+    });
+
+    const result = mapSensitivePaths(schema, "", {});
+    expect(result["custom.*.apiKey"]?.sensitive).toBe(true);
+    expect(result["custom.*.label"]?.sensitive).toBe(undefined);
+  });
+
+  it("does not mark plain catchall values sensitive by default", () => {
+    const schema = z.object({
+      env: z.object({}).catchall(z.string()),
+    });
+
+    const result = mapSensitivePaths(schema, "", {});
+    expect(result["env.*"]?.sensitive).toBe(undefined);
+  });
+
+  it("main schema yields correct hints (samples)", () => {
+    const schema = zodToJsonSchema(OpenClawSchema, {
+      target: "draft-07",
+      unrepresentable: "any",
+    });
+    schema.title = "OpenClawConfig";
+    const hints = mapSensitivePaths(OpenClawSchema, "", {});
+
+    expect(hints["channels.discord.accounts.*.token"]?.sensitive).toBe(true);
+    expect(hints["gateway.auth.token"]?.sensitive).toBe(true);
+    expect(hints["skills.entries.*.apiKey"]?.sensitive).toBe(true);
+  });
+});

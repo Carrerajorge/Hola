@@ -1,0 +1,38 @@
+@@ -723,24 +723,26 @@
+     const cacheKey = \`messages:\${chatId}:\${limit || 'all'}:\${offset || 0}:\${before?.getTime() || 'now'}:\${orderBy}\`;
+ 
+     return cache.remember(cacheKey, 10, async () => {
+-      let q = dbRead.select().from(chatMessages);
+-      if (before) {
+-        q = q.where(and(eq(chatMessages.chatId, chatId), sql\`\${chatMessages.createdAt} < \${before.toISOString()}\`));
+-      } else {
+-        q = q.where(eq(chatMessages.chatId, chatId));
+-      }
+-      let query = q;
+-        query.orderBy(desc(chatMessages.createdAt));
++      let query = dbRead.select().from(chatMessages).$dynamic();
++      
++      const conditions = [eq(chatMessages.chatId, chatId)];
++      if (before) {
++        conditions.push(sql\`\${chatMessages.createdAt} < '\${before.toISOString()}'\`);
++      }
++      query = query.where(and(...conditions));
++
++      if (orderBy === 'desc') {
++        query = query.orderBy(desc(chatMessages.createdAt));
+       } else {
+-        query.orderBy(chatMessages.createdAt);
++        query = query.orderBy(chatMessages.createdAt);
+       }
+ 
+       if (limit) {
+-        query.limit(limit);
++        query = query.limit(limit);
+       }
+ 
+       if (offset) {
+-        query.offset(offset);
++        query = query.offset(offset);
+       }
+ 
+       return await query;

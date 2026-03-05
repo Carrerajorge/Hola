@@ -1,0 +1,878 @@
+{
+  "generated_at": "2026-02-17T17:39:47.276273Z",
+  "summary": {
+    "total_runs": 1000,
+    "by_workflow": {
+      "CodeQL": 324,
+      "CI": 321,
+      "Deploy to Production (Blue-Green)": 43,
+      "Deploy to Production": 260,
+      ".github/workflows/ci.yml": 2,
+      ".github/workflows/deploy.yml": 4,
+      "npm_and_yarn in / for lru-cache - Update #1245636796": 1,
+      "npm_and_yarn in / for @opentelemetry/exporter-trace-otlp-http - Update #1245636797": 1,
+      "npm_and_yarn in / for @opentelemetry/exporter-trace-otlp-http - Update #1245635626": 1,
+      "npm_and_yarn in / for lru-cache - Update #1245635625": 1,
+      "docker in /. - Update #1245607617": 1,
+      "npm_and_yarn in /. - Update #1245607615": 1,
+      ".github/workflows/deploy-auto-no-cli.yml": 33,
+      "github_actions in /. - Update #1242229018": 1,
+      "npm_and_yarn in / for @playwright/test - Update #1238385574": 1,
+      "npm_and_yarn in / for @types/node - Update #1238384876": 1,
+      "docker in /. - Update #1238309766": 1,
+      "npm_and_yarn in /. - Update #1238309732": 1,
+      "npm_and_yarn in / for @tiptap/extension-underline - Update #1238048101": 1,
+      "github_actions in / for actions/upload-artifact - Update #1238047869": 1
+    },
+    "by_conclusion": {
+      "in_progress": 3,
+      "cancelled": 364,
+      "failure": 155,
+      "success": 403,
+      "skipped": 75
+    },
+    "in_progress": 3
+  },
+  "recent_failures": [
+    {
+      "id": 22108700699,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "hardening(fanout): template validation, run retention cleanup, run li\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22108700699"
+    },
+    {
+      "id": 22108700684,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "cancelled",
+      "title": "hardening(fanout): template validation, run retention cleanup, run li\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22108700684"
+    },
+    {
+      "id": 22108700665,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "hardening(fanout): template validation, run retention cleanup, run li\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22108700665"
+    },
+    {
+      "id": 22108588813,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "hardening(super-agent): auth-gate fanout, enforce budgets, add per-sh\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22108588813"
+    },
+    {
+      "id": 22108588876,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "cancelled",
+      "title": "hardening(super-agent): auth-gate fanout, enforce budgets, add per-sh\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22108588876"
+    },
+    {
+      "id": 22108588815,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "hardening(super-agent): auth-gate fanout, enforce budgets, add per-sh\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22108588815"
+    },
+    {
+      "id": 22108082927,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "cancelled",
+      "title": "fix(chat): replace broken runInfo.id ref with streamRunContext.runId",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22108082927"
+    },
+    {
+      "id": 22108083137,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "fix(chat): replace broken runInfo.id ref with streamRunContext.runId",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22108083137"
+    },
+    {
+      "id": 22108082775,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "fix(chat): replace broken runInfo.id ref with streamRunContext.runId",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22108082775"
+    },
+    {
+      "id": 22108068436,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "feat(super-agent): add bounded fanout planner/executor for high-scale\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22108068436"
+    },
+    {
+      "id": 22108068395,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "feat(super-agent): add bounded fanout planner/executor for high-scale\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22108068395"
+    },
+    {
+      "id": 22108068320,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "cancelled",
+      "title": "feat(super-agent): add bounded fanout planner/executor for high-scale\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22108068320"
+    },
+    {
+      "id": 22107866749,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "failure",
+      "title": "fix(download): honest release state with upcoming badges and disabled\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22107866749"
+    },
+    {
+      "id": 22107866669,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "fix(download): honest release state with upcoming badges and disabled\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22107866669"
+    },
+    {
+      "id": 22104182681,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "fix: load DATABASE_URL before running db push in deploy",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22104182681"
+    },
+    {
+      "id": 22104182754,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "cancelled",
+      "title": "fix: load DATABASE_URL before running db push in deploy",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22104182754"
+    },
+    {
+      "id": 22104182569,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "fix: load DATABASE_URL before running db push in deploy",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22104182569"
+    },
+    {
+      "id": 22104180010,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "cancelled",
+      "title": "fix: load env files in drizzle config for robust db:push",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22104180010"
+    },
+    {
+      "id": 22104179894,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "fix: load env files in drizzle config for robust db:push",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22104179894"
+    },
+    {
+      "id": 22104179724,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "fix: load env files in drizzle config for robust db:push",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22104179724"
+    },
+    {
+      "id": 22104164774,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "ci: harden deploy workflow diagnostics and health checks",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22104164774"
+    },
+    {
+      "id": 22104164830,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "cancelled",
+      "title": "ci: harden deploy workflow diagnostics and health checks",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22104164830"
+    },
+    {
+      "id": 22104164826,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "ci: harden deploy workflow diagnostics and health checks",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22104164826"
+    },
+    {
+      "id": 22103772924,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "feat(download): ship minimal aggressive download cards with real file\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22103772924"
+    },
+    {
+      "id": 22103156401,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "failure",
+      "title": "fix(chat): allow concurrent chats by scoping aiState check to current\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22103156401"
+    },
+    {
+      "id": 22086598717,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "fix: make deploy-auto-no-cli SSH port fallback robust",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22086598717"
+    },
+    {
+      "id": 22086598672,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "fix: make deploy-auto-no-cli SSH port fallback robust",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22086598672"
+    },
+    {
+      "id": 22086450814,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "cancelled",
+      "title": "REQ-002 Phase 3 polish: remove sudo in container plans + harden execu\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22086450814"
+    },
+    {
+      "id": 22086450778,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "REQ-002 Phase 3 polish: remove sudo in container plans + harden execu\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22086450778"
+    },
+    {
+      "id": 22079342554,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "failure",
+      "title": "fix(deploy): install nginx.conf to sites-enabled during deploy",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22079342554"
+    },
+    {
+      "id": 22077902878,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "failure",
+      "title": "fix(deploy): replace symlink upstream with direct file write",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22077902878"
+    },
+    {
+      "id": 22077338006,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "failure",
+      "title": "Deploy to Production (Blue-Green)",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22077338006"
+    },
+    {
+      "id": 22076903119,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "failure",
+      "title": "Merge pull request #249 from Carrerajorge/codex/gha-fix-deploy-bootstrap",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22076903119"
+    },
+    {
+      "id": 22076820564,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "failure",
+      "title": "fix(deploy): auto-bootstrap nginx upstream confs + sync nginx.conf to\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22076820564"
+    },
+    {
+      "id": 22076820555,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "fix(deploy): auto-bootstrap nginx upstream confs + sync nginx.conf to\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22076820555"
+    },
+    {
+      "id": 22076006589,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "failure",
+      "title": "Merge pull request #248 from Carrerajorge/codex/gha-hardening-finalize",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22076006589"
+    },
+    {
+      "id": 22075892045,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "cancelled",
+      "title": "REQ-002 Phase 3: execute OS packages via sandbox-runner docker jobs (\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075892045"
+    },
+    {
+      "id": 22075699424,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "failure",
+      "title": "fix(terminal): harden command execution inputs",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075699424"
+    },
+    {
+      "id": 22075699391,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "fix(terminal): harden command execution inputs",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075699391"
+    },
+    {
+      "id": 22075699403,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "fix(terminal): harden command execution inputs",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075699403"
+    },
+    {
+      "id": 22075688524,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "harden tool-runner fallback reporting in simple generation",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075688524"
+    },
+    {
+      "id": 22075688530,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "harden tool-runner fallback reporting in simple generation",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075688530"
+    },
+    {
+      "id": 22075688550,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "cancelled",
+      "title": "harden tool-runner fallback reporting in simple generation",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075688550"
+    },
+    {
+      "id": 22075595052,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "fix: sync llmGateway idle-timeout to root, remove broken testProvider\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075595052"
+    },
+    {
+      "id": 22075595134,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "cancelled",
+      "title": "fix: sync llmGateway idle-timeout to root, remove broken testProvider\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075595134"
+    },
+    {
+      "id": 22075535308,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "harden: document engine security, deploy v3.1 smoke tests, nginx hard\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075535308"
+    },
+    {
+      "id": 22075535356,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "cancelled",
+      "title": "harden: document engine security, deploy v3.1 smoke tests, nginx hard\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075535356"
+    },
+    {
+      "id": 22075535309,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "harden: document engine security, deploy v3.1 smoke tests, nginx hard\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075535309"
+    },
+    {
+      "id": 22075243745,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "chore: keep install hardening commit scoped to terminal controller",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075243745"
+    },
+    {
+      "id": 22075243727,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "chore: keep install hardening commit scoped to terminal controller",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075243727"
+    },
+    {
+      "id": 22075243779,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "cancelled",
+      "title": "chore: keep install hardening commit scoped to terminal controller",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075243779"
+    },
+    {
+      "id": 22075101631,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "failure",
+      "title": "Harden tool-runner CLI capability/healthcheck error mapping",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075101631"
+    },
+    {
+      "id": 22075086306,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "cancelled",
+      "title": "Deploy to Production (Blue-Green)",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075086306"
+    },
+    {
+      "id": 22075078070,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "cancelled",
+      "title": "ci/deploy: build images on push and gate auto deploy on CI (#245)",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075078070"
+    },
+    {
+      "id": 22075078013,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "ci/deploy: build images on push and gate auto deploy on CI (#245)",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075078013"
+    },
+    {
+      "id": 22075077975,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "ci/deploy: build images on push and gate auto deploy on CI (#245)",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075077975"
+    },
+    {
+      "id": 22075070884,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "cancelled",
+      "title": "Deploy to Production (Blue-Green)",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075070884"
+    },
+    {
+      "id": 22075026979,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "Harden tool-runner fallback with recoverable artifact reports",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075026979"
+    },
+    {
+      "id": 22075026981,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "Harden tool-runner fallback with recoverable artifact reports",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075026981"
+    },
+    {
+      "id": 22075004481,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "fix(terminal): secure executeScript argument handling",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075004481"
+    },
+    {
+      "id": 22075004479,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "fix(terminal): secure executeScript argument handling",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22075004479"
+    },
+    {
+      "id": 22074984534,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "fix(terminal): harden file operation path and payload limits",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22074984534"
+    },
+    {
+      "id": 22074984511,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "fix(terminal): harden file operation path and payload limits",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22074984511"
+    },
+    {
+      "id": 22074953630,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "harden: round 6 deep security \u2014 20+ fixes across pipeline & file serving",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22074953630"
+    },
+    {
+      "id": 22074917959,
+      "name": "Deploy to Production (Blue-Green)",
+      "conclusion": "failure",
+      "title": "Deploy to Production (Blue-Green)",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22074917959"
+    },
+    {
+      "id": 22074794720,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "ci: add build-images workflow + blue-green deploy infra",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22074794720"
+    },
+    {
+      "id": 22074660606,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "fix(actions): restore CI/Deploy validity and lockfile determinism (#244)",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22074660606"
+    },
+    {
+      "id": 22074660605,
+      "name": "Deploy to Production",
+      "conclusion": "failure",
+      "title": "fix(actions): restore CI/Deploy validity and lockfile determinism (#244)",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22074660605"
+    },
+    {
+      "id": 22074461320,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "harden: round 5 document pipeline polish \u2014 slicing, sanitization, per\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22074461320"
+    },
+    {
+      "id": 22074461303,
+      "name": ".github/workflows/ci.yml",
+      "conclusion": "failure",
+      "title": "harden: round 5 document pipeline polish \u2014 slicing, sanitization, per\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22074461303"
+    },
+    {
+      "id": 22074461359,
+      "name": ".github/workflows/deploy.yml",
+      "conclusion": "failure",
+      "title": "harden: round 5 document pipeline polish \u2014 slicing, sanitization, per\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22074461359"
+    },
+    {
+      "id": 22074366892,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "hardening: secure routes auth limits and deploy defaults",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22074366892"
+    },
+    {
+      "id": 22074366939,
+      "name": ".github/workflows/ci.yml",
+      "conclusion": "failure",
+      "title": "hardening: secure routes auth limits and deploy defaults",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22074366939"
+    },
+    {
+      "id": 22074366946,
+      "name": ".github/workflows/deploy.yml",
+      "conclusion": "failure",
+      "title": "hardening: secure routes auth limits and deploy defaults",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22074366946"
+    },
+    {
+      "id": 22073286310,
+      "name": "Deploy to Production",
+      "conclusion": "cancelled",
+      "title": "Deploy to Production (Blue-Green)",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22073286310"
+    },
+    {
+      "id": 22073284893,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "fix: rate limiter Redis timeout causing 503 on all API routes",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22073284893"
+    },
+    {
+      "id": 22073284914,
+      "name": "CI",
+      "conclusion": "failure",
+      "title": "fix: rate limiter Redis timeout causing 503 on all API routes",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22073284914"
+    },
+    {
+      "id": 22072721423,
+      "name": "Deploy to Production",
+      "conclusion": "cancelled",
+      "title": "Deploy to Production (Blue-Green)",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22072721423"
+    },
+    {
+      "id": 22072718047,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "harden: round 4 deep security \u2014 20+ fixes across document pipeline & \u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22072718047"
+    },
+    {
+      "id": 22072718014,
+      "name": "CI",
+      "conclusion": "failure",
+      "title": "harden: round 4 deep security \u2014 20+ fixes across document pipeline & \u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22072718014"
+    },
+    {
+      "id": 22072466786,
+      "name": "Deploy to Production",
+      "conclusion": "cancelled",
+      "title": "Deploy to Production (Blue-Green)",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22072466786"
+    },
+    {
+      "id": 22072459893,
+      "name": "Deploy to Production",
+      "conclusion": "failure",
+      "title": "Deploy to Production (Blue-Green)",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22072459893"
+    },
+    {
+      "id": 22072458070,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "fix: remove html-to-docx from vendor-office manual chunk",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22072458070"
+    },
+    {
+      "id": 22072458045,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "fix: remove html-to-docx from vendor-office manual chunk",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22072458045"
+    },
+    {
+      "id": 22072348331,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "harden: model integration pipeline \u2014 immutable maps, retries, structu\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22072348331"
+    },
+    {
+      "id": 22072348359,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "harden: model integration pipeline \u2014 immutable maps, retries, structu\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22072348359"
+    },
+    {
+      "id": 22072188279,
+      "name": "Deploy to Production",
+      "conclusion": "failure",
+      "title": "Deploy to Production (Blue-Green)",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22072188279"
+    },
+    {
+      "id": 22071959787,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "feat: i18n 100-locale system, Anthropic/DeepSeek providers, cleanup",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22071959787"
+    },
+    {
+      "id": 22071959834,
+      "name": "CI",
+      "conclusion": "failure",
+      "title": "feat: i18n 100-locale system, Anthropic/DeepSeek providers, cleanup",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22071959834"
+    },
+    {
+      "id": 22071398957,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "Harden document compiler pipeline (round 3) \u2014 deep security & safety",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22071398957"
+    },
+    {
+      "id": 22071398982,
+      "name": "CI",
+      "conclusion": "failure",
+      "title": "Harden document compiler pipeline (round 3) \u2014 deep security & safety",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22071398982"
+    },
+    {
+      "id": 22071243088,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "fix(phone-auth): fail when OTP provider is unavailable in production",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22071243088"
+    },
+    {
+      "id": 22071243125,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "fix(phone-auth): fail when OTP provider is unavailable in production",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22071243125"
+    },
+    {
+      "id": 22071213632,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "fix(login): wrap email/password in form; harden manifest icons; skip \u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22071213632"
+    },
+    {
+      "id": 22071213572,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "fix(login): wrap email/password in form; harden manifest icons; skip \u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22071213572"
+    },
+    {
+      "id": 22071160208,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "Harden document compiler pipeline (round 2) \u2014 resilience & safety",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22071160208"
+    },
+    {
+      "id": 22071160247,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "Harden document compiler pipeline (round 2) \u2014 resilience & safety",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22071160247"
+    },
+    {
+      "id": 22071001426,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "Harden document compiler pipeline \u2014 security & resilience fixes",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22071001426"
+    },
+    {
+      "id": 22071001423,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "Harden document compiler pipeline \u2014 security & resilience fixes",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22071001423"
+    },
+    {
+      "id": 22070660943,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "feat: Document Compiler \u2014 unified spec-driven document generation",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22070660943"
+    },
+    {
+      "id": 22070660935,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "feat: Document Compiler \u2014 unified spec-driven document generation",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22070660935"
+    },
+    {
+      "id": 22070294317,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "Fix streaming chat model/provider selection",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22070294317"
+    },
+    {
+      "id": 22070294324,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "Fix streaming chat model/provider selection",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22070294324"
+    },
+    {
+      "id": 22070198902,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "feat: implement provider token refresh and tighten OAuth key checks",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22070198902"
+    },
+    {
+      "id": 22070198910,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "feat: implement provider token refresh and tighten OAuth key checks",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22070198910"
+    },
+    {
+      "id": 22070153298,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "Add Codex to applications list",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22070153298"
+    },
+    {
+      "id": 22070153301,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "Add Codex to applications list",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22070153301"
+    },
+    {
+      "id": 22070101815,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "Add Codex entry point in sidebar",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22070101815"
+    },
+    {
+      "id": 22070101842,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "Add Codex entry point in sidebar",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22070101842"
+    },
+    {
+      "id": 22070063796,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "Harden chat submit error cleanup",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22070063796"
+    },
+    {
+      "id": 22070063779,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "Harden chat submit error cleanup",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22070063779"
+    },
+    {
+      "id": 22070035576,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "Fix env loader repo root detection",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22070035576"
+    },
+    {
+      "id": 22070035599,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "Fix env loader repo root detection",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22070035599"
+    },
+    {
+      "id": 22070011445,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "Cache table existence checks",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22070011445"
+    },
+    {
+      "id": 22070011457,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "Cache table existence checks",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22070011457"
+    },
+    {
+      "id": 22069902199,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "Harden auth and middleware controls",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22069902199"
+    },
+    {
+      "id": 22069902200,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "Harden auth and middleware controls",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22069902200"
+    },
+    {
+      "id": 22069899199,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "Add DOCX image rendering, ordered-list start support, and HTML list/i\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22069899199"
+    },
+    {
+      "id": 22069899196,
+      "name": "CI",
+      "conclusion": "cancelled",
+      "title": "Add DOCX image rendering, ordered-list start support, and HTML list/i\u2026",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22069899196"
+    },
+    {
+      "id": 22069887881,
+      "name": "CodeQL",
+      "conclusion": "cancelled",
+      "title": "fix(ci): make npm ci (npm@10) work (#93)",
+      "url": "https://github.com/Carrerajorge/Hola/actions/runs/22069887881"
+    }
+  ]
+}

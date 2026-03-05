@@ -1,0 +1,4 @@
+{
+  "commands": ["ls", "pwd", "git status", "cat"],
+  "dangerous": ["rm", "ssh", "sudo", "curl"]
+}

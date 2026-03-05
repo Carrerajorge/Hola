@@ -1,0 +1,55 @@
+{
+  "objective": "workflow run-traces deterministic reproduction",
+  "concurrency": 1,
+  "steps": [
+    {
+      "id": "prepare",
+      "name": "Prepare context",
+      "toolName": "noop",
+      "executorKey": "noop",
+      "input": {
+        "delayMs": 80
+      },
+      "retryPolicy": {
+        "attempts": 1,
+        "backoffMs": 0
+      }
+    },
+    {
+      "id": "unstable",
+      "name": "Retry flaky step",
+      "toolName": "flaky",
+      "executorKey": "flaky",
+      "dependencies": [
+        "prepare"
+      ],
+      "input": {
+        "failTimes": 1,
+        "delayMs": 40
+      },
+      "retryPolicy": {
+        "attempts": 3,
+        "backoffMs": 100,
+        "maxBackoffMs": 200
+      }
+    },
+    {
+      "id": "publish",
+      "name": "Emit artifact",
+      "toolName": "artifact",
+      "executorKey": "artifact",
+      "dependencies": [
+        "unstable"
+      ],
+      "input": {
+        "name": "result.json",
+        "type": "application/json",
+        "content": "{\"ok\":true}"
+      },
+      "retryPolicy": {
+        "attempts": 1,
+        "backoffMs": 0
+      }
+    }
+  ]
+}

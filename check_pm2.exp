@@ -1,0 +1,10 @@
+#!/usr/bin/expect -f
+set timeout -1
+spawn ssh -o StrictHostKeyChecking=no root@69.62.98.126 "pm2 status"
+expect {
+    "Enter passphrase for key" {
+        send "Sora2022.\r"
+        exp_continue
+    }
+    eof
+}

@@ -1,0 +1,592 @@
+{
+  "nodes": {
+    "pasillo.en": {
+      "id": "pasillo.en",
+      "type": "file_path",
+      "label": "pasillo.En",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/pasillo.En"
+      },
+      "lastSeen": "2026-02-28T02:37:08.035Z",
+      "frequency": 2
+    },
+    "ayudarte.ahora": {
+      "id": "ayudarte.ahora",
+      "type": "file_path",
+      "label": "ayudarte.Ahora",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/ayudarte.Ahora"
+      },
+      "lastSeen": "2026-02-28T02:37:11.607Z",
+      "frequency": 2
+    },
+    "n.en": {
+      "id": "n.en",
+      "type": "file_path",
+      "label": "n.En",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/n.En"
+      },
+      "lastSeen": "2026-02-28T02:37:13.319Z",
+      "frequency": 2
+    },
+    "recursos.3": {
+      "id": "recursos.3",
+      "type": "file_path",
+      "label": "recursos.3",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/recursos.3"
+      },
+      "lastSeen": "2026-02-28T02:37:13.319Z",
+      "frequency": 2
+    },
+    "decisiones.4": {
+      "id": "decisiones.4",
+      "type": "file_path",
+      "label": "decisiones.4",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/decisiones.4"
+      },
+      "lastSeen": "2026-02-28T02:37:13.319Z",
+      "frequency": 2
+    },
+    "deseados.es": {
+      "id": "deseados.es",
+      "type": "file_path",
+      "label": "deseados.Es",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/deseados.Es"
+      },
+      "lastSeen": "2026-02-28T02:37:13.319Z",
+      "frequency": 2
+    },
+    "computadora": {
+      "id": "computadora",
+      "type": "technology",
+      "label": "computadora",
+      "metadata": {},
+      "lastSeen": "2026-02-28T02:37:43.398Z",
+      "frequency": 7
+    },
+    "conversaciones.esto": {
+      "id": "conversaciones.esto",
+      "type": "file_path",
+      "label": "conversaciones.Esto",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/conversaciones.Esto"
+      },
+      "lastSeen": "2026-02-28T02:37:33.219Z",
+      "frequency": 2
+    },
+    "malware.si": {
+      "id": "malware.si",
+      "type": "file_path",
+      "label": "malware.Si",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/malware.Si"
+      },
+      "lastSeen": "2026-02-28T02:37:33.219Z",
+      "frequency": 2
+    },
+    "contenido.mi": {
+      "id": "contenido.mi",
+      "type": "file_path",
+      "label": "contenido.Mi",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/contenido.Mi"
+      },
+      "lastSeen": "2026-02-28T02:37:36.196Z",
+      "frequency": 2
+    },
+    "documentos.la": {
+      "id": "documentos.la",
+      "type": "file_path",
+      "label": "documentos.La",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/documentos.La"
+      },
+      "lastSeen": "2026-02-28T02:37:36.196Z",
+      "frequency": 2
+    },
+    "pantalla.2": {
+      "id": "pantalla.2",
+      "type": "file_path",
+      "label": "pantalla.2",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/pantalla.2"
+      },
+      "lastSeen": "2026-02-28T02:37:38.313Z",
+      "frequency": 2
+    },
+    "visual.si": {
+      "id": "visual.si",
+      "type": "file_path",
+      "label": "visual.Si",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/visual.Si"
+      },
+      "lastSeen": "2026-02-28T02:37:38.313Z",
+      "frequency": 2
+    },
+    "l.pero": {
+      "id": "l.pero",
+      "type": "file_path",
+      "label": "l.Pero",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/l.Pero"
+      },
+      "lastSeen": "2026-02-28T02:37:38.313Z",
+      "frequency": 2
+    },
+    "fundamentales.si": {
+      "id": "fundamentales.si",
+      "type": "file_path",
+      "label": "fundamentales.Si",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/fundamentales.Si"
+      },
+      "lastSeen": "2026-02-28T02:37:41.659Z",
+      "frequency": 2
+    },
+    "node.js": {
+      "id": "node.js",
+      "type": "file_path",
+      "label": "Node.js",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/Node.js"
+      },
+      "lastSeen": "2026-02-28T02:37:45.075Z",
+      "frequency": 2
+    },
+    "/var/folders/7k/m0v6dxgd057ggh271db8y87m0000gn/t/iliagpt-screenshot-1772226799259.png": {
+      "id": "/var/folders/7k/m0v6dxgd057ggh271db8y87m0000gn/t/iliagpt-screenshot-1772226799259.png",
+      "type": "file_path",
+      "label": "/var/folders/7k/m0v6dxgd057ggh271db8y87m0000gn/T/iliagpt-screenshot-1772226799259.png",
+      "metadata": {
+        "exists": false,
+        "securityViolation": true
+      },
+      "lastSeen": "2026-02-28T02:37:48.787Z",
+      "frequency": 2
+    },
+    "privacidad.si": {
+      "id": "privacidad.si",
+      "type": "file_path",
+      "label": "privacidad.Si",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/privacidad.Si"
+      },
+      "lastSeen": "2026-02-28T02:37:52.583Z",
+      "frequency": 2
+    },
+    "/var/folders/7k/m0v6dxgd057ggh271db8y87m0000gn/t/iliagpt-screenshot-1772227185707.png": {
+      "id": "/var/folders/7k/m0v6dxgd057ggh271db8y87m0000gn/t/iliagpt-screenshot-1772227185707.png",
+      "type": "file_path",
+      "label": "/var/folders/7k/m0v6dxgd057ggh271db8y87m0000gn/T/iliagpt-screenshot-1772227185707.png",
+      "metadata": {
+        "exists": false,
+        "securityViolation": true
+      },
+      "lastSeen": "2026-02-28T02:37:56.071Z",
+      "frequency": 2
+    },
+    "/var/folders/7k/m0v6dxgd057ggh271db8y87m0000gn/t/iliagpt-screenshot-1772227759987.png": {
+      "id": "/var/folders/7k/m0v6dxgd057ggh271db8y87m0000gn/t/iliagpt-screenshot-1772227759987.png",
+      "type": "file_path",
+      "label": "/var/folders/7k/m0v6dxgd057ggh271db8y87m0000gn/T/iliagpt-screenshot-1772227759987.png",
+      "metadata": {
+        "exists": false,
+        "securityViolation": true
+      },
+      "lastSeen": "2026-02-28T02:38:06.468Z",
+      "frequency": 2
+    },
+    "/var/folders/7k/m0v6dxgd057ggh271db8y87m0000gn/t/iliagpt-screenshot-1772227828507.png": {
+      "id": "/var/folders/7k/m0v6dxgd057ggh271db8y87m0000gn/t/iliagpt-screenshot-1772227828507.png",
+      "type": "file_path",
+      "label": "/var/folders/7k/m0v6dxgd057ggh271db8y87m0000gn/T/iliagpt-screenshot-1772227828507.png",
+      "metadata": {
+        "exists": false,
+        "securityViolation": true
+      },
+      "lastSeen": "2026-02-28T02:38:09.957Z",
+      "frequency": 2
+    },
+    "necesites.aqu": {
+      "id": "necesites.aqu",
+      "type": "file_path",
+      "label": "necesites.Aqu",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/necesites.Aqu"
+      },
+      "lastSeen": "2026-02-28T02:38:11.929Z",
+      "frequency": 2
+    },
+    "vx.y.z": {
+      "id": "vx.y.z",
+      "type": "file_path",
+      "label": "vX.Y.Z",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/vX.Y.Z"
+      },
+      "lastSeen": "2026-02-28T02:38:11.929Z",
+      "frequency": 2
+    },
+    "99.9": {
+      "id": "99.9",
+      "type": "file_path",
+      "label": "99.9",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/99.9"
+      },
+      "lastSeen": "2026-02-28T02:38:11.929Z",
+      "frequency": 2
+    },
+    "require": {
+      "id": "require",
+      "type": "technology",
+      "label": "require",
+      "metadata": {},
+      "lastSeen": "2026-02-28T02:35:36.214Z",
+      "frequency": 1
+    },
+    "códex": {
+      "id": "códex",
+      "type": "project_name",
+      "label": "códex",
+      "metadata": {},
+      "lastSeen": "2026-02-28T02:35:47.669Z",
+      "frequency": 2
+    },
+    "antigravity": {
+      "id": "antigravity",
+      "type": "technology",
+      "label": "antigravity",
+      "metadata": {},
+      "lastSeen": "2026-02-28T02:38:23.947Z",
+      "frequency": 2
+    },
+    "l.si": {
+      "id": "l.si",
+      "type": "file_path",
+      "label": "l.Si",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/l.Si"
+      },
+      "lastSeen": "2026-02-28T02:38:25.662Z",
+      "frequency": 2
+    },
+    "/var/folders/7k/m0v6dxgd057ggh271db8y87m0000gn/t/iliagpt-screenshot-1772229297852.png": {
+      "id": "/var/folders/7k/m0v6dxgd057ggh271db8y87m0000gn/t/iliagpt-screenshot-1772229297852.png",
+      "type": "file_path",
+      "label": "/var/folders/7k/m0v6dxgd057ggh271db8y87m0000gn/T/iliagpt-screenshot-1772229297852.png",
+      "metadata": {
+        "exists": false,
+        "securityViolation": true
+      },
+      "lastSeen": "2026-02-28T02:38:29.367Z",
+      "frequency": 2
+    },
+    "sistema.si": {
+      "id": "sistema.si",
+      "type": "file_path",
+      "label": "sistema.Si",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/sistema.Si"
+      },
+      "lastSeen": "2026-02-28T02:38:33.314Z",
+      "frequency": 2
+    },
+    "whatsapp": {
+      "id": "whatsapp",
+      "type": "technology",
+      "label": "WhatsApp",
+      "metadata": {},
+      "lastSeen": "2026-02-28T02:38:38.249Z",
+      "frequency": 4
+    },
+    "/var/folders/7k/m0v6dxgd057ggh271db8y87m0000gn/t/iliagpt-screenshot-1772229367671.png": {
+      "id": "/var/folders/7k/m0v6dxgd057ggh271db8y87m0000gn/t/iliagpt-screenshot-1772229367671.png",
+      "type": "file_path",
+      "label": "/var/folders/7k/m0v6dxgd057ggh271db8y87m0000gn/T/iliagpt-screenshot-1772229367671.png",
+      "metadata": {
+        "exists": false,
+        "securityViolation": true
+      },
+      "lastSeen": "2026-02-28T02:38:37.059Z",
+      "frequency": 2
+    },
+    "/var/folders/7k/m0v6dxgd057ggh271db8y87m0000gn/t/iliagpt-screenshot-1772229718641.png": {
+      "id": "/var/folders/7k/m0v6dxgd057ggh271db8y87m0000gn/t/iliagpt-screenshot-1772229718641.png",
+      "type": "file_path",
+      "label": "/var/folders/7k/m0v6dxgd057ggh271db8y87m0000gn/T/iliagpt-screenshot-1772229718641.png",
+      "metadata": {
+        "exists": false,
+        "securityViolation": true
+      },
+      "lastSeen": "2026-02-28T02:38:40.236Z",
+      "frequency": 2
+    },
+    "35.00": {
+      "id": "35.00",
+      "type": "file_path",
+      "label": "35.00",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/35.00"
+      },
+      "lastSeen": "2026-02-28T02:38:44.669Z",
+      "frequency": 2
+    },
+    "50.00": {
+      "id": "50.00",
+      "type": "file_path",
+      "label": "50.00",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/50.00"
+      },
+      "lastSeen": "2026-02-28T02:38:44.669Z",
+      "frequency": 2
+    },
+    "75.00": {
+      "id": "75.00",
+      "type": "file_path",
+      "label": "75.00",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/75.00"
+      },
+      "lastSeen": "2026-02-28T02:38:44.669Z",
+      "frequency": 2
+    },
+    "descontado.mar": {
+      "id": "descontado.mar",
+      "type": "file_path",
+      "label": "descontado.Mar",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/descontado.Mar"
+      },
+      "lastSeen": "2026-02-28T02:38:44.669Z",
+      "frequency": 2
+    },
+    "140.00": {
+      "id": "140.00",
+      "type": "file_path",
+      "label": "140.00",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/140.00"
+      },
+      "lastSeen": "2026-02-28T02:38:44.669Z",
+      "frequency": 2
+    },
+    "arista.para": {
+      "id": "arista.para",
+      "type": "file_path",
+      "label": "arista.Para",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/arista.Para"
+      },
+      "lastSeen": "2026-02-28T02:38:50.772Z",
+      "frequency": 2
+    },
+    "resultado.si": {
+      "id": "resultado.si",
+      "type": "file_path",
+      "label": "resultado.Si",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/resultado.Si"
+      },
+      "lastSeen": "2026-02-28T02:38:50.772Z",
+      "frequency": 2
+    },
+    "9.5": {
+      "id": "9.5",
+      "type": "file_path",
+      "label": "9.5",
+      "metadata": {
+        "exists": false,
+        "absolutePath": "/Users/luis/Desktop/Hola/9.5"
+      },
+      "lastSeen": "2026-02-28T02:39:12.347Z",
+      "frequency": 2
+    }
+  },
+  "edges": [
+    {
+      "source": "n.en",
+      "target": "recursos.3",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "n.en",
+      "target": "decisiones.4",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "n.en",
+      "target": "deseados.es",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "recursos.3",
+      "target": "decisiones.4",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "recursos.3",
+      "target": "deseados.es",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "decisiones.4",
+      "target": "deseados.es",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "conversaciones.esto",
+      "target": "malware.si",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "contenido.mi",
+      "target": "documentos.la",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "pantalla.2",
+      "target": "visual.si",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "pantalla.2",
+      "target": "l.pero",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "visual.si",
+      "target": "l.pero",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "necesites.aqu",
+      "target": "vx.y.z",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "necesites.aqu",
+      "target": "99.9",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "vx.y.z",
+      "target": "99.9",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "35.00",
+      "target": "50.00",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "35.00",
+      "target": "75.00",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "35.00",
+      "target": "descontado.mar",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "35.00",
+      "target": "140.00",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "50.00",
+      "target": "75.00",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "50.00",
+      "target": "descontado.mar",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "50.00",
+      "target": "140.00",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "75.00",
+      "target": "descontado.mar",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "75.00",
+      "target": "140.00",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "descontado.mar",
+      "target": "140.00",
+      "relation": "co_occurred",
+      "weight": 2
+    },
+    {
+      "source": "arista.para",
+      "target": "resultado.si",
+      "relation": "co_occurred",
+      "weight": 2
+    }
+  ]
+}
