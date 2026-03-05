@@ -59,6 +59,7 @@ import wordPipelineRoutes from "./routes/wordPipelineRoutes";
 import redisSSERouter from "./routes/redisSSERouter";
 import streamingResumeRouter from "./routes/streamingResumeRouter";
 import superAgentRouter from "./routes/superAgentRoutes";
+import superAgentControllerRouter from "./routes/superAgentControllerRouter";
 import conversationMemoryRoutes from "./routes/conversationMemoryRoutes";
 import { contextRoutes, semanticRoutes } from "./memory";
 import { createPythonToolsRouter } from "./routes/pythonToolsRouter";
@@ -804,6 +805,7 @@ export async function registerRoutes(
   app.use("/api/memory/semantic", semanticRoutes); // Semantic memory search API
   app.use("/api/context", contextRoutes); // Enterprise context validation API
   app.use("/api", superAgentRouter);
+  app.use("/api/super-agent-controller", superAgentControllerRouter);
   app.use("/api", createPythonToolsRouter());
   app.use("/api", createLocalControlRouter());
   app.use("/api/system", systemControlRouter);
