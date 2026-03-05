@@ -24,7 +24,10 @@ export function TooltipTrigger({ children }: WrapperProps & { asChild?: boolean 
   return <>{children}</>;
 }
 
-export const TooltipContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+export const TooltipContent = React.forwardRef<
+  HTMLDivElement,
+  React.HTMLAttributes<HTMLDivElement> & { side?: "top" | "right" | "bottom" | "left"; sideOffset?: number; align?: "start" | "center" | "end" }
+>(
   function TooltipContent(_props, _ref) {
     return null;
   }

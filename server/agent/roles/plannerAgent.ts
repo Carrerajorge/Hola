@@ -7,6 +7,7 @@ import {
   PlanStepSchema,
   ToolCapability,
 } from "../contracts";
+export type { AgentPlan };
 import { toolRegistry } from "../toolRegistry";
 import { policyEngine } from "../policyEngine";
 import { eventLogger, logRunEvent } from "../eventLogger";

@@ -23,12 +23,17 @@ export class CapabilityRegistry {
             parameters: "JSON_SCHEMA" // Placeholder
         }));
     }
+
+    getAllRaw(): AgentCapability[] {
+        return Array.from(this.capabilities.values());
+    }
 }
 import { webScraperCapability } from './browser/webScraper';
 import { localFileSearchCapability, dockerOperatorCapability } from './system/osOps';
 import { emailFetcherCapability } from './communication/email';
 
 export const capabilityRegistry = new CapabilityRegistry();
+export const globalRegistry = capabilityRegistry;
 capabilityRegistry.register(webScraperCapability);
 capabilityRegistry.register(localFileSearchCapability);
 capabilityRegistry.register(dockerOperatorCapability);

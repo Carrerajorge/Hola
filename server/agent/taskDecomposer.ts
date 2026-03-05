@@ -16,6 +16,71 @@ export interface TaskStep {
     dependencies: string[]; // IDs of tasks that must complete first
 }
 
+export type AgentType = "planner" | "researcher" | "coder" | "reviewer" | "browser" | "communicator" | "general";
+
+export interface SubTask {
+    id: string;
+    description: string;
+    agentType: AgentType;
+    dependencies: string[];
+    status: "pending" | "running" | "completed" | "failed";
+    output?: any;
+    error?: string;
+}
+
+export interface TaskPlan {
+    id: string;
+    goal: string;
+    tasks: SubTask[];
+    status: "pending" | "executing" | "completed" | "failed";
+    progress: number;
+}
+
+export function getExecutionOrder(plan: TaskPlan): SubTask[][] {
+    const completed = new Set(plan.tasks.filter(t => t.status === "completed").map(t => t.id));
+    const waves: SubTask[][] = [];
+    const remaining = plan.tasks.filter(t => t.status !== "completed" && t.status !== "failed");
+
+    let changed = true;
+    while (remaining.length > 0 && changed) {
+        changed = false;
+        const wave = remaining.filter(t =>
+            t.dependencies.every(dep => completed.has(dep))
+        );
+        if (wave.length > 0) {
+            waves.push(wave);
+            wave.forEach(t => {
+                completed.add(t.id);
+                const idx = remaining.indexOf(t);
+                if (idx >= 0) remaining.splice(idx, 1);
+            });
+            changed = true;
+        }
+    }
+    return waves;
+}
+
+export function updateSubtaskStatus(
+    plan: TaskPlan,
+    taskId: string,
+    status: SubTask["status"],
+    output?: any,
+    error?: string
+): TaskPlan {
+    return {
+        ...plan,
+        tasks: plan.tasks.map(t =>
+            t.id === taskId ? { ...t, status, output, error } : t
+        ),
+    };
+}
+
+export function calculateProgress(plan: TaskPlan): number {
+    if (plan.tasks.length === 0) return 0;
+    const completed = plan.tasks.filter(t => t.status === "completed").length;
+    return completed / plan.tasks.length;
+}
+
 export class TaskDecomposer {
     private llm: OpenAI;
 

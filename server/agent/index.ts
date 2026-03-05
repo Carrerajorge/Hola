@@ -45,8 +45,9 @@ export type {
 } from "./universalBrowserController";
 
 // Autonomous brain
-export { AutonomousAgentBrain, autonomousAgentBrain } from "./autonomousAgentBrain";
+export { AutonomousAgentBrain, brain, autonomousAgentBrain } from "./autonomousAgentBrain";
 export type {
+  AgentContext,
   AgentState,
   AgentGoal,
   GoalConstraints,
@@ -56,7 +57,6 @@ export type {
   ActionOutcome,
   ReflectionResult,
   AgentMemory,
-  AgentContext,
   ToolCapability,
   BrainConfig,
 } from "./autonomousAgentBrain";

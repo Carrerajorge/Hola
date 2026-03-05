@@ -6,6 +6,116 @@ import { worldModel } from './worldModel';
 import { agentMemory } from './memory';
 import { freeEnergy } from './freeEnergy';
 
+// ============================================
+// Types
+// ============================================
+
+export type AgentState = "idle" | "thinking" | "planning" | "acting" | "observing" | "reflecting" | "completed" | "error" | "waiting_confirmation";
+
+export interface AgentGoal {
+    id: string;
+    description: string;
+    priority: "low" | "medium" | "high" | "critical";
+    category: "research" | "browser_control" | "document_creation" | "data_analysis" | "communication" | "system_control" | "mixed";
+    constraints: GoalConstraints;
+    successCriteria: string[];
+    parentGoalId?: string;
+    subGoals?: AgentGoal[];
+}
+
+export interface GoalConstraints {
+    maxDuration: number;
+    maxActions: number;
+    maxCost: number;
+    requireConfirmation: boolean;
+    allowedTools: string[];
+    blockedTools: string[];
+    safetyLevel: "strict" | "moderate" | "permissive";
+}
+
+export interface ThoughtProcess {
+    id: string;
+    timestamp: number;
+    type: "reasoning" | "planning" | "reflection" | "observation" | "decision";
+    content: string;
+    confidence: number;
+    metadata?: Record<string, any>;
+}
+
+export interface ActionPlan {
+    id: string;
+    goalId: string;
+    steps: PlannedAction[];
+    estimatedDuration: number;
+    estimatedCost: number;
+    alternativePlans: ActionPlan[];
+    confidence: number;
+    reasoning: string;
+}
+
+export interface PlannedAction {
+    id: string;
+    order: number;
+    tool: string;
+    parameters: Record<string, any>;
+    description: string;
+    expectedOutcome: string;
+    fallbackTool?: string;
+    fallbackParams?: Record<string, any>;
+    isOptional: boolean;
+    dependsOn: string[];
+    estimatedDuration: number;
+}
+
+export interface ActionOutcome {
+    actionId: string;
+    success: boolean;
+    result: any;
+    duration: number;
+    error?: string;
+    sideEffects?: string[];
+    unexpectedChanges?: string[];
+}
+
+export interface ReflectionResult {
+    assessment: "on_track" | "needs_adjustment" | "stuck" | "completed" | "failed";
+    progress: number;
+    lessonsLearned: string[];
+    adjustments: string[];
+    nextSteps: string[];
+    shouldBacktrack: boolean;
+    backtrackTo?: string;
+    confidence: number;
+}
+
+export interface AgentMemory {
+    shortTerm: Array<{ id: string; type: string; content: string; timestamp: number; importance: number; decayRate: number }>;
+    episodic: Array<{ id: string; goalDescription: string; actions: string[]; outcome: string; lessons: string[]; timestamp: number; relevance: number }>;
+    semantic: Array<{ id: string; fact: string; source: string; confidence: number; lastVerified: number; category: string }>;
+    procedural: Array<{ id: string; name: string; description: string; steps: string[]; successRate: number; usageCount: number; lastUsed: number; applicableContexts: string[] }>;
+}
+
+export interface ToolCapability {
+    name: string;
+    description: string;
+    inputSchema: Record<string, any>;
+    category: string;
+    costEstimate: number;
+    reliability: number;
+    avgDuration: number;
+}
+
+export interface BrainConfig {
+    model: string;
+    maxThinkingDepth: number;
+    confidenceThreshold: number;
+    maxActionsPerGoal: number;
+    reflectionFrequency: number;
+    learningEnabled: boolean;
+    safetyChecksEnabled: boolean;
+    parallelActionLimit: number;
+}
+
 export interface AgentContext {
     runId: string;
     objective: string;
@@ -89,3 +199,6 @@ export class AutonomousAgentBrain {
 }
 
 export const brain = new AutonomousAgentBrain();
+
+/** Backward-compatible alias */
+export const autonomousAgentBrain = brain;
