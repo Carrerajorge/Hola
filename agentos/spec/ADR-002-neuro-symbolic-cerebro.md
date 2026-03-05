@@ -1,107 +1,129 @@
 # ADR-002: Neuro-Symbolic Cerebro
 
-**Status:** Accepted
 **Date:** 2026-03-05
-**Deciders:** AgentOS Core Team
-**Supersedes:** N/A
+**Status:** Accepted
+**Deciders:** AgentOS-ASI Architecture Board
 
 ---
 
 ## Context
 
-The Control Plane must convert high-level user goals into executable plans and ensure those plans are carried out correctly, safely, and efficiently. This requires three capabilities:
+The Control Plane must orchestrate complex, multi-step agent tasks that require:
 
-1. **Flexible reasoning**: Handling ambiguous, open-ended goals that cannot be fully specified in advance.
-2. **Structured planning**: Decomposing goals into dependency-ordered sub-tasks with resource estimates.
-3. **Verification**: Ensuring outputs meet quality standards and safety constraints before delivery.
+1. **Planning**: Decomposing high-level goals into executable sub-tasks with dependencies.
+2. **Execution**: Running sub-tasks with parallelism, retries, and compensation.
+3. **Quality assurance**: Evaluating outputs against criteria before delivery.
+4. **Safety enforcement**: Ensuring no harmful, policy-violating, or unauthorized actions proceed.
 
-We evaluated three approaches:
+Pure LLM-based approaches (e.g., ReAct, chain-of-thought with tool use) suffer from:
 
-### Option A: Pure LLM (ReAct-style agent loop)
+- **Unbounded loops**: LLMs can enter infinite refinement cycles without explicit termination conditions.
+- **Inconsistent planning**: LLM plans vary across runs and may miss constraints.
+- **Unverifiable safety**: There is no structural guarantee that safety checks occur; they depend on prompt engineering.
+- **Poor compensation**: When things fail mid-execution, pure LLM approaches lack systematic rollback.
 
-The LLM handles all reasoning, planning, and self-evaluation in a single prompt chain.
+Pure symbolic approaches (e.g., classical HTN planners, STRIPS) suffer from:
 
-- **Pro**: Simple implementation; leverages LLM's broad knowledge.
-- **Con**: Plans are opaque text with no formal structure. No guarantee of constraint satisfaction. Self-evaluation suffers from the same biases as generation ("the fox guarding the henhouse"). Difficult to enforce hard safety invariants.
+- **Brittleness**: Require complete domain axiomatization, which is infeasible for open-ended agent tasks.
+- **No natural language understanding**: Cannot directly interpret user goals expressed in natural language.
+- **Rigid execution**: Cannot adapt to unexpected intermediate results.
 
-### Option B: Pure symbolic planner (PDDL / HTN)
-
-A classical AI planner handles all task decomposition using formal domain specifications.
-
-- **Pro**: Provably correct plans given correct domain model. Constraint satisfaction guaranteed.
-- **Con**: Requires complete domain specification upfront, which is infeasible for general-purpose agent tasks. Cannot handle ambiguity or novel domains. Brittle to domain model errors.
-
-### Option C: Neuro-symbolic hybrid (proposed)
-
-Combine LLM reasoning with symbolic planning and multi-stage verification.
-
-- **Pro**: LLM handles ambiguity and novel domains; symbolic constraints enforce hard invariants; separate Critic and Judge stages provide independent verification.
-- **Con**: More complex architecture; requires careful interface design between neural and symbolic components.
+We need an architecture that combines the flexibility of neural (LLM) reasoning with the reliability of symbolic verification and control flow.
 
 ---
 
 ## Decision
 
-We adopt **Option C: a neuro-symbolic Cerebro** implementing a four-stage reasoning loop: **Planner -> Executor -> Critic -> Judge**.
+We adopt a **neuro-symbolic architecture** for the Control Plane, called the **Cerebro**, implementing a four-stage reasoning loop:
 
 ### Stage 1: Planner (Neural + Symbolic)
 
-The Planner combines LLM chain-of-thought reasoning with Hierarchical Task Network (HTN) decomposition:
+The Planner combines LLM-based reasoning with symbolic constraint propagation:
 
-1. The LLM generates a natural-language plan given the goal, available capabilities, and context.
-2. A structured output parser extracts the plan into a formal DAG representation.
-3. A symbolic constraint propagator validates:
-   - **Temporal constraints**: Dependency ordering is acyclic.
-   - **Resource constraints**: Estimated costs are within budget.
-   - **Capability constraints**: Every sub-task maps to an available capability.
-   - **Safety constraints**: No sub-task violates safety policies.
-4. If validation fails, the LLM is re-prompted with the constraint violations as feedback (up to `MAX_PLAN_RETRIES = 3`).
+1. **LLM decomposition**: The LLM receives the goal, available capabilities, world state, and generates a candidate plan as a DAG of sub-tasks.
+2. **Symbolic validation**: A constraint propagation engine validates the candidate plan against:
+   - Resource constraints (budget, time, capability availability).
+   - Dependency constraints (no circular dependencies, topological ordering).
+   - Safety constraints (prohibited action sequences, required approval gates).
+3. **Repair loop**: If validation fails, violations are fed back to the LLM for plan repair (max 3 repair attempts).
 
-### Stage 2: Executor (Saga orchestration)
+The output is a validated Plan DAG where each node specifies:
+- Task description, required capability, estimated cost/time.
+- Pre-conditions and post-conditions (symbolic assertions).
+- Compensation handler (for saga rollback).
 
-The Executor treats the plan DAG as a distributed saga:
+### Stage 2: Executor (Symbolic)
 
-- Nodes execute in topological order with maximum parallelism.
-- Each node dispatches to the Action Plane, Knowledge Plane, or Model Plane.
-- Failures trigger compensation handlers registered per node.
-- Partial results are checkpointed via the Data Plane (Temporal workflow).
+The Executor is purely symbolic -- a saga orchestrator:
 
-### Stage 3: Critic (Independent neural evaluation)
+1. Topologically sorts the Plan DAG.
+2. Executes tasks respecting dependency edges, maximizing parallelism.
+3. Dispatches tasks to the Action Plane via the Data Plane (durable execution).
+4. Collects results and updates the execution trace.
+5. On failure: triggers compensation handlers in reverse topological order.
 
-The Critic is a separate LLM call (potentially a different model) that evaluates the Executor's output:
+The Executor makes no LLM calls. Its behavior is deterministic given the Plan DAG and action results.
 
-- **Quality assessment**: Does the output satisfy the original goal?
-- **Constraint satisfaction**: Were all constraints met?
-- **Safety check**: Does the output contain harmful, biased, or policy-violating content?
-- **Evidence audit**: Are claims supported by the Evidence Packs from the Knowledge Plane?
+### Stage 3: Critic (Neural)
 
-The Critic produces a structured report with severity levels (`INFO`, `WARNING`, `CRITICAL`) and a recommendation (`PASS`, `REVISE`, `ABORT`).
+The Critic uses a separate LLM call (potentially a different model) to evaluate:
 
-### Stage 4: Judge (Policy enforcement + human gate)
+1. **Output quality**: Does the result satisfy the user's goal?
+2. **Constraint satisfaction**: Are all post-conditions met?
+3. **Safety compliance**: Does the output violate any safety policies?
+4. **Evidence quality**: Are claims supported by evidence (evidence pack provenance)?
 
-The Judge is the terminal decision maker:
+The Critic produces a structured Critique Report:
+```
+CritiqueReport {
+  overall_score:    float (0.0 - 1.0)
+  issues: [
+    {
+      severity: CRITICAL | HIGH | MEDIUM | LOW
+      category: "quality" | "safety" | "constraint" | "evidence"
+      description: string
+      suggestion: string
+    }
+  ]
+  recommendation: APPROVE | REVISE | ABORT
+}
+```
 
-- Applies organizational policy rules (deterministic, not LLM-based).
-- If the Critic reports any `CRITICAL` issue, the Judge must `ESCALATE` (cannot override).
-- If the task is flagged as high-risk, the Judge presents the result to a human approver via the UI Plane.
-- The Judge produces a final `APPROVE`, `REVISE`, `ESCALATE`, or `ABORT` decision with justification.
+### Stage 4: Judge (Symbolic + Policy)
+
+The Judge is primarily symbolic, applying organizational policy:
+
+1. If Critique has any CRITICAL issues: **ABORT** (non-overridable).
+2. If Critique recommends REVISE and revision count < `MAX_REVISIONS`: **REVISE** (return to Planner).
+3. If Critique recommends REVISE and revision count >= `MAX_REVISIONS`: **ESCALATE** to human.
+4. If the task is in the escalation-required category: **ESCALATE** regardless of Critique.
+5. Otherwise: **APPROVE**.
+
+The Judge's decision logic is expressed as declarative policy rules (Rego/OPA-style), not as LLM prompts. This ensures deterministic, auditable decision-making at the final gate.
 
 ### Loop Termination
 
-- `MAX_REVISIONS = 3` (configurable per task risk level).
-- If the loop exhausts revisions without approval, the task is `ESCALATED` to a human.
-- The loop counter is enforced in the Executor, not the LLM, making it un-bypassable.
+The loop is guaranteed to terminate:
 
-### Separation of Concerns
+- `MAX_REVISIONS` (default: 3) bounds the number of Planner re-entries.
+- Each stage has a wall-clock timeout.
+- The Judge's ABORT and ESCALATE paths are terminal.
+- A monotonically increasing iteration counter is checked at loop entry.
 
-| Stage | Neural | Symbolic | Human |
-|-------|--------|----------|-------|
-| Planner | LLM generates plan | Constraint propagator validates | N/A |
-| Executor | N/A | Saga orchestrator | N/A |
-| Critic | LLM evaluates output | Rubric scoring | N/A |
-| Judge | N/A | Policy rules engine | Escalation approver |
+### Feedback Mechanism
 
-The key insight: **generation and evaluation are performed by independent components** (Planner/Executor vs. Critic/Judge), and **hard safety invariants are enforced symbolically, not neurally**.
+Revision feedback flows backward through the loop:
+
+```
+Judge (REVISE) --> Planner receives:
+  - Original goal
+  - Previous plan DAG
+  - Execution trace
+  - Critique report with specific issues
+  - Revision number (for the LLM to understand this is a retry)
+```
+
+This gives the Planner rich context for generating an improved plan.
 
 ---
 
@@ -109,42 +131,34 @@ The key insight: **generation and evaluation are performed by independent compon
 
 ### Positive
 
-1. **Robust planning**: LLM handles ambiguity; symbolic constraints enforce hard requirements. Plans that violate constraints are caught before execution.
-
-2. **Independent verification**: The Critic evaluates output independently of the generation process, reducing self-consistency bias.
-
-3. **Enforceable safety**: Safety invariants are checked symbolically in the Judge. An LLM cannot "argue its way past" a deterministic policy rule.
-
-4. **Auditability**: Each stage produces a structured artifact (plan DAG, execution trace, critique report, judgment), creating a complete audit trail.
-
-5. **Tunability**: Risk tolerance is adjustable per task type -- low-risk tasks may skip human escalation; high-risk tasks may require multi-human approval.
-
-6. **Model independence**: The Planner LLM and Critic LLM can be different models, reducing the risk of correlated failures.
+- **Bounded execution**: The symbolic loop structure guarantees termination, unlike pure LLM loops.
+- **Separation of concerns**: Neural components (Planner, Critic) handle open-ended reasoning; symbolic components (Executor, Judge) handle control flow and policy enforcement.
+- **Verifiable safety**: The Judge's policy rules are inspectable, testable, and deterministic. Safety does not depend on prompt engineering.
+- **Auditable decisions**: Every loop iteration produces an immutable `CerebroIterationEvent` with the plan, execution trace, critique, and judgment.
+- **Model flexibility**: The Planner and Critic can use different models (e.g., a fast model for planning, a strong model for critique). They are decoupled.
+- **Systematic compensation**: The Executor's saga pattern provides reliable rollback, unlike ad-hoc LLM-driven error handling.
 
 ### Negative
 
-1. **Latency**: Four stages add latency compared to a single LLM call. Mitigated by parallelizing where possible and caching plans for repeated task types.
-
-2. **Cost**: Multiple LLM calls per task increase token costs. Mitigated by using smaller/cheaper models for the Critic when appropriate (via Model Plane routing).
-
-3. **Complexity**: The four-stage loop is more complex to implement and debug than a simple agent loop. Mitigated by comprehensive tracing and structured event logging.
-
-4. **Domain modeling**: Symbolic constraints require a schema of capabilities and policies. This schema must be maintained as the system evolves. Mitigated by deriving capability schemas from plugin manifests.
+- **Latency**: The four-stage loop adds latency compared to single-pass LLM execution. Mitigated by parallelism within stages and by skipping the Critic for low-risk tasks (configurable).
+- **Complexity**: Four interacting components are harder to debug than a single LLM call. Mitigated by comprehensive tracing and the DAG visualization in the UI Plane.
+- **Constraint specification burden**: Symbolic constraints must be specified for safety and resource limits. Mitigated by providing sensible defaults and a policy-as-code framework.
+- **Critique quality depends on LLM**: The Critic's evaluation is only as good as the LLM's judgment. Mitigated by using structured rubrics and supporting the Critic with evidence packs.
 
 ### Risks
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| Critic-Planner collusion (same model, correlated biases) | Medium | Missed safety issues | Use different models for Planner and Critic; rotate models periodically |
-| Constraint model incompleteness | High (initially) | Plans that satisfy constraints but are still flawed | Iterative refinement of constraint model based on Critic findings |
-| Loop starvation (always revising, never approving) | Low | Task never completes | MAX_REVISIONS hard limit with mandatory escalation |
+| Planner-Critic disagreement loop (plan is always revised) | Medium | Medium | `MAX_REVISIONS` bound; escalation to human after bound reached. |
+| Critic misses a safety issue | Low | Critical | Defense in depth: Judge applies symbolic safety rules independently of Critic. Action Plane has its own capability checks. |
+| Symbolic constraints are too restrictive | Medium | Medium | Start permissive; tighten based on incident data. Policy rules are hot-reloadable. |
 
 ---
 
 ## References
 
-- Yao et al., "ReAct: Synergizing Reasoning and Acting in Language Models" (2023).
-- Nau et al., "SHOP2: An HTN Planning System" (2003).
-- Madaan et al., "Self-Refine: Iterative Refinement with Self-Feedback" (2023).
-- Shinn et al., "Reflexion: Language Agents with Verbal Reinforcement Learning" (2023).
-- [ARCHITECTURE.md](ARCHITECTURE.md) -- Control Plane specification.
+- Kambhampati, S. "Can LLMs Really Plan?" Position paper, 2024.
+- Yao, S. et al. "ReAct: Synergizing Reasoning and Acting in Language Models." ICLR 2023.
+- Garcia-Molina, H. & Salem, K. "Sagas." ACM SIGMOD, 1987.
+- Open Policy Agent (OPA) documentation.
+- [ARCHITECTURE.md](ARCHITECTURE.md) -- Control Plane section.
