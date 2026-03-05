@@ -311,6 +311,7 @@ export class UploadQueue extends EventEmitter {
         return jobs
             .filter(job => job.data?.userId === userId)
             .map(job => job.data);
+    }
 
     /**
      * Cancel job
