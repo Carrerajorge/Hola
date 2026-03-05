@@ -355,17 +355,20 @@ export function createNodesRouter(): Router {
         if (!job) return res.status(404).json({ success: false, error: "Job not found" });
 
         const { status, result, error } = req.body as any;
+
+        const isTerminal = status === "succeeded" || status === "failed" || status === "cancelled";
+        const isRunning = status === "running";
+
         await db
           .update(nodeJobs)
           .set({
             status,
             result: result ?? null,
             error: error ?? null,
-            startedAt: sql`COALESCE(${nodeJobs.startedAt}, NOW())`,
-            finishedAt: new Date(),
+            startedAt: isRunning ? sql`COALESCE(${nodeJobs.startedAt}, NOW())` : undefined,
+            finishedAt: isTerminal ? new Date() : undefined,
           })
           .where(eq(nodeJobs.id, jobId));
-
         return res.json({ success: true });
       } catch (e: any) {
         // Some environments don't emit stack traces to container logs unless explicitly printed.
