@@ -125,7 +125,7 @@ export const skillCatalog = pgTable("skill_catalog", {
 ]);
 
 export const insertSkillCatalogSchema = createInsertSchema(skillCatalog);
-export type InsertSkillCatalog = typeof skillCatalogs.$inferInsert;
+export type InsertSkillCatalog = typeof skillCatalog.$inferInsert;
 export type SkillCatalog = typeof skillCatalog.$inferSelect;
 
 export const skillCatalogVersions = pgTable("skill_catalog_versions", {

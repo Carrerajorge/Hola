@@ -1,12 +1,10 @@
-import { Router } from "express";
-import { z } from "zod";
-import crypto from "crypto";
-import { db } from "../db";
-import { nodes, nodePairings, nodeJobs, users } from "@shared/schema";
-import { and, desc, eq, gt, isNull } from "drizzle-orm";
-import { validateBody } from "../middleware/validateRequest";
-import { getUserId } from "../types/express";
-import { requireNodeAuth, getNode } from "../middleware/nodeAuth";
+import { Router } from "express"; import { z } from "zod"; import crypto from 
+"crypto"; import { db } from "../db"; import { nodes, nodePairings, nodeJobs, 
+users } from "@shared/schema";
+
+import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
+import { validateBody } from "../middleware/validateRequest"; import { getUserId } from "../types/express"; import { requireNodeAuth, getNode } 
+from "../middleware/nodeAuth";
 
 const PAIRING_TTL_MINUTES = 5;
 
@@ -202,8 +200,8 @@ export function createNodesRouter(): Router {
   // Node side
   // =====================
 
-  // POST /api/nodes/pair/confirm
-  router.post("/api/nodes/pair/confirm", validateBody(confirmSchema), async (req, res) => {
+  // POST /api/nodes/pair/complete
+  router.post("/api/nodes/pair/complete", validateBody(confirmSchema), async (req, res) => {
     const { code, name, platform, agentVersion, capabilities } = req.body as any;
 
     const now = new Date();
@@ -256,6 +254,11 @@ export function createNodesRouter(): Router {
     });
   });
 
+  router.post("/api/nodes/pair/confirm", validateBody(confirmSchema), async (req, res) => {
+    // Backwards-compatible alias. Remove once device-agent uses /complete everywhere.
+    return res.redirect(307, "/api/nodes/pair/complete");
+  });
+
   // Node polls for queued jobs (MVP; WS comes next)
   // GET /api/nodes/jobs/poll
   router.get("/api/nodes/jobs/poll", requireNodeAuth, async (req, res) => {
@@ -274,14 +277,57 @@ export function createNodesRouter(): Router {
 
     if (!job) return res.json({ success: true, job: null });
 
-    // Mark sent
+    // Mark delivered (lease) but not started yet
     await db
       .update(nodeJobs)
-      .set({ status: "sent", startedAt: new Date() })
-      .where(eq(nodeJobs.id, (job as any).id));
-
+      .set({ status: "sent" })
+      .where(and(eq(nodeJobs.id, (job as any).id), eq(nodeJobs.status, "queued")));
+    
     res.json({ success: true, job: { ...job, id: String((job as any).id) } });
   });
+
+  // Node acknowledges a job and marks it as running
+  // POST /api/nodes/jobs/:jobId/ack
+  router.post(
+    "/api/nodes/jobs/:jobId/ack",
+    requireNodeAuth,
+    validateBody(z.object({})), // body vacío por ahora
+    async (req, res) => {
+      const node = getNode(req);
+      if (!node) return res.status(401).json({ success: false, error: "Unauthorized" });
+
+      const jobId = String((req.params as any).jobId || "").trim();
+      if (!jobId) return res.status(400).json({ success: false, error: "jobId required" });
+
+      // Only allow ack if the job belongs to this node and is not revoked
+      const [job] = await db
+        .select({ id: nodeJobs.id, status: nodeJobs.status })
+        .from(nodeJobs)
+        .where(and(eq(nodeJobs.id, jobId), eq(nodeJobs.nodeId, node.id), eq(nodeJobs.orgId, node.orgId)))
+        .limit(1);
+
+      if (!job) return res.status(404).json({ success: false, error: "Job not found" });
+
+      // Move sent/queued -> running
+      const [updated] = await db
+      .update(nodeJobs)
+      .set({ status: "running", startedAt: new Date() })
+      .where(
+        and(
+          eq(nodeJobs.id, jobId),
+          eq(nodeJobs.nodeId, node.id),
+          eq(nodeJobs.orgId, node.orgId),
+          or(eq(nodeJobs.status, "queued"), eq(nodeJobs.status, "sent"))
+        )
+      )
+      .returning({ id: nodeJobs.id });
+      if (!updated) {
+        return res.status(409).json({ success: false, error: `Job is not ackable (status=${String((job as any).status)})` });
+      }
+
+      return res.json({ success: true });
+    }
+  );
 
   // Node posts job result
   // POST /api/nodes/jobs/:jobId/result
@@ -307,16 +353,22 @@ export function createNodesRouter(): Router {
         if (!job) return res.status(404).json({ success: false, error: "Job not found" });
 
         const { status, result, error } = req.body as any;
-        await db
-          .update(nodeJobs)
-          .set({
-            status,
-            result: result ?? null,
-            error: error ?? null,
-            finishedAt: new Date(),
-          })
-          .where(eq(nodeJobs.id, jobId));
 
+        const setPatch: any = {
+          status,
+          startedAt: sql`COALESCE(${nodeJobs.startedAt}, NOW())`,
+          finishedAt: new Date(),
+        };
+
+        // IMPORTANT: Avoid passing null directly to drizzle .set() (can throw in mapUpdateSet).
+        if (typeof result !== "undefined") {
+          setPatch.result = result === null ? sql`NULL` : result;
+        }
+	if (typeof error !== "undefined") {
+	  setPatch.error = error === null ? sql`NULL` : error;
+	}
+
+	await db.update(nodeJobs).set(setPatch).where(eq(nodeJobs.id, jobId));
         return res.json({ success: true });
       } catch (e: any) {
         // Some environments don't emit stack traces to container logs unless explicitly printed.

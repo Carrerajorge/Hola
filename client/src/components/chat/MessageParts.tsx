@@ -177,7 +177,9 @@ export const AttachmentImage = memo(function AttachmentImage({
                         setIsLoading(false);
                         return;
                     }
-                } catch {}
+                } catch {
+                  // ignore cache errors
+                }
             }
 
             // Fall back to storagePath (network request)
@@ -215,7 +217,9 @@ export const AttachmentImage = memo(function AttachmentImage({
                             storeImage({ id: `att_${cacheKey}`, messageId: '', chatId: '', base64, mimeType: 'image/jpeg' }).catch(() => {});
                         }).catch(() => {});
                     }
-                } catch {}
+                } catch {
+                  // ignore cache errors
+                }
             };
             img.src = storagePath;
         }

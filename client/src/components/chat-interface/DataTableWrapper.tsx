@@ -9,7 +9,7 @@ export const downloadTableAsExcel = (children: React.ReactNode) => {
     const data = extractTableData(children);
     if (data.length === 0) return;
 
-    let csv = data.map(row =>
+    const csv = data.map(row =>
         row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(',')
     ).join('\n');
 

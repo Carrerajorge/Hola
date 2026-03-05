@@ -145,21 +145,23 @@ export function FigmaBlock({ diagram, fileUrl }: FigmaBlockProps) {
 
     switch (node.type) {
       case "start":
-      case "end":
+      case "end": {
         const r = height / 2;
         return `M ${node.x + r} ${node.y} 
                 L ${node.x + width - r} ${node.y}
                 A ${r} ${r} 0 0 1 ${node.x + width - r} ${node.y + height}
                 L ${node.x + r} ${node.y + height}
                 A ${r} ${r} 0 0 1 ${node.x + r} ${node.y} Z`;
-      case "decision":
+      }
+      case "decision": {
         const cx = node.x + width / 2;
         const cy = node.y + height / 2;
         return `M ${cx} ${node.y - 5} L ${node.x + width + 10} ${cy} L ${cx} ${node.y + height + 5} L ${node.x - 10} ${cy} Z`;
+      }
       case "process":
       default:
         return `M ${node.x} ${node.y} L ${node.x + width} ${node.y} L ${node.x + width} ${node.y + height} L ${node.x} ${node.y + height} Z`;
-    }
+      }
   };
 
   const getNodeCenter = (node: FigmaNode) => {

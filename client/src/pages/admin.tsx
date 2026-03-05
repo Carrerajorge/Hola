@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from "react"; import { useLocation } from "wouter"; import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"; import { Button } from
+/* eslint-disable react-hooks/set-state-in-effect */ import { useState, useRef, useEffect } from "react"; import { useLocation } from "wouter"; import { useQuery, useMutation, useQueryClient } from 
+"@tanstack/react-query"; import { Button } from
   "@/components/ui/button"; import { Input } from "@/components/ui/input"; import { Badge } from "@/components/ui/badge"; import { Switch } from "@/components/ui/switch"; import { ScrollArea } from
   "@/components/ui/scroll-area"; import { Separator } from "@/components/ui/separator"; import { Progress } from "@/components/ui/progress"; import {
     Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -86,11 +87,29 @@ import { AdminNotificationsPopover } from "@/components/admin/NotificationsPopov
 import { TerminalPanel } from "@/components/terminal-panel";
 import ReleasesManager from "./admin/ReleasesManager";
 
-type AdminSection = "dashboard" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings" | "agentic" | "excel" | "terminal" | "monitoring" | "releases";
+type AdminSection =
+  | "dashboard"
+  | "monitoring"
+  | "nodes"
+  | "users"
+  | "conversations"
+  | "ai-models"
+  | "payments"
+  | "invoices"
+  | "analytics"
+  | "database"
+  | "security"
+  | "reports"
+  | "settings"
+  | "agentic"
+  | "excel"
+  | "terminal"
+  | "releases";
 
 const navItems: { id: AdminSection; label: string; icon: React.ElementType }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "monitoring", label: "Monitoring", icon: Server },
+  { id: "nodes", label: "Devices", icon: Network },
   { id: "users", label: "Users", icon: Users },
   { id: "conversations", label: "Conversations", icon: MessageSquare },
   { id: "ai-models", label: "AI Models", icon: Bot },
@@ -412,6 +431,271 @@ function MonitoringSection() {
     </div>
   );
 }
+
+function NodesSection() {
+  const queryClient = useQueryClient();
+  const [pairOpen, setPairOpen] = useState(false);
+  const [pairInfo, setPairInfo] = useState<{ code: string; expiresAt: string } | null>(null);
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["/api/workspace/nodes"],
+    queryFn: async () => {
+      const res = await apiFetch("/api/workspace/nodes", { credentials: "include" });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+      return res.json();
+    },
+    retry: false,
+  });
+
+  async function getCsrfToken(): Promise<string> {
+    const res = await apiFetch("/api/csrf/token", { credentials: "include" });
+    const json = await res.json().catch(() => null);
+    const token = json?.csrfToken;
+    if (!token) throw new Error("Missing CSRF token");
+    return String(token);
+  }
+
+  const pairMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiFetch("/api/workspace/nodes/pair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+        credentials: "include",
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
+      return json as { success: true; code: string; expiresAt: string };
+    },
+    onSuccess: (r) => {
+      setPairInfo({ code: r.code, expiresAt: r.expiresAt });
+      setPairOpen(true);
+      queryClient.invalidateQueries({ queryKey: ["/api/workspace/nodes"] });
+    },
+  });
+
+  const sendTestJobMutation = useMutation({
+    mutationFn: async ({ nodeId }: { nodeId: string }) => {
+      const csrfToken = await getCsrfToken();
+      const res = await apiFetch("/api/workspace/nodes/jobs", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken,
+        },
+        body: JSON.stringify({
+          nodeId,
+          kind: "ping",
+          payload: { ts: new Date().toISOString() },
+        }),
+        credentials: "include",
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
+      return json as { success: true; jobId: string };
+    },
+    onSuccess: (r) => toast.success(`Job queued: ${r.jobId}`),
+    onError: (e: any) => toast.error(e?.message || "Failed to create job"),
+  });
+
+  const revokeMutation = useMutation({
+    mutationFn: async (nodeId: string) => {
+      const res = await apiFetch(`/api/workspace/nodes/${encodeURIComponent(nodeId)}/revoke`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/workspace/nodes"] });
+      toast.success("Node revocado");
+    },
+    onError: (e: any) => toast.error(e?.message || "No se pudo revocar"),
+  });
+
+  const nodes = (data?.nodes || []) as any[];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-medium">Devices</h2>
+          <p className="text-sm text-muted-foreground">
+            Dispositivos/agentes emparejados con tu workspace. (UI inicial)
+          </p>
+        </div>
+
+        <Dialog open={pairOpen} onOpenChange={setPairOpen}>
+          <DialogTrigger asChild>
+            <Button
+              onClick={() => pairMutation.mutate()}
+              disabled={pairMutation.isPending}
+              className="gap-2"
+            >
+              {pairMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              Pair device
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Pair device</DialogTitle>
+            </DialogHeader>
+            {!pairInfo ? (
+              <div className="text-sm text-muted-foreground">Generando código…</div>
+            ) : (
+              <div className="space-y-4">
+                <div>
+                  <Label>Code</Label>
+                  <div className="mt-1 flex items-center gap-2">
+                    <Input readOnly value={pairInfo.code} className="font-mono tracking-widest" />
+                    <Button
+                      variant="outline"
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(pairInfo.code);
+                        toast.success("Copied");
+                      }}
+                    >
+                      Copy
+                    </Button>
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">Expires: {pairInfo.expiresAt}</div>
+                </div>
+
+                <Separator />
+                <div className="space-y-2">
+		  <div className="text-sm font-medium">Instalar agente (real)</div>
+		  <div className="text-xs text-muted-foreground">
+		    Copia y pega este comando en el servidor/máquina que quieras emparejar. El agente usará el código y se registrará.
+		    (El token NO se muestra en la UI).
+		  </div>
+
+		  <Label>Docker run</Label>
+		  <Input
+		    readOnly
+		    className="font-mono text-xs"
+		    value={`docker run -d --restart unless-stopped --name iliagpt-device-agent -e ILIAGPT_URL=${typeof window !== "undefined" ? window.location.origin : "https://iliagpt.com"} -e PAIR_CODE=${pairInfo?.code || ""} -v iliagpt-device-agent:/data ghcr.io/carrerajorge/iliagpt-device-agent:latest`}
+		  />
+		  <div className="flex items-center gap-2">
+		    <Button
+		      variant="outline"
+		      onClick={async () => {
+		        const cmd = `docker run -d --restart unless-stopped --name iliagpt-device-agent -e ILIAGPT_URL=${window.location.origin} -e PAIR_CODE=${pairInfo?.code || ""} -v iliagpt-device-agent:/data ghcr.io/carrerajorge/iliagpt-device-agent:latest`;
+		        await navigator.clipboard.writeText(cmd);
+		        toast.success("Copied");
+		      }}
+		    >
+		      Copy command
+		    </Button>
+		  </div>
+
+		  <div className="text-xs text-muted-foreground">
+		    Nota: la imagen ghcr.io/carrerajorge/iliagpt-device-agent:latest la construiremos en el siguiente PR.
+		  </div>
+		</div>
+            </div>
+            )}
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {isLoading ? (
+        <TableSkeleton />
+      ) : error ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">No se pudo cargar</CardTitle>
+            <CardDescription>
+              {(error as any)?.message?.includes("401") || String((error as any)?.message || "").includes("Unauthorized")
+                ? "Debes iniciar sesión para ver tus devices."
+                : String((error as any)?.message || error)}
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      ) : (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Devices emparejados</CardTitle>
+            <CardDescription>{nodes.length} total</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-muted-foreground">
+                    <th className="py-2">Nombre</th>
+                    <th className="py-2">Plataforma</th>
+                    <th className="py-2">Versión</th>
+                    <th className="py-2">Last seen</th>
+                    <th className="py-2">Estado</th>
+                    <th className="py-2">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {nodes.map((n) => {
+                    const revoked = Boolean(n.revokedAt);
+                    return (
+                      <tr key={n.id} className="border-t">
+                        <td className="py-2 font-medium">{n.name}</td>
+                        <td className="py-2">{n.platform || "—"}</td>
+                        <td className="py-2">{n.agentVersion || "—"}</td>
+                        <td className="py-2">{n.lastSeenAt ? new Date(n.lastSeenAt).toLocaleString() : "—"}</td>
+                        <td className="py-2">
+                          {revoked ? <Badge variant="destructive">Revoked</Badge> : <Badge variant="secondary">Active</Badge>}
+                        </td>
+                        <td className="py-2 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={revoked || sendTestJobMutation.isPending}
+                              onClick={() => sendTestJobMutation.mutate({ nodeId: String(n.id) })}
+                            >
+                              Send test job
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={revoked || revokeMutation.isPending}
+                              onClick={() => revokeMutation.mutate(String(n.id))}
+                            >
+                              Revoke
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {nodes.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-6 text-center text-muted-foreground">
+                        No hay devices aún. Usa “Pair device” para generar un código.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Siguiente</CardTitle>
+          <CardDescription>
+            Esta pantalla pasará a ser 100% iliagpt: device-agent docker + long-poll + jobs/actions + logs + permisos (sin depender de OpenClaw).
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    </div>
+  );
+}
+
 
 function UsersSection() {
   const queryClient = useQueryClient();
@@ -1021,15 +1305,7 @@ function ConversationsSection() {
     archived: "bg-gray-500/10 text-gray-500 border-gray-500/30"
   };
 
-  const SortIcon = ({ column }: { column: string }) => (
-    <span className="ml-1 inline-flex">
-      {sortBy === column ? (
-        sortOrder === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
-      ) : (
-        <ChevronDown className="h-3 w-3 opacity-30" />
-      )}
-    </span>
-  );
+  
 
   const clearFilters = () => {
     setFilters({
@@ -4939,6 +5215,16 @@ const settingsCategories: { id: SettingsCategory; label: string; icon: React.Com
   { id: "advanced", label: "Advanced", icon: Code },
 ];
 
+const SortIcon = ({ column }: { column: string }) => (
+    <span className="ml-1 inline-flex">
+      {sortBy === column ? (
+        sortOrder === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
+      ) : (
+        <ChevronDown className="h-3 w-3 opacity-30" />
+      )}
+    </span>
+);
+
 const timezones = ["UTC", "America/New_York", "America/Los_Angeles", "Europe/London", "Europe/Paris", "Asia/Tokyo", "Asia/Shanghai", "Australia/Sydney"];
 const dateFormats = ["YYYY-MM-DD", "DD/MM/YYYY", "MM/DD/YYYY"];
 const themeModes = ["dark", "light", "auto"];
@@ -4954,8 +5240,18 @@ function SettingsSection() {
     queryFn: async () => {
       const res = await apiFetch("/api/admin/settings", { credentials: "include" });
       return res.json();
-    }
-  });
+    },
+    onSuccess: (data) => {
+      if (data?.settings) {
+        const mapped: Record<string, any> = {};
+        data.settings.forEach((s: any) => {
+          mapped[s.key] = s.value;
+        });
+        setLocalSettings(mapped);
+        setHasChanges(false);
+      }
+    },
+  });  
 
   const { data: aiModels = [] } = useQuery({
     queryKey: ["/api/ai-models"],
@@ -4965,17 +5261,7 @@ function SettingsSection() {
     }
   });
 
-  useEffect(() => {
-    if (settingsData?.settings) {
-      const mapped: Record<string, any> = {};
-      settingsData.settings.forEach((s: any) => {
-        mapped[s.key] = s.value;
-      });
-      setLocalSettings(mapped);
-      setHasChanges(false);
-    }
-  }, [settingsData]);
-
+  
   const updateSettingMutation = useMutation({
     mutationFn: async ({ key, value }: { key: string; value: any }) => {
       const res = await apiFetch(`/api/admin/settings/${key}`, {
@@ -6286,6 +6572,8 @@ export default function AdminPage() {
     switch (activeSection) {
       case "dashboard":
         return <DashboardSection />;
+      case "nodes":
+        return <NodesSection />;
       case "users":
         return <UsersSection />;
       case "conversations":

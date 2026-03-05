@@ -1,10 +1,23 @@
-import {
-  BedrockClient,
-  ListFoundationModelsCommand,
-  type ListFoundationModelsCommandOutput,
-} from "@aws-sdk/client-bedrock";
 import type { BedrockDiscoveryConfig, ModelDefinitionConfig } from "../config/types.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+
+type BedrockSdk = typeof import("@aws-sdk/client-bedrock");
+
+let _bedrockSdkPromise: Promise<BedrockSdk> | null = null;
+
+async function loadBedrockSdk(): Promise<BedrockSdk> {
+  if (!_bedrockSdkPromise) {
+    _bedrockSdkPromise = import("@aws-sdk/client-bedrock").catch((err) => {
+      _bedrockSdkPromise = null;
+      throw new Error(
+        "Optional dependency '@aws-sdk/client-bedrock' is not installed. " +
+          "Install it to enable Bedrock discovery.\n" +
+          String(err),
+      );
+    });
+  }
+  return _bedrockSdkPromise;
+}
 
 const log = createSubsystemLogger("bedrock-discovery");
 
@@ -176,7 +189,8 @@ export async function discoverBedrockModels(params: {
       return cached.inFlight;
     }
   }
-
+ 
+  const { BedrockClient, ListFoundationModelsCommand } = await loadBedrockSdk();
   const clientFactory = params.clientFactory ?? ((region: string) => new BedrockClient({ region }));
   const client = clientFactory(params.region);
 

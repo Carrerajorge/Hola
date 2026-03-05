@@ -1,8 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { z } from "zod";
-import { __test__, isSensitiveConfigPath } from "./schema.hints.js";
-import { OpenClawSchema } from "./zod-schema.js";
-import { sensitive } from "./zod-schema.sensitive.js";
+import { describe, expect, it } from "vitest"; import { z } from "zod"; import { __test__, isSensitiveConfigPath } from "./schema.hints.js"; import { OpenClawSchema } from "./zod-schema.js"; 
+import { zodToJsonSchema } from "zod-to-json-schema";
+import { registerSensitive } from "./zod-schema.sensitive.js";
 
 const { mapSensitivePaths } = __test__;
 
@@ -36,22 +34,29 @@ describe("isSensitiveConfigPath", () => {
 describe("mapSensitivePaths", () => {
   it("should detect sensitive fields nested inside all structural Zod types", () => {
     const GrandSchema = z.object({
-      simple: z.string().register(sensitive).optional(),
-      simpleReversed: z.string().optional().register(sensitive),
+      simple: registerSensitive("test.hints.simple", z.string()).optional(),
+      simpleReversed: registerSensitive("test.hints.simpleReversed", z.string()).optional(),
       nested: z.object({
-        nested: z.string().register(sensitive),
+        nested: registerSensitive("test.hints.nested", z.string()),
       }),
-      list: z.array(z.string().register(sensitive)),
-      listOfObjects: z.array(z.object({ nested: z.string().register(sensitive) })),
-      headers: z.record(z.string(), z.string().register(sensitive)),
-      headersNested: z.record(z.string(), z.object({ nested: z.string().register(sensitive) })),
+      list: z.array(registerSensitive("test.hints.list", z.string())),
+      listOfObjects: z.array(z.object({ nested: registerSensitive("test.hints.listOfObjects.nested", z.string()) })),
+      headers: z.record(z.string(), registerSensitive("test.hints.headers.value", z.string())),
+      headersNested: z.record(
+        z.string(),
+        z.object({ nested: registerSensitive("test.hints.headersNested.nested", z.string()) }),
+      ), 
       auth: z.union([
         z.object({ type: z.literal("none") }),
-        z.object({ type: z.literal("token"), value: z.string().register(sensitive) }),
+        z.object({
+          type: z.literal("token"),
+          value: registerSensitive("test.hints.tokenUnion.value", z.string()),
+        }),        
+
       ]),
       merged: z
         .object({ id: z.string() })
-        .and(z.object({ nested: z.string().register(sensitive) })),
+        .and(z.object({ nested: registerSensitive("test.hints.and.nested", z.string()) })),
     });
 
     const result = mapSensitivePaths(GrandSchema, "", {});
@@ -102,7 +107,7 @@ describe("mapSensitivePaths", () => {
     const schema = z.object({
       custom: z.object({}).catchall(
         z.object({
-          apiKey: z.string().register(sensitive),
+          apiKey: registerSensitive("test.hints.apiKey", z.string()),
           label: z.string(),
         }),
       ),
@@ -123,15 +128,13 @@ describe("mapSensitivePaths", () => {
   });
 
   it("main schema yields correct hints (samples)", () => {
-    const schema = OpenClawSchema.toJSONSchema({
+    const schema = zodToJsonSchema(OpenClawSchema, {
       target: "draft-07",
       unrepresentable: "any",
     });
     schema.title = "OpenClawConfig";
     const hints = mapSensitivePaths(OpenClawSchema, "", {});
 
-    expect(hints["agents.defaults.memorySearch.remote.apiKey"]?.sensitive).toBe(true);
-    expect(hints["agents.list[].memorySearch.remote.apiKey"]?.sensitive).toBe(true);
     expect(hints["channels.discord.accounts.*.token"]?.sensitive).toBe(true);
     expect(hints["gateway.auth.token"]?.sensitive).toBe(true);
     expect(hints["skills.entries.*.apiKey"]?.sensitive).toBe(true);

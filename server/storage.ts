@@ -2340,7 +2340,6 @@ export class MemStorage implements IStorage {
   }
 
   async getProviderMetrics(provider?: string, startDate?: Date, endDate?: Date): Promise<ProviderMetrics[]> {
-    let query = dbRead.select().from(providerMetrics);
     const conditions: any[] = [];
 
     if (provider) {

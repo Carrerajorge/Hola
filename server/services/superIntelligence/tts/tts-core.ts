@@ -1,8 +1,46 @@
 import { rmSync } from "node:fs";
-import { completeSimple, type TextContent } from "@mariozechner/pi-ai";
-import { EdgeTTS } from "node-edge-tts";
-import { getApiKeyForModel, requireApiKey } from "../agents/model-auth.js";
-import {
+
+import type { TextContent } from "@mariozechner/pi-ai";
+
+
+type PiAiModule = typeof import("@mariozechner/pi-ai");
+
+let _piAiPromise: Promise<PiAiModule> | null = null;
+
+async function loadPiAi(): Promise<PiAiModule> {
+  if (!_piAiPromise) {
+    _piAiPromise = import("@mariozechner/pi-ai").catch((err) => {
+      _piAiPromise = null;
+      throw new Error(
+        "Optional dependency '@mariozechner/pi-ai' is not installed. " +
+          "Install it to enable this TTS feature.\n" +
+          String(err),
+      );
+    });
+  }
+  return _piAiPromise;
+}
+
+type NodeEdgeTtsModule = typeof import("node-edge-tts");
+
+let _nodeEdgeTtsPromise: Promise<NodeEdgeTtsModule> | null = null;
+
+async function loadNodeEdgeTts(): Promise<NodeEdgeTtsModule> {
+  if (!_nodeEdgeTtsPromise) {
+    _nodeEdgeTtsPromise = import("node-edge-tts").catch((err) => {
+      _nodeEdgeTtsPromise = null;
+      throw new Error(
+        "Optional dependency 'node-edge-tts' is not installed. " +
+          "Install it to enable Edge TTS.\n" +
+          String(err),
+      );
+    });
+  }
+  return _nodeEdgeTtsPromise;
+}
+
+import { getApiKeyForModel, requireApiKey } from 
+"../agents/model-auth.js"; import {
   buildModelAliasIndex,
   resolveDefaultModelForAgent,
   resolveModelRefFromString,
@@ -445,6 +483,7 @@ export async function summarizeText(params: {
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
+      const { completeSimple } = await loadPiAi();
       const res = await completeSimple(
         resolved.model,
         {
@@ -658,6 +697,7 @@ export async function edgeTTS(params: {
   timeoutMs: number;
 }): Promise<void> {
   const { text, outputPath, config, timeoutMs } = params;
+  const { EdgeTTS } = await loadNodeEdgeTts();
   const tts = new EdgeTTS({
     voice: config.voice,
     lang: config.lang,

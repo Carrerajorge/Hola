@@ -1,9 +1,5 @@
-import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, serial, boolean, customType, check } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod/v4";
-import { users } from "./auth";
-import { workspaceGroups } from "./workspaceGroups";
+import { sql } from "drizzle-orm"; import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, serial, boolean, customType, check } from "drizzle-orm/pg-core"; import { 
+createInsertSchema } from "drizzle-zod"; import { z } from "zod/v4"; import { users } from "./auth"; import { workspaceGroups } from "./workspaceGroups";
 
 export const chats = pgTable("chats", {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -233,7 +229,7 @@ export const offlineMessageQueue = pgTable("offline_message_queue", {
 
 export const insertOfflineMessageQueueSchema = createInsertSchema(offlineMessageQueue);
 
-export type InsertOfflineMessageQueue = typeof offlineMessageQueues.$inferInsert;
+export type InsertOfflineMessageQueue = typeof offlineMessageQueue.$inferInsert;
 export type OfflineMessageQueue = typeof offlineMessageQueue.$inferSelect;
 
 // ── Prompt Integrity Audit Trail ───────────────────────────

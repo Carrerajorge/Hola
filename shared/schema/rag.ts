@@ -1,5 +1,4 @@
-import { sql } from "drizzle-orm";
-import {
+import { sql } from "drizzle-orm"; import {
     pgTable, text, varchar, integer, timestamp, jsonb,
     index, uniqueIndex, boolean, real, customType,
 } from "drizzle-orm/pg-core";
@@ -100,7 +99,7 @@ export const insertRagKvSchema = createInsertSchema(ragKvStore).omit({
     id: true, createdAt: true, updatedAt: true,
 });
 
-export type InsertRagKv = typeof ragKvs.$inferInsert;
+export type InsertRagKv = typeof ragKvStore.$inferInsert;
 export type RagKv = typeof ragKvStore.$inferSelect;
 
 // =============================================================================
@@ -168,7 +167,7 @@ export const insertUserMemorySchema = createInsertSchema(userMemories).omit({
     metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
-export type InsertUserMemory = typeof userMemorys.$inferInsert;
+export type InsertUserMemory = typeof userMemories.$inferInsert;
 export type UserMemory = typeof userMemories.$inferSelect;
 
 // =============================================================================
@@ -206,7 +205,7 @@ export const insertEpisodicSummarySchema = createInsertSchema(episodicSummaries)
     metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
-export type InsertEpisodicSummary = typeof episodicSummarys.$inferInsert;
+export type InsertEpisodicSummary = typeof episodicSummaries.$inferInsert;
 export type EpisodicSummary = typeof episodicSummaries.$inferSelect;
 
 // =============================================================================
@@ -241,7 +240,7 @@ export const insertRagAuditLogSchema = createInsertSchema(ragAuditLog).omit({
     id: true, createdAt: true,
 });
 
-export type InsertRagAuditLog = typeof ragAuditLogs.$inferInsert;
+export type InsertRagAuditLog = typeof ragAuditLog.$inferInsert;
 export type RagAuditLog = typeof ragAuditLog.$inferSelect;
 
 // =============================================================================

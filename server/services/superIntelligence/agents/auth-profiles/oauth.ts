@@ -1,28 +1,36 @@
-import {
-  getOAuthApiKey,
-  getOAuthProviders,
-  type OAuthCredentials,
-  type OAuthProvider,
-} from "@mariozechner/pi-ai";
-import type { OpenClawConfig } from "../../config/config.js";
-import { withFileLock } from "../../infra/file-lock.js";
-import { refreshQwenPortalCredentials } from "../../providers/qwen-portal-oauth.js";
-import { refreshChutesTokens } from "../chutes-oauth.js";
-import { AUTH_STORE_LOCK_OPTIONS, log } from "./constants.js";
-import { formatAuthDoctorHint } from "./doctor.js";
-import { ensureAuthStoreFile, resolveAuthStorePath } from "./paths.js";
-import { suggestOAuthProfileIdForLegacyDefault } from "./repair.js";
-import { ensureAuthProfileStore, saveAuthProfileStore } from "./store.js";
-import type { AuthProfileStore } from "./types.js";
+import type { OpenClawConfig } from "../../config/config.js"; import { withFileLock } from "../../infra/file-lock.js"; import { refreshQwenPortalCredentials } from 
+"../../providers/qwen-portal-oauth.js"; import { refreshChutesTokens } from "../chutes-oauth.js"; import { AUTH_STORE_LOCK_OPTIONS, log } from "./constants.js"; import { formatAuthDoctorHint } from 
+"./doctor.js"; import { ensureAuthStoreFile, resolveAuthStorePath } from "./paths.js"; import { suggestOAuthProfileIdForLegacyDefault } from "./repair.js"; import { ensureAuthProfileStore, 
+saveAuthProfileStore } from "./store.js"; import type { AuthProfileStore } from "./types.js";
 
-const OAUTH_PROVIDER_IDS = new Set<string>(getOAuthProviders().map((provider) => provider.id));
+type PiAiModule = typeof import("@mariozechner/pi-ai");
 
-const isOAuthProvider = (provider: string): provider is OAuthProvider =>
-  OAUTH_PROVIDER_IDS.has(provider);
+let _piAiPromise: Promise<PiAiModule> | null = null;
 
-const resolveOAuthProvider = (provider: string): OAuthProvider | null =>
-  isOAuthProvider(provider) ? provider : null;
+async function loadPiAi(): Promise<PiAiModule> {
+  if (!_piAiPromise) {
+    _piAiPromise = import("@mariozechner/pi-ai").catch((err) => {
+      _piAiPromise = null;
+      throw new Error(
+        "Optional dependency '@mariozechner/pi-ai' is not installed. " +
+          "Install it to enable OAuth auth-profiles.\n" +
+          String(err),
+      );
+    });
+  }
+  return _piAiPromise;
+}
 
+async function resolveOAuthProvider(provider: string): Promise<any | null> {
+  try {
+    const { getOAuthProviders } = await loadPiAi();
+    const providers = getOAuthProviders();
+    return providers.find((p: any) => p?.id === provider) ?? null;
+  } catch {
+    // CI-safe: if pi-ai isn't installed, we just treat it as "no generic oauth providers"
+    return null;
+  }
+}
 /** Bearer-token auth modes that are interchangeable (oauth tokens and raw tokens). */
 const BEARER_AUTH_MODES = new Set(["oauth", "token"]);
 
@@ -173,10 +181,11 @@ async function refreshOAuthTokenWithLock(params: {
               return { apiKey: newCredentials.access, newCredentials };
             })()
           : await (async () => {
-              const oauthProvider = resolveOAuthProvider(cred.provider);
+              const oauthProvider = await resolveOAuthProvider(cred.provider);
               if (!oauthProvider) {
                 return null;
               }
+              const { getOAuthApiKey } = await loadPiAi();
               return await getOAuthApiKey(oauthProvider, oauthCreds);
             })();
     if (!result) {
