@@ -1,4 +1,6 @@
-import { Router } from "express"; import { z } from "zod"; import crypto from "crypto"; import { db } from "../db"; import { nodes, nodePairings, nodeJobs, users } from "@shared/schema"; 
+import { Router } from "express"; import { z } from "zod"; import crypto from 
+"crypto"; import { db } from "../db"; import { nodes, nodePairings, nodeJobs, 
+users } from "@shared/schema";
 
 import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { validateBody } from "../middleware/validateRequest"; import { getUserId } from "../types/express"; import { requireNodeAuth, getNode } 
@@ -351,17 +353,22 @@ export function createNodesRouter(): Router {
         if (!job) return res.status(404).json({ success: false, error: "Job not found" });
 
         const { status, result, error } = req.body as any;
-        await db
-          .update(nodeJobs)
-          .set({
-            status,
-            result: result ?? null,
-            error: error ?? null,
-            startedAt: sql`COALESCE(${nodeJobs.startedAt}, NOW())`,
-            finishedAt: new Date(),
-          })
-          .where(eq(nodeJobs.id, jobId));
 
+        const setPatch: any = {
+          status,
+          startedAt: sql`COALESCE(${nodeJobs.startedAt}, NOW())`,
+          finishedAt: new Date(),
+        };
+
+        // IMPORTANT: Avoid passing null directly to drizzle .set() (can throw in mapUpdateSet).
+        if (typeof result !== "undefined") {
+          setPatch.result = result === null ? sql`NULL` : result;
+        }
+	if (typeof error !== "undefined") {
+	  setPatch.error = error === null ? sql`NULL` : error;
+	}
+
+	await db.update(nodeJobs).set(setPatch).where(eq(nodeJobs.id, jobId));
         return res.json({ success: true });
       } catch (e: any) {
         // Some environments don't emit stack traces to container logs unless explicitly printed.
