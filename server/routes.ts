@@ -146,6 +146,7 @@ import { createTerminalControlRouter, terminalClients } from "./routes/terminalC
 import { createWorkflowRouter } from "./routes/workflowRouter";
 import { createDeviceControlRouter } from "./routes/deviceControlRouter";
 import openClawRouter from "./routes/openClawRouter";
+import { createOpenClawRuntimeRouter } from "./routes/openclawRuntimeRouter";
 import { createSuperProgrammingAgentRouter } from "./routes/superProgrammingAgentRouter";
 import { createSkillPlatformRouter } from "./routes/skillPlatformRouter";
 import { CSRF_COOKIE_NAME, CSRF_TOKEN_PATTERN, issueCsrfCookie } from "./middleware/csrf";
@@ -848,6 +849,9 @@ export async function registerRoutes(
 
   // OpenClaw runtime capabilities are fused directly into the native agent pipeline.
   app.use("/api/openclaw", openClawRouter);
+
+  // OpenClaw Runtime: skills, RAG, orchestrator, subagents, and SuperAgent engines
+  app.use("/api/openclaw/runtime", createOpenClawRuntimeRouter());
 
   // ===== Run Detail Endpoints =====
   app.use("/api/runs", createRunRouter());
