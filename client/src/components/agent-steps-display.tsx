@@ -1,37 +1,6 @@
-import React, { useState, memo, useCallback, useMemo, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-  ChevronDown,
-  ChevronRight,
-  Download,
-  CheckCircle2,
-  Loader2,
-  XCircle,
-  Clock,
-  Search,
-  Globe,
-  FileText,
-  FileSpreadsheet,
-  Image as ImageIcon,
-  Code,
-  Database,
-  Terminal,
-  Zap,
-  Eye,
-  Wrench,
-  Bot,
-  Presentation,
-  Brain,
-  Play,
-  ShieldCheck,
-  PartyPopper,
-  RefreshCw,
-  AlertTriangle,
-  Copy,
-  WifiOff,
-  ServerCrash,
-  Ban,
-  AlertCircle
+import React, { useState, memo, useCallback, useMemo, useEffect } from "react"; import { motion, AnimatePresence } from "framer-motion"; import { ChevronDown, ChevronRight, Download, CheckCircle2, 
+  Loader2, XCircle, Clock, Search, Globe, FileText, FileSpreadsheet, Image as ImageIcon, Code, Database, Terminal, Zap, Eye, Wrench, Bot, Presentation, Brain, Play, ShieldCheck, PartyPopper, 
+  RefreshCw, AlertTriangle, Copy, WifiOff, ServerCrash, Ban, AlertCircle
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -65,6 +34,33 @@ export interface ClassifiedError {
   technicalDetails: string;
   icon: React.ElementType;
 }
+
+const TOOL_ICON_BY_NAME: Record<string, React.ComponentType<{ className?: string }>> = {
+  search: Search,
+  globe: Globe,
+  brain: Brain,
+  code: Code,
+  database: Database,
+  terminal: Terminal,
+  wrench: Wrench,
+  bot: Bot,
+  presentation: Presentation,
+  image: ImageIcon,
+  spreadsheet: FileSpreadsheet,
+  file: FileText,
+};
+
+const DOCUMENT_ICON_BY_CATEGORY: Record<string, React.ComponentType<{ className?: string }>> = {
+  spreadsheet: FileSpreadsheet,
+  image: ImageIcon,
+  presentation: Presentation,
+  code: Code,
+  data: Database,
+  document: FileText,
+  pdf: FileText,
+  text: FileText,
+  other: FileText,
+};
 
 const TRANSIENT_ERROR_PATTERNS = [
   /timeout/i,
@@ -435,8 +431,10 @@ const TOOL_ICONS: Record<string, React.ElementType> = {
   webdev_scaffold: Code,
 };
 
-function getToolIcon(toolName: string): React.ElementType {
-  return TOOL_ICONS[toolName] || Wrench;
+
+function resolveToolIcon(toolName: string | null | undefined): React.ComponentType<{ className?: string }> {
+  const key = String(toolName || "").trim();
+  return ((TOOL_ICONS as any)[key] ?? Wrench) as any;
 }
 
 function getToolDisplayName(toolName: string): string {
@@ -751,7 +749,7 @@ const CompletionSummary = memo(function CompletionSummary({
 }: CompletionSummaryProps) {
   const completedSteps = steps.filter(s => s.status === 'succeeded').length;
   const failedSteps = steps.filter(s => s.status === 'failed').length;
-  const totalTime = startTime ? Math.floor((Date.now() - startTime) / 1000) : null;
+  const totalTime = null;
 
   const formatDuration = (seconds: number): string => {
     if (seconds < 60) return `${seconds} segundos`;
@@ -837,7 +835,7 @@ const CompletionSummary = memo(function CompletionSummary({
 
 const StepItem = memo(function StepItem({ step }: { step: AgentStep }) {
   const [isOpen, setIsOpen] = useState(false);
-  const IconComponent = getToolIcon(step.toolName);
+  const IconComponent = TOOL_ICON_BY_NAME[String(step.toolName || "").toLowerCase()] ?? Wrench;
   const resultCount = getResultCount(step);
   const hasDetails = step.output || step.error;
 
@@ -1181,7 +1179,7 @@ export const DocumentCard = memo(function DocumentCard({
 }: DocumentCardProps) {
   const category = getFileCategory(artifact.name, artifact.mimeType);
   const theme = getFileTheme(artifact.name, artifact.mimeType);
-  const IconComponent = getDocumentIcon(category);
+  const IconComponent = DOCUMENT_ICON_BY_CATEGORY[String(category || "").toLowerCase()] ?? FileText;
 
   const handleClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();

@@ -1,15 +1,25 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto"; 
 import type { StreamFn } from "@mariozechner/pi-agent-core";
-import type {
-  AssistantMessage,
-  StopReason,
-  TextContent,
-  ToolCall,
-  Tool,
-  Usage,
-} from "@mariozechner/pi-ai";
-import { createAssistantMessageEventStream } from "@mariozechner/pi-ai";
+
 import { createSubsystemLogger } from "../logging/subsystem.js";
+
+type PiAiModule = typeof import("@mariozechner/pi-ai");
+
+let _piAiPromise: Promise<PiAiModule> | null = null;
+
+async function loadPiAi(): Promise<PiAiModule> {
+  if (!_piAiPromise) {
+    _piAiPromise = import("@mariozechner/pi-ai").catch((err) => {
+      _piAiPromise = null;
+      throw new Error(
+        "Optional dependency '@mariozechner/pi-ai' is not installed. " +
+          "Install it to enable Ollama streaming.\n" +
+          String(err),
+      );
+    });
+  }
+  return _piAiPromise;
+}
 
 const log = createSubsystemLogger("ollama-stream");
 
@@ -414,9 +424,9 @@ function resolveOllamaChatUrl(baseUrl: string): string {
 export function createOllamaStreamFn(baseUrl: string): StreamFn {
   const chatUrl = resolveOllamaChatUrl(baseUrl);
 
-  return (model, context, options) => {
+  return async (model, context, options) => {
+    const { createAssistantMessageEventStream } = await loadPiAi();
     const stream = createAssistantMessageEventStream();
-
     const run = async () => {
       try {
         const ollamaMessages = convertToOllamaMessages(

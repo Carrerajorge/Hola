@@ -1,5 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
-import {
+import React, { useState, useMemo, useCallback } from 'react'; import {
   ChevronDown,
   ChevronRight,
   TrendingUp,
@@ -400,16 +399,16 @@ function TablePreview({ table }: { table: Table }) {
 
 
 function AnomaliesSection({ anomalies }: { anomalies: Anomaly[] }) {
-  if (!anomalies || anomalies.length === 0) return null;
-
   const groupedAnomalies = useMemo(() => {
+    const list = anomalies ?? [];
     const groups: Record<string, Anomaly[]> = { high: [], medium: [], low: [] };
-    anomalies.forEach((a) => {
+    list.forEach((a) => {
       groups[a.severity].push(a);
     });
     return groups;
   }, [anomalies]);
 
+  if (!anomalies || anomalies.length === 0) return null;
   const severityOrder: Array<'high' | 'medium' | 'low'> = ['high', 'medium', 'low'];
 
   return (

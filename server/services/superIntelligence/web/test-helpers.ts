@@ -1,6 +1,6 @@
 import { vi } from "vitest";
-import type { MockBaileysSocket } from "../../test/mocks/baileys.js";
-import { createMockBaileys } from "../../test/mocks/baileys.js";
+import type { MockBaileysSocket } from "../../../openclaw/test/mocks/baileys";
+import { createMockBaileys } from "../../../openclaw/test/mocks/baileys";
 
 // Use globalThis to store the mock config so it survives vi.mock hoisting
 const CONFIG_KEY = Symbol.for("openclaw:testConfigMock");

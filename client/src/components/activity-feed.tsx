@@ -1,51 +1,6 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-  Brain,
-  Globe,
-  Sparkles,
-  Code,
-  FileText,
-  Database,
-  Shield,
-  ShieldCheck,
-  ShieldX,
-  Mail,
-  Search,
-  BarChart3,
-  ChevronDown,
-  ChevronRight,
-  Check,
-  Loader2,
-  XCircle,
-  RefreshCw,
-  Square,
-  Play,
-  Eye,
-  Download,
-  ExternalLink,
-  Clock,
-  Zap,
-  Bot,
-  Terminal,
-  FileSpreadsheet,
-  Image,
-  Video,
-  Music,
-  PanelRightClose,
-  PanelRightOpen,
-  Link2,
-  BookOpen,
-  Save,
-  HardDrive,
-  Users,
-  UserCheck,
-  Presentation,
-  FileType,
-  AlertCircle,
-  CheckCircle2,
-  Timer,
-  Wrench,
+import { useState, useEffect, useMemo, useCallback, useRef } from "react"; import { motion, AnimatePresence } from "framer-motion"; import { Brain, Globe, Sparkles, Code, FileText, Database, Shield, 
+  ShieldCheck, ShieldX, Mail, Search, BarChart3, ChevronDown, ChevronRight, Check, Loader2, XCircle, RefreshCw, Square, Play, Eye, Download, ExternalLink, Clock, Zap, Bot, Terminal, FileSpreadsheet, 
+  Image, Video, Music, PanelRightClose, PanelRightOpen, Link2, BookOpen, Save, HardDrive, Users, UserCheck, Presentation, FileType, AlertCircle, CheckCircle2, Timer, Wrench,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -77,6 +32,28 @@ import {
 } from "@/stores/agentTraceStore";
 import { useAgentStore } from "@/stores/agent-store";
 
+const TOOL_ICON_BY_NAME: Record<string, React.ComponentType<{ className?: string }>> = {
+  brain: Brain,
+  globe: Globe,
+  search: Search,
+  code: Code,
+  terminal: Terminal,
+  database: Database,
+  shield: Shield,
+  mail: Mail,
+  wrench: Wrench,
+};
+const ARTIFACT_ICON_BY_TYPE: Record<string, React.ComponentType<{ className?: string }>> = {
+  file: FileText,
+  document: FileText,
+  presentation: Presentation,
+  spreadsheet: FileSpreadsheet,
+  image: Image,
+  video: Video,
+  audio: Music,
+  code: Code,
+  chart: BarChart3,
+};
 export function useActivityFeed(messageId?: string | null) {
   const { subscribeToRun, unsubscribeFromRun, runs, activeRunId, isConnected } = useAgentTraceStore();
   const agentStoreRuns = useAgentStore((state) => state.runs);
@@ -184,9 +161,9 @@ function normalizeToolName(toolName: string): string {
   return toolName;
 }
 
-function getToolIcon(toolName: string): typeof Terminal {
-  const normalized = normalizeToolName(toolName);
-  return TOOL_ICONS[normalized] || Wrench;
+function resolveToolIcon(toolName: string | null | undefined): React.ComponentType<{ className?: string }> {
+  const key = String(toolName || "").trim().toLowerCase();
+  return TOOL_ICON_BY_NAME[key] ?? Wrench;
 }
 
 const STATUS_CONFIG: Record<string, { icon: typeof Clock; color: string; bg: string; label: string; animate?: boolean }> = {
@@ -217,13 +194,12 @@ function StepCard({ step, runId, isActive }: StepCardProps) {
   const { toggleStepExpanded } = useAgentTraceStore();
   const statusConfig = STATUS_CONFIG[step.status];
   const StatusIcon = statusConfig.icon;
-  const ToolIcon = getToolIcon(step.toolName);
+  const ToolIcon = TOOL_ICON_BY_NAME[String(step.toolName || "").toLowerCase()] ?? Wrench;
 
   const duration = useMemo(() => {
-    if (!step.startedAt) return null;
-    const end = step.completedAt || Date.now();
-    return end - step.startedAt;
-  }, [step.startedAt, step.completedAt]);
+    if (!step.startedAt || !step.completedAt) return null;
+    return step.completedAt - step.startedAt;
+  }, [step.startedAt, step.completedAt]); 
 
   return (
     <motion.div
@@ -318,26 +294,15 @@ function StepCard({ step, runId, isActive }: StepCardProps) {
   );
 }
 
+
 interface ArtifactCardProps {
   artifact: TraceArtifact;
   compact?: boolean;
 }
 
 function ArtifactCard({ artifact, compact = false }: ArtifactCardProps) {
-  const getArtifactIcon = (type: string) => {
-    switch (type) {
-      case "file": case "document": return FileText;
-      case "image": return Image;
-      case "video": return Video;
-      case "audio": return Music;
-      case "spreadsheet": return FileSpreadsheet;
-      case "code": return Code;
-      case "chart": return BarChart3;
-      default: return FileText;
-    }
-  };
-
-  const Icon = getArtifactIcon(artifact.type);
+  
+  const Icon = ARTIFACT_ICON_BY_TYPE[String(artifact.type || "").toLowerCase()] ?? FileText;
 
   if (compact) {
     return (
@@ -531,7 +496,7 @@ function ToolTimelineCard({ toolCalls }: ToolTimelineCardProps) {
           const isSuccess = tool.status === 'succeeded';
           const isFailed = tool.status === 'failed';
           const isRunning = tool.status === 'started' || tool.status === 'running';
-          const ToolIcon = getToolIcon(tool.toolName);
+          const ToolIcon = resolveToolIcon(tool.toolName);
 
           return (
             <motion.div
@@ -958,21 +923,7 @@ interface EnhancedArtifactCardProps {
 }
 
 function EnhancedArtifactCard({ artifact }: EnhancedArtifactCardProps) {
-  const getArtifactIcon = (type: string) => {
-    switch (type) {
-      case "presentation": return Presentation;
-      case "document": case "file": return FileText;
-      case "spreadsheet": return FileSpreadsheet;
-      case "image": return Image;
-      case "video": return Video;
-      case "audio": return Music;
-      case "code": return Code;
-      case "chart": return BarChart3;
-      default: return FileType;
-    }
-  };
-
-  const Icon = getArtifactIcon(artifact.type);
+  const Icon = ARTIFACT_ICON_BY_TYPE[String(artifact.type || "").toLowerCase()] ?? FileType;
 
   return (
     <motion.div
@@ -1322,14 +1273,8 @@ export function ActivityFeedConnector({
   onRetry,
   autoOpen = true,
 }: ActivityFeedConnectorProps) {
-  const [isOpen, setIsOpen] = useState(false);
   const { runId, run, hasActiveRun, isConnected } = useActivityFeed(messageId);
-
-  useEffect(() => {
-    if (autoOpen && hasActiveRun && !isOpen) {
-      setIsOpen(true);
-    }
-  }, [autoOpen, hasActiveRun, isOpen]);
+  const [isOpen, setIsOpen] = useState(() => autoOpen && hasActiveRun);
 
   useEffect(() => {
     if (run?.status === 'completed' || run?.status === 'failed' || run?.status === 'cancelled') {

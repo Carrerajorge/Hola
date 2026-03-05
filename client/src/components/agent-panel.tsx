@@ -1,16 +1,17 @@
-import { useQuery } from "@tanstack/react-query";
-import { X, FileSpreadsheet, Globe, Image, FileText, Loader2, CheckCircle2, XCircle, Clock, RefreshCw, Square, Bot, Sparkles, FileIcon, Terminal, FolderOpen, List, Monitor, Activity, Circle, CheckCircle, AlertCircle } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Progress } from "@/components/ui/progress";
-import { cn } from "@/lib/utils";
-import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
-import { formatZonedTime, normalizeTimeZone } from "@/lib/platformDateTime";
-import { apiFetch } from "@/lib/apiClient";
-import "@/components/ui/glass-effects.css";
+import { useQuery } from "@tanstack/react-query"; import { X, FileSpreadsheet, Globe, Image, FileText, Loader2, CheckCircle2, XCircle, Clock, RefreshCw, Square, Bot, Sparkles, FileIcon, Terminal, 
+FolderOpen, List, Monitor, Activity, Circle, CheckCircle, AlertCircle } from "lucide-react"; import { Button } from "@/components/ui/button"; import { Badge } from "@/components/ui/badge"; import { 
+Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"; import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"; import { ScrollArea } from 
+"@/components/ui/scroll-area"; import { Progress } from "@/components/ui/progress"; import { cn } from "@/lib/utils"; import { usePlatformSettings } from "@/contexts/PlatformSettingsContext"; import 
+{ formatZonedTime, normalizeTimeZone } from "@/lib/platformDateTime"; import { apiFetch } from "@/lib/apiClient"; import "@/components/ui/glass-effects.css";
+
+const TOOL_ICON_BY_NAME: Record<string, React.ComponentType<{ className?: string }>> = {
+  globe: Globe,
+  sparkles: Sparkles,
+  bot: Bot,
+  terminal: Terminal,
+  search: Globe, // fallback visual
+  web_search: Globe,
+};
 
 interface AgentStep {
   stepIndex: number;
@@ -125,7 +126,7 @@ function calculateDuration(startedAt?: string, completedAt?: string): number | n
 }
 
 function StepItem({ step, index }: { step: AgentStep; index: number }) {
-  const IconComponent = getToolIcon(step.toolName);
+  const IconComponent = TOOL_ICON_BY_NAME[String(step.toolName || "").toLowerCase()] ?? Terminal;
   const isRunning = step.status === "running";
   const duration = calculateDuration(step.startedAt, step.completedAt);
   

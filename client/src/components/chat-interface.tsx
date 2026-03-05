@@ -1358,7 +1358,9 @@ export function ChatInterface({
     if (!url) return;
     try {
       URL.revokeObjectURL(url);
-    } catch { }
+    } catch { 
+      // ignore revoke failures
+    }
     generatedAttachmentPreviewUrlRef.current = null;
   }, []);
 
@@ -1368,7 +1370,10 @@ export function ChatInterface({
         if (file.localUrl) {
           try {
             URL.revokeObjectURL(file.localUrl);
-          } catch { }
+          } catch { 
+
+            // ignore revoke failures
+          }
         }
       });
       releaseGeneratedAttachmentPreviewUrl();
@@ -3522,7 +3527,9 @@ export function ChatInterface({
       if (removed?.localUrl) {
         try {
           URL.revokeObjectURL(removed.localUrl);
-        } catch { }
+        } catch { 
+          // ignore revoke failures
+        }
       }
       return prev.filter((_, i: number) => i !== index);
     });

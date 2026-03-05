@@ -1,15 +1,10 @@
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { expectInboundContextContract } from "../../../../test/helpers/inbound-contract.js";
+import fs from "node:fs/promises"; import os from "node:os"; import path from "node:path"; import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"; 
 
-let capturedCtx: unknown;
-let capturedDispatchParams: unknown;
-let sessionDir: string | undefined;
-let sessionStorePath: string;
-let backgroundTasks: Set<Promise<unknown>>;
-const { deliverWebReplyMock } = vi.hoisted(() => ({
+import { expectInboundContextContract } from "../../../../../openclaw/test/helpers/inbound-contract";
+
+
+let capturedCtx: unknown; let capturedDispatchParams: unknown; let sessionDir: string | undefined; let sessionStorePath: string; let backgroundTasks: Set<Promise<unknown>>; const { 
+deliverWebReplyMock } = vi.hoisted(() => ({
   deliverWebReplyMock: vi.fn(async () => {}),
 }));
 
