@@ -1,6 +1,6 @@
-import { Router } from "express"; import { z } from "zod"; import crypto from "crypto"; import { db } from "../db"; import { nodes, nodePairings, nodeJobs, users } from "@shared/schema"; import { 
-and, desc, eq, gt, isNull, sql } from "drizzle-orm"; import { validateBody } from "../middleware/validateRequest"; import { getUserId } from "../types/express"; import { requireNodeAuth, getNode } 
-from "../middleware/nodeAuth";
+import { Router } from "express"; import { z } from "zod"; import crypto from "crypto"; import { db } from "../db"; import { nodes, nodePairings, workspaceNodeJobs, users } from "@shared/schema"; 
+import { and, desc, eq, gt, isNull, sql } from "drizzle-orm"; import { validateBody } from "../middleware/validateRequest"; import { getUserId } from "../types/express"; import { requireNodeAuth, 
+getNode } from "../middleware/nodeAuth";
 
 const PAIRING_TTL_MINUTES = 5;
 
@@ -145,7 +145,7 @@ export function createNodesRouter(): Router {
     if (!n) return res.status(404).json({ success: false, error: "Node not found" });
 
     const [job] = await db
-      .insert(nodeJobs)
+      .insert(workspaceNodeJobs)
       .values({
         orgId: actor.orgId,
         nodeId: String(nodeId),
@@ -174,9 +174,9 @@ export function createNodesRouter(): Router {
 
     const rows = await db
       .select()
-      .from(nodeJobs)
-      .where(and(eq(nodeJobs.orgId, actor.orgId), eq(nodeJobs.nodeId, nodeId)))
-      .orderBy(desc(nodeJobs.createdAt))
+      .from(workspaceNodeJobs)
+      .where(and(eq(workspaceNodeJobs.orgId, actor.orgId), eq(workspaceNodeJobs.nodeId, nodeId)))
+      .orderBy(desc(workspaceNodeJobs.createdAt))
       .limit(100);
 
     res.json({
@@ -266,18 +266,18 @@ export function createNodesRouter(): Router {
 
     const [job] = await db
       .select()
-      .from(nodeJobs)
-      .where(and(eq(nodeJobs.nodeId, node.id), eq(nodeJobs.orgId, node.orgId), eq(nodeJobs.status, "queued")))
-      .orderBy(desc(nodeJobs.createdAt))
+      .from(workspaceNodeJobs)
+      .where(and(eq(workspaceNodeJobs.nodeId, node.id), eq(workspaceNodeJobs.orgId, node.orgId), eq(workspaceNodeJobs.status, "queued")))
+      .orderBy(desc(workspaceNodeJobs.createdAt))
       .limit(1);
 
     if (!job) return res.json({ success: true, job: null });
 
     // Mark delivered (lease) but not started yet
     await db
-      .update(nodeJobs)
+      .update(workspaceNodeJobs)
       .set({ status: "sent" })
-      .where(and(eq(nodeJobs.id, (job as any).id), eq(nodeJobs.status, "queued")));
+      .where(and(eq(workspaceNodeJobs.id, (job as any).id), eq(workspaceNodeJobs.status, "queued")));
     
     res.json({ success: true, job: { ...job, id: String((job as any).id) } });
   });
@@ -297,31 +297,31 @@ export function createNodesRouter(): Router {
 
       // Only allow ack if the job belongs to this node and is not revoked
       const [job] = await db
-        .select({ id: nodeJobs.id, status: nodeJobs.status })
-        .from(nodeJobs)
-        .where(and(eq(nodeJobs.id, jobId), eq(nodeJobs.nodeId, node.id), eq(nodeJobs.orgId, node.orgId)))
+        .select({ id: workspaceNodeJobs.id, status: workspaceNodeJobs.status })
+        .from(workspaceNodeJobs)
+        .where(and(eq(workspaceNodeJobs.id, jobId), eq(workspaceNodeJobs.nodeId, node.id), eq(workspaceNodeJobs.orgId, node.orgId)))
         .limit(1);
 
       if (!job) return res.status(404).json({ success: false, error: "Job not found" });
 
       // Move sent/queued -> running
       const [updated] = await db
-        .update(nodeJobs)
+        .update(workspaceNodeJobs)
         .set({ status: "running", startedAt: new Date() })
         .where(
           and(
-            eq(nodeJobs.id, jobId),
-            eq(nodeJobs.nodeId, node.id),
-            eq(nodeJobs.orgId, node.orgId),
+            eq(workspaceNodeJobs.id, jobId),
+            eq(workspaceNodeJobs.nodeId, node.id),
+            eq(workspaceNodeJobs.orgId, node.orgId),
             // allow ack even if it was still queued (race)
             // and also if it was sent
             // (if already running/succeeded/failed, this update won't match)
             // @ts-ignore - drizzle doesn't have inArray imported here; keep simple OR
             // we'll do OR using SQL
-            sql`${nodeJobs.status} IN ('queued','sent')`
+            sql`${workspaceNodeJobs.status} IN ('queued','sent')`
           )
         )
-        .returning({ id: nodeJobs.id });
+        .returning({ id: workspaceNodeJobs.id });
 
       if (!updated) {
         return res.status(409).json({ success: false, error: `Job is not ackable (status=${String((job as any).status)})` });
@@ -348,9 +348,9 @@ export function createNodesRouter(): Router {
 
         // Ensure job belongs to node
         const [job] = await db
-          .select({ id: nodeJobs.id })
-          .from(nodeJobs)
-          .where(and(eq(nodeJobs.id, jobId), eq(nodeJobs.nodeId, node.id), eq(nodeJobs.orgId, node.orgId)))
+          .select({ id: workspaceNodeJobs.id })
+          .from(workspaceNodeJobs)
+          .where(and(eq(workspaceNodeJobs.id, jobId), eq(workspaceNodeJobs.nodeId, node.id), eq(workspaceNodeJobs.orgId, node.orgId)))
           .limit(1);
         if (!job) return res.status(404).json({ success: false, error: "Job not found" });
 
@@ -360,15 +360,15 @@ export function createNodesRouter(): Router {
         const isRunning = status === "running";
 
         await db
-          .update(nodeJobs)
+          .update(workspaceNodeJobs)
           .set({
             status,
             result: result ?? null,
             error: error ?? null,
-            startedAt: isRunning ? sql`COALESCE(${nodeJobs.startedAt}, NOW())` : undefined,
+            startedAt: isRunning ? sql`COALESCE(${workspaceNodeJobs.startedAt}, NOW())` : undefined,
             finishedAt: isTerminal ? new Date() : undefined,
           })
-          .where(eq(nodeJobs.id, jobId));
+          .where(eq(workspaceNodeJobs.id, jobId));
         return res.json({ success: true });
       } catch (e: any) {
         // Some environments don't emit stack traces to container logs unless explicitly printed.
