@@ -1,4 +1,5 @@
-import { Router } from "express"; import { z } from "zod"; import crypto from "crypto"; import { db } from "../db"; import { nodes, nodePairings, workspaceNodeJobs, users } from "@shared/schema"; 
+import { Router } from "express"; import { z } from "zod"; import crypto from "crypto"; import { db } from "../db"; 
+import { workspaceNodes, nodePairings, workspaceNodeJobs, users } from "@shared/schema";
 import { and, desc, eq, gt, isNull, sql } from "drizzle-orm"; import { validateBody } from "../middleware/validateRequest"; import { getUserId } from "../types/express"; import { requireNodeAuth, 
 getNode } from "../middleware/nodeAuth";
 
@@ -68,22 +69,22 @@ export function createNodesRouter(): Router {
 
     const rows = await db
       .select({
-        id: nodes.id,
-        name: nodes.name,
-        platform: nodes.platform,
-        agentVersion: nodes.agentVersion,
-        capabilities: nodes.capabilities,
-        policy: nodes.policy,
-        lastSeenAt: nodes.lastSeenAt,
-        revokedAt: nodes.revokedAt,
-        ownerUserId: nodes.ownerUserId,
-        createdAt: nodes.createdAt,
+        id: workspaceNodes.id,
+        name: workspaceNodes.name,
+        platform: workspaceNodes.platform,
+        agentVersion: workspaceNodes.agentVersion,
+        capabilities: workspaceNodes.capabilities,
+        policy: workspaceNodes.policy,
+        lastSeenAt: workspaceNodes.lastSeenAt,
+        revokedAt: workspaceNodes.revokedAt,
+        ownerUserId: workspaceNodes.ownerUserId,
+        createdAt: workspaceNodes.createdAt,
       })
-      .from(nodes)
-      .where(eq(nodes.orgId, actor.orgId))
-      .orderBy(desc(nodes.createdAt));
+      .from(workspaceNodes)
+      .where(eq(workspaceNodes.orgId, actor.orgId))
+      .orderBy(desc(workspaceNodes.createdAt));
 
-    res.json({ success: true, orgId: actor.orgId, nodes: rows.map((n) => ({
+    res.json({ success: true, orgId: actor.orgId, workspaceNodes: rows.map((n) => ({
       ...n,
       id: String(n.id),
       name: String(n.name),
@@ -124,9 +125,9 @@ export function createNodesRouter(): Router {
     if (!nodeId) return res.status(400).json({ success: false, error: "nodeId required" });
 
     const [updated] = await db
-      .update(nodes)
+      .update(workspaceNodes)
       .set({ revokedAt: new Date(), updatedAt: new Date() })
-      .where(and(eq(nodes.id, nodeId), eq(nodes.orgId, actor.orgId), isNull(nodes.revokedAt)))
+      .where(and(eq(workspaceNodes.id, nodeId), eq(workspaceNodes.orgId, actor.orgId), isNull(workspaceNodes.revokedAt)))
       .returning();
 
     if (!updated) return res.status(404).json({ success: false, error: "Node not found" });
@@ -141,7 +142,7 @@ export function createNodesRouter(): Router {
     const { nodeId, kind, payload } = req.body as any;
 
     // Ensure node belongs to org and not revoked
-    const [n] = await db.select({ id: nodes.id }).from(nodes).where(and(eq(nodes.id, String(nodeId)), eq(nodes.orgId, actor.orgId), isNull(nodes.revokedAt))).limit(1);
+    const [n] = await db.select({ id: workspaceNodes.id }).from(workspaceNodes).where(and(eq(workspaceNodes.id, String(nodeId)), eq(workspaceNodes.orgId, actor.orgId), isNull(workspaceNodes.revokedAt))).limit(1);
     if (!n) return res.status(404).json({ success: false, error: "Node not found" });
 
     const [job] = await db
@@ -169,7 +170,7 @@ export function createNodesRouter(): Router {
     if (!nodeId) return res.status(400).json({ success: false, error: "nodeId required" });
 
     // Ensure node belongs to org
-    const [n] = await db.select({ id: nodes.id }).from(nodes).where(and(eq(nodes.id, nodeId), eq(nodes.orgId, actor.orgId))).limit(1);
+    const [n] = await db.select({ id: workspaceNodes.id }).from(workspaceNodes).where(and(eq(workspaceNodes.id, nodeId), eq(workspaceNodes.orgId, actor.orgId))).limit(1);
     if (!n) return res.status(404).json({ success: false, error: "Node not found" });
 
     const rows = await db
@@ -227,7 +228,7 @@ export function createNodesRouter(): Router {
     const tokenHash = sha256Base64Url(token);
 
     const [created] = await db
-      .insert(nodes)
+      .insert(workspaceNodes)
       .values({
         orgId: String((pairing as any).orgId || "default"),
         ownerUserId: String((pairing as any).createdByUserId),
@@ -262,7 +263,7 @@ export function createNodesRouter(): Router {
     if (!node) return res.status(401).json({ success: false, error: "Unauthorized" });
 
     // Update last seen
-    await db.update(nodes).set({ lastSeenAt: new Date(), updatedAt: new Date() }).where(eq(nodes.id, node.id));
+    await db.update(workspaceNodes).set({ lastSeenAt: new Date(), updatedAt: new Date() }).where(eq(workspaceNodes.id, node.id));
 
     const [job] = await db
       .select()
