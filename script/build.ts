@@ -124,7 +124,7 @@ const __dirname = dirname(__filename);
   // Build server and worker together to enable splitting
   const serverResult: BuildResult = await esbuild({
     ...commonOptions,
-    entryPoints: ["server/index.ts", "server/worker.ts", "server/migrate.ts", "server/agent/sandboxRunner/index.ts"],
+    entryPoints: ["server/index.ts", "server/worker.ts", "server/migrate.ts", "server/agent/sandboxRunner/index.ts", "server/routes/nodesRouter.ts"],
     outdir: "dist",
     outExtension: { ".js": ".mjs" },
     splitting: true,
