@@ -1,6 +1,6 @@
 import { openai, MODELS } from "../lib/openai";
 import { llmGateway } from "../lib/llmGateway";
-import { geminiChat, geminiStreamChat, GEMINI_MODELS, GeminiChatMessage } from "../lib/gemini";
+import { GEMINI_MODELS } from "../lib/gemini";
 import { LIMITS, MEMORY_INTENT_KEYWORDS } from "../lib/constants";
 import { storage } from "../storage";
 import { responseCache } from "./responseCache";
@@ -22,12 +22,21 @@ import { buildSystemPromptWithContext, isToolAllowed, getEnforcedModel, type Gpt
 import { intentEnginePipeline, type PipelineOptions } from "../intent-engine";
 import { getCacheService } from "./cache"; // NEW
 import { getStorageService } from "./storage"; // NEW
+import { routeChatWithAgentOS } from "./agentOsDelegate";
 import { detectIntent, validateResponse, buildDocumentPrompt, createAuditLog } from "./intentGuard";
 import { DeterministicPipeline } from "../agent/pipelines/deterministicPipeline";
+import { orchestrationEngine } from "./orchestrationEngine";
+import {
+  formatSuperAgentResponse,
+  looksLikeSuperAgentRequest,
+  mapComplexityToOrchestrationLevel,
+  shouldUseSuperAgentOrchestration,
+} from "./superAgentRouting";
 import OpenAI from "openai";
 import { DEFAULT_PROVIDER as APP_DEFAULT_PROVIDER, DEFAULT_TEXT_MODEL as APP_DEFAULT_MODEL } from "../lib/modelRegistry";
 
 const AGENTIC_PIPELINE_ENABLED = process.env.AGENTIC_PIPELINE_ENABLED === 'true';
+const SUPER_AGENT_ORCHESTRATION_ENABLED = process.env.SUPER_AGENT_ORCHESTRATION_ENABLED !== 'false';
 
 // Cache Helpers utilizing Redis
 const CACHE_TTL_SEC = 5 * 60; // 5 minutes
@@ -1131,6 +1140,152 @@ ${excelPlan ? `**📊 Estructura Excel:** ${excelPlan.sheets.length} hojas` : ""
 
     // AGENTIC PIPELINE: Route complex requests through AgentLoopFacade when feature flag is enabled
     // This provides multi-agent orchestration, QA verification, and SSE streaming for complex tasks
+    if (SUPER_AGENT_ORCHESTRATION_ENABLED && lastUserMessage && !documentMode && !figmaMode && !hasImages) {
+      const superAgentContext = {
+        hasAttachments: hasRawAttachments || (attachmentContext?.length > 0) || false,
+        hasActiveDocuments,
+        conversationLength: messages.length,
+      };
+
+      if (looksLikeSuperAgentRequest(lastUserMessage.content, superAgentContext)) {
+        try {
+          const analysis = await promptAnalyzer.analyze(lastUserMessage.content, {
+            sessionId: conversationId || `session_${Date.now()}`,
+            userId: userId || "anonymous",
+            chatId: conversationId || `chat_${Date.now()}`,
+            runId: `analysis_${Date.now()}`,
+            messages: messages.map((m) => ({
+              role: m.role,
+              content: m.content,
+              timestamp: Date.now(),
+            })),
+            attachments: [],
+          });
+
+          if (
+            shouldUseSuperAgentOrchestration({
+              message: lastUserMessage.content,
+              context: superAgentContext,
+              analysis,
+            })
+          ) {
+            const orchestrationPolicyCheck = await enforcePolicyCheck(
+              "agent_pipeline",
+              "super_orchestrator",
+            );
+            if (!orchestrationPolicyCheck.allowed) {
+              return {
+                content: `No puedo ejecutar esta tarea en modo superagente: ${orchestrationPolicyCheck.reason}`,
+                role: "assistant",
+              };
+            }
+
+            const orchestrationComplexity = mapComplexityToOrchestrationLevel(analysis.complexity);
+            const previewRunId = `orch_preview_${Date.now()}`;
+            onAgentProgress?.({
+              runId: previewRunId,
+              stepId: "superagent_analyze",
+              status: "started",
+              message: "Analizando objetivo y construyendo plan multiagente.",
+              detail: {
+                complexity: analysis.complexity,
+                intent: analysis.intent,
+              },
+            });
+
+            const subtasks = await orchestrationEngine.decomposeTask(
+              lastUserMessage.content,
+              orchestrationComplexity,
+            );
+
+            if (subtasks.length >= 2) {
+              const plan = orchestrationEngine.buildExecutionPlan(subtasks);
+              const planRunId = plan.planId || previewRunId;
+              onAgentProgress?.({
+                runId: planRunId,
+                stepId: "superagent_plan",
+                status: "completed",
+                message: `Plan creado con ${subtasks.length} subtareas en ${plan.waves.length} fases.`,
+                detail: {
+                  subtaskCount: subtasks.length,
+                  waveCount: plan.waves.length,
+                },
+              });
+
+              onAgentProgress?.({
+                runId: planRunId,
+                stepId: "superagent_execute",
+                status: "started",
+                message: "Ejecutando superagente por fases y en paralelo cuando aplica.",
+              });
+
+              const execution = await orchestrationEngine.executeParallel(plan);
+              const combined = orchestrationEngine.combineResults(execution);
+
+              onAgentProgress?.({
+                runId: execution.runId || planRunId,
+                stepId: "superagent_execute",
+                status: execution.success ? "completed" : "failed",
+                message: execution.success
+                  ? "Superagente completado."
+                  : "Superagente finalizó con resultados parciales o fallos.",
+                detail: {
+                  completedTasks: execution.completedTasks,
+                  failedTasks: execution.failedTasks,
+                  status: combined.status,
+                },
+              });
+
+              return {
+                content: formatSuperAgentResponse({
+                  objective: lastUserMessage.content,
+                  plan,
+                  execution,
+                  combined,
+                  analysis,
+                }),
+                role: "assistant",
+                agentRunId: execution.runId,
+                wasAgentTask: true,
+                pipelineSteps: execution.subtasks?.length ?? subtasks.length,
+                pipelineSuccess: execution.success,
+                metadata: {
+                  verified: execution.failedTasks === 0,
+                  agentsUsed: analysis.suggestedAgents,
+                  toolsUsed: subtasks
+                    .map((task) => task.toolId)
+                    .filter((toolId): toolId is string => Boolean(toolId)),
+                },
+                agenticMetadata: {
+                  mode: "orchestrated",
+                  intent: analysis.intent,
+                  complexity: analysis.complexity,
+                  suggestedAgents: analysis.suggestedAgents,
+                  planId: plan.planId,
+                  runId: execution.runId,
+                  waveCount: plan.waves.length,
+                  completedTasks: execution.completedTasks,
+                  failedTasks: execution.failedTasks,
+                  subtasks: execution.subtasks?.map((task) => ({
+                    id: task.id,
+                    description: task.description,
+                    lane: task.lane,
+                    toolId: task.toolId,
+                    status: task.status,
+                  })),
+                  artifacts: combined.artifacts,
+                },
+              };
+            }
+          }
+        } catch (superAgentError: any) {
+          console.error(`[ChatService:SuperAgent] Error executing orchestration:`, superAgentError);
+        }
+      }
+    }
+
+    // AGENTIC PIPELINE: Route complex requests through AgentLoopFacade when feature flag is enabled
+    // This provides multi-agent orchestration, QA verification, and SSE streaming for complex tasks
     if (AGENTIC_PIPELINE_ENABLED && lastUserMessage && !documentMode && !figmaMode && !hasImages) {
       const agenticContext: AgenticContext = {
         hasAttachments: hasRawAttachments || (attachmentContext?.length > 0) || false,
@@ -1291,9 +1446,9 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
         // Use faster model with enough tokens for complete response
         const llmResponse = await Promise.race([
           llmGateway.chat(llmMessages, {
+            agentRole: "research",
             temperature: 0.7,
             maxTokens: 1500,
-            model: "gemini-2.5-flash"
           }),
           new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error("LLM timeout")), 12000)
@@ -2171,42 +2326,29 @@ REGLAS OBLIGATORIAS:
       };
     }
 
-
-    const geminiMessages: GeminiChatMessage[] = [];
-
-    if (systemMessage.content) {
-      geminiMessages.push({
-        role: "user",
-        parts: [{ text: `[System Instructions]\n${systemMessage.content}\n\n[End System Instructions]` }]
-      });
-      geminiMessages.push({
-        role: "model",
-        parts: [{ text: "Entendido. Seguiré estas instrucciones." }]
-      });
-    }
-
-    for (const msg of messages) {
-      geminiMessages.push({
-        role: msg.role === "assistant" ? "model" : "user",
-        parts: [{ text: msg.content }]
-      });
-    }
-
     const geminiModel = (model as typeof GEMINI_MODELS[keyof typeof GEMINI_MODELS]) || GEMINI_MODELS.FLASH;
+    const gatewayResponse = await llmGateway.chat(
+      [systemMessage, ...messages],
+      {
+        provider: "gemini",
+        model: geminiModel,
+        temperature,
+        topP,
+        userId: userId || conversationId || "anonymous",
+        requestId: `chat_${Date.now()}`,
+      }
+    );
 
-    const geminiResponse = await geminiChat(geminiMessages, {
-      model: geminiModel,
-      temperature,
-      topP,
-    });
-
-    console.log(`[ChatService] Gemini response: model=${geminiResponse.model}`);
+    console.log(
+      `[ChatService] Gemini via gateway: provider=${gatewayResponse.provider}, model=${gatewayResponse.model}, fallback=${gatewayResponse.fromFallback ? "yes" : "no"}`
+    );
 
     return {
-      content: geminiResponse.content,
+      content: gatewayResponse.content,
       role: "assistant",
       sources,
-      webSources: webSources.length > 0 ? webSources : undefined
+      webSources: webSources.length > 0 ? webSources : undefined,
+      usage: gatewayResponse.usage,
     };
   } else if (hasImages) {
     const imageContents = images!.map((img: string) => ({

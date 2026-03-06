@@ -110,7 +110,7 @@ Return JSON:
 
 export const generateImageTool = tool(
   async (input) => {
-    const { prompt, style = "realistic", size = "1024x1024", quality = "standard", model = "dall-e-3" } = input;
+    const { prompt, style = "realistic", size = "1024x1024", quality = "standard", model = "google/gemini-3.1-flash-image-preview" } = input;
     const startTime = Date.now();
 
     try {
@@ -150,7 +150,7 @@ Return only the enhanced prompt, no JSON.`,
         requestedSize: size,
         requestedQuality: quality,
         model,
-        note: "Actual image generation requires configured image API (DALL-E, Stable Diffusion, or Midjourney)",
+        note: "Image generation will be handled by " + model,
         latencyMs: Date.now() - startTime,
       });
     } catch (error: any) {
@@ -163,14 +163,14 @@ Return only the enhanced prompt, no JSON.`,
   },
   {
     name: "generate_image",
-    description: "Prepares and enhances prompts for image generation using diffusion models (DALL-E, Stable Diffusion). Returns optimized prompts for best results.",
+    description: "Prepares and enhances prompts for image generation using diffusion models. Returns optimized prompts for best results.",
     schema: z.object({
       prompt: z.string().describe("Description of the image to generate"),
       style: z.enum(["realistic", "artistic", "cartoon", "3d", "sketch", "watercolor", "oil_painting", "digital_art", "photography", "anime"])
         .optional().default("realistic").describe("Visual style"),
       size: z.enum(["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"]).optional().default("1024x1024").describe("Image dimensions"),
       quality: z.enum(["standard", "hd"]).optional().default("standard").describe("Image quality level"),
-      model: z.enum(["dall-e-3", "dall-e-2", "stable-diffusion", "midjourney"]).optional().default("dall-e-3").describe("Generation model"),
+      model: z.enum(["google/gemini-3.1-flash-image-preview", "dall-e-3", "dall-e-2", "stable-diffusion", "midjourney"]).optional().default("google/gemini-3.1-flash-image-preview").describe("Generation model"),
     }),
   }
 );
@@ -263,7 +263,7 @@ Return JSON:
 
 export const generateVideoTool = tool(
   async (input) => {
-    const { prompt, duration = 5, aspectRatio = "16:9", style = "cinematic", fps = 24 } = input;
+    const { prompt, duration = 5, aspectRatio = "16:9", style = "cinematic", fps = 24, model = "bytedance-seed/seed-2.0-mini" } = input;
     const startTime = Date.now();
 
     try {
@@ -303,7 +303,8 @@ Prompt: ${prompt}
 Duration: ${duration} seconds
 Aspect Ratio: ${aspectRatio}
 Style: ${style}
-FPS: ${fps}`,
+FPS: ${fps}
+Model: ${model}`,
           },
         ],
         temperature: 0.6,
@@ -321,7 +322,8 @@ FPS: ${fps}`,
           requestedAspectRatio: aspectRatio,
           requestedStyle: style,
           requestedFps: fps,
-          note: "Actual video generation requires configured video AI API (Runway, Pika, etc.)",
+          model,
+          note: "Video generation will be handled by " + model,
           latencyMs: Date.now() - startTime,
         });
       }
@@ -332,6 +334,7 @@ FPS: ${fps}`,
         duration,
         aspectRatio,
         style,
+        model,
         latencyMs: Date.now() - startTime,
       });
     } catch (error: any) {
@@ -352,6 +355,7 @@ FPS: ${fps}`,
       style: z.enum(["cinematic", "documentary", "animated", "timelapse", "slow_motion", "vlog", "commercial"]).optional().default("cinematic")
         .describe("Visual style"),
       fps: z.number().optional().default(24).describe("Frames per second"),
+      model: z.enum(["bytedance-seed/seed-2.0-mini", "runway-gen-2", "pika-labs", "stable-video-diffusion"]).optional().default("bytedance-seed/seed-2.0-mini").describe("Generation model"),
     }),
   }
 );

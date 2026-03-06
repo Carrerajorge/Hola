@@ -6,7 +6,7 @@
  * tracking, and response shape guarding.
  */
 
-const schemaCrypto = require("crypto");
+import * as schemaCrypto from "node:crypto";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */

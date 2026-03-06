@@ -1,4 +1,3 @@
-
 import { z } from "zod";
 import { getBlockedNetworkModeReason } from "../agents/sandbox/network-mode.js";
 import { parseDurationMs } from "../cli/parse-duration.js";
@@ -7,11 +6,11 @@ import {
   GroupChatSchema,
   HumanDelaySchema,
   IdentitySchema,
+  SecretInputSchema,
   ToolsLinksSchema,
   ToolsMediaSchema,
 } from "./zod-schema.core.js";
-import { sensitive, registerSensitive } from "./zod-schema.sensitive.js";
-import { registerSensitive } from "./zod-schema.sensitive.js";
+import { sensitive } from "./zod-schema.sensitive.js";
 
 export const HeartbeatSchema = z
   .object({
@@ -268,13 +267,13 @@ export const ToolsWebSearchSchema = z
         z.literal("kimi"),
       ])
       .optional(),
-    apiKey: registerSensitive("tools.webSearch.apiKey", z.string().optional()),
+    apiKey: SecretInputSchema.optional().register(sensitive),
     maxResults: z.number().int().positive().optional(),
     timeoutSeconds: z.number().int().positive().optional(),
     cacheTtlMinutes: z.number().nonnegative().optional(),
     perplexity: z
       .object({
-        apiKey: registerSensitive("tools.webSearch.perplexity.apiKey", z.string().optional()),
+        apiKey: SecretInputSchema.optional().register(sensitive),
         baseUrl: z.string().optional(),
         model: z.string().optional(),
       })
@@ -282,7 +281,7 @@ export const ToolsWebSearchSchema = z
       .optional(),
     grok: z
       .object({
-        apiKey: registerSensitive("tools.webSearch.grok.apiKey", z.string().optional()),
+        apiKey: SecretInputSchema.optional().register(sensitive),
         model: z.string().optional(),
         inlineCitations: z.boolean().optional(),
       })
@@ -290,14 +289,14 @@ export const ToolsWebSearchSchema = z
       .optional(),
     gemini: z
       .object({
-        apiKey: registerSensitive("tools.webSearch.gemini.apiKey", z.string().optional()),
+        apiKey: SecretInputSchema.optional().register(sensitive),
         model: z.string().optional(),
       })
       .strict()
       .optional(),
     kimi: z
       .object({
-        apiKey: registerSensitive("tools.webSearch.kimi.apiKey", z.string().optional()),
+        apiKey: SecretInputSchema.optional().register(sensitive),
         baseUrl: z.string().optional(),
         model: z.string().optional(),
       })
@@ -526,6 +525,21 @@ export const AgentToolsSchema = z
       })
       .strict()
       .optional(),
+    sessions_spawn: z
+      .object({
+        attachments: z
+          .object({
+            enabled: z.boolean().optional(),
+            maxTotalBytes: z.number().optional(),
+            maxFiles: z.number().optional(),
+            maxFileBytes: z.number().optional(),
+            retainOnSessionKeep: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -560,7 +574,7 @@ export const MemorySearchSchema = z
     remote: z
       .object({
         baseUrl: z.string().optional(),
-        apiKey: registerSensitive("tools.memorySearch.remote.apiKey", z.string().optional()),
+        apiKey: SecretInputSchema.optional().register(sensitive),
         headers: z.record(z.string(), z.string()).optional(),
         batch: z
           .object({

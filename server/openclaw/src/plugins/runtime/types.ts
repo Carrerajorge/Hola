@@ -72,9 +72,13 @@ type LoadConfig = typeof import("../../config/config.js").loadConfig;
 type WriteConfigFile = typeof import("../../config/config.js").writeConfigFile;
 type RecordChannelActivity = typeof import("../../infra/channel-activity.js").recordChannelActivity;
 type GetChannelActivity = typeof import("../../infra/channel-activity.js").getChannelActivity;
+type OnAgentEvent = typeof import("../../infra/agent-events.js").onAgentEvent;
+type RequestHeartbeatNow = typeof import("../../infra/heartbeat-wake.js").requestHeartbeatNow;
 type EnqueueSystemEvent = typeof import("../../infra/system-events.js").enqueueSystemEvent;
 type RunCommandWithTimeout = typeof import("../../process/exec.js").runCommandWithTimeout;
 type FormatNativeDependencyHint = typeof import("./native-deps.js").formatNativeDependencyHint;
+type OnSessionTranscriptUpdate =
+  typeof import("../../sessions/transcript-events.js").onSessionTranscriptUpdate;
 type LoadWebMedia = typeof import("../../web/media.js").loadWebMedia;
 type DetectMime = typeof import("../../media/mime.js").detectMime;
 type MediaKindFromMime = typeof import("../../media/constants.js").mediaKindFromMime;
@@ -184,6 +188,7 @@ export type PluginRuntime = {
   };
   system: {
     enqueueSystemEvent: EnqueueSystemEvent;
+    requestHeartbeatNow: RequestHeartbeatNow;
     runCommandWithTimeout: RunCommandWithTimeout;
     formatNativeDependencyHint: FormatNativeDependencyHint;
   };
@@ -202,6 +207,10 @@ export type PluginRuntime = {
     createMemoryGetTool: CreateMemoryGetTool;
     createMemorySearchTool: CreateMemorySearchTool;
     registerMemoryCli: RegisterMemoryCli;
+  };
+  events: {
+    onAgentEvent: OnAgentEvent;
+    onSessionTranscriptUpdate: OnSessionTranscriptUpdate;
   };
   channel: {
     text: {

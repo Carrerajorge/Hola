@@ -95,6 +95,60 @@ describe("Planner — decompose", () => {
     expect(callArgs.config.responseMimeType).toBe("application/json");
   });
 
+  it("injects active skill routing context into the system prompt", async () => {
+    const mockGenerateContent = vi.fn().mockResolvedValue({
+      text: JSON.stringify({
+        subtasks: [
+          {
+            id: "step_1",
+            description: "Inspect infrastructure health",
+            toolHint: "openclaw_clawi_exec",
+            args: { task: "inspect infra" },
+            dependencies: [],
+            priority: "high",
+            estimatedComplexity: "simple",
+          },
+        ],
+        reasoning: "Use the active infra skill to bias the plan",
+      }),
+    });
+
+    const { getGeminiClient } = await import("../../../lib/gemini");
+    (getGeminiClient as any).mockReturnValue({
+      models: { generateContent: mockGenerateContent },
+    });
+
+    await decompose("Revisa la salud de kubernetes", undefined, {
+      skillContext: {
+        activeSkill: {
+          id: "kubernetes-ops",
+          name: "kubernetes-ops",
+          description: "Operacion de clústeres",
+          badgeLabel: "InfraOps",
+          domainLabel: "Infraestructura, cloud y plataforma",
+          lane: "speed",
+          executionMode: "hybrid",
+          readiness: "setup_required",
+          primaryTools: ["openclaw_clawi_exec", "analyze_data"],
+          fallbackTools: ["synthesize"],
+          requiredScopes: ["external_network", "system"],
+          abilities: ["pod-health", "rollout-status"],
+          searchTerms: ["kubernetes", "pods", "rollout"],
+          routingStrategy: "Inspecciona, actua y valida impacto.",
+          routingNotes: ["Prioriza CLI antes de sintesis."],
+        },
+        relevantSkills: [],
+        routingNotes: ["La skill activa debe sesgar el planner."],
+      },
+    });
+
+    const callArgs = mockGenerateContent.mock.calls[0][0];
+    expect(callArgs.config.systemInstruction).toContain("ACTIVE_SKILL");
+    expect(callArgs.config.systemInstruction).toContain("kubernetes-ops");
+    expect(callArgs.config.systemInstruction).toContain("openclaw_clawi_exec");
+    expect(callArgs.config.systemInstruction).toContain("SKILL_ROUTING_RULES");
+  });
+
   it("returns fallback on Gemini error", async () => {
     const { getGeminiClient } = await import("../../../lib/gemini");
     (getGeminiClient as any).mockReturnValue({

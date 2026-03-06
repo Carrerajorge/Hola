@@ -6,8 +6,9 @@
  * feature flags, environment resolution, migration, and health checking.
  */
 
-const cryptoMod = require("crypto");
-const { EventEmitter } = require("events");
+import * as cryptoMod from "node:crypto";
+import { EventEmitter } from "node:events";
+import { promises as fs } from "node:fs";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -991,7 +992,6 @@ export class ConfigWatcher extends EventEmitter {
    */
   private async readFile(filePath: string): Promise<string | null> {
     try {
-      const fs = require("fs").promises;
       const content = await fs.readFile(filePath, "utf-8");
       return content;
     } catch {

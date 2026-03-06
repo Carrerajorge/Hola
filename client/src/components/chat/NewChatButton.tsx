@@ -29,11 +29,11 @@ export function NewChatButton({
     setTimeout(() => setShowSuccess(false), 800);
   }, [isCreating, onNewChat]);
 
-  const baseClasses = "relative group font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary/20";
+  const baseClasses = "relative group font-medium transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-primary/20";
 
   const variantClasses = {
-    full: "flex items-center justify-between gap-2.5 w-full px-4 py-2.5 text-[13px] rounded-full bg-black/[0.03] dark:bg-white/[0.03] text-foreground hover:bg-black/[0.06] dark:hover:bg-white/[0.06]",
-    compact: "flex items-center justify-center gap-2 px-3 py-1.5 text-[13px] rounded-full bg-black/[0.03] dark:bg-white/[0.03] text-foreground hover:bg-black/[0.06] dark:hover:bg-white/[0.06]",
+    full: "flex w-full items-center justify-between gap-2 rounded-[18px] border border-white/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(244,246,248,0.92))] px-3 py-2 text-[14px] tracking-[-0.02em] text-foreground shadow-[0_24px_48px_-36px_rgba(15,23,42,0.85)] backdrop-blur-xl hover:-translate-y-[1px] hover:border-white hover:shadow-[0_30px_70px_-42px_rgba(15,23,42,0.95)] dark:border-white/10 dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.05))] dark:hover:border-white/15 dark:hover:bg-white/[0.08]",
+    compact: "flex items-center justify-center gap-2 px-3 py-1.5 text-[13px] rounded-full border border-white/60 bg-white/80 text-foreground shadow-sm backdrop-blur-md hover:bg-white dark:border-white/10 dark:bg-white/[0.05] dark:hover:bg-white/[0.08]",
     fab: "fixed bottom-6 right-6 z-50 flex items-center justify-center w-12 h-12 rounded-full border border-border/40 bg-background/80 backdrop-blur-md text-foreground shadow-sm hover:shadow-md hover:-translate-y-0.5 md:hidden transition-all",
   };
 
@@ -49,20 +49,22 @@ export function NewChatButton({
     >
       <div className="flex items-center gap-2">
         {isCreating ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
+          <Loader2 className="h-4 w-4 animate-spin text-primary" />
         ) : showSuccess ? (
-          <Check className="h-4 w-4" />
+          <Check className="h-4 w-4 text-emerald-500" />
         ) : (
-          <SquarePen className="h-4 w-4" />
+          <div className="flex h-7 w-7 items-center justify-center rounded-[12px] border border-black/5 bg-white/90 text-foreground shadow-[0_16px_30px_-24px_rgba(15,23,42,0.7)] transition-all duration-300 group-hover:border-primary/15 group-hover:text-primary dark:border-white/10 dark:bg-white/[0.08]">
+            <SquarePen className="h-3.5 w-3.5" />
+          </div>
         )}
 
         {variant !== "fab" && (
-          <span>{isCreating ? "Creando..." : showSuccess ? "¡Creado!" : "Nuevo chat"}</span>
+          <span className="font-semibold">{isCreating ? "Creando..." : showSuccess ? "¡Creado!" : "New chat"}</span>
         )}
       </div>
 
       {variant === "full" && (
-        <kbd className="hidden lg:inline-flex items-center px-1.5 py-0.5 text-[10px] rounded border border-border text-muted-foreground bg-transparent">
+        <kbd className="hidden lg:inline-flex items-center rounded-full border border-black/5 bg-black/[0.03] px-2 py-0 text-[10px] font-medium tracking-[0.18em] text-muted-foreground shadow-inner dark:border-white/10 dark:bg-white/[0.06]">
           ⌘N
         </kbd>
       )}

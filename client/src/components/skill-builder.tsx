@@ -232,7 +232,11 @@ export function SkillBuilder({ open, onOpenChange, onSave, editingSkill }: Skill
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl p-0 gap-0 overflow-hidden" data-testid="skill-builder-dialog">
+      <DialogContent
+        className="max-w-2xl p-0 gap-0 overflow-hidden"
+        showCloseButton={false}
+        data-testid="skill-builder-dialog"
+      >
         <VisuallyHidden>
           <DialogTitle>Skill Builder</DialogTitle>
           <DialogDescription>

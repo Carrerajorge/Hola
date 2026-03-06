@@ -3,6 +3,16 @@ import { Button } from "@/components/ui/button";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 
+const RECOVERABLE_RUNTIME_RELOAD_KEY = "iliagpt_recoverable_runtime_reload";
+
+function isRecoverableReactRuntimeError(error: Error | null): boolean {
+    const message = error?.message || "";
+    return (
+        /Invalid hook call/i.test(message) ||
+        /Cannot read properties of null \(reading 'use(?:State|Effect|Memo|Reducer|Ref|Context|Callback|Id)'\)/i.test(message)
+    );
+}
+
 interface Props {
     children: ReactNode;
     fallback?: ReactNode;
@@ -22,6 +32,12 @@ export class GlobalErrorBoundary extends Component<Props, State> {
         errorInfo: null,
     };
 
+    public componentDidMount() {
+        if (typeof window !== "undefined") {
+            sessionStorage.removeItem(RECOVERABLE_RUNTIME_RELOAD_KEY);
+        }
+    }
+
     public static getDerivedStateFromError(error: Error): State {
         return { hasError: true, error, errorInfo: null };
     }
@@ -29,10 +45,24 @@ export class GlobalErrorBoundary extends Component<Props, State> {
     public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
         console.error("Uncaught error:", error, errorInfo);
         this.setState({ errorInfo });
+        if (
+            typeof window !== "undefined" &&
+            isRecoverableReactRuntimeError(error) &&
+            !sessionStorage.getItem(RECOVERABLE_RUNTIME_RELOAD_KEY)
+        ) {
+            sessionStorage.setItem(RECOVERABLE_RUNTIME_RELOAD_KEY, "true");
+            window.location.reload();
+            return;
+        }
         // Here you would typically log to an error reporting service
     }
 
     private handleReset = () => {
+        if (typeof window !== "undefined" && isRecoverableReactRuntimeError(this.state.error)) {
+            sessionStorage.removeItem(RECOVERABLE_RUNTIME_RELOAD_KEY);
+            window.location.reload();
+            return;
+        }
         this.setState({ hasError: false, error: null, errorInfo: null });
         this.props.onReset?.();
     };

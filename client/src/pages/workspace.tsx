@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { useLocation } from "wouter";
-import { Sidebar } from "@/components/sidebar";
+import { Sidebar, APP_SIDEBAR_WIDTH_CLASS } from "@/components/sidebar";
 import { MiniSidebar } from "@/components/mini-sidebar";
 import { ChatInterface } from "@/components/chat-interface";
 import { AiStepsRail } from "@/components/ai-steps-rail";
@@ -67,6 +67,10 @@ function WorkspaceContent() {
   const [isAiRailCollapsed, setIsAiRailCollapsed] = useState(false);
   const [isNewChatMode, setIsNewChatMode] = useState(false);
   const [newChatStableKey, setNewChatStableKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    setIsSidebarOpen(!isMobile);
+  }, [isMobile]);
 
   type WorkspaceAiState = "idle" | "thinking" | "responding" | "streaming" | "agent_working" | "sending" | "error" | "done";
   type WorkspaceAiStep = { step: string; status: "pending" | "active" | "done" };
@@ -371,7 +375,7 @@ function WorkspaceContent() {
                 <Menu className="h-5 w-5" />
               </Button>
             </SheetTrigger>
-            <SheetContent side="left" className="p-0 w-80">
+            <SheetContent side="left" className={`p-0 ${APP_SIDEBAR_WIDTH_CLASS}`}>
               {sidebarContent}
             </SheetContent>
           </Sheet>
@@ -387,6 +391,7 @@ function WorkspaceContent() {
               aiStateChatId={aiState === "idle" ? null : activeConversationId}
               aiProcessSteps={aiProcessSteps}
               setAiProcessSteps={setAiProcessSteps}
+              showSidebarToggleWhenCollapsed={false}
             />
           </div>
         </>
@@ -419,10 +424,7 @@ function WorkspaceContent() {
             </>
           ) : (
             <div className="flex-shrink-0">
-              <MiniSidebar
-                onNewChat={handleNewChat}
-                onExpand={() => setIsSidebarOpen(true)}
-              />
+              <MiniSidebar onExpand={() => setIsSidebarOpen(true)} />
             </div>
           )}
 
@@ -460,6 +462,7 @@ function WorkspaceContent() {
                     aiStateChatId={aiState === "idle" ? null : activeConversationId}
                     aiProcessSteps={aiProcessSteps}
                     setAiProcessSteps={setAiProcessSteps}
+                    showSidebarToggleWhenCollapsed={false}
                   />
                 </div>
               </Panel>

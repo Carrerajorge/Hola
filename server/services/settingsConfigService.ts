@@ -31,7 +31,7 @@ const DEFAULT_SETTINGS_MAP: Record<string, any> = {
   session_timeout_minutes: 1440,
 
   // AI models
-  default_model: "grok-4-1-fast-non-reasoning",
+  default_model: "gemini-2.5-flash",
   max_tokens_per_request: 4096,
   enable_streaming: true,
 

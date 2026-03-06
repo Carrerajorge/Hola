@@ -22,6 +22,7 @@ import type { ZodSchema } from "zod";
 import { type AgentEvent } from "./typedStreaming";
 import { costEngine } from "../services/finops/costEngine";
 import { secretManager } from "../services/secretManager";
+import { applyAgentRoleDefaults, type AgentGatewayProvider, type AgentLlmRoleId } from "../services/agentControlPlane";
 
 interface RateLimitState {
   tokens: number;
@@ -40,9 +41,11 @@ interface LLMRequestOptions {
   requestId?: string;
   timeout?: number;
   provider?: LLMProviderOrAuto;
+  agentRole?: AgentLlmRoleId;
   enableFallback?: boolean;
   skipCache?: boolean;
   disableImageGeneration?: boolean;
+  _fromRouter?: boolean; // Internal flag to bypass AgentOS routing
 }
 
 interface LLMResponse {
@@ -199,6 +202,13 @@ function detectProviderFromModel(model: string | undefined): LLMProvider | null 
 }
 
 class LLMGateway {
+  private router: any = null; // AgentOS ModelRouter
+  
+  public setRouter(router: any) {
+    this.router = router;
+    console.log("[LLMGateway] AgentOS ModelRouter registered");
+  }
+
   private xaiClient: OpenAI | null = null;
   private openaiClient: OpenAI | null = null;
   private deepseekClient: OpenAI | null = null;
@@ -804,16 +814,23 @@ class LLMGateway {
     messages: ChatCompletionMessageParam[],
     options: LLMRequestOptions = {}
   ): Promise<LLMResponse> {
-    const requestId = options.requestId || this.generateRequestId();
+    const routedOptions = this.resolveRoutingOptions(options);
+
+    // [AgentOS] Intercept
+    if (this.router && !routedOptions._fromRouter) {
+      return this.router.route({ ...routedOptions, messages });
+    }
+
+    const requestId = routedOptions.requestId || this.generateRequestId();
     const startTime = Date.now();
-    const userId = options.userId || "anonymous";
-    const enableFallback = options.enableFallback !== false;
-    const timeout = options.timeout || DEFAULT_TIMEOUT_MS;
+    const userId = routedOptions.userId || "anonymous";
+    const enableFallback = routedOptions.enableFallback !== false;
+    const timeout = routedOptions.timeout || DEFAULT_TIMEOUT_MS;
 
     this.metrics.totalRequests++;
 
     // Check cache first (Redis with in-memory fallback)
-    const cacheKey = this.getCacheKey(messages, options);
+    const cacheKey = this.getCacheKey(messages, routedOptions);
     if (cacheKey) {
       try {
         const redisCached = await redis.get(cacheKey);
@@ -837,7 +854,7 @@ class LLMGateway {
     }
 
     // Check for duplicate in-flight request
-    const contentHash = this.generateContentHash(messages, options);
+    const contentHash = this.generateContentHash(messages, routedOptions);
     const inFlight = this.getInFlightRequest(contentHash);
     if (inFlight) {
       this.metrics.deduplicatedRequests++;
@@ -851,7 +868,7 @@ class LLMGateway {
     }
 
     // Truncate context (budget is independent from max output tokens; we keep a safe floor for small outputs).
-    const truncationResult = this.truncateContext(messages, this.getTruncationBudget(options.maxTokens));
+    const truncationResult = this.truncateContext(messages, this.getTruncationBudget(routedOptions.maxTokens));
     const truncatedMessages = truncationResult.messages;
     if (truncationResult.truncationApplied) {
       console.log(`[LLMGateway] chat() context truncation: ${truncationResult.originalTokens} → ${truncationResult.finalTokens} tokens, dropped ${truncationResult.droppedMessages} msgs`);
@@ -860,7 +877,7 @@ class LLMGateway {
     // Create the request promise
     const requestPromise = this.executeWithFallback(
       truncatedMessages,
-      { ...options, requestId, timeout },
+      { ...routedOptions, requestId, timeout },
       startTime,
       enableFallback
     );
@@ -1517,9 +1534,21 @@ class LLMGateway {
     messages: ChatCompletionMessageParam[],
     options: LLMRequestOptions = {}
   ): AsyncGenerator<StreamChunk, void, unknown> {
-    const requestId = options.requestId || this.generateRequestId();
-    const userId = options.userId || "anonymous";
-    const enableFallback = options.enableFallback !== false;
+    const routedOptions = this.resolveRoutingOptions(options);
+
+    // [AgentOS] Intercept
+    if (this.router && !routedOptions._fromRouter) {
+      if (typeof this.router.routeStream !== 'function') {
+        console.warn("[LLMGateway] Router registered but routeStream not implemented. Falling back to gateway.");
+      } else {
+        yield* this.router.routeStream({ ...routedOptions, messages });
+        return;
+      }
+    }
+
+    const requestId = routedOptions.requestId || this.generateRequestId();
+    const userId = routedOptions.userId || "anonymous";
+    const enableFallback = routedOptions.enableFallback !== false;
     let sequenceId = 0;
     let accumulatedContent = "";
     const configuredProviders = this.getSmartRoutedProviders();
@@ -1529,11 +1558,11 @@ class LLMGateway {
       );
     }
 
-    if (options.provider && options.provider !== "auto" && !this.isProviderConfigured(options.provider)) {
-      throw new Error(`Provider '${options.provider}' requested but not configured (missing API key).`);
+    if (routedOptions.provider && routedOptions.provider !== "auto" && !this.isProviderConfigured(routedOptions.provider)) {
+      throw new Error(`Provider '${routedOptions.provider}' requested but not configured (missing API key).`);
     }
 
-    const selected = this.selectProvider(options);
+    const selected = this.selectProvider(routedOptions);
     let currentProvider: LLMProvider = this.isProviderConfigured(selected) ? selected : configuredProviders[0];
 
     this.metrics.totalRequests++;
@@ -1542,10 +1571,10 @@ class LLMGateway {
       throw new Error(`Rate limit exceeded for user ${userId}`);
     }
 
-    const truncationResult = this.truncateContext(messages, this.getTruncationBudget(options.maxTokens));
+    const truncationResult = this.truncateContext(messages, this.getTruncationBudget(routedOptions.maxTokens));
     const truncatedMessages = truncationResult.messages;
     // Expose truncation metadata via options for callers to read
-    (options as any).__truncationResult = truncationResult;
+    (routedOptions as any).__truncationResult = truncationResult;
     if (truncationResult.truncationApplied) {
       console.log(`[LLMGateway] streamChat() context truncation: ${truncationResult.originalTokens} → ${truncationResult.finalTokens} tokens, dropped ${truncationResult.droppedMessages} msgs, truncated ${truncationResult.truncatedMessageCount} msgs`);
     }
@@ -1571,10 +1600,10 @@ class LLMGateway {
 
       try {
         const stream = provider === "gemini"
-          ? this.streamGemini(truncatedMessages, options, requestId)
+          ? this.streamGemini(truncatedMessages, routedOptions, requestId)
           : provider === "anthropic"
-            ? this.streamAnthropic(truncatedMessages, options, requestId)
-            : this.streamOpenAICompatible(provider, truncatedMessages, options, requestId);
+            ? this.streamAnthropic(truncatedMessages, routedOptions, requestId)
+            : this.streamOpenAICompatible(provider, truncatedMessages, routedOptions, requestId);
 
         for await (const chunk of this.withIdleTimeout(stream, STREAM_IDLE_TIMEOUT_MS, requestId)) {
           accumulatedContent += chunk.content;
@@ -1826,6 +1855,13 @@ class LLMGateway {
     }
 
     yield { content: "", done: true };
+  }
+
+  private resolveRoutingOptions(options: LLMRequestOptions): LLMRequestOptions {
+    return applyAgentRoleDefaults({
+      ...options,
+      provider: options.provider as AgentGatewayProvider | "auto" | undefined,
+    });
   }
 
   private async * streamAnthropic(
@@ -2172,4 +2208,3 @@ class LLMGateway {
 export const llmGateway = new LLMGateway();
 
 export type { LLMRequestOptions, LLMResponse, StreamChunk, StreamCheckpoint, TokenUsageRecord };
-

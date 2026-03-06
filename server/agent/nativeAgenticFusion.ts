@@ -1,9 +1,9 @@
-import { getOpenClawConfig } from "../openclaw/config";
-import { buildClawiCapabilitiesSummary } from "../openclaw/fusion/clawiCatalog";
-import { initSkills } from "../openclaw/skills/skillLoader";
-import { skillRegistry } from "../openclaw/skills/skillRegistry";
-import { orchestrationEngine } from "../services/orchestrationEngine";
-import { RAGService } from "../services/ragService";
+import { getOpenClawConfig } from "../openclaw/config.ts";
+import { buildClawiCapabilitiesSummary } from "../openclaw/fusion/clawiCatalog.ts";
+import { initSkills } from "../openclaw/skills/skillLoader.ts";
+import { skillRegistry } from "../openclaw/skills/skillRegistry.ts";
+import { orchestrationEngine } from "../services/orchestrationEngine.ts";
+import { RAGService } from "../services/ragService.ts";
 
 const ragService = new RAGService();
 let skillsInitPromise: Promise<void> | null = null;

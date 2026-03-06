@@ -3,7 +3,15 @@ import { storage } from "../storage";
 import { chatService, AVAILABLE_MODELS, DEFAULT_PROVIDER, DEFAULT_MODEL } from "../services/ChatServiceV2";
 import { llmGateway } from "../lib/llmGateway";
 import { buildSystemPromptWithContext, getOrCreateSession, getEnforcedModel, getSessionByChatId, getSessionById, type GptSessionContract } from "../services/gptSessionService";
-import { generateImage, detectImageRequest, extractImagePrompt } from "../services/imageGeneration";
+import {
+  detectImageRequest,
+  detectVideoRequest,
+  extractImagePrompt,
+  extractVideoPrompt,
+  generateImage,
+  generateVideoStoryboardFrames,
+  type ImageGenerationResult,
+} from "../services/imageGeneration";
 import { runETLAgent, getAvailableCountries, getAvailableIndicators } from "../etl";
 import { extractAllAttachmentsContent, extractAttachmentContent, formatAttachmentsAsContext, type Attachment } from "../services/attachmentService";
 import { pareOrchestrator, type RobustRouteResult, type SimpleAttachment } from "../services/pare";
@@ -20,6 +28,7 @@ import { createUnifiedRun, hydrateSessionState, emitTraceEvent, SseBufferedWrite
 import { executeAgentLoop } from "../agent/agentExecutor";
 import type { UnifiedChatRequest, UnifiedChatContext, LatencyMode } from "../agent/unifiedChatHandler";
 import { createRequestSpec, AttachmentSpecSchema } from "../agent/requestSpec";
+import { promptAnalyzer } from "../agent/orchestration";
 import { routeIntent, type IntentResult } from "../services/intentRouter";
 import { questionClassifier, type QuestionClassification } from "../services/questionClassifier";
 import { answerFirstEnforcer } from "../services/answerFirstEnforcer";
@@ -70,9 +79,14 @@ import { recordIntegrityCheck, recordTruncation, recordPromptTokens, recordDropp
 import { promptPreProcessor } from "../lib/promptPreProcessor";
 import { promptAuditStore } from "../lib/promptAuditStore";
 import { promptAnalysisService } from "../services/promptAnalysisService";
+import {
+  looksLikeSuperAgentRequest,
+  shouldUseSuperAgentOrchestration,
+} from "../services/superAgentRouting";
 import * as macos from "../lib/macos";
 import { browserAdapter } from "../agent/webtool/browserAdapter";
 import { browserWorker } from "../agent/browser-worker";
+import { AgentOS } from "../agentos/index";
 
 type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
 const isDebugLogEnabled = process.env.DEBUG === "true";
@@ -98,6 +112,7 @@ const VALID_STREAM_SCOPE_SET = new Set<SkillScope>([
 const STREAM_IDENTIFIER_RE = /^[a-zA-Z0-9._-]{1,140}$/;
 const STREAM_ATTACHMENT_NAME_RE = /^[^<>:\"/\\|?*\u0000-\u001f]{1,220}$/;
 const STREAM_MIME_RE = /^[a-zA-Z0-9][a-zA-Z0-9.+-\/]*/;
+const SUPER_AGENT_STREAMING_ENABLED = process.env.SUPER_AGENT_ORCHESTRATION_ENABLED !== "false";
 
 function extractUserText(content: unknown): string {
   if (typeof content === "string") return content;
@@ -1590,6 +1605,52 @@ function buildLocalActionArtifact(payload?: Record<string, unknown>): Record<str
     path: localPath,
     sizeBytes: typeof payload.bytes === "number" ? payload.bytes : undefined,
     localControl: true,
+  };
+}
+
+function inferImageExtensionFromMimeType(mimeType: string): string {
+  const normalized = String(mimeType || "").toLowerCase();
+  if (normalized.includes("jpeg") || normalized.includes("jpg")) return "jpg";
+  if (normalized.includes("webp")) return "webp";
+  if (normalized.includes("gif")) return "gif";
+  return "png";
+}
+
+function buildGeneratedImageFileName(prompt: string, mimeType: string): string {
+  const slug = String(prompt || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48) || "generated_image";
+  const extension = inferImageExtensionFromMimeType(mimeType);
+  return `${slug}_${Date.now()}.${extension}`;
+}
+
+async function persistGeneratedImageArtifact(
+  imageResult: ImageGenerationResult,
+): Promise<Record<string, unknown>> {
+  const fileName = buildGeneratedImageFileName(imageResult.prompt, imageResult.mimeType);
+  const artifactsDir = path.join(process.cwd(), "artifacts");
+  await fs.mkdir(artifactsDir, { recursive: true });
+
+  const filePath = path.join(artifactsDir, fileName);
+  const imageBuffer = Buffer.from(imageResult.imageBase64, "base64");
+  await fs.writeFile(filePath, imageBuffer);
+
+  const artifactId = `img_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  const artifactUrl = `/api/artifacts/${fileName}`;
+
+  return {
+    artifactId,
+    type: "image",
+    mimeType: imageResult.mimeType || "image/png",
+    name: fileName,
+    filename: fileName,
+    model: imageResult.model,
+    downloadUrl: artifactUrl,
+    previewUrl: artifactUrl,
+    size: imageBuffer.length,
+    sizeBytes: imageBuffer.length,
   };
 }
 
@@ -4513,6 +4574,32 @@ function writeSse(res: Response, event: string, data: object): boolean {
   }
 }
 
+function splitAssistantTextForSse(text: string, maxChars = 1200): string[] {
+  const normalized = String(text || "").trim();
+  if (!normalized) return [];
+  if (normalized.length <= maxChars) return [normalized];
+
+  const chunks: string[] = [];
+  let remaining = normalized;
+  while (remaining.length > maxChars) {
+    const window = remaining.slice(0, maxChars);
+    const splitAt = Math.max(
+      window.lastIndexOf("\n\n"),
+      window.lastIndexOf("\n"),
+      window.lastIndexOf(". "),
+      window.lastIndexOf("; "),
+      window.lastIndexOf(", "),
+      window.lastIndexOf(" "),
+    );
+    const safeSplitAt = splitAt > Math.floor(maxChars * 0.45) ? splitAt : maxChars;
+    const chunk = remaining.slice(0, safeSplitAt).trim();
+    if (chunk) chunks.push(chunk);
+    remaining = remaining.slice(safeSplitAt).trim();
+  }
+  if (remaining) chunks.push(remaining);
+  return chunks;
+}
+
 interface CategorizedError {
   category: ErrorCategory;
   userMessage: string;
@@ -5155,14 +5242,25 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         return res.status(400).json({ error: "Prompt is required" });
       }
 
-      console.log("[ImageGen] Generating image for prompt:", prompt);
+      const normalizedPrompt = detectImageRequest(prompt) ? extractImagePrompt(prompt) : String(prompt).trim();
+      console.log("[ImageGen] Generating image for prompt:", normalizedPrompt);
 
-      const result = await generateImage(prompt);
+      const result = await generateImage(normalizedPrompt, {
+        preferredModel: process.env.GEMINI_IMAGE_MODEL || "gemini-3.1-flash-image-preview",
+      });
+      const artifact = await persistGeneratedImageArtifact(result);
 
       res.json({
         success: true,
         imageData: `data:${result.mimeType};base64,${result.imageBase64}`,
-        prompt: result.prompt
+        prompt: result.prompt,
+        model: result.model,
+        artifactId: artifact.artifactId,
+        downloadUrl: artifact.downloadUrl,
+        previewUrl: artifact.previewUrl,
+        fileName: artifact.filename,
+        size: artifact.size,
+        mimeType: result.mimeType,
       });
     } catch (error: any) {
       console.error("Image generation error:", error);
@@ -5183,6 +5281,48 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
     const extractedPrompt = isImageRequest ? extractImagePrompt(message) : null;
 
     res.json({ isImageRequest, extractedPrompt });
+  });
+
+  router.post("/video/generate", async (req, res) => {
+    try {
+      const { prompt, frameCount, durationSec, aspectRatio } = req.body || {};
+
+      if (!prompt || typeof prompt !== "string") {
+        return res.status(400).json({ error: "Prompt is required" });
+      }
+
+      const normalizedPrompt = detectVideoRequest(prompt) ? extractVideoPrompt(prompt) : prompt.trim();
+      console.log("[VideoGen] Generating storyboard frames for prompt:", normalizedPrompt);
+
+      const result = await generateVideoStoryboardFrames(normalizedPrompt, {
+        frameCount,
+        durationSec,
+        aspectRatio,
+      });
+
+      res.json({
+        success: true,
+        mode: result.mode,
+        prompt: result.prompt,
+        summary: result.summary,
+        plannerModel: result.plannerModel,
+        frames: result.frames.map((frame) => ({
+          index: frame.index,
+          title: frame.title,
+          caption: frame.caption,
+          seconds: frame.seconds,
+          prompt: frame.prompt,
+          model: frame.model,
+          imageData: `data:${frame.mimeType};base64,${frame.imageBase64}`,
+        })),
+      });
+    } catch (error: any) {
+      console.error("Video generation fallback error:", error);
+      res.status(500).json({
+        error: "Failed to generate storyboard frames for video request",
+        details: error.message,
+      });
+    }
   });
 
   router.get("/etl/config", async (req, res) => {
@@ -5399,6 +5539,18 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       let latencyMode: LatencyMode = ['fast', 'deep', 'auto'].includes(rawLatencyMode) ? rawLatencyMode : 'auto';
       const workspaceContext = normalizeWorkspaceContext(rawWorkspaceContext);
       const effectiveUserId = getOrCreateSecureUserId(req);
+
+      // [AgentOS] Governance Hook
+      try {
+        const agentOS = AgentOS.getInstance();
+        if (agentOS.status === "ready") {
+           // Log interception (non-blocking for now)
+           console.log(`[AgentOS] Governance: Intercepting request ${requestId} for ${effectiveUserId}`);
+           // In future: await agentOS.control.policy.evaluate({ ... });
+        }
+      } catch (e) {
+        console.warn("[AgentOS] Hook failed:", e);
+      }
       const streamConversationId = sanitizeStreamIdentifier(
         typeof conversationId === "string" && conversationId.trim().length > 0
           ? conversationId
@@ -5414,39 +5566,6 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       let effectiveGptId = typeof rawGptId === "string" ? rawGptId.trim() : "";
       if (effectiveGptId === "default") {
         effectiveGptId = "";
-      }
-
-      if (!effectiveGptId) {
-        const lookupChatId =
-          (typeof chatId === "string" && chatId.trim().length > 0 ? chatId.trim() : "") ||
-          (typeof conversationId === "string" && conversationId.trim().length > 0 ? conversationId.trim() : "");
-        if (lookupChatId) {
-          try {
-            const existingChat = await storage.getChat(lookupChatId);
-            const chatGptId = typeof existingChat?.gptId === "string" ? existingChat.gptId.trim() : "";
-            if (chatGptId) {
-              effectiveGptId = chatGptId;
-            }
-          } catch (chatLookupError) {
-            console.warn("[Stream] Failed to recover gptId from chat metadata:", chatLookupError);
-          }
-        }
-      }
-
-      if (!effectiveSessionId) {
-        const lookupChatId =
-          (typeof chatId === "string" && chatId.trim().length > 0 ? chatId.trim() : "") ||
-          (typeof conversationId === "string" && conversationId.trim().length > 0 ? conversationId.trim() : "");
-        if (lookupChatId) {
-          try {
-            const chatSession = await getSessionByChatId(lookupChatId);
-            if (chatSession?.id) {
-              effectiveSessionId = chatSession.id;
-            }
-          } catch (chatSessionError) {
-            console.warn("[Stream] Failed to recover session from chat metadata:", chatSessionError);
-          }
-        }
       }
 
       cleanConversationStreamLocks();
@@ -5503,6 +5622,46 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       }
       resetIdleTimeout();
 
+      let streamStarted = false;
+      let earlyCloseHandlerBound = false;
+      const bindEarlyCloseHandler = (): void => {
+        if (earlyCloseHandlerBound) return;
+        earlyCloseHandlerBound = true;
+        req.on("close", () => {
+          isConnectionClosed = true;
+          if (heartbeatInterval) {
+            clearInterval(heartbeatInterval);
+          }
+          clearStreamTimeouts();
+          console.log("[SSE] Connection closed (early handler)", { requestId });
+        });
+      };
+      const ensureSseStarted = (mode: LatencyMode): void => {
+        if (!res.headersSent) {
+          res.setHeader("Content-Type", "text/event-stream");
+          res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+          res.setHeader("Connection", "keep-alive");
+          res.setHeader("Transfer-Encoding", "chunked");
+          res.setHeader("X-Accel-Buffering", "no");
+          res.setHeader("X-Content-Type-Options", "nosniff");
+          res.setHeader("X-Request-Id", requestId);
+          res.setHeader("X-Trace-Id", requestId);
+          res.setHeader("X-Latency-Mode", mode);
+          res.flushHeaders();
+        }
+
+        if (!streamStarted && !isConnectionClosed && !(res as any).writableEnded) {
+          streamStarted = true;
+          writeSse(res, "start", {
+            requestId,
+            latencyMode: mode,
+            timestamp: Date.now(),
+          });
+        }
+
+        bindEarlyCloseHandler();
+      };
+
       const parsedSkillScopes = normalizeStreamSkillScopes(skillScopes);
       let docTool: "word" | "excel" | "ppt" | "figma" | null = null;
       if (typeof rawDocTool === "string") {
@@ -5544,136 +5703,22 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         return res.status(400).json({ error: "Messages array is required" });
       }
 
-      // ── Prompt Integrity Check ──
-      // Verify the latest user message was not altered/truncated in transit.
-      const clientPromptLen = (req.body as any).clientPromptLen;
-      const clientPromptHash = (req.body as any).clientPromptHash;
-      if (clientPromptLen != null || clientPromptHash != null) {
-        const latestUserForIntegrity = [...clientMessages].reverse().find((m: any) => m?.role === "user");
-        if (latestUserForIntegrity?.content) {
-          const integrityResult = checkPromptIntegrity(
-            latestUserForIntegrity.content,
-            clientPromptLen,
-            clientPromptHash,
-          );
+      const latestUserForRun = [...clientMessages].reverse().find((m: any) => m?.role === "user");
+      const latestUserTextForRun = extractUserText(latestUserForRun?.content);
 
-          // Record prompt token estimate
-          const promptTokenEst = Math.ceil(latestUserForIntegrity.content.length / 4);
-          recordPromptTokens(promptTokenEst);
-          recordDroppedChars(0); // Invariant: no chars dropped at this stage
-
-          if (!integrityResult.valid) {
-            recordIntegrityCheck("fail");
-            console.error("[PromptIntegrity] MISMATCH detected", {
-              requestId,
-              mismatchType: integrityResult.mismatchType,
-              clientLen: integrityResult.clientPromptLen,
-              serverLen: integrityResult.serverPromptLen,
-              lenDelta: integrityResult.lenDelta,
-            });
-            return res.status(422).json({
-              error: "PROMPT_INTEGRITY_MISMATCH",
-              message: "The prompt content was altered during transmission. Please retry.",
-              details: {
-                mismatchType: integrityResult.mismatchType,
-                serverLen: integrityResult.serverPromptLen,
-                clientLen: integrityResult.clientPromptLen,
-                lenDelta: integrityResult.lenDelta,
-              },
-            });
-          }
-          recordIntegrityCheck("pass");
-          // Attach integrity metadata to res.locals for downstream logging
-          (res as any).locals.promptIntegrity = {
-            serverPromptLen: integrityResult.serverPromptLen,
-            serverPromptHash: integrityResult.serverPromptHash,
-            verified: true,
-          };
-        }
-      } else {
-        recordIntegrityCheck("skipped");
-      }
-
-      // ── Prompt Pre-Processing Pipeline ──
-      // NFC normalization, language detection, structure analysis, dedup, whitespace cleanup.
-      const latestUserForPreProcess = [...clientMessages].reverse().find((m: any) => m?.role === "user");
-      if (latestUserForPreProcess?.content && typeof latestUserForPreProcess.content === "string") {
-        try {
-          const preProcessResult = promptPreProcessor.process(latestUserForPreProcess.content);
-          recordPreprocessDuration(preProcessResult.processingTimeMs);
-          if (preProcessResult.nfcApplied) recordNfcNormalization();
-          if (preProcessResult.isDuplicate) recordDuplicateDetected();
-          recordLanguageDetected(preProcessResult.language.primaryLanguage);
-
-          // Attach to res.locals for downstream use
-          (res as any).locals.preProcessResult = preProcessResult;
-
-          // Persist pre-processing transformation to audit trail
-          promptAuditStore.logTransformation({
-            chatId: chatId || undefined,
-            runId: runId || undefined,
-            requestId,
-            stage: "normalize",
-            inputTokens: Math.ceil(preProcessResult.originalText.length / 4),
-            outputTokens: Math.ceil(preProcessResult.text.length / 4),
-            droppedChars: preProcessResult.whitespace.originalLen - preProcessResult.whitespace.normalizedLen,
-            transformationDetails: {
-              nfcApplied: preProcessResult.nfcApplied,
-              language: preProcessResult.language.primaryLanguage,
-              isMultiLingual: preProcessResult.language.isMultiLingual,
-              structureType: preProcessResult.structure.type,
-              isDuplicate: preProcessResult.isDuplicate,
-              whitespace: preProcessResult.whitespace,
-            },
-          });
-        } catch (ppErr) {
-          // Pre-processing is non-critical — log and continue
-          console.warn("[PromptPreProcessor] Failed (non-blocking):", ppErr);
-        }
-      }
-
-      // ── Persist integrity check to audit trail ──
-      if (clientPromptLen != null || clientPromptHash != null) {
-        const integrityForAudit = (res as any).locals.promptIntegrity;
-        if (integrityForAudit) {
-          promptAuditStore.saveIntegrityCheck({
-            chatId: chatId || undefined,
-            runId: runId || undefined,
-            messageRole: "user",
-            clientPromptLen,
-            clientPromptHash,
-            serverPromptLen: integrityForAudit.serverPromptLen,
-            serverPromptHash: integrityForAudit.serverPromptHash,
-            valid: integrityForAudit.verified,
-            requestId,
-          });
-        }
-      }
-
-      // Fast local-control path: avoid expensive run-claim/skill-resolution before emitting SSE.
-      const latestUserForLocalControl = [...clientMessages].reverse().find((m: any) => m?.role === "user");
-      const latestUserTextForLocalControl = extractUserText(latestUserForLocalControl?.content);
-      console.log("[LocalControl] Stream interception check:", JSON.stringify(latestUserTextForLocalControl?.slice(0, 120)));
-      const earlyLocalControlResult = await executeLocalControlRequest(latestUserTextForLocalControl, {
+      // Preserve the fast local-control intercept before any run/chat persistence.
+      const localControlStageStart = performance.now();
+      console.log("[LocalControl] Stream interception check:", JSON.stringify(latestUserTextForRun?.slice(0, 120)));
+      const earlyLocalControlResult = await executeLocalControlRequest(latestUserTextForRun, {
         requestId,
         userId: effectiveUserId,
       });
+      recordStage("local_control_ms", localControlStageStart);
       console.log("[LocalControl] Stream interception result:", earlyLocalControlResult.handled ? `HANDLED (${(earlyLocalControlResult as any).code})` : "NOT handled — passing to LLM");
       if (earlyLocalControlResult.handled) {
         const localActionPayload = earlyLocalControlResult.payload || {};
         const localActionArtifact = buildLocalActionArtifact(localActionPayload);
-        if (!res.headersSent) {
-          res.setHeader("Content-Type", "text/event-stream");
-          res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-          res.setHeader("Connection", "keep-alive");
-          res.setHeader("Transfer-Encoding", "chunked");
-          res.setHeader("X-Accel-Buffering", "no");
-          res.setHeader("X-Content-Type-Options", "nosniff");
-          res.setHeader("X-Request-Id", requestId);
-          res.setHeader("X-Trace-Id", requestId);
-          res.flushHeaders();
-          writeSse(res, "start", { requestId, latencyMode, timestamp: Date.now() });
-        }
+        ensureSseStarted(latencyMode);
 
         if (earlyLocalControlResult.ok) {
           writeSse(res, "chunk", {
@@ -5705,22 +5750,6 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         return res.end();
       }
 
-      const resolvedSkillContext = await resolveSkillContextFromRequest(drizzleSkillStore, {
-        userId: effectiveUserId,
-        skillId,
-        skill,
-      });
-      const skillSystemSection = buildSkillSystemPromptSection(resolvedSkillContext);
-      if (skillSystemSection) {
-        console.info("[SkillContext] Applied to /api/chat/stream", {
-          requestId,
-          userId: effectiveUserId,
-          source: resolvedSkillContext?.source,
-          skillId: resolvedSkillContext?.id || null,
-          skillName: resolvedSkillContext?.name,
-        });
-      }
-
       const clientRequestId =
         typeof rawClientRequestId === "string" && rawClientRequestId.trim().length > 0
           ? sanitizeStreamText(rawClientRequestId, MAX_STREAM_REQUEST_ID_LEN)
@@ -5729,8 +5758,6 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         typeof rawUserRequestId === "string" && rawUserRequestId.trim().length > 0
           ? sanitizeStreamText(rawUserRequestId, MAX_STREAM_REQUEST_ID_LEN)
           : undefined;
-      const latestUserForRun = [...clientMessages].reverse().find((m: any) => m?.role === "user");
-      const latestUserTextForRun = extractUserText(latestUserForRun?.content);
       const sanitizedRunAttachments =
         attachments && Array.isArray(attachments)
           ? attachments
@@ -5918,8 +5945,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       ) as any;
 
       const hasAnyAttachments = sanitizedRunAttachments && sanitizedRunAttachments.length > 0;
-      const lastUserMsg = [...clientMessages].reverse().find((m: any) => m.role === 'user');
-      const userQuery = extractUserText(lastUserMsg?.content);
+      const userQuery = latestUserTextForRun;
       const earlyQuestionClassification = questionClassifier.classifyQuestion(userQuery || "");
 
       // Auto: decide based on complexity signals (simple vs complex).
@@ -5942,37 +5968,177 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       }
 
       // ── EARLY SSE SETUP ────────────────────────────────────────────
-      // Open SSE *before* any heavy I/O (web search, academic search,
-      // history augmentation) to minimize TTFT (Time-To-First-Token).
-      const sseAlreadyOpen = res.headersSent;
-      if (!sseAlreadyOpen) {
-        res.setHeader("Content-Type", "text/event-stream");
-        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-        res.setHeader("Connection", "keep-alive");
-        res.setHeader("Transfer-Encoding", "chunked");
-        res.setHeader("X-Accel-Buffering", "no");
-        res.setHeader("X-Content-Type-Options", "nosniff");
-        res.setHeader("X-Request-Id", requestId);
-        res.setHeader("X-Trace-Id", requestId);
-        res.setHeader("X-Latency-Mode", latencyMode);
-        res.flushHeaders();
+      // Open SSE right after the strict run-claim/idempotency section so the
+      // client sees immediate liveness while the rest of the pipeline warms up.
+      ensureSseStarted(latencyMode);
 
-        // Immediately send a start-handshake so the client knows the stream is alive
-        writeSse(res, 'start', {
-          requestId,
-          latencyMode,
-          timestamp: Date.now(),
-        });
-
-        // Register connection-close handler as early as possible so every
-        // subsequent writeSse can be guarded by isConnectionClosed.
-        req.on("close", () => {
-          isConnectionClosed = true;
-          if (heartbeatInterval) {
-            clearInterval(heartbeatInterval);
+      const chatMetadataLookupStageStart = performance.now();
+      if (!effectiveGptId) {
+        const lookupChatId =
+          (typeof chatId === "string" && chatId.trim().length > 0 ? chatId.trim() : "") ||
+          (typeof conversationId === "string" && conversationId.trim().length > 0 ? conversationId.trim() : "");
+        if (lookupChatId) {
+          try {
+            const existingChat = await storage.getChat(lookupChatId);
+            const chatGptId = typeof existingChat?.gptId === "string" ? existingChat.gptId.trim() : "";
+            if (chatGptId) {
+              effectiveGptId = chatGptId;
+            }
+          } catch (chatLookupError) {
+            console.warn("[Stream] Failed to recover gptId from chat metadata:", chatLookupError);
           }
-          clearStreamTimeouts();
-          console.log("[SSE] Connection closed (early handler)", { requestId });
+        }
+      }
+
+      if (!effectiveSessionId) {
+        const lookupChatId =
+          (typeof chatId === "string" && chatId.trim().length > 0 ? chatId.trim() : "") ||
+          (typeof conversationId === "string" && conversationId.trim().length > 0 ? conversationId.trim() : "");
+        if (lookupChatId) {
+          try {
+            const chatSession = await getSessionByChatId(lookupChatId);
+            if (chatSession?.id) {
+              effectiveSessionId = chatSession.id;
+            }
+          } catch (chatSessionError) {
+            console.warn("[Stream] Failed to recover session from chat metadata:", chatSessionError);
+          }
+        }
+      }
+      recordStage("chat_metadata_lookup_ms", chatMetadataLookupStageStart);
+
+      // ── Prompt Integrity Check ──
+      // Verify the latest user message was not altered/truncated in transit.
+      const clientPromptLen = (req.body as any).clientPromptLen;
+      const clientPromptHash = (req.body as any).clientPromptHash;
+      if (clientPromptLen != null || clientPromptHash != null) {
+        const promptIntegrityStageStart = performance.now();
+        if (latestUserForRun?.content) {
+          const integrityResult = checkPromptIntegrity(
+            latestUserForRun.content,
+            clientPromptLen,
+            clientPromptHash,
+          );
+
+          // Record prompt token estimate
+          const promptTokenEst = Math.ceil(latestUserForRun.content.length / 4);
+          recordPromptTokens(promptTokenEst);
+          recordDroppedChars(0); // Invariant: no chars dropped at this stage
+
+          if (!integrityResult.valid) {
+            recordIntegrityCheck("fail");
+            console.error("[PromptIntegrity] MISMATCH detected", {
+              requestId,
+              mismatchType: integrityResult.mismatchType,
+              clientLen: integrityResult.clientPromptLen,
+              serverLen: integrityResult.serverPromptLen,
+              lenDelta: integrityResult.lenDelta,
+            });
+            if (claimedRun) {
+              await storage.updateChatRunStatus(claimedRun.id, "failed", "PROMPT_INTEGRITY_MISMATCH").catch(() => null);
+              runFinalized = true;
+            }
+            writeSse(res, "error", {
+              code: "PROMPT_INTEGRITY_MISMATCH",
+              error: "The prompt content was altered during transmission. Please retry.",
+              message: "The prompt content was altered during transmission. Please retry.",
+              details: {
+                mismatchType: integrityResult.mismatchType,
+                serverLen: integrityResult.serverPromptLen,
+                clientLen: integrityResult.clientPromptLen,
+                lenDelta: integrityResult.lenDelta,
+              },
+              requestId,
+              timestamp: Date.now(),
+            });
+            return res.end();
+          }
+          recordIntegrityCheck("pass");
+          // Attach integrity metadata to res.locals for downstream logging
+          (res as any).locals.promptIntegrity = {
+            serverPromptLen: integrityResult.serverPromptLen,
+            serverPromptHash: integrityResult.serverPromptHash,
+            verified: true,
+          };
+        }
+        recordStage("prompt_integrity_ms", promptIntegrityStageStart);
+      } else {
+        recordIntegrityCheck("skipped");
+      }
+
+      // ── Prompt Pre-Processing Pipeline ──
+      // NFC normalization, language detection, structure analysis, dedup, whitespace cleanup.
+      if (latestUserForRun?.content && typeof latestUserForRun.content === "string") {
+        const preProcessStageStart = performance.now();
+        try {
+          const preProcessResult = promptPreProcessor.process(latestUserForRun.content);
+          recordPreprocessDuration(preProcessResult.processingTimeMs);
+          if (preProcessResult.nfcApplied) recordNfcNormalization();
+          if (preProcessResult.isDuplicate) recordDuplicateDetected();
+          recordLanguageDetected(preProcessResult.language.primaryLanguage);
+
+          // Attach to res.locals for downstream use
+          (res as any).locals.preProcessResult = preProcessResult;
+
+          // Persist pre-processing transformation to audit trail
+          promptAuditStore.logTransformation({
+            chatId: chatId || undefined,
+            runId: runId || undefined,
+            requestId,
+            stage: "normalize",
+            inputTokens: Math.ceil(preProcessResult.originalText.length / 4),
+            outputTokens: Math.ceil(preProcessResult.text.length / 4),
+            droppedChars: preProcessResult.whitespace.originalLen - preProcessResult.whitespace.normalizedLen,
+            transformationDetails: {
+              nfcApplied: preProcessResult.nfcApplied,
+              language: preProcessResult.language.primaryLanguage,
+              isMultiLingual: preProcessResult.language.isMultiLingual,
+              structureType: preProcessResult.structure.type,
+              isDuplicate: preProcessResult.isDuplicate,
+              whitespace: preProcessResult.whitespace,
+            },
+          });
+        } catch (ppErr) {
+          // Pre-processing is non-critical — log and continue
+          console.warn("[PromptPreProcessor] Failed (non-blocking):", ppErr);
+        } finally {
+          recordStage("prompt_preprocess_ms", preProcessStageStart);
+        }
+      }
+
+      // ── Persist integrity check to audit trail ──
+      if (clientPromptLen != null || clientPromptHash != null) {
+        const integrityForAudit = (res as any).locals.promptIntegrity;
+        if (integrityForAudit) {
+          promptAuditStore.saveIntegrityCheck({
+            chatId: chatId || undefined,
+            runId: runId || undefined,
+            messageRole: "user",
+            clientPromptLen,
+            clientPromptHash,
+            serverPromptLen: integrityForAudit.serverPromptLen,
+            serverPromptHash: integrityForAudit.serverPromptHash,
+            valid: integrityForAudit.verified,
+            requestId,
+          });
+        }
+      }
+
+      const skillContextStageStart = performance.now();
+      const resolvedSkillContext = await resolveSkillContextFromRequest(drizzleSkillStore, {
+        userId: effectiveUserId,
+        skillId,
+        skill,
+      });
+      const skillSystemSection = buildSkillSystemPromptSection(resolvedSkillContext);
+      recordStage("skill_context_ms", skillContextStageStart);
+      if (skillSystemSection) {
+        console.info("[SkillContext] Applied to /api/chat/stream", {
+          requestId,
+          userId: effectiveUserId,
+          source: resolvedSkillContext?.source,
+          skillId: resolvedSkillContext?.id || null,
+          skillName: resolvedSkillContext?.name,
         });
       }
 
@@ -5981,12 +6147,76 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       let agentLoopHandled = false;
       let shouldRunModel = true;
       let skillSeedForModel = "";
+      let streamedAssistantMetadata: Record<string, unknown> | undefined;
       // NOTE: doneSent is attached to `res` so that the bundler cannot
       // rename or tree-shake it across try/catch/finally boundaries.
       // Previous attempts with local variables (`let doneSent`, `const streamFlags`)
       // were broken by the bundler renaming the variable in try but not catch/finally.
       (res as any).__doneSent = false;
       let skillExecutionResult: SkillExecutionResult | null = null;
+
+      const earlyImagePrompt =
+        !hasAnyAttachments && !docTool && detectImageRequest(userQuery)
+          ? extractImagePrompt(userQuery)
+          : "";
+      if (earlyImagePrompt && !isConnectionClosed) {
+        try {
+          console.log(`[Stream] Early image generation intercept: "${earlyImagePrompt.slice(0, 120)}"`);
+          const imageResult = await generateImage(earlyImagePrompt, {
+            preferredModel: process.env.GEMINI_IMAGE_MODEL || "gemini-3.1-flash-image-preview",
+          });
+          const imageArtifact = await persistGeneratedImageArtifact(imageResult);
+
+          markFirstToken();
+          writeSse(res, "chunk", {
+            content: "Aquí está la imagen que generé basada en tu descripción.",
+            requestId,
+            runId: runId || requestId,
+            timestamp: Date.now(),
+            artifact: imageArtifact,
+          });
+          writeSse(res, "done", {
+            requestId,
+            runId: runId || requestId,
+            latencyMode,
+            traceId: requestId,
+            timestamp: Date.now(),
+            artifact: imageArtifact,
+            model: imageResult.model,
+          });
+
+          if (claimedRun) {
+            await storage.updateChatRunStatus(claimedRun.id, "done");
+            runFinalized = true;
+          }
+
+          return res.end();
+        } catch (imageError: any) {
+          const message = imageError?.message || "No se pudo generar la imagen solicitada.";
+          console.error("[Stream] Early image generation failed:", imageError);
+
+          if (claimedRun) {
+            await storage.updateChatRunStatus(claimedRun.id, "failed", message);
+            runFinalized = true;
+          }
+
+          writeSse(res, "error", {
+            code: "IMAGE_GENERATION_FAILED",
+            error: message,
+            message,
+            requestId,
+            timestamp: Date.now(),
+          });
+          writeSse(res, "done", {
+            requestId,
+            runId: runId || requestId,
+            latencyMode,
+            traceId: requestId,
+            timestamp: Date.now(),
+          });
+          return res.end();
+        }
+      }
 
       const effectiveSkillRunId = claimedRun?.id || sanitizeStreamText(runId, MAX_STREAM_REQUEST_ID_LEN) || requestId;
       const emitSkillTrace = (trace: { stage: string; status: string; message: string; details?: Record<string, unknown> }) => {
@@ -6203,7 +6433,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           const quick = await llmGateway.chat(llmMessages as any, {
             userId: effectiveUserId || streamConversationId || "anonymous",
             requestId,
-            model: model || DEFAULT_MODEL,
+            model: model || undefined,
+            agentRole: model ? undefined : "speed",
             provider,
             maxTokens: Math.min(answerFirstPrompt.maxTokens || 300, 600), // Was 200 cap — caused mid-sentence truncation on simple questions
             temperature: 0.2,
@@ -7690,6 +7921,150 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
         phase: 'planning'
       }).catch(() => { });
 
+      if (
+        SUPER_AGENT_STREAMING_ENABLED &&
+        shouldRunModel &&
+        !agentLoopHandled &&
+        userMessageText &&
+        !docTool &&
+        imagePartsForVision.length === 0
+      ) {
+        const superAgentContext = {
+          hasAttachments: hasAttachments || Boolean(attachmentContext),
+          hasActiveDocuments: Boolean(docTool) || Boolean(attachmentContext && hasAttachments),
+          conversationLength: formattedMessages.length,
+        };
+
+        if (looksLikeSuperAgentRequest(userMessageText, superAgentContext)) {
+          try {
+            const superAgentAnalysis = await promptAnalyzer.analyze(userMessageText, {
+              sessionId: streamConversationId || `session_${Date.now()}`,
+              userId: userId || "anonymous",
+              chatId: effectiveChatIdForPersistence || `chat_${Date.now()}`,
+              runId: effectiveRunId,
+              messages: formattedMessages.map((message) => ({
+                role: message.role,
+                content: extractUserText(message.content),
+                timestamp: Date.now(),
+              })),
+              attachments: attachmentSpecs,
+            });
+
+            if (
+              shouldUseSuperAgentOrchestration({
+                message: userMessageText,
+                context: superAgentContext,
+                analysis: superAgentAnalysis,
+              })
+            ) {
+              writeSse(res, "agent_progress", {
+                stepId: "superagent_boot",
+                status: "started",
+                message: "Activando modo superagente.",
+                detail: {
+                  intent: superAgentAnalysis.intent,
+                  complexity: superAgentAnalysis.complexity,
+                  suggestedAgents: superAgentAnalysis.suggestedAgents,
+                },
+                runId: effectiveRunId,
+                timestamp: Date.now(),
+              });
+
+              const superAgentResponse = await chatService.chat(
+                formattedMessages.map((message) => ({
+                  role: message.role,
+                  content: extractUserText(message.content),
+                })),
+                {
+                useRag,
+                conversationId: effectiveChatIdForPersistence,
+                userId,
+                gptSession: gptSessionContract ? { contract: gptSessionContract } : undefined,
+                documentMode: undefined,
+                figmaMode: false,
+                provider: effectiveProvider,
+                model: effectiveModel,
+                attachmentContext,
+                forceDirectResponse: hasAttachments && attachmentContext.length > 0,
+                hasRawAttachments: hasAttachments,
+                onAgentProgress: (update) => {
+                  writeSse(res, "agent_progress", {
+                    stepId: update.stepId,
+                    status: update.status,
+                    message: update.message,
+                    detail: update.detail,
+                    runId: update.runId || effectiveRunId,
+                    timestamp: Date.now(),
+                  });
+                },
+              });
+
+              if (
+                superAgentResponse.wasAgentTask ||
+                superAgentResponse.agenticMetadata?.mode === "orchestrated"
+              ) {
+                fullContent = superAgentResponse.content || "";
+                shouldRunModel = false;
+                agentLoopHandled = true;
+
+                if (Array.isArray(superAgentResponse.webSources) && superAgentResponse.webSources.length > 0) {
+                  detectedWebSources = superAgentResponse.webSources;
+                }
+
+                streamedAssistantMetadata = {
+                  ...(superAgentResponse.metadata || {}),
+                  wasAgentTask: true,
+                  agentRunId: superAgentResponse.agentRunId || superAgentResponse.agenticMetadata?.runId || null,
+                  pipelineSteps: superAgentResponse.pipelineSteps ?? null,
+                  pipelineSuccess: superAgentResponse.pipelineSuccess ?? null,
+                  agenticMetadata: superAgentResponse.agenticMetadata || null,
+                  artifacts: superAgentResponse.artifacts || null,
+                };
+
+                if (!isConnectionClosed) {
+                  const superAgentRunId =
+                    superAgentResponse.agentRunId ||
+                    superAgentResponse.agenticMetadata?.runId ||
+                    effectiveRunId;
+                  const chunks = splitAssistantTextForSse(fullContent);
+
+                  for (const chunk of chunks) {
+                    lastAckSequence += 1;
+                    writeSse(res, "chunk", {
+                      content: chunk,
+                      sequenceId: lastAckSequence,
+                      requestId,
+                      runId: superAgentRunId,
+                      timestamp: Date.now(),
+                    });
+                  }
+
+                  (res as any).__doneSent = true;
+                  writeSse(res, "done", {
+                    requestId,
+                    runId: superAgentRunId,
+                    latencyLane: "brain",
+                    webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
+                    metadata: superAgentResponse.metadata,
+                    agentRunId: superAgentResponse.agentRunId,
+                    wasAgentTask: superAgentResponse.wasAgentTask,
+                    pipelineSteps: superAgentResponse.pipelineSteps,
+                    pipelineSuccess: superAgentResponse.pipelineSuccess,
+                    agenticMetadata: superAgentResponse.agenticMetadata,
+                    artifact: superAgentResponse.artifact,
+                    artifacts: superAgentResponse.artifacts,
+                    timestamp: Date.now(),
+                    ...sessionMetadata,
+                  });
+                }
+              }
+            }
+          } catch (superAgentStreamError: any) {
+            console.error("[Stream] Super-agent orchestration fallback:", superAgentStreamError?.message || superAgentStreamError);
+          }
+        }
+      }
+
       // Apply dynamic token limit based on question type (Answer-First)
       const hasWebSearchContext = webSearchContextForLLM.length > 0;
       const effectiveMaxTokens = hasWebSearchContext
@@ -7962,6 +8337,7 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
           const metadata: Record<string, any> = {};
           if (detectedWebSources.length > 0) metadata.webSources = detectedWebSources;
           if (cotSteps.length > 0) metadata.steps = cotSteps;
+          if (streamedAssistantMetadata) Object.assign(metadata, streamedAssistantMetadata);
 
           const finalMetadata = Object.keys(metadata).length > 0 ? metadata : undefined;
 

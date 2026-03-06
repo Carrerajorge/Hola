@@ -3,6 +3,8 @@
 // SuperPlanner Orchestrator — Type definitions
 // ---------------------------------------------------------------------------
 
+import type { PlannerSkillContext } from "@shared/skills/skillOperationalCatalog";
+
 export type SubTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 export type PlanStatus = 'planning' | 'executing' | 'replanning' | 'completed' | 'failed';
 export type Priority = 'critical' | 'high' | 'normal';
@@ -69,18 +71,22 @@ export interface OrchestratorOptions {
   userId?: string;
   chatId?: string;
   sseRes?: any;
+  skillContext?: PlannerSkillContext | null;
   maxRetries?: number;
   maxReplanAttempts?: number;
   timeout?: number;
   workspaceRoot?: string;
+  plannerOutput?: PlannerOutput;
 }
 
 export interface OrchestratorResult {
   planId: string;
   status: 'completed' | 'partial' | 'failed';
   results: Record<string, any>;
+  errors?: Record<string, string>;
   finalOutput: any;
   timeline: ProcessMemory['timeline'];
+  subtasks?: SubTask[];
   stats: {
     totalSubtasks: number;
     completed: number;
