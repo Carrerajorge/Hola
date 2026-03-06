@@ -1,7 +1,9 @@
-import { Router } from "express"; import { z } from "zod"; import crypto from "crypto"; import { db } from "../db"; 
-import { workspaceNodes, nodePairings, workspaceNodeJobs, users } from "@shared/schema";
-import { and, desc, eq, gt, isNull, sql } from "drizzle-orm"; import { validateBody } from "../middleware/validateRequest"; import { getUserId } from "../types/express"; import { requireNodeAuth, 
-getNode } from "../middleware/nodeAuth";
+import { Router } from "express"; import { z } from "zod"; import crypto from 
+"crypto"; import { db } from "../db"; import { workspaceNodes, nodePairings, 
+workspaceNodeJobs, users } from "@shared/schema"; import { and, desc, eq, gt, 
+isNull, sql } from "drizzle-orm"; import { validateBody } from 
+"../middleware/validateRequest"; import { getUserId } from "../types/express"; 
+import { requireNodeAuth, getNode } from "../middleware/nodeAuth";
 
 const PAIRING_TTL_MINUTES = 5;
 
@@ -63,7 +65,7 @@ export function createNodesRouter(): Router {
   // =====================
 
   // GET /api/workspace/nodes
-  router.get("/api/workspace/nodes", async (req, res) => {
+  router.get("/workspace/nodes", async (req, res) => {
     const actor = await getActor(req);
     if (!actor) return res.status(401).json({ success: false, error: "Debes iniciar sesión" });
 
@@ -97,7 +99,7 @@ export function createNodesRouter(): Router {
   });
 
   // POST /api/workspace/nodes/pair
-  router.post("/api/workspace/nodes/pair", validateBody(pairSchema), async (req, res) => {
+  router.post("/workspace/nodes/pair", validateBody(pairSchema), async (req, res) => {
     const actor = await getActor(req);
     if (!actor) return res.status(401).json({ success: false, error: "Debes iniciar sesión" });
 
@@ -117,7 +119,7 @@ export function createNodesRouter(): Router {
   });
 
   // POST /api/workspace/nodes/:nodeId/revoke
-  router.post("/api/workspace/nodes/:nodeId/revoke", async (req, res) => {
+  router.post("/workspace/nodes/:nodeId/revoke", async (req, res) => {
     const actor = await getActor(req);
     if (!actor) return res.status(401).json({ success: false, error: "Debes iniciar sesión" });
 
@@ -135,7 +137,7 @@ export function createNodesRouter(): Router {
   });
 
   // POST /api/workspace/nodes/jobs
-  router.post("/api/workspace/nodes/jobs", validateBody(createJobSchema), async (req, res) => {
+  router.post("/workspace/nodes/jobs", validateBody(createJobSchema), async (req, res) => {
     const actor = await getActor(req);
     if (!actor) return res.status(401).json({ success: false, error: "Debes iniciar sesión" });
 
@@ -162,7 +164,7 @@ export function createNodesRouter(): Router {
   });
 
   // GET /api/workspace/nodes/:nodeId/jobs
-  router.get("/api/workspace/nodes/:nodeId/jobs", async (req, res) => {
+  router.get("/workspace/nodes/:nodeId/jobs", async (req, res) => {
     const actor = await getActor(req);
     if (!actor) return res.status(401).json({ success: false, error: "Debes iniciar sesión" });
 
@@ -198,7 +200,7 @@ export function createNodesRouter(): Router {
   // =====================
 
   // POST /api/nodes/pair/complete
-  router.post("/api/nodes/pair/complete", validateBody(confirmSchema), async (req, res) => {
+  router.post("/nodes/pair/complete", validateBody(confirmSchema), async (req, res) => {
     const { code, name, platform, agentVersion, capabilities } = req.body as any;
 
     const now = new Date();
@@ -252,13 +254,13 @@ export function createNodesRouter(): Router {
   });
 
   // Backwards-compatible alias. Remove once device-agent uses /complete everywhere.
-  router.post("/api/nodes/pair/confirm", validateBody(confirmSchema), async (req, res) => {
-    return res.redirect(307, "/api/nodes/pair/complete");
+  router.post("/nodes/pair/confirm", validateBody(confirmSchema), async (req, res) => {
+    return res.redirect(307, "/nodes/pair/complete");
   });
 
   // Node polls for queued jobs (MVP; WS comes next)
   // GET /api/nodes/jobs/poll
-  router.get("/api/nodes/jobs/poll", requireNodeAuth, async (req, res) => {
+  router.get("/nodes/jobs/poll", requireNodeAuth, async (req, res) => {
     const node = getNode(req);
     if (!node) return res.status(401).json({ success: false, error: "Unauthorized" });
 
@@ -334,8 +336,7 @@ export function createNodesRouter(): Router {
 
   // Node posts job result
   // POST /api/nodes/jobs/:jobId/result
-  router.post(
-    "/api/nodes/jobs/:jobId/result",
+  router.post("/nodes/jobs/:jobId/result",
     // requireNodeAuth, // DEBUG: Temporarily disable auth for testing 404
     validateBody(z.object({ status: z.enum(["succeeded", "failed"]), result: z.any().optional(), error: z.string().optional() })),
     async (req, res) => {
