@@ -32,6 +32,10 @@ services:
 
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/${POSTGRES_DB:-iliagpt}
 
+      REDIS_PASSWORD: carrerajorge84secure
+
+      REDIS_URL: redis://:carrerajorge84secure@redis:6379/
+
       AGENT_WORKSPACE_ROOT: /app/sandbox_workspace
 
       # Use isolated runner for shell_command execution (no docker socket in app)
