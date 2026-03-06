@@ -336,9 +336,10 @@ export function createNodesRouter(): Router {
 
   // Node posts job result
   // POST /api/nodes/jobs/:jobId/result
-  router.post("/nodes/jobs/:jobId/result",
-    // requireNodeAuth, // DEBUG: Temporarily disable auth for testing 404
-    validateBody(z.object({ status: z.enum(["succeeded", "failed", "running", "cancelled"]), result: z.any().optional(), error: z.string().optional() })),
+  router.post(
+    "/api/nodes/jobs/:jobId/result",
+    requireNodeAuth,
+    validateBody(z.object({ status: z.enum(["running", "succeeded", "failed"]), result: z.any().optional(), error: z.string().optional().nullable() })),
     async (req, res) => {
       const requestId = (req as any).correlationId || (req as any).requestId || (req.headers["x-request-id"] as string) || null;
       try {
@@ -348,45 +349,47 @@ export function createNodesRouter(): Router {
         const jobId = String((req.params as any).jobId || "").trim();
         if (!jobId) return res.status(400).json({ success: false, error: "jobId required" });
 
+        const { status, result, error } = req.body as any;
+
         // Ensure job belongs to node
+        // Use select explicit columns to avoid issues with schema vs DB mismatch
         const [job] = await db
-          .select({ id: workspaceNodeJobs.id })
+          .select({
+            id: workspaceNodeJobs.id,
+            startedAt: workspaceNodeJobs.startedAt
+          })
           .from(workspaceNodeJobs)
           .where(and(eq(workspaceNodeJobs.id, jobId), eq(workspaceNodeJobs.nodeId, node.id), eq(workspaceNodeJobs.orgId, node.orgId)))
           .limit(1);
+
         if (!job) return res.status(404).json({ success: false, error: "Job not found" });
 
-        const { status, result, error } = req.body as any;
+        const now = new Date();
+        const updateData: any = {
+          status,
+          updatedAt: now,
+        };
 
-        const isTerminal = status === "succeeded" || status === "failed" || status === "cancelled";
-        const isRunning = status === "running";
+        if (status === "running") {
+           // If moving to running and not started yet, set startedAt
+           if (!job.startedAt) {
+             updateData.startedAt = now;
+           }
+        } else {
+           // Terminal states (succeeded/failed)
+           updateData.finishedAt = now;
+           if (result !== undefined) updateData.result = result;
+           if (error !== undefined) updateData.error = error;
+        }
 
-        await db
-          .update(workspaceNodeJobs)
-          .set({
-            status,
-            result: result ?? null,
-            error: error ?? null,
-            startedAt: isRunning ? sql`COALESCE(${workspaceNodeJobs.startedAt}, NOW())` : undefined,
-            finishedAt: isTerminal ? new Date() : undefined,
-          })
-          .where(eq(workspaceNodeJobs.id, jobId));
+        await db.update(workspaceNodeJobs).set(updateData).where(eq(workspaceNodeJobs.id, jobId));
+
         return res.json({ success: true });
       } catch (e: any) {
-        // Some environments don't emit stack traces to container logs unless explicitly printed.
-        console.error(
-          `[nodes] job result failed requestId=${requestId || "unknown"} nodeId=${(getNode(req) as any)?.id || "unknown"} jobId=${(req.params as any)?.jobId || ""} error=${e?.message || e}`,
-          e?.stack
-        );
-        return res.status(500).json({
-          success: false,
-          error: "Internal error",
-          code: "NODES_JOB_RESULT_INTERNAL",
-          requestId: requestId || undefined,
-        });
+        console.error(`[nodes] job result failed: ${e.message}`, e);
+        return res.status(500).json({ success: false, error: "Internal error" });
       }
     }
   );
-
   return router;
 }

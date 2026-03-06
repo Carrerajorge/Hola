@@ -1,4 +1,5 @@
 import type { Express, Request, Response } from "express";
+import { createNodesRouter } from "./routes/nodesRouter";
 import { type AuthenticatedRequest, getUserId } from "./types/express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
@@ -845,7 +846,7 @@ export async function registerRoutes(
 
   // ===== Device Control (autonomy primitives: local/remote terminal + browser) =====
   app.use("/api/device-control", createDeviceControlRouter());
-
+  app.use(createNodesRouter());
   // ===== Browser & Terminal Control =====
   app.use("/api/browser-control", createBrowserControlRouter());
   app.use("/api/terminal", requireAdminMiddleware, require2FA, createTerminalControlRouter());
