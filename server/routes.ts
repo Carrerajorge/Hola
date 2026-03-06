@@ -594,6 +594,8 @@ export async function registerRoutes(
   );
 
   app.use("/api/ppt", pptExportRouter);
+  // Node / Device Agent routes (API for external nodes)
+  app.use("/api", createNodesRouter());
   app.use("/api", createChatsRouter());
   app.use(createFilesRouter());
   app.use(createLocalStorageRouter());
@@ -614,7 +616,6 @@ export async function registerRoutes(
   app.use(createFigmaRouter());
   app.use(createLibraryRouter());
   app.use(createWorkspaceRouter());
-  app.use(createNodesRouter());
   app.use(createCodeRouter());
   app.use(createUserRouter());
   app.use("/api", createChatAiRouter(broadcastAgentUpdate));
