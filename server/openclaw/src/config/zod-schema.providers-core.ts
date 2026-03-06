@@ -686,13 +686,17 @@ export const SlackAccountSchema = z
     });
   });
 
-export const SlackConfigSchema = SlackAccountSchema.safeExtend({
-  mode: z.enum(["socket", "http"]).optional().default("socket"),
-  signingSecret: z.string().optional().register(sensitive),
-  webhookPath: z.string().optional().default("/slack/events"),
-  groupPolicy: GroupPolicySchema.optional().default("allowlist"),
-  accounts: z.record(z.string(), SlackAccountSchema.optional()).optional(),
-}).superRefine((value, ctx) => {
+export const SlackConfigSchema = SlackAccountSchema.and(
+  z
+    .object({
+      mode: z.enum(["socket", "http"]).optional().default("socket"),
+      signingSecret: z.string().optional().register(sensitive),
+      webhookPath: z.string().optional().default("/slack/events"),
+      groupPolicy: GroupPolicySchema.optional().default("allowlist"),
+      accounts: z.record(z.string(), SlackAccountSchema.optional()).optional(),
+    })
+    .strict(),
+).superRefine((value, ctx) => {
   const baseMode = value.mode ?? "socket";
   if (baseMode === "http" && !value.signingSecret) {
     ctx.addIssue({
