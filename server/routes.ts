@@ -611,6 +611,23 @@ export async function registerRoutes(
   app.use("/api/telemetry", createTelemetryRouter());
 
   const { createPublicReleasesRouter } = await import("./routes/releasesRouter");
+  // DEBUG: Temporary endpoint to list all registered Express routes
+    app.get("/api/debug/routes", (req, res) => {
+      const routePaths: string[] = [];
+      app._router.stack.forEach((middleware: any) => {
+        if (middleware.route) { // Routes registered directly on the app
+          routePaths.push(middleware.route.path);
+        } else if (middleware.name === 'router') { // Routers mounted on the app
+          middleware.handle.stack.forEach((handler: any) => {
+            if (handler.route) {
+              routePaths.push(handler.route.path);
+            }
+          });
+        }
+      });
+      res.json({ routes: routePaths });
+    });
+
   app.use("/api/public/releases", createPublicReleasesRouter());
 
   app.use(createFigmaRouter());
