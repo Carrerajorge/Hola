@@ -16,7 +16,7 @@ IFS=$'\n\t'
 #    DRY_RUN              — set to "true" for preflight only (no deploy)
 # ═══════════════════════════════════════════════════════════
 
-readonly SCRIPT_VERSION="3.3.0"
+readonly SCRIPT_VERSION="3.4.0"
 
 # ── Configuration ───────────────────────────────────────────
 DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
@@ -40,6 +40,28 @@ if [[ ! "${PULL_TIMEOUT}" =~ ^[0-9]+$ ]] || [ "${PULL_TIMEOUT}" -lt 60 ]; then
   exit 1
 fi
 readonly PULL_TIMEOUT
+PULL_ATTEMPT_TIMEOUT="${PULL_ATTEMPT_TIMEOUT:-600}"
+if [[ ! "${PULL_ATTEMPT_TIMEOUT}" =~ ^[0-9]+$ ]] || [ "${PULL_ATTEMPT_TIMEOUT}" -lt 60 ]; then
+  echo "Invalid PULL_ATTEMPT_TIMEOUT: ${PULL_ATTEMPT_TIMEOUT}" >&2
+  exit 1
+fi
+if [ "${PULL_ATTEMPT_TIMEOUT}" -gt "${PULL_TIMEOUT}" ]; then
+  echo "PULL_ATTEMPT_TIMEOUT cannot exceed PULL_TIMEOUT" >&2
+  exit 1
+fi
+readonly PULL_ATTEMPT_TIMEOUT
+PULL_RETRY_ATTEMPTS="${PULL_RETRY_ATTEMPTS:-12}"
+if [[ ! "${PULL_RETRY_ATTEMPTS}" =~ ^[0-9]+$ ]] || [ "${PULL_RETRY_ATTEMPTS}" -lt 1 ]; then
+  echo "Invalid PULL_RETRY_ATTEMPTS: ${PULL_RETRY_ATTEMPTS}" >&2
+  exit 1
+fi
+readonly PULL_RETRY_ATTEMPTS
+PULL_RETRY_DELAY="${PULL_RETRY_DELAY:-20}"
+if [[ ! "${PULL_RETRY_DELAY}" =~ ^[0-9]+$ ]] || [ "${PULL_RETRY_DELAY}" -lt 1 ]; then
+  echo "Invalid PULL_RETRY_DELAY: ${PULL_RETRY_DELAY}" >&2
+  exit 1
+fi
+readonly PULL_RETRY_DELAY
 readonly MIN_DISK_MB=2048
 readonly MIN_DISK_INODES_K=100
 readonly STATE_FILE_MAX_BYTES=65536
@@ -719,8 +741,58 @@ ensure_legacy_upstream_file() {
   fi
 }
 
+pull_image_with_retries() {
+  local img="$1"
+  local started_at attempt now elapsed_seconds remaining attempt_timeout
+
+  started_at="$(date +%s)"
+  attempt=1
+
+  while [ "${attempt}" -le "${PULL_RETRY_ATTEMPTS}" ]; do
+    if docker image inspect "${img}" > /dev/null 2>&1; then
+      logok "Image already present: ${img}"
+      return 0
+    fi
+
+    now="$(date +%s)"
+    elapsed_seconds=$((now - started_at))
+    remaining=$((PULL_TIMEOUT - elapsed_seconds))
+    if [ "${remaining}" -le 0 ]; then
+      loge "Timed out pulling ${img} after ${elapsed_seconds}s total"
+      return 1
+    fi
+
+    attempt_timeout="${PULL_ATTEMPT_TIMEOUT}"
+    if [ "${attempt_timeout}" -gt "${remaining}" ]; then
+      attempt_timeout="${remaining}"
+    fi
+
+    log "  Pull attempt ${attempt}/${PULL_RETRY_ATTEMPTS} for ${img} (attempt timeout: ${attempt_timeout}s, remaining budget: ${remaining}s)"
+    if timeout --foreground --kill-after=30s "${attempt_timeout}" docker pull "${img}" 2>&1; then
+      logok "Pulled ${img}"
+      return 0
+    fi
+
+    if docker image inspect "${img}" > /dev/null 2>&1; then
+      logok "Pulled ${img} after transient registry failure"
+      return 0
+    fi
+
+    if [ "${attempt}" -ge "${PULL_RETRY_ATTEMPTS}" ]; then
+      break
+    fi
+
+    logw "Pull attempt ${attempt} failed for ${img}; retrying in ${PULL_RETRY_DELAY}s"
+    sleep "${PULL_RETRY_DELAY}"
+    attempt=$((attempt + 1))
+  done
+
+  loge "Failed to pull ${img} after ${PULL_RETRY_ATTEMPTS} attempts within ${PULL_TIMEOUT}s total"
+  return 1
+}
+
 # ── Step 1: Pull images from GHCR (with timeout + digest verification) ──
-log "[1/14] Pulling images from GHCR (timeout: ${PULL_TIMEOUT}s)..."
+log "[1/14] Pulling images from GHCR (budget: ${PULL_TIMEOUT}s, per-attempt timeout: ${PULL_ATTEMPT_TIMEOUT}s, retries: ${PULL_RETRY_ATTEMPTS})..."
 IMAGES=(
   "${REGISTRY}/iliagpt-app:${IMAGE_TAG}"
   "${REGISTRY}/iliagpt-sandbox:${IMAGE_TAG}"
@@ -728,7 +800,7 @@ IMAGES=(
 )
 
 for img in "${IMAGES[@]}"; do
-  if ! timeout "${PULL_TIMEOUT}" docker pull "${img}" 2>&1; then
+  if ! pull_image_with_retries "${img}"; then
     loge "Failed to pull ${img}"
     exit 1
   fi
