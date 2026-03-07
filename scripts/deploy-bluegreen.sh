@@ -16,7 +16,7 @@ IFS=$'\n\t'
 #    DRY_RUN              — set to "true" for preflight only (no deploy)
 # ═══════════════════════════════════════════════════════════
 
-readonly SCRIPT_VERSION="3.4.0"
+readonly SCRIPT_VERSION="3.5.0"
 
 # ── Configuration ───────────────────────────────────────────
 DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
@@ -62,6 +62,12 @@ if [[ ! "${PULL_RETRY_DELAY}" =~ ^[0-9]+$ ]] || [ "${PULL_RETRY_DELAY}" -lt 1 ];
   exit 1
 fi
 readonly PULL_RETRY_DELAY
+DEPLOY_LOCK_STALE_AFTER="${DEPLOY_LOCK_STALE_AFTER:-1800}"
+if [[ ! "${DEPLOY_LOCK_STALE_AFTER}" =~ ^[0-9]+$ ]] || [ "${DEPLOY_LOCK_STALE_AFTER}" -lt 60 ]; then
+  echo "Invalid DEPLOY_LOCK_STALE_AFTER: ${DEPLOY_LOCK_STALE_AFTER}" >&2
+  exit 1
+fi
+readonly DEPLOY_LOCK_STALE_AFTER
 readonly MIN_DISK_MB=2048
 readonly MIN_DISK_INODES_K=100
 readonly STATE_FILE_MAX_BYTES=65536
@@ -373,26 +379,79 @@ validate_image_digests() {
   return 0
 }
 
+signal_process_tree() {
+  local signal="$1"
+  local pid="$2"
+  local child
+
+  if [[ -z "${pid}" || ! "${pid}" =~ ^[0-9]+$ ]]; then
+    return 0
+  fi
+
+  for child in $(ps -o pid= --ppid "${pid}" 2>/dev/null | awk '{print $1}'); do
+    signal_process_tree "${signal}" "${child}"
+  done
+
+  kill "-${signal}" "${pid}" 2>/dev/null || true
+}
+
+clear_stale_lock_process() {
+  local pid="$1"
+
+  logw "Stale deploy lock detected for PID ${pid}; terminating old deploy process tree."
+  signal_process_tree TERM "${pid}"
+  sleep 5
+
+  if kill -0 "${pid}" 2>/dev/null; then
+    signal_process_tree KILL "${pid}"
+    sleep 1
+  fi
+
+  if kill -0 "${pid}" 2>/dev/null; then
+    loge "Unable to clear stale deploy PID ${pid}; aborting for safety."
+    return 1
+  fi
+
+  return 0
+}
+
 # ── Deploy lock (prevent concurrent deploys) ───────────────
 acquire_lock() {
   if [ -f "${LOCK_FILE}" ]; then
-    local lock_pid lock_age now age_sec
+    local lock_pid lock_age now age_sec process_age
     lock_pid="$(cat "${LOCK_FILE}" 2>/dev/null || echo "")"
     lock_age="$(stat -c %Y "${LOCK_FILE}" 2>/dev/null || stat -f %m "${LOCK_FILE}" 2>/dev/null || echo "0")"
     now="$(date +%s)"
     age_sec=$(( now - lock_age ))
-    # A long-running image pull can legitimately exceed the stale threshold.
-    # Only steal the lock when the recorded PID is gone.
+
+    if [ -n "${lock_pid}" ] && [[ "${lock_pid}" =~ ^[0-9]+$ ]]; then
+      process_age="$(ps -p "${lock_pid}" -o etimes= 2>/dev/null | tr -d '[:space:]' || true)"
+      if [[ "${process_age}" =~ ^[0-9]+$ ]] && [ "${process_age}" -gt "${age_sec}" ]; then
+        age_sec="${process_age}"
+      fi
+    fi
+
     if [ -n "${lock_pid}" ] && kill -0 "${lock_pid}" 2>/dev/null; then
-      loge "Another deploy is running (PID ${lock_pid}, ${age_sec}s ago). Aborting."
-      exit 1
+      if [ "${age_sec}" -gt "${DEPLOY_LOCK_STALE_AFTER}" ] && \
+         ps -p "${lock_pid}" -o args= 2>/dev/null | grep -Fq "scripts/deploy-bluegreen.sh"; then
+        if ! clear_stale_lock_process "${lock_pid}"; then
+          exit 1
+        fi
+        rm -f "${LOCK_FILE}"
+      else
+        loge "Another deploy is running (PID ${lock_pid}, ${age_sec}s ago). Aborting."
+        exit 1
+      fi
     fi
-    if [ "${age_sec}" -gt 900 ]; then
-      logw "Stale lock found (${age_sec}s old, PID ${lock_pid}). Removing."
-    else
-      logw "Lock found but PID ${lock_pid} is dead (${age_sec}s ago). Stealing lock."
+
+    if [ -f "${LOCK_FILE}" ]; then
+      if [ "${age_sec}" -gt 900 ]; then
+        logw "Stale lock found (${age_sec}s old, PID ${lock_pid}). Removing."
+      else
+        logw "Lock found but PID ${lock_pid} is dead (${age_sec}s ago). Stealing lock."
+      fi
+      rm -f "${LOCK_FILE}"
     fi
-    rm -f "${LOCK_FILE}"
   fi
   echo "$$" > "${LOCK_FILE}"
 }
