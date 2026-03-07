@@ -583,6 +583,17 @@ slot() {
     docker compose -p "hola-${slot_name}" -f "${SLOT_COMPOSE}" "$@"
 }
 
+ensure_redis_on_hola_net() {
+  local connected
+  connected="$(docker inspect -f '{{if index .NetworkSettings.Networks "hola-net"}}yes{{else}}no{{end}}' hola-redis 2>/dev/null || echo "no")"
+  if [ "${connected}" = "yes" ]; then
+    return 0
+  fi
+
+  logw "Redis is not attached to hola-net; reconnecting with stable aliases."
+  docker network connect --alias hola-redis --alias redis hola-net hola-redis > /dev/null
+}
+
 
 run_sql_migrations() {
 
@@ -743,6 +754,7 @@ echo ""
 # ── Step 2: Ensure shared infrastructure is running ────────
 log "[2/14] Ensuring shared infrastructure..."
 infra up -d --remove-orphans
+ensure_redis_on_hola_net
 
 log "  Waiting for Postgres..."
 for i in $(seq 1 30); do
