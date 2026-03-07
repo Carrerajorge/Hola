@@ -388,6 +388,8 @@
   "overrides": {
     "@aws-sdk/middleware-sdk-s3": "3.972.10",
     "fast-xml-parser": "5.3.6",
+    "express-rate-limit": "8.3.0",
+    "tar": "7.5.10",
     "xlsx": "npm:@e965/xlsx@^0.20.3",
     "pdfjs-dist": "4.10.38",
     "esbuild": "^0.25.0",
@@ -404,6 +406,12 @@
     "fsevents": "^2.3.3",
     "bn": {
       "js": "^5.2.3"
+    }
+  },
+  "pnpm": {
+    "overrides": {
+      "express-rate-limit": "8.3.0",
+      "tar": "7.5.10"
     }
   },
   "build": {

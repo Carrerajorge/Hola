@@ -42,6 +42,9 @@ updates:
       # Don't update major versions automatically
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # Upstream chain teeny-request -> http-proxy-agent@5 still pins
+      # @tootallnate/once@2, and the available fixed release is ESM-only.
+      - dependency-name: "@tootallnate/once"
 
   # Docker (Dockerfile, docker-compose*.yml)
   - package-ecosystem: "docker"
