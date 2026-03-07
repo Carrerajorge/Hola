@@ -34,7 +34,7 @@ readonly HEALTHCHECK_INTERVAL=3
 readonly DRAIN_WAIT=8
 readonly STOP_TIMEOUT=15
 readonly MIGRATION_TIMEOUT=120
-PULL_TIMEOUT="${PULL_TIMEOUT:-1800}"
+PULL_TIMEOUT="${PULL_TIMEOUT:-3600}"
 if [[ ! "${PULL_TIMEOUT}" =~ ^[0-9]+$ ]] || [ "${PULL_TIMEOUT}" -lt 60 ]; then
   echo "Invalid PULL_TIMEOUT: ${PULL_TIMEOUT}" >&2
   exit 1
