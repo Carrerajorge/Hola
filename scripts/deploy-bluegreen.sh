@@ -16,7 +16,7 @@ IFS=$'\n\t'
 #    DRY_RUN              — set to "true" for preflight only (no deploy)
 # ═══════════════════════════════════════════════════════════
 
-readonly SCRIPT_VERSION="3.5.0"
+readonly SCRIPT_VERSION="3.6.0"
 
 # ── Configuration ───────────────────────────────────────────
 DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
@@ -40,7 +40,15 @@ if [[ ! "${PULL_TIMEOUT}" =~ ^[0-9]+$ ]] || [ "${PULL_TIMEOUT}" -lt 60 ]; then
   exit 1
 fi
 readonly PULL_TIMEOUT
-PULL_ATTEMPT_TIMEOUT="${PULL_ATTEMPT_TIMEOUT:-600}"
+DEFAULT_PULL_ATTEMPT_TIMEOUT=$((PULL_TIMEOUT / 4))
+if [ "${DEFAULT_PULL_ATTEMPT_TIMEOUT}" -lt 600 ]; then
+  DEFAULT_PULL_ATTEMPT_TIMEOUT=600
+fi
+if [ "${DEFAULT_PULL_ATTEMPT_TIMEOUT}" -gt 1800 ]; then
+  DEFAULT_PULL_ATTEMPT_TIMEOUT=1800
+fi
+readonly DEFAULT_PULL_ATTEMPT_TIMEOUT
+PULL_ATTEMPT_TIMEOUT="${PULL_ATTEMPT_TIMEOUT:-${DEFAULT_PULL_ATTEMPT_TIMEOUT}}"
 if [[ ! "${PULL_ATTEMPT_TIMEOUT}" =~ ^[0-9]+$ ]] || [ "${PULL_ATTEMPT_TIMEOUT}" -lt 60 ]; then
   echo "Invalid PULL_ATTEMPT_TIMEOUT: ${PULL_ATTEMPT_TIMEOUT}" >&2
   exit 1
