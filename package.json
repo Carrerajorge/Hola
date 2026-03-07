@@ -232,7 +232,7 @@
     "js-tiktoken": "^1.0.21",
     "jsdom": "^28.1.0",
     "jszip": "^3.10.1",
-    "katex": "^0.16.27",
+    "katex": "^0.16.37",
     "konva": "^10.0.12",
     "lightningcss": "^1.31.1",
     "linkedom": "^0.18.12",
