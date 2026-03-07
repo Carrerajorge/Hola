@@ -217,6 +217,22 @@ function toPublicModelSummary(model: any): PublicModelSummary {
   };
 }
 
+async function computeMfaForAuthCallback(params: {
+  userId: string;
+  excludeSid?: string | null;
+  providerLabel: string;
+}) {
+  try {
+    return await computeMfaForUser({
+      userId: params.userId,
+      excludeSid: params.excludeSid,
+    });
+  } catch (error) {
+    console.error(`[Auth] ${params.providerLabel} MFA evaluation failed:`, error);
+    return null;
+  }
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -247,7 +263,14 @@ export async function registerRoutes(
               return res.redirect("/login?error=login_failed");
             }
 
-            const mfa = await computeMfaForUser({ userId, excludeSid: req.sessionID || null });
+            const mfa = await computeMfaForAuthCallback({
+              userId,
+              excludeSid: req.sessionID || null,
+              providerLabel: "Google callback",
+            });
+            if (!mfa) {
+              return res.redirect("/login?error=login_failed");
+            }
             if (mfa.requiresMfa) {
               try {
                 await startMfaLoginChallenge({
@@ -325,7 +348,14 @@ export async function registerRoutes(
               return res.redirect("/login?error=login_failed");
             }
 
-            const mfa = await computeMfaForUser({ userId, excludeSid: req.sessionID || null });
+            const mfa = await computeMfaForAuthCallback({
+              userId,
+              excludeSid: req.sessionID || null,
+              providerLabel: "Microsoft callback",
+            });
+            if (!mfa) {
+              return res.redirect("/login?error=login_failed");
+            }
             if (mfa.requiresMfa) {
               try {
                 await startMfaLoginChallenge({
@@ -402,7 +432,14 @@ export async function registerRoutes(
               return res.redirect("/login?error=login_failed");
             }
 
-            const mfa = await computeMfaForUser({ userId, excludeSid: req.sessionID || null });
+            const mfa = await computeMfaForAuthCallback({
+              userId,
+              excludeSid: req.sessionID || null,
+              providerLabel: "Auth0 callback",
+            });
+            if (!mfa) {
+              return res.redirect("/login?error=login_failed");
+            }
             if (mfa.requiresMfa) {
               try {
                 await startMfaLoginChallenge({

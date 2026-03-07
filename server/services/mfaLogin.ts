@@ -23,7 +23,7 @@ export async function getPushTargetsForUser(params: {
   const excludeSid = params.excludeSid ?? null;
 
   // Query sessions that *might* belong to the user, then filter defensively in code.
-  const result = await dbRead.execute(sql`
+  const query = sql`
     SELECT sid, sess
     FROM sessions
     WHERE expire > NOW()
@@ -33,7 +33,20 @@ export async function getPushTargetsForUser(params: {
         OR sess ->> 'authUserId' = ${userId}
         OR sess #>> '{passport,user}' = ${userId}
       )
-  `);
+  `;
+
+  let result: any;
+  try {
+    result = await dbRead.execute(query);
+  } catch (readError: any) {
+    // OAuth callbacks must not fail just because the read replica is stale or unavailable.
+    // Retry the same lookup on primary so MFA can still be evaluated deterministically.
+    console.warn(
+      "[MFA] Session lookup on read replica failed, retrying on primary:",
+      readError?.message || readError,
+    );
+    result = await db.execute(query);
+  }
 
   const rows = (result as any)?.rows ?? (result as any);
   const targets: PushTarget[] = [];
@@ -60,10 +73,29 @@ export async function computeMfaForUser(params: {
   methods: MfaMethods;
   requiresMfa: boolean;
 }> {
-  const [totpEnabled, pushTargets] = await Promise.all([
+  const [totpResult, pushTargetsResult] = await Promise.allSettled([
     is2FAEnabled(params.userId),
     getPushTargetsForUser({ userId: params.userId, excludeSid: params.excludeSid }),
   ]);
+
+  if (totpResult.status === "rejected") {
+    console.warn("[MFA] Failed to check TOTP status:", totpResult.reason);
+  }
+
+  if (pushTargetsResult.status === "rejected") {
+    console.warn("[MFA] Failed to resolve push approval targets:", pushTargetsResult.reason);
+  }
+
+  if (totpResult.status === "rejected" && pushTargetsResult.status === "rejected") {
+    const lookupError = Object.assign(new Error("MFA lookup failed"), {
+      code: "MFA_LOOKUP_FAILED",
+      cause: pushTargetsResult.reason || totpResult.reason,
+    });
+    throw lookupError;
+  }
+
+  const totpEnabled = totpResult.status === "fulfilled" ? totpResult.value : false;
+  const pushTargets = pushTargetsResult.status === "fulfilled" ? pushTargetsResult.value : [];
 
   const methods: MfaMethods = { totp: totpEnabled, push: pushTargets.length > 0 };
   const requiresMfa = methods.totp || methods.push;
