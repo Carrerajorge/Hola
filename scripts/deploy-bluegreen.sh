@@ -34,7 +34,12 @@ readonly HEALTHCHECK_INTERVAL=3
 readonly DRAIN_WAIT=8
 readonly STOP_TIMEOUT=15
 readonly MIGRATION_TIMEOUT=120
-readonly PULL_TIMEOUT=300
+PULL_TIMEOUT="${PULL_TIMEOUT:-1800}"
+if [[ ! "${PULL_TIMEOUT}" =~ ^[0-9]+$ ]] || [ "${PULL_TIMEOUT}" -lt 60 ]; then
+  echo "Invalid PULL_TIMEOUT: ${PULL_TIMEOUT}" >&2
+  exit 1
+fi
+readonly PULL_TIMEOUT
 readonly MIN_DISK_MB=2048
 readonly MIN_DISK_INODES_K=100
 readonly STATE_FILE_MAX_BYTES=65536
