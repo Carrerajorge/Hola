@@ -1,4 +1,4 @@
-import type { Express, Request, Response } from "express";
+import type { Express, NextFunction, Request, Response } from "express";
 import { createNodesRouter } from "./routes/nodesRouter";
 import { type AuthenticatedRequest, getUserId } from "./types/express";
 import { createServer, type Server } from "http";
@@ -141,22 +141,33 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 
-import { createRunRouter } from "./routes/runRouter";
-import { createBrowserControlRouter } from "./routes/browserControlRouter";
 import { createTerminalControlRouter, terminalClients } from "./routes/terminalControlRouter";
-import { createWorkflowRouter } from "./routes/workflowRouter";
-import { createDeviceControlRouter } from "./routes/deviceControlRouter";
-import openClawRouter from "./routes/openClawRouter";
-import { createOpenClawRuntimeRouter } from "./routes/openclawRuntimeRouter";
-import { createSuperProgrammingAgentRouter } from "./routes/superProgrammingAgentRouter";
-import { createSkillPlatformRouter } from "./routes/skillPlatformRouter";
-import { createSkillsRouter } from "./routes/skillsRouter";
 import { CSRF_COOKIE_NAME, CSRF_TOKEN_PATTERN, issueCsrfCookie } from "./middleware/csrf";
 import { finopsRouter } from "./routes/finopsRouter";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
 const fileStatusClients: Map<string, Set<WebSocket>> = new Map();
+
+type LazyMountedRouter = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => unknown;
+
+function lazyMountRouter(factory: () => Promise<LazyMountedRouter>): LazyMountedRouter {
+  let routerPromise: Promise<LazyMountedRouter> | null = null;
+
+  return async (req, res, next) => {
+    try {
+      routerPromise ??= factory();
+      const router = await routerPromise;
+      return router(req, res, next);
+    } catch (error) {
+      return next(error);
+    }
+  };
+}
 
 type PublicModelSummary = {
   id: string;
@@ -832,8 +843,14 @@ export async function registerRoutes(
   app.use("/api/agents", multiAgentRouter);
   app.use("/api/errors", errorRouter);
   app.use("/api/spreadsheet", createSpreadsheetRouter());
-  app.use("/api/skills", createSkillsRouter());
-  app.use("/api/skill-platform", createSkillPlatformRouter());
+  app.use("/api/skills", lazyMountRouter(async () => {
+    const { createSkillsRouter } = await import("./routes/skillsRouter");
+    return createSkillsRouter();
+  }));
+  app.use("/api/skill-platform", lazyMountRouter(async () => {
+    const { createSkillPlatformRouter } = await import("./routes/skillPlatformRouter");
+    return createSkillPlatformRouter();
+  }));
   app.use("/api/chat", createChatRoutes());
   app.use("/api/agent", createAgentModeRouter());
   app.use("/api/orchestrator", createOrchestratorRouter());
@@ -882,13 +899,22 @@ export async function registerRoutes(
   // SuperIntelligence System
   app.use("/api/audit", createAuditDashboardRouter());
   app.use("/api/super-intelligence", createSuperIntelligenceRouter());
-  app.use("/api/super-programming-agent", createSuperProgrammingAgentRouter());
+  app.use("/api/super-programming-agent", lazyMountRouter(async () => {
+    const { createSuperProgrammingAgentRouter } = await import("./routes/superProgrammingAgentRouter");
+    return createSuperProgrammingAgentRouter();
+  }));
 
   // ===== Device Control (autonomy primitives: local/remote terminal + browser) =====
-  app.use("/api/device-control", createDeviceControlRouter());
+  app.use("/api/device-control", lazyMountRouter(async () => {
+    const { createDeviceControlRouter } = await import("./routes/deviceControlRouter");
+    return createDeviceControlRouter();
+  }));
   app.use(createNodesRouter());
   // ===== Browser & Terminal Control =====
-  app.use("/api/browser-control", createBrowserControlRouter());
+  app.use("/api/browser-control", lazyMountRouter(async () => {
+    const { createBrowserControlRouter } = await import("./routes/browserControlRouter");
+    return createBrowserControlRouter();
+  }));
   app.use("/api/terminal", requireAdminMiddleware, require2FA, createTerminalControlRouter());
 
   // ===== macOS Native Control (AppleScript, System, Apps, Calendar, etc.) =====
@@ -903,16 +929,28 @@ export async function registerRoutes(
   // ===== Analytics & Cost Tracking =====
   app.use("/api/analytics", requireAdminMiddleware, createAnalyticsRouter());
 
-  app.use("/api/workflows", createWorkflowRouter());
+  app.use("/api/workflows", lazyMountRouter(async () => {
+    const { createWorkflowRouter } = await import("./routes/workflowRouter");
+    return createWorkflowRouter();
+  }));
 
   // OpenClaw runtime control-plane endpoints (health, skills, orchestrator, subagents).
-  app.use("/api/openclaw/runtime", createOpenClawRuntimeRouter());
+  app.use("/api/openclaw/runtime", lazyMountRouter(async () => {
+    const { createOpenClawRuntimeRouter } = await import("./routes/openclawRuntimeRouter");
+    return createOpenClawRuntimeRouter();
+  }));
 
   // OpenClaw capability inventory/report endpoints.
-  app.use("/api/openclaw", openClawRouter);
+  app.use("/api/openclaw", lazyMountRouter(async () => {
+    const module = await import("./routes/openClawRouter");
+    return module.default;
+  }));
 
   // ===== Run Detail Endpoints =====
-  app.use("/api/runs", createRunRouter());
+  app.use("/api/runs", lazyMountRouter(async () => {
+    const { createRunRouter } = await import("./routes/runRouter");
+    return createRunRouter();
+  }));
 
   initializeEventStore().catch(console.error);
 

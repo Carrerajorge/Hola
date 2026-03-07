@@ -359,19 +359,18 @@ acquire_lock() {
     lock_age="$(stat -c %Y "${LOCK_FILE}" 2>/dev/null || stat -f %m "${LOCK_FILE}" 2>/dev/null || echo "0")"
     now="$(date +%s)"
     age_sec=$(( now - lock_age ))
+    # A long-running image pull can legitimately exceed the stale threshold.
+    # Only steal the lock when the recorded PID is gone.
+    if [ -n "${lock_pid}" ] && kill -0 "${lock_pid}" 2>/dev/null; then
+      loge "Another deploy is running (PID ${lock_pid}, ${age_sec}s ago). Aborting."
+      exit 1
+    fi
     if [ "${age_sec}" -gt 900 ]; then
       logw "Stale lock found (${age_sec}s old, PID ${lock_pid}). Removing."
-      rm -f "${LOCK_FILE}"
     else
-      # Check if the PID is still alive
-      if [ -n "${lock_pid}" ] && kill -0 "${lock_pid}" 2>/dev/null; then
-        loge "Another deploy is running (PID ${lock_pid}, ${age_sec}s ago). Aborting."
-        exit 1
-      else
-        logw "Lock found but PID ${lock_pid} is dead (${age_sec}s ago). Stealing lock."
-        rm -f "${LOCK_FILE}"
-      fi
+      logw "Lock found but PID ${lock_pid} is dead (${age_sec}s ago). Stealing lock."
     fi
+    rm -f "${LOCK_FILE}"
   fi
   echo "$$" > "${LOCK_FILE}"
 }
