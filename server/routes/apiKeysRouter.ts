@@ -12,6 +12,7 @@ import { auditLog } from "../services/auditLogger";
 export const apiKeysRouter = Router();
 
 const ALLOWED_PERMISSIONS = ["read", "write", "delete", "admin"] as const;
+let ensureTablePromise: Promise<void> | null = null;
 
 // Ensure table exists
 const ensureTable = async () => {
@@ -40,11 +41,17 @@ const ensureTable = async () => {
   }
 };
 
-ensureTable();
+const ensureTableOnce = () => {
+  if (!ensureTablePromise) {
+    ensureTablePromise = ensureTable();
+  }
+  return ensureTablePromise;
+};
 
 // GET /api/api-keys - List user's API keys
 apiKeysRouter.get("/", async (req, res) => {
   try {
+    await ensureTableOnce();
     const userId = (req as any).user?.id;
     if (!userId) {
       return res.status(401).json({ error: "Not authenticated" });
@@ -67,6 +74,7 @@ apiKeysRouter.get("/", async (req, res) => {
 // POST /api/api-keys - Create new API key
 apiKeysRouter.post("/", async (req, res) => {
   try {
+    await ensureTableOnce();
     const userId = (req as any).user?.id;
     if (!userId) {
       return res.status(401).json({ error: "Not authenticated" });
@@ -132,6 +140,7 @@ apiKeysRouter.post("/", async (req, res) => {
 // PATCH /api/api-keys/:id - Update API key
 apiKeysRouter.patch("/:id", async (req, res) => {
   try {
+    await ensureTableOnce();
     const userId = (req as any).user?.id;
     if (!userId) {
       return res.status(401).json({ error: "Not authenticated" });
@@ -176,6 +185,7 @@ apiKeysRouter.patch("/:id", async (req, res) => {
 // DELETE /api/api-keys/:id - Delete API key
 apiKeysRouter.delete("/:id", async (req, res) => {
   try {
+    await ensureTableOnce();
     const userId = (req as any).user?.id;
     if (!userId) {
       return res.status(401).json({ error: "Not authenticated" });
@@ -209,6 +219,7 @@ apiKeysRouter.delete("/:id", async (req, res) => {
 // POST /api/api-keys/:id/rotate - Rotate API key
 apiKeysRouter.post("/:id/rotate", async (req, res) => {
   try {
+    await ensureTableOnce();
     const userId = (req as any).user?.id;
     if (!userId) {
       return res.status(401).json({ error: "Not authenticated" });
@@ -270,6 +281,7 @@ export async function validateApiKey(req: any, res: any, next: any) {
   const keyHash = hashApiKey(apiKey);
   
   try {
+    await ensureTableOnce();
     const result = await db.execute(sql`
       SELECT ak.*, u.id as uid, u.email, u.role
       FROM api_keys ak

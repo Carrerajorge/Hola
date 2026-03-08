@@ -8,41 +8,55 @@ import { ObjectStorageService } from "./objectStorage";
 import { processDocument } from "./services/documentProcessing";
 import { env } from "./config/env";
 import { chunkText, generateEmbeddingsBatch } from "./embeddingService";
-import type { StepUpdate } from "./agent/orchestrator";
-import type { SessionEvent } from "./agent/browser";
+import { StepUpdate } from "./agent";
+import { browserSessionManager, SessionEvent } from "./agent/browser";
 import { fileProcessingQueue, FileStatusUpdate } from "./lib/fileProcessingQueue";
 import { globalAuditMiddleware } from "./middleware/audit";
+import { pptExportRouter } from "./routes/pptExport";
 import swaggerUi from 'swagger-ui-express';
 import { passport } from "./lib/auth/passport";
 import { resolveOAuthCallbackUrl } from "./lib/auth/oauthCallbackUrl";
 import { swaggerSpec } from "./lib/swagger";
+import { createChatsRouter } from "./routes/chatsRouter";
+import { createFilesRouter } from "./routes/filesRouter";
 import { createLocalStorageRouter } from "./routes/localStorageRouter";
+import { createGptRouter } from "./routes/gptRouter";
+import { createDocumentsRouter } from "./routes/documentsRouter";
+import { createAdminRouter } from "./routes/admin";
+import { createRetrievalAdminRouter } from "./routes/retrievalAdminRouter";
+import { createAgentRouter } from "./routes/agentRouter";
 import { createFigmaRouter } from "./routes/figmaRouter";
-import { createNodesRouter } from "./routes/nodesRouter";
+import { createLibraryRouter } from "./routes/libraryRouter";
+import { createWorkspaceRouter } from "./routes/workspaceRouter";
 import { createCodeRouter } from "./routes/codeRouter";
+import { createUserRouter } from "./routes/userRouter";
 import { createGoogleFormsRouter } from "./routes/googleFormsRouter";
+import { createGmailRouter } from "./routes/gmailRouter";
 import { createAppsIntegrationRouter } from "./routes/appsIntegrationRouter";
 import { createConnectorOAuthRouter } from "./routes/connectorOAuthRouter";
 import gmailOAuthRouter from "./routes/gmailOAuthRouter";
 import calendarOAuthRouter from "./routes/calendarOAuthRouter";
 import outlookOAuthRouter from "./routes/outlookOAuthRouter";
+import { createGmailMcpRouter } from "./mcp/gmailMcpServer";
 import healthRouter from "./routes/healthRouter";
 import powerRouter from "./routes/powerRouter";
 import { hitlRouter } from "./agent/tenaga/hitl/HitlRouter";
-import multiAgentRouter from "./routes/multiAgentRouter";
 import { metricsHandler, getMetricsJson } from "./lib/parePrometheusMetrics";
 import { createHealthRouter as createPareHealthRouter, getHealthSummary as getPareHealthSummary } from "./lib/pareHealthChecks";
 import { getMetricsSummary as getPareMetricsSummary } from "./lib/pareMetrics";
 import errorRouter from "./routes/errorRouter";
+import { registerAgenticTools } from "./agent/orchestrator/agenticToolRegistrations";
+import { createLangGraphRouter } from "./routes/langGraphRouter";
+import { createRegistryRouter } from "./routes/registryRouter";
 import wordPipelineRoutes from "./routes/wordPipelineRoutes";
 import redisSSERouter from "./routes/redisSSERouter";
 import streamingResumeRouter from "./routes/streamingResumeRouter";
-import conversationMemoryRoutes from "./routes/conversationMemoryRoutes";
-import { contextRoutes, semanticRoutes } from "./memory";
-import { createPythonToolsRouter } from "./routes/pythonToolsRouter";
+import { createLocalControlRouter } from "./routes/localControlRouter";
+import { createMacOSControlRouter } from "./routes/macosControlRouter";
+import { systemControlRouter } from "./routes/systemControlRouter";
 import { createAutomationTriggersRouter } from "./routes/automationTriggersRouter";
 import { createVoiceRouter } from "./routes/voiceRouter";
-import agentPlanRouter from "./routes/agentPlanRouter";
+import { createAnalyticsRouter } from "./routes/analyticsRouter";
 import ragRouter from "./routes/ragRouter";
 import ragMemoryRouter from "./routes/ragMemoryRouter";
 import feedbackRouter from "./routes/feedbackRouter";
@@ -51,14 +65,28 @@ import { createTelegramIntegrationRouter } from "./routes/telegramIntegrationRou
 import { createWhatsAppCloudIntegrationRouter } from "./routes/whatsappCloudIntegrationRouter";
 import { createMessengerIntegrationRouter } from "./routes/messengerIntegrationRouter";
 import { createWeChatIntegrationRouter } from "./routes/wechatIntegrationRouter";
+import { createStripeRouter } from "./routes/stripeRouter";
+import { createSettingsRouter } from "./routes/settingsRouter";
 import { hasLogoutMarker, clearLogoutMarker } from "./lib/logoutMarker";
-import { auditMiddleware } from "./services/superIntelligence/audit";
+import requestUnderstandingRoutes from "./routes/requestUnderstandingRoutes";
+import { createRunController } from "./agent/superAgent/tracing/RunController";
+import { createAuditDashboardRouter } from "./routes/auditDashboardRouter";
+import { initializeAuditSystem, auditMiddleware } from "./services/superIntelligence/audit";
+import { initializeSuperIntelligence } from "./services/superIntelligence";
+import { initializeEventStore, getEventStore } from "./agent/superAgent/tracing/EventStore";
 import type { ExecutionEvent, ExecutionEventType } from "@shared/executionProtocol";
 import type { TraceEvent } from "./agent/superAgent/tracing/types";
+import { getStreamGateway } from "./agent/superAgent/tracing/StreamGateway";
 import type { TraceEmitter } from "./agent/superAgent/tracing/TraceEmitter";
 import { initializeRedisSSE } from "./lib/redisSSE";
-import type { SuperAgentCoverageSource } from "./services/superAgentCoverage";
+import { initializeAgentSystem } from "./agent/registry";
+import { ALL_TOOLS, SAFE_TOOLS, SYSTEM_TOOLS } from "./agent/langgraph/tools";
+import { getAllAgents, getAgentSummary, SPECIALIZED_AGENTS } from "./agent/langgraph/agents";
+import { getSuperAgentCoverageReport, type SuperAgentCoverageSource } from "./services/superAgentCoverage";
+import { listOpenClaw1000Capabilities, getOpenClaw1000QuickStats } from "./services/openClaw1000Service";
+import { buildOpenClaw1000CapabilityProfile } from "./services/openClaw1000CapabilityProfiler";
 import { createAuthenticatedWebSocketHandler, AuthenticatedWebSocket } from "./lib/wsAuth";
+import { llmGateway } from "./lib/llmGateway";
 import { generateAnonToken } from "./lib/anonToken";
 import { getUserConfig, setUserConfig, getDefaultConfig, validatePatterns, getFilterStats } from "./services/contentFilter";
 import { isModelEligibleForPublic } from "./services/modelIntegration";
@@ -75,6 +103,7 @@ import { apiKeysRouter } from "./routes/apiKeysRouter";
 import { memoryRouter } from "./routes/memoryRouter";
 import { advancedAnalyticsRouter } from "./routes/admin/advancedAnalytics";
 import { requireAdmin as requireAdminMiddleware } from "./routes/admin/utils";
+import { automationsRouter } from "./routes/admin/automations";
 import { createSecurityRouter } from "./routes/securityRouter";
 import { createMfaRouter } from "./routes/mfaRouter";
 import { createPackagesRouter } from "./routes/packagesRouter";
@@ -82,6 +111,7 @@ import { computeMfaForUser, startMfaLoginChallenge } from "./services/mfaLogin";
 import { getActiveAlerts, getAlertHistory, getAlertStats, resolveAlert } from "./lib/alertManager";
 import { recordConnectorUsage, getConnectorStats, getAllConnectorStats, resetConnectorStats, isValidConnector, type ConnectorName } from "./lib/connectorMetrics";
 import { checkConnectorHealth, checkAllConnectorsHealth, getHealthSummary, startPeriodicHealthCheck } from "./lib/connectorAlerting";
+import { getExecutionIntentGuardStatus, preExecutionIntentGuard } from "./middleware/preExecutionIntentGuard";
 import { require2FA } from "./middleware/auth";
 import {
   runAgent, getTools, healthCheck as pythonAgentHealthCheck, isServiceAvailable, PythonAgentClientError,
@@ -118,46 +148,6 @@ function lazyMountRouter(factory: () => Promise<LazyMountedRouter>): LazyMounted
       return next(error);
     }
   };
-}
-
-function shouldBypassChatAiRouter(pathname: string): boolean {
-  return (
-    pathname === "/auth" ||
-    pathname.startsWith("/auth/") ||
-    pathname === "/health" ||
-    pathname.startsWith("/health/") ||
-    pathname === "/session/identity" ||
-    pathname === "/csrf/token"
-  );
-}
-
-let agenticToolsRegistrationPromise: Promise<void> | null = null;
-let browserSessionManagerPromise: Promise<typeof import("./agent/browser")> | null = null;
-let executionIntentGuardModulePromise: Promise<typeof import("./middleware/preExecutionIntentGuard")> | null = null;
-let browserEventListenerAttached = false;
-
-async function ensureAgenticToolsRegistered(): Promise<void> {
-  agenticToolsRegistrationPromise ??= import("./agent/orchestrator/agenticToolRegistrations").then(
-    ({ registerAgenticTools }) => {
-      registerAgenticTools();
-    },
-  );
-  return agenticToolsRegistrationPromise;
-}
-
-async function getBrowserSessionManager() {
-  const browserModule = await (browserSessionManagerPromise ??= import("./agent/browser"));
-  if (!browserEventListenerAttached) {
-    browserModule.browserSessionManager.addGlobalEventListener((event: SessionEvent) => {
-      broadcastBrowserEvent(event.sessionId, event);
-    });
-    browserEventListenerAttached = true;
-  }
-  return browserModule.browserSessionManager;
-}
-
-async function getExecutionIntentGuardModule() {
-  return (executionIntentGuardModulePromise ??= import("./middleware/preExecutionIntentGuard"));
 }
 
 type PublicModelSummary = {
@@ -257,15 +247,6 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  const chatAiRouter = lazyMountRouter(async () => {
-    const { createChatAiRouter } = await import("./routes/chatAiRouter");
-    return createChatAiRouter(broadcastAgentUpdate);
-  });
-  const executionIntentGuardMiddleware = lazyMountRouter(async () => {
-    const { preExecutionIntentGuard } = await getExecutionIntentGuardModule();
-    return preExecutionIntentGuard;
-  });
-
   // Session + Passport are initialized in server/index.ts (before csrf/rateLimiter).
 
   // Passport Auth Routes
@@ -713,19 +694,10 @@ export async function registerRoutes(
   }));
   // Node / Device Agent routes (API for external nodes)
   app.use("/api", createNodesRouter());
-  app.use("/api", lazyMountRouter(async () => {
-    const { createChatsRouter } = await import("./routes/chatsRouter");
-    return createChatsRouter();
-  }));
-  app.use(lazyMountRouter(async () => {
-    const { createFilesRouter } = await import("./routes/filesRouter");
-    return createFilesRouter();
-  }));
+  app.use("/api", createChatsRouter());
+  app.use(createFilesRouter());
   app.use(createLocalStorageRouter());
-  app.use("/api", lazyMountRouter(async () => {
-    const { createGptRouter } = await import("./routes/gptRouter");
-    return createGptRouter();
-  }));
+  app.use("/api", createGptRouter());
   app.use("/api/documents", lazyMountRouter(async () => {
     const { createDocumentsRouter } = await import("./routes/documentsRouter");
     return createDocumentsRouter();
@@ -734,18 +706,9 @@ export async function registerRoutes(
     const { createAdminRouter } = await import("./routes/admin");
     return createAdminRouter();
   }));
-  app.use("/api/finops", lazyMountRouter(async () => {
-    const { finopsRouter } = await import("./routes/finopsRouter");
-    return finopsRouter;
-  }));
-  app.use("/api/admin", lazyMountRouter(async () => {
-    const { createRetrievalAdminRouter } = await import("./routes/retrievalAdminRouter");
-    return createRetrievalAdminRouter();
-  }));
-  app.use("/api", lazyMountRouter(async () => {
-    const { createAgentRouter } = await import("./routes/agentRouter");
-    return createAgentRouter(broadcastBrowserEvent);
-  }));
+  app.use("/api/finops", finopsRouter);
+  app.use("/api/admin", createRetrievalAdminRouter());
+  app.use("/api", createAgentRouter(broadcastBrowserEvent));
 
   // Telemetry Dashboard
   const { createTelemetryRouter } = await import('./telemetry/telemetryRouter');
@@ -772,29 +735,14 @@ export async function registerRoutes(
   app.use("/api/public/releases", createPublicReleasesRouter());
 
   app.use(createFigmaRouter());
-  app.use(
-    lazyMountRouter(async () => {
-      const { createLibraryRouter } = await import("./routes/libraryRouter");
-      return createLibraryRouter();
-    }),
-  );
-  app.use(lazyMountRouter(async () => {
-    const { createWorkspaceRouter } = await import("./routes/workspaceRouter");
-    return createWorkspaceRouter();
-  }));
+  app.use(createLibraryRouter());
+  app.use(createWorkspaceRouter());
   app.use(createCodeRouter());
-  app.use(
-    lazyMountRouter(async () => {
-      const { createUserRouter } = await import("./routes/userRouter");
-      return createUserRouter();
-    }),
-  );
-  app.use("/api", (req, res, next) => {
-    if (shouldBypassChatAiRouter(req.path || "")) {
-      return next();
-    }
-    return chatAiRouter(req, res, next);
-  });
+  app.use(createUserRouter());
+  app.use("/api", lazyMountRouter(async () => {
+    const { createChatAiRouter } = await import("./routes/chatAiRouter");
+    return createChatAiRouter(broadcastAgentUpdate);
+  }));
   app.use("/api/apps", createAppsIntegrationRouter());
 
   // Integration Kernel OAuth routes (generic connector flow).
@@ -809,13 +757,7 @@ export async function registerRoutes(
   }
 
   app.use("/api/integrations/google/forms", createGoogleFormsRouter());
-  app.use(
-    "/api/integrations/google/gmail",
-    lazyMountRouter(async () => {
-      const { createGmailRouter } = await import("./routes/gmailRouter");
-      return createGmailRouter();
-    }),
-  );
+  app.use("/api/integrations/google/gmail", createGmailRouter());
   const { createWhatsAppWebRouter } = await import('./routes/whatsappWebRouter');
   app.use('/api/integrations/whatsapp/web', createWhatsAppWebRouter());
   app.use("/api/integrations/whatsapp/cloud", createWhatsAppCloudIntegrationRouter());
@@ -825,12 +767,8 @@ export async function registerRoutes(
   app.use("/api/oauth/google/gmail", gmailOAuthRouter);
   app.use("/api/oauth/google/calendar", calendarOAuthRouter);
   app.use("/api/oauth/microsoft", outlookOAuthRouter);
-  const gmailMcpRouter = lazyMountRouter(async () => {
-    const { createGmailMcpRouter } = await import("./mcp/gmailMcpServer");
-    return createGmailMcpRouter();
-  });
-  app.use("/api/mcp/gmail", gmailMcpRouter);
-  app.use("/mcp/gmail", gmailMcpRouter); // Backward compatibility
+  app.use("/api/mcp/gmail", createGmailMcpRouter());
+  app.use("/mcp/gmail", createGmailMcpRouter()); // Backward compatibility
 
   // External inbound webhooks must live outside /api to bypass CSRF middleware.
   app.use("/webhooks", createChannelWebhooksRouter());
@@ -852,7 +790,7 @@ export async function registerRoutes(
     "/api/openclaw",
   ];
   for (const prefix of guardedExecutionPrefixes) {
-    app.use(prefix, executionIntentGuardMiddleware);
+    app.use(prefix, preExecutionIntentGuard);
   }
 
 
@@ -933,13 +871,8 @@ export async function registerRoutes(
     });
   });
 
-  app.get("/api/audit/execution-guard/status", async (_req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { getExecutionIntentGuardStatus } = await getExecutionIntentGuardModule();
-      res.json(getExecutionIntentGuardStatus());
-    } catch (error) {
-      next(error);
-    }
+  app.get("/api/audit/execution-guard/status", (_req: Request, res: Response) => {
+    res.json(getExecutionIntentGuardStatus());
   });
 
   // API Documentation
@@ -966,7 +899,10 @@ export async function registerRoutes(
   // Tenaga HITL Routes
   app.use("/api/hitl", hitlRouter);
 
-  app.use("/api/agents", multiAgentRouter);
+  app.use("/api/agents", lazyMountRouter(async () => {
+    const { multiAgentRouter } = await import("./routes/multiAgentRouter");
+    return multiAgentRouter;
+  }));
   app.use("/api/errors", errorRouter);
   app.use("/api/spreadsheet", lazyMountRouter(async () => {
     const { createSpreadsheetRouter } = await import("./routes/spreadsheetRoutes");
@@ -994,16 +930,12 @@ export async function registerRoutes(
   }));
 
   // Register agentic tools (browser, research, documents, terminal)
+  registerAgenticTools();
   app.use("/api", lazyMountRouter(async () => {
-    await ensureAgenticToolsRegistered();
     const { createSandboxAgentRouter } = await import("./routes/sandboxAgentRouter");
     return createSandboxAgentRouter();
   }));
-  app.use("/api", lazyMountRouter(async () => {
-    await ensureAgenticToolsRegistered();
-    const { createLangGraphRouter } = await import("./routes/langGraphRouter");
-    return createLangGraphRouter();
-  }));
+  app.use("/api", createLangGraphRouter());
 
   // New routes from 8H plan
   app.use("/api/templates", templatesRouter);
@@ -1015,43 +947,37 @@ export async function registerRoutes(
   app.use("/api/memory", memoryRouter);
   app.use("/api/packages", createPackagesRouter());
   app.use("/api/admin/analytics/advanced", advancedAnalyticsRouter);
-  app.use("/api/admin/automations", lazyMountRouter(async () => {
-    const { automationsRouter } = await import("./routes/admin/automations");
-    return automationsRouter;
-  }));
+  app.use("/api/admin/automations", automationsRouter);
   app.use("/api/academic", lazyMountRouter(async () => {
     const { academicSearchRouter } = await import("./routes/academicSearchRouter");
     return academicSearchRouter;
   })); // Scopus + Scholar academic search
-  app.use(
-    "/api",
-    lazyMountRouter(async () => {
-      const { createRegistryRouter } = await import("./routes/registryRouter");
-      return createRegistryRouter();
-    }),
-  );
+  app.use("/api", createRegistryRouter());
   app.use("/api/word-pipeline", wordPipelineRoutes);
   app.use("/api/sse", redisSSERouter);
   app.use("/api/streaming", streamingResumeRouter);
-  app.use("/api/memory", conversationMemoryRoutes);
-  app.use("/api/memory/semantic", semanticRoutes); // Semantic memory search API
-  app.use("/api/context", contextRoutes); // Enterprise context validation API
+  app.use("/api/memory", lazyMountRouter(async () => {
+    const module = await import("./routes/conversationMemoryRoutes");
+    return module.default;
+  }));
+  app.use("/api/memory/semantic", lazyMountRouter(async () => {
+    const module = await import("./memory");
+    return module.semanticRoutes;
+  })); // Semantic memory search API
+  app.use("/api/context", lazyMountRouter(async () => {
+    const module = await import("./memory");
+    return module.contextRoutes;
+  })); // Enterprise context validation API
   app.use("/api", lazyMountRouter(async () => {
     const module = await import("./routes/superAgentRoutes");
     return module.default;
   }));
-  app.use("/api", createPythonToolsRouter());
   app.use("/api", lazyMountRouter(async () => {
-    const { createLocalControlRouter } = await import("./routes/localControlRouter");
-    return createLocalControlRouter();
+    const { createPythonToolsRouter } = await import("./routes/pythonToolsRouter");
+    return createPythonToolsRouter();
   }));
-  app.use(
-    "/api/system",
-    lazyMountRouter(async () => {
-      const { systemControlRouter } = await import("./routes/systemControlRouter");
-      return systemControlRouter;
-    }),
-  );
+  app.use("/api", createLocalControlRouter());
+  app.use("/api/system", systemControlRouter);
   app.use("/api/execution", lazyMountRouter(async () => {
     const { createToolExecutionRouter } = await import("./routes/toolExecutionRouter");
     return createToolExecutionRouter();
@@ -1060,7 +986,10 @@ export async function registerRoutes(
     const { default: scientificSearchRouter } = await import("./routes/scientificSearchRouter");
     return scientificSearchRouter;
   }));
-  app.use("/api/planning", agentPlanRouter);
+  app.use("/api/planning", lazyMountRouter(async () => {
+    const module = await import("./routes/agentPlanRouter");
+    return module.default;
+  }));
   app.use("/api/document-analysis", lazyMountRouter(async () => {
     const { default: documentAnalysisRouter } = await import("./routes/documentAnalysisRouter");
     return documentAnalysisRouter;
@@ -1068,37 +997,17 @@ export async function registerRoutes(
   app.use("/api/rag", ragRouter);
   app.use("/api/rag/memory", ragMemoryRouter);
   app.use("/api/feedback", feedbackRouter);
-  app.use(lazyMountRouter(async () => {
-    const { createStripeRouter } = await import("./routes/stripeRouter");
-    return createStripeRouter();
-  }));
-  app.use(
-    lazyMountRouter(async () => {
-      const { createSettingsRouter } = await import("./routes/settingsRouter");
-      return createSettingsRouter();
-    }),
-  );
-  app.use("/api", lazyMountRouter(async () => {
-    const { createRunController } = await import("./agent/superAgent/tracing/RunController");
-    return createRunController();
-  }));
+  app.use(createStripeRouter());
+  app.use(createSettingsRouter());
+  app.use("/api", createRunController());
   app.use("/api/superintelligence", lazyMountRouter(async () => {
     const { superintelligenceRouter } = await import("./routes/superintelligence");
     return superintelligenceRouter;
   }));
-  app.use(
-    "/api/understanding",
-    lazyMountRouter(async () => {
-      const { default: requestUnderstandingRoutes } = await import("./routes/requestUnderstandingRoutes");
-      return requestUnderstandingRoutes;
-    }),
-  ); // Request Understanding Pipeline (gating agent, RAG, verification)
+  app.use("/api/understanding", requestUnderstandingRoutes); // Request Understanding Pipeline (gating agent, RAG, verification)
 
   // SuperIntelligence System
-  app.use("/api/audit", lazyMountRouter(async () => {
-    const { createAuditDashboardRouter } = await import("./routes/auditDashboardRouter");
-    return createAuditDashboardRouter();
-  }));
+  app.use("/api/audit", createAuditDashboardRouter());
   app.use("/api/super-intelligence", lazyMountRouter(async () => {
     const { createSuperIntelligenceRouter } = await import("./routes/superIntelligenceRouter");
     return createSuperIntelligenceRouter();
@@ -1122,14 +1031,7 @@ export async function registerRoutes(
   app.use("/api/terminal", requireAdminMiddleware, require2FA, createTerminalControlRouter());
 
   // ===== macOS Native Control (AppleScript, System, Apps, Calendar, etc.) =====
-  app.use(
-    "/api/macos",
-    requireAdminMiddleware,
-    lazyMountRouter(async () => {
-      const { createMacOSControlRouter } = await import("./routes/macosControlRouter");
-      return createMacOSControlRouter();
-    }),
-  );
+  app.use("/api/macos", requireAdminMiddleware, createMacOSControlRouter());
 
   // ===== Automation Triggers (Cron, File Watch, Webhooks, System Events) =====
   app.use("/api/triggers", requireAdminMiddleware, createAutomationTriggersRouter());
@@ -1138,14 +1040,7 @@ export async function registerRoutes(
   app.use("/api/voice", requireAdminMiddleware, createVoiceRouter());
 
   // ===== Analytics & Cost Tracking =====
-  app.use(
-    "/api/analytics",
-    requireAdminMiddleware,
-    lazyMountRouter(async () => {
-      const { createAnalyticsRouter } = await import("./routes/analyticsRouter");
-      return createAnalyticsRouter();
-    }),
-  );
+  app.use("/api/analytics", requireAdminMiddleware, createAnalyticsRouter());
 
   app.use("/api/workflows", lazyMountRouter(async () => {
     const { createWorkflowRouter } = await import("./routes/workflowRouter");
@@ -1170,9 +1065,7 @@ export async function registerRoutes(
     return createRunRouter();
   }));
 
-  import("./agent/superAgent/tracing/EventStore")
-    .then(({ initializeEventStore }) => initializeEventStore())
-    .catch(console.error);
+  initializeEventStore().catch(console.error);
 
   // ===== Start Persistent Trigger Engine =====
   import("./services/persistentTriggerEngine").then(({ triggerEngine }) => {
@@ -1195,43 +1088,30 @@ export async function registerRoutes(
     console.warn("[RedisSSE] Not available (Redis may not be configured):", err.message);
   });
 
-  import("./agent/registry").then(({ initializeAgentSystem }) => {
-    initializeAgentSystem({ runSmokeTest: false }).then(result => {
-      console.log(`[AgentSystem] Initialized: ${result.toolCount} tools, ${result.agentCount} agents`);
-    }).catch(err => {
-      console.error("[AgentSystem] Initialization failed:", err.message);
-    });
+  initializeAgentSystem({ runSmokeTest: false }).then(result => {
+    console.log(`[AgentSystem] Initialized: ${result.toolCount} tools, ${result.agentCount} agents`);
   }).catch(err => {
-    console.error("[AgentSystem] Registry import failed:", err.message);
+    console.error("[AgentSystem] Initialization failed:", err.message);
   });
 
   // Initialize SuperIntelligence System (includes all phases)
-  import("./services/superIntelligence").then(({ initializeSuperIntelligence }) => {
-    initializeSuperIntelligence().then((status) => {
-      console.log(`[SuperIntelligence] System initialized - Health: ${status.stats.healthScore.toFixed(1)}%`);
-    }).catch(err => {
-      console.error("[SuperIntelligence] System initialization failed:", err.message);
-      // Fall back to just audit system
-      import("./services/superIntelligence/audit").then(({ initializeAuditSystem }) => {
-        initializeAuditSystem().then(() => {
-          console.log("[SuperIntelligence] Audit System initialized (fallback)");
-        }).catch(e => {
-          console.error("[SuperIntelligence] Audit System fallback failed:", e.message);
-        });
-      }).catch(e => {
-        console.error("[SuperIntelligence] Audit import failed:", e.message);
-      });
-    });
+  initializeSuperIntelligence().then((status) => {
+    console.log(`[SuperIntelligence] System initialized - Health: ${status.stats.healthScore.toFixed(1)}%`);
   }).catch(err => {
-    console.error("[SuperIntelligence] Bootstrap import failed:", err.message);
+    console.error("[SuperIntelligence] System initialization failed:", err.message);
+    // Fall back to just audit system
+    initializeAuditSystem().then(() => {
+      console.log("[SuperIntelligence] Audit System initialized (fallback)");
+    }).catch(e => {
+      console.error("[SuperIntelligence] Audit System fallback failed:", e.message);
+    });
   });
 
   // ===== Simple Tools & Agents Endpoints =====
 
   // GET /tools - Return all 100 tools
-  app.get("/tools", requireAdminMiddleware, async (_req: Request, res: Response) => {
+  app.get("/tools", requireAdminMiddleware, (_req: Request, res: Response) => {
     try {
-      const { ALL_TOOLS, SAFE_TOOLS, SYSTEM_TOOLS } = await import("./agent/langgraph/tools");
       const tools = ALL_TOOLS.map(tool => ({
         name: tool.name,
         description: tool.description,
@@ -1256,9 +1136,8 @@ export async function registerRoutes(
   });
 
   // GET /agents - Return all 10 agents
-  app.get("/agents", requireAdminMiddleware, async (_req: Request, res: Response) => {
+  app.get("/agents", requireAdminMiddleware, (_req: Request, res: Response) => {
     try {
-      const { SPECIALIZED_AGENTS } = await import("./agent/langgraph/agents");
       const agents = SPECIALIZED_AGENTS.map(agent => ({
         name: agent.name,
         description: agent.description,
@@ -1284,7 +1163,6 @@ export async function registerRoutes(
   // Query: ?source=combined|runtime|langgraph
   app.get("/api/super-agent/capabilities", requireAdminMiddleware, async (req: Request, res: Response) => {
     try {
-      const { getSuperAgentCoverageReport } = await import("./services/superAgentCoverage");
       const rawSource = typeof req.query.source === "string" ? req.query.source : "combined";
       const source: SuperAgentCoverageSource =
         rawSource === "langgraph" || rawSource === "runtime" || rawSource === "combined"
@@ -1337,15 +1215,8 @@ export async function registerRoutes(
   // - ?status=implemented|partial|stub|missing
   // - ?q=<prompt-like text> (returns capability profile + filtered matches)
   // - ?limit=1..1000
-  app.get("/api/super-agent/capabilities-1000", requireAdminMiddleware, async (req: Request, res: Response) => {
+  app.get("/api/super-agent/capabilities-1000", requireAdminMiddleware, (req: Request, res: Response) => {
     try {
-      const [
-        { listOpenClaw1000Capabilities, getOpenClaw1000QuickStats },
-        { buildOpenClaw1000CapabilityProfile },
-      ] = await Promise.all([
-        import("./services/openClaw1000Service"),
-        import("./services/openClaw1000CapabilityProfiler"),
-      ]);
       const category = typeof req.query.category === "string" ? req.query.category : undefined;
       const status = typeof req.query.status === "string" ? req.query.status : undefined;
       const query = typeof req.query.q === "string" ? req.query.q.trim() : "";
@@ -1399,9 +1270,8 @@ export async function registerRoutes(
   });
 
   // GET /api/tools - Enhanced tool catalog with category metadata
-  app.get("/api/tools", requireAdminMiddleware, async (_req: Request, res: Response) => {
+  app.get("/api/tools", requireAdminMiddleware, (_req: Request, res: Response) => {
     try {
-      const { ALL_TOOLS, SAFE_TOOLS, SYSTEM_TOOLS } = await import("./agent/langgraph/tools");
       const categoryMap: Record<string, string[]> = {
         "Core": SAFE_TOOLS.map(t => t.name),
         "System": SYSTEM_TOOLS.map(t => t.name),
@@ -1482,9 +1352,8 @@ export async function registerRoutes(
   });
 
   // GET /api/agents - Alias for /agents
-  app.get("/api/agents", async (_req: Request, res: Response) => {
+  app.get("/api/agents", (_req: Request, res: Response) => {
     try {
-      const { SPECIALIZED_AGENTS } = await import("./agent/langgraph/agents");
       const agents = SPECIALIZED_AGENTS;
       res.json({
         success: true,
@@ -1689,12 +1558,11 @@ export async function registerRoutes(
   // ===== AI Quality Stats & Content Filter Endpoints =====
 
   // GET /api/ai/quality-stats - Return quality statistics
-  app.get("/api/ai/quality-stats", async (req: Request, res: Response) => {
+  app.get("/api/ai/quality-stats", (req: Request, res: Response) => {
     try {
       const sinceParam = req.query.since as string | undefined;
       const since = sinceParam ? new Date(sinceParam) : undefined;
 
-      const { llmGateway } = await import("./lib/llmGateway");
       const stats = llmGateway.getQualityStats(since);
       const filterStats = getFilterStats();
 
@@ -2042,6 +1910,10 @@ export async function registerRoutes(
 
   const objectStorageService = new ObjectStorageService();
 
+  browserSessionManager.addGlobalEventListener((event: SessionEvent) => {
+    broadcastBrowserEvent(event.sessionId, event);
+  });
+
   const wss = new WebSocketServer({ server: httpServer, path: "/ws/agent" });
 
   createAuthenticatedWebSocketHandler(wss, true, (ws: AuthenticatedWebSocket) => {
@@ -2202,7 +2074,6 @@ export async function registerRoutes(
           ws.send(JSON.stringify({ type: "subscribed", sessionId: data.sessionId }));
 
           try {
-            const browserSessionManager = await getBrowserSessionManager();
             const screenshot = await browserSessionManager.getScreenshot(data.sessionId);
             if (screenshot && ws.readyState === WebSocket.OPEN) {
               ws.send(JSON.stringify({

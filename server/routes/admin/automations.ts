@@ -14,6 +14,7 @@ import { Logger } from "../../lib/logger";
 import crypto from "crypto";
 
 export const automationsRouter = Router();
+let ensureTablePromise: Promise<void> | null = null;
 
 /* ──────────────────────── constants ──────────────────────── */
 
@@ -96,7 +97,21 @@ const ensureTable = async () => {
   }
 };
 
-ensureTable();
+const ensureTableOnce = () => {
+  if (!ensureTablePromise) {
+    ensureTablePromise = ensureTable();
+  }
+  return ensureTablePromise;
+};
+
+automationsRouter.use(async (_req, _res, next) => {
+  try {
+    await ensureTableOnce();
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 
 /* ──────────────────────── validation helpers ──────────────────────── */
 
