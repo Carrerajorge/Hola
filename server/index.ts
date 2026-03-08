@@ -192,18 +192,51 @@ export function log(message: string, source = "express") {
   Logger.info(`[${source}] ${message}`);
 }
 
-(async () => {
-  // Boot AgentOS-ASI Kernel (NASA-grade architecture)
+function startAgentOSKernel() {
+  const agentOSEnabled = process.env.AGENTOS_BOOT_ENABLED !== "false";
+  if (!agentOSEnabled) {
+    log("AgentOS kernel boot disabled via AGENTOS_BOOT_ENABLED=false", "agentos");
+    return;
+  }
+
+  const timeoutMs = clampConfigNumber(process.env.AGENTOS_BOOT_TIMEOUT_MS, 15000, 1000, 120000);
+
   try {
     const agentOS = AgentOS.getInstance({
       mode: process.env.NODE_ENV === "production" ? "SAFE" : "SUPERVISED",
       workspaceRoot: process.env.OPENCLAW_WORKSPACE_ROOT || process.cwd(),
-      logLevel: process.env.NODE_ENV === "production" ? "info" : "debug"
+      logLevel: process.env.NODE_ENV === "production" ? "info" : "debug",
     });
-    await agentOS.boot();
+
+    let finished = false;
+    const timer = setTimeout(() => {
+      if (!finished) {
+        log(
+          `[WARNING] AgentOS kernel boot is still pending after ${timeoutMs}ms; continuing without blocking HTTP startup`,
+          "agentos",
+        );
+      }
+    }, timeoutMs);
+
+    void agentOS
+      .boot()
+      .then(() => {
+        finished = true;
+        clearTimeout(timer);
+        log(`AgentOS kernel ready in mode ${agentOS.config.mode}`, "agentos");
+      })
+      .catch((err) => {
+        finished = true;
+        clearTimeout(timer);
+        Logger.error("Failed to boot AgentOS Kernel:", err);
+      });
   } catch (err) {
-    Logger.error("Failed to boot AgentOS Kernel:", err);
+    Logger.error("Failed to initialize AgentOS Kernel:", err);
   }
+}
+
+(async () => {
+  startAgentOSKernel();
 
   const isProduction = process.env.NODE_ENV === "production";
   const isTest = process.env.NODE_ENV === "test";
