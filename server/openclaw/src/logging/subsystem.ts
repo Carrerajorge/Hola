@@ -1,12 +1,16 @@
-import * as chalkModule from "chalk";
+import { Chalk } from "chalk";
+import type { Logger as TsLogger } from "tslog";
 import { isVerbose } from "../globals.js";
 import { defaultRuntime, type RuntimeEnv } from "../runtime.js";
 import { clearActiveProgressLine } from "../terminal/progress-line.js";
-import { getConsoleSettings, shouldLogSubsystemToConsole } from "./console.js";
+import {
+  formatConsoleTimestamp,
+  getConsoleSettings,
+  shouldLogSubsystemToConsole,
+} from "./console.js";
 import { type LogLevel, levelToMinLevel } from "./levels.js";
 import { getChildLogger, isFileLogLevelEnabled } from "./logger.js";
 import { loggingState } from "./state.js";
-import type { Logger as TsLogger } from "./tslogCompat.js";
 
 type LogObj = { date?: Date } & Record<string, unknown>;
 
@@ -32,28 +36,7 @@ function shouldLogToConsole(level: LogLevel, settings: { level: LogLevel }): boo
   return current <= min;
 }
 
-type ChalkInstance = {
-  gray: (value: string) => string;
-  cyan: (value: string) => string;
-  yellow: (value: string) => string;
-  red: (value: string) => string;
-  green: (value: string) => string;
-  blue: (value: string) => string;
-  magenta: (value: string) => string;
-  bold: ChalkInstance & {
-    hex?: (value: string) => (input: string) => string;
-  };
-  level: number;
-};
-
-type ChalkConstructor = new (options?: { level?: number }) => ChalkInstance;
-
-const chalkExports = chalkModule as Record<string, unknown>;
-const chalkFactory = (typeof chalkModule.default === "function"
-  ? chalkModule.default
-  : chalkModule) as ChalkInstance;
-const ChalkCtor = (Reflect.get(chalkExports, "Chalk") ??
-  Reflect.get(chalkExports, "Instance")) as ChalkConstructor | undefined;
+type ChalkInstance = InstanceType<typeof Chalk>;
 
 const inspectValue: ((value: unknown) => string) | null = (() => {
   const getBuiltinModule = (
@@ -102,20 +85,20 @@ function getColorForConsole(): ChalkInstance {
     process.env.FORCE_COLOR.trim().length > 0 &&
     process.env.FORCE_COLOR.trim() !== "0";
   if (process.env.NO_COLOR && !hasForceColor) {
-    return ChalkCtor ? new ChalkCtor({ level: 0 }) : chalkFactory;
+    return new Chalk({ level: 0 });
   }
   const hasTty = Boolean(process.stdout.isTTY || process.stderr.isTTY);
-  if (!ChalkCtor) {
-    return chalkFactory;
-  }
-  return hasTty || isRichConsoleEnv() ? new ChalkCtor({ level: 1 }) : new ChalkCtor({ level: 0 });
+  return hasTty || isRichConsoleEnv() ? new Chalk({ level: 1 }) : new Chalk({ level: 0 });
 }
 
 const SUBSYSTEM_COLORS = ["cyan", "green", "yellow", "blue", "magenta", "red"] as const;
 const SUBSYSTEM_COLOR_OVERRIDES: Record<string, (typeof SUBSYSTEM_COLORS)[number]> = {
   "gmail-watcher": "blue",
 };
-const CHAT_CHANNEL_IDS = [
+const SUBSYSTEM_PREFIXES_TO_DROP = ["gateway", "channels", "providers"] as const;
+const SUBSYSTEM_MAX_SEGMENTS = 2;
+// Keep local to avoid importing channel registry into hot logging paths.
+const CHANNEL_SUBSYSTEM_PREFIXES = new Set<string>([
   "telegram",
   "whatsapp",
   "discord",
@@ -124,10 +107,7 @@ const CHAT_CHANNEL_IDS = [
   "slack",
   "signal",
   "imessage",
-] as const;
-const SUBSYSTEM_PREFIXES_TO_DROP = ["gateway", "channels", "providers"] as const;
-const SUBSYSTEM_MAX_SEGMENTS = 2;
-const CHANNEL_SUBSYSTEM_PREFIXES = new Set<string>(CHAT_CHANNEL_IDS);
+]);
 
 function pickSubsystemColor(color: ChalkInstance, subsystem: string): ChalkInstance {
   const override = SUBSYSTEM_COLOR_OVERRIDES[subsystem];
@@ -221,7 +201,7 @@ function formatConsoleLine(opts: {
     opts.style === "json" ? opts.subsystem : formatSubsystemForConsole(opts.subsystem);
   if (opts.style === "json") {
     return JSON.stringify({
-      time: new Date().toISOString(),
+      time: formatConsoleTimestamp("json"),
       level: opts.level,
       subsystem: displaySubsystem,
       message: opts.message,
@@ -242,10 +222,10 @@ function formatConsoleLine(opts: {
   const displayMessage = stripRedundantSubsystemPrefixForConsole(opts.message, displaySubsystem);
   const time = (() => {
     if (opts.style === "pretty") {
-      return color.gray(new Date().toISOString().slice(11, 19));
+      return color.gray(formatConsoleTimestamp("pretty"));
     }
     if (loggingState.consoleTimestampPrefix) {
-      return color.gray(new Date().toISOString());
+      return color.gray(formatConsoleTimestamp(opts.style));
     }
     return "";
   })();
@@ -295,14 +275,21 @@ function logToFile(
 
 export function createSubsystemLogger(subsystem: string): SubsystemLogger {
   let fileLogger: TsLogger<LogObj> | null = null;
-  function getFileLogger(): TsLogger<LogObj> {
+  const getFileLogger = () => {
     if (!fileLogger) {
       fileLogger = getChildLogger({ subsystem });
     }
     return fileLogger;
-  }
-  function emit(level: LogLevel, message: string, meta?: Record<string, unknown>): void {
+  };
+  const emit = (level: LogLevel, message: string, meta?: Record<string, unknown>) => {
     const consoleSettings = getConsoleSettings();
+    const consoleEnabled =
+      shouldLogToConsole(level, { level: consoleSettings.level }) &&
+      shouldLogSubsystemToConsole(subsystem);
+    const fileEnabled = isFileLogLevelEnabled(level);
+    if (!consoleEnabled && !fileEnabled) {
+      return;
+    }
     let consoleMessageOverride: string | undefined;
     let fileMeta = meta;
     if (meta && Object.keys(meta).length > 0) {
@@ -314,11 +301,10 @@ export function createSubsystemLogger(subsystem: string): SubsystemLogger {
       }
       fileMeta = Object.keys(rest).length > 0 ? rest : undefined;
     }
-    logToFile(getFileLogger(), level, message, fileMeta);
-    if (!shouldLogToConsole(level, { level: consoleSettings.level })) {
-      return;
+    if (fileEnabled) {
+      logToFile(getFileLogger(), level, message, fileMeta);
     }
-    if (!shouldLogSubsystemToConsole(subsystem)) {
+    if (!consoleEnabled) {
       return;
     }
     const consoleMessage = consoleMessageOverride ?? message;
@@ -337,69 +323,49 @@ export function createSubsystemLogger(subsystem: string): SubsystemLogger {
       meta: fileMeta,
     });
     writeConsoleLine(level, line);
-  }
-  function isConsoleEnabled(level: LogLevel): boolean {
+  };
+  const isConsoleEnabled = (level: LogLevel): boolean => {
     const consoleSettings = getConsoleSettings();
     return (
       shouldLogToConsole(level, { level: consoleSettings.level }) &&
       shouldLogSubsystemToConsole(subsystem)
     );
-  }
-  function isFileEnabled(level: LogLevel): boolean {
-    return isFileLogLevelEnabled(level);
-  }
-
-  function isEnabled(level: LogLevel, target: "any" | "console" | "file" = "any"): boolean {
-    if (target === "console") {
-      return isConsoleEnabled(level);
-    }
-    if (target === "file") {
-      return isFileEnabled(level);
-    }
-    return isConsoleEnabled(level) || isFileEnabled(level);
-  }
-
-  function raw(message: string): void {
-    logToFile(getFileLogger(), "info", message, { raw: true });
-    if (shouldLogSubsystemToConsole(subsystem)) {
-      if (
-        !isVerbose() &&
-        subsystem === "agent/embedded" &&
-        /(sessionId|runId)=probe-/.test(message)
-      ) {
-        return;
-      }
-      writeConsoleLine("info", message);
-    }
-  }
-
-  function child(name: string): SubsystemLogger {
-    return createSubsystemLogger(`${subsystem}/${name}`);
-  }
+  };
+  const isFileEnabled = (level: LogLevel): boolean => isFileLogLevelEnabled(level);
 
   const logger: SubsystemLogger = {
     subsystem,
-    isEnabled,
-    trace(message, meta) {
-      emit("trace", message, meta);
+    isEnabled: (level, target = "any") => {
+      if (target === "console") {
+        return isConsoleEnabled(level);
+      }
+      if (target === "file") {
+        return isFileEnabled(level);
+      }
+      return isConsoleEnabled(level) || isFileEnabled(level);
     },
-    debug(message, meta) {
-      emit("debug", message, meta);
+    trace: (message, meta) => emit("trace", message, meta),
+    debug: (message, meta) => emit("debug", message, meta),
+    info: (message, meta) => emit("info", message, meta),
+    warn: (message, meta) => emit("warn", message, meta),
+    error: (message, meta) => emit("error", message, meta),
+    fatal: (message, meta) => emit("fatal", message, meta),
+    raw: (message) => {
+      if (isFileEnabled("info")) {
+        logToFile(getFileLogger(), "info", message, { raw: true });
+      }
+      if (isConsoleEnabled("info")) {
+        if (
+          !isVerbose() &&
+          subsystem === "agent/embedded" &&
+          /(sessionId|runId)=probe-/.test(message)
+        ) {
+          return;
+        }
+        writeConsoleLine("info", message);
+      }
     },
-    info(message, meta) {
-      emit("info", message, meta);
-    },
-    warn(message, meta) {
-      emit("warn", message, meta);
-    },
-    error(message, meta) {
-      emit("error", message, meta);
-    },
-    fatal(message, meta) {
-      emit("fatal", message, meta);
-    },
-    raw,
-    child,
+    child: (name) => createSubsystemLogger(`${subsystem}/${name}`),
   };
   return logger;
 }
@@ -408,19 +374,14 @@ export function runtimeForLogger(
   logger: SubsystemLogger,
   exit: RuntimeEnv["exit"] = defaultRuntime.exit,
 ): RuntimeEnv {
-  function formatArgs(...args: unknown[]): string {
-    return args
+  const formatArgs = (...args: unknown[]) =>
+    args
       .map((arg) => formatRuntimeArg(arg))
       .join(" ")
       .trim();
-  }
   return {
-    log(...args: unknown[]) {
-      logger.info(formatArgs(...args));
-    },
-    error(...args: unknown[]) {
-      logger.error(formatArgs(...args));
-    },
+    log: (...args: unknown[]) => logger.info(formatArgs(...args)),
+    error: (...args: unknown[]) => logger.error(formatArgs(...args)),
     exit,
   };
 }

@@ -1,6 +1,3 @@
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { createSessionSlug as createSessionSlugId } from "./session-slug.js";
 
@@ -8,7 +5,6 @@ const DEFAULT_JOB_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const MIN_JOB_TTL_MS = 60 * 1000; // 1 minute
 const MAX_JOB_TTL_MS = 3 * 60 * 60 * 1000; // 3 hours
 const DEFAULT_PENDING_OUTPUT_CHARS = 30_000;
-const MAX_PERSISTED_SESSIONS = 200;
 
 function clampTtl(value: number | undefined) {
   if (!value || Number.isNaN(value)) {
@@ -74,222 +70,10 @@ export interface FinishedSession {
   totalOutputChars: number;
 }
 
-type PersistedSessionStatus = ProcessStatus | "running";
-
-type PersistedSessionSnapshot = {
-  id: string;
-  command: string;
-  scopeKey?: string;
-  sessionKey?: string;
-  startedAt: number;
-  endedAt?: number;
-  cwd?: string;
-  status: PersistedSessionStatus;
-  exitCode?: number | null;
-  exitSignal?: NodeJS.Signals | number | null;
-  aggregated: string;
-  tail: string;
-  truncated: boolean;
-  totalOutputChars: number;
-};
-
-type ProcessRegistryStoreFile = {
-  version: 1;
-  updatedAt: string;
-  sessions: PersistedSessionSnapshot[];
-};
-
-export type ProcessRegistryPersistenceStatus = {
-  enabled: boolean;
-  storePath: string;
-  persistedSessions: number;
-  recoveredInterruptedSessions: number;
-  lastLoadedAt: number | null;
-  lastPersistedAt: number | null;
-};
-
 const runningSessions = new Map<string, ProcessSession>();
 const finishedSessions = new Map<string, FinishedSession>();
 
 let sweeper: NodeJS.Timeout | null = null;
-let recoveredInterruptedSessions = 0;
-let lastLoadedAt: number | null = null;
-let lastPersistedAt: number | null = null;
-
-function isPersistenceEnabled() {
-  return process.env.OPENCLAW_PROCESS_SESSION_PERSIST !== "false";
-}
-
-function resolveProcessRegistryStorePath() {
-  if (process.env.OPENCLAW_PROCESS_SESSION_STORE_PATH?.trim()) {
-    return path.resolve(process.env.OPENCLAW_PROCESS_SESSION_STORE_PATH.trim());
-  }
-  if (process.env.NODE_ENV === "test") {
-    return path.join(os.tmpdir(), "hola-openclaw", "process-sessions.json");
-  }
-  return path.resolve(process.cwd(), "output", "openclaw", "process-sessions.json");
-}
-
-function buildRunningSnapshot(session: ProcessSession): PersistedSessionSnapshot {
-  return {
-    id: session.id,
-    command: session.command,
-    scopeKey: session.scopeKey,
-    sessionKey: session.sessionKey,
-    startedAt: session.startedAt,
-    cwd: session.cwd,
-    status: "running",
-    aggregated: session.aggregated,
-    tail: session.tail,
-    truncated: session.truncated,
-    totalOutputChars: session.totalOutputChars,
-  };
-}
-
-function buildFinishedSnapshot(session: FinishedSession): PersistedSessionSnapshot {
-  return {
-    id: session.id,
-    command: session.command,
-    scopeKey: session.scopeKey,
-    startedAt: session.startedAt,
-    endedAt: session.endedAt,
-    cwd: session.cwd,
-    status: session.status,
-    exitCode: session.exitCode,
-    exitSignal: session.exitSignal,
-    aggregated: session.aggregated,
-    tail: session.tail,
-    truncated: session.truncated,
-    totalOutputChars: session.totalOutputChars,
-  };
-}
-
-function persistRegistry() {
-  if (!isPersistenceEnabled()) {
-    return;
-  }
-  try {
-    const storePath = resolveProcessRegistryStorePath();
-    const sessions = [
-      ...Array.from(runningSessions.values())
-        .filter((session) => session.backgrounded)
-        .map(buildRunningSnapshot),
-      ...Array.from(finishedSessions.values()).map(buildFinishedSnapshot),
-    ]
-      .sort((a, b) => b.startedAt - a.startedAt)
-      .slice(0, MAX_PERSISTED_SESSIONS);
-    const payload: ProcessRegistryStoreFile = {
-      version: 1,
-      updatedAt: new Date().toISOString(),
-      sessions,
-    };
-    fs.mkdirSync(path.dirname(storePath), { recursive: true });
-    const tmpPath = `${storePath}.${process.pid}.${Date.now()}.tmp`;
-    fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2), "utf8");
-    fs.renameSync(tmpPath, storePath);
-    lastPersistedAt = Date.now();
-  } catch (error) {
-    console.warn(
-      `[bash-process-registry] Failed to persist process registry: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
-}
-
-function withRecoveryNote(snapshot: PersistedSessionSnapshot) {
-  const note = "\n\n[Recovered after restart: background session was interrupted before completion.]";
-  const aggregated = trimWithCap(`${snapshot.aggregated || ""}${note}`, DEFAULT_PENDING_OUTPUT_CHARS * 4);
-  return {
-    aggregated,
-    tail: tail(aggregated, 2000),
-  };
-}
-
-export function rehydrateProcessRegistryFromDisk() {
-  runningSessions.clear();
-  finishedSessions.clear();
-  recoveredInterruptedSessions = 0;
-  lastLoadedAt = Date.now();
-
-  if (!isPersistenceEnabled()) {
-    return;
-  }
-
-  try {
-    const raw = fs.readFileSync(resolveProcessRegistryStorePath(), "utf8");
-    const parsed = JSON.parse(raw) as Partial<ProcessRegistryStoreFile>;
-    if (!parsed || !Array.isArray(parsed.sessions)) {
-      return;
-    }
-    for (const snapshot of parsed.sessions.slice(0, MAX_PERSISTED_SESSIONS)) {
-      if (!snapshot?.id || !snapshot?.command || typeof snapshot.startedAt !== "number") {
-        continue;
-      }
-      if (snapshot.status === "running") {
-        const recovered = withRecoveryNote(snapshot);
-        finishedSessions.set(snapshot.id, {
-          id: snapshot.id,
-          command: snapshot.command,
-          scopeKey: snapshot.scopeKey,
-          startedAt: snapshot.startedAt,
-          endedAt: snapshot.endedAt ?? Date.now(),
-          cwd: snapshot.cwd,
-          status: "failed",
-          exitCode: snapshot.exitCode,
-          exitSignal: snapshot.exitSignal,
-          aggregated: recovered.aggregated,
-          tail: recovered.tail,
-          truncated: snapshot.truncated,
-          totalOutputChars: snapshot.totalOutputChars,
-        });
-        recoveredInterruptedSessions += 1;
-        continue;
-      }
-      finishedSessions.set(snapshot.id, {
-        id: snapshot.id,
-        command: snapshot.command,
-        scopeKey: snapshot.scopeKey,
-        startedAt: snapshot.startedAt,
-        endedAt: snapshot.endedAt ?? snapshot.startedAt,
-        cwd: snapshot.cwd,
-        status: snapshot.status,
-        exitCode: snapshot.exitCode,
-        exitSignal: snapshot.exitSignal,
-        aggregated: snapshot.aggregated || "",
-        tail: snapshot.tail || tail(snapshot.aggregated || "", 2000),
-        truncated: Boolean(snapshot.truncated),
-        totalOutputChars: snapshot.totalOutputChars ?? (snapshot.aggregated || "").length,
-      });
-    }
-    if (finishedSessions.size > 0) {
-      startSweeper();
-    }
-    if (recoveredInterruptedSessions > 0) {
-      persistRegistry();
-    }
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException)?.code;
-    if (code !== "ENOENT") {
-      console.warn(
-        `[bash-process-registry] Failed to rehydrate process registry: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-  }
-}
-
-export function getProcessRegistryPersistenceStatus(): ProcessRegistryPersistenceStatus {
-  return {
-    enabled: isPersistenceEnabled(),
-    storePath: resolveProcessRegistryStorePath(),
-    persistedSessions: runningSessions.size + finishedSessions.size,
-    recoveredInterruptedSessions,
-    lastLoadedAt,
-    lastPersistedAt,
-  };
-}
 
 function isSessionIdTaken(id: string) {
   return runningSessions.has(id) || finishedSessions.has(id);
@@ -302,7 +86,6 @@ export function createSessionSlug(): string {
 export function addSession(session: ProcessSession) {
   runningSessions.set(session.id, session);
   startSweeper();
-  persistRegistry();
 }
 
 export function getSession(id: string) {
@@ -316,7 +99,6 @@ export function getFinishedSession(id: string) {
 export function deleteSession(id: string) {
   runningSessions.delete(id);
   finishedSessions.delete(id);
-  persistRegistry();
 }
 
 export function appendOutput(session: ProcessSession, stream: "stdout" | "stderr", chunk: string) {
@@ -347,9 +129,6 @@ export function appendOutput(session: ProcessSession, stream: "stdout" | "stderr
     session.truncated || aggregated.length < session.aggregated.length + chunk.length;
   session.aggregated = aggregated;
   session.tail = tail(session.aggregated, 2000);
-  if (session.backgrounded) {
-    persistRegistry();
-  }
 }
 
 export function drainSession(session: ProcessSession) {
@@ -373,12 +152,10 @@ export function markExited(
   session.exitSignal = exitSignal;
   session.tail = tail(session.aggregated, 2000);
   moveToFinished(session, status);
-  persistRegistry();
 }
 
 export function markBackgrounded(session: ProcessSession) {
   session.backgrounded = true;
-  persistRegistry();
 }
 
 function moveToFinished(session: ProcessSession, status: ProcessStatus) {
@@ -489,23 +266,12 @@ export function listFinishedSessions() {
 
 export function clearFinished() {
   finishedSessions.clear();
-  persistRegistry();
 }
 
-export function resetProcessRegistryForTests(options?: { preserveStore?: boolean }) {
+export function resetProcessRegistryForTests() {
   runningSessions.clear();
   finishedSessions.clear();
-  recoveredInterruptedSessions = 0;
-  lastLoadedAt = null;
-  lastPersistedAt = null;
   stopSweeper();
-  if (!options?.preserveStore) {
-    try {
-      fs.rmSync(resolveProcessRegistryStorePath(), { force: true });
-    } catch {
-      // ignore test cleanup failures
-    }
-  }
 }
 
 export function setJobTtlMs(value?: number) {
@@ -524,7 +290,6 @@ function pruneFinishedSessions() {
       finishedSessions.delete(id);
     }
   }
-  persistRegistry();
 }
 
 function startSweeper() {
@@ -542,5 +307,3 @@ function stopSweeper() {
   clearInterval(sweeper);
   sweeper = null;
 }
-
-rehydrateProcessRegistryFromDisk();

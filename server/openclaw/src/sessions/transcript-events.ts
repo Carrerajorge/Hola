@@ -36,6 +36,10 @@ export function emitSessionTranscriptUpdate(sessionFile: string): void {
   }
   const update = { sessionFile: trimmed };
   for (const listener of state.listeners) {
-    listener(update);
+    try {
+      listener(update);
+    } catch {
+      /* ignore */
+    }
   }
 }

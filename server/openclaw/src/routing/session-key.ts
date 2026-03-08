@@ -30,6 +30,13 @@ function normalizeToken(value: string | undefined | null): string {
   return (value ?? "").trim().toLowerCase();
 }
 
+export function scopedHeartbeatWakeOptions<T extends object>(
+  sessionKey: string,
+  wakeOptions: T,
+): T | (T & { sessionKey: string }) {
+  return parseAgentSessionKey(sessionKey) ? { ...wakeOptions, sessionKey } : wakeOptions;
+}
+
 export function normalizeMainKey(value: string | undefined | null): string {
   const trimmed = (value ?? "").trim();
   return trimmed ? trimmed.toLowerCase() : DEFAULT_MAIN_KEY;
@@ -49,15 +56,16 @@ export function toAgentStoreSessionKey(params: {
   mainKey?: string | undefined;
 }): string {
   const raw = (params.requestKey ?? "").trim();
-  if (!raw || raw === DEFAULT_MAIN_KEY) {
+  if (!raw || raw.toLowerCase() === DEFAULT_MAIN_KEY) {
     return buildAgentMainSessionKey({ agentId: params.agentId, mainKey: params.mainKey });
+  }
+  const parsed = parseAgentSessionKey(raw);
+  if (parsed) {
+    return `agent:${parsed.agentId}:${parsed.rest}`;
   }
   const lowered = raw.toLowerCase();
   if (lowered.startsWith("agent:")) {
     return lowered;
-  }
-  if (lowered.startsWith("subagent:")) {
-    return `agent:${normalizeAgentId(params.agentId)}:${lowered}`;
   }
   return `agent:${normalizeAgentId(params.agentId)}:${lowered}`;
 }

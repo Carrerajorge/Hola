@@ -1,24 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { onAgentEvent } from "../../infra/agent-events.js";
+import { requestHeartbeatNow } from "../../infra/heartbeat-wake.js";
+import { onSessionTranscriptUpdate } from "../../sessions/transcript-events.js";
 
 const runCommandWithTimeoutMock = vi.hoisted(() => vi.fn());
-const requestHeartbeatNowMock = vi.hoisted(() => vi.fn());
-const onAgentEventMock = vi.hoisted(() => vi.fn(() => () => {}));
-const onSessionTranscriptUpdateMock = vi.hoisted(() => vi.fn(() => () => {}));
 
 vi.mock("../../process/exec.js", () => ({
   runCommandWithTimeout: (...args: unknown[]) => runCommandWithTimeoutMock(...args),
-}));
-
-vi.mock("../../infra/heartbeat-wake.js", () => ({
-  requestHeartbeatNow: (...args: unknown[]) => requestHeartbeatNowMock(...args),
-}));
-
-vi.mock("../../infra/agent-events.js", () => ({
-  onAgentEvent: (...args: unknown[]) => onAgentEventMock(...args),
-}));
-
-vi.mock("../../sessions/transcript-events.js", () => ({
-  onSessionTranscriptUpdate: (...args: unknown[]) => onSessionTranscriptUpdateMock(...args),
 }));
 
 import { createPluginRuntime } from "./index.js";
@@ -26,9 +14,6 @@ import { createPluginRuntime } from "./index.js";
 describe("plugin runtime command execution", () => {
   beforeEach(() => {
     runCommandWithTimeoutMock.mockClear();
-    requestHeartbeatNowMock.mockClear();
-    onAgentEventMock.mockClear();
-    onSessionTranscriptUpdateMock.mockClear();
   });
 
   it("exposes runtime.system.runCommandWithTimeout by default", async () => {
@@ -58,20 +43,14 @@ describe("plugin runtime command execution", () => {
     expect(runCommandWithTimeoutMock).toHaveBeenCalledWith(["echo", "hello"], { timeoutMs: 1000 });
   });
 
-  it("exposes heartbeat and runtime event bridges", () => {
+  it("exposes runtime.events listener registration helpers", () => {
     const runtime = createPluginRuntime();
-    const agentListener = vi.fn();
-    const transcriptListener = vi.fn();
+    expect(runtime.events.onAgentEvent).toBe(onAgentEvent);
+    expect(runtime.events.onSessionTranscriptUpdate).toBe(onSessionTranscriptUpdate);
+  });
 
-    runtime.system.requestHeartbeatNow({ reason: "plugin:test", sessionKey: "agent:main:main" });
-    runtime.events.onAgentEvent(agentListener);
-    runtime.events.onSessionTranscriptUpdate(transcriptListener);
-
-    expect(requestHeartbeatNowMock).toHaveBeenCalledWith({
-      reason: "plugin:test",
-      sessionKey: "agent:main:main",
-    });
-    expect(onAgentEventMock).toHaveBeenCalledWith(agentListener);
-    expect(onSessionTranscriptUpdateMock).toHaveBeenCalledWith(transcriptListener);
+  it("exposes runtime.system.requestHeartbeatNow", () => {
+    const runtime = createPluginRuntime();
+    expect(runtime.system.requestHeartbeatNow).toBe(requestHeartbeatNow);
   });
 });
