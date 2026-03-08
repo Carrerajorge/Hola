@@ -15,6 +15,7 @@ import { globalAuditMiddleware } from "./middleware/audit";
 import { pptExportRouter } from "./routes/pptExport";
 import swaggerUi from 'swagger-ui-express';
 import { passport } from "./lib/auth/passport";
+import { resolveOAuthCallbackUrl } from "./lib/auth/oauthCallbackUrl";
 import { swaggerSpec } from "./lib/swagger";
 import { createChatsRouter } from "./routes/chatsRouter";
 import { createFilesRouter } from "./routes/filesRouter";
@@ -228,6 +229,24 @@ function toPublicModelSummary(model: any): PublicModelSummary {
   };
 }
 
+function setOAuthCallbackUrl(req: Request, provider: string, callbackUrl: string): string {
+  const session = (req as any).session as Record<string, any> | undefined;
+  if (session) {
+    session.oauthCallbackUrls = session.oauthCallbackUrls || {};
+    session.oauthCallbackUrls[provider] = callbackUrl;
+  }
+  return callbackUrl;
+}
+
+function getOAuthCallbackUrl(req: Request, provider: string, path: string): string {
+  const session = (req as any).session as Record<string, any> | undefined;
+  const stored = session?.oauthCallbackUrls?.[provider];
+  if (typeof stored === "string" && stored.length > 0) {
+    return stored;
+  }
+  return resolveOAuthCallbackUrl(req, path);
+}
+
 async function computeMfaForAuthCallback(params: {
   userId: string;
   excludeSid?: string | null;
@@ -253,18 +272,32 @@ export async function registerRoutes(
   // Passport Auth Routes
   // Google (only register if credentials are configured)
   if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
-    app.get("/api/auth/google", passport.authenticate("google", {
-      scope: ["openid", "email", "profile"],
-      // Ensure Google issues a refresh_token (needed for long-lived access).
-      // Note: Google may still only return refresh_token on first consent unless prompt includes "consent".
-      accessType: "offline",
-      prompt: "consent select_account",
-    }));
+    app.get("/api/auth/google", (req, res, next) => {
+      const callbackURL = setOAuthCallbackUrl(
+        req,
+        "google",
+        resolveOAuthCallbackUrl(req, "/api/auth/google/callback"),
+      );
+      return passport.authenticate("google", {
+        scope: ["openid", "email", "profile"],
+        callbackURL,
+        // Ensure Google issues a refresh_token (needed for long-lived access).
+        // Note: Google may still only return refresh_token on first consent unless prompt includes "consent".
+        accessType: "offline",
+        prompt: "consent select_account",
+      })(req, res, next);
+    });
     app.get("/api/auth/google/callback",
       (req, res, next) => {
-        passport.authenticate("google", { failureRedirect: "/login?error=google_failed" }, (err: any, user: any) => {
+        passport.authenticate("google", {
+          failureRedirect: "/login?error=google_failed",
+          callbackURL: getOAuthCallbackUrl(req, "google", "/api/auth/google/callback"),
+        }, (err: any, user: any) => {
           (async () => {
             if (err || !user) {
+              if (err) {
+                console.warn("[Auth] Google callback failed:", err?.message || err);
+              }
               return res.redirect("/login?error=google_failed");
             }
 
@@ -344,12 +377,27 @@ export async function registerRoutes(
 
   // Microsoft (only register if credentials are configured)
   if (env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET) {
-    app.get("/api/auth/microsoft", passport.authenticate("microsoft"));
+    app.get("/api/auth/microsoft", (req, res, next) => {
+      const callbackURL = setOAuthCallbackUrl(
+        req,
+        "microsoft",
+        resolveOAuthCallbackUrl(req, "/api/auth/microsoft/callback"),
+      );
+      return passport.authenticate("microsoft", {
+        callbackURL,
+      })(req, res, next);
+    });
     app.get("/api/auth/microsoft/callback",
       (req, res, next) => {
-        passport.authenticate("microsoft", { failureRedirect: "/login?error=microsoft_failed" }, (err: any, user: any) => {
+        passport.authenticate("microsoft", {
+          failureRedirect: "/login?error=microsoft_failed",
+          callbackURL: getOAuthCallbackUrl(req, "microsoft", "/api/auth/microsoft/callback"),
+        }, (err: any, user: any) => {
           (async () => {
             if (err || !user) {
+              if (err) {
+                console.warn("[Auth] Microsoft callback failed:", err?.message || err);
+              }
               return res.redirect("/login?error=microsoft_failed");
             }
 
@@ -428,12 +476,28 @@ export async function registerRoutes(
 
   // Auth0 (only register if credentials are configured)
   if (env.AUTH0_DOMAIN && env.AUTH0_CLIENT_ID && env.AUTH0_CLIENT_SECRET) {
-    app.get("/api/auth/auth0", passport.authenticate("auth0", { scope: "openid email profile offline_access" }));
+    app.get("/api/auth/auth0", (req, res, next) => {
+      const callbackURL = setOAuthCallbackUrl(
+        req,
+        "auth0",
+        resolveOAuthCallbackUrl(req, "/api/auth/auth0/callback"),
+      );
+      return passport.authenticate("auth0", {
+        scope: "openid email profile offline_access",
+        callbackURL,
+      })(req, res, next);
+    });
     app.get("/api/auth/auth0/callback",
       (req, res, next) => {
-        passport.authenticate("auth0", { failureRedirect: "/login?error=auth0_failed" }, (err: any, user: any) => {
+        passport.authenticate("auth0", {
+          failureRedirect: "/login?error=auth0_failed",
+          callbackURL: getOAuthCallbackUrl(req, "auth0", "/api/auth/auth0/callback"),
+        }, (err: any, user: any) => {
           (async () => {
             if (err || !user) {
+              if (err) {
+                console.warn("[Auth] Auth0 callback failed:", err?.message || err);
+              }
               return res.redirect("/login?error=auth0_failed");
             }
 
@@ -644,15 +708,24 @@ export async function registerRoutes(
     }),
   );
 
-  app.use("/api/ppt", pptExportRouter);
+  app.use("/api/ppt", lazyMountRouter(async () => {
+    const { pptExportRouter } = await import("./routes/pptExport");
+    return pptExportRouter;
+  }));
   // Node / Device Agent routes (API for external nodes)
   app.use("/api", createNodesRouter());
   app.use("/api", createChatsRouter());
   app.use(createFilesRouter());
   app.use(createLocalStorageRouter());
   app.use("/api", createGptRouter());
-  app.use("/api/documents", createDocumentsRouter());
-  app.use("/api/admin", createAdminRouter());
+  app.use("/api/documents", lazyMountRouter(async () => {
+    const { createDocumentsRouter } = await import("./routes/documentsRouter");
+    return createDocumentsRouter();
+  }));
+  app.use("/api/admin", lazyMountRouter(async () => {
+    const { createAdminRouter } = await import("./routes/admin");
+    return createAdminRouter();
+  }));
   app.use("/api/finops", finopsRouter);
   app.use("/api/admin", createRetrievalAdminRouter());
   app.use("/api", createAgentRouter(broadcastBrowserEvent));
@@ -835,14 +908,20 @@ export async function registerRoutes(
       health: getPareHealthSummary()
     });
   });
-  app.use("/api/ai", aiExcelRouter);
+  app.use("/api/ai", lazyMountRouter(async () => {
+    const { default: aiExcelRouter } = await import("./routes/aiExcelRouter");
+    return aiExcelRouter;
+  }));
   app.use("/api/power", powerRouter);
   // Tenaga HITL Routes
   app.use("/api/hitl", hitlRouter);
 
   app.use("/api/agents", multiAgentRouter);
   app.use("/api/errors", errorRouter);
-  app.use("/api/spreadsheet", createSpreadsheetRouter());
+  app.use("/api/spreadsheet", lazyMountRouter(async () => {
+    const { createSpreadsheetRouter } = await import("./routes/spreadsheetRoutes");
+    return createSpreadsheetRouter();
+  }));
   app.use("/api/skills", lazyMountRouter(async () => {
     const { createSkillsRouter } = await import("./routes/skillsRouter");
     return createSkillsRouter();
@@ -851,7 +930,10 @@ export async function registerRoutes(
     const { createSkillPlatformRouter } = await import("./routes/skillPlatformRouter");
     return createSkillPlatformRouter();
   }));
-  app.use("/api/chat", createChatRoutes());
+  app.use("/api/chat", lazyMountRouter(async () => {
+    const { createChatRoutes } = await import("./routes/chatRoutes");
+    return createChatRoutes();
+  }));
   app.use("/api/agent", createAgentModeRouter());
   app.use("/api/orchestrator", createOrchestratorRouter());
 
@@ -871,7 +953,10 @@ export async function registerRoutes(
   app.use("/api/packages", createPackagesRouter());
   app.use("/api/admin/analytics/advanced", advancedAnalyticsRouter);
   app.use("/api/admin/automations", automationsRouter);
-  app.use("/api/academic", academicSearchRouter); // Scopus + Scholar academic search
+  app.use("/api/academic", lazyMountRouter(async () => {
+    const { academicSearchRouter } = await import("./routes/academicSearchRouter");
+    return academicSearchRouter;
+  })); // Scopus + Scholar academic search
   app.use("/api", createRegistryRouter());
   app.use("/api/word-pipeline", wordPipelineRoutes);
   app.use("/api/sse", redisSSERouter);
@@ -884,9 +969,15 @@ export async function registerRoutes(
   app.use("/api", createLocalControlRouter());
   app.use("/api/system", systemControlRouter);
   app.use("/api/execution", createToolExecutionRouter());
-  app.use("/api/scientific", scientificSearchRouter);
+  app.use("/api/scientific", lazyMountRouter(async () => {
+    const { default: scientificSearchRouter } = await import("./routes/scientificSearchRouter");
+    return scientificSearchRouter;
+  }));
   app.use("/api/planning", agentPlanRouter);
-  app.use("/api/document-analysis", documentAnalysisRouter);
+  app.use("/api/document-analysis", lazyMountRouter(async () => {
+    const { default: documentAnalysisRouter } = await import("./routes/documentAnalysisRouter");
+    return documentAnalysisRouter;
+  }));
   app.use("/api/rag", ragRouter);
   app.use("/api/rag/memory", ragMemoryRouter);
   app.use("/api/feedback", feedbackRouter);

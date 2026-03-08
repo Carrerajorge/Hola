@@ -31,8 +31,6 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { createServer } from "http";
 import hpp from "hpp";
 
-import { registerRoutes } from "./routes";
-
 import { serveStatic } from "./static";
 
 import { apiErrorHandler } from "./middleware/apiErrorHandler";
@@ -363,6 +361,7 @@ export function log(message: string, source = "express") {
   // Idempotency for mutations
   app.use("/api", idempotency);
 
+  const { registerRoutes } = await import("./routes");
   await registerRoutes(httpServer, app);
 
   // Initialize OpenClaw agentic integration layer (feature-flagged).
