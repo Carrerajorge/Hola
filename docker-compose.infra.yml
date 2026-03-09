@@ -109,7 +109,7 @@ services:
       - "--maxmemory"
       - "256mb"
       - "--maxmemory-policy"
-      - "allkeys-lru"
+      - "noeviction"
       # ── RDB persistence (snapshot) ──
       - "--save"
       - "900 1"

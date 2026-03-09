@@ -289,7 +289,11 @@ fi
 check_http_code "04" "${BASE_URL}/api/health/live" "200"
 check_contains "05" "$TMP_DIR/04.out" '"status":"ok"' "/api/health/live returns status ok"
 check_http_code "06" "${BASE_URL}/api/health/ready" "200"
-check_contains "07" "$TMP_DIR/06.out" '"status":"ready"' "/api/health/ready returns status ready"
+if grep -Eq '"status":"(ready|degraded)"' "$TMP_DIR/06.out"; then
+  pass "07" "/api/health/ready returned an acceptable readiness status"
+else
+  fail "07" "/api/health/ready returned an acceptable readiness status"
+fi
 check_http_code "08" "${BASE_URL}/health" "200"
 check_http_code "09" "${BASE_URL}/api/registry/health" "200"
 check_contains "10" "$TMP_DIR/09.out" '"healthy":true' "/api/registry/health reports healthy"

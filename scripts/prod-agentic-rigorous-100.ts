@@ -221,7 +221,11 @@ async function run(): Promise<void> {
 
   const ready = await request("/api/health/ready");
   expectStatus("/api/health/ready responds", ready, 200);
-  addCheck("/api/health/ready status ready", ready.json?.status === "ready", `status=${ready.json?.status}`);
+  addCheck(
+    "/api/health/ready status acceptable",
+    ready.json?.status === "ready" || ready.json?.status === "degraded",
+    `status=${ready.json?.status}`,
+  );
 
   const registryHealth = await request("/api/registry/health");
   expectStatus("/api/registry/health responds", registryHealth, 200);

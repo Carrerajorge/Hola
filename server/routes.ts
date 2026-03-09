@@ -715,8 +715,11 @@ export async function registerRoutes(
     const mem = process.memoryUsage();
     const rlStatus = getRateLimiterStatus();
 
-    const dbReady = db.status === "HEALTHY";
-    const status = dbReady ? "ready" : "degraded";
+    // Treat transient DB degradation as ready so blue/green health probes do not
+    // flap the slot on a single failed sample. Only mark not-ready once the DB
+    // health monitor escalates to UNHEALTHY after consecutive failures.
+    const dbReady = db.status !== "UNHEALTHY";
+    const status = db.status === "HEALTHY" ? "ready" : db.status === "DEGRADED" ? "degraded" : "not_ready";
     const httpStatus = dbReady ? 200 : 503;
 
     res.status(httpStatus).json({
