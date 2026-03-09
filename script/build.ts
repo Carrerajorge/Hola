@@ -94,6 +94,16 @@ async function buildAll() {
             };
           });
         },
+      },
+      {
+        name: "externalize-bare-imports",
+        setup(build) {
+          build.onResolve({ filter: /^[^./]|^\.[^./]|^\.\.[^/]/ }, (args) => {
+            if (args.path.startsWith("@shared")) return;
+            if (args.path.startsWith("@hola")) return;
+            return { path: args.path, external: true };
+          });
+        }
       }
     ],
     define: {
