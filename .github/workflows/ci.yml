@@ -21,7 +21,7 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - name: Install dependencies
-        run: npm ci
+        run: npm install
       - name: Run production build
         run: npm run build
       - name: Run TypeScript Compiler Check
@@ -50,7 +50,7 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - name: Install dependencies
-        run: npm ci
+        run: npm install
       - name: Run integrated OpenClaw smoke tests
         run: npm run test:openclaw1000
 
