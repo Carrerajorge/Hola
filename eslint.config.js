@@ -20,6 +20,7 @@ export default ts.config(
       "**/dist/**",
       "**/node_modules/**",
       "**/coverage/**",
+      "client/public/vendor/**",
       "**/playwright-report/**",
       "**/test-results/**",
       "**/hola-infra/**",
