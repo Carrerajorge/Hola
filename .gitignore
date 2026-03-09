@@ -112,13 +112,13 @@ deploy.log
 
 *.rollback-bak
 
-health-dashboard.sh
+/health-dashboard.sh
 
-deploy-bluegreen.sh
+/deploy-bluegreen.sh
 
-rollback-bluegreen.sh
+/rollback-bluegreen.sh
 
-vps-bootstrap-bluegreen.sh
+/vps-bootstrap-bluegreen.sh
 
 audit.json
 
