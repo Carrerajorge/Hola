@@ -59,8 +59,35 @@ function getSqlCode(error: any): string | undefined {
   return error?.cause?.code || error?.code;
 }
 
-function isMissingColumnError(error: any): boolean {
-  return getSqlCode(error) === "42703";
+function getSqlMessage(error: any): string {
+  return [
+    error?.cause?.message,
+    error?.cause?.detail,
+    error?.message,
+    error?.detail,
+  ]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .join("\n");
+}
+
+function isMissingColumnError(error: any, columnNames: string[] = []): boolean {
+  if (getSqlCode(error) === "42703") {
+    return true;
+  }
+
+  const message = getSqlMessage(error).toLowerCase();
+  if (!message || !message.includes("does not exist")) {
+    return false;
+  }
+
+  if (columnNames.length === 0) {
+    return message.includes("column");
+  }
+
+  return columnNames.some((columnName) => {
+    const normalized = columnName.toLowerCase();
+    return message.includes(`"${normalized}"`) || message.includes(normalized);
+  });
 }
 
 async function ensureIdentityLink(
@@ -99,9 +126,9 @@ class AuthStorage implements IAuthStorage {
   async getUser(id: string): Promise<User | undefined> {
     try {
       const result = await db.execute(sql`
-        SELECT id, email, password, username, first_name, last_name, role, status,
+        SELECT id, email, password, username, first_name, last_name, full_name, role, status,
                auth_provider, email_verified, created_at, updated_at, last_login_at,
-               last_ip, user_agent, login_count, org_id
+               last_ip, user_agent, login_count
         FROM users
         WHERE id = ${id}
         LIMIT 1
@@ -111,7 +138,7 @@ class AuthStorage implements IAuthStorage {
       return mapAuthUserRow(row);
     } catch (error: any) {
       const sqlCode = getSqlCode(error);
-      if (sqlCode === "42703") {
+      if (isMissingColumnError(error)) {
         const fallbackResult = await db.execute(sql`
           SELECT id, email, password FROM users WHERE id = ${id} LIMIT 1
         `);
@@ -129,9 +156,9 @@ class AuthStorage implements IAuthStorage {
     const canonical = canonicalizeEmail(email);
     try {
       const result = await db.execute(sql`
-        SELECT id, email, password, username, first_name, last_name, role, status,
+        SELECT id, email, password, username, first_name, last_name, full_name, role, status,
                auth_provider, email_verified, created_at, updated_at, last_login_at,
-               last_ip, user_agent, login_count, org_id
+               last_ip, user_agent, login_count
         FROM users
         WHERE email_canonical = ${canonical}
         LIMIT 1
@@ -141,18 +168,21 @@ class AuthStorage implements IAuthStorage {
       return mapAuthUserRow(row);
     } catch (error: any) {
       const sqlCode = getSqlCode(error);
-      if (sqlCode === "42703") {
+      if (isMissingColumnError(error, ["email_canonical"])) {
         try {
           const result = await db.execute(sql`
-            SELECT id, email, password, username, first_name, last_name, role, status,
+            SELECT id, email, password, username, first_name, last_name, full_name, role, status,
                    auth_provider, email_verified, created_at, updated_at, last_login_at,
-                   last_ip, user_agent, login_count, org_id
+                   last_ip, user_agent, login_count
             FROM users WHERE email ILIKE ${canonical} LIMIT 1
           `);
           const row = (result as any)?.rows?.[0];
           if (!row) return undefined;
           return mapAuthUserRow(row);
-        } catch {
+        } catch (fallbackError: any) {
+          if (!isMissingColumnError(fallbackError)) {
+            throw fallbackError;
+          }
           const result = await db.execute(sql`
             SELECT id, email, password FROM users WHERE email ILIKE ${canonical} LIMIT 1
           `);
@@ -160,6 +190,14 @@ class AuthStorage implements IAuthStorage {
           if (!row) return undefined;
           return mapAuthUserRow(row);
         }
+      }
+      if (isMissingColumnError(error)) {
+        const result = await db.execute(sql`
+          SELECT id, email, password FROM users WHERE email ILIKE ${canonical} LIMIT 1
+        `);
+        const row = (result as any)?.rows?.[0];
+        if (!row) return undefined;
+        return mapAuthUserRow(row);
       }
       if (sqlCode === "42P01") return undefined;
       console.error(`[AuthStorage] getUserByEmail failed:`, error?.message || error);

@@ -70,6 +70,11 @@ async function loadAuthStorage() {
   return (await import("./storage")).authStorage;
 }
 
+function queryText(callIndex: number): string {
+  const query = executeMock.mock.calls[callIndex]?.[0];
+  return query?.strings?.join("") ?? "";
+}
+
 describe("authStorage schema drift resilience", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -126,7 +131,6 @@ describe("authStorage schema drift resilience", () => {
           },
         ],
       })
-      .mockRejectedValueOnce({ code: "42703", message: 'column "org_id" does not exist' })
       .mockResolvedValueOnce({
         rows: [
           {
@@ -152,6 +156,7 @@ describe("authStorage schema drift resilience", () => {
     expect(updateSetMock).toHaveBeenCalledTimes(1);
     expect(updateWhereMock).toHaveBeenCalledTimes(1);
     expect(userInsertValuesMock).not.toHaveBeenCalled();
+    expect(queryText(4)).not.toContain("org_id");
     expect(publishMock).toHaveBeenCalledWith("IDENTITY_LINKED", "user_1", {
       provider: "google",
       resolvedBy: "email",
@@ -164,7 +169,6 @@ describe("authStorage schema drift resilience", () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockRejectedValueOnce({ code: "42703", message: 'column "email_canonical" does not exist' })
       .mockResolvedValueOnce({ rows: [] })
-      .mockRejectedValueOnce({ code: "42703", message: 'column "org_id" does not exist' })
       .mockResolvedValueOnce({
         rows: [
           {
@@ -214,5 +218,49 @@ describe("authStorage schema drift resilience", () => {
       email: "new@example.com",
       provider: "google",
     });
+  });
+
+  it("reads users without selecting legacy-missing org_id during session hydration", async () => {
+    executeMock.mockResolvedValueOnce({
+      rows: [
+        {
+          id: "user_legacy",
+          email: "legacy@example.com",
+          username: "legacy",
+        },
+      ],
+    });
+
+    const authStorage = await loadAuthStorage();
+    const user = await authStorage.getUser("user_legacy");
+
+    expect(user?.id).toBe("user_legacy");
+    expect(user?.orgId).toBe("default");
+    expect(queryText(0)).not.toContain("org_id");
+  });
+
+  it("falls back to email lookup when email_canonical is missing even if the SQLSTATE is swallowed", async () => {
+    executeMock
+      .mockRejectedValueOnce({
+        message: "Failed query",
+        cause: { message: 'column "email_canonical" does not exist' },
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: "user_email_legacy",
+            email: "legacy@example.com",
+            username: "legacy",
+          },
+        ],
+      });
+
+    const authStorage = await loadAuthStorage();
+    const user = await authStorage.getUserByEmail("Legacy@Example.com");
+
+    expect(user?.id).toBe("user_email_legacy");
+    expect(queryText(0)).not.toContain("org_id");
+    expect(queryText(1)).toContain("email ILIKE");
+    expect(queryText(1)).not.toContain("org_id");
   });
 });
