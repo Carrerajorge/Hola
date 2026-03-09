@@ -444,8 +444,8 @@ const openClawSessionRuntimeMock = {
 
 const openClawSuperAgentRuntimeMock = {
   getStatus: vi.fn(async () => ({
-    requestedOpenClawTag: "v2026.3.2",
-    localOpenClawVersion: "2026.2.25",
+    requestedOpenClawTag: "v2026.3.7-beta.1",
+    localOpenClawVersion: "2026.3.7-beta.1",
     connectors: {
       totalConnectors: 58,
       totalCapabilities: 143,
@@ -1172,7 +1172,7 @@ describe("openclawRuntimeRouter smoke flow", () => {
       expect(statusRes.body.subagents.storePath).toBe("/tmp/subagent-runs.json");
       expect(statusRes.body.sessions.storePath).toBe("/tmp/session-runtime.json");
       expect(statusRes.body.browser.activeSessions).toBe(1);
-      expect(statusRes.body.superAgent.requestedOpenClawTag).toBe("v2026.3.2");
+      expect(statusRes.body.superAgent.requestedOpenClawTag).toBe("v2026.3.7-beta.1");
       expect(statusRes.body.superAgent.connectors.totalConnectors).toBe(58);
 
       const jobsRes = await client.get("/api/openclaw/runtime/background/cron/jobs");
@@ -1266,7 +1266,7 @@ describe("openclawRuntimeRouter smoke flow", () => {
     try {
       const healthRes = await client.get("/api/openclaw/runtime/health");
       expect(healthRes.status).toBe(200);
-      expect(healthRes.body.superAgent.requestedOpenClawTag).toBe("v2026.3.2");
+      expect(healthRes.body.superAgent.requestedOpenClawTag).toBe("v2026.3.7-beta.1");
       expect(healthRes.body.superAgent.connectors.totalConnectors).toBe(58);
       expect(healthRes.body.superAgent.ecosystem.enabledServices).toBe(6);
       expect(openClawSuperAgentRuntimeMock.getStatus).toHaveBeenCalledWith({
@@ -1275,7 +1275,7 @@ describe("openclawRuntimeRouter smoke flow", () => {
 
       const superAgentRes = await client.get("/api/openclaw/runtime/superagent/status");
       expect(superAgentRes.status).toBe(200);
-      expect(superAgentRes.body.localOpenClawVersion).toBe("2026.2.25");
+      expect(superAgentRes.body.localOpenClawVersion).toBe("2026.3.7-beta.1");
       expect(superAgentRes.body.capabilities.workflowAutomation).toBe(true);
       expect(superAgentRes.body.ecosystem.featuredServices[0].id).toBe("n8n");
       expect(openClawSuperAgentRuntimeMock.getStatus).toHaveBeenCalledWith({
@@ -1294,7 +1294,7 @@ describe("openclawRuntimeRouter smoke flow", () => {
       const overviewRes = await client.get("/api/openclaw/runtime/overview");
       expect(overviewRes.status).toBe(200);
       expect(overviewRes.body.health.ok).toBe(true);
-      expect(overviewRes.body.superAgent.requestedOpenClawTag).toBe("v2026.3.2");
+      expect(overviewRes.body.superAgent.requestedOpenClawTag).toBe("v2026.3.7-beta.1");
       expect(overviewRes.body.background.jobs.total).toBe(1);
       expect(overviewRes.body.background.processes.running).toBe(1);
       expect(overviewRes.body.browser.activeSessions).toBe(1);

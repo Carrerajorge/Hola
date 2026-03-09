@@ -45,6 +45,29 @@ function resolveExistingFile(candidate: string) {
   return null;
 }
 
+function resolvePnpmShimPath(candidate: string) {
+  if (!fs.existsSync(candidate) || path.extname(candidate)) {
+    return candidate;
+  }
+
+  try {
+    const stat = fs.statSync(candidate);
+    if (!stat.isFile()) {
+      return candidate;
+    }
+
+    const raw = fs.readFileSync(candidate, "utf8").trim();
+    if (!raw.startsWith(".pnpm/")) {
+      return candidate;
+    }
+
+    const packageRoot = resolveExistingFile(path.resolve(path.dirname(candidate), raw));
+    return packageRoot ?? candidate;
+  } catch {
+    return candidate;
+  }
+}
+
 function resolveExportTarget(
   packageDir: string,
   exportsField: unknown,
@@ -136,6 +159,18 @@ function resolvePackageFromVendorRoot(id: string, root: string) {
   return null;
 }
 
+function isUsableResolvedPath(candidate: string | null) {
+  return Boolean(candidate) && path.isAbsolute(candidate) && fs.existsSync(candidate);
+}
+
+function resolveFromWorkspace(id: string) {
+  try {
+    return workspaceRequire.resolve(id);
+  } catch {
+    return null;
+  }
+}
+
 function shouldKeepWorkspaceResolution(id: string) {
   return (
     id === "vitest" ||
@@ -171,7 +206,7 @@ function resolveVendoredDependency(id: string, importer?: string) {
     for (const root of candidateRoots) {
       try {
         const requireFromRoot = createRequire(path.join(root, "__vitest_vendor_resolver__.cjs"));
-        return requireFromRoot.resolve(id);
+        return resolvePnpmShimPath(requireFromRoot.resolve(id));
       } catch {
         const manuallyResolved = resolvePackageFromVendorRoot(id, root);
         if (manuallyResolved) {
@@ -182,17 +217,18 @@ function resolveVendoredDependency(id: string, importer?: string) {
     return null;
   };
 
+  const workspaceResolved = resolveFromWorkspace(id);
+  if (workspaceResolved) {
+    return workspaceResolved;
+  }
+
   const vendoredResolved = tryResolveFromRoots(roots);
-  if (vendoredResolved) {
+  if (isUsableResolvedPath(vendoredResolved)) {
     return vendoredResolved;
   }
 
-  try {
-    workspaceRequire.resolve(id);
-    return null;
-  } catch {
-    return tryResolveFromRoots(vendoredNodeModulesRoots);
-  }
+  const fallbackVendoredResolved = tryResolveFromRoots(vendoredNodeModulesRoots);
+  return isUsableResolvedPath(fallbackVendoredResolved) ? fallbackVendoredResolved : null;
 }
 
 export default defineConfig({
@@ -253,6 +289,8 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./client/src"),
       "@shared": path.resolve(__dirname, "./shared"),
+      tslog: path.resolve(__dirname, "./node_modules/tslog/esm/index.js"),
+      json5: path.resolve(__dirname, "./node_modules/json5/lib/index.js"),
     },
   },
 });

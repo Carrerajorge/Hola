@@ -111,8 +111,8 @@ const THRESHOLDS = {
     critical: 500, // req/s
   },
   memory: {
-    warning: 0.7, // 70%
-    critical: 0.9, // 90%
+    warning: 0.8, // 80%
+    critical: 0.95, // 95%
   },
   tokenCost: {
     warning: 10, // $10/hour

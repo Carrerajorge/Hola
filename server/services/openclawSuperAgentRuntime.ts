@@ -10,7 +10,6 @@ import {
   type AgentEcosystemServiceId,
 } from "./agentEcosystemService";
 
-const REQUESTED_OPENCLAW_TAG = "v2026.3.2";
 const STATUS_CACHE_TTL_MS = 15_000;
 const DEFAULT_PROBE_TIMEOUT_MS = 1_500;
 
@@ -120,6 +119,15 @@ function readOpenClawVersion(packagePath: string): string | null {
   } catch {
     return null;
   }
+}
+
+function toOpenClawReleaseTag(version: string | null): string {
+  if (!version) {
+    return "unknown";
+  }
+
+  const normalized = version.trim();
+  return normalized.startsWith("v") ? normalized : `v${normalized}`;
 }
 
 function countByCategory(manifests: readonly ConnectorManifest[]): Record<string, number> {
@@ -338,9 +346,10 @@ export class OpenClawSuperAgentRuntime {
     const manifests = this.connectorRegistryImpl.listEnabled();
     const connectors = this.buildConnectorSummary(manifests);
     const ecosystem = await this.buildEcosystemSummary({ includeProbes, probeTimeoutMs });
+    const localOpenClawVersion = readOpenClawVersion(this.openClawPackagePath);
     const value: OpenClawSuperAgentStatus = {
-      requestedOpenClawTag: REQUESTED_OPENCLAW_TAG,
-      localOpenClawVersion: readOpenClawVersion(this.openClawPackagePath),
+      requestedOpenClawTag: toOpenClawReleaseTag(localOpenClawVersion),
+      localOpenClawVersion,
       connectors,
       ecosystem,
       capabilities: this.buildCapabilitySummary(connectors, ecosystem),

@@ -5,6 +5,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetHeartbeatWakeStateForTests } from "../openclaw/src/infra/heartbeat-wake";
 import { OpenClawTaskRuntime } from "./openclawTaskRuntime";
 
+async function removeDirWithRetry(target: string, attempts = 5) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      await fs.rm(target, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
+    }
+  }
+  throw lastError;
+}
+
 describe("OpenClawTaskRuntime", () => {
   let tempDir: string;
 
@@ -15,7 +29,7 @@ describe("OpenClawTaskRuntime", () => {
   afterEach(async () => {
     vi.useRealTimers();
     resetHeartbeatWakeStateForTests();
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await removeDirWithRetry(tempDir);
   });
 
   it("normalizes and runs a background agent job", async () => {
@@ -52,7 +66,7 @@ describe("OpenClawTaskRuntime", () => {
       expect(runs.total).toBe(1);
       expect(runs.entries[0]?.status).toBe("ok");
     } finally {
-      runtime.stop();
+      await runtime.stop();
     }
   });
 
@@ -76,7 +90,7 @@ describe("OpenClawTaskRuntime", () => {
       await new Promise((resolve) => setTimeout(resolve, 90));
       expect(spawn.mock.calls.length).toBeGreaterThanOrEqual(1);
     } finally {
-      runtime.stop();
+      await runtime.stop();
     }
   });
 
@@ -119,7 +133,7 @@ describe("OpenClawTaskRuntime", () => {
       expect(wakes.events[0]?.spawnedRunId).toBeTruthy();
       expect(wakes.events[0]?.dispatchedAtMs).toBeTypeOf("number");
     } finally {
-      runtime.stop();
+      await runtime.stop();
     }
   });
 });

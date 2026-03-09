@@ -503,11 +503,12 @@ export class OpenClawTaskRuntime {
     return await this.startPromise;
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     this.clearTimer();
     this.clearHeartbeatTimer();
     this.detachHeartbeatHandler();
     this.started = false;
+    await this.op.catch(() => undefined);
   }
 
   async status(): Promise<OpenClawTaskRuntimeStatus> {

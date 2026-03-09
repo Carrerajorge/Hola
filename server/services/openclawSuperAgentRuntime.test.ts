@@ -102,7 +102,7 @@ describe("OpenClawSuperAgentRuntime", () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-superagent-"));
     tempDirs.push(tempDir);
     const packagePath = path.join(tempDir, "package.json");
-    fs.writeFileSync(packagePath, JSON.stringify({ version: "2026.2.25" }), "utf8");
+    fs.writeFileSync(packagePath, JSON.stringify({ version: "2026.3.7-beta.1" }), "utf8");
 
     const runtime = new OpenClawSuperAgentRuntime({
       connectorRegistry: {
@@ -132,8 +132,8 @@ describe("OpenClawSuperAgentRuntime", () => {
     const status = await runtime.getStatus({ includeProbes: false });
 
     expect(probeService).not.toHaveBeenCalled();
-    expect(status.requestedOpenClawTag).toBe("v2026.3.2");
-    expect(status.localOpenClawVersion).toBe("2026.2.25");
+    expect(status.requestedOpenClawTag).toBe("v2026.3.7-beta.1");
+    expect(status.localOpenClawVersion).toBe("2026.3.7-beta.1");
     expect(status.connectors.totalConnectors).toBe(6);
     expect(status.connectors.totalCapabilities).toBe(18);
     expect(status.connectors.categoryCounts).toEqual({

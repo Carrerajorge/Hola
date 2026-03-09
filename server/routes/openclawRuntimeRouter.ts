@@ -354,27 +354,58 @@ export function createOpenClawRuntimeRouter(): Router {
     const userId = getOrCreateSecureUserId(req);
     try {
       const controlPlane = getAgentControlPlaneSnapshot();
+
+      // Use Promise.allSettled-style approach: each call wrapped so partial failures
+      // don't take down the entire overview response.
+      const safe = async <T>(fn: () => Promise<T>, fallback: T): Promise<T> => {
+        try { return await fn(); } catch { return fallback; }
+      };
+
       const [superAgent, tasks, jobs, runs, wakes, browser, connectorCatalog] = await Promise.all([
-        openClawSuperAgentRuntime.getStatus({
-          includeProbes: false,
+        safe(() => openClawSuperAgentRuntime.getStatus({ includeProbes: false }), {
+          requestedOpenClawTag: "unknown", localOpenClawVersion: null,
+          connectors: { totalConnectors: 0, totalCapabilities: 0, coreConnectors: [] },
+          ecosystem: { totalServices: 0, enabledServices: 0, featuredServices: [] },
+          capabilities: {},
+        } as any),
+        safe(() => openClawTaskRuntime.status(), {
+          started: false, cronEnabled: false, heartbeatsEnabled: false, jobs: 0,
+          pendingWakes: 0, runningJobs: [], startupError: null,
+          heartbeat: { enabled: false, intervalMs: null, lastStatus: "unknown", runCount: 0, pendingWakeEvents: 0 },
         }),
-        openClawTaskRuntime.status(),
-        openClawTaskRuntime.listPage({ limit: 5, offset: 0 }),
-        openClawTaskRuntime.listRuns({ scope: "all", limit: 10, offset: 0, sortDir: "desc" }),
-        openClawTaskRuntime.listWakeEvents(5),
-        openClawBrowserRuntime.getStatus(userId),
-        openClawConnectorRuntime.listCatalog(userId),
+        safe(() => openClawTaskRuntime.listPage({ limit: 5, offset: 0 }), { jobs: [], total: 0 }),
+        safe(() => openClawTaskRuntime.listRuns({ scope: "all", limit: 10, offset: 0, sortDir: "desc" }), { entries: [], total: 0 }),
+        safe(() => openClawTaskRuntime.listWakeEvents(5), { count: 0, events: [] }),
+        safe(() => openClawBrowserRuntime.getStatus(userId), {
+          profiles: openClawBrowserRuntime.listProfiles(),
+          activeSessions: 0, counts: { browser: 0, computerBrowser: 0, computerDesktop: 0 },
+          capabilities: { multiBrowser: true, computerUse: true, structuredExtraction: true, agenticNavigation: true, visionAnalysis: true },
+          sessions: [],
+        }),
+        safe(() => openClawConnectorRuntime.listCatalog(userId), []),
       ]);
-      const processes = openClawProcessRuntime.listSessions();
-      const extensions = openClawExtensionRuntime.getSummary();
-      const sessions = openClawSessionRuntime.getStatus();
+
+      let processes = { count: 0, sessions: [] as any[] };
+      try { processes = openClawProcessRuntime.listSessions(); } catch {}
+
+      let extensions = { pluginsEnabled: false, pluginCount: 0, hookCount: 0 } as any;
+      try { extensions = openClawExtensionRuntime.getSummary(); } catch {}
+
+      let sessions = { totalSessions: 0, activeSessions: 0, interruptedSessions: 0, recoveryRequestedSessions: 0, errorSessions: 0 };
+      try { sessions = openClawSessionRuntime.getStatus(); } catch {}
+
       const subagents = openclawSubagentService.getStatus();
-      const orchestratorStatus = orchestrationEngine.getStatus();
-      const recentRuns = orchestrationEngine.listRuns(10);
+
+      let orchestratorStatus = { storePath: "", runCount: 0, lastRunAtMs: null as number | null };
+      try { orchestratorStatus = orchestrationEngine.getStatus(); } catch {}
+
+      let recentRuns: any[] = [];
+      try { recentRuns = orchestrationEngine.listRuns(10); } catch {}
+
       const warnings: string[] = [];
 
-      if (tasks.startupError) {
-        warnings.push(tasks.startupError);
+      if ((tasks as any).startupError) {
+        warnings.push((tasks as any).startupError);
       }
       if (sessions.errorSessions > 0) {
         warnings.push(`Session runtime has ${sessions.errorSessions} error session(s).`);
@@ -401,7 +432,7 @@ export function createOpenClawRuntimeRouter(): Router {
           wakes,
           processes: {
             count: processes.count,
-            running: processes.sessions.filter((session) => session.status === "running").length,
+            running: processes.sessions.filter((session: any) => session.status === "running").length,
             recent: processes.sessions.slice(0, 10),
           },
           extensions,

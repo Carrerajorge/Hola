@@ -86,6 +86,7 @@ import { SecurityAlertsPanel } from "@/components/admin/SecurityAlerts";
 import { AdminNotificationsPopover } from "@/components/admin/NotificationsPopover";
 import { TerminalPanel } from "@/components/terminal-panel";
 import ReleasesManager from "./admin/ReleasesManager";
+import { useOpenClawRuntimeOverview } from "@/hooks/use-openclaw-runtime-overview";
 
 type AdminSection =
   | "dashboard"
@@ -104,7 +105,8 @@ type AdminSection =
   | "agentic"
   | "excel"
   | "terminal"
-  | "releases";
+  | "releases"
+  | "openclaw";
 
 const navItems: { id: AdminSection; label: string; icon: React.ElementType }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -124,6 +126,7 @@ const navItems: { id: AdminSection; label: string; icon: React.ElementType }[] =
   { id: "excel", label: "Excel Manager", icon: FileSpreadsheet },
   { id: "terminal", label: "Terminal", icon: Terminal },
   { id: "releases", label: "App Releases", icon: Download },
+  { id: "openclaw", label: "OpenClaw", icon: Zap },
 ];
 
 function DashboardSection() {
@@ -6525,6 +6528,145 @@ function ExcelManagerSection() {
   );
 }
 
+function OpenClawAdminSection() {
+  const { overview, isLoading: ocLoading, error: ocError, refresh: ocRefresh } = useOpenClawRuntimeOverview(15_000);
+  const [, nav] = useLocation();
+
+  if (ocLoading && !overview) {
+    return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+  }
+
+  if (ocError && !overview) {
+    return (
+      <div className="space-y-4">
+        <h2 className="text-lg font-medium">OpenClaw Runtime</h2>
+        <Card><CardContent className="py-8 text-center">
+          <AlertTriangle className="h-8 w-8 text-amber-500 mx-auto mb-3" />
+          <p className="text-sm text-muted-foreground mb-3">{ocError}</p>
+          <Button variant="outline" size="sm" onClick={ocRefresh}><RefreshCw className="h-4 w-4 mr-2" /> Retry</Button>
+        </CardContent></Card>
+      </div>
+    );
+  }
+
+  const o = overview!;
+  const health = o.health;
+  const sa = o.superAgent;
+  const cp = o.controlPlane;
+  const bg = o.background;
+  const conn = o.connectors;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600"><Zap className="h-5 w-5 text-white" /></div>
+          <div>
+            <h2 className="text-lg font-medium">OpenClaw Runtime</h2>
+            <p className="text-sm text-muted-foreground">v{sa.localOpenClawVersion || "unknown"} · {health.ok ? "✅ Healthy" : "⚠️ Issues detected"}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={ocRefresh} data-testid="button-refresh-openclaw">
+            <RefreshCw className={`h-4 w-4 mr-2 ${ocLoading ? "animate-spin" : ""}`} /> Refresh
+          </Button>
+          <Button size="sm" onClick={() => nav("/openclaw")} data-testid="button-openclaw-dashboard">
+            <Eye className="h-4 w-4 mr-2" /> Full Dashboard
+          </Button>
+        </div>
+      </div>
+
+      {health.warnings.length > 0 && (
+        <Card className="border-amber-500/30 bg-amber-500/5"><CardContent className="py-4">
+          <div className="flex items-center gap-2 mb-2"><AlertTriangle className="h-4 w-4 text-amber-500" /><span className="text-sm font-medium text-amber-500">Warnings</span></div>
+          <ul className="space-y-1">{health.warnings.map((w, i) => <li key={i} className="text-xs text-muted-foreground">• {w}</li>)}</ul>
+        </CardContent></Card>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader><CardTitle className="text-base">Modules</CardTitle><CardDescription>Enabled OpenClaw subsystems</CardDescription></CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(health.modules).map(([key, enabled]) => (
+                <Badge key={key} variant={enabled ? "default" : "secondary"} className="gap-1.5">
+                  {enabled ? <CheckCircle className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                  {key.charAt(0).toUpperCase() + key.slice(1)}
+                </Badge>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-base">Statistics</CardTitle><CardDescription>System overview</CardDescription></CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <div><p className="text-2xl font-bold">{conn.total}</p><p className="text-xs text-muted-foreground">Connectors</p></div>
+              <div><p className="text-2xl font-bold">{bg.subagents?.totalRuns || 0}</p><p className="text-xs text-muted-foreground">Subagent Runs</p></div>
+              <div><p className="text-2xl font-bold">{bg.processes?.count || 0}</p><p className="text-xs text-muted-foreground">Processes</p></div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base flex items-center gap-2"><Brain className="h-4 w-4" /> Control Plane — Agent Roles</CardTitle></CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            {Object.entries(cp.roles).map(([key, role]) => (
+              <div key={key} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-colors">
+                <div className="flex items-center gap-3">
+                  <span className={`w-2.5 h-2.5 rounded-full ${role.configured ? "bg-green-500" : "bg-red-500"}`} />
+                  <div><span className="text-sm font-medium capitalize">{role.role}</span><p className="text-xs text-muted-foreground">{role.purpose}</p></div>
+                </div>
+                <div className="text-right">
+                  <code className="text-xs bg-muted px-2 py-0.5 rounded">{role.provider}/{role.target}</code>
+                  <p className="text-xs text-muted-foreground mt-0.5">{role.lane}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 pt-3 border-t">
+            <p className="text-xs font-medium text-muted-foreground mb-2">Platform Capabilities</p>
+            <div className="flex flex-wrap gap-1.5">
+              {Object.entries(cp.capabilities).map(([key, value]) => (
+                <Badge key={key} variant={typeof value === "boolean" && value ? "default" : "secondary"} className="text-xs">
+                  {key.replace(/([A-Z])/g, " $1").trim()}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {conn.items.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Connectors ({conn.total})</CardTitle>
+            <CardDescription>{conn.connected} connected · {conn.enabledForUser} enabled · {conn.writeCapabilities} write capabilities</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {conn.items.slice(0, 12).map((c) => (
+                <div key={c.connectorId} className="flex items-center gap-2 p-2 rounded-lg border text-sm">
+                  <span className={`w-2 h-2 rounded-full ${c.connected ? "bg-green-500" : "bg-gray-400"}`} />
+                  <span className="font-medium truncate">{c.displayName}</span>
+                  <span className="text-xs text-muted-foreground ml-auto">{c.category}</span>
+                </div>
+              ))}
+            </div>
+            {conn.items.length > 12 && (
+              <p className="text-xs text-muted-foreground mt-2 text-center">
+                +{conn.items.length - 12} more · <button className="text-primary underline" onClick={() => nav("/openclaw")}>View all</button>
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const [, setLocation] = useLocation();
   const [activeSection, setActiveSection] = useState<AdminSection>("dashboard");
@@ -6569,6 +6711,10 @@ export default function AdminPage() {
   }
 
   const renderSection = () => {
+    // OpenClaw Admin Section rendered inline
+    if (activeSection === "openclaw") {
+      return <OpenClawAdminSection />;
+    }
     switch (activeSection) {
       case "dashboard":
         return <DashboardSection />;
@@ -6609,6 +6755,8 @@ export default function AdminPage() {
         return <MonitoringSection />;
       case "releases":
         return <ReleasesManager />;
+      case "openclaw":
+        return <OpenClawAdminSection />;
       default:
         return <DashboardSection />;
     }

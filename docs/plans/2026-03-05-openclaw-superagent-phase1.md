@@ -56,14 +56,14 @@ Note:
 
 Local vendored OpenClaw:
 
-- `server/openclaw/package.json` version: `2026.2.25`
+- `server/openclaw/package.json` version: `2026.3.7-beta.1`
 
 Requested upstream target:
 
-- `openclaw/openclaw` tag: `v2026.3.2`
-- release URL: `https://github.com/openclaw/openclaw/releases/tag/v2026.3.2`
+- `openclaw/openclaw` tag: `v2026.3.7-beta.1`
+- release URL: `https://github.com/openclaw/openclaw/releases/tag/v2026.3.7-beta.1`
 
-The diff against `/tmp/openclaw-v2026.3.2` is large and spans many files across:
+The diff against `/tmp/openclaw-v2026.3.7-beta.1` is large and spans many files across:
 
 - `.github`
 - `apps/android`
@@ -109,7 +109,7 @@ Official sources checked on 2026-03-05:
 
 ## Immediate next steps
 
-1. Port high-value OpenClaw `v2026.3.2` changes into `server/openclaw/src/infra` and `server/openclaw/src/agents`.
+1. Port high-value OpenClaw `v2026.3.7-beta.1` changes into `server/openclaw/src/infra` and `server/openclaw/src/agents`.
 2. Replace the simplistic `server/services/orchestrationEngine.ts` with role-aware planning and execution.
 3. Add runtime endpoints for cron jobs, background exec sessions, and heartbeats.
 4. Wire Langfuse and Qdrant into the control-plane status page.

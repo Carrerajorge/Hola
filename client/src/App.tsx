@@ -159,6 +159,7 @@ const BusinessPage = lazyWithRetry(() => import("@/pages/business"));
 const DownloadPage = lazyWithRetry(() => import("@/pages/download"));
 const PowerPage = lazyWithRetry(() => import("@/pages/power"));
 const MemoryPage = lazyWithRetry(() => import("@/pages/memory"));
+const OpenClawDashboardPage = lazyWithRetry(() => import("@/pages/openclaw-dashboard"));
 
 const ProtectedProfilePage = requireAuth(ProfilePage);
 const ProtectedBillingPage = requireAuth(BillingPage);
@@ -174,6 +175,7 @@ const ProtectedMemoryPage = requireAuth(MemoryPage);
 const ProtectedSpreadsheetAnalyzerPage = requireAuth(SpreadsheetAnalyzerPage);
 const ProtectedMonitoringDashboard = requireAuth(MonitoringDashboard);
 const ProtectedRunProgressPage = requireAuth(RunProgressPage);
+const ProtectedOpenClawDashboard = requireAuth(OpenClawDashboardPage, { allowLocalDevHost: true });
 
 function GlobalKeyboardShortcuts() {
   const [, setLocation] = useLocation();
@@ -315,6 +317,7 @@ function Router() {
             <Route path="/memory" component={ProtectedMemoryPage} />
             <Route path="/spreadsheet-analyzer" component={ProtectedSpreadsheetAnalyzerPage} />
             <Route path="/monitoring" component={ProtectedMonitoringDashboard} />
+            <Route path="/openclaw" component={ProtectedOpenClawDashboard} />
             <Route path="/runs/:id/progress" component={ProtectedRunProgressPage} />
             <Route path="/about" component={AboutPage} />
             <Route path="/learn" component={LearnPage} />
