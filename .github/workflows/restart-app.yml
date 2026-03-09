@@ -103,6 +103,23 @@ jobs:
           STATE_FILE="${DEPLOY_PATH}/deploy-state.json"
           SLOT_COMPOSE="${DEPLOY_PATH}/docker-compose.slot.yml"
 
+          extract_env_value() {
+            local file="$1"
+            local key="$2"
+            local line
+            line="$(grep -m1 -E "^${key}=" "$file" 2>/dev/null || true)"
+            if [ -z "$line" ]; then
+              return 1
+            fi
+            line="${line#*=}"
+            line="${line%$'\r'}"
+            line="${line%\"}"
+            line="${line#\"}"
+            line="${line%\'}"
+            line="${line#\'}"
+            echo "$line"
+          }
+
           if [ ! -f "${STATE_FILE}" ]; then
             echo "ERROR: state file not found"
             exit 1
@@ -114,11 +131,42 @@ jobs:
           APP_VERSION="$(python3 -c "import json; d=json.load(open('${STATE_FILE}')); print(d.get('app_version',''))")"
 
           echo "Active slot: ${ACTIVE_SLOT} (port ${ACTIVE_PORT})"
-          echo "Restarting app container..."
+          echo "Disk status:"
+          df -h "${DEPLOY_PATH}" || true
+          echo "Preparing app container recovery..."
 
           cd "${DEPLOY_PATH}"
-          SLOT="${ACTIVE_SLOT}" HOST_PORT="${ACTIVE_PORT}" IMAGE_TAG="${IMAGE_TAG}" APP_VERSION="${APP_VERSION}" \
-            docker compose -p "hola-${ACTIVE_SLOT}" -f "${SLOT_COMPOSE}" restart app || true
+
+          EXISTING_STATUS="$(docker inspect --format='{{.State.Status}}' "hola-${ACTIVE_SLOT}-app" 2>/dev/null || echo "missing")"
+          echo "Existing app container status: ${EXISTING_STATUS}"
+
+          RECREATE_APP=false
+          if [ "${EXISTING_STATUS}" = "removing" ] || [ "${EXISTING_STATUS}" = "missing" ]; then
+            RECREATE_APP=true
+          else
+            if ! SLOT="${ACTIVE_SLOT}" HOST_PORT="${ACTIVE_PORT}" IMAGE_TAG="${IMAGE_TAG}" APP_VERSION="${APP_VERSION}" \
+              docker compose -p "hola-${ACTIVE_SLOT}" -f "${SLOT_COMPOSE}" restart app; then
+              RECREATE_APP=true
+            fi
+          fi
+
+          if [ "${RECREATE_APP}" = "true" ]; then
+            echo "Recreating app container..."
+            SANDBOX_RUNNER_TOKEN="$(extract_env_value .env.production SANDBOX_RUNNER_TOKEN || true)"
+            REDIS_PASSWORD="$(extract_env_value .env.production REDIS_PASSWORD || true)"
+
+            docker rm -f "hola-${ACTIVE_SLOT}-app" >/dev/null 2>&1 || true
+            docker container prune -f >/dev/null 2>&1 || true
+            docker image prune -f >/dev/null 2>&1 || true
+
+            SLOT="${ACTIVE_SLOT}" \
+            HOST_PORT="${ACTIVE_PORT}" \
+            IMAGE_TAG="${IMAGE_TAG}" \
+            APP_VERSION="${APP_VERSION}" \
+            SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN}" \
+            REDIS_PASSWORD="${REDIS_PASSWORD}" \
+              docker compose -p "hola-${ACTIVE_SLOT}" -f "${SLOT_COMPOSE}" up -d --no-deps --force-recreate app
+          fi
 
           echo "Waiting for health check..."
           for i in $(seq 1 24); do
