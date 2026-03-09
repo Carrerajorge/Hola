@@ -762,6 +762,7 @@ describe('Worker Pool', () => {
         
         expect(result).toBeDefined();
       } catch (error) {
+        expect(error).toBeDefined();
       } finally {
         await pool.shutdown();
       }

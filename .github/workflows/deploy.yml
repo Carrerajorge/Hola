@@ -60,9 +60,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Wait for the CI workflow run to appear and the "CI Status" job to finish.
-          # The "CI Status" aggregator job is the single source of truth — it soft-fails
-          # non-blocking jobs (test, audit) while hard-failing critical ones (typecheck, build).
+          # Wait for the CI workflow run to appear and finish for this SHA.
+          # The CI workflow currently has multiple first-class jobs and no single
+          # aggregator job, so gate on the workflow-level conclusion instead of a
+          # job name that may drift and deadlock deploys.
           for attempt in $(seq 1 360); do
             # Find the CI run for this SHA
             run_id="$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow "Enterprise Quality Gates (CI)" --branch "${BRANCH}" --json headSha,databaseId,status --limit 50 --jq "[ .[] | select(.headSha==\"${SHA}\") ][0].databaseId // 0" 2>/dev/null || echo '0')"
@@ -73,25 +74,24 @@ jobs:
               continue
             fi
 
-            # Check the "CI Status" job specifically (not the workflow-level conclusion)
-            ci_status_line="$(gh run view "${run_id}" --repo "${GITHUB_REPOSITORY}" --json jobs --jq '[ .jobs[] | select(.name=="Lint & Typecheck") | (.status + " " + .conclusion) ][0] // "__notfound__"' 2>/dev/null || echo '__queryfail__')"
+            ci_status_line="$(gh run view "${run_id}" --repo "${GITHUB_REPOSITORY}" --json status,conclusion --jq '.status + " " + (.conclusion // "")' 2>/dev/null || echo '__queryfail__')"
 
             job_status="$(echo "${ci_status_line}" | awk '{print $1}')"
             job_conclusion="$(echo "${ci_status_line}" | awk '{print $2}')"
 
             if [ "${ci_status_line}" = "__queryfail__" ]; then
               if [ "${attempt}" -ge 6 ]; then
-                echo "::error::Unable to query CI Status job after ${attempt} attempts."
+                echo "::error::Unable to query CI workflow state after ${attempt} attempts."
                 echo "ci_ok=false" >> "$GITHUB_OUTPUT"
                 exit 1
               fi
-              echo "Unable to query CI Status job. Retry ${attempt}/360..."
+              echo "Unable to query CI workflow state. Retry ${attempt}/360..."
               sleep 10
               continue
             fi
 
-            if [ "${ci_status_line}" = "__notfound__" ] || [ -z "${job_status}" ]; then
-              echo "CI Status job not yet available. Retry ${attempt}/360..."
+            if [ -z "${job_status}" ]; then
+              echo "CI workflow state not yet available. Retry ${attempt}/360..."
               sleep 10
               continue
             fi
@@ -99,19 +99,19 @@ jobs:
             if [ "${job_status}" = "completed" ]; then
               if [ "${job_conclusion}" = "success" ]; then
                 echo "ci_ok=true" >> "$GITHUB_OUTPUT"
-                echo "CI Status job for ${SHA} completed successfully."
+                echo "CI workflow for ${SHA} completed successfully."
                 exit 0
               fi
-              echo "::error::CI Status job did not pass for ${SHA} (status=${job_status}, conclusion=${job_conclusion})"
+              echo "::error::CI workflow did not pass for ${SHA} (status=${job_status}, conclusion=${job_conclusion})"
               echo "ci_ok=false" >> "$GITHUB_OUTPUT"
               exit 1
             fi
 
-            echo "CI Status job: status=${job_status}, conclusion=${job_conclusion}. Waiting..."
+            echo "CI workflow: status=${job_status}, conclusion=${job_conclusion}. Waiting..."
             sleep 10
           done
 
-          echo "::error::Timed out waiting for CI Status job result for ${SHA}."
+          echo "::error::Timed out waiting for CI workflow result for ${SHA}."
           echo "ci_ok=false" >> "$GITHUB_OUTPUT"
           exit 1
 

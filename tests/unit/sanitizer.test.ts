@@ -2,7 +2,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock DOMPurify before importing the module
 vi.mock("dompurify", () => {
+<<<<<<< HEAD
   const hooks: Record<string, Array<(node: unknown, data: unknown) => void>> = {};
+=======
+  type HookCallback = (...args: unknown[]) => void;
+  const hooks: Record<string, HookCallback[]> = {};
+>>>>>>> eeea2c5119542b9153533255fb8caa24dfac2306
   return {
     default: {
       sanitize: vi.fn((html: string, _config?: unknown) => {
@@ -11,7 +16,11 @@ vi.mock("dompurify", () => {
           .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
           .replace(/\s+on\w+\s*=\s*["'][^"']*["']/gi, "");
       }),
+<<<<<<< HEAD
       addHook: vi.fn((hookName: string, cb: (node: unknown, data: unknown) => void) => {
+=======
+      addHook: vi.fn((hookName: string, cb: HookCallback) => {
+>>>>>>> eeea2c5119542b9153533255fb8caa24dfac2306
         if (!hooks[hookName]) hooks[hookName] = [];
         hooks[hookName].push(cb);
       }),

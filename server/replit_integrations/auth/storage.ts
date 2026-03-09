@@ -13,20 +13,12 @@ import { eq, sql, and } from "drizzle-orm";
 import { autoAcceptWorkspaceInvitationForUser } from "../../services/workspaceInvitationService";
 import { canonicalizeEmail } from "../../lib/emailCanon";
 import { authEventBus } from "../../services/authEventBus";
+import {
+  normalizeUpsertUserPayload,
+  type UpsertUserPayload,
+} from "./upsertUserNormalization";
 
-export type UpsertUser = {
-  id: string;
-  email?: string | null;
-  username?: string | null;
-  fullName?: string | null;
-  firstName?: string | null;
-  lastName?: string | null;
-  profileImageUrl?: string | null;
-  role?: string | null;
-  authProvider?: string | null;
-  emailVerified?: string | null;
-  providerSubject?: string | null;
-};
+export type UpsertUser = UpsertUserPayload;
 
 export interface IAuthStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -190,9 +182,10 @@ class AuthStorage implements IAuthStorage {
 
   async upsertUser(userData: UpsertUser): Promise<User> {
     const startTime = Date.now();
-    const provider = userData.authProvider || "email";
-    const providerSubject = userData.providerSubject || userData.id;
-    const canonical = userData.email ? canonicalizeEmail(userData.email) : null;
+    const normalizedUser = normalizeUpsertUserPayload(userData);
+    const provider = normalizedUser.authProvider || "email";
+    const providerSubject = normalizedUser.providerSubject || normalizedUser.id;
+    const canonical = normalizedUser.email ? canonicalizeEmail(normalizedUser.email) : null;
 
     try {
       // Step 1: Resolve by provider identity
@@ -209,20 +202,26 @@ class AuthStorage implements IAuthStorage {
             const [updatedUser] = await db
               .update(users)
               .set({
-                email: userData.email ?? existingUser.email,
-                username: userData.username ?? existingUser.username,
-                fullName: userData.fullName ?? existingUser.fullName,
-                firstName: userData.firstName ?? existingUser.firstName,
-                lastName: userData.lastName ?? existingUser.lastName,
-                profileImageUrl: userData.profileImageUrl ?? existingUser.profileImageUrl,
-                authProvider: userData.authProvider ?? existingUser.authProvider,
-                emailVerified: userData.emailVerified ?? existingUser.emailVerified,
+                email: normalizedUser.email ?? existingUser.email,
+                username: normalizedUser.username ?? existingUser.username,
+                fullName: normalizedUser.fullName ?? existingUser.fullName,
+                firstName: normalizedUser.firstName ?? existingUser.firstName,
+                lastName: normalizedUser.lastName ?? existingUser.lastName,
+                profileImageUrl: normalizedUser.profileImageUrl ?? existingUser.profileImageUrl,
+                authProvider: normalizedUser.authProvider ?? existingUser.authProvider,
+                emailVerified: normalizedUser.emailVerified ?? existingUser.emailVerified,
                 updatedAt: new Date(),
               })
               .where(eq(users.id, existingUser.id))
               .returning(RETURNING_COLUMNS);
 
-            await ensureIdentityLink(existingUser.id, provider, providerSubject, userData.email, userData.emailVerified === "true");
+            await ensureIdentityLink(
+              existingUser.id,
+              provider,
+              providerSubject,
+              normalizedUser.email,
+              normalizedUser.emailVerified === "true",
+            );
             authEventBus.publish("USER_UPDATED", updatedUser.id, { provider, resolvedBy: "identity" });
             this.bestEffortPostLogin(updatedUser.id);
             return updatedUser;
@@ -240,20 +239,26 @@ class AuthStorage implements IAuthStorage {
         const [updatedUser] = await db
           .update(users)
           .set({
-            email: userData.email ?? existingById.email,
-            username: userData.username ?? existingById.username,
-            fullName: userData.fullName ?? existingById.fullName,
-            firstName: userData.firstName ?? existingById.firstName,
-            lastName: userData.lastName ?? existingById.lastName,
-            profileImageUrl: userData.profileImageUrl ?? existingById.profileImageUrl,
-            authProvider: userData.authProvider ?? existingById.authProvider,
-            emailVerified: userData.emailVerified ?? existingById.emailVerified,
+            email: normalizedUser.email ?? existingById.email,
+            username: normalizedUser.username ?? existingById.username,
+            fullName: normalizedUser.fullName ?? existingById.fullName,
+            firstName: normalizedUser.firstName ?? existingById.firstName,
+            lastName: normalizedUser.lastName ?? existingById.lastName,
+            profileImageUrl: normalizedUser.profileImageUrl ?? existingById.profileImageUrl,
+            authProvider: normalizedUser.authProvider ?? existingById.authProvider,
+            emailVerified: normalizedUser.emailVerified ?? existingById.emailVerified,
             updatedAt: new Date(),
           })
-          .where(eq(users.id, userData.id))
+          .where(eq(users.id, normalizedUser.id))
           .returning(RETURNING_COLUMNS);
 
-        await ensureIdentityLink(updatedUser.id, provider, providerSubject, userData.email, userData.emailVerified === "true");
+        await ensureIdentityLink(
+          updatedUser.id,
+          provider,
+          providerSubject,
+          normalizedUser.email,
+          normalizedUser.emailVerified === "true",
+        );
         authEventBus.publish("USER_UPDATED", updatedUser.id, { provider, resolvedBy: "id" });
         this.bestEffortPostLogin(updatedUser.id);
         return updatedUser;
@@ -266,19 +271,25 @@ class AuthStorage implements IAuthStorage {
           const [updatedUser] = await db
             .update(users)
             .set({
-              username: userData.username ?? existingByEmail.username,
-              fullName: userData.fullName ?? existingByEmail.fullName,
-              firstName: userData.firstName ?? existingByEmail.firstName,
-              lastName: userData.lastName ?? existingByEmail.lastName,
-              profileImageUrl: userData.profileImageUrl ?? existingByEmail.profileImageUrl,
-              authProvider: userData.authProvider ?? existingByEmail.authProvider,
-              emailVerified: userData.emailVerified ?? existingByEmail.emailVerified,
+              username: normalizedUser.username ?? existingByEmail.username,
+              fullName: normalizedUser.fullName ?? existingByEmail.fullName,
+              firstName: normalizedUser.firstName ?? existingByEmail.firstName,
+              lastName: normalizedUser.lastName ?? existingByEmail.lastName,
+              profileImageUrl: normalizedUser.profileImageUrl ?? existingByEmail.profileImageUrl,
+              authProvider: normalizedUser.authProvider ?? existingByEmail.authProvider,
+              emailVerified: normalizedUser.emailVerified ?? existingByEmail.emailVerified,
               updatedAt: new Date(),
             })
             .where(eq(users.id, existingByEmail.id))
             .returning(RETURNING_COLUMNS);
 
-          await ensureIdentityLink(existingByEmail.id, provider, providerSubject, userData.email, userData.emailVerified === "true");
+          await ensureIdentityLink(
+            existingByEmail.id,
+            provider,
+            providerSubject,
+            normalizedUser.email,
+            normalizedUser.emailVerified === "true",
+          );
           authEventBus.publish("IDENTITY_LINKED", updatedUser.id, { provider, resolvedBy: "email" });
           this.bestEffortPostLogin(updatedUser.id);
           return updatedUser;
@@ -301,6 +312,7 @@ class AuthStorage implements IAuthStorage {
         RETURNING id, email, username, role, auth_provider
       `);
 
+<<<<<<< HEAD
       const newUserRow = (rawResult as any).rows[0];
       // Map back to expected User shape (simplified)
       const newUser = {
@@ -309,8 +321,37 @@ class AuthStorage implements IAuthStorage {
          id: newUserRow.id,
          email: newUserRow.email
       };
+=======
+      // Step 4: Create new user + identity
+      const [newUser] = await db
+        .insert(users)
+        .values({
+          id: normalizedUser.id,
+          orgId: normalizedUser.id,
+          email: normalizedUser.email,
+          emailCanonical: canonical,
+          username: normalizedUser.username ?? (normalizedUser.email ? normalizedUser.email.split("@")[0] : null),
+          fullName: normalizedUser.fullName,
+          firstName: normalizedUser.firstName,
+          lastName: normalizedUser.lastName,
+          profileImageUrl: normalizedUser.profileImageUrl,
+          authProvider: normalizedUser.authProvider ?? "email",
+          emailVerified: normalizedUser.emailVerified ?? "false",
+          role: normalizedUser.role ?? "user",
+          plan: "free",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .returning(RETURNING_COLUMNS);
+>>>>>>> eeea2c5119542b9153533255fb8caa24dfac2306
 
-      await ensureIdentityLink(newUser.id, provider, providerSubject, userData.email, userData.emailVerified === "true");
+      await ensureIdentityLink(
+        newUser.id,
+        provider,
+        providerSubject,
+        normalizedUser.email,
+        normalizedUser.emailVerified === "true",
+      );
       authEventBus.publish("USER_REGISTERED", newUser.id, { email: newUser.email, provider });
 
       console.log(JSON.stringify({

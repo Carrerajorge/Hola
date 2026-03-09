@@ -10,7 +10,7 @@ const redisClient = createClient({
   url: process.env.REDIS_URL || "redis://localhost:6379",
   password: process.env.REDIS_PASSWORD,
   socket: {
-    connectTimeoutMs: REDIS_CONNECT_TIMEOUT_MS,
+    connectTimeout: REDIS_CONNECT_TIMEOUT_MS,
     reconnectStrategy: (retries: number) => {
       // Give up after 3 retries to avoid blocking startup
       if (retries > 3) return false as unknown as number;

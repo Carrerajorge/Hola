@@ -9,6 +9,7 @@ export default ts.config(
       ...globals.browser,
       ...globals.node,
     },
+<<<<<<< HEAD
   },
   linterOptions: {
     reportUnusedDisableDirectives: "off",
@@ -68,4 +69,28 @@ export default ts.config(
     "shared/schema.bak.ts",
   ],
 }
+=======
+    rules: {
+      "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
+      "@typescript-eslint/no-explicit-any": "warn",
+    },
+    ignores: [
+      "**/dist/**",
+      "**/node_modules/**",
+      "**/coverage/**",
+      "client/public/vendor/**",
+      "**/playwright-report/**",
+      "**/test-results/**",
+      "**/hola-infra/**",
+      "**/.claude/**",
+      "**/.codex/**",
+      "**/.git/**",
+      "Hola/**",
+      "Hola_wt_*/**",
+      "artifacts/**",
+      "sandbox_workspace/**",
+      "external/agent_ecosystem/**",
+    ],
+  }
+>>>>>>> eeea2c5119542b9153533255fb8caa24dfac2306
 );

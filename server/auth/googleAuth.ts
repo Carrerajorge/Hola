@@ -190,13 +190,18 @@ router.get("/google/callback", async (req: Request, res: Response) => {
         const email = googleUser.email;
         const firstName = googleUser.given_name || googleUser.name?.split(" ")[0] || "";
         const lastName = googleUser.family_name || googleUser.name?.split(" ").slice(1).join(" ") || "";
+        const fullName = googleUser.name || [firstName, lastName].filter(Boolean).join(" ") || null;
 
         await authStorage.upsertUser({
             id: `google_${googleUser.id}`,
             email,
+            username: email ? email.split("@")[0] : null,
+            fullName,
             firstName,
             lastName,
             profileImageUrl: googleUser.picture || null,
+            authProvider: "google",
+            emailVerified: googleUser.verified_email ? "true" : "false",
         });
 
         // Create session
@@ -206,7 +211,7 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                 email,
                 first_name: firstName,
                 last_name: lastName,
-                name: googleUser.name,
+                name: fullName,
                 picture: googleUser.picture,
             },
             access_token: tokens.access_token,

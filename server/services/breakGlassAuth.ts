@@ -11,9 +11,9 @@
 import { db } from "../db";
 import { breakGlassAccounts, users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
-import bcrypt from "bcrypt";
 import { Logger } from "../lib/logger";
 import net from "net";
+import { hashPassword, verifyPassword } from "../utils/password";
 
 /**
  * Check if an IP address falls within a CIDR range.
@@ -79,7 +79,7 @@ export async function authenticateBreakGlass(
     }
 
     // Verify password
-    const valid = await bcrypt.compare(password, account.password_hash);
+    const valid = await verifyPassword(password, account.password_hash);
     if (!valid) {
       return { success: false, reason: "invalid_password" };
     }
@@ -174,7 +174,7 @@ export async function rotateBreakGlassPassword(
   userId: string,
   newPasswordPlain: string,
 ): Promise<void> {
-  const hash = await bcrypt.hash(newPasswordPlain, 12);
+  const hash = await hashPassword(newPasswordPlain);
   await db.execute(sql`
     UPDATE break_glass_accounts
     SET password_hash = ${hash},

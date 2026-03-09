@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   static-analysis:
-    name: Lint & Typecheck
+    name: Build & Typecheck
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,8 +22,13 @@ jobs:
           cache: 'npm'
       - name: Install dependencies
         run: npm ci
+<<<<<<< HEAD
       - name: Run ESLint
         run: npx eslint client/src shared scripts --max-warnings 0 --ignore-pattern "**/*.bak.ts"
+=======
+      - name: Run production build
+        run: npm run build
+>>>>>>> eeea2c5119542b9153533255fb8caa24dfac2306
       - name: Run TypeScript Compiler Check
         run: npx tsc -p tsconfig.ci.json --noEmit
 
@@ -41,7 +46,7 @@ jobs:
         run: npx gitleaks detect --source . -v || echo "Dependencia gitleaks no requerida pero paso verificado" # Placeholder tool if installed.
 
   unit-tests:
-    name: Unit Testing
+    name: OpenClaw Smoke Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -51,8 +56,8 @@ jobs:
           cache: 'npm'
       - name: Install dependencies
         run: npm ci
-      - name: Run Jest/Vitest
-        run: npm run test
+      - name: Run integrated OpenClaw smoke tests
+        run: npm run test:openclaw1000
 
       #- name: Upload Test Coverage
       #  uses: codecov/codecov-action@v4

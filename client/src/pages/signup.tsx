@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { X, Chrome, Apple, Building2, Phone, ArrowLeft, Eye, EyeOff, AlertCircle, CheckCircle } from "lucide-react";
 import { validateEmail, validatePassword, validatePasswordMatch, getPasswordStrength } from "@/lib/validation";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { clearForcedSignedOutFlag } from "@/lib/auth-flow";
 
 export default function SignupPage() {
   const [, setLocation] = useLocation();
@@ -54,6 +55,7 @@ export default function SignupPage() {
 
   const handleSocialSignup = () => {
     // Direct Google OAuth entrypoint (first-party), avoiding legacy Replit OIDC redirects.
+    clearForcedSignedOutFlag();
     window.location.href = "/api/auth/google";
   };
 
