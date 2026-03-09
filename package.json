@@ -6,6 +6,11 @@
   "main": "dist-desktop/main.js",
   "type": "module",
   "license": "MIT",
+  "packageManager": "pnpm@10.31.0",
+  "engines": {
+    "node": ">=20 <23",
+    "pnpm": ">=10"
+  },
   "scripts": {
     "lint": "eslint server client shared tests scripts",
     "daemon": "node --import tsx server/daemon/desktopDaemon.ts",
@@ -47,13 +52,14 @@
     "test:smoke": "npx playwright test e2e/smoke.spec.ts --reporter=list",
     "test:e2e": "npx playwright test --reporter=html",
     "test:emaiti": "node scripts/run-emaiti-capabilities.cjs",
-    "generate:openclaw1000": "node scripts/generate-openclaw1000.cjs /Users/ale/Downloads/Iliagpt_1000_Implementaciones_Limpio.txt /Users/ale/Desktop/ILIACODEX/Hola",
+    "generate:openclaw1000": "node scripts/generate-openclaw1000.cjs",
     "test:openclaw1000": "vitest run tests/unit/openclaw1000-service.test.ts tests/unit/openclaw1000-capability-profiler.test.ts",
     "test:openclaw:benchmarks:raw": "OPENCLAW_BENCHMARK_STDOUT_ONLY=true node --import tsx scripts/openclaw-runtime-bench.ts",
     "test:openclaw:benchmarks": "node --import tsx scripts/openclaw-runtime-bench.ts",
     "tool-runner:capabilities": "node --import tsx server/toolRunner/cli.ts --capabilities",
     "tool-runner:health": "node --import tsx server/toolRunner/cli.ts --healthcheck",
     "tool-runner:test": "npm run test:run -- server/toolRunner/cli.contract.test.ts server/toolRunner/orchestrator.golden.test.ts",
+    "test:security:guardrails": "vitest run server/agent/permissionProfiles.test.ts server/agent/security/shellCommandPolicy.test.ts tests/unit/command-gating-defaults.test.ts",
     "quality:gate": "node --import tsx scripts/quality-gate.ts",
     "verify:prod": "bash ./scripts/prod-rigorous-checks.sh",
     "test:prod:agentic100": "node --import tsx scripts/prod-agentic-rigorous-100.ts",

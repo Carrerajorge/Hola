@@ -5,13 +5,27 @@ export type CommandAuthorizer = {
 
 export type CommandGatingModeWhenAccessGroupsOff = "allow" | "deny" | "configured";
 
+export function resolveDefaultCommandGatingModeWhenAccessGroupsOff(
+  env: NodeJS.ProcessEnv = process.env,
+): CommandGatingModeWhenAccessGroupsOff {
+  const configured = String(env.CHANNEL_COMMAND_GATING_MODE_WHEN_ACCESS_GROUPS_OFF || "")
+    .trim()
+    .toLowerCase();
+
+  if (configured === "allow" || configured === "deny" || configured === "configured") {
+    return configured;
+  }
+
+  return "configured";
+}
+
 export function resolveCommandAuthorizedFromAuthorizers(params: {
   useAccessGroups: boolean;
   authorizers: CommandAuthorizer[];
   modeWhenAccessGroupsOff?: CommandGatingModeWhenAccessGroupsOff;
 }): boolean {
   const { useAccessGroups, authorizers } = params;
-  const mode = params.modeWhenAccessGroupsOff ?? "allow";
+  const mode = params.modeWhenAccessGroupsOff ?? resolveDefaultCommandGatingModeWhenAccessGroupsOff();
   if (!useAccessGroups) {
     if (mode === "allow") {
       return true;

@@ -1,4 +1,4 @@
-/* eslint-disable react-hooks/set-state-in-effect */ import { useState, useRef, useEffect } from "react"; import { useLocation } from "wouter"; import { useQuery, useMutation, useQueryClient } from 
+import { useState, useRef, useEffect } from "react"; import { useLocation } from "wouter"; import { useQuery, useMutation, useQueryClient } from 
 "@tanstack/react-query"; import { Button } from
   "@/components/ui/button"; import { Input } from "@/components/ui/input"; import { Badge } from "@/components/ui/badge"; import { Switch } from "@/components/ui/switch"; import { ScrollArea } from
   "@/components/ui/scroll-area"; import { Separator } from "@/components/ui/separator"; import { Progress } from "@/components/ui/progress"; import {

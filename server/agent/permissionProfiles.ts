@@ -26,6 +26,16 @@ export interface ProfileConfig {
   };
 }
 
+const VALID_PERMISSION_PROFILES = new Set<PermissionProfile>(["minimal", "coding", "messaging", "full"]);
+
+function normalizePermissionProfile(value: string | undefined): PermissionProfile | undefined {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!VALID_PERMISSION_PROFILES.has(normalized as PermissionProfile)) {
+    return undefined;
+  }
+  return normalized as PermissionProfile;
+}
+
 const PROFILES: Record<PermissionProfile, ProfileConfig> = {
   minimal: {
     profile: "minimal",
@@ -126,8 +136,12 @@ const PROFILES: Record<PermissionProfile, ProfileConfig> = {
   },
 };
 
+export function resolveDefaultPermissionProfile(env: NodeJS.ProcessEnv = process.env): PermissionProfile {
+  return normalizePermissionProfile(env.AGENT_PERMISSION_PROFILE_DEFAULT) ?? "full";
+}
+
 // Active profile (per-process)
-let activeProfile: PermissionProfile = "full";
+let activeProfile: PermissionProfile = resolveDefaultPermissionProfile();
 
 export function setPermissionProfile(profile: PermissionProfile): ProfileConfig {
   if (!PROFILES[profile]) {

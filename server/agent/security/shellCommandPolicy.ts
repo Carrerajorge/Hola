@@ -1,5 +1,7 @@
 export type DangerousMatch = { reason: string; pattern: RegExp };
 
+const VALID_SHELL_SANDBOX_MODES = new Set(["host", "docker", "runner"]);
+
 // High-risk shell command patterns.
 // Requirement alignment: allow execution, but require explicit confirmation for destructive operations.
 export const SHELL_DANGEROUS_PATTERNS: DangerousMatch[] = [
@@ -22,12 +24,26 @@ export function getDangerousShellMatch(command: string): DangerousMatch | null {
   return null;
 }
 
-export function getShellSandboxMode(): "host" | "docker" | "runner" {
-  const explicit = (process.env.SHELL_COMMAND_SANDBOX_MODE || "").toLowerCase().trim();
-  if (explicit === "host" || explicit === "docker" || explicit === "runner") return explicit;
+function normalizeShellSandboxMode(value: string | undefined): "host" | "docker" | "runner" | undefined {
+  const normalized = String(value || "").toLowerCase().trim();
+  if (!VALID_SHELL_SANDBOX_MODES.has(normalized)) {
+    return undefined;
+  }
+  return normalized as "host" | "docker" | "runner";
+}
 
-  // Stable default: in production, use runner (docker-isolated) by default.
-  if ((process.env.NODE_ENV || "").toLowerCase() === "production") return "runner";
+export function resolveDefaultShellSandboxMode(env: NodeJS.ProcessEnv = process.env): "host" | "docker" | "runner" {
+  const configuredDefault = normalizeShellSandboxMode(env.SHELL_COMMAND_SANDBOX_MODE_DEFAULT);
+  if (configuredDefault) return configuredDefault;
+
+  if ((env.NODE_ENV || "").toLowerCase() === "production") return "runner";
 
   return "host";
+}
+
+export function getShellSandboxMode(): "host" | "docker" | "runner" {
+  const explicit = normalizeShellSandboxMode(process.env.SHELL_COMMAND_SANDBOX_MODE);
+  if (explicit) return explicit;
+
+  return resolveDefaultShellSandboxMode();
 }

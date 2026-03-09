@@ -1,8 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   resolveCommandAuthorizedFromAuthorizers,
   resolveControlCommandGate,
+  resolveDefaultCommandGatingModeWhenAccessGroupsOff,
 } from "./command-gating.js";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("resolveCommandAuthorizedFromAuthorizers", () => {
   it("denies when useAccessGroups is enabled and no authorizer is configured", () => {
@@ -26,11 +31,20 @@ describe("resolveCommandAuthorizedFromAuthorizers", () => {
     ).toBe(true);
   });
 
-  it("allows when useAccessGroups is disabled (default)", () => {
+  it("denies by default when access groups are disabled but a configured authorizer disallows", () => {
     expect(
       resolveCommandAuthorizedFromAuthorizers({
         useAccessGroups: false,
         authorizers: [{ configured: true, allowed: false }],
+      }),
+    ).toBe(false);
+  });
+
+  it("allows by default when access groups are disabled and no authorizer is configured", () => {
+    expect(
+      resolveCommandAuthorizedFromAuthorizers({
+        useAccessGroups: false,
+        authorizers: [{ configured: false, allowed: false }],
       }),
     ).toBe(true);
   });
@@ -68,6 +82,17 @@ describe("resolveCommandAuthorizedFromAuthorizers", () => {
         useAccessGroups: false,
         authorizers: [{ configured: true, allowed: true }],
         modeWhenAccessGroupsOff: "configured",
+      }),
+    ).toBe(true);
+  });
+
+  it("supports environment override for the default mode", () => {
+    vi.stubEnv("CHANNEL_COMMAND_GATING_MODE_WHEN_ACCESS_GROUPS_OFF", "allow");
+    expect(resolveDefaultCommandGatingModeWhenAccessGroupsOff()).toBe("allow");
+    expect(
+      resolveCommandAuthorizedFromAuthorizers({
+        useAccessGroups: false,
+        authorizers: [{ configured: true, allowed: false }],
       }),
     ).toBe(true);
   });

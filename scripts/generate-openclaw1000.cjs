@@ -2,7 +2,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const DEFAULT_SPEC = "/Users/ale/Downloads/Iliagpt_1000_Implementaciones_Limpio.txt";
+const DEFAULT_SPEC = process.env.OPENCLAW1000_SPEC || "";
 
 function normalize(text) {
   return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
@@ -228,10 +228,10 @@ function generateMatrixTs(caps, outFile) {
   fs.writeFileSync(outFile, `${header}${entries.join("\n")}\n${footer}`);
 }
 
-function generateManifestJson(caps, outFile) {
+function generateManifestJson(caps, outFile, specPath) {
   const payload = {
     generatedAt: new Date().toISOString(),
-    source: DEFAULT_SPEC,
+    source: specPath,
     totalCapabilities: caps.length,
     capabilities: caps.map((cap) => ({
       id: cap.id,
@@ -250,12 +250,28 @@ function generateManifestJson(caps, outFile) {
   fs.writeFileSync(outFile, JSON.stringify(payload, null, 2));
 }
 
+function printUsage() {
+  console.error(
+    "Usage: node scripts/generate-openclaw1000.cjs <spec-path> [repo-path]\n" +
+      "   or: OPENCLAW1000_SPEC=/path/to/spec.txt OPENCLAW1000_REPO=/path/to/repo node scripts/generate-openclaw1000.cjs",
+  );
+}
+
 function main() {
-  const specPath = path.resolve(process.argv[2] || DEFAULT_SPEC);
-  const repoPath = path.resolve(process.argv[3] || process.cwd());
+  const rawSpecPath = process.argv[2] || DEFAULT_SPEC;
+  const rawRepoPath = process.argv[3] || process.env.OPENCLAW1000_REPO || process.cwd();
+  const specPath = rawSpecPath ? path.resolve(rawSpecPath) : "";
+  const repoPath = path.resolve(rawRepoPath);
+
+  if (!specPath) {
+    console.error("[openclaw1000] Missing spec path.");
+    printUsage();
+    process.exit(1);
+  }
 
   if (!fs.existsSync(specPath)) {
     console.error(`[openclaw1000] Spec not found: ${specPath}`);
+    printUsage();
     process.exit(1);
   }
 
@@ -277,7 +293,7 @@ function main() {
 
   generateCapabilitiesTs(caps, capabilitiesOut);
   generateMatrixTs(caps, matrixOut);
-  generateManifestJson(caps, manifestOut);
+  generateManifestJson(caps, manifestOut, specPath);
 
   const lineCount = (p) => fs.readFileSync(p, "utf8").split("\n").length;
 

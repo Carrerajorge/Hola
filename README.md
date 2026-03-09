@@ -17,13 +17,14 @@ This repository contains the codebase after the rebrand from **MICHAT** to **ILI
 
 ### Prerequisites
 
-- Node.js 20 (recommended)
+- Node.js 20 or 22 LTS
 - Docker (recommended for Postgres/Redis/Meilisearch)
 
 ### Install
 
 ```bash
-npm ci
+corepack enable
+pnpm install --frozen-lockfile
 ```
 
 ### Configure Environment
@@ -45,7 +46,7 @@ docker compose up -d
 ### Run the App
 
 ```bash
-npm run dev
+pnpm run dev
 ```
 
 The server serves the API and the client on the same port (default: `5000` unless `PORT` is set).
@@ -53,19 +54,19 @@ The server serves the API and the client on the same port (default: `5000` unles
 ## Testing
 
 ```bash
-npm run verify
+pnpm run verify
 ```
 
 If you are running in a restricted/sandboxed environment that blocks `listen(2)` (some sandboxes do), you can still run type-check + build:
 
 ```bash
-npm run verify:sandbox
+pnpm run verify:sandbox
 ```
 
 E2E (Playwright):
 
 ```bash
-npm run test:e2e
+pnpm run test:e2e
 ```
 
 In GitHub Actions, Playwright E2E runs only when a PR is labeled `run-e2e`.

@@ -980,7 +980,6 @@ export function ChatInterface({
       if (isVoiceChatOpen) setIsVoiceChatOpen(false);
       if (isRecording || isPaused) stopVoiceRecording();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.voiceMode]);
 
   useEffect(() => {
@@ -992,7 +991,6 @@ export function ChatInterface({
       }
       if (minimizedDocument) setMinimizedDocument(null);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvasEnabledForActiveContext]);
 
   useEffect(() => {

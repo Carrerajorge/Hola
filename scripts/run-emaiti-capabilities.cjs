@@ -18,7 +18,7 @@ const fs = require("fs");
 const path = require("path");
 const { execSync } = require("child_process");
 
-const DEFAULT_SPEC = "/Users/ale/Downloads/Iliagpt_1000_Implementaciones_Limpio.txt";
+const DEFAULT_SPEC = process.env.OPENCLAW1000_SPEC || "";
 const STOPWORDS = new Set([
   "de", "la", "el", "los", "las", "y", "en", "por", "para", "con", "sin", "a", "del", "al", "via", "vía", "full", "stack", "global", "stricta", "estricta", "the", "and"
 ]);
@@ -150,6 +150,13 @@ function getArgValue(args, key, fallback) {
   const idx = args.indexOf(key);
   if (idx === -1 || idx + 1 >= args.length) return fallback;
   return args[idx + 1];
+}
+
+function printUsage() {
+  console.error(
+    "Usage: node scripts/run-emaiti-capabilities.cjs --spec <spec-path> [--repo <repo-path>] [--out <output-dir>]\n" +
+      "   or: OPENCLAW1000_SPEC=/path/to/spec.txt OPENCLAW1000_REPO=/path/to/repo node scripts/run-emaiti-capabilities.cjs",
+  );
 }
 
 function normalizeWhitespace(text) {
@@ -298,12 +305,22 @@ function nowIso() {
 
 function main() {
   const args = process.argv.slice(2);
-  const repoPath = path.resolve(getArgValue(args, "--repo", process.cwd()));
-  const specPath = path.resolve(getArgValue(args, "--spec", DEFAULT_SPEC));
-  const outputDir = path.resolve(getArgValue(args, "--out", path.join(repoPath, "artifacts", "emaiti")));
+  const repoPath = path.resolve(getArgValue(args, "--repo", process.env.OPENCLAW1000_REPO || process.cwd()));
+  const rawSpecPath = getArgValue(args, "--spec", DEFAULT_SPEC);
+  const specPath = rawSpecPath ? path.resolve(rawSpecPath) : "";
+  const outputDir = path.resolve(
+    getArgValue(args, "--out", process.env.OPENCLAW1000_EMAITI_OUT || path.join(repoPath, "artifacts", "emaiti")),
+  );
+
+  if (!specPath) {
+    console.error("[EMAITI] Missing spec path.");
+    printUsage();
+    process.exit(1);
+  }
 
   if (!fs.existsSync(specPath)) {
     console.error(`[EMAITI] Spec file not found: ${specPath}`);
+    printUsage();
     process.exit(1);
   }
 
