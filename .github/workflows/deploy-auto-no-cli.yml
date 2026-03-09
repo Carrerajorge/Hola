@@ -92,7 +92,7 @@ jobs:
               git remote set-url origin "$REPO"
             else
               mkdir -p "$(dirname "$TARGET_DIR")"
-              git clone "$REPO" "$TARGET_DIR"
+              GIT_TERMINAL_PROMPT=0 git clone --progress "$REPO" "$TARGET_DIR"
               cd "$TARGET_DIR"
               git config --global --add safe.directory "$TARGET_DIR"
             fi
@@ -102,7 +102,7 @@ jobs:
             local attempt=1
             while true; do
               rm -f ".git/index.lock" ".git/FETCH_HEAD.lock" ".git/ORIG_HEAD.lock"
-              if git fetch --force --prune --depth=1 origin "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"; then
+              if GIT_TERMINAL_PROMPT=0 git fetch --progress --verbose --force --prune --depth=1 origin "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"; then
                 break
               fi
 
