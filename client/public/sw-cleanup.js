@@ -4,7 +4,9 @@
   var APP_VERSION = '2.0.2';
   // Keep the key consistent with client/src/main.tsx so both mechanisms agree.
   var VERSION_KEY = 'iliagpt_app_version';
+  var RELOAD_GUARD_KEY = 'iliagpt_sw_cleanup_reload';
   var stored = localStorage.getItem(VERSION_KEY);
+  var reloadGuardVersion = null;
 
   // In development (served by Vite), skip version enforcement to avoid
   // infinite reload loops with main.tsx which uses "dev" as its version.
@@ -13,6 +15,12 @@
     window.location.hostname === '127.0.0.1';
   if (isDev) {
     return;
+  }
+
+  try {
+    reloadGuardVersion = sessionStorage.getItem(RELOAD_GUARD_KEY);
+  } catch (error) {
+    reloadGuardVersion = null;
   }
 
   if (stored !== APP_VERSION) {
@@ -34,13 +42,24 @@
               console.log('[IliaGPT Cleanup] Deleted cache:', names[j]);
             }
             // Force reload after cleanup
-            if (registrations.length > 0 || names.length > 0) {
+            if ((registrations.length > 0 || names.length > 0) && reloadGuardVersion !== APP_VERSION) {
+              try {
+                sessionStorage.setItem(RELOAD_GUARD_KEY, APP_VERSION);
+              } catch (error) {
+                // Ignore storage errors.
+              }
               console.log('[IliaGPT Cleanup] Reloading...');
               window.location.reload(true);
             }
           });
         }
       });
+    }
+  } else {
+    try {
+      sessionStorage.removeItem(RELOAD_GUARD_KEY);
+    } catch (error) {
+      // Ignore storage errors.
     }
   }
 })();

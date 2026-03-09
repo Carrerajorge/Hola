@@ -170,13 +170,18 @@ router.get("/microsoft/callback", async (req: Request, res: Response) => {
         const nameParts = (msUser.displayName || "").split(" ");
         const firstName = nameParts[0] || "";
         const lastName = nameParts.slice(1).join(" ") || "";
+        const fullName = msUser.displayName || [firstName, lastName].filter(Boolean).join(" ") || null;
 
         await authStorage.upsertUser({
             id: `ms_${msUser.id}`,
             email,
+            username: email ? email.split("@")[0] : null,
+            fullName,
             firstName,
             lastName,
             profileImageUrl: null, // Microsoft Graph requires separate call for photo
+            authProvider: "microsoft",
+            emailVerified: "true",
         });
 
         // Create session
@@ -186,7 +191,7 @@ router.get("/microsoft/callback", async (req: Request, res: Response) => {
                 email,
                 first_name: firstName,
                 last_name: lastName,
-                name: msUser.displayName,
+                name: fullName,
             },
             access_token: tokens.access_token,
             refresh_token: tokens.refresh_token,

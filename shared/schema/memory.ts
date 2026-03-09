@@ -267,7 +267,7 @@ export const runningSummaries = pgTable("running_summaries", {
 
 export const insertRunningSummarySchema = createInsertSchema(runningSummaries);
 
-export type InsertRunningSummary = typeof runningSummarys.$inferInsert;
+export type InsertRunningSummary = typeof runningSummaries.$inferInsert;
 export type RunningSummary = typeof runningSummaries.$inferSelect;
 
 // Processed requests table for idempotency
@@ -368,7 +368,7 @@ export const retrievalTelemetry = pgTable("retrieval_telemetry", {
 
 export const insertRetrievalTelemetrySchema = createInsertSchema(retrievalTelemetry);
 
-export type InsertRetrievalTelemetry = typeof retrievalTelemetrys.$inferInsert;
+export type InsertRetrievalTelemetry = typeof retrievalTelemetry.$inferInsert;
 export type RetrievalTelemetry = typeof retrievalTelemetry.$inferSelect;
 
 // Semantic Memory Chunks - stores user memories with vector embeddings

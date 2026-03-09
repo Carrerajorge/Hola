@@ -233,7 +233,7 @@ export const offlineMessageQueue = pgTable("offline_message_queue", {
 
 export const insertOfflineMessageQueueSchema = createInsertSchema(offlineMessageQueue);
 
-export type InsertOfflineMessageQueue = typeof offlineMessageQueues.$inferInsert;
+export type InsertOfflineMessageQueue = typeof offlineMessageQueue.$inferInsert;
 export type OfflineMessageQueue = typeof offlineMessageQueue.$inferSelect;
 
 // ── Prompt Integrity Audit Trail ───────────────────────────

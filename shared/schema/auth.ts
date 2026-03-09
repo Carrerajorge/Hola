@@ -207,7 +207,7 @@ export const insertUserSettingsSchema = createInsertSchema(userSettings).omit({
     privacySettings: privacySettingsSchema.optional(),
 });
 
-export type InsertUserSettings = typeof userSettingss.$inferInsert;
+export type InsertUserSettings = typeof userSettings.$inferInsert;
 export type UserSettings = typeof userSettings.$inferSelect;
 
 // Consent Logs - Audit trail for privacy consent changes

@@ -7,6 +7,7 @@ import { X, Apple, Phone, Loader2, Mail, Sparkles, ArrowLeft, CheckCircle2, XCir
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import { apiFetch } from "@/lib/apiClient";
+import { clearForcedSignedOutFlag } from "@/lib/auth-flow";
 
 const COUNTRY_CODES = [
   { code: "+1", country: "US", flag: "\u{1F1FA}\u{1F1F8}", name: "Estados Unidos" },
@@ -250,6 +251,7 @@ export default function LoginPage() {
 
   const handleContinue = async () => {
     if (email && password) {
+      clearForcedSignedOutFlag();
       setIsLoading(true);
       setError("");
       try {
@@ -287,6 +289,7 @@ export default function LoginPage() {
   };
 
   const handleGoogleLogin = () => {
+    clearForcedSignedOutFlag();
     setIsGoogleLoading(true);
     setError("");
     window.location.href = "/api/auth/google";
@@ -370,6 +373,7 @@ export default function LoginPage() {
       return;
     }
 
+    clearForcedSignedOutFlag();
     setIsPhoneLoading(true);
     setError("");
 

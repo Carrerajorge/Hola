@@ -1,13 +1,19 @@
 
-
-import { createContext, ReactNode, useContext, useEffect, useCallback } from "react";
+import { createContext, ReactNode, useContext, useEffect, useCallback, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { User } from "@shared/schema";
+import {
+  FORCE_SIGNED_OUT_STORAGE_KEY,
+  clearForcedSignedOutFlag,
+  hasLoggedOutMarker,
+  hasOAuthSuccessMarker,
+  isPublicAuthRoute,
+  shouldSkipAnonymousIdentity,
+} from "@/lib/auth-flow";
 
 const AUTH_STORAGE_KEY = "siragpt_auth_user";
 const ANON_USER_ID_KEY = "siragpt_anon_user_id";
 const ANON_TOKEN_KEY = "siragpt_anon_token";
-const FORCE_SIGNED_OUT_KEY = "siragpt_force_signed_out";
 
 function isAnonymousUser(user: User | null): boolean {
   if (!user) return false;
@@ -136,7 +142,7 @@ function setStoredAnonToken(token: string): void {
 
 function isForcedSignedOut(): boolean {
   try {
-    return localStorage.getItem(FORCE_SIGNED_OUT_KEY) === "1";
+    return localStorage.getItem(FORCE_SIGNED_OUT_STORAGE_KEY) === "1";
   } catch {
     return false;
   }
@@ -145,9 +151,9 @@ function isForcedSignedOut(): boolean {
 function setForcedSignedOut(enabled: boolean): void {
   try {
     if (enabled) {
-      localStorage.setItem(FORCE_SIGNED_OUT_KEY, "1");
+      localStorage.setItem(FORCE_SIGNED_OUT_STORAGE_KEY, "1");
     } else {
-      localStorage.removeItem(FORCE_SIGNED_OUT_KEY);
+      localStorage.removeItem(FORCE_SIGNED_OUT_STORAGE_KEY);
     }
   } catch {
     // Ignore
@@ -207,16 +213,12 @@ async function fetchUser(): Promise<User | null> {
     return null;
   };
   
-  const params = new URLSearchParams(window.location.search);
-  const isLoginRoute = window.location.pathname.startsWith("/login");
-  const loggedOut = params.get("logged_out") === "1";
-
   if (response.status === 401 || response.status === 403) {
     clearOldUserData();
 
-    // ✅ Si el usuario se acaba de desloguear o está en /login, NO crear Guest
-    if (loggedOut || isLoginRoute || isForcedSignedOut()) {
-      if (loggedOut) setForcedSignedOut(true);
+    // Public/auth routes should stay fast and OAuth callback recovery must not fall back to guest mode.
+    if (shouldSkipAnonymousIdentity(window.location.pathname, window.location.search, isForcedSignedOut())) {
+      if (hasLoggedOutMarker(window.location.search)) setForcedSignedOut(true);
       return null;
     }
 
@@ -236,6 +238,7 @@ async function fetchUser(): Promise<User | null> {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
+  const [isOAuthSyncing, setIsOAuthSyncing] = useState(false);
 
   const { data: user, isLoading, isFetched, refetch } = useQuery<User | null>({
     queryKey: ["/api/auth/user"],
@@ -281,24 +284,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (typeof window === "undefined") return;
 
     const forced = isForcedSignedOut();
-    const pathname = window.location.pathname;
-    const publicAuthRoute =
-      pathname === "/" ||
-      [
-        "/login",
-        "/welcome",
-        "/signup",
-        "/terms",
-        "/privacy-policy",
-        "/about",
-        "/learn",
-        "/pricing",
-        "/business",
-        "/download",
-        "/power",
-      ].some((route) => pathname.startsWith(route));
-
-    if (forced && !publicAuthRoute) {
+    if (forced && !isPublicAuthRoute(window.location.pathname)) {
       window.location.replace("/login?logged_out=1");
     }
   }, []);
@@ -306,21 +292,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Handle OAuth Callback Logic
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("auth") === "success") {
-      // Invalidate cache to force fresh fetch
-      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-      // Trigger a refetch to get the new user session
-      refetch().then((result) => {
-        if (result.data) {
-          setStoredUser(result.data);
-        } else {
-          console.warn('[Auth] OAuth callback but no user data received');
-        }
-      });
-      // Clean URL
-      window.history.replaceState({}, "", window.location.pathname);
+    if (typeof window === "undefined" || !hasOAuthSuccessMarker(window.location.search)) {
+      return;
     }
+
+    let cancelled = false;
+    clearForcedSignedOutFlag();
+    clearAnonUserId();
+    setIsOAuthSyncing(true);
+
+    const syncOAuthSession = async () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const result = await refetch();
+        if (cancelled) return;
+
+        const nextUser = result.data ?? null;
+        if (nextUser && !isAnonymousUser(nextUser)) {
+          setStoredUser(nextUser);
+          setForcedSignedOut(false);
+          window.history.replaceState({}, "", window.location.pathname);
+          setIsOAuthSyncing(false);
+          return;
+        }
+
+        if (attempt < 3) {
+          await new Promise((resolve) => window.setTimeout(resolve, 250 * (attempt + 1)));
+        }
+      }
+
+      if (cancelled) return;
+      setIsOAuthSyncing(false);
+      window.location.replace("/login?error=session_error");
+    };
+
+    void syncOAuthSession();
+
+    return () => {
+      cancelled = true;
+    };
   }, [refetch, queryClient]);
 
   useEffect(() => {
@@ -340,7 +351,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider value={{
       user: user ?? null,
       isLoading,
-      isReady: isFetched,
+      isReady: isFetched && !isOAuthSyncing,
       isAuthenticated: !!user && !isAnonymousUser(user),
       login,
       logout,

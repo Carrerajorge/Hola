@@ -94,7 +94,7 @@ export const integrationPolicies = pgTable("integration_policies", {
 
 export const insertIntegrationPolicySchema = createInsertSchema(integrationPolicies);
 
-export type InsertIntegrationPolicy = typeof integrationPolicys.$inferInsert;
+export type InsertIntegrationPolicy = typeof integrationPolicies.$inferInsert;
 export type IntegrationPolicy = typeof integrationPolicies.$inferSelect;
 
 // Shared Links - For sharing resources with external users
@@ -182,5 +182,5 @@ export const connectorUsageHourly = pgTable("connector_usage_hourly", {
 
 export const insertConnectorUsageHourlySchema = createInsertSchema(connectorUsageHourly);
 
-export type InsertConnectorUsageHourly = typeof connectorUsageHourlys.$inferInsert;
+export type InsertConnectorUsageHourly = typeof connectorUsageHourly.$inferInsert;
 export type ConnectorUsageHourly = typeof connectorUsageHourly.$inferSelect;

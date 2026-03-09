@@ -220,15 +220,20 @@ export async function registerRoutes(
   // Session + Passport are initialized in server/index.ts (before csrf/rateLimiter).
 
   // Passport Auth Routes
-  // Google (only register if credentials are configured)
-  if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
-    app.get("/api/auth/google", passport.authenticate("google", {
+  // Google (always register to prevent 404, throw helpful errors internally if misconfigured)
+  app.get("/api/auth/google", (req, res, next) => {
+    console.log("[Auth] Hit /api/auth/google endpoint", { id: !!env.GOOGLE_CLIENT_ID, secret: !!env.GOOGLE_CLIENT_SECRET });
+    if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
+      return res.status(503).json({ error: "Google authentication is not configured on this server" });
+    }
+    passport.authenticate("google", {
       scope: ["openid", "email", "profile"],
-      // Ensure Google issues a refresh_token (needed for long-lived access).
-      // Note: Google may still only return refresh_token on first consent unless prompt includes "consent".
       accessType: "offline",
       prompt: "consent select_account",
-    }));
+    })(req, res, next);
+  });
+  
+  if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
     app.get("/api/auth/google/callback",
       (req, res, next) => {
         passport.authenticate("google", { failureRedirect: "/login?error=google_failed" }, (err: any, user: any) => {
