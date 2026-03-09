@@ -758,10 +758,15 @@ export class OpenClawTaskRuntime {
   }
 
   private async onTimer(): Promise<void> {
+    if (!this.started) {
+      return;
+    }
     this.clearTimer();
     this.lastTickAtMs = this.nowMs();
     const dueIds = await this.withLock(async () => {
-      await this.ensureStarted();
+      if (!this.started) {
+        return [];
+      }
       const now = this.nowMs();
       return this.jobs
         .filter(
@@ -774,6 +779,9 @@ export class OpenClawTaskRuntime {
         .map((job) => job.id);
     });
     for (const id of dueIds) {
+      if (!this.started) {
+        break;
+      }
       const begin = await this.beginRun(id, "due");
       if (!begin.ok) {
         continue;
@@ -781,12 +789,19 @@ export class OpenClawTaskRuntime {
       const result = await this.executeRun(begin.job, begin.startedAtMs, "schedule:due");
       await this.finishRun(begin.job.id, begin.startedAtMs, result);
     }
-    this.armTimer();
+    if (this.started) {
+      this.armTimer();
+    }
   }
 
   private async beginRun(id: string, mode: "due" | "force") {
     return await this.withLock(async () => {
-      await this.ensureStarted();
+      if (!this.started) {
+        return {
+          ok: false as const,
+          result: { ok: true as const, ran: false as const, reason: "missing" as const },
+        };
+      }
       const job = this.jobs.find((entry) => entry.id === id);
       if (!job) {
         return {
@@ -901,9 +916,16 @@ export class OpenClawTaskRuntime {
   }
 
   private async finishRun(jobId: string, startedAtMs: number, outcome: ExecuteJobResult) {
+    if (!this.started) {
+      this.runningJobs.delete(jobId);
+      return;
+    }
     const finishedAtMs = this.nowMs();
     await this.withLock(async () => {
-      await this.ensureStarted();
+      if (!this.started) {
+        this.runningJobs.delete(jobId);
+        return;
+      }
       const index = this.jobs.findIndex((job) => job.id === jobId);
       const job = index === -1 ? null : this.jobs[index];
       this.runningJobs.delete(jobId);
@@ -935,6 +957,9 @@ export class OpenClawTaskRuntime {
       this.armTimer();
     });
 
+    if (!this.started) {
+      return;
+    }
     await appendCronRunLog(resolveCronRunLogPath({ storePath: this.storePath, jobId }), {
       ts: finishedAtMs,
       jobId,
@@ -1106,6 +1131,9 @@ export class OpenClawTaskRuntime {
     agentId?: string;
     sessionKey?: string;
   }): Promise<HeartbeatRunResult> {
+    if (!this.started) {
+      return { status: "skipped", reason: "runtime-stopped" };
+    }
     const startedAtMs = this.nowMs();
     const reason = normalizeString(opts.reason) ?? "runtime:heartbeat";
     const agentId = normalizeString(opts.agentId);
@@ -1117,9 +1145,15 @@ export class OpenClawTaskRuntime {
     let processedCount = 0;
     try {
       await this.withLock(async () => {
-        await this.ensureStarted();
+        if (!this.started) {
+          processedCount = 0;
+          return;
+        }
         const pending = this.wakes.filter((event) => {
           if (event.mode !== "next-heartbeat" || event.dispatchedAtMs) {
+            return false;
+          }
+          if (!this.started) {
             return false;
           }
           if (agentId && event.agentId && event.agentId !== agentId) {
@@ -1146,6 +1180,9 @@ export class OpenClawTaskRuntime {
         }
       });
 
+      if (!this.started) {
+        return { status: "skipped", reason: "runtime-stopped" };
+      }
       this.heartbeat.lastRunAtMs = this.nowMs();
       this.heartbeat.lastDurationMs = Math.max(0, this.nowMs() - startedAtMs);
       this.heartbeat.lastError = processedCount > 0 ? null : "No pending wake events";

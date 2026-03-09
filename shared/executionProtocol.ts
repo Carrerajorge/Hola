@@ -72,8 +72,8 @@ export const ToolCallSchema = z.object({
   preview: z.string().optional(),
   error: z.string().optional(),
   retry_count: z.number().optional(),
-  inputs: z.record(z.unknown()).optional(),
-  outputs: z.record(z.unknown()).optional(),
+  inputs: z.record(z.string(), z.unknown()).optional(),
+  outputs: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const ArtifactKindSchema = z.enum([
@@ -176,7 +176,7 @@ export const RunStartedPayloadSchema = z.object({
   request_type: z.string(),
   request_summary: z.string(),
   estimated_duration_ms: z.number().optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const RunCompletedPayloadSchema = z.object({
@@ -301,7 +301,7 @@ export const ErrorPayloadSchema = z.object({
 
 export const InfoPayloadSchema = z.object({
   message: z.string(),
-  details: z.record(z.unknown()).optional(),
+  details: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const HeartbeatPayloadSchema = z.object({

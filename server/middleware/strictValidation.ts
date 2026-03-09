@@ -17,13 +17,13 @@ export const validate = (schema: z.ZodSchema<any>, source: ValidationSource = 'b
             next();
         } catch (error) {
             if (error instanceof ZodError) {
-                log(`[Validation Error] ${req.method} ${req.path}: ${JSON.stringify(error.errors)}`, 'security');
+                log(`[Validation Error] ${req.method} ${req.path}: ${JSON.stringify(error.issues)}`, 'security');
 
                 return res.status(400).json({
                     status: 'error',
                     code: 'VALIDATION_ERROR',
                     message: 'Invalid request data',
-                    details: error.errors.map(err => ({
+                    details: error.issues.map(err => ({
                         path: err.path.join('.'),
                         message: err.message
                     }))

@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { RunStatusSchema, StepStatusSchema } from "./stateMachine";
 
+const AnyRecordSchema = z.record(z.string(), z.any());
+
 export const ToolCapabilitySchema = z.enum([
   "requires_network",
   "produces_artifacts",
@@ -31,8 +33,8 @@ export const DocumentArtifactDataSchema = z.object({
 
 export const ChartArtifactDataSchema = z.object({
   chartType: z.enum(["bar", "line", "pie", "scatter", "area", "radar"]),
-  config: z.record(z.any()),
-  data: z.array(z.record(z.any())),
+  config: AnyRecordSchema,
+  data: z.array(AnyRecordSchema),
 });
 
 export const DataArtifactDataSchema = z.object({
@@ -60,14 +62,14 @@ export const ArtifactSchema = z.object({
   url: z.string().url().optional(),
   data: ArtifactDataSchema.optional(),
   size: z.number().int().positive().optional(),
-  metadata: z.record(z.any()).optional(),
+  metadata: AnyRecordSchema.optional(),
   createdAt: z.date(),
 });
 export type Artifact = z.infer<typeof ArtifactSchema>;
 
 export const ToolInputSchema = z.object({
   toolName: z.string().min(1),
-  params: z.record(z.any()),
+  params: AnyRecordSchema,
   idempotencyKey: z.string().optional(),
 });
 export type ToolInput = z.infer<typeof ToolInputSchema>;
@@ -121,7 +123,7 @@ export const PlanStepSchema = z.object({
   index: z.number().int().nonnegative(),
   toolName: z.string().min(1),
   description: z.string().min(1),
-  input: z.record(z.any()),
+  input: AnyRecordSchema,
   expectedOutput: z.string(),
   dependencies: z.array(z.number().int().nonnegative()).default([]),
   optional: z.boolean().default(false),
@@ -143,7 +145,7 @@ export const AgentTaskSchema = z.object({
   id: z.string().uuid().optional(),
   goal: z.string().min(1).describe("The primary objective the agent needs to achieve"),
   constraints: z.array(z.string()).default([]).describe("Rules, boundaries, or limitations the agent must strictly follow"),
-  context: z.record(z.any()).default({}).describe("Background information, entity data, or environment state relevant to the task"),
+  context: AnyRecordSchema.default({}).describe("Background information, entity data, or environment state relevant to the task"),
   artifacts: z.array(
     z.object({
       name: z.string(),
@@ -173,14 +175,14 @@ export const StepSchema = z.object({
   toolName: z.string().min(1),
   description: z.string(),
   status: StepStatusSchema,
-  input: z.record(z.any()),
+  input: AnyRecordSchema,
   output: ToolOutputSchema.optional(),
   startedAt: z.date().optional(),
   completedAt: z.date().optional(),
   durationMs: z.number().int().nonnegative().optional(),
   retryCount: z.number().int().nonnegative().default(0),
   error: z.string().optional(),
-  metadata: z.record(z.any()).optional(),
+  metadata: AnyRecordSchema.optional(),
 });
 export type Step = z.infer<typeof StepSchema>;
 
@@ -204,7 +206,7 @@ export const RunSchema = z.object({
   completedAt: z.date().optional(),
   createdAt: z.date(),
   updatedAt: z.date(),
-  metadata: z.record(z.any()).optional(),
+  metadata: AnyRecordSchema.optional(),
 });
 export type Run = z.infer<typeof RunSchema>;
 
@@ -234,9 +236,9 @@ export const AgentEventSchema = z.object({
     "error_occurred",
     "warning_logged"
   ]),
-  payload: z.record(z.any()),
+  payload: AnyRecordSchema,
   timestamp: z.date(),
-  metadata: z.record(z.any()).optional(),
+  metadata: AnyRecordSchema.optional(),
 });
 export type AgentEvent = z.infer<typeof AgentEventSchema>;
 
@@ -293,7 +295,7 @@ export const RunResponseSchema = z.object({
   // Optional debug/UX helpers (present for in-memory runs; empty for historical runs).
   eventStream: z.array(z.any()).optional(),
   todoList: z.array(z.any()).optional(),
-  workspaceFiles: z.record(z.string()).optional(),
+  workspaceFiles: z.record(z.string(), z.string()).optional(),
   currentStepIndex: z.number(),
   totalSteps: z.number(),
   completedSteps: z.number(),
@@ -342,7 +344,7 @@ export const RoleTransitionSchema = z.object({
   toRole: AgentRoleSchema,
   timestamp: z.date(),
   reason: z.string(),
-  metadata: z.record(z.any()).optional(),
+  metadata: AnyRecordSchema.optional(),
 });
 export type RoleTransition = z.infer<typeof RoleTransitionSchema>;
 

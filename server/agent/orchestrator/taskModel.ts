@@ -11,6 +11,9 @@
 import { z } from "zod";
 import { randomUUID } from "crypto";
 
+const withObjectDefaults = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((value) => value ?? {}, schema);
+
 /* ------------------------------------------------------------------ */
 /*  Enums & Primitives                                                */
 /* ------------------------------------------------------------------ */
@@ -92,7 +95,7 @@ export const AssertionSchema = z.object({
     "custom",
   ]),
   /** Parameters specific to the assertion type. */
-  params: z.record(z.any()).default({}),
+  params: z.record(z.string(), z.any()).default({}),
 });
 export type Assertion = z.infer<typeof AssertionSchema>;
 
@@ -106,6 +109,17 @@ export const DefinitionOfDoneSchema = z.object({
 });
 export type DefinitionOfDone = z.infer<typeof DefinitionOfDoneSchema>;
 
+const TaskMetricsSchema = z.object({
+  stepsExecuted: z.number().int().min(0).default(0),
+  stepsSucceeded: z.number().int().min(0).default(0),
+  stepsFailed: z.number().int().min(0).default(0),
+  retries: z.number().int().min(0).default(0),
+  replans: z.number().int().min(0).default(0),
+  tokensUsed: z.number().int().min(0).default(0),
+  wallClockMs: z.number().int().min(0).default(0),
+  artifactsProduced: z.number().int().min(0).default(0),
+});
+
 /* ------------------------------------------------------------------ */
 /*  Full Task Model                                                   */
 /* ------------------------------------------------------------------ */
@@ -115,13 +129,13 @@ export const TaskModelSchema = z.object({
   /** What the user wants to achieve. */
   goal: z.string().min(1),
   /** Operational constraints. */
-  constraints: TaskConstraintsSchema.default({}),
+  constraints: withObjectDefaults(TaskConstraintsSchema),
   /** What "done" means. */
   definitionOfDone: DefinitionOfDoneSchema,
   /** Risk assessment. */
   riskLevel: RiskLevelSchema.default("low"),
   /** Time/resource budget. */
-  budget: BudgetSchema.default({}),
+  budget: withObjectDefaults(BudgetSchema),
   /** Priority for scheduling. */
   priority: TaskPrioritySchema.default("medium"),
   /** Current lifecycle status. */
@@ -152,16 +166,7 @@ export const TaskModelSchema = z.object({
   completedAt: z.date().optional(),
 
   /** Metrics collected during execution. */
-  metrics: z.object({
-    stepsExecuted: z.number().int().min(0).default(0),
-    stepsSucceeded: z.number().int().min(0).default(0),
-    stepsFailed: z.number().int().min(0).default(0),
-    retries: z.number().int().min(0).default(0),
-    replans: z.number().int().min(0).default(0),
-    tokensUsed: z.number().int().min(0).default(0),
-    wallClockMs: z.number().int().min(0).default(0),
-    artifactsProduced: z.number().int().min(0).default(0),
-  }).default({}),
+  metrics: withObjectDefaults(TaskMetricsSchema),
 });
 export type TaskModel = z.infer<typeof TaskModelSchema>;
 

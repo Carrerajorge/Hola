@@ -877,10 +877,10 @@ const GenerateDocumentRequestSchema = z.object({
   title: z.string().trim().min(1).max(MAX_DOC_TITLE_LENGTH),
   content: z.string().min(1).max(MAX_DOC_BODY_SIZE),
   locale: z.string().trim().max(20).optional(),
-  designTokens: z.record(z.unknown()).optional(),
-  theme: z.record(z.unknown()).optional(),
-  assets: z.array(z.record(z.unknown())).max(32).optional(),
-  options: z.record(z.unknown()).optional(),
+  designTokens: z.record(z.string(), z.unknown()).optional(),
+  theme: z.record(z.string(), z.unknown()).optional(),
+  assets: z.array(z.record(z.string(), z.unknown())).max(32).optional(),
+  options: z.record(z.string(), z.unknown()).optional(),
 }).passthrough();
 
 const PromptGenerationSchema = z.object({
@@ -909,7 +909,7 @@ const TranslateRequestSchema = z.object({
 
 const PlanCommandSchema = z.object({
   name: z.string().trim().min(1).max(64),
-  payload: z.record(z.unknown()).optional(),
+  payload: z.record(z.string(), z.unknown()).optional(),
   description: z.string().trim().max(400).optional(),
 });
 
