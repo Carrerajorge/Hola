@@ -9,12 +9,13 @@
 
 import { users, userSettings, libraryStorage, userIdentities, type User } from "@shared/schema";
 import { db } from "../../db";
-import { eq, sql, and } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { autoAcceptWorkspaceInvitationForUser } from "../../services/workspaceInvitationService";
 import { canonicalizeEmail } from "../../lib/emailCanon";
 import { authEventBus } from "../../services/authEventBus";
 import {
   normalizeUpsertUserPayload,
+  type NormalizedUpsertUserPayload,
   type UpsertUserPayload,
 } from "./upsertUserNormalization";
 
@@ -26,24 +27,6 @@ export interface IAuthStorage {
   upsertUser(user: UpsertUser): Promise<User>;
   updateUserLogin(id: string, loginData: { ipAddress?: string | null; userAgent?: string | null }): Promise<void>;
 }
-
-const RETURNING_COLUMNS = {
-  id: users.id,
-  email: users.email,
-  username: users.username,
-  fullName: users.fullName,
-  firstName: users.firstName,
-  lastName: users.lastName,
-  profileImageUrl: users.profileImageUrl,
-  role: users.role,
-  status: users.status,
-  authProvider: users.authProvider,
-  emailVerified: users.emailVerified,
-  plan: users.plan,
-  createdAt: users.createdAt,
-  updatedAt: users.updatedAt,
-  orgId: users.orgId,
-};
 
 function mapAuthUserRow(row: any): User {
   const firstName = row.first_name ?? row.firstName ?? null;
@@ -74,6 +57,10 @@ function mapAuthUserRow(row: any): User {
 
 function getSqlCode(error: any): string | undefined {
   return error?.cause?.code || error?.code;
+}
+
+function isMissingColumnError(error: any): boolean {
+  return getSqlCode(error) === "42703";
 }
 
 async function ensureIdentityLink(
@@ -180,6 +167,82 @@ class AuthStorage implements IAuthStorage {
     }
   }
 
+  private async refreshUserOrThrow(id: string, stage: string): Promise<User> {
+    const user = await this.getUser(id);
+    if (!user) {
+      throw new Error(`[AuthStorage] ${stage}: user ${id} not found after write`);
+    }
+    return user;
+  }
+
+  private async updateResolvedUser(params: {
+    userId: string;
+    existingUser: User;
+    normalizedUser: NormalizedUpsertUserPayload;
+    includeEmail?: boolean;
+  }): Promise<User> {
+    const { userId, existingUser, normalizedUser, includeEmail = false } = params;
+
+    await db
+      .update(users)
+      .set({
+        ...(includeEmail ? { email: normalizedUser.email ?? existingUser.email } : {}),
+        username: normalizedUser.username ?? existingUser.username,
+        fullName: normalizedUser.fullName ?? existingUser.fullName,
+        firstName: normalizedUser.firstName ?? existingUser.firstName,
+        lastName: normalizedUser.lastName ?? existingUser.lastName,
+        profileImageUrl: normalizedUser.profileImageUrl ?? existingUser.profileImageUrl,
+        authProvider: normalizedUser.authProvider ?? existingUser.authProvider,
+        emailVerified: normalizedUser.emailVerified ?? existingUser.emailVerified,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
+
+    return this.refreshUserOrThrow(userId, "updateResolvedUser");
+  }
+
+  private async insertNewUser(params: {
+    normalizedUser: NormalizedUpsertUserPayload;
+    canonical: string | null;
+  }): Promise<User> {
+    const { normalizedUser, canonical } = params;
+    const now = new Date();
+    const baseValues = {
+      id: normalizedUser.id,
+      email: normalizedUser.email,
+      username: normalizedUser.username ?? (normalizedUser.email ? normalizedUser.email.split("@")[0] : null),
+      fullName: normalizedUser.fullName,
+      firstName: normalizedUser.firstName,
+      lastName: normalizedUser.lastName,
+      profileImageUrl: normalizedUser.profileImageUrl,
+      authProvider: normalizedUser.authProvider ?? "email",
+      emailVerified: normalizedUser.emailVerified ?? "false",
+      role: normalizedUser.role ?? "user",
+      plan: "free",
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    try {
+      await db.insert(users).values({
+        ...baseValues,
+        orgId: normalizedUser.id,
+        emailCanonical: canonical,
+      });
+    } catch (error: any) {
+      if (!isMissingColumnError(error)) {
+        throw error;
+      }
+
+      console.warn(
+        `[AuthStorage] Retrying user insert without legacy-missing columns: ${error?.message || error}`,
+      );
+      await db.insert(users).values(baseValues);
+    }
+
+    return this.refreshUserOrThrow(normalizedUser.id, "insertNewUser");
+  }
+
   async upsertUser(userData: UpsertUser): Promise<User> {
     const startTime = Date.now();
     const normalizedUser = normalizeUpsertUserPayload(userData);
@@ -199,21 +262,12 @@ class AuthStorage implements IAuthStorage {
         if (identityRow) {
           const existingUser = await this.getUser(identityRow.user_id);
           if (existingUser) {
-            const [updatedUser] = await db
-              .update(users)
-              .set({
-                email: normalizedUser.email ?? existingUser.email,
-                username: normalizedUser.username ?? existingUser.username,
-                fullName: normalizedUser.fullName ?? existingUser.fullName,
-                firstName: normalizedUser.firstName ?? existingUser.firstName,
-                lastName: normalizedUser.lastName ?? existingUser.lastName,
-                profileImageUrl: normalizedUser.profileImageUrl ?? existingUser.profileImageUrl,
-                authProvider: normalizedUser.authProvider ?? existingUser.authProvider,
-                emailVerified: normalizedUser.emailVerified ?? existingUser.emailVerified,
-                updatedAt: new Date(),
-              })
-              .where(eq(users.id, existingUser.id))
-              .returning(RETURNING_COLUMNS);
+            const updatedUser = await this.updateResolvedUser({
+              userId: existingUser.id,
+              existingUser,
+              normalizedUser,
+              includeEmail: true,
+            });
 
             await ensureIdentityLink(
               existingUser.id,
@@ -236,21 +290,12 @@ class AuthStorage implements IAuthStorage {
       // Step 2: Resolve by user ID
       const existingById = await this.getUser(userData.id);
       if (existingById) {
-        const [updatedUser] = await db
-          .update(users)
-          .set({
-            email: normalizedUser.email ?? existingById.email,
-            username: normalizedUser.username ?? existingById.username,
-            fullName: normalizedUser.fullName ?? existingById.fullName,
-            firstName: normalizedUser.firstName ?? existingById.firstName,
-            lastName: normalizedUser.lastName ?? existingById.lastName,
-            profileImageUrl: normalizedUser.profileImageUrl ?? existingById.profileImageUrl,
-            authProvider: normalizedUser.authProvider ?? existingById.authProvider,
-            emailVerified: normalizedUser.emailVerified ?? existingById.emailVerified,
-            updatedAt: new Date(),
-          })
-          .where(eq(users.id, normalizedUser.id))
-          .returning(RETURNING_COLUMNS);
+        const updatedUser = await this.updateResolvedUser({
+          userId: normalizedUser.id,
+          existingUser: existingById,
+          normalizedUser,
+          includeEmail: true,
+        });
 
         await ensureIdentityLink(
           updatedUser.id,
@@ -268,20 +313,11 @@ class AuthStorage implements IAuthStorage {
       if (canonical) {
         const existingByEmail = await this.getUserByEmail(canonical);
         if (existingByEmail) {
-          const [updatedUser] = await db
-            .update(users)
-            .set({
-              username: normalizedUser.username ?? existingByEmail.username,
-              fullName: normalizedUser.fullName ?? existingByEmail.fullName,
-              firstName: normalizedUser.firstName ?? existingByEmail.firstName,
-              lastName: normalizedUser.lastName ?? existingByEmail.lastName,
-              profileImageUrl: normalizedUser.profileImageUrl ?? existingByEmail.profileImageUrl,
-              authProvider: normalizedUser.authProvider ?? existingByEmail.authProvider,
-              emailVerified: normalizedUser.emailVerified ?? existingByEmail.emailVerified,
-              updatedAt: new Date(),
-            })
-            .where(eq(users.id, existingByEmail.id))
-            .returning(RETURNING_COLUMNS);
+          const updatedUser = await this.updateResolvedUser({
+            userId: existingByEmail.id,
+            existingUser: existingByEmail,
+            normalizedUser,
+          });
 
           await ensureIdentityLink(
             existingByEmail.id,
@@ -297,26 +333,7 @@ class AuthStorage implements IAuthStorage {
       }
 
       // Step 4: Create new user + identity
-      const [newUser] = await db
-        .insert(users)
-        .values({
-          id: normalizedUser.id,
-          orgId: normalizedUser.id,
-          email: normalizedUser.email,
-          emailCanonical: canonical,
-          username: normalizedUser.username ?? (normalizedUser.email ? normalizedUser.email.split("@")[0] : null),
-          fullName: normalizedUser.fullName,
-          firstName: normalizedUser.firstName,
-          lastName: normalizedUser.lastName,
-          profileImageUrl: normalizedUser.profileImageUrl,
-          authProvider: normalizedUser.authProvider ?? "email",
-          emailVerified: normalizedUser.emailVerified ?? "false",
-          role: normalizedUser.role ?? "user",
-          plan: "free",
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .returning(RETURNING_COLUMNS);
+      const newUser = await this.insertNewUser({ normalizedUser, canonical });
 
       await ensureIdentityLink(
         newUser.id,
