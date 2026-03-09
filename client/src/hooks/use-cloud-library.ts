@@ -98,12 +98,15 @@ export interface FileFilters {
   search?: string;
   limit?: number;
   offset?: number;
+  enabled?: boolean;
 }
 
 interface UploadUrlResponse {
   uploadUrl: string;
-  storagePath: string;
-  expiresAt: string;
+  storagePath?: string;
+  objectPath?: string;
+  fileUuid?: string;
+  expiresAt?: string | null;
 }
 
 interface FileMetadata {
@@ -180,6 +183,7 @@ async function fetchWithAuth<T>(url: string): Promise<FetchResult<T>> {
 export function useCloudLibrary(filters?: FileFilters) {
   const queryClient = useQueryClient();
   const [uploadProgress, setUploadProgress] = useState<Map<string, UploadProgress>>(new Map());
+  const isEnabled = filters?.enabled ?? true;
 
   const buildFilesUrl = useCallback(() => {
     const params = new URLSearchParams();
@@ -195,26 +199,34 @@ export function useCloudLibrary(filters?: FileFilters) {
   const filesQuery = useQuery<FetchResult<LibraryFile[]>>({
     queryKey: [QUERY_KEYS.files, filters],
     queryFn: () => fetchWithAuth<LibraryFile[]>(buildFilesUrl()),
+    enabled: isEnabled,
     staleTime: 30000,
     gcTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const foldersQuery = useQuery<FetchResult<LibraryFolder[]>>({
     queryKey: [QUERY_KEYS.folders],
     queryFn: () => fetchWithAuth<LibraryFolder[]>(QUERY_KEYS.folders),
+    enabled: isEnabled,
     staleTime: 60000,
+    refetchOnWindowFocus: false,
   });
 
   const collectionsQuery = useQuery<FetchResult<LibraryCollection[]>>({
     queryKey: [QUERY_KEYS.collections],
     queryFn: () => fetchWithAuth<LibraryCollection[]>(QUERY_KEYS.collections),
+    enabled: isEnabled,
     staleTime: 60000,
+    refetchOnWindowFocus: false,
   });
 
   const statsQuery = useQuery<FetchResult<StorageStats>>({
     queryKey: [QUERY_KEYS.stats],
     queryFn: () => fetchWithAuth<StorageStats>(QUERY_KEYS.stats),
+    enabled: isEnabled,
     staleTime: 30000,
+    refetchOnWindowFocus: false,
   });
 
   const uploadFileMutation = useMutation({
@@ -247,6 +259,11 @@ export function useCloudLibrary(filters?: FileFilters) {
           folderId,
         });
         const urlData: UploadUrlResponse = await urlResponse.json();
+        const resolvedStoragePath = urlData.storagePath || urlData.objectPath;
+
+        if (!resolvedStoragePath) {
+          throw new Error('No storage path returned by upload URL endpoint');
+        }
 
         setUploadProgress((prev) => {
           const next = new Map(prev);
@@ -291,7 +308,7 @@ export function useCloudLibrary(filters?: FileFilters) {
         const fileType = getFileTypeFromMime(file.type);
 
         const completeResponse = await apiRequest('POST', '/api/library/upload/complete', {
-          storagePath: urlData.storagePath,
+          storagePath: resolvedStoragePath,
           metadata: {
             name: metadata?.name || file.name.replace(/\.[^/.]+$/, ''),
             originalName: file.name,

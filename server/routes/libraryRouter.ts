@@ -63,7 +63,8 @@ export function createLibraryRouter() {
     try {
       const userId = getOrCreateSecureUserId(req);
 
-      const { storagePath, metadata } = req.body;
+      const { storagePath, objectPath, metadata } = req.body;
+      const resolvedStoragePath = storagePath || objectPath || "";
 
       const fileMetadata: FileMetadata = {
         name: metadata.name,
@@ -81,7 +82,7 @@ export function createLibraryRouter() {
         metadata: metadata.metadata,
       };
 
-      const file = await libraryService.saveFileMetadata(userId, storagePath, fileMetadata);
+      const file = await libraryService.saveFileMetadata(userId, resolvedStoragePath, fileMetadata);
       res.json(file);
     } catch (error: any) {
       if (error instanceof LibraryServiceError) {
@@ -507,6 +508,22 @@ export function createLibraryRouter() {
     } catch (error: any) {
       console.error("Error getting file:", error);
       res.status(500).json({ error: "Failed to get file" });
+    }
+  });
+
+  router.get("/api/library/files/:id/preview", async (req, res) => {
+    try {
+      const userId = getOrCreateSecureUserId(req);
+      const { id } = req.params;
+
+      const preview = await libraryService.getFilePreview(userId, id);
+      res.json(preview);
+    } catch (error: any) {
+      if (error instanceof LibraryServiceError) {
+        return res.status(error.statusCode).json({ error: error.message, code: error.code });
+      }
+      console.error("Error getting file preview:", error);
+      res.status(500).json({ error: "Failed to get file preview" });
     }
   });
 

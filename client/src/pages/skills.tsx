@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useDeferredValue } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -393,6 +393,7 @@ export default function SkillsPage() {
   const [isBuilderOpen, setIsBuilderOpen] = useState(false);
   const [editingSkill, setEditingSkill] = useState<UserSkill | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const deferredSearchQuery = useDeferredValue(searchQuery);
 
   // --- Fluid Pack Install State ---
   const [fluidInstallOpen, setFluidInstallOpen] = useState(false);
@@ -458,8 +459,8 @@ export default function SkillsPage() {
   };
 
   const filteredSkills = allSkills.filter(skill => {
-    const matchesSearch = skill.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      skill.description.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = skill.name.toLowerCase().includes(deferredSearchQuery.toLowerCase()) ||
+                          skill.description.toLowerCase().includes(deferredSearchQuery.toLowerCase());
     const matchesCategory = selectedCategory === "all" || skill.category === selectedCategory;
     return matchesSearch && matchesCategory;
   });
@@ -517,7 +518,7 @@ export default function SkillsPage() {
   return (
     <div className="h-screen flex flex-col bg-background">
       <header className="sticky top-0 z-20 backdrop-blur-xl bg-background/80 border-b">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div className="liquid-shell max-w-7xl mx-auto px-4 py-3 flex items-center justify-between rounded-[28px]">
           <div className="flex items-center gap-4">
             <Button
               variant="ghost"
@@ -539,12 +540,12 @@ export default function SkillsPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <Badge variant="secondary" className="gap-1">
+            <Badge variant="secondary" className="liquid-chip gap-1">
               <Play className="h-3 w-3" />
               {enabledCount} activos
             </Badge>
             {customCount > 0 && (
-              <Badge variant="outline" className="gap-1 text-purple-600 border-purple-200">
+              <Badge variant="outline" className="liquid-chip gap-1 text-purple-600 border-purple-200">
                 <Sparkles className="h-3 w-3" />
                 {customCount} personalizados
               </Badge>
@@ -552,13 +553,13 @@ export default function SkillsPage() {
             <Button
               onClick={() => { setFluidResult(null); setFluidError(null); setFluidInstallOpen(true); }}
               variant="outline"
-              className="gap-2 border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-900/20"
+              className="liquid-chip gap-2 border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-900/20"
               data-testid="button-install-fluid-pack"
             >
               <Package className="h-4 w-4" />
               Instalar Pack Fluid 20
             </Button>
-            <Button onClick={handleCreateSkill} className="gap-2" data-testid="button-create-skill">
+            <Button onClick={handleCreateSkill} className="liquid-chip btn-premium gap-2" data-testid="button-create-skill">
               <Plus className="h-4 w-4" />
               Crear Skill
             </Button>
@@ -576,12 +577,12 @@ export default function SkillsPage() {
                   placeholder="Buscar skills..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 bg-background"
+                  className="liquid-input pl-9 bg-background"
                   data-testid="skills-search-input"
                 />
               </div>
               <Tabs value={selectedCategory} onValueChange={setSelectedCategory}>
-                <TabsList className="bg-background">
+                <TabsList className="liquid-chip bg-background">
                   {Object.entries(categoryLabels).map(([key, label]) => (
                     <TabsTrigger key={key} value={key} data-testid={`tab-${key}`}>
                       {label}
@@ -599,10 +600,10 @@ export default function SkillsPage() {
                   <Card
                     key={skill.id}
                     className={cn(
-                      "group cursor-pointer transition-all duration-200 hover:shadow-md",
+                      "liquid-card group cursor-pointer transition-all duration-200 hover:shadow-md",
                       skill.enabled
                         ? "border-primary/20 bg-card"
-                        : "bg-muted/30 border-transparent",
+                        : "border-transparent",
                       selectedSkill?.id === skill.id && "ring-2 ring-primary"
                     )}
                     onClick={() => setSelectedSkill(skill)}

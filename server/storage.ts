@@ -93,6 +93,76 @@ import { db, dbRead } from "./db";
 import { eq, sql, desc, and, isNull, ilike, inArray, or, type SQL } from "drizzle-orm";
 import { knowledgeBaseService } from "./services/knowledgeBase";
 
+function getSqlCode(error: any): string | undefined {
+  return error?.cause?.code || error?.code;
+}
+
+function getSqlMessage(error: any): string {
+  return [
+    error?.cause?.message,
+    error?.cause?.detail,
+    error?.message,
+    error?.detail,
+  ]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .join("\n");
+}
+
+function isMissingColumnError(error: any, columnNames: string[] = []): boolean {
+  if (getSqlCode(error) === "42703") {
+    return true;
+  }
+
+  const message = getSqlMessage(error).toLowerCase();
+  if (!message || !message.includes("does not exist")) {
+    return false;
+  }
+
+  if (columnNames.length === 0) {
+    return message.includes("column");
+  }
+
+  return columnNames.some((columnName) => {
+    const normalized = columnName.toLowerCase();
+    return message.includes(`"${normalized}"`) || message.includes(normalized);
+  });
+}
+
+function isMissingRelationError(error: any): boolean {
+  return getSqlCode(error) === "42P01";
+}
+
+function mapFileRow(row: any): File {
+  return {
+    id: String(row.id),
+    userId: row.user_id ?? row.userId ?? null,
+    name: row.name ?? "",
+    type: row.type ?? "application/octet-stream",
+    size: Number(row.size ?? 0),
+    storagePath: row.storage_path ?? row.storagePath ?? "",
+    status: row.status ?? "pending",
+    processingProgress: row.processing_progress ?? row.processingProgress ?? 0,
+    processingError: row.processing_error ?? row.processingError ?? null,
+    completedAt: row.completed_at ?? row.completedAt ?? null,
+    totalChunks: row.total_chunks ?? row.totalChunks ?? null,
+    uploadedChunks: row.uploaded_chunks ?? row.uploadedChunks ?? 0,
+    createdAt: row.created_at ?? row.createdAt ?? null,
+  } as File;
+}
+
+function mapFileJobRow(row: any): FileJob {
+  return {
+    id: String(row.id),
+    fileId: String(row.file_id ?? row.fileId),
+    status: row.status ?? "pending",
+    retries: row.retries ?? 0,
+    lastError: row.last_error ?? row.lastError ?? null,
+    startedAt: row.started_at ?? row.startedAt ?? null,
+    completedAt: row.completed_at ?? row.completedAt ?? null,
+    createdAt: row.created_at ?? row.createdAt ?? null,
+  } as FileJob;
+}
+
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
@@ -417,6 +487,14 @@ export class MemStorage implements IStorage {
     this.users = new Map();
   }
 
+  private async refreshFileOrThrow(id: string, stage: string): Promise<File> {
+    const file = await this.getFile(id);
+    if (!file) {
+      throw new Error(`[storage] ${stage}: file ${id} not found after write`);
+    }
+    return file;
+  }
+
   async getUser(id: string): Promise<User | undefined> {
     return cache.remember(`user:${id}`, 300, async () => {
       const [result] = await dbRead.select().from(users).where(eq(users.id, id));
@@ -435,30 +513,117 @@ export class MemStorage implements IStorage {
   }
 
   async createFile(insertFile: InsertFile): Promise<File> {
-    const [file] = await db.insert(files).values(insertFile).returning();
-    return file;
+    const fileId = insertFile.id ?? randomUUID();
+    const baseValues = {
+      id: fileId,
+      userId: insertFile.userId ?? null,
+      name: insertFile.name,
+      type: insertFile.type,
+      size: insertFile.size,
+      storagePath: insertFile.storagePath,
+      status: insertFile.status ?? "pending",
+    };
+
+    try {
+      const [file] = await db.insert(files).values({ ...insertFile, id: fileId }).returning();
+      return file;
+    } catch (error: any) {
+      if (!isMissingColumnError(error)) {
+        throw error;
+      }
+
+      console.warn(`[storage] Retrying file insert without legacy-missing columns: ${error?.message || error}`);
+      await db.insert(files).values(baseValues);
+      return this.refreshFileOrThrow(fileId, "createFile");
+    }
   }
 
   async getFile(id: string): Promise<File | undefined> {
-    const [file] = await dbRead.select().from(files).where(eq(files.id, id));
-    return file;
+    try {
+      const [file] = await dbRead.select().from(files).where(eq(files.id, id));
+      return file;
+    } catch (error: any) {
+      if (!isMissingColumnError(error) && !isMissingRelationError(error)) {
+        throw error;
+      }
+      if (isMissingRelationError(error)) {
+        return undefined;
+      }
+
+      const result = await dbRead.execute(sql`
+        SELECT id, user_id, name, type, size, storage_path, status, created_at
+        FROM files
+        WHERE id = ${id}
+        LIMIT 1
+      `);
+      const row = (result as any)?.rows?.[0];
+      return row ? mapFileRow(row) : undefined;
+    }
   }
 
   async getFileByStoragePath(storagePath: string): Promise<File | undefined> {
-    const [file] = await dbRead.select().from(files).where(eq(files.storagePath, storagePath));
-    return file;
+    try {
+      const [file] = await dbRead.select().from(files).where(eq(files.storagePath, storagePath));
+      return file;
+    } catch (error: any) {
+      if (!isMissingColumnError(error) && !isMissingRelationError(error)) {
+        throw error;
+      }
+      if (isMissingRelationError(error)) {
+        return undefined;
+      }
+
+      const result = await dbRead.execute(sql`
+        SELECT id, user_id, name, type, size, storage_path, status, created_at
+        FROM files
+        WHERE storage_path = ${storagePath}
+        LIMIT 1
+      `);
+      const row = (result as any)?.rows?.[0];
+      return row ? mapFileRow(row) : undefined;
+    }
   }
 
   async getFiles(userId?: string): Promise<File[]> {
-    if (userId) {
-      return dbRead.select().from(files).where(eq(files.userId, userId)).orderBy(desc(files.createdAt));
+    try {
+      if (userId) {
+        return dbRead.select().from(files).where(eq(files.userId, userId)).orderBy(desc(files.createdAt));
+      }
+      return dbRead.select().from(files).orderBy(desc(files.createdAt));
+    } catch (error: any) {
+      if (!isMissingColumnError(error) && !isMissingRelationError(error)) {
+        throw error;
+      }
+      if (isMissingRelationError(error)) {
+        return [];
+      }
+
+      const whereClause = userId ? sql`WHERE user_id = ${userId}` : sql``;
+      const result = await dbRead.execute(sql`
+        SELECT id, user_id, name, type, size, storage_path, status, created_at
+        FROM files
+        ${whereClause}
+        ORDER BY created_at DESC
+      `);
+      return ((result as any)?.rows ?? []).map(mapFileRow);
     }
-    return dbRead.select().from(files).orderBy(desc(files.createdAt));
   }
 
   async updateFileStatus(id: string, status: string): Promise<File | undefined> {
-    const [file] = await db.update(files).set({ status }).where(eq(files.id, id)).returning();
-    return file;
+    try {
+      await db.update(files).set({ status }).where(eq(files.id, id));
+      return this.getFile(id);
+    } catch (error: any) {
+      if (!isMissingColumnError(error) && !isMissingRelationError(error)) {
+        throw error;
+      }
+      if (isMissingRelationError(error)) {
+        return undefined;
+      }
+
+      await db.execute(sql`UPDATE files SET status = ${status} WHERE id = ${id}`);
+      return this.getFile(id);
+    }
   }
 
   async deleteFile(id: string): Promise<void> {
@@ -466,40 +631,113 @@ export class MemStorage implements IStorage {
   }
 
   async updateFileProgress(id: string, progress: number): Promise<File | undefined> {
-    const [file] = await db.update(files).set({ processingProgress: progress }).where(eq(files.id, id)).returning();
-    return file;
+    try {
+      await db.update(files).set({ processingProgress: progress }).where(eq(files.id, id));
+      return this.getFile(id);
+    } catch (error: any) {
+      if (!isMissingColumnError(error, ["processing_progress"])) {
+        if (isMissingRelationError(error)) return undefined;
+        throw error;
+      }
+      return this.getFile(id);
+    }
   }
 
   async updateFileError(id: string, error: string): Promise<File | undefined> {
-    const [file] = await db.update(files).set({ processingError: error, status: "failed" }).where(eq(files.id, id)).returning();
-    return file;
+    try {
+      await db.update(files).set({ processingError: error, status: "failed" }).where(eq(files.id, id));
+      return this.getFile(id);
+    } catch (writeError: any) {
+      if (!isMissingColumnError(writeError, ["processing_error"]) && !isMissingRelationError(writeError)) {
+        throw writeError;
+      }
+      if (isMissingRelationError(writeError)) {
+        return undefined;
+      }
+
+      await db.execute(sql`UPDATE files SET status = ${"failed"} WHERE id = ${id}`);
+      return this.getFile(id);
+    }
   }
 
   async updateFileCompleted(id: string): Promise<File | undefined> {
-    const [file] = await db.update(files).set({
-      status: "completed",
-      processingProgress: 100,
-      completedAt: new Date()
-    }).where(eq(files.id, id)).returning();
-    return file;
+    try {
+      await db.update(files).set({
+        status: "completed",
+        processingProgress: 100,
+        completedAt: new Date()
+      }).where(eq(files.id, id));
+      return this.getFile(id);
+    } catch (writeError: any) {
+      if (!isMissingColumnError(writeError) && !isMissingRelationError(writeError)) {
+        throw writeError;
+      }
+      if (isMissingRelationError(writeError)) {
+        return undefined;
+      }
+
+      await db.execute(sql`UPDATE files SET status = ${"completed"} WHERE id = ${id}`);
+      return this.getFile(id);
+    }
   }
 
   async updateFileUploadChunks(id: string, uploadedChunks: number, totalChunks: number): Promise<File | undefined> {
-    const [file] = await db.update(files).set({
-      uploadedChunks,
-      totalChunks
-    }).where(eq(files.id, id)).returning();
-    return file;
+    try {
+      await db.update(files).set({
+        uploadedChunks,
+        totalChunks
+      }).where(eq(files.id, id));
+      return this.getFile(id);
+    } catch (error: any) {
+      if (!isMissingColumnError(error, ["uploaded_chunks", "total_chunks"])) {
+        if (isMissingRelationError(error)) return undefined;
+        throw error;
+      }
+      return this.getFile(id);
+    }
   }
 
   async createFileJob(job: InsertFileJob): Promise<FileJob> {
-    const [result] = await db.insert(fileJobs).values(job).returning();
-    return result;
+    const jobId = job.id ?? randomUUID();
+    try {
+      const [result] = await db.insert(fileJobs).values({ ...job, id: jobId }).returning();
+      return result;
+    } catch (error: any) {
+      if (!isMissingColumnError(error) && !isMissingRelationError(error)) {
+        throw error;
+      }
+      console.warn(`[storage] Skipping file job insert on legacy schema: ${error?.message || error}`);
+      return mapFileJobRow({
+        id: jobId,
+        file_id: job.fileId,
+        status: job.status ?? "pending",
+        retries: 0,
+        created_at: new Date(),
+      });
+    }
   }
 
   async getFileJob(fileId: string): Promise<FileJob | undefined> {
-    const [result] = await dbRead.select().from(fileJobs).where(eq(fileJobs.fileId, fileId));
-    return result;
+    try {
+      const [result] = await dbRead.select().from(fileJobs).where(eq(fileJobs.fileId, fileId));
+      return result;
+    } catch (error: any) {
+      if (!isMissingColumnError(error) && !isMissingRelationError(error)) {
+        throw error;
+      }
+      if (isMissingRelationError(error)) {
+        return undefined;
+      }
+
+      const result = await dbRead.execute(sql`
+        SELECT id, file_id, status, created_at
+        FROM file_jobs
+        WHERE file_id = ${fileId}
+        LIMIT 1
+      `);
+      const row = (result as any)?.rows?.[0];
+      return row ? mapFileJobRow(row) : undefined;
+    }
   }
 
   async updateFileJobStatus(fileId: string, status: string, error?: string): Promise<FileJob | undefined> {
@@ -514,53 +752,89 @@ export class MemStorage implements IStorage {
       updates.lastError = error;
       updates.retries = sql<number>`${fileJobs.retries} + 1` as any;
     }
-    const [result] = await db.update(fileJobs).set(updates).where(eq(fileJobs.fileId, fileId)).returning();
-    return result;
+    try {
+      await db.update(fileJobs).set(updates).where(eq(fileJobs.fileId, fileId));
+      return this.getFileJob(fileId);
+    } catch (writeError: any) {
+      if (!isMissingColumnError(writeError) && !isMissingRelationError(writeError)) {
+        throw writeError;
+      }
+      console.warn(`[storage] Skipping file job status update on legacy schema: ${writeError?.message || writeError}`);
+      return undefined;
+    }
   }
 
   async createFileChunks(chunks: InsertFileChunk[]): Promise<FileChunk[]> {
     if (chunks.length === 0) return [];
-    const result = await db.insert(fileChunks).values(chunks).returning();
-    return result;
+    try {
+      const result = await db.insert(fileChunks).values(chunks).returning();
+      return result;
+    } catch (error: any) {
+      if (!isMissingColumnError(error) && !isMissingRelationError(error)) {
+        throw error;
+      }
+      console.warn(`[storage] Skipping file chunk insert on legacy schema: ${error?.message || error}`);
+      return [];
+    }
   }
 
   async getFileChunks(fileId: string): Promise<FileChunk[]> {
-    return dbRead.select().from(fileChunks).where(eq(fileChunks.fileId, fileId));
+    try {
+      return dbRead.select().from(fileChunks).where(eq(fileChunks.fileId, fileId));
+    } catch (error: any) {
+      if (!isMissingColumnError(error) && !isMissingRelationError(error)) {
+        throw error;
+      }
+      return [];
+    }
   }
 
   async searchSimilarChunks(embedding: number[], limit: number = 5, userId?: string): Promise<FileChunk[]> {
     const embeddingStr = `[${embedding.join(",")}]`;
 
-    if (userId) {
-      const result = await db.execute(sql`
+    try {
+      if (userId) {
+        const result = await db.execute(sql`
+          SELECT fc.*, f.name as file_name,
+            fc.embedding <=> ${embeddingStr}::vector AS distance
+          FROM file_chunks fc
+          JOIN files f ON fc.file_id = f.id
+          WHERE fc.embedding IS NOT NULL
+            AND f.user_id = ${userId}
+          ORDER BY fc.embedding <=> ${embeddingStr}::vector
+          LIMIT ${limit}
+        `);
+        return result.rows as FileChunk[];
+      }
+
+      const result = await dbRead.execute(sql`
         SELECT fc.*, f.name as file_name,
           fc.embedding <=> ${embeddingStr}::vector AS distance
         FROM file_chunks fc
         JOIN files f ON fc.file_id = f.id
         WHERE fc.embedding IS NOT NULL
-          AND f.user_id = ${userId}
         ORDER BY fc.embedding <=> ${embeddingStr}::vector
         LIMIT ${limit}
       `);
       return result.rows as FileChunk[];
+    } catch (error: any) {
+      if (!isMissingColumnError(error) && !isMissingRelationError(error)) {
+        throw error;
+      }
+      return [];
     }
-
-    const result = await dbRead.execute(sql`
-      SELECT fc.*, f.name as file_name,
-        fc.embedding <=> ${embeddingStr}::vector AS distance
-      FROM file_chunks fc
-      JOIN files f ON fc.file_id = f.id
-      WHERE fc.embedding IS NOT NULL
-      ORDER BY fc.embedding <=> ${embeddingStr}::vector
-      LIMIT ${limit}
-    `);
-    return result.rows as FileChunk[];
   }
 
   async updateFileChunkEmbedding(fileId: string, chunkIndex: number, embedding: number[]): Promise<void> {
-    await db.update(fileChunks)
-      .set({ embedding })
-      .where(and(eq(fileChunks.fileId, fileId), eq(fileChunks.chunkIndex, chunkIndex)));
+    try {
+      await db.update(fileChunks)
+        .set({ embedding })
+        .where(and(eq(fileChunks.fileId, fileId), eq(fileChunks.chunkIndex, chunkIndex)));
+    } catch (error: any) {
+      if (!isMissingColumnError(error) && !isMissingRelationError(error)) {
+        throw error;
+      }
+    }
   }
 
   async createAgentRun(run: InsertAgentRun): Promise<AgentRun> {

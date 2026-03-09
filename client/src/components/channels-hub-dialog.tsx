@@ -1164,7 +1164,7 @@ export function ChannelsHubDialog({
   // Main hub: channel cards grid
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="liquid-shell max-w-lg border-0 bg-transparent">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <svg viewBox="0 0 24 24" className="h-5 w-5 text-primary" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1183,7 +1183,7 @@ export function ChannelsHubDialog({
               key={ch.id}
               onClick={() => handleChannelClick(ch.id)}
               className={cn(
-                "relative rounded-xl border p-4 text-left transition-all duration-200",
+                "liquid-card relative rounded-[22px] border p-4 text-left transition-all duration-200",
                 "hover:shadow-md hover:scale-[1.02] active:scale-[0.98]",
                 ch.bgHover,
                 ch.borderColor,
@@ -1220,7 +1220,7 @@ export function ChannelsHubDialog({
           ))}
         </div>
 
-        <div className="mt-3 rounded-xl border bg-muted/20 p-4 space-y-3">
+        <div className="liquid-panel mt-3 rounded-[22px] border p-4 space-y-3">
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1">
               <div className="flex items-center gap-2">

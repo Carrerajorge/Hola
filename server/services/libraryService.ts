@@ -15,6 +15,7 @@ import {
   ObjectNotFoundError,
   objectStorageClient,
 } from "../replit_integrations/object_storage";
+import { parseDocument } from "./documentIngestion";
 
 export interface FileMetadata {
   name: string;
@@ -35,7 +36,28 @@ export interface FileMetadata {
 export interface UploadUrlResponse {
   uploadUrl: string;
   objectPath: string;
+  storagePath: string;
   fileUuid: string;
+  expiresAt: string | null;
+}
+
+export interface LibraryFilePreview {
+  metadata: {
+    fileType: string;
+    fileName: string;
+    fileSize: number;
+    pageCount?: number;
+    sheetCount?: number;
+  };
+  sections: Array<{
+    name: string;
+    index: number;
+    rowCount: number;
+    columnCount: number;
+    headers: string[];
+    previewData: string[][];
+    isTabular: boolean;
+  }>;
 }
 
 export class LibraryServiceError extends Error {
@@ -54,6 +76,18 @@ export class LibraryService {
 
   constructor() {
     this.objectStorage = new ObjectStorageService();
+  }
+
+  private normalizeStoragePath(storagePath: string): string {
+    return this.objectStorage.normalizeObjectEntityPath(storagePath);
+  }
+
+  private toStorageUrl(storagePath: string): string {
+    const normalizedPath = this.normalizeStoragePath(storagePath);
+    if (/^https?:\/\//i.test(normalizedPath)) {
+      return normalizedPath;
+    }
+    return `/objects/${normalizedPath.replace(/^\/objects\//, "")}`;
   }
 
   async generateUploadUrl(
@@ -114,7 +148,9 @@ export class LibraryService {
       return {
         uploadUrl,
         objectPath,
+        storagePath: objectPath,
         fileUuid,
+        expiresAt: null,
       };
     } catch (error) {
       if (error instanceof LibraryServiceError) {
@@ -151,6 +187,7 @@ export class LibraryService {
     }
 
     try {
+      const normalizedStoragePath = this.normalizeStoragePath(storagePath);
       const fileData: InsertLibraryFile = {
         uuid: randomUUID(),
         name: metadata.name,
@@ -159,8 +196,8 @@ export class LibraryService {
         type: metadata.type,
         mimeType: metadata.mimeType,
         extension: metadata.extension,
-        storagePath: storagePath,
-        storageUrl: `/objects/${storagePath.replace(/^\/objects\//, "")}`,
+        storagePath: normalizedStoragePath,
+        storageUrl: this.toStorageUrl(normalizedStoragePath),
         size: metadata.size,
         width: metadata.width || null,
         height: metadata.height || null,
@@ -326,6 +363,96 @@ export class LibraryService {
       throw new LibraryServiceError(
         "Failed to get file URL",
         "GET_URL_FAILED",
+        500
+      );
+    }
+  }
+
+  async getFilePreview(userId: string, fileId: string): Promise<LibraryFilePreview> {
+    if (!userId) {
+      throw new LibraryServiceError(
+        "User ID is required",
+        "INVALID_USER_ID",
+        400
+      );
+    }
+
+    if (!fileId) {
+      throw new LibraryServiceError(
+        "File ID is required",
+        "INVALID_FILE_ID",
+        400
+      );
+    }
+
+    const [file] = await db
+      .select()
+      .from(libraryFiles)
+      .where(
+        and(eq(libraryFiles.uuid, fileId), eq(libraryFiles.userId, userId))
+      )
+      .limit(1);
+
+    if (!file) {
+      throw new LibraryServiceError(
+        "File not found or access denied",
+        "FILE_NOT_FOUND",
+        404
+      );
+    }
+
+    if (!file.storagePath) {
+      throw new LibraryServiceError(
+        "File storage path not available",
+        "STORAGE_PATH_MISSING",
+        500
+      );
+    }
+
+    try {
+      const buffer = await this.objectStorage.getObjectEntityBuffer(file.storagePath);
+      const parsed = await parseDocument(
+        buffer,
+        file.mimeType || "application/octet-stream",
+        file.originalName || file.name,
+      );
+
+      return {
+        metadata: {
+          fileType: parsed.metadata.fileType,
+          fileName: parsed.metadata.fileName,
+          fileSize: parsed.metadata.fileSize,
+          pageCount: parsed.metadata.pageCount,
+          sheetCount: parsed.metadata.sheetCount,
+        },
+        sections: parsed.sheets.slice(0, 6).map((sheet) => ({
+          name: sheet.name,
+          index: sheet.index,
+          rowCount: sheet.rowCount,
+          columnCount: sheet.columnCount,
+          headers: sheet.headers.slice(0, 12),
+          previewData: sheet.previewData.slice(0, 20).map((row) =>
+            row.slice(0, 8).map((cell) => {
+              if (cell === null || cell === undefined) return "";
+              if (typeof cell === "string") return cell;
+              if (typeof cell === "number" || typeof cell === "boolean") {
+                return String(cell);
+              }
+              try {
+                return JSON.stringify(cell);
+              } catch {
+                return String(cell);
+              }
+            })
+          ),
+          isTabular: sheet.isTabular,
+        })),
+      };
+    } catch (error) {
+      console.error("Error generating file preview:", error);
+      throw new LibraryServiceError(
+        "Failed to generate file preview",
+        "FILE_PREVIEW_FAILED",
         500
       );
     }

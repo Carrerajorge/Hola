@@ -25,8 +25,12 @@ export const fileMetadataSchema = z.object({
 });
 
 export const uploadCompleteSchema = z.object({
-  storagePath: z.string().min(1, { message: 'Storage path is required' }),
+  storagePath: z.string().min(1, { message: 'Storage path is required' }).optional(),
+  objectPath: z.string().min(1, { message: 'Object path is required' }).optional(),
   metadata: fileMetadataSchema,
+}).refine((value) => Boolean(value.storagePath || value.objectPath), {
+  message: 'Storage path is required',
+  path: ['storagePath'],
 });
 
 export type UploadCompleteInput = z.infer<typeof uploadCompleteSchema>;

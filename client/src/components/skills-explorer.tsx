@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -220,6 +220,7 @@ export function SkillsExplorer({ open, onOpenChange }: SkillsExplorerProps) {
   const [isBuilderOpen, setIsBuilderOpen] = useState(false);
   const [editingSkill, setEditingSkill] = useState<UserSkill | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const deferredSearchQuery = useDeferredValue(searchQuery);
 
   const allSkills = useMemo(() => {
     const builtIn: Skill[] = BUILT_IN_SKILLS.map(s => ({
@@ -248,8 +249,8 @@ export function SkillsExplorer({ open, onOpenChange }: SkillsExplorerProps) {
   };
 
   const filteredSkills = allSkills.filter(skill => {
-    const matchesSearch = skill.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          skill.description.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = skill.name.toLowerCase().includes(deferredSearchQuery.toLowerCase()) ||
+                          skill.description.toLowerCase().includes(deferredSearchQuery.toLowerCase());
     const matchesCategory = selectedCategory === "all" || skill.category === selectedCategory;
     return matchesSearch && matchesCategory;
   });
@@ -309,8 +310,8 @@ export function SkillsExplorer({ open, onOpenChange }: SkillsExplorerProps) {
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-4xl h-[80vh] p-0 gap-0" data-testid="skills-explorer-dialog">
-          <DialogHeader className="px-6 py-4 border-b">
+        <DialogContent className="liquid-shell max-w-4xl h-[80vh] border-0 bg-transparent p-0 gap-0" data-testid="skills-explorer-dialog">
+          <DialogHeader className="px-6 py-4 border-b border-slate-200/70 dark:border-white/10">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-amber-100 dark:bg-amber-900/30 rounded-lg">
                 <Zap className="h-5 w-5 text-amber-600" />
@@ -343,12 +344,12 @@ export function SkillsExplorer({ open, onOpenChange }: SkillsExplorerProps) {
                     placeholder="Buscar skills..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-9"
+                    className="liquid-input pl-9"
                     data-testid="skills-search-input"
                   />
                 </div>
                 <Tabs value={selectedCategory} onValueChange={setSelectedCategory}>
-                  <TabsList>
+                  <TabsList className="liquid-chip">
                     {Object.entries(categoryLabels).map(([key, label]) => (
                       <TabsTrigger key={key} value={key} data-testid={`tab-${key}`}>
                         {label}
@@ -356,7 +357,7 @@ export function SkillsExplorer({ open, onOpenChange }: SkillsExplorerProps) {
                     ))}
                   </TabsList>
                 </Tabs>
-                <Button onClick={handleCreateSkill} className="gap-2" data-testid="button-create-skill">
+                <Button onClick={handleCreateSkill} className="liquid-chip btn-premium gap-2" data-testid="button-create-skill">
                   <Plus className="h-4 w-4" />
                   Crear Skill
                 </Button>
@@ -370,10 +371,10 @@ export function SkillsExplorer({ open, onOpenChange }: SkillsExplorerProps) {
                     <div
                       key={skill.id}
                       className={cn(
-                        "group relative p-4 rounded-xl border transition-all duration-200 cursor-pointer",
+                        "liquid-card group relative cursor-pointer rounded-[22px] p-4 transition-all duration-200",
                         skill.enabled 
-                          ? "bg-card border-primary/20 shadow-sm" 
-                          : "bg-muted/30 border-border hover:border-primary/30",
+                          ? "border-primary/20 shadow-sm" 
+                          : "border-border/60 hover:border-primary/30",
                         selectedSkill?.id === skill.id && "ring-2 ring-primary"
                       )}
                       onClick={() => setSelectedSkill(skill)}

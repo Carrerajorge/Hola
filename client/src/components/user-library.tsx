@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -9,11 +9,9 @@ import {
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
-import { Image, Video, FileText, Download, X, FolderOpen, Trash2, Upload, HardDrive, LayoutGrid } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Image, Video, FileText, Download, X, FolderOpen, Trash2, Upload, HardDrive, LayoutGrid, Loader2 } from "lucide-react";
 import {
   useCloudLibrary,
   LibraryFile,
@@ -42,9 +40,69 @@ interface VirtualizedGridProps {
   onDownload: (item: LibraryFile) => void;
 }
 
+interface LibraryPreviewSection {
+  name: string;
+  index: number;
+  rowCount: number;
+  columnCount: number;
+  headers: string[];
+  previewData: string[][];
+  isTabular: boolean;
+}
+
+interface LibraryPreviewResponse {
+  metadata: {
+    fileType: string;
+    fileName: string;
+    fileSize: number;
+    pageCount?: number;
+    sheetCount?: number;
+  };
+  sections: LibraryPreviewSection[];
+}
+
 const GUTTER_SIZE = 16;
 const ITEM_HEIGHT = 200; // Approximate height of card + text
 const OPTS_MIN_COLUMN_WIDTH = 180;
+
+function resolveLibraryAssetUrl(path?: string | null): string | undefined {
+  if (!path) return undefined;
+
+  const trimmedPath = path.trim();
+  if (!trimmedPath) return undefined;
+  if (/^(blob:|data:|https?:\/\/)/i.test(trimmedPath)) {
+    return trimmedPath;
+  }
+
+  const normalizedPath = trimmedPath.startsWith("/") ? trimmedPath : `/${trimmedPath}`;
+
+  if (
+    typeof window !== "undefined" &&
+    window.location.port === "5050" &&
+    (normalizedPath.startsWith("/objects/") || normalizedPath.startsWith("/api/"))
+  ) {
+    return normalizedPath;
+  }
+
+  const configuredApiBase = String(import.meta.env.VITE_API_URL || "").trim();
+  if (configuredApiBase && normalizedPath.startsWith("/")) {
+    try {
+      return new URL(normalizedPath, configuredApiBase).toString();
+    } catch {
+      return normalizedPath;
+    }
+  }
+
+  return normalizedPath;
+}
+
+function isPdfLibraryFile(item: LibraryFile): boolean {
+  return (
+    item.mimeType === "application/pdf" ||
+    item.extension?.toLowerCase() === "pdf" ||
+    /\.pdf$/i.test(item.originalName || item.name)
+  );
+}
 
 function VirtualizedMediaGrid({ items, onSelect, onDelete, onDownload }: VirtualizedGridProps) {
   return (
@@ -80,7 +138,7 @@ function VirtualizedMediaGrid({ items, onSelect, onDelete, onDownload }: Virtual
               };
 
               return (
-                <div style={itemStyle}>
+                <div {...({ style: itemStyle } as React.HTMLAttributes<HTMLDivElement>)}>
                   <MediaThumbnail
                     item={item}
                     onClick={() => onSelect(item)}
@@ -142,7 +200,7 @@ function MediaThumbnail({
   onDelete: () => void;
   onDownload: () => void;
 }) {
-  const thumbnailUrl = item.thumbnailUrl || item.storageUrl || item.storagePath;
+  const thumbnailUrl = resolveLibraryAssetUrl(item.thumbnailUrl || item.storageUrl || item.storagePath);
   const displayType = item.type as FileType;
 
   return (
@@ -157,6 +215,8 @@ function MediaThumbnail({
             src={thumbnailUrl}
             alt={item.name}
             className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
+            loading="lazy"
+            decoding="async"
             onError={(e) => {
               (e.target as HTMLImageElement).style.display = 'none';
             }}
@@ -222,8 +282,53 @@ function LightboxView({
   onClose: () => void;
   onDownload: () => void;
 }) {
-  const fileUrl = item.storageUrl || item.storagePath;
+  const fileUrl = resolveLibraryAssetUrl(item.storageUrl || item.storagePath);
   const displayType = item.type as FileType;
+  const isPdf = isPdfLibraryFile(item);
+  const [preview, setPreview] = useState<LibraryPreviewResponse | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+
+  useEffect(() => {
+    if (displayType !== "document" || isPdf) {
+      setPreview(null);
+      setPreviewError(null);
+      setIsPreviewLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsPreviewLoading(true);
+    setPreview(null);
+    setPreviewError(null);
+
+    fetch(`/api/library/files/${item.uuid}/preview`, {
+      credentials: "include",
+    })
+      .then(async (response) => {
+        const data = await response.json().catch(() => null);
+        if (!response.ok) {
+          throw new Error(data?.error || `Preview failed with status ${response.status}`);
+        }
+        if (!cancelled) {
+          setPreview(data);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setPreviewError(error instanceof Error ? error.message : "No se pudo cargar la vista previa");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsPreviewLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [displayType, isPdf, item.uuid]);
 
   return (
     <div
@@ -258,19 +363,109 @@ function LightboxView({
         className="max-h-[90vh] max-w-[90vw]"
         onClick={(e) => e.stopPropagation()}
       >
-        {displayType === "image" ? (
+        {displayType === "image" && fileUrl ? (
           <img
             src={fileUrl}
             alt={item.name}
             className="max-h-[90vh] max-w-[90vw] object-contain rounded-2xl shadow-2xl ring-1 ring-white/10"
           />
-        ) : displayType === "video" ? (
+        ) : displayType === "video" && fileUrl ? (
           <video
             src={fileUrl}
             controls
             autoPlay
             className="max-h-[90vh] max-w-[90vw] rounded-2xl shadow-2xl ring-1 ring-white/10"
           />
+        ) : isPdf && fileUrl ? (
+          <div className="w-[min(92vw,1100px)] h-[min(88vh,900px)] overflow-hidden rounded-3xl bg-white/95 shadow-2xl ring-1 ring-black/10">
+            <iframe
+              src={fileUrl}
+              title={item.name}
+              className="h-full w-full"
+            />
+          </div>
+        ) : isPreviewLoading ? (
+          <div className="flex min-h-[420px] w-[min(92vw,1100px)] flex-col items-center justify-center gap-4 rounded-3xl border border-white/10 bg-white/5 p-16 text-white shadow-2xl backdrop-blur-3xl">
+            <Loader2 className="h-10 w-10 animate-spin text-[#A5A0FF]" />
+            <div className="space-y-1 text-center">
+              <p className="text-lg font-medium">Generando vista previa</p>
+              <p className="text-sm text-white/60">Analizando el contenido del documento…</p>
+            </div>
+          </div>
+        ) : preview ? (
+          <div className="max-h-[88vh] w-[min(92vw,1100px)] overflow-auto rounded-3xl border border-white/10 bg-white/95 p-6 text-slate-900 shadow-2xl">
+            <div className="mb-5 flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-[#A5A0FF]/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[#5f57d8]">
+                {preview.metadata.fileType}
+              </span>
+              <span className="rounded-full bg-slate-900/5 px-3 py-1 text-xs font-medium text-slate-600">
+                {formatFileSize(item.size)}
+              </span>
+              {preview.metadata.pageCount ? (
+                <span className="rounded-full bg-slate-900/5 px-3 py-1 text-xs font-medium text-slate-600">
+                  {preview.metadata.pageCount} p&aacute;ginas
+                </span>
+              ) : null}
+              {preview.metadata.sheetCount ? (
+                <span className="rounded-full bg-slate-900/5 px-3 py-1 text-xs font-medium text-slate-600">
+                  {preview.metadata.sheetCount} hojas
+                </span>
+              ) : null}
+            </div>
+            <div className="space-y-4">
+              {preview.sections.map((section) => (
+                <div
+                  key={`${section.name}-${section.index}`}
+                  className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+                >
+                  <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
+                    <div>
+                      <p className="font-semibold text-slate-900">{section.name}</p>
+                      <p className="text-xs text-slate-500">
+                        {section.rowCount} filas · {section.columnCount} columnas
+                      </p>
+                    </div>
+                  </div>
+                  {section.isTabular && section.previewData.length > 0 ? (
+                    <div className="overflow-auto">
+                      <table className="min-w-full text-sm">
+                        <thead className="bg-slate-100 text-slate-700">
+                          <tr>
+                            {(section.headers.length > 0 ? section.headers : section.previewData[0]).map((header, index) => (
+                              <th key={`${section.name}-header-${index}`} className="border-b border-slate-200 px-3 py-2 text-left font-medium">
+                                {header || `Col ${index + 1}`}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {section.previewData.map((row, rowIndex) => (
+                            <tr key={`${section.name}-row-${rowIndex}`} className="odd:bg-white even:bg-slate-50/60">
+                              {row.map((cell, cellIndex) => (
+                                <td key={`${section.name}-cell-${rowIndex}-${cellIndex}`} className="max-w-[220px] border-b border-slate-100 px-3 py-2 align-top text-slate-700">
+                                  <div className="line-clamp-3 whitespace-pre-wrap break-words">{cell}</div>
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 px-4 py-4">
+                      {section.previewData.length > 0 ? section.previewData.map((row, rowIndex) => (
+                        <p key={`${section.name}-text-${rowIndex}`} className="whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                          {row.join(" ").trim() || "\u2014"}
+                        </p>
+                      )) : (
+                        <p className="text-sm text-slate-500">No hay contenido previo disponible en esta secci&oacute;n.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         ) : (
           <div className="flex flex-col items-center justify-center gap-6 rounded-3xl bg-white/5 border border-white/10 backdrop-blur-3xl p-16 shadow-2xl">
             <div className="p-6 rounded-3xl bg-gradient-to-br from-[#A5A0FF]/20 to-transparent shadow-inner">
@@ -279,6 +474,8 @@ function LightboxView({
             <div className="text-center space-y-1">
               <p className="text-2xl font-semibold text-white tracking-tight">{item.name}</p>
               <p className="text-base text-white/50">{formatFileSize(item.size)}</p>
+              <p className="text-sm text-white/40">{item.mimeType || "Documento"}</p>
+              {previewError ? <p className="max-w-lg text-sm text-amber-200">{previewError}</p> : null}
             </div>
             <Button
               size="lg"
@@ -357,8 +554,8 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
     uploadFile,
     isUploading,
     isAuthenticated,
-    libraryError,
-  } = useCloudLibrary({ type: filterType as FileType | undefined });
+    libraryError: _libraryError,
+  } = useCloudLibrary({ type: filterType as FileType | undefined, enabled: open });
 
   const safeFiles = files ?? [];
 
@@ -386,9 +583,11 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
       } else {
-        const fallbackUrl = item.storageUrl || item.storagePath;
+        const fallbackUrl = resolveLibraryAssetUrl(item.storageUrl || item.storagePath);
         // FRONTEND FIX #35: Add noopener,noreferrer to prevent window.opener attacks
-        window.open(fallbackUrl, '_blank', 'noopener,noreferrer');
+        if (fallbackUrl) {
+          window.open(fallbackUrl, '_blank', 'noopener,noreferrer');
+        }
       }
     } catch (error) {
       console.error("Download failed:", error);
@@ -444,10 +643,10 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent
-          className="max-w-none w-screen h-screen max-h-screen p-0 rounded-none border-0 gap-0"
+          className="liquid-shell max-w-none w-screen h-screen max-h-screen rounded-none border-0 bg-transparent p-0 gap-0"
           data-testid="user-library-dialog"
         >
-          <DialogHeader className="px-6 py-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <DialogHeader className="px-6 py-4 border-b border-slate-200/70 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 dark:border-white/10">
             <div className="flex items-center justify-between">
               <DialogTitle className="text-xl font-semibold" data-testid="library-title">
                 Tu Biblioteca de Medios
@@ -456,7 +655,7 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
                 <StorageInfo stats={stats ?? null} />
                 <label htmlFor="file-upload">
                   <Button asChild variant="outline" size="sm" disabled={isUploading}>
-                    <span>
+                    <span className="liquid-chip btn-premium">
                       <Upload className="h-4 w-4 mr-2" />
                       Subir archivo
                     </span>
@@ -483,7 +682,7 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
             className="flex flex-col h-[calc(100vh-73px)]"
           >
             <div className="px-6 pt-4 pb-2 border-b bg-background">
-              <TabsList className="h-10" data-testid="library-tabs">
+              <TabsList className="liquid-chip h-10" data-testid="library-tabs">
                 <TabsTrigger
                   value="all"
                   className="px-4"

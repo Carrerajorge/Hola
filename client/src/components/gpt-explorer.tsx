@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useDeferredValue } from "react";
 import { SkeletonCard } from "@/components/skeletons";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
@@ -78,6 +78,7 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt, onEd
   const [categories, setCategories] = useState<GptCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<"explore" | "my-gpts">("explore");
+  const deferredSearchQuery = useDeferredValue(searchQuery);
 
   useEffect(() => {
     if (open) {
@@ -119,15 +120,15 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt, onEd
   const filteredGpts = useMemo(() => {
     let filtered = view === "my-gpts" ? myGpts : gpts;
 
-    if (searchQuery.trim()) {
+    if (deferredSearchQuery.trim()) {
       filtered = filtered.filter(gpt =>
-        gpt.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        gpt.description?.toLowerCase().includes(searchQuery.toLowerCase())
+        gpt.name.toLowerCase().includes(deferredSearchQuery.toLowerCase()) ||
+        gpt.description?.toLowerCase().includes(deferredSearchQuery.toLowerCase())
       );
     }
 
     return filtered;
-  }, [gpts, myGpts, searchQuery, view]);
+  }, [deferredSearchQuery, gpts, myGpts, view]);
 
   const displayGpts = useMemo(() => {
     if (activeTab === "destacados") {
@@ -155,13 +156,13 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt, onEd
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-screen h-screen max-w-none rounded-none p-0 gap-0 overflow-hidden" data-testid="gpt-explorer-dialog">
+      <DialogContent className="liquid-shell w-screen h-screen max-w-none rounded-none border-0 bg-transparent p-0 gap-0 overflow-hidden" data-testid="gpt-explorer-dialog">
         <VisuallyHidden>
           <DialogTitle>Explorar GPTs</DialogTitle>
           <DialogDescription>Descubre y crea versiones personalizadas de ChatGPT</DialogDescription>
         </VisuallyHidden>
         <div className="flex flex-col h-full">
-          <div className="flex items-center justify-between px-6 py-4 border-b">
+          <div className="flex items-center justify-between border-b border-slate-200/70 px-6 py-4 dark:border-white/10">
             <div className="flex items-center gap-4">
               <span
                 className={cn(
@@ -186,7 +187,7 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt, onEd
             </div>
             <Button
               onClick={handleCreateNew}
-              className="gap-2 mr-[44px]"
+              className="liquid-chip btn-premium mr-[44px] gap-2"
               data-testid="button-create-gpt"
             >
               <Plus className="h-4 w-4" />
@@ -209,7 +210,7 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt, onEd
                   placeholder="Buscar GPT"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 h-12 rounded-full bg-muted/50"
+                  className="liquid-input h-12 rounded-full border-white/40 pl-10"
                   data-testid="input-search-gpts"
                 />
               </div>
@@ -221,7 +222,7 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt, onEd
                       <Button
                         key={cat.slug}
                         variant={activeTab === cat.slug ? "secondary" : "ghost"}
-                        className="whitespace-nowrap"
+                        className={cn("whitespace-nowrap rounded-full", activeTab === cat.slug && "liquid-chip")}
                         onClick={() => setActiveTab(cat.slug)}
                         data-testid={`tab-category-${cat.slug}`}
                       >
@@ -345,7 +346,7 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt, onEd
 
               {!searchQuery && view === "explore" && (
                 <div className="mt-8 text-center">
-                  <Button variant="outline" className="w-full max-w-xs" data-testid="button-view-more">
+                  <Button variant="outline" className="liquid-chip w-full max-w-xs" data-testid="button-view-more">
                     Ver más
                   </Button>
                 </div>
@@ -380,10 +381,10 @@ function GptCard({ gpt, index, onClick, showEdit, onEdit }: GptCardProps) {
   return (
     <div
       className={cn(
-        "flex items-start gap-4 p-4 rounded-xl cursor-pointer transition-all duration-200 group relative",
+        "liquid-card group relative flex items-start gap-4 rounded-[22px] p-4 cursor-pointer transition-all duration-200",
         isPopular
-          ? "bg-gradient-to-r from-primary/5 to-purple-500/5 border border-primary/20 hover:border-primary/40 shadow-sm hover:shadow-md"
-          : "hover:bg-muted/50",
+          ? "border-primary/20"
+          : "hover:bg-white/80 dark:hover:bg-slate-900/70",
         isRecent && !isPopular && "ring-1 ring-green-500/20"
       )}
       onClick={onClick}
