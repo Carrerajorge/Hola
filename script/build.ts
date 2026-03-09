@@ -74,7 +74,7 @@ async function buildAll() {
     bundle: true,
     format: "esm" as const,
     treeShaking: true,
-    minify: true,
+    minify: process.env.CI ? false : true,
     splitting: true, // Enable code splitting to share common chunks between server and worker
     // Mark ALL node_modules as external - they're installed at runtime
     external: [...externals, "./node_modules/*", "fsevents", "*.node", "@node-llama-cpp/*", "node-llama-cpp", "reflink", "canvas", "@napi-rs/canvas", "chromium-bidi*", "ffmpeg-static"],
@@ -121,15 +121,21 @@ const __dirname = dirname(__filename);
     logLevel: "info" as const,
   };
 
-  // Build server and worker together to enable splitting
-  const serverResult: BuildResult = await esbuild({
-    ...commonOptions,
-    entryPoints: ["server/index.ts", "server/worker.ts", "server/migrate.ts", "server/agent/sandboxRunner/index.ts"],
-    outdir: "dist",
-    outExtension: { ".js": ".mjs" },
-    splitting: true,
-    metafile: true,
-  });
+  let serverResult: BuildResult;
+  try {
+    serverResult = await esbuild({
+      ...commonOptions,
+      entryPoints: ["server/index.ts", "server/worker.ts", "server/migrate.ts", "server/agent/sandboxRunner/index.ts"],
+      outdir: "dist",
+      outExtension: { ".js": ".mjs" },
+      splitting: true,
+      metafile: true,
+    });
+  } catch (err: any) {
+    console.error("[build] ESBUILD FAILED:");
+    if (err.errors) console.error(JSON.stringify(err.errors, null, 2));
+    throw err;
+  }
 
   // Output bundle analysis
   if (serverResult.metafile) {
