@@ -60,6 +60,7 @@
     "build:desktop:all": "npm run build && tsc -p desktop/tsconfig.json && npx electron-builder --mac --win --linux"
   },
   "dependencies": {
+    "@hola/openclaw": "workspace:*",
     "@aarkue/tiptap-math-extension": "^1.4.0",
     "@anthropic-ai/sdk": "^0.74.0",
     "@aws-sdk/client-s3": "^3.985.0",
