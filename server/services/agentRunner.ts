@@ -2,6 +2,8 @@ import { EventEmitter } from "events";
 import { nanoid } from "nanoid";
 import { defaultToolRegistry, ToolRegistry } from "../agent/sandbox/tools";
 import type { ToolResult as SandboxToolResult } from "../agent/sandbox/agentTypes";
+import { llmGateway } from "../lib/llmGateway";
+import { resolvePrimaryLlmModelForRole } from "./agentControlPlane";
 
 export interface AgentState {
   objective: string;
@@ -321,15 +323,13 @@ export class AgentRunner extends EventEmitter {
       return this.heuristicNextAction();
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey || process.env.NODE_ENV === "test") {
-      this.logStructured("debug", "llm_unavailable", { run_id: this.runId, reason: "GEMINI_API_KEY not configured", fallback: "heuristic" });
+    const plannerModel = resolvePrimaryLlmModelForRole("brain");
+    if (!plannerModel || process.env.NODE_ENV === "test") {
+      this.logStructured("debug", "llm_unavailable", { run_id: this.runId, reason: "No planner model configured", fallback: "heuristic" });
       return this.heuristicNextAction();
     }
 
     try {
-      const { geminiChat } = await import("../lib/gemini");
-
       const context = {
         objective: this.state!.objective,
         plan: this.state!.plan,
@@ -381,12 +381,25 @@ Decide la siguiente acción. Responde SOLO con JSON (sin markdown):
 Si ya tienes suficiente información para responder, usa final_answer.`;
 
       const result = await withTimeout(
-        geminiChat(
-          [{ role: "user", parts: [{ text: prompt }] }],
-          { model: "gemini-2.5-flash", maxOutputTokens: 300, temperature: 0.2 }
+        llmGateway.chat(
+          [
+            {
+              role: "system",
+              content:
+                "Eres el planificador principal del super agente. Debes elegir la siguiente acción exacta y devolver solo JSON válido.",
+            },
+            { role: "user", content: prompt },
+          ],
+          {
+            model: plannerModel,
+            maxTokens: 300,
+            temperature: 0.2,
+            enableFallback: true,
+            _fromRouter: true,
+          }
         ),
         DEFAULT_LLM_TIMEOUT_MS,
-        "geminiChat(decideNextAction)"
+        "llmGateway.chat(decideNextAction)"
       );
 
       const responseText = result.content?.trim() || "";

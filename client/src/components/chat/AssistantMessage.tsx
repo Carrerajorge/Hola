@@ -38,6 +38,7 @@ import { InlineGmailPreview } from "@/components/inline-gmail-preview";
 import { SourcesPanel } from "@/components/sources-panel";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import { useSettingsContext } from "@/contexts/SettingsContext";
+import { SuperAgentSummaryCard } from "./SuperAgentSummaryCard";
 
 import {
     parseDocumentBlocks,
@@ -210,6 +211,8 @@ export const AssistantMessage = memo(function AssistantMessage({
                     onToolDeny={onToolDeny ? (toolName, stepIndex) => onToolDeny(message.id, toolName, stepIndex) : undefined}
                 />
             )}
+
+            <SuperAgentSummaryCard metadata={message.metadata} />
 
             {/* Super Agent display - show research progress with sources */}
             {superAgentState && (

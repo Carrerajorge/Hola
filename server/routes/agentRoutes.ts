@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express"; import { AuthenticatedRequest } from "../types/express"; import { db } from "../db"; import {
   agentModeRuns, agentModeSteps,
-  agentModeEvents
+  agentModeEvents, chats
 } from "@shared/schema"; import { agentManager, AgentPlan } from "../agent/agentOrchestrator"; import { agentEventBus } from "../agent/eventBus"; import {
   activityStreamPublisher,
   agentLoopFacade
@@ -10,6 +10,7 @@ import { Router, Request, Response, NextFunction } from "express"; import { Auth
 } from "../agent/contracts"; import { validateOrThrow, ValidationError } from "../agent/validation"; import { checkIdempotency } from
   "../agent/idempotency"; import { updateRunWithLock } from "../agent/dbTransactions"; import { toolRegistry, TOOL_CATEGORIES } from "../agent/registry/toolRegistry"; import { ToolArtifact } from
   "../agent/toolRegistry"; import { agentRegistry } from "../agent/registry/agentRegistry";
+import { ensureUserRowExists } from "../lib/ensureUserRowExists";
 
 
 
@@ -79,6 +80,82 @@ function getRobustnessPolicy() {
   };
 }
 
+const DEFAULT_AGENT_STEP_ESTIMATE_MS = 60_000;
+
+function parseEstimatedTimeMs(value: unknown, stepCount: number): number {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return Math.trunc(value);
+  }
+
+  const fallback = Math.max(stepCount, 1) * DEFAULT_AGENT_STEP_ESTIMATE_MS;
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const match = value.toLowerCase().match(/(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|sec(?:onds?)?|m|min(?:utes?)?|h|hours?)/);
+  if (!match) {
+    return fallback;
+  }
+
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return fallback;
+  }
+
+  const unit = match[2];
+  const multiplier =
+    unit.startsWith("h") ? 3_600_000 :
+    unit.startsWith("m") && unit !== "ms" ? 60_000 :
+    unit.startsWith("s") ? 1_000 :
+    1;
+
+  return Math.max(1, Math.round(amount * multiplier));
+}
+
+function normalizePlanStep(step: any, index: number) {
+  return {
+    index: typeof step?.index === "number" ? step.index : index,
+    toolName: typeof step?.toolName === "string" && step.toolName.trim().length > 0 ? step.toolName : "unknown",
+    description: typeof step?.description === "string" && step.description.trim().length > 0 ? step.description : `Step ${index + 1}`,
+    input: step?.input && typeof step.input === "object" && !Array.isArray(step.input) ? step.input : {},
+    expectedOutput: typeof step?.expectedOutput === "string" ? step.expectedOutput : "",
+    dependencies: Array.isArray(step?.dependencies) ? step.dependencies.filter((value: unknown) => typeof value === "number") : [],
+    optional: step?.optional === true,
+    timeoutMs: typeof step?.timeoutMs === "number" && Number.isFinite(step.timeoutMs) ? step.timeoutMs : undefined,
+    phaseId: typeof step?.phaseId === "string" ? step.phaseId : undefined,
+  };
+}
+
+function normalizeStoredPlan(plan: unknown, fallbackCreatedAt: Date) {
+  if (!plan || typeof plan !== "object") {
+    return null;
+  }
+
+  const record = plan as Record<string, any>;
+  const steps = Array.isArray(record.steps)
+    ? record.steps.map((step, index) => normalizePlanStep(step, index))
+    : [];
+
+  if (steps.length === 0) {
+    return null;
+  }
+
+  const createdAtCandidate = record.createdAt instanceof Date ? record.createdAt : new Date(record.createdAt || fallbackCreatedAt);
+  const createdAt = Number.isNaN(createdAtCandidate.getTime()) ? fallbackCreatedAt : createdAtCandidate;
+
+  return {
+    objective: typeof record.objective === "string" && record.objective.trim().length > 0
+      ? record.objective
+      : "Agent task",
+    steps,
+    phases: Array.isArray(record.phases) ? record.phases : undefined,
+    currentPhaseIndex: typeof record.currentPhaseIndex === "number" ? record.currentPhaseIndex : undefined,
+    estimatedTimeMs: parseEstimatedTimeMs(record.estimatedTimeMs ?? record.estimatedTime, steps.length),
+    reasoning: typeof record.reasoning === "string" ? record.reasoning : undefined,
+    createdAt,
+  };
+}
+
 
 
 function toPercent(value: number, total: number): number {
@@ -92,10 +169,20 @@ export function createAgentModeRouter() {
   router.post("/runs", requireAuth, async (req: Request, res: Response) => {
     try {
       const validatedBody = validateOrThrow(CreateRunRequestSchema, req.body, "POST /runs request body");
-      const { chatId, messageId, message, model, attachments, idempotencyKey } = validatedBody;
+      const { chatId, messageId, message, model, attachments, workspaceContext, idempotencyKey } = validatedBody;
       const user = (req as AuthenticatedRequest).user;
       const userId = user?.claims?.sub || user?.id;
       const userPlan = ((user as any)?.plan === "pro" || (user as any)?.plan === "admin") ? (user as any).plan : "free" as "free" | "pro" | "admin";
+
+      if (userId) {
+        await ensureUserRowExists(String(userId));
+      }
+
+      await db.insert(chats).values({
+        id: chatId,
+        userId: userId ? String(userId) : null,
+        title: message.slice(0, 120) || "New Chat",
+      }).onConflictDoNothing();
 
       if (idempotencyKey) {
         const idempotencyResult = await checkIdempotency(idempotencyKey, chatId);
@@ -149,12 +236,14 @@ export function createAgentModeRouter() {
             message,
             attachments,
             userPlan,
-            model
+            model,
+            workspaceContext
           );
 
           orchestrator.on("progress", async (progress) => {
             try {
               const newStatus = progress.status === "executing" ? "running" : progress.status;
+              const normalizedPlan = progress.plan ? normalizeStoredPlan(progress.plan, new Date()) : null;
               const updateData: Record<string, any> = {
                 status: newStatus,
                 currentStepIndex: progress.currentStepIndex,
@@ -163,8 +252,8 @@ export function createAgentModeRouter() {
                 completedSteps: progress.stepResults.length,
               };
 
-              if (progress.plan) {
-                updateData.plan = progress.plan;
+              if (normalizedPlan) {
+                updateData.plan = normalizedPlan;
               }
 
               if (progress.artifacts && progress.artifacts.length > 0) {
@@ -206,7 +295,7 @@ export function createAgentModeRouter() {
                     runId,
                     stepIndex: stepResult.stepIndex,
                     toolName: stepResult.toolName,
-                    toolInput: progress.plan?.steps[stepResult.stepIndex]?.input || null,
+                    toolInput: normalizedPlan?.steps[stepResult.stepIndex]?.input || null,
                     toolOutput: stepResult.output,
                     status: stepResult.success ? "succeeded" : "failed",
                     error: stepResult.error || null,
@@ -307,7 +396,8 @@ export function createAgentModeRouter() {
         .where(eq(agentModeSteps.runId, run.id))
         .orderBy(agentModeSteps.stepIndex);
 
-      const planSteps = (effectiveRun.plan as AgentPlan)?.steps || [];
+      const normalizedPlan = normalizeStoredPlan(effectiveRun.plan, effectiveRun.createdAt);
+      const planSteps = normalizedPlan?.steps || [];
 
       const mergedSteps = planSteps.map((planStep: any, index: number) => {
         const dbStep = steps.find(s => s.stepIndex === index);
@@ -340,9 +430,9 @@ export function createAgentModeRouter() {
         id: effectiveRun.id,
         chatId: effectiveRun.chatId,
         status: effectiveRun.status,
-        plan: effectiveRun.plan,
+        plan: normalizedPlan,
         currentStepIndex: effectiveRun.currentStepIndex ?? 0,
-        totalSteps: effectiveRun.totalSteps ?? planSteps.length,
+        totalSteps: effectiveRun.totalSteps && effectiveRun.totalSteps > 0 ? effectiveRun.totalSteps : planSteps.length,
         completedSteps: effectiveRun.completedSteps ?? 0,
         steps: mergedSteps.length > 0 ? mergedSteps : steps.map(s => ({
           stepIndex: s.stepIndex,
@@ -428,7 +518,8 @@ export function createAgentModeRouter() {
         .where(eq(agentModeSteps.runId, id))
         .orderBy(agentModeSteps.stepIndex);
 
-      const planSteps = (effectiveRun.plan as AgentPlan)?.steps || [];
+      const normalizedPlan = normalizeStoredPlan(effectiveRun.plan, effectiveRun.createdAt);
+      const planSteps = normalizedPlan?.steps || [];
 
       const mergedSteps = planSteps.map((planStep: any, index: number) => {
         const dbStep = steps.find(s => s.stepIndex === index);
@@ -461,9 +552,9 @@ export function createAgentModeRouter() {
         id: effectiveRun.id,
         chatId: effectiveRun.chatId,
         status: effectiveRun.status,
-        plan: effectiveRun.plan,
+        plan: normalizedPlan,
         currentStepIndex: effectiveRun.currentStepIndex ?? 0,
-        totalSteps: effectiveRun.totalSteps ?? planSteps.length,
+        totalSteps: effectiveRun.totalSteps && effectiveRun.totalSteps > 0 ? effectiveRun.totalSteps : planSteps.length,
         completedSteps: effectiveRun.completedSteps ?? 0,
         steps: mergedSteps.length > 0 ? mergedSteps : steps.map(s => ({
           stepIndex: s.stepIndex,

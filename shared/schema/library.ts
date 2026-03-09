@@ -1,9 +1,5 @@
-import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, serial, boolean, bigint } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod/v4";
-import { users } from "./auth";
-import { chatMessages } from "./chat";
+import { sql } from "drizzle-orm"; import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, serial, boolean, bigint } from "drizzle-orm/pg-core"; import { createInsertSchema } 
+from "drizzle-zod"; import { z } from "zod/v4"; import { users } from "./auth"; import { chatMessages } from "./chat";
 
 export const libraryItems = pgTable("library_items", {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

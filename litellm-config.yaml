@@ -1,0 +1,86 @@
+# ──────────────────────────────────────────────
+# ILIAGPT × OpenClaw Fusion — LiteLLM Configuration
+# Unified proxy for all AI model providers
+# ──────────────────────────────────────────────
+
+model_list:
+  # ── Anthropic Models ────────────────────────────
+  - model_name: claude-opus-brain
+    litellm_params:
+      model: anthropic/claude-opus-4-20250603
+      api_key: os.environ/ANTHROPIC_API_KEY
+      max_tokens: 32768
+      temperature: 0.3
+
+  - model_name: claude-sonnet-coder
+    litellm_params:
+      model: anthropic/claude-sonnet-4-5-20251022
+      api_key: os.environ/ANTHROPIC_API_KEY
+      max_tokens: 16384
+      temperature: 0.1
+
+  # ── Google Models ───────────────────────────────
+  - model_name: gemini-research-pro
+    litellm_params:
+      model: gemini/gemini-2.5-pro-preview-06-05
+      api_key: os.environ/GOOGLE_AI_API_KEY
+      max_tokens: 65536
+      temperature: 0.2
+
+  # ── OpenAI Models ───────────────────────────────
+  - model_name: gpt4o-vision
+    litellm_params:
+      model: openai/gpt-4o-2024-11-20
+      api_key: os.environ/OPENAI_API_KEY
+      max_tokens: 16384
+
+  - model_name: gpt4o-mini-fast
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+      max_tokens: 8192
+
+  # ── xAI Models ──────────────────────────────────
+  - model_name: grok-creative
+    litellm_params:
+      model: xai/grok-3-vision-beta
+      api_key: os.environ/XAI_API_KEY
+      max_tokens: 32768
+
+  # ── Ollama Local Models ─────────────────────────
+  - model_name: llama-local
+    litellm_params:
+      model: ollama/llama3.2:latest
+      api_base: http://ollama:11434
+      stream: true
+
+  - model_name: codestral-local
+    litellm_params:
+      model: ollama/codestral:latest
+      api_base: http://ollama:11434
+      stream: true
+
+litellm_settings:
+  # Caching
+  cache: true
+  cache_params:
+    type: redis
+    host: redis
+    port: 6379
+
+  # Fallbacks
+  fallbacks:
+    - claude-opus-brain: ["claude-sonnet-coder", "gpt4o-vision"]
+    - gemini-research-pro: ["gpt4o-vision", "claude-sonnet-coder"]
+
+  # Budget limits
+  max_budget: 100.0
+  budget_duration: 1d
+
+  # Logging
+  success_callback: ["langfuse"]
+  failure_callback: ["langfuse"]
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL

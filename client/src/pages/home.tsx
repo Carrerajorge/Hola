@@ -1,10 +1,11 @@
-import { Sidebar } from "@/components/sidebar";
+import { Sidebar, APP_SIDEBAR_WIDTH_CLASS } from "@/components/sidebar";
 import { SkeletonPage } from "@/components/skeletons";
 import { MiniSidebar } from "@/components/mini-sidebar";
 import { ChatInterface } from "@/components/chat-interface";
 import { ChatErrorBoundary } from "@/components/error-boundaries";
 // Re-deploy: override manual hotfix-20260220-051334 with git-tracked code
 import type { Gpt } from "@/components/gpt-explorer";
+import { GptExplorer } from "@/components/gpt-explorer";
 import { OfflineIndicator, OfflineBanner } from "@/components/offline-indicator";
 import { useMediaLibrary } from "@/hooks/use-media-library";
 import { lazy, Suspense, useState, useCallback, useMemo, useEffect, useRef } from "react";
@@ -51,7 +52,6 @@ const ChannelsHubDialogLazy = lazy(() =>
   import("@/components/channels-hub-dialog").then((m) => ({ default: m.ChannelsHubDialog }))
 );
 import { whatsappWebEventStream } from "@/lib/whatsapp-web-events";
-const GptExplorerLazy = lazy(() => import("@/components/gpt-explorer").then((m) => ({ default: m.GptExplorer })));
 const AboutGptDialogLazy = lazy(() =>
   import("@/components/about-gpt-dialog").then((m) => ({ default: m.AboutGptDialog }))
 );
@@ -129,6 +129,10 @@ export default function Home() {
     const raw = typeof activeGpt?.id === "string" ? activeGpt.id.trim() : "";
     return raw.length > 0 ? raw : null;
   }, [activeGpt?.id]);
+
+  useEffect(() => {
+    setIsSidebarOpen(!isMobile);
+  }, [isMobile]);
 
   const { favorites, addFavorite, removeFavorite, isFavorite } = useFavorites();
   const { templates, addTemplate, removeTemplate, updateTemplate, incrementUsage, categories } = usePromptTemplates();
@@ -879,11 +883,8 @@ export default function Home() {
       </div>
 
       {/* Desktop Sidebar - Mini (collapsed) */}
-      <div className={!isSidebarOpen ? "hidden md:block" : "hidden"}>
-        <MiniSidebar
-          onNewChat={handleNewChat}
-          onExpand={() => setIsSidebarOpen(true)}
-        />
+      <div className={!isSidebarOpen ? "hidden shrink-0 md:block" : "hidden"}>
+        <MiniSidebar onExpand={() => setIsSidebarOpen(true)} />
       </div>
 
       {/* Mobile Sidebar */}
@@ -894,7 +895,7 @@ export default function Home() {
               <Menu className="h-6 w-6 text-foreground" />
             </Button>
           </SheetTrigger>
-          <SheetContent side="left" className="p-0 w-[260px]">
+          <SheetContent side="left" className={`p-0 ${APP_SIDEBAR_WIDTH_CLASS}`}>
             <Sidebar
               chats={chats}
               hiddenChats={hiddenChats}
@@ -956,64 +957,63 @@ export default function Home() {
               isSidebarOpen={isSidebarOpen}
               onToggleSidebar={() => setIsSidebarOpen(true)}
               onCloseSidebar={() => setIsSidebarOpen(false)}
+              showSidebarToggleWhenCollapsed={false}
               activeGpt={activeGpt}
               aiState={aiState}
-            setAiState={setAiState}
-            aiStateChatId={aiStateChatId}
-            aiProcessSteps={aiProcessSteps}
-            setAiProcessSteps={setAiProcessSteps}
+              setAiState={setAiState}
+              aiStateChatId={aiStateChatId}
+              aiProcessSteps={aiProcessSteps}
+              setAiProcessSteps={setAiProcessSteps}
               chatId={activeChat?.id || pendingChatIdRef.current || null}
               chatGptId={activeChatGptId}
               onOpenApps={handleOpenApps}
-            onUpdateMessageAttachments={updateMessageAttachments}
-            onEditMessageAndTruncate={editMessageAndTruncate}
-            onTruncateAndReplaceMessage={truncateAndReplaceMessage}
-            onTruncateMessagesAt={truncateMessagesAt}
-            onNewChat={handleNewChat}
-            onEditGpt={handleEditGpt}
-            onHideGptFromSidebar={handleHideGptFromSidebar}
-            onPinGptToSidebar={handlePinGptToSidebar}
-            isGptPinned={isPinned}
-            onAboutGpt={handleAboutGptFromChat}
-            onPinChat={pinChat}
-            onArchiveChat={archiveChat}
-            onHideChat={hideChat}
-            onDeleteChat={deleteChat}
-            onDownloadChat={downloadChat}
-            onEditChatTitle={editChatTitle}
-            isPinned={!!activeChat?.pinned}
-            isArchived={!!activeChat?.archived}
-            folders={folders}
-            onMoveToFolder={handleMoveToFolder}
-            onCreateFolder={createFolder}
-            currentFolderId={activeChat?.id ? getFolderForChat(activeChat.id)?.id || null : null}
-            uiPhase={uiPhase}
-            setUiPhase={setUiPhase}
-            activeRunId={activeRunId}
-            setActiveRunId={setActiveRunId}
-            selectedProjectId={selectedProjectId}
-            selectedDocTool={selectedDocTool}
-            setSelectedDocTool={setSelectedDocTool}
-            docGenerationState={docGenerationState}
-            setDocGenerationState={setDocGenerationState}
-          />
+              onUpdateMessageAttachments={updateMessageAttachments}
+              onEditMessageAndTruncate={editMessageAndTruncate}
+              onTruncateAndReplaceMessage={truncateAndReplaceMessage}
+              onTruncateMessagesAt={truncateMessagesAt}
+              onNewChat={handleNewChat}
+              onEditGpt={handleEditGpt}
+              onHideGptFromSidebar={handleHideGptFromSidebar}
+              onPinGptToSidebar={handlePinGptToSidebar}
+              isGptPinned={isPinned}
+              onAboutGpt={handleAboutGptFromChat}
+              onPinChat={pinChat}
+              onArchiveChat={archiveChat}
+              onHideChat={hideChat}
+              onDeleteChat={deleteChat}
+              onDownloadChat={downloadChat}
+              onEditChatTitle={editChatTitle}
+              isPinned={!!activeChat?.pinned}
+              isArchived={!!activeChat?.archived}
+              folders={folders}
+              onMoveToFolder={handleMoveToFolder}
+              onCreateFolder={createFolder}
+              currentFolderId={activeChat?.id ? getFolderForChat(activeChat.id)?.id || null : null}
+              uiPhase={uiPhase}
+              setUiPhase={setUiPhase}
+              activeRunId={activeRunId}
+              setActiveRunId={setActiveRunId}
+              selectedProjectId={selectedProjectId}
+              selectedDocTool={selectedDocTool}
+              setSelectedDocTool={setSelectedDocTool}
+              docGenerationState={docGenerationState}
+              setDocGenerationState={setDocGenerationState}
+            />
           </ChatErrorBoundary>
         )}
       </main>
 
       {/* GPT Explorer Modal */}
       
-      <Suspense fallback={null}>
-        {isGptExplorerOpen ? (
-          <GptExplorerLazy
-            open={isGptExplorerOpen}
-            onOpenChange={setIsGptExplorerOpen}
-            onSelectGpt={handleSelectGpt}
-            onCreateGpt={handleCreateGpt}
-            onEditGpt={handleEditGpt}
-          />
-        ) : null}
-      </Suspense>
+      {isGptExplorerOpen ? (
+        <GptExplorer
+          open={isGptExplorerOpen}
+          onOpenChange={setIsGptExplorerOpen}
+          onSelectGpt={handleSelectGpt}
+          onCreateGpt={handleCreateGpt}
+          onEditGpt={handleEditGpt}
+        />
+      ) : null}
       
 
       {/* About GPT Dialog */}

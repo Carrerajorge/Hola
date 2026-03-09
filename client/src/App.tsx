@@ -83,18 +83,19 @@ function RootRoute() {
 
 // Wouter passes RouteComponentProps to route components; pages typically ignore them.
 // Keep this permissive so protected routes type-check cleanly.
-function requireAuth(Component: ComponentType<any>) {
+function requireAuth(Component: ComponentType<any>, options?: { allowLocalDevHost?: boolean }) {
   return function ProtectedRoute(props: any) {
     const { isReady, isAuthenticated } = useAuth();
     const [, setLocation] = useLocation();
+    const allowAnonymousAccess = !!options?.allowLocalDevHost && isLocalDevHost();
 
     useEffect(() => {
       if (!isReady) return;
-      if (!isAuthenticated) setLocation("/login");
-    }, [isReady, isAuthenticated, setLocation]);
+      if (!isAuthenticated && !allowAnonymousAccess) setLocation("/login");
+    }, [allowAnonymousAccess, isReady, isAuthenticated, setLocation]);
 
     if (!isReady) return <PageLoader />;
-    if (!isAuthenticated) return <PageLoader />;
+    if (!isAuthenticated && !allowAnonymousAccess) return <PageLoader />;
     return <Component {...props} />;
   };
 }
@@ -158,6 +159,7 @@ const BusinessPage = lazyWithRetry(() => import("@/pages/business"));
 const DownloadPage = lazyWithRetry(() => import("@/pages/download"));
 const PowerPage = lazyWithRetry(() => import("@/pages/power"));
 const MemoryPage = lazyWithRetry(() => import("@/pages/memory"));
+const OpenClawDashboardPage = lazyWithRetry(() => import("@/pages/openclaw-dashboard"));
 
 const ProtectedProfilePage = requireAuth(ProfilePage);
 const ProtectedBillingPage = requireAuth(BillingPage);
@@ -167,12 +169,13 @@ const ProtectedAdminPage = requireAuth(AdminPage);
 const ProtectedSystemHealthPage = requireAuth(SystemHealthPage);
 const ProtectedWorkspaceSettingsPage = requireAuth(WorkspaceSettingsPage);
 const ProtectedWorkspacePage = requireAuth(WorkspacePage);
-const ProtectedSkillsPage = requireAuth(SkillsPage);
+const ProtectedSkillsPage = requireAuth(SkillsPage, { allowLocalDevHost: true });
 const ProtectedCodexPage = requireAuth(CodexPage);
 const ProtectedMemoryPage = requireAuth(MemoryPage);
 const ProtectedSpreadsheetAnalyzerPage = requireAuth(SpreadsheetAnalyzerPage);
 const ProtectedMonitoringDashboard = requireAuth(MonitoringDashboard);
 const ProtectedRunProgressPage = requireAuth(RunProgressPage);
+const ProtectedOpenClawDashboard = requireAuth(OpenClawDashboardPage, { allowLocalDevHost: true });
 
 function GlobalKeyboardShortcuts() {
   const [, setLocation] = useLocation();
@@ -314,6 +317,7 @@ function Router() {
             <Route path="/memory" component={ProtectedMemoryPage} />
             <Route path="/spreadsheet-analyzer" component={ProtectedSpreadsheetAnalyzerPage} />
             <Route path="/monitoring" component={ProtectedMonitoringDashboard} />
+            <Route path="/openclaw" component={ProtectedOpenClawDashboard} />
             <Route path="/runs/:id/progress" component={ProtectedRunProgressPage} />
             <Route path="/about" component={AboutPage} />
             <Route path="/learn" component={LearnPage} />

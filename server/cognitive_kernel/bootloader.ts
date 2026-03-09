@@ -4,7 +4,9 @@ import { globalBroker } from './messageBroker.js';
 import { globalThreadPool, globalProcessPool } from './executionPools.js';
 import { globalModelManager } from './modelWarmup.js';
 import { initializeKnowledgeGraph } from './knowledgeGraphInit.js';
-import { spawnPerceptionDaemons } from './perceptionDaemons.js';
+import { globalPerception } from './perception/index.js';
+import { globalRagEnterprise } from '../rag_enterprise/index.js';
+import { doctoralReasoning } from '../reasoning_engine/index.js';
 
 export class CognitiveKernelBootloader {
     private hwProfile: HardwareProfile | null = null;
@@ -55,13 +57,18 @@ export class CognitiveKernelBootloader {
     private async phase5_SpawnPerceptionDaemons() {
         this.currentPhase = 5;
         console.log(`[Phase ${this.currentPhase}] Spawning supervised Perception Daemons (Screen, Input, FS, Network, Process)...`);
-        await spawnPerceptionDaemons();
+        await globalPerception.bootAll();
     }
 
     private async phase6_BootstrapToolRegistryAndMemory() {
         this.currentPhase = 6;
         console.log(`[Phase ${this.currentPhase}] Bootstrapping Tool Registry (MCP), generating embeddings, restoring memory state...`);
-        // TODO: Load toolRegistry + memory indices
+        await globalRagEnterprise.initialize();
+        await doctoralReasoning.bootDoctoralEngine();
+
+        // Mock query & reasoning trace
+        await globalRagEnterprise.serveQuery("What is the current system status?");
+        await doctoralReasoning.solveComplexGoal("Optimize the system for AGI scalability");
     }
 
     private async phase7_SelfTestDiagnostic() {

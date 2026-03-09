@@ -34,4 +34,30 @@ describe("agentExecutor tool selection", () => {
 
     expect(names.some((name) => name.startsWith("skill_"))).toBe(false);
   });
+
+  it("avoids web tools for simple inline table requests even if the intent is misclassified", () => {
+    const tools = getToolsForIntent(
+      "document_generation",
+      "owner",
+      "crea una tabla de 12 filas x 8 columnas de alimentos",
+    );
+    const names = tools.map((tool) => tool.name);
+
+    expect(names).toContain("create_spreadsheet");
+    expect(names).not.toContain("web_search");
+    expect(names).not.toContain("fetch_url");
+  });
+
+  it("keeps web research tools for document creation when the prompt explicitly asks for sources", () => {
+    const tools = getToolsForIntent(
+      "document_generation",
+      "owner",
+      "crea un informe con fuentes web actualizadas sobre nutricion deportiva",
+    );
+    const names = tools.map((tool) => tool.name);
+
+    expect(names).toContain("create_document");
+    expect(names).toContain("web_search");
+    expect(names).toContain("fetch_url");
+  });
 });

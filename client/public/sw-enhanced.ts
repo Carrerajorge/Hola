@@ -28,6 +28,7 @@ const CACHE_STRATEGIES = {
 // ============================================
 // INSTALL EVENT
 // ============================================
+declare const self: ServiceWorkerGlobalScope;
 
 self.addEventListener('install', (event: ExtendableEvent) => {
     console.log('[SW] Installing service worker...');
@@ -40,7 +41,7 @@ self.addEventListener('install', (event: ExtendableEvent) => {
             })
             .then(() => {
                 console.log('[SW] Installation complete');
-                return (self as any).skipWaiting();
+                return self.skipWaiting();
             })
     );
 });
@@ -66,7 +67,7 @@ self.addEventListener('activate', (event: ExtendableEvent) => {
             })
             .then(() => {
                 console.log('[SW] Activation complete');
-                return (self as any).clients.claim();
+                return self.clients.claim();
             })
     );
 });

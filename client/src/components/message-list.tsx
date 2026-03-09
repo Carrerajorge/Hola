@@ -170,6 +170,7 @@ const LazyImage = memo(function LazyImage({
       <img
         src={src}
         alt={alt}
+        title={alt || "Image preview"}
         loading="lazy"
         className={cn(className, !isLoaded && "opacity-0")}
         style={style}
@@ -761,12 +762,14 @@ const ActionToolbar = memo(function ActionToolbar({
                   onKeyDown={(e) => e.key === "Enter" && handleCustomSubmit()}
                   className="flex-1 h-7 px-2 text-[13px] bg-transparent border-none outline-none placeholder:text-muted-foreground/50"
                   data-testid={`input-custom-regenerate-${testIdSuffix}`}
+                  title="Pedir cambio de respuesta"
                 />
                 <button
                   onClick={handleCustomSubmit}
                   disabled={!customInstruction.trim()}
                   className="h-6 w-6 flex items-center justify-center rounded-full bg-foreground/10 hover:bg-foreground/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
                   data-testid={`button-submit-custom-${testIdSuffix}`}
+                  title="Enviar petición de cambio"
                 >
                   <ArrowUp className="h-3.5 w-3.5" />
                 </button>
@@ -2542,11 +2545,9 @@ export function MessageList({
     return (
       <div
         ref={!parentRef ? internalParentRef : undefined}
-        className="flex flex-col gap-4"
+        className="flex flex-col gap-4 relative w-full"
         style={{
-          height: `${virtualizer.getTotalSize()}px`,
-          width: '100%',
-          position: 'relative',
+          height: `${virtualizer.getTotalSize()}px`
         }}
       >
         {virtualizer.getVirtualItems().map((virtualRow) => {
@@ -2554,11 +2555,8 @@ export function MessageList({
           return (
             <div
               key={msg.id}
+              className="absolute top-0 left-0 w-full"
               style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
                 transform: `translateY(${virtualRow.start}px)`,
               }}
               data-index={virtualRow.index}
@@ -2608,12 +2606,8 @@ export function MessageList({
 
         {streamingContent && variant === "default" && (
           <div
-            className="flex w-full max-w-3xl mx-auto gap-4 justify-start"
+            className="flex w-full max-w-3xl mx-auto gap-4 justify-start absolute top-0 left-0"
             style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
               transform: `translateY(${virtualizer.getTotalSize()}px)`,
             }}
           >

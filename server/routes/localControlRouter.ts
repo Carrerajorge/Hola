@@ -115,6 +115,167 @@ function sanitizeRelativeFolderPath(inputPath: string): string {
   return raw.replace(/^\.\/+/, "");
 }
 
+function sanitizeRepositoryRelativePath(inputPath: string, allowDot = false): string {
+  const raw = String(inputPath || "").trim().replace(/\\/g, "/");
+  if (!raw || raw === ".") {
+    if (allowDot) return ".";
+    throw new Error("Path is required");
+  }
+  if (raw.startsWith("/")) throw new Error("Path must be relative");
+  if (raw.includes("..")) throw new Error("Path cannot include '..'");
+  return raw.replace(/^\.\/+/, "");
+}
+
+function resolveRepositoryPath(rootPath: string, relativePath: string): string {
+  const safeRelativePath = sanitizeRepositoryRelativePath(relativePath, true);
+  const resolvedPath = safeRelativePath === "."
+    ? rootPath
+    : path.resolve(rootPath, safeRelativePath);
+  if (!isPathInside(rootPath, resolvedPath)) {
+    throw new Error("Path escapes repository root");
+  }
+  return resolvedPath;
+}
+
+function shouldSkipRepositoryEntry(entryName: string, includeHidden: boolean): boolean {
+  if (!includeHidden && entryName.startsWith(".")) return true;
+  return ["node_modules", ".git", "dist", "build", ".next", "coverage"].includes(entryName);
+}
+
+function isProbablyTextBuffer(buffer: Buffer): boolean {
+  if (buffer.length === 0) return true;
+  let suspiciousBytes = 0;
+  const sample = buffer.subarray(0, Math.min(buffer.length, 8192));
+  for (const byte of sample) {
+    if (byte === 0) return false;
+    if ((byte < 7 || (byte > 14 && byte < 32)) && byte !== 9 && byte !== 10 && byte !== 13) {
+      suspiciousBytes += 1;
+    }
+  }
+  return suspiciousBytes / sample.length < 0.1;
+}
+
+type RepositoryTreeNode = {
+  name: string;
+  path: string;
+  type: "file" | "directory";
+  children?: RepositoryTreeNode[];
+};
+
+async function collectRepositoryTree(
+  rootPath: string,
+  folderPath: string,
+  maxDepth: number,
+  maxEntries: number,
+  includeHidden: boolean,
+): Promise<{ nodes: RepositoryTreeNode[]; count: number; truncated: boolean }> {
+  const startPath = resolveRepositoryPath(rootPath, folderPath);
+  const state = { remaining: maxEntries, truncated: false };
+
+  const walk = async (absolutePath: string, relativePath: string, depth: number): Promise<RepositoryTreeNode[]> => {
+    const entries = await fs.readdir(absolutePath, { withFileTypes: true }).catch(() => []);
+    const sortedEntries = entries
+      .filter((entry) => !shouldSkipRepositoryEntry(entry.name, includeHidden))
+      .sort((left, right) => {
+        if (left.isDirectory() && !right.isDirectory()) return -1;
+        if (!left.isDirectory() && right.isDirectory()) return 1;
+        return left.name.localeCompare(right.name);
+      });
+
+    const nodes: RepositoryTreeNode[] = [];
+    for (const entry of sortedEntries) {
+      if (state.remaining <= 0) {
+        state.truncated = true;
+        break;
+      }
+
+      const nextRelativePath = relativePath === "."
+        ? entry.name
+        : `${relativePath}/${entry.name}`;
+
+      state.remaining -= 1;
+
+      const node: RepositoryTreeNode = {
+        name: entry.name,
+        path: nextRelativePath,
+        type: entry.isDirectory() ? "directory" : "file",
+      };
+
+      if (entry.isDirectory() && depth + 1 < maxDepth) {
+        const childAbsolutePath = path.join(absolutePath, entry.name);
+        node.children = await walk(childAbsolutePath, nextRelativePath, depth + 1);
+      }
+
+      nodes.push(node);
+    }
+
+    return nodes;
+  };
+
+  const normalizedFolderPath = folderPath === "." ? "." : sanitizeRepositoryRelativePath(folderPath, true);
+  const nodes = await walk(startPath, normalizedFolderPath, 0);
+  return {
+    nodes,
+    count: maxEntries - state.remaining,
+    truncated: state.truncated,
+  };
+}
+
+type RepositoryCommandResult = {
+  command: string;
+  cwd: string;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+  truncated: boolean;
+};
+
+async function executeRepositoryCommand(
+  command: string,
+  cwd: string,
+  timeoutMs: number,
+): Promise<RepositoryCommandResult> {
+  return new Promise((resolve) => {
+    execFile(
+      "bash",
+      ["-lc", command],
+      {
+        cwd,
+        timeout: timeoutMs,
+        maxBuffer: 1_000_000,
+      },
+      (error, stdout, stderr) => {
+        const execError = error as (NodeJS.ErrnoException & {
+          code?: number | string;
+          signal?: string;
+          killed?: boolean;
+        }) | null;
+        const message = String(execError?.message || "");
+        const timedOut = Boolean(execError?.killed && /timed out/i.test(message));
+        const truncated = message.includes("maxBuffer");
+        const exitCode = typeof execError?.code === "number"
+          ? execError.code
+          : timedOut
+            ? 124
+            : execError
+              ? 1
+              : 0;
+
+        resolve({
+          command,
+          cwd,
+          exitCode,
+          stdout: String(stdout || ""),
+          stderr: String(stderr || ""),
+          timedOut,
+          truncated,
+        });
+      },
+    );
+  });
+}
+
 async function collectRepositoryFolders(rootPath: string, maxDepth: number, maxEntries: number, includeHidden: boolean): Promise<string[]> {
   const folders: string[] = [];
   const queue: Array<{ absPath: string; depth: number; relativePath: string }> = [
@@ -288,6 +449,143 @@ router.get("/local/repo/branches", async (req, res) => {
   }
 });
 
+router.get("/local/repo/tree", async (req, res) => {
+  try {
+    const rootPath = await resolveRepositoryRoot(String(req.query.rootPath || ""));
+    const folderPath = String(req.query.folderPath || ".").trim() || ".";
+    const requestedDepth = Number(req.query.maxDepth ?? 4);
+    const maxDepth = Number.isFinite(requestedDepth)
+      ? Math.min(Math.max(Math.trunc(requestedDepth), 1), 8)
+      : 4;
+    const requestedEntries = Number(req.query.maxEntries ?? 1200);
+    const maxEntries = Number.isFinite(requestedEntries)
+      ? Math.min(Math.max(Math.trunc(requestedEntries), 50), 5000)
+      : 1200;
+    const includeHidden = String(req.query.includeHidden || "false").toLowerCase() === "true";
+
+    const tree = await collectRepositoryTree(rootPath, folderPath, maxDepth, maxEntries, includeHidden);
+    return res.json({
+      success: true,
+      rootPath,
+      folderPath: folderPath === "." ? "." : sanitizeRepositoryRelativePath(folderPath, true),
+      maxDepth,
+      maxEntries,
+      count: tree.count,
+      truncated: tree.truncated,
+      nodes: tree.nodes,
+    });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error?.message || "Failed to inspect repository tree" });
+  }
+});
+
+router.get("/local/repo/file", async (req, res) => {
+  try {
+    const rootPath = await resolveRepositoryRoot(String(req.query.rootPath || ""));
+    const filePath = sanitizeRepositoryRelativePath(String(req.query.filePath || ""));
+    const absolutePath = resolveRepositoryPath(rootPath, filePath);
+    const stat = await fs.stat(absolutePath).catch(() => null);
+
+    if (!stat) {
+      return res.status(404).json({ success: false, error: "File not found" });
+    }
+    if (!stat.isFile()) {
+      return res.status(400).json({ success: false, error: "Path is not a file" });
+    }
+    if (stat.size > 750_000) {
+      return res.status(413).json({
+        success: false,
+        error: "File too large to edit in browser",
+        size: stat.size,
+      });
+    }
+
+    const buffer = await fs.readFile(absolutePath);
+    if (!isProbablyTextBuffer(buffer)) {
+      return res.status(415).json({
+        success: false,
+        error: "Binary files are not supported in the editor",
+        size: stat.size,
+      });
+    }
+
+    return res.json({
+      success: true,
+      rootPath,
+      filePath,
+      absolutePath,
+      content: buffer.toString("utf-8"),
+      size: stat.size,
+      updatedAt: stat.mtime.toISOString(),
+    });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error?.message || "Failed to read repository file" });
+  }
+});
+
+router.put("/local/repo/file", async (req, res) => {
+  try {
+    const rootPath = await resolveRepositoryRoot(String(req.body?.rootPath || ""));
+    const filePath = sanitizeRepositoryRelativePath(String(req.body?.filePath || ""));
+    const content = typeof req.body?.content === "string" ? req.body.content : null;
+    if (content === null) {
+      return res.status(400).json({ success: false, error: "Content must be a string" });
+    }
+    if (content.length > 2_000_000) {
+      return res.status(413).json({ success: false, error: "Content too large to save" });
+    }
+
+    const absolutePath = resolveRepositoryPath(rootPath, filePath);
+    await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+    await fs.writeFile(absolutePath, content, "utf-8");
+    const stat = await fs.stat(absolutePath);
+
+    return res.json({
+      success: true,
+      rootPath,
+      filePath,
+      absolutePath,
+      size: stat.size,
+      updatedAt: stat.mtime.toISOString(),
+    });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error?.message || "Failed to save repository file" });
+  }
+});
+
+router.post("/local/repo/command", async (req, res) => {
+  try {
+    const rootPath = await resolveRepositoryRoot(String(req.body?.rootPath || ""));
+    const cwdRelative = String(req.body?.cwd || ".").trim() || ".";
+    const absoluteCwd = resolveRepositoryPath(rootPath, cwdRelative);
+    const stat = await fs.stat(absoluteCwd).catch(() => null);
+    if (!stat || !stat.isDirectory()) {
+      return res.status(400).json({ success: false, error: "cwd must resolve to a directory" });
+    }
+
+    const command = String(req.body?.command || "").trim();
+    if (!command) {
+      return res.status(400).json({ success: false, error: "Command is required" });
+    }
+
+    const requestedTimeout = Number(req.body?.timeoutMs ?? 20_000);
+    const timeoutMs = Number.isFinite(requestedTimeout)
+      ? Math.min(Math.max(Math.trunc(requestedTimeout), 1_000), 120_000)
+      : 20_000;
+
+    const result = await executeRepositoryCommand(command, absoluteCwd, timeoutMs);
+    return res.json({
+      success: true,
+      ok: result.exitCode === 0 && !result.timedOut,
+      rootPath,
+      ...result,
+      cwd: path.relative(rootPath, absoluteCwd) || ".",
+    });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error?.message || "Failed to execute repository command" });
+  }
+});
+
 /**
  * General-purpose local control endpoint.
  * Accepts either:
@@ -384,7 +682,7 @@ router.get("/local/file", async (req, res) => {
     res.setHeader("Content-Type", mimeType);
     res.setHeader("Content-Length", String(stat.size));
     res.setHeader("Cache-Control", "private, max-age=60");
-    res.setHeader("Content-Disposition", `inline; filename=\"${fileName.replace(/\"/g, "")}\"`);
+    res.setHeader("Content-Disposition", `inline; filename="${fileName.replace(/"/g, "")}"`);
 
     const stream = createReadStream(realPath);
     stream.on("error", () => {

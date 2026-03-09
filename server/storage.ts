@@ -93,6 +93,76 @@ import { db, dbRead } from "./db";
 import { eq, sql, desc, and, isNull, ilike, inArray, or, type SQL } from "drizzle-orm";
 import { knowledgeBaseService } from "./services/knowledgeBase";
 
+function isMissingRelationError(error: unknown, relationName: string): boolean {
+  const anyError = error as any;
+  const code = anyError?.code || anyError?.cause?.code;
+  const message = String(anyError?.message || "");
+  const causeMessage = String(anyError?.cause?.message || "");
+  if (code === "42P01") return true;
+  return message.includes(relationName) || causeMessage.includes(relationName);
+}
+
+const defaultUserSettingsResponsePreferences = {
+  responseStyle: "default" as const,
+  responseTone: "professional",
+  customInstructions: "",
+};
+
+const defaultUserSettingsProfile = {
+  nickname: "",
+  occupation: "",
+  bio: "",
+  showName: true,
+  linkedInUrl: "",
+  githubUrl: "",
+  websiteDomain: "",
+  receiveEmailComments: false,
+};
+
+const defaultUserSettingsFeatureFlags = {
+  memoryEnabled: false,
+  recordingHistoryEnabled: false,
+  webSearchAuto: true,
+  codeInterpreterEnabled: true,
+  canvasEnabled: true,
+  voiceEnabled: true,
+  voiceAdvanced: false,
+  connectorSearchAuto: false,
+};
+
+const defaultUserPrivacySettings = {
+  trainingOptIn: false,
+  remoteBrowserDataAccess: false,
+  analyticsTracking: true,
+  chatHistoryEnabled: true,
+};
+
+function buildFallbackUserSettings(
+  userId: string,
+  settings: Partial<InsertUserSettings> = {},
+  existing: UserSettings | null = null,
+): UserSettings {
+  const now = new Date();
+  return {
+    id: existing?.id || `ephemeral:${userId}`,
+    userId,
+    responsePreferences: settings.responsePreferences
+      ? { ...(existing?.responsePreferences || defaultUserSettingsResponsePreferences), ...settings.responsePreferences }
+      : existing?.responsePreferences || defaultUserSettingsResponsePreferences,
+    userProfile: settings.userProfile
+      ? { ...(existing?.userProfile || defaultUserSettingsProfile), ...settings.userProfile }
+      : existing?.userProfile || defaultUserSettingsProfile,
+    featureFlags: settings.featureFlags
+      ? { ...(existing?.featureFlags || defaultUserSettingsFeatureFlags), ...settings.featureFlags }
+      : existing?.featureFlags || defaultUserSettingsFeatureFlags,
+    privacySettings: settings.privacySettings
+      ? { ...(existing?.privacySettings || defaultUserPrivacySettings), ...settings.privacySettings }
+      : existing?.privacySettings || defaultUserPrivacySettings,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
@@ -1765,90 +1835,69 @@ export class MemStorage implements IStorage {
 
   // User Settings
   async getUserSettings(userId: string): Promise<UserSettings | null> {
-    const [result] = await dbRead.select().from(userSettings).where(eq(userSettings.userId, userId));
-    return result || null;
+    try {
+      const [result] = await dbRead.select().from(userSettings).where(eq(userSettings.userId, userId));
+      return result || null;
+    } catch (error) {
+      if (isMissingRelationError(error, "user_settings")) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   async upsertUserSettings(userId: string, settings: Partial<InsertUserSettings>): Promise<UserSettings> {
-    const defaultFeatureFlags = {
-      memoryEnabled: false,
-      recordingHistoryEnabled: false,
-      webSearchAuto: true,
-      codeInterpreterEnabled: true,
-      canvasEnabled: true,
-      voiceEnabled: true,
-      voiceAdvanced: false,
-      connectorSearchAuto: false
-    };
-
-    const defaultResponsePreferences = {
-      responseStyle: 'default' as const,
-      responseTone: 'professional',
-      customInstructions: ''
-    };
-
-    const defaultUserProfile = {
-      nickname: '',
-      occupation: '',
-      bio: '',
-      showName: true,
-      linkedInUrl: '',
-      githubUrl: '',
-      websiteDomain: '',
-      receiveEmailComments: false,
-    };
-
-    const defaultPrivacySettings = {
-      trainingOptIn: false,
-      remoteBrowserDataAccess: false,
-      analyticsTracking: true,
-      chatHistoryEnabled: true,
-    };
-
     const existing = await this.getUserSettings(userId);
 
-    if (existing) {
-      const mergedSettings = {
+    try {
+      if (existing) {
+        const mergedSettings = {
+          responsePreferences: settings.responsePreferences
+            ? { ...existing.responsePreferences, ...settings.responsePreferences }
+            : existing.responsePreferences,
+          userProfile: settings.userProfile
+            ? { ...existing.userProfile, ...settings.userProfile }
+            : existing.userProfile,
+          featureFlags: settings.featureFlags
+            ? { ...existing.featureFlags, ...settings.featureFlags }
+            : existing.featureFlags,
+          privacySettings: settings.privacySettings
+            ? { ...existing.privacySettings, ...settings.privacySettings }
+            : existing.privacySettings,
+          updatedAt: new Date()
+        };
+
+        const [updated] = await db.update(userSettings)
+          .set(mergedSettings)
+          .where(eq(userSettings.userId, userId))
+          .returning();
+        return updated;
+      }
+
+      const newSettings: InsertUserSettings = {
+        userId,
         responsePreferences: settings.responsePreferences
-          ? { ...existing.responsePreferences, ...settings.responsePreferences }
-          : existing.responsePreferences,
+          ? { ...defaultUserSettingsResponsePreferences, ...settings.responsePreferences }
+          : defaultUserSettingsResponsePreferences,
         userProfile: settings.userProfile
-          ? { ...existing.userProfile, ...settings.userProfile }
-          : existing.userProfile,
+          ? { ...defaultUserSettingsProfile, ...settings.userProfile }
+          : defaultUserSettingsProfile,
         featureFlags: settings.featureFlags
-          ? { ...existing.featureFlags, ...settings.featureFlags }
-          : existing.featureFlags,
+          ? { ...defaultUserSettingsFeatureFlags, ...settings.featureFlags }
+          : defaultUserSettingsFeatureFlags,
         privacySettings: settings.privacySettings
-          ? { ...existing.privacySettings, ...settings.privacySettings }
-          : existing.privacySettings,
-        updatedAt: new Date()
+          ? { ...defaultUserPrivacySettings, ...settings.privacySettings }
+          : defaultUserPrivacySettings
       };
 
-      const [updated] = await db.update(userSettings)
-        .set(mergedSettings)
-        .where(eq(userSettings.userId, userId))
-        .returning();
-      return updated;
+      const [created] = await db.insert(userSettings).values(newSettings).returning();
+      return created;
+    } catch (error) {
+      if (isMissingRelationError(error, "user_settings")) {
+        return buildFallbackUserSettings(userId, settings, existing);
+      }
+      throw error;
     }
-
-    const newSettings: InsertUserSettings = {
-      userId,
-      responsePreferences: settings.responsePreferences
-        ? { ...defaultResponsePreferences, ...settings.responsePreferences }
-        : defaultResponsePreferences,
-      userProfile: settings.userProfile
-        ? { ...defaultUserProfile, ...settings.userProfile }
-        : defaultUserProfile,
-      featureFlags: settings.featureFlags
-        ? { ...defaultFeatureFlags, ...settings.featureFlags }
-        : defaultFeatureFlags,
-      privacySettings: settings.privacySettings
-        ? { ...defaultPrivacySettings, ...settings.privacySettings }
-        : defaultPrivacySettings
-    };
-
-    const [created] = await db.insert(userSettings).values(newSettings).returning();
-    return created;
   }
 
   // Integration Management
@@ -2340,7 +2389,6 @@ export class MemStorage implements IStorage {
   }
 
   async getProviderMetrics(provider?: string, startDate?: Date, endDate?: Date): Promise<ProviderMetrics[]> {
-    let query = dbRead.select().from(providerMetrics);
     const conditions: any[] = [];
 
     if (provider) {
@@ -2676,7 +2724,7 @@ export class MemStorage implements IStorage {
       { category: "users", key: "allow_registration", value: true, defaultValue: true, valueType: "boolean", description: "Allow user registration" },
       { category: "users", key: "require_email_verification", value: false, defaultValue: false, valueType: "boolean", description: "Require email verification" },
       { category: "users", key: "session_timeout_minutes", value: 1440, defaultValue: 1440, valueType: "number", description: "Session timeout in minutes" },
-      { category: "ai_models", key: "default_model", value: "grok-4-1-fast-non-reasoning", defaultValue: "grok-4-1-fast-non-reasoning", valueType: "string", description: "Default AI model" },
+      { category: "ai_models", key: "default_model", value: "gemini-2.5-flash", defaultValue: "gemini-2.5-flash", valueType: "string", description: "Default AI model" },
       { category: "ai_models", key: "max_tokens_per_request", value: 4096, defaultValue: 4096, valueType: "number", description: "Max tokens per request" },
       { category: "ai_models", key: "enable_streaming", value: true, defaultValue: true, valueType: "boolean", description: "Enable streaming responses" },
       { category: "security", key: "max_login_attempts", value: 5, defaultValue: 5, valueType: "number", description: "Max login attempts before lockout" },

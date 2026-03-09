@@ -1,9 +1,5 @@
-import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, serial, boolean, customType, check } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod/v4";
-import { users } from "./auth";
-import { workspaceGroups } from "./workspaceGroups";
+import { sql } from "drizzle-orm"; import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, serial, boolean, customType, check } from "drizzle-orm/pg-core"; import { 
+createInsertSchema } from "drizzle-zod"; import { z } from "zod/v4"; import { users } from "./auth"; import { workspaceGroups } from "./workspaceGroups";
 
 export const chats = pgTable("chats", {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

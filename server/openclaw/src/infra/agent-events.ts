@@ -15,20 +15,41 @@ export type AgentRunContext = {
   sessionKey?: string;
   verboseLevel?: VerboseLevel;
   isHeartbeat?: boolean;
+  /** Whether control UI clients should receive chat/agent updates for this run. */
+  isControlUiVisible?: boolean;
 };
 
-// Keep per-run counters so streams stay strictly monotonic per runId.
-const seqByRun = new Map<string, number>();
-const listeners = new Set<(evt: AgentEventPayload) => void>();
-const runContextById = new Map<string, AgentRunContext>();
+type AgentEventListener = (evt: AgentEventPayload) => void;
+
+type AgentEventsState = {
+  seqByRun: Map<string, number>;
+  listeners: Set<AgentEventListener>;
+  runContextById: Map<string, AgentRunContext>;
+};
+
+const AGENT_EVENTS_STATE = Symbol.for("openclaw.agentEventsState");
+
+const state = (() => {
+  const globalState = globalThis as typeof globalThis & {
+    [AGENT_EVENTS_STATE]?: AgentEventsState;
+  };
+  if (!globalState[AGENT_EVENTS_STATE]) {
+    globalState[AGENT_EVENTS_STATE] = {
+      seqByRun: new Map<string, number>(),
+      listeners: new Set<AgentEventListener>(),
+      runContextById: new Map<string, AgentRunContext>(),
+    };
+  }
+  return globalState[AGENT_EVENTS_STATE]!;
+})();
 
 export function registerAgentRunContext(runId: string, context: AgentRunContext) {
   if (!runId) {
     return;
   }
-  const existing = runContextById.get(runId);
+  const existing = state.runContextById.get(runId);
   if (!existing) {
-    runContextById.set(runId, { ...context });
+    state.runContextById.set(runId, { ...context });
     return;
   }
   if (context.sessionKey && existing.sessionKey !== context.sessionKey) {
@@ -37,38 +58,43 @@ export function registerAgentRunContext(runId: string, context: AgentRunContext)
   if (context.verboseLevel && existing.verboseLevel !== context.verboseLevel) {
     existing.verboseLevel = context.verboseLevel;
   }
+  if (context.isControlUiVisible !== undefined) {
+    existing.isControlUiVisible = context.isControlUiVisible;
+  }
   if (context.isHeartbeat !== undefined && existing.isHeartbeat !== context.isHeartbeat) {
     existing.isHeartbeat = context.isHeartbeat;
   }
 }
 
 export function getAgentRunContext(runId: string) {
-  return runContextById.get(runId);
+  return state.runContextById.get(runId);
 }
 
 export function clearAgentRunContext(runId: string) {
-  runContextById.delete(runId);
+  state.runContextById.delete(runId);
 }
 
 export function resetAgentRunContextForTest() {
-  runContextById.clear();
+  state.seqByRun.clear();
+  state.listeners.clear();
+  state.runContextById.clear();
 }
 
 export function emitAgentEvent(event: Omit<AgentEventPayload, "seq" | "ts">) {
-  const nextSeq = (seqByRun.get(event.runId) ?? 0) + 1;
-  seqByRun.set(event.runId, nextSeq);
-  const context = runContextById.get(event.runId);
-  const sessionKey =
-    typeof event.sessionKey === "string" && event.sessionKey.trim()
-      ? event.sessionKey
-      : context?.sessionKey;
+  const nextSeq = (state.seqByRun.get(event.runId) ?? 0) + 1;
+  state.seqByRun.set(event.runId, nextSeq);
+  const context = state.runContextById.get(event.runId);
+  const isControlUiVisible = context?.isControlUiVisible ?? true;
+  const eventSessionKey =
+    typeof event.sessionKey === "string" && event.sessionKey.trim() ? event.sessionKey : undefined;
+  const sessionKey = isControlUiVisible ? (eventSessionKey ?? context?.sessionKey) : undefined;
   const enriched: AgentEventPayload = {
     ...event,
     sessionKey,
     seq: nextSeq,
     ts: Date.now(),
   };
-  for (const listener of listeners) {
+  for (const listener of state.listeners) {
     try {
       listener(enriched);
     } catch {
@@ -78,6 +104,6 @@ export function emitAgentEvent(event: Omit<AgentEventPayload, "seq" | "ts">) {
 }
 
 export function onAgentEvent(listener: (evt: AgentEventPayload) => void) {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
+  state.listeners.add(listener);
+  return () => state.listeners.delete(listener);
 }

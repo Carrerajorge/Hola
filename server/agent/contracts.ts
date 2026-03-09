@@ -246,9 +246,20 @@ export const CreateRunRequestSchema = z.object({
   message: z.string().min(1),
   model: z.string().optional(),
   attachments: z.array(z.any()).optional(),
+  workspaceContext: z.object({
+    projectId: z.string().optional(),
+    projectName: z.string().optional(),
+    repositoryPath: z.string().min(1),
+    selectedFolder: z.string().default("."),
+    codingAgents: z.array(z.enum(["coder", "reviewer", "improver"])).default(["coder"]),
+    runtimeTarget: z.string().optional(),
+    executionAccess: z.string().optional(),
+    branch: z.string().optional(),
+  }).optional(),
   idempotencyKey: z.string().optional(),
 });
 export type CreateRunRequest = z.infer<typeof CreateRunRequestSchema>;
+export type RunWorkspaceContext = NonNullable<CreateRunRequest["workspaceContext"]>;
 
 export const StepResponseSchema = z.object({
   stepIndex: z.number(),
@@ -395,4 +406,3 @@ export function validateCancellationToken(data: unknown): CancellationToken {
 export function validateAgentTask(data: unknown): AgentTask {
   return AgentTaskSchema.parse(data);
 }
-

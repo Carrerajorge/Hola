@@ -42,6 +42,7 @@ function assertSafeWebhookUrl(raw: string): string {
 }
 
 export const webhooksRouter = Router();
+let ensureTablePromise: Promise<void> | null = null;
 
 // Ensure table exists
 const ensureTable = async () => {
@@ -84,7 +85,21 @@ const ensureTable = async () => {
   }
 };
 
-ensureTable();
+const ensureTableOnce = () => {
+  if (!ensureTablePromise) {
+    ensureTablePromise = ensureTable();
+  }
+  return ensureTablePromise;
+};
+
+webhooksRouter.use(async (_req, _res, next) => {
+  try {
+    await ensureTableOnce();
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 
 // Available event types
 const EVENT_TYPES = [

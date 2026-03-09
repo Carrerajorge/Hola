@@ -1,6 +1,4 @@
-import { Chalk } from "chalk";
-import type { Logger as TsLogger } from "tslog";
-import { CHAT_CHANNEL_ORDER } from "../channels/registry.js";
+import * as chalkModule from "chalk";
 import { isVerbose } from "../globals.js";
 import { defaultRuntime, type RuntimeEnv } from "../runtime.js";
 import { clearActiveProgressLine } from "../terminal/progress-line.js";
@@ -8,6 +6,7 @@ import { getConsoleSettings, shouldLogSubsystemToConsole } from "./console.js";
 import { type LogLevel, levelToMinLevel } from "./levels.js";
 import { getChildLogger, isFileLogLevelEnabled } from "./logger.js";
 import { loggingState } from "./state.js";
+import type { Logger as TsLogger } from "./tslogCompat.js";
 
 type LogObj = { date?: Date } & Record<string, unknown>;
 
@@ -33,7 +32,28 @@ function shouldLogToConsole(level: LogLevel, settings: { level: LogLevel }): boo
   return current <= min;
 }
 
-type ChalkInstance = InstanceType<typeof Chalk>;
+type ChalkInstance = {
+  gray: (value: string) => string;
+  cyan: (value: string) => string;
+  yellow: (value: string) => string;
+  red: (value: string) => string;
+  green: (value: string) => string;
+  blue: (value: string) => string;
+  magenta: (value: string) => string;
+  bold: ChalkInstance & {
+    hex?: (value: string) => (input: string) => string;
+  };
+  level: number;
+};
+
+type ChalkConstructor = new (options?: { level?: number }) => ChalkInstance;
+
+const chalkExports = chalkModule as Record<string, unknown>;
+const chalkFactory = (typeof chalkModule.default === "function"
+  ? chalkModule.default
+  : chalkModule) as ChalkInstance;
+const ChalkCtor = (Reflect.get(chalkExports, "Chalk") ??
+  Reflect.get(chalkExports, "Instance")) as ChalkConstructor | undefined;
 
 const inspectValue: ((value: unknown) => string) | null = (() => {
   const getBuiltinModule = (
@@ -82,19 +102,32 @@ function getColorForConsole(): ChalkInstance {
     process.env.FORCE_COLOR.trim().length > 0 &&
     process.env.FORCE_COLOR.trim() !== "0";
   if (process.env.NO_COLOR && !hasForceColor) {
-    return new Chalk({ level: 0 });
+    return ChalkCtor ? new ChalkCtor({ level: 0 }) : chalkFactory;
   }
   const hasTty = Boolean(process.stdout.isTTY || process.stderr.isTTY);
-  return hasTty || isRichConsoleEnv() ? new Chalk({ level: 1 }) : new Chalk({ level: 0 });
+  if (!ChalkCtor) {
+    return chalkFactory;
+  }
+  return hasTty || isRichConsoleEnv() ? new ChalkCtor({ level: 1 }) : new ChalkCtor({ level: 0 });
 }
 
 const SUBSYSTEM_COLORS = ["cyan", "green", "yellow", "blue", "magenta", "red"] as const;
 const SUBSYSTEM_COLOR_OVERRIDES: Record<string, (typeof SUBSYSTEM_COLORS)[number]> = {
   "gmail-watcher": "blue",
 };
+const CHAT_CHANNEL_IDS = [
+  "telegram",
+  "whatsapp",
+  "discord",
+  "irc",
+  "googlechat",
+  "slack",
+  "signal",
+  "imessage",
+] as const;
 const SUBSYSTEM_PREFIXES_TO_DROP = ["gateway", "channels", "providers"] as const;
 const SUBSYSTEM_MAX_SEGMENTS = 2;
-const CHANNEL_SUBSYSTEM_PREFIXES = new Set<string>(CHAT_CHANNEL_ORDER);
+const CHANNEL_SUBSYSTEM_PREFIXES = new Set<string>(CHAT_CHANNEL_IDS);
 
 function pickSubsystemColor(color: ChalkInstance, subsystem: string): ChalkInstance {
   const override = SUBSYSTEM_COLOR_OVERRIDES[subsystem];

@@ -8,7 +8,7 @@
  * Standalone module — no imports from other kernel files.
  */
 
-const crypto = require("crypto");
+import * as crypto from "node:crypto";
 
 /* ================================================================== */
 /*  1. Core Types                                                      */

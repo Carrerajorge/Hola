@@ -299,7 +299,20 @@ check_http_code "09" "${BASE_URL}/api/registry/health" "200"
 check_contains "10" "$TMP_DIR/09.out" '"healthy":true' "/api/registry/health reports healthy"
 check_http_code "11" "${BASE_URL}/metrics" "401"
 check_http_code "12" "${BASE_URL}/api/user/usage" "401"
-check_http_code_set "13" "${BASE_URL}/api/auth/google" "301" "302" "303" "307" "308" "429"
+# Google OAuth may be intentionally not configured in production.
+  # When configured, this endpoint should redirect (30x). When not configured, it may return 503.
+  google_code="$(curl -sS --max-time "${HTTP_TIMEOUT}" -o "$TMP_DIR/13.out" -w '%{http_code}' "${BASE_URL}/api/auth/google" || echo "000")"
+  case "$google_code" in
+    301|302|303|307|308|429)
+      pass "13" "${BASE_URL}/api/auth/google -> HTTP ${google_code}"
+      ;;
+    503)
+      pass "13" "${BASE_URL}/api/auth/google -> HTTP 503 (Google OAuth not configured; non-fatal)"
+      ;;
+    *)
+      fail "13" "${BASE_URL}/api/auth/google -> HTTP ${google_code} (expected one of: 301 302 303 307 308 429 503)"
+      ;;
+  esac
 check_http_code "14" "${BASE_URL}/sw-cleanup.js" "200"
 check_contains "15" "$TMP_DIR/14.out" "APP_VERSION" "/sw-cleanup.js present"
 

@@ -9,9 +9,10 @@
  *   });
  */
 
+import { trace } from "@opentelemetry/api";
+
 let tracer: any = null;
 try {
-  const { trace } = require("@opentelemetry/api");
   tracer = trace.getTracer("connector-platform", "1.0.0");
 } catch {
   // OTel not available — all spans will be no-ops

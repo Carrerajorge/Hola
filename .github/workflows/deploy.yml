@@ -28,6 +28,7 @@ env:
   VPS_PORT: "8022"
   DEPLOY_PATH: /opt/hola
   REGISTRY: ghcr.io/carrerajorge
+  DEPLOY_PULL_TIMEOUT_SECONDS: "7200"
 
 jobs:
   # ── CI Gate ──────────────────────────────────────────────
@@ -138,7 +139,9 @@ jobs:
         needs.ci.result == 'success' &&
         needs.build_images.result == 'success'
       }}
-    timeout-minutes: 20
+    # GHCR pulls on the VPS can exceed 20 minutes on large images.
+    # Keep this above the remote pull timeout plus post-deploy verification.
+    timeout-minutes: 150
     env:
       VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
       VPS_USER: ${{ secrets.VPS_USER || 'root' }}
@@ -403,16 +406,7 @@ jobs:
       - name: Run blue-green deploy
         run: |
           set -euo pipefail
-          for attempt in 1 2; do
-            if ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ConnectionAttempts=3               -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}               "echo '${{ github.token }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null &&                cd ${{ env.DEPLOY_PATH }} &&                IMAGE_TAG='${{ steps.tag.outputs.image_tag }}'                APP_VERSION='${{ steps.tag.outputs.app_version }}'                BUILD_IMAGE_TAG='${{ needs.build_images.outputs.image_tag }}'                EXPECTED_APP_DIGEST='${{ needs.build_images.outputs.app_digest }}'                EXPECTED_SANDBOX_DIGEST='${{ needs.build_images.outputs.sandbox_digest }}'                EXPECTED_OCR_DIGEST='${{ needs.build_images.outputs.ocr_digest }}'                bash scripts/deploy-bluegreen.sh"; then
-              break
-            fi
-            if [ "$attempt" -eq 2 ]; then
-              echo "Blue-green deploy failed after retry" >&2
-              exit 1
-            fi
-            sleep 10
-          done
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ConnectionAttempts=3             -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "echo '${{ github.token }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null &&              cd ${{ env.DEPLOY_PATH }} &&              IMAGE_TAG='${{ steps.tag.outputs.image_tag }}'              APP_VERSION='${{ steps.tag.outputs.app_version }}'              BUILD_IMAGE_TAG='${{ needs.build_images.outputs.image_tag }}'              EXPECTED_APP_DIGEST='${{ needs.build_images.outputs.app_digest }}'              EXPECTED_SANDBOX_DIGEST='${{ needs.build_images.outputs.sandbox_digest }}'              EXPECTED_OCR_DIGEST='${{ needs.build_images.outputs.ocr_digest }}'              PULL_TIMEOUT='${{ env.DEPLOY_PULL_TIMEOUT_SECONDS }}'              bash scripts/deploy-bluegreen.sh"
 
       - name: Verify production
         run: |
@@ -512,7 +506,9 @@ jobs:
         github.ref == 'refs/heads/main' &&
         needs.build_images.result == 'success'
       }}
-    timeout-minutes: 25
+    # GHCR pulls on the VPS can exceed 20-30 minutes on large images.
+    # Keep the runner alive longer than the remote pull timeout plus acceptance checks.
+    timeout-minutes: 150
     # Job-level concurrency: if a newer deploy is queued, cancel this one.
     # This ensures the most recent commit always ships, without blocking the queue.
     # The VPS-level deploy script itself is idempotent and rolls back on failure.
@@ -781,16 +777,7 @@ jobs:
       - name: Run blue-green deploy
         run: |
           set -euo pipefail
-          for attempt in 1 2; do
-            if ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ConnectionAttempts=3               -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}               "echo '${{ github.token }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null &&                cd ${{ env.DEPLOY_PATH }} &&                IMAGE_TAG='${{ steps.tag.outputs.image_tag }}'                APP_VERSION='${{ steps.tag.outputs.app_version }}'                BUILD_IMAGE_TAG='${{ needs.build_images.outputs.image_tag }}'                EXPECTED_APP_DIGEST='${{ needs.build_images.outputs.app_digest }}'                EXPECTED_SANDBOX_DIGEST='${{ needs.build_images.outputs.sandbox_digest }}'                EXPECTED_OCR_DIGEST='${{ needs.build_images.outputs.ocr_digest }}'                bash scripts/deploy-bluegreen.sh"; then
-              break
-            fi
-            if [ "$attempt" -eq 2 ]; then
-              echo "Blue-green deploy failed after retry" >&2
-              exit 1
-            fi
-            sleep 10
-          done
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ConnectionAttempts=3             -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "echo '${{ github.token }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null &&              cd ${{ env.DEPLOY_PATH }} &&              IMAGE_TAG='${{ steps.tag.outputs.image_tag }}'              APP_VERSION='${{ steps.tag.outputs.app_version }}'              BUILD_IMAGE_TAG='${{ needs.build_images.outputs.image_tag }}'              EXPECTED_APP_DIGEST='${{ needs.build_images.outputs.app_digest }}'              EXPECTED_SANDBOX_DIGEST='${{ needs.build_images.outputs.sandbox_digest }}'              EXPECTED_OCR_DIGEST='${{ needs.build_images.outputs.ocr_digest }}'              PULL_TIMEOUT='${{ env.DEPLOY_PULL_TIMEOUT_SECONDS }}'              bash scripts/deploy-bluegreen.sh"
 
       - name: Verify production
         run: |

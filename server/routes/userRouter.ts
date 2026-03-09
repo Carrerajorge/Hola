@@ -23,6 +23,63 @@ import { runChatScheduleNow } from "../services/chatScheduleRunner";
 export function createUserRouter() {
   const router = Router();
 
+  function isMissingRelationError(error: any, relation?: string): boolean {
+    const code = error?.cause?.code || error?.code;
+    const message = String(error?.cause?.message || error?.message || "");
+    if (code !== "42P01") return false;
+    if (!relation) return true;
+    return message.includes(`relation "${relation}" does not exist`) || message.includes(relation);
+  }
+
+  function buildDefaultUserSettings(
+    userId: string,
+    overrides: {
+      responsePreferences?: Record<string, unknown>;
+      userProfile?: Record<string, unknown>;
+      featureFlags?: Record<string, unknown>;
+      privacySettings?: Record<string, unknown>;
+    } = {}
+  ) {
+    return {
+      userId,
+      responsePreferences: {
+        responseStyle: "default",
+        responseTone: "professional",
+        customInstructions: "",
+        ...(overrides.responsePreferences || {}),
+      },
+      userProfile: {
+        nickname: "",
+        occupation: "",
+        bio: "",
+        showName: true,
+        linkedInUrl: "",
+        githubUrl: "",
+        websiteDomain: "",
+        receiveEmailComments: false,
+        ...(overrides.userProfile || {}),
+      },
+      featureFlags: {
+        memoryEnabled: false,
+        recordingHistoryEnabled: false,
+        webSearchAuto: true,
+        codeInterpreterEnabled: true,
+        canvasEnabled: true,
+        voiceEnabled: true,
+        voiceAdvanced: false,
+        connectorSearchAuto: false,
+        ...(overrides.featureFlags || {}),
+      },
+      privacySettings: {
+        trainingOptIn: false,
+        remoteBrowserDataAccess: false,
+        analyticsTracking: true,
+        chatHistoryEnabled: true,
+        ...(overrides.privacySettings || {}),
+      },
+    };
+  }
+
   const updateNotificationPreferenceSchema = z.object({
     eventTypeId: z.string().min(1),
     enabled: z.boolean().optional(),
@@ -297,39 +354,16 @@ export function createUserRouter() {
       const settings = await storage.getUserSettings(id);
 
       if (!settings) {
-        res.json({
-          userId: id,
-          responsePreferences: {
-            responseStyle: 'default',
-            responseTone: 'professional',
-            customInstructions: ''
-          },
-          userProfile: {
-            nickname: '',
-            occupation: '',
-            bio: '',
-            showName: true,
-            linkedInUrl: '',
-            githubUrl: '',
-            websiteDomain: '',
-            receiveEmailComments: false,
-          },
-          featureFlags: {
-            memoryEnabled: false,
-            recordingHistoryEnabled: false,
-            webSearchAuto: true,
-            codeInterpreterEnabled: true,
-            canvasEnabled: true,
-            voiceEnabled: true,
-            voiceAdvanced: false,
-            connectorSearchAuto: false
-          }
-        });
+        res.json(buildDefaultUserSettings(id));
         return;
       }
 
       res.json(settings);
     } catch (error: any) {
+      if (isMissingRelationError(error, "user_settings")) {
+        console.warn("[UserSettings] user_settings table missing, returning defaults");
+        return res.json(buildDefaultUserSettings(req.params.id));
+      }
       console.error("Error getting user settings:", error);
       res.status(500).json({ error: "Failed to get user settings" });
     }
@@ -391,6 +425,10 @@ export function createUserRouter() {
       invalidateUserSettingsCache(id);
       res.json(settings);
     } catch (error: any) {
+      if (isMissingRelationError(error, "user_settings")) {
+        console.warn("[UserSettings] user_settings table missing, returning non-persistent defaults");
+        return res.json(buildDefaultUserSettings(req.params.id, req.body || {}));
+      }
       console.error("Error updating user settings:", error);
       res.status(500).json({ error: "Failed to update user settings" });
     }
@@ -1198,6 +1236,13 @@ export function createUserRouter() {
         consentHistory: logs
       });
     } catch (error: any) {
+      if (isMissingRelationError(error, "user_settings")) {
+        console.warn("[Privacy] user_settings table missing, returning default privacy settings");
+        return res.json({
+          privacySettings: buildDefaultUserSettings(req.params.id).privacySettings,
+          consentHistory: [],
+        });
+      }
       console.error("Error getting privacy settings:", error);
       res.status(500).json({ error: "Failed to get privacy settings" });
     }
@@ -1265,6 +1310,14 @@ export function createUserRouter() {
       invalidateUserPrivacySettingsCache(id);
       res.json(settings);
     } catch (error: any) {
+      if (isMissingRelationError(error, "user_settings")) {
+        console.warn("[Privacy] user_settings table missing, returning non-persistent privacy settings");
+        return res.json(
+          buildDefaultUserSettings(req.params.id, {
+            privacySettings: req.body || {},
+          })
+        );
+      }
       console.error("Error updating privacy settings:", error);
       res.status(500).json({ error: "Failed to update privacy settings" });
     }

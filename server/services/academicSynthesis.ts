@@ -22,6 +22,7 @@ async function llmGenerate<T>(systemPrompt: string, userInput: string, requestId
     ],
     {
       requestId,
+      agentRole: "research",
       temperature: 0.3,
       maxTokens: 3000,
       enableFallback: true,

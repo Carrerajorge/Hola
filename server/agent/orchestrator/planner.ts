@@ -6,6 +6,10 @@
 
 import { getGeminiClient, GEMINI_MODELS } from "../../lib/gemini";
 import type { PlannerOutput, ProcessMemory, Priority, Complexity } from "./types";
+import {
+  renderPlannerSkillContext,
+  type PlannerSkillContext,
+} from "@shared/skills/skillOperationalCatalog";
 
 // ---------------------------------------------------------------------------
 // Tool discovery — builds the list of everything the agent can do
@@ -63,10 +67,14 @@ async function getAvailableTools(): Promise<string[]> {
 // System prompt for the Planner LLM
 // ---------------------------------------------------------------------------
 
-function buildSystemPrompt(tools: string[]): string {
+function buildSystemPrompt(tools: string[], skillContext?: PlannerSkillContext | null): string {
+  const skillContextBlock = renderPlannerSkillContext(skillContext);
+
   return `You are SuperPlanner, an elite autonomous task decomposition engine.
 
 AVAILABLE TOOLS: [${tools.join(", ")}]
+
+${skillContextBlock ? `SKILL-AWARE ROUTING CONTEXT:\n${skillContextBlock}\n` : ""}
 
 ─── TOOL CATALOG (use these toolHint values and args) ───
 
@@ -158,6 +166,9 @@ RULES:
 9. Each subtask's args should contain the specific parameters for its tool
 10. PREFER real tools (scaffold, generate_code, write_file, shell_exec) over synthesize.
     Only use synthesize for reasoning/combining — NEVER for tasks a real tool can handle.
+11. If ACTIVE_SKILL or RELEVANT_SKILLS are present, bias the plan toward their primary tools,
+    lane, and routing rules when the objective matches.
+12. Treat skill routing rules as operational policy, not as decorative context.
 
 Return ONLY valid JSON matching this exact schema:
 {
@@ -220,14 +231,17 @@ function buildUserPrompt(goal: string, memory?: ProcessMemory): string {
 export async function decompose(
   goal: string,
   memory?: ProcessMemory,
+  options?: {
+    skillContext?: PlannerSkillContext | null;
+  },
 ): Promise<PlannerOutput> {
   const tools = await getAvailableTools();
-  const systemPrompt = buildSystemPrompt(tools);
+  const systemPrompt = buildSystemPrompt(tools, options?.skillContext);
   const userPrompt = buildUserPrompt(goal, memory);
 
   const client = getGeminiClient();
   if (!client) {
-    return fallbackDecompose(goal);
+    return fallbackDecompose(goal, options?.skillContext);
   }
 
   try {
@@ -247,7 +261,7 @@ export async function decompose(
 
     // Validate basic structure
     if (!parsed.subtasks || !Array.isArray(parsed.subtasks) || parsed.subtasks.length === 0) {
-      return fallbackDecompose(goal);
+      return fallbackDecompose(goal, options?.skillContext);
     }
 
     // Ensure all subtasks have required fields with defaults
@@ -260,7 +274,7 @@ export async function decompose(
     return parsed;
   } catch (err: any) {
     console.error("[SuperPlanner] Decomposition failed:", err?.message);
-    return fallbackDecompose(goal);
+    return fallbackDecompose(goal, options?.skillContext);
   }
 }
 
@@ -268,19 +282,34 @@ export async function decompose(
 // Fallback decomposer (no LLM needed)
 // ---------------------------------------------------------------------------
 
-function fallbackDecompose(goal: string): PlannerOutput {
-  // Deterministic fallback: research → synthesize
+function fallbackDecompose(
+  goal: string,
+  skillContext?: PlannerSkillContext | null,
+): PlannerOutput {
+  const activeSkill = skillContext?.activeSkill ?? null;
+  const primaryTool = activeSkill?.primaryTools[0] || "web_search";
+  const alternateTool = activeSkill?.fallbackTools[0] || "web_search";
+
   return {
     subtasks: [
       {
         id: "step_1",
-        description: `Search the web for information about: ${goal}`,
-        toolHint: "web_search",
-        args: { query: goal },
+        description: activeSkill
+          ? `Execute the active skill path for: ${goal}`
+          : `Search the web for information about: ${goal}`,
+        toolHint: primaryTool,
+        args:
+          primaryTool === "fetch_url"
+            ? { url: goal }
+            : primaryTool === "web_search"
+              ? { query: goal }
+              : { objective: goal, query: goal, task: goal },
         dependencies: [],
         priority: "high" as Priority,
         estimatedComplexity: "simple" as Complexity,
-        alternateStrategy: "Try rephrasing the search query",
+        alternateStrategy: activeSkill
+          ? `Fallback to ${alternateTool} if ${primaryTool} is unavailable`
+          : "Try rephrasing the search query",
       },
       {
         id: "step_2",
@@ -292,6 +321,8 @@ function fallbackDecompose(goal: string): PlannerOutput {
         estimatedComplexity: "medium" as Complexity,
       },
     ],
-    reasoning: "Fallback: LLM unavailable. Using search → synthesize pipeline.",
+    reasoning: activeSkill
+      ? `Fallback: LLM unavailable. Using active skill ${activeSkill.name} before synthesize.`
+      : "Fallback: LLM unavailable. Using search → synthesize pipeline.",
   };
 }

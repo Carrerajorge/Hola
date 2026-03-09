@@ -58,6 +58,39 @@ export interface GeminiResponse {
   model: string;
 }
 
+type GeminiApiError = Error & {
+  status?: number;
+  code?: string | number;
+  cause?: unknown;
+};
+
+function normalizeGeminiError(error: unknown): GeminiApiError {
+  const source = error as {
+    message?: string;
+    status?: number;
+    code?: string | number;
+    response?: { status?: number };
+  } | null;
+
+  const message =
+    typeof source?.message === "string" && source.message.trim().length > 0
+      ? source.message.trim()
+      : "Unknown Gemini API error";
+  const status =
+    typeof source?.status === "number"
+      ? source.status
+      : typeof source?.response?.status === "number"
+        ? source.response.status
+        : undefined;
+
+  const wrapped = new Error(`Gemini API error: ${message}`) as GeminiApiError;
+  wrapped.name = "GeminiApiError";
+  wrapped.status = status;
+  wrapped.code = source?.code;
+  wrapped.cause = error;
+  return wrapped;
+}
+
 export async function geminiChat(
   messages: GeminiChatMessage[],
   options: GeminiChatOptions = {}
@@ -92,7 +125,7 @@ export async function geminiChat(
     };
   } catch (error: any) {
     console.error("[Gemini] Error generating content:", error.message);
-    throw new Error(`Gemini API error: ${error.message}`);
+    throw normalizeGeminiError(error);
   }
 }
 
@@ -132,6 +165,6 @@ export async function* geminiStreamChat(
     yield { content: "", done: true };
   } catch (error: any) {
     console.error("[Gemini] Stream error:", error.message);
-    throw new Error(`Gemini API error: ${error.message}`);
+    throw normalizeGeminiError(error);
   }
 }

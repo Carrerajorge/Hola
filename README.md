@@ -72,7 +72,8 @@ In GitHub Actions, Playwright E2E runs only when a PR is labeled `run-e2e`.
 
 ## Deployment
 
-- VPS via Docker Compose: see `deployment_guide.md`
+- PR-first GitHub flow: see `docs/GITHUB_FLOW_DEPLOY.md`
+- Production deploy runbook: see `docs/DEPLOY-GUIDE.md`
 - Production Compose file: `docker-compose.prod.yml`
 - Production env template: `.env.production.example`
 
@@ -83,3 +84,4 @@ Please report vulnerabilities privately. See `SECURITY.md`.
 ## License
 
 MIT. See `LICENSE`.
+

@@ -1,7 +1,4 @@
-import { Router } from "express";
-import { z } from "zod";
-import { db } from "../db";
-import {
+import { Router } from "express"; import { z } from "zod"; import { db } from "../db"; import {
   auditLogs,
   libraryFiles,
   users,
@@ -33,6 +30,16 @@ import {
 } from "../services/workspaceRoleService";
 
 const DEFAULT_ORG_ID = "default";
+
+function isMissingRelationError(error: unknown, relationName: string): boolean {
+  const anyError = error as any;
+  const code = anyError?.code || anyError?.cause?.code;
+  const message = String(anyError?.message || "");
+  const causeMessage = String(anyError?.cause?.message || "");
+  if (code === "42P01") return true;
+  return message.includes(relationName) || causeMessage.includes(relationName);
+}
+
 function normalizeEmail(value: unknown): string {
   return String(value || "").toLowerCase().trim();
 }
@@ -1583,21 +1590,29 @@ export function createWorkspaceRouter() {
         const action = req.body.eventType === "page_view" ? "page_view" : "user_action";
         const resource = req.body.eventType === "page_view" ? req.body.page : req.body.action;
 
-        await db.insert(auditLogs).values({
-          userId,
-          action,
-          resource,
-          details: {
-            eventType: req.body.eventType,
-            sessionId: req.body.sessionId,
-            page: req.body.page,
-            action: req.body.action,
-            metadata: req.body.metadata,
-          },
-          ipAddress: Array.isArray(ipAddress) ? ipAddress[0] : ipAddress,
-          userAgent,
-          createdAt: new Date(),
-        });
+        try {
+          await db.insert(auditLogs).values({
+            userId,
+            action,
+            resource,
+            details: {
+              eventType: req.body.eventType,
+              sessionId: req.body.sessionId,
+              page: req.body.page,
+              action: req.body.action,
+              metadata: req.body.metadata,
+            },
+            ipAddress: Array.isArray(ipAddress) ? ipAddress[0] : ipAddress,
+            userAgent,
+            createdAt: new Date(),
+          });
+        } catch (error) {
+          if (isMissingRelationError(error, "audit_logs")) {
+            console.warn("[Workspace] audit_logs missing; skipping analytics event persistence");
+            return res.json({ ok: true, skipped: "audit_logs_missing" });
+          }
+          throw error;
+        }
 
         res.json({ ok: true });
       } catch (e: any) {

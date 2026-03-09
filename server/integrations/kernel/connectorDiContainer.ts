@@ -6,7 +6,7 @@
  * interceptor chains, scoped containers, and diagnostic tooling.
  */
 
-const { EventEmitter: DiEventEmitter } = require("events");
+import { EventEmitter as DiEventEmitter } from "node:events";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */

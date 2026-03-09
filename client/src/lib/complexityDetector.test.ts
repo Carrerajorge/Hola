@@ -42,18 +42,23 @@ describe("checkComplexityLocally", () => {
     expect(result.agent_required).toBe(true);
   });
 
-  it("returns required for long non-agent messages (default agent policy)", () => {
+  it("keeps general explanatory prompts in normal chat", () => {
     const result = checkComplexityLocally(
       "Explícame detalladamente cómo funciona la fotosíntesis y cuáles son las etapas principales del proceso bioquímico"
     );
-    expect(result.agent_required).toBe(true);
-    expect(result.agent_reason).toBe("Modo agente activado por defecto");
+    expect(result.agent_required).toBe(false);
     expect(result.confidence).toBe("high");
   });
 
-  it("returns high confidence for non-trivial messages", () => {
-    const result = checkComplexityLocally("Cuáles son los mejores restaurantes en Madrid");
+  it("detects clear coding/tool requests", () => {
+    const result = checkComplexityLocally("revisa este repo, corrige el bug y ejecuta npm test");
     expect(result.agent_required).toBe(true);
+    expect(result.confidence).toBe("high");
+  });
+
+  it("keeps tutoring prompts out of agent mode", () => {
+    const result = checkComplexityLocally("dame un ejercicio de derivadas con integrales");
+    expect(result.agent_required).toBe(false);
     expect(result.confidence).toBe("high");
   });
 
@@ -63,12 +68,12 @@ describe("checkComplexityLocally", () => {
     expect(result.confidence).toBe("high");
   });
 
-  it("handles attachments parameter without changing result", () => {
+  it("activates agent mode for attachments only when present", () => {
     const withAttach = checkComplexityLocally("Analiza este archivo", true);
     const withoutAttach = checkComplexityLocally("Analiza este archivo", false);
     expect(withAttach.agent_required).toBe(true);
     expect(withAttach.agent_reason).toBe("Modo agente por adjuntos");
-    expect(withoutAttach.agent_required).toBe(true);
+    expect(withoutAttach.agent_required).toBe(false);
   });
 });
 

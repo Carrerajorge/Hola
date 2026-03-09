@@ -1,13 +1,5 @@
-import fs from "node:fs/promises";
-import os from "node:os";
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
-import {
-  createAgentSession,
-  DefaultResourceLoader,
-  estimateTokens,
-  SessionManager,
-  SettingsManager,
-} from "@mariozechner/pi-coding-agent";
+import fs from "node:fs/promises"; import os from "node:os"; import type { AgentMessage } from "@mariozechner/pi-agent-core";
+
 import { resolveHeartbeatPrompt } from "../../auto-reply/heartbeat.js";
 import type { ReasoningLevel, ThinkLevel } from "../../auto-reply/thinking.js";
 import { resolveChannelCapabilities } from "../../config/channel-capabilities.js";
@@ -85,7 +77,23 @@ import { splitSdkTools } from "./tool-split.js";
 import type { EmbeddedPiCompactResult } from "./types.js";
 import { describeUnknownError, mapThinkingLevel } from "./utils.js";
 import { flushPendingToolResultsAfterIdle } from "./wait-for-idle-before-flush.js";
+type PiCodingAgentModule = typeof import("@mariozechner/pi-coding-agent");
 
+let _piCodingAgentPromise: Promise<PiCodingAgentModule> | null = null;
+
+async function loadPiCodingAgent(): Promise<PiCodingAgentModule> {
+  if (!_piCodingAgentPromise) {
+    _piCodingAgentPromise = import("@mariozechner/pi-coding-agent").catch((err) => {
+      _piCodingAgentPromise = null;
+      throw new Error(
+        "Optional dependency '@mariozechner/pi-coding-agent' is not installed. " +
+          "Install it to enable PI embedded runner.\n" +
+          String(err),
+      );
+    });
+  }
+  return _piCodingAgentPromise;
+}
 export type CompactEmbeddedPiSessionParams = {
   sessionId: string;
   runId?: string;
@@ -530,11 +538,16 @@ export async function compactEmbeddedPiSessionDirect(
         provider,
         modelId,
       });
-      const sessionManager = guardSessionManager(SessionManager.open(params.sessionFile), {
-        agentId: sessionAgentId,
-        sessionKey: params.sessionKey,
-        allowSyntheticToolResults: transcriptPolicy.allowSyntheticToolResults,
-        allowedToolNames,
+      const {
+        createAgentSession,
+        DefaultResourceLoader,
+        estimateTokens,
+        SessionManager,
+        SettingsManager,
+      } = await loadPiCodingAgent();
+      const sessionManager = guardSessionManager(SessionManager.open(params.sessionFile), { agentId: sessionAgentId, sessionKey: params.sessionKey, allowSyntheticToolResults: 
+        transcriptPolicy.allowSyntheticToolResults, allowedToolNames,
+
       });
       trackSessionManagerAccess(params.sessionFile);
       const settingsManager = SettingsManager.create(effectiveWorkspace, agentDir);

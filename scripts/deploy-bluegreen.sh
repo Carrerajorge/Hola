@@ -16,7 +16,7 @@ IFS=$'\n\t'
 #    DRY_RUN              — set to "true" for preflight only (no deploy)
 # ═══════════════════════════════════════════════════════════
 
-readonly SCRIPT_VERSION="3.3.0"
+readonly SCRIPT_VERSION="3.6.0"
 
 # ── Configuration ───────────────────────────────────────────
 DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
@@ -34,7 +34,48 @@ readonly HEALTHCHECK_INTERVAL=3
 readonly DRAIN_WAIT=8
 readonly STOP_TIMEOUT=15
 readonly MIGRATION_TIMEOUT=120
-readonly PULL_TIMEOUT=300
+PULL_TIMEOUT="${PULL_TIMEOUT:-7200}"
+if [[ ! "${PULL_TIMEOUT}" =~ ^[0-9]+$ ]] || [ "${PULL_TIMEOUT}" -lt 60 ]; then
+  echo "Invalid PULL_TIMEOUT: ${PULL_TIMEOUT}" >&2
+  exit 1
+fi
+readonly PULL_TIMEOUT
+DEFAULT_PULL_ATTEMPT_TIMEOUT=$((PULL_TIMEOUT / 4))
+if [ "${DEFAULT_PULL_ATTEMPT_TIMEOUT}" -lt 600 ]; then
+  DEFAULT_PULL_ATTEMPT_TIMEOUT=600
+fi
+if [ "${DEFAULT_PULL_ATTEMPT_TIMEOUT}" -gt 1800 ]; then
+  DEFAULT_PULL_ATTEMPT_TIMEOUT=1800
+fi
+readonly DEFAULT_PULL_ATTEMPT_TIMEOUT
+PULL_ATTEMPT_TIMEOUT="${PULL_ATTEMPT_TIMEOUT:-${DEFAULT_PULL_ATTEMPT_TIMEOUT}}"
+if [[ ! "${PULL_ATTEMPT_TIMEOUT}" =~ ^[0-9]+$ ]] || [ "${PULL_ATTEMPT_TIMEOUT}" -lt 60 ]; then
+  echo "Invalid PULL_ATTEMPT_TIMEOUT: ${PULL_ATTEMPT_TIMEOUT}" >&2
+  exit 1
+fi
+if [ "${PULL_ATTEMPT_TIMEOUT}" -gt "${PULL_TIMEOUT}" ]; then
+  echo "PULL_ATTEMPT_TIMEOUT cannot exceed PULL_TIMEOUT" >&2
+  exit 1
+fi
+readonly PULL_ATTEMPT_TIMEOUT
+PULL_RETRY_ATTEMPTS="${PULL_RETRY_ATTEMPTS:-12}"
+if [[ ! "${PULL_RETRY_ATTEMPTS}" =~ ^[0-9]+$ ]] || [ "${PULL_RETRY_ATTEMPTS}" -lt 1 ]; then
+  echo "Invalid PULL_RETRY_ATTEMPTS: ${PULL_RETRY_ATTEMPTS}" >&2
+  exit 1
+fi
+readonly PULL_RETRY_ATTEMPTS
+PULL_RETRY_DELAY="${PULL_RETRY_DELAY:-20}"
+if [[ ! "${PULL_RETRY_DELAY}" =~ ^[0-9]+$ ]] || [ "${PULL_RETRY_DELAY}" -lt 1 ]; then
+  echo "Invalid PULL_RETRY_DELAY: ${PULL_RETRY_DELAY}" >&2
+  exit 1
+fi
+readonly PULL_RETRY_DELAY
+DEPLOY_LOCK_STALE_AFTER="${DEPLOY_LOCK_STALE_AFTER:-1800}"
+if [[ ! "${DEPLOY_LOCK_STALE_AFTER}" =~ ^[0-9]+$ ]] || [ "${DEPLOY_LOCK_STALE_AFTER}" -lt 60 ]; then
+  echo "Invalid DEPLOY_LOCK_STALE_AFTER: ${DEPLOY_LOCK_STALE_AFTER}" >&2
+  exit 1
+fi
+readonly DEPLOY_LOCK_STALE_AFTER
 readonly MIN_DISK_MB=2048
 readonly MIN_DISK_INODES_K=100
 readonly STATE_FILE_MAX_BYTES=65536
@@ -346,26 +387,78 @@ validate_image_digests() {
   return 0
 }
 
+signal_process_tree() {
+  local signal="$1"
+  local pid="$2"
+  local child
+
+  if [[ -z "${pid}" || ! "${pid}" =~ ^[0-9]+$ ]]; then
+    return 0
+  fi
+
+  for child in $(ps -o pid= --ppid "${pid}" 2>/dev/null | awk '{print $1}'); do
+    signal_process_tree "${signal}" "${child}"
+  done
+
+  kill "-${signal}" "${pid}" 2>/dev/null || true
+}
+
+clear_stale_lock_process() {
+  local pid="$1"
+
+  logw "Stale deploy lock detected for PID ${pid}; terminating old deploy process tree."
+  signal_process_tree TERM "${pid}"
+  sleep 5
+
+  if kill -0 "${pid}" 2>/dev/null; then
+    signal_process_tree KILL "${pid}"
+    sleep 1
+  fi
+
+  if kill -0 "${pid}" 2>/dev/null; then
+    loge "Unable to clear stale deploy PID ${pid}; aborting for safety."
+    return 1
+  fi
+
+  return 0
+}
+
 # ── Deploy lock (prevent concurrent deploys) ───────────────
 acquire_lock() {
   if [ -f "${LOCK_FILE}" ]; then
-    local lock_pid lock_age now age_sec
+    local lock_pid lock_age now age_sec process_age
     lock_pid="$(cat "${LOCK_FILE}" 2>/dev/null || echo "")"
     lock_age="$(stat -c %Y "${LOCK_FILE}" 2>/dev/null || stat -f %m "${LOCK_FILE}" 2>/dev/null || echo "0")"
     now="$(date +%s)"
     age_sec=$(( now - lock_age ))
-    if [ "${age_sec}" -gt 900 ]; then
-      logw "Stale lock found (${age_sec}s old, PID ${lock_pid}). Removing."
-      rm -f "${LOCK_FILE}"
-    else
-      # Check if the PID is still alive
-      if [ -n "${lock_pid}" ] && kill -0 "${lock_pid}" 2>/dev/null; then
+
+    if [ -n "${lock_pid}" ] && [[ "${lock_pid}" =~ ^[0-9]+$ ]]; then
+      process_age="$(ps -p "${lock_pid}" -o etimes= 2>/dev/null | tr -d '[:space:]' || true)"
+      if [[ "${process_age}" =~ ^[0-9]+$ ]] && [ "${process_age}" -gt "${age_sec}" ]; then
+        age_sec="${process_age}"
+      fi
+    fi
+
+    if [ -n "${lock_pid}" ] && kill -0 "${lock_pid}" 2>/dev/null; then
+      if [ "${age_sec}" -gt "${DEPLOY_LOCK_STALE_AFTER}" ] && \
+         ps -p "${lock_pid}" -o args= 2>/dev/null | grep -Fq "scripts/deploy-bluegreen.sh"; then
+        if ! clear_stale_lock_process "${lock_pid}"; then
+          exit 1
+        fi
+        rm -f "${LOCK_FILE}"
+      else
         loge "Another deploy is running (PID ${lock_pid}, ${age_sec}s ago). Aborting."
         exit 1
+      fi
+    fi
+
+    if [ -f "${LOCK_FILE}" ]; then
+      if [ "${age_sec}" -gt 900 ]; then
+        logw "Stale lock found (${age_sec}s old, PID ${lock_pid}). Removing."
       else
         logw "Lock found but PID ${lock_pid} is dead (${age_sec}s ago). Stealing lock."
-        rm -f "${LOCK_FILE}"
       fi
+      rm -f "${LOCK_FILE}"
     fi
   fi
   echo "$$" > "${LOCK_FILE}"
@@ -579,6 +672,17 @@ slot() {
     docker compose -p "hola-${slot_name}" -f "${SLOT_COMPOSE}" "$@"
 }
 
+ensure_redis_on_hola_net() {
+  local connected
+  connected="$(docker inspect -f '{{if index .NetworkSettings.Networks "hola-net"}}yes{{else}}no{{end}}' hola-redis 2>/dev/null || echo "no")"
+  if [ "${connected}" = "yes" ]; then
+    return 0
+  fi
+
+  logw "Redis is not attached to hola-net; reconnecting with stable aliases."
+  docker network connect --alias hola-redis --alias redis hola-net hola-redis > /dev/null
+}
+
 
 run_sql_migrations() {
 
@@ -704,8 +808,58 @@ ensure_legacy_upstream_file() {
   fi
 }
 
+pull_image_with_retries() {
+  local img="$1"
+  local started_at attempt now elapsed_seconds remaining attempt_timeout
+
+  started_at="$(date +%s)"
+  attempt=1
+
+  while [ "${attempt}" -le "${PULL_RETRY_ATTEMPTS}" ]; do
+    if docker image inspect "${img}" > /dev/null 2>&1; then
+      logok "Image already present: ${img}"
+      return 0
+    fi
+
+    now="$(date +%s)"
+    elapsed_seconds=$((now - started_at))
+    remaining=$((PULL_TIMEOUT - elapsed_seconds))
+    if [ "${remaining}" -le 0 ]; then
+      loge "Timed out pulling ${img} after ${elapsed_seconds}s total"
+      return 1
+    fi
+
+    attempt_timeout="${PULL_ATTEMPT_TIMEOUT}"
+    if [ "${attempt_timeout}" -gt "${remaining}" ]; then
+      attempt_timeout="${remaining}"
+    fi
+
+    log "  Pull attempt ${attempt}/${PULL_RETRY_ATTEMPTS} for ${img} (attempt timeout: ${attempt_timeout}s, remaining budget: ${remaining}s)"
+    if timeout --foreground --kill-after=30s "${attempt_timeout}" docker pull "${img}" 2>&1; then
+      logok "Pulled ${img}"
+      return 0
+    fi
+
+    if docker image inspect "${img}" > /dev/null 2>&1; then
+      logok "Pulled ${img} after transient registry failure"
+      return 0
+    fi
+
+    if [ "${attempt}" -ge "${PULL_RETRY_ATTEMPTS}" ]; then
+      break
+    fi
+
+    logw "Pull attempt ${attempt} failed for ${img}; retrying in ${PULL_RETRY_DELAY}s"
+    sleep "${PULL_RETRY_DELAY}"
+    attempt=$((attempt + 1))
+  done
+
+  loge "Failed to pull ${img} after ${PULL_RETRY_ATTEMPTS} attempts within ${PULL_TIMEOUT}s total"
+  return 1
+}
+
 # ── Step 1: Pull images from GHCR (with timeout + digest verification) ──
-log "[1/14] Pulling images from GHCR (timeout: ${PULL_TIMEOUT}s)..."
+log "[1/14] Pulling images from GHCR (budget: ${PULL_TIMEOUT}s, per-attempt timeout: ${PULL_ATTEMPT_TIMEOUT}s, retries: ${PULL_RETRY_ATTEMPTS})..."
 IMAGES=(
   "${REGISTRY}/iliagpt-app:${IMAGE_TAG}"
   "${REGISTRY}/iliagpt-sandbox:${IMAGE_TAG}"
@@ -713,7 +867,7 @@ IMAGES=(
 )
 
 for img in "${IMAGES[@]}"; do
-  if ! timeout "${PULL_TIMEOUT}" docker pull "${img}" 2>&1; then
+  if ! pull_image_with_retries "${img}"; then
     loge "Failed to pull ${img}"
     exit 1
   fi
@@ -739,6 +893,7 @@ echo ""
 # ── Step 2: Ensure shared infrastructure is running ────────
 log "[2/14] Ensuring shared infrastructure..."
 infra up -d --remove-orphans
+ensure_redis_on_hola_net
 
 log "  Waiting for Postgres..."
 for i in $(seq 1 30); do
@@ -785,7 +940,7 @@ log "[4/14] Running database migrations (timeout: ${MIGRATION_TIMEOUT}s)..."
 
   # Apply SQL migrations (idempotent)
 
-  if ! timeout "${MIGRATION_TIMEOUT}" bash -lc "$(declare -f run_sql_migrations); run_sql_migrations"; then
+  if ! timeout "${MIGRATION_TIMEOUT}" bash -lc "$(declare -f log logok logw loge run_sql_migrations); run_sql_migrations"; then
 
     loge "SQL migrations failed or timed out."
 

@@ -1,134 +1,43 @@
-import { SquarePen, Search, Library, Bot } from "lucide-react";
+import { MessageSquareText, PanelLeftOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useAuth } from "@/hooks/use-auth";
-import { IliaGPTLogo } from "@/components/iliagpt-logo";
-import { isAdminUser } from "@/lib/admin";
 
 interface MiniSidebarProps {
   className?: string;
-  onNewChat?: () => void;
   onExpand?: () => void;
 }
 
-export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps) {
-  const { user } = useAuth();
-  const isAdmin = isAdminUser(user as any);
-  const displayName = isAdmin ? "Admin" : (user?.firstName || user?.email?.split("@")[0] || "Usuario");
-  const avatarInitial = isAdmin ? "A" : (user?.firstName?.[0] || user?.email?.[0] || "U").toUpperCase();
+export function MiniSidebar({ className, onExpand }: MiniSidebarProps) {
   return (
     <TooltipProvider delayDuration={100}>
-      <div className={cn(
-        "flex h-screen w-[56px] flex-col items-center py-2 bg-[#eef3f4] dark:bg-[#111315] border-r border-black/10 dark:border-white/10",
-        className
-      )}>
-        <div className="flex flex-col items-center gap-1 mb-3">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-9 w-9 rounded-md hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
-                onClick={onExpand}
-              >
-                <IliaGPTLogo size={24} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              <p>Expandir Sidebar</p>
-            </TooltipContent>
-          </Tooltip>
-        </div>
-
-        <div className="flex flex-col items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-9 w-9 rounded-md hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
-                onClick={onNewChat}
-                data-testid="mini-button-new-chat"
-              >
-                <SquarePen className="h-4 w-4 text-foreground" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              <p>New Chat</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-9 w-9 rounded-md hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
-                data-testid="mini-button-search"
-              >
-                <Search className="h-4 w-4 text-foreground" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              <p>Search chats</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-9 w-9 rounded-md hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
-                data-testid="mini-button-library"
-              >
-                <Library className="h-4 w-4 text-foreground" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              <p>Library</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-9 w-9 rounded-md hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
-                data-testid="mini-button-gpts"
-              >
-                <Bot className="h-4 w-4 text-foreground" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              <p>GPTs</p>
-            </TooltipContent>
-          </Tooltip>
-        </div>
-
-        <div className="mt-auto">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-9 w-9 rounded-md hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
-                data-testid="mini-button-user"
-              >
-                <Avatar className="h-7 w-7">
-                  <AvatarFallback className="bg-muted text-muted-foreground text-xs">{avatarInitial}</AvatarFallback>
-                </Avatar>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              <p>{displayName}</p>
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      </div>
+      <aside
+        className={cn(
+          "flex h-screen w-[88px] min-w-[88px] shrink-0 flex-col items-center px-3 py-4 border-r border-black/10 dark:border-white/10 bg-[linear-gradient(180deg,rgba(248,250,252,0.92),rgba(238,243,244,0.82))] dark:bg-[linear-gradient(180deg,rgba(17,19,21,0.96),rgba(17,19,21,0.84))] backdrop-blur-xl",
+          className
+        )}
+        aria-label="Acceso rápido al historial de chats"
+      >
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              className="group flex h-16 w-16 items-center justify-center rounded-2xl border border-black/10 bg-white/85 text-foreground shadow-[0_14px_30px_-22px_rgba(15,23,42,0.9)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-0.5 hover:border-primary/20 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+              onClick={onExpand}
+              data-testid="button-toggle-chat-history"
+            >
+              <div className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-black/[0.04] text-muted-foreground transition-all duration-300 group-hover:bg-primary/10 group-hover:text-primary dark:bg-white/[0.08]">
+                <MessageSquareText className="h-[18px] w-[18px]" />
+                <PanelLeftOpen className="absolute -right-1 -top-1 h-3.5 w-3.5 rounded-full bg-background p-[1px] text-primary shadow-sm" />
+              </div>
+              <span className="sr-only">Mostrar historial de chats</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right">
+            <p>Mostrar historial de chats</p>
+          </TooltipContent>
+        </Tooltip>
+      </aside>
     </TooltipProvider>
   );
 }

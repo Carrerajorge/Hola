@@ -10,6 +10,7 @@ import { sql } from "drizzle-orm";
 import { auditLog, AuditActions } from "../services/auditLogger";
 
 export const templatesRouter = Router();
+let ensureTablePromise: Promise<void> | null = null;
 
 // Ensure table exists
 const ensureTable = async () => {
@@ -37,8 +38,21 @@ const ensureTable = async () => {
   }
 };
 
-// Initialize table
-ensureTable();
+const ensureTableOnce = () => {
+  if (!ensureTablePromise) {
+    ensureTablePromise = ensureTable();
+  }
+  return ensureTablePromise;
+};
+
+templatesRouter.use(async (_req, _res, next) => {
+  try {
+    await ensureTableOnce();
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 
 // GET /api/templates - List templates
 templatesRouter.get("/", async (req, res) => {

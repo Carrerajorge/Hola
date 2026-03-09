@@ -1,4 +1,5 @@
-import type { Express, Request, Response } from "express";
+import type { Express, NextFunction, Request, Response } from "express";
+import { createNodesRouter } from "./routes/nodesRouter";
 import { type AuthenticatedRequest, getUserId } from "./types/express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
@@ -14,6 +15,7 @@ import { globalAuditMiddleware } from "./middleware/audit";
 import { pptExportRouter } from "./routes/pptExport";
 import swaggerUi from 'swagger-ui-express';
 import { passport } from "./lib/auth/passport";
+import { resolveOAuthCallbackUrl } from "./lib/auth/oauthCallbackUrl";
 import { swaggerSpec } from "./lib/swagger";
 import { createChatsRouter } from "./routes/chatsRouter";
 import { createFilesRouter } from "./routes/filesRouter";
@@ -28,7 +30,6 @@ import { createLibraryRouter } from "./routes/libraryRouter";
 import { createWorkspaceRouter } from "./routes/workspaceRouter";
 import { createCodeRouter } from "./routes/codeRouter";
 import { createUserRouter } from "./routes/userRouter";
-import { createChatAiRouter } from "./routes/chatAiRouter";
 import { createGoogleFormsRouter } from "./routes/googleFormsRouter";
 import { createGmailRouter } from "./routes/gmailRouter";
 import { createAppsIntegrationRouter } from "./routes/appsIntegrationRouter";
@@ -38,39 +39,24 @@ import calendarOAuthRouter from "./routes/calendarOAuthRouter";
 import outlookOAuthRouter from "./routes/outlookOAuthRouter";
 import { createGmailMcpRouter } from "./mcp/gmailMcpServer";
 import healthRouter from "./routes/healthRouter";
-import aiExcelRouter from "./routes/aiExcelRouter";
 import powerRouter from "./routes/powerRouter";
 import { hitlRouter } from "./agent/tenaga/hitl/HitlRouter";
-import multiAgentRouter from "./routes/multiAgentRouter";
 import { metricsHandler, getMetricsJson } from "./lib/parePrometheusMetrics";
 import { createHealthRouter as createPareHealthRouter, getHealthSummary as getPareHealthSummary } from "./lib/pareHealthChecks";
 import { getMetricsSummary as getPareMetricsSummary } from "./lib/pareMetrics";
 import errorRouter from "./routes/errorRouter";
-import { createSpreadsheetRouter } from "./routes/spreadsheetRoutes";
-import { createChatRoutes } from "./routes/chatRoutes";
-import { createAgentModeRouter } from "./routes/agentRoutes";
-import { createOrchestratorRouter } from "./routes/orchestratorRoutes";
 import { registerAgenticTools } from "./agent/orchestrator/agenticToolRegistrations";
-import { createSandboxAgentRouter } from "./routes/sandboxAgentRouter";
 import { createLangGraphRouter } from "./routes/langGraphRouter";
 import { createRegistryRouter } from "./routes/registryRouter";
 import wordPipelineRoutes from "./routes/wordPipelineRoutes";
 import redisSSERouter from "./routes/redisSSERouter";
 import streamingResumeRouter from "./routes/streamingResumeRouter";
-import superAgentRouter from "./routes/superAgentRoutes";
-import conversationMemoryRoutes from "./routes/conversationMemoryRoutes";
-import { contextRoutes, semanticRoutes } from "./memory";
-import { createPythonToolsRouter } from "./routes/pythonToolsRouter";
 import { createLocalControlRouter } from "./routes/localControlRouter";
 import { createMacOSControlRouter } from "./routes/macosControlRouter";
 import { systemControlRouter } from "./routes/systemControlRouter";
 import { createAutomationTriggersRouter } from "./routes/automationTriggersRouter";
 import { createVoiceRouter } from "./routes/voiceRouter";
 import { createAnalyticsRouter } from "./routes/analyticsRouter";
-import { createToolExecutionRouter } from "./routes/toolExecutionRouter";
-import agentPlanRouter from "./routes/agentPlanRouter";
-import scientificSearchRouter from "./routes/scientificSearchRouter";
-import documentAnalysisRouter from "./routes/documentAnalysisRouter";
 import ragRouter from "./routes/ragRouter";
 import ragMemoryRouter from "./routes/ragMemoryRouter";
 import feedbackRouter from "./routes/feedbackRouter";
@@ -81,12 +67,10 @@ import { createMessengerIntegrationRouter } from "./routes/messengerIntegrationR
 import { createWeChatIntegrationRouter } from "./routes/wechatIntegrationRouter";
 import { createStripeRouter } from "./routes/stripeRouter";
 import { createSettingsRouter } from "./routes/settingsRouter";
-import { superintelligenceRouter } from "./routes/superintelligence";
 import { hasLogoutMarker, clearLogoutMarker } from "./lib/logoutMarker";
 import requestUnderstandingRoutes from "./routes/requestUnderstandingRoutes";
 import { createRunController } from "./agent/superAgent/tracing/RunController";
 import { createAuditDashboardRouter } from "./routes/auditDashboardRouter";
-import { createSuperIntelligenceRouter } from "./routes/superIntelligenceRouter";
 import { initializeAuditSystem, auditMiddleware } from "./services/superIntelligence/audit";
 import { initializeSuperIntelligence } from "./services/superIntelligence";
 import { initializeEventStore, getEventStore } from "./agent/superAgent/tracing/EventStore";
@@ -120,7 +104,6 @@ import { memoryRouter } from "./routes/memoryRouter";
 import { advancedAnalyticsRouter } from "./routes/admin/advancedAnalytics";
 import { requireAdmin as requireAdminMiddleware } from "./routes/admin/utils";
 import { automationsRouter } from "./routes/admin/automations";
-import { academicSearchRouter } from "./routes/academicSearchRouter";
 import { createSecurityRouter } from "./routes/securityRouter";
 import { createMfaRouter } from "./routes/mfaRouter";
 import { createPackagesRouter } from "./routes/packagesRouter";
@@ -139,20 +122,33 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 
-import { createRunRouter } from "./routes/runRouter";
-import { createBrowserControlRouter } from "./routes/browserControlRouter";
 import { createTerminalControlRouter, terminalClients } from "./routes/terminalControlRouter";
-import { createWorkflowRouter } from "./routes/workflowRouter";
-import { createDeviceControlRouter } from "./routes/deviceControlRouter";
-import openClawRouter from "./routes/openClawRouter";
-import { createSuperProgrammingAgentRouter } from "./routes/superProgrammingAgentRouter";
-import { createSkillPlatformRouter } from "./routes/skillPlatformRouter";
 import { CSRF_COOKIE_NAME, CSRF_TOKEN_PATTERN, issueCsrfCookie } from "./middleware/csrf";
 import { finopsRouter } from "./routes/finopsRouter";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
 const fileStatusClients: Map<string, Set<WebSocket>> = new Map();
+
+type LazyMountedRouter = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => unknown;
+
+function lazyMountRouter(factory: () => Promise<LazyMountedRouter>): LazyMountedRouter {
+  let routerPromise: Promise<LazyMountedRouter> | null = null;
+
+  return async (req, res, next) => {
+    try {
+      routerPromise ??= factory();
+      const router = await routerPromise;
+      return router(req, res, next);
+    } catch (error) {
+      return next(error);
+    }
+  };
+}
 
 type PublicModelSummary = {
   id: string;
@@ -213,6 +209,40 @@ function toPublicModelSummary(model: any): PublicModelSummary {
   };
 }
 
+function setOAuthCallbackUrl(req: Request, provider: string, callbackUrl: string): string {
+  const session = (req as any).session as Record<string, any> | undefined;
+  if (session) {
+    session.oauthCallbackUrls = session.oauthCallbackUrls || {};
+    session.oauthCallbackUrls[provider] = callbackUrl;
+  }
+  return callbackUrl;
+}
+
+function getOAuthCallbackUrl(req: Request, provider: string, path: string): string {
+  const session = (req as any).session as Record<string, any> | undefined;
+  const stored = session?.oauthCallbackUrls?.[provider];
+  if (typeof stored === "string" && stored.length > 0) {
+    return stored;
+  }
+  return resolveOAuthCallbackUrl(req, path);
+}
+
+async function computeMfaForAuthCallback(params: {
+  userId: string;
+  excludeSid?: string | null;
+  providerLabel: string;
+}) {
+  try {
+    return await computeMfaForUser({
+      userId: params.userId,
+      excludeSid: params.excludeSid,
+    });
+  } catch (error) {
+    console.error(`[Auth] ${params.providerLabel} MFA evaluation failed:`, error);
+    return null;
+  }
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -220,6 +250,25 @@ export async function registerRoutes(
   // Session + Passport are initialized in server/index.ts (before csrf/rateLimiter).
 
   // Passport Auth Routes
+<<<<<<< HEAD
+  // Google (only register if credentials are configured)
+  if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
+    app.get("/api/auth/google", (req, res, next) => {
+      const callbackURL = setOAuthCallbackUrl(
+        req,
+        "google",
+        resolveOAuthCallbackUrl(req, "/api/auth/google/callback"),
+      );
+      return passport.authenticate("google", {
+        scope: ["openid", "email", "profile"],
+        callbackURL,
+        // Ensure Google issues a refresh_token (needed for long-lived access).
+        // Note: Google may still only return refresh_token on first consent unless prompt includes "consent".
+        accessType: "offline",
+        prompt: "consent select_account",
+      })(req, res, next);
+    });
+=======
   // Google (always register to prevent 404, throw helpful errors internally if misconfigured)
   app.get("/api/auth/google", (req, res, next) => {
     console.log("[Auth] Hit /api/auth/google endpoint", { id: !!env.GOOGLE_CLIENT_ID, secret: !!env.GOOGLE_CLIENT_SECRET });
@@ -234,11 +283,18 @@ export async function registerRoutes(
   });
   
   if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
+>>>>>>> eeea2c5119542b9153533255fb8caa24dfac2306
     app.get("/api/auth/google/callback",
       (req, res, next) => {
-        passport.authenticate("google", { failureRedirect: "/login?error=google_failed" }, (err: any, user: any) => {
+        passport.authenticate("google", {
+          failureRedirect: "/login?error=google_failed",
+          callbackURL: getOAuthCallbackUrl(req, "google", "/api/auth/google/callback"),
+        }, (err: any, user: any) => {
           (async () => {
             if (err || !user) {
+              if (err) {
+                console.warn("[Auth] Google callback failed:", err?.message || err);
+              }
               return res.redirect("/login?error=google_failed");
             }
 
@@ -248,7 +304,14 @@ export async function registerRoutes(
               return res.redirect("/login?error=login_failed");
             }
 
-            const mfa = await computeMfaForUser({ userId, excludeSid: req.sessionID || null });
+            const mfa = await computeMfaForAuthCallback({
+              userId,
+              excludeSid: req.sessionID || null,
+              providerLabel: "Google callback",
+            });
+            if (!mfa) {
+              return res.redirect("/login?error=login_failed");
+            }
             if (mfa.requiresMfa) {
               try {
                 await startMfaLoginChallenge({
@@ -311,12 +374,27 @@ export async function registerRoutes(
 
   // Microsoft (only register if credentials are configured)
   if (env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET) {
-    app.get("/api/auth/microsoft", passport.authenticate("microsoft"));
+    app.get("/api/auth/microsoft", (req, res, next) => {
+      const callbackURL = setOAuthCallbackUrl(
+        req,
+        "microsoft",
+        resolveOAuthCallbackUrl(req, "/api/auth/microsoft/callback"),
+      );
+      return passport.authenticate("microsoft", {
+        callbackURL,
+      })(req, res, next);
+    });
     app.get("/api/auth/microsoft/callback",
       (req, res, next) => {
-        passport.authenticate("microsoft", { failureRedirect: "/login?error=microsoft_failed" }, (err: any, user: any) => {
+        passport.authenticate("microsoft", {
+          failureRedirect: "/login?error=microsoft_failed",
+          callbackURL: getOAuthCallbackUrl(req, "microsoft", "/api/auth/microsoft/callback"),
+        }, (err: any, user: any) => {
           (async () => {
             if (err || !user) {
+              if (err) {
+                console.warn("[Auth] Microsoft callback failed:", err?.message || err);
+              }
               return res.redirect("/login?error=microsoft_failed");
             }
 
@@ -326,7 +404,14 @@ export async function registerRoutes(
               return res.redirect("/login?error=login_failed");
             }
 
-            const mfa = await computeMfaForUser({ userId, excludeSid: req.sessionID || null });
+            const mfa = await computeMfaForAuthCallback({
+              userId,
+              excludeSid: req.sessionID || null,
+              providerLabel: "Microsoft callback",
+            });
+            if (!mfa) {
+              return res.redirect("/login?error=login_failed");
+            }
             if (mfa.requiresMfa) {
               try {
                 await startMfaLoginChallenge({
@@ -388,12 +473,28 @@ export async function registerRoutes(
 
   // Auth0 (only register if credentials are configured)
   if (env.AUTH0_DOMAIN && env.AUTH0_CLIENT_ID && env.AUTH0_CLIENT_SECRET) {
-    app.get("/api/auth/auth0", passport.authenticate("auth0", { scope: "openid email profile offline_access" }));
+    app.get("/api/auth/auth0", (req, res, next) => {
+      const callbackURL = setOAuthCallbackUrl(
+        req,
+        "auth0",
+        resolveOAuthCallbackUrl(req, "/api/auth/auth0/callback"),
+      );
+      return passport.authenticate("auth0", {
+        scope: "openid email profile offline_access",
+        callbackURL,
+      })(req, res, next);
+    });
     app.get("/api/auth/auth0/callback",
       (req, res, next) => {
-        passport.authenticate("auth0", { failureRedirect: "/login?error=auth0_failed" }, (err: any, user: any) => {
+        passport.authenticate("auth0", {
+          failureRedirect: "/login?error=auth0_failed",
+          callbackURL: getOAuthCallbackUrl(req, "auth0", "/api/auth/auth0/callback"),
+        }, (err: any, user: any) => {
           (async () => {
             if (err || !user) {
+              if (err) {
+                console.warn("[Auth] Auth0 callback failed:", err?.message || err);
+              }
               return res.redirect("/login?error=auth0_failed");
             }
 
@@ -403,7 +504,14 @@ export async function registerRoutes(
               return res.redirect("/login?error=login_failed");
             }
 
-            const mfa = await computeMfaForUser({ userId, excludeSid: req.sessionID || null });
+            const mfa = await computeMfaForAuthCallback({
+              userId,
+              excludeSid: req.sessionID || null,
+              providerLabel: "Auth0 callback",
+            });
+            if (!mfa) {
+              return res.redirect("/login?error=login_failed");
+            }
             if (mfa.requiresMfa) {
               try {
                 await startMfaLoginChallenge({
@@ -597,13 +705,24 @@ export async function registerRoutes(
     }),
   );
 
-  app.use("/api/ppt", pptExportRouter);
+  app.use("/api/ppt", lazyMountRouter(async () => {
+    const { pptExportRouter } = await import("./routes/pptExport");
+    return pptExportRouter;
+  }));
+  // Node / Device Agent routes (API for external nodes)
+  app.use("/api", createNodesRouter());
   app.use("/api", createChatsRouter());
   app.use(createFilesRouter());
   app.use(createLocalStorageRouter());
   app.use("/api", createGptRouter());
-  app.use("/api/documents", createDocumentsRouter());
-  app.use("/api/admin", createAdminRouter());
+  app.use("/api/documents", lazyMountRouter(async () => {
+    const { createDocumentsRouter } = await import("./routes/documentsRouter");
+    return createDocumentsRouter();
+  }));
+  app.use("/api/admin", lazyMountRouter(async () => {
+    const { createAdminRouter } = await import("./routes/admin");
+    return createAdminRouter();
+  }));
   app.use("/api/finops", finopsRouter);
   app.use("/api/admin", createRetrievalAdminRouter());
   app.use("/api", createAgentRouter(broadcastBrowserEvent));
@@ -613,6 +732,23 @@ export async function registerRoutes(
   app.use("/api/telemetry", createTelemetryRouter());
 
   const { createPublicReleasesRouter } = await import("./routes/releasesRouter");
+  // DEBUG: Temporary endpoint to list all registered Express routes
+    app.get("/api/debug/routes", (req, res) => {
+      const routePaths: string[] = [];
+      app._router.stack.forEach((middleware: any) => {
+        if (middleware.route) { // Routes registered directly on the app
+          routePaths.push(middleware.route.path);
+        } else if (middleware.name === 'router') { // Routers mounted on the app
+          middleware.handle.stack.forEach((handler: any) => {
+            if (handler.route) {
+              routePaths.push(handler.route.path);
+            }
+          });
+        }
+      });
+      res.json({ routes: routePaths });
+    });
+
   app.use("/api/public/releases", createPublicReleasesRouter());
 
   app.use(createFigmaRouter());
@@ -620,7 +756,10 @@ export async function registerRoutes(
   app.use(createWorkspaceRouter());
   app.use(createCodeRouter());
   app.use(createUserRouter());
-  app.use("/api", createChatAiRouter(broadcastAgentUpdate));
+  app.use("/api", lazyMountRouter(async () => {
+    const { createChatAiRouter } = await import("./routes/chatAiRouter");
+    return createChatAiRouter(broadcastAgentUpdate);
+  }));
   app.use("/api/apps", createAppsIntegrationRouter());
 
   // Integration Kernel OAuth routes (generic connector flow).
@@ -772,22 +911,50 @@ export async function registerRoutes(
       health: getPareHealthSummary()
     });
   });
-  app.use("/api/ai", aiExcelRouter);
+  app.use("/api/ai", lazyMountRouter(async () => {
+    const { default: aiExcelRouter } = await import("./routes/aiExcelRouter");
+    return aiExcelRouter;
+  }));
   app.use("/api/power", powerRouter);
   // Tenaga HITL Routes
   app.use("/api/hitl", hitlRouter);
 
-  app.use("/api/agents", multiAgentRouter);
+  app.use("/api/agents", lazyMountRouter(async () => {
+    const { multiAgentRouter } = await import("./routes/multiAgentRouter");
+    return multiAgentRouter;
+  }));
   app.use("/api/errors", errorRouter);
-  app.use("/api/spreadsheet", createSpreadsheetRouter());
-  app.use("/api/skill-platform", createSkillPlatformRouter());
-  app.use("/api/chat", createChatRoutes());
-  app.use("/api/agent", createAgentModeRouter());
-  app.use("/api/orchestrator", createOrchestratorRouter());
+  app.use("/api/spreadsheet", lazyMountRouter(async () => {
+    const { createSpreadsheetRouter } = await import("./routes/spreadsheetRoutes");
+    return createSpreadsheetRouter();
+  }));
+  app.use("/api/skills", lazyMountRouter(async () => {
+    const { createSkillsRouter } = await import("./routes/skillsRouter");
+    return createSkillsRouter();
+  }));
+  app.use("/api/skill-platform", lazyMountRouter(async () => {
+    const { createSkillPlatformRouter } = await import("./routes/skillPlatformRouter");
+    return createSkillPlatformRouter();
+  }));
+  app.use("/api/chat", lazyMountRouter(async () => {
+    const { createChatRoutes } = await import("./routes/chatRoutes");
+    return createChatRoutes();
+  }));
+  app.use("/api/agent", lazyMountRouter(async () => {
+    const { createAgentModeRouter } = await import("./routes/agentRoutes");
+    return createAgentModeRouter();
+  }));
+  app.use("/api/orchestrator", lazyMountRouter(async () => {
+    const { createOrchestratorRouter } = await import("./routes/orchestratorRoutes");
+    return createOrchestratorRouter();
+  }));
 
   // Register agentic tools (browser, research, documents, terminal)
   registerAgenticTools();
-  app.use("/api", createSandboxAgentRouter());
+  app.use("/api", lazyMountRouter(async () => {
+    const { createSandboxAgentRouter } = await import("./routes/sandboxAgentRouter");
+    return createSandboxAgentRouter();
+  }));
   app.use("/api", createLangGraphRouter());
 
   // New routes from 8H plan
@@ -801,41 +968,86 @@ export async function registerRoutes(
   app.use("/api/packages", createPackagesRouter());
   app.use("/api/admin/analytics/advanced", advancedAnalyticsRouter);
   app.use("/api/admin/automations", automationsRouter);
-  app.use("/api/academic", academicSearchRouter); // Scopus + Scholar academic search
+  app.use("/api/academic", lazyMountRouter(async () => {
+    const { academicSearchRouter } = await import("./routes/academicSearchRouter");
+    return academicSearchRouter;
+  })); // Scopus + Scholar academic search
   app.use("/api", createRegistryRouter());
   app.use("/api/word-pipeline", wordPipelineRoutes);
   app.use("/api/sse", redisSSERouter);
   app.use("/api/streaming", streamingResumeRouter);
-  app.use("/api/memory", conversationMemoryRoutes);
-  app.use("/api/memory/semantic", semanticRoutes); // Semantic memory search API
-  app.use("/api/context", contextRoutes); // Enterprise context validation API
-  app.use("/api", superAgentRouter);
-  app.use("/api", createPythonToolsRouter());
+  app.use("/api/memory", lazyMountRouter(async () => {
+    const module = await import("./routes/conversationMemoryRoutes");
+    return module.default;
+  }));
+  app.use("/api/memory/semantic", lazyMountRouter(async () => {
+    const module = await import("./memory");
+    return module.semanticRoutes;
+  })); // Semantic memory search API
+  app.use("/api/context", lazyMountRouter(async () => {
+    const module = await import("./memory");
+    return module.contextRoutes;
+  })); // Enterprise context validation API
+  app.use("/api", lazyMountRouter(async () => {
+    const module = await import("./routes/superAgentRoutes");
+    return module.default;
+  }));
+  app.use("/api", lazyMountRouter(async () => {
+    const { createPythonToolsRouter } = await import("./routes/pythonToolsRouter");
+    return createPythonToolsRouter();
+  }));
   app.use("/api", createLocalControlRouter());
   app.use("/api/system", systemControlRouter);
-  app.use("/api/execution", createToolExecutionRouter());
-  app.use("/api/scientific", scientificSearchRouter);
-  app.use("/api/planning", agentPlanRouter);
-  app.use("/api/document-analysis", documentAnalysisRouter);
+  app.use("/api/execution", lazyMountRouter(async () => {
+    const { createToolExecutionRouter } = await import("./routes/toolExecutionRouter");
+    return createToolExecutionRouter();
+  }));
+  app.use("/api/scientific", lazyMountRouter(async () => {
+    const { default: scientificSearchRouter } = await import("./routes/scientificSearchRouter");
+    return scientificSearchRouter;
+  }));
+  app.use("/api/planning", lazyMountRouter(async () => {
+    const module = await import("./routes/agentPlanRouter");
+    return module.default;
+  }));
+  app.use("/api/document-analysis", lazyMountRouter(async () => {
+    const { default: documentAnalysisRouter } = await import("./routes/documentAnalysisRouter");
+    return documentAnalysisRouter;
+  }));
   app.use("/api/rag", ragRouter);
   app.use("/api/rag/memory", ragMemoryRouter);
   app.use("/api/feedback", feedbackRouter);
   app.use(createStripeRouter());
   app.use(createSettingsRouter());
   app.use("/api", createRunController());
-  app.use("/api/superintelligence", superintelligenceRouter);
+  app.use("/api/superintelligence", lazyMountRouter(async () => {
+    const { superintelligenceRouter } = await import("./routes/superintelligence");
+    return superintelligenceRouter;
+  }));
   app.use("/api/understanding", requestUnderstandingRoutes); // Request Understanding Pipeline (gating agent, RAG, verification)
 
   // SuperIntelligence System
   app.use("/api/audit", createAuditDashboardRouter());
-  app.use("/api/super-intelligence", createSuperIntelligenceRouter());
-  app.use("/api/super-programming-agent", createSuperProgrammingAgentRouter());
+  app.use("/api/super-intelligence", lazyMountRouter(async () => {
+    const { createSuperIntelligenceRouter } = await import("./routes/superIntelligenceRouter");
+    return createSuperIntelligenceRouter();
+  }));
+  app.use("/api/super-programming-agent", lazyMountRouter(async () => {
+    const { createSuperProgrammingAgentRouter } = await import("./routes/superProgrammingAgentRouter");
+    return createSuperProgrammingAgentRouter();
+  }));
 
   // ===== Device Control (autonomy primitives: local/remote terminal + browser) =====
-  app.use("/api/device-control", createDeviceControlRouter());
-
+  app.use("/api/device-control", lazyMountRouter(async () => {
+    const { createDeviceControlRouter } = await import("./routes/deviceControlRouter");
+    return createDeviceControlRouter();
+  }));
+  app.use(createNodesRouter());
   // ===== Browser & Terminal Control =====
-  app.use("/api/browser-control", createBrowserControlRouter());
+  app.use("/api/browser-control", lazyMountRouter(async () => {
+    const { createBrowserControlRouter } = await import("./routes/browserControlRouter");
+    return createBrowserControlRouter();
+  }));
   app.use("/api/terminal", requireAdminMiddleware, require2FA, createTerminalControlRouter());
 
   // ===== macOS Native Control (AppleScript, System, Apps, Calendar, etc.) =====
@@ -850,13 +1062,28 @@ export async function registerRoutes(
   // ===== Analytics & Cost Tracking =====
   app.use("/api/analytics", requireAdminMiddleware, createAnalyticsRouter());
 
-  app.use("/api/workflows", createWorkflowRouter());
+  app.use("/api/workflows", lazyMountRouter(async () => {
+    const { createWorkflowRouter } = await import("./routes/workflowRouter");
+    return createWorkflowRouter();
+  }));
 
-  // OpenClaw runtime capabilities are fused directly into the native agent pipeline.
-  app.use("/api/openclaw", openClawRouter);
+  // OpenClaw runtime control-plane endpoints (health, skills, orchestrator, subagents).
+  app.use("/api/openclaw/runtime", lazyMountRouter(async () => {
+    const { createOpenClawRuntimeRouter } = await import("./routes/openclawRuntimeRouter");
+    return createOpenClawRuntimeRouter();
+  }));
+
+  // OpenClaw capability inventory/report endpoints.
+  app.use("/api/openclaw", lazyMountRouter(async () => {
+    const module = await import("./routes/openClawRouter");
+    return module.default;
+  }));
 
   // ===== Run Detail Endpoints =====
-  app.use("/api/runs", createRunRouter());
+  app.use("/api/runs", lazyMountRouter(async () => {
+    const { createRunRouter } = await import("./routes/runRouter");
+    return createRunRouter();
+  }));
 
   initializeEventStore().catch(console.error);
 

@@ -3,13 +3,25 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 
-export type AgentModeStatus = 'idle' | 'queued' | 'planning' | 'running' | 'verifying' | 'paused' | 'cancelling' | 'completed' | 'failed' | 'cancelled' | 'replanning';
+export type AgentModeStatus =
+  | 'idle'
+  | 'queued'
+  | 'planning'
+  | 'running'
+  | 'verifying'
+  | 'paused'
+  | 'cancelling'
+  | 'awaiting_confirmation'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'replanning';
 
 export interface AgentPlanStep {
   index: number;
   toolName: string;
   description: string;
-  input: any;
+  input: unknown;
   expectedOutput: string;
 }
 
@@ -23,16 +35,47 @@ export interface AgentStep {
   stepIndex: number;
   toolName: string;
   status: 'pending' | 'running' | 'succeeded' | 'failed';
-  output?: any;
+  output?: unknown;
   error?: string;
   startedAt?: string;
   completedAt?: string;
 }
 
 export interface Artifact {
+  id?: string;
   type: string;
   name: string;
-  data: any;
+  url?: string;
+  data?: unknown;
+}
+
+export interface AgentRuntimeEvent {
+  type?: string;
+  title?: string;
+  timestamp?: number;
+  content?: unknown;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface AgentTodoItem {
+  id: string;
+  task: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped';
+  stepIndex?: number;
+  attempts?: number;
+  lastError?: string | Record<string, unknown>;
+}
+
+export interface AgentWorkspaceContext {
+  projectId?: string;
+  projectName?: string;
+  repositoryPath: string;
+  selectedFolder: string;
+  codingAgents: Array<"coder" | "reviewer" | "improver">;
+  runtimeTarget: string;
+  executionAccess: string;
+  branch?: string;
 }
 
 export interface AgentRunResponse {
@@ -44,6 +87,9 @@ export interface AgentRunResponse {
   artifacts: Artifact[];
   summary?: string;
   error?: string;
+  eventStream?: AgentRuntimeEvent[];
+  todoList?: AgentTodoItem[];
+  workspaceFiles?: Record<string, string>;
   createdAt: string;
   updatedAt: string;
 }
@@ -58,6 +104,9 @@ interface AgentModeState {
   error: string | null;
   progress: { current: number; total: number };
   createdChatId: string | null;
+  eventStream: AgentRuntimeEvent[];
+  todoList: AgentTodoItem[];
+  workspaceFiles: Record<string, string>;
 }
 
 const initialState: AgentModeState = {
@@ -69,15 +118,25 @@ const initialState: AgentModeState = {
   summary: null,
   error: null,
   progress: { current: 0, total: 0 },
-  createdChatId: null
+  createdChatId: null,
+  eventStream: [],
+  todoList: [],
+  workspaceFiles: {},
 };
+
+interface StartRunOptions {
+  model?: string;
+  workspaceContext?: AgentWorkspaceContext;
+}
 
 export function useAgentMode(chatId: string) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const [state, setState] = useState<AgentModeState>(initialState);
   const lastMessageRef = useRef<string | null>(null);
-  const lastAttachmentsRef = useRef<any[] | undefined>(undefined);
+  const lastAttachmentsRef = useRef<unknown[] | undefined>(undefined);
+  const lastModelRef = useRef<string | undefined>(undefined);
+  const lastWorkspaceContextRef = useRef<AgentWorkspaceContext | undefined>(undefined);
   const initializedForChatRef = useRef<string | null>(null);
 
   const isPollingActive = ['queued', 'planning', 'running', 'verifying', 'replanning', 'cancelling'].includes(state.status);
@@ -116,7 +175,10 @@ export function useAgentMode(chatId: string) {
         summary: chatRunData.summary || null,
         error: chatRunData.error || null,
         progress: { current: completedSteps, total: totalSteps },
-        createdChatId: chatRunData.chatId
+        createdChatId: chatRunData.chatId,
+        eventStream: chatRunData.eventStream || [],
+        todoList: chatRunData.todoList || [],
+        workspaceFiles: chatRunData.workspaceFiles || {},
       });
     }
   }, [chatRunData, state.runId, chatId]);
@@ -160,13 +222,26 @@ export function useAgentMode(chatId: string) {
         artifacts: runData.artifacts || [],
         summary: runData.summary || null,
         error: runData.error || null,
-        progress: { current: completedSteps, total: totalSteps }
+        progress: { current: completedSteps, total: totalSteps },
+        eventStream: runData.eventStream || [],
+        todoList: runData.todoList || [],
+        workspaceFiles: runData.workspaceFiles || {},
       }));
     }
   }, [runData]);
 
   const startRunMutation = useMutation({
-    mutationFn: async ({ message, attachments }: { message: string; attachments?: any[] }) => {
+    mutationFn: async ({
+      message,
+      attachments,
+      model,
+      workspaceContext,
+    }: {
+      message: string;
+      attachments?: unknown[];
+      model?: string;
+      workspaceContext?: AgentWorkspaceContext;
+    }) => {
       let resolvedChatId = chatId;
 
       // If chatId is pending or empty, create a new chat first
@@ -183,11 +258,14 @@ export function useAgentMode(chatId: string) {
       const res = await apiRequest('POST', `/api/agent/runs`, {
         chatId: resolvedChatId,
         message,
-        attachments
+        attachments,
+        model,
+        workspaceContext,
       });
       return res.json() as Promise<AgentRunResponse>;
     },
     onSuccess: (data) => {
+      initializedForChatRef.current = data.chatId || initializedForChatRef.current;
       setState({
         runId: data.id,
         status: data.status,
@@ -197,7 +275,10 @@ export function useAgentMode(chatId: string) {
         summary: data.summary || null,
         error: data.error || null,
         progress: { current: 0, total: data.plan?.steps.length || 0 },
-        createdChatId: data.chatId || null
+        createdChatId: data.chatId || null,
+        eventStream: data.eventStream || [],
+        todoList: data.todoList || [],
+        workspaceFiles: data.workspaceFiles || {},
       });
       queryClient.invalidateQueries({ queryKey: ['/api/agent/runs', data.id] });
     },
@@ -275,6 +356,28 @@ export function useAgentMode(chatId: string) {
     }
   });
 
+  const confirmRunMutation = useMutation({
+    mutationFn: async (decision: 'confirm' | 'cancel' = 'confirm') => {
+      if (!state.runId) throw new Error('No run awaiting confirmation');
+      const res = await apiRequest('POST', `/api/agent/runs/${state.runId}/confirm`, {
+        decision,
+      });
+      return res.json() as Promise<{ success: boolean; status: AgentModeStatus }>;
+    },
+    onSuccess: (data) => {
+      setState(prev => ({
+        ...prev,
+        status: data.status,
+      }));
+      if (state.runId) {
+        queryClient.invalidateQueries({ queryKey: ['/api/agent/runs', state.runId] });
+      }
+    },
+    onError: (error: Error) => {
+      console.error('Failed to confirm run:', error);
+    }
+  });
+
   const retryRunMutation = useMutation({
     mutationFn: async () => {
       if (!lastMessageRef.current) throw new Error('No previous message to retry');
@@ -293,11 +396,14 @@ export function useAgentMode(chatId: string) {
       const res = await apiRequest('POST', `/api/agent/runs`, {
         chatId: resolvedChatId,
         message: lastMessageRef.current,
-        attachments: lastAttachmentsRef.current
+        attachments: lastAttachmentsRef.current,
+        model: lastModelRef.current,
+        workspaceContext: lastWorkspaceContextRef.current,
       });
       return res.json() as Promise<AgentRunResponse>;
     },
     onSuccess: (data) => {
+      initializedForChatRef.current = data.chatId || initializedForChatRef.current;
       setState({
         runId: data.id,
         status: data.status,
@@ -307,7 +413,10 @@ export function useAgentMode(chatId: string) {
         summary: data.summary || null,
         error: data.error || null,
         progress: { current: 0, total: data.plan?.steps.length || 0 },
-        createdChatId: data.chatId || null
+        createdChatId: data.chatId || null,
+        eventStream: data.eventStream || [],
+        todoList: data.todoList || [],
+        workspaceFiles: data.workspaceFiles || {},
       });
       queryClient.invalidateQueries({ queryKey: ['/api/agent/runs', data.id] });
     },
@@ -320,11 +429,22 @@ export function useAgentMode(chatId: string) {
     }
   });
 
-  const startRun = useCallback(async (message: string, attachments?: any[]): Promise<{ runId: string; chatId: string }> => {
+  const startRun = useCallback(async (
+    message: string,
+    attachments?: unknown[],
+    options?: StartRunOptions,
+  ): Promise<{ runId: string; chatId: string }> => {
     lastMessageRef.current = message;
     lastAttachmentsRef.current = attachments;
+    lastModelRef.current = options?.model;
+    lastWorkspaceContextRef.current = options?.workspaceContext;
 
-    const result = await startRunMutation.mutateAsync({ message, attachments });
+    const result = await startRunMutation.mutateAsync({
+      message,
+      attachments,
+      model: options?.model,
+      workspaceContext: options?.workspaceContext,
+    });
     return { runId: result.id, chatId: result.chatId };
   }, [startRunMutation]);
 
@@ -340,16 +460,21 @@ export function useAgentMode(chatId: string) {
     await resumeRunMutation.mutateAsync();
   }, [resumeRunMutation]);
 
+  const confirmRun = useCallback(async (decision: 'confirm' | 'cancel' = 'confirm'): Promise<void> => {
+    await confirmRunMutation.mutateAsync(decision);
+  }, [confirmRunMutation]);
+
   const retryRun = useCallback(async (): Promise<void> => {
     await retryRunMutation.mutateAsync();
   }, [retryRunMutation]);
 
-  const isRunning = ['queued', 'planning', 'running', 'verifying', 'replanning'].includes(state.status);
-  const isCancellable = ['queued', 'planning', 'running', 'verifying', 'paused', 'replanning'].includes(state.status);
+  const isRunning = ['queued', 'planning', 'running', 'verifying', 'replanning', 'awaiting_confirmation'].includes(state.status);
+  const isCancellable = ['queued', 'planning', 'running', 'verifying', 'paused', 'replanning', 'awaiting_confirmation'].includes(state.status);
 
   const reset = useCallback(() => {
     setState(initialState);
     initializedForChatRef.current = null;
+    lastWorkspaceContextRef.current = undefined;
   }, []);
 
   return {
@@ -362,10 +487,14 @@ export function useAgentMode(chatId: string) {
     error: state.error,
     progress: state.progress,
     createdChatId: state.createdChatId,
+    eventStream: state.eventStream,
+    todoList: state.todoList,
+    workspaceFiles: state.workspaceFiles,
     startRun,
     cancelRun,
     pauseRun,
     resumeRun,
+    confirmRun,
     retryRun,
     reset,
     isRunning,

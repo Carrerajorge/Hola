@@ -4,12 +4,28 @@ type SessionTranscriptUpdate = {
 
 type SessionTranscriptListener = (update: SessionTranscriptUpdate) => void;
 
-const SESSION_TRANSCRIPT_LISTENERS = new Set<SessionTranscriptListener>();
+type SessionTranscriptState = {
+  listeners: Set<SessionTranscriptListener>;
+};
+
+const SESSION_TRANSCRIPT_STATE = Symbol.for("openclaw.sessionTranscriptState");
+
+const state = (() => {
+  const globalState = globalThis as typeof globalThis & {
+    [SESSION_TRANSCRIPT_STATE]?: SessionTranscriptState;
+  };
+  if (!globalState[SESSION_TRANSCRIPT_STATE]) {
+    globalState[SESSION_TRANSCRIPT_STATE] = {
+      listeners: new Set<SessionTranscriptListener>(),
+    };
+  }
+  return globalState[SESSION_TRANSCRIPT_STATE]!;
+})();
 
 export function onSessionTranscriptUpdate(listener: SessionTranscriptListener): () => void {
-  SESSION_TRANSCRIPT_LISTENERS.add(listener);
+  state.listeners.add(listener);
   return () => {
-    SESSION_TRANSCRIPT_LISTENERS.delete(listener);
+    state.listeners.delete(listener);
   };
 }
 
@@ -19,7 +35,11 @@ export function emitSessionTranscriptUpdate(sessionFile: string): void {
     return;
   }
   const update = { sessionFile: trimmed };
-  for (const listener of SESSION_TRANSCRIPT_LISTENERS) {
-    listener(update);
+  for (const listener of state.listeners) {
+    try {
+      listener(update);
+    } catch {
+      /* ignore */
+    }
   }
 }

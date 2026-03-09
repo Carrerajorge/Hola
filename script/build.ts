@@ -84,6 +84,17 @@ async function buildAll() {
     },
     plugins: [
       {
+        name: "zod-v4-server",
+        setup(build) {
+          // Keep `zod/v4` imports intact while upgrading bare `zod` imports used by
+          // server-side schemas to the v4 entrypoint expected by drizzle-zod output.
+          build.onResolve({ filter: /^zod$/ }, () => ({
+            path: "zod/v4",
+            external: true,
+          }));
+        },
+      },
+      {
         name: "native-modules",
         setup(build) {
           // If a resolution ends with .node, mark it as external
@@ -124,7 +135,7 @@ const __dirname = dirname(__filename);
   // Build server and worker together to enable splitting
   const serverResult: BuildResult = await esbuild({
     ...commonOptions,
-    entryPoints: ["server/index.ts", "server/worker.ts", "server/migrate.ts", "server/agent/sandboxRunner/index.ts"],
+    entryPoints: ["server/index.ts", "server/worker.ts", "server/migrate.ts", "server/agent/sandboxRunner/index.ts", "server/routes/nodesRouter.ts"],
     outdir: "dist",
     outExtension: { ".js": ".mjs" },
     splitting: true,

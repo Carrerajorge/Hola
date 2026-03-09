@@ -8,6 +8,7 @@ import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { createCustomRateLimiter } from "../middleware/userRateLimiter";
 import { getOpenClawSkillsRuntimeSnapshot } from "../services/openclawSkillsRuntimeAdapter";
 import { FLUID_FUNCTIONAL_SKILLS } from "../config/fluidFunctionalSkills";
+import { getActiveSkillPreferenceForUser, sanitizeActiveSkillRef } from "../services/orchestratorSkillContext";
 
 const generateSchema = z.object({
   prompt: z.string().min(1).max(2000),
@@ -21,6 +22,20 @@ const ensureSchema = z.object({
 });
 
 const skillCategorySchema = z.enum(["documents", "data", "integrations", "custom"]);
+const skillCatalogCategorySchema = z.enum(["documents", "data", "integrations", "custom", "automation"]);
+
+const activeSkillRefSchema = z.object({
+  id: z.string().min(1).max(64),
+  name: z.string().min(1).max(120),
+  description: z.string().max(500).optional().default(""),
+  category: skillCatalogCategorySchema.default("custom"),
+  features: z.array(z.string().min(1).max(120)).max(20).optional().default([]),
+  triggers: z.array(z.string().min(1).max(60)).max(20).optional().default([]),
+  builtIn: z.boolean().optional().default(false),
+  enabled: z.boolean().optional().default(true),
+  instructions: z.string().max(8000).optional(),
+  runtimeTools: z.array(z.string().min(1).max(80)).max(12).optional().default([]),
+});
 
 const createSkillSchema = z.object({
   name: z.string().min(1).max(64),
@@ -50,6 +65,12 @@ const importSkillsSchema = z.object({
 
 const setActiveSkillSchema = z.object({
   activeSkillId: z.string().min(1).max(64).nullable().optional(),
+  activeSkillRef: activeSkillRefSchema.nullable().optional(),
+}).refine((value) => {
+  if (!value.activeSkillRef || !value.activeSkillId) return true;
+  return value.activeSkillRef.id.trim() === value.activeSkillId.trim();
+}, {
+  message: "activeSkillRef.id must match activeSkillId",
 });
 
 function normalizeCategory(raw: unknown): z.infer<typeof skillCategorySchema> {
@@ -172,20 +193,11 @@ export function createSkillsRouter(): Router {
   router.get("/active", async (req, res) => {
     const userId = getOrCreateSecureUserId(req);
     try {
-      const rows = await db
-        .select({ preferences: users.preferences })
-        .from(users)
-        .where(eq(users.id, userId))
-        .limit(1);
-
-      const prefs = rows[0]?.preferences as any;
-      const nested = prefs?.skills?.activeSkillId;
-      const legacy = prefs?.activeSkillId;
-      const activeSkillIdRaw = typeof nested === "string" && nested.trim()
-        ? nested.trim()
-        : (typeof legacy === "string" && legacy.trim() ? legacy.trim() : null);
-
-      return res.json({ activeSkillId: activeSkillIdRaw });
+      const preference = await getActiveSkillPreferenceForUser(userId);
+      return res.json({
+        activeSkillId: preference.activeSkillId,
+        activeSkillRef: preference.activeSkillRef,
+      });
     } catch (error: any) {
       console.error("[SkillsRouter] get active error:", error);
       return res.status(503).json({ error: "Database unavailable" });
@@ -209,6 +221,9 @@ export function createSkillsRouter(): Router {
     const nextActiveSkillId = typeof parsed.data.activeSkillId === "string"
       ? parsed.data.activeSkillId.trim()
       : null;
+    const nextActiveSkillRef = nextActiveSkillId
+      ? sanitizeActiveSkillRef(parsed.data.activeSkillRef ?? null)
+      : null;
 
     try {
       const rows = await db
@@ -230,10 +245,14 @@ export function createSkillsRouter(): Router {
         : {};
 
       if (nextActiveSkillId) {
-        nextPrefs.skills = { ...currentSkills, activeSkillId: nextActiveSkillId };
+        const nextSkills = { ...currentSkills, activeSkillId: nextActiveSkillId };
+        if (nextActiveSkillRef) nextSkills.activeSkillRef = nextActiveSkillRef;
+        else delete (nextSkills as any).activeSkillRef;
+        nextPrefs.skills = nextSkills;
       } else {
         const skillsNext: Record<string, any> = { ...currentSkills };
         delete (skillsNext as any).activeSkillId;
+        delete (skillsNext as any).activeSkillRef;
         if (Object.keys(skillsNext).length) nextPrefs.skills = skillsNext;
         else delete (nextPrefs as any).skills;
       }
@@ -244,7 +263,10 @@ export function createSkillsRouter(): Router {
         .where(eq(users.id, userId))
         .returning({ id: users.id });
 
-      return res.json({ activeSkillId: nextActiveSkillId });
+      return res.json({
+        activeSkillId: nextActiveSkillId,
+        activeSkillRef: nextActiveSkillRef,
+      });
     } catch (error: any) {
       console.error("[SkillsRouter] set active error:", error);
       return res.status(503).json({ error: "Database unavailable" });

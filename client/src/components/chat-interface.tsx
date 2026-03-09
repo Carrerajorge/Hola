@@ -105,7 +105,11 @@ import { CodeExecutionBlock } from "@/components/code-execution-block";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { ShareChatDialog, ShareIcon } from "@/components/share-chat-dialog";
 import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
-import { computePromptIntegrity } from "@/lib/promptIntegrity";
+import {
+  computePromptIntegrityWithBudget,
+  createPromptIntegrityFallback,
+  warmPromptIntegrity,
+} from "@/lib/promptIntegrity";
 import { DocumentGeneratorDialog } from "@/components/document-generator-dialog";
 import { GoogleFormsDialog } from "@/components/google-forms-dialog";
 import { InlineGoogleFormPreview } from "@/components/inline-google-form-preview";
@@ -276,6 +280,7 @@ interface ChatInterfaceProps {
   isSidebarOpen?: boolean;
   onToggleSidebar?: () => void;
   onCloseSidebar?: () => void;
+  showSidebarToggleWhenCollapsed?: boolean;
   activeGpt?: ActiveGpt | null;
   aiState: AiState;
   setAiState: React.Dispatch<React.SetStateAction<AiState>>;
@@ -435,6 +440,7 @@ export function ChatInterface({
   isSidebarOpen = true,
   onToggleSidebar,
   onCloseSidebar,
+  showSidebarToggleWhenCollapsed = true,
   activeGpt,
   aiState,
   setAiState,
@@ -1345,6 +1351,10 @@ export function ChatInterface({
   const streamingChatIdRef = useRef<string | null>(null);
   const prevAiStateRef = useRef<AiState>("idle");
 
+  useEffect(() => {
+    warmPromptIntegrity();
+  }, []);
+
   // Access streaming store actions
   const { startRun, updateStatus, completeRun, failRun, abortRun, appendContent, clearRun } = useStreamingStore();
 
@@ -1358,7 +1368,9 @@ export function ChatInterface({
     if (!url) return;
     try {
       URL.revokeObjectURL(url);
-    } catch { }
+    } catch { 
+      // ignore revoke failures
+    }
     generatedAttachmentPreviewUrlRef.current = null;
   }, []);
 
@@ -1368,7 +1380,10 @@ export function ChatInterface({
         if (file.localUrl) {
           try {
             URL.revokeObjectURL(file.localUrl);
-          } catch { }
+          } catch { 
+
+            // ignore revoke failures
+          }
         }
       });
       releaseGeneratedAttachmentPreviewUrl();
@@ -3522,7 +3537,9 @@ export function ChatInterface({
       if (removed?.localUrl) {
         try {
           URL.revokeObjectURL(removed.localUrl);
-        } catch { }
+        } catch { 
+          // ignore revoke failures
+        }
       }
       return prev.filter((_, i: number) => i !== index);
     });
@@ -5233,15 +5250,22 @@ export function ChatInterface({
         }
       }
 
-      // GENERATION INTENT DETECTION: Handle image, document, spreadsheet, presentation requests
+      // GENERATION INTENT DETECTION: Handle image, video, document, spreadsheet, presentation requests
       // These are handled directly by /api/chat + ProductionWorkflowRunner - no agent mode or SSE needed
-      const generationPatterns = [
+      const imageGenerationPatterns = [
         /\b(crea|create|genera|generate|haz|make)\b.*\b(imagen|image|foto|photo|ilustración|illustration)\b/i,
+      ];
+      const generationPatterns = [
+        ...imageGenerationPatterns,
         /\b(crea|create|genera|generate|haz|make)\b.*\b(documento|document|word|docx)\b/i,
         /\b(crea|create|genera|generate|haz|make)\b.*\b(excel|hoja de cálculo|spreadsheet|xlsx)\b/i,
         /\b(crea|create|genera|generate|haz|make)\b.*\b(presentación|presentation|ppt|powerpoint|slides|diapositivas)\b/i,
         /\b(crea|create|genera|generate|haz|make)\b.*\b(pdf)\b/i,
         /\b(cv|curriculum|resume|currículum|carta de presentación|cover letter)\b/i,
+      ];
+      const videoGenerationPatterns = [
+        /\b(crea|create|genera|generate|haz|make)\b.*\b(video|vídeo|clip|animación|animation|movie|short)\b/i,
+        /\b(video|vídeo|clip|animación|animation)\s+(de|of)\b/i,
       ];
 
       const imageEditPatterns = [
@@ -5274,6 +5298,8 @@ export function ChatInterface({
       ];
 
       const isGenerationRequest = generationPatterns.some(p => p.test(input));
+      const isImageGenerationRequest = imageGenerationPatterns.some(p => p.test(input));
+      const isVideoGenerationRequest = videoGenerationPatterns.some(p => p.test(input));
       const hasEditPattern = imageEditPatterns.some(p => p.test(input));
 
       const inferDocToolFromPrompt = (prompt: string): "word" | "excel" | "ppt" | null => {
@@ -5312,8 +5338,8 @@ export function ChatInterface({
         (f: any) => f?.status !== "error" && !(f.type || "").startsWith("image/")
       );
 
-      if ((isGenerationRequest || hasEditPattern) && !hasDocToolSelected && !hasDocumentFiles) {
-        console.log("[handleSubmit] Generation/Edit pattern detected - checking image context...");
+      if ((isGenerationRequest || isVideoGenerationRequest || hasEditPattern) && !hasDocToolSelected && !hasDocumentFiles) {
+        console.log("[handleSubmit] Generation/Edit/Video pattern detected - checking specialized route...");
 
         // Set thinking state
         setAiStateForChat("thinking", submitConversationId);
@@ -5330,7 +5356,8 @@ export function ChatInterface({
 
         // Add user message to chat
         const userMsgId = `temp-gen-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-        const genIntegrity = await computePromptIntegrity(generationInput);
+        const genIntegrityFallback = createPromptIntegrityFallback(generationInput);
+        const genIntegrityPromise = computePromptIntegrityWithBudget(generationInput);
         const userMsg: Message = {
           id: userMsgId,
           clientTempId: userMsgId,
@@ -5342,18 +5369,138 @@ export function ChatInterface({
           status: "pending",
           deliveryStatus: "sending",
           deliveryError: undefined,
-          clientPromptLen: genIntegrity.clientPromptLen,
-          clientPromptHash: genIntegrity.clientPromptHash,
-          promptMessageId: genIntegrity.messageId,
+          promptMessageId: genIntegrityFallback.messageId,
         } as any;
         // Show message immediately (optimistic update)
         setOptimisticMessages((prev: Message[]) => [...prev, userMsg]);
+        const genIntegrity = await genIntegrityPromise;
+        if (genIntegrity) {
+          (userMsg as any).clientPromptLen = genIntegrity.clientPromptLen;
+          (userMsg as any).clientPromptHash = genIntegrity.clientPromptHash;
+          (userMsg as any).promptMessageId = genIntegrity.messageId;
+        }
         const persistGenerationUserMessagePromise = onSendMessage(userMsg).catch((err) => {
           console.warn("[handleSubmit] Failed to persist generation user message:", err);
           return undefined;
         });
 
         try {
+          if (isVideoGenerationRequest) {
+            setAiProcessStepsForChat([
+              { step: "Analizando la idea del video", status: "active" },
+              { step: "Generando storyboard visual", status: "pending" },
+              { step: "Renderizando fotogramas", status: "pending" }
+            ], submitConversationId);
+
+            try {
+              abortControllerRef.current = new AbortController();
+              const videoRes = await apiFetch("/api/video/generate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ prompt: generationInput }),
+                signal: abortControllerRef.current.signal,
+              });
+
+              const videoData = await videoRes.json();
+              const frames = Array.isArray(videoData?.frames) ? videoData.frames : [];
+              if (videoRes.ok && videoData?.success && frames.length > 0) {
+                setAiProcessStepsForChat((prev: AiProcessStep[]) => prev.map((step: AiProcessStep) => ({
+                  ...step,
+                  status: "done" as const,
+                })), submitConversationId);
+
+                const summaryMsg: Message = {
+                  id: `video-summary-${Date.now()}`,
+                  role: "assistant",
+                  content:
+                    videoData.summary ||
+                    `Preparé ${frames.length} fotogramas para representar el video solicitado.`,
+                  timestamp: new Date(),
+                  requestId: generateRequestId(),
+                  userMessageId: userMsgId,
+                  metadata: {
+                    videoStoryboard: true,
+                    plannerModel: videoData.plannerModel,
+                    frameCount: frames.length,
+                  },
+                };
+
+                const frameMessages: Message[] = frames.map((frame: any, index: number) => {
+                  const msgId = `video-frame-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`;
+                  if (typeof frame?.imageData === "string" && frame.imageData.length > 0) {
+                    storeGeneratedImage(msgId, frame.imageData);
+                    if (index === frames.length - 1) {
+                      storeLastGeneratedImageInfo({
+                        messageId: msgId,
+                        base64: frame.imageData,
+                        artifactId: null,
+                      });
+                    }
+                  }
+
+                  return {
+                    id: msgId,
+                    role: "assistant",
+                    content: frame?.caption || frame?.title || `Fotograma ${index + 1}`,
+                    generatedImage: frame?.imageData,
+                    timestamp: new Date(),
+                    requestId: generateRequestId(),
+                    userMessageId: userMsgId,
+                    metadata: {
+                      videoStoryboardFrame: true,
+                      frameIndex: frame?.index || index + 1,
+                      plannerModel: videoData.plannerModel,
+                      imageModel: frame?.model,
+                      framePrompt: frame?.prompt,
+                    },
+                  };
+                });
+
+                const allMessages = [summaryMsg, ...frameMessages];
+                setOptimisticMessages((prev: Message[]) => [...prev, ...allMessages]);
+                for (const message of allMessages) {
+                  void onSendMessage(message).catch((error) => {
+                    console.warn("[handleSubmit] Failed to persist video storyboard message:", error);
+                  });
+                }
+
+                setAiStateForChat("idle", submitConversationId);
+                setAiProcessStepsForChat([], submitConversationId);
+                setSelectedTool(null);
+                abortControllerRef.current = null;
+                void persistGenerationUserMessagePromise;
+                return;
+              }
+
+              throw new Error(videoData?.error || "No se pudieron generar fotogramas para el video");
+            } catch (videoError: any) {
+              if (videoError.name === "AbortError") {
+                setAiStateForChat("idle", submitConversationId);
+                setAiProcessStepsForChat([], submitConversationId);
+                abortControllerRef.current = null;
+                return;
+              }
+
+              console.error("[VideoGeneration] Failed:", videoError);
+              const errorMsg: Message = {
+                id: `video-error-${Date.now()}`,
+                role: "assistant",
+                content: "No pude generar los fotogramas del video en este intento. Vuelve a intentarlo.",
+                timestamp: new Date(),
+                requestId: generateRequestId(),
+                userMessageId: userMsgId,
+              };
+              setOptimisticMessages((prev: Message[]) => [...prev, errorMsg]);
+              void onSendMessage(errorMsg).catch((error) => {
+                console.warn("[handleSubmit] Failed to persist video error message:", error);
+              });
+              setAiStateForChat("idle", submitConversationId);
+              setAiProcessStepsForChat([], submitConversationId);
+              abortControllerRef.current = null;
+              return;
+            }
+          }
+
           // Only fetch image context if we have an edit pattern (not for generation-only requests)
           // This prevents misrouting generation requests like "agrega una conclusión" to image edit
           let lastImageBase64: string | null = null;
@@ -5436,6 +5583,103 @@ export function ChatInterface({
               { step: "Procesando edición de imagen", status: "active" },
               { step: "Editando imagen", status: "pending" }
             ], submitConversationId);
+          }
+
+          if (isImageGenerationRequest && !isImageEditRequest) {
+            setAiProcessStepsForChat([
+              { step: "Analizando tu descripción", status: "done" },
+              { step: "Generando imagen con IA", status: "active" },
+              { step: "Preparando vista previa", status: "pending" }
+            ], submitConversationId);
+
+            abortControllerRef.current = new AbortController();
+
+            try {
+              const imageRes = await apiFetch("/api/image/generate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ prompt: generationInput }),
+                signal: abortControllerRef.current.signal,
+              });
+
+              const imageData = await imageRes.json();
+              if (!imageRes.ok || !imageData?.success) {
+                throw new Error(imageData?.error || "Error al generar imagen");
+              }
+
+              const msgId = `generated-image-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+              storeGeneratedImage(msgId, imageData.imageData);
+              storeLastGeneratedImageInfo({
+                messageId: msgId,
+                base64: imageData.imageData,
+                artifactId: imageData.artifactId || null,
+                previewUrl: imageData.previewUrl,
+              });
+
+              const artifact = imageData.previewUrl
+                ? {
+                  artifactId: imageData.artifactId,
+                  type: "image" as const,
+                  name: imageData.fileName || "generated-image.png",
+                  mimeType: imageData.mimeType || "image/png",
+                  previewUrl: imageData.previewUrl,
+                  downloadUrl: imageData.downloadUrl || imageData.previewUrl,
+                  size: imageData.size,
+                }
+                : undefined;
+
+              const aiMsg: Message = {
+                id: msgId,
+                role: "assistant",
+                content: "Aquí está la imagen que generé basada en tu descripción:",
+                generatedImage: imageData.imageData,
+                artifact,
+                timestamp: new Date(),
+                requestId: generateRequestId(),
+                userMessageId: userMsgId,
+              };
+
+              setAiProcessStepsForChat((prev: AiProcessStep[]) => prev.map((step: AiProcessStep) => ({
+                ...step,
+                status: "done" as const,
+              })), submitConversationId);
+              setOptimisticMessages((prev: Message[]) => [...prev, aiMsg]);
+              void onSendMessage(aiMsg).catch((error) => {
+                console.warn("[handleSubmit] Failed to persist generated image message:", error);
+              });
+
+              setAiStateForChat("idle", submitConversationId);
+              setAiProcessStepsForChat([], submitConversationId);
+              setSelectedTool(null);
+              abortControllerRef.current = null;
+              void persistGenerationUserMessagePromise;
+              return;
+            } catch (imageError: any) {
+              if (imageError?.name === "AbortError") {
+                setAiStateForChat("idle", submitConversationId);
+                setAiProcessStepsForChat([], submitConversationId);
+                abortControllerRef.current = null;
+                return;
+              }
+
+              console.error("[ImageGeneration] Direct generation failed:", imageError);
+              const errorMsg: Message = {
+                id: `image-error-${Date.now()}`,
+                role: "assistant",
+                content: "No pude generar la imagen en este intento. Vuelve a intentarlo.",
+                timestamp: new Date(),
+                requestId: generateRequestId(),
+                userMessageId: userMsgId,
+              };
+              setOptimisticMessages((prev: Message[]) => [...prev, errorMsg]);
+              void onSendMessage(errorMsg).catch((error) => {
+                console.warn("[handleSubmit] Failed to persist image error message:", error);
+              });
+              setAiStateForChat("idle", submitConversationId);
+              setAiProcessStepsForChat([], submitConversationId);
+              abortControllerRef.current = null;
+              return;
+            }
           }
 
           // Direct call to /api/chat/stream for generation - REAL-TIME SSE
@@ -6046,7 +6290,8 @@ export function ChatInterface({
         }));
 
       // Compute prompt integrity metadata (SHA-256 hash + byte length)
-      const promptIntegrity = await computePromptIntegrity(userInput);
+      const promptIntegrityFallback = createPromptIntegrityFallback(userInput);
+      const promptIntegrityPromise = computePromptIntegrityWithBudget(userInput);
 
       // Construct the User Message object
       const userMsg: Message = {
@@ -6061,10 +6306,7 @@ export function ChatInterface({
         deliveryStatus: "sending",
         deliveryError: undefined,
         attachments: attachments.length > 0 ? attachments : undefined,
-        // Prompt integrity fields — server validates these to detect data loss
-        clientPromptLen: promptIntegrity.clientPromptLen,
-        clientPromptHash: promptIntegrity.clientPromptHash,
-        promptMessageId: promptIntegrity.messageId,
+        promptMessageId: promptIntegrityFallback.messageId,
       } as any;
 
       // Apply Optimistic Update IMMEDIATELY
@@ -6076,6 +6318,13 @@ export function ChatInterface({
             console.debug("[Perf] optimistic_render_ms", Math.max(0, performance.now() - optimisticStart).toFixed(1));
           });
         });
+      }
+
+      const promptIntegrity = await promptIntegrityPromise;
+      if (promptIntegrity) {
+        (userMsg as any).clientPromptLen = promptIntegrity.clientPromptLen;
+        (userMsg as any).clientPromptHash = promptIntegrity.clientPromptHash;
+        (userMsg as any).promptMessageId = promptIntegrity.messageId;
       }
 
       // Set initial AI state
@@ -6264,27 +6513,34 @@ export function ChatInterface({
         isDocumentFile(a.mimeType || a.type, a.name, a.type)
       );
 
-      // Send user message — await for NEW chats (need chatId), fire-and-forget for existing ones
+      // Persist the user message in the background.
+      // For a brand-new chat we can start streaming as soon as the provisional
+      // chatId propagates through React state; the stream route can create or
+      // resume the run idempotently from clientRequestId.
       let sendMessageAck: SendMessageAck | undefined;
+      let provisionalStreamChatId: string | null = null;
       try {
         const isNewChat = !chatId || chatId.startsWith("pending-");
-        console.log("[handleSubmit] ABOUT TO CALL onSendMessage", isNewChat ? "(await — new chat, need chatId)" : "(fire-and-forget)");
+        console.log(
+          "[handleSubmit] ABOUT TO CALL onSendMessage",
+          isNewChat ? "(parallel — new chat, stream uses provisional chatId)" : "(fire-and-forget)"
+        );
 
-        if (isNewChat) {
-          // NEW CHAT: We MUST await to get the real chatId from the server.
-          // Without this, the stream has no chatId and silently fails.
-          try {
-            sendMessageAck = await onSendMessage(userMsg);
-            console.log("[handleSubmit] onSendMessage resolved for new chat:", sendMessageAck?.chatId);
-          } catch (err) {
-            console.warn("[handleSubmit] Failed to persist new chat message:", err);
-          }
-        } else {
-          // EXISTING CHAT: Fire-and-forget for speed (chatId already known).
-          onSendMessage(userMsg).catch((err) => {
+        void onSendMessage(userMsg)
+          .then((ack) => {
+            sendMessageAck = ack;
+            if (isNewChat) {
+              console.log("[handleSubmit] onSendMessage resolved for new chat:", ack?.chatId);
+            }
+          })
+          .catch((err) => {
             console.warn("[handleSubmit] Failed to persist user message (will still attempt streaming):", err);
             return undefined;
           });
+
+        if (isNewChat) {
+          const pendingOrRealChatId = await waitForActiveChatId(150);
+          provisionalStreamChatId = pendingOrRealChatId ? resolveRealChatId(pendingOrRealChatId) : null;
         }
 
         // Start image detection early (runs in parallel with intent checks below).
@@ -6564,11 +6820,24 @@ export function ChatInterface({
                 setPendingGeneratedImage(pendingImage);
                 latestGeneratedImageRef.current = pendingImage;
 
+                const artifact = imageData.previewUrl
+                  ? {
+                    artifactId: imageData.artifactId,
+                    type: "image" as const,
+                    name: imageData.fileName || "generated-image.png",
+                    mimeType: imageData.mimeType || "image/png",
+                    previewUrl: imageData.previewUrl,
+                    downloadUrl: imageData.downloadUrl || imageData.previewUrl,
+                    size: imageData.size,
+                  }
+                  : undefined;
+
                 const aiMsg: Message = {
                   id: msgId,
                   role: "assistant",
                   content: "Aquí está la imagen que generé basada en tu descripción:",
                   generatedImage: imageData.imageData,
+                  artifact,
                   timestamp: new Date(),
                   requestId: generateRequestId(),
                   userMessageId: userMsgId,
@@ -6713,7 +6982,7 @@ IMPORTANTE:
             const streamRunContext = buildStreamRunContext(userMsg, sendMessageAck);
             const ackChatId = sendMessageAck?.chatId || sendMessageAck?.run?.chatId;
             const fallbackChatId: string | null =
-              ackChatId || latestChatIdRef.current || chatId || (await waitForActiveChatId());
+              ackChatId || provisionalStreamChatId || latestChatIdRef.current || chatId || (await waitForActiveChatId());
             const effectiveStreamChatId = resolveStreamChatId(sendMessageAck, fallbackChatId);
             if (!effectiveStreamChatId) {
               toast({
@@ -6982,6 +7251,43 @@ IMPORTANTE:
                     return;
                   }
 
+                  if (eventType === "agent_progress") {
+                    setAiStateForStream("agent_working");
+                    setAiProcessStepsForStream((prev: any[]) => {
+                      const stepId = String(data?.stepId || data?.id || `agent-${Date.now()}`);
+                      const nextStatus = data?.status === "completed" || data?.status === "failed" ? "done" : "active";
+                      const nextTitle = data?.message || "Ejecutando superagente";
+                      const nextDescription = data?.detail
+                        ? [
+                          data.detail?.complexity ? `Complejidad: ${data.detail.complexity}` : null,
+                          data.detail?.waveCount ? `${data.detail.waveCount} fases` : null,
+                          data.detail?.status ? `Estado: ${data.detail.status}` : null,
+                        ].filter(Boolean).join(" · ")
+                        : undefined;
+
+                      const nextStep = {
+                        id: stepId,
+                        step: stepId,
+                        title: nextTitle,
+                        status: nextStatus,
+                        description: nextDescription,
+                      };
+
+                      const existingIndex = prev.findIndex((step: any) => step.id === stepId);
+                      if (existingIndex === -1) {
+                        return [...prev, nextStep];
+                      }
+
+                      const updated = [...prev];
+                      updated[existingIndex] = {
+                        ...updated[existingIndex],
+                        ...nextStep,
+                      };
+                      return updated;
+                    });
+                    return;
+                  }
+
                   if (eventType === "context") {
                     setAiStateForStream("responding");
                     if (data?.isAgenticMode === true) {
@@ -7138,6 +7444,34 @@ IMPORTANTE:
                     uncertaintyReason: uncertainty?.reason,
                     artifact: data?.artifact || undefined,
                     webSources: data?.webSources || streamWebSources,
+                    agentRun: data?.agentRunId || data?.wasAgentTask
+                      ? {
+                        runId: data?.agentRunId || data?.agenticMetadata?.runId || null,
+                        status: data?.pipelineSuccess === false ? "failed" : "completed",
+                        userMessage: userInput,
+                        steps: Array.isArray(data?.agenticMetadata?.subtasks)
+                          ? data.agenticMetadata.subtasks.map((task: any, index: number) => ({
+                            stepIndex: index,
+                            toolName: String(task?.toolId || task?.lane || `task_${index + 1}`),
+                            status: String(task?.status || "completed"),
+                            output: task,
+                          }))
+                          : [],
+                        eventStream: [],
+                        summary: typeof data?.agenticMetadata?.summary === "string" ? data.agenticMetadata.summary : null,
+                        error: data?.pipelineSuccess === false ? "Superagente completado con incidencias." : null,
+                      }
+                      : undefined,
+                    metadata: {
+                      ...(data?.metadata || {}),
+                      ...(data?.agenticMetadata ? { agenticMetadata: data.agenticMetadata } : {}),
+                      ...(data?.wasAgentTask ? {
+                        wasAgentTask: true,
+                        agentRunId: data?.agentRunId || data?.agenticMetadata?.runId || null,
+                        pipelineSteps: data?.pipelineSteps || 0,
+                        pipelineSuccess: data?.pipelineSuccess !== false,
+                      } : {}),
+                    },
                   };
                 },
                 buildErrorMessage: (error, messageId) => ({
@@ -7469,6 +7803,7 @@ IMPORTANTE:
           isArchived={isArchived}
           isSidebarOpen={isSidebarOpen}
           onToggleSidebar={onToggleSidebar || (() => { })}
+          showSidebarToggleWhenCollapsed={showSidebarToggleWhenCollapsed}
           onNewChat={handleNewChat}
           onEditGpt={onEditGpt}
           onHideGptFromSidebar={onHideGptFromSidebar}

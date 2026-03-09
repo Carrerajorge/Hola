@@ -2,6 +2,7 @@ import path from "node:path";
 import { type Api, getEnvApiKey, type Model } from "@mariozechner/pi-ai";
 import { formatCliCommand } from "../cli/command-format.js";
 import type { OpenClawConfig } from "../config/config.js";
+import { normalizeResolvedSecretInputString } from "../config/types.secrets.js";
 import type { ModelProviderAuthMode, ModelProviderConfig } from "../config/types.js";
 import { getShellEnvAppliedKeys } from "../infra/shell-env.js";
 import {
@@ -17,6 +18,8 @@ import {
   resolveAuthStorePathForDisplay,
 } from "./auth-profiles.js";
 import { normalizeProviderId } from "./model-selection.js";
+
+
 
 export { ensureAuthProfileStore, resolveAuthProfileOrder } from "./auth-profiles.js";
 
@@ -52,7 +55,10 @@ export function getCustomProviderApiKey(
   provider: string,
 ): string | undefined {
   const entry = resolveProviderConfig(cfg, provider);
-  return normalizeOptionalSecretInput(entry?.apiKey);
+  return normalizeResolvedSecretInputString({
+    value: entry?.apiKey,
+    path: `models.providers.${provider}.apiKey`,
+  });
 }
 
 function resolveProviderAuthOverride(
@@ -264,11 +270,7 @@ export function resolveEnvApiKey(provider: string): EnvApiKeyResult | null {
   }
 
   if (normalized === "google-vertex") {
-    const envKey = getEnvApiKey(normalized);
-    if (!envKey) {
-      return null;
-    }
-    return { apiKey: envKey, source: "gcloud adc" };
+    return null;
   }
 
   if (normalized === "opencode") {
@@ -388,7 +390,7 @@ export function resolveModelAuthMode(
 }
 
 export async function getApiKeyForModel(params: {
-  model: Model<Api>;
+  model: { provider: string };
   cfg?: OpenClawConfig;
   profileId?: string;
   preferredProfile?: string;

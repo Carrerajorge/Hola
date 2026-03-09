@@ -35,6 +35,8 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 1
           persist-credentials: false
+          submodules: false
+          clean: true
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4

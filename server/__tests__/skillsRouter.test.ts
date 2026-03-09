@@ -86,10 +86,11 @@ describe("skillsRouter", () => {
       },
     ];
 
-    dbMock.select.mockImplementationOnce(() => ({
+    dbMock.select.mockImplementation(() => ({
       from: () => ({
         where: () => ({
           orderBy: async () => rows,
+          limit: async () => rows,
         }),
       }),
     }));
@@ -154,6 +155,49 @@ describe("skillsRouter", () => {
         skills: { foo: "bar", activeSkillId: "skill_active_2" },
       });
       expect(lastUpdatePatch?.updatedAt instanceof Date).toBe(true);
+    } finally {
+      await close();
+    }
+  });
+
+  it("PUT /api/skills/active stores activeSkillRef for built-in orchestrator skills", async () => {
+    dbMock.select.mockImplementationOnce(() => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => [{ preferences: { skills: {} } }],
+        }),
+      }),
+    }));
+    updateReturningQueue.push([{ id: "user_test" }]);
+
+    const app = await createTestApp();
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client
+        .put("/api/skills/active")
+        .send({
+          activeSkillId: "kubernetes-ops",
+          activeSkillRef: {
+            id: "kubernetes-ops",
+            name: "kubernetes-ops",
+            description: "Operacion de clusters",
+            category: "integrations",
+            builtIn: true,
+            enabled: true,
+            features: ["pod-health"],
+            triggers: ["k8s"],
+            runtimeTools: ["openclaw_clawi_exec"],
+          },
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.activeSkillId).toBe("kubernetes-ops");
+      expect(res.body.activeSkillRef.id).toBe("kubernetes-ops");
+      expect(lastUpdatePatch?.preferences.skills.activeSkillRef).toMatchObject({
+        id: "kubernetes-ops",
+        name: "kubernetes-ops",
+        builtIn: true,
+      });
     } finally {
       await close();
     }
