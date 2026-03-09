@@ -11,10 +11,13 @@
 
 # Node
 node_modules
+**/node_modules
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+**/.pnpm-store
+**/.npm
 
 # Build outputs
 dist
@@ -35,4 +38,21 @@ artifacts
 sandbox_workspace
 uploads
 tmp
+logs
 
+# Backups / archives / local junk that bloat VPS build contexts
+*.log
+*.tar
+*.tgz
+*.part.*
+*.bak
+*.bak.*
+*.backup
+*.backup.*
+._*
+.DS_Store
+dist.bad-*/
+dist.prev/
+dist-backup-*/
+Hola_wt_github
+*_backup_*/
