@@ -10,6 +10,7 @@ import { Router } from "express"; import { z } from "zod"; import { db } from ".
 } from "@shared/schema";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { validateBody } from "../middleware/validateRequest";
+import { getSecureUserId } from "../lib/anonUserHelper";
 import { getUserId } from "../types/express";
 import { isValidWorkspaceName, normalizeWorkspaceName } from "../services/workspaceValidation";
 import { createMagicLink, getMagicLinkUrl } from "../services/magicLink";
@@ -46,6 +47,13 @@ function toNumber(value: unknown): number {
     return Number.isFinite(n) ? n : 0;
   }
   return 0;
+}
+
+function normalizeAnalyticsMetadata(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
 }
 
 async function ensureWorkspace(orgId: string) {
@@ -1563,7 +1571,7 @@ export function createWorkspaceRouter() {
           sessionId: z.string().trim().min(1).max(200).optional(),
           page: z.string().trim().min(1).max(1000).optional(),
           action: z.string().trim().min(1).max(200).optional(),
-          metadata: z.record(z.any()).optional(),
+          metadata: z.unknown().optional(),
         })
         .refine((v) => (v.eventType === "page_view" ? !!v.page : !!v.action), {
           message: "Missing required fields for eventType",
@@ -1571,8 +1579,12 @@ export function createWorkspaceRouter() {
     ),
     async (req, res) => {
       try {
-        const userId = getUserId(req);
-        if (!userId) return res.status(401).json({ error: "Debes iniciar sesión" });
+        const userId = getSecureUserId(req);
+        const metadata = normalizeAnalyticsMetadata(req.body.metadata);
+        if (!userId || String(userId).startsWith("anon_")) {
+          console.warn("[Workspace] POST /analytics/track skipped for anonymous session");
+          return res.status(202).json({ ok: false, skipped: true });
+        }
 
         const ipAddress = req.ip || req.socket.remoteAddress;
         const userAgent = req.get("user-agent");
@@ -1589,7 +1601,7 @@ export function createWorkspaceRouter() {
             sessionId: req.body.sessionId,
             page: req.body.page,
             action: req.body.action,
-            metadata: req.body.metadata,
+            metadata,
           },
           ipAddress: Array.isArray(ipAddress) ? ipAddress[0] : ipAddress,
           userAgent,
@@ -1598,8 +1610,9 @@ export function createWorkspaceRouter() {
 
         res.json({ ok: true });
       } catch (e: any) {
-        console.error("[Workspace] POST /analytics/track error:", e);
-        res.status(500).json({ error: "No se pudo registrar el evento" });
+        // Workspace analytics is best-effort and must not surface as a user-facing error.
+        console.warn("[Workspace] POST /analytics/track skipped:", e?.message || e);
+        res.status(202).json({ ok: false, skipped: true });
       }
     }
   );

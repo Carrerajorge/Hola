@@ -1,4 +1,4 @@
-import { chromium, Browser, Page, BrowserContext, Request, Response } from "playwright";
+import type { Browser, BrowserContext, Page, Request, Response } from "playwright";
 import crypto from "crypto";
 import { 
   SessionConfig, 
@@ -12,6 +12,14 @@ import {
   SessionEventCallback,
   ComputerSession
 } from "./types";
+
+type PlaywrightChromium = typeof import("playwright")["chromium"];
+
+let chromiumPromise: Promise<PlaywrightChromium> | null = null;
+
+async function getChromium(): Promise<PlaywrightChromium> {
+  return (chromiumPromise ??= import("playwright").then((mod) => mod.chromium));
+}
 
 interface ActiveSession {
   id: string;
@@ -65,6 +73,7 @@ class BrowserSessionManager {
 
     const sessionConfig = { ...DEFAULT_SESSION_CONFIG, ...config };
     const sessionId = crypto.randomUUID();
+    const chromium = await getChromium();
 
     const browser = await chromium.launch({
       headless: true,

@@ -71,7 +71,6 @@ import { getUserId } from "./types/express";
 import { updateContext } from "./middleware/correlationContext";
 import { validateApiKey } from "./routes/apiKeysRouter";
 import { AppError } from "./utils/errors";
-import { AgentOS } from "./agentos/index";
 initTracing();
 
 const app = express();
@@ -192,7 +191,7 @@ export function log(message: string, source = "express") {
   Logger.info(`[${source}] ${message}`);
 }
 
-function startAgentOSKernel() {
+async function startAgentOSKernel() {
   const agentOSEnabled = process.env.AGENTOS_BOOT_ENABLED !== "false";
   if (!agentOSEnabled) {
     log("AgentOS kernel boot disabled via AGENTOS_BOOT_ENABLED=false", "agentos");
@@ -202,6 +201,7 @@ function startAgentOSKernel() {
   const timeoutMs = clampConfigNumber(process.env.AGENTOS_BOOT_TIMEOUT_MS, 15000, 1000, 120000);
 
   try {
+    const { AgentOS } = await import("./agentos/index");
     const agentOS = AgentOS.getInstance({
       mode: process.env.NODE_ENV === "production" ? "SAFE" : "SUPERVISED",
       workspaceRoot: process.env.OPENCLAW_WORKSPACE_ROOT || process.cwd(),
@@ -236,8 +236,6 @@ function startAgentOSKernel() {
 }
 
 (async () => {
-  startAgentOSKernel();
-
   const isProduction = process.env.NODE_ENV === "production";
   const isTest = process.env.NODE_ENV === "test";
   const startPythonService = process.env.START_PYTHON_SERVICE === "true";
@@ -256,6 +254,7 @@ function startAgentOSKernel() {
   // Verify database connection before starting (critical in production)
   log("Verifying database connection...");
   const dbConnected = await verifyDatabaseConnection();
+  log(`Database verification completed: ${dbConnected ? "connected" : "not connected"}`);
 
   if (!dbConnected && isProduction) {
     log("[FATAL] Cannot start production server without database connection");
@@ -268,16 +267,22 @@ function startAgentOSKernel() {
     log("Database health checks started");
 
     // Setup Full-Text Search
+    log("Initializing full-text search...");
     const { setupFts } = await import("./lib/fts");
     await setupFts();
+    log("Full-text search initialized");
 
     // Initialize CQRS admin projection (subscribes to auth events, refreshes materialized view)
+    log("Initializing admin projection...");
     const { initAdminProjection } = await import("./services/adminProjection");
     initAdminProjection();
+    log("Admin projection initialized");
 
     // Start background ActionTriggerDaemon
+    log("Starting ActionTriggerDaemon...");
     const { actionTriggerDaemon } = await import("./services/actionTriggerDaemon");
     await actionTriggerDaemon.start();
+    log("ActionTriggerDaemon started");
   } else {
     log("[WARNING] Database connection failed - some features may not work");
   }
@@ -285,8 +290,10 @@ function startAgentOSKernel() {
   // Initialize connector manifests + mount connector tools/policies.
   // This enables "Apps" (Slack/Notion/GitHub/etc) tool wiring via the Integration Kernel.
   try {
+    log("Initializing connector manifests...");
     const { initializeConnectorManifests, mountConnectorTools } = await import("./integrations/kernel");
     await initializeConnectorManifests();
+    log("Connector manifests initialized");
     await mountConnectorTools();
     log("Connector manifests initialized and tools mounted", "integrations");
   } catch (err: any) {
@@ -296,6 +303,7 @@ function startAgentOSKernel() {
   // Verify LLM connectivity in production
   if (isProduction) {
     try {
+      log("Running LLM health checks...");
       const { llmGateway } = await import("./lib/llmGateway");
       const llmHealth = await llmGateway.healthCheck();
       if (llmHealth.xai?.available) {
@@ -313,7 +321,9 @@ function startAgentOSKernel() {
   }
 
   // Session + Passport (must be before csrfProtection/rateLimiter/idempotency)
+  log("Setting up auth middleware...");
   await setupAuth(app);
+  log("Auth middleware ready");
   // Ensure CorrelationContext has the authenticated userId (req.user can be populated by Passport/session).
   // Also bind the session to the authenticated userId for simpler secure queries later.
   app.use((req, _res, next) => {
@@ -329,7 +339,9 @@ function startAgentOSKernel() {
     next();
   });
 
+  log("Registering auth routes...");
   registerAuthRoutes(app);
+  log("Auth routes registered");
 
   // Capture best-effort device metadata for session management UI.
   app.use("/api", sessionDeviceInfoMiddleware);
@@ -394,14 +406,19 @@ function startAgentOSKernel() {
   // Idempotency for mutations
   app.use("/api", idempotency);
 
+  log("Importing application routes...");
   const { registerRoutes } = await import("./routes");
+  log("Registering application routes...");
   await registerRoutes(httpServer, app);
+  log("Application routes registered");
 
   // Initialize OpenClaw agentic integration layer (feature-flagged).
   // Fail-open: channel mirror/chat must keep working even if OpenClaw has a runtime issue.
   try {
+    log("Initializing OpenClaw...");
     const { initializeOpenClaw } = await import("./openclaw/index");
     await initializeOpenClaw(httpServer);
+    log("OpenClaw initialized");
   } catch (error) {
     log(`[OpenClaw] initialization skipped after error: ${String((error as Error)?.message || error)}`);
   }
@@ -443,11 +460,18 @@ function startAgentOSKernel() {
     ? ({ port, host: "0.0.0.0", reusePort: true } as const)
     : port;
 
+  log(`Starting HTTP server bind on port ${port}...`);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const server = (httpServer.listen as any)(listenOptions, async () => {
     log(`serving on port ${port}`);
     log(`Environment: ${isProduction ? "PRODUCTION" : "development"}`);
     log(`Database: ${dbConnected ? "connected" : "NOT CONNECTED"}`);
+
+    // Keep boot probes cheap; AgentOS can come up after HTTP starts serving.
+    setImmediate(() => {
+      void startAgentOSKernel();
+    });
+
     startAggregator();
     await seedProductionData();
     if (dbConnected) {

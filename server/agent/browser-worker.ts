@@ -1,5 +1,13 @@
-import { chromium, Browser, Page, BrowserContext } from "playwright";
+import type { Browser, BrowserContext, Page } from "playwright";
 import crypto from "crypto";
+
+type PlaywrightChromium = typeof import("playwright")["chromium"];
+
+let chromiumPromise: Promise<PlaywrightChromium> | null = null;
+
+async function getChromium(): Promise<PlaywrightChromium> {
+  return (chromiumPromise ??= import("playwright").then((mod) => mod.chromium));
+}
 
 export interface BrowserSession {
   id: string;
@@ -43,6 +51,7 @@ class BrowserWorker {
     if (this.browser) return;
     
     try {
+      const chromium = await getChromium();
       this.browser = await chromium.launch({
         headless: true,
         args: [
