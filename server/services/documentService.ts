@@ -65,9 +65,9 @@ export type DocumentType = z.infer<typeof DocumentTypeSchema>;
 export const DocumentRenderRequestSchema = z.object({
   templateId: z.string().min(1, "Template ID is required"),
   type: DocumentTypeSchema,
-  data: z.record(z.any()),
+  data: z.record(z.string(), z.any()),
   locale: z.string().max(16).optional(),
-  designTokens: z.record(z.any()).optional(),
+  designTokens: z.record(z.string(), z.any()).optional(),
   options: z.object({
     format: z.enum(["A4", "Letter", "Legal", "Tabloid", "A3", "A5"]).optional(),
     landscape: z.boolean().optional(),
@@ -84,7 +84,7 @@ export const DocumentRenderRequestSchema = z.object({
     .object({
       id: z.string().optional(),
       name: z.string().optional(),
-      tokens: z.record(z.any()).optional(),
+      tokens: z.record(z.string(), z.any()).optional(),
     })
     .optional(),
   assets: z

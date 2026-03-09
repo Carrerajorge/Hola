@@ -87,7 +87,7 @@ export const MultiIntentResultSchema = z.object({
 export const CompoundPlanStepSchema = z.object({
   type: z.enum(["WEB_RESEARCH", "EVIDENCE_BUILD", "OUTLINE", "DRAFT_SECTIONS", "FACT_VERIFY", "RENDER_DOCX"]),
   query: z.string().optional(),
-  constraints: z.record(z.any()).optional(),
+  constraints: z.record(z.string(), z.any()).optional(),
   min_sources: z.number().optional(),
   dedupe: z.boolean().optional(),
   rank: z.string().optional(),
@@ -192,7 +192,7 @@ export const PlanConstraintsSchema = z.object({
 export const FullPlanStepSchema = z.object({
   id: z.string(),
   intent: IntentTypeSchema,
-  slots: z.record(z.unknown()),
+  slots: z.record(z.string(), z.unknown()),
   output_format: OutputFormatSchema,
   constraints: StepConstraintsSchema,
   depends_on: z.array(z.string()),

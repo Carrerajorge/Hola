@@ -36,7 +36,7 @@ const envSchema = z.object({
     GOOGLE_CLIENT_SECRET: z.string().optional(),
 
     // Server config
-    PORT: z.string().transform(Number).default('5000'),
+    PORT: z.coerce.number().default(5000),
     LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 });
 

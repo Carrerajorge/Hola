@@ -73,8 +73,9 @@ describe("OpenClawTaskRuntime", () => {
         payload: { kind: "agentTurn", message: "chequear sitio" },
       });
 
-      await new Promise((resolve) => setTimeout(resolve, 90));
-      expect(spawn.mock.calls.length).toBeGreaterThanOrEqual(1);
+      await vi.waitFor(() => {
+        expect(spawn.mock.calls.length).toBeGreaterThanOrEqual(1);
+      }, { timeout: 500, interval: 20 });
     } finally {
       runtime.stop();
     }

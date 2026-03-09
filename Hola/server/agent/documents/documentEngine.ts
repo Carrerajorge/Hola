@@ -12,7 +12,12 @@
  *   5. Validator → verify output quality
  */
 
+/* eslint-disable no-control-regex, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
+
 import { z } from "zod";
+
+const withObjectDefaults = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((value) => value ?? {}, schema);
 
 /* ================================================================== */
 /*  SECURITY HELPERS                                                   */
@@ -111,7 +116,7 @@ function safeColor(color: string | undefined | null, fallback: string = "#000000
 export const DesignTokensSchema = z.object({
   version: z.string().default("1.0.0"),
   name: z.string().default("default"),
-  font: z.object({
+  font: withObjectDefaults(z.object({
     heading: z.string().max(100).regex(/^[a-zA-Z0-9\s\-_.]+$/).default("Calibri"),
     body: z.string().max(100).regex(/^[a-zA-Z0-9\s\-_.]+$/).default("Calibri"),
     mono: z.string().max(100).regex(/^[a-zA-Z0-9\s\-_.]+$/).default("Consolas"),
@@ -123,8 +128,8 @@ export const DesignTokensSchema = z.object({
     sizeCaption: z.number().min(1).max(72).default(10),
     sizeMin: z.number().min(1).max(50).default(8),
     lineHeight: z.number().min(0.5).max(5).default(1.15),
-  }).default({}),
-  color: z.object({
+  })),
+  color: withObjectDefaults(z.object({
     primary: z.string().default("#1a73e8"),
     secondary: z.string().default("#34a853"),
     accent: z.string().default("#ea4335"),
@@ -145,16 +150,16 @@ export const DesignTokensSchema = z.object({
     priorityHigh: z.string().default("#FEEBC8"),
     priorityMedium: z.string().default("#C6F6D5"),
     priorityLow: z.string().default("#E2E8F0"),
-  }).default({}),
-  spacing: z.object({
+  })),
+  spacing: withObjectDefaults(z.object({
     xs: z.number().default(4),
     sm: z.number().default(8),
     md: z.number().default(16),
     lg: z.number().default(24),
     xl: z.number().default(32),
     xxl: z.number().default(48),
-  }).default({}),
-  layout: z.object({
+  })),
+  layout: withObjectDefaults(z.object({
     slideWidth: z.number().min(1).max(50).default(10),      // inches
     slideHeight: z.number().min(1).max(50).default(5.625),  // 16:9 widescreen default
     marginTop: z.number().min(0).max(5).default(0.5),
@@ -164,28 +169,28 @@ export const DesignTokensSchema = z.object({
     gridColumns: z.number().int().min(1).max(24).default(12),
     pageWidth: z.number().min(1).max(50).default(8.5),      // DOCX letter width inches
     pageHeight: z.number().min(1).max(50).default(11),      // DOCX letter height inches
-  }).default({}),
-  border: z.object({
+  })),
+  border: withObjectDefaults(z.object({
     radiusSm: z.number().default(2),
     radiusMd: z.number().default(4),
     radiusLg: z.number().default(8),
     widthThin: z.number().default(1),
     widthMedium: z.number().default(2),
-  }).default({}),
-  shadow: z.object({
-    sm: z.object({
+  })),
+  shadow: withObjectDefaults(z.object({
+    sm: withObjectDefaults(z.object({
       offsetX: z.number().default(1),
       offsetY: z.number().default(1),
       blur: z.number().default(2),
       color: z.string().default("00000033"),
-    }).default({}),
-    md: z.object({
+    })),
+    md: withObjectDefaults(z.object({
       offsetX: z.number().default(2),
       offsetY: z.number().default(2),
       blur: z.number().default(6),
       color: z.string().default("00000040"),
-    }).default({}),
-  }).default({}),
+    })),
+  })),
 });
 export type DesignTokens = z.infer<typeof DesignTokensSchema>;
 
@@ -196,7 +201,7 @@ export type DesignTokens = z.infer<typeof DesignTokensSchema>;
 export const SlideComponentSchema = z.object({
   type: z.enum(["title", "subtitle", "body", "bullets", "image", "chart", "table", "shape", "footer", "pageNumber"]),
   content: z.any(),
-  style: z.record(z.any()).optional(),
+  style: z.record(z.string(), z.any()).optional(),
   position: z.object({
     x: z.number().optional(),
     y: z.number().optional(),
@@ -217,9 +222,9 @@ export const PresentationSpecSchema = z.object({
   title: z.string(),
   author: z.string().optional(),
   subject: z.string().optional(),
-  theme: DesignTokensSchema.default({}),
+  theme: withObjectDefaults(DesignTokensSchema),
   slides: z.array(SlideSpecSchema),
-  metadata: z.record(z.union([z.string().max(1000), z.number(), z.boolean(), z.null()])).optional(),
+  metadata: z.record(z.string(), z.union([z.string().max(1000), z.number(), z.boolean(), z.null()])).optional(),
 });
 export type PresentationSpec = z.infer<typeof PresentationSpecSchema>;
 
@@ -231,7 +236,7 @@ export const DocSectionSchema = z.object({
   type: z.enum(["heading", "paragraph", "bullets", "numberedList", "table", "image", "pageBreak", "toc", "quote", "code"]),
   level: z.number().int().min(1).max(6).optional(),
   content: z.any(),
-  style: z.record(z.any()).optional(),
+  style: z.record(z.string(), z.any()).optional(),
 });
 
 export const DocumentSpecSchema = z.object({
@@ -239,11 +244,11 @@ export const DocumentSpecSchema = z.object({
   title: z.string(),
   author: z.string().optional(),
   subject: z.string().optional(),
-  theme: DesignTokensSchema.default({}),
+  theme: withObjectDefaults(DesignTokensSchema),
   sections: z.array(DocSectionSchema),
   header: z.string().optional(),
   footer: z.string().optional(),
-  metadata: z.record(z.union([z.string().max(1000), z.number(), z.boolean(), z.null()])).optional(),
+  metadata: z.record(z.string(), z.union([z.string().max(1000), z.number(), z.boolean(), z.null()])).optional(),
 });
 export type DocumentSpec = z.infer<typeof DocumentSpecSchema>;
 
@@ -269,7 +274,7 @@ export const ColumnDefSchema = z.object({
 export const SheetSpecSchema = z.object({
   name: z.string(),
   columns: z.array(ColumnDefSchema),
-  rows: z.array(z.record(z.any())),
+  rows: z.array(z.record(z.string(), z.any())),
   formulas: z.array(z.object({
     cell: z.string(),
     formula: z.string(),
@@ -284,9 +289,9 @@ export const WorkbookSpecSchema = z.object({
   format: z.literal("xlsx"),
   title: z.string(),
   author: z.string().optional(),
-  theme: DesignTokensSchema.default({}),
+  theme: withObjectDefaults(DesignTokensSchema),
   sheets: z.array(SheetSpecSchema),
-  metadata: z.record(z.union([z.string().max(1000), z.number(), z.boolean(), z.null()])).optional(),
+  metadata: z.record(z.string(), z.union([z.string().max(1000), z.number(), z.boolean(), z.null()])).optional(),
 });
 export type WorkbookSpec = z.infer<typeof WorkbookSpecSchema>;
 

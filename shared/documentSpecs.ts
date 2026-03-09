@@ -22,7 +22,10 @@ export const tableSpecSchema = z.object({
   table_style: z.string().default("TableStyleMedium9").describe("Excel table style name (OpenXML)"),
   column_formats: z.record(z.string(), z.string()).default({}).describe("Map header -> Excel number format"),
   formulas: z.record(z.string(), z.string()).default({}).describe("Map header -> formula template with {row} placeholder, e.g. {'Total': '=B{row}*C{row}'}"),
-  header_style: headerStyleSchema.default({}).describe("Styling for header row"),
+  header_style: z.preprocess(
+    (value) => value ?? {},
+    headerStyleSchema,
+  ).describe("Styling for header row"),
   autofilter: z.boolean().default(true),
   freeze_header: z.boolean().default(true),
 });
@@ -52,7 +55,7 @@ export const sheetSpecSchema = z.object({
   name: z.string().min(1).max(31),
   tables: z.array(tableSpecSchema).default([]),
   charts: z.array(chartSpecSchema).default([]),
-  layout: sheetLayoutSpecSchema.default({}),
+  layout: z.preprocess((value) => value ?? {}, sheetLayoutSpecSchema),
 });
 
 export type SheetSpec = z.infer<typeof sheetSpecSchema>;
@@ -405,7 +408,7 @@ export const cvSpecSchema = z.object({
   certifications: z.array(cvCertificationSchema).default([]),
   projects: z.array(cvProjectSchema).default([]),
   template_style: z.enum(["modern", "classic", "creative", "minimalist"]).default("modern"),
-  color_scheme: cvColorSchemeSchema.default({}),
+  color_scheme: z.preprocess((value) => value ?? {}, cvColorSchemeSchema),
 });
 
 export type CvSpec = z.infer<typeof cvSpecSchema>;

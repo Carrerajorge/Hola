@@ -184,7 +184,7 @@ export const FilterConfigSchema = z.object({
 
 export const TableConfigSchema = z.object({
   columns: z.array(ColumnDefSchema),
-  data: z.array(z.record(z.any())),
+  data: z.array(z.record(z.string(), z.any())),
   
   pageSize: z.number().optional(),
   serverSide: z.boolean().optional(),

@@ -1,6 +1,16 @@
 import { z } from "zod";
 
 const MIME_TYPE_REGEX = /^[a-z]+\/[a-z0-9\-\+\.]+$/i;
+const withObjectDefaults = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((value) => value ?? {}, schema);
+const ATTACHMENT_TYPES = ["document", "image", "file"] as const;
+type AttachmentType = (typeof ATTACHMENT_TYPES)[number];
+const AttachmentTypeSchema = z.string()
+  .refine(
+    (value): value is AttachmentType => ATTACHMENT_TYPES.includes(value as AttachmentType),
+    { message: "Attachment type must be 'document', 'image', or 'file'" }
+  )
+  .transform((value) => value as AttachmentType);
 
 export const MessageSchema = z.object({
   role: z.enum(["user", "assistant", "system"]),
@@ -10,9 +20,7 @@ export const MessageSchema = z.object({
 export const AttachmentSchema = z.object({
   name: z.string().min(1, "Attachment name is required").max(255, "Attachment name exceeds 255 characters"),
   mimeType: z.string().regex(MIME_TYPE_REGEX, "Invalid mimeType format (expected: type/subtype)"),
-  type: z.enum(["document", "image", "file"], {
-    errorMap: () => ({ message: "Attachment type must be 'document', 'image', or 'file'" }),
-  }),
+  type: AttachmentTypeSchema,
   content: z.string().optional(),
   url: z.string().url("Invalid URL format").optional(),
   size: z.number().int("Size must be an integer").positive("Size must be positive").optional(),
@@ -50,7 +58,7 @@ export const ChatRequestSchema = z.object({
     z.array(z.string()).optional()
   ),
   useRag: z.boolean().optional(),
-  gptConfig: z.record(z.any()).optional(),
+  gptConfig: z.record(z.string(), z.any()).optional(),
   documentMode: z.boolean().optional(),
   figmaMode: z.boolean().optional(),
   provider: z.string().optional(),
@@ -58,37 +66,37 @@ export const ChatRequestSchema = z.object({
 });
 
 export const TypeLimitsSchema = z.object({
-  pdf: z.object({
+  pdf: withObjectDefaults(z.object({
     maxPages: z.number().int().positive().default(500),
     maxSizeBytes: z.number().int().positive().default(50 * 1024 * 1024),
-  }).default({}),
-  xlsx: z.object({
+  })),
+  xlsx: withObjectDefaults(z.object({
     maxRows: z.number().int().positive().default(100000),
     maxCells: z.number().int().positive().default(1000000),
     maxSheets: z.number().int().positive().default(50),
     maxSizeBytes: z.number().int().positive().default(50 * 1024 * 1024),
-  }).default({}),
-  csv: z.object({
+  })),
+  csv: withObjectDefaults(z.object({
     maxRows: z.number().int().positive().default(100000),
     maxColumns: z.number().int().positive().default(1000),
     maxSizeBytes: z.number().int().positive().default(50 * 1024 * 1024),
-  }).default({}),
-  pptx: z.object({
+  })),
+  pptx: withObjectDefaults(z.object({
     maxSlides: z.number().int().positive().default(200),
     maxSizeBytes: z.number().int().positive().default(100 * 1024 * 1024),
-  }).default({}),
-  docx: z.object({
+  })),
+  docx: withObjectDefaults(z.object({
     maxPages: z.number().int().positive().default(500),
     maxSizeBytes: z.number().int().positive().default(50 * 1024 * 1024),
-  }).default({}),
-  txt: z.object({
+  })),
+  txt: withObjectDefaults(z.object({
     maxLines: z.number().int().positive().default(100000),
     maxSizeBytes: z.number().int().positive().default(10 * 1024 * 1024),
-  }).default({}),
-  json: z.object({
+  })),
+  json: withObjectDefaults(z.object({
     maxSizeBytes: z.number().int().positive().default(10 * 1024 * 1024),
     maxDepth: z.number().int().positive().default(50),
-  }).default({}),
+  })),
 });
 
 export type Message = z.infer<typeof MessageSchema>;
@@ -114,7 +122,7 @@ export interface ValidationResult<T> {
 }
 
 export function formatZodErrors(error: z.ZodError): ValidationFieldError[] {
-  return error.errors.map((err) => ({
+  return error.issues.map((err) => ({
     path: err.path.join("."),
     message: err.message,
     code: err.code,
