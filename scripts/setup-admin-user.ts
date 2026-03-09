@@ -1,12 +1,12 @@
 import { db } from "../server/db";
 import { users } from "@shared/schema";
 import { eq } from "drizzle-orm";
-import bcrypt from "bcrypt";
+import { hashPassword } from "../server/utils/password";
 
 async function ensureUser() {
     const email = "admin@gmail.com";
     const password = "123456";
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await hashPassword(password);
 
     try {
         const existing = await db.select().from(users).where(eq(users.email, email));
