@@ -41,15 +41,63 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
+          {
+            echo "Host *"
+            echo "  StrictHostKeyChecking accept-new"
+            echo "  PubkeyAcceptedKeyTypes +ssh-rsa"
+            echo "  HostKeyAlgorithms +ssh-rsa"
+          } > ~/.ssh/config
+          chmod 600 ~/.ssh/config
+
+      - name: Resolve reachable deploy endpoint
+        id: target
+        run: |
+          set -euo pipefail
+          DEFAULT_HOST="69.62.98.126"
+          HOSTS=()
+          if [ -n "${{ secrets.VPS_HOST }}" ]; then HOSTS+=("${{ secrets.VPS_HOST }}"); fi
+          HOSTS+=("${VPS_HOST}" "${DEFAULT_HOST}")
+          PORTS=("${VPS_PORT}" "8022" "22" "2222")
+
+          mapfile -t uniq_hosts < <(printf "%s\n" "${HOSTS[@]}" | awk 'NF' | awk '!seen[$0]++')
+          mapfile -t uniq_ports < <(printf "%s\n" "${PORTS[@]}" | awk 'NF' | awk '!seen[$0]++')
+
+          for host in "${uniq_hosts[@]}"; do
+            for port in "${uniq_ports[@]}"; do
+              echo "Trying ${VPS_USER}@${host}:${port}..."
+              ssh-keyscan -p "$port" -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
+              ssh_probe_opts=(
+                -i ~/.ssh/deploy_key
+                -p "$port"
+                -o StrictHostKeyChecking=accept-new
+                -o BatchMode=yes
+                -o ConnectTimeout=8
+                -o PubkeyAcceptedAlgorithms=+ssh-rsa
+                -o HostKeyAlgorithms=+ssh-rsa
+              )
+              if ssh "${ssh_probe_opts[@]}" -4 "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1 || \
+                 ssh "${ssh_probe_opts[@]}" "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1; then
+                echo "host=${host}" >> "$GITHUB_OUTPUT"
+                echo "port=${port}" >> "$GITHUB_OUTPUT"
+                echo "✓ Selected endpoint ${host}:${port}"
+                exit 0
+              fi
+            done
+          done
+
+          echo "::error::No reachable VPS endpoint found (hosts: ${uniq_hosts[*]} | ports: ${uniq_ports[*]})"
+          exit 1
 
       - name: Restart active slot
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} \
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }} \
             -o StrictHostKeyChecking=accept-new \
             -o ConnectTimeout=15 \
             -o ServerAliveInterval=30 \
-            ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << 'ENDSSH'
+            -o PubkeyAcceptedAlgorithms=+ssh-rsa \
+            -o HostKeyAlgorithms=+ssh-rsa \
+            ${{ env.VPS_USER }}@${{ steps.target.outputs.host }} << 'ENDSSH'
           set -euo pipefail
           DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
           STATE_FILE="${DEPLOY_PATH}/deploy-state.json"
