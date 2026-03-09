@@ -1,3 +1,4 @@
+import { AgentOS } from "../agentos";
 import { z } from "zod";
 import type { Response } from "express";
 import { toolRegistry, type ToolContext, type ToolResult } from "./toolRegistry";
@@ -110,6 +111,13 @@ const LOCAL_FILESYSTEM_SIGNAL_REGEX =
 const SKILL_SIGNAL_REGEX = /\b(skill|skills|habilidad|habilidades)\b|\$[a-z0-9_-]{2,80}/i;
 const LANDING_PAGE_SIGNAL_REGEX =
   /\b(landing\s+page|p[aá]gina\s+de\s+aterrizaje|p[aá]gina\s+web|sitio\s+web|website|landing)\b/i;
+const SIMPLE_TABLE_REQUEST_REGEX =
+  /\b(?:crea|crear|genera|generar|haz|hacer|dame|arma|construye)\b.*\b(?:tabla|table)\b/i;
+const EXPLICIT_ARTIFACT_OUTPUT_REGEX =
+  /\b(?:excel|xlsx|spreadsheet|hoja\s+de\s+c[aá]lculo|csv|archivo|file|descarga|download|exporta|exportar)\b/i;
+const WEB_RESEARCH_SIGNAL_REGEX =
+  /\b(?:busca|buscar|investiga|investigar|research|search|fuentes?|source|sources|cita|citas|citation|citations|referencias?|reference|references|web|internet|sitio|url|link|enlace|actualizado|actualizada|latest|noticias?)\b/i;
+const EXPLICIT_URL_SIGNAL_REGEX = /\b(?:https?:\/\/|www\.)\S+/i;
 
 function normalizeWorkspaceSubdir(value: string | null | undefined): string {
   const raw = String(value || ".").trim().replace(/\\/g, "/");
@@ -510,6 +518,14 @@ function withToolSubset(tools: FunctionDeclaration[], names: string[]): Function
   return tools.filter((tool) => allowed.has(tool.name));
 }
 
+function shouldPreferInlineTableFlow(rawPrompt = ""): boolean {
+  return SIMPLE_TABLE_REQUEST_REGEX.test(rawPrompt) && !EXPLICIT_ARTIFACT_OUTPUT_REGEX.test(rawPrompt);
+}
+
+function shouldIncludeWebResearchTools(rawPrompt = ""): boolean {
+  return EXPLICIT_URL_SIGNAL_REGEX.test(rawPrompt) || WEB_RESEARCH_SIGNAL_REGEX.test(rawPrompt);
+}
+
 function getToolsForIntent(
   intent: string,
   accessLevel: 'owner' | 'trusted' | 'unknown' = 'owner',
@@ -518,28 +534,44 @@ function getToolsForIntent(
   const toolPool = [...AGENT_TOOLS, ...getRelevantDynamicSkillTools(rawPrompt)];
   let matchedTools = toolPool;
 
-  switch (intent) {
-    case "research":
-      matchedTools = withToolSubset(toolPool, ["web_search", "fetch_url", "memory_search", "openclaw_rag_search"]);
-      break;
-    case "presentation_creation":
-      matchedTools = withToolSubset(toolPool, ["create_presentation", "web_search", "fetch_url"]);
-      break;
-    case "document_generation":
-      matchedTools = withToolSubset(toolPool, ["create_document", "web_search", "fetch_url", "memory_search"]);
-      break;
-    case "spreadsheet_creation":
-      matchedTools = withToolSubset(toolPool, ["create_spreadsheet", "analyze_data", "generate_chart"]);
-      break;
-    case "data_analysis":
-      matchedTools = withToolSubset(toolPool, ["analyze_data", "generate_chart", "create_spreadsheet", "read_file"]);
-      break;
-    case "web_automation":
-      matchedTools = withToolSubset(toolPool, ["web_search", "fetch_url", "browse_and_act"]);
-      break;
-    default:
-      matchedTools = toolPool;
-      break;
+  if (shouldPreferInlineTableFlow(rawPrompt)) {
+    matchedTools = withToolSubset(toolPool, ["create_spreadsheet", "analyze_data", "generate_chart"]);
+  } else {
+    const includeWebResearchTools = shouldIncludeWebResearchTools(rawPrompt);
+
+    switch (intent) {
+      case "research":
+        matchedTools = withToolSubset(toolPool, ["web_search", "fetch_url", "memory_search", "openclaw_rag_search"]);
+        break;
+      case "presentation_creation":
+        matchedTools = withToolSubset(
+          toolPool,
+          includeWebResearchTools
+            ? ["create_presentation", "web_search", "fetch_url"]
+            : ["create_presentation"],
+        );
+        break;
+      case "document_generation":
+        matchedTools = withToolSubset(
+          toolPool,
+          includeWebResearchTools
+            ? ["create_document", "web_search", "fetch_url", "memory_search"]
+            : ["create_document", "memory_search"],
+        );
+        break;
+      case "spreadsheet_creation":
+        matchedTools = withToolSubset(toolPool, ["create_spreadsheet", "analyze_data", "generate_chart"]);
+        break;
+      case "data_analysis":
+        matchedTools = withToolSubset(toolPool, ["analyze_data", "generate_chart", "create_spreadsheet", "read_file"]);
+        break;
+      case "web_automation":
+        matchedTools = withToolSubset(toolPool, ["web_search", "fetch_url", "browse_and_act"]);
+        break;
+      default:
+        matchedTools = toolPool;
+        break;
+    }
   }
 
   // For local computer/folder requests, force local read-only tools into the set.
@@ -589,6 +621,56 @@ async function executeToolCall(
   preExtractedReservation?: ReservationDetails
 ): Promise<{ result: any; artifact?: { type: string; url: string; name: string } }> {
   console.log(`[AgentExecutor] Executing tool: ${toolName}`, args);
+
+  // [AgentOS] Intercept High-Risk Tools
+  try {
+    const agentOS = AgentOS.getInstance();
+    if (agentOS.status === "ready") {
+      let targetTool = toolName;
+      let targetArgs = args;
+
+      // Mapping logic (legacy -> action plane)
+      if (toolName === "read_file") {
+          targetTool = "file_read";
+          targetArgs = { path: args.path || args.filepath };
+      } else if (toolName === "run_command" || toolName === "terminal.exec") {
+          targetTool = "terminal_exec";
+      }
+
+      // Intercept known migrated tools
+      if (targetTool === "terminal_exec" || targetTool === "file_read") {
+         console.log(`[AgentOS] Intercepting tool ${toolName} -> ActionPlane.${targetTool}`);
+         
+         await emitTraceEvent(runId, "tool_call_started", {
+            toolCall: {
+                id: randomUUID(),
+                name: toolName,
+                input: args,
+                status: "running"
+            }
+         });
+
+         const actionResult = await agentOS.action.execute(targetTool, targetArgs, { userId: context.userId, role: "operator" });
+         
+         await emitTraceEvent(runId, "tool_call_succeeded", {
+            toolCall: {
+                id: randomUUID(),
+                name: toolName,
+                input: args,
+                output: actionResult.data,
+                status: "completed",
+                durationMs: actionResult.duration
+            }
+         });
+         return { result: actionResult.data };
+      }
+    }
+  } catch (osError: any) {
+      console.warn(`[AgentOS] Action Interception Failed: ${osError.message}. Falling back/Erroring.`);
+      if (osError.message.includes("blocked by Policy")) {
+          return { result: { error: osError.message } };
+      }
+  }
 
   await emitTraceEvent(runId, "tool_call_started", {
     toolCall: {

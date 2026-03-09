@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback } from "react";
 import { useLocation } from "wouter";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -60,35 +61,69 @@ import {
   Pause,
   Settings2,
   BookOpen,
-  Speaker, Music, FileText, LayoutTemplate, MessageSquare, ListTodo, Frame, Phone, Cloud, Box, Server, CheckSquare, RefreshCcw, UploadCloud, Paintbrush, GitBranch, AlertTriangle, Activity, ShieldAlert, CreditCard, Send, Mail, Briefcase, Users, Ticket, ZoomIn, Video, Globe, Calendar, FormInput, LineChart, PieChart, TrendingUp, BarChart2, Layers, Database, Lock, Search, List, ArrowRight, ArrowRightCircle, Anchor, PlayCircle, FastForward, Cpu, Compass, HardDrive, Wifi, Eye, Edit3, Shield, Bug,
-
+  Speaker,
+  Music,
+  LayoutTemplate,
+  MessageSquare,
+  ListTodo,
+  Frame,
+  Phone,
+  Cloud,
+  Box,
+  Server,
+  CheckSquare,
+  RefreshCcw,
+  UploadCloud,
+  Paintbrush,
+  GitBranch,
+  AlertTriangle,
+  Activity,
+  ShieldAlert,
+  CreditCard,
+  Send,
+  Briefcase,
+  Users,
+  Ticket,
+  ZoomIn,
+  Video,
+  Calendar,
+  FormInput,
+  LineChart,
+  PieChart,
+  TrendingUp,
+  BarChart2,
+  Layers,
+  Lock,
+  List,
+  ArrowRight,
+  ArrowRightCircle,
+  Anchor,
+  PlayCircle,
+  FastForward,
+  Cpu,
+  Compass,
+  HardDrive,
+  Wifi,
+  Eye,
+  Edit3,
+  Shield,
+  Bug,
   KeyRound,
   FileEdit,
-  ListTodo,
   StickyNote,
   Rss,
-  Speaker,
-  MessageSquare,
   Camera,
-  Layers,
   Terminal,
   Snowflake,
   Bot,
   Flame,
   Image as ImageIcon,
-  LayoutTemplate,
   Mic,
-  Music,
   ShoppingBag,
-  Eye,
-  Activity,
-  Phone,
-
   Download,
   CheckCircle2,
   XCircle,
   Loader2,
-  AlertTriangle,
   Package,
   Blocks,
 } from "lucide-react";
@@ -97,6 +132,8 @@ import { toast } from "sonner";
 import { useUserSkills, UserSkill } from "@/hooks/use-user-skills";
 import { SkillBuilder } from "@/components/skill-builder";
 import { BUNDLED_SKILLS } from "@/data/bundledSkills";
+import { apiFetch } from "@/lib/apiClient";
+import { deriveSkillOperationalProfile, type SkillOperationalInput } from "@/lib/skillOperationalProfile";
 interface BuiltInSkill {
   id: string;
   name: string;
@@ -110,6 +147,11 @@ interface BuiltInSkill {
 }
 
 type Skill = BuiltInSkill | (UserSkill & { triggers?: string[] });
+
+type ActiveSkillResponse = {
+  activeSkillId: string | null;
+  activeSkillRef?: SkillOperationalInput | null;
+};
 
 const BASE_BUILT_IN_SKILLS: BuiltInSkill[] = [
   {
@@ -383,6 +425,7 @@ const BUILT_IN_SKILLS: BuiltInSkill[] = [...BASE_BUILT_IN_SKILLS, ...EXTRA_SKILL
 
 export default function SkillsPage() {
   const [, setLocation] = useLocation();
+  const queryClient = useQueryClient();
   const { skills: userSkills, createSkill, updateSkill, deleteSkill, toggleSkill: toggleUserSkill, duplicateSkill } = useUserSkills();
   const [builtInStates, setBuiltInStates] = useState<Record<string, boolean>>(
     Object.fromEntries(BUILT_IN_SKILLS.map(s => [s.id, s.enabled]))
@@ -403,6 +446,44 @@ export default function SkillsPage() {
     catalogTotal: number;
   } | null>(null);
   const [fluidError, setFluidError] = useState<string | null>(null);
+
+  const activeSkillQuery = useQuery<ActiveSkillResponse>({
+    queryKey: ["skills-active"],
+    queryFn: async () => {
+      const res = await apiFetch("/api/skills/active", { method: "GET" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || `Error ${res.status}`);
+      }
+      const data = await res.json().catch(() => ({}));
+      return {
+        activeSkillId: typeof data?.activeSkillId === "string" ? data.activeSkillId : null,
+        activeSkillRef: data?.activeSkillRef || null,
+      };
+    },
+    staleTime: 15_000,
+  });
+
+  const setActiveSkillMutation = useMutation({
+    mutationFn: async (payload: { activeSkillId: string | null; activeSkillRef?: SkillOperationalInput | null }) => {
+      const res = await apiFetch("/api/skills/active", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || `Error ${res.status}`);
+      }
+      return await res.json().catch(() => ({ activeSkillId: payload.activeSkillId, activeSkillRef: payload.activeSkillRef ?? null }));
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(["skills-active"], {
+        activeSkillId: typeof data?.activeSkillId === "string" ? data.activeSkillId : null,
+        activeSkillRef: data?.activeSkillRef || null,
+      } satisfies ActiveSkillResponse);
+    },
+  });
 
   const handleInstallFluidPack = useCallback(async () => {
     setFluidInstalling(true);
@@ -439,6 +520,26 @@ export default function SkillsPage() {
     return [...builtIn, ...userSkills.map(s => ({ ...s, triggers: [] }))];
   }, [userSkills, builtInStates]);
 
+  const activeSkillId = activeSkillQuery.data?.activeSkillId ?? null;
+
+  const toActiveSkillRef = useCallback((skill: Skill): SkillOperationalInput => ({
+    id: skill.id,
+    name: skill.name,
+    description: skill.description,
+    category: skill.category as SkillOperationalInput["category"],
+    features: skill.features || [],
+    triggers: "triggers" in skill && Array.isArray(skill.triggers) ? skill.triggers : [],
+    builtIn: skill.builtIn,
+    enabled: skill.enabled,
+    instructions: !skill.builtIn && "instructions" in skill ? skill.instructions : undefined,
+    runtimeTools: deriveSkillOperationalProfile(skill).orchestrator.primaryTools,
+  }), []);
+
+  const skillProfilesById = useMemo(
+    () => new Map(allSkills.map((skill) => [skill.id, deriveSkillOperationalProfile(skill)])),
+    [allSkills]
+  );
+
   const toggleBuiltInSkill = (skillId: string) => {
     setBuiltInStates(prev => {
       const newState = { ...prev, [skillId]: !prev[skillId] };
@@ -449,20 +550,62 @@ export default function SkillsPage() {
   };
 
   const handleToggleSkill = (skill: Skill) => {
+    const willDisable = skill.enabled;
     if (skill.builtIn) {
       toggleBuiltInSkill(skill.id);
     } else {
       toggleUserSkill(skill.id);
       toast.success(!skill.enabled ? `${skill.name} activado` : `${skill.name} desactivado`);
     }
+    if (willDisable && activeSkillId === skill.id) {
+      void setActiveSkillMutation.mutateAsync({ activeSkillId: null, activeSkillRef: null }).catch(() => undefined);
+    }
   };
 
   const filteredSkills = allSkills.filter(skill => {
-    const matchesSearch = skill.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      skill.description.toLowerCase().includes(searchQuery.toLowerCase());
+    const profile = skillProfilesById.get(skill.id);
+    const haystack = [
+      skill.name,
+      skill.description,
+      skill.features.join(" "),
+      profile?.domainLabel || "",
+      profile?.modeLabel || "",
+      profile?.inputSurface || "",
+      profile?.outputSurface || "",
+      profile?.searchTerms.join(" ") || "",
+    ].join(" ").toLowerCase();
+    const matchesSearch = haystack.includes(searchQuery.toLowerCase());
     const matchesCategory = selectedCategory === "all" || skill.category === selectedCategory;
     return matchesSearch && matchesCategory;
   });
+
+  const selectedSkillProfile = useMemo(
+    () => (selectedSkill ? skillProfilesById.get(selectedSkill.id) ?? deriveSkillOperationalProfile(selectedSkill) : null),
+    [selectedSkill, skillProfilesById]
+  );
+
+  const handleBindSkillToOrchestrator = useCallback(async (skill: Skill) => {
+    if (!skill.enabled) {
+      toast.error("Activa la skill antes de vincularla al orquestador");
+      return;
+    }
+
+    try {
+      if (activeSkillId === skill.id) {
+        await setActiveSkillMutation.mutateAsync({ activeSkillId: null, activeSkillRef: null });
+        toast.success("Skill desvinculada del orquestador");
+        return;
+      }
+
+      await setActiveSkillMutation.mutateAsync({
+        activeSkillId: skill.id,
+        activeSkillRef: toActiveSkillRef(skill),
+      });
+      toast.success(`${skill.name} ahora gobierna el orquestador`);
+    } catch (error: any) {
+      toast.error(error?.message || "No se pudo actualizar la skill del orquestador");
+    }
+  }, [activeSkillId, setActiveSkillMutation, toActiveSkillRef]);
 
   const enabledCount = allSkills.filter(s => s.enabled).length;
   const customCount = userSkills.length;
@@ -495,6 +638,9 @@ export default function SkillsPage() {
 
   const handleDeleteSkill = (id: string) => {
     deleteSkill(id);
+    if (activeSkillId === id) {
+      void setActiveSkillMutation.mutateAsync({ activeSkillId: null, activeSkillRef: null }).catch(() => undefined);
+    }
     setDeleteConfirmId(null);
     if (selectedSkill && !selectedSkill.builtIn && selectedSkill.id === id) {
       setSelectedSkill(null);
@@ -543,6 +689,12 @@ export default function SkillsPage() {
               <Play className="h-3 w-3" />
               {enabledCount} activos
             </Badge>
+            {activeSkillId && (
+              <Badge variant="outline" className="gap-1 border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-400">
+                <Cpu className="h-3 w-3" />
+                1 enlazada al orquestador
+              </Badge>
+            )}
             {customCount > 0 && (
               <Badge variant="outline" className="gap-1 text-purple-600 border-purple-200">
                 <Sparkles className="h-3 w-3" />
@@ -609,6 +761,9 @@ export default function SkillsPage() {
                     data-testid={`skill-card-${skill.id}`}
                   >
                     <CardContent className="p-4">
+                      {(() => {
+                        const profile = skillProfilesById.get(skill.id) ?? deriveSkillOperationalProfile(skill);
+                        return (
                       <div className="flex items-start gap-4">
                         <div className={cn(
                           "p-3 rounded-xl transition-colors",
@@ -663,6 +818,19 @@ export default function SkillsPage() {
                           <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
                             {skill.description}
                           </p>
+                          <div className="flex flex-wrap gap-1.5 mb-3">
+                            <Badge variant="secondary" className="text-[10px] font-semibold uppercase tracking-wide">
+                              {profile.badgeLabel}
+                            </Badge>
+                            <Badge variant="outline" className="text-[10px]">
+                              {profile.modeChip}
+                            </Badge>
+                            {activeSkillId === skill.id && (
+                              <Badge className="text-[10px] bg-amber-600 hover:bg-amber-600">
+                                Orquestador
+                              </Badge>
+                            )}
+                          </div>
                           <div className="flex items-center gap-2">
                             {skill.builtIn ? (
                               <Badge variant="outline" className="text-xs">Integrado</Badge>
@@ -687,9 +855,17 @@ export default function SkillsPage() {
                                 Inactivo
                               </span>
                             )}
+                            {activeSkillId === skill.id && (
+                              <span className="flex items-center gap-1 text-xs text-amber-700">
+                                <Cpu className="h-3 w-3" />
+                                Governing skill
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
+                        );
+                      })()}
                     </CardContent>
                   </Card>
                 ))}
@@ -727,6 +903,9 @@ export default function SkillsPage() {
                     ) : (
                       <Badge variant="outline" className="text-purple-600">Personalizado</Badge>
                     )}
+                    {activeSkillId === selectedSkill.id && (
+                      <Badge className="bg-amber-600 hover:bg-amber-600">Skill del orquestador</Badge>
+                    )}
                   </div>
                 </div>
               </div>
@@ -744,11 +923,116 @@ export default function SkillsPage() {
                   </p>
                 </div>
 
+                {selectedSkillProfile && (
+                  <>
+                    <div>
+                      <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
+                        <Cpu className="h-4 w-4" />
+                        Funcion operativa
+                      </h4>
+                      <p className="text-sm text-muted-foreground leading-6">
+                        {selectedSkillProfile.operatingFunction}
+                      </p>
+                    </div>
+
+                    <div>
+                      <h4 className="text-sm font-medium mb-3 flex items-center gap-2">
+                        <Layers className="h-4 w-4" />
+                        Perfil operativo
+                      </h4>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-xl border bg-background p-3">
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Dominio</p>
+                          <p className="mt-1 text-sm font-semibold">{selectedSkillProfile.domainLabel}</p>
+                        </div>
+                        <div className="rounded-xl border bg-background p-3">
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Modo</p>
+                          <p className="mt-1 text-sm font-semibold">{selectedSkillProfile.modeLabel}</p>
+                        </div>
+                        <div className="rounded-xl border bg-background p-3">
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Entrada</p>
+                          <p className="mt-1 text-sm text-muted-foreground">{selectedSkillProfile.inputSurface}</p>
+                        </div>
+                        <div className="rounded-xl border bg-background p-3">
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Salida</p>
+                          <p className="mt-1 text-sm text-muted-foreground">{selectedSkillProfile.outputSurface}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4 className="text-sm font-medium mb-3 flex items-center gap-2">
+                        <Bot className="h-4 w-4" />
+                        Acoplamiento al orquestador
+                      </h4>
+                      <div className="rounded-2xl border bg-background p-4 space-y-4">
+                        <p className="text-sm text-muted-foreground leading-6">
+                          {selectedSkillProfile.operatorSummary}
+                        </p>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="rounded-xl border bg-muted/30 p-3">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Lane</p>
+                            <p className="mt-1 text-sm font-semibold">{selectedSkillProfile.orchestrator.laneLabel}</p>
+                          </div>
+                          <div className="rounded-xl border bg-muted/30 p-3">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Ejecucion</p>
+                            <p className="mt-1 text-sm font-semibold">{selectedSkillProfile.orchestrator.executionModeLabel}</p>
+                          </div>
+                          <div className="rounded-xl border bg-muted/30 p-3">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Runtime</p>
+                            <p className="mt-1 text-sm font-semibold">{selectedSkillProfile.orchestrator.runtimeLabel}</p>
+                          </div>
+                          <div className="rounded-xl border bg-muted/30 p-3">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Readiness</p>
+                            <p className="mt-1 text-sm font-semibold">{selectedSkillProfile.orchestrator.readinessLabel}</p>
+                          </div>
+                        </div>
+
+                        <div>
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Herramientas primarias</p>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {selectedSkillProfile.orchestrator.primaryTools.map((tool) => (
+                              <Badge key={tool} variant="secondary" className="text-xs">
+                                {tool}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Fallbacks y guardas</p>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {selectedSkillProfile.orchestrator.fallbackTools.map((tool) => (
+                              <Badge key={tool} variant="outline" className="text-xs">
+                                {tool}
+                              </Badge>
+                            ))}
+                            {selectedSkillProfile.orchestrator.requiredScopes.map((scope) => (
+                              <Badge key={scope} variant="outline" className="text-xs border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-400">
+                                {scope}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          {selectedSkillProfile.orchestrator.routingNotes.map((note) => (
+                            <div key={note} className="flex items-start gap-2 text-sm text-muted-foreground">
+                              <ArrowRight className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-amber-600" />
+                              <span>{note}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+
                 {selectedSkill.builtIn && (selectedSkill as BuiltInSkill).triggers && (
                   <div>
                     <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
                       <Zap className="h-4 w-4" />
-                      Triggers
+                      Activadores
                     </h4>
                     <div className="flex flex-wrap gap-1">
                       {(selectedSkill as BuiltInSkill).triggers.map((trigger, i) => (
@@ -758,23 +1042,58 @@ export default function SkillsPage() {
                   </div>
                 )}
 
-                <div>
-                  <h4 className="text-sm font-medium mb-3 flex items-center gap-2">
-                    <Settings2 className="h-4 w-4" />
-                    Capacidades
-                  </h4>
-                  <div className="space-y-2">
-                    {selectedSkill.features.map((feature, index) => (
-                      <div key={index} className="flex items-center gap-2 text-sm">
-                        <Check className="h-4 w-4 text-green-500 flex-shrink-0" />
-                        <span>{feature}</span>
+                {selectedSkillProfile && (
+                  <>
+                    <div>
+                      <h4 className="text-sm font-medium mb-3 flex items-center gap-2">
+                        <CheckSquare className="h-4 w-4" />
+                        Habilidades ejecutables
+                      </h4>
+                      <div className="space-y-2">
+                        {selectedSkillProfile.abilityHighlights.map((feature, index) => (
+                          <div key={index} className="flex items-center gap-2 text-sm">
+                            <Check className="h-4 w-4 text-green-500 flex-shrink-0" />
+                            <span>{feature}</span>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                    {selectedSkill.features.length === 0 && (
-                      <p className="text-sm text-muted-foreground">Sin capacidades definidas</p>
-                    )}
-                  </div>
-                </div>
+                    </div>
+
+                    <div>
+                      <h4 className="text-sm font-medium mb-3 flex items-center gap-2">
+                        <ArrowRightCircle className="h-4 w-4" />
+                        Ciclo operativo
+                      </h4>
+                      <div className="space-y-3">
+                        {selectedSkillProfile.executionPhases.map((phase, index) => (
+                          <div key={phase.title} className="rounded-xl border bg-background p-3">
+                            <div className="flex items-center gap-2 mb-1">
+                              <Badge variant="secondary" className="h-5 min-w-5 justify-center px-1.5 text-[10px]">
+                                {index + 1}
+                              </Badge>
+                              <p className="text-sm font-semibold">{phase.title}</p>
+                            </div>
+                            <p className="text-sm text-muted-foreground leading-6">{phase.description}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4 className="text-sm font-medium mb-3 flex items-center gap-2">
+                        <Shield className="h-4 w-4" />
+                        Requisitos operativos
+                      </h4>
+                      <div className="flex flex-wrap gap-2">
+                        {selectedSkillProfile.requirements.map((requirement) => (
+                          <Badge key={requirement} variant="outline" className="text-xs py-1">
+                            {requirement}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 {!selectedSkill.builtIn && 'instructions' in selectedSkill && (selectedSkill as UserSkill).instructions && (
                   <div>
@@ -789,6 +1108,16 @@ export default function SkillsPage() {
             </ScrollArea>
 
             <div className="p-4 border-t bg-background space-y-2">
+              <Button
+                className="w-full"
+                variant={activeSkillId === selectedSkill.id ? "outline" : "default"}
+                onClick={() => handleBindSkillToOrchestrator(selectedSkill)}
+                disabled={setActiveSkillMutation.isPending}
+                data-testid="button-link-orchestrator"
+              >
+                <Cpu className="h-4 w-4 mr-2" />
+                {activeSkillId === selectedSkill.id ? "Desvincular del orquestador" : "Vincular al orquestador"}
+              </Button>
               <Button
                 className="w-full"
                 variant={selectedSkill.enabled ? "outline" : "default"}

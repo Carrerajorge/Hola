@@ -1,9 +1,18 @@
 import { describe, it, expect, beforeAll, vi, beforeEach, afterEach } from "vitest";
 import { Router, decideRoute, checkDynamicEscalation } from "../services/router";
 
-vi.mock("../lib/gemini", () => ({
-  geminiChat: vi.fn().mockResolvedValue({ content: '{"route":"chat","confidence":0.7,"reasons":["test"],"tool_needs":[],"plan_hint":[]}' })
-}));
+vi.mock("../lib/gemini", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/gemini")>();
+
+  return {
+    ...actual,
+    geminiChat: vi
+      .fn()
+      .mockResolvedValue({
+        content: '{"route":"chat","confidence":0.7,"reasons":["test"],"tool_needs":[],"plan_hint":[]}',
+      }),
+  };
+});
 
 describe("Router - Hybrid Decision System", () => {
   let router: Router;

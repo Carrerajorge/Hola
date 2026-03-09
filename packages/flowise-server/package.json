@@ -107,7 +107,7 @@
         "express-session": "^1.18.1",
         "flowise-components": "workspace:^",
         "flowise-nim-container-manager": "^1.0.11",
-        "flowise-ui": "workspace:^",
+        "flowise-ui": "^3.0.13",
         "global-agent": "^3.0.0",
         "gulp": "^4.0.2",
         "handlebars": "^4.7.8",

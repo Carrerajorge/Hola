@@ -61,6 +61,16 @@ export class MessageBroker {
         }
     }
 
+    public async dispatchTask(payload: any): Promise<void> {
+        // Send down the DEALER socket to worker nodes
+        const messageBuf = Buffer.from(JSON.stringify(payload));
+        try {
+            await this.dealer.send([messageBuf]);
+        } catch (e) {
+            console.error('[MessageBroker ZMQ] Failed to dispatch task via DEALER:', e);
+        }
+    }
+
     public async publishRedisEvent(payload: Record<string, any>) {
         const streamKey = 'tenaga:events';
         try {

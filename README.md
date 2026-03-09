@@ -1,66 +1,85 @@
-# IliaGPT (Powered by AgentOS-ASI)
+# ILIAGPT
 
-![Status](https://img.shields.io/badge/Status-Production-green) ![Architecture](https://img.shields.io/badge/Architecture-AgentOS-blue) ![License](https://img.shields.io/badge/License-Proprietary-red)
+ILIAGPT is a full-stack AI chat and agentic automation platform with multi-provider LLM support, tools, document analysis, and an admin dashboard.
 
-**IliaGPT** no es un simple chatbot. Es un Sistema Operativo Agéntico (AgentOS) diseñado para la autonomía, la seguridad "NASA-grade" y la ejecución de tareas complejas en el mundo real.
+This repository contains the codebase after the rebrand from **MICHAT** to **ILIAGPT**.
 
-## 🧠 Arquitectura: AgentOS-ASI Kernel
+## Repo Layout
 
-El sistema opera bajo una arquitectura de **8 Planos Estancos** para garantizar gobernanza y estabilidad:
+- `client/`: React + Vite UI
+- `server/`: Express API + agent system
+- `migrations/`: database migrations (Drizzle)
+- `docs/`: specs, architecture notes, and reference docs
+- `docker-compose.yml`: local infrastructure (Postgres + Redis + Meilisearch)
+- `docker-compose.prod.yml` / `Dockerfile`: production container build
 
-1.  **Model Plane (Cerebro):** Enrutamiento inteligente (Cascading) entre modelos (Claude, GPT-4, Grok) con gestión de presupuesto.
-2.  **Knowledge Plane (Memoria):** RAG avanzado, integración con YouTube, CSV, Crawling web y auto-organización vectorial.
-3.  **Action Plane (Manos):** Ejecución segura de herramientas con validación de riesgos.
-4.  **Control Plane (Conciencia):** Motor de políticas, detección de PII, Jailbreak y Rate Limiting.
-5.  **Computer Plane (Sistema):** Control nativo del host (Shell, Archivos, Docker).
-6.  **Voice Plane (Voz):** Interfaz de audio bidireccional.
-7.  **Data Plane (Historial):** Auditoría forense inmutable (Event Sourcing).
-8.  **Media Plane (Ojos):** Generación y procesamiento de Imagen/Video.
+## Quickstart (Local Development)
 
-## 🚀 Capacidades Clave
+### Prerequisites
 
-*   **Deep Research:** Agentes autónomos que navegan la web profunda y generan reportes HTML citados.
-*   **Artifacts:** Generación de UI (React/HTML) en tiempo real.
-*   **Business Ops:** Envío de emails (.eml), generación de PDFs y comparación de precios.
-*   **Self-Healing:** El sistema detecta fallos en herramientas y reintenta con estrategias exponenciales.
+- Node.js 20 (recommended)
+- Docker (recommended for Postgres/Redis/Meilisearch)
 
-## 🛠️ Instalación y Uso
-
-### Requisitos
-*   Node.js v20+
-*   PostgreSQL (o Docker)
-*   API Keys (OpenAI, Anthropic, Google) en `.env`
-
-### Desarrollo Local
+### Install
 
 ```bash
-# 1. Instalar dependencias
-npm install
+npm ci
+```
 
-# 2. Configurar entorno
-cp .env.example .env
+### Configure Environment
 
-# 3. Arrancar en modo dev
+Create a `.env` file in the repo root. Use `.env.example` as a reference (it documents required variables).
+
+Minimum required:
+
+- `DATABASE_URL`
+- `SESSION_SECRET`
+- at least one LLM key: `XAI_API_KEY` or `GEMINI_API_KEY` or `OPENAI_API_KEY`
+
+### Start Local Services (Recommended)
+
+```bash
+docker compose up -d
+```
+
+### Run the App
+
+```bash
 npm run dev
 ```
 
-### SDK para Clientes
+The server serves the API and the client on the same port (default: `5000` unless `PORT` is set).
 
-IliaGPT incluye un SDK "drop-in" para integrar el agente en cualquier web existente:
+## Testing
 
-```html
-<script src="https://api.iliagpt.com/sdk/agentos-client.js"></script>
-<script>
-  const ilia = new IliaGPTClient();
-  ilia.streamChat("Analiza mis ventas", (chunk) => console.log(chunk));
-</script>
+```bash
+npm run verify
 ```
 
-## 🔒 Seguridad
+If you are running in a restricted/sandboxed environment that blocks `listen(2)` (some sandboxes do), you can still run type-check + build:
 
-*   **PII Redaction:** Los datos sensibles se eliminan antes de salir del servidor.
-*   **Sandboxing:** Las herramientas de terminal corren bajo supervisión estricta.
-*   **Audit Log:** Cada acción queda registrada criptográficamente.
+```bash
+npm run verify:sandbox
+```
 
----
-© 2026 IliaGPT Inc. Todos los derechos reservados.
+E2E (Playwright):
+
+```bash
+npm run test:e2e
+```
+
+In GitHub Actions, Playwright E2E runs only when a PR is labeled `run-e2e`.
+
+## Deployment
+
+- VPS via Docker Compose: see `deployment_guide.md`
+- Production Compose file: `docker-compose.prod.yml`
+- Production env template: `.env.production.example`
+
+## Security
+
+Please report vulnerabilities privately. See `SECURITY.md`.
+
+## License
+
+MIT. See `LICENSE`.

@@ -1,34 +1,62 @@
 import { z } from "zod";
 
-export const EventType = z.enum([
-  "system.boot",
-  "system.shutdown",
-  "agent.thinking",
-  "tool.call",
-  "tool.result",
-  "tool.error",
-  "governance.decision", // Allowed/Blocked
-  "memory.store",
-  "memory.recall",
-  "user.input",
-  "model.response"
+export const AgentOSEventType = z.enum([
+  "RUN_START",
+  "RUN_COMPLETE",
+  "RUN_FAILED",
+  "STEP_START",
+  "STEP_COMPLETE",
+  "TOOL_CALL",
+  "TOOL_RESULT",
+  "ARTIFACT_CREATED",
+  "DECISION_MADE",
+  "POLICY_CHECK",
+  "COST_WARNING",
+  "SYSTEM_LOG"
 ]);
 
-export type AgentOSEventType = z.infer<typeof EventType>;
+export type AgentOSEventType = z.infer<typeof AgentOSEventType>;
 
-export interface AgentOSEvent {
-  id: string;                // UUID v4
-  type: AgentOSEventType;
-  timestamp: number;
-  actor: string;             // userId or agentId
-  runId: string;             // Correlation ID for the session/task
-  previousHash: string;      // Hash of the previous event (Tamper-evidence)
-  payload: Record<string, any>;
-  metadata: {
-    riskLevel?: "low" | "medium" | "high" | "critical";
-    component?: string;
-    durationMs?: number;
-    cost?: number;
-  };
-  hash: string;              // Hash of this event (id + prevHash + payload)
-}
+export const BaseEventSchema = z.object({
+  id: z.string().uuid(),
+  type: AgentOSEventType,
+  runId: z.string(),
+  stepId: z.string().optional(),
+  timestamp: z.number(),
+  agentId: z.string(),
+  metadata: z.record(z.unknown()).optional(),
+});
+
+export const RunStartEvent = BaseEventSchema.extend({
+  type: z.literal("RUN_START"),
+  payload: z.object({
+    goal: z.string(),
+    mode: z.enum(["SAFE", "SUPERVISED", "AUTOPILOT", "RESEARCH", "EMERGENCY-STOP"]),
+    params: z.record(z.unknown()),
+  }),
+});
+
+export const ToolCallEvent = BaseEventSchema.extend({
+  type: z.literal("TOOL_CALL"),
+  payload: z.object({
+    toolName: z.string(),
+    input: z.unknown(),
+  }),
+});
+
+export const ToolResultEvent = BaseEventSchema.extend({
+  type: z.literal("TOOL_RESULT"),
+  payload: z.object({
+    toolName: z.string(),
+    output: z.unknown(),
+    durationMs: z.number(),
+    status: z.enum(["success", "error"]),
+    error: z.string().optional(),
+  }),
+});
+
+export type AgentOSEvent = 
+  | z.infer<typeof RunStartEvent>
+  | z.infer<typeof ToolCallEvent>
+  | z.infer<typeof ToolResultEvent>
+  | (z.infer<typeof BaseEventSchema> & { payload: unknown });

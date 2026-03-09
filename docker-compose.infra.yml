@@ -147,7 +147,10 @@ services:
     tmpfs:
       - /tmp:size=32m
     networks:
-      - hola-net
+      hola-net:
+        aliases:
+          - hola-redis
+          - redis
     healthcheck:
       test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_secure_password_change_me}", "ping" ]
       interval: 10s

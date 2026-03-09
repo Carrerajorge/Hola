@@ -3024,7 +3024,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-[600px] p-0 gap-0 overflow-hidden">
+        <DialogContent
+          className="max-w-[600px] p-0 gap-0 overflow-hidden"
+          showCloseButton={false}
+        >
           <div className="flex h-[500px]">
             <div className="w-48 border-r bg-muted/30 p-2">
               <div className="flex items-center justify-between p-2 mb-2">

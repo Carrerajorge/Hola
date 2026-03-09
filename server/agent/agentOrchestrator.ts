@@ -6,7 +6,7 @@ import type { User, TraceEventType, TraceEvent } from "@shared/schema";
 import { EventEmitter } from "events";
 import { agentEventBus } from "./eventBus";
 import { defaultToolRegistry as sandboxToolRegistry } from "./sandbox/tools";
-import { getHTNPlanner, type Task } from "./htnPlanner";
+import { getHTNPlanner, type Task, type Plan as HtnPlan } from "./htnPlanner";
 import { db } from "../db";
 import { agentModeRuns } from "@shared/schema";
 import { eq } from "drizzle-orm";
@@ -48,6 +48,17 @@ export interface AgentPlan {
   objective: string;
   steps: PlanStep[];
   estimatedTime: string;
+}
+
+export interface AgentWorkspaceContext {
+  projectId?: string;
+  projectName?: string;
+  repositoryPath?: string | null;
+  selectedFolder?: string | null;
+  codingAgents?: Array<"coder" | "reviewer" | "improver">;
+  runtimeTarget?: string;
+  executionAccess?: string;
+  branch?: string | null;
 }
 
 export type AgentStatus =
@@ -258,6 +269,16 @@ function normalizeToolName(toolName: string): string {
   return TOOL_NAME_ALIASES[normalized] || normalized;
 }
 
+function normalizeConversationalText(message: string): string {
+  return String(message || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 
 const MAX_RETRY_ATTEMPTS = 2;
 const MAX_REPLAN_ATTEMPTS = 2;
@@ -298,8 +319,16 @@ export class AgentOrchestrator extends EventEmitter {
   private stepRetryCount: Map<number, number> = new Map();
   private htnPlanId?: string; // ID of the underlying HTN plan if used
   public modelId?: string;
+  private workspaceContext?: AgentWorkspaceContext;
 
-  constructor(runId: string, chatId: string, userId: string, userPlan: "free" | "pro" | "admin" = "free", modelId?: string) {
+  constructor(
+    runId: string,
+    chatId: string,
+    userId: string,
+    userPlan: "free" | "pro" | "admin" = "free",
+    modelId?: string,
+    workspaceContext?: AgentWorkspaceContext,
+  ) {
     super();
     this.modelId = modelId;
     this.runId = runId;
@@ -316,6 +345,7 @@ export class AgentOrchestrator extends EventEmitter {
     this.abortController = new AbortController();
     this.userMessage = "";
     this.attachments = [];
+    this.workspaceContext = workspaceContext;
   }
 
   private logEvent(
@@ -500,6 +530,262 @@ export class AgentOrchestrator extends EventEmitter {
 
   private updateWorkspaceFile(filename: string, content: string): void {
     this.workspaceFiles.set(filename, content);
+  }
+
+  private getCurrentHtnPlan(): HtnPlan | undefined {
+    if (!this.htnPlanId) return undefined;
+    return getHTNPlanner().getPlan(this.htnPlanId);
+  }
+
+  private getDependencyTasks(task: Task): Task[] {
+    const currentPlan = this.getCurrentHtnPlan();
+    if (!currentPlan) return [];
+    return task.dependencies
+      .map((dependencyId) => currentPlan.allTasks.get(dependencyId))
+      .filter((dependencyTask): dependencyTask is Task => Boolean(dependencyTask));
+  }
+
+  private extractUrlFromTaskResult(result: unknown): string | undefined {
+    if (!result) return undefined;
+
+    if (typeof result === "string") {
+      const match = result.match(/https?:\/\/[^\s"'<>]+/i);
+      return match?.[0];
+    }
+
+    if (Array.isArray(result)) {
+      for (const item of result) {
+        const candidate = this.extractUrlFromTaskResult(item);
+        if (candidate) return candidate;
+      }
+      return undefined;
+    }
+
+    if (typeof result !== "object") {
+      return undefined;
+    }
+
+    const record = result as Record<string, unknown>;
+    const directCandidates = [
+      record.url,
+      record.href,
+      record.link,
+      record.finalUrl,
+      record.final_url,
+      record.sourceUrl,
+      record.source_url,
+    ];
+
+    for (const candidate of directCandidates) {
+      if (typeof candidate === "string" && /^https?:\/\//i.test(candidate.trim())) {
+        return candidate.trim();
+      }
+    }
+
+    const nestedCollections = [record.results, record.items, record.sources, record.data];
+    for (const collection of nestedCollections) {
+      const candidate = this.extractUrlFromTaskResult(collection);
+      if (candidate) return candidate;
+    }
+
+    return undefined;
+  }
+
+  private extractSummarizableContent(result: unknown): string | undefined {
+    if (!result) return undefined;
+
+    if (typeof result === "string") {
+      const trimmed = result.trim();
+      return trimmed.length > 0 ? trimmed : undefined;
+    }
+
+    if (Array.isArray(result)) {
+      const fragments = result
+        .map((item) => {
+          if (!item || typeof item !== "object") {
+            return this.extractSummarizableContent(item);
+          }
+
+          const record = item as Record<string, unknown>;
+          const title = typeof record.title === "string" ? record.title.trim() : "";
+          const snippet = typeof record.snippet === "string" ? record.snippet.trim() : "";
+          const url = typeof record.url === "string" ? record.url.trim() : "";
+          const line = [title, snippet, url].filter(Boolean).join(" - ");
+          return line || this.extractSummarizableContent(item);
+        })
+        .filter((fragment): fragment is string => Boolean(fragment && fragment.trim().length > 0));
+
+      if (fragments.length === 0) return undefined;
+      return fragments.join("\n").slice(0, 50_000);
+    }
+
+    if (typeof result !== "object") {
+      return undefined;
+    }
+
+    const record = result as Record<string, unknown>;
+    const directContent = [record.content, record.text, record.summary, record.snippet, record.markdown];
+    for (const value of directContent) {
+      if (typeof value === "string" && value.trim().length > 0) {
+        return value.trim().slice(0, 50_000);
+      }
+    }
+
+    const nestedCollections = [record.results, record.items, record.sources, record.data];
+    for (const collection of nestedCollections) {
+      const content = this.extractSummarizableContent(collection);
+      if (content) return content;
+    }
+
+    try {
+      return JSON.stringify(record).slice(0, 50_000);
+    } catch {
+      return undefined;
+    }
+  }
+
+  private normalizeToolInput(rawInput: unknown): Record<string, any> {
+    if (rawInput && typeof rawInput === "object" && !Array.isArray(rawInput)) {
+      return { ...(rawInput as Record<string, any>) };
+    }
+
+    if (typeof rawInput === "string" && rawInput.trim().length > 0) {
+      return { input: rawInput.trim() };
+    }
+
+    return {};
+  }
+
+  private resolveToolInput(
+    toolName: string,
+    rawInput: unknown,
+    options?: {
+      description?: string;
+      dependencyResults?: unknown[];
+    },
+  ): Record<string, any> {
+    const resolvedInput = this.normalizeToolInput(rawInput);
+    const dependencyResults = options?.dependencyResults || [];
+    const firstDependencyUrl = dependencyResults
+      .map((result) => this.extractUrlFromTaskResult(result))
+      .find((candidate): candidate is string => typeof candidate === "string" && candidate.length > 0);
+    const dependencyContent = dependencyResults
+      .map((result) => this.extractSummarizableContent(result))
+      .find((content): content is string => typeof content === "string" && content.length > 0);
+    const messageUrl = this.extractUrlFromTaskResult(this.userMessage);
+    const trimmedUserMessage = typeof this.userMessage === "string" ? this.userMessage.trim() : "";
+    const summarySource = [
+      typeof resolvedInput.content === "string" ? resolvedInput.content.trim() : "",
+      typeof resolvedInput.input === "string" ? resolvedInput.input.trim() : "",
+      dependencyContent,
+      trimmedUserMessage,
+      options?.description,
+    ].find((value): value is string => typeof value === "string" && value.trim().length > 0);
+
+    if (toolName === "web_search") {
+      if (typeof resolvedInput.query !== "string" || resolvedInput.query.trim().length === 0) {
+        resolvedInput.query = trimmedUserMessage || this.plan?.objective || options?.description || "general search";
+      }
+      if (typeof resolvedInput.maxResults !== "number") {
+        resolvedInput.maxResults = 5;
+      }
+    }
+
+    if (toolName === "fetch_url") {
+      if (typeof resolvedInput.url !== "string" || resolvedInput.url.trim().length === 0) {
+        resolvedInput.url = firstDependencyUrl || messageUrl;
+      }
+      if (typeof resolvedInput.extractContent !== "boolean" && typeof resolvedInput.extractText !== "boolean") {
+        resolvedInput.extractContent = true;
+      }
+      if (typeof resolvedInput.maxLength !== "number") {
+        resolvedInput.maxLength = 50_000;
+      }
+    }
+
+    if (toolName === "summarize") {
+      if (
+        (typeof resolvedInput.content !== "string" || resolvedInput.content.trim().length === 0) &&
+        typeof summarySource === "string"
+      ) {
+        resolvedInput.content = summarySource;
+      }
+      if (
+        (typeof resolvedInput.input !== "string" || resolvedInput.input.trim().length === 0) &&
+        typeof summarySource === "string"
+      ) {
+        resolvedInput.input = summarySource;
+      }
+      if (
+        (typeof resolvedInput.content !== "string" || resolvedInput.content.trim().length === 0) &&
+        typeof resolvedInput.input === "string" &&
+        resolvedInput.input.trim().length > 0
+      ) {
+        resolvedInput.content = resolvedInput.input.trim();
+      }
+      if (
+        (typeof resolvedInput.input !== "string" || resolvedInput.input.trim().length === 0) &&
+        typeof resolvedInput.content === "string" &&
+        resolvedInput.content.trim().length > 0
+      ) {
+        resolvedInput.input = resolvedInput.content.trim();
+      }
+      resolvedInput.targetLength = resolvedInput.targetLength || "medium";
+      resolvedInput.format = resolvedInput.format || "paragraph";
+      resolvedInput.audience = resolvedInput.audience || "general";
+    }
+
+    return resolvedInput;
+  }
+
+  private getPriorSuccessfulStepOutputs(stepIndex: number): unknown[] {
+    return this.stepResults
+      .filter((result) => result.success && result.stepIndex < stepIndex)
+      .sort((left, right) => right.stepIndex - left.stepIndex)
+      .map((result) => result.output);
+  }
+
+  private resolveStepInput(stepIndex: number, step: PlanStep): Record<string, any> {
+    return this.resolveToolInput(step.toolName, step.input, {
+      description: step.description,
+      dependencyResults: this.getPriorSuccessfulStepOutputs(stepIndex),
+    });
+  }
+
+  private resolveHTNTaskInput(task: Task, toolName: string): Record<string, any> {
+    return this.resolveToolInput(toolName, task.toolParams, {
+      description: task.description,
+      dependencyResults: this.getDependencyTasks(task).map((dependencyTask) => dependencyTask.result),
+    });
+  }
+
+  private buildSyntheticHTNResult(task: Task, toolName: string, input: Record<string, any>): ToolResult | null {
+    if (toolName !== "fetch_url") {
+      return null;
+    }
+
+    if (typeof input.url === "string" && input.url.trim().length > 0) {
+      return null;
+    }
+
+    const dependencyContent = this.getDependencyTasks(task)
+      .map((dependencyTask) => this.extractSummarizableContent(dependencyTask.result))
+      .find((content): content is string => typeof content === "string" && content.length > 0);
+
+    if (!dependencyContent) {
+      return null;
+    }
+
+    return {
+      success: true,
+      output: {
+        url: null,
+        title: "Search results summary",
+        content: dependencyContent,
+        synthesizedFromDependencies: true,
+      },
+      artifacts: [],
+    };
   }
 
   updateTodoList(stepIndex: number, status: TodoItem['status'], error?: string | { code: string; message: string; retryable: boolean; details?: any; }): void {
@@ -821,22 +1107,54 @@ Respond with ONLY valid JSON:
   }
 
   private async checkIfConversational(message: string): Promise<boolean> {
+    const normalizedMessage = normalizeConversationalText(message);
+    if (!normalizedMessage) return false;
+
+    const exactConversationalPhrases = new Set([
+      "como estas",
+      "como te va",
+      "como andas",
+      "que tal",
+      "que onda",
+      "que haces",
+      "que estas haciendo",
+      "quien eres",
+      "que eres",
+      "como te llamas",
+      "cual es tu nombre",
+      "que puedes hacer",
+      "que sabes hacer",
+      "en que me puedes ayudar",
+      "para que sirves",
+      "ayuda",
+      "help",
+      "gracias",
+      "ok",
+      "okay",
+      "vale",
+      "perfecto",
+      "genial",
+      "excelente",
+      "adios",
+      "bye",
+      "chao",
+      "nos vemos",
+    ]);
+
+    if (exactConversationalPhrases.has(normalizedMessage)) {
+      return true;
+    }
+
     const conversationalPatterns = [
-      /^(hola|hi|hey|hello|buenos?\s*(días?|tardes?|noches?)|saludos?|qué\s*tal|cómo\s*estás?|qué\s*onda)/i,
-      /^(gracias|thank|thanks|ok|okay|vale|entendido|perfecto|genial|excelente)/i,
-      /^(adiós|bye|chao|hasta\s*(luego|pronto|mañana)|nos\s*vemos)/i,
-      /^(quién\s*eres|qué\s*eres|cómo\s*te\s*llamas|cuál\s*es\s*tu\s*nombre)/i,
-      /^(ayuda|help|qué\s*puedes\s*hacer|para\s*qué\s*sirves)/i,
+      /^(hola|hi|hey|hello|saludos?)$/,
+      /^buenos?\s+(dias|tardes|noches)$/,
+      /^hasta\s+(luego|pronto|manana)$/,
     ];
 
-    const trimmedMessage = message.trim();
-    if (trimmedMessage.length < 50) {
-      for (const pattern of conversationalPatterns) {
-        if (pattern.test(trimmedMessage)) {
-          return true;
-        }
-      }
+    if (normalizedMessage.length <= 120) {
+      return conversationalPatterns.some((pattern) => pattern.test(normalizedMessage));
     }
+
     return false;
   }
 
@@ -994,6 +1312,16 @@ No uses markdown ni emojis.${userProfileLine ? `\n${userProfileLine}` : ""}${cus
     const attachmentInfo = this.attachments.length > 0
       ? `\nUser has attached ${this.attachments.length} file(s): ${this.attachments.map((a: any) => a.name || a.filename || "file").join(", ")}`
       : "";
+    const workspaceInfo = this.workspaceContext?.repositoryPath
+      ? `\nWorkspace context:
+- Project: ${this.workspaceContext.projectName || this.workspaceContext.projectId || "workspace"}
+- Repository root: ${this.workspaceContext.repositoryPath}
+- Target folder: ${this.workspaceContext.selectedFolder || "."}
+- Branch: ${this.workspaceContext.branch || "main"}
+- Coding profiles: ${(this.workspaceContext.codingAgents || ["coder"]).join(", ")}
+- Runtime target: ${this.workspaceContext.runtimeTarget || "Local"}
+- Execution access: ${this.workspaceContext.executionAccess || "Full access"}`
+      : "";
 
     const systemPrompt = `You are an AI agent planner. Your job is to analyze the user's request and create a step-by-step execution plan using the available tools.
 
@@ -1007,6 +1335,7 @@ Rules:
 3. Steps should be logically ordered with dependencies considered
 4. Include realistic input parameters for each tool
 5. Estimate the total execution time
+6. If the user is asking for coding help and a workspace context is present, prefer read_file, list_files, write_file, and shell_command steps grounded in the repository.
 
 Respond with ONLY valid JSON in this exact format:
 {
@@ -1027,7 +1356,7 @@ Respond with ONLY valid JSON in this exact format:
       { role: "system", content: systemPrompt },
       {
         role: "user",
-        content: `User request: ${userMessage}${attachmentInfo}\n\nCreate an execution plan.`,
+        content: `User request: ${userMessage}${attachmentInfo}${workspaceInfo}\n\nCreate an execution plan.`,
       },
     ];
 
@@ -1110,6 +1439,7 @@ Respond with ONLY valid JSON in this exact format:
     if (normalizedToolName !== step.toolName) {
       step.toolName = normalizedToolName;
     }
+    const resolvedInput = this.resolveStepInput(stepIndex, step);
     this.currentStepIndex = stepIndex;
     this.emitProgress();
 
@@ -1120,7 +1450,7 @@ Respond with ONLY valid JSON in this exact format:
       stepIndex,
       toolName: step.toolName,
       description: step.description,
-      input: step.input,
+      input: resolvedInput,
     }, stepIndex);
 
     await this.emitTraceEvent('step_started', {
@@ -1136,7 +1466,7 @@ Respond with ONLY valid JSON in this exact format:
       stepIndex,
       stepId: `step-${stepIndex}`,
       tool_name: step.toolName,
-      command: JSON.stringify(step.input).substring(0, 200),
+      command: JSON.stringify(resolvedInput).substring(0, 200),
       summary: `Calling ${step.toolName}`,
     });
 
@@ -1147,12 +1477,12 @@ Respond with ONLY valid JSON in this exact format:
       runId: this.runId,
       userId: this.userId,
       toolName: step.toolName,
-      toolInput: step.input,
+      toolInput: resolvedInput,
     });
 
     // --- CLAWI TOOL LOOP DETECTION ---
     (this as any).toolCallHistory = (this as any).toolCallHistory || [];
-    const loopStatus = detectToolCallLoop((this as any).toolCallHistory, step.toolName, step.input);
+    const loopStatus = detectToolCallLoop((this as any).toolCallHistory, step.toolName, resolvedInput);
 
     if (loopStatus.stuck) {
       console.warn(`[AgentOrchestrator] Loop detected for tool ${step.toolName}: ${loopStatus.message}`);
@@ -1163,7 +1493,7 @@ Respond with ONLY valid JSON in this exact format:
       };
     }
 
-    const currentCallHash = hashToolCall(step.toolName, step.input);
+    const currentCallHash = hashToolCall(step.toolName, resolvedInput);
     const currentCallRecord: any = {
       toolName: step.toolName,
       argsHash: currentCallHash,
@@ -1173,11 +1503,17 @@ Respond with ONLY valid JSON in this exact format:
     if ((this as any).toolCallHistory.length > 30) (this as any).toolCallHistory.shift();
 
     try {
-      const result = await toolRegistry.execute(step.toolName, step.input, {
+      const result = await toolRegistry.execute(step.toolName, resolvedInput, {
         userId: this.userId,
         chatId: this.chatId,
         runId: this.runId,
         userPlan: this.userPlan,
+        workspaceRoot: this.workspaceContext?.repositoryPath || undefined,
+        workspaceSubdir: this.workspaceContext?.selectedFolder || undefined,
+        workspaceBranch: this.workspaceContext?.branch || undefined,
+        codingAgents: this.workspaceContext?.codingAgents,
+        runtimeTarget: this.workspaceContext?.runtimeTarget,
+        executionAccess: this.workspaceContext?.executionAccess,
         isConfirmed: opts?.isConfirmed === true,
         signal: this.abortController.signal,
         stepIndex,
@@ -1225,7 +1561,7 @@ Respond with ONLY valid JSON in this exact format:
               stepId: `step-${stepIndex}`,
               tool_name: step.toolName,
               stream: "exit",
-              command: typeof step.input?.command === "string" ? step.input.command : "",
+              command: typeof resolvedInput.command === "string" ? resolvedInput.command : "",
               exit_code: evt.exitCode,
               signal: evt.signal,
               is_final_chunk: true,
@@ -1236,7 +1572,7 @@ Respond with ONLY valid JSON in this exact format:
               stepIndex,
               stepId: `step-${stepIndex}`,
               tool_name: step.toolName,
-              command: typeof step.input?.command === "string" ? step.input.command : "",
+              command: typeof resolvedInput.command === "string" ? resolvedInput.command : "",
               exit_code: evt.exitCode,
               signal: evt.signal,
               wasKilled: evt.wasKilled,
@@ -1269,6 +1605,18 @@ Respond with ONLY valid JSON in this exact format:
 
       if (result.artifacts) {
         this.artifacts.push(...result.artifacts);
+      }
+
+      if (step.toolName === "write_file" && typeof resolvedInput.filepath === "string" && typeof resolvedInput.content === "string") {
+        this.updateWorkspaceFile(resolvedInput.filepath, resolvedInput.content);
+      }
+
+      if (
+        step.toolName === "read_file" &&
+        typeof resolvedInput.filepath === "string" &&
+        typeof (result.output as { content?: unknown } | null)?.content === "string"
+      ) {
+        this.updateWorkspaceFile(resolvedInput.filepath, (result.output as { content: string }).content);
       }
 
       this.logEvent('observation', {
@@ -1309,7 +1657,7 @@ Respond with ONLY valid JSON in this exact format:
         this.pendingConfirmation = {
           stepIndex,
           toolName: step.toolName,
-          toolInput: step.input,
+          toolInput: resolvedInput,
           reason: result.error?.message || "Requires confirmation",
           requestedAt: Date.now(),
         };
@@ -1940,8 +2288,12 @@ Provide a brief, user-friendly summary (2-4 sentences) of what was accomplished.
   }
 
   async executeHTNTask(task: Task): Promise<any> {
+    const actualToolName = normalizeToolName(task.toolName || 'unknown');
+
     // Find corresponding step index for UI updates (if strictly mapped)
-    const stepIndex = this.plan!.steps.findIndex(s => s.description === task.description && s.toolName === (task.toolName || 'unknown'));
+    const stepIndex = this.plan!.steps.findIndex(
+      (step) => step.description === task.description && step.toolName === actualToolName
+    );
 
     if (this.isCancelled) {
       throw new Error("Run cancelled");
@@ -1958,20 +2310,23 @@ Provide a brief, user-friendly summary (2-4 sentences) of what was accomplished.
     await this.emitTraceEvent('step_started', {
       stepIndex: stepIndex >= 0 ? stepIndex : undefined,
       status: 'running',
-      tool_name: task.toolName || 'unknown',
+      tool_name: actualToolName,
       summary: task.description
     });
+
+    const resolvedInput = this.resolveHTNTaskInput(task, actualToolName);
 
     // OpenClaw hook: before_tool_call (HTN path)
     await hookSystem.dispatch('before_tool_call', {
       runId: this.runId,
       userId: this.userId,
-      toolName: task.toolName || 'unknown',
-      toolInput: task.toolParams,
+      toolName: actualToolName,
+      toolInput: resolvedInput,
     });
 
     try {
-      const result = await toolRegistry.execute(task.toolName || 'unknown', task.toolParams, {
+      const syntheticResult = this.buildSyntheticHTNResult(task, actualToolName, resolvedInput);
+      const result = syntheticResult || await toolRegistry.execute(actualToolName, resolvedInput, {
         userId: this.userId,
         chatId: this.chatId,
         runId: this.runId,
@@ -1983,14 +2338,14 @@ Provide a brief, user-friendly summary (2-4 sentences) of what was accomplished.
       await hookSystem.dispatch('after_tool_call', {
         runId: this.runId,
         userId: this.userId,
-        toolName: task.toolName || 'unknown',
+        toolName: actualToolName,
         toolResult: result,
       });
 
       if (stepIndex >= 0) {
         const stepResult: StepResult = {
           stepIndex,
-          toolName: task.toolName || 'unknown',
+          toolName: actualToolName,
           success: result.success,
           output: result.output,
           artifacts: result.artifacts || [],
@@ -2008,7 +2363,7 @@ Provide a brief, user-friendly summary (2-4 sentences) of what was accomplished.
       await this.emitTraceEvent(result.success ? 'step_completed' : 'step_failed', {
         stepIndex: stepIndex >= 0 ? stepIndex : undefined,
         status: result.success ? 'completed' : 'failed',
-        tool_name: task.toolName || 'unknown',
+        tool_name: actualToolName,
         error: result.success ? undefined : { message: result.error ? (typeof result.error === 'string' ? result.error : result.error.message) : 'Task failed', retryable: true }
       });
 
@@ -2042,9 +2397,19 @@ class AgentManager {
     message: string,
     attachments?: any[],
     userPlan: "free" | "pro" | "admin" = "free",
-    modelId?: string
+    modelId?: string,
+    workspaceContext?: AgentWorkspaceContext,
   ): Promise<AgentOrchestrator> {
-    const orchestrator = await this.createRun(runId, chatId, userId, message, attachments, userPlan, modelId);
+    const orchestrator = await this.createRun(
+      runId,
+      chatId,
+      userId,
+      message,
+      attachments,
+      userPlan,
+      modelId,
+      workspaceContext,
+    );
     this.executeRun(runId).catch((error) => {
       console.error(`[AgentManager] Run ${runId} failed:`, error.message);
     });
@@ -2058,13 +2423,21 @@ class AgentManager {
     message: string,
     attachments?: any[],
     userPlan: "free" | "pro" | "admin" = "free",
-    modelId?: string
+    modelId?: string,
+    workspaceContext?: AgentWorkspaceContext,
   ): Promise<AgentOrchestrator> {
     if (this.activeRuns.has(runId)) {
       throw new Error(`Run ${runId} already exists`);
     }
 
-    const orchestrator = new AgentOrchestrator(runId, chatId, userId, userPlan, modelId);
+    const orchestrator = new AgentOrchestrator(
+      runId,
+      chatId,
+      userId,
+      userPlan,
+      modelId,
+      workspaceContext,
+    );
     this.activeRuns.set(runId, orchestrator);
 
     // Generate initial plan synchronously so UI has something to show

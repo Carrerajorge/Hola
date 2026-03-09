@@ -110,8 +110,19 @@ export interface InternalHookEvent {
 
 export type InternalHookHandler = (event: InternalHookEvent) => Promise<void> | void;
 
-/** Registry of hook handlers by event key */
-const handlers = new Map<string, InternalHookHandler[]>();
+/**
+ * Registry of hook handlers by event key.
+ *
+ * Use a global singleton so register/trigger share the same handlers even if the
+ * runtime ends up loading more than one bundled copy of this module.
+ */
+const _g = globalThis as typeof globalThis & {
+  __openclaw_internal_hook_handlers__?: Map<string, InternalHookHandler[]>;
+};
+const handlers = (_g.__openclaw_internal_hook_handlers__ ??= new Map<
+  string,
+  InternalHookHandler[]
+>());
 const log = createSubsystemLogger("internal-hooks");
 
 /**

@@ -1,2 +1,0 @@
-ok pero lo que veo que en la parte de arriba de llama 3 local cambia de modelo y en otro modelo
-este comprueba la generación de imágenes por favor

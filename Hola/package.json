@@ -260,7 +260,8 @@
     "zod": "^3.25.76",
     "zod-to-json-schema": "^3.25.1",
     "zod-validation-error": "^3.4.0",
-    "zustand": "^5.0.11"
+    "zustand": "^5.0.11",
+    "openclaw": "file:./openclaw-engine"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",

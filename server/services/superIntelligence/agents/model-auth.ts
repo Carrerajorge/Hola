@@ -1,7 +1,11 @@
-import path from "node:path"; 
-import { formatCliCommand } from "../cli/command-format.js"; 
-import type { OpenClawConfig } 
-from "../config/config.js"; import type { ModelProviderAuthMode, ModelProviderConfig } from "../config/types.js"; import { getShellEnvAppliedKeys } from "../infra/shell-env.js"; import {
+import path from "node:path";
+import { type Api, getEnvApiKey, type Model } from "@mariozechner/pi-ai";
+import { formatCliCommand } from "../cli/command-format.js";
+import type { OpenClawConfig } from "../config/config.js";
+import { normalizeResolvedSecretInputString } from "../config/types.secrets.js";
+import type { ModelProviderAuthMode, ModelProviderConfig } from "../config/types.js";
+import { getShellEnvAppliedKeys } from "../infra/shell-env.js";
+import {
   normalizeOptionalSecretInput,
   normalizeSecretInput,
 } from "../utils/normalize-secret-input.js";
@@ -51,7 +55,10 @@ export function getCustomProviderApiKey(
   provider: string,
 ): string | undefined {
   const entry = resolveProviderConfig(cfg, provider);
-  return normalizeOptionalSecretInput(entry?.apiKey);
+  return normalizeResolvedSecretInputString({
+    value: entry?.apiKey,
+    path: `models.providers.${provider}.apiKey`,
+  });
 }
 
 function resolveProviderAuthOverride(

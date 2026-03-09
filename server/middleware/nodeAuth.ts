@@ -1,7 +1,6 @@
-import type { Request, Response, NextFunction } from "express";
-import crypto from "crypto";
-import { db } from "../db";
-import { nodes } from "@shared/schema";
+import type { Request, Response, NextFunction } from "express"; import crypto 
+from "crypto"; import { db } from "../db"; 
+import { workspaceNodes } from "@shared/schema";
 import { eq, and, isNull } from "drizzle-orm";
 
 export type AuthenticatedNode = {
@@ -30,9 +29,9 @@ export async function requireNodeAuth(req: Request, res: Response, next: NextFun
 
     const tokenHash = sha256Base64Url(token);
     const [row] = await db
-      .select({ id: nodes.id, orgId: nodes.orgId, ownerUserId: nodes.ownerUserId, name: nodes.name, revokedAt: nodes.revokedAt })
-      .from(nodes)
-      .where(and(eq(nodes.tokenHash, tokenHash), isNull(nodes.revokedAt)))
+      .select({ id: workspaceNodes.id, orgId: workspaceNodes.orgId, ownerUserId: workspaceNodes.ownerUserId, name: workspaceNodes.name, revokedAt: workspaceNodes.revokedAt })
+      .from(workspaceNodes)
+      .where(and(eq(workspaceNodes.tokenHash, tokenHash), isNull(workspaceNodes.revokedAt)))
       .limit(1);
 
     if (!row) return res.status(401).json({ success: false, error: "Invalid token" });

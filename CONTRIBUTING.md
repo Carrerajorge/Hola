@@ -1,26 +1,53 @@
-# Contribuyendo a IliaGPT
+# Contributing
 
-Gracias por tu interés en mejorar IliaGPT. Seguimos estándares estrictos para mantener la confiabilidad "NASA-grade".
+Thanks for contributing to ILIAGPT.
 
-## 📐 Principios de Ingeniería
+## Development Setup
 
-1.  **Seguridad Primero:** Ninguna herramienta nueva se aprueba sin su correspondiente entrada en el `RiskRegistry` y validación en `PolicyEngine`.
-2.  **No Mocks en Producción:** Las herramientas deben hacer trabajo real. Si usas una API externa, implementa manejo de errores y retries.
-3.  **Tipado Estricto:** Zod schemas obligatorios para todas las entradas y salidas de herramientas.
+1. Install dependencies:
 
-## 🔄 Flujo de Trabajo
+```bash
+npm ci
+```
 
-1.  **Branching:** Usa `feature/nombre-funcionalidad`.
-2.  **Commits:** Conventional Commits (`feat:`, `fix:`, `chore:`).
-3.  **Testing:** Ejecuta `npm test` antes de subir. El "Smoke Test" del AgentOS debe pasar.
+2. Create a `.env` file.
 
-## 🧩 Añadir una Nueva Herramienta
+`.env.example` documents the required variables. At minimum you need:
 
-1.  Definir la herramienta en `server/agentos/action_plane/tools/`.
-2.  Asignar nivel de riesgo (`low`, `medium`, `high`, `critical`).
-3.  Registrarla en `ActionPlane.initialize()`.
-4.  Documentarla en `README.md`.
+- `DATABASE_URL`
+- `SESSION_SECRET`
+- at least one LLM provider key (for full chat functionality)
 
-## 🐛 Reporte de Bugs
+3. (Recommended) Start local services:
 
-Usa el sistema de Issues de GitHub. Incluye el `runId` del log de auditoría si es posible para facilitar el trazado (Time Travel Debugging).
+```bash
+docker compose up -d
+```
+
+4. Run the app:
+
+```bash
+npm run dev
+```
+
+## Quality Gates
+
+Before opening a PR, run:
+
+```bash
+npm run type-check
+npm run test:run
+npm run build
+```
+
+## Pull Requests
+
+- Keep PRs focused and small when possible.
+- Include a clear description and testing notes.
+- Do not commit secrets (`.env`, API keys, tokens, private certificates).
+- If a change impacts behavior, add or update tests.
+
+## Reporting Security Issues
+
+Please do not open public issues for security vulnerabilities. See `SECURITY.md`.
+

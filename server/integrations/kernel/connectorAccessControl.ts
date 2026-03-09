@@ -20,9 +20,7 @@
  * Standalone module — zero imports from other kernel files.
  */
 
-import { randomUUID } from "node:crypto";
-
-const crypto = require("crypto");
+import { createHash, randomUUID } from "node:crypto";
 
 // ─── Constants ──────────────────────────────────────────────────────
 
@@ -1927,7 +1925,7 @@ export class ConnectorAccessControl {
     const policies = this.policyEngine.getAllPolicies().map((p) => `${p.id}:${p.effect}:${p.priority}`);
     const roles = this.roleManager.getAllRoles().map((r) => `${r.id}:${r.priority}:${r.inherits.join(",")}`);
     const combined = [...policies, ...roles].sort().join("|");
-    return crypto.createHash("sha256").update(combined).digest("hex").slice(0, 16);
+    return createHash("sha256").update(combined).digest("hex").slice(0, 16);
   }
 }
 

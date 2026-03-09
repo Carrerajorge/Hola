@@ -227,7 +227,7 @@ handlers.set('orchestrator.plan', async (req) => {
     ? Number(params?.complexity)
     : Math.min(10, Math.max(1, Math.ceil(objective.length / 120)));
 
-  const { orchestrationEngine } = await import('../../services/orchestrationEngine');
+  const { orchestrationEngine } = await import('../../services/orchestrationEngine.ts');
   const subtasks = await orchestrationEngine.decomposeTask(objective, complexity);
   const plan = orchestrationEngine.buildExecutionPlan(subtasks);
   return { subtasks, plan };
@@ -243,7 +243,7 @@ handlers.set('orchestrator.run', async (req) => {
     ? Number(params?.complexity)
     : Math.min(10, Math.max(1, Math.ceil(objective.length / 120)));
 
-  const { orchestrationEngine } = await import('../../services/orchestrationEngine');
+  const { orchestrationEngine } = await import('../../services/orchestrationEngine.ts');
   const subtasks = await orchestrationEngine.decomposeTask(objective, complexity);
   const plan = orchestrationEngine.buildExecutionPlan(subtasks);
   const execution = await orchestrationEngine.executeParallel(plan);

@@ -21,11 +21,13 @@ import {
   ProviderCommandsSchema,
   ReplyToModeSchema,
   RetryConfigSchema,
+  SecretInputSchema,
+  SecretRefSchema,
   TtsConfigSchema,
   requireOpenAllowFrom,
 } from "./zod-schema.core.js";
 
-import { registerSensitive } from "./zod-schema.sensitive.js";
+import { sensitive, registerSensitive } from "./zod-schema.sensitive.js";
 const ToolPolicyBySenderSchema = z.record(z.string(), ToolPolicySchema).optional();
 
 const DiscordIdSchema = z
@@ -520,8 +522,12 @@ export const GoogleChatAccountSchema = z
     groupAllowFrom: z.array(z.union([z.string(), z.number()])).optional(),
     groups: z.record(z.string(), GoogleChatGroupSchema.optional()).optional(),
     defaultTo: z.string().optional(),
-    serviceAccount: z.union([z.string(), z.record(z.string(), z.unknown())]).optional(),
+    serviceAccount: z
+      .union([z.string(), z.record(z.string(), z.unknown()), SecretRefSchema])
+      .optional()
+      .register(sensitive),
     serviceAccountFile: z.string().optional(),
+    serviceAccountRef: SecretRefSchema.optional().register(sensitive),
     audienceType: z.enum(["app-url", "project-number"]).optional(),
     audience: z.string().optional(),
     webhookPath: z.string().optional(),
@@ -1064,7 +1070,7 @@ export const MSTeamsConfigSchema = z
     markdown: MarkdownConfigSchema,
     configWrites: z.boolean().optional(),
     appId: z.string().optional(),
-    appPassword: registerSensitive("providers.imessage.appPassword", z.string().optional()),
+    appPassword: SecretInputSchema.optional().register(sensitive),
     tenantId: z.string().optional(),
     webhook: z
       .object({

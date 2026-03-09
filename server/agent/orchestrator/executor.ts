@@ -696,7 +696,9 @@ export async function orchestrate(
   emitSSE(opts.sseRes, "planning", { planId, status: "decomposing" });
   logEvent(memory, "planning", "Decomposing goal into subtasks");
 
-  const plannerOutput = await decompose(goal);
+  const plannerOutput = opts.plannerOutput ?? (await decompose(goal, undefined, {
+    skillContext: opts.skillContext,
+  }));
 
   const subtasks: SubTask[] = plannerOutput.subtasks.map((st) => ({
     ...st,
@@ -813,7 +815,9 @@ export async function orchestrate(
             attempt: replanCount,
           });
 
-          const newPlan = await decompose(goal, memory);
+          const newPlan = await decompose(goal, memory, {
+            skillContext: opts.skillContext,
+          });
           const newSubtasks: SubTask[] = newPlan.subtasks.map((st) => ({
             ...st,
             status: "pending" as const,
@@ -866,6 +870,11 @@ export async function orchestrate(
   const completed = subtasks.filter((t) => t.status === "completed");
   const failed = subtasks.filter((t) => t.status === "failed");
   const skipped = subtasks.filter((t) => t.status === "skipped");
+  const errors = Object.fromEntries(
+    subtasks
+      .filter((t) => typeof t.error === "string" && t.error.trim().length > 0)
+      .map((t) => [t.id, t.error as string]),
+  );
 
   // The final output is the last completed subtask's result
   const lastCompleted = completed[completed.length - 1];
@@ -895,8 +904,10 @@ export async function orchestrate(
     planId,
     status: resultStatus,
     results: memory.completedResults,
+    errors,
     finalOutput,
     timeline: memory.timeline,
+    subtasks: subtasks.map((task) => ({ ...task })),
     stats: {
       totalSubtasks: subtasks.length,
       completed: completed.length,

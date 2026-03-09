@@ -284,28 +284,31 @@ class AuthStorage implements IAuthStorage {
           return updatedUser;
         }
       }
+      // Step 4: Create new user + identity (Raw SQL for safety against schema drift)
+      const now = new Date();
+      const rawResult = await db.execute(sql`
+        INSERT INTO users (
+          id, email, username, full_name, first_name, last_name,
+          profile_image_url, auth_provider, email_verified, role, plan,
+          created_at, updated_at
+        ) VALUES (
+          ${userData.id}, ${userData.email}, ${userData.username ?? (userData.email ? userData.email.split("@")[0] : null)},
+          ${userData.fullName}, ${userData.firstName}, ${userData.lastName},
+          ${userData.profileImageUrl}, ${userData.authProvider ?? "email"},
+          ${userData.emailVerified ?? "false"}, ${userData.role ?? "user"}, 'free',
+          ${now}, ${now}
+        )
+        RETURNING id, email, username, role, auth_provider
+      `);
 
-      // Step 4: Create new user + identity
-      const [newUser] = await db
-        .insert(users)
-        .values({
-          id: userData.id,
-          orgId: userData.id,
-          email: userData.email,
-          emailCanonical: canonical,
-          username: userData.username ?? (userData.email ? userData.email.split("@")[0] : null),
-          fullName: userData.fullName,
-          firstName: userData.firstName,
-          lastName: userData.lastName,
-          profileImageUrl: userData.profileImageUrl,
-          authProvider: userData.authProvider ?? "email",
-          emailVerified: userData.emailVerified ?? "false",
-          role: userData.role ?? "user",
-          plan: "free",
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .returning(RETURNING_COLUMNS);
+      const newUserRow = (rawResult as any).rows[0];
+      // Map back to expected User shape (simplified)
+      const newUser = {
+         ...mapAuthUserRow(newUserRow),
+         // Ensure critical fields are set even if mapAuthUserRow misses them from partial select
+         id: newUserRow.id,
+         email: newUserRow.email
+      };
 
       await ensureIdentityLink(newUser.id, provider, providerSubject, userData.email, userData.emailVerified === "true");
       authEventBus.publish("USER_REGISTERED", newUser.id, { email: newUser.email, provider });
@@ -317,7 +320,6 @@ class AuthStorage implements IAuthStorage {
 
       this.bestEffortPostLogin(newUser.id);
       return newUser;
-
     } catch (error: any) {
       console.error(JSON.stringify({
         event: "user_upsert_failed", error: error.message,

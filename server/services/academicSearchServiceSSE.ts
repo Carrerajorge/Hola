@@ -240,7 +240,7 @@ export class AcademicSearchServiceSSE {
                 { role: "user", content: userQuery }
             ], {
                 userId: "system-optimizer",
-                model: "grok-beta",
+                agentRole: "research",
                 maxTokens: 500,
                 temperature: 0.1
             });

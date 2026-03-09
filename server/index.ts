@@ -1,4 +1,25 @@
 
+// Polyfill browser globals needed by pdf-parse and canvas libraries in Node.js
+if (typeof globalThis.DOMMatrix === "undefined") {
+  globalThis.DOMMatrix = class DOMMatrix {
+    a: number; b: number; c: number; d: number; e: number; f: number;
+    m11: number; m12: number; m13: number; m14: number;
+    m21: number; m22: number; m23: number; m24: number;
+    m31: number; m32: number; m33: number; m34: number;
+    m41: number; m42: number; m43: number; m44: number;
+    constructor() { this.m11=1;this.m12=0;this.m13=0;this.m14=0;this.m21=0;this.m22=1;this.m23=0;this.m24=0;this.m31=0;this.m32=0;this.m33=1;this.m34=0;this.m41=0;this.m42=0;this.m43=0;this.m44=1;this.a=1;this.b=0;this.c=0;this.d=1;this.e=0;this.f=0; }
+  } as any;
+}
+if (typeof globalThis.ImageData === "undefined") {
+  globalThis.ImageData = class ImageData { 
+    width: number; height: number; data: Uint8ClampedArray;
+    constructor(w: number, h: number) { this.width=w;this.height=h;this.data=new Uint8ClampedArray(w*h*4); } 
+  } as any;
+}
+if (typeof globalThis.Path2D === "undefined") {
+  globalThis.Path2D = class Path2D { constructor() {} } as any;
+}
+
 import "./otel";
 
 import "./config/load-env";
@@ -11,6 +32,7 @@ import { createServer } from "http";
 import hpp from "hpp";
 
 import { registerRoutes } from "./routes";
+
 import { serveStatic } from "./static";
 
 import { apiErrorHandler } from "./middleware/apiErrorHandler";
@@ -51,6 +73,7 @@ import { getUserId } from "./types/express";
 import { updateContext } from "./middleware/correlationContext";
 import { validateApiKey } from "./routes/apiKeysRouter";
 import { AppError } from "./utils/errors";
+import { AgentOS } from "./agentos/index";
 initTracing();
 
 const app = express();
@@ -172,6 +195,18 @@ export function log(message: string, source = "express") {
 }
 
 (async () => {
+  // Boot AgentOS-ASI Kernel (NASA-grade architecture)
+  try {
+    const agentOS = AgentOS.getInstance({
+      mode: process.env.NODE_ENV === "production" ? "SAFE" : "SUPERVISED",
+      workspaceRoot: process.env.OPENCLAW_WORKSPACE_ROOT || process.cwd(),
+      logLevel: process.env.NODE_ENV === "production" ? "info" : "debug"
+    });
+    await agentOS.boot();
+  } catch (err) {
+    Logger.error("Failed to boot AgentOS Kernel:", err);
+  }
+
   const isProduction = process.env.NODE_ENV === "production";
   const isTest = process.env.NODE_ENV === "test";
   const startPythonService = process.env.START_PYTHON_SERVICE === "true";
@@ -310,6 +345,10 @@ export function log(message: string, source = "express") {
   }
 
   // Rate Limiting (User-based) - Applied AFTER auth to use req.user
+  
+  // [AgentOS] Capabilities & Status Endpoint
+
+  
   app.use("/api", globalLimiter);
   // Legacy/public routes outside /api should still be rate-limited.
   app.use(["/tools", "/agents", "/metrics", "/mcp"], globalLimiter);

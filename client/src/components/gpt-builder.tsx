@@ -525,7 +525,11 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-screen h-screen max-w-none rounded-none p-0 gap-0 overflow-hidden" data-testid="gpt-builder-dialog">
+      <DialogContent
+        className="w-screen h-screen max-w-none rounded-none p-0 gap-0 overflow-hidden"
+        showCloseButton={false}
+        data-testid="gpt-builder-dialog"
+      >
         <DialogTitle className="sr-only">Configurar GPT</DialogTitle>
         <DialogDescription className="sr-only">Constructor de GPT personalizado</DialogDescription>
         <div className="flex flex-col h-full bg-background">

@@ -589,4 +589,14 @@ export type ToolsConfig = {
       deny?: string[];
     };
   };
+  /** sessions_spawn tool limits for inline attachment materialization. */
+  sessions_spawn?: {
+    attachments?: {
+      enabled?: boolean;
+      maxTotalBytes?: number;
+      maxFiles?: number;
+      maxFileBytes?: number;
+      retainOnSessionKeep?: boolean;
+    };
+  };
 };

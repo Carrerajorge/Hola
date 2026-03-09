@@ -67,10 +67,12 @@ import { resolveDiscordChannelAllowlist } from "../../discord/resolve-channels.j
 import { resolveDiscordUserAllowlist } from "../../discord/resolve-users.js";
 import { sendMessageDiscord, sendPollDiscord } from "../../discord/send.js";
 import { shouldLogVerbose } from "../../globals.js";
+import { onAgentEvent } from "../../infra/agent-events.js";
 import { monitorIMessageProvider } from "../../imessage/monitor.js";
 import { probeIMessage } from "../../imessage/probe.js";
 import { sendMessageIMessage } from "../../imessage/send.js";
 import { getChannelActivity, recordChannelActivity } from "../../infra/channel-activity.js";
+import { requestHeartbeatNow } from "../../infra/heartbeat-wake.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
 import {
   listLineAccountIds,
@@ -128,6 +130,7 @@ import { probeTelegram } from "../../telegram/probe.js";
 import { sendMessageTelegram, sendPollTelegram } from "../../telegram/send.js";
 import { resolveTelegramToken } from "../../telegram/token.js";
 import { textToSpeechTelephony } from "../../tts/tts.js";
+import { onSessionTranscriptUpdate } from "../../sessions/transcript-events.js";
 import { getActiveWebListener } from "../../web/active-listener.js";
 import {
   getWebAuthAgeMs,
@@ -244,6 +247,7 @@ export function createPluginRuntime(): PluginRuntime {
     media: createRuntimeMedia(),
     tts: { textToSpeechTelephony },
     tools: createRuntimeTools(),
+    events: createRuntimeEvents(),
     channel: createRuntimeChannel(),
     logging: createRuntimeLogging(),
     state: { resolveStateDir },
@@ -260,6 +264,7 @@ function createRuntimeConfig(): PluginRuntime["config"] {
 function createRuntimeSystem(): PluginRuntime["system"] {
   return {
     enqueueSystemEvent,
+    requestHeartbeatNow,
     runCommandWithTimeout,
     formatNativeDependencyHint,
   };
@@ -281,6 +286,13 @@ function createRuntimeTools(): PluginRuntime["tools"] {
     createMemoryGetTool,
     createMemorySearchTool,
     registerMemoryCli,
+  };
+}
+
+function createRuntimeEvents(): PluginRuntime["events"] {
+  return {
+    onAgentEvent,
+    onSessionTranscriptUpdate,
   };
 }
 

@@ -1,5 +1,5 @@
-/* eslint-disable react-hooks/set-state-in-effect */
-import { useState, useRef, useEffect } from "react"; import { useLocation } from "wouter"; import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"; import { Button } from
+/* eslint-disable react-hooks/set-state-in-effect */ import { useState, useRef, useEffect } from "react"; import { useLocation } from "wouter"; import { useQuery, useMutation, useQueryClient } from 
+"@tanstack/react-query"; import { Button } from
   "@/components/ui/button"; import { Input } from "@/components/ui/input"; import { Badge } from "@/components/ui/badge"; import { Switch } from "@/components/ui/switch"; import { ScrollArea } from
   "@/components/ui/scroll-area"; import { Separator } from "@/components/ui/separator"; import { Progress } from "@/components/ui/progress"; import {
     Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -437,22 +437,6 @@ function NodesSection() {
   const [pairOpen, setPairOpen] = useState(false);
   const [pairInfo, setPairInfo] = useState<{ code: string; expiresAt: string } | null>(null);
 
-  // For demo/testing: allow confirming pairing and running node calls from the UI.
-  // NOTE: nodeToken is a secret; do not use this UI flow for untrusted users.
-  const [confirmForm, setConfirmForm] = useState({
-    name: "VPS Test Node",
-    platform: "linux",
-    agentVersion: "0.1",
-  });
-  const [confirmedNode, setConfirmedNode] = useState<{ nodeId: string; nodeToken: string } | null>(null);
-  const [nodeTokens, setNodeTokens] = useState<Record<string, string>>(() => {
-    try {
-      return JSON.parse(localStorage.getItem("iliagpt.nodeTokens") || "{}");
-    } catch {
-      return {};
-    }
-  });
-
   const { data, isLoading, error } = useQuery({
     queryKey: ["/api/workspace/nodes"],
     queryFn: async () => {
@@ -473,36 +457,6 @@ function NodesSection() {
     if (!token) throw new Error("Missing CSRF token");
     return String(token);
   }
-
-  const confirmPairMutation = useMutation({
-    mutationFn: async ({ code, name, platform, agentVersion }: { code: string; name: string; platform?: string; agentVersion?: string }) => {
-      const res = await fetch("/api/nodes/pair/confirm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          code,
-          name,
-          platform,
-          agentVersion,
-          capabilities: { uiConfirm: true },
-        }),
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
-      return json as { success: true; nodeId: string; nodeToken: string };
-    },
-    onSuccess: (r) => {
-      setConfirmedNode({ nodeId: r.nodeId, nodeToken: r.nodeToken });
-      setNodeTokens((prev) => {
-        const next = { ...prev, [r.nodeId]: r.nodeToken };
-        localStorage.setItem("iliagpt.nodeTokens", JSON.stringify(next));
-        return next;
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/workspace/nodes"] });
-      toast.success("Device paired");
-    },
-    onError: (e: any) => toast.error(e?.message || "Pairing failed"),
-  });
 
   const pairMutation = useMutation({
     mutationFn: async () => {
@@ -545,25 +499,6 @@ function NodesSection() {
     },
     onSuccess: (r) => toast.success(`Job queued: ${r.jobId}`),
     onError: (e: any) => toast.error(e?.message || "Failed to create job"),
-  });
-
-  const pollJobsMutation = useMutation({
-    mutationFn: async ({ nodeId }: { nodeId: string }) => {
-      const token = nodeTokens[nodeId];
-      if (!token) throw new Error("Missing node token for this device (pair it via the UI confirm step). ");
-      const res = await fetch("/api/nodes/jobs/poll", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
-      return json;
-    },
-    onSuccess: (json: any) => {
-      const job = json?.job;
-      if (!job) return toast.info("No jobs");
-      toast.success(`Received job: ${job.id} (${job.kind})`);
-    },
-    onError: (e: any) => toast.error(e?.message || "Poll failed"),
   });
 
   const revokeMutation = useMutation({
@@ -632,54 +567,37 @@ function NodesSection() {
                 </div>
 
                 <Separator />
-
                 <div className="space-y-2">
-                  <div className="text-sm font-medium">Confirm pairing (UI demo)</div>
-                  <div className="text-xs text-muted-foreground">
-                    This will call <span className="font-mono">/api/nodes/pair/confirm</span> from the browser and will expose a node token in the UI.
-                    Use only for testing.
-                  </div>
-                  <div className="grid grid-cols-1 gap-2">
-                    <div>
-                      <Label>Name</Label>
-                      <Input value={confirmForm.name} onChange={(e) => setConfirmForm((p) => ({ ...p, name: e.target.value }))} />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <Label>Platform</Label>
-                        <Input value={confirmForm.platform} onChange={(e) => setConfirmForm((p) => ({ ...p, platform: e.target.value }))} />
-                      </div>
-                      <div>
-                        <Label>Agent version</Label>
-                        <Input value={confirmForm.agentVersion} onChange={(e) => setConfirmForm((p) => ({ ...p, agentVersion: e.target.value }))} />
-                      </div>
-                    </div>
-                  </div>
+		  <div className="text-sm font-medium">Instalar agente (real)</div>
+		  <div className="text-xs text-muted-foreground">
+		    Copia y pega este comando en el servidor/máquina que quieras emparejar. El agente usará el código y se registrará.
+		    (El token NO se muestra en la UI).
+		  </div>
 
-                  <div className="flex items-center gap-2">
-                    <Button
-                      onClick={() => confirmPairMutation.mutate({ code: pairInfo.code, name: confirmForm.name, platform: confirmForm.platform, agentVersion: confirmForm.agentVersion })}
-                      disabled={confirmPairMutation.isPending}
-                      className="gap-2"
-                    >
-                      {confirmPairMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                      Confirm pairing
-                    </Button>
-                    {confirmedNode ? (
-                      <Badge variant="secondary">Paired</Badge>
-                    ) : null}
-                  </div>
+		  <Label>Docker run</Label>
+		  <Input
+		    readOnly
+		    className="font-mono text-xs"
+		    value={`docker run -d --restart unless-stopped --name iliagpt-device-agent -e ILIAGPT_URL=${typeof window !== "undefined" ? window.location.origin : "https://iliagpt.com"} -e PAIR_CODE=${pairInfo?.code || ""} -v iliagpt-device-agent:/data ghcr.io/carrerajorge/iliagpt-device-agent:latest`}
+		  />
+		  <div className="flex items-center gap-2">
+		    <Button
+		      variant="outline"
+		      onClick={async () => {
+		        const cmd = `docker run -d --restart unless-stopped --name iliagpt-device-agent -e ILIAGPT_URL=${window.location.origin} -e PAIR_CODE=${pairInfo?.code || ""} -v iliagpt-device-agent:/data ghcr.io/carrerajorge/iliagpt-device-agent:latest`;
+		        await navigator.clipboard.writeText(cmd);
+		        toast.success("Copied");
+		      }}
+		    >
+		      Copy command
+		    </Button>
+		  </div>
 
-                  {confirmedNode ? (
-                    <div className="space-y-1">
-                      <div className="text-xs text-muted-foreground">nodeId</div>
-                      <Input readOnly value={confirmedNode.nodeId} className="font-mono" />
-                      <div className="text-xs text-muted-foreground">nodeToken</div>
-                      <Input readOnly value={confirmedNode.nodeToken} className="font-mono" />
-                    </div>
-                  ) : null}
-                </div>
-              </div>
+		  <div className="text-xs text-muted-foreground">
+		    Nota: la imagen ghcr.io/carrerajorge/iliagpt-device-agent:latest la construiremos en el siguiente PR.
+		  </div>
+		</div>
+            </div>
             )}
           </DialogContent>
         </Dialog>
@@ -742,14 +660,6 @@ function NodesSection() {
                             <Button
                               variant="outline"
                               size="sm"
-                              disabled={revoked || pollJobsMutation.isPending}
-                              onClick={() => pollJobsMutation.mutate({ nodeId: String(n.id) })}
-                            >
-                              Poll
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
                               disabled={revoked || revokeMutation.isPending}
                               onClick={() => revokeMutation.mutate(String(n.id))}
                             >
@@ -778,7 +688,7 @@ function NodesSection() {
         <CardHeader>
           <CardTitle className="text-base">Siguiente</CardTitle>
           <CardDescription>
-            Esta pantalla es solo el “front inicial”. Luego implementamos: ver jobs por node, enviar jobs (jobs/poll/result) e integración real con OpenClaw.
+            Esta pantalla pasará a ser 100% iliagpt: device-agent docker + long-poll + jobs/actions + logs + permisos (sin depender de OpenClaw).
           </CardDescription>
         </CardHeader>
       </Card>
@@ -5619,7 +5529,7 @@ function SettingsSection() {
     <div className="space-y-6">
       <div className="space-y-2">
         <Label htmlFor="default_model">Default Model</Label>
-        <Select value={localSettings.default_model || "grok-3-fast"} onValueChange={(v) => updateLocal("default_model", v)}>
+        <Select value={localSettings.default_model || "gemini-2.5-flash"} onValueChange={(v) => updateLocal("default_model", v)}>
           <SelectTrigger data-testid="select-default-model">
             <SelectValue />
           </SelectTrigger>

@@ -103,7 +103,10 @@ export function AboutGptDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
+      <DialogContent
+        className="max-w-md p-0 gap-0 overflow-hidden"
+        showCloseButton={false}
+      >
         <VisuallyHidden>
           <DialogTitle>Información del GPT</DialogTitle>
           <DialogDescription>Detalles e información sobre el GPT seleccionado</DialogDescription>

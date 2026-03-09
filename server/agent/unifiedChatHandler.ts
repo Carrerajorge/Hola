@@ -19,6 +19,15 @@ import { agentManager } from "./agentOrchestrator";
 import { routeAgentRequest } from "./agentRouter";
 import { buildNativeAgenticFusion, hasNativeAgenticSignal } from "./nativeAgenticFusion";
 
+const SIMPLE_TABLE_REQUEST_REGEX =
+  /\b(?:crea|crear|genera|generar|haz|hacer|dame|arma|construye)\b.*\b(?:tabla|table)\b/i;
+const EXPLICIT_ARTIFACT_OUTPUT_REGEX =
+  /\b(?:excel|xlsx|spreadsheet|hoja\s+de\s+c[aá]lculo|csv|archivo|file|descarga|download|exporta|exportar)\b/i;
+
+function shouldPreferInlineTableFlow(rawMessage: string): boolean {
+  return SIMPLE_TABLE_REQUEST_REGEX.test(rawMessage) && !EXPLICIT_ARTIFACT_OUTPUT_REGEX.test(rawMessage);
+}
+
 // ============================================================================
 // Latency Mode types
 // ============================================================================
@@ -731,6 +740,7 @@ export async function executeUnifiedChat(
 
 function buildSystemPrompt(requestSpec: RequestSpec): string {
   let prompt = `Eres un asistente de IA avanzado. `;
+  const preferInlineTableFlow = shouldPreferInlineTableFlow(requestSpec.rawMessage);
 
   switch (requestSpec.intent) {
     case 'research':
@@ -764,6 +774,10 @@ function buildSystemPrompt(requestSpec: RequestSpec): string {
 
   if (requestSpec.sessionState && requestSpec.sessionState.turnNumber > 1) {
     prompt += `\n\nEsta es una conversación en curso (turno ${requestSpec.sessionState.turnNumber}). Mantén coherencia con el contexto previo.`;
+  }
+
+  if (preferInlineTableFlow) {
+    prompt += `\n\nSi el usuario pide una tabla simple y no menciona Excel, archivo o descarga, responde directamente con una tabla Markdown en el chat. No uses herramientas web ni inventes URLs o fuentes.`;
   }
 
   return prompt;

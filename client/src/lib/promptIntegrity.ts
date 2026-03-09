@@ -12,6 +12,17 @@ export interface PromptIntegrityMeta {
   messageId: string;
 }
 
+function generatePromptIntegrityMessageId(): string {
+  return crypto.randomUUID?.() ?? `msg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export function createPromptIntegrityFallback(content: string): Pick<PromptIntegrityMeta, "messageId" | "clientPromptCharCount"> {
+  return {
+    clientPromptCharCount: [...content].length,
+    messageId: generatePromptIntegrityMessageId(),
+  };
+}
+
 /**
  * Compute integrity metadata for a prompt string.
  *
@@ -40,6 +51,39 @@ export async function computePromptIntegrity(content: string): Promise<PromptInt
     clientPromptLen: byteLen,
     clientPromptHash: hashHex,
     clientPromptCharCount: [...content].length,
-    messageId: crypto.randomUUID?.() ?? `msg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+    messageId: generatePromptIntegrityMessageId(),
   };
+}
+
+let promptIntegrityWarmupStarted = false;
+
+export function warmPromptIntegrity(): void {
+  if (promptIntegrityWarmupStarted) return;
+  promptIntegrityWarmupStarted = true;
+
+  try {
+    void crypto.subtle.digest("SHA-256", new Uint8Array(0)).catch(() => {
+      // Ignore warm-up failures; runtime will just fall back to best-effort mode.
+    });
+  } catch {
+    // Ignore warm-up failures; runtime will just fall back to best-effort mode.
+  }
+}
+
+export async function computePromptIntegrityWithBudget(
+  content: string,
+  budgetMs = 16,
+): Promise<PromptIntegrityMeta | null> {
+  const computePromise = computePromptIntegrity(content).catch(() => null);
+
+  if (budgetMs <= 0) {
+    return computePromise;
+  }
+
+  return Promise.race<PromptIntegrityMeta | null>([
+    computePromise,
+    new Promise<null>((resolve) => {
+      setTimeout(() => resolve(null), budgetMs);
+    }),
+  ]);
 }

@@ -1,11 +1,8 @@
-import { Router } from "express";
-import { z } from "zod";
-import crypto from "crypto";
-import { db } from "../db";
-import { nodes, nodePairings, nodeJobs, users } from "@shared/schema";
-import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
-import { validateBody } from "../middleware/validateRequest";
-import { getUserId } from "../types/express";
+import { Router } from "express"; import { z } from "zod"; import crypto from 
+"crypto"; import { db } from "../db"; import { workspaceNodes, nodePairings, 
+workspaceNodeJobs, users } from "@shared/schema"; import { and, desc, eq, gt, 
+isNull, sql } from "drizzle-orm"; import { validateBody } from 
+"../middleware/validateRequest"; import { getUserId } from "../types/express"; 
 import { requireNodeAuth, getNode } from "../middleware/nodeAuth";
 
 const PAIRING_TTL_MINUTES = 5;
@@ -68,28 +65,28 @@ export function createNodesRouter(): Router {
   // =====================
 
   // GET /api/workspace/nodes
-  router.get("/api/workspace/nodes", async (req, res) => {
+  router.get("/workspace/nodes", async (req, res) => {
     const actor = await getActor(req);
     if (!actor) return res.status(401).json({ success: false, error: "Debes iniciar sesión" });
 
     const rows = await db
       .select({
-        id: nodes.id,
-        name: nodes.name,
-        platform: nodes.platform,
-        agentVersion: nodes.agentVersion,
-        capabilities: nodes.capabilities,
-        policy: nodes.policy,
-        lastSeenAt: nodes.lastSeenAt,
-        revokedAt: nodes.revokedAt,
-        ownerUserId: nodes.ownerUserId,
-        createdAt: nodes.createdAt,
+        id: workspaceNodes.id,
+        name: workspaceNodes.name,
+        platform: workspaceNodes.platform,
+        agentVersion: workspaceNodes.agentVersion,
+        capabilities: workspaceNodes.capabilities,
+        policy: workspaceNodes.policy,
+        lastSeenAt: workspaceNodes.lastSeenAt,
+        revokedAt: workspaceNodes.revokedAt,
+        ownerUserId: workspaceNodes.ownerUserId,
+        createdAt: workspaceNodes.createdAt,
       })
-      .from(nodes)
-      .where(eq(nodes.orgId, actor.orgId))
-      .orderBy(desc(nodes.createdAt));
+      .from(workspaceNodes)
+      .where(eq(workspaceNodes.orgId, actor.orgId))
+      .orderBy(desc(workspaceNodes.createdAt));
 
-    res.json({ success: true, orgId: actor.orgId, nodes: rows.map((n) => ({
+    res.json({ success: true, orgId: actor.orgId, workspaceNodes: rows.map((n) => ({
       ...n,
       id: String(n.id),
       name: String(n.name),
@@ -102,7 +99,7 @@ export function createNodesRouter(): Router {
   });
 
   // POST /api/workspace/nodes/pair
-  router.post("/api/workspace/nodes/pair", validateBody(pairSchema), async (req, res) => {
+  router.post("/workspace/nodes/pair", validateBody(pairSchema), async (req, res) => {
     const actor = await getActor(req);
     if (!actor) return res.status(401).json({ success: false, error: "Debes iniciar sesión" });
 
@@ -122,7 +119,7 @@ export function createNodesRouter(): Router {
   });
 
   // POST /api/workspace/nodes/:nodeId/revoke
-  router.post("/api/workspace/nodes/:nodeId/revoke", async (req, res) => {
+  router.post("/workspace/nodes/:nodeId/revoke", async (req, res) => {
     const actor = await getActor(req);
     if (!actor) return res.status(401).json({ success: false, error: "Debes iniciar sesión" });
 
@@ -130,9 +127,9 @@ export function createNodesRouter(): Router {
     if (!nodeId) return res.status(400).json({ success: false, error: "nodeId required" });
 
     const [updated] = await db
-      .update(nodes)
+      .update(workspaceNodes)
       .set({ revokedAt: new Date(), updatedAt: new Date() })
-      .where(and(eq(nodes.id, nodeId), eq(nodes.orgId, actor.orgId), isNull(nodes.revokedAt)))
+      .where(and(eq(workspaceNodes.id, nodeId), eq(workspaceNodes.orgId, actor.orgId), isNull(workspaceNodes.revokedAt)))
       .returning();
 
     if (!updated) return res.status(404).json({ success: false, error: "Node not found" });
@@ -140,18 +137,18 @@ export function createNodesRouter(): Router {
   });
 
   // POST /api/workspace/nodes/jobs
-  router.post("/api/workspace/nodes/jobs", validateBody(createJobSchema), async (req, res) => {
+  router.post("/workspace/nodes/jobs", validateBody(createJobSchema), async (req, res) => {
     const actor = await getActor(req);
     if (!actor) return res.status(401).json({ success: false, error: "Debes iniciar sesión" });
 
     const { nodeId, kind, payload } = req.body as any;
 
     // Ensure node belongs to org and not revoked
-    const [n] = await db.select({ id: nodes.id }).from(nodes).where(and(eq(nodes.id, String(nodeId)), eq(nodes.orgId, actor.orgId), isNull(nodes.revokedAt))).limit(1);
+    const [n] = await db.select({ id: workspaceNodes.id }).from(workspaceNodes).where(and(eq(workspaceNodes.id, String(nodeId)), eq(workspaceNodes.orgId, actor.orgId), isNull(workspaceNodes.revokedAt))).limit(1);
     if (!n) return res.status(404).json({ success: false, error: "Node not found" });
 
     const [job] = await db
-      .insert(nodeJobs)
+      .insert(workspaceNodeJobs)
       .values({
         orgId: actor.orgId,
         nodeId: String(nodeId),
@@ -167,7 +164,7 @@ export function createNodesRouter(): Router {
   });
 
   // GET /api/workspace/nodes/:nodeId/jobs
-  router.get("/api/workspace/nodes/:nodeId/jobs", async (req, res) => {
+  router.get("/workspace/nodes/:nodeId/jobs", async (req, res) => {
     const actor = await getActor(req);
     if (!actor) return res.status(401).json({ success: false, error: "Debes iniciar sesión" });
 
@@ -175,14 +172,14 @@ export function createNodesRouter(): Router {
     if (!nodeId) return res.status(400).json({ success: false, error: "nodeId required" });
 
     // Ensure node belongs to org
-    const [n] = await db.select({ id: nodes.id }).from(nodes).where(and(eq(nodes.id, nodeId), eq(nodes.orgId, actor.orgId))).limit(1);
+    const [n] = await db.select({ id: workspaceNodes.id }).from(workspaceNodes).where(and(eq(workspaceNodes.id, nodeId), eq(workspaceNodes.orgId, actor.orgId))).limit(1);
     if (!n) return res.status(404).json({ success: false, error: "Node not found" });
 
     const rows = await db
       .select()
-      .from(nodeJobs)
-      .where(and(eq(nodeJobs.orgId, actor.orgId), eq(nodeJobs.nodeId, nodeId)))
-      .orderBy(desc(nodeJobs.createdAt))
+      .from(workspaceNodeJobs)
+      .where(and(eq(workspaceNodeJobs.orgId, actor.orgId), eq(workspaceNodeJobs.nodeId, nodeId)))
+      .orderBy(desc(workspaceNodeJobs.createdAt))
       .limit(100);
 
     res.json({
@@ -202,8 +199,8 @@ export function createNodesRouter(): Router {
   // Node side
   // =====================
 
-  // POST /api/nodes/pair/confirm
-  router.post("/api/nodes/pair/confirm", validateBody(confirmSchema), async (req, res) => {
+  // POST /api/nodes/pair/complete
+  router.post("/nodes/pair/complete", validateBody(confirmSchema), async (req, res) => {
     const { code, name, platform, agentVersion, capabilities } = req.body as any;
 
     const now = new Date();
@@ -233,7 +230,7 @@ export function createNodesRouter(): Router {
     const tokenHash = sha256Base64Url(token);
 
     const [created] = await db
-      .insert(nodes)
+      .insert(workspaceNodes)
       .values({
         orgId: String((pairing as any).orgId || "default"),
         ownerUserId: String((pairing as any).createdByUserId),
@@ -256,29 +253,34 @@ export function createNodesRouter(): Router {
     });
   });
 
+  // Backwards-compatible alias. Remove once device-agent uses /complete everywhere.
+  router.post("/nodes/pair/confirm", validateBody(confirmSchema), async (req, res) => {
+    return res.redirect(307, "/nodes/pair/complete");
+  });
+
   // Node polls for queued jobs (MVP; WS comes next)
   // GET /api/nodes/jobs/poll
-  router.get("/api/nodes/jobs/poll", requireNodeAuth, async (req, res) => {
+  router.get("/nodes/jobs/poll", requireNodeAuth, async (req, res) => {
     const node = getNode(req);
     if (!node) return res.status(401).json({ success: false, error: "Unauthorized" });
 
     // Update last seen
-    await db.update(nodes).set({ lastSeenAt: new Date(), updatedAt: new Date() }).where(eq(nodes.id, node.id));
+    await db.update(workspaceNodes).set({ lastSeenAt: new Date(), updatedAt: new Date() }).where(eq(workspaceNodes.id, node.id));
 
     const [job] = await db
       .select()
-      .from(nodeJobs)
-      .where(and(eq(nodeJobs.nodeId, node.id), eq(nodeJobs.orgId, node.orgId), eq(nodeJobs.status, "queued")))
-      .orderBy(desc(nodeJobs.createdAt))
+      .from(workspaceNodeJobs)
+      .where(and(eq(workspaceNodeJobs.nodeId, node.id), eq(workspaceNodeJobs.orgId, node.orgId), eq(workspaceNodeJobs.status, "queued")))
+      .orderBy(desc(workspaceNodeJobs.createdAt))
       .limit(1);
 
     if (!job) return res.json({ success: true, job: null });
 
     // Mark delivered (lease) but not started yet
     await db
-      .update(nodeJobs)
+      .update(workspaceNodeJobs)
       .set({ status: "sent" })
-      .where(and(eq(nodeJobs.id, (job as any).id), eq(nodeJobs.status, "queued")));
+      .where(and(eq(workspaceNodeJobs.id, (job as any).id), eq(workspaceNodeJobs.status, "queued")));
     
     res.json({ success: true, job: { ...job, id: String((job as any).id) } });
   });
@@ -298,31 +300,31 @@ export function createNodesRouter(): Router {
 
       // Only allow ack if the job belongs to this node and is not revoked
       const [job] = await db
-        .select({ id: nodeJobs.id, status: nodeJobs.status })
-        .from(nodeJobs)
-        .where(and(eq(nodeJobs.id, jobId), eq(nodeJobs.nodeId, node.id), eq(nodeJobs.orgId, node.orgId)))
+        .select({ id: workspaceNodeJobs.id, status: workspaceNodeJobs.status })
+        .from(workspaceNodeJobs)
+        .where(and(eq(workspaceNodeJobs.id, jobId), eq(workspaceNodeJobs.nodeId, node.id), eq(workspaceNodeJobs.orgId, node.orgId)))
         .limit(1);
 
       if (!job) return res.status(404).json({ success: false, error: "Job not found" });
 
       // Move sent/queued -> running
       const [updated] = await db
-        .update(nodeJobs)
+        .update(workspaceNodeJobs)
         .set({ status: "running", startedAt: new Date() })
         .where(
           and(
-            eq(nodeJobs.id, jobId),
-            eq(nodeJobs.nodeId, node.id),
-            eq(nodeJobs.orgId, node.orgId),
+            eq(workspaceNodeJobs.id, jobId),
+            eq(workspaceNodeJobs.nodeId, node.id),
+            eq(workspaceNodeJobs.orgId, node.orgId),
             // allow ack even if it was still queued (race)
             // and also if it was sent
             // (if already running/succeeded/failed, this update won't match)
             // @ts-ignore - drizzle doesn't have inArray imported here; keep simple OR
             // we'll do OR using SQL
-            sql`${nodeJobs.status} IN ('queued','sent')`
+            sql`${workspaceNodeJobs.status} IN ('queued','sent')`
           )
         )
-        .returning({ id: nodeJobs.id });
+        .returning({ id: workspaceNodeJobs.id });
 
       if (!updated) {
         return res.status(409).json({ success: false, error: `Job is not ackable (status=${String((job as any).status)})` });
@@ -337,7 +339,7 @@ export function createNodesRouter(): Router {
   router.post(
     "/api/nodes/jobs/:jobId/result",
     requireNodeAuth,
-    validateBody(z.object({ status: z.enum(["succeeded", "failed"]), result: z.any().optional(), error: z.string().optional() })),
+    validateBody(z.object({ status: z.enum(["running", "succeeded", "failed"]), result: z.any().optional(), error: z.string().optional().nullable() })),
     async (req, res) => {
       const requestId = (req as any).correlationId || (req as any).requestId || (req.headers["x-request-id"] as string) || null;
       try {
@@ -347,42 +349,47 @@ export function createNodesRouter(): Router {
         const jobId = String((req.params as any).jobId || "").trim();
         if (!jobId) return res.status(400).json({ success: false, error: "jobId required" });
 
+        const { status, result, error } = req.body as any;
+
         // Ensure job belongs to node
+        // Use select explicit columns to avoid issues with schema vs DB mismatch
         const [job] = await db
-          .select({ id: nodeJobs.id })
-          .from(nodeJobs)
-          .where(and(eq(nodeJobs.id, jobId), eq(nodeJobs.nodeId, node.id), eq(nodeJobs.orgId, node.orgId)))
+          .select({
+            id: workspaceNodeJobs.id,
+            startedAt: workspaceNodeJobs.startedAt
+          })
+          .from(workspaceNodeJobs)
+          .where(and(eq(workspaceNodeJobs.id, jobId), eq(workspaceNodeJobs.nodeId, node.id), eq(workspaceNodeJobs.orgId, node.orgId)))
           .limit(1);
+
         if (!job) return res.status(404).json({ success: false, error: "Job not found" });
 
-        const { status, result, error } = req.body as any;
-        await db
-          .update(nodeJobs)
-          .set({
-            status,
-            result: result ?? null,
-            error: error ?? null,
-            startedAt: sql`COALESCE(${nodeJobs.startedAt}, NOW())`,
-            finishedAt: new Date(),
-          })
-          .where(eq(nodeJobs.id, jobId));
+        const now = new Date();
+        const updateData: any = {
+          status,
+          updatedAt: now,
+        };
+
+        if (status === "running") {
+           // If moving to running and not started yet, set startedAt
+           if (!job.startedAt) {
+             updateData.startedAt = now;
+           }
+        } else {
+           // Terminal states (succeeded/failed)
+           updateData.finishedAt = now;
+           if (result !== undefined) updateData.result = result;
+           if (error !== undefined) updateData.error = error;
+        }
+
+        await db.update(workspaceNodeJobs).set(updateData).where(eq(workspaceNodeJobs.id, jobId));
 
         return res.json({ success: true });
       } catch (e: any) {
-        // Some environments don't emit stack traces to container logs unless explicitly printed.
-        console.error(
-          `[nodes] job result failed requestId=${requestId || "unknown"} nodeId=${(getNode(req) as any)?.id || "unknown"} jobId=${(req.params as any)?.jobId || ""} error=${e?.message || e}`,
-          e?.stack
-        );
-        return res.status(500).json({
-          success: false,
-          error: "Internal error",
-          code: "NODES_JOB_RESULT_INTERNAL",
-          requestId: requestId || undefined,
-        });
+        console.error(`[nodes] job result failed: ${e.message}`, e);
+        return res.status(500).json({ success: false, error: "Internal error" });
       }
     }
   );
-
   return router;
 }

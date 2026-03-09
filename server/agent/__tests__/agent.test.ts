@@ -10,6 +10,7 @@ import {
 import { ToolRegistry, type ToolDefinition, type ToolContext, type ToolResult } from '../toolRegistry';
 import { PolicyEngine, type PolicyContext, type ToolPolicy } from '../policyEngine';
 import { metricsCollector, type StepMetrics } from '../metricsCollector';
+import { AGENT_TOOLS } from '../../config/agentTools';
 
 describe('RunStateMachine', () => {
   let machine: RunStateMachine;
@@ -484,6 +485,17 @@ describe('PolicyEngine', () => {
       expect(result.requiresConfirmation).toBe(false);
     });
 
+    it('should allow free plan to access fetch_url', () => {
+      const result = engine.checkAccess({
+        userId: 'user-1',
+        userPlan: 'free',
+        toolName: 'fetch_url',
+      });
+
+      expect(result.allowed).toBe(true);
+      expect(result.requiresConfirmation).toBe(false);
+    });
+
     it('should deny free plan to access generate_image', () => {
       const result = engine.checkAccess({
         userId: 'user-1',
@@ -636,6 +648,14 @@ describe('PolicyEngine', () => {
       expect(policy?.toolName).toBe('web_search');
     });
 
+    it('should define policies for every declared agent tool', () => {
+      const missingPolicies = AGENT_TOOLS
+        .map((tool) => tool.name)
+        .filter((toolName) => !engine.getPolicy(toolName));
+
+      expect(missingPolicies).toEqual([]);
+    });
+
     it('should return undefined for unregistered tool', () => {
       expect(engine.getPolicy('unknown')).toBeUndefined();
     });
@@ -676,6 +696,8 @@ describe('PolicyEngine', () => {
       const tools = engine.getToolsForPlan('free');
       expect(tools).toContain('analyze_spreadsheet');
       expect(tools).toContain('web_search');
+      expect(tools).toContain('fetch_url');
+      expect(tools).toContain('create_spreadsheet');
       expect(tools).not.toContain('generate_image');
     });
 

@@ -4,7 +4,7 @@ import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/compone
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { X, Sparkles, MessageSquare, Image, Brain, Clock, Target, Zap, Users, Shield, FileText, Video, Code, Star, Infinity, CheckCircle2, Loader2 } from "lucide-react";
+import { X, Sparkles, MessageSquare, Image, Brain, Clock, Target, Zap, Users, Shield, FileText, Video, Code, Star, Infinity as InfinityIcon, CheckCircle2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 
@@ -174,7 +174,7 @@ export function UpgradePlanDialog({ open, onOpenChange }: UpgradePlanDialogProps
       buttonVariant: "default" as const,
       features: [
         { icon: Star, text: "Domina tareas y temas avanzados" },
-        { icon: Infinity, text: "Trabaja en proyectos grandes con mensajes ilimitados" },
+        { icon: InfinityIcon, text: "Trabaja en proyectos grandes con mensajes ilimitados" },
         { icon: Image, text: "Crea imágenes de alta calidad a cualquier escala" },
         { icon: Brain, text: "Mantén todo el contexto con la memoria máxima" },
         { icon: Zap, text: "Ejecuta investigaciones y planifica tareas con agentes" },
@@ -212,7 +212,7 @@ export function UpgradePlanDialog({ open, onOpenChange }: UpgradePlanDialogProps
       highlight: true,
       features: [
         { icon: CheckCircle2, text: "Realiza un análisis profesional" },
-        { icon: Infinity, text: "Obtén mensajes ilimitados con GPT-5" },
+        { icon: InfinityIcon, text: "Obtén mensajes ilimitados con GPT-5" },
         { icon: Image, text: "Produce imágenes, videos, presentaciones y más" },
         { icon: Shield, text: "Protege tu espacio con SSO, MFA y más" },
         { icon: Shield, text: "Protege la privacidad; los datos nunca se usan para fines de entrenamiento" },
@@ -228,7 +228,10 @@ export function UpgradePlanDialog({ open, onOpenChange }: UpgradePlanDialogProps
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl w-[95vw] max-h-[90vh] overflow-y-auto p-0">
+      <DialogContent
+        className="max-w-6xl w-[95vw] max-h-[90vh] overflow-y-auto p-0"
+        showCloseButton={false}
+      >
         <VisuallyHidden>
           <DialogTitle>Mejora tu plan</DialogTitle>
           <DialogDescription>Compara y selecciona el plan que mejor se adapte a tus necesidades</DialogDescription>

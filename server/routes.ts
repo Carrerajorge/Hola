@@ -1,4 +1,5 @@
-import type { Express, Request, Response } from "express";
+import type { Express, NextFunction, Request, Response } from "express";
+import { createNodesRouter } from "./routes/nodesRouter";
 import { type AuthenticatedRequest, getUserId } from "./types/express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
@@ -140,20 +141,33 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 
-import { createRunRouter } from "./routes/runRouter";
-import { createBrowserControlRouter } from "./routes/browserControlRouter";
 import { createTerminalControlRouter, terminalClients } from "./routes/terminalControlRouter";
-import { createWorkflowRouter } from "./routes/workflowRouter";
-import { createDeviceControlRouter } from "./routes/deviceControlRouter";
-import openClawRouter from "./routes/openClawRouter";
-import { createSuperProgrammingAgentRouter } from "./routes/superProgrammingAgentRouter";
-import { createSkillPlatformRouter } from "./routes/skillPlatformRouter";
 import { CSRF_COOKIE_NAME, CSRF_TOKEN_PATTERN, issueCsrfCookie } from "./middleware/csrf";
 import { finopsRouter } from "./routes/finopsRouter";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
 const fileStatusClients: Map<string, Set<WebSocket>> = new Map();
+
+type LazyMountedRouter = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => unknown;
+
+function lazyMountRouter(factory: () => Promise<LazyMountedRouter>): LazyMountedRouter {
+  let routerPromise: Promise<LazyMountedRouter> | null = null;
+
+  return async (req, res, next) => {
+    try {
+      routerPromise ??= factory();
+      const router = await routerPromise;
+      return router(req, res, next);
+    } catch (error) {
+      return next(error);
+    }
+  };
+}
 
 type PublicModelSummary = {
   id: string;
@@ -214,6 +228,22 @@ function toPublicModelSummary(model: any): PublicModelSummary {
   };
 }
 
+async function computeMfaForAuthCallback(params: {
+  userId: string;
+  excludeSid?: string | null;
+  providerLabel: string;
+}) {
+  try {
+    return await computeMfaForUser({
+      userId: params.userId,
+      excludeSid: params.excludeSid,
+    });
+  } catch (error) {
+    console.error(`[Auth] ${params.providerLabel} MFA evaluation failed:`, error);
+    return null;
+  }
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -244,7 +274,14 @@ export async function registerRoutes(
               return res.redirect("/login?error=login_failed");
             }
 
-            const mfa = await computeMfaForUser({ userId, excludeSid: req.sessionID || null });
+            const mfa = await computeMfaForAuthCallback({
+              userId,
+              excludeSid: req.sessionID || null,
+              providerLabel: "Google callback",
+            });
+            if (!mfa) {
+              return res.redirect("/login?error=login_failed");
+            }
             if (mfa.requiresMfa) {
               try {
                 await startMfaLoginChallenge({
@@ -322,7 +359,14 @@ export async function registerRoutes(
               return res.redirect("/login?error=login_failed");
             }
 
-            const mfa = await computeMfaForUser({ userId, excludeSid: req.sessionID || null });
+            const mfa = await computeMfaForAuthCallback({
+              userId,
+              excludeSid: req.sessionID || null,
+              providerLabel: "Microsoft callback",
+            });
+            if (!mfa) {
+              return res.redirect("/login?error=login_failed");
+            }
             if (mfa.requiresMfa) {
               try {
                 await startMfaLoginChallenge({
@@ -399,7 +443,14 @@ export async function registerRoutes(
               return res.redirect("/login?error=login_failed");
             }
 
-            const mfa = await computeMfaForUser({ userId, excludeSid: req.sessionID || null });
+            const mfa = await computeMfaForAuthCallback({
+              userId,
+              excludeSid: req.sessionID || null,
+              providerLabel: "Auth0 callback",
+            });
+            if (!mfa) {
+              return res.redirect("/login?error=login_failed");
+            }
             if (mfa.requiresMfa) {
               try {
                 await startMfaLoginChallenge({
@@ -594,6 +645,8 @@ export async function registerRoutes(
   );
 
   app.use("/api/ppt", pptExportRouter);
+  // Node / Device Agent routes (API for external nodes)
+  app.use("/api", createNodesRouter());
   app.use("/api", createChatsRouter());
   app.use(createFilesRouter());
   app.use(createLocalStorageRouter());
@@ -609,12 +662,28 @@ export async function registerRoutes(
   app.use("/api/telemetry", createTelemetryRouter());
 
   const { createPublicReleasesRouter } = await import("./routes/releasesRouter");
+  // DEBUG: Temporary endpoint to list all registered Express routes
+    app.get("/api/debug/routes", (req, res) => {
+      const routePaths: string[] = [];
+      app._router.stack.forEach((middleware: any) => {
+        if (middleware.route) { // Routes registered directly on the app
+          routePaths.push(middleware.route.path);
+        } else if (middleware.name === 'router') { // Routers mounted on the app
+          middleware.handle.stack.forEach((handler: any) => {
+            if (handler.route) {
+              routePaths.push(handler.route.path);
+            }
+          });
+        }
+      });
+      res.json({ routes: routePaths });
+    });
+
   app.use("/api/public/releases", createPublicReleasesRouter());
 
   app.use(createFigmaRouter());
   app.use(createLibraryRouter());
   app.use(createWorkspaceRouter());
-  app.use(createNodesRouter());
   app.use(createCodeRouter());
   app.use(createUserRouter());
   app.use("/api", createChatAiRouter(broadcastAgentUpdate));
@@ -774,7 +843,14 @@ export async function registerRoutes(
   app.use("/api/agents", multiAgentRouter);
   app.use("/api/errors", errorRouter);
   app.use("/api/spreadsheet", createSpreadsheetRouter());
-  app.use("/api/skill-platform", createSkillPlatformRouter());
+  app.use("/api/skills", lazyMountRouter(async () => {
+    const { createSkillsRouter } = await import("./routes/skillsRouter");
+    return createSkillsRouter();
+  }));
+  app.use("/api/skill-platform", lazyMountRouter(async () => {
+    const { createSkillPlatformRouter } = await import("./routes/skillPlatformRouter");
+    return createSkillPlatformRouter();
+  }));
   app.use("/api/chat", createChatRoutes());
   app.use("/api/agent", createAgentModeRouter());
   app.use("/api/orchestrator", createOrchestratorRouter());
@@ -823,13 +899,22 @@ export async function registerRoutes(
   // SuperIntelligence System
   app.use("/api/audit", createAuditDashboardRouter());
   app.use("/api/super-intelligence", createSuperIntelligenceRouter());
-  app.use("/api/super-programming-agent", createSuperProgrammingAgentRouter());
+  app.use("/api/super-programming-agent", lazyMountRouter(async () => {
+    const { createSuperProgrammingAgentRouter } = await import("./routes/superProgrammingAgentRouter");
+    return createSuperProgrammingAgentRouter();
+  }));
 
   // ===== Device Control (autonomy primitives: local/remote terminal + browser) =====
-  app.use("/api/device-control", createDeviceControlRouter());
-
+  app.use("/api/device-control", lazyMountRouter(async () => {
+    const { createDeviceControlRouter } = await import("./routes/deviceControlRouter");
+    return createDeviceControlRouter();
+  }));
+  app.use(createNodesRouter());
   // ===== Browser & Terminal Control =====
-  app.use("/api/browser-control", createBrowserControlRouter());
+  app.use("/api/browser-control", lazyMountRouter(async () => {
+    const { createBrowserControlRouter } = await import("./routes/browserControlRouter");
+    return createBrowserControlRouter();
+  }));
   app.use("/api/terminal", requireAdminMiddleware, require2FA, createTerminalControlRouter());
 
   // ===== macOS Native Control (AppleScript, System, Apps, Calendar, etc.) =====
@@ -844,13 +929,28 @@ export async function registerRoutes(
   // ===== Analytics & Cost Tracking =====
   app.use("/api/analytics", requireAdminMiddleware, createAnalyticsRouter());
 
-  app.use("/api/workflows", createWorkflowRouter());
+  app.use("/api/workflows", lazyMountRouter(async () => {
+    const { createWorkflowRouter } = await import("./routes/workflowRouter");
+    return createWorkflowRouter();
+  }));
 
-  // OpenClaw runtime capabilities are fused directly into the native agent pipeline.
-  app.use("/api/openclaw", openClawRouter);
+  // OpenClaw runtime control-plane endpoints (health, skills, orchestrator, subagents).
+  app.use("/api/openclaw/runtime", lazyMountRouter(async () => {
+    const { createOpenClawRuntimeRouter } = await import("./routes/openclawRuntimeRouter");
+    return createOpenClawRuntimeRouter();
+  }));
+
+  // OpenClaw capability inventory/report endpoints.
+  app.use("/api/openclaw", lazyMountRouter(async () => {
+    const module = await import("./routes/openClawRouter");
+    return module.default;
+  }));
 
   // ===== Run Detail Endpoints =====
-  app.use("/api/runs", createRunRouter());
+  app.use("/api/runs", lazyMountRouter(async () => {
+    const { createRunRouter } = await import("./routes/runRouter");
+    return createRunRouter();
+  }));
 
   initializeEventStore().catch(console.error);
 

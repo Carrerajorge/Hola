@@ -5,6 +5,7 @@ import type {
   ReplyToMode,
 } from "./types.base.js";
 import type { DmConfig } from "./types.messages.js";
+import type { SecretRef } from "./types.secrets.js";
 
 export type GoogleChatDmConfig = {
   /** If false, ignore all incoming Google Chat DMs. Default: true. */
@@ -64,9 +65,11 @@ export type GoogleChatAccountConfig = {
   /** Per-space configuration keyed by space id or name. */
   groups?: Record<string, GoogleChatGroupConfig>;
   /** Service account JSON (inline string or object). */
-  serviceAccount?: string | Record<string, unknown>;
+  serviceAccount?: string | Record<string, unknown> | SecretRef;
   /** Service account JSON file path. */
   serviceAccountFile?: string;
+  /** Explicit service account SecretRef. */
+  serviceAccountRef?: SecretRef;
   /** Webhook audience type (app-url or project-number). */
   audienceType?: "app-url" | "project-number";
   /** Audience value (app URL or project number). */

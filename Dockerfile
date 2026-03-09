@@ -1,46 +1,123 @@
-# Stage 1: Builder
-FROM node:20-alpine AS builder
+# ILIAGPT Dockerfile - Optimized for lower disk usage in GitHub/VPS builds Multi-stage build for production
 
+# ============================================
+# Stage 1: Build (dependencies + compile)
+# ============================================
+FROM node:22-slim AS builder
 WORKDIR /app
 
-# Install build dependencies (python for node-gyp if needed)
-RUN apk add --no-cache python3 make g++
+# Build-time tooling for native modules
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  python3 make g++ \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
-# Install dependencies
-COPY package*.json ./
-# Clean install based on lock file
-RUN npm ci
-
-# Copy source
+# Full deps for build
+COPY package.json package-lock.json ./
+# Ensure mathjax sync script exists before npm ci postinstall hook
+COPY scripts/sync-mathjax-assets.cjs scripts/sync-mathjax-assets.cjs
+RUN npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts \
+  && npm i -D @rollup/rollup-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund \
+  && npm i -D lightningcss-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund \
+  && npm i -D @tailwindcss/oxide-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund \
+  && npm rebuild esbuild bcrypt node-pty sharp \
+  && node scripts/sync-mathjax-assets.cjs \
+  && npm cache clean --force
+# Build client and server assets
 COPY . .
-
-# Build (TypeScript -> JS)
+ARG APP_VERSION=dev
+ENV NODE_ENV=production
+ENV VITE_APP_VERSION=$APP_VERSION
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 RUN npm run build
 
-# Stage 2: Runner
-FROM node:20-alpine AS runner
+# Convert to production-only deps for runtime images
+RUN npm prune --legacy-peer-deps --omit=dev
 
+# ============================================
+# Stage 2: Sandbox Runner
+# ============================================
+FROM node:22-slim AS sandbox-runner
 WORKDIR /app
 
-# Production environment
+# Bake APP_VERSION into the image so runtime can report the deployed commit SHA
+# even if docker-compose environment expansion is missing/misconfigured.
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
+
+# docker CLI (runner executes docker-run jobs via /var/run/docker.sock)
+RUN apt-get update && apt-get install -y --no-install-recommends bash ca-certificates curl && apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+ARG DOCKER_CLI_VERSION=29.2.1
+RUN curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" | tar -xz -C /tmp && mv /tmp/docker/docker /usr/local/bin/docker && chmod +x /usr/local/bin/docker && docker --version
+
+ENV NODE_ENV=production
+ENV SANDBOX_RUNNER_PORT=8080
+
+# Runtime deps + built artifacts
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/package.json ./package.json
+
+EXPOSE 8080
+
+CMD ["node", "dist/sandbox-runner.cjs"]
+
+# ============================================
+# Stage 3: Production Runner
+# ============================================
+FROM node:22-slim AS runner
+WORKDIR /app
+
+# Bake APP_VERSION into the image (source of truth for /api/health version).
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
+
+# Create non-root user for security
+RUN groupadd --system --gid 1001 nodejs \
+  && useradd --system --uid 1001 --gid nodejs iliagpt
+
 ENV NODE_ENV=production
 ENV PORT=5000
 
-# Install runtime dependencies (ffmpeg for audio/video processing)
-RUN apk add --no-cache ffmpeg
+# Install Playwright Chromium system dependencies + wget for healthcheck + python3/matplotlib for Code Interpreter.
+# These are the shared libraries Playwright's bundled Chromium needs on Debian.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  bash \
+  wget ca-certificates fonts-liberation \
+  libasound2 libatk-bridge2.0-0 libatk1.0-0 libcairo2 libcups2 \
+  libdbus-1-3 libdrm2 libgbm1 libglib2.0-0 libgtk-3-0 \
+  libnspr4 libnss3 libpango-1.0-0 libx11-6 libx11-xcb1 \
+  libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
+  libxkbcommon0 libxrandr2 libxshmfence1 xdg-utils \
+  libxtst6 \
+  libjpeg62-turbo libgif7 librsvg2-2 libpixman-1-0 libpangocairo-1.0-0 \
+  python3 python3-matplotlib \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+# Copy prod dependencies only (with ownership)
+COPY --chown=iliagpt:nodejs --from=builder /app/node_modules ./node_modules
+# Copy built artifacts
+COPY --chown=iliagpt:nodejs --from=builder /app/dist ./dist
+COPY --chown=iliagpt:nodejs --from=builder /app/migrations ./migrations
+COPY --chown=iliagpt:nodejs --from=builder /app/client/public ./client/public
+COPY --chown=iliagpt:nodejs --from=builder /app/package.json ./package.json
 
-# Copy built assets from builder
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/node_modules ./node_modules
-# Copy static assets (reports, drafts)
-COPY --from=builder /app/public ./public
+# Download Playwright's bundled Chromium browser binary.
+# System deps are installed above via apt-get; here we only fetch the browser.
+ENV PLAYWRIGHT_BROWSERS_PATH=/app/.playwright-browsers
+RUN node ./node_modules/playwright/cli.js install chromium \
+  && chown -R iliagpt:nodejs /app/.playwright-browsers
 
-# Create non-root user for security (NASA-grade)
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nodejs -u 1001
-USER nodejs
+# Create temp directories for uploads/sandbox/logs with correct permissions
+RUN mkdir -p /app/uploads /app/artifacts /app/sandbox_workspace /app/data /app/logs \
+  && chown -R iliagpt:nodejs /app/uploads /app/artifacts /app/sandbox_workspace /app/data /app/logs
+
+USER iliagpt
 
 EXPOSE 5000
 
-CMD ["node", "dist/index.js"]
+# Health check (use IPv4 to avoid localhost -> ::1 issues)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=5 \
+  CMD wget -qO- http://127.0.0.1:5000/api/health >/dev/null 2>&1 || exit 1
+
+CMD ["node", "dist/index.cjs"]

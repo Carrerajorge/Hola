@@ -18,6 +18,7 @@ import type {
 } from "./types";
 import type { ToolDefinition, ToolContext } from "../../agent/toolRegistry";
 import type { ToolCapability } from "../../agent/contracts";
+import { z } from "zod";
 
 // ─── Interfaces for dependency injection (no circular imports) ──────
 
@@ -333,9 +334,6 @@ export class ConnectorRegistry {
 /** Lazy Zod schema from JSON Schema — produces a z.any() with passthrough.
  *  The real validation happens at the Gemini/connector layer via JSON Schema. */
 function jsonSchemaToZodLazy(schema: JSONSchema7): import("zod").ZodSchema {
-  // We import zod lazily to avoid circular dep issues at module load time
-  const { z } = require("zod");
-
   // For the ToolRegistry, we use a permissive schema — the connector handler
   // does its own validation against the JSON Schema.  This avoids maintaining
   // two sets of schemas (Zod + JSON Schema) for every operation.
