@@ -43,6 +43,11 @@ jobs:
           fi
           echo "Confirmation received. Proceeding with rollback..."
 
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - name: Setup SSH key
         run: |
           set -euo pipefail
@@ -95,6 +100,41 @@ jobs:
 
           echo "::error::No reachable VPS endpoint found (hosts: ${uniq_hosts[*]} | ports: ${uniq_ports[*]})"
           exit 1
+
+      - name: Sync rollback assets to VPS
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }} \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=12 \
+            -o PubkeyAcceptedAlgorithms=+ssh-rsa \
+            -o HostKeyAlgorithms=+ssh-rsa \
+            ${{ env.VPS_USER }}@${{ steps.target.outputs.host }} \
+            "mkdir -p ${{ env.DEPLOY_PATH }}/scripts"
+
+          scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }} \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=12 \
+            -o PubkeyAcceptedAlgorithms=+ssh-rsa \
+            -o HostKeyAlgorithms=+ssh-rsa \
+            docker-compose.slot.yml \
+            ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/docker-compose.slot.yml
+
+          scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }} \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=12 \
+            -o PubkeyAcceptedAlgorithms=+ssh-rsa \
+            -o HostKeyAlgorithms=+ssh-rsa \
+            scripts/rollback-bluegreen.sh \
+            ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/scripts/rollback-bluegreen.sh
+
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }} \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=12 \
+            -o PubkeyAcceptedAlgorithms=+ssh-rsa \
+            -o HostKeyAlgorithms=+ssh-rsa \
+            ${{ env.VPS_USER }}@${{ steps.target.outputs.host }} \
+            "chmod +x ${{ env.DEPLOY_PATH }}/scripts/rollback-bluegreen.sh"
 
       - name: Execute rollback
         run: |
