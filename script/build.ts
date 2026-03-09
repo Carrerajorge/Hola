@@ -61,11 +61,15 @@ async function buildAll() {
 
   console.log("building server...");
   const pkg = JSON.parse(await readFile("package.json", "utf-8"));
+  const openClawPkg = JSON.parse(await readFile("server/openclaw/package.json", "utf-8"));
   const allDeps = [
     ...Object.keys(pkg.dependencies || {}),
     ...Object.keys(pkg.devDependencies || {}),
+    ...Object.keys(openClawPkg.dependencies || {}),
+    ...Object.keys(openClawPkg.devDependencies || {}),
+    ...Object.keys(openClawPkg.optionalDependencies || {}),
   ];
-  const externals = allDeps.filter((dep) => !allowlist.includes(dep));
+  const externals = Array.from(new Set(allDeps.filter((dep) => !allowlist.includes(dep))));
   const appVersion = process.env.VITE_APP_VERSION || process.env.APP_VERSION || `build-${Date.now()}`;
 
   // Common esbuild options for optimal bundle size

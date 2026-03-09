@@ -27,6 +27,9 @@ importers:
       '@aws-sdk/s3-request-presigner':
         specifier: ^3.985.0
         version: 3.998.0
+      '@buape/carbon':
+        specifier: 0.0.0-beta-20260216184201
+        version: 0.0.0-beta-20260216184201(@discordjs/opus@0.10.0(encoding@0.1.13))(bufferutil@4.1.0)(hono@4.12.2)(opusscript@0.1.1)
       '@bull-board/api':
         specifier: ^6.18.2
         version: 6.20.3(@bull-board/ui@6.20.3)
@@ -39,6 +42,12 @@ importers:
       '@clickhouse/client':
         specifier: ^1.17.0
         version: 1.17.0
+      '@discordjs/opus':
+        specifier: ^0.10.0
+        version: 0.10.0(encoding@0.1.13)
+      '@discordjs/voice':
+        specifier: ^0.19.0
+        version: 0.19.0(@discordjs/opus@0.10.0(encoding@0.1.13))(bufferutil@4.1.0)(opusscript@0.1.1)
       '@e965/xlsx':
         specifier: ^0.20.3
         version: 0.20.3
@@ -48,6 +57,15 @@ importers:
       '@google/genai':
         specifier: ^1.40.0
         version: 1.43.0(@modelcontextprotocol/sdk@1.27.1(@cfworker/json-schema@4.1.1)(zod@4.3.6))(bufferutil@4.1.0)
+      '@grammyjs/runner':
+        specifier: ^2.0.3
+        version: 2.0.3(grammy@1.40.0(encoding@0.1.13))
+      '@grammyjs/transformer-throttler':
+        specifier: ^1.2.1
+        version: 1.2.1(grammy@1.40.0(encoding@0.1.13))
+      '@grammyjs/types':
+        specifier: ^3.23.0
+        version: 3.24.0
       '@handsontable/react':
         specifier: ^16.2.0
         version: 16.2.0(handsontable@16.2.0)
@@ -78,6 +96,12 @@ importers:
       '@langchain/openai':
         specifier: ^1.2.9
         version: 1.2.10(@langchain/core@1.1.28(@opentelemetry/api@1.9.0)(@opentelemetry/exporter-trace-otlp-proto@0.212.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.5.1(@opentelemetry/api@1.9.0))(openai@6.25.0(ws@8.19.0(bufferutil@4.1.0))(zod@4.3.6)))(ws@8.19.0(bufferutil@4.1.0))
+      '@line/bot-sdk':
+        specifier: ^10.6.0
+        version: 10.6.0
+      '@lydell/node-pty':
+        specifier: 1.2.0-beta.3
+        version: 1.2.0-beta.3
       '@mariozechner/pi-ai':
         specifier: ^0.55.3
         version: 0.55.4(@modelcontextprotocol/sdk@1.27.1(@cfworker/json-schema@4.1.1)(zod@4.3.6))(bufferutil@4.1.0)(ws@8.19.0(bufferutil@4.1.0))(zod@4.3.6)
@@ -441,6 +465,9 @@ importers:
       cors:
         specifier: ^2.8.5
         version: 2.8.6
+      cytoscape:
+        specifier: ^3.33.1
+        version: 3.33.1
       d3:
         specifier: ^7.9.0
         version: 7.9.0
@@ -612,6 +639,9 @@ importers:
       node-cron:
         specifier: ^4.2.1
         version: 4.2.1
+      node-edge-tts:
+        specifier: ^1.2.10
+        version: 1.2.10(bufferutil@4.1.0)
       node-pty:
         specifier: ^1.1.0
         version: 1.1.0
@@ -630,6 +660,12 @@ importers:
       opossum:
         specifier: ^8.1.4
         version: 8.5.0
+      opusscript:
+        specifier: ^0.1.1
+        version: 0.1.1
+      osc-progress:
+        specifier: ^0.3.0
+        version: 0.3.0
       passport:
         specifier: ^0.7.0
         version: 0.7.0
@@ -753,6 +789,9 @@ importers:
       resend:
         specifier: ^4.0.0
         version: 4.8.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      sharp:
+        specifier: ^0.34.5
+        version: 0.34.5
       simple-git:
         specifier: ^3.32.2
         version: 3.32.2
@@ -27600,7 +27639,6 @@ snapshots:
     transitivePeerDependencies:
       - encoding
       - supports-color
-    optional: true
 
   '@discordjs/opus@0.10.0(encoding@0.1.13)':
     dependencies:
@@ -27609,7 +27647,6 @@ snapshots:
     transitivePeerDependencies:
       - encoding
       - supports-color
-    optional: true
 
   '@discordjs/rest@2.6.0':
     dependencies:
@@ -30262,7 +30299,7 @@ snapshots:
     dependencies:
       '@types/node': 24.10.14
     optionalDependencies:
-      axios: 1.13.5(debug@4.4.3)
+      axios: 1.13.6(debug@4.4.3)
     transitivePeerDependencies:
       - debug
 
@@ -37582,8 +37619,7 @@ snapshots:
 
   abab@2.0.6: {}
 
-  abbrev@1.1.1:
-    optional: true
+  abbrev@1.1.1: {}
 
   abbrev@3.0.1: {}
 
@@ -37898,7 +37934,6 @@ snapshots:
     dependencies:
       delegates: 1.0.0
       readable-stream: 3.6.2
-    optional: true
 
   are-we-there-yet@3.0.1:
     dependencies:
@@ -39055,7 +39090,7 @@ snapshots:
 
   cmake-js@7.4.0:
     dependencies:
-      axios: 1.13.5(debug@4.4.3)
+      axios: 1.13.6(debug@4.4.3)
       debug: 4.4.3(supports-color@8.1.1)
       fs-extra: 11.3.4
       memory-stream: 1.0.0
@@ -41542,7 +41577,7 @@ snapshots:
       prettier: 3.8.1
       solid-element: 1.7.0(solid-js@1.7.1)
       solid-js: 1.7.1
-      zod: 3.25.76
+      zod: 3.22.4
     transitivePeerDependencies:
       - debug
       - supports-color
@@ -41941,7 +41976,6 @@ snapshots:
       string-width: 4.2.3
       strip-ansi: 6.0.1
       wide-align: 1.1.5
-    optional: true
 
   gauge@4.0.4:
     dependencies:
@@ -44914,7 +44948,6 @@ snapshots:
   make-dir@3.1.0:
     dependencies:
       semver: 6.3.1
-    optional: true
 
   make-dir@4.0.0:
     dependencies:
@@ -46590,7 +46623,6 @@ snapshots:
   nopt@5.0.0:
     dependencies:
       abbrev: 1.1.1
-    optional: true
 
   nopt@8.1.0:
     dependencies:
@@ -46664,7 +46696,6 @@ snapshots:
       console-control-strings: 1.1.0
       gauge: 3.0.2
       set-blocking: 2.0.0
-    optional: true
 
   npmlog@6.0.2:
     dependencies:
@@ -49047,7 +49078,6 @@ snapshots:
   rimraf@3.0.2:
     dependencies:
       glob: 7.2.3
-    optional: true
 
   rimraf@5.0.10:
     dependencies:

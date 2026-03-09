@@ -443,10 +443,12 @@ export class OpenClawTaskRuntime {
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private heartbeatDisposer: (() => void) | null = null;
   private started = false;
+  private stopping = false;
   private lastTickAtMs: number | null = null;
   private startupError: string | null = null;
   private startPromise: Promise<void> | null = null;
   private op: Promise<unknown> = Promise.resolve();
+  private backgroundTasks = new Set<Promise<unknown>>();
   private heartbeat = {
     lastRequestedAtMs: null as number | null,
     lastRunAtMs: null as number | null,
@@ -487,6 +489,7 @@ export class OpenClawTaskRuntime {
           .map((raw) => this.hydratePersistedJob(raw, now))
           .filter((job): job is CronJob => Boolean(job));
         this.jobs = jobs;
+        this.stopping = false;
         this.started = true;
         this.startupError = null;
         await this.persistStore();
@@ -503,11 +506,18 @@ export class OpenClawTaskRuntime {
     return await this.startPromise;
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
+    this.stopping = true;
     this.clearTimer();
     this.clearHeartbeatTimer();
     this.detachHeartbeatHandler();
+    const pending = Array.from(this.backgroundTasks);
+    if (pending.length > 0) {
+      await Promise.allSettled(pending);
+    }
+    await this.op;
     this.started = false;
+    this.stopping = false;
   }
 
   async status(): Promise<OpenClawTaskRuntimeStatus> {
@@ -762,6 +772,9 @@ export class OpenClawTaskRuntime {
       return;
     }
     this.clearTimer();
+    if (this.stopping) {
+      return;
+    }
     this.lastTickAtMs = this.nowMs();
     const dueIds = await this.withLock(async () => {
       if (!this.started) {
@@ -778,8 +791,11 @@ export class OpenClawTaskRuntime {
         )
         .map((job) => job.id);
     });
+    if (this.stopping) {
+      return;
+    }
     for (const id of dueIds) {
-      if (!this.started) {
+      if (this.stopping || !this.started) {
         break;
       }
       const begin = await this.beginRun(id, "due");
@@ -1106,7 +1122,7 @@ export class OpenClawTaskRuntime {
 
   private armHeartbeatTimer() {
     this.clearHeartbeatTimer();
-    if (!this.started || !this.heartbeatsEnabled || !this.heartbeatIntervalMs) {
+    if (!this.started || this.stopping || !this.heartbeatsEnabled || !this.heartbeatIntervalMs) {
       return;
     }
     this.heartbeatTimer = setTimeout(() => {
@@ -1267,7 +1283,7 @@ export class OpenClawTaskRuntime {
 
   private armTimer() {
     this.clearTimer();
-    if (!this.started || !this.cronEnabled) {
+    if (!this.started || this.stopping || !this.cronEnabled) {
       return;
     }
     const nextWakeAtMs = this.resolveNextWakeAtMs();
@@ -1276,7 +1292,11 @@ export class OpenClawTaskRuntime {
     }
     const delay = Math.max(0, Math.min(MAX_TIMER_DELAY_MS, nextWakeAtMs - this.nowMs()));
     this.timer = setTimeout(() => {
-      void this.onTimer();
+      const task = this.trackBackgroundTask(this.onTimer());
+      void task.catch(() => {
+        // Avoid unhandled rejections from background scheduler work; callers
+        // can observe state through runtime status and run logs.
+      });
     }, delay);
     this.timer.unref?.();
   }
@@ -1296,6 +1316,13 @@ export class OpenClawTaskRuntime {
       () => undefined,
     );
     return await next;
+  }
+
+  private trackBackgroundTask<T>(task: Promise<T>): Promise<T> {
+    this.backgroundTasks.add(task);
+    return task.finally(() => {
+      this.backgroundTasks.delete(task);
+    });
   }
 }
 

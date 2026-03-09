@@ -52,7 +52,7 @@ describe("OpenClawTaskRuntime", () => {
       expect(runs.total).toBe(1);
       expect(runs.entries[0]?.status).toBe("ok");
     } finally {
-      runtime.stop();
+      await runtime.stop();
     }
   });
 
@@ -77,7 +77,7 @@ describe("OpenClawTaskRuntime", () => {
         expect(spawn.mock.calls.length).toBeGreaterThanOrEqual(1);
       }, { timeout: 500, interval: 20 });
     } finally {
-      runtime.stop();
+      await runtime.stop();
     }
   });
 
@@ -120,7 +120,7 @@ describe("OpenClawTaskRuntime", () => {
       expect(wakes.events[0]?.spawnedRunId).toBeTruthy();
       expect(wakes.events[0]?.dispatchedAtMs).toBeTypeOf("number");
     } finally {
-      runtime.stop();
+      await runtime.stop();
     }
   });
 });

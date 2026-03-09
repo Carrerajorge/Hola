@@ -23,7 +23,6 @@ import { randomUUID } from "crypto";
 import * as path from "path";
 import { promises as fs } from "fs";
 import * as os from "os";
-import * as pty from "node-pty";
 import Docker from "dockerode";
 
 const docker = new Docker();
@@ -124,7 +123,7 @@ export interface TerminalSession {
   baseCwd: string;
   env: Record<string, string>;
   history: CommandResult[];
-  activeProcesses: Map<string, ChildProcess | pty.IPty>;
+  activeProcesses: Map<string, ChildProcess | PtyProcess>;
   commandWindowStart: number;
   commandsInWindow: number;
   activeCommandCount: number;
@@ -253,6 +252,46 @@ type RunCommandForInfoResult = {
   stderr: string;
   exitCode: number | null;
 };
+
+type PtyProcess = {
+  pid: number;
+  onData(handler: (data: string) => void): void;
+  onExit(handler: (event: { exitCode: number; signal?: number | string }) => void): void;
+  write(data: string): void;
+  kill(signal?: string): void;
+};
+
+type PtyModule = {
+  spawn(
+    file: string,
+    args: string[],
+    options: {
+      name?: string;
+      cols?: number;
+      rows?: number;
+      cwd?: string;
+      env?: Record<string, string>;
+    },
+  ): PtyProcess;
+};
+
+let ptyModulePromise: Promise<PtyModule> | null = null;
+
+async function loadPtyModule(): Promise<PtyModule> {
+  if (!ptyModulePromise) {
+    ptyModulePromise = import("node-pty")
+      .then((module) => module as unknown as PtyModule)
+      .catch((error: any) => {
+        ptyModulePromise = null;
+        const detail = typeof error?.message === "string" && error.message.trim()
+          ? error.message.trim()
+          : "unknown native module error";
+        throw new Error(`Interactive PTY support is unavailable: ${detail}`);
+      });
+  }
+
+  return ptyModulePromise;
+}
 
 type CommandSlotAcquisition =
   | { ok: true; release: () => void }
@@ -569,8 +608,8 @@ function validatePermissions(rawPermissions: string): string {
   return permissions;
 }
 
-function isPtyProcess(process: ChildProcess | pty.IPty): process is pty.IPty {
-  return typeof (process as pty.IPty).onData === "function";
+function isPtyProcess(process: ChildProcess | PtyProcess): process is PtyProcess {
+  return typeof (process as PtyProcess).onData === "function";
 }
 
 function terminateChildProcess(proc: ChildProcess): void {
@@ -590,7 +629,7 @@ function terminateChildProcess(proc: ChildProcess): void {
   }, 250).unref?.();
 }
 
-function terminatePtyProcess(proc: pty.IPty): void {
+function terminatePtyProcess(proc: PtyProcess): void {
   try {
     proc.kill();
   } catch {
@@ -604,7 +643,7 @@ function terminatePtyProcess(proc: pty.IPty): void {
   }, 250).unref?.();
 }
 
-function closeSessionProcess(proc: ChildProcess | pty.IPty): void {
+function closeSessionProcess(proc: ChildProcess | PtyProcess): void {
   if (isPtyProcess(proc)) {
     terminatePtyProcess(proc);
   } else {
@@ -1205,6 +1244,24 @@ export class TerminalController extends EventEmitter {
     const args = validateCommandArgs(request.args);
     const session = this.getSessionOrFail(sessionId);
     const cwd = resolveSessionCwd(session, request.cwd);
+    const fullCommand = buildCommandLine(command, args);
+
+    let pty: PtyModule;
+    try {
+      pty = await loadPtyModule();
+    } catch (error: any) {
+      return {
+        id: commandId,
+        command: fullCommand,
+        exitCode: 1,
+        stdout: "",
+        stderr: error?.message || "Interactive PTY support is unavailable",
+        duration: Date.now() - startTime,
+        killed: false,
+        signal: null,
+        success: false,
+      };
+    }
 
     return new Promise((resolve) => {
       const shell = request.shell || "bash";
@@ -1234,7 +1291,6 @@ export class TerminalController extends EventEmitter {
       // Send command — use shell-escaped args to prevent PTY injection
       // (CodeQL: code-injection via PTY write).
       // Strip ANSI escape sequences from the command to prevent terminal escape injection.
-      const fullCommand = buildCommandLine(command, args);
       const sanitizedCommand = fullCommand.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
       ptyProc.write(`${sanitizedCommand}\r`);
 
