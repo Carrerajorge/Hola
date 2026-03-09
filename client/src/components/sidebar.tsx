@@ -1152,41 +1152,47 @@ export function Sidebar({
             <PopoverTrigger asChild>
               <button className="flex flex-1 items-center gap-2 cursor-pointer rounded-lg px-2 py-1.5 hover:bg-white/60 dark:hover:bg-white/10 backdrop-blur-md border border-transparent hover:border-white/20 dark:hover:border-white/10 shadow-sm transition-all duration-300 liquid-button" data-testid="button-user-menu">
                 <div className="relative">
-                  <Avatar className="h-9 w-9 border border-black/5 bg-white/90 shadow-inner dark:border-white/10 dark:bg-white/[0.08]">
-                    <AvatarFallback className="bg-transparent text-base text-muted-foreground">
-                      {(
-                        isAdmin
-                          ? "A"
-                          : user?.fullName?.[0] ||
-                            user?.firstName?.[0] ||
-                            user?.username?.[0] ||
-                            user?.email?.[0] ||
-                            "U"
-                      ).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span className="absolute bottom-0 right-0 block h-2 w-2 rounded-full bg-green-500 ring-2 ring-[#eef3f4] dark:ring-[#111315]" title="En linea" />
-                </div>
-                <div className="flex flex-1 flex-col overflow-hidden text-left">
-                  <span className="truncate text-[14px] font-semibold leading-tight tracking-[-0.02em]">
-                    {isAdmin
-                      ? "Admin"
-                      : user?.fullName ||
-                        [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim() ||
-                        user?.username ||
-                        user?.email?.split("@")[0] ||
-                        "Usuario"}
-                  </span>
-                  <span className="truncate text-[10px] uppercase tracking-[0.18em] text-muted-foreground/75">
-                    {(() => {
-                      // Avoid hardcoding plan by email. Use server-provided plan when available.
-                      const plan = ((user as any)?.plan || "free").toString().toLowerCase();
-                      return plan === "free" ? "Cuenta personal" : plan.toUpperCase();
-                    })()}
-                  </span>
-                </div>
-              </button>
-            </PopoverTrigger>
+
+              <Avatar className="h-9 w-9 border border-black/5 bg-white/90 shadow-inner dark:border-white/10 dark:bg-white/[0.08]">
+		<AvatarFallback className="bg-transparent text-muted-foreground text-base">
+		{isAdmin
+		? "A"
+		: (
+		user?.fullName?.[0] ||
+		user?.firstName?.[0] ||
+		user?.username?.[0] ||
+		user?.email?.[0] ||
+		"U"
+		).toUpperCase()}
+		</AvatarFallback>
+		</Avatar>
+		{/* Online status indicator */}
+		<span className="absolute bottom-0 right-0 block h-2 w-2 rounded-full bg-green-500 ring-2 ring-[#eef3f4] dark:ring-[#111315]" title="En línea" />
+		</div>
+		<div className="flex flex-1 flex-col overflow-hidden text-left">
+		<span className="truncate text-[14px] font-semibold tracking-[-0.02em] leading-tight">
+		{isAdmin
+		? "Admin"
+		: (
+		user?.fullName ||
+		[user?.firstName, user?.lastName].filter(Boolean).join(" ").trim() ||
+		user?.username ||
+		user?.email?.split("@")[0] ||
+		"Usuario"
+		)}
+		</span>
+
+		<span className="truncate text-[10px] uppercase tracking-[0.18em] text-muted-foreground/75">
+		{(() => {
+		// Avoid hardcoding plan by email. Use server-provided plan when available.
+		const plan = ((user as any)?.plan || "free").toString().toLowerCase();
+		return plan === "free" ? "Cuenta personal" : plan.toUpperCase();
+		})()}
+		</span>
+		</div>
+		</button>
+		</PopoverTrigger>
+   
             <PopoverContent className="w-auto min-w-56 p-2 bg-white/80 dark:bg-black/80 backdrop-blur-xl border border-white/20 dark:border-white/10 shadow-lg" align="start" side="top">
               <div className="flex flex-col">
                 {/* Profile section */}
