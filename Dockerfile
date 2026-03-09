@@ -16,6 +16,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY package.json package-lock.json ./
 # Ensure mathjax sync script exists before npm ci postinstall hook
 COPY scripts/sync-mathjax-assets.cjs scripts/sync-mathjax-assets.cjs
+# Copy all source files BEFORE npm install so file: dependencies (like @hola/openclaw) resolve
+COPY . .
 RUN npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts \
   && npm i -D @rollup/rollup-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund \
   && npm i -D lightningcss-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund \
@@ -24,7 +26,6 @@ RUN npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts \
   && node scripts/sync-mathjax-assets.cjs \
   && npm cache clean --force
 # Build client and server assets
-COPY . .
 ARG APP_VERSION=dev
 ENV NODE_ENV=production
 ENV VITE_APP_VERSION=$APP_VERSION
