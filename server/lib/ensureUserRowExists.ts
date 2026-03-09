@@ -11,22 +11,12 @@ export async function ensureUserRowExists(userId: string): Promise<void> {
   const id = String(userId || "").trim();
   if (!id || id === "anonymous") return;
 
-  const isAnon = id.startsWith("anon_");
-
   try {
     await db
       .insert(users)
-      .values({
-        id,
-        username: isAnon ? `Guest-${id.slice(0, 4)}` : `User-${id.slice(0, 4)}`,
-        authProvider: isAnon ? "anonymous" : "unknown",
-        role: "user",
-        plan: "free",
-        status: "active",
-      })
+      .values({ id } as typeof users.$inferInsert)
       .onConflictDoNothing();
   } catch (e: any) {
     console.warn("[ensureUserRowExists] Failed to ensure user row:", e?.message || e);
   }
 }
-

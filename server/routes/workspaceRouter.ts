@@ -10,7 +10,6 @@ import { Router } from "express"; import { z } from "zod"; import { db } from ".
 } from "@shared/schema";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { validateBody } from "../middleware/validateRequest";
-import { getSecureUserId } from "../lib/anonUserHelper";
 import { getUserId } from "../types/express";
 import { isValidWorkspaceName, normalizeWorkspaceName } from "../services/workspaceValidation";
 import { createMagicLink, getMagicLinkUrl } from "../services/magicLink";
@@ -31,6 +30,16 @@ import {
 } from "../services/workspaceRoleService";
 
 const DEFAULT_ORG_ID = "default";
+
+function isMissingRelationError(error: unknown, relationName: string): boolean {
+  const anyError = error as any;
+  const code = anyError?.code || anyError?.cause?.code;
+  const message = String(anyError?.message || "");
+  const causeMessage = String(anyError?.cause?.message || "");
+  if (code === "42P01") return true;
+  return message.includes(relationName) || causeMessage.includes(relationName);
+}
+
 function normalizeEmail(value: unknown): string {
   return String(value || "").toLowerCase().trim();
 }
@@ -47,13 +56,6 @@ function toNumber(value: unknown): number {
     return Number.isFinite(n) ? n : 0;
   }
   return 0;
-}
-
-function normalizeAnalyticsMetadata(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-  return value as Record<string, unknown>;
 }
 
 async function ensureWorkspace(orgId: string) {
@@ -1571,7 +1573,7 @@ export function createWorkspaceRouter() {
           sessionId: z.string().trim().min(1).max(200).optional(),
           page: z.string().trim().min(1).max(1000).optional(),
           action: z.string().trim().min(1).max(200).optional(),
-          metadata: z.unknown().optional(),
+          metadata: z.record(z.any()).optional(),
         })
         .refine((v) => (v.eventType === "page_view" ? !!v.page : !!v.action), {
           message: "Missing required fields for eventType",
@@ -1579,12 +1581,8 @@ export function createWorkspaceRouter() {
     ),
     async (req, res) => {
       try {
-        const userId = getSecureUserId(req);
-        const metadata = normalizeAnalyticsMetadata(req.body.metadata);
-        if (!userId || String(userId).startsWith("anon_")) {
-          console.warn("[Workspace] POST /analytics/track skipped for anonymous session");
-          return res.status(202).json({ ok: false, skipped: true });
-        }
+        const userId = getUserId(req);
+        if (!userId) return res.status(401).json({ error: "Debes iniciar sesión" });
 
         const ipAddress = req.ip || req.socket.remoteAddress;
         const userAgent = req.get("user-agent");
@@ -1592,27 +1590,34 @@ export function createWorkspaceRouter() {
         const action = req.body.eventType === "page_view" ? "page_view" : "user_action";
         const resource = req.body.eventType === "page_view" ? req.body.page : req.body.action;
 
-        await db.insert(auditLogs).values({
-          userId,
-          action,
-          resource,
-          details: {
-            eventType: req.body.eventType,
-            sessionId: req.body.sessionId,
-            page: req.body.page,
-            action: req.body.action,
-            metadata,
-          },
-          ipAddress: Array.isArray(ipAddress) ? ipAddress[0] : ipAddress,
-          userAgent,
-          createdAt: new Date(),
-        });
+        try {
+          await db.insert(auditLogs).values({
+            userId,
+            action,
+            resource,
+            details: {
+              eventType: req.body.eventType,
+              sessionId: req.body.sessionId,
+              page: req.body.page,
+              action: req.body.action,
+              metadata: req.body.metadata,
+            },
+            ipAddress: Array.isArray(ipAddress) ? ipAddress[0] : ipAddress,
+            userAgent,
+            createdAt: new Date(),
+          });
+        } catch (error) {
+          if (isMissingRelationError(error, "audit_logs")) {
+            console.warn("[Workspace] audit_logs missing; skipping analytics event persistence");
+            return res.json({ ok: true, skipped: "audit_logs_missing" });
+          }
+          throw error;
+        }
 
         res.json({ ok: true });
       } catch (e: any) {
-        // Workspace analytics is best-effort and must not surface as a user-facing error.
-        console.warn("[Workspace] POST /analytics/track skipped:", e?.message || e);
-        res.status(202).json({ ok: false, skipped: true });
+        console.error("[Workspace] POST /analytics/track error:", e);
+        res.status(500).json({ error: "No se pudo registrar el evento" });
       }
     }
   );
