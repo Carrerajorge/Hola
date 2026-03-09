@@ -96,6 +96,7 @@ export default defineConfig(async () => {
     },
     root: path.resolve(import.meta.dirname, "client"),
     build: {
+      minify: process.env.CI ? false : "esbuild",
       sourcemap: false,
       outDir: path.resolve(import.meta.dirname, "dist/public"),
       emptyOutDir: true,
