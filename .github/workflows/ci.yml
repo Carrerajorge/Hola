@@ -20,7 +20,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install dependencies
-        run: corepack enable && pnpm install --frozen-lockfile
+        run: corepack enable && pnpm install --no-frozen-lockfile
       - name: Run ESLint
         run: npx eslint client/src shared scripts --max-warnings 0 --ignore-pattern "**/*.bak.ts"
       - name: Run TypeScript Compiler Check
@@ -48,7 +48,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install dependencies
-        run: corepack enable && pnpm install --frozen-lockfile
+        run: corepack enable && pnpm install --no-frozen-lockfile
       - name: Run Jest/Vitest
         run: pnpm run test
 

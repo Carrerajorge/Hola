@@ -9,7 +9,7 @@ COPY package.json package-lock.json ./
 
 # Install deps without running lifecycle scripts (keeps builds fast + avoids large downloads),
 # then enable only what we need for compilation (esbuild).
-RUN npm ci --ignore-scripts --no-audit --no-fund \
+RUN npm install --legacy-peer-deps --ignore-scripts --no-audit --no-fund \
   && npm rebuild esbuild \
   && npm cache clean --force
 

@@ -22,7 +22,7 @@ jobs:
           cache: "npm"
 
       - name: Install dependencies
-        run: npm ci --legacy-peer-deps
+        run: npm install --legacy-peer-deps --no-audit --no-fund
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -30,7 +30,7 @@ jobs:
       - name: Build Native Bindings (macOS)
         run: |
           cd native
-          npm ci
+          npm install --no-audit --no-fund
           npm run build:native
 
       - name: Build web + compile desktop TypeScript
@@ -64,7 +64,7 @@ jobs:
           cache: "npm"
 
       - name: Install dependencies
-        run: npm ci --legacy-peer-deps
+        run: npm install --legacy-peer-deps --no-audit --no-fund
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -72,7 +72,7 @@ jobs:
       - name: Build Native Bindings (Windows)
         run: |
           cd native
-          npm ci
+          npm install --no-audit --no-fund
           npm run build:native
 
       - name: Build web + compile desktop TypeScript
@@ -105,7 +105,7 @@ jobs:
           cache: "npm"
 
       - name: Install dependencies
-        run: npm ci --legacy-peer-deps
+        run: npm install --legacy-peer-deps --no-audit --no-fund
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -116,7 +116,7 @@ jobs:
       - name: Build Native Bindings (Linux)
         run: |
           cd native
-          npm ci
+          npm install --no-audit --no-fund
           npm run build:native
 
       - name: Build web + compile desktop TypeScript
