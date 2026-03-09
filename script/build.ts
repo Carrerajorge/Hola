@@ -101,6 +101,16 @@ async function buildAll() {
       {
         name: "native-modules",
         setup(build) {
+          // Some vendored OpenClaw deps ship platform-specific native packages behind
+          // a JS loader. Keep the package import external so Node resolves the right
+          // prebuilt binary at runtime instead of esbuild trying to bundle it.
+          build.onResolve({ filter: /^@snazzah\/davey(?:-.+)?$/ }, (args) => {
+            return {
+              path: args.path,
+              external: true,
+            };
+          });
+
           // If a resolution ends with .node, mark it as external
           build.onResolve({ filter: /\.node$/, namespace: "file" }, (args) => {
             return {

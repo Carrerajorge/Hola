@@ -8,15 +8,18 @@ WORKDIR /app
 
 # Build-time tooling for native modules
 RUN apt-get update && apt-get install -y --no-install-recommends \
+  ca-certificates git \
   python3 make g++ \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
 # Full deps for build
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json .npmrc ./
+COPY server/openclaw/package.json server/openclaw/.npmrc ./server/openclaw/
 # Ensure mathjax sync script exists before npm ci postinstall hook
 COPY scripts/sync-mathjax-assets.cjs scripts/sync-mathjax-assets.cjs
 RUN npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts \
+  && npm --prefix server/openclaw install --legacy-peer-deps --no-audit --no-fund --ignore-scripts \
   && npm i -D @rollup/rollup-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund \
   && npm i -D lightningcss-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund \
   && npm i -D @tailwindcss/oxide-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund \
