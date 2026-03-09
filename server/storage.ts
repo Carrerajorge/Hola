@@ -725,7 +725,7 @@ export class MemStorage implements IStorage {
     const cacheKey = `messages:${chatId}:${limit || 'all'}:${offset || 0}:${before?.getTime() || 'now'}:${orderBy}`;
 
     return cache.remember(cacheKey, 10, async () => {
-      let query: any = dbRead.select().from(chatMessages);
+      let query = dbRead.select().from(chatMessages).$dynamic();
       
       const conditions = [eq(chatMessages.chatId, chatId)];
       if (before) {

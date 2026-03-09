@@ -7,6 +7,10 @@
   ],
   "exclude": [
     "node_modules",
+    ".claude",
+    "Hola",
+    "Hola_wt_github",
+    "Hola_wt_pr",
     "build",
     "dist",
     "artifacts",
