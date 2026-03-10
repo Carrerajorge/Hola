@@ -18,13 +18,34 @@ COPY package.json package-lock.json ./
 COPY scripts/sync-mathjax-assets.cjs scripts/sync-mathjax-assets.cjs
 # Copy all source files BEFORE npm install so file: dependencies (like @hola/openclaw) resolve
 COPY . .
-RUN npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts \
-  && npm i -D @rollup/rollup-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund \
-  && npm i -D lightningcss-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund \
-  && npm i -D @tailwindcss/oxide-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund \
-  && npm rebuild esbuild bcrypt node-pty sharp \
-  && node scripts/sync-mathjax-assets.cjs \
-  && npm cache clean --force
+RUN set -eux; \
+  retry_npm() { \
+    attempt=1; \
+    while [ "$attempt" -le 3 ]; do \
+      if "$@"; then \
+        return 0; \
+      fi; \
+      if [ "$attempt" -eq 3 ]; then \
+        return 1; \
+      fi; \
+      sleep_seconds=$((attempt * 15)); \
+      echo "npm command failed on attempt ${attempt}; retrying in ${sleep_seconds}s..." >&2; \
+      sleep "$sleep_seconds"; \
+      attempt=$((attempt + 1)); \
+    done; \
+  }; \
+  export npm_config_fetch_retries=5; \
+  export npm_config_fetch_timeout=120000; \
+  export npm_config_fetch_retry_mintimeout=20000; \
+  export npm_config_fetch_retry_maxtimeout=120000; \
+  export npm_config_maxsockets=4; \
+  retry_npm npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts; \
+  retry_npm npm i -D @rollup/rollup-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund; \
+  retry_npm npm i -D lightningcss-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund; \
+  retry_npm npm i -D @tailwindcss/oxide-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund; \
+  npm rebuild esbuild bcrypt node-pty sharp; \
+  node scripts/sync-mathjax-assets.cjs; \
+  npm cache clean --force
 # Build client and server assets
 ARG APP_VERSION=dev
 ENV NODE_ENV=production
