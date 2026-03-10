@@ -19,7 +19,7 @@ function makeModel(overrides: Partial<AvailableModel>): AvailableModel {
     displayOrder: overrides.displayOrder ?? 0,
     icon: overrides.icon ?? null,
     modelType: overrides.modelType || "TEXT",
-    contextWindow: overrides.contextWindow ?? null,
+    contextWindow: overrides.contextWindow ?? 128000,
   };
 }
 
@@ -45,14 +45,16 @@ describe("ModelAvailabilityContext helpers", () => {
     expect(pickPreferredEnabledModel([grok, gemini], null, null)?.id).toBe("gemini-id");
   });
 
-  it("keeps DeepSeek visible when additional models are collapsed", () => {
+  it("keeps a DeepSeek model visible when additional models are collapsed", () => {
+    const enabledModels = [
+      makeModel({ id: "xai-1", name: "Grok 4", provider: "xai", modelId: "grok-4" }),
+      makeModel({ id: "google-1", name: "Gemini 2.5 Flash", provider: "google", modelId: "gemini-2.5-flash" }),
+      makeModel({ id: "openai-1", name: "GPT-5 Mini", provider: "openai", modelId: "gpt-5-mini" }),
+      makeModel({ id: "deepseek-1", name: "DeepSeek Chat", provider: "deepseek", modelId: "deepseek-chat" }),
+    ];
+
     const visible = selectVisibleModels({
-      enabledModels: [
-        makeModel({ id: "grok-id", provider: "xai", modelId: "grok-4-fast" }),
-        makeModel({ id: "gemini-id", provider: "gemini", modelId: "gemini-2.5-flash" }),
-        makeModel({ id: "gpt-id", provider: "openai", modelId: "gpt-5-mini" }),
-        makeModel({ id: "deepseek-id", provider: "deepseek", modelId: "deepseek-chat" }),
-      ],
+      enabledModels,
       selectedModelId: null,
       showAdditionalModels: false,
     });
@@ -61,20 +63,39 @@ describe("ModelAvailabilityContext helpers", () => {
     expect(visible.some((model) => model.provider === "deepseek")).toBe(true);
   });
 
-  it("preserves the selected model while surfacing DeepSeek", () => {
+  it("preserves the selected model while still surfacing DeepSeek", () => {
+    const enabledModels = [
+      makeModel({ id: "xai-1", name: "Grok 4", provider: "xai", modelId: "grok-4" }),
+      makeModel({ id: "google-1", name: "Gemini 2.5 Flash", provider: "google", modelId: "gemini-2.5-flash" }),
+      makeModel({ id: "openai-1", name: "GPT-5 Mini", provider: "openai", modelId: "gpt-5-mini" }),
+      makeModel({ id: "anthropic-1", name: "Claude Sonnet", provider: "anthropic", modelId: "claude-sonnet-4-5" }),
+      makeModel({ id: "deepseek-1", name: "DeepSeek Chat", provider: "deepseek", modelId: "deepseek-chat" }),
+    ];
+
     const visible = selectVisibleModels({
-      enabledModels: [
-        makeModel({ id: "grok-id", provider: "xai", modelId: "grok-4-fast" }),
-        makeModel({ id: "gemini-id", provider: "gemini", modelId: "gemini-2.5-flash" }),
-        makeModel({ id: "gpt-id", provider: "openai", modelId: "gpt-5-mini" }),
-        makeModel({ id: "claude-id", provider: "anthropic", modelId: "claude-sonnet-4-5" }),
-        makeModel({ id: "deepseek-id", provider: "deepseek", modelId: "deepseek-chat" }),
-      ],
-      selectedModelId: "claude-id",
+      enabledModels,
+      selectedModelId: "anthropic-1",
       showAdditionalModels: false,
     });
 
-    expect(visible.some((model) => model.id === "claude-id")).toBe(true);
-    expect(visible.some((model) => model.id === "deepseek-id")).toBe(true);
+    expect(visible.some((model) => model.id === "anthropic-1")).toBe(true);
+    expect(visible.some((model) => model.provider === "deepseek")).toBe(true);
+  });
+
+  it("returns all enabled models when additional models are expanded", () => {
+    const enabledModels = [
+      makeModel({ id: "xai-1", name: "Grok 4", provider: "xai", modelId: "grok-4" }),
+      makeModel({ id: "deepseek-1", name: "DeepSeek Chat", provider: "deepseek", modelId: "deepseek-chat" }),
+      makeModel({ id: "openai-1", name: "GPT-5 Mini", provider: "openai", modelId: "gpt-5-mini" }),
+      makeModel({ id: "google-1", name: "Gemini 2.5 Flash", provider: "google", modelId: "gemini-2.5-flash" }),
+    ];
+
+    const visible = selectVisibleModels({
+      enabledModels,
+      selectedModelId: null,
+      showAdditionalModels: true,
+    });
+
+    expect(visible).toEqual(enabledModels);
   });
 });
