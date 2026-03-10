@@ -16,6 +16,7 @@ import {
   objectStorageClient,
 } from "../replit_integrations/object_storage";
 import { parseDocument } from "./documentIngestion";
+import { registerLocalUploadIntent } from "../lib/localUploadIntents";
 
 export interface FileMetadata {
   name: string;
@@ -134,15 +135,31 @@ export class LibraryService {
         }
       }
 
-      const uploadUrl = await this.objectStorage.getObjectEntityUploadURL();
-      const objectPath = this.objectStorage.normalizeObjectEntityPath(uploadUrl);
       const fileUuid = randomUUID();
+      let uploadUrl: string;
+      let objectPath: string;
+      let usedLocalFallback = false;
+
+      try {
+        uploadUrl = await this.objectStorage.getObjectEntityUploadURL();
+        objectPath = this.objectStorage.normalizeObjectEntityPath(uploadUrl);
+      } catch (uploadError) {
+        usedLocalFallback = true;
+        objectPath = `/objects/uploads/${fileUuid}`;
+        uploadUrl = `/api/local-upload/${fileUuid}`;
+        registerLocalUploadIntent(fileUuid, userId, objectPath);
+        console.warn(
+          `[LibraryService] Object storage unavailable for ${filename}; using local upload fallback`,
+          uploadError instanceof Error ? uploadError.message : String(uploadError)
+        );
+      }
 
       await this.logActivity(userId, null, "upload_initiated", {
         filename,
         contentType,
         folderId,
         objectPath,
+        localFallback: usedLocalFallback,
       });
 
       return {

@@ -12,6 +12,13 @@ import dns from "node:dns/promises";
 import net from "node:net";
 import path from "node:path";
 import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
+import {
+  registerLocalUploadIntent,
+  consumeLocalUploadIntent,
+  clearLocalUploadIntents,
+  clearLocalUploadIntent,
+  cleanupExpiredLocalUploadIntents,
+} from "../lib/localUploadIntents";
 
 // SECURITY FIX #28: Path traversal prevention helper
 function sanitizeFilePath(filePath: string): string | null {
@@ -76,12 +83,6 @@ interface UploadActorRateState {
   blockedUntil: number;
 }
 
-interface LocalUploadIntent {
-  actorId: string;
-  storagePath: string;
-  expiresAt: number;
-}
-
 // ============================================
 // SECURITY: Multipart session limits & cleanup
 // ============================================
@@ -95,8 +96,6 @@ const MAX_MULTIPART_CHUNKS = Math.min(
 const MAX_UPLOAD_RATE_PER_MINUTE = Number(process.env.MAX_UPLOAD_RATE_PER_MINUTE || 120);
 const UPLOAD_RATE_WINDOW_MS = 60 * 1000;
 const UPLOAD_RATE_BLOCK_MS = 30 * 1000;
-const LOCAL_UPLOAD_INTENTS_TTL_MS = 10 * 60 * 1000;
-const MAX_LOCAL_UPLOAD_INTENTS = Number(process.env.MAX_LOCAL_UPLOAD_INTENTS || 5000);
 const MAX_LOCAL_UPLOAD_BYTES = Math.max(LIMITS.MAX_FILE_SIZE_BYTES, FILE_UPLOAD_CONFIG.CHUNK_SIZE_BYTES);
 
 const UPLOAD_IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
@@ -117,7 +116,6 @@ const multipartSessions: Map<string, MultipartUploadSession> = new Map();
 const fileRegistrationCache = new Map<string, FileRegistrationCacheEntry>();
 const multipartCompletionCache = new Map<string, MultipartCompletionCacheEntry>();
 const uploadActorRateState = new Map<string, UploadActorRateState>();
-const localUploadIntents = new Map<string, LocalUploadIntent>();
 
 const MAX_RATE_LIMIT_BOUNDARY = 10000;
 const MIN_RATE_LIMIT_BOUNDARY = 20;
@@ -238,54 +236,6 @@ function enforceUploadRateLimit(req: Request, res: Response): boolean {
   return false;
 }
 
-function registerLocalUploadIntent(objectId: string, actorId: string, storagePath: string): void {
-  localUploadIntents.set(objectId, {
-    actorId,
-    storagePath,
-    expiresAt: Date.now() + LOCAL_UPLOAD_INTENTS_TTL_MS,
-  });
-
-  if (localUploadIntents.size <= MAX_LOCAL_UPLOAD_INTENTS) {
-    return;
-  }
-
-  const now = Date.now();
-  for (const [id, intent] of localUploadIntents) {
-    if (intent.expiresAt <= now) {
-      localUploadIntents.delete(id);
-    }
-    if (localUploadIntents.size <= MAX_LOCAL_UPLOAD_INTENTS) {
-      break;
-    }
-  }
-
-  if (localUploadIntents.size > MAX_LOCAL_UPLOAD_INTENTS) {
-    const excess = localUploadIntents.size - MAX_LOCAL_UPLOAD_INTENTS;
-    const keys = Array.from(localUploadIntents.keys()).slice(0, excess);
-    keys.forEach((key) => localUploadIntents.delete(key));
-  }
-}
-
-function consumeLocalUploadIntent(objectId: string, actorId: string): LocalUploadIntent | null {
-  const intent = localUploadIntents.get(objectId);
-  if (!intent || intent.expiresAt < Date.now() || intent.actorId !== actorId) {
-    return null;
-  }
-  return intent;
-}
-
-function clearLocalUploadIntents(prefix: string): void {
-  for (const key of localUploadIntents.keys()) {
-    if (key.startsWith(prefix)) {
-      localUploadIntents.delete(key);
-    }
-  }
-}
-
-function clearLocalUploadIntent(objectId: string): void {
-  localUploadIntents.delete(objectId);
-}
-
 // Periodic cleanup of stale multipart sessions to prevent memory leaks
 setInterval(() => {
   const now = Date.now();
@@ -300,12 +250,7 @@ setInterval(() => {
 setInterval(() => {
   const now = Date.now();
   cleanupUploadRateStates(now);
-
-  for (const [id, intent] of localUploadIntents) {
-    if (intent.expiresAt < now) {
-      localUploadIntents.delete(id);
-    }
-  }
+  cleanupExpiredLocalUploadIntents(now);
 }, SESSION_CLEANUP_INTERVAL_MS).unref();
 
 function extractHeader(req: any, key: string): string | undefined {
