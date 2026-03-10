@@ -36,6 +36,7 @@ readonly STOP_TIMEOUT=15
 readonly MIGRATION_TIMEOUT=120
 readonly PULL_TIMEOUT=300
 readonly MIN_DISK_MB=2048
+readonly MIN_PULL_HEADROOM_MB=4096
 readonly MIN_DISK_INODES_K=100
 readonly STATE_FILE_MAX_BYTES=65536
 
@@ -299,6 +300,94 @@ loge() { echo "[$(date '+%H:%M:%S')]   ✗ $*" >&2; }
 
 validate_image_inputs "${IMAGE_TAG}" "${APP_VERSION}" || exit 1
 
+measure_available_mb() {
+  df -m "${DEPLOY_PATH}" | awk 'NR==2 {print $4}'
+}
+
+measure_available_inodes_k() {
+  df -i "${DEPLOY_PATH}" | awk 'NR==2 {print int($4/1000)}'
+}
+
+reclaim_docker_space() {
+  logw "Reclaiming Docker disk space from unused containers, images, and cache..."
+  docker container prune -f >/dev/null 2>&1 || true
+  docker image prune -af >/dev/null 2>&1 || true
+  docker builder prune -af >/dev/null 2>&1 || true
+  docker network prune -f >/dev/null 2>&1 || true
+}
+
+ensure_min_disk_space() {
+  local available_mb
+  available_mb="$(measure_available_mb)"
+
+  if [ "${available_mb}" -ge "${MIN_DISK_MB}" ]; then
+    logok "Disk space: ${available_mb}MB available"
+    return 0
+  fi
+
+  logw "Low disk space: ${available_mb}MB available. Attempting Docker cleanup before aborting."
+  reclaim_docker_space
+  available_mb="$(measure_available_mb)"
+
+  if [ "${available_mb}" -lt "${MIN_DISK_MB}" ]; then
+    loge "Insufficient disk space: ${available_mb}MB available, need ${MIN_DISK_MB}MB"
+    loge "Run 'docker system prune -af' to free space."
+    exit 1
+  fi
+
+  logok "Disk space after cleanup: ${available_mb}MB available"
+}
+
+ensure_pull_headroom() {
+  local available_mb
+  available_mb="$(measure_available_mb)"
+
+  if [ "${available_mb}" -ge "${MIN_PULL_HEADROOM_MB}" ]; then
+    logok "Pull headroom: ${available_mb}MB available"
+    return 0
+  fi
+
+  logw "Limited free space before image pull (${available_mb}MB < ${MIN_PULL_HEADROOM_MB}MB). Running Docker cleanup."
+  reclaim_docker_space
+  available_mb="$(measure_available_mb)"
+
+  if [ "${available_mb}" -lt "${MIN_DISK_MB}" ]; then
+    loge "Insufficient disk space after Docker cleanup: ${available_mb}MB available, need ${MIN_DISK_MB}MB"
+    exit 1
+  fi
+
+  logok "Pull headroom after cleanup: ${available_mb}MB available"
+}
+
+pull_image_with_retry() {
+  local image_ref="$1"
+  local attempt
+  local output_file
+
+  for attempt in 1 2; do
+    output_file="$(mktemp)"
+    if timeout "${PULL_TIMEOUT}" docker pull "${image_ref}" 2>&1 | tee "${output_file}"; then
+      rm -f "${output_file}"
+      return 0
+    fi
+
+    if grep -qi "no space left on device" "${output_file}"; then
+      logw "Pull for ${image_ref} exhausted disk space on attempt ${attempt}. Running Docker cleanup before retry."
+      reclaim_docker_space
+      rm -f "${output_file}"
+      if [ "${attempt}" -lt 2 ]; then
+        continue
+      fi
+    else
+      rm -f "${output_file}"
+    fi
+
+    return 1
+  done
+
+  return 1
+}
+
 extract_manifest_digest() {
   local image_ref="$1"
   local digest
@@ -436,15 +525,9 @@ cd "${DEPLOY_PATH}"
 # ── Preflight 0: Disk space check ─────────────────────────
 log "[0/14] Preflight checks..."
 
-AVAIL_MB="$(df -m "${DEPLOY_PATH}" | awk 'NR==2 {print $4}')"
-if [ "${AVAIL_MB}" -lt "${MIN_DISK_MB}" ]; then
-  loge "Insufficient disk space: ${AVAIL_MB}MB available, need ${MIN_DISK_MB}MB"
-  loge "Run 'docker system prune -af' to free space."
-  exit 1
-fi
-logok "Disk space: ${AVAIL_MB}MB available"
+ensure_min_disk_space
 
-AVAIL_INODES_K="$(df -i "${DEPLOY_PATH}" | awk 'NR==2 {print int($4/1000)}')"
+AVAIL_INODES_K="$(measure_available_inodes_k)"
 if [ "${AVAIL_INODES_K}" -lt "${MIN_DISK_INODES_K}" ]; then
   loge "Low inodes: ${AVAIL_INODES_K}K available, need ${MIN_DISK_INODES_K}K"
   exit 1
@@ -746,6 +829,7 @@ ensure_legacy_upstream_file() {
 
 # ── Step 1: Pull images from GHCR (with timeout + digest verification) ──
 log "[1/14] Pulling images from GHCR (timeout: ${PULL_TIMEOUT}s)..."
+ensure_pull_headroom
 IMAGES=(
   "${REGISTRY}/iliagpt-app:${IMAGE_TAG}"
   "${REGISTRY}/iliagpt-sandbox:${IMAGE_TAG}"
@@ -753,7 +837,7 @@ IMAGES=(
 )
 
 for img in "${IMAGES[@]}"; do
-  if ! timeout "${PULL_TIMEOUT}" docker pull "${img}" 2>&1; then
+  if ! pull_image_with_retry "${img}"; then
     loge "Failed to pull ${img}"
     exit 1
   fi
