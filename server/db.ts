@@ -1,4 +1,4 @@
-import { drizzle } from "drizzle-orm/node-postgres"; import { migrate } from "drizzle-orm/node-postgres/migrator"; import * as pkg from "pg"; import type { PoolClient } from "pg"; import * as schema
+import { createHash } from "node:crypto"; import { readFile } from "node:fs/promises"; import { drizzle } from "drizzle-orm/node-postgres"; import { migrate } from "drizzle-orm/node-postgres/migrator"; import * as pkg from "pg"; import type { PoolClient } from "pg"; import * as schema
   from "../shared/schema"; import { Registry, Histogram, Counter, Gauge } from 'prom-client'; import { env } from "./config/env"; import { Logger } from "./lib/logger";
 
 const { Pool } = pkg;
@@ -56,9 +56,206 @@ export { pool, poolRead };
 export const db = drizzle(pool, { schema });
 export const dbRead = drizzle(poolRead, { schema });
 
+interface MigrationMetadata {
+  hash: string;
+  sql: string;
+  tag: string;
+  when: number;
+}
+
+interface MigrationJournalFile {
+  entries: Array<{
+    tag: string;
+    when: number;
+  }>;
+}
+
+function stripSqlLineComments(statement: string): string {
+  return statement
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("--"))
+    .join("\n")
+    .trim();
+}
+
+function normalizeSqlStatement(statement: string): string {
+  return stripSqlLineComments(statement).replace(/\s+/g, " ").trim();
+}
+
+async function schemaObjectExists(client: PoolClient, schemaName: string, objectName: string): Promise<boolean> {
+  const result = await client.query<{ exists: boolean }>(
+    "SELECT to_regclass(format('%I.%I', $1, $2)) IS NOT NULL AS exists",
+    [schemaName, objectName],
+  );
+  return Boolean(result.rows[0]?.exists);
+}
+
+async function columnExists(
+  client: PoolClient,
+  schemaName: string,
+  tableName: string,
+  columnName: string,
+): Promise<boolean> {
+  const result = await client.query<{ exists: boolean }>(
+    `SELECT EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = $1
+        AND table_name = $2
+        AND column_name = $3
+    ) AS exists`,
+    [schemaName, tableName, columnName],
+  );
+  return Boolean(result.rows[0]?.exists);
+}
+
+async function constraintExists(
+  client: PoolClient,
+  schemaName: string,
+  tableName: string,
+  constraintName: string,
+): Promise<boolean> {
+  const result = await client.query<{ exists: boolean }>(
+    `SELECT EXISTS (
+      SELECT 1
+      FROM pg_constraint
+      WHERE conname = $1
+        AND conrelid = to_regclass(format('%I.%I', $2, $3))
+    ) AS exists`,
+    [constraintName, schemaName, tableName],
+  );
+  return Boolean(result.rows[0]?.exists);
+}
+
+async function isMigrationStatementApplied(client: PoolClient, statement: string): Promise<boolean> {
+  const normalized = normalizeSqlStatement(statement);
+  if (!normalized) {
+    return false;
+  }
+
+  const createTableMatch = normalized.match(/^CREATE TABLE(?: IF NOT EXISTS)? "([^"]+)"/i);
+  if (createTableMatch) {
+    return schemaObjectExists(client, "public", createTableMatch[1]!);
+  }
+
+  const createIndexMatch = normalized.match(/^CREATE (?:UNIQUE )?INDEX(?: IF NOT EXISTS)? "([^"]+)"/i);
+  if (createIndexMatch) {
+    return schemaObjectExists(client, "public", createIndexMatch[1]!);
+  }
+
+  const addColumnMatch = normalized.match(/^ALTER TABLE "([^"]+)" ADD COLUMN(?: IF NOT EXISTS)? "([^"]+)"/i);
+  if (addColumnMatch) {
+    return columnExists(client, "public", addColumnMatch[1]!, addColumnMatch[2]!);
+  }
+
+  const addConstraintMatch = normalized.match(/^ALTER TABLE "([^"]+)" ADD CONSTRAINT "([^"]+)"/i);
+  if (addConstraintMatch) {
+    return constraintExists(client, "public", addConstraintMatch[1]!, addConstraintMatch[2]!);
+  }
+
+  return false;
+}
+
+async function isMigrationApplied(client: PoolClient, migrationSql: string): Promise<boolean> {
+  const statements = migrationSql.split("--> statement-breakpoint");
+  let verifiedStatements = 0;
+
+  for (const statement of statements) {
+    const normalized = normalizeSqlStatement(statement);
+    if (!normalized) {
+      continue;
+    }
+
+    verifiedStatements++;
+    if (!(await isMigrationStatementApplied(client, normalized))) {
+      return false;
+    }
+  }
+
+  return verifiedStatements > 0;
+}
+
+async function loadMigrationMetadata(): Promise<MigrationMetadata[]> {
+  const journal = JSON.parse(
+    await readFile("./migrations/meta/_journal.json", "utf8"),
+  ) as MigrationJournalFile;
+
+  const migrations = await Promise.all(
+    journal.entries.map(async (entry) => {
+      const sql = await readFile(`./migrations/${entry.tag}.sql`, "utf8");
+      return {
+        hash: createHash("sha256").update(sql).digest("hex"),
+        sql,
+        tag: entry.tag,
+        when: entry.when,
+      };
+    }),
+  );
+
+  migrations.sort((left, right) => left.when - right.when);
+  return migrations;
+}
+
+async function ensureMigrationJournalBaseline(): Promise<void> {
+  const client = await pool.connect();
+
+  try {
+    await client.query('CREATE SCHEMA IF NOT EXISTS "drizzle";');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS "drizzle"."__drizzle_migrations" (
+        id SERIAL PRIMARY KEY,
+        hash text NOT NULL,
+        created_at bigint
+      )
+    `);
+
+    const existingEntries = await client.query<{ count: string }>(
+      'SELECT COUNT(*)::text AS count FROM "drizzle"."__drizzle_migrations"',
+    );
+    if (Number(existingEntries.rows[0]?.count ?? "0") > 0) {
+      return;
+    }
+
+    const migrations = await loadMigrationMetadata();
+    const appliedPrefix: MigrationMetadata[] = [];
+
+    for (const migration of migrations) {
+      if (!(await isMigrationApplied(client, migration.sql))) {
+        break;
+      }
+      appliedPrefix.push(migration);
+    }
+
+    if (!appliedPrefix.length) {
+      return;
+    }
+
+    await client.query("BEGIN");
+    try {
+      for (const migration of appliedPrefix) {
+        await client.query(
+          'INSERT INTO "drizzle"."__drizzle_migrations" ("hash", "created_at") VALUES ($1, $2)',
+          [migration.hash, migration.when],
+        );
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    }
+
+    Logger.warn(
+      `[DB] Backfilled ${appliedPrefix.length} Drizzle migration journal entr${appliedPrefix.length === 1 ? "y" : "ies"} through ${appliedPrefix.at(-1)?.tag ?? "unknown"} for an existing schema`,
+    );
+  } finally {
+    client.release();
+  }
+}
+
 export async function runMigrations(): Promise<void> {
   await pool.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto";');
   await pool.query("CREATE EXTENSION IF NOT EXISTS vector;");
+  await ensureMigrationJournalBaseline();
   await migrate(db, { migrationsFolder: "./migrations" });
 }
 
