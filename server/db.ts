@@ -84,7 +84,7 @@ function normalizeSqlStatement(statement: string): string {
 
 async function schemaObjectExists(client: PoolClient, schemaName: string, objectName: string): Promise<boolean> {
   const result = await client.query<{ exists: boolean }>(
-    "SELECT to_regclass(format('%I.%I', $1, $2)) IS NOT NULL AS exists",
+    "SELECT to_regclass(format('%I.%I', $1::text, $2::text)) IS NOT NULL AS exists",
     [schemaName, objectName],
   );
   return Boolean(result.rows[0]?.exists);
@@ -120,7 +120,7 @@ async function constraintExists(
       SELECT 1
       FROM pg_constraint
       WHERE conname = $1
-        AND conrelid = to_regclass(format('%I.%I', $2, $3))
+        AND conrelid = to_regclass(format('%I.%I', $2::text, $3::text))
     ) AS exists`,
     [constraintName, schemaName, tableName],
   );
