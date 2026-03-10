@@ -722,6 +722,31 @@ infra() {
     docker compose -p hola-infra -f "${INFRA_COMPOSE}" "$@"
 }
 
+ensure_infra_up() {
+  local infra_output conflict_name
+
+  if infra_output="$(infra up -d --remove-orphans 2>&1)"; then
+    printf '%s\n' "${infra_output}"
+    return 0
+  fi
+
+  printf '%s\n' "${infra_output}" >&2
+  conflict_name="$(
+    printf '%s\n' "${infra_output}" |
+      sed -n 's/.*The container name \"\/\([^\"]*\)\" is already in use.*/\1/p' |
+      head -n 1
+  )"
+
+  if [ -n "${conflict_name}" ]; then
+    logw "Removing conflicting container ${conflict_name} and retrying infra startup."
+    docker rm -f "${conflict_name}" >/dev/null 2>&1 || true
+    infra up -d --remove-orphans
+    return $?
+  fi
+
+  return 1
+}
+
 slot() {
   local slot_name="$1"; shift
   local port
@@ -948,7 +973,7 @@ echo ""
 
 # ── Step 2: Ensure shared infrastructure is running ────────
 log "[2/14] Ensuring shared infrastructure..."
-infra up -d --remove-orphans
+ensure_infra_up
 
 log "  Waiting for Postgres..."
 for i in $(seq 1 30); do

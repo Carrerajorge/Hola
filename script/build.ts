@@ -111,8 +111,14 @@ async function buildAll() {
     },
     banner: {
     js: `
+    import { fileURLToPath as __iliagptFileURLToPath } from 'url';
+    import { dirname as __iliagptDirname } from 'path';
+
     const module = { exports: {} };
     const exports = module.exports;
+
+    const __filename = __iliagptFileURLToPath(import.meta.url);
+    const __dirname = __iliagptDirname(__filename);
     `.trim(),
     },
     logLevel: "info" as const,
