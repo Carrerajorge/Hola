@@ -82,6 +82,13 @@ function normalizeSqlStatement(statement: string): string {
   return stripSqlLineComments(statement).replace(/\s+/g, " ").trim();
 }
 
+function splitMigrationStatements(migrationSql: string): string[] {
+  return migrationSql
+    .split("--> statement-breakpoint")
+    .map((statement) => normalizeSqlStatement(statement))
+    .filter(Boolean);
+}
+
 async function schemaObjectExists(client: PoolClient, schemaName: string, objectName: string): Promise<boolean> {
   const result = await client.query<{ exists: boolean }>(
     "SELECT to_regclass(format('%I.%I', $1::text, $2::text)) IS NOT NULL AS exists",
@@ -156,23 +163,29 @@ async function isMigrationStatementApplied(client: PoolClient, statement: string
   return false;
 }
 
-async function isMigrationApplied(client: PoolClient, migrationSql: string): Promise<boolean> {
-  const statements = migrationSql.split("--> statement-breakpoint");
-  let verifiedStatements = 0;
-
-  for (const statement of statements) {
-    const normalized = normalizeSqlStatement(statement);
-    if (!normalized) {
-      continue;
-    }
-
-    verifiedStatements++;
-    if (!(await isMigrationStatementApplied(client, normalized))) {
-      return false;
-    }
+function isDuplicateMigrationError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
   }
 
-  return verifiedStatements > 0;
+  const code = "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
+  return code === "42P07" || code === "42710" || code === "42701";
+}
+
+async function reconcileMigrationStatement(client: PoolClient, statement: string): Promise<"skipped" | "executed"> {
+  if (await isMigrationStatementApplied(client, statement)) {
+    return "skipped";
+  }
+
+  try {
+    await client.query(statement);
+    return "executed";
+  } catch (error) {
+    if (isDuplicateMigrationError(error) && (await isMigrationStatementApplied(client, statement))) {
+      return "skipped";
+    }
+    throw error;
+  }
 }
 
 async function loadMigrationMetadata(): Promise<MigrationMetadata[]> {
@@ -209,44 +222,49 @@ async function ensureMigrationJournalBaseline(): Promise<void> {
       )
     `);
 
-    const existingEntries = await client.query<{ count: string }>(
-      'SELECT COUNT(*)::text AS count FROM "drizzle"."__drizzle_migrations"',
+    const existingEntries = await client.query<{ hash: string }>(
+      'SELECT "hash" FROM "drizzle"."__drizzle_migrations"',
     );
-    if (Number(existingEntries.rows[0]?.count ?? "0") > 0) {
-      return;
-    }
+    const knownHashes = new Set(existingEntries.rows.map((row) => row.hash));
 
     const migrations = await loadMigrationMetadata();
-    const appliedPrefix: MigrationMetadata[] = [];
-
     for (const migration of migrations) {
-      if (!(await isMigrationApplied(client, migration.sql))) {
-        break;
+      if (knownHashes.has(migration.hash)) {
+        continue;
       }
-      appliedPrefix.push(migration);
-    }
 
-    if (!appliedPrefix.length) {
-      return;
-    }
+      const statements = splitMigrationStatements(migration.sql);
+      let executedStatements = 0;
 
-    await client.query("BEGIN");
-    try {
-      for (const migration of appliedPrefix) {
+      await client.query("BEGIN");
+      try {
+        for (const statement of statements) {
+          const result = await reconcileMigrationStatement(client, statement);
+          if (result === "executed") {
+            executedStatements++;
+          }
+        }
+
         await client.query(
           'INSERT INTO "drizzle"."__drizzle_migrations" ("hash", "created_at") VALUES ($1, $2)',
           [migration.hash, migration.when],
         );
+        knownHashes.add(migration.hash);
+
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
       }
-      await client.query("COMMIT");
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
+
+      if (executedStatements > 0) {
+        Logger.warn(
+          `[DB] Reconciled ${executedStatements} missing statement${executedStatements === 1 ? "" : "s"} while backfilling Drizzle migration ${migration.tag} for an existing schema`,
+        );
+      }
     }
 
-    Logger.warn(
-      `[DB] Backfilled ${appliedPrefix.length} Drizzle migration journal entr${appliedPrefix.length === 1 ? "y" : "ies"} through ${appliedPrefix.at(-1)?.tag ?? "unknown"} for an existing schema`,
-    );
+    Logger.warn(`[DB] Backfilled Drizzle migration journal for an existing schema`);
   } finally {
     client.release();
   }
