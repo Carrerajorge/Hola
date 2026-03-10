@@ -686,15 +686,29 @@ remove_slot_containers() {
   fi
 
   logw "Removing stale ${slot_name} slot containers before startup..."
+  docker container prune -f --filter "label=com.docker.compose.project=hola-${slot_name}" >/dev/null 2>&1 || true
   while IFS= read -r cid; do
     [ -z "${cid}" ] && continue
-    docker rm -f "${cid}" >/dev/null 2>&1 || true
+    docker rm -f -v "${cid}" >/dev/null 2>&1 || true
   done <<< "${ids}"
+  docker container prune -f --filter "label=com.docker.compose.project=hola-${slot_name}" >/dev/null 2>&1 || true
 
   remaining="$(list_slot_container_ids "${slot_name}")"
   if [ -n "${remaining}" ]; then
+    logw "Retrying stale ${slot_name} slot cleanup with detailed Docker output..."
+    while IFS= read -r cid; do
+      [ -z "${cid}" ] && continue
+      if ! docker rm -f -v "${cid}"; then
+        logw "docker rm could not remove stale ${slot_name} container ${cid}"
+      fi
+    done <<< "${remaining}"
+    docker container prune -f --filter "label=com.docker.compose.project=hola-${slot_name}" >/dev/null 2>&1 || true
+    remaining="$(list_slot_container_ids "${slot_name}")"
+  fi
+
+  if [ -n "${remaining}" ]; then
     loge "Failed to fully remove stale ${slot_name} slot containers."
-    docker ps -a --filter "label=com.docker.compose.project=hola-${slot_name}" \
+    docker ps -a --no-trunc --filter "label=com.docker.compose.project=hola-${slot_name}" \
       --format '  - {{.ID}} {{.Names}} :: {{.Status}}' || true
     exit 1
   fi
