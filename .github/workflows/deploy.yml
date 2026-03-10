@@ -656,7 +656,29 @@ jobs:
             echo "::warning::Circuit breaker: ${failures}/8 recent deploys failed. Proceeding anyway."
           fi
 
+      - name: Check whether production already serves target version
+        id: production_state
+        env:
+          EXPECTED: ${{ steps.tag.outputs.app_version }}
+        run: |
+          set -euo pipefail
+          HEALTH_JSON="$(curl -sf --max-time 10 https://iliagpt.com/api/health 2>/dev/null || echo "{}")"
+          READY_CODE="$(curl -sf -o /dev/null -w '%{http_code}' --max-time 10 https://iliagpt.com/api/health/ready 2>/dev/null || echo "000")"
+          ROOT_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 https://iliagpt.com/ || echo "000")"
+
+          if echo "${HEALTH_JSON}" | grep -q "\"version\":\"${EXPECTED}\"" && \
+             [ "${READY_CODE}" = "200" ] && \
+             [ "${ROOT_CODE}" -lt 500 ]; then
+            echo "already_deployed=true" >> "$GITHUB_OUTPUT"
+            echo "✓ Production already serves ${EXPECTED}; skipping SSH deployment path."
+            echo "  ${HEALTH_JSON}"
+          else
+            echo "already_deployed=false" >> "$GITHUB_OUTPUT"
+            echo "Production is not yet on ${EXPECTED}; SSH deployment path required."
+          fi
+
       - name: Setup SSH key
+        if: steps.production_state.outputs.already_deployed != 'true'
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
@@ -673,6 +695,7 @@ jobs:
           } > ~/.ssh/config
           chmod 600 ~/.ssh/config
       - name: Resolve reachable deploy endpoint
+        if: steps.production_state.outputs.already_deployed != 'true'
         id: target
         run: |
           set -euo pipefail
@@ -712,6 +735,7 @@ jobs:
           exit 1
 
       - name: Validate resolved target inputs
+        if: steps.production_state.outputs.already_deployed != 'true'
         run: |
           set -euo pipefail
           RESOLVED_HOST="${{ steps.target.outputs.host }}"
@@ -749,12 +773,14 @@ jobs:
           fi
 
       - name: Preflight target host
+        if: steps.production_state.outputs.already_deployed != 'true'
         run: |
           set -euo pipefail
           echo "▸ Deploy target: ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ steps.target.outputs.port }}"
           nc -vz -w 5 "${{ steps.target.outputs.host }}" "${{ steps.target.outputs.port }}" || echo "⚠️ TCP probe failed (continuing to SSH)"
 
       - name: Sync deploy scripts to VPS
+        if: steps.production_state.outputs.already_deployed != 'true'
         run: |
           set -euo pipefail
           sync_ok=false
@@ -779,6 +805,7 @@ jobs:
             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/nginx/ 2>/dev/null || true
 
       - name: Run blue-green deploy
+        if: steps.production_state.outputs.already_deployed != 'true'
         run: |
           set -euo pipefail
           for attempt in 1 2; do
@@ -836,6 +863,7 @@ jobs:
             exit 1
           fi
       - name: Run rigorous production acceptance checks
+        if: steps.production_state.outputs.already_deployed != 'true'
         env:
           VPS_HOST: ${{ steps.target.outputs.host }}
           VPS_PORT: ${{ steps.target.outputs.port }}
