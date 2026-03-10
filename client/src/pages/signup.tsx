@@ -3,10 +3,11 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { X, Chrome, Apple, Building2, Phone, ArrowLeft, Eye, EyeOff, AlertCircle, CheckCircle } from "lucide-react";
+import { X, Apple, Phone, ArrowLeft, Eye, EyeOff, AlertCircle, CheckCircle, Loader2 } from "lucide-react";
 import { validateEmail, validatePassword, validatePasswordMatch, getPasswordStrength } from "@/lib/validation";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import { clearForcedSignedOutFlag } from "@/lib/auth-flow";
+import { apiFetch } from "@/lib/apiClient";
 
 export default function SignupPage() {
   const [, setLocation] = useLocation();
@@ -20,6 +21,9 @@ export default function SignupPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [submitSuccess, setSubmitSuccess] = useState("");
 
   // Validation results
   const emailValidation = useMemo(() => validateEmail(email), [email]);
@@ -36,13 +40,36 @@ export default function SignupPage() {
     }
   };
 
-  const handleSignup = () => {
+  const handleSignup = async () => {
     setTouched({ email: true, password: true, confirmPassword: true });
-    if (isFormValid) {
-      // Email/password signup is completed in the first-party login flow.
-      // Keep the email context and avoid legacy Replit-only redirects.
+    if (!isFormValid || isSubmitting) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSubmitError("");
+    setSubmitSuccess("");
+
+    try {
+      const response = await apiFetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await response.json().catch(() => ({} as any));
+
+      if (!response.ok || !(data as any)?.success) {
+        setSubmitError((data as any)?.message || "No se pudo crear la cuenta");
+        return;
+      }
+
+      setSubmitSuccess((data as any)?.message || "Cuenta creada correctamente");
       const emailParam = encodeURIComponent(email);
-      window.location.href = `/login?email=${emailParam}`;
+      setLocation(`/login?email=${emailParam}`);
+    } catch {
+      setSubmitError("No se pudo crear la cuenta");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -250,12 +277,28 @@ export default function SignupPage() {
 
             <Button
               className="w-full h-12 text-base mt-4 bg-black text-white hover:bg-zinc-900 border border-black/10 rounded-xl font-semibold"
-              onClick={handleSignup}
-              disabled={!isFormValid}
+              onClick={() => {
+                void handleSignup();
+              }}
+              disabled={!isFormValid || isSubmitting}
               data-testid="button-create-account"
             >
-              Crear cuenta
+              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Crear cuenta"}
             </Button>
+
+            {submitError ? (
+              <p className="text-sm text-red-500 flex items-center gap-1" data-testid="text-signup-error">
+                <AlertCircle className="h-3 w-3" />
+                {submitError}
+              </p>
+            ) : null}
+
+            {submitSuccess ? (
+              <p className="text-sm text-green-600 flex items-center gap-1" data-testid="text-signup-success">
+                <CheckCircle className="h-3 w-3" />
+                {submitSuccess}
+              </p>
+            ) : null}
           </div>
 
           <p className="text-center text-xs text-zinc-500 mt-6">
