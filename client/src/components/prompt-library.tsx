@@ -227,7 +227,7 @@ export const PromptLibrary = memo(function PromptLibrary({
                 initial={{ scale: 0.95, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.95, opacity: 0 }}
-                className="relative w-full max-w-3xl bg-background rounded-2xl border shadow-2xl overflow-hidden"
+                className="liquid-shell relative w-full max-w-3xl bg-background rounded-[28px] border-0 shadow-2xl overflow-hidden"
                 onClick={e => e.stopPropagation()}
             >
                 {/* Header */}
@@ -283,7 +283,7 @@ export const PromptLibrary = memo(function PromptLibrary({
                                     value={search}
                                     onChange={e => setSearch(e.target.value)}
                                     placeholder="Buscar plantillas..."
-                                    className="pl-9"
+                                    className="liquid-input pl-9"
                                 />
                             </div>
                         </div>
@@ -330,7 +330,7 @@ export const PromptLibrary = memo(function PromptLibrary({
                                     {filteredTemplates.map(template => (
                                         <button
                                             key={template.id}
-                                            className="text-left p-3 rounded-lg border hover:border-primary/50 hover:bg-muted/50 transition-colors"
+                                            className="liquid-card text-left p-4 rounded-2xl border border-transparent hover:border-primary/30 bg-muted/30 hover:bg-muted/60 transition-all duration-300 hover:shadow-md"
                                             onClick={() => handleSelectTemplate(template)}
                                         >
                                             <div className="flex items-center gap-2 mb-1">

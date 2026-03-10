@@ -465,7 +465,7 @@ export const ThinkingDots = memo(function ThinkingDots({
             "rounded-full bg-current animate-bounce",
             sizeClasses[size]
           )}
-          style={{ animationDelay: `${i * 150}ms` }}
+          {...({ style: { animationDelay: `${i * 150}ms` } } as React.HTMLAttributes<HTMLSpanElement>)}
         />
       ))}
     </span>

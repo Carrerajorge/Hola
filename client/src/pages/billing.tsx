@@ -3,14 +3,15 @@ import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Card, CardContent } from "@/components/ui/card";
 import { ArrowLeft, CreditCard, Calendar, CheckCircle, Download, ShieldAlert } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { isAdminUser } from "@/lib/admin";
+import { isAdminUser, AdminCheckUser } from "@/lib/admin";
 
 export default function BillingPage() {
   const [, setLocation] = useLocation();
   const { user, isLoading } = useAuth();
-  const isAdmin = isAdminUser(user as any);
+  const isAdmin = isAdminUser(user as AdminCheckUser);
 
   useEffect(() => {
     if (!isLoading && !isAdmin) {
@@ -65,73 +66,79 @@ export default function BillingPage() {
       
       <div className="max-w-2xl mx-auto px-4 py-8">
         <div className="space-y-8">
-          <div className="rounded-lg border p-6 space-y-4">
-            <h2 className="font-medium">Plan actual</h2>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-2xl font-semibold">Enterprise</p>
-                <p className="text-muted-foreground">€99/mes</p>
-              </div>
-              <Badge variant="secondary" className="text-sm">ACTIVO</Badge>
-            </div>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Calendar className="h-4 w-4" />
-              <span>Próxima factura: 15 Enero 2025</span>
-            </div>
-            <div className="flex gap-3">
-              <Button variant="outline" data-testid="button-change-plan">Cambiar plan</Button>
-              <Button variant="outline" data-testid="button-cancel-subscription">Cancelar</Button>
-            </div>
-          </div>
-          
-          <div className="rounded-lg border p-6 space-y-4">
-            <h2 className="font-medium flex items-center gap-2">
-              <CreditCard className="h-5 w-5" />
-              Método de pago
-            </h2>
-            <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
-              <div className="flex items-center gap-4">
-                <div className="h-10 w-16 rounded bg-background border flex items-center justify-center font-semibold text-sm">
-                  VISA
-                </div>
+          <Card className="border-0 shadow-md transition-all duration-300 hover:shadow-lg">
+            <CardContent className="p-6 space-y-4">
+              <h2 className="font-medium">Plan actual</h2>
+              <div className="flex items-center justify-between">
                 <div>
-                  <p className="font-medium">•••• •••• •••• 4242</p>
-                  <p className="text-sm text-muted-foreground">Expira 12/26</p>
+                  <p className="text-2xl font-semibold">Enterprise</p>
+                  <p className="text-muted-foreground">€99/mes</p>
                 </div>
+                <Badge variant="secondary" className="text-sm">ACTIVO</Badge>
               </div>
-              <Button variant="outline" size="sm" data-testid="button-edit-payment">
-                Editar
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Calendar className="h-4 w-4" />
+                <span>Próxima factura: 15 Enero 2025</span>
+              </div>
+              <div className="flex gap-3">
+                <Button variant="outline" data-testid="button-change-plan">Cambiar plan</Button>
+                <Button variant="outline" data-testid="button-cancel-subscription">Cancelar</Button>
+              </div>
+            </CardContent>
+          </Card>
+          
+          <Card className="border-0 shadow-md transition-all duration-300 hover:shadow-lg">
+            <CardContent className="p-6 space-y-4">
+              <h2 className="font-medium flex items-center gap-2">
+                <CreditCard className="h-5 w-5" />
+                Método de pago
+              </h2>
+              <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
+                <div className="flex items-center gap-4">
+                  <div className="h-10 w-16 rounded bg-background border flex items-center justify-center font-semibold text-sm">
+                    VISA
+                  </div>
+                  <div>
+                    <p className="font-medium">•••• •••• •••• 4242</p>
+                    <p className="text-sm text-muted-foreground">Expira 12/26</p>
+                  </div>
+                </div>
+                <Button variant="outline" size="sm" data-testid="button-edit-payment">
+                  Editar
+                </Button>
+              </div>
+              <Button variant="outline" className="w-full" data-testid="button-add-payment">
+                Añadir método de pago
               </Button>
-            </div>
-            <Button variant="outline" className="w-full" data-testid="button-add-payment">
-              Añadir método de pago
-            </Button>
-          </div>
+            </CardContent>
+          </Card>
           
           <Separator />
           
-          <div className="space-y-4">
-            <h2 className="font-medium flex items-center gap-2">
-              <Calendar className="h-5 w-5" />
-              Historial de facturas
-            </h2>
-            <div className="rounded-lg border divide-y">
-              {invoices.map((invoice, i) => (
-                <div key={i} className="flex items-center justify-between p-4">
-                  <div className="flex items-center gap-4">
-                    <CheckCircle className="h-5 w-5 text-green-500" />
-                    <div>
-                      <p className="font-medium">{invoice.amount}</p>
-                      <p className="text-sm text-muted-foreground">{invoice.date}</p>
+          <Card className="border-0 shadow-md transition-all duration-300 hover:shadow-lg">
+            <CardContent className="p-6 space-y-4">
+              <h2 className="font-medium flex items-center gap-2">
+                <Calendar className="h-5 w-5" />
+                Historial de facturas
+              </h2>
+              <div className="rounded-lg border divide-y overflow-hidden">
+                {invoices.map((invoice, i) => (
+                  <div key={i} className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors">
+                    <div className="flex items-center gap-4">
+                      <CheckCircle className="h-5 w-5 text-green-500" />
+                      <div>
+                        <p className="font-medium">{invoice.amount}</p>
+                        <p className="text-sm text-muted-foreground">{invoice.date}</p>
+                      </div>
                     </div>
+                    <Button variant="ghost" size="sm" data-testid={`button-download-invoice-${i}`}>
+                      <Download className="h-4 w-4" />
+                    </Button>
                   </div>
-                  <Button variant="ghost" size="sm" data-testid={`button-download-invoice-${i}`}>
-                    <Download className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>

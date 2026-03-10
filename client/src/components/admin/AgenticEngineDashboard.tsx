@@ -563,7 +563,7 @@ export default function AgenticEngineDashboard() {
 
         <TabsContent value="overview" className="mt-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            <Card>
+            <Card className="liquid-card border-0 rounded-xl shadow-md bg-opacity-70 backdrop-blur-md">
               <CardContent className="pt-6">
                 <div className="flex items-center gap-3">
                   <div className="p-2 rounded-lg bg-blue-500/10">
@@ -578,7 +578,7 @@ export default function AgenticEngineDashboard() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="liquid-card border-0 rounded-xl shadow-md bg-opacity-70 backdrop-blur-md">
               <CardContent className="pt-6">
                 <div className="flex items-center gap-3">
                   <div className="p-2 rounded-lg bg-green-500/10">
@@ -595,7 +595,7 @@ export default function AgenticEngineDashboard() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="liquid-card border-0 rounded-xl shadow-md bg-opacity-70 backdrop-blur-md">
               <CardContent className="pt-6">
                 <div className="flex items-center gap-3">
                   <div className="p-2 rounded-lg bg-slate-500/10">
@@ -610,7 +610,7 @@ export default function AgenticEngineDashboard() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="liquid-card border-0 rounded-xl shadow-md bg-opacity-70 backdrop-blur-md">
               <CardContent className="pt-6">
                 <div className="flex items-center gap-3">
                   <div className="p-2 rounded-lg bg-yellow-500/10">
@@ -625,7 +625,7 @@ export default function AgenticEngineDashboard() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="liquid-card border-0 rounded-xl shadow-md bg-opacity-70 backdrop-blur-md">
               <CardContent className="pt-6">
                 <div className="flex items-center gap-3">
                   <div className="p-2 rounded-lg bg-purple-500/10">
@@ -640,7 +640,7 @@ export default function AgenticEngineDashboard() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="liquid-card border-0 rounded-xl shadow-md bg-opacity-70 backdrop-blur-md">
               <CardContent className="pt-6">
                 <div className="flex items-center gap-3">
                   <div className={cn("p-2 rounded-lg", isDegraded ? "bg-red-500/10" : "bg-green-500/10")}>
@@ -659,7 +659,7 @@ export default function AgenticEngineDashboard() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
-            <Card>
+            <Card className="liquid-card border-0 rounded-xl shadow-md bg-opacity-70 backdrop-blur-md">
               <CardHeader>
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
@@ -815,7 +815,7 @@ export default function AgenticEngineDashboard() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="liquid-card border-0 rounded-xl shadow-md bg-opacity-70 backdrop-blur-md">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <BarChart3 className="h-4 w-4" />
@@ -883,7 +883,7 @@ export default function AgenticEngineDashboard() {
         </TabsContent>
 
         <TabsContent value="tools" className="mt-6">
-          <Card>
+          <Card className="liquid-card border-0 rounded-xl shadow-md bg-opacity-70 backdrop-blur-md">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div className="min-w-0">
@@ -962,7 +962,7 @@ export default function AgenticEngineDashboard() {
         <TabsContent value="analyzer" className="mt-6">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-4">
-              <Card>
+              <Card className="liquid-card border-0 rounded-xl shadow-md bg-opacity-70 backdrop-blur-md">
                 <CardHeader>
                   <CardTitle>Complexity Analyzer</CardTitle>
                   <CardDescription>Test prompt complexity scoring</CardDescription>
@@ -982,7 +982,7 @@ export default function AgenticEngineDashboard() {
               </Card>
 
               {analysisResult && (
-                <Card>
+                <Card className="liquid-card border-0 rounded-xl shadow-md bg-opacity-70 backdrop-blur-md">
                   <CardHeader>
                     <CardTitle>Analysis Result</CardTitle>
                   </CardHeader>
@@ -1044,7 +1044,7 @@ export default function AgenticEngineDashboard() {
             </div>
 
             <div>
-              <Card>
+              <Card className="liquid-card border-0 rounded-xl shadow-md bg-opacity-70 backdrop-blur-md">
                 <CardHeader>
                   <CardTitle>History</CardTitle>
                 </CardHeader>
@@ -1080,7 +1080,7 @@ export default function AgenticEngineDashboard() {
         </TabsContent>
 
         <TabsContent value="orchestration" className="mt-6">
-          <Card>
+          <Card className="liquid-card border-0 rounded-xl shadow-md bg-opacity-70 backdrop-blur-md">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
@@ -1133,7 +1133,7 @@ export default function AgenticEngineDashboard() {
         </TabsContent>
 
         <TabsContent value="gaps" className="mt-6">
-          <Card>
+          <Card className="liquid-card border-0 rounded-xl shadow-md bg-opacity-70 backdrop-blur-md">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
@@ -1246,7 +1246,7 @@ export default function AgenticEngineDashboard() {
 
         <TabsContent value="memory" className="mt-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
+            <Card className="liquid-card border-0 rounded-xl shadow-md bg-opacity-70 backdrop-blur-md">
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle>Memory Statistics</CardTitle>
@@ -1277,7 +1277,7 @@ export default function AgenticEngineDashboard() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="liquid-card border-0 rounded-xl shadow-md bg-opacity-70 backdrop-blur-md">
               <CardHeader>
                 <CardTitle>Atoms by Type</CardTitle>
               </CardHeader>
@@ -1303,7 +1303,7 @@ export default function AgenticEngineDashboard() {
         </TabsContent>
 
         <TabsContent value="circuits" className="mt-6">
-          <Card>
+          <Card className="liquid-card border-0 rounded-xl shadow-md bg-opacity-70 backdrop-blur-md">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>

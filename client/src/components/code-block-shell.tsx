@@ -134,11 +134,11 @@ function VirtualizedLines({
     <div
       ref={containerRef}
       className="overflow-auto"
-      style={{ height: containerHeight, maxHeight: containerHeight }}
+      {...({ style: { height: containerHeight, maxHeight: containerHeight } } as React.HTMLAttributes<HTMLDivElement>)}
       data-testid="code-virtualized-container"
     >
-      <div style={{ height: totalHeight, position: "relative" }}>
-        <div style={{ transform: `translateY(${offsetTop}px)` }}>
+      <div {...({ style: { height: totalHeight, position: "relative" } } as React.HTMLAttributes<HTMLDivElement>)}>
+        <div {...({ style: { transform: `translateY(${offsetTop}px)` } } as React.HTMLAttributes<HTMLDivElement>)}>
           {lines.slice(visibleRange.start, visibleRange.end).map((_, idx) => {
             const lineIndex = visibleRange.start + idx;
             const lineNum = lineIndex + 1;
@@ -226,7 +226,7 @@ function LineRow({
         annotation && "bg-blue-500/5",
         annotationMode && !annotation && "cursor-pointer hover:bg-zinc-800/50"
       )}
-      style={{ height: LINE_HEIGHT, lineHeight: `${LINE_HEIGHT}px` }}
+      {...({ style: { height: LINE_HEIGHT, lineHeight: `${LINE_HEIGHT}px` } } as React.HTMLAttributes<HTMLDivElement>)}
       onClick={handleLineClick}
       data-testid={`code-line-${lineNum}`}
     >
@@ -413,7 +413,7 @@ export function CodeBlockShell({
     scrollToLine(annotation.line);
   }, [scrollToLine]);
 
-  const handleMarkerClick = useCallback((annotation: CodeAnnotation) => {
+  const handleMarkerClick = useCallback((_annotation: CodeAnnotation) => {
     if (!sidebarOpen) {
       setSidebarOpen(true);
     }
@@ -568,7 +568,7 @@ export function CodeBlockShell({
               <div
                 ref={codeContainerRef}
                 className="overflow-auto text-zinc-100"
-                style={{ maxHeight }}
+                {...({ style: { maxHeight } } as React.HTMLAttributes<HTMLDivElement>)}
                 data-testid="code-container"
               >
                 {lines.map((_, lineIndex) => {
@@ -600,7 +600,7 @@ export function CodeBlockShell({
           </div>
 
           {enableAnnotations && sidebarOpen && (
-            <div className="w-[30%] min-w-[200px] max-w-[300px]" style={{ height: maxHeight }}>
+            <div className="w-[30%] min-w-[200px] max-w-[300px]" {...({ style: { height: maxHeight } } as React.HTMLAttributes<HTMLDivElement>)}>
               <CodeAnnotationSidebar
                 annotations={annotationsArray}
                 onAnnotationClick={handleSidebarAnnotationClick}

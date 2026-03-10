@@ -1,0 +1,47 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - link "Saltar al contenido principal" [ref=e4] [cursor=pointer]:
+      - /url: "#main-content"
+    - link "Ir al chat" [ref=e5] [cursor=pointer]:
+      - /url: "#chat-input"
+  - region "Notifications (F8)":
+    - list
+  - region "Notifications alt+T"
+  - main [ref=e7]:
+    - generic [ref=e39]:
+      - button [ref=e40]:
+        - img
+      - button [ref=e55]:
+        - img
+      - generic [ref=e44]:
+        - heading "Crea tu cuenta" [level=1] [ref=e56]
+        - paragraph [ref=e57]: Ingresa tu correo electrónico y crea una contraseña
+      - generic [ref=e46]:
+        - generic [ref=e47]:
+          - text: Correo electrónico
+          - textbox "Correo electrónico" [ref=e58]:
+            - /placeholder: tu@email.com
+            - text: carrerajorge874+iliagptcheck090651@gmail.com
+        - generic [ref=e59]:
+          - text: Contraseña
+          - generic [ref=e60]:
+            - textbox "Contraseña" [ref=e61]:
+              - /placeholder: Mínimo 8 caracteres
+              - text: TempCodex!2026Check
+            - button [ref=e62]:
+              - img
+          - paragraph [ref=e76]: "Fortaleza: Muy fuerte"
+        - generic [ref=e49]:
+          - text: Confirmar contraseña
+          - generic [ref=e63]:
+            - textbox "Confirmar contraseña" [active] [ref=e64]:
+              - /placeholder: Repite tu contraseña
+              - text: TempCodex!2026Check
+            - button [ref=e65]:
+              - img
+        - button "Crear cuenta" [ref=e77]
+      - paragraph [ref=e66]:
+        - text: Al crear una cuenta, aceptas nuestros
+        - button "Términos de servicio" [ref=e67]
+        - text: "y"
+        - button "Política de privacidad" [ref=e68]

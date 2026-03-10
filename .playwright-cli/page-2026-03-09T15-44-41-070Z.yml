@@ -1,0 +1,46 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - link "Saltar al contenido principal" [ref=e4] [cursor=pointer]:
+      - /url: "#main-content"
+    - link "Ir al chat" [ref=e5] [cursor=pointer]:
+      - /url: "#chat-input"
+  - region "Notifications (F8)":
+    - list
+  - region "Notifications alt+T"
+  - main [ref=e7]:
+    - generic [ref=e10]:
+      - button [ref=e11]:
+        - img
+      - generic [ref=e12]:
+        - heading "Bienvenido a ILIAGPT" [level=1] [ref=e13]:
+          - text: Bienvenido a
+          - generic [ref=e14]: ILIAGPT
+        - paragraph [ref=e15]: Obtén respuestas más inteligentes, carga archivos e imágenes, y más.
+      - generic [ref=e16]:
+        - button "Continuar con Google" [ref=e17]:
+          - img
+          - text: Continuar con Google
+        - generic [ref=e18]:
+          - button "Continuar con Apple Próximamente" [disabled]:
+            - img
+            - generic: Continuar con Apple
+            - generic: Próximamente
+        - generic [ref=e19]:
+          - button "Continuar con Microsoft Próximamente" [disabled]:
+            - img
+            - generic: Continuar con Microsoft
+            - generic: Próximamente
+        - button "Continuar con el teléfono" [ref=e20]:
+          - img
+          - text: Continuar con el teléfono
+      - generic [ref=e23]: o
+      - generic [ref=e25]:
+        - textbox "Dirección de correo electrónico" [ref=e26]
+        - textbox "Contraseña" [ref=e27]
+        - generic [ref=e28]:
+          - button "Continuar" [ref=e29]
+          - button [ref=e30]:
+            - img
+      - paragraph [ref=e31]:
+        - text: ¿No tienes una cuenta?
+        - button "Suscríbete gratis" [ref=e32]

@@ -165,7 +165,8 @@ export function WhatsAppConnectDialog({
       if (res.status.state === 'qr' || res.status.state === 'connected') {
         stopBusy();
       }
-    } catch (e: any) {
+    } catch (err) {
+      const e = err as Error;
       setError(e?.message || 'No se pudo iniciar la conexión');
       stopBusy();
     }
@@ -185,7 +186,8 @@ export function WhatsAppConnectDialog({
       if (res.status.state === 'qr' || res.status.state === 'connected') {
         stopBusy();
       }
-    } catch (e: any) {
+    } catch (err) {
+      const e = err as Error;
       setError(e?.message || 'No se pudo reiniciar la conexión');
       stopBusy();
     }
@@ -213,7 +215,8 @@ export function WhatsAppConnectDialog({
         body: JSON.stringify({ phone }),
       });
       setStatus(res.status);
-    } catch (e: any) {
+    } catch (err) {
+      const e = err as Error;
       setError(e?.message || 'No se pudo generar el código');
     } finally {
       stopBusy();
@@ -231,7 +234,8 @@ export function WhatsAppConnectDialog({
       setStatus({ state: 'disconnected' });
       setQrDataUrl(null);
       lastQrRef.current = null;
-    } catch (e: any) {
+    } catch (err) {
+      const e = err as Error;
       setError(e?.message || 'No se pudo desconectar');
     } finally {
       stopBusy();
@@ -250,7 +254,8 @@ export function WhatsAppConnectDialog({
         body: JSON.stringify({}),
       });
       setTestSent(true);
-    } catch (e: any) {
+    } catch (err) {
+      const e = err as Error;
       setError(e?.message || 'No se pudo enviar el mensaje de prueba');
     } finally {
       stopBusy();
@@ -290,7 +295,7 @@ export function WhatsAppConnectDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="liquid-shell max-w-md rounded-[24px] border-0 shadow-2xl p-6">
         <DialogHeader>
           <DialogTitle>Conectar WhatsApp (Web QR)</DialogTitle>
           <DialogDescription>
@@ -301,7 +306,7 @@ export function WhatsAppConnectDialog({
 
         <div className="space-y-4">
           {/* Status bar */}
-          <div className="rounded-lg border p-3 bg-muted/20">
+          <div className="liquid-card rounded-xl border border-border p-3">
             <div className="flex items-center gap-2 text-sm">
               <span className={cn('h-2.5 w-2.5 rounded-full shrink-0', statusColor)} />
               <span className="font-medium">{statusLabel}</span>
@@ -319,7 +324,7 @@ export function WhatsAppConnectDialog({
 
           {/* Connected success */}
           {status.state === 'connected' && (
-            <div className="rounded-lg border border-green-200 bg-green-50 dark:bg-green-950/20 dark:border-green-800 p-4 space-y-3">
+            <div className="liquid-card border border-green-200/50 bg-green-50/50 dark:bg-green-900/10 dark:border-green-800/50 p-4 space-y-3 rounded-xl">
               <div className="text-green-700 dark:text-green-400 font-medium text-center">
                 WhatsApp conectado exitosamente
               </div>
@@ -336,6 +341,8 @@ export function WhatsAppConnectDialog({
                 <span className="text-sm">Respuesta automática (IA)</span>
                 <button
                   onClick={toggleAutoReply}
+                  title={autoReply ? 'Desactivar respuesta automática' : 'Activar respuesta automática'}
+                  aria-label={autoReply ? 'Desactivar respuesta automática' : 'Activar respuesta automática'}
                   className={cn(
                     'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
                     autoReply ? 'bg-green-600' : 'bg-gray-300 dark:bg-gray-600',
@@ -355,7 +362,7 @@ export function WhatsAppConnectDialog({
           {/* QR Code display */}
           {status.state === 'qr' && (
             <div className="flex flex-col items-center gap-3">
-              <div className={cn('rounded-xl border-2 border-green-500/30 bg-white p-3', 'w-fit shadow-sm')}>
+              <div className={cn('liquid-card rounded-2xl p-4', 'w-fit shadow-md')}>
                 {qrDataUrl ? (
                   <img
                     src={qrDataUrl}
@@ -389,7 +396,7 @@ export function WhatsAppConnectDialog({
 
           {/* Pairing code display */}
           {status.state === 'pairing_code' && (
-            <div className="rounded-lg border p-4 bg-muted/20 space-y-3">
+            <div className="liquid-card rounded-xl border p-4 space-y-3">
               <div className="text-sm">
                 Número: <span className="font-medium">{status.phone}</span>
               </div>
@@ -426,7 +433,7 @@ export function WhatsAppConnectDialog({
                   onValueChange={setCountryName}
                   disabled={busy}
                 >
-                  <SelectTrigger className="h-9 w-[130px] rounded-md border bg-background px-2 text-sm flex gap-2">
+                  <SelectTrigger className="liquid-input h-9 w-[130px] rounded-lg border-0 px-3 text-sm flex gap-2">
                     <SelectValue placeholder="+51" />
                   </SelectTrigger>
                   <SelectContent className="max-h-[280px]">
@@ -444,7 +451,7 @@ export function WhatsAppConnectDialog({
                   value={phoneNumber}
                   onChange={(e) => setPhoneNumber(e.target.value.replace(/[^0-9]/g, ''))}
                   placeholder="918714054"
-                  className="h-9 flex-1 rounded-md border bg-background px-2 text-sm"
+                  className="liquid-input h-9 flex-1 rounded-lg px-3 text-sm border-0"
                   disabled={busy}
                   inputMode="numeric"
                   onKeyDown={(e) => {

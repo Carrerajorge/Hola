@@ -42,14 +42,9 @@ import {
   AlertTriangle,
   RefreshCw,
   Loader2,
-  ChevronLeft,
-  ChevronRight,
-  Filter,
-  Calendar,
   Search,
   TrendingUp,
   TrendingDown,
-  Eye,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
@@ -277,7 +272,7 @@ function GranularitySelector({
 
 function UserGrowthChart({ data, granularity }: { data: any[]; granularity: TimeGranularity }) {
   return (
-    <Card data-testid="chart-user-growth">
+    <Card className="liquid-card border-0 rounded-xl shadow-md transition-all" data-testid="chart-user-growth">
       <CardHeader className="pb-2">
         <CardTitle className="text-base">User Growth</CardTitle>
         <CardDescription>New users over time</CardDescription>
@@ -314,7 +309,7 @@ function UserGrowthChart({ data, granularity }: { data: any[]; granularity: Time
 
 function RevenueTrendChart({ data, granularity }: { data: any[]; granularity: TimeGranularity }) {
   return (
-    <Card data-testid="chart-revenue-trend">
+    <Card className="liquid-card border-0 rounded-xl shadow-md transition-all" data-testid="chart-revenue-trend">
       <CardHeader className="pb-2">
         <CardTitle className="text-base">Revenue Trend</CardTitle>
         <CardDescription>Revenue over time</CardDescription>
@@ -359,7 +354,7 @@ function ModelUsageChart({ data, granularity }: { data: any[]; granularity: Time
   }, [data]);
 
   return (
-    <Card data-testid="chart-model-usage">
+    <Card className="liquid-card border-0 rounded-xl shadow-md transition-all" data-testid="chart-model-usage">
       <CardHeader className="pb-2">
         <CardTitle className="text-base">Model Usage</CardTitle>
         <CardDescription>Requests by model</CardDescription>
@@ -397,7 +392,7 @@ function LatencyByProviderChart({ data, granularity }: { data: any[]; granularit
   }, [data]);
 
   return (
-    <Card data-testid="chart-latency-provider">
+    <Card className="liquid-card border-0 rounded-xl shadow-md transition-all" data-testid="chart-latency-provider">
       <CardHeader className="pb-2">
         <CardTitle className="text-base">Latency by Provider</CardTitle>
         <CardDescription>Response time comparison (ms)</CardDescription>
@@ -431,9 +426,10 @@ function LatencyByProviderChart({ data, granularity }: { data: any[]; granularit
   );
 }
 
-function ErrorRateChart({ data, granularity }: { data: any[]; granularity: TimeGranularity }) {
+function ErrorRateChart({ data }: { data: any[]; granularity: TimeGranularity }) {
+
   return (
-    <Card data-testid="chart-error-rate">
+    <Card className="liquid-card border-0 rounded-xl shadow-md transition-all" data-testid="chart-error-rate">
       <CardHeader className="pb-2">
         <CardTitle className="text-base">Error Rate</CardTitle>
         <CardDescription>Error percentage over time (5% threshold)</CardDescription>
@@ -477,7 +473,7 @@ function TokenConsumptionChart({ data, granularity }: { data: any[]; granularity
   }, [data]);
 
   return (
-    <Card data-testid="chart-token-consumption">
+    <Card className="liquid-card border-0 rounded-xl shadow-md transition-all" data-testid="chart-token-consumption">
       <CardHeader className="pb-2">
         <CardTitle className="text-base">Token Consumption</CardTitle>
         <CardDescription>Tokens used by model</CardDescription>
@@ -564,7 +560,7 @@ function PerformanceTable({ data }: { data: any[] }) {
   };
 
   return (
-    <Card data-testid="table-performance">
+    <Card className="liquid-card border-0 rounded-xl shadow-md transition-all" data-testid="table-performance">
       <CardHeader>
         <CardTitle className="text-base">Provider Performance</CardTitle>
         <CardDescription>Real-time provider metrics and health status</CardDescription>
@@ -640,7 +636,7 @@ function CostTrackingPanel({ data }: { data: any[] }) {
           const isOverThreshold = percentage > 80;
 
           return (
-            <Card key={providerName} data-testid={`card-cost-${providerName}`}>
+            <Card className="liquid-card border-0 rounded-xl shadow-md transition-all" key={providerName} data-testid={`card-cost-${providerName}`}>
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -745,7 +741,7 @@ function APILogsExplorer() {
   };
 
   return (
-    <Card data-testid="panel-api-logs">
+    <Card className="liquid-card border-0 rounded-xl shadow-md transition-all" data-testid="panel-api-logs">
       <CardHeader>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
@@ -942,7 +938,7 @@ function UsageHeatmap({ data }: { data: number[][] }) {
   };
 
   return (
-    <Card data-testid="panel-usage-heatmap">
+    <Card className="liquid-card border-0 rounded-xl shadow-md transition-all" data-testid="panel-usage-heatmap">
       <CardHeader>
         <CardTitle className="text-base">Usage Heatmap</CardTitle>
         <CardDescription>Query volume by hour and day of week</CardDescription>

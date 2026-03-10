@@ -73,7 +73,7 @@ export default function Checkpoints() {
                     <div className="col-span-full py-12 text-center text-muted-foreground">No serialized checkpoints found.</div>
                 ) : (
                     checkpoints.map((cp) => (
-                        <Card key={cp.id} className="bg-card border-border shadow-md">
+                        <Card key={cp.id} className="liquid-card rounded-xl border-0 shadow-md">
                             <CardHeader className="pb-2">
                                 <CardTitle className="flex justify-between items-center text-lg">
                                     <span className="font-mono text-sm truncate w-2/3" title={cp.id}>{cp.id}</span>

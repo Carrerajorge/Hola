@@ -10,6 +10,7 @@
   - region "Notifications (F8)":
     - list
   - region "Notifications alt+T"
-  - generic [ref=e6]:
-    - img
+  - main [ref=e6]:
+    - generic [ref=e7]:
+      - img
 ```

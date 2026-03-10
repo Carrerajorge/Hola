@@ -1,0 +1,23 @@
+- generic [ref=e1]:
+  - generic [ref=e3]:
+    - heading "Ubuntu 22.04.5 LTS" [level=1] [ref=e4]
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - generic [ref=e8]: Nombre de usuario
+        - textbox "Nombre de usuario" [ref=e9]: codexdeploycodexdeploy
+      - generic [ref=e10]:
+        - generic [ref=e11]: Contraseña
+        - generic [ref=e12]:
+          - textbox "Contraseña" [ref=e13]: TESIS20@hostinger2026
+          - button "Show password" [ref=e14] [cursor=pointer]:
+            - img [ref=e15]
+      - link "Otras opciones" [ref=e18] [cursor=pointer]:
+        - /url: "#"
+        - img [ref=e19]
+        - text: Otras opciones
+      - button "Iniciar sesión" [active] [ref=e22] [cursor=pointer]:
+        - generic [ref=e23]: Iniciar sesión
+  - generic [ref=e24]:
+    - paragraph [ref=e25]:
+      - generic [ref=e26]: "Servidor: srv1288142"
+    - paragraph [ref=e27]: Acceda con su cuenta de usuario al servidor.

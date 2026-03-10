@@ -1,9 +1,9 @@
-import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
-import { ArrowLeft, Shield, Eye, Download, Trash2, Lock, History, FileText } from "lucide-react";
+import { Card } from "@/components/ui/card";
+import { ArrowLeft, Shield, Eye, Download, Trash2, History, FileText } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/apiClient";
@@ -84,7 +84,7 @@ export default function PrivacyPage() {
       if (!res.ok) throw new Error('Failed to delete chats');
       return res.json();
     },
-    onSuccess: (data: any) => {
+    onSuccess: (data: { count?: number }) => {
       queryClient.invalidateQueries({ queryKey: ['/api/chats'] });
       queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'chats', 'deleted'] });
       queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'chats', 'archived'] });
@@ -113,8 +113,8 @@ export default function PrivacyPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const err = new Error(data?.error || 'Failed to delete account');
-        (err as any).status = res.status;
+        const err = new Error(data?.error || 'Failed to delete account') as Error & { status?: number };
+        err.status = res.status;
         throw err;
       }
       return data;
@@ -127,10 +127,11 @@ export default function PrivacyPage() {
       setShowDeleteAccountConfirm(false);
       await logout();
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
+      const errorMsg = err instanceof Error ? err.message : "No se pudo eliminar la cuenta.";
       toast({
         title: "Error",
-        description: err?.message || "No se pudo eliminar la cuenta.",
+        description: errorMsg,
         variant: "destructive",
       });
     },
@@ -177,8 +178,8 @@ export default function PrivacyPage() {
         <div className="space-y-8">
           <div className="space-y-4">
             <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Control de datos</h2>
-            <div className="rounded-lg border divide-y">
-              <div className="flex items-center justify-between p-4">
+            <Card className="rounded-xl border divide-y overflow-hidden border-0 shadow-md transition-all duration-300 hover:shadow-lg">
+              <div className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors">
                 <div className="flex items-center gap-4">
                   <Shield className="h-5 w-5 text-muted-foreground" />
                   <div>
@@ -193,7 +194,7 @@ export default function PrivacyPage() {
                   data-testid="switch-share-data"
                 />
               </div>
-              <div className="flex items-center justify-between p-4">
+              <div className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors">
                 <div className="flex items-center gap-4">
                   <Eye className="h-5 w-5 text-muted-foreground" />
                   <div>
@@ -208,15 +209,15 @@ export default function PrivacyPage() {
                   data-testid="switch-analytics"
                 />
               </div>
-            </div>
+            </Card>
           </div>
           
           <Separator />
           
           <div className="space-y-4">
             <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Historial</h2>
-            <div className="rounded-lg border divide-y">
-              <div className="flex items-center justify-between p-4">
+            <Card className="rounded-xl border divide-y overflow-hidden border-0 shadow-md transition-all duration-300 hover:shadow-lg">
+              <div className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors">
                 <div className="flex items-center gap-4">
                   <History className="h-5 w-5 text-muted-foreground" />
                   <div>
@@ -231,7 +232,7 @@ export default function PrivacyPage() {
                   data-testid="switch-save-history"
                 />
               </div>
-              <div className="flex items-center justify-between p-4">
+              <div className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors">
                 <div className="flex items-center gap-4">
                   <Trash2 className="h-5 w-5 text-muted-foreground" />
                   <div>
@@ -249,15 +250,15 @@ export default function PrivacyPage() {
                   Borrar todo
                 </Button>
               </div>
-            </div>
+            </Card>
           </div>
           
           <Separator />
           
           <div className="space-y-4">
             <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Tus datos</h2>
-            <div className="rounded-lg border divide-y">
-              <div className="flex items-center justify-between p-4">
+            <Card className="rounded-xl border divide-y overflow-hidden border-0 shadow-md transition-all duration-300 hover:shadow-lg">
+              <div className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors">
                 <div className="flex items-center gap-4">
                   <Download className="h-5 w-5 text-muted-foreground" />
                   <div>
@@ -275,7 +276,7 @@ export default function PrivacyPage() {
                   Descargar
                 </Button>
               </div>
-              <div className="flex items-center justify-between p-4">
+              <div className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors">
                 <div className="flex items-center gap-4">
                   <FileText className="h-5 w-5 text-muted-foreground" />
                   <div>
@@ -292,7 +293,7 @@ export default function PrivacyPage() {
                   Ver
                 </Button>
               </div>
-            </div>
+            </Card>
           </div>
           
           <Separator />

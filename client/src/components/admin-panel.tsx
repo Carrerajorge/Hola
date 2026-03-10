@@ -47,19 +47,26 @@ interface AdminPanelProps {
   onOpenChange: (open: boolean) => void;
 }
 
-type AdminSection = "dashboard" | "users" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings";
+type AdminSection = "dashboard" | "monitoring" | "users" | "devices" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "agentic-engine" | "excel-manager" | "terminal" | "app-releases" | "settings";
 
 const navItems: { id: AdminSection; label: string; icon: React.ElementType }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "users", label: "Users", icon: Users },
-  { id: "ai-models", label: "AI Models", icon: Bot },
-  { id: "payments", label: "Payments", icon: CreditCard },
-  { id: "invoices", label: "Invoices", icon: FileText },
-  { id: "analytics", label: "Analytics", icon: BarChart3 },
-  { id: "database", label: "Database", icon: Database },
-  { id: "security", label: "Security", icon: Shield },
-  { id: "reports", label: "Reports", icon: FileBarChart },
-  { id: "settings", label: "Settings", icon: Settings },
+  { id: "monitoring", label: "Monitoring", icon: Activity },
+  { id: "users", label: "Usuarios", icon: Users },
+  { id: "devices", label: "Dispositivos", icon: HardDrive },
+  { id: "conversations", label: "Conversaciones", icon: FileText },
+  { id: "ai-models", label: "Modelos IA", icon: Bot },
+  { id: "payments", label: "Pagos", icon: CreditCard },
+  { id: "invoices", label: "Facturas", icon: FileText },
+  { id: "analytics", label: "Analíticas", icon: BarChart3 },
+  { id: "database", label: "Base de Datos", icon: Database },
+  { id: "security", label: "Seguridad", icon: Shield },
+  { id: "reports", label: "Reportes", icon: FileBarChart },
+  { id: "agentic-engine", label: "Agentic Engine", icon: Bot },
+  { id: "excel-manager", label: "Excel Manager", icon: FileText },
+  { id: "terminal", label: "Terminal", icon: Settings },
+  { id: "app-releases", label: "App Releases", icon: Download },
+  { id: "settings", label: "Configuración", icon: Settings },
 ];
 
 function DashboardSection() {
@@ -67,7 +74,7 @@ function DashboardSection() {
     <div className="space-y-6">
       <h2 className="text-lg font-medium">Dashboard</h2>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="rounded-lg border p-4 space-y-2">
+        <div className="liquid-card border-0 rounded-xl p-4 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">Usuarios</span>
             <Users className="h-4 w-4 text-muted-foreground" />
@@ -78,7 +85,7 @@ function DashboardSection() {
             +12% este mes
           </div>
         </div>
-        <div className="rounded-lg border p-4 space-y-2">
+        <div className="liquid-card border-0 rounded-xl p-4 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">Consultas/día</span>
             <Activity className="h-4 w-4 text-muted-foreground" />
@@ -89,7 +96,7 @@ function DashboardSection() {
             +8% vs ayer
           </div>
         </div>
-        <div className="rounded-lg border p-4 space-y-2">
+        <div className="liquid-card border-0 rounded-xl p-4 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">Ingresos</span>
             <CreditCard className="h-4 w-4 text-muted-foreground" />
@@ -100,7 +107,7 @@ function DashboardSection() {
             +15% este mes
           </div>
         </div>
-        <div className="rounded-lg border p-4 space-y-2">
+        <div className="liquid-card border-0 rounded-xl p-4 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">Uptime</span>
             <CheckCircle className="h-4 w-4 text-green-500" />
@@ -109,7 +116,7 @@ function DashboardSection() {
           <span className="text-xs text-muted-foreground">Últimos 30 días</span>
         </div>
       </div>
-      <div className="rounded-lg border p-4">
+      <div className="liquid-card border-0 rounded-xl p-4">
         <h3 className="text-sm font-medium mb-4">Actividad reciente</h3>
         <div className="space-y-3">
           {[
@@ -227,7 +234,7 @@ function UsersSection() {
           <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
       ) : (
-        <div className="rounded-lg border">
+        <div className="liquid-card border-0 rounded-xl overflow-hidden">
           <div className="grid grid-cols-6 gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground">
             <span>Usuario</span>
             <span>Plan</span>
@@ -384,7 +391,7 @@ function AIModelsSection() {
         {models.map((model, i) => {
           const providerStatus = getProviderStatus(model.provider);
           return (
-            <div key={i} className="rounded-lg border p-4">
+            <div key={i} className="liquid-card border-0 rounded-xl p-4">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-3">
                   <Bot className="h-5 w-5" />
@@ -461,7 +468,7 @@ function PaymentsSection() {
     <div className="space-y-6">
       <h2 className="text-lg font-medium">Payments</h2>
       <div className="grid grid-cols-3 gap-4">
-        <div className="rounded-lg border p-4">
+        <div className="liquid-card border-0 rounded-xl p-4">
           <p className="text-xs text-muted-foreground mb-1">Ingresos del mes</p>
           <p className="text-xl font-semibold">€12,450</p>
         </div>
@@ -549,7 +556,7 @@ function AnalyticsSection() {
     <div className="space-y-6">
       <h2 className="text-lg font-medium">Analytics</h2>
       <div className="grid grid-cols-2 gap-4">
-        <div className="rounded-lg border p-4 space-y-4">
+        <div className="liquid-card border-0 rounded-xl p-4 space-y-4">
           <h3 className="text-sm font-medium">Consultas por día</h3>
           <div className="h-32 flex items-end justify-between gap-1">
             {[40, 65, 45, 80, 55, 90, 75].map((h, i) => (
@@ -596,22 +603,22 @@ function AnalyticsSection() {
           </div>
         </div>
       </div>
-      <div className="rounded-lg border p-4">
+      <div className="liquid-card border-0 rounded-xl p-4">
         <h3 className="text-sm font-medium mb-4">Métricas clave</h3>
         <div className="grid grid-cols-4 gap-4">
-          <div>
+          <div className="liquid-card border-0 rounded-xl p-3 hover:bg-muted/10 transition-colors">
             <p className="text-2xl font-semibold">2.3s</p>
             <p className="text-xs text-muted-foreground">Tiempo respuesta</p>
           </div>
-          <div>
+          <div className="liquid-card border-0 rounded-xl p-3 hover:bg-muted/10 transition-colors">
             <p className="text-2xl font-semibold">94%</p>
             <p className="text-xs text-muted-foreground">Satisfacción</p>
           </div>
-          <div>
+          <div className="liquid-card border-0 rounded-xl p-3 hover:bg-muted/10 transition-colors">
             <p className="text-2xl font-semibold">1.2M</p>
             <p className="text-xs text-muted-foreground">Tokens/día</p>
           </div>
-          <div>
+          <div className="liquid-card border-0 rounded-xl p-3 hover:bg-muted/10 transition-colors">
             <p className="text-2xl font-semibold">€0.08</p>
             <p className="text-xs text-muted-foreground">Costo/consulta</p>
           </div>
@@ -632,7 +639,7 @@ function DatabaseSection() {
         </Button>
       </div>
       <div className="grid grid-cols-3 gap-4">
-        <div className="rounded-lg border p-4">
+        <div className="liquid-card border-0 rounded-xl p-4">
           <div className="flex items-center gap-2 mb-2">
             <HardDrive className="h-4 w-4 text-muted-foreground" />
             <span className="text-xs text-muted-foreground">Almacenamiento</span>
@@ -641,7 +648,7 @@ function DatabaseSection() {
           <Progress value={49} className="h-1.5 mt-2" />
           <p className="text-xs text-muted-foreground mt-1">de 50 GB</p>
         </div>
-        <div className="rounded-lg border p-4">
+        <div className="liquid-card border-0 rounded-xl p-4">
           <div className="flex items-center gap-2 mb-2">
             <Activity className="h-4 w-4 text-muted-foreground" />
             <span className="text-xs text-muted-foreground">Conexiones</span>
@@ -686,7 +693,7 @@ function SecuritySection() {
     <div className="space-y-6">
       <h2 className="text-lg font-medium">Security</h2>
       <div className="grid grid-cols-2 gap-4">
-        <div className="rounded-lg border p-4">
+        <div className="liquid-card border-0 rounded-xl p-4">
           <div className="flex items-center gap-2 mb-4">
             <Shield className="h-5 w-5 text-green-500" />
             <span className="font-medium">Estado del sistema</span>
@@ -808,7 +815,7 @@ function SettingsSection() {
     <div className="space-y-6">
       <h2 className="text-lg font-medium">Settings</h2>
       <div className="space-y-4">
-        <div className="rounded-lg border p-4">
+        <div className="liquid-card border-0 rounded-xl p-4">
           <h3 className="text-sm font-medium mb-4">General</h3>
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -867,7 +874,10 @@ export function AdminPanel({ open, onOpenChange }: AdminPanelProps) {
   const renderSection = () => {
     switch (activeSection) {
       case "dashboard": return <DashboardSection />;
+      case "monitoring": return <div className="p-6 text-center text-muted-foreground"><Activity className="w-12 h-12 mx-auto mb-4 opacity-50"/>Modulo de Monitoreo</div>;
       case "users": return <UsersSection />;
+      case "devices": return <div className="p-6 text-center text-muted-foreground"><HardDrive className="w-12 h-12 mx-auto mb-4 opacity-50"/>Modulo de Dispositivos</div>;
+      case "conversations": return <div className="p-6 text-center text-muted-foreground"><FileText className="w-12 h-12 mx-auto mb-4 opacity-50"/>Modulo de Conversaciones</div>;
       case "ai-models": return <AIModelsSection />;
       case "payments": return <PaymentsSection />;
       case "invoices": return <InvoicesSection />;
@@ -875,6 +885,10 @@ export function AdminPanel({ open, onOpenChange }: AdminPanelProps) {
       case "database": return <DatabaseSection />;
       case "security": return <SecuritySection />;
       case "reports": return <ReportsSection />;
+      case "agentic-engine": return <div className="p-6 text-center text-muted-foreground"><Bot className="w-12 h-12 mx-auto mb-4 opacity-50"/>Modulo Agentic Engine</div>;
+      case "excel-manager": return <div className="p-6 text-center text-muted-foreground"><FileText className="w-12 h-12 mx-auto mb-4 opacity-50"/>Modulo Excel Manager</div>;
+      case "terminal": return <div className="p-6 text-center text-muted-foreground"><Settings className="w-12 h-12 mx-auto mb-4 opacity-50"/>Modulo Terminal</div>;
+      case "app-releases": return <div className="p-6 text-center text-muted-foreground"><Download className="w-12 h-12 mx-auto mb-4 opacity-50"/>Modulo App Releases</div>;
       case "settings": return <SettingsSection />;
       default: return <DashboardSection />;
     }
@@ -882,7 +896,7 @@ export function AdminPanel({ open, onOpenChange }: AdminPanelProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl h-[80vh] p-0 gap-0">
+      <DialogContent className="liquid-shell max-w-6xl h-[85vh] p-0 gap-0 rounded-[28px] border-0 shadow-2xl overflow-hidden">
         <VisuallyHidden>
           <DialogTitle>Admin Panel</DialogTitle>
           <DialogDescription>Panel de administración del sistema</DialogDescription>

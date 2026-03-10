@@ -4,12 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Paperclip,
-  Search,
-  BookOpen,
-  Image,
-  Mic,
   X,
-  Sparkles,
   Zap,
   Shield,
   Menu,
@@ -17,10 +12,6 @@ import {
   Clock,
   Lock,
   Send,
-  Palette,
-  Gift,
-  Drama,
-  Wand2,
   Terminal,
   Cpu,
   MonitorSmartphone,
@@ -130,7 +121,7 @@ export default function LandingPage() {
     if (!mobileMenuOpen) return;
     const k = "mobile-menu-open";
     const s = window.history.state;
-    if (!s || s[k] !== true) window.history.pushState({ ...(s || {}), [k]: true }, "");
+    if (!s || s[k] !== true) window.history.pushState({ ...s, [k]: true }, "");
     const pop = () => setMobileMenuOpen(false);
     window.addEventListener("popstate", pop);
     return () => window.removeEventListener("popstate", pop);
@@ -231,7 +222,7 @@ export default function LandingPage() {
       </header>
 
       {/* ════════════════════ MOBILE DRAWER ════════════════════ */}
-      <div className={"md:hidden" + (mobileMenuOpen ? "" : " pointer-events-none")} aria-hidden={!mobileMenuOpen}>
+      <div className={"md:hidden" + (mobileMenuOpen ? "" : " pointer-events-none")} {...({ "aria-hidden": !mobileMenuOpen } as React.HTMLAttributes<HTMLDivElement>)}>
         <div
           className={"fixed left-0 right-0 top-16 bottom-0 z-40 bg-black/40 transition-opacity duration-200 " + (mobileMenuOpen ? "opacity-100" : "opacity-0")}
           onClick={() => setMobileMenuOpen(false)}
@@ -269,10 +260,10 @@ export default function LandingPage() {
       {/* ════════════════════ HERO ════════════════════ */}
       <section className="relative flex flex-col items-center px-5 pt-20 pb-24 md:pt-32 md:pb-36 overflow-hidden">
         {/* Dot grid */}
-        <div className="absolute inset-0 opacity-[0.025]" style={{
+        <div className="absolute inset-0 opacity-[0.025]" {...({ style: {
           backgroundImage: "radial-gradient(circle at 1px 1px, black 1px, transparent 0)",
           backgroundSize: "28px 28px",
-        }} />
+        } } as React.HTMLAttributes<HTMLDivElement>)} />
         {/* Gradient blobs */}
         <div className="absolute -top-40 -left-40 w-[500px] h-[500px] rounded-full bg-neutral-100 blur-[120px] opacity-60" />
         <div className="absolute -bottom-40 -right-40 w-[400px] h-[400px] rounded-full bg-neutral-200/60 blur-[100px] opacity-40" />
@@ -334,7 +325,7 @@ export default function LandingPage() {
               {features.map((f, i) => (
                 <Button key={f.label} variant="outline"
                   className="rounded-full gap-2 text-[13px] border-neutral-200 bg-white text-neutral-600 hover:bg-black hover:text-white hover:border-black transition-all duration-300 hover:scale-105 hover:shadow-md fade-in-up h-9 px-4"
-                  style={{ animationDelay: `${(i + 2) * 80}ms` }}
+                  {...({ style: { animationDelay: `${(i + 2) * 80}ms` } } as React.ButtonHTMLAttributes<HTMLButtonElement>)}
                   onClick={() => setLocation("/login")}
                   data-testid={`button-${f.label.toLowerCase().replace(" ", "-")}`}
                 >
@@ -446,10 +437,10 @@ export default function LandingPage() {
       {/* ════════════════════ FINAL CTA ════════════════════ */}
       <section ref={ctaReveal.ref} className="py-24 md:py-32 px-5 relative overflow-hidden">
         <div className="absolute inset-0 bg-black" />
-        <div className="absolute inset-0 opacity-10" style={{
+        <div className="absolute inset-0 opacity-10" {...({ style: {
           backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)",
           backgroundSize: "24px 24px",
-        }} />
+        } } as React.HTMLAttributes<HTMLDivElement>)} />
 
         <div className={`relative max-w-3xl mx-auto text-center ${rv(ctaReveal.visible)}`}>
           <h2 className="text-3xl md:text-5xl lg:text-6xl font-black text-white tracking-tight mb-6">

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import {
   Plus,
   Upload,
@@ -17,13 +17,6 @@ import {
   Maximize2,
   Minimize2,
   Users,
-  Calendar,
-  Contact,
-  Settings2,
-  Wand2,
-  Sparkles,
-  Presentation,
-  Clock,
   Laptop,
   ShieldAlert,
   GitBranch,
@@ -74,7 +67,7 @@ interface UploadedFile {
   spreadsheetData?: {
     uploadId: string;
     sheets: Array<{ name: string; rowCount: number; columnCount: number }>;
-    previewData?: { headers: string[]; data: any[][] };
+    previewData?: { headers: string[]; data: unknown[][] };
   };
 }
 
@@ -229,18 +222,18 @@ export function Composer({
   onCloseSidebar,
   setPreviewUploadedImage,
   onPreviewUploadedFile,
-  isFigmaConnected,
-  isFigmaConnecting,
-  handleFigmaConnect,
-  handleFigmaDisconnect,
+  isFigmaConnected: _isFigmaConnected,
+  isFigmaConnecting: _isFigmaConnecting,
+  handleFigmaConnect: _handleFigmaConnect,
+  handleFigmaDisconnect: _handleFigmaDisconnect,
   onOpenGoogleForms,
   onOpenApps,
-  isGoogleFormsActive,
+  isGoogleFormsActive: _isGoogleFormsActive,
   setIsGoogleFormsActive,
   onTextareaFocus,
   isFilesLoading = false,
-  latencyMode = "auto",
-  setLatencyMode,
+  latencyMode: _latencyMode = "auto",
+  setLatencyMode: _setLatencyMode,
   runtimeTarget: runtimeTargetProp,
   onRuntimeTargetChange,
   executionAccess: executionAccessProp,
@@ -290,86 +283,23 @@ export function Composer({
   const [showMentionPopover, setShowMentionPopover] = useState(false);
   const [mentionSearch, setMentionSearch] = useState("");
   const [mentionIndex, setMentionIndex] = useState(0);
-  const [recentTemplates, setRecentTemplates] = useState<string[]>([]);
 
-  const quickActionTemplates = [
-    {
-      id: "image",
-      label: "Generar imagen",
-      icon: Sparkles,
-      template: "Genera una imagen de ",
-      color: "from-pink-500 to-rose-500",
-      bgColor: "bg-pink-50 dark:bg-pink-950/30",
-      textColor: "text-pink-600 dark:text-pink-400",
-      borderColor: "border-pink-200 dark:border-pink-800",
-    },
-    {
-      id: "document",
-      label: "Crear documento",
-      icon: FileText,
-      template: "Crea un documento Word sobre ",
-      color: "from-blue-500 to-blue-600",
-      bgColor: "bg-blue-50 dark:bg-blue-950/30",
-      textColor: "text-blue-600 dark:text-blue-400",
-      borderColor: "border-blue-200 dark:border-blue-800",
-    },
-    {
-      id: "presentation",
-      label: "Crear presentación",
-      icon: Presentation,
-      template: "Crea una presentación PowerPoint sobre ",
-      color: "from-orange-500 to-amber-500",
-      bgColor: "bg-orange-50 dark:bg-orange-950/30",
-      textColor: "text-orange-600 dark:text-orange-400",
-      borderColor: "border-orange-200 dark:border-orange-800",
-    },
-    {
-      id: "web",
-      label: "Buscar en web",
-      icon: Search,
-      template: "Busca en la web información sobre ",
-      color: "from-cyan-500 to-teal-500",
-      bgColor: "bg-cyan-50 dark:bg-cyan-950/30",
-      textColor: "text-cyan-600 dark:text-cyan-400",
-      borderColor: "border-cyan-200 dark:border-cyan-800",
-    },
-  ];
 
-  useEffect(() => {
-    const stored = localStorage.getItem("recentQuickTemplates");
-    if (stored) {
-      try {
-        setRecentTemplates(JSON.parse(stored));
-      } catch {
-        setRecentTemplates([]);
-      }
-    }
-  }, []);
 
-  const handleQuickAction = useCallback((templateId: string, template: string) => {
-    setInput(template);
-    textareaRef.current?.focus();
-    setTimeout(() => {
-      if (textareaRef.current) {
-        textareaRef.current.setSelectionRange(template.length, template.length);
-      }
-    }, 0);
 
-    const newRecent = [templateId, ...recentTemplates.filter((id: string) => id !== templateId)].slice(0, 4);
-    setRecentTemplates(newRecent);
-    localStorage.setItem("recentQuickTemplates", JSON.stringify(newRecent));
-  }, [setInput, textareaRef, recentTemplates]);
+
+
 
   const { connectedSources, getSourceActive, setSourceActive } = useConnectedSources();
   const { addToHistory, navigateUp, navigateDown, resetNavigation } = useCommandHistory();
 
-  const mentionSources = connectedSources.map((source: any) => ({
+  const mentionSources = connectedSources.map((source: { id: string; name: string;[key: string]: unknown }) => ({
     ...source,
     mention: source.id === 'gmail' ? '@Gmail' : source.id === 'googleForms' ? '@GoogleForms' : `@${source.name}`,
     action: source.id === 'googleForms' ? () => onOpenGoogleForms?.() : () => { }
   }));
 
-  const filteredSources = mentionSources.filter((source: any) =>
+  const filteredSources = mentionSources.filter((source: { id: string; name: string; mention: string;[key: string]: unknown }) =>
     source.name.toLowerCase().includes(mentionSearch.toLowerCase()) ||
     source.mention.toLowerCase().includes(mentionSearch.toLowerCase())
   );
@@ -510,14 +440,6 @@ export function Composer({
                   : cn("bg-card", "border-[#c7c7c7]/45 dark:border-white/10", SILVER_HOVER_BORDER_SOFT)
               )}
               onClick={() => handleAttachmentPreviewClick(file)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  handleAttachmentPreviewClick(file);
-                }
-              }}
               data-testid={`inline-file-${index}`}
             >
               <button
@@ -662,14 +584,6 @@ export function Composer({
                       file.status === "error" && "bg-red-50 dark:bg-red-950/30 border-[0.5px] border-red-200 dark:border-red-800"
                     )}
                     onClick={() => handleAttachmentPreviewClick(file)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        handleAttachmentPreviewClick(file);
-                      }
-                    }}
                   >
                     <div className={cn(
                       "flex items-center justify-center w-6 h-6 rounded shrink-0",
@@ -1346,7 +1260,7 @@ export function Composer({
         "transition-colors duration-200"
       )
       : cn(
-        "max-w-3xl mx-auto relative transition-all duration-300 ease-out overflow-visible",
+        "liquid-shell max-w-3xl mx-auto relative transition-all duration-300 ease-out overflow-visible",
         "bg-white/40 dark:bg-[#0d0d0d]/40 backdrop-blur-2xl",
         "border border-[#A5A0FF]/30",
         "hover:border-[#A5A0FF]/50",

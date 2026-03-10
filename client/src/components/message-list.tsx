@@ -18,7 +18,6 @@ import {
   MessageSquare,
   Download,
   FileText,
-  FileSpreadsheet,
   FileIcon,
   Image as ImageIcon,
   Check,
@@ -37,9 +36,6 @@ import {
   Eye,
   Brain,
   List,
-  Globe,
-  Wrench,
-  Zap,
   ZoomIn
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -65,7 +61,6 @@ import {
   PopoverContent,
   PopoverTrigger
 } from "@/components/ui/popover";
-import { Input } from "@/components/ui/input";
 import { motion } from "framer-motion";
 import { z } from "zod";
 
@@ -78,15 +73,15 @@ import { CodeExecutionBlock } from "@/components/code-execution-block";
 import { InlineGoogleFormPreview } from "@/components/inline-google-form-preview";
 import { InlineGmailPreview } from "@/components/inline-gmail-preview";
 import { SuggestedReplies, generateSuggestions } from "@/components/suggested-replies";
-import { getFileTheme, getFileCategory } from "@/lib/fileTypeTheme";
+import { getFileTheme } from "@/lib/fileTypeTheme";
 import { ChatSpreadsheetViewer } from "@/components/chat/ChatSpreadsheetViewer";
 import { DocumentAnalysisResults } from "@/components/chat/DocumentAnalysisResults";
 import { DocumentAnalysisResults as SemanticDocumentAnalysisResults } from "@/components/DocumentAnalysisResults";
 import { normalizeAgentEvent, hasPayloadDetails, type MappedAgentEvent } from "@/lib/agent-event-mapper";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { AgentStepsDisplay, type AgentArtifact } from "@/components/agent-steps-display";
-import { ArtifactViewer, type Artifact } from "@/components/artifact-viewer";
-import { NewsCards, SourcesList } from "@/components/news-cards";
+import { ArtifactViewer } from "@/components/artifact-viewer";
+import { NewsCards } from "@/components/news-cards";
 import { SuperAgentDisplay } from "@/components/super-agent-display";
 import { useSuperAgentRun } from "@/stores/super-agent-store";
 import { LiveExecutionConsole } from "@/components/live-execution-console";
@@ -117,7 +112,7 @@ const extractTextFromChildren = (children: React.ReactNode): string => {
     return children.map(extractTextFromChildren).join("");
   }
   if (React.isValidElement(children)) {
-    return extractTextFromChildren((children.props as any)?.children);
+    return extractTextFromChildren((children.props as { children?: React.ReactNode })?.children);
   }
   const childArray = React.Children.toArray(children);
   return childArray.map(extractTextFromChildren).join("");
@@ -172,7 +167,11 @@ const LazyImage = memo(function LazyImage({
         alt={alt}
         loading="lazy"
         className={cn(className, !isLoaded && "opacity-0")}
-        style={style}
+        ref={(el) => {
+          if (el && style) {
+            Object.assign(el.style, style);
+          }
+        }}
         onClick={onClick}
         onLoad={() => setIsLoaded(true)}
         onError={() => setHasError(true)}
@@ -767,6 +766,7 @@ const ActionToolbar = memo(function ActionToolbar({
                   disabled={!customInstruction.trim()}
                   className="h-6 w-6 flex items-center justify-center rounded-full bg-foreground/10 hover:bg-foreground/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
                   data-testid={`button-submit-custom-${testIdSuffix}`}
+                  title="Enviar"
                 >
                   <ArrowUp className="h-3.5 w-3.5" />
                 </button>
@@ -1028,12 +1028,12 @@ interface AgentRunContentProps {
       stepIndex: number;
       toolName: string;
       status: string;
-      output?: any;
+      output?: unknown;
       error?: string;
     }>;
     eventStream: Array<{
       type: string;
-      content: any;
+      content: unknown;
       timestamp: number;
     }>;
     summary: string | null;
@@ -1189,10 +1189,12 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
 
   // Extract objective from event stream
   const objective = useMemo(() => {
-    const planEvent = (agentRun.eventStream || []).find(
-      (e: any) => e.content?.plan?.objective || e.content?.objective
-    );
-    return planEvent?.content?.plan?.objective || planEvent?.content?.objective || agentRun.userMessage || null;
+    const planEvent = (agentRun.eventStream || []).find((e) => {
+      const content = e.content as { plan?: { objective?: string }, objective?: string } | undefined;
+      return content?.plan?.objective || content?.objective;
+    });
+    const content = planEvent?.content as { plan?: { objective?: string }, objective?: string } | undefined;
+    return content?.plan?.objective || content?.objective || agentRun.userMessage || null;
   }, [agentRun.eventStream, agentRun.userMessage]);
 
   // Count completed vs total steps
@@ -1286,7 +1288,7 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
               <div className="flex-1 h-1.5 bg-purple-500/20 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-purple-500 to-blue-500 transition-all duration-500"
-                  style={{ width: `${Math.min(100, (stepProgress.completed / stepProgress.total) * 100)}%` }}
+                  {...({ style: { width: `${Math.min(100, (stepProgress.completed / stepProgress.total) * 100)}%` } } as React.HTMLAttributes<HTMLDivElement>)}
                 />
               </div>
               <span className="text-xs text-muted-foreground shrink-0">
@@ -1527,7 +1529,7 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
                         : 'pending' as const
                 }))}
                 summary={agentRun.summary}
-                artifacts={(agentRun as any).artifacts}
+                artifacts={(agentRun as { artifacts?: AgentArtifact[] }).artifacts}
                 isRunning={false}
                 onDocumentClick={(artifact) => {
                   if (onArtifactPreview) {
@@ -1540,11 +1542,10 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
                 onDownload={(artifact) => {
                   if (artifact.data?.base64) {
                     const byteCharacters = atob(artifact.data.base64);
-                    const byteNumbers = new Array(byteCharacters.length);
+                    const byteArray = new Uint8Array(byteCharacters.length);
                     for (let i = 0; i < byteCharacters.length; i++) {
-                      byteNumbers[i] = byteCharacters.charCodeAt(i);
+                      byteArray[i] = byteCharacters.charCodeAt(i);
                     }
-                    const byteArray = new Uint8Array(byteNumbers);
                     const blob = new Blob([byteArray], { type: artifact.mimeType || 'application/octet-stream' });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
@@ -1687,7 +1688,7 @@ const AssistantMessage = memo(function AssistantMessage({
   onAgentCancel,
   onAgentRetry,
   onAgentArtifactPreview,
-  onQuestionClick,
+  _onQuestionClick,
   onSuperAgentCancel,
   onSuperAgentRetry
 }: AssistantMessageProps) {
@@ -2055,7 +2056,7 @@ const AssistantMessage = memo(function AssistantMessage({
 
                             // Try to fetch content from contentUrl if available (for PPT deck JSON)
                             let content = "";
-                            const contentUrl = (message.artifact as any)?.contentUrl;
+                            const contentUrl = (message.artifact as { contentUrl?: string })?.contentUrl;
                             if (contentUrl && docType === "ppt") {
                               try {
                                 const response = await fetch(contentUrl);
@@ -2542,27 +2543,18 @@ export function MessageList({
     return (
       <div
         ref={!parentRef ? internalParentRef : undefined}
-        className="flex flex-col gap-4"
-        style={{
-          height: `${virtualizer.getTotalSize()}px`,
-          width: '100%',
-          position: 'relative',
-        }}
+        className="flex flex-col gap-4 relative w-full"
+        {...({ style: { height: `${virtualizer.getTotalSize()}px` } } as React.HTMLAttributes<HTMLDivElement>)}
       >
         {virtualizer.getVirtualItems().map((virtualRow) => {
           const msg = messages[virtualRow.index];
           return (
             <div
               key={msg.id}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                transform: `translateY(${virtualRow.start}px)`,
-              }}
-              data-index={virtualRow.index}
               ref={virtualizer.measureElement}
+              className="absolute top-0 left-0 w-full"
+              {...({ style: { transform: `translateY(${virtualRow.start}px)` } } as React.HTMLAttributes<HTMLDivElement>)}
+              data-index={virtualRow.index}
             >
               <MessageItem
                 message={msg}
@@ -2608,14 +2600,8 @@ export function MessageList({
 
         {streamingContent && variant === "default" && (
           <div
-            className="flex w-full max-w-3xl mx-auto gap-4 justify-start"
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              transform: `translateY(${virtualizer.getTotalSize()}px)`,
-            }}
+            className="flex w-full max-w-3xl mx-auto gap-4 justify-start absolute top-0 left-0"
+            {...({ style: { transform: `translateY(${virtualizer.getTotalSize()}px)` } } as React.HTMLAttributes<HTMLDivElement>)}
           >
             <div className="flex flex-col gap-2 max-w-[85%] items-start min-w-0">
               <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
@@ -2636,14 +2622,8 @@ export function MessageList({
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
-            className="flex w-full max-w-3xl mx-auto gap-4 justify-start mt-2"
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              transform: `translateY(${virtualizer.getTotalSize() + 20}px)`,
-            }}
+            className="flex w-full max-w-3xl mx-auto gap-4 justify-start mt-2 absolute top-0 left-0"
+            {...({ style: { transform: `translateY(${virtualizer.getTotalSize() + 20}px)` } } as React.HTMLAttributes<HTMLDivElement>)}
           >
             <SuggestedReplies
               suggestions={suggestions}

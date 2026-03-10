@@ -213,7 +213,7 @@ export function SearchModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-w-lg p-0 gap-0 overflow-hidden rounded-xl shadow-2xl"
+        className="liquid-shell max-w-lg p-0 gap-0 overflow-hidden rounded-[24px] border-0 shadow-2xl"
         onKeyDown={handleKeyDown}
         data-testid="modal-search"
       >
@@ -257,8 +257,8 @@ export function SearchModal({
                   <button
                     key={result.item.id}
                     className={cn(
-                      "w-full px-4 py-2.5 flex items-center gap-3 transition-colors text-left",
-                      selectedIndex === index ? "bg-accent" : "hover:bg-muted/50"
+                      "liquid-card w-[calc(100%-16px)] mx-2 my-1 px-4 py-2.5 rounded-xl border border-transparent flex items-center gap-3 transition-all duration-300 text-left hover:shadow-md hover:border-primary/20 hover:bg-muted/30",
+                      selectedIndex === index && "bg-accent border-border shadow-sm"
                     )}
                     onClick={() => handleSelectResult(result.item.id)}
                     data-testid={`search-result-${result.item.id}`}
@@ -298,8 +298,8 @@ export function SearchModal({
                   <button
                     key={result.item.id}
                     className={cn(
-                      "w-full px-4 py-2.5 flex items-center gap-3 transition-colors text-left group",
-                      selectedIndex === index ? "bg-accent" : "hover:bg-muted/50"
+                      "liquid-card w-[calc(100%-16px)] mx-2 my-1 px-4 py-2.5 rounded-xl border border-transparent flex items-center gap-3 transition-all duration-300 text-left group hover:shadow-md hover:border-primary/20 hover:bg-muted/30",
+                      selectedIndex === index && "bg-accent border-border shadow-sm"
                     )}
                     onClick={() => handleSelectResult(result.item.id)}
                     data-testid={`search-result-${result.item.id}`}

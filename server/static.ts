@@ -58,7 +58,20 @@ export function serveStatic(app: Express) {
     res.send(body);
   });
 
-  app.use(express.static(distPath));
+  app.use(express.static(distPath, {
+    setHeaders: (res, path) => {
+      if (path.includes("/assets/")) {
+        // Vite hashes assets in the assets folder, making them safely immutable
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      } else if (!path.endsWith(".html")) {
+        // Shorter cache for PWA icons, manifest, etc.
+        res.setHeader("Cache-Control", "public, max-age=3600");
+      } else {
+        // No cache for index.html
+        res.setHeader("Cache-Control", "no-cache");
+      }
+    }
+  }));
 
   // fall through to index.html if the file doesn't exist
   app.use("*", (req, res, next) => {

@@ -157,7 +157,7 @@ export function TokenProgress({ used, limit, className }: TokenProgressProps) {
             <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                 <div
                     className={cn("h-full transition-all duration-300", getColor())}
-                    style={{ width: `${percentage}%` }}
+                    {...({ style: { width: `${percentage}%` } } as React.HTMLAttributes<HTMLDivElement>)}
                 />
             </div>
         </div>

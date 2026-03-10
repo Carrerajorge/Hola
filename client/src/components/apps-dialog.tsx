@@ -839,7 +839,7 @@ export function AppsDialog({ open, onOpenChange, onOpenGoogleForms }: AppsDialog
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden p-0" data-testid="apps-dialog">
+      <DialogContent className="liquid-shell max-w-4xl max-h-[85vh] overflow-hidden p-0 rounded-[28px] border-0 shadow-2xl" data-testid="apps-dialog">
         <div className="flex flex-col h-full max-h-[85vh]">
           <DialogHeader className="px-6 pt-6 pb-4 border-b flex-shrink-0">
             <div className="flex items-center justify-between">
@@ -918,8 +918,7 @@ export function AppsDialog({ open, onOpenChange, onOpenGoogleForms }: AppsDialog
                   <TabsTrigger
                     value="featured"
                     className={cn(
-                      "px-4 py-2 rounded-full data-[state=active]:bg-foreground data-[state=active]:text-background",
-                      "data-[state=inactive]:bg-muted data-[state=inactive]:text-foreground"
+                      "px-4 py-2 rounded-full transition-all duration-300 data-[state=active]:liquid-chip data-[state=active]:shadow-md data-[state=inactive]:bg-muted/50 data-[state=inactive]:hover:bg-muted"
                     )}
                     data-testid="tab-featured"
                   >
@@ -928,8 +927,7 @@ export function AppsDialog({ open, onOpenChange, onOpenGoogleForms }: AppsDialog
                   <TabsTrigger
                     value="productivity"
                     className={cn(
-                      "px-4 py-2 rounded-full data-[state=active]:bg-foreground data-[state=active]:text-background",
-                      "data-[state=inactive]:bg-muted data-[state=inactive]:text-foreground"
+                      "px-4 py-2 rounded-full transition-all duration-300 data-[state=active]:liquid-chip data-[state=active]:shadow-md data-[state=inactive]:bg-muted/50 data-[state=inactive]:hover:bg-muted"
                     )}
                     data-testid="tab-productivity"
                   >
@@ -938,8 +936,7 @@ export function AppsDialog({ open, onOpenChange, onOpenGoogleForms }: AppsDialog
                   <TabsTrigger
                     value="lifestyle"
                     className={cn(
-                      "px-4 py-2 rounded-full data-[state=active]:bg-foreground data-[state=active]:text-background",
-                      "data-[state=inactive]:bg-muted data-[state=inactive]:text-foreground"
+                      "px-4 py-2 rounded-full transition-all duration-300 data-[state=active]:liquid-chip data-[state=active]:shadow-md data-[state=inactive]:bg-muted/50 data-[state=inactive]:hover:bg-muted"
                     )}
                     data-testid="tab-lifestyle"
                   >
@@ -952,7 +949,7 @@ export function AppsDialog({ open, onOpenChange, onOpenGoogleForms }: AppsDialog
                 {filteredApps.map((app) => (
                   <button
                     key={app.id}
-                    className="flex items-center gap-4 p-4 rounded-2xl bg-card border border-border/50 shadow-sm hover:shadow-md hover:border-[#A5A0FF]/40 hover:bg-[#A5A0FF]/[0.02] transition-all duration-300 text-left group"
+                    className="liquid-card flex items-center gap-4 p-4 rounded-[20px] border border-transparent shadow-sm hover:shadow-lg hover:border-[#A5A0FF]/30 transition-all duration-300 text-left group"
                     onClick={() => handleAppClick(app.id)}
                     data-testid={`app-item-${app.id}`}
                   >
@@ -987,7 +984,7 @@ export function AppsDialog({ open, onOpenChange, onOpenGoogleForms }: AppsDialog
                 <h3 className="text-sm font-medium text-muted-foreground mb-3">Tus aplicaciones conectadas</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                   <button
-                    className="flex items-center gap-4 p-4 rounded-2xl bg-[#A5A0FF]/5 hover:bg-[#A5A0FF]/10 border border-[#A5A0FF]/20 hover:border-[#A5A0FF]/40 shadow-sm hover:shadow-md transition-all duration-300 text-left group"
+                    className="liquid-card flex items-center gap-4 p-4 rounded-[20px] bg-[#A5A0FF]/5 hover:bg-[#A5A0FF]/10 border border-[#A5A0FF]/20 hover:border-[#A5A0FF]/40 shadow-sm hover:shadow-md transition-all duration-300 text-left group"
                     onClick={() => {
                       onOpenChange(false);
                       onOpenGoogleForms?.();

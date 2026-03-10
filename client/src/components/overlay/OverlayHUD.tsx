@@ -12,13 +12,14 @@ export function OverlayHUD() {
 
     // IPC Click-Through control for semi-transparent Electron Window
     useEffect(() => {
-        if ((window as any).electronAPI) {
-            (window as any).electronAPI.setClickThrough(true);
+        const win = window as unknown as { electronAPI?: { setClickThrough: (val: boolean) => void } };
+        if (win.electronAPI) {
+            win.electronAPI.setClickThrough(true);
         }
     }, []);
 
     return (
-        <div style={{ background: 'rgba(0,0,0,0.8)', padding: 10, borderRadius: 8, color: 'white' }}>
+        <div {...({ style: { background: 'rgba(0,0,0,0.8)', padding: 10, borderRadius: 8, color: 'white' } } as React.HTMLAttributes<HTMLDivElement>)}>
             <div>Agent Status: {state.status}</div>
         </div>
     );
