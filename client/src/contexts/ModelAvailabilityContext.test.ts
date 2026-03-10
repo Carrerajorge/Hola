@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   pickPreferredEnabledModel,
+  selectVisibleModels,
   shouldExposeLocalMockModels,
   type AvailableModel,
 } from "@/contexts/ModelAvailabilityContext";
@@ -42,5 +43,38 @@ describe("ModelAvailabilityContext helpers", () => {
     const gemini = makeModel({ id: "gemini-id", provider: "gemini", modelId: "gemini-2.5-flash" });
 
     expect(pickPreferredEnabledModel([grok, gemini], null, null)?.id).toBe("gemini-id");
+  });
+
+  it("keeps DeepSeek visible when additional models are collapsed", () => {
+    const visible = selectVisibleModels({
+      enabledModels: [
+        makeModel({ id: "grok-id", provider: "xai", modelId: "grok-4-fast" }),
+        makeModel({ id: "gemini-id", provider: "gemini", modelId: "gemini-2.5-flash" }),
+        makeModel({ id: "gpt-id", provider: "openai", modelId: "gpt-5-mini" }),
+        makeModel({ id: "deepseek-id", provider: "deepseek", modelId: "deepseek-chat" }),
+      ],
+      selectedModelId: null,
+      showAdditionalModels: false,
+    });
+
+    expect(visible).toHaveLength(3);
+    expect(visible.some((model) => model.provider === "deepseek")).toBe(true);
+  });
+
+  it("preserves the selected model while surfacing DeepSeek", () => {
+    const visible = selectVisibleModels({
+      enabledModels: [
+        makeModel({ id: "grok-id", provider: "xai", modelId: "grok-4-fast" }),
+        makeModel({ id: "gemini-id", provider: "gemini", modelId: "gemini-2.5-flash" }),
+        makeModel({ id: "gpt-id", provider: "openai", modelId: "gpt-5-mini" }),
+        makeModel({ id: "claude-id", provider: "anthropic", modelId: "claude-sonnet-4-5" }),
+        makeModel({ id: "deepseek-id", provider: "deepseek", modelId: "deepseek-chat" }),
+      ],
+      selectedModelId: "claude-id",
+      showAdditionalModels: false,
+    });
+
+    expect(visible.some((model) => model.id === "claude-id")).toBe(true);
+    expect(visible.some((model) => model.id === "deepseek-id")).toBe(true);
   });
 });

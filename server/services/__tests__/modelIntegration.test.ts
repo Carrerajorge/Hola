@@ -7,6 +7,7 @@ const ENV_KEYS = [
   "GROK_API_KEY",
   "ILIAGPT_API_KEY",
   "OPENAI_API_KEY",
+  "DEEPSEEK_API_KEY",
 ] as const;
 
 describe("modelIntegration", () => {
@@ -54,6 +55,7 @@ describe("modelIntegration", () => {
     expect(isModelChatCapable({ provider: "google", modelId: "imagen-4", modelType: "IMAGE" })).toBe(false);
     expect(isModelChatCapable({ provider: "xai", modelId: "grok-4-fast", modelType: "TEXT" })).toBe(true);
     expect(isModelChatCapable({ provider: "openai", modelId: "gpt-5", modelType: "TEXT" })).toBe(true);
+    expect(isModelChatCapable({ provider: "deepseek", modelId: "deepseek-chat", modelType: "TEXT" })).toBe(true);
   });
 
   it("only exposes enabled+active+integrated+chat-capable models publicly", async () => {
@@ -64,5 +66,19 @@ describe("modelIntegration", () => {
     expect(isModelEligibleForPublic({ provider: "google", modelId: "gemini-2.0-flash", modelType: "TEXT", status: "inactive", isEnabled: "true" })).toBe(false);
     expect(isModelEligibleForPublic({ provider: "google", modelId: "imagen-4", modelType: "IMAGE", status: "active", isEnabled: "true" })).toBe(false);
     expect(isModelEligibleForPublic({ provider: "google", modelId: "gemini-2.0-flash", modelType: "TEXT", status: "active", isEnabled: "false" })).toBe(false);
+  });
+
+  it("treats DEEPSEEK_API_KEY as a native DeepSeek integration key", async () => {
+    process.env.DEEPSEEK_API_KEY = "x";
+    const { isModelProviderIntegrated, isModelEligibleForPublic } = await import("../modelIntegration");
+
+    expect(isModelProviderIntegrated("deepseek")).toBe(true);
+    expect(isModelEligibleForPublic({
+      provider: "deepseek",
+      modelId: "deepseek-chat",
+      modelType: "TEXT",
+      status: "active",
+      isEnabled: "true",
+    })).toBe(true);
   });
 });

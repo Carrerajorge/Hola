@@ -199,6 +199,14 @@ const KNOWN_MODELS: Readonly<Record<string, readonly KnownModel[]>> = deepFreeze
   ],
 
   // ========================================
+  // DEEPSEEK MODELS
+  // ========================================
+  deepseek: [
+    { modelId: "deepseek-chat", name: "DeepSeek Chat", contextWindow: 64000, maxOutput: 8192, type: "TEXT", inputCost: "0.00014", outputCost: "0.00028", description: "DeepSeek's primary chat model" },
+    { modelId: "deepseek-reasoner", name: "DeepSeek Reasoner", contextWindow: 64000, maxOutput: 8192, type: "TEXT", inputCost: "0.00055", outputCost: "0.00219", description: "DeepSeek reasoning model" },
+  ],
+
+  // ========================================
   // OPENROUTER MODELS
   // ========================================
   openrouter: [

@@ -168,34 +168,80 @@ type PublicModelSummary = {
   contextWindow: number | null;
 };
 
-const PUBLIC_MODEL_FALLBACKS: ReadonlyArray<PublicModelSummary> = Object.freeze([
-  {
-    id: "fallback-gemini-2.5-flash",
-    name: "Gemini 2.5 Flash",
-    provider: "gemini",
-    modelId: GEMINI_MODELS_REGISTRY.FLASH_25,
-    description: "Modelo rapido y estable",
-    isEnabled: "true",
-    enabledAt: null,
-    displayOrder: 0,
-    icon: null,
-    modelType: "TEXT",
-    contextWindow: 1000000,
-  },
-  {
-    id: "fallback-grok-4.1-fast",
-    name: "Grok 4.1 Fast",
-    provider: "xai",
-    modelId: XAI_MODELS.GROK_4_1_FAST,
-    description: "Modelo rapido con contexto amplio",
-    isEnabled: "true",
-    enabledAt: null,
-    displayOrder: 1,
-    icon: null,
-    modelType: "TEXT",
-    contextWindow: 2000000,
-  },
-]);
+function getConfiguredBootstrapModels(): PublicModelSummary[] {
+  const models: PublicModelSummary[] = [];
+
+  if ((env.DEEPSEEK_API_KEY || "").trim()) {
+    const configuredModelId = (env.DEEPSEEK_MODEL || "").trim().toLowerCase();
+    const isReasoner = configuredModelId === "deepseek-reasoner";
+
+    models.push({
+      id: "bootstrap-deepseek-primary",
+      name: isReasoner ? "DeepSeek Reasoner" : "DeepSeek Chat",
+      provider: "deepseek",
+      modelId: configuredModelId || "deepseek-chat",
+      description: isReasoner ? "Modelo DeepSeek para razonamiento" : "Modelo DeepSeek para chat general",
+      isEnabled: "true",
+      enabledAt: null,
+      displayOrder: 2,
+      icon: null,
+      modelType: "TEXT",
+      contextWindow: 64000,
+    });
+  }
+
+  return models;
+}
+
+function getPublicModelFallbacks(): PublicModelSummary[] {
+  return [
+    {
+      id: "fallback-gemini-2.5-flash",
+      name: "Gemini 2.5 Flash",
+      provider: "gemini",
+      modelId: GEMINI_MODELS_REGISTRY.FLASH_25,
+      description: "Modelo rapido y estable",
+      isEnabled: "true",
+      enabledAt: null,
+      displayOrder: 0,
+      icon: null,
+      modelType: "TEXT",
+      contextWindow: 1000000,
+    },
+    {
+      id: "fallback-grok-4.1-fast",
+      name: "Grok 4.1 Fast",
+      provider: "xai",
+      modelId: XAI_MODELS.GROK_4_1_FAST,
+      description: "Modelo rapido con contexto amplio",
+      isEnabled: "true",
+      enabledAt: null,
+      displayOrder: 1,
+      icon: null,
+      modelType: "TEXT",
+      contextWindow: 2000000,
+    },
+    ...getConfiguredBootstrapModels(),
+  ];
+}
+
+function mergeConfiguredBootstrapModels(models: PublicModelSummary[]): PublicModelSummary[] {
+  const merged = [...models];
+
+  for (const bootstrap of getConfiguredBootstrapModels()) {
+    const alreadyVisible = merged.some((model) =>
+      model.id === bootstrap.id ||
+      model.provider === bootstrap.provider ||
+      model.modelId === bootstrap.modelId
+    );
+
+    if (!alreadyVisible) {
+      merged.push(bootstrap);
+    }
+  }
+
+  return merged.sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
+}
 
 function toPublicModelSummary(model: any): PublicModelSummary {
   return {
@@ -1335,16 +1381,16 @@ export async function registerRoutes(
     });
     try {
       const allModels = await storage.getAiModels();
-      const models = allModels
+      const models = mergeConfiguredBootstrapModels(allModels
         .filter((m: any) => isModelEligibleForPublic(m))
         .sort((a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0))
-        .map((m: any) => toPublicModelSummary(m));
+        .map((m: any) => toPublicModelSummary(m)));
       res.json({ models });
     } catch (error: any) {
       console.error("[Models] Error fetching available models:", error);
       // Defensive fallback for production when DB schema is temporarily behind code.
       // Keep app shell functional (especially after logout) instead of surfacing 500.
-      res.json({ models: PUBLIC_MODEL_FALLBACKS });
+      res.json({ models: getPublicModelFallbacks() });
     }
   });
 

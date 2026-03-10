@@ -21,11 +21,16 @@ export interface AvailableModel {
 }
 
 const PREFERRED_PROVIDER_ORDER = Object.freeze(["gemini", "openai", "anthropic", "deepseek", "xai"]);
+const DEFAULT_VISIBLE_MODEL_LIMIT = 3;
 
 export function shouldExposeLocalMockModels(hostname?: string): boolean {
   const host = (hostname || "").trim().toLowerCase();
   if (!host) return false;
   return host === "localhost" || host === "127.0.0.1";
+}
+
+function isDeepSeekModel(model: AvailableModel): boolean {
+  return model.provider.trim().toLowerCase() === "deepseek" || /^deepseek/i.test(model.modelId.trim());
 }
 
 export function pickPreferredEnabledModel(
@@ -48,6 +53,41 @@ export function pickPreferredEnabledModel(
   }
 
   return enabledModels[0] || null;
+}
+
+export function selectVisibleModels(params: {
+  enabledModels: AvailableModel[];
+  selectedModelId: string | null;
+  showAdditionalModels: boolean;
+}): AvailableModel[] {
+  const { enabledModels, selectedModelId, showAdditionalModels } = params;
+
+  if (showAdditionalModels) return enabledModels;
+
+  const visible = enabledModels.slice(0, DEFAULT_VISIBLE_MODEL_LIMIT);
+  const selected = selectedModelId
+    ? enabledModels.find((model) => model.id === selectedModelId || model.modelId === selectedModelId) ?? null
+    : null;
+
+  if (selected && !visible.some((model) => model.id === selected.id)) {
+    visible.push(selected);
+  }
+
+  const deepSeekModel = enabledModels.find((model) => isDeepSeekModel(model)) ?? null;
+  if (deepSeekModel && !visible.some((model) => model.id === deepSeekModel.id)) {
+    if (visible.length < DEFAULT_VISIBLE_MODEL_LIMIT) {
+      visible.push(deepSeekModel);
+    } else {
+      const replaceIndex = visible.findLastIndex((model) => !selected || model.id !== selected.id);
+      if (replaceIndex >= 0) {
+        visible[replaceIndex] = deepSeekModel;
+      } else {
+        visible.push(deepSeekModel);
+      }
+    }
+  }
+
+  return Array.from(new Map(visible.map((model) => [model.id, model])).values());
 }
 
 function toSafeString(value: unknown, fallback = ""): string {
@@ -158,21 +198,11 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
     .filter((m) => m.isEnabled === "true")
     .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
 
-  const recommendedModels = enabledModels.slice(0, 3);
-
-  const availableModels = (() => {
-    if (settings.showAdditionalModels) return enabledModels;
-
-    // Keep the currently selected model visible even when "additional models" are hidden.
-    const visible = [...recommendedModels];
-    if (selectedModelId) {
-      const selected = enabledModels.find((m) => m.id === selectedModelId || m.modelId === selectedModelId);
-      if (selected && !visible.some((m) => m.id === selected.id)) {
-        visible.push(selected);
-      }
-    }
-    return visible;
-  })();
+  const availableModels = selectVisibleModels({
+    enabledModels,
+    selectedModelId,
+    showAdditionalModels: settings.showAdditionalModels,
+  });
 
   const isAnyModelAvailable = availableModels.length > 0;
 
