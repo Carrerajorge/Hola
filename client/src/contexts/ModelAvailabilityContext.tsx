@@ -20,6 +20,36 @@ export interface AvailableModel {
   contextWindow: number | null;
 }
 
+const PREFERRED_PROVIDER_ORDER = Object.freeze(["gemini", "openai", "anthropic", "deepseek", "xai"]);
+
+export function shouldExposeLocalMockModels(hostname?: string): boolean {
+  const host = (hostname || "").trim().toLowerCase();
+  if (!host) return false;
+  return host === "localhost" || host === "127.0.0.1";
+}
+
+export function pickPreferredEnabledModel(
+  enabledModels: AvailableModel[],
+  primaryId?: string | null,
+  secondaryId?: string | null
+): AvailableModel | null {
+  const findEnabled = (id?: string | null) => {
+    const safeId = typeof id === "string" ? id.trim() : "";
+    if (!safeId) return undefined;
+    return enabledModels.find((m) => m.modelId === safeId || m.id === safeId);
+  };
+
+  const explicit = findEnabled(primaryId) || findEnabled(secondaryId);
+  if (explicit) return explicit;
+
+  for (const provider of PREFERRED_PROVIDER_ORDER) {
+    const candidate = enabledModels.find((model) => model.provider === provider);
+    if (candidate) return candidate;
+  }
+
+  return enabledModels[0] || null;
+}
+
 function toSafeString(value: unknown, fallback = ""): string {
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
@@ -94,22 +124,26 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
     refetchOnWindowFocus: true,
   });
 
-  const localMockModels: AvailableModel[] = [
-    {
-      id: "llama3-8b",
-      name: "Llama 3 (M\u00e1quina Local / Ollama)",
-      provider: "Local (Off-Grid)",
-      modelId: "llama3-8b",
-      description: "Modelo Llama 3 ejecutado directamente en su hardware local via ollama o LM Studio",
-      isEnabled: "true",
-      enabledAt: new Date().toISOString(),
-      enabledByAdminId: "system",
-      displayOrder: -1,
-      icon: null,
-      modelType: "chat",
-      contextWindow: 128000
-    }
-  ];
+  const localMockModels: AvailableModel[] = shouldExposeLocalMockModels(
+    typeof window !== "undefined" ? window.location.hostname : ""
+  )
+    ? [
+        {
+          id: "llama3-8b",
+          name: "Llama 3 (M\u00e1quina Local / Ollama)",
+          provider: "local",
+          modelId: "llama3-8b",
+          description: "Modelo Llama 3 ejecutado directamente en su hardware local via ollama o LM Studio",
+          isEnabled: "true",
+          enabledAt: new Date().toISOString(),
+          enabledByAdminId: "system",
+          displayOrder: -1,
+          icon: null,
+          modelType: "chat",
+          contextWindow: 128000,
+        },
+      ]
+    : [];
 
   const remoteModels = (modelsData?.models || [])
     .map((model, index) => normalizeAvailableModel(model, index))
@@ -173,9 +207,6 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
 
     const legacyDefaultModelIds = new Set(["gemini-2.5-flash"]);
 
-    const findEnabled = (id: string) =>
-      enabledModels.find((m) => m.modelId === id || m.id === id);
-
     const userDefault = settings.defaultModel;
     const platformDefault = platformSettings.default_model;
     const preferPlatformDefault =
@@ -184,14 +215,9 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
     const primary = preferPlatformDefault ? platformDefault : userDefault;
     const secondary = preferPlatformDefault ? userDefault : platformDefault;
 
-    const target = (primary ? findEnabled(primary) : undefined) || (secondary ? findEnabled(secondary) : undefined);
+    const target = pickPreferredEnabledModel(enabledModels, primary, secondary);
     if (target) {
       setSelectedModelIdState(target.id);
-      return;
-    }
-    if (enabledModels[0]) {
-      // Fall back to the first enabled model so the rest of the app has a stable selection.
-      setSelectedModelIdState(enabledModels[0].id);
     }
   }, [enabledModels, selectedModelId, settings.defaultModel, platformSettings.default_model]);
 
