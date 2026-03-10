@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { useCallback, useState } from 'react';
+import { resolveUploadUrlForResponse, uploadBlobWithProgress } from '@/lib/uploadTransport';
 
 export type FileType = 'image' | 'video' | 'document' | 'audio' | 'other';
 
@@ -271,32 +272,25 @@ export function useCloudLibrary(filters?: FileFilters) {
           return next;
         });
 
-        const xhr = new XMLHttpRequest();
-        await new Promise<void>((resolve, reject) => {
-          xhr.upload.onprogress = (event) => {
-            if (event.lengthComputable) {
-              const pct = Math.round((event.loaded / event.total) * 80) + 10;
-              setUploadProgress((prev) => {
-                const next = new Map(prev);
-                next.set(uploadId, { ...prev.get(uploadId)!, progress: pct });
-                return next;
-              });
-            }
-          };
-
-          xhr.onload = () => {
-            if (xhr.status >= 200 && xhr.status < 300) {
-              resolve();
-            } else {
-              reject(new Error(`Upload failed with status ${xhr.status}`));
-            }
-          };
-
-          xhr.onerror = () => reject(new Error('Network error during upload'));
-          xhr.open('PUT', urlData.uploadUrl);
-          xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
-          xhr.send(file);
-        });
+        const uploadUrl = resolveUploadUrlForResponse(urlData.uploadUrl, urlResponse.url);
+        await uploadBlobWithProgress(
+          uploadUrl,
+          file,
+          (percent) => {
+            const pct = Math.round(percent * 0.8) + 10;
+            setUploadProgress((prev) => {
+              const next = new Map(prev);
+              next.set(uploadId, { ...prev.get(uploadId)!, progress: pct });
+              return next;
+            });
+          },
+          {
+            timeoutMs: 120000,
+            headers: {
+              'Content-Type': file.type || 'application/octet-stream',
+            },
+          }
+        );
 
         setUploadProgress((prev) => {
           const next = new Map(prev);
