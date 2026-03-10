@@ -1,5 +1,7 @@
 import { S3Client, HeadObjectCommand, GetObjectCommand, DeleteObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import { Readable } from "stream";
 
 
@@ -12,6 +14,7 @@ import { Storage, File } from "@google-cloud/storage"; import { Response } from 
 } from "./objectAcl";
 
 const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
+const LOCAL_OBJECT_UPLOADS_PREFIX = "/objects/uploads/";
 
 function isS3Provider() {
   return String(process.env.OBJECT_STORAGE_PROVIDER || "").toLowerCase() === "s3";
@@ -232,6 +235,11 @@ export class ObjectStorageService {
 
   // Gets the object entity file content as a Buffer
   async getObjectEntityBuffer(objectPath: string): Promise<Buffer> {
+    const localFallbackBuffer = await readLocalUploadFallbackBuffer(objectPath);
+    if (localFallbackBuffer) {
+      return localFallbackBuffer;
+    }
+
     const objectFile = await this.getObjectEntityFile(objectPath);
     const [content] = await objectFile.download();
     return content;
@@ -323,6 +331,46 @@ function parseObjectPath(path: string): {
     bucketName,
     objectName,
   };
+}
+
+function isValidLocalObjectId(objectId: string): boolean {
+  if (!objectId || typeof objectId !== "string") return false;
+  if (objectId.length > 512) return false;
+  if (objectId.includes("..") || objectId.includes("//")) return false;
+  if (objectId.includes("\0") || objectId.includes("%00")) return false;
+  if (objectId.includes("%2e%2e") || objectId.includes("%2E%2E")) return false;
+  if (objectId.startsWith("/")) return false;
+  if (!/^[a-zA-Z0-9._\-\/]+$/.test(objectId)) return false;
+  const normalized = path.normalize(objectId);
+  if (normalized.startsWith("..") || normalized.startsWith("/")) return false;
+  return true;
+}
+
+async function readLocalUploadFallbackBuffer(objectPath: string): Promise<Buffer | null> {
+  if (!objectPath.startsWith(LOCAL_OBJECT_UPLOADS_PREFIX)) {
+    return null;
+  }
+
+  const objectId = objectPath.slice(LOCAL_OBJECT_UPLOADS_PREFIX.length);
+  if (!isValidLocalObjectId(objectId)) {
+    throw new ObjectNotFoundError();
+  }
+
+  const uploadsDir = path.resolve(process.cwd(), "uploads");
+  const localFilePath = path.resolve(uploadsDir, objectId);
+  const safePrefix = `${uploadsDir}${path.sep}`;
+  if (!localFilePath.startsWith(safePrefix)) {
+    throw new ObjectNotFoundError();
+  }
+
+  try {
+    return await fs.readFile(localFilePath);
+  } catch (error: any) {
+    if (error?.code === "ENOENT") {
+      throw new ObjectNotFoundError();
+    }
+    throw error;
+  }
 }
 
 async function signObjectURL({
