@@ -316,6 +316,77 @@ reclaim_docker_space() {
   docker network prune -f >/dev/null 2>&1 || true
 }
 
+wait_for_docker_daemon() {
+  local attempts="${1:-30}"
+  local sleep_seconds="${2:-2}"
+  local i
+
+  for i in $(seq 1 "${attempts}"); do
+    if docker info >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep "${sleep_seconds}"
+  done
+
+  return 1
+}
+
+list_dead_container_records() {
+  docker ps -a --no-trunc --filter status=dead \
+    --format '  - {{.ID}} {{.Names}} :: {{.Status}} [project={{.Label "com.docker.compose.project"}} service={{.Label "com.docker.compose.service"}}]' \
+    2>/dev/null || true
+}
+
+list_uninspectable_dead_container_ids() {
+  local cid
+
+  while IFS= read -r cid; do
+    [ -z "${cid}" ] && continue
+    if ! docker inspect "${cid}" >/dev/null 2>&1; then
+      echo "${cid}"
+    fi
+  done < <(docker ps -a --no-trunc --filter status=dead --format '{{.ID}}' 2>/dev/null || true)
+}
+
+restart_docker_if_dead_metadata_ghosts_detected() {
+  local ghost_ids
+  local ghost_count
+  local remaining_ghosts
+
+  ghost_ids="$(list_uninspectable_dead_container_ids)"
+  if [ -z "${ghost_ids}" ]; then
+    return 0
+  fi
+
+  ghost_count="$(printf '%s\n' "${ghost_ids}" | awk 'NF' | wc -l | tr -d ' ')"
+  logw "Detected ${ghost_count} uninspectable dead Docker container record(s). Restarting Docker to recover daemon state."
+  list_dead_container_records
+
+  if ! command -v systemctl >/dev/null 2>&1; then
+    loge "systemctl is required to recover dead Docker container metadata ghosts."
+    exit 1
+  fi
+
+  if ! systemctl restart docker; then
+    loge "Failed to restart Docker daemon while recovering dead container metadata ghosts."
+    exit 1
+  fi
+
+  if ! wait_for_docker_daemon 30 2; then
+    loge "Docker daemon did not recover after restart."
+    exit 1
+  fi
+
+  remaining_ghosts="$(list_uninspectable_dead_container_ids)"
+  if [ -n "${remaining_ghosts}" ]; then
+    loge "Dead Docker container metadata ghosts remain after daemon restart."
+    list_dead_container_records
+    exit 1
+  fi
+
+  logok "Dead Docker container ghosts cleared after daemon restart."
+}
+
 ensure_min_disk_space() {
   local available_mb
   available_mb="$(measure_available_mb)"
@@ -540,6 +611,7 @@ if ! docker info > /dev/null 2>&1; then
   exit 1
 fi
 logok "Docker daemon responsive"
+restart_docker_if_dead_metadata_ghosts_detected
 
 # Verify Nginx is installed and running
 if ! command -v nginx > /dev/null 2>&1; then
