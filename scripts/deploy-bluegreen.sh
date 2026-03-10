@@ -579,6 +579,46 @@ slot() {
     docker compose -p "hola-${slot_name}" -f "${SLOT_COMPOSE}" "$@"
 }
 
+list_slot_container_ids() {
+  local slot_name="$1"
+
+  {
+    docker ps -aq --filter "label=com.docker.compose.project=hola-${slot_name}" 2>/dev/null || true
+    docker ps -aq --filter "name=hola-${slot_name}-app" 2>/dev/null || true
+    docker ps -aq --filter "name=hola-${slot_name}-worker" 2>/dev/null || true
+    docker ps -aq --filter "name=hola-${slot_name}-sandbox" 2>/dev/null || true
+  } | awk 'NF' | sort -u
+}
+
+remove_slot_containers() {
+  local slot_name="$1"
+  local ids
+  local cid
+  local remaining
+
+  ids="$(list_slot_container_ids "${slot_name}")"
+  if [ -z "${ids}" ]; then
+    logok "No stale ${slot_name} slot containers found."
+    return 0
+  fi
+
+  logw "Removing stale ${slot_name} slot containers before startup..."
+  while IFS= read -r cid; do
+    [ -z "${cid}" ] && continue
+    docker rm -f "${cid}" >/dev/null 2>&1 || true
+  done <<< "${ids}"
+
+  remaining="$(list_slot_container_ids "${slot_name}")"
+  if [ -n "${remaining}" ]; then
+    loge "Failed to fully remove stale ${slot_name} slot containers."
+    docker ps -a --filter "label=com.docker.compose.project=hola-${slot_name}" \
+      --format '  - {{.ID}} {{.Names}} :: {{.Status}}' || true
+    exit 1
+  fi
+
+  logok "${slot_name} slot containers removed."
+}
+
 
 run_sql_migrations() {
 
@@ -785,7 +825,8 @@ log "[4/14] Running database migrations (timeout: ${MIGRATION_TIMEOUT}s)..."
 
   # Apply SQL migrations (idempotent)
 
-  if ! timeout "${MIGRATION_TIMEOUT}" bash -lc "$(declare -f run_sql_migrations); run_sql_migrations"; then
+  if ! timeout "${MIGRATION_TIMEOUT}" env DEPLOY_PATH="${DEPLOY_PATH}" \
+    bash -lc "$(declare -f log logok logw loge run_sql_migrations); run_sql_migrations"; then
 
     loge "SQL migrations failed or timed out."
 
@@ -821,19 +862,16 @@ echo ""
 
 # ── Step 5: Clean stale containers for new slot ──────────
 log "[5/15] Cleaning stale ${NEW_SLOT} containers (if any)..."
-STALE_APP="$(docker ps -aq --filter "name=hola-${NEW_SLOT}-app" 2>/dev/null || echo "")"
-if [ -n "${STALE_APP}" ]; then
-  logw "Found stale ${NEW_SLOT} containers — removing before deploy."
-  slot "${NEW_SLOT}" down --remove-orphans 2>/dev/null || true
-fi
+slot "${NEW_SLOT}" down --remove-orphans >/dev/null 2>&1 || true
+remove_slot_containers "${NEW_SLOT}"
 
 # Ensure target slot port is truly free (handles legacy non-slot containers).
 free_target_port_if_safe "${NEW_PORT}"
 
 # ── Step 6: Start new slot ─────────────────────────────────
 log "[6/15] Starting ${NEW_SLOT} slot on port ${NEW_PORT}..."
-slot "${NEW_SLOT}" up -d --force-recreate --remove-orphans
 NEW_SLOT_STARTED=true
+slot "${NEW_SLOT}" up -d --force-recreate --remove-orphans
 echo ""
 
 # ── Step 6: Healthcheck new slot ───────────────────────────
