@@ -1,7 +1,6 @@
 import { build as esbuild, BuildResult } from "esbuild";
 import { build as viteBuild } from "vite";
 import { copyFile, mkdir, rm, readFile, writeFile } from "fs/promises";
-
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times.
 const allowlist: string[] = [];
@@ -111,22 +110,19 @@ async function buildAll() {
       "process.env.APP_VERSION": JSON.stringify(appVersion),
     },
     banner: {
-      js: `
-import { createRequire as __iliagptCreateRequire } from 'module';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
+    js: `
+    import { fileURLToPath } from 'url';
+    import { dirname } from 'path';
 
-// Some dependencies still reference CommonJS globals (module/exports) even when bundled.
-// When output format is ESM, these are not defined by Node.
-// Provide a minimal shim to avoid runtime crashes like:
-//   ReferenceError: module is not defined in ES module scope
-const module = { exports: {} };
-const exports = module.exports;
+    // Some bundled dependencies still expect CommonJS-ish globals.
+    // Provide only the minimal shims that are safe in ESM output. 
+    const module = { exports: {} };
+    const exports = module.exports;
+ 
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
+    `.trim(),
 
-const require = __iliagptCreateRequire(import.meta.url);
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-      `.trim(),
     },
     logLevel: "info" as const,
   };

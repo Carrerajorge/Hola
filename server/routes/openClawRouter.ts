@@ -29,7 +29,6 @@ import {
 } from "../services/openClaw1000Service";
 
 // Native OpenClaw Integration
-import { createDefaultDeps } from "@hola/openclaw";
 
 
 const router = Router();
@@ -389,10 +388,10 @@ router.get("/roadmap-1000", (req: Request, res: Response) => {
 router.post("/execute", async (req: Request, res: Response) => {
   try {
     const { prompt, context } = req.body;
-    
     // Initialize Native OpenClaw Engine
     console.log("[OpenClaw Native] Initializing context-engine for RAG...");
-    const engineDeps = await createDefaultDeps();
+    const { createDefaultDeps } = await import("../openclaw/src/index.ts");
+    const engineDeps = await createDefaultDeps();    
     
     // Demonstrate basic simulated RAG & Intent Understanding Native Pipeline
     const combinedInput = `[CONTEXT]: ${JSON.stringify(context || {})} \n\n[INSTRUCTION]: ${prompt}`;
