@@ -666,10 +666,10 @@ list_slot_container_ids() {
   local slot_name="$1"
 
   {
-    docker ps -aq --filter "label=com.docker.compose.project=hola-${slot_name}" 2>/dev/null || true
-    docker ps -aq --filter "name=hola-${slot_name}-app" 2>/dev/null || true
-    docker ps -aq --filter "name=hola-${slot_name}-worker" 2>/dev/null || true
-    docker ps -aq --filter "name=hola-${slot_name}-sandbox" 2>/dev/null || true
+    docker ps -aq --no-trunc --filter "label=com.docker.compose.project=hola-${slot_name}" 2>/dev/null || true
+    docker ps -aq --no-trunc --filter "name=hola-${slot_name}-app" 2>/dev/null || true
+    docker ps -aq --no-trunc --filter "name=hola-${slot_name}-worker" 2>/dev/null || true
+    docker ps -aq --no-trunc --filter "name=hola-${slot_name}-sandbox" 2>/dev/null || true
   } | awk 'NF' | sort -u
 }
 
