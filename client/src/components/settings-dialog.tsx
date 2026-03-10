@@ -3025,6 +3025,12 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-[600px] p-0 gap-0 overflow-hidden">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Configuración</DialogTitle>
+            <DialogDescription>
+              Ajusta la apariencia, privacidad, integraciones y preferencias de tu cuenta.
+            </DialogDescription>
+          </DialogHeader>
           <div className="flex h-[500px]">
             <div className="w-48 border-r bg-muted/30 p-2">
               <div className="flex items-center justify-between p-2 mb-2">

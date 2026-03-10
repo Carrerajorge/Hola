@@ -45,6 +45,20 @@ describe("i18n DOM auto-translation", () => {
     await initializeI18n();
   });
 
+  it("keeps Spanish literals intact while Spanish is the active language", async () => {
+    render(<ViewA />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Notificaciones")).toBeInTheDocument();
+      expect(screen.getByText("Guardar")).toBeInTheDocument();
+      expect(screen.getByPlaceholderText("Escribe tu mensaje")).toBeInTheDocument();
+      expect(screen.getByLabelText("Buscar")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("Notifications")).not.toBeInTheDocument();
+    expect(screen.queryByText("Save")).not.toBeInTheDocument();
+  });
+
   it("updates mounted and newly rendered views after language change", async () => {
     render(<ViewsHarness />);
 

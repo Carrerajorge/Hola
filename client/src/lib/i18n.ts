@@ -243,11 +243,12 @@ function resolveMessageTemplate(key: string, logMissing = true): string | null {
 }
 
 function resolveLiteralTemplate(literal: string, logMissing = true): string | null {
-  for (const locale of activeFallbackChain) {
-    const translated = loadedBundles.get(locale)?.literals?.[literal];
-    if (typeof translated === "string" && translated.length > 0) {
-      return translated;
-    }
+  // Literal bundles are directional dictionaries authored against the active locale.
+  // Falling back across locales can reverse-translate already localized UI
+  // (for example, Spanish source text being turned back into English via en.json).
+  const translated = loadedBundles.get(activeLanguage)?.literals?.[literal];
+  if (typeof translated === "string" && translated.length > 0) {
+    return translated;
   }
 
   if (logMissing) {
@@ -292,7 +293,7 @@ function shouldTranslateLiteral(coreText: string): boolean {
   return true;
 }
 
-function translateLiteralText(text: string, logMissing = true): string {
+function translateLiteralText(text: string, logMissing = false): string {
   const match = /^(\s*)(.*?)(\s*)$/su.exec(text);
   if (!match) return text;
 
