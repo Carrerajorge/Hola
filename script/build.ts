@@ -112,7 +112,7 @@ async function buildAll() {
     },
     banner: {
       js: `
-import { createRequire } from 'module';
+import { createRequire as __iliagptCreateRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
@@ -123,7 +123,7 @@ import { dirname } from 'path';
 const module = { exports: {} };
 const exports = module.exports;
 
-const require = createRequire(import.meta.url);
+const require = __iliagptCreateRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
       `.trim(),
