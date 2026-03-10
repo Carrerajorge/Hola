@@ -70,6 +70,7 @@ import { recordIntegrityCheck, recordTruncation, recordPromptTokens, recordDropp
 import { promptPreProcessor } from "../lib/promptPreProcessor";
 import { promptAuditStore } from "../lib/promptAuditStore";
 import { promptAnalysisService } from "../services/promptAnalysisService";
+import { normalizeChatRequestProvider } from "../lib/chatProviderNormalization";
 import * as macos from "../lib/macos";
 import { browserAdapter } from "../agent/webtool/browserAdapter";
 import { browserWorker } from "../agent/browser-worker";
@@ -4661,7 +4662,8 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
 
   router.post("/chat", async (req, res) => {
     try {
-      const { messages: clientMessages, useRag = true, conversationId, images, gptConfig, gptId: rawGptId, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachments, lastImageBase64, lastImageId, session_id: rawSessionId, skillId, skill } = req.body;
+      const { messages: clientMessages, useRag = true, conversationId, images, gptConfig, gptId: rawGptId, documentMode, figmaMode, provider: rawProvider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachments, lastImageBase64, lastImageId, session_id: rawSessionId, skillId, skill } = req.body;
+      const provider = normalizeChatRequestProvider(rawProvider) ?? DEFAULT_PROVIDER;
 
       if (!clientMessages || !Array.isArray(clientMessages)) {
         return res.status(400).json({ error: "Messages array is required" });
@@ -5911,11 +5913,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         }
       }
 
-      const provider = (
-        rawProvider && ['xai', 'gemini', 'openai', 'anthropic', 'deepseek', 'auto'].includes(rawProvider)
-          ? rawProvider
-          : undefined
-      ) as any;
+      const provider = normalizeChatRequestProvider(rawProvider);
 
       const hasAnyAttachments = sanitizedRunAttachments && sanitizedRunAttachments.length > 0;
       const lastUserMsg = [...clientMessages].reverse().find((m: any) => m.role === 'user');
