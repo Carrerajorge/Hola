@@ -321,10 +321,10 @@ export function WhatsAppConnectDialog({
           {status.state === 'connected' && (
             <div className="rounded-lg border border-green-200 bg-green-50 dark:bg-green-950/20 dark:border-green-800 p-4 space-y-3">
               <div className="text-green-700 dark:text-green-400 font-medium text-center">
-                WhatsApp conectado
+                WhatsApp conectado exitosamente
               </div>
               <div className="text-xs text-muted-foreground text-center">
-                Los mensajes que lleguen por WhatsApp aparecerán aquí automáticamente.
+                Los mensajes entrantes aparecerán en su bandeja automáticamente.
               </div>
               {testSent && (
                 <div className="text-xs text-green-600 dark:text-green-400 text-center font-medium">

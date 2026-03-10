@@ -714,6 +714,26 @@ export function Sidebar({
           </Button>
           <Button
             variant="ghost"
+            className={cn(minimalSectionButtonClass, "group")}
+            onClick={onOpenWhatsAppConnect}
+            data-testid="button-whatsapp-connect"
+          >
+            <div className={minimalIconChipClass}>
+              <PremiumIcons.ChatQr className="h-4 w-4" />
+            </div>
+            <span className="flex-1 text-left">AppsWebChat (QR)</span>
+            <span
+              className={cn(
+                "h-2 w-2 rounded-full ring-2 ring-[#eef3f4] dark:ring-[#111315] shadow-sm",
+                waStatus.state === 'connected' && 'bg-green-500',
+                (waStatus.state === 'connecting' || waStatus.state === 'qr' || waStatus.state === 'pairing_code') && 'bg-amber-500 animate-pulse',
+                waStatus.state === 'disconnected' && 'bg-red-500'
+              )}
+              title={`Canales: ${waStatus.state}`}
+            />
+          </Button>
+          <Button
+            variant="ghost"
             className={cn(minimalSectionButtonClass, "group mt-1")}
             onClick={onOpenCodex}
             data-testid="button-codex"
