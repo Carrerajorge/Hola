@@ -28,11 +28,6 @@ interface UserLibraryProps {
 
 type FilterType = "all" | "image" | "video" | "document" | "app";
 
-import { Grid } from "react-window";
-import { AutoSizer } from "react-virtualized-auto-sizer";
-
-// ... existing imports ...
-
 interface VirtualizedGridProps {
   items: LibraryFile[];
   onSelect: (item: LibraryFile) => void;
@@ -60,10 +55,6 @@ interface LibraryPreviewResponse {
   };
   sections: LibraryPreviewSection[];
 }
-
-const GUTTER_SIZE = 16;
-const ITEM_HEIGHT = 200; // Approximate height of card + text
-const OPTS_MIN_COLUMN_WIDTH = 180;
 
 function resolveLibraryAssetUrl(path?: string | null): string | undefined {
   if (!path) return undefined;
@@ -106,52 +97,18 @@ function isPdfLibraryFile(item: LibraryFile): boolean {
 
 function VirtualizedMediaGrid({ items, onSelect, onDelete, onDownload }: VirtualizedGridProps) {
   return (
-    <AutoSizer>
-      {({ height, width }: { height: number; width: number }) => {
-        const columnCount = Math.floor((width + GUTTER_SIZE) / (OPTS_MIN_COLUMN_WIDTH + GUTTER_SIZE));
-        const safeColumnCount = Math.max(1, columnCount);
-        const columnWidth = (width - (safeColumnCount - 1) * GUTTER_SIZE) / safeColumnCount;
-        const rowCount = Math.ceil(items.length / safeColumnCount);
-
-        return (
-          <Grid
-            columnCount={safeColumnCount}
-            columnWidth={columnWidth + GUTTER_SIZE}
-            height={height}
-            rowCount={rowCount}
-            rowHeight={ITEM_HEIGHT + GUTTER_SIZE}
-            width={width}
-            className="px-6 py-4"
-          >
-            {({ columnIndex, rowIndex, style }: { columnIndex: number; rowIndex: number; style: React.CSSProperties }) => {
-              const index = rowIndex * safeColumnCount + columnIndex;
-              if (index >= items.length) return null;
-              const item = items[index];
-
-              // Adjust style for gutter
-              const itemStyle = {
-                ...style,
-                left: Number(style.left),
-                top: Number(style.top),
-                width: columnWidth,
-                height: ITEM_HEIGHT,
-              };
-
-              return (
-                <div {...({ style: itemStyle } as React.HTMLAttributes<HTMLDivElement>)}>
-                  <MediaThumbnail
-                    item={item}
-                    onClick={() => onSelect(item)}
-                    onDelete={() => onDelete(item)}
-                    onDownload={() => onDownload(item)}
-                  />
-                </div>
-              );
-            }}
-          </Grid>
-        );
-      }}
-    </AutoSizer>
+    <div className="grid grid-cols-1 gap-5 overflow-y-auto px-6 py-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      {items.map((item) => (
+        <div key={item.uuid} className="min-h-[200px]">
+          <MediaThumbnail
+            item={item}
+            onClick={() => onSelect(item)}
+            onDelete={() => onDelete(item)}
+            onDownload={() => onDownload(item)}
+          />
+        </div>
+      ))}
+    </div>
   );
 }
 
