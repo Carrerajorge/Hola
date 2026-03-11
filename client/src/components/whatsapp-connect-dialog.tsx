@@ -295,7 +295,7 @@ export function WhatsAppConnectDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="liquid-shell max-w-md rounded-[24px] border-0 shadow-2xl p-6">
+        <DialogContent className="liquid-shell w-[calc(100%-2rem)] max-w-md max-h-[85vh] overflow-y-auto rounded-[24px] border-0 shadow-2xl p-6">
         <DialogHeader>
           <DialogTitle>Conectar WhatsApp (Web QR)</DialogTitle>
           <DialogDescription>

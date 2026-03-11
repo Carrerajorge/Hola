@@ -1,7 +1,7 @@
 /**
- * CORS Configuration Middleware - Production-ready
- * Fix #22: Configure restrictive CORS for production
- */
+* CORS Configuration Middleware - Production-ready
+* Fix #22: Configure restrictive CORS for production
+*/
 import cors from 'cors';
 
 // Production domains - add your actual domains here
@@ -108,12 +108,26 @@ export const corsOptions: cors.CorsOptions = {
         }
 
         // In production, check against whitelist
-        if (Array.isArray(allowedOrigins) && allowedOrigins.includes(origin)) {
-            callback(null, true);
-        } else {
-            console.warn(`[CORS] Blocked request from origin: ${String(origin).substring(0, 200)}`);
-            callback(new Error('Not allowed by CORS'));
-        }
+	const localhostPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+
+	const normalizedAllowed = Array.isArray(allowedOrigins)
+	? allowedOrigins.flatMap((entry) => {
+	const value = String(entry).trim();
+	if (!value) return [];
+	if (/^https?:\/\//i.test(value)) return [value];
+	return [`https://${value}`, `http://${value}`, value];
+	})
+	: [];
+
+	const explicitlyAllowed = normalizedAllowed.includes(origin);
+	const localhostAllowed = localhostPattern.test(origin);
+
+	if (explicitlyAllowed || localhostAllowed) {
+	callback(null, true);
+	} else {
+	console.warn(`[CORS] Blocked request from origin: ${String(origin).substring(0, 200)}`);
+	callback(new Error('Not allowed by CORS'));
+	}
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
