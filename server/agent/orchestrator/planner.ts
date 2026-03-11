@@ -1,10 +1,11 @@
 // server/agent/orchestrator/planner.ts
 // ---------------------------------------------------------------------------
 // SuperPlanner — LLM-powered task decomposition into a dependency DAG
-// Uses Gemini to reason about how to break down an open-ended NL task.
+// Uses the shared LLM gateway to reason about how to break down an open-ended NL task.
 // ---------------------------------------------------------------------------
 
-import { getGeminiClient, GEMINI_MODELS } from "../../lib/gemini";
+import { llmGateway } from "../../lib/llmGateway";
+import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import type { PlannerOutput, ProcessMemory, Priority, Complexity } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -224,25 +225,19 @@ export async function decompose(
   const tools = await getAvailableTools();
   const systemPrompt = buildSystemPrompt(tools);
   const userPrompt = buildUserPrompt(goal, memory);
-
-  const client = getGeminiClient();
-  if (!client) {
-    return fallbackDecompose(goal);
-  }
+  const messages: ChatCompletionMessageParam[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userPrompt },
+  ];
 
   try {
-    const result = await client.models.generateContent({
-      model: GEMINI_MODELS.FLASH,
-      contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-      config: {
-        systemInstruction: systemPrompt,
-        temperature: 0.2,
-        maxOutputTokens: 4096,
-        responseMimeType: "application/json",
-      },
+    const result = await llmGateway.chat(messages, {
+      temperature: 0.2,
+      maxTokens: 4096,
+      provider: "auto",
+      enableFallback: true,
     });
-
-    const text = result.text ?? "";
+    const text = result.content ?? "";
     const parsed = JSON.parse(text) as PlannerOutput;
 
     // Validate basic structure

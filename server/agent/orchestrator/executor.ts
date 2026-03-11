@@ -10,6 +10,7 @@
 
 import { randomUUID } from "crypto";
 import path from "path";
+import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { decompose } from "./planner";
 import { buildWaves, rebuildWaves, shouldReplan, skipDependents } from "./scheduler";
 import {
@@ -615,8 +616,8 @@ async function executeSynthesize(
   subtask: SubTask,
   memory: ProcessMemory,
 ): Promise<string> {
-  const { getGeminiClient, GEMINI_MODELS } = await import("../../lib/gemini");
-  const client = getGeminiClient();
+  const { llmGateway } = await import("../../lib/llmGateway");
+  const messages: ChatCompletionMessageParam[] = [];
 
   // Build context from all completed results
   let contextStr = "";
@@ -643,24 +644,19 @@ Execute the current task using the context above. Provide a thorough, detailed r
 If the task asks you to create a report, document, or analysis — produce the FULL content, not a summary.
 If the task asks you to combine results — integrate ALL available data.`;
 
-  if (!client) {
-    // No LLM — return a deterministic summary
-    return `[Synthesize fallback] Task: ${subtask.description}\nContext keys: ${Object.keys(memory.completedResults).join(", ")}`;
-  }
+  messages.push({ role: "system" as const, content: "You are an expert analyst and writer." });
+  messages.push({ role: "user" as const, content: prompt });
 
   try {
-    const result = await client.models.generateContent({
-      model: GEMINI_MODELS.FLASH,
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: {
-        temperature: 0.3,
-        maxOutputTokens: 8192,
-      },
+    const result = await llmGateway.chat(messages, {
+      temperature: 0.3,
+      maxTokens: 8192,
+      provider: "auto",
+      enableFallback: true,
     });
-
-    return result.text ?? "[No response from LLM]";
+    return result.content ?? "[No response from LLM]";
   } catch (err: any) {
-    return `[Synthesize error: ${err.message}] Task: ${subtask.description}`;
+    return `[Synthesize fallback] Task: ${subtask.description}\nContext keys: ${Object.keys(memory.completedResults).join(", ")}\nReason: ${err.message}`;
   }
 }
 

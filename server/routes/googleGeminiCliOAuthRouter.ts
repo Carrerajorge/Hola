@@ -18,6 +18,13 @@ import {
 
 type GeminiCliFlowSessionEntry = GeminiCliOAuthFlowRecord;
 
+type GeminiCliFlowProof = {
+  verifier: string;
+  oauthState: string;
+  redirectUri: string;
+  createdAt: number;
+};
+
 type GeminiCliSessionState = {
   geminiCliOAuthFlows?: Record<string, GeminiCliFlowSessionEntry>;
 };
@@ -86,14 +93,31 @@ googleGeminiCliOAuthRouter.post("/start", async (req: Request, res: Response) =>
     };
     flowStore[flowId] = flowRecord;
     saveGeminiCliOAuthFlow(flowId, flowRecord);
+    const respond = () =>
+      res.json({
+        flowId,
+        authUrl: flow.authUrl,
+        redirectUri: flow.redirectUri,
+        flowProof: {
+          verifier: flow.verifier,
+          oauthState,
+          redirectUri,
+          createdAt: flowRecord.createdAt,
+        } satisfies GeminiCliFlowProof,
+        warning:
+          "Integracion no oficial. Algunas cuentas pueden sufrir restricciones al usar Gemini CLI OAuth desde terceros.",
+      });
 
-    res.json({
-      flowId,
-      authUrl: flow.authUrl,
-      redirectUri: flow.redirectUri,
-      warning:
-        "Integracion no oficial. Algunas cuentas pueden sufrir restricciones al usar Gemini CLI OAuth desde terceros.",
-    });
+    if (typeof (req as any).session?.save === "function") {
+      return (req as any).session.save((sessionError: unknown) => {
+        if (sessionError) {
+          console.error("[GeminiCliOAuth] failed to persist session flow:", sessionError);
+        }
+        respond();
+      });
+    }
+
+    respond();
   } catch (error) {
     console.error("[GeminiCliOAuth] start failed:", error);
     const message = error instanceof Error ? error.message : "No se pudo iniciar Gemini CLI OAuth";
@@ -113,6 +137,20 @@ googleGeminiCliOAuthRouter.post("/complete", async (req: Request, res: Response)
       (typeof req.body?.flowId === "string" ? req.body.flowId.trim() : "") ||
       extractGeminiCliFlowIdFromCallbackInput(callbackUrl) ||
       "";
+    const flowProofRaw = req.body?.flowProof;
+    const flowProof: GeminiCliFlowProof | null =
+      flowProofRaw &&
+      typeof flowProofRaw?.verifier === "string" &&
+      typeof flowProofRaw?.oauthState === "string" &&
+      typeof flowProofRaw?.redirectUri === "string" &&
+      typeof flowProofRaw?.createdAt === "number"
+        ? {
+            verifier: flowProofRaw.verifier.trim(),
+            oauthState: flowProofRaw.oauthState.trim(),
+            redirectUri: flowProofRaw.redirectUri.trim(),
+            createdAt: flowProofRaw.createdAt,
+          }
+        : null;
     if (!flowId || !callbackUrl) {
       return res.status(400).json({ error: "flowId y callbackUrl son requeridos" });
     }
@@ -120,7 +158,27 @@ googleGeminiCliOAuthRouter.post("/complete", async (req: Request, res: Response)
     const flowStore = getFlowStore(req);
     clearExpiredFlows(flowStore);
 
-    const flow = flowStore[flowId] ?? getGeminiCliOAuthFlow(flowId);
+    const storedFlow = flowStore[flowId] ?? getGeminiCliOAuthFlow(flowId);
+    let flow:
+      | (GeminiCliFlowSessionEntry & {
+          userId: string;
+        })
+      | null = storedFlow;
+
+    if (!flow && flowProof) {
+      const isFresh = Date.now() - flowProof.createdAt <= 45 * 60 * 1000;
+      const expectedState = `gemini-cli:${flowId}`;
+      if (isFresh && flowProof.oauthState === expectedState) {
+        flow = {
+          verifier: flowProof.verifier,
+          createdAt: flowProof.createdAt,
+          userId,
+          oauthState: flowProof.oauthState,
+          redirectUri: flowProof.redirectUri,
+        };
+      }
+    }
+
     if (!flow) {
       return res.status(400).json({ error: "La sesion OAuth expiro. Inicia la vinculacion otra vez." });
     }

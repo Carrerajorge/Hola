@@ -30,11 +30,19 @@ type GeminiCliStartResponse = {
   flowId: string;
   authUrl: string;
   redirectUri: string;
+  flowProof: GeminiCliFlowProof;
   warning: string;
 };
 
 type GeminiCliCompleteResponse = GeminiCliStatusResponse & {
   selectedModelId: string;
+};
+
+type GeminiCliFlowProof = {
+  verifier: string;
+  oauthState: string;
+  redirectUri: string;
+  createdAt: number;
 };
 
 type GeminiCliResultMessage =
@@ -62,6 +70,7 @@ type StoredGeminiCliFlowDraft = {
   authUrl: string;
   redirectUri: string;
   createdAt: number;
+  flowProof: GeminiCliFlowProof;
 };
 
 function extractFlowIdFromCallbackValue(value: string): string | null {
@@ -93,7 +102,11 @@ function readStoredFlowDraft(): StoredGeminiCliFlowDraft | null {
       typeof parsed.flowId !== "string" ||
       typeof parsed.authUrl !== "string" ||
       typeof parsed.redirectUri !== "string" ||
-      typeof parsed.createdAt !== "number"
+      typeof parsed.createdAt !== "number" ||
+      typeof parsed.flowProof?.verifier !== "string" ||
+      typeof parsed.flowProof?.oauthState !== "string" ||
+      typeof parsed.flowProof?.redirectUri !== "string" ||
+      typeof parsed.flowProof?.createdAt !== "number"
     ) {
       window.sessionStorage.removeItem(FLOW_STORAGE_KEY);
       return null;
@@ -176,6 +189,7 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
         authUrl: payload.authUrl,
         redirectUri: payload.redirectUri,
         createdAt: Date.now(),
+        flowProof: payload.flowProof,
       });
 
       const popup = window.open(
@@ -205,15 +219,16 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
   const completeMutation = useMutation<
     GeminiCliCompleteResponse,
     Error,
-    { flowId: string; callbackUrl: string }
+    { flowId: string; callbackUrl: string; flowProof?: GeminiCliFlowProof }
   >({
-    mutationFn: async ({ flowId, callbackUrl }) => {
+    mutationFn: async ({ flowId, callbackUrl, flowProof }) => {
       const res = await apiFetch("/api/oauth/google/gemini-cli/complete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           flowId,
           callbackUrl,
+          flowProof,
         }),
       });
       const payload = await res.json().catch(() => ({}));
@@ -337,7 +352,11 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
     if (!flowId) {
       setFlowId(resolvedFlowId);
     }
-    completeMutation.mutate({ flowId: resolvedFlowId, callbackUrl });
+    completeMutation.mutate({
+      flowId: resolvedFlowId,
+      callbackUrl,
+      flowProof: readStoredFlowDraft()?.flowProof,
+    });
   }, [callbackUrl, completeMutation, flowId, getManualCallbackValidationError, toast]);
 
   const handleCopyUrl = React.useCallback(async () => {
@@ -490,6 +509,7 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
       completeMutation.mutate({
         flowId: payload.flowId,
         callbackUrl: nextCallbackUrl,
+        flowProof: readStoredFlowDraft()?.flowProof,
       });
     };
 

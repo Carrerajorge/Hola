@@ -2045,8 +2045,19 @@ class AgentManager {
     modelId?: string
   ): Promise<AgentOrchestrator> {
     const orchestrator = await this.createRun(runId, chatId, userId, message, attachments, userPlan, modelId);
-    this.executeRun(runId).catch((error) => {
-      console.error(`[AgentManager] Run ${runId} failed:`, error.message);
+    setImmediate(() => {
+      (async () => {
+        await orchestrator.generatePlan(message, attachments);
+
+        // Conversational requests can finish during plan generation without entering the executor.
+        if (orchestrator.status === "completed" || orchestrator.status === "failed" || orchestrator.status === "cancelled") {
+          return;
+        }
+
+        await this.executeRun(runId);
+      })().catch((error) => {
+        console.error(`[AgentManager] Run ${runId} failed:`, error.message);
+      });
     });
     return orchestrator;
   }
@@ -2066,9 +2077,6 @@ class AgentManager {
 
     const orchestrator = new AgentOrchestrator(runId, chatId, userId, userPlan, modelId);
     this.activeRuns.set(runId, orchestrator);
-
-    // Generate initial plan synchronously so UI has something to show
-    await orchestrator.generatePlan(message, attachments);
 
     return orchestrator;
   }

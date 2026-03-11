@@ -142,32 +142,17 @@ function renderGeminiCliBridge(
 
         try {
           if (!payload.error && payload.flowId && payload.callbackUrl) {
-            const response = await fetch("/api/oauth/google/gemini-cli/complete", {
-              method: "POST",
-              credentials: "include",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                flowId: payload.flowId,
-                callbackUrl: payload.callbackUrl,
-              }),
-            });
-            const result = await response.json().catch(() => ({}));
-            if (!response.ok) {
-              const message =
-                (result && (result.error || result.message)) ||
-                "No se pudo completar Gemini CLI OAuth";
-              throw new Error(String(message));
-            }
             if (statusNode) {
-              statusNode.textContent = "Vinculación completada. Cerrando ventana...";
+              statusNode.textContent = "Código recibido. Volviendo a ILIAGPT para completar la vinculación...";
             }
             postToOpener({
+              type: "gemini-cli-oauth-callback",
               flowId: payload.flowId,
-              status: "success",
-              result,
+              callbackUrl: payload.callbackUrl,
             });
           } else {
             postToOpener({
+              type: "gemini-cli-oauth-result",
               flowId: payload.flowId,
               status: "error",
               error: payload.error,
@@ -184,6 +169,7 @@ function renderGeminiCliBridge(
             statusNode.textContent = message;
           }
           postToOpener({
+            type: "gemini-cli-oauth-result",
             flowId: payload.flowId,
             status: "error",
             error: "gemini_cli_complete_failed",

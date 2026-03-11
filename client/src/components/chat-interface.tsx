@@ -1001,26 +1001,49 @@ export function ChatInterface({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvasEnabledForActiveContext]);
 
+  const fetchUserPlanInfo = useCallback(async () => {
+    try {
+      const response = await apiFetch("/api/user/usage", { credentials: "include" });
+      if (!response.ok) {
+        return;
+      }
+      const data = await response.json();
+      setUserPlanState({
+        plan: data.plan,
+        isAdmin: data.isAdmin,
+        isPaid: Boolean(data.isPaid),
+        subscriptionStatus: typeof data.subscriptionStatus === "string" ? data.subscriptionStatus : null,
+        subscriptionPlan: typeof data.subscriptionPlan === "string" ? data.subscriptionPlan : null,
+      });
+    } catch (error) {
+      console.error("Failed to fetch user plan info:", error);
+    }
+  }, []);
+
   useEffect(() => {
-    const fetchUserPlanInfo = async () => {
-      try {
-        const response = await apiFetch("/api/user/usage", { credentials: "include" });
-        if (response.ok) {
-          const data = await response.json();
-          setUserPlanState({
-            plan: data.plan,
-            isAdmin: data.isAdmin,
-            isPaid: Boolean(data.isPaid),
-            subscriptionStatus: typeof data.subscriptionStatus === "string" ? data.subscriptionStatus : null,
-            subscriptionPlan: typeof data.subscriptionPlan === "string" ? data.subscriptionPlan : null,
-          });
-        }
-      } catch (error) {
-        console.error("Failed to fetch user plan info:", error);
+    void fetchUserPlanInfo();
+  }, [fetchUserPlanInfo, user?.id]);
+
+  useEffect(() => {
+    const handleFocus = () => {
+      void fetchUserPlanInfo();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void fetchUserPlanInfo();
       }
     };
-    fetchUserPlanInfo();
-  }, [user?.id]);
+
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("pageshow", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("pageshow", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [fetchUserPlanInfo]);
 
   const effectiveUserPlanInfo = useMemo(() => {
     if (!userPlanInfo && !userPlanState) return null;
