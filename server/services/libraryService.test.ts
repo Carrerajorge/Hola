@@ -31,4 +31,27 @@ describe("LibraryService.generateUploadUrl", () => {
 
     clearLocalUploadIntent(result.fileUuid);
   });
+
+  it("binds local upload intents to the explicit upload actor when provided", async () => {
+    const service = new LibraryService();
+    const objectStorage = (service as any).objectStorage;
+    vi.spyOn(service as any, "logActivity").mockResolvedValue(undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(objectStorage, "getObjectEntityUploadURL").mockRejectedValue(new Error("sidecar unavailable"));
+
+    const result = await service.generateUploadUrl(
+      "user-123",
+      "report.csv",
+      "text/csv",
+      undefined,
+      "apiKey:upload-actor-1"
+    );
+
+    expect(consumeLocalUploadIntent(result.fileUuid, "user-123")).toBeNull();
+    expect(
+      consumeLocalUploadIntent(result.fileUuid, "apiKey:upload-actor-1")
+    ).toMatchObject({ storagePath: result.storagePath });
+
+    clearLocalUploadIntent(result.fileUuid);
+  });
 });

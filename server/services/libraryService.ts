@@ -95,7 +95,8 @@ export class LibraryService {
     userId: string,
     filename: string,
     contentType: string,
-    folderId?: string
+    folderId?: string,
+    uploadActorId?: string
   ): Promise<UploadUrlResponse> {
     if (!userId) {
       throw new LibraryServiceError(
@@ -147,7 +148,7 @@ export class LibraryService {
         usedLocalFallback = true;
         objectPath = `/objects/uploads/${fileUuid}`;
         uploadUrl = `/api/local-upload/${fileUuid}`;
-        registerLocalUploadIntent(fileUuid, userId, objectPath);
+        registerLocalUploadIntent(fileUuid, uploadActorId || userId, objectPath);
         console.warn(
           `[LibraryService] Object storage unavailable for ${filename}; using local upload fallback`,
           uploadError instanceof Error ? uploadError.message : String(uploadError)

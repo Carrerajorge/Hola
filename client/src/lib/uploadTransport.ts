@@ -1,5 +1,6 @@
 import type { UploadSecurityContract } from "@shared/uploadContracts";
 import { apiFetch } from "@/lib/apiClient";
+import { getStoredAnonToken, getStoredAnonUserId } from "@/hooks/use-auth";
 
 type UploadHeaders = Record<string, string>;
 
@@ -107,6 +108,14 @@ function buildUploadHeaders(
 ): { headers: Headers; includeCredentials: boolean; shouldIncludeCsrf: boolean } {
   const resolved = analyzeUploadUrl(rawUrl);
   const finalHeaders = new Headers(headers);
+  const anonUserId = getStoredAnonUserId();
+  const anonToken = getStoredAnonToken();
+  if (anonUserId) {
+    finalHeaders.set("X-Anonymous-User-Id", anonUserId);
+  }
+  if (anonToken) {
+    finalHeaders.set("X-Anonymous-Token", anonToken);
+  }
   const shouldIncludeCsrf = requireCsrf === undefined
     ? resolved.shouldIncludeCsrf
     : requireCsrf;

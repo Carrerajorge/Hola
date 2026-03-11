@@ -2,6 +2,7 @@ import { Router } from "express";
 import { storage } from "../storage";
 import { libraryService, LibraryServiceError, type FileMetadata } from "../services/libraryService";
 import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
+import { getUploadActorId } from "../lib/uploadActor";
 import { db } from "../db";
 import { eq, and, desc, isNull } from "drizzle-orm";
 import { generateWordDocument, generateExcelDocument, generatePptDocument, parseExcelFromText, parseSlidesFromText } from "../services/documentGeneration";
@@ -39,6 +40,7 @@ export function createLibraryRouter() {
   router.post("/api/library/upload/request-url", ...validate({ body: uploadRequestUrlSchema }), async (req, res) => {
     try {
       const userId = getOrCreateSecureUserId(req);
+      const uploadActorId = getUploadActorId(req);
 
       const { filename, contentType, folderId } = req.body;
 
@@ -46,7 +48,8 @@ export function createLibraryRouter() {
         userId,
         filename,
         contentType || "application/octet-stream",
-        folderId
+        folderId,
+        uploadActorId
       );
 
       res.json(result);
