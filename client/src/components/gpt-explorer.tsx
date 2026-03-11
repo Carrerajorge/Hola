@@ -156,12 +156,15 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt, onEd
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="liquid-shell max-w-6xl h-[88vh] border-0 bg-transparent p-0 gap-0 overflow-hidden rounded-[32px]" data-testid="gpt-explorer-dialog">
+      <DialogContent
+        className="liquid-shell !left-0 !top-0 !h-screen !w-screen !max-w-none !translate-x-0 !translate-y-0 gap-0 overflow-hidden !rounded-none border-0 bg-transparent p-0"
+        data-testid="gpt-explorer-dialog"
+      >
         <VisuallyHidden>
           <DialogTitle>Explorar GPTs</DialogTitle>
           <DialogDescription>Descubre y crea versiones personalizadas de ChatGPT</DialogDescription>
         </VisuallyHidden>
-        <div className="flex h-full flex-col bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.16),transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,255,255,0.88))] dark:bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.18),transparent_30%),linear-gradient(180deg,rgba(12,12,16,0.98),rgba(10,10,14,0.92))]">
+        <div className="flex h-full min-h-0 flex-col bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.16),transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,255,255,0.88))] dark:bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.18),transparent_30%),linear-gradient(180deg,rgba(12,12,16,0.98),rgba(10,10,14,0.92))]">
           <div className="flex items-center justify-between border-b border-slate-200/70 px-6 py-4 dark:border-white/10">
             <div className="flex items-center gap-4">
               <span
@@ -195,8 +198,8 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt, onEd
             </Button>
           </div>
 
-          <ScrollArea className="flex-1">
-            <div className="p-6 md:p-8">
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="mx-auto w-full max-w-[1680px] p-6 md:p-8">
               <div className="mb-8 grid gap-5 rounded-[28px] border border-white/50 bg-white/72 p-6 shadow-[0_30px_80px_rgba(90,88,170,0.12)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/5 dark:shadow-[0_24px_80px_rgba(8,8,20,0.35)] md:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
                 <div className="space-y-4">
                   <div className="inline-flex items-center gap-2 rounded-full border border-[#A5A0FF]/25 bg-[#A5A0FF]/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[#5b56d6] dark:border-[#A5A0FF]/20 dark:bg-[#A5A0FF]/12 dark:text-[#c9c6ff]">

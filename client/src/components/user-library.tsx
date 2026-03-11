@@ -645,7 +645,7 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent
-          className="liquid-shell max-w-7xl h-[88vh] max-h-[88vh] rounded-[32px] border-0 bg-transparent p-0 gap-0 overflow-hidden"
+          className="liquid-shell !left-0 !top-0 !h-screen !w-screen !max-w-none !translate-x-0 !translate-y-0 gap-0 overflow-hidden !rounded-none border-0 bg-transparent p-0"
           data-testid="user-library-dialog"
         >
           <DialogHeader className="border-b border-slate-200/70 bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.18),transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,255,255,0.88))] px-6 py-5 backdrop-blur-2xl supports-[backdrop-filter]:bg-background/60 dark:border-white/10 dark:bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.18),transparent_32%),linear-gradient(180deg,rgba(12,12,16,0.98),rgba(10,10,14,0.92))]">
@@ -692,7 +692,7 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
           <Tabs
             value={activeTab}
             onValueChange={handleTabChange}
-            className="flex flex-col h-[calc(88vh-104px)]"
+            className="flex h-[calc(100vh-104px)] min-h-0 flex-col"
           >
             <div className="px-6 pt-4 pb-3 border-b bg-background/85 backdrop-blur-xl dark:bg-background/60">
               <TabsList className="liquid-chip h-11" data-testid="library-tabs">
@@ -739,7 +739,7 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
               </TabsList>
             </div>
 
-            <div className="flex-1 overflow-hidden">
+            <div className="min-h-0 flex-1 overflow-hidden">
               <TabsContent value={activeTab} className="mt-0 h-full">
                 {!isAuthenticated ? (
                   <div className="flex flex-col items-center justify-center py-16 text-center" data-testid="auth-required-state">
