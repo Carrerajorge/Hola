@@ -1,4 +1,6 @@
-import { createDefaultDeps } from "@hola/openclaw";
+// Import the vendored OpenClaw source directly so the server bundle includes the
+// native integration instead of depending on a packaged @hola/openclaw runtime.
+import { createDefaultDeps } from "../openclaw/src/cli/deps.js";
 import fs from "fs/promises";
 
 export interface CreateDatasetRequest {
