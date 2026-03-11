@@ -136,7 +136,7 @@ jobs:
         always() &&
         github.event_name == 'workflow_dispatch' &&
         needs.ci.result == 'success' &&
-        needs.build_images.result == 'success'
+        (needs.build_images.result == 'success' || needs.build_images.result == 'skipped')
       }}
     timeout-minutes: 20
     env:
@@ -538,7 +538,7 @@ jobs:
         always() &&
         github.event_name == 'push' &&
         github.ref == 'refs/heads/main' &&
-        needs.build_images.result == 'success'
+        (needs.build_images.result == 'success' || needs.build_images.result == 'skipped')
       }}
     timeout-minutes: 25
     # Job-level concurrency: if a newer deploy is queued, cancel this one.
