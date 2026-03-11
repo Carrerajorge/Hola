@@ -879,7 +879,7 @@ export const SlackAccountSchema = z
     // can inherit top-level allowFrom via runtime shallow merge.
   });
 
-export const SlackConfigSchema = SlackAccountSchema.safeExtend({
+export const SlackConfigSchema = SlackAccountSchema.extend({
   mode: z.enum(["socket", "http"]).optional().default("socket"),
   signingSecret: SecretInputSchema.optional().register(sensitive),
   webhookPath: z.string().optional().default("/slack/events"),
