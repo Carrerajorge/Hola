@@ -3,20 +3,20 @@ import { Router, type Request, type Response } from "express";
 import { requireAdmin } from "./admin/utils";
 import { getUserId } from "../types/express";
 import {
+  clearExpiredGeminiCliOAuthFlows,
+  deleteGeminiCliOAuthFlow,
+  extractGeminiCliFlowIdFromCallbackInput,
+  getGeminiCliOAuthFlow,
+  saveGeminiCliOAuthFlow,
+  type GeminiCliOAuthFlowRecord,
+} from "../lib/geminiCliOAuthFlowStore";
+import {
   beginGoogleGeminiCliOAuthFlow,
   finishGoogleGeminiCliOAuthFlow,
   getGoogleGeminiCliOAuthStatus,
 } from "../services/googleGeminiCliOAuthService";
 
-const FLOW_TTL_MS = 20 * 60 * 1000;
-
-type GeminiCliFlowSessionEntry = {
-  verifier: string;
-  createdAt: number;
-  userId: string;
-  oauthState: string;
-  redirectUri: string;
-};
+type GeminiCliFlowSessionEntry = GeminiCliOAuthFlowRecord;
 
 type GeminiCliSessionState = {
   geminiCliOAuthFlows?: Record<string, GeminiCliFlowSessionEntry>;
@@ -30,9 +30,10 @@ function getFlowStore(req: Request): Record<string, GeminiCliFlowSessionEntry> {
 }
 
 function clearExpiredFlows(store: Record<string, GeminiCliFlowSessionEntry>): void {
+  clearExpiredGeminiCliOAuthFlows();
   const now = Date.now();
   for (const [flowId, flow] of Object.entries(store)) {
-    if (now - flow.createdAt > FLOW_TTL_MS) {
+    if (now - flow.createdAt > 45 * 60 * 1000) {
       delete store[flowId];
     }
   }
@@ -76,13 +77,15 @@ googleGeminiCliOAuthRouter.post("/start", async (req: Request, res: Response) =>
       redirectUri,
       state: oauthState,
     });
-    flowStore[flowId] = {
+    const flowRecord: GeminiCliFlowSessionEntry = {
       verifier: flow.verifier,
       createdAt: Date.now(),
       userId,
       oauthState,
       redirectUri,
     };
+    flowStore[flowId] = flowRecord;
+    saveGeminiCliOAuthFlow(flowId, flowRecord);
 
     res.json({
       flowId,
@@ -105,8 +108,11 @@ googleGeminiCliOAuthRouter.post("/complete", async (req: Request, res: Response)
       return res.status(401).json({ error: "Authentication required" });
     }
 
-    const flowId = typeof req.body?.flowId === "string" ? req.body.flowId.trim() : "";
     const callbackUrl = typeof req.body?.callbackUrl === "string" ? req.body.callbackUrl.trim() : "";
+    const flowId =
+      (typeof req.body?.flowId === "string" ? req.body.flowId.trim() : "") ||
+      extractGeminiCliFlowIdFromCallbackInput(callbackUrl) ||
+      "";
     if (!flowId || !callbackUrl) {
       return res.status(400).json({ error: "flowId y callbackUrl son requeridos" });
     }
@@ -114,7 +120,7 @@ googleGeminiCliOAuthRouter.post("/complete", async (req: Request, res: Response)
     const flowStore = getFlowStore(req);
     clearExpiredFlows(flowStore);
 
-    const flow = flowStore[flowId];
+    const flow = flowStore[flowId] ?? getGeminiCliOAuthFlow(flowId);
     if (!flow) {
       return res.status(400).json({ error: "La sesion OAuth expiro. Inicia la vinculacion otra vez." });
     }
@@ -130,6 +136,7 @@ googleGeminiCliOAuthRouter.post("/complete", async (req: Request, res: Response)
     });
 
     delete flowStore[flowId];
+    deleteGeminiCliOAuthFlow(flowId);
 
     res.json({
       ...status,

@@ -5130,6 +5130,17 @@ export function ChatInterface({
 
       // Handle Agent mode - show in chat, not side panel
       if (selectedTool === "agent") {
+        const agentToolMessage = (input || autoPromptForFiles).trim();
+        const readyAgentFiles = uploadedFilesRef.current.filter((f: any) => f.status === "ready");
+        const agentIntentCheck = shouldAutoActivateAgent(agentToolMessage, readyAgentFiles.length > 0);
+        const shouldBypassExplicitAgent =
+          readyAgentFiles.length === 0 &&
+          !agentIntentCheck.agent_required &&
+          agentIntentCheck.confidence === "high";
+
+        if (shouldBypassExplicitAgent) {
+          setSelectedTool(null);
+        } else {
         // Save files before clearing so we can restore on error
         const savedAgentFiles = [...uploadedFilesRef.current];
         try {
@@ -5226,8 +5237,8 @@ export function ChatInterface({
             setCurrentAgentMessageId(null);
             setSelectedTool(null);
             toast({
-              title: "Error",
-              description: "No se pudo iniciar el agente. Por favor, inicia sesión para usar esta función.",
+              title: "Modo agente no disponible",
+              description: "No se pudo iniciar el modo agente para esta solicitud. Intenta nuevamente o enviala en chat normal.",
               variant: "destructive"
             });
           }
@@ -5241,9 +5252,14 @@ export function ChatInterface({
           }
           setCurrentAgentMessageId(null);
           setSelectedTool(null);
-          toast({ title: "Error", description: "Error al iniciar el agente. Tus archivos fueron restaurados.", variant: "destructive" });
+          const description =
+            error instanceof Error && error.message
+              ? error.message
+              : "Error al iniciar el agente. Tus archivos fueron restaurados.";
+          toast({ title: "Error", description, variant: "destructive" });
         }
         return;
+        }
       }
 
       // If there's selected text from document, rewrite it
@@ -6141,6 +6157,17 @@ export function ChatInterface({
           });
         });
       }
+
+      // Yield one frame so the optimistic bubble paints before the heavier
+      // classification / network work continues. This removes the visible
+      // "send lag" on slower production devices.
+      await new Promise<void>((resolve) => {
+        if (typeof requestAnimationFrame === "function") {
+          requestAnimationFrame(() => resolve());
+          return;
+        }
+        setTimeout(resolve, 0);
+      });
 
       // Set initial AI state
       setAiStateForChat("thinking", submitConversationId);

@@ -54,6 +54,77 @@ type GeminiCliResultMessage =
     };
 
 const STATUS_QUERY_KEY = ["/api/oauth/google/gemini-cli/status"];
+const FLOW_STORAGE_KEY = "iliagpt:gemini-cli-oauth-flow";
+const FLOW_STORAGE_TTL_MS = 45 * 60 * 1000;
+
+type StoredGeminiCliFlowDraft = {
+  flowId: string;
+  authUrl: string;
+  redirectUri: string;
+  createdAt: number;
+};
+
+function extractFlowIdFromCallbackValue(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const extractFromState = (state: string | null | undefined) => {
+    const normalized = typeof state === "string" ? state.trim() : "";
+    if (!normalized.startsWith("gemini-cli:")) return null;
+    return normalized.slice("gemini-cli:".length).trim() || null;
+  };
+
+  try {
+    const url = new URL(trimmed);
+    return extractFromState(url.searchParams.get("state"));
+  } catch {
+    const normalized = trimmed.startsWith("?") ? trimmed.slice(1) : trimmed;
+    return extractFromState(new URLSearchParams(normalized).get("state"));
+  }
+}
+
+function readStoredFlowDraft(): StoredGeminiCliFlowDraft | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(FLOW_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<StoredGeminiCliFlowDraft>;
+    if (
+      typeof parsed.flowId !== "string" ||
+      typeof parsed.authUrl !== "string" ||
+      typeof parsed.redirectUri !== "string" ||
+      typeof parsed.createdAt !== "number"
+    ) {
+      window.sessionStorage.removeItem(FLOW_STORAGE_KEY);
+      return null;
+    }
+    if (Date.now() - parsed.createdAt > FLOW_STORAGE_TTL_MS) {
+      window.sessionStorage.removeItem(FLOW_STORAGE_KEY);
+      return null;
+    }
+    return parsed as StoredGeminiCliFlowDraft;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredFlowDraft(flow: StoredGeminiCliFlowDraft): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(FLOW_STORAGE_KEY, JSON.stringify(flow));
+  } catch {
+    // Ignore storage quota/privacy mode failures.
+  }
+}
+
+function clearStoredFlowDraft(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(FLOW_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
 
 export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps) {
   const { toast } = useToast();
@@ -100,6 +171,12 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
       setRedirectUri(payload.redirectUri);
       setCallbackUrl("");
       lastAutoCompletedCallbackRef.current = null;
+      writeStoredFlowDraft({
+        flowId: payload.flowId,
+        authUrl: payload.authUrl,
+        redirectUri: payload.redirectUri,
+        createdAt: Date.now(),
+      });
 
       const popup = window.open(
         payload.authUrl,
@@ -158,6 +235,7 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
       setRedirectUri("");
       setCallbackUrl("");
       lastAutoCompletedCallbackRef.current = null;
+      clearStoredFlowDraft();
       toast({
         title: "Gemini CLI vinculado",
         description: payload.email
@@ -189,6 +267,7 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
       setRedirectUri("");
       setCallbackUrl("");
       lastAutoCompletedCallbackRef.current = null;
+      clearStoredFlowDraft();
       toast({
         title: "Gemini CLI vinculado",
         description: payload.email
@@ -236,7 +315,6 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
   );
 
   const handleManualComplete = React.useCallback(() => {
-    if (!flowId) return;
     const validationError = getManualCallbackValidationError(callbackUrl);
     if (validationError) {
       toast({
@@ -246,7 +324,20 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
       });
       return;
     }
-    completeMutation.mutate({ flowId, callbackUrl });
+    const resolvedFlowId =
+      flowId || extractFlowIdFromCallbackValue(callbackUrl) || readStoredFlowDraft()?.flowId || "";
+    if (!resolvedFlowId) {
+      toast({
+        title: "Sesion OAuth no encontrada",
+        description: "Inicia nuevamente la vinculacion para continuar.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!flowId) {
+      setFlowId(resolvedFlowId);
+    }
+    completeMutation.mutate({ flowId: resolvedFlowId, callbackUrl });
   }, [callbackUrl, completeMutation, flowId, getManualCallbackValidationError, toast]);
 
   const handleCopyUrl = React.useCallback(async () => {
@@ -298,6 +389,25 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
   }, [completeMutation, startMutation]);
 
   React.useEffect(() => {
+    if (!open || flowId || startMutation.isPending || completeMutation.isPending) {
+      return;
+    }
+    const storedFlow = readStoredFlowDraft();
+    if (!storedFlow) {
+      return;
+    }
+    setFlowId(storedFlow.flowId);
+    setAuthUrl(storedFlow.authUrl);
+    setRedirectUri(storedFlow.redirectUri);
+  }, [completeMutation.isPending, flowId, open, startMutation.isPending]);
+
+  React.useEffect(() => {
+    if (status?.connected) {
+      clearStoredFlowDraft();
+    }
+  }, [status?.connected]);
+
+  React.useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) {
         return;
@@ -308,8 +418,12 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
       if (payload?.type !== "gemini-cli-oauth-callback" && payload?.type !== "gemini-cli-oauth-result") {
         return;
       }
-      if (!payload.flowId || !flowId || payload.flowId !== flowId) {
+      const activeFlowId = flowId || readStoredFlowDraft()?.flowId || null;
+      if (!payload.flowId || !activeFlowId || payload.flowId !== activeFlowId) {
         return;
+      }
+      if (!flowId) {
+        setFlowId(payload.flowId);
       }
 
       if (payload.type === "gemini-cli-oauth-result") {
@@ -321,6 +435,9 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
         if (payload.status === "error") {
           if (payload.callbackUrl) {
             setCallbackUrl(payload.callbackUrl);
+          }
+          if (payload.error === "gemini_cli_invalid_state") {
+            clearStoredFlowDraft();
           }
           lastAutoCompletedCallbackRef.current = null;
           toast({
@@ -335,6 +452,9 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
       if ("error" in payload && payload.error) {
         if ("callbackUrl" in payload && typeof payload.callbackUrl === "string" && payload.callbackUrl.trim()) {
           setCallbackUrl(payload.callbackUrl.trim());
+        }
+        if (payload.error === "gemini_cli_invalid_state") {
+          clearStoredFlowDraft();
         }
         lastAutoCompletedCallbackRef.current = null;
         toast({

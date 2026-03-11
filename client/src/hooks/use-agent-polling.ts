@@ -167,7 +167,7 @@ export function useStartAgentRun() {
         return null;
       }
       clearRun(messageId);
-      return null;
+      throw error;
     }
   }, [createRun, setRunId, clearRun]);
   

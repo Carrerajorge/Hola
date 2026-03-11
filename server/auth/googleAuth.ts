@@ -6,9 +6,12 @@ import { Router, Request, Response } from "express";
 import { authStorage } from "../replit_integrations/auth/storage";
 import { storage } from "../storage";
 import { env } from "../config/env";
+import {
+    extractGeminiCliFlowIdFromState,
+    getGeminiCliOAuthFlow,
+} from "../lib/geminiCliOAuthFlowStore";
 
 const router = Router();
-const GEMINI_CLI_STATE_PREFIX = "gemini-cli:";
 
 type GeminiCliFlowSessionEntry = {
     verifier: string;
@@ -253,13 +256,11 @@ router.get("/google", (req: Request, res: Response) => {
 router.get("/google/callback", async (req: Request, res: Response) => {
     const { code, state, error, error_description } = req.query;
     const stateValue = typeof state === "string" ? state.trim() : "";
-    const geminiFlowId = stateValue.startsWith(GEMINI_CLI_STATE_PREFIX)
-        ? stateValue.slice(GEMINI_CLI_STATE_PREFIX.length)
-        : "";
+    const geminiFlowId = extractGeminiCliFlowIdFromState(stateValue) || "";
 
     if (geminiFlowId) {
         const session = (((req as any).session ?? {}) as GeminiCliSessionState);
-        const flow = session.geminiCliOAuthFlows?.[geminiFlowId];
+        const flow = session.geminiCliOAuthFlows?.[geminiFlowId] || getGeminiCliOAuthFlow(geminiFlowId);
 
         if (!flow || flow.oauthState !== stateValue) {
             console.error("[Google Auth] Gemini CLI OAuth flow missing or expired");
