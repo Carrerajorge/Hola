@@ -15,7 +15,7 @@ import { useNotifications } from "@/hooks/use-notifications";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useLocation, useSearch } from "wouter";
-import { Menu } from "lucide-react";
+import { Loader2, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useChats, Message, generateRequestId, resolveRealChatId } from "@/hooks/use-chats";
@@ -87,7 +87,29 @@ export default function Home() {
   }, [user, isLoading, isReady, setLocation]);
 
   useEffect(() => {
-    useMediaLibrary.getState().preload();
+    const preload = () => {
+      void useMediaLibrary.getState().preload();
+    };
+
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (
+        callback: IdleRequestCallback,
+        options?: IdleRequestOptions,
+      ) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+
+    if (typeof idleWindow.requestIdleCallback === "function") {
+      const idleId = idleWindow.requestIdleCallback(() => preload(), { timeout: 2000 });
+      return () => {
+        if (typeof idleWindow.cancelIdleCallback === "function") {
+          idleWindow.cancelIdleCallback(idleId);
+        }
+      };
+    }
+
+    const timeoutId = window.setTimeout(preload, 350);
+    return () => window.clearTimeout(timeoutId);
   }, []);
 
 
@@ -834,9 +856,11 @@ export default function Home() {
     },
   ]);
 
-  if (isChatsLoading || isLoading) {
+  if (isLoading || !isReady) {
     return <SkeletonPage />;
   }
+
+  const showChatShellLoading = isChatsLoading && chats.length === 0;
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background relative">
@@ -844,6 +868,14 @@ export default function Home() {
       <div className="liquid-blob liquid-blob-1 opacity-30"></div>
       <div className="liquid-blob liquid-blob-2 opacity-20"></div>
       <div className="liquid-blob liquid-blob-3 opacity-25"></div>
+      {showChatShellLoading ? (
+        <div className="pointer-events-none absolute inset-x-0 top-3 z-40 flex justify-center px-4">
+          <div className="inline-flex items-center gap-2 rounded-full border border-[#A5A0FF]/25 bg-background/88 px-4 py-2 text-sm text-muted-foreground shadow-lg shadow-[#A5A0FF]/10 backdrop-blur-xl">
+            <Loader2 className="h-4 w-4 animate-spin text-[#756ef1]" />
+            Sincronizando tus chats...
+          </div>
+        </div>
+      ) : null}
 
       {/* Desktop Sidebar - Full */}
       <div className={isSidebarOpen ? "hidden md:block" : "hidden"}>

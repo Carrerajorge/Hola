@@ -18,7 +18,13 @@ import { KeyboardShortcutsModal } from "@/components/modals/KeyboardShortcutsMod
 import { OfflineIndicator } from "@/components/OfflineIndicator";
 import { SkipLink } from "@/lib/accessibility";
 import { trackWorkspaceEvent } from "@/lib/analytics";
+import { normalizeAppBuildVersion, shouldAttemptChunkRecovery } from "@/lib/chunk-recovery";
 import { Loader2 } from "lucide-react";
+import LoginPage from "@/pages/login";
+import LoginApprovePage from "@/pages/login-approve";
+import SignupPage from "@/pages/signup";
+
+const APP_VERSION = normalizeAppBuildVersion(import.meta.env.VITE_APP_VERSION);
 
 const lazyWithRetry = <T extends React.ComponentType<any>>(
   componentImport: () => Promise<{ default: T }>
@@ -28,17 +34,9 @@ const lazyWithRetry = <T extends React.ComponentType<any>>(
       return await componentImport();
     } catch (error) {
       if (typeof window !== "undefined") {
-        const isChunkLoadFailed = error instanceof Error &&
-          (/Failed to fetch dynamically imported module/i.test(error.message) ||
-            /Importing a module script failed/i.test(error.message) ||
-            /Unable to load/i.test(error.message));
-        if (isChunkLoadFailed) {
-          // Evitar bucles infinitos
-          if (!sessionStorage.getItem('chunk-reload')) {
-            sessionStorage.setItem('chunk-reload', 'true');
-            window.location.reload();
-            return { default: (() => <PageLoader />) as unknown as T };
-          }
+        if (shouldAttemptChunkRecovery(error, APP_VERSION)) {
+          window.location.reload();
+          return { default: (() => <PageLoader />) as unknown as T };
         }
       }
       throw error;
@@ -130,10 +128,6 @@ function ChatPageRedirect() {
 
   return <Home />;
 }
-
-const LoginPage = lazyWithRetry(() => import("@/pages/login"));
-const LoginApprovePage = lazyWithRetry(() => import("@/pages/login-approve"));
-const SignupPage = lazyWithRetry(() => import("@/pages/signup"));
 const NotFound = lazyWithRetry(() => import("@/pages/not-found"));
 
 const ProfilePage = lazyWithRetry(() => import("@/pages/profile"));

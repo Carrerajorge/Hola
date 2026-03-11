@@ -4,25 +4,19 @@ import "./index.css";
 import "katex/dist/katex.min.css";
 import "katex/contrib/mhchem";
 import "@/lib/i18n";
+import {
+  normalizeAppBuildVersion,
+  shouldAttemptChunkRecovery,
+} from "@/lib/chunk-recovery";
 
 // Force Service Worker update and cache clear on new version
-const APP_VERSION = import.meta.env.VITE_APP_VERSION?.trim() || null;
+const APP_VERSION = normalizeAppBuildVersion(import.meta.env.VITE_APP_VERSION);
 const STORED_VERSION_KEY = "iliagpt_app_version";
 let cleanupInProgress = false;
 
 function persistCurrentVersion() {
   if (!APP_VERSION) return;
   localStorage.setItem(STORED_VERSION_KEY, APP_VERSION);
-}
-
-function isChunkLoadError(err: unknown): boolean {
-  const msg =
-    typeof err === "string"
-      ? err
-      : err && typeof err === "object" && "message" in err
-        ? String((err as any).message)
-        : "";
-  return /ChunkLoadError|Loading chunk|Failed to fetch dynamically imported module|Importing a module script failed/i.test(msg);
 }
 
 async function clearCacheAndReload() {
@@ -55,12 +49,12 @@ async function clearCacheAndReload() {
 
 // Auto-recover from stale deploys (Vite chunk load errors) by clearing SW caches.
 window.addEventListener("error", (event) => {
-  if (isChunkLoadError((event as any).error || (event as any).message)) {
+  if (shouldAttemptChunkRecovery((event as any).error || (event as any).message, APP_VERSION)) {
     void clearCacheAndReload();
   }
 });
 window.addEventListener("unhandledrejection", (event) => {
-  if (isChunkLoadError((event as any).reason)) {
+  if (shouldAttemptChunkRecovery((event as any).reason, APP_VERSION)) {
     void clearCacheAndReload();
   }
 });
