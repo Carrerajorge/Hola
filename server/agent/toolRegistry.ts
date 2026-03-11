@@ -2379,6 +2379,7 @@ const listFilesTool: ToolDefinition = {
 import { initializeClawiSkills } from "../openclaw/skills/clawiSkillAdapter";
 import { createAgenticTools } from "../openclaw/tools/agenticTools";
 import { createClawiRuntimeTools } from "../openclaw/tools/clawiRuntimeTools";
+import { createBridgedComputerUseToolDefinitions } from "./langchainToolBridge";
 import { spawnSubagentTool } from "./tools/spawn_subagent";
 import { memorySearchTool } from "./tools/memory_search";
 
@@ -2397,7 +2398,11 @@ for (const tool of createClawiRuntimeTools()) {
     toolRegistry.register(tool);
   }
 }
-
+for (const tool of createBridgedComputerUseToolDefinitions()) {
+  if (!toolRegistry.get(tool.name)) {
+    toolRegistry.register(tool);
+  }
+}
 
 
 toolRegistry.register(analyzeSpreadsheetTool);

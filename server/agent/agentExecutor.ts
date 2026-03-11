@@ -108,6 +108,8 @@ const dynamicSkillTools: FunctionDeclaration[] = BUNDLED_SKILL_TOOLS.map(t => {
 
 const LOCAL_FILESYSTEM_SIGNAL_REGEX =
   /\b(?:carpetas?|folders?|directorios?|directories?|archivos?|files?|lee|escribe|crea|modifica|busca|encuentra|abre|leer|escribir|crear|borrar|eliminar|revisar|analizar)\b/i;
+const LOCAL_COMPUTER_CONTROL_SIGNAL_REGEX =
+  /\b(?:github|git\s*hub|logout|log\s*out|sign\s*out|cerrar\s+sesion|cerrar\s+sesión|browser|navegador|desktop|escritorio|mouse|cursor|click|keyboard|teclado|pantalla|screen|screenshot|repo|repositorio|pull\s+request|pr)\b/i;
 const SKILL_SIGNAL_REGEX = /\b(skill|skills|habilidad|habilidades)\b|\$[a-z0-9_-]{2,80}/i;
 const LANDING_PAGE_SIGNAL_REGEX =
   /\b(landing\s+page|p[aá]gina\s+de\s+aterrizaje|p[aá]gina\s+web|sitio\s+web|website|landing)\b/i;
@@ -566,7 +568,19 @@ function getToolsForIntent(
         matchedTools = withToolSubset(toolPool, ["analyze_data", "generate_chart", "create_spreadsheet", "read_file"]);
         break;
       case "web_automation":
-        matchedTools = withToolSubset(toolPool, ["web_search", "fetch_url", "browse_and_act"]);
+        matchedTools = withToolSubset(toolPool, [
+          "web_search",
+          "fetch_url",
+          "browse_and_act",
+          "computer_use_session",
+          "computer_use_navigate",
+          "computer_use_interact",
+          "computer_use_screenshot",
+          "computer_use_extract",
+          "computer_use_agentic",
+          "vision_analyze",
+          "terminal_execute",
+        ]);
         break;
       default:
         matchedTools = toolPool;
@@ -575,8 +589,28 @@ function getToolsForIntent(
   }
 
   // For local computer/folder requests, force local read-only tools into the set.
-  if (LOCAL_FILESYSTEM_SIGNAL_REGEX.test(rawPrompt)) {
-    const mustHave = new Set(["list_files", "read_file", "memory_search", "openclaw_clawi_status", "openclaw_read", "openclaw_write", "openclaw_list", "openclaw_exec"]);
+  if (LOCAL_FILESYSTEM_SIGNAL_REGEX.test(rawPrompt) || LOCAL_COMPUTER_CONTROL_SIGNAL_REGEX.test(rawPrompt)) {
+    const mustHave = new Set([
+      "list_files",
+      "read_file",
+      "memory_search",
+      "openclaw_clawi_status",
+      "openclaw_read",
+      "openclaw_write",
+      "openclaw_list",
+      "openclaw_exec",
+      "computer_use_session",
+      "computer_use_navigate",
+      "computer_use_interact",
+      "computer_use_screenshot",
+      "computer_use_extract",
+      "computer_use_agentic",
+      "terminal_execute",
+      "terminal_system_info",
+      "terminal_file_op",
+      "vision_analyze",
+      "physical_desktop_control",
+    ]);
     const byName = new Map(matchedTools.map((tool) => [tool.name, tool]));
     for (const tool of AGENT_TOOLS) {
       if (mustHave.has(tool.name)) {
@@ -588,7 +622,7 @@ function getToolsForIntent(
 
   // Filter out sensitive tools if user is not the owner
   if (accessLevel !== 'owner') {
-    const sensitiveToolPatterns = ["browse_and_act", "skill_shell", "skill_run_command", "skill_system", "skill_file", "openclaw_clawi_exec"];
+    const sensitiveToolPatterns = ["browse_and_act", "skill_shell", "skill_run_command", "skill_system", "skill_file", "openclaw_clawi_exec", "computer_use_", "terminal_execute", "terminal_file_op", "physical_desktop_control"];
     matchedTools = matchedTools.filter(t => !sensitiveToolPatterns.some(pattern => t.name.includes(pattern)));
   }
 

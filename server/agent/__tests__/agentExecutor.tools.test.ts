@@ -60,4 +60,33 @@ describe("agentExecutor tool selection", () => {
     expect(names).toContain("web_search");
     expect(names).toContain("fetch_url");
   });
+
+  it("includes computer-use and terminal tools for GitHub browser-control prompts", () => {
+    const tools = getToolsForIntent(
+      "chat",
+      "owner",
+      "github par jao, mera repo check karo aur logout karo",
+    );
+    const names = tools.map((tool) => tool.name);
+
+    expect(names).toContain("computer_use_session");
+    expect(names).toContain("computer_use_agentic");
+    expect(names).toContain("terminal_execute");
+    expect(names).toContain("vision_analyze");
+    expect(names).toContain("physical_desktop_control");
+  });
+
+  it("keeps sensitive computer-control tools away from non-owner users", () => {
+    const tools = getToolsForIntent(
+      "chat",
+      "trusted",
+      "github par jao, mera repo check karo aur logout karo",
+    );
+    const names = tools.map((tool) => tool.name);
+
+    expect(names).not.toContain("computer_use_session");
+    expect(names).not.toContain("computer_use_agentic");
+    expect(names).not.toContain("terminal_execute");
+    expect(names).not.toContain("physical_desktop_control");
+  });
 });

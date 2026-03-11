@@ -290,6 +290,94 @@ const DEFAULT_TOOL_POLICIES: Record<string, Partial<ToolPolicy>> = {
     deniedByDefault: false,
   },
 
+  computer_use_session: {
+    capabilities: ["long_running"],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 120000,
+    maxRetries: 1,
+    deniedByDefault: false,
+  },
+  computer_use_navigate: {
+    capabilities: ["requires_network", "accesses_external_api", "long_running"],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 120000,
+    maxRetries: 2,
+    deniedByDefault: false,
+  },
+  computer_use_interact: {
+    capabilities: ["high_risk", "long_running"],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: true,
+    maxExecutionTimeMs: 120000,
+    maxRetries: 1,
+    deniedByDefault: false,
+  },
+  computer_use_screenshot: {
+    capabilities: ["reads_files"],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 60000,
+    maxRetries: 2,
+    deniedByDefault: false,
+  },
+  computer_use_extract: {
+    capabilities: ["reads_files"],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 60000,
+    maxRetries: 2,
+    deniedByDefault: false,
+  },
+  computer_use_agentic: {
+    capabilities: ["requires_network", "accesses_external_api", "high_risk", "long_running"],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: true,
+    maxExecutionTimeMs: 300000,
+    maxRetries: 1,
+    deniedByDefault: false,
+  },
+  terminal_execute: {
+    capabilities: ["executes_code", "high_risk", "long_running"],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: true,
+    maxExecutionTimeMs: 120000,
+    maxRetries: 1,
+    deniedByDefault: false,
+  },
+  terminal_system_info: {
+    capabilities: ["reads_files"],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 30000,
+    maxRetries: 2,
+    deniedByDefault: false,
+  },
+  terminal_file_op: {
+    capabilities: ["reads_files", "writes_files", "high_risk"],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: true,
+    maxExecutionTimeMs: 120000,
+    maxRetries: 1,
+    deniedByDefault: false,
+  },
+  vision_analyze: {
+    capabilities: ["reads_files"],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 60000,
+    maxRetries: 2,
+    deniedByDefault: false,
+  },
+  physical_desktop_control: {
+    capabilities: ["high_risk", "long_running"],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: true,
+    maxExecutionTimeMs: 120000,
+    maxRetries: 1,
+    deniedByDefault: false,
+  },
   // Sandbox tool aliases (server/agent/sandbox/*)
   shell: {
     capabilities: ["executes_code", "high_risk", "long_running"],
@@ -710,3 +798,4 @@ export class PolicyEngine {
 }
 
 export const policyEngine = new PolicyEngine();
+

@@ -12,9 +12,18 @@ vi.mock("../../server/db", () => {
 });
 
 const toolExecuteMock = vi.fn();
+const toolListMock = vi.fn(() => []);
+const llmChatMock = vi.fn();
 vi.mock("../../server/agent/toolRegistry", () => ({
   toolRegistry: {
     execute: (...args: any[]) => toolExecuteMock(...args),
+    list: () => toolListMock(),
+  },
+}));
+
+vi.mock("../../server/lib/llmGateway", () => ({
+  llmGateway: {
+    chat: (...args: any[]) => llmChatMock(...args),
   },
 }));
 
@@ -61,6 +70,9 @@ function makePrimitiveTask(overrides: Partial<Task> = {}): Task {
 describe("AgentOrchestrator robustness", () => {
   beforeEach(() => {
     toolExecuteMock.mockReset();
+    toolListMock.mockReset();
+    toolListMock.mockReturnValue([]);
+    llmChatMock.mockReset();
   });
 
   it("treats short capability questions as conversational", async () => {
@@ -267,5 +279,42 @@ describe("AgentOrchestrator robustness", () => {
       format: "paragraph",
       audience: "general",
     });
+  });
+
+  it("pauses HTN execution when a tool requires confirmation", async () => {
+    toolExecuteMock
+      .mockResolvedValueOnce({
+        success: true,
+        output: { sessionId: "session-123" },
+        artifacts: [],
+      })
+      .mockResolvedValueOnce({
+        success: false,
+        output: null,
+        artifacts: [],
+        error: { code: "REQUIRES_CONFIRMATION", message: "User confirmation required", retryable: false },
+      });
+
+    const orchestrator = new AgentOrchestrator("run-confirm", "chat-1", "user-1", "pro");
+    (orchestrator as any).emitTraceEvent = vi.fn().mockResolvedValue(undefined);
+
+    await orchestrator.generatePlan("GitHub par jao, mera repo check karo");
+    await orchestrator.executeHTNPlan();
+
+    expect(orchestrator.status).toBe("awaiting_confirmation");
+    expect(orchestrator.getPendingConfirmation()).toMatchObject({
+      toolName: "computer_use_agentic",
+      stepIndex: 1,
+    });
+  });
+
+  it("creates an HTN browser-autonomy plan for GitHub prompts", async () => {
+    const orchestrator = new AgentOrchestrator("run-plan", "chat-1", "user-1", "pro");
+    const plan = await orchestrator.generatePlan("GitHub par jao, mera repo check karo");
+
+    const toolNames = plan.steps.map((step) => step.toolName);
+    expect(toolNames).toContain("computer_use_session");
+    expect(toolNames).toContain("computer_use_agentic");
+    expect(toolNames).toContain("computer_use_screenshot");
   });
 });

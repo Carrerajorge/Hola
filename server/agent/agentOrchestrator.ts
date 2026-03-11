@@ -212,17 +212,32 @@ function userExplicitlyRequestsWebSearch(text: string): boolean {
 function getAvailableToolDescriptions() {
   if (_cachedTools) return _cachedTools;
 
-  const legacyTools = [
-    { name: "analyze_spreadsheet", description: "Analyze Excel or CSV spreadsheet files.", inputSchema: "{ uploadId, scope, analysisMode, userPrompt? }" },
-    { name: "web_search", description: "Search the web for information.", inputSchema: "{ query, maxResults?, academic? }" },
-    { name: "generate_image", description: "Generate an image using AI.", inputSchema: "{ prompt }" },
-    { name: "browse_url", description: "Navigate to a URL using a browser.", inputSchema: "{ url, takeScreenshot? }" },
-    { name: "generate_document", description: "Generate Office documents (Word, Excel, PowerPoint).", inputSchema: "{ type, title, content }" },
-    { name: "read_file", description: "Read contents of a file.", inputSchema: "{ filepath }" },
-    { name: "write_file", description: "Write or create a file.", inputSchema: "{ filepath, content }" },
-    { name: "shell_command", description: "Execute a shell command.", inputSchema: "{ command, timeout? }" },
-    { name: "list_files", description: "List files and directories.", inputSchema: "{ directory? }" },
-  ];
+  const describeSchema = (schema: unknown): string => {
+    if (!schema || typeof schema !== "object") return "{ }";
+
+    const shape = (schema as any)?._def?.shape;
+    if (typeof shape === "function") {
+      try {
+        const keys = Object.keys(shape());
+        return keys.length > 0 ? `{ ${keys.join(", ")} }` : "{ }";
+      } catch {
+        // Fall through to generic serialization below.
+      }
+    }
+
+    try {
+      const serialized = JSON.stringify(schema, null, 0);
+      return serialized && serialized.length <= 300 ? serialized : "{ ... }";
+    } catch {
+      return "{ ... }";
+    }
+  };
+
+  const registryTools = toolRegistry.list().map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    inputSchema: describeSchema(tool.inputSchema),
+  }));
 
   // Add sandbox tools (lazy access to avoid circular deps)
   try {
@@ -234,12 +249,12 @@ function getAvailableToolDescriptions() {
 
     // Merge, preferring sandbox tools for same-name entries
     const toolMap = new Map<string, { name: string; description: string; inputSchema: string }>();
-    for (const tool of legacyTools) toolMap.set(tool.name, tool);
+    for (const tool of registryTools) toolMap.set(tool.name, tool);
     for (const tool of sandboxTools) toolMap.set(tool.name, tool);
 
     _cachedTools = Array.from(toolMap.values());
   } catch {
-    _cachedTools = legacyTools;
+    _cachedTools = registryTools;
   }
 
   return _cachedTools;
@@ -545,6 +560,40 @@ export class AgentOrchestrator extends EventEmitter {
       .filter((dependencyTask): dependencyTask is Task => Boolean(dependencyTask));
   }
 
+  private extractSessionIdFromTaskResult(result: unknown): string | undefined {
+    if (!result) return undefined;
+
+    if (typeof result === "string") {
+      return undefined;
+    }
+
+    if (Array.isArray(result)) {
+      for (const item of result) {
+        const candidate = this.extractSessionIdFromTaskResult(item);
+        if (candidate) return candidate;
+      }
+      return undefined;
+    }
+
+    if (typeof result !== "object") {
+      return undefined;
+    }
+
+    const record = result as Record<string, unknown>;
+    const directCandidates = [record.sessionId, record.session_id, record.browserSessionId];
+    for (const candidate of directCandidates) {
+      if (typeof candidate === "string" && candidate.trim().length > 0) {
+        return candidate.trim();
+      }
+    }
+
+    for (const nested of [record.data, record.result, record.output]) {
+      const candidate = this.extractSessionIdFromTaskResult(nested);
+      if (candidate) return candidate;
+    }
+
+    return undefined;
+  }
   private extractUrlFromTaskResult(result: unknown): string | undefined {
     if (!result) return undefined;
 
@@ -669,6 +718,9 @@ export class AgentOrchestrator extends EventEmitter {
     const firstDependencyUrl = dependencyResults
       .map((result) => this.extractUrlFromTaskResult(result))
       .find((candidate): candidate is string => typeof candidate === "string" && candidate.length > 0);
+    const firstDependencySessionId = dependencyResults
+      .map((result) => this.extractSessionIdFromTaskResult(result))
+      .find((candidate): candidate is string => typeof candidate === "string" && candidate.length > 0);
     const dependencyContent = dependencyResults
       .map((result) => this.extractSummarizableContent(result))
       .find((content): content is string => typeof content === "string" && content.length > 0);
@@ -703,6 +755,11 @@ export class AgentOrchestrator extends EventEmitter {
       }
     }
 
+    if (["computer_use_navigate", "computer_use_interact", "computer_use_screenshot", "computer_use_extract", "computer_use_agentic", "vision_analyze"].includes(toolName)) {
+      if (typeof resolvedInput.sessionId !== "string" || resolvedInput.sessionId.trim().length === 0) {
+        resolvedInput.sessionId = firstDependencySessionId;
+      }
+    }
     if (toolName === "summarize") {
       if (
         (typeof resolvedInput.content !== "string" || resolvedInput.content.trim().length === 0) &&
@@ -1674,6 +1731,12 @@ Respond with ONLY valid JSON in this exact format:
         return result;
       }
 
+      if (result?.error?.code === "REQUIRES_CONFIRMATION") {
+        const confirmationError: Error & { code?: string } = new Error(result.error?.message || "Requires confirmation");
+        confirmationError.code = "AWAITING_CONFIRMATION";
+        throw confirmationError;
+      }
+
       if (result.success) {
         await this.emitTraceEvent('step_completed', {
           stepIndex,
@@ -2265,6 +2328,17 @@ Provide a brief, user-friendly summary (2-4 sentences) of what was accomplished.
         userId: this.userId,
       });
 
+      if (result.pausedForConfirmation) {
+        this.status = "awaiting_confirmation";
+        this.logEvent('action', {
+          type: 'confirmation_required',
+          awaitingTaskId: result.awaitingTaskId,
+          pendingConfirmation: this.pendingConfirmation,
+        });
+        this.emitProgress();
+        return;
+      }
+
       if (result.success) {
         this.status = "completed";
         this.logEvent('observation', { type: 'run_completed', duration: result.executionTime });
@@ -2356,8 +2430,14 @@ Provide a brief, user-friendly summary (2-4 sentences) of what was accomplished.
         this.stepResults.push(stepResult);
         if (result.artifacts) this.artifacts.push(...result.artifacts);
 
-        this.updateTodoList(stepIndex, result.success ? 'completed' : 'failed',
-          result.success ? undefined : (result.error ? (typeof result.error === 'string' ? result.error : result.error.message) : 'Task failed'));
+        const requiresConfirmation = result?.error?.code === 'REQUIRES_CONFIRMATION';
+        this.updateTodoList(
+          stepIndex,
+          result.success ? 'completed' : (requiresConfirmation ? 'in_progress' : 'failed'),
+          result.success || requiresConfirmation
+            ? undefined
+            : (result.error ? (typeof result.error === 'string' ? result.error : result.error.message) : 'Task failed')
+        );
       }
 
       await this.emitTraceEvent(result.success ? 'step_completed' : 'step_failed', {
@@ -2367,13 +2447,40 @@ Provide a brief, user-friendly summary (2-4 sentences) of what was accomplished.
         error: result.success ? undefined : { message: result.error ? (typeof result.error === 'string' ? result.error : result.error.message) : 'Task failed', retryable: true }
       });
 
+      if (result?.error?.code === 'REQUIRES_CONFIRMATION') {
+        this.pendingConfirmation = {
+          stepIndex: stepIndex >= 0 ? stepIndex : this.currentStepIndex,
+          toolName: actualToolName,
+          toolInput: resolvedInput,
+          reason: result.error?.message || 'Requires confirmation',
+          requestedAt: Date.now(),
+        };
+        this.status = 'awaiting_confirmation';
+
+        await this.emitTraceEvent('confirmation_required' as any, {
+          phase: 'executing',
+          status: 'awaiting_confirmation',
+          stepIndex: stepIndex >= 0 ? stepIndex : undefined,
+          summary: `Se requiere confirmaci?n para ejecutar: ${actualToolName}. Responda CONFIRM o CANCEL.`,
+          metadata: {
+            toolName: actualToolName,
+            stepIndex: stepIndex >= 0 ? stepIndex : undefined,
+            reason: this.pendingConfirmation.reason,
+          },
+        } as any);
+
+        const confirmationError: Error & { code?: string } = new Error(result.error?.message || 'Requires confirmation');
+        confirmationError.code = 'AWAITING_CONFIRMATION';
+        throw confirmationError;
+      }
+
       if (!result.success) {
         throw new Error(result.error ? (typeof result.error === 'string' ? result.error : result.error.message) : 'Task failed');
       }
 
       return result.output;
     } catch (err: any) {
-      if (stepIndex >= 0) {
+      if (err?.code !== 'AWAITING_CONFIRMATION' && stepIndex >= 0) {
         this.updateTodoList(stepIndex, 'failed', err.message);
       }
       throw err;

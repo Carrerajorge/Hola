@@ -114,6 +114,8 @@ export interface ExecutionResult {
     failedTasks: Task[];
     completedTasks: Task[];
     compensatedTasks: Task[];
+    pausedForConfirmation?: boolean;
+    awaitingTaskId?: string;
     executionTime: number;
 }
 
@@ -449,6 +451,81 @@ export class HTNPlanner extends EventEmitter {
      */
     private createTaskFromGoal(goal: string, context: Record<string, any>): Task {
         const lowerGoal = goal.toLowerCase();
+        const browserAutomationRequested =
+            /(github|git\s*hub|repo|repository|repositorio|logout|log\s*out|sign\s*out|browser|navegador|website|sitio\s+web)/i.test(goal);
+
+        if (browserAutomationRequested) {
+            return {
+                id: randomUUID(),
+                name: goal,
+                type: 'compound',
+                description: goal,
+                preconditions: [],
+                effects: [{ type: 'set_fact', key: 'browser_automation_complete', value: true }],
+                cost: 12,
+                estimatedDuration: 90000,
+                priority: 8,
+                decompositionMethods: [{
+                    id: 'browser_autonomy',
+                    name: 'Browser Autonomy',
+                    applicabilityConditions: [],
+                    subtasks: [
+                        {
+                            name: 'Create Browser Session',
+                            type: 'primitive',
+                            description: 'Create an autonomous browser session',
+                            preconditions: [],
+                            effects: [],
+                            cost: 1,
+                            estimatedDuration: 5000,
+                            priority: 8,
+                            toolName: 'computer_use_session',
+                            toolParams: { action: 'create_browser', mode: 'browser' },
+                            dependencies: [],
+                            dependents: [],
+                            maxRetries: 2,
+                        },
+                        {
+                            name: 'Inspect GitHub Or Browser Task',
+                            type: 'primitive',
+                            description: 'Use browser autonomy to accomplish the requested GitHub or browser task',
+                            preconditions: [],
+                            effects: [],
+                            cost: 6,
+                            estimatedDuration: 45000,
+                            priority: 7,
+                            toolName: 'computer_use_agentic',
+                            toolParams: { goal },
+                            dependencies: [],
+                            dependents: [],
+                            maxRetries: 2,
+                        },
+                        {
+                            name: 'Capture Final Browser State',
+                            type: 'primitive',
+                            description: 'Capture the final browser state for verification',
+                            preconditions: [],
+                            effects: [],
+                            cost: 2,
+                            estimatedDuration: 10000,
+                            priority: 6,
+                            toolName: 'computer_use_screenshot',
+                            toolParams: { analyze: true, query: 'Summarize the current GitHub or browser page state.' },
+                            dependencies: [],
+                            dependents: [],
+                            maxRetries: 2,
+                        }
+                    ],
+                    priority: 10
+                }],
+                dependencies: [],
+                dependents: [],
+                maxRetries: 2,
+                status: 'pending',
+                retryCount: 0,
+                toolParams: context,
+            };
+        }
 
         // Match goal to template
         let templateKey = 'research_deep'; // default
@@ -604,6 +681,8 @@ export class HTNPlanner extends EventEmitter {
         const results = new Map<string, any>();
         const failedTasks: Task[] = [];
         const completedTasks: Task[] = [];
+        let pausedForConfirmation = false;
+        let awaitingTaskId: string | undefined;
 
         // We track processed tasks to avoid re-execution
         const processedTaskIds = new Set<string>();
@@ -735,34 +814,53 @@ export class HTNPlanner extends EventEmitter {
                     plan.metadata.completedTasks++;
                     this.emit("task:complete", { planId, taskId: task.id, result });
 
-                } catch (error) {
+                } catch (error: any) {
+                    if (error?.code === 'AWAITING_CONFIRMATION') {
+                        task.status = 'ready';
+                        task.error = undefined;
+                        task.endTime = undefined;
+                        pausedForConfirmation = true;
+                        awaitingTaskId = task.id;
+                        this.emit("task:confirmation_required", {
+                            planId,
+                            taskId: task.id,
+                            taskName: task.name,
+                            error: error.message,
+                        });
+                        return;
+                    }
+
                     task.retryCount++;
                     if (task.retryCount < task.maxRetries) {
                         task.status = 'failed';
-                        task.error = (error as Error).message;
+                        task.error = error.message;
                         task.endTime = new Date();
                         failedTasks.push(task);
                         plan.metadata.failedTasks++;
-                        this.emit("task:failed", { planId, taskId: task.id, error: (error as Error).message });
+                        this.emit("task:failed", { planId, taskId: task.id, error: error.message });
                     } else {
                         task.status = 'failed';
-                        task.error = (error as Error).message;
+                        task.error = error.message;
                         task.endTime = new Date();
                         failedTasks.push(task);
                         plan.metadata.failedTasks++;
-                        this.emit("task:failed", { planId, taskId: task.id, error: (error as Error).message });
+                        this.emit("task:failed", { planId, taskId: task.id, error: error.message });
                     }
                 }
             });
 
             await Promise.all(executionPromises);
+
+            if (pausedForConfirmation) {
+                break;
+            }
         }
 
-        const success = failedTasks.length === 0;
+        const success = failedTasks.length === 0 && !pausedForConfirmation;
         const compensatedTasks: Task[] = [];
 
         // 3. Rollback (Compensation) phase if plan failed
-        if (!success && completedTasks.length > 0) {
+        if (!success && !pausedForConfirmation && completedTasks.length > 0) {
             this.emit("plan:rollback_started", { planId, reason: failedTasks[0]?.error });
 
             // Execute rollback in reverse order of completion
@@ -785,7 +883,7 @@ export class HTNPlanner extends EventEmitter {
             }
         }
 
-        plan.status = success ? 'completed' : 'failed';
+        plan.status = pausedForConfirmation ? 'ready' : success ? 'completed' : 'failed';
         plan.metadata.updatedAt = new Date();
 
         const executionTime = Date.now() - startTime;
@@ -797,6 +895,8 @@ export class HTNPlanner extends EventEmitter {
             failedTasks,
             completedTasks,
             compensatedTasks,
+            pausedForConfirmation,
+            awaitingTaskId,
             executionTime
         };
     }

@@ -139,7 +139,7 @@ export function useAgentMode(chatId: string) {
   const lastWorkspaceContextRef = useRef<AgentWorkspaceContext | undefined>(undefined);
   const initializedForChatRef = useRef<string | null>(null);
 
-  const isPollingActive = ['queued', 'planning', 'running', 'verifying', 'replanning', 'cancelling'].includes(state.status);
+  const isPollingActive = ['queued', 'planning', 'running', 'verifying', 'replanning', 'cancelling', 'awaiting_confirmation'].includes(state.status);
 
   // Fetch active run for the current chat when chatId changes
   const { data: chatRunData } = useQuery<AgentRunResponse | null>({

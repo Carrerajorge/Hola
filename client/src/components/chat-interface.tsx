@@ -3130,24 +3130,59 @@ export function ChatInterface({
     }
   }, [speakingMessageId]);
 
-  const handleToolConfirm = useCallback((messageId: string, toolName: string, stepIndex: number) => {
-    chatLogger.info("User confirmed tool execution", { messageId, toolName, stepIndex });
-    toast({
-      title: "Ejecución Aprobada",
-      description: `Se ha autorizado la ejecución de ${toolName}.`,
-    });
-    // In a full implementation, we would call the backend to resume the pending tool call here.
-  }, [toast]);
+  const handleToolConfirm = useCallback(async (messageId: string, toolName: string, stepIndex: number) => {
+    chatLogger.info("User confirmed tool execution", { messageId, toolName, stepIndex, runId: agentMode.runId });
 
-  const handleToolDeny = useCallback((messageId: string, toolName: string, stepIndex: number) => {
-    chatLogger.info("User denied tool execution", { messageId, toolName, stepIndex });
-    toast({
-      title: "Ejecución Cancelada",
-      description: `Se ha denegado la ejecución de ${toolName}.`,
-      variant: "destructive"
-    });
-    // In a full implementation, we would call the backend to cancel the run or tool call here.
-  }, [toast]);
+    if (!agentMode.runId) {
+      toast({
+        title: "No hay ejecuci?n activa",
+        description: "No se encontr? un run del agente para confirmar.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      await agentMode.confirmRun("confirm");
+      toast({
+        title: "Ejecuci?n aprobada",
+        description: `Se autoriz? la ejecuci?n de ${toolName}.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "No se pudo confirmar",
+        description: error?.message || "La ejecuci?n no pudo reanudarse.",
+        variant: "destructive"
+      });
+    }
+  }, [agentMode, toast]);
+
+  const handleToolDeny = useCallback(async (messageId: string, toolName: string, stepIndex: number) => {
+    chatLogger.info("User denied tool execution", { messageId, toolName, stepIndex, runId: agentMode.runId });
+
+    if (!agentMode.runId) {
+      toast({
+        title: "No hay ejecuci?n activa",
+        description: "No se encontr? un run del agente para rechazar.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      await agentMode.confirmRun("cancel");
+      toast({
+        title: "Ejecuci?n cancelada",
+        description: `Se rechaz? la ejecuci?n de ${toolName}.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "No se pudo cancelar",
+        description: error?.message || "La solicitud de cancelaci?n fall?.",
+        variant: "destructive"
+      });
+    }
+  }, [agentMode, toast]);
 
   const handleRegenerate = useCallback(async (msgIndex: number, instruction?: string) => {
     const prevMessages = messages.slice(0, msgIndex);

@@ -258,5 +258,181 @@ export const AGENT_TOOLS: FunctionDeclaration[] = [
             },
             required: ["args"]
         }
+    },
+    {
+        name: "computer_use_session",
+        description: "Create, close, and inspect autonomous browser/desktop sessions for OpenClaw-style computer use.",
+        parameters: {
+            type: "object",
+            properties: {
+                action: { type: "string", enum: ["create_browser", "create_multi_browser", "close", "list_profiles"] },
+                sessionId: { type: "string", description: "Existing session id for close." },
+                mode: { type: "string", enum: ["browser", "desktop"] },
+                profileId: { type: "string", description: "Browser profile such as chrome-desktop." },
+                viewport: {
+                    type: "object",
+                    properties: {
+                        width: { type: "number" },
+                        height: { type: "number" }
+                    }
+                }
+            },
+            required: ["action"]
+        }
+    },
+    {
+        name: "computer_use_navigate",
+        description: "Navigate an active computer-use browser session to a URL and optionally capture a screenshot.",
+        parameters: {
+            type: "object",
+            properties: {
+                sessionId: { type: "string" },
+                url: { type: "string", description: "Target URL." },
+                waitUntil: { type: "string", enum: ["load", "domcontentloaded", "networkidle"] },
+                screenshot: { type: "boolean" }
+            },
+            required: ["sessionId", "url"]
+        }
+    },
+    {
+        name: "computer_use_interact",
+        description: "Click, type, scroll, press keys, or use hotkeys inside a computer-use session.",
+        parameters: {
+            type: "object",
+            properties: {
+                sessionId: { type: "string" },
+                action: { type: "string", enum: ["click", "type", "scroll", "press_key", "hotkey", "select", "hover"] },
+                selector: { type: "string" },
+                value: { type: "string" },
+                coordinates: {
+                    type: "object",
+                    properties: {
+                        x: { type: "number" },
+                        y: { type: "number" }
+                    }
+                }
+            },
+            required: ["sessionId", "action"]
+        }
+    },
+    {
+        name: "computer_use_screenshot",
+        description: "Capture and analyze the current browser or desktop screen.",
+        parameters: {
+            type: "object",
+            properties: {
+                sessionId: { type: "string" },
+                fullPage: { type: "boolean" },
+                analyze: { type: "boolean" },
+                query: { type: "string" }
+            },
+            required: ["sessionId"]
+        }
+    },
+    {
+        name: "computer_use_extract",
+        description: "Extract structured data or page content from the active computer-use session.",
+        parameters: {
+            type: "object",
+            properties: {
+                sessionId: { type: "string" },
+                description: { type: "string" },
+                rules: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            name: { type: "string" },
+                            selector: { type: "string" },
+                            type: { type: "string", enum: ["text", "html", "attribute", "list", "table"] },
+                            attribute: { type: "string" }
+                        },
+                        required: ["name", "selector", "type"]
+                    }
+                }
+            },
+            required: ["sessionId"]
+        }
+    },
+    {
+        name: "computer_use_agentic",
+        description: "Let the agent autonomously operate a browser session to accomplish a goal like checking GitHub or signing out.",
+        parameters: {
+            type: "object",
+            properties: {
+                sessionId: { type: "string" },
+                goal: { type: "string" },
+                maxSteps: { type: "number" }
+            },
+            required: ["sessionId", "goal"]
+        }
+    },
+    {
+        name: "terminal_execute",
+        description: "Execute a terminal command in a managed local session for repository inspection and developer workflows.",
+        parameters: {
+            type: "object",
+            properties: {
+                command: { type: "string" },
+                cwd: { type: "string" },
+                timeout: { type: "number" },
+                sessionId: { type: "string" }
+            },
+            required: ["command"]
+        }
+    },
+    {
+        name: "terminal_system_info",
+        description: "Inspect local machine OS, CPU, memory, disk, and network information.",
+        parameters: {
+            type: "object",
+            properties: {}
+        }
+    },
+    {
+        name: "terminal_file_op",
+        description: "Perform local file operations like read, write, copy, move, mkdir, list, stat, and search.",
+        parameters: {
+            type: "object",
+            properties: {
+                operation: { type: "string", enum: ["read", "write", "append", "delete", "copy", "move", "mkdir", "list", "stat", "search", "chmod"] },
+                path: { type: "string" },
+                destination: { type: "string" },
+                content: { type: "string" },
+                pattern: { type: "string" },
+                recursive: { type: "boolean" },
+                sessionId: { type: "string" }
+            },
+            required: ["operation", "path"]
+        }
+    },
+    {
+        name: "vision_analyze",
+        description: "Run AI vision analysis on the current computer-use screenshot to identify state and next actions.",
+        parameters: {
+            type: "object",
+            properties: {
+                sessionId: { type: "string" },
+                query: { type: "string" },
+                mode: { type: "string", enum: ["analyze", "ocr", "detect_elements", "accessibility"] }
+            },
+            required: ["sessionId"]
+        }
+    },
+    {
+        name: "physical_desktop_control",
+        description: "Use low-level OS input controls for mouse, keyboard, and screen-size operations on the local computer.",
+        parameters: {
+            type: "object",
+            properties: {
+                action: { type: "string", enum: ["mouse_move", "mouse_click", "keyboard_type", "keyboard_press", "get_screen_size"] },
+                x: { type: "number" },
+                y: { type: "number" },
+                button: { type: "string", enum: ["left", "right", "middle"] },
+                text: { type: "string" },
+                key: { type: "string", enum: ["enter", "escape", "tab", "space"] }
+            },
+            required: ["action"]
+        }
     }
 ];

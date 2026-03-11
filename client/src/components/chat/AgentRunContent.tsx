@@ -32,7 +32,7 @@ import { ToolInvocationCard, ToolStatus } from "@/components/chat/ToolInvocation
 interface AgentRunContentProps {
     agentRun: {
         runId: string | null;
-        status: "idle" | "starting" | "running" | "completed" | "failed" | "cancelled" | "queued" | "planning" | "verifying" | "paused" | "cancelling" | "replanning";
+        status: "idle" | "starting" | "running" | "completed" | "failed" | "cancelled" | "queued" | "planning" | "verifying" | "paused" | "cancelling" | "replanning" | "awaiting_confirmation";
         userMessage?: string;
         steps: Array<{
             stepIndex: number;
@@ -77,8 +77,9 @@ export const AgentRunContent = memo(function AgentRunContent({
     const [viewMode, setViewMode] = useState<"steps" | "plan">("steps");
     const eventsEndRef = useRef<HTMLDivElement>(null);
 
-    const isCancellable = ["starting", "running", "queued", "planning", "verifying", "paused", "replanning"].includes(agentRun.status);
-    const isActive = ["starting", "running", "queued", "planning", "verifying", "cancelling", "replanning"].includes(agentRun.status);
+    const isAwaitingConfirmation = agentRun.status === "awaiting_confirmation";
+    const isCancellable = ["starting", "running", "queued", "planning", "verifying", "paused", "replanning", "awaiting_confirmation"].includes(agentRun.status);
+    const isActive = ["starting", "running", "queued", "planning", "verifying", "cancelling", "replanning", "awaiting_confirmation"].includes(agentRun.status);
     const isPaused = agentRun.status === "paused";
     const isCancelling = agentRun.status === "cancelling";
     const isWaitingForResponse = agentRun.status === "starting" || agentRun.status === "queued";
@@ -129,6 +130,8 @@ export const AgentRunContent = memo(function AgentRunContent({
                 return <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />;
             case "completed":
                 return <CheckCircle2 className="h-4 w-4 text-green-500" />;
+            case "awaiting_confirmation":
+                return <AlertCircle className="h-4 w-4 text-amber-500" />;
             case "failed":
                 return <XCircle className="h-4 w-4 text-red-500" />;
             case "cancelled":
@@ -149,6 +152,7 @@ export const AgentRunContent = memo(function AgentRunContent({
             case "paused": return "Pausado";
             case "cancelling": return "Cancelando...";
             case "completed": return "Completado";
+            case "awaiting_confirmation": return "Esperando confirmaci?n";
             case "failed": return "Error";
             case "cancelled": return "Cancelado";
             default: return agentRun.status;
@@ -370,6 +374,34 @@ export const AgentRunContent = memo(function AgentRunContent({
 
             {isExpanded && (
                 <div className="space-y-3">
+                    {isAwaitingConfirmation && (onToolConfirm || onToolDeny) && (
+                        <div className="rounded-lg border border-amber-300/40 bg-amber-50/70 px-3 py-3 dark:border-amber-500/30 dark:bg-amber-950/20">
+                            <div className="flex items-start gap-2">
+                                <AlertCircle className="mt-0.5 h-4 w-4 text-amber-600 dark:text-amber-400" />
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium text-foreground">Confirmaci?n requerida</p>
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                        Esta acci?n necesita tu aprobaci?n antes de que el agente siga con el control del navegador o del equipo.
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="mt-3 flex gap-2">
+                                {onToolConfirm && (
+                                    <Button size="sm" onClick={() => onToolConfirm('pending_confirmation', -1)} className="h-8">
+                                        <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
+                                        Confirmar
+                                    </Button>
+                                )}
+                                {onToolDeny && (
+                                    <Button size="sm" variant="outline" onClick={() => onToolDeny('pending_confirmation', -1)} className="h-8">
+                                        <XCircle className="h-3.5 w-3.5 mr-1.5" />
+                                        Rechazar
+                                    </Button>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
                     {/* Action buttons for runs */}
                     {showVerboseAgentInternals && (isCancellable || isPaused) && (
                         <div className="flex justify-end gap-2">
