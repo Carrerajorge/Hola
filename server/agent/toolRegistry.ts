@@ -309,6 +309,99 @@ export interface ToolDefinition {
 export class ToolRegistry {
   private tools: Map<string, ToolDefinition> = new Map();
 
+  private inferUrlCandidate(value: unknown, seen = new Set<unknown>()): string | null {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      return /^https?:\/\//i.test(trimmed) ? trimmed : null;
+    }
+
+    if (!value || typeof value !== "object") {
+      return null;
+    }
+
+    if (seen.has(value)) {
+      return null;
+    }
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const candidate = this.inferUrlCandidate(item, seen);
+        if (candidate) {
+          return candidate;
+        }
+      }
+      return null;
+    }
+
+    const record = value as Record<string, unknown>;
+    const priorityKeys = [
+      "url",
+      "href",
+      "link",
+      "sourceUrl",
+      "source_url",
+      "targetUrl",
+      "target_url",
+      "finalUrl",
+      "final_url",
+    ];
+
+    for (const key of priorityKeys) {
+      const candidate = this.inferUrlCandidate(record[key], seen);
+      if (candidate) {
+        return candidate;
+      }
+    }
+
+    const nestedKeys = [
+      "output",
+      "data",
+      "result",
+      "results",
+      "contents",
+      "sources",
+      "items",
+      "articles",
+      "searchResults",
+      "webSearchResults",
+      "_dependencyResults",
+      "_completedResults",
+      "previousResults",
+      "previousResult",
+    ];
+
+    for (const key of nestedKeys) {
+      const candidate = this.inferUrlCandidate(record[key], seen);
+      if (candidate) {
+        return candidate;
+      }
+    }
+
+    for (const child of Object.values(record)) {
+      const candidate = this.inferUrlCandidate(child, seen);
+      if (candidate) {
+        return candidate;
+      }
+    }
+
+    return null;
+  }
+
+  private coerceFetchUrlInput(input: any): any {
+    const safeInput = input && typeof input === "object" ? { ...input } : {};
+    if (typeof safeInput.url === "string" && safeInput.url.trim()) {
+      return safeInput;
+    }
+
+    const inferredUrl = this.inferUrlCandidate(safeInput);
+    if (inferredUrl) {
+      safeInput.url = inferredUrl;
+    }
+
+    return safeInput;
+  }
+
   register(tool: ToolDefinition): void {
     const validatedTool = validateOrThrow(
       ToolDefinitionSchema,
@@ -1000,6 +1093,15 @@ export class ToolRegistry {
       let validatedInput: unknown;
       try {
         const safeInput: any = input || {};
+        if (name === "fetch_url") {
+          const coercedFetchInput = this.coerceFetchUrlInput(safeInput);
+          if (!safeInput.url && coercedFetchInput.url) {
+            addLog("info", "Inferred fetch_url target from prior tool results", {
+              url: coercedFetchInput.url,
+            });
+          }
+          Object.assign(safeInput, coercedFetchInput);
+        }
         if (name === 'web_search' && !safeInput.query) {
           safeInput.query = typeof context?.runId === 'string' ? "general search" : "search";
         }
