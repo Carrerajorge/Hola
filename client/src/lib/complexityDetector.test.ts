@@ -25,6 +25,12 @@ describe("checkComplexityLocally", () => {
     expect(checkComplexityLocally("yes!").agent_required).toBe(false);
   });
 
+  it("keeps conversational prompts out of agent mode", () => {
+    expect(checkComplexityLocally("como estas?").agent_required).toBe(false);
+    expect(checkComplexityLocally("¿Qué puedes hacer?").agent_required).toBe(false);
+    expect(checkComplexityLocally("Explícame la fotosíntesis").agent_required).toBe(false);
+  });
+
   it("returns required for explicit agent request", () => {
     const result = checkComplexityLocally("usa el agente para buscar información");
     expect(result.agent_required).toBe(true);
@@ -42,19 +48,25 @@ describe("checkComplexityLocally", () => {
     expect(result.agent_required).toBe(true);
   });
 
-  it("returns required for long non-agent messages (default agent policy)", () => {
+  it("returns not required for long non-agent messages", () => {
     const result = checkComplexityLocally(
       "Explícame detalladamente cómo funciona la fotosíntesis y cuáles son las etapas principales del proceso bioquímico"
     );
-    expect(result.agent_required).toBe(true);
-    expect(result.agent_reason).toBe("Modo agente activado por defecto");
+    expect(result.agent_required).toBe(false);
+    expect(result.agent_reason).toBeUndefined();
     expect(result.confidence).toBe("high");
   });
 
-  it("returns high confidence for non-trivial messages", () => {
+  it("returns medium-to-high confidence for non-trivial messages", () => {
     const result = checkComplexityLocally("Cuáles son los mejores restaurantes en Madrid");
+    expect(result.agent_required).toBe(false);
+    expect(["high", "medium"]).toContain(result.confidence);
+  });
+
+  it("activates agent mode for strong web research signals", () => {
+    const result = checkComplexityLocally("Busca en internet las últimas noticias de OpenAI y verifica las fuentes");
     expect(result.agent_required).toBe(true);
-    expect(result.confidence).toBe("high");
+    expect(result.agent_reason).toBe("Requiere búsqueda web");
   });
 
   it("handles empty string", () => {

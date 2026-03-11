@@ -1164,63 +1164,76 @@ export function ChannelsHubDialog({
   // Main hub: channel cards grid
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="liquid-shell max-w-lg border-0 bg-transparent">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <svg viewBox="0 0 24 24" className="h-5 w-5 text-primary" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z" />
-            </svg>
-            AppsWebChat
-          </DialogTitle>
-          <DialogDescription>
-            Conecta tus canales de mensajería para enviar y recibir mensajes con IA, todo en un solo lugar.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid grid-cols-2 gap-3 mt-1">
-          {CHANNELS.map((ch) => (
-            <button
-              key={ch.id}
-              onClick={() => handleChannelClick(ch.id)}
-              className={cn(
-                "liquid-card relative rounded-[22px] border p-4 text-left transition-all duration-200",
-                "hover:shadow-md hover:scale-[1.02] active:scale-[0.98]",
-                ch.bgHover,
-                ch.borderColor,
-                "group cursor-pointer"
-              )}
-            >
-              {/* Status dot */}
-              <div className="absolute top-3 right-3">
-                {getStatusDot(ch.id)}
+      <DialogContent className="liquid-shell max-w-4xl border-0 bg-transparent p-0 overflow-hidden">
+        <div className="grid gap-0 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+          <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.22),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.88),rgba(255,255,255,0.74))] p-6 dark:bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.22),transparent_28%),linear-gradient(180deg,rgba(18,18,24,0.96),rgba(12,12,18,0.92))] md:border-b-0 md:border-r">
+            <DialogHeader className="space-y-4">
+              <div className="inline-flex w-fit items-center gap-2 rounded-full border border-[#A5A0FF]/25 bg-[#A5A0FF]/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#5f57d8] dark:border-[#A5A0FF]/20 dark:bg-[#A5A0FF]/12 dark:text-[#cbc7ff]">
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z" />
+                </svg>
+                AppsWebChat
               </div>
-
-              {/* Logo */}
-              <div className="mb-3">
-                <ChannelLogo id={ch.id} className="h-12 w-12" />
+              <div>
+                <DialogTitle className="text-3xl font-semibold tracking-tight">Conecta todos tus canales en una sola consola</DialogTitle>
+                <DialogDescription className="mt-2 max-w-md text-sm leading-6 text-slate-600 dark:text-white/65">
+                  Vincula WhatsApp, Telegram, Messenger y WeChat para centralizar atención, automatizaciones y respuestas con IA desde ILIAGPT.
+                </DialogDescription>
               </div>
+            </DialogHeader>
 
-              {/* Name & description */}
-              <div className={cn("font-semibold text-sm", ch.color)}>
-                {ch.name}
+            <div className="mt-6 grid gap-3">
+              <div className="rounded-[24px] border border-white/50 bg-white/75 p-4 shadow-sm dark:border-white/10 dark:bg-white/6">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-white/45">Cobertura</div>
+                <div className="mt-2 text-2xl font-semibold">{CHANNELS.length} canales</div>
+                <p className="mt-1 text-sm text-slate-600 dark:text-white/60">Conexiones nativas para mensajería personal y business.</p>
               </div>
-              <p className="text-xs text-muted-foreground mt-1 leading-relaxed line-clamp-2">
-                {ch.description}
-              </p>
-
-              {/* Connect hint */}
-              <div className="mt-3 text-xs font-medium text-muted-foreground group-hover:text-foreground transition-colors">
-                {ch.id === "whatsapp" && waStatus.state === "connected"
-                  ? "Conectado"
-                  : ch.id !== "whatsapp" && getChannelIntegrationStatus(ch.id) === "active"
-                    ? "Conectado"
-                    : "Configurar →"}
+              <div className="rounded-[24px] border border-white/50 bg-white/75 p-4 shadow-sm dark:border-white/10 dark:bg-white/6">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-white/45">Automatización</div>
+                <div className="mt-2 text-2xl font-semibold">{autoResponderTargets}</div>
+                <p className="mt-1 text-sm text-slate-600 dark:text-white/60">Canales listos para respuestas asistidas por IA.</p>
               </div>
-            </button>
-          ))}
-        </div>
+            </div>
+          </div>
 
-        <div className="liquid-panel mt-3 rounded-[22px] border p-4 space-y-3">
+          <div className="p-6">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {CHANNELS.map((ch) => (
+                <button
+                  key={ch.id}
+                  onClick={() => handleChannelClick(ch.id)}
+                  className={cn(
+                    "liquid-card relative rounded-[24px] border p-4 text-left transition-all duration-200",
+                    "hover:shadow-md hover:scale-[1.02] active:scale-[0.98]",
+                    ch.bgHover,
+                    ch.borderColor,
+                    "group cursor-pointer bg-white/72 dark:bg-white/5"
+                  )}
+                >
+                  <div className="absolute top-3 right-3">
+                    {getStatusDot(ch.id)}
+                  </div>
+                  <div className="mb-3">
+                    <ChannelLogo id={ch.id} className="h-12 w-12" />
+                  </div>
+                  <div className={cn("font-semibold text-sm", ch.color)}>
+                    {ch.name}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed line-clamp-2">
+                    {ch.description}
+                  </p>
+                  <div className="mt-3 text-xs font-medium text-muted-foreground group-hover:text-foreground transition-colors">
+                    {ch.id === "whatsapp" && waStatus.state === "connected"
+                      ? "Conectado"
+                      : ch.id !== "whatsapp" && getChannelIntegrationStatus(ch.id) === "active"
+                        ? "Conectado"
+                        : "Configurar →"}
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <div className="liquid-panel mt-4 rounded-[24px] border p-4 space-y-3">
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1">
               <div className="flex items-center gap-2">
@@ -1358,6 +1371,8 @@ export function ChannelsHubDialog({
               ✓ Ajustes guardados
             </div>
           )}
+            </div>
+          </div>
         </div>
 
         <AlertDialog open={confirmEnableAutoResponderOpen} onOpenChange={setConfirmEnableAutoResponderOpen}>

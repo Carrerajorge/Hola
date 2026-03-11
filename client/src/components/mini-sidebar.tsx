@@ -21,7 +21,7 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
   return (
     <TooltipProvider delayDuration={100}>
       <div className={cn(
-        "flex h-screen w-[56px] flex-col items-center py-2 bg-[#eef3f4] dark:bg-[#111315] border-r border-black/10 dark:border-white/10",
+        "flex h-screen w-[64px] flex-col items-center border-r border-white/35 bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.18),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.86),rgba(248,250,252,0.76))] py-3 shadow-[0_18px_50px_rgba(15,23,42,0.08)] backdrop-blur-3xl dark:border-white/10 dark:bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.14),transparent_28%),linear-gradient(180deg,rgba(10,12,18,0.92),rgba(6,8,14,0.84))]",
         className
       )}>
         <div className="flex flex-col items-center gap-1 mb-3">
@@ -30,7 +30,7 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
               <Button 
                 variant="ghost" 
                 size="icon" 
-                className="h-9 w-9 rounded-md hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
+                className="h-10 w-10 rounded-2xl border border-white/40 bg-white/70 shadow-sm transition-colors hover:bg-white dark:border-white/8 dark:bg-white/6 dark:hover:bg-white/10"
                 onClick={onExpand}
               >
                 <IliaGPTLogo size={24} />
@@ -48,7 +48,7 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
               <Button 
                 variant="ghost" 
                 size="icon" 
-                className="h-9 w-9 rounded-md hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
+                className="h-10 w-10 rounded-2xl border border-white/40 bg-white/70 shadow-sm transition-colors hover:bg-white dark:border-white/8 dark:bg-white/6 dark:hover:bg-white/10"
                 onClick={onNewChat}
                 data-testid="mini-button-new-chat"
               >
@@ -65,7 +65,7 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
               <Button 
                 variant="ghost" 
                 size="icon" 
-                className="h-9 w-9 rounded-md hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
+                className="h-10 w-10 rounded-2xl border border-white/40 bg-white/70 shadow-sm transition-colors hover:bg-white dark:border-white/8 dark:bg-white/6 dark:hover:bg-white/10"
                 data-testid="mini-button-search"
               >
                 <Search className="h-4 w-4 text-foreground" />
@@ -81,7 +81,7 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
               <Button 
                 variant="ghost" 
                 size="icon" 
-                className="h-9 w-9 rounded-md hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
+                className="h-10 w-10 rounded-2xl border border-white/40 bg-white/70 shadow-sm transition-colors hover:bg-white dark:border-white/8 dark:bg-white/6 dark:hover:bg-white/10"
                 data-testid="mini-button-library"
               >
                 <Library className="h-4 w-4 text-foreground" />
@@ -97,7 +97,7 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
               <Button 
                 variant="ghost" 
                 size="icon" 
-                className="h-9 w-9 rounded-md hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
+                className="h-10 w-10 rounded-2xl border border-white/40 bg-white/70 shadow-sm transition-colors hover:bg-white dark:border-white/8 dark:bg-white/6 dark:hover:bg-white/10"
                 data-testid="mini-button-gpts"
               >
                 <Bot className="h-4 w-4 text-foreground" />
@@ -115,7 +115,7 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
               <Button 
                 variant="ghost" 
                 size="icon" 
-                className="h-9 w-9 rounded-md hover:bg-black/[0.04] dark:hover:bg-white/[0.06] transition-colors"
+                className="h-10 w-10 rounded-2xl border border-white/40 bg-white/70 shadow-sm transition-colors hover:bg-white dark:border-white/8 dark:bg-white/6 dark:hover:bg-white/10"
                 data-testid="mini-button-user"
               >
                 <Avatar className="h-7 w-7">

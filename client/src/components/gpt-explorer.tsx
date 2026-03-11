@@ -156,12 +156,12 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt, onEd
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="liquid-shell w-screen h-screen max-w-none rounded-none border-0 bg-transparent p-0 gap-0 overflow-hidden" data-testid="gpt-explorer-dialog">
+      <DialogContent className="liquid-shell max-w-6xl h-[88vh] border-0 bg-transparent p-0 gap-0 overflow-hidden rounded-[32px]" data-testid="gpt-explorer-dialog">
         <VisuallyHidden>
           <DialogTitle>Explorar GPTs</DialogTitle>
           <DialogDescription>Descubre y crea versiones personalizadas de ChatGPT</DialogDescription>
         </VisuallyHidden>
-        <div className="flex flex-col h-full">
+        <div className="flex h-full flex-col bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.16),transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,255,255,0.88))] dark:bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.18),transparent_30%),linear-gradient(180deg,rgba(12,12,16,0.98),rgba(10,10,14,0.92))]">
           <div className="flex items-center justify-between border-b border-slate-200/70 px-6 py-4 dark:border-white/10">
             <div className="flex items-center gap-4">
               <span
@@ -196,12 +196,45 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt, onEd
           </div>
 
           <ScrollArea className="flex-1">
-            <div className="p-6">
-              <div className="text-center mb-8">
-                <h1 className="text-4xl font-bold mb-4">GPT</h1>
-                <p className="text-muted-foreground max-w-xl mx-auto">
-                  Descubre y crea versiones personalizadas de ChatGPT que combinen instrucciones, conocimientos adicionales y cualquier combinación de habilidades.
-                </p>
+            <div className="p-6 md:p-8">
+              <div className="mb-8 grid gap-5 rounded-[28px] border border-white/50 bg-white/72 p-6 shadow-[0_30px_80px_rgba(90,88,170,0.12)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/5 dark:shadow-[0_24px_80px_rgba(8,8,20,0.35)] md:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+                <div className="space-y-4">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-[#A5A0FF]/25 bg-[#A5A0FF]/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[#5b56d6] dark:border-[#A5A0FF]/20 dark:bg-[#A5A0FF]/12 dark:text-[#c9c6ff]">
+                    <Sparkles className="h-3.5 w-3.5" />
+                    GPT Workspace
+                  </div>
+                  <div className="space-y-3">
+                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950 dark:text-white">Descubre, combina y publica GPTs de alto nivel</h1>
+                    <p className="max-w-2xl text-sm leading-6 text-slate-600 dark:text-white/65">
+                      Explora asistentes curados para investigación, productividad, programación y automatización.
+                      Cada GPT puede combinar instrucciones, contexto propio y skills especializadas sin salir de tu flujo actual.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-3 md:grid-cols-1 xl:grid-cols-3">
+                  <div className="rounded-[22px] border border-white/60 bg-white/80 p-4 shadow-sm dark:border-white/10 dark:bg-white/6">
+                    <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-[#A5A0FF]/12 text-[#5b56d6] dark:bg-[#A5A0FF]/14 dark:text-[#cbc7ff]">
+                      <Bot className="h-5 w-5" />
+                    </div>
+                    <p className="text-2xl font-semibold text-slate-950 dark:text-white">{myGpts.length}</p>
+                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-white/45">Mis GPTs</p>
+                  </div>
+                  <div className="rounded-[22px] border border-white/60 bg-white/80 p-4 shadow-sm dark:border-white/10 dark:bg-white/6">
+                    <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-500/12 text-emerald-600 dark:bg-emerald-500/14 dark:text-emerald-300">
+                      <BarChart3 className="h-5 w-5" />
+                    </div>
+                    <p className="text-2xl font-semibold text-slate-950 dark:text-white">{gpts.length}</p>
+                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-white/45">Explorar</p>
+                  </div>
+                  <div className="rounded-[22px] border border-white/60 bg-white/80 p-4 shadow-sm dark:border-white/10 dark:bg-white/6">
+                    <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-sky-500/12 text-sky-600 dark:bg-sky-500/14 dark:text-sky-300">
+                      <LinkIcon className="h-5 w-5" />
+                    </div>
+                    <p className="text-2xl font-semibold text-slate-950 dark:text-white">{categories.length || defaultCategories.length}</p>
+                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-white/45">Categorías</p>
+                  </div>
+                </div>
               </div>
 
               <div className="relative max-w-xl mx-auto mb-8">
@@ -381,7 +414,7 @@ function GptCard({ gpt, index, onClick, showEdit, onEdit }: GptCardProps) {
   return (
     <div
       className={cn(
-        "liquid-card group relative flex items-start gap-4 rounded-[22px] p-4 cursor-pointer transition-all duration-200",
+        "liquid-card group relative flex items-start gap-4 rounded-[24px] p-4 cursor-pointer transition-all duration-300 border border-white/45 bg-white/72 shadow-sm hover:-translate-y-1 hover:shadow-[0_24px_40px_rgba(96,90,190,0.12)] dark:border-white/8 dark:bg-white/5",
         isPopular
           ? "border-primary/20"
           : "hover:bg-white/80 dark:hover:bg-slate-900/70",

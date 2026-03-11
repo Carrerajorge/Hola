@@ -178,7 +178,9 @@ function EmptyState({ filter }: { filter: FilterType }) {
       className="flex flex-col items-center justify-center py-16 text-center"
       data-testid="empty-state"
     >
-      <FolderOpen className="h-16 w-16 text-muted-foreground/50 mb-4" />
+      <div className="mb-5 rounded-[28px] border border-[#A5A0FF]/18 bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.24),transparent_55%),linear-gradient(180deg,rgba(165,160,255,0.08),rgba(255,255,255,0.75))] p-6 shadow-[0_20px_60px_rgba(96,90,190,0.14)] dark:border-[#A5A0FF]/12 dark:bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.24),transparent_55%),linear-gradient(180deg,rgba(165,160,255,0.09),rgba(18,18,26,0.8))]">
+        <FolderOpen className="h-16 w-16 text-[#756ef1]" />
+      </div>
       <p className="text-lg font-medium text-muted-foreground">
         {messages[filter]}
       </p>
@@ -205,7 +207,7 @@ function MediaThumbnail({
 
   return (
     <div
-      className="group relative flex flex-col h-full cursor-pointer rounded-3xl border border-border/50 bg-card overflow-hidden hover:bg-[#A5A0FF]/[0.02] hover:border-[#A5A0FF]/40 transition-all duration-300 hover:shadow-lg hover:shadow-[#A5A0FF]/10 hover:-translate-y-1"
+      className="group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-[28px] border border-white/40 bg-white/72 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-[#A5A0FF]/40 hover:bg-[#A5A0FF]/[0.03] hover:shadow-lg hover:shadow-[#A5A0FF]/10 dark:border-white/8 dark:bg-white/5"
       onClick={onClick}
       data-testid={`media-item-${item.uuid}`}
     >
@@ -643,14 +645,25 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent
-          className="liquid-shell max-w-none w-screen h-screen max-h-screen rounded-none border-0 bg-transparent p-0 gap-0"
+          className="liquid-shell max-w-7xl h-[88vh] max-h-[88vh] rounded-[32px] border-0 bg-transparent p-0 gap-0 overflow-hidden"
           data-testid="user-library-dialog"
         >
-          <DialogHeader className="px-6 py-4 border-b border-slate-200/70 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 dark:border-white/10">
+          <DialogHeader className="border-b border-slate-200/70 bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.18),transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,255,255,0.88))] px-6 py-5 backdrop-blur-2xl supports-[backdrop-filter]:bg-background/60 dark:border-white/10 dark:bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.18),transparent_32%),linear-gradient(180deg,rgba(12,12,16,0.98),rgba(10,10,14,0.92))]">
             <div className="flex items-center justify-between">
-              <DialogTitle className="text-xl font-semibold" data-testid="library-title">
-                Tu Biblioteca de Medios
-              </DialogTitle>
+              <div className="space-y-2">
+                <div className="inline-flex items-center gap-2 rounded-full border border-[#A5A0FF]/25 bg-[#A5A0FF]/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#5f57d8] dark:border-[#A5A0FF]/20 dark:bg-[#A5A0FF]/12 dark:text-[#cbc7ff]">
+                  <FolderOpen className="h-3.5 w-3.5" />
+                  Media Vault
+                </div>
+                <div>
+                  <DialogTitle className="text-2xl font-semibold tracking-tight" data-testid="library-title">
+                    Tu Biblioteca de Medios
+                  </DialogTitle>
+                  <p className="mt-1 text-sm text-slate-600 dark:text-white/60">
+                    Guarda, previsualiza y reutiliza documentos, imágenes, videos y archivos de trabajo desde un solo lugar.
+                  </p>
+                </div>
+              </div>
               <div className="flex items-center gap-4">
                 <StorageInfo stats={stats ?? null} />
                 <label htmlFor="file-upload">
@@ -679,10 +692,10 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
           <Tabs
             value={activeTab}
             onValueChange={handleTabChange}
-            className="flex flex-col h-[calc(100vh-73px)]"
+            className="flex flex-col h-[calc(88vh-104px)]"
           >
-            <div className="px-6 pt-4 pb-2 border-b bg-background">
-              <TabsList className="liquid-chip h-10" data-testid="library-tabs">
+            <div className="px-6 pt-4 pb-3 border-b bg-background/85 backdrop-blur-xl dark:bg-background/60">
+              <TabsList className="liquid-chip h-11" data-testid="library-tabs">
                 <TabsTrigger
                   value="all"
                   className="px-4"

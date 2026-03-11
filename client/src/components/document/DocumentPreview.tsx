@@ -17,6 +17,7 @@ import {
   Presentation,
   Loader2,
 } from "lucide-react";
+import { loadPdfJsDist } from "@/lib/pdfjs";
 
 export type DocumentType = "pdf" | "docx" | "xlsx" | "pptx";
 
@@ -34,9 +35,6 @@ interface PDFViewerState {
   currentPage: number;
   scale: number;
 }
-
-const PDFJS_CDN_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs";
-const PDFJS_WORKER_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs";
 
 const ZOOM_LEVELS = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3];
 const DEFAULT_ZOOM = 1;
@@ -159,8 +157,7 @@ const PDFViewer = memo(function PDFViewer({
     if (pdfjsLibRef.current) return pdfjsLibRef.current;
 
     try {
-      const pdfjsLib = await import(/* @vite-ignore */ PDFJS_CDN_URL);
-      pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+      const pdfjsLib = await loadPdfJsDist();
       pdfjsLibRef.current = pdfjsLib;
       return pdfjsLib;
     } catch (err) {

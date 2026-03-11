@@ -612,17 +612,17 @@ export function Sidebar({
   });
 
   const minimalSectionButtonClass =
-    "w-full justify-start gap-2.5 px-2.5 py-2 text-sm font-normal rounded-lg hover:bg-black/5 dark:hover:bg-white/10 hover:shadow-sm transition-all duration-300 liquid-button";
+    "w-full justify-start gap-2.5 rounded-xl border border-white/35 bg-white/55 px-2.5 py-2 text-sm font-normal shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-[#A5A0FF]/30 hover:bg-white/80 hover:shadow-[0_16px_34px_rgba(96,90,190,0.10)] dark:border-white/8 dark:bg-white/5 dark:hover:bg-white/8 liquid-button";
   const minimalIconChipClass =
-    "p-1 rounded-md bg-transparent text-muted-foreground transition-all duration-300 group-hover:scale-110 group-hover:text-foreground group-hover:drop-shadow-[0_0_8px_currentColor]";
+    "rounded-xl border border-white/40 bg-white/70 p-1.5 text-muted-foreground shadow-sm transition-all duration-300 group-hover:scale-110 group-hover:border-[#A5A0FF]/35 group-hover:text-foreground group-hover:shadow-[0_10px_24px_rgba(96,90,190,0.12)] dark:border-white/8 dark:bg-white/6";
 
   return (
     <nav
-      className={cn("flex h-screen w-[280px] flex-col bg-black/5 dark:bg-black/50 backdrop-blur-3xl border-r border-black/5 dark:border-white/10 text-sidebar-foreground transition-all duration-300", className)}
+      className={cn("relative flex h-screen w-[280px] flex-col overflow-hidden border-r border-white/40 bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.18),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.88),rgba(248,250,252,0.74))] text-sidebar-foreground shadow-[0_24px_60px_rgba(15,23,42,0.08)] backdrop-blur-3xl transition-all duration-300 dark:border-white/10 dark:bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.16),transparent_28%),linear-gradient(180deg,rgba(10,12,18,0.92),rgba(6,8,14,0.84))] dark:shadow-[0_24px_70px_rgba(2,6,23,0.38)]", className)}
       aria-label="Navegación principal y chats"
       role="navigation"
     >
-      <div className="flex h-14 items-center justify-between px-4 py-2 border-b border-black/10 dark:border-white/10">
+      <div className="flex h-14 items-center justify-between border-b border-white/35 px-4 py-2 dark:border-white/10">
         <div className="flex items-center gap-3 group cursor-pointer transition-all duration-300 hover:drop-shadow-[0_0_10px_currentColor]">
           <IliaGPTLogo size={30} />
           <div className="flex flex-col min-w-0">
@@ -652,7 +652,7 @@ export function Sidebar({
         <button
           ref={searchButtonRef}
           onClick={() => setIsSearchModalOpen(true)}
-          className="w-full mt-1 mb-2 group flex items-center justify-between gap-2 px-4 py-2 text-sm text-muted-foreground bg-white/50 dark:bg-black/50 hover:bg-white/80 dark:hover:bg-black/80 backdrop-blur-md shadow-inner border border-white/20 dark:border-white/10 rounded-full transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-primary/20 liquid-button"
+          className="group mb-2 mt-1 flex w-full items-center justify-between gap-2 rounded-full border border-white/45 bg-white/72 px-4 py-2 text-sm text-muted-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.85),0_14px_28px_rgba(15,23,42,0.06)] backdrop-blur-md transition-all duration-300 hover:border-[#A5A0FF]/30 hover:bg-white/88 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/8 focus:outline-none focus:ring-2 focus:ring-primary/20 liquid-button"
           data-testid="button-search-chats"
         >
           <div className="flex items-center gap-2">
@@ -1146,8 +1146,8 @@ export function Sidebar({
         )
       }
 
-      <div className="mt-auto border-t border-black/10 dark:border-white/10 p-3">
-        <div className="flex w-full items-center gap-2 rounded-md p-1">
+      <div className="mt-auto border-t border-white/35 p-3 dark:border-white/10">
+        <div className="flex w-full items-center gap-2 rounded-2xl border border-white/35 bg-white/60 p-1.5 shadow-sm backdrop-blur-xl dark:border-white/8 dark:bg-white/5">
           <Popover open={isUserMenuOpen} onOpenChange={setIsUserMenuOpen}>
             <PopoverTrigger asChild>
               <button className="flex flex-1 items-center gap-2 cursor-pointer rounded-lg px-2 py-1.5 hover:bg-white/60 dark:hover:bg-white/10 backdrop-blur-md border border-transparent hover:border-white/20 dark:hover:border-white/10 shadow-sm transition-all duration-300 liquid-button" data-testid="button-user-menu">

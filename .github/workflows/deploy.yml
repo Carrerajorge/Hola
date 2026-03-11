@@ -149,10 +149,38 @@ jobs:
       url: https://iliagpt.com
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
+      - name: Fetch deployment assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          fetch_asset() {
+            local asset_path="$1"
+            mkdir -p "$(dirname "${asset_path}")"
+            curl -fsSL \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github.raw" \
+              "https://api.github.com/repos/${REPO}/contents/${asset_path}?ref=${REF}" \
+              -o "${asset_path}"
+          }
+
+          for asset in \
+            docker-compose.infra.yml \
+            docker-compose.slot.yml \
+            nginx.conf \
+            nginx/maintenance.html \
+            scripts/deploy-bluegreen.sh \
+            scripts/rollback-bluegreen.sh \
+            scripts/health-dashboard.sh \
+            scripts/vps-bootstrap-bluegreen.sh \
+            scripts/prod-rigorous-checks.sh
+          do
+            fetch_asset "${asset}"
+          done
+
+          chmod +x scripts/*.sh
 
       - name: Validate deployment prerequisites
         env:
@@ -529,11 +557,38 @@ jobs:
       url: https://iliagpt.com
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
+      - name: Fetch deployment assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          fetch_asset() {
+            local asset_path="$1"
+            mkdir -p "$(dirname "${asset_path}")"
+            curl -fsSL \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github.raw" \
+              "https://api.github.com/repos/${REPO}/contents/${asset_path}?ref=${REF}" \
+              -o "${asset_path}"
+          }
+
+          for asset in \
+            docker-compose.infra.yml \
+            docker-compose.slot.yml \
+            nginx.conf \
+            nginx/maintenance.html \
+            scripts/deploy-bluegreen.sh \
+            scripts/rollback-bluegreen.sh \
+            scripts/health-dashboard.sh \
+            scripts/vps-bootstrap-bluegreen.sh \
+            scripts/prod-rigorous-checks.sh
+          do
+            fetch_asset "${asset}"
+          done
+
+          chmod +x scripts/*.sh
 
       - name: Validate deployment prerequisites
         env:
