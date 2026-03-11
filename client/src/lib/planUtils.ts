@@ -63,7 +63,8 @@ export function shouldShowUpgradeCTA(user?: UserPlan | null): boolean {
   if (!user) return true;
 
   const role = toLower(user.role);
-  if (role === "admin" || role === "superadmin") {
+  const effectivePlan = getEffectivePlan(user);
+  if (role === "admin" || role === "superadmin" || effectivePlan === "admin") {
     return false;
   }
 

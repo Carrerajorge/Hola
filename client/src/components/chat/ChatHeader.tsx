@@ -64,7 +64,14 @@ interface ChatHeaderProps {
     onEditChatTitle?: (id: string, newTitle: string) => void;
     onMoveToFolder?: (chatId: string, folderId: string | null) => void;
     onCreateFolder?: (name: string) => void;
-    userPlanInfo?: { plan: string; isAdmin?: boolean; isPaid?: boolean } | null;
+    userPlanInfo?: {
+        plan: string;
+        role?: string | null;
+        isAdmin?: boolean;
+        isPaid?: boolean;
+        subscriptionStatus?: string | null;
+        subscriptionPlan?: string | null;
+    } | null;
 }
 
 export function ChatHeader({

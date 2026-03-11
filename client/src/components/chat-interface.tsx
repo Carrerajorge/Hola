@@ -1027,12 +1027,18 @@ export function ChatInterface({
 
     return {
       plan: userPlanState?.plan || userPlanInfo?.plan || "free",
-      isAdmin: Boolean(userPlanState?.isAdmin ?? userPlanInfo?.isAdmin),
+      role: (user as any)?.role || null,
+      isAdmin: Boolean(
+        userPlanInfo?.isAdmin ||
+        userPlanState?.isAdmin ||
+        userPlanState?.plan === "admin" ||
+        userPlanInfo?.plan === "admin"
+      ),
       isPaid: Boolean(userPlanState?.isPaid ?? userPlanInfo?.isPaid),
       subscriptionStatus: userPlanState?.subscriptionStatus ?? userPlanInfo?.subscriptionStatus ?? null,
       subscriptionPlan: userPlanState?.subscriptionPlan ?? userPlanInfo?.subscriptionPlan ?? null,
     };
-  }, [userPlanInfo, userPlanState]);
+  }, [user, userPlanInfo, userPlanState]);
 
   const agentMode = useAgentMode(chatId || "");
 
