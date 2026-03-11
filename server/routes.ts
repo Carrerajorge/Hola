@@ -250,7 +250,6 @@ export async function registerRoutes(
   // Session + Passport are initialized in server/index.ts (before csrf/rateLimiter).
 
   // Passport Auth Routes
-<<<<<<< HEAD
   // Google (only register if credentials are configured)
   if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
     app.get("/api/auth/google", (req, res, next) => {
@@ -268,22 +267,6 @@ export async function registerRoutes(
         prompt: "consent select_account",
       })(req, res, next);
     });
-=======
-  // Google (always register to prevent 404, throw helpful errors internally if misconfigured)
-  app.get("/api/auth/google", (req, res, next) => {
-    console.log("[Auth] Hit /api/auth/google endpoint", { id: !!env.GOOGLE_CLIENT_ID, secret: !!env.GOOGLE_CLIENT_SECRET });
-    if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
-      return res.status(503).json({ error: "Google authentication is not configured on this server" });
-    }
-    passport.authenticate("google", {
-      scope: ["openid", "email", "profile"],
-      accessType: "offline",
-      prompt: "consent select_account",
-    })(req, res, next);
-  });
-  
-  if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
->>>>>>> eeea2c5119542b9153533255fb8caa24dfac2306
     app.get("/api/auth/google/callback",
       (req, res, next) => {
         passport.authenticate("google", {
@@ -733,21 +716,21 @@ export async function registerRoutes(
 
   const { createPublicReleasesRouter } = await import("./routes/releasesRouter");
   // DEBUG: Temporary endpoint to list all registered Express routes
-    app.get("/api/debug/routes", (req, res) => {
-      const routePaths: string[] = [];
-      app._router.stack.forEach((middleware: any) => {
-        if (middleware.route) { // Routes registered directly on the app
-          routePaths.push(middleware.route.path);
-        } else if (middleware.name === 'router') { // Routers mounted on the app
-          middleware.handle.stack.forEach((handler: any) => {
-            if (handler.route) {
-              routePaths.push(handler.route.path);
-            }
-          });
-        }
-      });
-      res.json({ routes: routePaths });
+  app.get("/api/debug/routes", (req, res) => {
+    const routePaths: string[] = [];
+    app._router.stack.forEach((middleware: any) => {
+      if (middleware.route) { // Routes registered directly on the app
+        routePaths.push(middleware.route.path);
+      } else if (middleware.name === 'router') { // Routers mounted on the app
+        middleware.handle.stack.forEach((handler: any) => {
+          if (handler.route) {
+            routePaths.push(handler.route.path);
+          }
+        });
+      }
     });
+    res.json({ routes: routePaths });
+  });
 
   app.use("/api/public/releases", createPublicReleasesRouter());
 

@@ -312,38 +312,14 @@ class AuthStorage implements IAuthStorage {
         RETURNING id, email, username, role, auth_provider
       `);
 
-<<<<<<< HEAD
       const newUserRow = (rawResult as any).rows[0];
       // Map back to expected User shape (simplified)
       const newUser = {
-         ...mapAuthUserRow(newUserRow),
-         // Ensure critical fields are set even if mapAuthUserRow misses them from partial select
-         id: newUserRow.id,
-         email: newUserRow.email
+        ...mapAuthUserRow(newUserRow),
+        // Ensure critical fields are set even if mapAuthUserRow misses them from partial select
+        id: newUserRow.id,
+        email: newUserRow.email
       };
-=======
-      // Step 4: Create new user + identity
-      const [newUser] = await db
-        .insert(users)
-        .values({
-          id: normalizedUser.id,
-          orgId: normalizedUser.id,
-          email: normalizedUser.email,
-          emailCanonical: canonical,
-          username: normalizedUser.username ?? (normalizedUser.email ? normalizedUser.email.split("@")[0] : null),
-          fullName: normalizedUser.fullName,
-          firstName: normalizedUser.firstName,
-          lastName: normalizedUser.lastName,
-          profileImageUrl: normalizedUser.profileImageUrl,
-          authProvider: normalizedUser.authProvider ?? "email",
-          emailVerified: normalizedUser.emailVerified ?? "false",
-          role: normalizedUser.role ?? "user",
-          plan: "free",
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .returning(RETURNING_COLUMNS);
->>>>>>> eeea2c5119542b9153533255fb8caa24dfac2306
 
       await ensureIdentityLink(
         newUser.id,
@@ -372,7 +348,7 @@ class AuthStorage implements IAuthStorage {
 
   private bestEffortPostLogin(userId: string): void {
     Promise.resolve().then(async () => {
-      try { await autoAcceptWorkspaceInvitationForUser(userId); } catch {}
+      try { await autoAcceptWorkspaceInvitationForUser(userId); } catch { }
     });
   }
 
@@ -393,8 +369,8 @@ class AuthStorage implements IAuthStorage {
 
       authEventBus.publish("USER_LOGIN", id, { ip: loginData.ipAddress });
 
-      try { await db.insert(userSettings).values({ userId: id }).onConflictDoNothing(); } catch {}
-      try { await db.insert(libraryStorage).values({ userId: id }).onConflictDoNothing(); } catch {}
+      try { await db.insert(userSettings).values({ userId: id }).onConflictDoNothing(); } catch { }
+      try { await db.insert(libraryStorage).values({ userId: id }).onConflictDoNothing(); } catch { }
     } catch (error: any) {
       console.error(`[AuthStorage] updateUserLogin failed for id=${id}:`, error.message);
       throw error;
