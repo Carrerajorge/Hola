@@ -99,7 +99,7 @@ function VirtualizedMediaGrid({ items, onSelect, onDelete, onDownload }: Virtual
   return (
     <div className="grid grid-cols-1 gap-5 overflow-y-auto px-6 py-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       {items.map((item) => (
-        <div key={item.uuid} className="min-h-[200px]">
+        <div key={item.uuid} className="h-[260px]">
           <MediaThumbnail
             item={item}
             onClick={() => onSelect(item)}
@@ -164,7 +164,7 @@ function MediaThumbnail({
 
   return (
     <div
-      className="group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-[28px] border border-white/40 bg-white/72 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-[#A5A0FF]/40 hover:bg-[#A5A0FF]/[0.03] hover:shadow-lg hover:shadow-[#A5A0FF]/10 dark:border-white/8 dark:bg-white/5"
+      className="group relative flex h-full min-h-0 cursor-pointer flex-col overflow-hidden rounded-[28px] border border-white/40 bg-white/72 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-[#A5A0FF]/40 hover:bg-[#A5A0FF]/[0.03] hover:shadow-lg hover:shadow-[#A5A0FF]/10 dark:border-white/8 dark:bg-white/5"
       onClick={onClick}
       data-testid={`media-item-${item.uuid}`}
     >
