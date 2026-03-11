@@ -198,7 +198,13 @@ export function GptActionMenu({
                         {Object.entries(modelsByProvider).map(([provider, models], providerIndex) => (
                             <div key={provider} className={cn(providerIndex > 0 && "pt-3 border-t")}>
                                 <p className="text-xs font-medium text-muted-foreground mb-2">
-                                    {provider === "xai" ? "xAI" : provider === "gemini" ? "Google Gemini" : safeText(provider, "provider")}
+                                    {provider === "xai"
+                                        ? "xAI"
+                                        : provider === "gemini" || provider === "google"
+                                            ? "Google Gemini"
+                                            : provider === "google-gemini-cli"
+                                                ? "Gemini CLI OAuth"
+                                                : safeText(provider, "provider")}
                                 </p>
                                 <div className="space-y-1">
                                     {models.map((model) => {

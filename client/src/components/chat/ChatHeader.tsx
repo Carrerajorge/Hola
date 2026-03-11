@@ -96,7 +96,7 @@ export function ChatHeader({
     const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
     const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
     const currentInput = useChatStore((s) => s.input);
-    const { availableModels, selectedModelId, setSelectedModelId } = useModelAvailability();
+    const { availableModels, selectedModelId, setSelectedModelId, refetch } = useModelAvailability();
     const isChatProcessing = useChatIsProcessing(chatId);
 
     const firstMessageSnippet = useMemo(() => {
@@ -188,6 +188,8 @@ export function ChatHeader({
                         onModelChange={handleModelChange}
                         modelChangeDisabled={isChatProcessing}
                         modelsByProvider={modelsByProvider}
+                        refetchModels={refetch}
+                        showGeminiCliOAuthButton={Boolean(userPlanInfo?.isAdmin)}
                         activeGptName={activeGpt?.name === 'ILIAGPT' ? undefined : activeGpt?.name}
                     />
                 )}

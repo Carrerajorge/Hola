@@ -20,7 +20,15 @@ export interface AvailableModel {
   contextWindow: number | null;
 }
 
-const PREFERRED_PROVIDER_ORDER = Object.freeze(["gemini", "openai", "anthropic", "deepseek", "xai"]);
+const PREFERRED_PROVIDER_ORDER = Object.freeze([
+  "google-gemini-cli",
+  "google",
+  "gemini",
+  "openai",
+  "anthropic",
+  "deepseek",
+  "xai",
+]);
 const DEFAULT_VISIBLE_MODEL_LIMIT = 3;
 
 export function shouldExposeLocalMockModels(hostname?: string): boolean {
@@ -31,6 +39,10 @@ export function shouldExposeLocalMockModels(hostname?: string): boolean {
 
 function isDeepSeekModel(model: AvailableModel): boolean {
   return model.provider.trim().toLowerCase() === "deepseek" || /^deepseek/i.test(model.modelId.trim());
+}
+
+function isGeminiCliModel(model: AvailableModel): boolean {
+  return model.provider.trim().toLowerCase() === "google-gemini-cli";
 }
 
 export function pickPreferredEnabledModel(
@@ -87,6 +99,22 @@ export function selectVisibleModels(params: {
     }
   }
 
+  const geminiCliModel = enabledModels.find((model) => isGeminiCliModel(model)) ?? null;
+  if (geminiCliModel && !visible.some((model) => model.id === geminiCliModel.id)) {
+    if (visible.length < DEFAULT_VISIBLE_MODEL_LIMIT) {
+      visible.push(geminiCliModel);
+    } else {
+      const replaceIndex = visible.findLastIndex(
+        (model) => !selected || (model.id !== selected.id && model.id !== deepSeekModel?.id),
+      );
+      if (replaceIndex >= 0) {
+        visible[replaceIndex] = geminiCliModel;
+      } else {
+        visible.push(geminiCliModel);
+      }
+    }
+  }
+
   return Array.from(new Map(visible.map((model) => [model.id, model])).values());
 }
 
@@ -133,7 +161,7 @@ interface ModelAvailabilityContextType {
   enableModel: (id: string) => Promise<void>;
   disableModel: (id: string) => Promise<void>;
   toggleModel: (id: string, enabled: boolean) => Promise<void>;
-  refetch: () => void;
+  refetch: () => Promise<unknown> | unknown;
   selectedModelId: string | null;
   setSelectedModelId: (id: string | null) => void;
 }

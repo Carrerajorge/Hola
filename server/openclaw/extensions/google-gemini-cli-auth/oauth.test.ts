@@ -235,6 +235,8 @@ describe("loginGeminiCliOAuth", () => {
     "OPENCLAW_GEMINI_OAUTH_CLIENT_SECRET",
     "GEMINI_CLI_OAUTH_CLIENT_ID",
     "GEMINI_CLI_OAUTH_CLIENT_SECRET",
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
     "GOOGLE_CLOUD_PROJECT",
     "GOOGLE_CLOUD_PROJECT_ID",
   ] as const;
@@ -311,6 +313,8 @@ describe("loginGeminiCliOAuth", () => {
     process.env.OPENCLAW_GEMINI_OAUTH_CLIENT_SECRET = "GOCSPX-test-client-secret"; // pragma: allowlist secret
     delete process.env.GEMINI_CLI_OAUTH_CLIENT_ID;
     delete process.env.GEMINI_CLI_OAUTH_CLIENT_SECRET;
+    delete process.env.GOOGLE_CLIENT_ID;
+    delete process.env.GOOGLE_CLIENT_SECRET;
     delete process.env.GOOGLE_CLOUD_PROJECT;
     delete process.env.GOOGLE_CLOUD_PROJECT_ID;
   });
@@ -386,6 +390,42 @@ describe("loginGeminiCliOAuth", () => {
         pluginType: "GEMINI",
       },
     });
+  });
+
+  it("falls back to GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET when Gemini-specific vars are absent", async () => {
+    delete process.env.OPENCLAW_GEMINI_OAUTH_CLIENT_ID;
+    delete process.env.OPENCLAW_GEMINI_OAUTH_CLIENT_SECRET;
+    process.env.GOOGLE_CLIENT_ID = "google-client-id.apps.googleusercontent.com";
+    process.env.GOOGLE_CLIENT_SECRET = "GOCSPX-google-client-secret";
+
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = getRequestUrl(input);
+      if (url === TOKEN_URL) {
+        return responseJson({
+          access_token: "access-token",
+          refresh_token: "refresh-token",
+          expires_in: 3600,
+        });
+      }
+      if (url === USERINFO_URL) {
+        return responseJson({ email: "admin@iliagpt.com" });
+      }
+      if (url === LOAD_PROD) {
+        return responseJson({
+          currentTier: { id: "standard-tier" },
+          cloudaicompanionProject: { id: "google-fallback-project" },
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    const { loginGeminiCliOAuth } = await import("./oauth.js");
+    const { authUrl, result } = await runRemoteLoginWithCapturedAuthUrl(loginGeminiCliOAuth);
+    const url = new URL(authUrl);
+
+    expect(url.searchParams.get("client_id")).toBe("google-client-id.apps.googleusercontent.com");
+    expect(result.projectId).toBe("google-fallback-project");
+    expect(result.email).toBe("admin@iliagpt.com");
   });
 
   it("falls back to GOOGLE_CLOUD_PROJECT when all loadCodeAssist endpoints fail", async () => {

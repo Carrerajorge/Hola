@@ -4,10 +4,15 @@ import { createServer } from "node:http";
 import { delimiter, dirname, join } from "node:path";
 import { fetchWithSsrFGuard, isWSL2Sync } from "openclaw/plugin-sdk/google-gemini-cli-auth";
 
-const CLIENT_ID_KEYS = ["OPENCLAW_GEMINI_OAUTH_CLIENT_ID", "GEMINI_CLI_OAUTH_CLIENT_ID"];
+const CLIENT_ID_KEYS = [
+  "OPENCLAW_GEMINI_OAUTH_CLIENT_ID",
+  "GEMINI_CLI_OAUTH_CLIENT_ID",
+  "GOOGLE_CLIENT_ID",
+];
 const CLIENT_SECRET_KEYS = [
   "OPENCLAW_GEMINI_OAUTH_CLIENT_SECRET",
   "GEMINI_CLI_OAUTH_CLIENT_SECRET",
+  "GOOGLE_CLIENT_SECRET",
 ];
 const REDIRECT_URI = "http://localhost:8085/oauth2callback";
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -274,6 +279,19 @@ function buildAuthUrl(challenge: string, verifier: string): string {
   return `${AUTH_URL}?${params.toString()}`;
 }
 
+export function startGeminiCliOAuthSession(): {
+  verifier: string;
+  authUrl: string;
+  redirectUri: string;
+} {
+  const { verifier, challenge } = generatePkce();
+  return {
+    verifier,
+    authUrl: buildAuthUrl(challenge, verifier),
+    redirectUri: REDIRECT_URI,
+  };
+}
+
 function parseCallbackInput(
   input: string,
   expectedState: string,
@@ -447,6 +465,20 @@ async function exchangeCodeForTokens(
     projectId,
     email,
   };
+}
+
+export async function completeGeminiCliOAuthSession(params: {
+  callbackInput: string;
+  verifier: string;
+}): Promise<GeminiCliOAuthCredentials> {
+  const parsed = parseCallbackInput(params.callbackInput, params.verifier);
+  if ("error" in parsed) {
+    throw new Error(parsed.error);
+  }
+  if (parsed.state !== params.verifier) {
+    throw new Error("OAuth state mismatch - please try again");
+  }
+  return await exchangeCodeForTokens(parsed.code, params.verifier);
 }
 
 async function getUserEmail(accessToken: string): Promise<string | undefined> {

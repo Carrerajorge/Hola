@@ -1289,7 +1289,8 @@ export function ChatInterface({
     }
     // Default: prefer Gemini models over others (Perplexity has no API key)
     const preferredModel = availableModels.find((m: any) =>
-      (m.provider === 'google' || m.provider === 'gemini') && m.modelId?.includes('gemini')
+      (m.provider === 'google-gemini-cli' || m.provider === 'google' || m.provider === 'gemini') &&
+      m.modelId?.includes('gemini')
     );
     return preferredModel || availableModels[0] || null;
   }, [selectedModelId, availableModels]);

@@ -35,6 +35,7 @@ import { createAppsIntegrationRouter } from "./routes/appsIntegrationRouter";
 import { createConnectorOAuthRouter } from "./routes/connectorOAuthRouter";
 import gmailOAuthRouter from "./routes/gmailOAuthRouter";
 import calendarOAuthRouter from "./routes/calendarOAuthRouter";
+import googleGeminiCliOAuthRouter from "./routes/googleGeminiCliOAuthRouter";
 import outlookOAuthRouter from "./routes/outlookOAuthRouter";
 import { createGmailMcpRouter } from "./mcp/gmailMcpServer";
 import healthRouter from "./routes/healthRouter";
@@ -107,6 +108,7 @@ import { generateAnonToken } from "./lib/anonToken";
 import { getUserConfig, setUserConfig, getDefaultConfig, validatePatterns, getFilterStats } from "./services/contentFilter";
 import { isModelEligibleForPublic } from "./services/modelIntegration";
 import { GEMINI_MODELS_REGISTRY, XAI_MODELS } from "./lib/modelRegistry";
+import { getGoogleGeminiCliBootstrapModel } from "./services/googleGeminiCliOAuthService";
 import { getLogs, getLogStats, type LogFilters } from "./lib/structuredLogger";
 import { getActiveRequests, getRequestStats } from "./lib/requestTracer";
 import { getAllServicesHealth, getOverallStatus, initializeHealthMonitoring } from "./lib/healthMonitor";
@@ -168,7 +170,7 @@ type PublicModelSummary = {
   contextWindow: number | null;
 };
 
-function getConfiguredBootstrapModels(): PublicModelSummary[] {
+async function getConfiguredBootstrapModels(): Promise<PublicModelSummary[]> {
   const models: PublicModelSummary[] = [];
 
   if ((env.DEEPSEEK_API_KEY || "").trim()) {
@@ -190,10 +192,15 @@ function getConfiguredBootstrapModels(): PublicModelSummary[] {
     });
   }
 
+  const geminiCliBootstrap = await getGoogleGeminiCliBootstrapModel();
+  if (geminiCliBootstrap) {
+    models.push(geminiCliBootstrap);
+  }
+
   return models;
 }
 
-function getPublicModelFallbacks(): PublicModelSummary[] {
+async function getPublicModelFallbacks(): Promise<PublicModelSummary[]> {
   return [
     {
       id: "fallback-gemini-2.5-flash",
@@ -221,18 +228,16 @@ function getPublicModelFallbacks(): PublicModelSummary[] {
       modelType: "TEXT",
       contextWindow: 2000000,
     },
-    ...getConfiguredBootstrapModels(),
+    ...(await getConfiguredBootstrapModels()),
   ];
 }
 
-function mergeConfiguredBootstrapModels(models: PublicModelSummary[]): PublicModelSummary[] {
+async function mergeConfiguredBootstrapModels(models: PublicModelSummary[]): Promise<PublicModelSummary[]> {
   const merged = [...models];
 
-  for (const bootstrap of getConfiguredBootstrapModels()) {
+  for (const bootstrap of await getConfiguredBootstrapModels()) {
     const alreadyVisible = merged.some((model) =>
-      model.id === bootstrap.id ||
-      model.provider === bootstrap.provider ||
-      model.modelId === bootstrap.modelId
+      model.id === bootstrap.id || model.provider === bootstrap.provider
     );
 
     if (!alreadyVisible) {
@@ -690,6 +695,7 @@ export async function registerRoutes(
   app.use("/api/integrations/wechat", createWeChatIntegrationRouter());
   app.use("/api/oauth/google/gmail", gmailOAuthRouter);
   app.use("/api/oauth/google/calendar", calendarOAuthRouter);
+  app.use("/api/oauth/google/gemini-cli", googleGeminiCliOAuthRouter);
   app.use("/api/oauth/microsoft", outlookOAuthRouter);
   app.use("/api/mcp/gmail", createGmailMcpRouter());
   app.use("/mcp/gmail", createGmailMcpRouter()); // Backward compatibility
@@ -1381,7 +1387,7 @@ export async function registerRoutes(
     });
     try {
       const allModels = await storage.getAiModels();
-      const models = mergeConfiguredBootstrapModels(allModels
+      const models = await mergeConfiguredBootstrapModels(allModels
         .filter((m: any) => isModelEligibleForPublic(m))
         .sort((a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0))
         .map((m: any) => toPublicModelSummary(m)));
@@ -1390,7 +1396,7 @@ export async function registerRoutes(
       console.error("[Models] Error fetching available models:", error);
       // Defensive fallback for production when DB schema is temporarily behind code.
       // Keep app shell functional (especially after logout) instead of surfacing 500.
-      res.json({ models: getPublicModelFallbacks() });
+      res.json({ models: await getPublicModelFallbacks() });
     }
   });
 

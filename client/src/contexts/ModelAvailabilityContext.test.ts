@@ -38,11 +38,23 @@ describe("ModelAvailabilityContext helpers", () => {
     expect(pickPreferredEnabledModel([grok, gemini], "gemini-2.5-flash", null)?.id).toBe("gemini-id");
   });
 
-  it("prefers safer providers before xai when no explicit default exists", () => {
+  it("prefers Google Gemini style providers before xai when no explicit default exists", () => {
     const grok = makeModel({ id: "grok-id", provider: "xai", modelId: "grok-4-fast" });
-    const gemini = makeModel({ id: "gemini-id", provider: "gemini", modelId: "gemini-2.5-flash" });
+    const gemini = makeModel({ id: "gemini-id", provider: "google", modelId: "gemini-2.5-flash" });
 
     expect(pickPreferredEnabledModel([grok, gemini], null, null)?.id).toBe("gemini-id");
+  });
+
+  it("prioritizes Gemini CLI OAuth when it is available", () => {
+    const geminiApi = makeModel({ id: "gemini-api-id", provider: "gemini", modelId: "gemini-2.5-flash" });
+    const geminiCli = makeModel({
+      id: "gemini-cli-id",
+      provider: "google-gemini-cli",
+      modelId: "gemini-3.1-pro-preview",
+      name: "Gemini 3.1 Pro (Google OAuth)",
+    });
+
+    expect(pickPreferredEnabledModel([geminiApi, geminiCli], null, null)?.id).toBe("gemini-cli-id");
   });
 
   it("keeps a DeepSeek model visible when additional models are collapsed", () => {
@@ -80,6 +92,28 @@ describe("ModelAvailabilityContext helpers", () => {
 
     expect(visible.some((model) => model.id === "anthropic-1")).toBe(true);
     expect(visible.some((model) => model.provider === "deepseek")).toBe(true);
+  });
+
+  it("keeps Gemini CLI OAuth visible when additional models are collapsed", () => {
+    const enabledModels = [
+      makeModel({ id: "google-1", name: "Gemini 2.5 Flash", provider: "google", modelId: "gemini-2.5-flash" }),
+      makeModel({ id: "xai-1", name: "Grok 4", provider: "xai", modelId: "grok-4" }),
+      makeModel({ id: "openai-1", name: "GPT-5 Mini", provider: "openai", modelId: "gpt-5-mini" }),
+      makeModel({
+        id: "gemini-cli-1",
+        name: "Gemini 3.1 Pro (Google OAuth)",
+        provider: "google-gemini-cli",
+        modelId: "gemini-3.1-pro-preview",
+      }),
+    ];
+
+    const visible = selectVisibleModels({
+      enabledModels,
+      selectedModelId: null,
+      showAdditionalModels: false,
+    });
+
+    expect(visible.some((model) => model.provider === "google-gemini-cli")).toBe(true);
   });
 
   it("returns all enabled models when additional models are expanded", () => {
