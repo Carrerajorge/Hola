@@ -1,12 +1,5 @@
-import { EventEmitter } from "events";
-import fs from "fs/promises";
-import path from "path";
-import makeWASocket, {
-Browsers,
-DisconnectReason,
-fetchLatestBaileysVersion,
-useMultiFileAuthState,
-type WASocket,
+import { EventEmitter } from "events"; import fs from "fs/promises"; import path from "path"; import makeWASocket, { Browsers, DisconnectReason, fetchLatestBaileysVersion, useMultiFileAuthState, type 
+WASocket,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 
@@ -197,11 +190,14 @@ phone: phone ?? null,
 }
 
 if (connection === "connecting") {
-this.setStatus(userId, {
-state: "connecting",
-error: null,
-phone: phone ?? null,
-});
+  const current = this.getStatus(userId);
+  if (current.state !== "pairing_code") {
+    this.setStatus(userId, {
+      state: "connecting",
+      error: null,
+      phone: phone ?? null,
+    });
+  }
 }
 
 if (connection === "open") {
@@ -245,28 +241,37 @@ return;
 
 if (shouldReconnect) {
 currentSession.socket = null;
-this.setStatus(userId, {
-state: "connecting",
-error: null,
-qr: null,
-code: null,
-});
+const current = this.getStatus(userId);
+if (current.state !== "pairing_code") {
+  this.setStatus(userId, {
+    state: "connecting",
+    error: null,
+    qr: null,
+    code: null,
+  });
+}
 void this.startWithOptions(userId, currentSession.phone ? { phone: currentSession.phone } : undefined);
 return;
 }
 
 currentSession.socket = null;
-this.setStatus(userId, {
-state: "disconnected",
-me: null,
-qr: null,
-code: null,
-error: boom?.message || "WhatsApp desconectado",
-phone: null,
-});
+const current = this.getStatus(userId);
+if (current.state === "pairing_code") {
+  this.setStatus(userId, {
+    error: boom?.message || "WhatsApp desconectado",
+  });
+} else {
+  this.setStatus(userId, {
+    state: "disconnected",
+    me: null,
+    qr: null,
+    code: null,
+    error: boom?.message || "WhatsApp desconectado",
+    phone: null,
+  });
+}
 }
 });
-
 if (phone) {
 const waitForPairing = async () => {
 for (let i = 0; i < 60; i += 1) {
