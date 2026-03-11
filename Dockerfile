@@ -20,19 +20,19 @@ COPY scripts/sync-mathjax-assets.cjs scripts/sync-mathjax-assets.cjs
 COPY . .
 RUN set -eux; \
   retry_npm() { \
-    attempt=1; \
-    while [ "$attempt" -le 3 ]; do \
-      if "$@"; then \
-        return 0; \
-      fi; \
-      if [ "$attempt" -eq 3 ]; then \
-        return 1; \
-      fi; \
-      sleep_seconds=$((attempt * 15)); \
-      echo "npm command failed on attempt ${attempt}; retrying in ${sleep_seconds}s..." >&2; \
-      sleep "$sleep_seconds"; \
-      attempt=$((attempt + 1)); \
-    done; \
+  attempt=1; \
+  while [ "$attempt" -le 3 ]; do \
+  if "$@"; then \
+  return 0; \
+  fi; \
+  if [ "$attempt" -eq 3 ]; then \
+  return 1; \
+  fi; \
+  sleep_seconds=$((attempt * 15)); \
+  echo "npm command failed on attempt ${attempt}; retrying in ${sleep_seconds}s..." >&2; \
+  sleep "$sleep_seconds"; \
+  attempt=$((attempt + 1)); \
+  done; \
   }; \
   export npm_config_fetch_retries=5; \
   export npm_config_fetch_timeout=120000; \
@@ -80,6 +80,7 @@ ENV SANDBOX_RUNNER_PORT=8080
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/server/openclaw ./server/openclaw
 
 EXPOSE 8080
 
@@ -124,6 +125,7 @@ COPY --chown=iliagpt:nodejs --from=builder /app/dist ./dist
 COPY --chown=iliagpt:nodejs --from=builder /app/migrations ./migrations
 COPY --chown=iliagpt:nodejs --from=builder /app/client/public ./client/public
 COPY --chown=iliagpt:nodejs --from=builder /app/package.json ./package.json
+COPY --chown=iliagpt:nodejs --from=builder /app/server/openclaw ./server/openclaw
 
 # Download Playwright's bundled Chromium browser binary.
 # System deps are installed above via apt-get; here we only fetch the browser.
