@@ -133,7 +133,7 @@ const FullScreenDialogContent = React.forwardRef<
       ref={ref}
       data-testid="dialog-content-fullscreen"
       className={cn(
-        "fixed inset-0 z-[60] block h-screen w-screen max-h-screen max-w-none overflow-hidden border-0 bg-transparent p-0 shadow-none outline-none data-[state=open]:animate-none data-[state=closed]:animate-none",
+        "!fixed !inset-0 !top-0 !right-0 !bottom-0 !left-0 z-[60] block h-screen w-screen max-h-screen max-w-none overflow-hidden border-0 bg-transparent p-0 shadow-none outline-none data-[state=open]:animate-none data-[state=closed]:animate-none",
         className
       )}
       {...props}

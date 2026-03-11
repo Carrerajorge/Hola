@@ -645,9 +645,10 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
         <FullScreenDialogContent
-          className="liquid-shell gap-0 overflow-hidden rounded-none border-0 bg-transparent p-0"
+          className="gap-0 overflow-hidden rounded-none border-0 bg-transparent p-0"
           data-testid="user-library-dialog"
         >
+          <div className="liquid-shell flex h-full min-h-0 flex-col">
           <DialogHeader className="border-b border-slate-200/70 bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.18),transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,255,255,0.88))] px-6 py-5 backdrop-blur-2xl supports-[backdrop-filter]:bg-background/60 dark:border-white/10 dark:bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.18),transparent_32%),linear-gradient(180deg,rgba(12,12,16,0.98),rgba(10,10,14,0.92))]">
             <div className="flex items-center justify-between">
               <div className="space-y-2">
@@ -775,6 +776,7 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
               </TabsContent>
             </div>
           </Tabs>
+          </div>
         </FullScreenDialogContent>
       </Dialog>
 

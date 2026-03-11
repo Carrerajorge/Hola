@@ -2958,7 +2958,7 @@ export function ChatInterface({
       const response = await apiFetch(`/api/files/${effectiveFileId}/content`);
       if (response.ok) {
         const data = await response.json();
-        if (data.status === "ready" && data.content) {
+        if (data.status === "ready" && (data.content || data.previewArtifact)) {
           if (data.previewArtifact) {
             setPreviewFileAttachment(null);
             setDocumentPreviewArtifact({
@@ -2970,7 +2970,7 @@ export function ChatInterface({
           setPreviewFileAttachment((prev: any) => prev ? {
             ...prev,
             fileId: effectiveFileId,
-            content: data.content,
+            content: data.content || "",
             isLoading: false,
             isProcessing: false,
           } : null);

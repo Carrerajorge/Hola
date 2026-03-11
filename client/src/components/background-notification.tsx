@@ -38,12 +38,19 @@ function BackgroundNotificationToast({
 
     return (
         <div
-            className="liquid-shell max-w-[360px] cursor-pointer rounded-2xl border border-white/14 bg-[linear-gradient(180deg,rgba(15,23,42,0.96),rgba(15,23,42,0.88))] p-4 text-white shadow-[0_28px_80px_rgba(2,6,23,0.45)] animate-in slide-in-from-right-5 fade-in duration-300 transition-all hover:-translate-y-0.5 hover:border-[#A5A0FF]/35"
+            className="liquid-shell relative max-w-[360px] cursor-pointer overflow-hidden rounded-2xl border border-white/14 bg-[linear-gradient(180deg,rgba(15,23,42,0.96),rgba(15,23,42,0.88))] p-4 text-white shadow-[0_28px_80px_rgba(2,6,23,0.45)] animate-in slide-in-from-right-5 fade-in duration-300 transition-all hover:-translate-y-0.5 hover:border-[#A5A0FF]/35"
             onClick={handleClick}
             role="button"
             tabIndex={0}
             onKeyDown={(e) => e.key === 'Enter' && handleClick()}
         >
+            <div
+                className={`absolute inset-x-0 top-0 h-1 ${
+                    isSuccess
+                        ? 'bg-[linear-gradient(90deg,rgba(16,185,129,0.9),rgba(52,211,153,0.4))]'
+                        : 'bg-[linear-gradient(90deg,rgba(244,63,94,0.9),rgba(251,113,133,0.45))]'
+                }`}
+            />
             <div className="flex items-start gap-3">
                     <div className={`flex-shrink-0 rounded-2xl border p-2 ${isSuccess ? 'border-emerald-400/25 bg-emerald-500/15 text-emerald-300' : 'border-rose-400/25 bg-rose-500/15 text-rose-300'}`}>
                         {isSuccess ? <CheckCircle className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
@@ -64,6 +71,9 @@ function BackgroundNotificationToast({
                             {notification.preview}
                         </p>
                     )}
+                    <p className="mt-2 text-[11px] font-medium uppercase tracking-[0.16em] text-white/45">
+                        Abrir chat
+                    </p>
                 </div>
 
                 <button

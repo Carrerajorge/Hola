@@ -1165,8 +1165,8 @@ export function ChannelsHubDialog({
   // Main hub: channel cards grid
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <FullScreenDialogContent className="liquid-shell overflow-hidden rounded-none border-0 bg-transparent p-0">
-        <div className="grid h-full min-h-0 gap-0 md:grid-cols-[minmax(340px,0.8fr)_minmax(0,1.2fr)]">
+      <FullScreenDialogContent className="overflow-hidden rounded-none border-0 bg-transparent p-0">
+        <div className="liquid-shell grid h-full min-h-0 gap-0 md:grid-cols-[minmax(340px,0.8fr)_minmax(0,1.2fr)]">
           <div className="overflow-auto border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.22),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.88),rgba(255,255,255,0.74))] p-6 dark:bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.22),transparent_28%),linear-gradient(180deg,rgba(18,18,24,0.96),rgba(12,12,18,0.92))] md:border-b-0 md:border-r">
             <DialogHeader className="space-y-4">
               <div className="inline-flex w-fit items-center gap-2 rounded-full border border-[#A5A0FF]/25 bg-[#A5A0FF]/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#5f57d8] dark:border-[#A5A0FF]/20 dark:bg-[#A5A0FF]/12 dark:text-[#cbc7ff]">

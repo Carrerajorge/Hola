@@ -612,9 +612,9 @@ export function Sidebar({
   });
 
   const minimalSectionButtonClass =
-    "w-full justify-start gap-2 rounded-lg border border-white/35 bg-white/55 px-2.5 py-1.5 text-[13px] font-normal shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-[#A5A0FF]/30 hover:bg-white/80 hover:shadow-[0_16px_34px_rgba(96,90,190,0.10)] dark:border-white/8 dark:bg-white/5 dark:hover:bg-white/8 liquid-button";
+    "w-full justify-start gap-1.5 rounded-xl border border-white/35 bg-white/55 px-2.5 py-[0.375rem] text-[12.5px] font-normal shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-[#A5A0FF]/30 hover:bg-white/80 hover:shadow-[0_16px_34px_rgba(96,90,190,0.10)] dark:border-white/8 dark:bg-white/5 dark:hover:bg-white/8 liquid-button";
   const minimalIconChipClass =
-    "rounded-lg border border-white/40 bg-white/70 p-1.25 text-muted-foreground shadow-sm transition-all duration-300 group-hover:scale-110 group-hover:border-[#A5A0FF]/35 group-hover:text-foreground group-hover:shadow-[0_10px_24px_rgba(96,90,190,0.12)] dark:border-white/8 dark:bg-white/6";
+    "rounded-lg border border-white/40 bg-white/70 p-[0.3125rem] text-muted-foreground shadow-sm transition-all duration-300 group-hover:scale-110 group-hover:border-[#A5A0FF]/35 group-hover:text-foreground group-hover:shadow-[0_10px_24px_rgba(96,90,190,0.12)] dark:border-white/8 dark:bg-white/6";
 
   return (
     <nav
@@ -646,13 +646,13 @@ export function Sidebar({
         </Button>
       </div>
 
-      <div className="px-3 py-2.5 flex flex-col gap-1">
+      <div className="px-3 py-2 flex flex-col gap-0.5">
         <NewChatButton onNewChat={onNewChat} variant="full" showTooltip={false} />
 
         <button
           ref={searchButtonRef}
           onClick={() => setIsSearchModalOpen(true)}
-          className="group mb-1.5 mt-0.5 flex w-full items-center justify-between gap-2 rounded-full border border-white/45 bg-white/72 px-4 py-1.5 text-sm text-muted-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.85),0_14px_28px_rgba(15,23,42,0.06)] backdrop-blur-md transition-all duration-300 hover:border-[#A5A0FF]/30 hover:bg-white/88 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/8 focus:outline-none focus:ring-2 focus:ring-primary/20 liquid-button"
+          className="group mb-1 mt-0.5 flex w-full items-center justify-between gap-2 rounded-full border border-white/45 bg-white/72 px-4 py-[0.375rem] text-sm text-muted-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.85),0_14px_28px_rgba(15,23,42,0.06)] backdrop-blur-md transition-all duration-300 hover:border-[#A5A0FF]/30 hover:bg-white/88 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/8 focus:outline-none focus:ring-2 focus:ring-primary/20 liquid-button"
           data-testid="button-search-chats"
         >
           <div className="flex items-center gap-2">
@@ -664,7 +664,7 @@ export function Sidebar({
           </kbd>
         </button>
 
-        <div className="space-y-0.5 mt-0.5">
+        <div className="space-y-px mt-0.5">
           <Button
             variant="ghost"
             className={cn(minimalSectionButtonClass, "group")}
@@ -689,7 +689,7 @@ export function Sidebar({
           </Button>
           <Button
             variant="ghost"
-            className={cn(minimalSectionButtonClass, "group h-auto py-1.25")}
+            className={cn(minimalSectionButtonClass, "group h-auto py-[0.375rem]")}
             onClick={onOpenSkills}
             data-testid="button-skills"
           >
@@ -746,7 +746,7 @@ export function Sidebar({
         </div>
       </div>
 
-      <Separator className="mx-4 my-2 w-auto" />
+      <Separator className="mx-4 my-1.5 w-auto" />
 
       <ScrollArea className="flex-1 px-2 liquid-scroll [&_[data-radix-scroll-area-viewport]]:scrollbar-thin [&_[data-radix-scroll-area-viewport]]:scrollbar-thumb-muted-foreground/30 [&_[data-radix-scroll-area-viewport]]:scrollbar-track-transparent hover:[&_[data-radix-scroll-area-viewport]]:scrollbar-thumb-muted-foreground/50">
         <div className="flex flex-col gap-4 pb-4">

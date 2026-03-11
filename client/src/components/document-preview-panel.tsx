@@ -274,6 +274,55 @@ const CSVPreview = memo(function CSVPreview({ data }: { data: any }) {
   return <ExcelPreview data={data} />;
 });
 
+const PdfPreview = memo(function PdfPreview({
+  data,
+  url,
+  name,
+}: {
+  data: any;
+  url?: string;
+  name: string;
+}) {
+  const textContent = useMemo(() => {
+    if (!data) return "";
+    if (typeof data === "string") return data;
+    if (typeof data?.text === "string") return data.text;
+    return "";
+  }, [data]);
+
+  if (url) {
+    return (
+      <div className="h-full p-4" data-testid="pdf-preview-content">
+        <div className="h-full min-h-[72vh] overflow-hidden rounded-2xl border border-border bg-white shadow-sm dark:bg-black/20">
+          <iframe
+            src={url}
+            title={`Vista previa de ${name}`}
+            className="h-full min-h-[72vh] w-full"
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (textContent.trim()) {
+    return (
+      <div className="p-4" data-testid="pdf-preview-text">
+        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <pre className="whitespace-pre-wrap text-sm leading-6 text-foreground">
+            {textContent}
+          </pre>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-center h-full text-muted-foreground" data-testid="pdf-preview-empty">
+      <p>No hay contenido PDF disponible para previsualizar</p>
+    </div>
+  );
+});
+
 const GenericPreview = memo(function GenericPreview({ data, name }: { data: any; name: string }) {
   const content = useMemo(() => {
     if (!data) return null;
@@ -317,8 +366,21 @@ export const DocumentPreviewPanel = memo(function DocumentPreviewPanel({
   const typeLabel = getDocumentTypeLabel(category);
 
   const handleDownload = () => {
-    if (artifact && onDownload) {
+    if (!artifact) return;
+
+    if (onDownload) {
       onDownload(artifact);
+    }
+
+    if (!artifact.data?.base64 && artifact.url) {
+      const anchor = document.createElement("a");
+      anchor.href = artifact.url;
+      anchor.download = artifact.name;
+      anchor.target = "_blank";
+      anchor.rel = "noreferrer";
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
     }
   };
 
@@ -351,6 +413,8 @@ export const DocumentPreviewPanel = memo(function DocumentPreviewPanel({
     }
 
     switch (category) {
+      case "pdf":
+        return <PdfPreview data={artifact.data} url={artifact.url} name={artifact.name} />;
       case "word":
         return <WordPreview data={artifact.data} />;
       case "excel":

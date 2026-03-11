@@ -157,14 +157,14 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt, onEd
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <FullScreenDialogContent
-        className="liquid-shell gap-0 overflow-hidden rounded-none border-0 bg-transparent p-0"
+        className="gap-0 overflow-hidden rounded-none border-0 bg-transparent p-0"
         data-testid="gpt-explorer-dialog"
       >
         <VisuallyHidden>
           <DialogTitle>Explorar GPTs</DialogTitle>
           <DialogDescription>Descubre y crea versiones personalizadas de ChatGPT</DialogDescription>
         </VisuallyHidden>
-        <div className="flex h-full min-h-0 flex-col bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.16),transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,255,255,0.88))] dark:bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.18),transparent_30%),linear-gradient(180deg,rgba(12,12,16,0.98),rgba(10,10,14,0.92))]">
+        <div className="liquid-shell flex h-full min-h-0 flex-col bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.16),transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,255,255,0.88))] dark:bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.18),transparent_30%),linear-gradient(180deg,rgba(12,12,16,0.98),rgba(10,10,14,0.92))]">
           <div className="flex items-center justify-between border-b border-slate-200/70 px-6 py-4 dark:border-white/10">
             <div className="flex items-center gap-4">
               <span

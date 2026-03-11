@@ -8,9 +8,15 @@ let soundEnabled = true;
 let primed = false;
 
 function getAudioContext(): AudioContext | null {
-    if (!audioContext && typeof window !== 'undefined' && window.AudioContext) {
+    if (!audioContext && typeof window !== 'undefined') {
         try {
-            audioContext = new AudioContext();
+            const AudioContextCtor =
+                window.AudioContext ||
+                (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+            if (!AudioContextCtor) {
+                return null;
+            }
+            audioContext = new AudioContextCtor();
         } catch (e) {
             console.warn('[NotificationSound] Failed to create AudioContext:', e);
             return null;
@@ -51,10 +57,14 @@ export function primeNotificationAudio(): void {
 
     const cleanup = () => {
         window.removeEventListener("pointerdown", unlock);
+        window.removeEventListener("mousedown", unlock);
+        window.removeEventListener("touchstart", unlock);
         window.removeEventListener("keydown", unlock);
     };
 
     window.addEventListener("pointerdown", unlock, { once: true });
+    window.addEventListener("mousedown", unlock, { once: true });
+    window.addEventListener("touchstart", unlock, { once: true });
     window.addEventListener("keydown", unlock, { once: true });
 }
 

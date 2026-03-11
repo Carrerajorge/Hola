@@ -1017,19 +1017,109 @@ function buildStructuredPreviewArtifact(params: {
       };
 
     case "pdf":
+      return {
+        name: fileName,
+        type: "pdf",
+        mimeType,
+        data: {
+          text: sections
+            .flatMap((section) => section.previewData.map((row) => String(row[0] ?? "").trim()))
+            .filter(Boolean)
+            .join("\n\n"),
+        },
+      };
+
     case "rtf":
       return {
         name: fileName,
-        type: "document",
+        type: "word",
         mimeType,
-        data: sections
-          .flatMap((section) => section.previewData.map((row) => String(row[0] ?? "").trim()))
-          .filter(Boolean)
-          .join("\n\n"),
+        data: {
+          content: sections
+            .flatMap((section) => section.previewData.map((row) => String(row[0] ?? "").trim()))
+            .filter(Boolean)
+            .join("\n\n"),
+        },
       };
 
     default:
       return null;
+  }
+}
+
+function buildStructuredPreviewText(
+  artifact:
+    | {
+        name: string;
+        type: string;
+        mimeType: string;
+        data: unknown;
+      }
+    | null
+    | undefined,
+): string {
+  if (!artifact?.data) {
+    return "";
+  }
+
+  if (typeof artifact.data === "string") {
+    return artifact.data.trim();
+  }
+
+  if (artifact.type === "word") {
+    const content = (artifact.data as { content?: unknown }).content;
+    return typeof content === "string" ? content.trim() : "";
+  }
+
+  if (artifact.type === "pdf") {
+    const text = (artifact.data as { text?: unknown }).text;
+    return typeof text === "string" ? text.trim() : "";
+  }
+
+  if (artifact.type === "ppt") {
+    const slides = Array.isArray((artifact.data as { slides?: unknown[] }).slides)
+      ? ((artifact.data as { slides: Array<{ title?: unknown; content?: unknown }> }).slides)
+      : [];
+    return slides
+      .map((slide, index) => {
+        const title = typeof slide.title === "string" ? slide.title.trim() : `Slide ${index + 1}`;
+        const content = Array.isArray(slide.content)
+          ? slide.content.map((item) => String(item ?? "").trim()).filter(Boolean).join("\n")
+          : typeof slide.content === "string"
+            ? slide.content.trim()
+            : "";
+        return [title, content].filter(Boolean).join("\n");
+      })
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  if (artifact.type === "excel") {
+    const sheets = Array.isArray((artifact.data as { sheets?: unknown[] }).sheets)
+      ? ((artifact.data as {
+          sheets: Array<{ name?: unknown; data?: unknown[][] }>;
+        }).sheets)
+      : [];
+
+    return sheets
+      .map((sheet) => {
+        const name = typeof sheet.name === "string" ? sheet.name.trim() : "Sheet";
+        const rows = Array.isArray(sheet.data) ? sheet.data : [];
+        const tabularPreview = rows
+          .slice(0, 25)
+          .map((row) => (Array.isArray(row) ? row.map((cell) => String(cell ?? "")).join("\t") : ""))
+          .filter(Boolean)
+          .join("\n");
+        return [name, tabularPreview].filter(Boolean).join("\n");
+      })
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  try {
+    return JSON.stringify(artifact.data, null, 2);
+  } catch {
+    return "";
   }
 }
 
@@ -2306,7 +2396,7 @@ export function createFilesRouter() {
         return res.status(202).json({ status: file.status, content: null });
       }
       const chunks = await storage.getFileChunks(req.params.id);
-      const content = chunks
+      let content = chunks
         .sort((a, b) => a.chunkIndex - b.chunkIndex)
         .map(c => c.content)
         .join("\n");
@@ -2324,6 +2414,10 @@ export function createFilesRouter() {
         } catch (previewError) {
           console.warn("[FilesRouter] Structured preview unavailable:", previewError);
         }
+      }
+
+      if (!content.trim() && previewArtifact) {
+        content = buildStructuredPreviewText(previewArtifact);
       }
 
       res.json({
