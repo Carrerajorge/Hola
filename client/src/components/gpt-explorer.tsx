@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useDeferredValue } from "react";
 import { SkeletonCard } from "@/components/skeletons";
-import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, FullScreenDialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -156,8 +156,8 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt, onEd
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="liquid-shell !left-0 !top-0 !h-screen !w-screen !max-w-none !translate-x-0 !translate-y-0 gap-0 overflow-hidden !rounded-none border-0 bg-transparent p-0"
+      <FullScreenDialogContent
+        className="liquid-shell gap-0 overflow-hidden rounded-none border-0 bg-transparent p-0"
         data-testid="gpt-explorer-dialog"
       >
         <VisuallyHidden>
@@ -390,7 +390,7 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt, onEd
             </div>
           </ScrollArea>
         </div>
-      </DialogContent>
+      </FullScreenDialogContent>
     </Dialog>
   );
 }

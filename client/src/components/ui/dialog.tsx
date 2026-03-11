@@ -123,6 +123,34 @@ const DialogContent = React.forwardRef<
 ))
 DialogContent.displayName = DialogPrimitive.Content.displayName
 
+const FullScreenDialogContent = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
+>(({ className, children, ...props }, ref) => (
+  <DialogPortal>
+    <DialogOverlay className="data-[state=open]:animate-none data-[state=closed]:animate-none" />
+    <DialogPrimitive.Content
+      ref={ref}
+      data-testid="dialog-content-fullscreen"
+      className={cn(
+        "fixed inset-0 z-[60] block h-screen w-screen max-h-screen max-w-none overflow-hidden border-0 bg-transparent p-0 shadow-none outline-none data-[state=open]:animate-none data-[state=closed]:animate-none",
+        className
+      )}
+      {...props}
+    >
+      {children}
+      <DialogPrimitive.Close
+        data-testid="dialog-close-button"
+        className="absolute right-4 top-4 rounded-full border border-black/10 bg-white/80 p-2 text-zinc-600 shadow-sm backdrop-blur transition hover:text-zinc-900 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 dark:border-white/10 dark:bg-black/40 dark:text-white/70 dark:hover:text-white"
+      >
+        <X className="h-4 w-4" aria-hidden="true" />
+        <span className="sr-only">Close</span>
+      </DialogPrimitive.Close>
+    </DialogPrimitive.Content>
+  </DialogPortal>
+))
+FullScreenDialogContent.displayName = "FullScreenDialogContent"
+
 /**
  * Container for dialog header content (title and description).
  * Provides consistent spacing and alignment.
@@ -211,6 +239,7 @@ export {
   DialogTrigger,
   DialogClose,
   DialogContent,
+  FullScreenDialogContent,
   DialogHeader,
   DialogFooter,
   DialogTitle,

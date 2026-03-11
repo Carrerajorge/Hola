@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import {
   Dialog,
   DialogContent,
+  FullScreenDialogContent,
   DialogHeader,
   DialogTitle,
   DialogDescription,
@@ -1164,7 +1165,7 @@ export function ChannelsHubDialog({
   // Main hub: channel cards grid
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="liquid-shell !left-0 !top-0 !h-screen !w-screen !max-w-none !translate-x-0 !translate-y-0 overflow-hidden !rounded-none border-0 bg-transparent p-0">
+      <FullScreenDialogContent className="liquid-shell overflow-hidden rounded-none border-0 bg-transparent p-0">
         <div className="grid h-full min-h-0 gap-0 md:grid-cols-[minmax(340px,0.8fr)_minmax(0,1.2fr)]">
           <div className="overflow-auto border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.22),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.88),rgba(255,255,255,0.74))] p-6 dark:bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.22),transparent_28%),linear-gradient(180deg,rgba(18,18,24,0.96),rgba(12,12,18,0.92))] md:border-b-0 md:border-r">
             <DialogHeader className="space-y-4">
@@ -1404,7 +1405,7 @@ export function ChannelsHubDialog({
         <div className="text-xs text-muted-foreground text-center mt-2">
           Los mensajes entrantes se procesan con IA y aparecen en tu bandeja, incluso si desactivas las respuestas automáticas.
         </div>
-      </DialogContent>
+      </FullScreenDialogContent>
     </Dialog>
   );
 }
