@@ -40,6 +40,7 @@ RUN set -eux; \
   export npm_config_fetch_retry_maxtimeout=120000; \
   export npm_config_maxsockets=4; \
   retry_npm npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts; \
+  retry_npm npm i ajv@^8.18.0 ajv-formats@^3.0.1 --legacy-peer-deps --no-audit --no-fund --save-prod; \
   retry_npm npm i -D @rollup/rollup-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund; \
   retry_npm npm i -D lightningcss-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund; \
   retry_npm npm i -D @tailwindcss/oxide-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund; \
@@ -56,7 +57,7 @@ RUN npm run build
 
 # Convert to production-only deps for runtime images
 RUN npm prune --legacy-peer-deps --omit=dev
-
+RUN node -e "console.log(require.resolve('ajv/package.json'))"
 # ============================================
 # Stage 2: Sandbox Runner
 # ============================================
