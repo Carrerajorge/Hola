@@ -324,6 +324,15 @@ function parseCallbackInput(
 
   try {
     const url = new URL(trimmed);
+    const isAuthorizationUrl =
+      url.hostname === "accounts.google.com" &&
+      (url.pathname === "/o/oauth2/v2/auth" || url.pathname === "/o/oauth2/auth");
+    if (isAuthorizationUrl) {
+      return {
+        error:
+          "Pegaste la URL de autorización de Google. Completa el login y pega la URL final que vuelve a ILIAGPT con ?code=...&state=....",
+      };
+    }
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state") ?? expectedState;
     if (!code) {
@@ -334,6 +343,32 @@ function parseCallbackInput(
     }
     return { code, state };
   } catch {
+    const normalized =
+      trimmed.startsWith("?")
+        ? trimmed
+        : trimmed.startsWith("code=") || trimmed.startsWith("state=") || trimmed.includes("&code=") || trimmed.includes("&state=")
+          ? `?${trimmed}`
+          : "";
+    if (normalized) {
+      const params = new URLSearchParams(normalized.slice(1));
+      const looksLikeAuthorizationUrl =
+        params.has("response_type") || params.has("code_challenge") || params.has("code_challenge_method");
+      if (looksLikeAuthorizationUrl && !params.has("code")) {
+        return {
+          error:
+            "Pegaste la URL de autorización de Google. Completa el login y pega la URL final que vuelve a ILIAGPT con ?code=...&state=....",
+        };
+      }
+      const code = params.get("code")?.trim();
+      const state = params.get("state")?.trim() || expectedState;
+      if (!code) {
+        return { error: "Missing 'code' parameter in callback input" };
+      }
+      if (!state) {
+        return { error: "Missing 'state' parameter. Paste the full URL." };
+      }
+      return { code, state };
+    }
     if (!expectedState) {
       return { error: "Paste the full redirect URL, not just the code." };
     }

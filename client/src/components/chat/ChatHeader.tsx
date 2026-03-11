@@ -37,6 +37,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { StandardModelSelector } from './StandardModelSelector';
 import { GptActionMenu } from './GptActionMenu';
 import { useChatIsProcessing } from "@/stores/streamingStore";
+import { shouldShowUpgradeCTA } from "@/lib/planUtils";
 
 interface ChatHeaderProps {
     chatId: string | null;
@@ -197,7 +198,7 @@ export function ChatHeader({
 
             <div className="flex items-center gap-0.5 sm:gap-1">
                 {/* Upgrade button - Show for free users and guests, hide for paid/admin */}
-                {(!userPlanInfo || userPlanInfo.plan === "free") && !userPlanInfo?.isPaid && !userPlanInfo?.isAdmin && (
+                {shouldShowUpgradeCTA(userPlanInfo) && (
                     <Button
                         variant="outline"
                         size="sm"

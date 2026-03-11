@@ -37,6 +37,22 @@ type GeminiCliCompleteResponse = GeminiCliStatusResponse & {
   selectedModelId: string;
 };
 
+type GeminiCliResultMessage =
+  | {
+      type?: string;
+      flowId?: string;
+      status?: "success";
+      result?: GeminiCliCompleteResponse;
+    }
+  | {
+      type?: string;
+      flowId?: string;
+      status?: "error";
+      error?: string;
+      errorDescription?: string;
+      callbackUrl?: string;
+    };
+
 const STATUS_QUERY_KEY = ["/api/oauth/google/gemini-cli/status"];
 
 export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps) {
@@ -159,6 +175,80 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
     },
   });
 
+  const finishConnectedState = React.useCallback(
+    async (payload: GeminiCliCompleteResponse) => {
+      popupRef.current?.close();
+      popupRef.current = null;
+      await queryClient.invalidateQueries({ queryKey: STATUS_QUERY_KEY });
+      await queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+      await Promise.resolve(onConnected?.(payload.selectedModelId));
+      setOpen(false);
+      setAcceptedRisk(false);
+      setFlowId(null);
+      setAuthUrl("");
+      setRedirectUri("");
+      setCallbackUrl("");
+      lastAutoCompletedCallbackRef.current = null;
+      toast({
+        title: "Gemini CLI vinculado",
+        description: payload.email
+          ? `La cuenta ${payload.email} ya puede usar Gemini 3.1 Pro desde ILIAGPT.`
+          : "Gemini 3.1 Pro ya puede usarse desde ILIAGPT.",
+      });
+    },
+    [onConnected, queryClient, toast],
+  );
+
+  const getManualCallbackValidationError = React.useCallback(
+    (value: string): string | null => {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return "Pega la URL final que vuelve a ILIAGPT con ?code=...&state=....";
+      }
+
+      try {
+        const url = new URL(trimmed);
+        const isAuthorizationUrl =
+          url.hostname === "accounts.google.com" &&
+          (url.pathname === "/o/oauth2/v2/auth" || url.pathname === "/o/oauth2/auth");
+        if (isAuthorizationUrl) {
+          return "Pegaste la URL de autorización de Google. Debes completar el login y usar la URL final que vuelve a ILIAGPT.";
+        }
+        if (!url.searchParams.get("code")) {
+          return "La URL final debe incluir el parámetro code. Completa el login y copia la URL de regreso a ILIAGPT.";
+        }
+      } catch {
+        const normalized = trimmed.startsWith("?") ? trimmed.slice(1) : trimmed;
+        const params = new URLSearchParams(normalized);
+        const looksLikeAuthorizationUrl =
+          params.has("response_type") || params.has("code_challenge") || params.has("code_challenge_method");
+        if (looksLikeAuthorizationUrl && !params.has("code")) {
+          return "Pegaste la URL de autorización de Google. Debes completar el login y usar la URL final que vuelve a ILIAGPT.";
+        }
+        if (!params.has("code")) {
+          return "Pega la URL final que vuelve a ILIAGPT con ?code=...&state=....";
+        }
+      }
+
+      return null;
+    },
+    [],
+  );
+
+  const handleManualComplete = React.useCallback(() => {
+    if (!flowId) return;
+    const validationError = getManualCallbackValidationError(callbackUrl);
+    if (validationError) {
+      toast({
+        title: "Callback inválido",
+        description: validationError,
+        variant: "destructive",
+      });
+      return;
+    }
+    completeMutation.mutate({ flowId, callbackUrl });
+  }, [callbackUrl, completeMutation, flowId, getManualCallbackValidationError, toast]);
+
   const handleCopyUrl = React.useCallback(async () => {
     if (!authUrl) return;
     try {
@@ -213,23 +303,40 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
         return;
       }
 
-      const payload = event.data as
-        | {
-            type?: string;
-            flowId?: string;
-            callbackUrl?: string;
-            error?: string;
-            errorDescription?: string;
-          }
-        | undefined;
+      const payload = event.data as GeminiCliResultMessage | undefined;
 
-      if (payload?.type !== "gemini-cli-oauth-callback") {
+      if (payload?.type !== "gemini-cli-oauth-callback" && payload?.type !== "gemini-cli-oauth-result") {
         return;
       }
       if (!payload.flowId || !flowId || payload.flowId !== flowId) {
         return;
       }
-      if (payload.error) {
+
+      if (payload.type === "gemini-cli-oauth-result") {
+        if (payload.status === "success" && payload.result) {
+          void finishConnectedState(payload.result);
+          return;
+        }
+
+        if (payload.status === "error") {
+          if (payload.callbackUrl) {
+            setCallbackUrl(payload.callbackUrl);
+          }
+          lastAutoCompletedCallbackRef.current = null;
+          toast({
+            title: "No se pudo completar la vinculacion",
+            description: payload.errorDescription || payload.error || "No se pudo completar Gemini CLI OAuth.",
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+
+      if ("error" in payload && payload.error) {
+        if ("callbackUrl" in payload && typeof payload.callbackUrl === "string" && payload.callbackUrl.trim()) {
+          setCallbackUrl(payload.callbackUrl.trim());
+        }
+        lastAutoCompletedCallbackRef.current = null;
         toast({
           title: "Google devolvió un error",
           description: payload.errorDescription || payload.error,
@@ -238,7 +345,8 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
         return;
       }
 
-      const nextCallbackUrl = typeof payload.callbackUrl === "string" ? payload.callbackUrl.trim() : "";
+      const nextCallbackUrl =
+        "callbackUrl" in payload && typeof payload.callbackUrl === "string" ? payload.callbackUrl.trim() : "";
       if (!nextCallbackUrl || completeMutation.isPending) {
         return;
       }
@@ -248,6 +356,17 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
 
       lastAutoCompletedCallbackRef.current = nextCallbackUrl;
       setCallbackUrl(nextCallbackUrl);
+      const validationError = getManualCallbackValidationError(nextCallbackUrl);
+      if (validationError) {
+        lastAutoCompletedCallbackRef.current = null;
+        toast({
+          title: "Callback inválido",
+          description: validationError,
+          variant: "destructive",
+        });
+        return;
+      }
+
       completeMutation.mutate({
         flowId: payload.flowId,
         callbackUrl: nextCallbackUrl,
@@ -256,7 +375,7 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
 
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [completeMutation, flowId, toast]);
+  }, [completeMutation, finishConnectedState, flowId, getManualCallbackValidationError, toast]);
 
   const isBusy = startMutation.isPending || completeMutation.isPending;
   const isConnected = Boolean(status?.connected);
@@ -395,7 +514,7 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
             {flowId ? (
               <Button
                 type="button"
-                onClick={() => flowId && completeMutation.mutate({ flowId, callbackUrl })}
+                onClick={handleManualComplete}
                 disabled={!callbackUrl.trim() || isBusy}
               >
                 {completeMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}

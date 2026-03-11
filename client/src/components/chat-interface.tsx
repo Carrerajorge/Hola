@@ -106,6 +106,7 @@ import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { ShareChatDialog, ShareIcon } from "@/components/share-chat-dialog";
 import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
 import { computePromptIntegrity } from "@/lib/promptIntegrity";
+import { getEffectivePlan, isPaidPlan } from "@/lib/planUtils";
 import { DocumentGeneratorDialog } from "@/components/document-generator-dialog";
 import { GoogleFormsDialog } from "@/components/google-forms-dialog";
 import { InlineGoogleFormPreview } from "@/components/inline-google-form-preview";
@@ -754,11 +755,16 @@ export function ChatInterface({
 
   const userPlanInfo = useMemo(() => {
     if (!user) return null;
-    const plan = user.plan || 'free';
-    const isAdmin = Boolean((user as any)?.isAdmin || (user?.email?.toLowerCase() === 'carrerajorge874@gmail.com'));
-    // isPaid = true only if plan is NOT 'free' AND status is 'active'
-    const isPaid = Boolean(plan && plan !== 'free' && (user?.status === 'active'));
-    return { plan, isAdmin, isPaid };
+    const plan = getEffectivePlan(user as any);
+    const isAdmin = plan === "admin" || Boolean((user as any)?.isAdmin || (user?.email?.toLowerCase() === 'carrerajorge874@gmail.com'));
+    const isPaid = isPaidPlan(user as any);
+    return {
+      plan,
+      isAdmin,
+      isPaid,
+      subscriptionStatus: (user as any)?.subscriptionStatus ?? null,
+      subscriptionPlan: (user as any)?.subscriptionPlan ?? null,
+    };
   }, [user]);
 
   // Upgrade prompt for free users after 3rd query
@@ -901,7 +907,13 @@ export function ChatInterface({
   const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
   const [showPricingModal, setShowPricingModal] = useState(false);
   const [quotaInfo, setQuotaInfo] = useState<{ remaining: number; limit: number; resetAt: string | null; plan: string } | null>(null);
-  const [userPlanState, setUserPlanState] = useState<{ plan: string; isAdmin?: boolean; isPaid?: boolean } | null>(null);
+  const [userPlanState, setUserPlanState] = useState<{
+    plan: string;
+    isAdmin?: boolean;
+    isPaid?: boolean;
+    subscriptionStatus?: string | null;
+    subscriptionPlan?: string | null;
+  } | null>(null);
   // isAgentPanelOpen removed - agent progress is shown inline in chat
   const modelSelectorRef = useRef<HTMLDivElement>(null);
   const gptCapabilities = activeGpt?.capabilities;
@@ -998,7 +1010,9 @@ export function ChatInterface({
           setUserPlanState({
             plan: data.plan,
             isAdmin: data.isAdmin,
-            isPaid: data.plan !== "free"
+            isPaid: Boolean(data.isPaid),
+            subscriptionStatus: typeof data.subscriptionStatus === "string" ? data.subscriptionStatus : null,
+            subscriptionPlan: typeof data.subscriptionPlan === "string" ? data.subscriptionPlan : null,
           });
         }
       } catch (error) {
@@ -1015,6 +1029,8 @@ export function ChatInterface({
       plan: userPlanState?.plan || userPlanInfo?.plan || "free",
       isAdmin: Boolean(userPlanState?.isAdmin ?? userPlanInfo?.isAdmin),
       isPaid: Boolean(userPlanState?.isPaid ?? userPlanInfo?.isPaid),
+      subscriptionStatus: userPlanState?.subscriptionStatus ?? userPlanInfo?.subscriptionStatus ?? null,
+      subscriptionPlan: userPlanState?.subscriptionPlan ?? userPlanInfo?.subscriptionPlan ?? null,
     };
   }, [userPlanInfo, userPlanState]);
 
@@ -1304,6 +1320,14 @@ export function ChatInterface({
     );
     return preferredModel || availableModels[0] || null;
   }, [selectedModelId, availableModels]);
+
+  const activeAgentModel = useMemo(() => {
+    if (!selectedModelData) return undefined;
+    return {
+      model: selectedModelData.modelId || selectedModelId || undefined,
+      provider: selectedModelData.provider || undefined,
+    };
+  }, [selectedModelData, selectedModelId]);
 
   const selectedProvider = selectedModelData?.provider || "gemini";
   const selectedModel = selectedModelData?.modelId || "gemini-3-flash-preview";
@@ -3322,14 +3346,19 @@ export function ChatInterface({
           chatId || "",
           userMessage,
           newMessageId,
-          []
+          [],
+          activeAgentModel,
         );
 
         if (result?.chatId && (!chatId || chatId.startsWith("pending-"))) {
           window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: result.chatId, preserveKey: true } }));
+        } else if (!result) {
+          setCurrentAgentMessageId(null);
+          toast({ title: "Error", description: "No se pudo reiniciar el agente", variant: "destructive" });
         }
       } catch (error) {
         console.error("Failed to retry agent run:", error);
+        setCurrentAgentMessageId(null);
         toast({ title: "Error", description: "No se pudo reiniciar el agente", variant: "destructive" });
       }
     };
@@ -3338,7 +3367,7 @@ export function ChatInterface({
     return () => {
       window.removeEventListener("retry-agent-run", handleRetryAgentRun as unknown as EventListener);
     };
-  }, [chatId, agentStore, startAgentRun, toast]);
+  }, [activeAgentModel, chatId, agentStore, startAgentRun, toast]);
 
   // Handle tool-selected events from the ToolCatalog dialog
   useEffect(() => {
@@ -5163,12 +5192,13 @@ export function ChatInterface({
 
           // Use the store-based approach for starting the run
           // This will create the run in the store and start polling automatically
-          const result = await startAgentRun(
-            chatId || "",
-            userMessageContent,
-            agentMessageId,
-            attachments
-          );
+        const result = await startAgentRun(
+          chatId || "",
+          userMessageContent,
+          agentMessageId,
+          attachments,
+          activeAgentModel,
+        );
 
           console.log("[Agent Mode] Run result:", result);
 
@@ -5187,6 +5217,7 @@ export function ChatInterface({
             console.error("[Agent Mode] Failed to start run, result is null");
             // Remove the optimistic message since the agent failed to start
             setOptimisticMessages((prev: Message[]) => prev.filter((m: Message) => m.id !== userMessage.id));
+            setCurrentAgentMessageId(null);
             setSelectedTool(null);
             toast({
               title: "Error",
@@ -5202,6 +5233,7 @@ export function ChatInterface({
           if (savedAgentFiles.length > 0) {
             setUploadedFiles(savedAgentFiles);
           }
+          setCurrentAgentMessageId(null);
           setSelectedTool(null);
           toast({ title: "Error", description: "Error al iniciar el agente. Tus archivos fueron restaurados.", variant: "destructive" });
         }
@@ -6066,8 +6098,13 @@ export function ChatInterface({
           spreadsheetData: f.spreadsheetData,
         }));
 
-      // Compute prompt integrity metadata (SHA-256 hash + byte length)
-      const promptIntegrity = await computePromptIntegrity(userInput);
+      // Start prompt integrity hashing in parallel so the optimistic bubble renders immediately.
+      const promptIntegrityPromise = computePromptIntegrity(userInput);
+      const fallbackPromptMessageId =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `msg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      const fallbackPromptLen = new TextEncoder().encode(userInput).byteLength;
 
       // Construct the User Message object
       const userMsg: Message = {
@@ -6083,9 +6120,9 @@ export function ChatInterface({
         deliveryError: undefined,
         attachments: attachments.length > 0 ? attachments : undefined,
         // Prompt integrity fields — server validates these to detect data loss
-        clientPromptLen: promptIntegrity.clientPromptLen,
-        clientPromptHash: promptIntegrity.clientPromptHash,
-        promptMessageId: promptIntegrity.messageId,
+        clientPromptLen: fallbackPromptLen,
+        clientPromptHash: "",
+        promptMessageId: fallbackPromptMessageId,
       } as any;
 
       // Apply Optimistic Update IMMEDIATELY
@@ -6107,6 +6144,30 @@ export function ChatInterface({
       // Track document attachments for analysis (declared here to avoid TDZ with later reassignment)
       let hasDocumentAttachments = false;
       let documentAttachmentsForAnalysis: any[] = [];
+      let promptIntegrityApplied = false;
+
+      const applyPromptIntegrity = async () => {
+        if (promptIntegrityApplied) {
+          return;
+        }
+        promptIntegrityApplied = true;
+        const promptIntegrity = await promptIntegrityPromise;
+        userMsg.clientPromptLen = promptIntegrity.clientPromptLen;
+        userMsg.clientPromptHash = promptIntegrity.clientPromptHash;
+        userMsg.promptMessageId = promptIntegrity.messageId;
+        setOptimisticMessages((prev: Message[]) =>
+          prev.map((m: Message) =>
+            m.id === userMsgId
+              ? {
+                  ...m,
+                  clientPromptLen: promptIntegrity.clientPromptLen,
+                  clientPromptHash: promptIntegrity.clientPromptHash,
+                  promptMessageId: promptIntegrity.messageId,
+                }
+              : m,
+          ),
+        );
+      };
 
       // If there are pending uploads, wait for them before kicking off any backend work.
       // The user message is already visible (optimistic), so this doesn't block perceived responsiveness.
@@ -6220,11 +6281,13 @@ export function ChatInterface({
             chatId || "",
             userInput,
             agentMessageId,
-            agentAttachments
+            agentAttachments,
+            activeAgentModel,
           );
 
           if (result) {
             // Optimistic message already added above! just notify parent/server if needed
+            await applyPromptIntegrity();
             onSendMessage({ ...userMsg, skipRun: true });
 
             setSelectedTool(null);
@@ -6290,6 +6353,7 @@ export function ChatInterface({
       try {
         const isNewChat = !chatId || chatId.startsWith("pending-");
         console.log("[handleSubmit] ABOUT TO CALL onSendMessage", isNewChat ? "(await — new chat, need chatId)" : "(fire-and-forget)");
+        await applyPromptIntegrity();
 
         if (isNewChat) {
           // NEW CHAT: We MUST await to get the real chatId from the server.

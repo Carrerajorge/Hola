@@ -8,7 +8,7 @@ import {
   getGoogleGeminiCliOAuthStatus,
 } from "../services/googleGeminiCliOAuthService";
 
-const FLOW_TTL_MS = 10 * 60 * 1000;
+const FLOW_TTL_MS = 20 * 60 * 1000;
 
 type GeminiCliFlowSessionEntry = {
   verifier: string;
@@ -122,14 +122,14 @@ googleGeminiCliOAuthRouter.post("/complete", async (req: Request, res: Response)
       return res.status(403).json({ error: "La sesion OAuth no pertenece a este usuario" });
     }
 
-    delete flowStore[flowId];
-
     const status = await finishGoogleGeminiCliOAuthFlow({
       verifier: flow.verifier,
       callbackInput: callbackUrl,
       redirectUri: flow.redirectUri,
       expectedState: flow.oauthState,
     });
+
+    delete flowStore[flowId];
 
     res.json({
       ...status,

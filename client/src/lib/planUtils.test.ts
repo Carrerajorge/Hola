@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getEffectivePlan, getPlanLabel, isPaidPlan } from "./planUtils";
+import { getEffectivePlan, getPlanLabel, isPaidPlan, shouldShowUpgradeCTA } from "./planUtils";
 
 describe("getEffectivePlan", () => {
   it("returns 'free' for null/undefined user", () => {
@@ -72,5 +72,33 @@ describe("isPaidPlan", () => {
     expect(isPaidPlan({ subscriptionStatus: "active", subscriptionPlan: "pro" })).toBe(true);
     expect(isPaidPlan({ subscriptionStatus: "active", subscriptionPlan: "enterprise" })).toBe(true);
     expect(isPaidPlan({ plan: "go" })).toBe(true);
+  });
+});
+
+describe("shouldShowUpgradeCTA", () => {
+  it("shows the CTA for free or cancelled users", () => {
+    expect(shouldShowUpgradeCTA(null)).toBe(true);
+    expect(shouldShowUpgradeCTA({ plan: "free" })).toBe(true);
+    expect(
+      shouldShowUpgradeCTA({
+        plan: "go",
+        subscriptionPlan: "go",
+        subscriptionStatus: "cancelled",
+      }),
+    ).toBe(true);
+  });
+
+  it("hides the CTA for active paid subscribers", () => {
+    expect(
+      shouldShowUpgradeCTA({
+        plan: "free",
+        subscriptionPlan: "go",
+        subscriptionStatus: "active",
+      }),
+    ).toBe(false);
+  });
+
+  it("hides the CTA for admins", () => {
+    expect(shouldShowUpgradeCTA({ role: "admin" })).toBe(false);
   });
 });

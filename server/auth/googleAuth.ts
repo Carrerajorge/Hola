@@ -111,6 +111,7 @@ function renderGeminiCliBridge(
       .card { max-width: 520px; background: rgba(15, 23, 42, 0.92); border: 1px solid rgba(148, 163, 184, 0.22); border-radius: 20px; padding: 24px; box-shadow: 0 24px 80px rgba(15, 23, 42, 0.35); }
       h1 { margin: 0 0 12px; font-size: 22px; }
       p { margin: 0 0 12px; line-height: 1.55; color: #cbd5e1; }
+      #status { color: #93c5fd; }
       code { display: block; margin-top: 12px; padding: 12px; background: rgba(15, 23, 42, 0.8); border-radius: 12px; color: #e2e8f0; word-break: break-all; }
     </style>
   </head>
@@ -118,20 +119,78 @@ function renderGeminiCliBridge(
     <div class="card">
       <h1>${payload.error ? "No se pudo completar Gemini CLI OAuth" : "Gemini CLI OAuth completado"}</h1>
       <p>${payload.error ? "Vuelve a ILIAGPT. El modal recibirá el error y podrás reintentar." : "Puedes volver a ILIAGPT. Esta ventana se cerrará automáticamente si el navegador lo permite."}</p>
+      <p id="status">${payload.error ? "Error devuelto por Google." : "Completando la vinculación en ILIAGPT..."}</p>
       ${payload.callbackUrl ? `<code>${payload.callbackUrl.replace(/</g, "&lt;")}</code>` : ""}
     </div>
     <script>
-      (function () {
+      (async function () {
         const payload = ${serializedPayload};
+        const statusNode = document.getElementById("status");
+        const postToOpener = (message) => {
+          try {
+            if (window.opener && !window.opener.closed) {
+              window.opener.postMessage(
+                { type: "gemini-cli-oauth-result", ...message },
+                window.location.origin
+              );
+            }
+          } catch {}
+        };
+
         try {
-          if (window.opener && !window.opener.closed) {
-            window.opener.postMessage(
-              { type: "gemini-cli-oauth-callback", ...payload },
-              window.location.origin
-            );
+          if (!payload.error && payload.flowId && payload.callbackUrl) {
+            const response = await fetch("/api/oauth/google/gemini-cli/complete", {
+              method: "POST",
+              credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                flowId: payload.flowId,
+                callbackUrl: payload.callbackUrl,
+              }),
+            });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              const message =
+                (result && (result.error || result.message)) ||
+                "No se pudo completar Gemini CLI OAuth";
+              throw new Error(String(message));
+            }
+            if (statusNode) {
+              statusNode.textContent = "Vinculación completada. Cerrando ventana...";
+            }
+            postToOpener({
+              flowId: payload.flowId,
+              status: "success",
+              result,
+            });
+          } else {
+            postToOpener({
+              flowId: payload.flowId,
+              status: "error",
+              error: payload.error,
+              errorDescription: payload.errorDescription,
+              callbackUrl: payload.callbackUrl,
+            });
           }
-        } catch {}
-        try { window.close(); } catch {}
+        } catch (error) {
+          const message =
+            error && typeof error === "object" && "message" in error
+              ? String(error.message)
+              : "No se pudo completar Gemini CLI OAuth";
+          if (statusNode) {
+            statusNode.textContent = message;
+          }
+          postToOpener({
+            flowId: payload.flowId,
+            status: "error",
+            error: "gemini_cli_complete_failed",
+            errorDescription: message,
+            callbackUrl: payload.callbackUrl,
+          });
+        }
+        setTimeout(() => {
+          try { window.close(); } catch {}
+        }, 400);
       })();
     </script>
   </body>

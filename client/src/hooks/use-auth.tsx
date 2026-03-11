@@ -60,6 +60,11 @@ function setStoredUser(user: User | null): void {
         fullName: user.fullName,
         role: user.role,
         plan: user.plan,
+        status: (user as any).status,
+        subscriptionStatus: (user as any).subscriptionStatus,
+        subscriptionPlan: (user as any).subscriptionPlan,
+        subscriptionPeriodEnd: (user as any).subscriptionPeriodEnd,
+        subscriptionExpiresAt: (user as any).subscriptionExpiresAt,
         avatarUrl: user.avatarUrl,
         // Explicitly exclude: password, tokens, secrets, etc.
       };
@@ -84,6 +89,17 @@ function parseUserPayload(payload: unknown): User | null {
     fullName: typeof data.fullName === "string" ? data.fullName : undefined,
     role: typeof data.role === "string" ? data.role : undefined,
     plan: typeof data.plan === "string" ? data.plan : undefined,
+    status: typeof data.status === "string" ? data.status : undefined,
+    subscriptionStatus: typeof data.subscriptionStatus === "string" ? data.subscriptionStatus : undefined,
+    subscriptionPlan: typeof data.subscriptionPlan === "string" ? data.subscriptionPlan : undefined,
+    subscriptionPeriodEnd:
+      typeof data.subscriptionPeriodEnd === "string" || data.subscriptionPeriodEnd instanceof Date
+        ? (data.subscriptionPeriodEnd as any)
+        : undefined,
+    subscriptionExpiresAt:
+      typeof data.subscriptionExpiresAt === "string" || data.subscriptionExpiresAt instanceof Date
+        ? (data.subscriptionExpiresAt as any)
+        : undefined,
     avatarUrl: typeof data.avatarUrl === "string" ? data.avatarUrl : undefined,
     isAnonymous: data.isAnonymous === true,
     username: typeof data.username === "string" ? data.username : undefined,

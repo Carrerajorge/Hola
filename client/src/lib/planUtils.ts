@@ -11,6 +11,11 @@ function toLower(value: string | null | undefined): string {
   return (value || "").trim().toLowerCase();
 }
 
+function hasSubscriptionMetadata(user?: UserPlan | null): boolean {
+  if (!user) return false;
+  return Boolean(toLower(user.subscriptionStatus) || toLower(user.subscriptionPlan));
+}
+
 export function getEffectivePlan(user?: UserPlan | null): string {
   if (!user) return "free";
 
@@ -52,4 +57,26 @@ export function getPlanLabel(user?: UserPlan | null): string {
 export function isPaidPlan(user?: UserPlan | null): boolean {
   const plan = getEffectivePlan(user);
   return plan !== "free" && plan !== "admin";
+}
+
+export function shouldShowUpgradeCTA(user?: UserPlan | null): boolean {
+  if (!user) return true;
+
+  const role = toLower(user.role);
+  if (role === "admin" || role === "superadmin") {
+    return false;
+  }
+
+  const subscriptionStatus = toLower(user.subscriptionStatus);
+  const subscriptionPlan = toLower(user.subscriptionPlan);
+  const plan = toLower(user.plan);
+
+  if (hasSubscriptionMetadata(user)) {
+    const hasActivePaidSubscription =
+      subscriptionStatus === "active" &&
+      (subscriptionPlan ? subscriptionPlan !== "free" : plan !== "free");
+    return !hasActivePaidSubscription;
+  }
+
+  return !isPaidPlan(user);
 }

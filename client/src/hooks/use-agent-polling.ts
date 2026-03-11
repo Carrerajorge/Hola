@@ -57,7 +57,8 @@ export function useStartAgentRun() {
     chatId: string,
     userMessage: string,
     messageId: string,
-    attachments?: any[]
+    attachments?: any[],
+    options?: { model?: string; provider?: string }
   ): Promise<{ runId: string; chatId: string } | null> => {
     // Create AbortController for this request
     const abortController = new AbortController();
@@ -74,10 +75,11 @@ export function useStartAgentRun() {
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           signal: abortController.signal,
+          timeoutMs: 10_000,
           body: JSON.stringify({
             title: userMessage.substring(0, 50) + (userMessage.length > 50 ? "..." : ""),
-            model: "gemini-3-flash-preview",
-            provider: "google"
+            model: options?.model || "gemini-3-flash-preview",
+            provider: options?.provider || "google"
           })
         });
         if (!chatRes.ok) throw new Error('Inicia sesión para usar el modo agente');
@@ -97,10 +99,12 @@ export function useStartAgentRun() {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         signal: abortController.signal,
+        timeoutMs: 12_000,
         body: JSON.stringify({
           chatId: resolvedChatId,
           message: userMessage,
-          attachments
+          attachments,
+          model: options?.model,
         })
       });
 

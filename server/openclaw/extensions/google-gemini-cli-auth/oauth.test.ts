@@ -332,6 +332,72 @@ describe("Gemini web OAuth flow", () => {
     expect(result.projectId).toBe("iliagpt-project");
     expect(result.email).toBe("admin@iliagpt.com");
   });
+
+  it("accepts a pasted callback query string without the full URL", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url === TOKEN_URL) {
+        return new Response(JSON.stringify({
+          access_token: "access-token",
+          refresh_token: "refresh-token",
+          expires_in: 3600,
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url === USERINFO_URL) {
+        return new Response(JSON.stringify({ email: "admin@iliagpt.com" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url === LOAD_PROD) {
+        return new Response(JSON.stringify({
+          currentTier: { id: "standard-tier" },
+          cloudaicompanionProject: { id: "iliagpt-project" },
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    const { startGeminiCliOAuthSession, completeGeminiCliOAuthSession } = await import("./oauth.js");
+    const flow = startGeminiCliOAuthSession({
+      redirectUri: "https://iliagpt.com/api/auth/google/callback",
+      state: "gemini-cli:test-flow",
+    });
+
+    const result = await completeGeminiCliOAuthSession({
+      callbackInput: "code=oauth-code&state=gemini-cli:test-flow",
+      verifier: flow.verifier,
+      redirectUri: flow.redirectUri,
+      expectedState: flow.state,
+    });
+
+    expect(result.projectId).toBe("iliagpt-project");
+    expect(result.email).toBe("admin@iliagpt.com");
+  });
+
+  it("rejects the Google authorization URL when pasted instead of the callback URL", async () => {
+    const { startGeminiCliOAuthSession, completeGeminiCliOAuthSession } = await import("./oauth.js");
+    const flow = startGeminiCliOAuthSession({
+      redirectUri: "https://iliagpt.com/api/auth/google/callback",
+      state: "gemini-cli:test-flow",
+    });
+
+    await expect(
+      completeGeminiCliOAuthSession({
+        callbackInput: flow.authUrl,
+        verifier: flow.verifier,
+        redirectUri: flow.redirectUri,
+        expectedState: flow.state,
+      }),
+    ).rejects.toThrow(/Pegaste la URL de autorización de Google/);
+  });
 });
 
 describe("loginGeminiCliOAuth", () => {
