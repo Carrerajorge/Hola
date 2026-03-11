@@ -1,4 +1,4 @@
-import chalk, { Chalk } from "chalk";
+import chalk from "chalk";
 import { LOBSTER_PALETTE } from "./palette.js";
 
 const hasForceColor =
@@ -6,7 +6,7 @@ const hasForceColor =
   process.env.FORCE_COLOR.trim().length > 0 &&
   process.env.FORCE_COLOR.trim() !== "0";
 
-const baseChalk = process.env.NO_COLOR && !hasForceColor ? new Chalk({ level: 0 }) : chalk;
+const baseChalk = process.env.NO_COLOR && !hasForceColor ? new (chalk.Instance || chalk.constructor)({ level: 0 }) : chalk;
 
 const hex = (value: string) => baseChalk.hex(value);
 

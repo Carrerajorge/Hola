@@ -1,4 +1,4 @@
-import { Chalk } from "chalk";
+import chalk from "chalk";
 import type { Logger as TsLogger } from "tslog";
 import { isVerbose } from "../globals.js";
 import { defaultRuntime, type RuntimeEnv } from "../runtime.js";
@@ -36,7 +36,7 @@ function shouldLogToConsole(level: LogLevel, settings: { level: LogLevel }): boo
   return current <= min;
 }
 
-type ChalkInstance = InstanceType<typeof Chalk>;
+type ChalkInstance = any;
 
 const inspectValue: ((value: unknown) => string) | null = (() => {
   const getBuiltinModule = (
@@ -85,10 +85,10 @@ function getColorForConsole(): ChalkInstance {
     process.env.FORCE_COLOR.trim().length > 0 &&
     process.env.FORCE_COLOR.trim() !== "0";
   if (process.env.NO_COLOR && !hasForceColor) {
-    return new Chalk({ level: 0 });
+    return new (chalk.Instance || (chalk as any).constructor)({ level: 0 });
   }
   const hasTty = Boolean(process.stdout.isTTY || process.stderr.isTTY);
-  return hasTty || isRichConsoleEnv() ? new Chalk({ level: 1 }) : new Chalk({ level: 0 });
+  return hasTty || isRichConsoleEnv() ? new (chalk.Instance || (chalk as any).constructor)({ level: 1 }) : new (chalk.Instance || (chalk as any).constructor)({ level: 0 });
 }
 
 const SUBSYSTEM_COLORS = ["cyan", "green", "yellow", "blue", "magenta", "red"] as const;
