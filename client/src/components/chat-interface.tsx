@@ -755,7 +755,7 @@ export function ChatInterface({
   const userPlanInfo = useMemo(() => {
     if (!user) return null;
     const plan = user.plan || 'free';
-    const isAdmin = Boolean((user as any)?.isAdmin || (user?.email === 'Carrerajorge874@gmail.com'));
+    const isAdmin = Boolean((user as any)?.isAdmin || (user?.email?.toLowerCase() === 'carrerajorge874@gmail.com'));
     // isPaid = true only if plan is NOT 'free' AND status is 'active'
     const isPaid = Boolean(plan && plan !== 'free' && (user?.status === 'active'));
     return { plan, isAdmin, isPaid };
@@ -1007,6 +1007,16 @@ export function ChatInterface({
     };
     fetchUserPlanInfo();
   }, [user?.id]);
+
+  const effectiveUserPlanInfo = useMemo(() => {
+    if (!userPlanInfo && !userPlanState) return null;
+
+    return {
+      plan: userPlanState?.plan || userPlanInfo?.plan || "free",
+      isAdmin: Boolean(userPlanState?.isAdmin ?? userPlanInfo?.isAdmin),
+      isPaid: Boolean(userPlanState?.isPaid ?? userPlanInfo?.isPaid),
+    };
+  }, [userPlanInfo, userPlanState]);
 
   const agentMode = useAgentMode(chatId || "");
 
@@ -7486,7 +7496,7 @@ IMPORTANTE:
           onEditChatTitle={onEditChatTitle}
           onMoveToFolder={onMoveToFolder}
           onCreateFolder={onCreateFolder}
-          userPlanInfo={userPlanInfo}
+          userPlanInfo={effectiveUserPlanInfo}
         />
         {/* Main Content Area with Side Panel */}
         {(previewDocument || activeDocEditor || (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool))) ? (
