@@ -62,6 +62,7 @@
   "dependencies": {
     "@hola/openclaw": "file:./server/openclaw",
     "@aarkue/tiptap-math-extension": "^1.4.0",
+    "ajv": "^8.18.0",
     "@anthropic-ai/sdk": "^0.74.0",
     "@aws-sdk/client-s3": "^3.985.0",
     "@aws-sdk/s3-request-presigner": "^3.985.0",

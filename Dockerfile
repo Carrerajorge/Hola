@@ -40,6 +40,7 @@ RUN set -eux; \
   export npm_config_fetch_retry_maxtimeout=120000; \
   export npm_config_maxsockets=4; \
   retry_npm npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts; \
+  retry_npm npm i ajv@^8.18.0 --legacy-peer-deps --no-audit --no-fund --save-prod; \
   retry_npm npm i -D @rollup/rollup-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund; \
   retry_npm npm i -D lightningcss-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund; \
   retry_npm npm i -D @tailwindcss/oxide-linux-x64-gnu --legacy-peer-deps --no-audit --no-fund; \
