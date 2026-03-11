@@ -877,56 +877,10 @@ export default function Home() {
         </div>
       ) : null}
 
-      {/* Desktop Sidebar - Full */}
-      <div className={isSidebarOpen ? "hidden md:block" : "hidden"}>
-        <Sidebar
-          chats={chats}
-          hiddenChats={hiddenChats}
-          pinnedChats={pinnedChats}
-          activeChatId={activeChat?.id || null}
-          onSelectChat={handleSelectChatWithClear}
-          onNewChat={handleNewChat}
-          onToggle={() => setIsSidebarOpen(false)}
-          onDeleteChat={deleteChat}
-          onEditChat={editChatTitle}
-          onArchiveChat={archiveChat}
-          onHideChat={hideChat}
-          onPinChat={pinChat}
-          onDownloadChat={downloadChat}
-          onOpenGpts={handleOpenGpts}
-          onOpenApps={handleOpenApps}
-          onOpenSkills={handleOpenSkills}
-          onOpenWhatsAppConnect={() => setIsWhatsAppConnectOpen(true)}
-          onOpenCodex={handleOpenCodex}
-          onOpenLibrary={handleOpenLibrary}
-          processingChatIds={processingChatIds}
-          pendingResponseCounts={pendingResponseCounts}
-          onClearPendingCount={handleClearPendingCount}
-          folders={folders}
-          onCreateFolder={createFolder}
-          onMoveToFolder={handleMoveToFolder}
-          selectedProjectId={selectedProjectId}
-          onSelectProject={handleSelectProject}
-        />
-      </div>
-
-      {/* Desktop Sidebar - Mini (collapsed) */}
-      <div className={!isSidebarOpen ? "hidden md:block" : "hidden"}>
-        <MiniSidebar
-          onNewChat={handleNewChat}
-          onExpand={() => setIsSidebarOpen(true)}
-        />
-      </div>
-
-      {/* Mobile Sidebar */}
-      <div className="md:hidden absolute top-4 left-3 z-50">
-        <Sheet>
-          <SheetTrigger asChild>
-            <Button variant="ghost" size="icon" className="bg-card border border-border rounded-lg mt-[-9px] mb-[-9px] ml-[-5px] mr-[-5px]">
-              <Menu className="h-6 w-6 text-foreground" />
-            </Button>
-          </SheetTrigger>
-          <SheetContent side="left" className="p-0 w-[260px]">
+      {!isMobile ? (
+        <>
+          {/* Desktop Sidebar - Full */}
+          <div className={isSidebarOpen ? "hidden md:block" : "hidden"}>
             <Sidebar
               chats={chats}
               hiddenChats={hiddenChats}
@@ -934,7 +888,7 @@ export default function Home() {
               activeChatId={activeChat?.id || null}
               onSelectChat={handleSelectChatWithClear}
               onNewChat={handleNewChat}
-              onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
+              onToggle={() => setIsSidebarOpen(false)}
               onDeleteChat={deleteChat}
               onEditChat={editChatTitle}
               onArchiveChat={archiveChat}
@@ -945,6 +899,7 @@ export default function Home() {
               onOpenApps={handleOpenApps}
               onOpenSkills={handleOpenSkills}
               onOpenWhatsAppConnect={() => setIsWhatsAppConnectOpen(true)}
+              onOpenCodex={handleOpenCodex}
               onOpenLibrary={handleOpenLibrary}
               processingChatIds={processingChatIds}
               pendingResponseCounts={pendingResponseCounts}
@@ -955,9 +910,57 @@ export default function Home() {
               selectedProjectId={selectedProjectId}
               onSelectProject={handleSelectProject}
             />
-          </SheetContent>
-        </Sheet>
-      </div>
+          </div>
+
+          {/* Desktop Sidebar - Mini (collapsed) */}
+          <div className={!isSidebarOpen ? "hidden md:block" : "hidden"}>
+            <MiniSidebar
+              onNewChat={handleNewChat}
+              onExpand={() => setIsSidebarOpen(true)}
+            />
+          </div>
+        </>
+      ) : (
+        <div className="absolute top-4 left-3 z-50">
+          <Sheet>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="icon" className="bg-card border border-border rounded-lg mt-[-9px] mb-[-9px] ml-[-5px] mr-[-5px]">
+                <Menu className="h-6 w-6 text-foreground" />
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="left" className="p-0 w-[260px]">
+              <Sidebar
+                chats={chats}
+                hiddenChats={hiddenChats}
+                pinnedChats={pinnedChats}
+                activeChatId={activeChat?.id || null}
+                onSelectChat={handleSelectChatWithClear}
+                onNewChat={handleNewChat}
+                onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
+                onDeleteChat={deleteChat}
+                onEditChat={editChatTitle}
+                onArchiveChat={archiveChat}
+                onHideChat={hideChat}
+                onPinChat={pinChat}
+                onDownloadChat={downloadChat}
+                onOpenGpts={handleOpenGpts}
+                onOpenApps={handleOpenApps}
+                onOpenSkills={handleOpenSkills}
+                onOpenWhatsAppConnect={() => setIsWhatsAppConnectOpen(true)}
+                onOpenLibrary={handleOpenLibrary}
+                processingChatIds={processingChatIds}
+                pendingResponseCounts={pendingResponseCounts}
+                onClearPendingCount={handleClearPendingCount}
+                folders={folders}
+                onCreateFolder={createFolder}
+                onMoveToFolder={handleMoveToFolder}
+                selectedProjectId={selectedProjectId}
+                onSelectProject={handleSelectProject}
+              />
+            </SheetContent>
+          </Sheet>
+        </div>
+      )}
 
       <Suspense fallback={null}>
         {isWhatsAppConnectOpen ? (
