@@ -6,9 +6,9 @@ const hasForceColor =
   process.env.FORCE_COLOR.trim().length > 0 &&
   process.env.FORCE_COLOR.trim() !== "0";
 
-const baseChalk = process.env.NO_COLOR && !hasForceColor ? new (chalk.Instance || (chalk as any).constructor)({ level: 0 }) : chalk;
-
-const hex = (value: string) => baseChalk.hex(value);
+const noColor = Boolean(process.env.NO_COLOR && !hasForceColor);
+const hex = (value: string) => (noColor ? (text: string) => text : chalk.hex(value));
+const heading = (value: string) => (noColor ? value : chalk.bold.hex(value));
 
 export const theme = {
   accent: hex(LOBSTER_PALETTE.accent),
@@ -19,12 +19,12 @@ export const theme = {
   warn: hex(LOBSTER_PALETTE.warn),
   error: hex(LOBSTER_PALETTE.error),
   muted: hex(LOBSTER_PALETTE.muted),
-  heading: baseChalk.bold.hex(LOBSTER_PALETTE.accent),
+  heading: heading(LOBSTER_PALETTE.accent),
   command: hex(LOBSTER_PALETTE.accentBright),
   option: hex(LOBSTER_PALETTE.warn),
 } as const;
 
-export const isRich = () => Boolean(baseChalk.level > 0);
+export const isRich = () => !noColor && Boolean(chalk.level > 0);
 
 export const colorize = (rich: boolean, color: (value: string) => string, value: string) =>
   rich ? color(value) : value;

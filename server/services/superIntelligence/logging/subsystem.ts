@@ -34,6 +34,21 @@ function shouldLogToConsole(level: LogLevel, settings: { level: LogLevel }): boo
 }
 
 type ChalkInstance = any;
+type ChalkLike = ChalkInstance;
+
+const passthrough = (value: unknown) => String(value ?? "");
+let noColorChalk: ChalkLike;
+noColorChalk = new Proxy(passthrough as ChalkLike, {
+  get(_target, prop) {
+    if (prop === "level") {
+      return 0;
+    }
+    return noColorChalk;
+  },
+  apply(_target, _thisArg, args) {
+    return passthrough(args[0]);
+  },
+});
 
 const inspectValue: ((value: unknown) => string) | null = (() => {
   const getBuiltinModule = (
@@ -82,10 +97,10 @@ function getColorForConsole(): ChalkInstance {
     process.env.FORCE_COLOR.trim().length > 0 &&
     process.env.FORCE_COLOR.trim() !== "0";
   if (process.env.NO_COLOR && !hasForceColor) {
-    return new (chalk.Instance || (chalk as any).constructor)({ level: 0 });
+    return noColorChalk;
   }
   const hasTty = Boolean(process.stdout.isTTY || process.stderr.isTTY);
-  return hasTty || isRichConsoleEnv() ? new (chalk.Instance || (chalk as any).constructor)({ level: 1 }) : new (chalk.Instance || (chalk as any).constructor)({ level: 0 });
+  return hasTty || isRichConsoleEnv() ? chalk : noColorChalk;
 }
 
 const SUBSYSTEM_COLORS = ["cyan", "green", "yellow", "blue", "magenta", "red"] as const;
