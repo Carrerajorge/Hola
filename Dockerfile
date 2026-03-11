@@ -58,6 +58,7 @@ RUN npm run build
 # Convert to production-only deps for runtime images
 RUN npm prune --legacy-peer-deps --omit=dev
 RUN node -e "console.log(require.resolve('ajv/package.json'))"
+RUN node -e "console.log(require.resolve('ajv/package.json'))"
 # ============================================
 # Stage 2: Sandbox Runner
 # ============================================
