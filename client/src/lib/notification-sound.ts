@@ -5,6 +5,7 @@
 
 let audioContext: AudioContext | null = null;
 let soundEnabled = true;
+let primed = false;
 
 function getAudioContext(): AudioContext | null {
     if (!audioContext && typeof window !== 'undefined' && window.AudioContext) {
@@ -24,6 +25,37 @@ export function setSoundEnabled(enabled: boolean): void {
 
 export function isSoundEnabled(): boolean {
     return soundEnabled;
+}
+
+export function primeNotificationAudio(): void {
+    if (primed || typeof window === "undefined") {
+        return;
+    }
+    primed = true;
+
+    const unlock = async () => {
+        const ctx = getAudioContext();
+        if (!ctx) {
+            cleanup();
+            return;
+        }
+        if (ctx.state === "suspended") {
+            try {
+                await ctx.resume();
+            } catch {
+                // ignore
+            }
+        }
+        cleanup();
+    };
+
+    const cleanup = () => {
+        window.removeEventListener("pointerdown", unlock);
+        window.removeEventListener("keydown", unlock);
+    };
+
+    window.addEventListener("pointerdown", unlock, { once: true });
+    window.addEventListener("keydown", unlock, { once: true });
 }
 
 /**

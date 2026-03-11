@@ -612,9 +612,9 @@ export function Sidebar({
   });
 
   const minimalSectionButtonClass =
-    "w-full justify-start gap-2.5 rounded-xl border border-white/35 bg-white/55 px-2.5 py-2 text-sm font-normal shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-[#A5A0FF]/30 hover:bg-white/80 hover:shadow-[0_16px_34px_rgba(96,90,190,0.10)] dark:border-white/8 dark:bg-white/5 dark:hover:bg-white/8 liquid-button";
+    "w-full justify-start gap-2 rounded-lg border border-white/35 bg-white/55 px-2.5 py-1.5 text-[13px] font-normal shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-[#A5A0FF]/30 hover:bg-white/80 hover:shadow-[0_16px_34px_rgba(96,90,190,0.10)] dark:border-white/8 dark:bg-white/5 dark:hover:bg-white/8 liquid-button";
   const minimalIconChipClass =
-    "rounded-xl border border-white/40 bg-white/70 p-1.5 text-muted-foreground shadow-sm transition-all duration-300 group-hover:scale-110 group-hover:border-[#A5A0FF]/35 group-hover:text-foreground group-hover:shadow-[0_10px_24px_rgba(96,90,190,0.12)] dark:border-white/8 dark:bg-white/6";
+    "rounded-lg border border-white/40 bg-white/70 p-1.25 text-muted-foreground shadow-sm transition-all duration-300 group-hover:scale-110 group-hover:border-[#A5A0FF]/35 group-hover:text-foreground group-hover:shadow-[0_10px_24px_rgba(96,90,190,0.12)] dark:border-white/8 dark:bg-white/6";
 
   return (
     <nav
@@ -646,13 +646,13 @@ export function Sidebar({
         </Button>
       </div>
 
-      <div className="px-3 py-3 flex flex-col gap-1.5">
+      <div className="px-3 py-2.5 flex flex-col gap-1">
         <NewChatButton onNewChat={onNewChat} variant="full" showTooltip={false} />
 
         <button
           ref={searchButtonRef}
           onClick={() => setIsSearchModalOpen(true)}
-          className="group mb-2 mt-1 flex w-full items-center justify-between gap-2 rounded-full border border-white/45 bg-white/72 px-4 py-2 text-sm text-muted-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.85),0_14px_28px_rgba(15,23,42,0.06)] backdrop-blur-md transition-all duration-300 hover:border-[#A5A0FF]/30 hover:bg-white/88 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/8 focus:outline-none focus:ring-2 focus:ring-primary/20 liquid-button"
+          className="group mb-1.5 mt-0.5 flex w-full items-center justify-between gap-2 rounded-full border border-white/45 bg-white/72 px-4 py-1.5 text-sm text-muted-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.85),0_14px_28px_rgba(15,23,42,0.06)] backdrop-blur-md transition-all duration-300 hover:border-[#A5A0FF]/30 hover:bg-white/88 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/8 focus:outline-none focus:ring-2 focus:ring-primary/20 liquid-button"
           data-testid="button-search-chats"
         >
           <div className="flex items-center gap-2">
@@ -664,7 +664,7 @@ export function Sidebar({
           </kbd>
         </button>
 
-        <div className="space-y-0.5 mt-1">
+        <div className="space-y-0.5 mt-0.5">
           <Button
             variant="ghost"
             className={cn(minimalSectionButtonClass, "group")}
@@ -689,7 +689,7 @@ export function Sidebar({
           </Button>
           <Button
             variant="ghost"
-            className={cn(minimalSectionButtonClass, "group h-auto")}
+            className={cn(minimalSectionButtonClass, "group h-auto py-1.25")}
             onClick={onOpenSkills}
             data-testid="button-skills"
           >
@@ -698,7 +698,7 @@ export function Sidebar({
             </div>
             <span className="flex flex-col items-start leading-tight">
               <span>Skills</span>
-              <span className="text-[10px] font-normal text-muted-foreground/70">Capacidades modulares</span>
+              <span className="text-[9px] font-normal text-muted-foreground/70">Capacidades modulares</span>
             </span>
           </Button>
           <Button
@@ -734,7 +734,7 @@ export function Sidebar({
           </Button>
           <Button
             variant="ghost"
-            className={cn(minimalSectionButtonClass, "group mt-1")}
+            className={cn(minimalSectionButtonClass, "group mt-0.5")}
             onClick={onOpenCodex}
             data-testid="button-codex"
           >

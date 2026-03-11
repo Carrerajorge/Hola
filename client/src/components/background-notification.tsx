@@ -6,7 +6,7 @@
 import React, { useEffect, useCallback } from 'react';
 import { X, CheckCircle, AlertCircle, MessageSquare } from 'lucide-react';
 import { useNotifications, useStreamingStore, BackgroundNotification } from '@/stores/streamingStore';
-import { playSuccessSound, playErrorSound } from '@/lib/notification-sound';
+import { playSuccessSound, playErrorSound, primeNotificationAudio } from '@/lib/notification-sound';
 import { useSettingsContext } from '@/contexts/SettingsContext';
 import { channelIncludesPush, isWithinQuietHours } from '@/lib/notification-preferences';
 
@@ -38,29 +38,29 @@ function BackgroundNotificationToast({
 
     return (
         <div
-            className="bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl p-4 max-w-sm animate-in slide-in-from-right-5 fade-in duration-300 cursor-pointer hover:bg-zinc-800 transition-colors"
+            className="liquid-shell max-w-[360px] cursor-pointer rounded-2xl border border-white/14 bg-[linear-gradient(180deg,rgba(15,23,42,0.96),rgba(15,23,42,0.88))] p-4 text-white shadow-[0_28px_80px_rgba(2,6,23,0.45)] animate-in slide-in-from-right-5 fade-in duration-300 transition-all hover:-translate-y-0.5 hover:border-[#A5A0FF]/35"
             onClick={handleClick}
             role="button"
             tabIndex={0}
             onKeyDown={(e) => e.key === 'Enter' && handleClick()}
         >
             <div className="flex items-start gap-3">
-                <div className={`flex-shrink-0 p-1.5 rounded-full ${isSuccess ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
-                    {isSuccess ? <CheckCircle className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
-                </div>
-
-                <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                        <MessageSquare className="w-3.5 h-3.5 text-zinc-400" />
-                        <span className="text-sm font-medium text-zinc-200 truncate">
-                            {notification.chatTitle}
-                        </span>
+                    <div className={`flex-shrink-0 rounded-2xl border p-2 ${isSuccess ? 'border-emerald-400/25 bg-emerald-500/15 text-emerald-300' : 'border-rose-400/25 bg-rose-500/15 text-rose-300'}`}>
+                        {isSuccess ? <CheckCircle className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
                     </div>
-                    <p className="text-xs text-zinc-400 line-clamp-2">
+
+                    <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                            <MessageSquare className="w-3.5 h-3.5 text-white/55" />
+                            <span className="text-sm font-semibold text-white truncate">
+                                {notification.chatTitle}
+                            </span>
+                        </div>
+                    <p className="text-xs text-white/70 line-clamp-2">
                         {isSuccess ? 'Tarea completada' : 'Error en la tarea'}
                     </p>
                     {notification.preview && (
-                        <p className="text-xs text-zinc-500 mt-1 line-clamp-1 italic">
+                        <p className="mt-1 line-clamp-1 text-xs italic text-white/45">
                             {notification.preview}
                         </p>
                     )}
@@ -71,7 +71,7 @@ function BackgroundNotificationToast({
                         e.stopPropagation();
                         onDismiss(notification.id);
                     }}
-                    className="flex-shrink-0 p-1 rounded-md hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors"
+                    className="flex-shrink-0 rounded-md p-1 text-white/45 transition-colors hover:bg-white/8 hover:text-white/80"
                     aria-label="Dismiss notification"
                 >
                     <X className="w-4 h-4" />
@@ -99,6 +99,10 @@ export function BackgroundNotificationContainer({ onNavigateToChat }: Background
 
   const allowInApp = settings.notifInApp && pushEnabled && !quietNow;
   const allowDesktop = settings.notifDesktop && pushEnabled && !quietNow;
+
+  useEffect(() => {
+    primeNotificationAudio();
+  }, []);
 
   // Play sound when new notification arrives
   useEffect(() => {
@@ -150,7 +154,7 @@ export function BackgroundNotificationContainer({ onNavigateToChat }: Background
   if (!allowInApp || notifications.length === 0) return null;
 
   return (
-    <div className="fixed top-4 right-4 z-[9999] flex flex-col gap-2 pointer-events-auto">
+    <div className="fixed right-5 top-5 z-[9999] flex flex-col gap-3 pointer-events-auto">
       {notifications.slice(-3).map((notif) => (
         <BackgroundNotificationToast
                     key={notif.id}

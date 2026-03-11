@@ -5,6 +5,7 @@ import { ALLOWED_MIME_TYPES, ALLOWED_EXTENSIONS, FILE_UPLOAD_CONFIG, HTTP_HEADER
 import { fileProcessingQueue } from "../lib/fileProcessingQueue";
 import { validateAttachmentSecurity } from "../lib/pareSecurityGuard";
 import { processDocument } from "../services/documentProcessing";
+import { parseDocument } from "../services/documentIngestion";
 import { chunkText, generateEmbeddingsBatch } from "../embeddingService";
 import { sanitizeFilename } from "../services/fileValidation";
 import crypto from "node:crypto";
@@ -953,6 +954,82 @@ async function processFileInlineFallback(fileId: string, storagePath: string, mi
     } catch {
       // ignore
     }
+  }
+}
+
+function buildStructuredPreviewArtifact(params: {
+  fileName: string;
+  mimeType: string;
+  parsed: Awaited<ReturnType<typeof parseDocument>>;
+}): {
+  name: string;
+  type: string;
+  mimeType: string;
+  data: unknown;
+} | null {
+  const { fileName, mimeType, parsed } = params;
+  const sections = parsed.sheets;
+
+  switch (parsed.metadata.fileType) {
+    case "docx":
+      return {
+        name: fileName,
+        type: "word",
+        mimeType,
+        data: {
+          content: sections
+            .flatMap((section) => section.previewData.map((row) => String(row[0] ?? "").trim()))
+            .filter(Boolean)
+            .join("\n\n"),
+        },
+      };
+
+    case "pptx":
+    case "ppt":
+      return {
+        name: fileName,
+        type: "ppt",
+        mimeType,
+        data: {
+          slides: sections.map((section, index) => ({
+            title: section.name || `Diapositiva ${index + 1}`,
+            content: section.previewData
+              .map((row) => String(row[0] ?? "").trim())
+              .filter(Boolean),
+          })),
+        },
+      };
+
+    case "xlsx":
+    case "xls":
+    case "csv":
+    case "tsv":
+      return {
+        name: fileName,
+        type: "excel",
+        mimeType,
+        data: {
+          sheets: sections.map((section) => ({
+            name: section.name,
+            data: section.previewData,
+          })),
+        },
+      };
+
+    case "pdf":
+    case "rtf":
+      return {
+        name: fileName,
+        type: "document",
+        mimeType,
+        data: sections
+          .flatMap((section) => section.previewData.map((row) => String(row[0] ?? "").trim()))
+          .filter(Boolean)
+          .join("\n\n"),
+      };
+
+    default:
+      return null;
   }
 }
 
@@ -2233,7 +2310,29 @@ export function createFilesRouter() {
         .sort((a, b) => a.chunkIndex - b.chunkIndex)
         .map(c => c.content)
         .join("\n");
-      res.json({ status: "ready", content, fileName: file.name });
+
+      let previewArtifact: ReturnType<typeof buildStructuredPreviewArtifact> | null = null;
+      if (file.storagePath && file.mimeType) {
+        try {
+          const buffer = await readFileBufferFromStoragePath(file.storagePath);
+          const parsed = await parseDocument(buffer, file.mimeType, file.name);
+          previewArtifact = buildStructuredPreviewArtifact({
+            fileName: file.name,
+            mimeType: file.mimeType,
+            parsed,
+          });
+        } catch (previewError) {
+          console.warn("[FilesRouter] Structured preview unavailable:", previewError);
+        }
+      }
+
+      res.json({
+        status: "ready",
+        content,
+        fileName: file.name,
+        mimeType: file.mimeType,
+        previewArtifact,
+      });
     } catch (error: any) {
       console.error("Error getting file content:", error);
       res.status(500).json({ error: "Failed to get file content" });

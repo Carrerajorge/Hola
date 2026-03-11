@@ -2959,6 +2959,14 @@ export function ChatInterface({
       if (response.ok) {
         const data = await response.json();
         if (data.status === "ready" && data.content) {
+          if (data.previewArtifact) {
+            setPreviewFileAttachment(null);
+            setDocumentPreviewArtifact({
+              ...data.previewArtifact,
+              url: resolvedStoragePath,
+            });
+            return;
+          }
           setPreviewFileAttachment((prev: any) => prev ? {
             ...prev,
             fileId: effectiveFileId,

@@ -14,7 +14,7 @@ const CLIENT_SECRET_KEYS = [
   "GEMINI_CLI_OAUTH_CLIENT_SECRET",
   "GOOGLE_CLIENT_SECRET",
 ];
-const REDIRECT_URI = "http://localhost:8085/oauth2callback";
+const LOCAL_REDIRECT_URI = "http://localhost:8085/oauth2callback";
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const USERINFO_URL = "https://www.googleapis.com/oauth2/v1/userinfo?alt=json";
@@ -263,16 +263,20 @@ async function fetchWithTimeout(
   }
 }
 
-function buildAuthUrl(challenge: string, verifier: string): string {
+function buildAuthUrl(options: {
+  challenge: string;
+  redirectUri: string;
+  state: string;
+}): string {
   const { clientId } = resolveOAuthClientConfig();
   const params = new URLSearchParams({
     client_id: clientId,
     response_type: "code",
-    redirect_uri: REDIRECT_URI,
+    redirect_uri: options.redirectUri,
     scope: SCOPES.join(" "),
-    code_challenge: challenge,
+    code_challenge: options.challenge,
     code_challenge_method: "S256",
-    state: verifier,
+    state: options.state,
     access_type: "offline",
     prompt: "consent",
   });
@@ -281,14 +285,31 @@ function buildAuthUrl(challenge: string, verifier: string): string {
 
 export function startGeminiCliOAuthSession(): {
   verifier: string;
+  state: string;
+  authUrl: string;
+  redirectUri: string;
+};
+export function startGeminiCliOAuthSession(options: {
+  redirectUri?: string;
+  state?: string;
+} = {}): {
+  verifier: string;
+  state: string;
   authUrl: string;
   redirectUri: string;
 } {
   const { verifier, challenge } = generatePkce();
+  const redirectUri = options.redirectUri?.trim() || LOCAL_REDIRECT_URI;
+  const state = options.state?.trim() || verifier;
   return {
     verifier,
-    authUrl: buildAuthUrl(challenge, verifier),
-    redirectUri: REDIRECT_URI,
+    state,
+    authUrl: buildAuthUrl({
+      challenge,
+      redirectUri,
+      state,
+    }),
+    redirectUri,
   };
 }
 
@@ -404,7 +425,7 @@ async function waitForLocalCallback(params: {
     });
 
     server.listen(port, hostname, () => {
-      params.onProgress?.(`Waiting for OAuth callback on ${REDIRECT_URI}…`);
+      params.onProgress?.(`Waiting for OAuth callback on ${LOCAL_REDIRECT_URI}…`);
     });
 
     timeout = setTimeout(() => {
@@ -416,13 +437,14 @@ async function waitForLocalCallback(params: {
 async function exchangeCodeForTokens(
   code: string,
   verifier: string,
+  redirectUri: string,
 ): Promise<GeminiCliOAuthCredentials> {
   const { clientId, clientSecret } = resolveOAuthClientConfig();
   const body = new URLSearchParams({
     client_id: clientId,
     code,
     grant_type: "authorization_code",
-    redirect_uri: REDIRECT_URI,
+    redirect_uri: redirectUri,
     code_verifier: verifier,
   });
   if (clientSecret) {
@@ -470,15 +492,19 @@ async function exchangeCodeForTokens(
 export async function completeGeminiCliOAuthSession(params: {
   callbackInput: string;
   verifier: string;
+  redirectUri?: string;
+  expectedState?: string;
 }): Promise<GeminiCliOAuthCredentials> {
-  const parsed = parseCallbackInput(params.callbackInput, params.verifier);
+  const expectedState = params.expectedState?.trim() || params.verifier;
+  const redirectUri = params.redirectUri?.trim() || LOCAL_REDIRECT_URI;
+  const parsed = parseCallbackInput(params.callbackInput, expectedState);
   if ("error" in parsed) {
     throw new Error(parsed.error);
   }
-  if (parsed.state !== params.verifier) {
+  if (parsed.state !== expectedState) {
     throw new Error("OAuth state mismatch - please try again");
   }
-  return await exchangeCodeForTokens(parsed.code, params.verifier);
+  return await exchangeCodeForTokens(parsed.code, params.verifier, redirectUri);
 }
 
 async function getUserEmail(accessToken: string): Promise<string | undefined> {
@@ -707,8 +733,8 @@ export async function loginGeminiCliOAuth(
     "Gemini CLI OAuth",
   );
 
-  const { verifier, challenge } = generatePkce();
-  const authUrl = buildAuthUrl(challenge, verifier);
+  const flow = startGeminiCliOAuthSession();
+  const { verifier, state, authUrl, redirectUri } = flow;
 
   if (needsManual) {
     ctx.progress.update("OAuth URL ready");
@@ -719,11 +745,11 @@ export async function loginGeminiCliOAuth(
     if ("error" in parsed) {
       throw new Error(parsed.error);
     }
-    if (parsed.state !== verifier) {
+    if (parsed.state !== state) {
       throw new Error("OAuth state mismatch - please try again");
     }
     ctx.progress.update("Exchanging authorization code for tokens...");
-    return exchangeCodeForTokens(parsed.code, verifier);
+    return exchangeCodeForTokens(parsed.code, verifier, redirectUri);
   }
 
   ctx.progress.update("Complete sign-in in browser...");
@@ -735,12 +761,12 @@ export async function loginGeminiCliOAuth(
 
   try {
     const { code } = await waitForLocalCallback({
-      expectedState: verifier,
+      expectedState: state,
       timeoutMs: 5 * 60 * 1000,
       onProgress: (msg) => ctx.progress.update(msg),
     });
     ctx.progress.update("Exchanging authorization code for tokens...");
-    return await exchangeCodeForTokens(code, verifier);
+    return await exchangeCodeForTokens(code, verifier, redirectUri);
   } catch (err) {
     if (
       err instanceof Error &&
@@ -755,11 +781,11 @@ export async function loginGeminiCliOAuth(
       if ("error" in parsed) {
         throw new Error(parsed.error, { cause: err });
       }
-      if (parsed.state !== verifier) {
+      if (parsed.state !== state) {
         throw new Error("OAuth state mismatch - please try again", { cause: err });
       }
       ctx.progress.update("Exchanging authorization code for tokens...");
-      return exchangeCodeForTokens(parsed.code, verifier);
+      return exchangeCodeForTokens(parsed.code, verifier, redirectUri);
     }
     throw err;
   }
