@@ -5168,6 +5168,7 @@ export function ChatInterface({
             console.error("[Agent Mode] Failed to start run, result is null");
             // Remove the optimistic message since the agent failed to start
             setOptimisticMessages((prev: Message[]) => prev.filter((m: Message) => m.id !== userMessage.id));
+            setSelectedTool(null);
             toast({
               title: "Error",
               description: "No se pudo iniciar el agente. Por favor, inicia sesión para usar esta función.",
@@ -5182,6 +5183,7 @@ export function ChatInterface({
           if (savedAgentFiles.length > 0) {
             setUploadedFiles(savedAgentFiles);
           }
+          setSelectedTool(null);
           toast({ title: "Error", description: "Error al iniciar el agente. Tus archivos fueron restaurados.", variant: "destructive" });
         }
         return;
