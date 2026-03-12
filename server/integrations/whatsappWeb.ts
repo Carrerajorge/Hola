@@ -302,11 +302,11 @@ await new Promise((resolve) => setTimeout(resolve, 1000));
 }
 };
 
-void waitForPairing();
+await waitForPairing();
+return this.getStatus(userId);
 }
 
 return this.getStatus(userId);
-}
 
 async restart(userId: string, options?: StartOptions): Promise<WhatsAppStatus> {
 await this.disconnect(userId, { preserveAuth: false });
