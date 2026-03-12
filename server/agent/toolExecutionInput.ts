@@ -10,6 +10,11 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+function supportsDependencyContext(toolName: string): boolean {
+  const normalized = String(toolName || "").trim();
+  return normalized === "fetch_url" || normalized === "summarize";
+}
+
 export function enrichToolExecutionInput(
   toolName: string,
   input: unknown,
@@ -20,11 +25,15 @@ export function enrichToolExecutionInput(
       ? { ...(input as Record<string, unknown>) }
       : {};
 
-  if (String(toolName || "").trim() !== "fetch_url") {
+  if (!supportsDependencyContext(toolName)) {
     return safeInput;
   }
 
-  if (isNonEmptyString(safeInput.url)) {
+  if (
+    (String(toolName || "").trim() === "fetch_url" && isNonEmptyString(safeInput.url)) ||
+    (String(toolName || "").trim() === "summarize" &&
+      (isNonEmptyString(safeInput.input) || isNonEmptyString(safeInput.content)))
+  ) {
     return safeInput;
   }
 

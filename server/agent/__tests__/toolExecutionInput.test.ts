@@ -45,4 +45,46 @@ describe("enrichToolExecutionInput", () => {
 
     expect(enriched).toEqual({ url: "https://iliagpt.com/docs" });
   });
+
+  it("attaches successful prior results for summarize when the planner omitted input", () => {
+    const enriched = enrichToolExecutionInput(
+      "summarize",
+      {},
+      [
+        {
+          stepIndex: 1,
+          toolName: "fetch_url",
+          success: true,
+          output: {
+            title: "Example",
+            textContent: "OpenAI published a post about better tool use.",
+          },
+        },
+      ],
+    );
+
+    expect((enriched._dependencyResults as any)?.step_2?.output?.textContent).toBe(
+      "OpenAI published a post about better tool use.",
+    );
+    expect((enriched.previousResults as any)?.[0]?.toolName).toBe("fetch_url");
+  });
+
+  it("does not overwrite an explicit summarize input", () => {
+    const enriched = enrichToolExecutionInput(
+      "summarize",
+      { input: "Use this exact text" },
+      [
+        {
+          stepIndex: 1,
+          toolName: "fetch_url",
+          success: true,
+          output: {
+            textContent: "This should not replace the explicit input.",
+          },
+        },
+      ],
+    );
+
+    expect(enriched).toEqual({ input: "Use this exact text" });
+  });
 });
