@@ -70,7 +70,7 @@ type GeminiCliResultMessage =
 
 const STATUS_QUERY_KEY = ["/api/oauth/google/gemini-cli/status"];
 const FLOW_STORAGE_KEY = "iliagpt:gemini-cli-oauth-flow";
-const FLOW_STORAGE_TTL_MS = 45 * 60 * 1000;
+const FLOW_STORAGE_TTL_MS = 2 * 60 * 60 * 1000;
 
 type StoredGeminiCliFlowDraft = {
   flowId: string;
@@ -101,50 +101,67 @@ function extractFlowIdFromCallbackValue(value: string): string | null {
   }
 }
 
-function readStoredFlowDraft(): StoredGeminiCliFlowDraft | null {
-  if (typeof window === "undefined") return null;
+function getFlowStorageTargets(): Storage[] {
+  if (typeof window === "undefined") return [];
+  return [window.sessionStorage, window.localStorage];
+}
+
+function removeStoredFlowDraftFrom(storage: Storage): void {
   try {
-    const raw = window.sessionStorage.getItem(FLOW_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<StoredGeminiCliFlowDraft>;
-    if (
-      typeof parsed.flowId !== "string" ||
-      typeof parsed.authUrl !== "string" ||
-      typeof parsed.redirectUri !== "string" ||
-      typeof parsed.createdAt !== "number" ||
-      typeof parsed.flowProof?.verifier !== "string" ||
-      typeof parsed.flowProof?.oauthState !== "string" ||
-      typeof parsed.flowProof?.redirectUri !== "string" ||
-      typeof parsed.flowProof?.createdAt !== "number"
-    ) {
-      window.sessionStorage.removeItem(FLOW_STORAGE_KEY);
-      return null;
-    }
-    const freshness =
-      typeof parsed.updatedAt === "number"
-        ? parsed.updatedAt
-        : parsed.createdAt;
-    if (Date.now() - freshness > FLOW_STORAGE_TTL_MS) {
-      window.sessionStorage.removeItem(FLOW_STORAGE_KEY);
-      return null;
-    }
-    return {
-      ...(parsed as StoredGeminiCliFlowDraft),
-      callbackUrl:
-        typeof parsed.callbackUrl === "string" ? parsed.callbackUrl : "",
-      updatedAt: freshness,
-    };
+    storage.removeItem(FLOW_STORAGE_KEY);
   } catch {
-    return null;
+    // Ignore storage quota/privacy mode failures.
   }
 }
 
+function readStoredFlowDraft(): StoredGeminiCliFlowDraft | null {
+  if (typeof window === "undefined") return null;
+  for (const storage of getFlowStorageTargets()) {
+    try {
+      const raw = storage.getItem(FLOW_STORAGE_KEY);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw) as Partial<StoredGeminiCliFlowDraft>;
+      if (
+        typeof parsed.flowId !== "string" ||
+        typeof parsed.authUrl !== "string" ||
+        typeof parsed.redirectUri !== "string" ||
+        typeof parsed.createdAt !== "number" ||
+        typeof parsed.flowProof?.verifier !== "string" ||
+        typeof parsed.flowProof?.oauthState !== "string" ||
+        typeof parsed.flowProof?.redirectUri !== "string" ||
+        typeof parsed.flowProof?.createdAt !== "number"
+      ) {
+        removeStoredFlowDraftFrom(storage);
+        continue;
+      }
+      const freshness =
+        typeof parsed.updatedAt === "number"
+          ? parsed.updatedAt
+          : parsed.createdAt;
+      if (Date.now() - freshness > FLOW_STORAGE_TTL_MS) {
+        removeStoredFlowDraftFrom(storage);
+        continue;
+      }
+      return {
+        ...(parsed as StoredGeminiCliFlowDraft),
+        callbackUrl:
+          typeof parsed.callbackUrl === "string" ? parsed.callbackUrl : "",
+        updatedAt: freshness,
+      };
+    } catch {
+      removeStoredFlowDraftFrom(storage);
+    }
+  }
+  return null;
+}
+
 function writeStoredFlowDraft(flow: StoredGeminiCliFlowDraft): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.sessionStorage.setItem(FLOW_STORAGE_KEY, JSON.stringify(flow));
-  } catch {
-    // Ignore storage quota/privacy mode failures.
+  for (const storage of getFlowStorageTargets()) {
+    try {
+      storage.setItem(FLOW_STORAGE_KEY, JSON.stringify(flow));
+    } catch {
+      // Ignore storage quota/privacy mode failures.
+    }
   }
 }
 
@@ -162,11 +179,8 @@ function normalizeCallbackInput(input: string, redirectUri: string): string {
 }
 
 function clearStoredFlowDraft(): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.sessionStorage.removeItem(FLOW_STORAGE_KEY);
-  } catch {
-    // ignore
+  for (const storage of getFlowStorageTargets()) {
+    removeStoredFlowDraftFrom(storage);
   }
 }
 
