@@ -429,6 +429,16 @@ function clearSubmitLock(): void {
   }
 }
 
+function createPendingPromptIntegrityMeta(content: string) {
+  return {
+    clientPromptLen: new TextEncoder().encode(content).byteLength,
+    clientPromptHash: "",
+    clientPromptCharCount: [...content].length,
+    messageId:
+      crypto.randomUUID?.() ?? `msg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+  };
+}
+
 export function ChatInterface({
   messages,
   setMessages,
@@ -1002,8 +1012,16 @@ export function ChatInterface({
   }, [canvasEnabledForActiveContext]);
 
   const fetchUserPlanInfo = useCallback(async () => {
+    if (!user?.id) {
+      setUserPlanState(null);
+      return;
+    }
+
     try {
-      const response = await apiFetch("/api/user/usage", { credentials: "include" });
+      const response = await apiFetch("/api/user/usage", {
+        credentials: "include",
+        cache: "no-store",
+      });
       if (!response.ok) {
         return;
       }
@@ -1018,32 +1036,40 @@ export function ChatInterface({
     } catch (error) {
       console.error("Failed to fetch user plan info:", error);
     }
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     void fetchUserPlanInfo();
-  }, [fetchUserPlanInfo, user?.id]);
+  }, [fetchUserPlanInfo]);
 
   useEffect(() => {
-    const handleFocus = () => {
+    if (!user?.id) return;
+
+    const refreshPlanState = () => {
       void fetchUserPlanInfo();
     };
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        void fetchUserPlanInfo();
+        refreshPlanState();
       }
     };
 
-    window.addEventListener("focus", handleFocus);
-    window.addEventListener("pageshow", handleFocus);
+    window.addEventListener("focus", refreshPlanState);
+    window.addEventListener("pageshow", refreshPlanState);
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        refreshPlanState();
+      }
+    }, 60_000);
 
     return () => {
-      window.removeEventListener("focus", handleFocus);
-      window.removeEventListener("pageshow", handleFocus);
+      window.removeEventListener("focus", refreshPlanState);
+      window.removeEventListener("pageshow", refreshPlanState);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.clearInterval(intervalId);
     };
-  }, [fetchUserPlanInfo]);
+  }, [fetchUserPlanInfo, user?.id]);
 
   const effectiveUserPlanInfo = useMemo(() => {
     if (!userPlanInfo && !userPlanState) return null;
@@ -5428,7 +5454,8 @@ export function ChatInterface({
 
         // Add user message to chat
         const userMsgId = `temp-gen-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-        const genIntegrity = await computePromptIntegrity(generationInput);
+        const genIntegritySeed = createPendingPromptIntegrityMeta(generationInput);
+        const genIntegrityPromise = computePromptIntegrity(generationInput);
         const userMsg: Message = {
           id: userMsgId,
           clientTempId: userMsgId,
@@ -5440,12 +5467,16 @@ export function ChatInterface({
           status: "pending",
           deliveryStatus: "sending",
           deliveryError: undefined,
-          clientPromptLen: genIntegrity.clientPromptLen,
-          clientPromptHash: genIntegrity.clientPromptHash,
-          promptMessageId: genIntegrity.messageId,
+          clientPromptLen: genIntegritySeed.clientPromptLen,
+          clientPromptHash: genIntegritySeed.clientPromptHash,
+          promptMessageId: genIntegritySeed.messageId,
         } as any;
         // Show message immediately (optimistic update)
         setOptimisticMessages((prev: Message[]) => [...prev, userMsg]);
+        const genIntegrity = await genIntegrityPromise;
+        userMsg.clientPromptLen = genIntegrity.clientPromptLen;
+        userMsg.clientPromptHash = genIntegrity.clientPromptHash;
+        userMsg.promptMessageId = genIntegrity.messageId;
         const persistGenerationUserMessagePromise = onSendMessage(userMsg).catch((err) => {
           console.warn("[handleSubmit] Failed to persist generation user message:", err);
           return undefined;
@@ -6143,13 +6174,8 @@ export function ChatInterface({
           spreadsheetData: f.spreadsheetData,
         }));
 
-      // Start prompt integrity hashing in parallel so the optimistic bubble renders immediately.
+      const promptIntegritySeed = createPendingPromptIntegrityMeta(userInput);
       const promptIntegrityPromise = computePromptIntegrity(userInput);
-      const fallbackPromptMessageId =
-        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-          ? crypto.randomUUID()
-          : `msg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-      const fallbackPromptLen = new TextEncoder().encode(userInput).byteLength;
 
       // Construct the User Message object
       const userMsg: Message = {
@@ -6165,9 +6191,9 @@ export function ChatInterface({
         deliveryError: undefined,
         attachments: attachments.length > 0 ? attachments : undefined,
         // Prompt integrity fields — server validates these to detect data loss
-        clientPromptLen: fallbackPromptLen,
-        clientPromptHash: "",
-        promptMessageId: fallbackPromptMessageId,
+        clientPromptLen: promptIntegritySeed.clientPromptLen,
+        clientPromptHash: promptIntegritySeed.clientPromptHash,
+        promptMessageId: promptIntegritySeed.messageId,
       } as any;
 
       // Apply Optimistic Update IMMEDIATELY

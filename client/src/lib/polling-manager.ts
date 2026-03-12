@@ -11,6 +11,7 @@ interface StreamingInstance {
   eventSource: EventSource | null;
   abortController: AbortController | null;
   intervalRef: NodeJS.Timeout | null;
+  statusWatchdogRef: NodeJS.Timeout | null;
   currentInterval: number;
   retryCount: number;
   lastEventCount: number;
@@ -58,6 +59,7 @@ class PollingManager {
       eventSource: null,
       abortController: null,
       intervalRef: null,
+      statusWatchdogRef: null,
       currentInterval: this.options.initialInterval,
       retryCount: 0,
       lastEventCount: 0,
@@ -127,6 +129,10 @@ class PollingManager {
       clearTimeout(instance.intervalRef);
       instance.intervalRef = null;
     }
+    if (instance.statusWatchdogRef) {
+      clearTimeout(instance.statusWatchdogRef);
+      instance.statusWatchdogRef = null;
+    }
     if (instance.abortController) {
       instance.abortController.abort();
       instance.abortController = null;
@@ -189,10 +195,32 @@ class PollingManager {
         instance.eventHandlers.push({ type: eventType, handler });
       }
 
+      this.scheduleStatusWatchdog(runId);
+
     } catch (error) {
       console.warn(`[PollingManager] SSE not supported, falling back to polling for run ${runId}`);
       this.fallbackToPolling(runId);
     }
+  }
+
+  private scheduleStatusWatchdog(runId: string): void {
+    const instance = this.instances.get(runId);
+    if (!instance || instance.statusWatchdogRef || instance.lastEventCount > 0) {
+      return;
+    }
+
+    instance.statusWatchdogRef = setTimeout(() => {
+      const currentInstance = this.instances.get(runId);
+      if (!currentInstance) return;
+      currentInstance.statusWatchdogRef = null;
+
+      if (currentInstance.lastEventCount > 0 || !currentInstance.isUsingSSE) {
+        return;
+      }
+
+      console.warn(`[PollingManager] No SSE events received for run ${runId}; switching to HTTP polling`);
+      this.fallbackToPolling(runId);
+    }, 4000);
   }
 
   private handleSSEMessage(runId: string, event: MessageEvent, eventType?: string): void {
@@ -205,6 +233,12 @@ class PollingManager {
       
       if (effectiveEventType === 'heartbeat') {
         return;
+      }
+
+      instance.lastEventCount += 1;
+      if (instance.statusWatchdogRef) {
+        clearTimeout(instance.statusWatchdogRef);
+        instance.statusWatchdogRef = null;
       }
 
       const store = useAgentStore.getState();
@@ -516,6 +550,10 @@ class PollingManager {
     instance.isUsingSSE = false;
     instance.reconnectAttempts = 0;
     instance.currentInterval = this.options.initialInterval;
+    if (instance.statusWatchdogRef) {
+      clearTimeout(instance.statusWatchdogRef);
+      instance.statusWatchdogRef = null;
+    }
     
     this.poll(runId);
   }
