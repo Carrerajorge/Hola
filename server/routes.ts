@@ -151,6 +151,7 @@ import {
   deleteGeminiCliOAuthFlow,
   extractGeminiCliFlowIdFromState,
   getGeminiCliOAuthFlow,
+  saveGeminiCliOAuthCompleted,
 } from "./lib/geminiCliOAuthFlowStore";
 import { getLogs, getLogStats, type LogFilters } from "./lib/structuredLogger";
 import { getActiveRequests, getRequestStats } from "./lib/requestTracer";
@@ -589,6 +590,11 @@ export async function registerRoutes(
             redirectUri: flow.redirectUri,
             expectedState: flow.oauthState,
           });
+          const responsePayload = {
+            ...status,
+            selectedModelId: status.defaultModelId,
+          };
+          saveGeminiCliOAuthCompleted(geminiFlowId, flow.userId, responsePayload);
 
           if (session.geminiCliOAuthFlows?.[geminiFlowId]) {
             delete session.geminiCliOAuthFlows[geminiFlowId];
@@ -599,10 +605,7 @@ export async function registerRoutes(
           return renderGeminiCliOAuthBridge(res, {
             flowId: geminiFlowId,
             status: "success",
-            result: {
-              ...status,
-              selectedModelId: status.defaultModelId,
-            },
+            result: responsePayload,
           });
         } catch (error) {
           console.error("[Google Auth] Gemini CLI callback completion failed:", error);

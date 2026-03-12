@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   clearExpiredGeminiCliOAuthFlows,
+  deleteGeminiCliOAuthCompleted,
   deleteGeminiCliOAuthFlow,
   extractGeminiCliFlowIdFromCallbackInput,
   extractGeminiCliFlowIdFromState,
+  getGeminiCliOAuthCompleted,
   getGeminiCliOAuthFlow,
+  saveGeminiCliOAuthCompleted,
   saveGeminiCliOAuthFlow,
 } from "./geminiCliOAuthFlowStore";
 
@@ -39,5 +42,18 @@ describe("geminiCliOAuthFlowStore", () => {
     deleteGeminiCliOAuthFlow("active-flow");
     clearExpiredGeminiCliOAuthFlows();
     expect(getGeminiCliOAuthFlow("active-flow")).toBeNull();
+  });
+
+  it("stores and retrieves completed flows for manual fallback", () => {
+    saveGeminiCliOAuthCompleted("completed-flow", "user-2", {
+      connected: true,
+      defaultModelId: "gemini-3.1-pro-preview",
+    });
+
+    expect(getGeminiCliOAuthCompleted("completed-flow", "user-2")?.response.connected).toBe(true);
+
+    deleteGeminiCliOAuthCompleted("completed-flow", "user-2");
+    clearExpiredGeminiCliOAuthFlows();
+    expect(getGeminiCliOAuthCompleted("completed-flow", "user-2")).toBeNull();
   });
 });
