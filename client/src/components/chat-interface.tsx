@@ -1,13 +1,26 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import React, {
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  useMemo,
+} from "react";
 import { SkeletonChatMessages } from "@/components/skeletons";
 import { useDraft } from "@/hooks/use-draft";
 import { useStreamingTransition } from "@/hooks/use-streaming-transition";
 import { useStreamChat } from "@/hooks/use-stream-chat";
 import { apiFetch, getAnonUserIdHeader } from "@/lib/apiClient";
 import { getFileUploader } from "@/lib/fileUploader";
-import { ensureCsrfToken, resolveUploadUrlForResponse, uploadBlobWithProgress } from "@/lib/uploadTransport";
+import {
+  ensureCsrfToken,
+  resolveUploadUrlForResponse,
+  uploadBlobWithProgress,
+} from "@/lib/uploadTransport";
 import { WelcomeAnimation } from "@/components/welcome-animation-simple";
-import { WelcomeExplosion, useFirstVisit } from "@/components/welcome-explosion";
+import {
+  WelcomeExplosion,
+  useFirstVisit,
+} from "@/components/welcome-explosion";
 import {
   Plus,
   ArrowUp,
@@ -56,17 +69,40 @@ import {
   Settings,
   Archive,
   Folder,
-  FolderPlus
+  FolderPlus,
 } from "lucide-react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { chatLogger } from "@/lib/logger";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuPortal, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+  DropdownMenuPortal,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import { Upload, Search, Image, Video, Bot, Plug } from "lucide-react";
@@ -91,12 +127,23 @@ import {
   resolveRealChatId,
   isPendingChat,
 } from "@/hooks/use-chats";
-import { MarkdownRenderer, MarkdownErrorBoundary } from "@/components/markdown-renderer";
+import {
+  MarkdownRenderer,
+  MarkdownErrorBoundary,
+} from "@/components/markdown-renderer";
 import { useAgent } from "@/hooks/use-agent";
-import { useBrowserSession, globalStartSseSession, globalUpdateFromSseStep } from "@/hooks/use-browser-session";
+import {
+  useBrowserSession,
+  globalStartSseSession,
+  globalUpdateFromSseStep,
+} from "@/hooks/use-browser-session";
 import { AgentObserver } from "@/components/agent-observer";
 import { VirtualComputer } from "@/components/virtual-computer";
-import { EnhancedDocumentEditorLazy, SpreadsheetEditorLazy, PPTEditorShellLazy } from "@/lib/lazyComponents";
+import {
+  EnhancedDocumentEditorLazy,
+  SpreadsheetEditorLazy,
+  PPTEditorShellLazy,
+} from "@/lib/lazyComponents";
 import { usePptStreaming } from "@/hooks/usePptStreaming";
 import { PPT_STREAMING_SYSTEM_PROMPT } from "@/lib/pptPrompts";
 import { ETLDialog } from "@/components/etl-dialog";
@@ -110,38 +157,74 @@ import { getEffectivePlan, isPaidPlan } from "@/lib/planUtils";
 import { DocumentGeneratorDialog } from "@/components/document-generator-dialog";
 import { GoogleFormsDialog } from "@/components/google-forms-dialog";
 import { InlineGoogleFormPreview } from "@/components/inline-google-form-preview";
-import { detectFormIntent, extractMentionFromPrompt } from "@/lib/formIntentDetector";
+import {
+  detectFormIntent,
+  extractMentionFromPrompt,
+} from "@/lib/formIntentDetector";
 import { markdownToTipTap } from "@/lib/markdownToHtml";
 import { detectGmailIntent } from "@/lib/gmailIntentDetector";
 import { shouldAutoActivateAgent } from "@/lib/complexityDetector";
 import { shouldUseSuperAgent } from "@/lib/superAgentDetector";
 import { useImageState, fetchImageAsBase64 } from "@/hooks/use-image-state";
-import { useAgentStore, useAgentRun, type AgentRunState } from "@/stores/agent-store";
+import {
+  useAgentStore,
+  useAgentRun,
+  type AgentRunState,
+} from "@/stores/agent-store";
 import { useSuperAgentStore } from "@/stores/super-agent-store";
-import { useSuperAgentStream, type SuperAgentState, type SuperAgentArtifact, type SuperAgentFinal } from "@/hooks/use-super-agent";
-import { useStartAgentRun, useCancelAgentRun, useAgentPolling, abortPendingAgentStart } from "@/hooks/use-agent-polling";
+import {
+  useSuperAgentStream,
+  type SuperAgentState,
+  type SuperAgentArtifact,
+  type SuperAgentFinal,
+} from "@/hooks/use-super-agent";
+import {
+  useStartAgentRun,
+  useCancelAgentRun,
+  useAgentPolling,
+  abortPendingAgentStart,
+} from "@/hooks/use-agent-polling";
 import { useStreamingStore } from "@/stores/streamingStore";
-import { DocumentPreviewPanel, type DocumentPreviewArtifact } from "@/components/document-preview-panel";
+import {
+  DocumentPreviewPanel,
+  type DocumentPreviewArtifact,
+} from "@/components/document-preview-panel";
 import { InlineGmailPreview } from "@/components/inline-gmail-preview";
 import { VoiceChatMode } from "@/components/voice-chat-mode";
 import { RecordingPanel } from "@/components/recording-panel";
 import { Composer } from "@/components/composer";
-import { parseDocumentBlocks, type DocumentBlock } from "@/components/message-list";
-import { ChatMessageList, ChatMessageListProps } from "@/components/chat/ChatMessageList";
+import {
+  parseDocumentBlocks,
+  type DocumentBlock,
+} from "@/components/message-list";
+import {
+  ChatMessageList,
+  ChatMessageListProps,
+} from "@/components/chat/ChatMessageList";
 import { ChatHeader } from "@/components/chat/ChatHeader";
 import { useChatStore } from "@/stores/chatStore";
 import { KeyboardShortcutsDialog } from "@/components/keyboard-shortcuts-dialog";
 import { PromptSuggestions } from "@/components/prompt-suggestions";
 import { MessageFeedback } from "@/components/message-feedback";
-import { UpgradePromptModal, useUpgradePrompt } from "@/components/upgrade-prompt-modal";
+import {
+  UpgradePromptModal,
+  useUpgradePrompt,
+} from "@/components/upgrade-prompt-modal";
 // AgentPanel removed - progress is shown inline in chat messages
 import { useAuth } from "@/hooks/use-auth";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useConversationState } from "@/hooks/use-conversation-state";
 import { useAgentMode } from "@/hooks/use-agent-mode";
 import { Database, Sparkles, AudioLines } from "lucide-react";
-import { useModelAvailability, type AvailableModel } from "@/contexts/ModelAvailabilityContext";
-import { getFileTheme, getFileCategory, FileCategory } from "@/lib/fileTypeTheme";
+import {
+  useModelAvailability,
+  type AvailableModel,
+} from "@/contexts/ModelAvailabilityContext";
+import {
+  getFileTheme,
+  getFileCategory,
+  FileCategory,
+} from "@/lib/fileTypeTheme";
 import {
   dataImageUrlToFile,
   extractBareUrlsFromText,
@@ -156,12 +239,21 @@ import {
   compressImageToDataUrl,
 } from "@/lib/attachmentIngest";
 import { useChats } from "@/hooks/use-chats";
-import { useChatFolders, type Folder as FolderType } from "@/hooks/use-chat-folders";
+import {
+  useChatFolders,
+  type Folder as FolderType,
+} from "@/hooks/use-chat-folders";
 import { useProjects } from "@/hooks/use-projects";
 import { usePinnedGpts } from "@/hooks/use-pinned-gpts";
-import { DEFAULT_UI_GPT_CAPABILITIES, normalizeUiGptCapabilities } from "@/lib/gptCapabilities";
+import {
+  DEFAULT_UI_GPT_CAPABILITIES,
+  normalizeUiGptCapabilities,
+} from "@/lib/gptCapabilities";
 import { UniversalExecutionConsole } from "./universal-execution-console";
-import { ExecutionStreamClient, FlatRunState } from "@/lib/executionStreamClient";
+import {
+  ExecutionStreamClient,
+  FlatRunState,
+} from "@/lib/executionStreamClient";
 import { LiveExecutionConsole } from "./live-execution-console";
 import { PricingModal } from "./pricing-modal";
 
@@ -170,15 +262,26 @@ import { ProductionProgress } from "@/components/production-progress";
 import { AiProcessStep, AIState } from "./chat-interface/types";
 import { GranularErrorBoundary } from "@/components/ui/granular-error-boundary";
 import { EditorErrorBoundary } from "@/components/error-boundaries";
-import { DataTableWrapper, CleanDataTableComponents, downloadTableAsExcel, copyTableToClipboard } from "./chat-interface/DataTableWrapper";
+import {
+  DataTableWrapper,
+  CleanDataTableComponents,
+  downloadTableAsExcel,
+  copyTableToClipboard,
+} from "./chat-interface/DataTableWrapper";
 import { StreamingIndicator } from "./chat-interface/StreamingIndicator";
-import { EditableDocumentPreview, type TextSelection } from "./chat-interface/EditableDocumentPreview";
-import { extractTextFromChildren, isNumericValue } from "./chat-interface/utils";
+import {
+  EditableDocumentPreview,
+  type TextSelection,
+} from "./chat-interface/EditableDocumentPreview";
+import {
+  extractTextFromChildren,
+  isNumericValue,
+} from "./chat-interface/utils";
 
 function AvatarWithFallback({
   src,
   alt,
-  fallback
+  fallback,
 }: {
   src: string;
   alt: string;
@@ -207,7 +310,10 @@ function AvatarWithFallback({
 }
 
 // Heuristic function to detect uncertainty in AI responses
-function detectUncertainty(content: string): { confidence: 'high' | 'medium' | 'low'; reason?: string } {
+function detectUncertainty(content: string): {
+  confidence: "high" | "medium" | "low";
+  reason?: string;
+} {
   const lowConfidencePatterns = [
     /no (estoy|está) seguro/i,
     /no (puedo|logro|he podido) confirmar/i,
@@ -218,7 +324,7 @@ function detectUncertainty(content: string): { confidence: 'high' | 'medium' | '
     /es probable que/i,
     /sin certeza/i,
     /no garantiza/i,
-    /difícil determinar/i
+    /difícil determinar/i,
   ];
 
   const mediumConfidencePatterns = [
@@ -227,14 +333,15 @@ function detectUncertainty(content: string): { confidence: 'high' | 'medium' | '
     /aparentemente/i,
     /posiblemente/i,
     /en principio/i,
-    /según el contexto/i
+    /según el contexto/i,
   ];
 
   for (const pattern of lowConfidencePatterns) {
     if (pattern.test(content)) {
       return {
-        confidence: 'low',
-        reason: 'La respuesta contiene expresiones de duda o falta de información.'
+        confidence: "low",
+        reason:
+          "La respuesta contiene expresiones de duda o falta de información.",
       };
     }
   }
@@ -242,18 +349,15 @@ function detectUncertainty(content: string): { confidence: 'high' | 'medium' | '
   for (const pattern of mediumConfidencePatterns) {
     if (pattern.test(content)) {
       return {
-        confidence: 'medium',
-        reason: 'La respuesta se basa en inferencias o indicaciones no explícitas.'
+        confidence: "medium",
+        reason:
+          "La respuesta se basa en inferencias o indicaciones no explícitas.",
       };
     }
   }
 
-  return { confidence: 'high' };
+  return { confidence: "high" };
 }
-
-
-
-
 
 type AiState = AIState;
 
@@ -287,9 +391,23 @@ interface ChatInterfaceProps {
   chatGptId?: string | null;
   chatTitle?: string | null;
   onOpenApps?: () => void;
-  onUpdateMessageAttachments?: (chatId: string, messageId: string, attachments: Message['attachments'], newMessage?: Message) => void;
-  onEditMessageAndTruncate?: (chatId: string, messageId: string, newContent: string, messageIndex: number) => void;
-  onTruncateAndReplaceMessage?: (chatId: string, messageIndex: number, newMessage: Message) => void;
+  onUpdateMessageAttachments?: (
+    chatId: string,
+    messageId: string,
+    attachments: Message["attachments"],
+    newMessage?: Message,
+  ) => void;
+  onEditMessageAndTruncate?: (
+    chatId: string,
+    messageId: string,
+    newContent: string,
+    messageIndex: number,
+  ) => void;
+  onTruncateAndReplaceMessage?: (
+    chatId: string,
+    messageIndex: number,
+    newMessage: Message,
+  ) => void;
   onTruncateMessagesAt?: (chatId: string, messageIndex: number) => void;
   onNewChat?: (options?: { preserveGpt?: boolean }) => void;
   onEditGpt?: (gpt: ActiveGpt) => void;
@@ -305,21 +423,30 @@ interface ChatInterfaceProps {
   onEditChatTitle?: (id: string, newTitle: string) => void;
   isPinned?: boolean;
   isArchived?: boolean;
-  folders?: Array<{ id: string; name: string; color: string; chatIds: string[] }>;
+  folders?: Array<{
+    id: string;
+    name: string;
+    color: string;
+    chatIds: string[];
+  }>;
   onMoveToFolder?: (chatId: string, folderId: string | null) => void;
   onCreateFolder?: (name: string) => void;
   currentFolderId?: string | null;
   // Super Agent UI state - kept in parent to survive ChatInterface key changes
-  uiPhase?: 'idle' | 'thinking' | 'console' | 'done';
-  setUiPhase?: React.Dispatch<React.SetStateAction<'idle' | 'thinking' | 'console' | 'done'>>;
+  uiPhase?: "idle" | "thinking" | "console" | "done";
+  setUiPhase?: React.Dispatch<
+    React.SetStateAction<"idle" | "thinking" | "console" | "done">
+  >;
   activeRunId?: string | null;
   setActiveRunId?: React.Dispatch<React.SetStateAction<string | null>>;
   selectedProjectId?: string | null;
   // Document generation state - kept in parent to survive ChatInterface key changes during new chat creation
   selectedDocTool?: "word" | "excel" | "ppt" | "figma" | null;
-  setSelectedDocTool?: React.Dispatch<React.SetStateAction<"word" | "excel" | "ppt" | "figma" | null>>;
+  setSelectedDocTool?: React.Dispatch<
+    React.SetStateAction<"word" | "excel" | "ppt" | "figma" | null>
+  >;
   docGenerationState?: {
-    status: 'idle' | 'generating' | 'ready' | 'error';
+    status: "idle" | "generating" | "ready" | "error";
     progress: number;
     stage: string;
     downloadUrl: string | null;
@@ -327,15 +454,17 @@ interface ChatInterfaceProps {
     fileSize: number | null;
     error?: string;
   };
-  setDocGenerationState?: React.Dispatch<React.SetStateAction<{
-    status: 'idle' | 'generating' | 'ready' | 'error';
-    progress: number;
-    stage: string;
-    downloadUrl: string | null;
-    fileName: string | null;
-    fileSize: number | null;
-    error?: string;
-  }>>;
+  setDocGenerationState?: React.Dispatch<
+    React.SetStateAction<{
+      status: "idle" | "generating" | "ready" | "error";
+      progress: number;
+      stage: string;
+      downloadUrl: string | null;
+      fileName: string | null;
+      fileSize: number | null;
+      error?: string;
+    }>
+  >;
 }
 
 interface UploadedFile {
@@ -359,8 +488,8 @@ interface UploadedFile {
 }
 
 function isAnalyzableFile(filename: string): boolean {
-  const ext = filename.toLowerCase().split('.').pop();
-  return ['xlsx', 'xls', 'csv', 'pdf', 'doc', 'docx'].includes(ext || '');
+  const ext = filename.toLowerCase().split(".").pop();
+  return ["xlsx", "xls", "csv", "pdf", "doc", "docx"].includes(ext || "");
 }
 
 function isPdfFile(mimeType?: string, fileName?: string): boolean {
@@ -374,15 +503,15 @@ function isPdfFile(mimeType?: string, fileName?: string): boolean {
 async function triggerDocumentAnalysis(
   uploadId: string,
   filename: string,
-  onAnalysisStarted: (analysisId: string) => void
+  onAnalysisStarted: (analysisId: string) => void,
 ): Promise<void> {
   if (!isAnalyzableFile(filename)) return;
 
   try {
     const response = await apiFetch(`/api/chat/uploads/${uploadId}/analyze`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scope: 'all' })
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope: "all" }),
     });
 
     if (response.ok) {
@@ -392,7 +521,7 @@ async function triggerDocumentAnalysis(
       }
     }
   } catch (err) {
-    console.error('Analysis failed to start:', err);
+    console.error("Analysis failed to start:", err);
   }
 }
 
@@ -435,7 +564,8 @@ function createPendingPromptIntegrityMeta(content: string) {
     clientPromptHash: "",
     clientPromptCharCount: [...content].length,
     messageId:
-      crypto.randomUUID?.() ?? `msg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+      crypto.randomUUID?.() ??
+      `msg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
   };
 }
 
@@ -492,15 +622,14 @@ export function ChatInterface({
 }: ChatInterfaceProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { settings } = useSettingsContext();
-  const {
-    projects,
-    getProject,
-    updateProject,
-  } = useProjects();
+  const { projects, getProject, updateProject } = useProjects();
 
   const selectedProject = useMemo(() => {
     if (!selectedProjectId) return null;
-    return getProject(selectedProjectId) || projects.find((p: any) => p.id === selectedProjectId);
+    return (
+      getProject(selectedProjectId) ||
+      projects.find((p: any) => p.id === selectedProjectId)
+    );
   }, [selectedProjectId, projects, getProject]);
 
   const activeGptConversationStarters = useMemo(() => {
@@ -544,7 +673,9 @@ export function ChatInterface({
   const [repoBranches, setRepoBranches] = useState<string[]>(["main"]);
   const [activeRepoBranch, setActiveRepoBranch] = useState("main");
   const [selectedRepoFolder, setSelectedRepoFolder] = useState<string>(".");
-  const [selectedCodingAgents, setSelectedCodingAgents] = useState<CodingAgentProfile[]>(["coder"]);
+  const [selectedCodingAgents, setSelectedCodingAgents] = useState<
+    CodingAgentProfile[]
+  >(["coder"]);
 
   const refreshRepositoryWorkspace = useCallback(
     async (repositoryPath: string, preferredFolder?: string) => {
@@ -578,12 +709,16 @@ export function ChatInterface({
         if (foldersRes.ok) {
           const foldersData = await foldersRes.json();
           const folders = Array.isArray(foldersData?.folders)
-            ? foldersData.folders.filter((item: unknown): item is string => typeof item === "string" && item.length > 0)
+            ? foldersData.folders.filter(
+                (item: unknown): item is string =>
+                  typeof item === "string" && item.length > 0,
+              )
             : [];
           setRepoFolders(folders);
           setSelectedRepoFolder((prev) => {
             const candidate = preferredFolder || prev || ".";
-            if (candidate === "." || folders.includes(candidate)) return candidate;
+            if (candidate === "." || folders.includes(candidate))
+              return candidate;
             return ".";
           });
         } else {
@@ -593,12 +728,18 @@ export function ChatInterface({
         if (branchesRes.ok) {
           const branchesData = await branchesRes.json();
           const branches = Array.isArray(branchesData?.branches)
-            ? branchesData.branches.filter((item: unknown): item is string => typeof item === "string" && item.length > 0)
+            ? branchesData.branches.filter(
+                (item: unknown): item is string =>
+                  typeof item === "string" && item.length > 0,
+              )
             : [];
           const normalizedBranches = branches.length > 0 ? branches : ["main"];
           setRepoBranches(normalizedBranches);
           setActiveRepoBranch((prev) => {
-            if (branchesData?.current && normalizedBranches.includes(branchesData.current)) {
+            if (
+              branchesData?.current &&
+              normalizedBranches.includes(branchesData.current)
+            ) {
               return branchesData.current;
             }
             if (normalizedBranches.includes(prev)) return prev;
@@ -609,13 +750,16 @@ export function ChatInterface({
           setActiveRepoBranch("main");
         }
       } catch (error: any) {
-        console.warn("[ChatInterface] Failed to refresh repository workspace:", error?.message || error);
+        console.warn(
+          "[ChatInterface] Failed to refresh repository workspace:",
+          error?.message || error,
+        );
         setRepoFolders([]);
         setRepoBranches(["main"]);
         setActiveRepoBranch("main");
       }
     },
-    []
+    [],
   );
 
   useEffect(() => {
@@ -628,14 +772,19 @@ export function ChatInterface({
       return;
     }
 
-    const normalizedDefaultFolder = selectedProject.defaultCodeFolder?.trim() || ".";
+    const normalizedDefaultFolder =
+      selectedProject.defaultCodeFolder?.trim() || ".";
     setSelectedRepoFolder(normalizedDefaultFolder);
     setSelectedCodingAgents(
-      Array.isArray(selectedProject.codingAgents) && selectedProject.codingAgents.length > 0
+      Array.isArray(selectedProject.codingAgents) &&
+        selectedProject.codingAgents.length > 0
         ? selectedProject.codingAgents
-        : ["coder"]
+        : ["coder"],
     );
-    void refreshRepositoryWorkspace(selectedProject.repositoryPath, normalizedDefaultFolder);
+    void refreshRepositoryWorkspace(
+      selectedProject.repositoryPath,
+      normalizedDefaultFolder,
+    );
   }, [
     refreshRepositoryWorkspace,
     selectedProject?.codingAgents,
@@ -644,92 +793,107 @@ export function ChatInterface({
     selectedProject?.repositoryPath,
   ]);
 
-  const handleSelectRepoFolder = useCallback((folder: string) => {
-    const normalizedFolder = String(folder || ".").trim() || ".";
-    setSelectedRepoFolder(normalizedFolder);
-    if (selectedProject?.id) {
-      updateProject(selectedProject.id, {
-        defaultCodeFolder: normalizedFolder === "." ? null : normalizedFolder,
-      });
-    }
-  }, [selectedProject?.id, updateProject]);
-
-  const handleCreateRepoFolder = useCallback(async (folderName: string) => {
-    const rootPath = selectedProject?.repositoryPath?.trim();
-    if (!rootPath) {
-      toast({
-        title: "Workspace no configurado",
-        description: "Este proyecto no tiene una ruta de repositorio.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const normalizedName = String(folderName || "")
-      .trim()
-      .replace(/\\/g, "/")
-      .replace(/^\/+/, "")
-      .replace(/\/+$/, "");
-
-    if (!normalizedName || normalizedName.includes("..")) {
-      toast({
-        title: "Nombre inválido",
-        description: "La carpeta no puede estar vacía ni contener '..'.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const targetFolder = selectedRepoFolder && selectedRepoFolder !== "."
-      ? `${selectedRepoFolder}/${normalizedName}`
-      : normalizedName;
-
-    try {
-      const response = await apiFetch("/api/local/repo/folders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-        credentials: "include",
-        body: JSON.stringify({ rootPath, folderPath: targetFolder }),
-      });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        throw new Error(payload?.error || "No se pudo crear la carpeta");
-      }
-
-      await refreshRepositoryWorkspace(rootPath, targetFolder);
-      handleSelectRepoFolder(targetFolder);
-      toast({
-        title: "Carpeta creada",
-        description: targetFolder,
-        duration: 2200,
-      });
-    } catch (error: any) {
-      toast({
-        title: "No se pudo crear la carpeta",
-        description: error?.message || "Error desconocido",
-        variant: "destructive",
-      });
-    }
-  }, [
-    handleSelectRepoFolder,
-    refreshRepositoryWorkspace,
-    selectedProject?.repositoryPath,
-    selectedRepoFolder,
-    toast,
-  ]);
-
-  const handleToggleCodingAgent = useCallback((agent: CodingAgentProfile) => {
-    setSelectedCodingAgents((prev) => {
-      const exists = prev.includes(agent);
-      const next = exists ? prev.filter((item) => item !== agent) : [...prev, agent];
-      const normalized = next.length > 0 ? next : ["coder"];
+  const handleSelectRepoFolder = useCallback(
+    (folder: string) => {
+      const normalizedFolder = String(folder || ".").trim() || ".";
+      setSelectedRepoFolder(normalizedFolder);
       if (selectedProject?.id) {
-        updateProject(selectedProject.id, { codingAgents: normalized });
+        updateProject(selectedProject.id, {
+          defaultCodeFolder: normalizedFolder === "." ? null : normalizedFolder,
+        });
       }
-      return normalized;
-    });
-  }, [selectedProject?.id, updateProject]);
+    },
+    [selectedProject?.id, updateProject],
+  );
+
+  const handleCreateRepoFolder = useCallback(
+    async (folderName: string) => {
+      const rootPath = selectedProject?.repositoryPath?.trim();
+      if (!rootPath) {
+        toast({
+          title: "Workspace no configurado",
+          description: "Este proyecto no tiene una ruta de repositorio.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const normalizedName = String(folderName || "")
+        .trim()
+        .replace(/\\/g, "/")
+        .replace(/^\/+/, "")
+        .replace(/\/+$/, "");
+
+      if (!normalizedName || normalizedName.includes("..")) {
+        toast({
+          title: "Nombre inválido",
+          description: "La carpeta no puede estar vacía ni contener '..'.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const targetFolder =
+        selectedRepoFolder && selectedRepoFolder !== "."
+          ? `${selectedRepoFolder}/${normalizedName}`
+          : normalizedName;
+
+      try {
+        const response = await apiFetch("/api/local/repo/folders", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...getAnonUserIdHeader(),
+          },
+          credentials: "include",
+          body: JSON.stringify({ rootPath, folderPath: targetFolder }),
+        });
+
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload?.error || "No se pudo crear la carpeta");
+        }
+
+        await refreshRepositoryWorkspace(rootPath, targetFolder);
+        handleSelectRepoFolder(targetFolder);
+        toast({
+          title: "Carpeta creada",
+          description: targetFolder,
+          duration: 2200,
+        });
+      } catch (error: any) {
+        toast({
+          title: "No se pudo crear la carpeta",
+          description: error?.message || "Error desconocido",
+          variant: "destructive",
+        });
+      }
+    },
+    [
+      handleSelectRepoFolder,
+      refreshRepositoryWorkspace,
+      selectedProject?.repositoryPath,
+      selectedRepoFolder,
+      toast,
+    ],
+  );
+
+  const handleToggleCodingAgent = useCallback(
+    (agent: CodingAgentProfile) => {
+      setSelectedCodingAgents((prev) => {
+        const exists = prev.includes(agent);
+        const next = exists
+          ? prev.filter((item) => item !== agent)
+          : [...prev, agent];
+        const normalized = next.length > 0 ? next : ["coder"];
+        if (selectedProject?.id) {
+          updateProject(selectedProject.id, { codingAgents: normalized });
+        }
+        return normalized;
+      });
+    },
+    [selectedProject?.id, updateProject],
+  );
 
   const workspaceContext = useMemo<WorkspaceContextPayload | undefined>(() => {
     const repositoryPath = selectedProject?.repositoryPath?.trim();
@@ -755,10 +919,13 @@ export function ChatInterface({
     selectedRepoFolder,
   ]);
 
-  const withWorkspaceContext = useCallback((body: Record<string, any>) => {
-    if (!workspaceContext) return body;
-    return { ...body, workspaceContext };
-  }, [workspaceContext]);
+  const withWorkspaceContext = useCallback(
+    (body: Record<string, any>) => {
+      if (!workspaceContext) return body;
+      return { ...body, workspaceContext };
+    },
+    [workspaceContext],
+  );
 
   // First visit explosion
   const { showExplosion, completeWelcome } = useFirstVisit();
@@ -773,7 +940,12 @@ export function ChatInterface({
   const userPlanInfo = useMemo(() => {
     if (!user) return null;
     const plan = getEffectivePlan(user as any);
-    const isAdmin = plan === "admin" || Boolean((user as any)?.isAdmin || (user?.email?.toLowerCase() === 'carrerajorge874@gmail.com'));
+    const isAdmin =
+      plan === "admin" ||
+      Boolean(
+        (user as any)?.isAdmin ||
+        user?.email?.toLowerCase() === "carrerajorge874@gmail.com",
+      );
     const isPaid = isPaidPlan(user as any);
     return {
       plan,
@@ -810,30 +982,40 @@ export function ChatInterface({
 
   useEffect(() => {
     if (conversationState) {
-      console.log(`[ChatInterface] Conversation state loaded for chat ${chatId}:`, {
-        messagesCount: conversationState.messages?.length || 0,
-        imagesCount: conversationState.images?.length || 0,
-        artifactsCount: conversationState.artifacts?.length || 0,
-      });
+      console.log(
+        `[ChatInterface] Conversation state loaded for chat ${chatId}:`,
+        {
+          messagesCount: conversationState.messages?.length || 0,
+          imagesCount: conversationState.images?.length || 0,
+          artifactsCount: conversationState.artifacts?.length || 0,
+        },
+      );
     }
     if (conversationStateError) {
-      console.warn(`[ChatInterface] Failed to load conversation state for chat ${chatId}:`, conversationStateError);
+      console.warn(
+        `[ChatInterface] Failed to load conversation state for chat ${chatId}:`,
+        conversationStateError,
+      );
     }
   }, [chatId, conversationState, conversationStateError]);
 
-  const { initialDraft, saveDraftDebounced, clearDraft, currentTextRef } = useDraft(chatId);
+  const { initialDraft, saveDraftDebounced, clearDraft, currentTextRef } =
+    useDraft(chatId);
   const [input, setInputRaw] = useState(initialDraft);
 
-  const setInput = useCallback((value: string | ((prev: string) => string)) => {
-    setInputRaw((prev: string) => {
-      const newValue = typeof value === "function" ? value(prev) : value;
-      currentTextRef.current = newValue;
-      if (chatId) {
-        saveDraftDebounced(chatId, newValue);
-      }
-      return newValue;
-    });
-  }, [chatId, saveDraftDebounced, currentTextRef]);
+  const setInput = useCallback(
+    (value: string | ((prev: string) => string)) => {
+      setInputRaw((prev: string) => {
+        const newValue = typeof value === "function" ? value(prev) : value;
+        currentTextRef.current = newValue;
+        if (chatId) {
+          saveDraftDebounced(chatId, newValue);
+        }
+        return newValue;
+      });
+    },
+    [chatId, saveDraftDebounced, currentTextRef],
+  );
   const [streamingContent, setStreamingContent] = useState("");
   const [contextNotice, setContextNotice] = useState<{
     type: string;
@@ -847,25 +1029,33 @@ export function ChatInterface({
   const [uploadedFiles, setUploadedFilesState] = useState<UploadedFile[]>([]);
   // uploadedFiles is mutated by async upload/polling code; keep a ref so helpers can read the latest state.
   const uploadedFilesRef = useRef<UploadedFile[]>([]);
-  const setUploadedFiles = useCallback((value: React.SetStateAction<UploadedFile[]>) => {
-    setUploadedFilesState((prev: UploadedFile[]) => {
-      const next =
-        typeof value === "function"
-          ? (value as (p: UploadedFile[]) => UploadedFile[])(prev)
-          : value;
-      uploadedFilesRef.current = next;
-      return next;
-    });
-  }, []);
+  const setUploadedFiles = useCallback(
+    (value: React.SetStateAction<UploadedFile[]>) => {
+      setUploadedFilesState((prev: UploadedFile[]) => {
+        const next =
+          typeof value === "function"
+            ? (value as (p: UploadedFile[]) => UploadedFile[])(prev)
+            : value;
+        uploadedFilesRef.current = next;
+        return next;
+      });
+    },
+    [],
+  );
   const pendingUploadsRef = useRef<Map<string, Promise<void>>>(new Map());
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
-  const [regeneratingMsgIndex, setRegeneratingMsgIndex] = useState<number | null>(null);
+  const [regeneratingMsgIndex, setRegeneratingMsgIndex] = useState<
+    number | null
+  >(null);
   const [gptSessionId, setGptSessionId] = useState<string | null>(null);
   const activeGptId = useMemo(() => {
     const rawId = activeGpt?.id;
     const fallbackId = typeof chatGptId === "string" ? chatGptId.trim() : "";
-    const normalized = typeof rawId === "string" && rawId.trim().length > 0 ? rawId.trim() : fallbackId;
+    const normalized =
+      typeof rawId === "string" && rawId.trim().length > 0
+        ? rawId.trim()
+        : fallbackId;
     if (!normalized || normalized === "default") return null;
     return normalized;
   }, [activeGpt?.id, chatGptId]);
@@ -876,40 +1066,84 @@ export function ChatInterface({
     return payload;
   }, [activeGptId, gptSessionId]);
   const syncGptSessionFromEvent = useCallback((data: any) => {
-    const sessionFromEvent = typeof data?.session_id === "string" ? data.session_id.trim() : "";
+    const sessionFromEvent =
+      typeof data?.session_id === "string" ? data.session_id.trim() : "";
     if (!sessionFromEvent) return;
-    setGptSessionId((prev) => (prev === sessionFromEvent ? prev : sessionFromEvent));
+    setGptSessionId((prev) =>
+      prev === sessionFromEvent ? prev : sessionFromEvent,
+    );
   }, []);
-  const [messageFeedback, setMessageFeedback] = useState<Record<string, "up" | "down" | null>>({});
-  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+  const [messageFeedback, setMessageFeedback] = useState<
+    Record<string, "up" | "down" | null>
+  >({});
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(
+    null,
+  );
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
-  const [previewDocument, setPreviewDocument] = useState<DocumentBlock | null>(null);
-  const [editedDocumentContent, setEditedDocumentContent] = useState<string>("");
-  const [documentPreviewArtifact, setDocumentPreviewArtifact] = useState<DocumentPreviewArtifact | null>(null);
-  const [textSelection, setTextSelection] = useState<TextSelection | null>(null);
+  const [previewDocument, setPreviewDocument] = useState<DocumentBlock | null>(
+    null,
+  );
+  const [editedDocumentContent, setEditedDocumentContent] =
+    useState<string>("");
+  const [documentPreviewArtifact, setDocumentPreviewArtifact] =
+    useState<DocumentPreviewArtifact | null>(null);
+  const [textSelection, setTextSelection] = useState<TextSelection | null>(
+    null,
+  );
   const [editingSelectionText, setEditingSelectionText] = useState<string>("");
-  const [originalSelectionText, setOriginalSelectionText] = useState<string>("");
+  const [originalSelectionText, setOriginalSelectionText] =
+    useState<string>("");
   const [selectedDocText, setSelectedDocText] = useState<string>("");
   // selectedDocTool: prefer parent prop (survives remount), fallback to local state
-  const [selectedDocToolLocal, setSelectedDocToolLocal] = useState<"word" | "excel" | "ppt" | "figma" | null>(null);
-  const selectedDocTool = selectedDocToolProp !== undefined ? selectedDocToolProp : selectedDocToolLocal;
+  const [selectedDocToolLocal, setSelectedDocToolLocal] = useState<
+    "word" | "excel" | "ppt" | "figma" | null
+  >(null);
+  const selectedDocTool =
+    selectedDocToolProp !== undefined
+      ? selectedDocToolProp
+      : selectedDocToolLocal;
   const setSelectedDocTool = setSelectedDocToolProp || setSelectedDocToolLocal;
-  const [selectedTool, setSelectedTool] = useState<"web" | "agent" | "image" | null>(null);
-  const [latencyMode, setLatencyMode] = useState<"fast" | "deep" | "auto">("auto");
-  const [activeDocEditor, setActiveDocEditor] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string; showInstructions?: boolean } | null>(null);
-  const [minimizedDocument, setMinimizedDocument] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string; messageId?: string } | null>(null);
+  const [selectedTool, setSelectedTool] = useState<
+    "web" | "agent" | "image" | null
+  >(null);
+  const [latencyMode, setLatencyMode] = useState<"fast" | "deep" | "auto">(
+    "auto",
+  );
+  const [activeDocEditor, setActiveDocEditor] = useState<{
+    type: "word" | "excel" | "ppt";
+    title: string;
+    content: string;
+    showInstructions?: boolean;
+  } | null>(null);
+  const [minimizedDocument, setMinimizedDocument] = useState<{
+    type: "word" | "excel" | "ppt";
+    title: string;
+    content: string;
+    messageId?: string;
+  } | null>(null);
   // DOCX Generation State - prefer parent prop (survives remount), fallback to local state
   const [docGenerationStateLocal, setDocGenerationStateLocal] = useState<{
-    status: 'idle' | 'generating' | 'ready' | 'error';
+    status: "idle" | "generating" | "ready" | "error";
     progress: number;
     stage: string;
     downloadUrl: string | null;
     fileName: string | null;
     fileSize: number | null;
     error?: string;
-  }>({ status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null });
-  const docGenerationState = docGenerationStateProp !== undefined ? docGenerationStateProp : docGenerationStateLocal;
-  const setDocGenerationState = setDocGenerationStateProp || setDocGenerationStateLocal;
+  }>({
+    status: "idle",
+    progress: 0,
+    stage: "",
+    downloadUrl: null,
+    fileName: null,
+    fileSize: null,
+  });
+  const docGenerationState =
+    docGenerationStateProp !== undefined
+      ? docGenerationStateProp
+      : docGenerationStateLocal;
+  const setDocGenerationState =
+    setDocGenerationStateProp || setDocGenerationStateLocal;
 
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -923,17 +1157,25 @@ export function ChatInterface({
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false);
   const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
   const [showPricingModal, setShowPricingModal] = useState(false);
-  const [quotaInfo, setQuotaInfo] = useState<{ remaining: number; limit: number; resetAt: string | null; plan: string } | null>(null);
+  const [quotaInfo, setQuotaInfo] = useState<{
+    remaining: number;
+    limit: number;
+    resetAt: string | null;
+    plan: string;
+  } | null>(null);
   // isAgentPanelOpen removed - agent progress is shown inline in chat
   const modelSelectorRef = useRef<HTMLDivElement>(null);
   const gptCapabilities = activeGpt?.capabilities;
   const gptCapabilityFlags = useMemo(
-    () => normalizeUiGptCapabilities(gptCapabilities, DEFAULT_UI_GPT_CAPABILITIES),
-    [gptCapabilities]
+    () =>
+      normalizeUiGptCapabilities(gptCapabilities, DEFAULT_UI_GPT_CAPABILITIES),
+    [gptCapabilities],
   );
 
   // For custom GPTs, canvas capability should not be turned off by global user settings.
-  const canvasEnabledForActiveContext = activeGpt ? gptCapabilityFlags.canvas : settings.canvas;
+  const canvasEnabledForActiveContext = activeGpt
+    ? gptCapabilityFlags.canvas
+    : settings.canvas;
 
   // Keep UI state consistent with Settings toggles (disable features when turned off).
   useEffect(() => {
@@ -958,9 +1200,12 @@ export function ChatInterface({
     if (!selectedDocTool) return;
     const disabledByGpt =
       (selectedDocTool === "figma" && !gptCapabilityFlags.canvas) ||
-      (selectedDocTool === "word" && (!gptCapabilityFlags.canvas || !gptCapabilityFlags.wordCreation)) ||
-      (selectedDocTool === "excel" && (!gptCapabilityFlags.canvas || !gptCapabilityFlags.excelCreation)) ||
-      (selectedDocTool === "ppt" && (!gptCapabilityFlags.canvas || !gptCapabilityFlags.pptCreation));
+      (selectedDocTool === "word" &&
+        (!gptCapabilityFlags.canvas || !gptCapabilityFlags.wordCreation)) ||
+      (selectedDocTool === "excel" &&
+        (!gptCapabilityFlags.canvas || !gptCapabilityFlags.excelCreation)) ||
+      (selectedDocTool === "ppt" &&
+        (!gptCapabilityFlags.canvas || !gptCapabilityFlags.pptCreation));
     if (disabledByGpt) {
       setSelectedDocTool(null);
     }
@@ -977,16 +1222,20 @@ export function ChatInterface({
   // This ensures the editor is visible and docInsertContentRef is registered
   // BEFORE the user sends their first message, so streaming works immediately.
   useEffect(() => {
-    if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool) && !activeDocEditor) {
+    if (
+      selectedDocTool &&
+      ["word", "excel", "ppt"].includes(selectedDocTool) &&
+      !activeDocEditor
+    ) {
       const titleMap: Record<string, string> = {
-        word: 'Nuevo Documento',
-        excel: 'Nueva Hoja de Cálculo',
-        ppt: 'Nueva Presentación',
+        word: "Nuevo Documento",
+        excel: "Nueva Hoja de Cálculo",
+        ppt: "Nueva Presentación",
       };
       setActiveDocEditor({
-        type: selectedDocTool as 'word' | 'excel' | 'ppt',
-        title: titleMap[selectedDocTool] || 'Nuevo Documento',
-        content: '',
+        type: selectedDocTool as "word" | "excel" | "ppt",
+        title: titleMap[selectedDocTool] || "Nuevo Documento",
+        content: "",
       });
     }
   }, [selectedDocTool, activeDocEditor]);
@@ -1030,8 +1279,14 @@ export function ChatInterface({
         plan: data.plan,
         isAdmin: data.isAdmin,
         isPaid: Boolean(data.isPaid),
-        subscriptionStatus: typeof data.subscriptionStatus === "string" ? data.subscriptionStatus : null,
-        subscriptionPlan: typeof data.subscriptionPlan === "string" ? data.subscriptionPlan : null,
+        subscriptionStatus:
+          typeof data.subscriptionStatus === "string"
+            ? data.subscriptionStatus
+            : null,
+        subscriptionPlan:
+          typeof data.subscriptionPlan === "string"
+            ? data.subscriptionPlan
+            : null,
       });
     } catch (error) {
       console.error("Failed to fetch user plan info:", error);
@@ -1081,11 +1336,17 @@ export function ChatInterface({
         userPlanInfo?.isAdmin ||
         userPlanState?.isAdmin ||
         userPlanState?.plan === "admin" ||
-        userPlanInfo?.plan === "admin"
+        userPlanInfo?.plan === "admin",
       ),
       isPaid: Boolean(userPlanState?.isPaid ?? userPlanInfo?.isPaid),
-      subscriptionStatus: userPlanState?.subscriptionStatus ?? userPlanInfo?.subscriptionStatus ?? null,
-      subscriptionPlan: userPlanState?.subscriptionPlan ?? userPlanInfo?.subscriptionPlan ?? null,
+      subscriptionStatus:
+        userPlanState?.subscriptionStatus ??
+        userPlanInfo?.subscriptionStatus ??
+        null,
+      subscriptionPlan:
+        userPlanState?.subscriptionPlan ??
+        userPlanInfo?.subscriptionPlan ??
+        null,
     };
   }, [user, userPlanInfo, userPlanState]);
 
@@ -1097,17 +1358,22 @@ export function ChatInterface({
   const { cancel: cancelAgentRun } = useCancelAgentRun();
 
   // Track the current agent message ID for this chat session
-  const [currentAgentMessageId, setCurrentAgentMessageId] = useState<string | null>(null);
+  const [currentAgentMessageId, setCurrentAgentMessageId] = useState<
+    string | null
+  >(null);
 
   // Track active run ID for Live Execution Console
   // Use props from parent to survive key changes, with local state as fallback
   const [activeRunIdLocal, setActiveRunIdLocal] = useState<string | null>(null);
-  const activeRunId = activeRunIdProp !== undefined ? activeRunIdProp : activeRunIdLocal;
+  const activeRunId =
+    activeRunIdProp !== undefined ? activeRunIdProp : activeRunIdLocal;
   const setActiveRunId = setActiveRunIdProp || setActiveRunIdLocal;
 
   // uiPhase: single source of truth for UI state during Super Agent runs
   // 'idle' = normal state, 'thinking' = spinner (max 2s), 'console' = LiveExecutionConsole, 'done' = completed
-  const [uiPhaseLocal, setUiPhaseLocal] = useState<'idle' | 'thinking' | 'console' | 'done'>('idle');
+  const [uiPhaseLocal, setUiPhaseLocal] = useState<
+    "idle" | "thinking" | "console" | "done"
+  >("idle");
   const uiPhase = uiPhaseProp !== undefined ? uiPhaseProp : uiPhaseLocal;
   const setUiPhase = setUiPhaseProp || setUiPhaseLocal;
 
@@ -1116,8 +1382,10 @@ export function ChatInterface({
   // Execution stream client for UniversalExecutionConsole - DISABLED
   // This was causing re-renders that interfered with LiveExecutionConsole in MessageList.
   // LiveExecutionConsole has its own RunStreamClient that handles streaming correctly.
-  const [executionClient, setExecutionClient] = useState<ExecutionStreamClient | null>(null);
-  const [executionRunState, setExecutionRunState] = useState<FlatRunState | null>(null);
+  const [executionClient, setExecutionClient] =
+    useState<ExecutionStreamClient | null>(null);
+  const [executionRunState, setExecutionRunState] =
+    useState<FlatRunState | null>(null);
 
   // DISABLED: ExecutionStreamClient was connecting to /stream endpoint and causing re-renders
   // that unmounted/remounted the LiveExecutionConsole in a loop.
@@ -1154,33 +1422,45 @@ export function ChatInterface({
   // Clean up optimistic messages once they appear in props.messages
   useEffect(() => {
     if (optimisticMessages.length > 0 && messages.length > 0) {
-      const propsMessageIds = new Set(messages.map(m => m.id));
+      const propsMessageIds = new Set(messages.map((m) => m.id));
       const propsTempIds = new Set(
-        messages.map((m: any) => m.clientTempId).filter((id: any): id is string => typeof id === "string" && id.length > 0)
+        messages
+          .map((m: any) => m.clientTempId)
+          .filter(
+            (id: any): id is string => typeof id === "string" && id.length > 0,
+          ),
       );
       setOptimisticMessages((prev: Message[]) =>
-        prev.filter((m: any) => !propsMessageIds.has(m.id) && !propsTempIds.has(m.id))
+        prev.filter(
+          (m: any) => !propsMessageIds.has(m.id) && !propsTempIds.has(m.id),
+        ),
       );
     }
   }, [messages, optimisticMessages.length]);
 
   // Track previous chatId for optimistic message cleanup - separate from the stream reset tracking
-  const prevChatIdForOptimisticRef = useRef<string | null | undefined>(undefined);
+  const prevChatIdForOptimisticRef = useRef<string | null | undefined>(
+    undefined,
+  );
 
   // Clear optimistic messages only when switching between existing chats
   // NOT when transitioning from null to a new pending chat (which happens during message send)
   useEffect(() => {
     const prevChatId = prevChatIdForOptimisticRef.current;
     const isInitialRender = prevChatId === undefined;
-    const isNewChatCreation = prevChatId === null && chatId?.startsWith('pending-');
-    const isSameChatTransition = prevChatId?.startsWith('pending-') && chatId && !chatId.startsWith('pending-');
+    const isNewChatCreation =
+      prevChatId === null && chatId?.startsWith("pending-");
+    const isSameChatTransition =
+      prevChatId?.startsWith("pending-") &&
+      chatId &&
+      !chatId.startsWith("pending-");
 
     chatLogger.debug("optimistic chatId effect:", {
       prevChatId,
       chatId,
       isInitialRender,
       isNewChatCreation,
-      isSameChatTransition
+      isSameChatTransition,
     });
 
     // Only clear optimistic messages when:
@@ -1189,7 +1469,9 @@ export function ChatInterface({
     // 3. Not transitioning from pending to confirmed chatId (same chat)
     if (!isInitialRender && !isNewChatCreation && !isSameChatTransition) {
       // This is a real chat switch - clear optimistic messages and pending uploads
-      chatLogger.debug("Clearing optimistic messages and pending uploads (real chat switch)");
+      chatLogger.debug(
+        "Clearing optimistic messages and pending uploads (real chat switch)",
+      );
       setOptimisticMessages([]);
       // Clear uploaded files so they don't bleed into the new chat
       setUploadedFiles([]);
@@ -1220,74 +1502,100 @@ export function ChatInterface({
     }
     // Also check if there's an active run for this chatId from the store
     const runs = Object.values(allAgentRuns);
-    return runs.find((r: any) => r.chatId === chatId && ['starting', 'queued', 'planning', 'running'].includes(r.status)) || null;
+    return (
+      runs.find(
+        (r: any) =>
+          r.chatId === chatId &&
+          ["starting", "queued", "planning", "running"].includes(r.status),
+      ) || null
+    );
   }, [currentAgentMessageId, allAgentRuns, chatId]);
 
   // Combined messages: prop messages + optimistic messages + agent runs from store
   const displayMessages = useMemo(() => {
-    const messageKey = (m: any): string => (m?.clientTempId && typeof m.clientTempId === "string" ? m.clientTempId : m.id);
+    const messageKey = (m: any): string =>
+      m?.clientTempId && typeof m.clientTempId === "string"
+        ? m.clientTempId
+        : m.id;
 
     // Start with optimistic messages, then merge prop messages (prop messages take priority)
-    const msgMap = new Map(optimisticMessages.map((m: any) => [messageKey(m), m]));
+    const msgMap = new Map(
+      optimisticMessages.map((m: any) => [messageKey(m), m]),
+    );
     // Override with prop messages (they are the source of truth once available)
     messages.forEach((m: any) => msgMap.set(messageKey(m), m));
 
     // Merge agent runs from the store into messages (use reactive allAgentRuns)
-    Object.entries(allAgentRuns).forEach(([messageId, runState]: [string, any]) => {
-      const hasVisibleMessage = msgMap.has(messageId);
-      const matchesCurrentChat = !!chatId && runState.chatId === chatId;
-      const isCurrentActiveRun = !!currentAgentMessageId && messageId === currentAgentMessageId;
-      const includeRun =
-        hasVisibleMessage ||
-        matchesCurrentChat ||
-        isCurrentActiveRun;
+    Object.entries(allAgentRuns).forEach(
+      ([messageId, runState]: [string, any]) => {
+        const hasVisibleMessage = msgMap.has(messageId);
+        const matchesCurrentChat = !!chatId && runState.chatId === chatId;
+        const isCurrentActiveRun =
+          !!currentAgentMessageId && messageId === currentAgentMessageId;
+        const includeRun =
+          hasVisibleMessage || matchesCurrentChat || isCurrentActiveRun;
 
-      if (!includeRun) return;
+        if (!includeRun) return;
 
-      const existingMsg = msgMap.get(messageId);
-      if (existingMsg) {
-        // Update existing message with agent run data
-        msgMap.set(messageId, {
-          ...existingMsg,
-          agentRun: {
-            runId: runState.runId,
-            status: runState.status,
-            userMessage: runState.userMessage,
-            steps: runState.steps,
-            eventStream: runState.eventStream,
-            summary: runState.summary,
-            error: runState.error,
-          }
-        });
-      } else {
-        // Create new message for agent run
-        msgMap.set(messageId, {
-          id: messageId,
-          role: "assistant" as const,
-          content: "",
-          timestamp: new Date(runState.createdAt),
-          agentRun: {
-            runId: runState.runId,
-            status: runState.status,
-            userMessage: runState.userMessage,
-            steps: runState.steps,
-            eventStream: runState.eventStream,
-            summary: runState.summary,
-            error: runState.error,
-          }
-        });
-      }
-    });
-
-    return Array.from(msgMap.values()).sort((a: any, b: any) =>
-      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        const existingMsg = msgMap.get(messageId);
+        if (existingMsg) {
+          // Update existing message with agent run data
+          msgMap.set(messageId, {
+            ...existingMsg,
+            agentRun: {
+              runId: runState.runId,
+              status: runState.status,
+              userMessage: runState.userMessage,
+              steps: runState.steps,
+              eventStream: runState.eventStream,
+              summary: runState.summary,
+              error: runState.error,
+            },
+          });
+        } else {
+          // Create new message for agent run
+          msgMap.set(messageId, {
+            id: messageId,
+            role: "assistant" as const,
+            content: "",
+            timestamp: new Date(runState.createdAt),
+            agentRun: {
+              runId: runState.runId,
+              status: runState.status,
+              userMessage: runState.userMessage,
+              steps: runState.steps,
+              eventStream: runState.eventStream,
+              summary: runState.summary,
+              error: runState.error,
+            },
+          });
+        }
+      },
     );
-  }, [messages, optimisticMessages, allAgentRuns, chatId, currentAgentMessageId]);
+
+    return Array.from(msgMap.values()).sort(
+      (a: any, b: any) =>
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+    );
+  }, [
+    messages,
+    optimisticMessages,
+    allAgentRuns,
+    chatId,
+    currentAgentMessageId,
+  ]);
 
   // Reset current agent message ID when chatId changes - polling auto-starts via useAgentPolling
   useEffect(() => {
     const isActiveAgentStatus = (status: string) =>
-      ['starting', 'queued', 'planning', 'running', 'verifying', 'replanning'].includes(status);
+      [
+        "starting",
+        "queued",
+        "planning",
+        "running",
+        "verifying",
+        "replanning",
+      ].includes(status);
 
     // Keep tracking the already-active run even if chatId is still "pending-*".
     if (currentAgentMessageId) {
@@ -1299,7 +1607,8 @@ export function ChatInterface({
 
     // Find if there's an active run for this chat
     const matchingRun = Object.entries(allAgentRuns).find(
-      ([_, run]: [string, any]) => run.chatId === chatId && isActiveAgentStatus(String(run.status || ""))
+      ([_, run]: [string, any]) =>
+        run.chatId === chatId && isActiveAgentStatus(String(run.status || "")),
     );
 
     if (matchingRun) {
@@ -1321,10 +1630,10 @@ export function ChatInterface({
 
     // Only trigger toasts on status changes
     if (currentStatus && currentStatus !== prevStatus) {
-      if (currentStatus === 'failed') {
+      if (currentStatus === "failed") {
         toast({
           variant: "destructive",
-          description: `Error: ${activeAgentRun?.error || 'Error desconocido'}`,
+          description: `Error: ${activeAgentRun?.error || "Error desconocido"}`,
           duration: 5000,
         });
       }
@@ -1336,7 +1645,13 @@ export function ChatInterface({
   // Compute whether agent is actively running (for stop button)
   const isAgentRunning = useMemo(() => {
     const status = activeAgentRun?.status;
-    return status === 'starting' || status === 'queued' || status === 'planning' || status === 'running' || status === 'replanning';
+    return (
+      status === "starting" ||
+      status === "queued" ||
+      status === "planning" ||
+      status === "running" ||
+      status === "replanning"
+    );
   }, [activeAgentRun?.status]);
 
   // Handle stopping the agent
@@ -1349,7 +1664,11 @@ export function ChatInterface({
           toast({ description: "Agente detenido", duration: 3000 });
         } catch (error) {
           console.error("Failed to stop agent:", error);
-          toast({ title: "Error", description: "No se pudo detener el agente", variant: "destructive" });
+          toast({
+            title: "Error",
+            description: "No se pudo detener el agente",
+            variant: "destructive",
+          });
         }
       } else {
         // If still in starting/queued state without runId, abort the pending request and cancel locally
@@ -1360,18 +1679,29 @@ export function ChatInterface({
     }
   }, [activeAgentRun, currentAgentMessageId, cancelAgentRun, toast]);
 
-  const { availableModels, isLoading: isModelsLoading, isAnyModelAvailable, selectedModelId, setSelectedModelId } = useModelAvailability();
+  const {
+    availableModels,
+    isLoading: isModelsLoading,
+    isAnyModelAvailable,
+    selectedModelId,
+    setSelectedModelId,
+  } = useModelAvailability();
 
   const selectedModelData = useMemo(() => {
     // If user selected a model, use that
     if (selectedModelId) {
-      const found = availableModels.find((m: any) => m.id === selectedModelId || m.modelId === selectedModelId);
+      const found = availableModels.find(
+        (m: any) => m.id === selectedModelId || m.modelId === selectedModelId,
+      );
       if (found) return found;
     }
     // Default: prefer Gemini models over others (Perplexity has no API key)
-    const preferredModel = availableModels.find((m: any) =>
-      (m.provider === 'google-gemini-cli' || m.provider === 'google' || m.provider === 'gemini') &&
-      m.modelId?.includes('gemini')
+    const preferredModel = availableModels.find(
+      (m: any) =>
+        (m.provider === "google-gemini-cli" ||
+          m.provider === "google" ||
+          m.provider === "gemini") &&
+        m.modelId?.includes("gemini"),
     );
     return preferredModel || availableModels[0] || null;
   }, [selectedModelId, availableModels]);
@@ -1398,7 +1728,9 @@ export function ChatInterface({
     return grouped;
   }, [availableModels]);
   const [isDocGeneratorOpen, setIsDocGeneratorOpen] = useState(false);
-  const [docGeneratorType, setDocGeneratorType] = useState<"word" | "excel">("word");
+  const [docGeneratorType, setDocGeneratorType] = useState<"word" | "excel">(
+    "word",
+  );
   const [isGoogleFormsOpen, setIsGoogleFormsOpen] = useState(false);
   const [googleFormsPrompt, setGoogleFormsPrompt] = useState("");
   const [isGoogleFormsActive, setIsGoogleFormsActive] = useState(true);
@@ -1407,9 +1739,15 @@ export function ChatInterface({
   const [isKeyboardShortcutsOpen, setIsKeyboardShortcutsOpen] = useState(false);
   const [screenReaderAnnouncement, setScreenReaderAnnouncement] = useState("");
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
-  const [pendingGeneratedImage, setPendingGeneratedImage] = useState<{ messageId: string; imageData: string } | null>(null);
+  const [pendingGeneratedImage, setPendingGeneratedImage] = useState<{
+    messageId: string;
+    imageData: string;
+  } | null>(null);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
-  const [previewUploadedImage, setPreviewUploadedImage] = useState<{ name: string; dataUrl: string } | null>(null);
+  const [previewUploadedImage, setPreviewUploadedImage] = useState<{
+    name: string;
+    dataUrl: string;
+  } | null>(null);
   const [previewFileAttachment, setPreviewFileAttachment] = useState<{
     name: string;
     type: string;
@@ -1424,19 +1762,37 @@ export function ChatInterface({
   } | null>(null);
   const [copiedAttachmentContent, setCopiedAttachmentContent] = useState(false);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
-  const latestGeneratedImageRef = useRef<{ messageId: string; imageData: string } | null>(null);
+  const latestGeneratedImageRef = useRef<{
+    messageId: string;
+    imageData: string;
+  } | null>(null);
   const dragCounterRef = useRef(0);
   const generatedAttachmentPreviewUrlRef = useRef<string | null>(null);
-  const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string; showInstructions?: boolean } | null>(null);
+  const activeDocEditorRef = useRef<{
+    type: "word" | "excel" | "ppt";
+    title: string;
+    content: string;
+    showInstructions?: boolean;
+  } | null>(null);
   const previewDocumentRef = useRef<DocumentBlock | null>(null);
-  const orchestratorRef = useRef<{ runOrchestrator: (prompt: string) => Promise<void> } | null>(null);
+  const orchestratorRef = useRef<{
+    runOrchestrator: (prompt: string) => Promise<void>;
+  } | null>(null);
   const editedDocumentContentRef = useRef<string>("");
   const chatIdRef = useRef<string | null>(null);
   const streamingChatIdRef = useRef<string | null>(null);
   const prevAiStateRef = useRef<AiState>("idle");
 
   // Access streaming store actions
-  const { startRun, updateStatus, completeRun, failRun, abortRun, appendContent, clearRun } = useStreamingStore();
+  const {
+    startRun,
+    updateStatus,
+    completeRun,
+    failRun,
+    abortRun,
+    appendContent,
+    clearRun,
+  } = useStreamingStore();
 
   // Keep refs in sync with state for cleanup function access
   useEffect(() => {
@@ -1448,7 +1804,7 @@ export function ChatInterface({
     if (!url) return;
     try {
       URL.revokeObjectURL(url);
-    } catch { }
+    } catch {}
     generatedAttachmentPreviewUrlRef.current = null;
   }, []);
 
@@ -1458,7 +1814,7 @@ export function ChatInterface({
         if (file.localUrl) {
           try {
             URL.revokeObjectURL(file.localUrl);
-          } catch { }
+          } catch {}
         }
       });
       releaseGeneratedAttachmentPreviewUrl();
@@ -1486,7 +1842,10 @@ export function ChatInterface({
     // Start run when streaming begins
     if (
       prevState === "idle" &&
-      (aiState === "thinking" || aiState === "responding" || aiState === "sending" || aiState === "streaming")
+      (aiState === "thinking" ||
+        aiState === "responding" ||
+        aiState === "sending" ||
+        aiState === "streaming")
     ) {
       streamingChatIdRef.current = currentChatId;
       if (currentChatId) {
@@ -1500,13 +1859,16 @@ export function ChatInterface({
       (aiState === "responding" || aiState === "streaming")
     ) {
       if (streamingChatIdRef.current) {
-        updateStatus(streamingChatIdRef.current, 'streaming');
+        updateStatus(streamingChatIdRef.current, "streaming");
       }
     }
 
     // Complete run when streaming ends
     if (
-      (prevState === "thinking" || prevState === "responding" || prevState === "sending" || prevState === "streaming") &&
+      (prevState === "thinking" ||
+        prevState === "responding" ||
+        prevState === "sending" ||
+        prevState === "streaming") &&
       (aiState === "idle" || aiState === "done" || aiState === "error")
     ) {
       const completedChatId = streamingChatIdRef.current;
@@ -1520,7 +1882,15 @@ export function ChatInterface({
         streamingChatIdRef.current = null;
       }
     }
-  }, [aiState, chatId, chatTitle, startRun, updateStatus, completeRun, failRun]);
+  }, [
+    aiState,
+    chatId,
+    chatTitle,
+    startRun,
+    updateStatus,
+    completeRun,
+    failRun,
+  ]);
 
   // Reset streaming state when chatId changes (switching chats)
   // This ensures the new chat starts clean without interference from previous chat
@@ -1529,7 +1899,9 @@ export function ChatInterface({
   const prevChatIdRef = useRef<string | null | undefined>(chatId);
   useEffect(() => {
     if (prevChatIdRef.current !== chatId) {
-      console.debug(`[ChatInterface] Chat switched from ${prevChatIdRef.current} to ${chatId}`);
+      console.debug(
+        `[ChatInterface] Chat switched from ${prevChatIdRef.current} to ${chatId}`,
+      );
 
       // NOTE: Do NOT abort streaming when switching chats!
       // Streaming continues in background and completes in the streamingStore.
@@ -1544,7 +1916,10 @@ export function ChatInterface({
   }, [chatId]);
 
   const validateStreamingChatId = useCallback(() => {
-    return streamingChatIdRef.current === null || streamingChatIdRef.current === chatId;
+    return (
+      streamingChatIdRef.current === null ||
+      streamingChatIdRef.current === chatId
+    );
   }, [chatId]);
 
   // Auto-save document when component unmounts (chat switch, new chat, etc.)
@@ -1559,25 +1934,30 @@ export function ChatInterface({
       const realChatId = resolveRealChatId(currentChatId);
       if (realChatId.startsWith("pending-")) return;
 
-      const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '').trim();
+      const stripHtml = (html: string) => html.replace(/<[^>]*>/g, "").trim();
       const plainText = stripHtml(currentContent);
       const placeholderPhrases = [
         "comienza a escribir tu documento aquí",
         "generación inteligente de documentos",
         "escribe tu solicitud en el chat",
         "título de la presentación",
-        "haz clic para agregar"
+        "haz clic para agregar",
       ];
-      const isPlaceholder = placeholderPhrases.some(p => plainText.toLowerCase().includes(p)) || plainText.length < 20;
+      const isPlaceholder =
+        placeholderPhrases.some((p) => plainText.toLowerCase().includes(p)) ||
+        plainText.length < 20;
 
       if (!isPlaceholder && plainText.length > 20) {
         // Use sendBeacon for reliable save on unmount
         const data = JSON.stringify({
           type: currentDoc.type,
           title: currentDoc.title,
-          content: currentContent
+          content: currentContent,
         });
-        navigator.sendBeacon(`/api/chats/${realChatId}/documents`, new Blob([data], { type: 'application/json' }));
+        navigator.sendBeacon(
+          `/api/chats/${realChatId}/documents`,
+          new Blob([data], { type: "application/json" }),
+        );
       }
     };
   }, []);
@@ -1585,7 +1965,13 @@ export function ChatInterface({
   // PPT streaming integration
   const pptStreaming = usePptStreaming();
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
-  const docInsertContentRef = useRef<((content: string, replaceMode?: boolean | 'html') => Promise<void> | void) | null>(null);
+  const docInsertContentRef = useRef<
+    | ((
+        content: string,
+        replaceMode?: boolean | "html",
+      ) => Promise<void> | void)
+    | null
+  >(null);
   const speechRecognitionRef = useRef<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -1594,30 +1980,36 @@ export function ChatInterface({
   const lastScrollTimeRef = useRef<number>(0);
   const scrollThrottleMs = 100; // Reduced from 300ms for snappier scroll-to-bottom during streaming
 
-  const scrollToBottom = useCallback((force = false, instant = false) => {
-    if (userHasScrolledUp && !force) return;
+  const scrollToBottom = useCallback(
+    (force = false, instant = false) => {
+      if (userHasScrolledUp && !force) return;
 
-    if (instant) {
-      // Instant scroll — no animation delay (used when user sends a message)
-      messagesEndRef.current?.scrollIntoView({
-        behavior: 'auto',
-        block: 'end'
-      });
-    } else {
-      requestAnimationFrame(() => {
+      if (instant) {
+        // Instant scroll — no animation delay (used when user sends a message)
         messagesEndRef.current?.scrollIntoView({
-          behavior: 'smooth',
-          block: 'end'
+          behavior: "auto",
+          block: "end",
         });
-      });
-    }
-  }, [userHasScrolledUp]);
+      } else {
+        requestAnimationFrame(() => {
+          messagesEndRef.current?.scrollIntoView({
+            behavior: "smooth",
+            block: "end",
+          });
+        });
+      }
+    },
+    [userHasScrolledUp],
+  );
 
   const isNearBottom = useCallback(() => {
     const container = messagesContainerRef.current;
     if (!container) return true;
     const threshold = 150;
-    return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+    return (
+      container.scrollHeight - container.scrollTop - container.clientHeight <
+      threshold
+    );
   }, []);
 
   const handleScroll = useCallback(() => {
@@ -1677,13 +2069,16 @@ export function ChatInterface({
     if (!isModelSelectorOpen) return;
 
     const handleClickOutside = (e: MouseEvent) => {
-      if (modelSelectorRef.current && !modelSelectorRef.current.contains(e.target as Node)) {
+      if (
+        modelSelectorRef.current &&
+        !modelSelectorRef.current.contains(e.target as Node)
+      ) {
         setIsModelSelectorOpen(false);
       }
     };
 
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isModelSelectorOpen]);
 
   // Callback to close model selector when textarea receives focus
@@ -1753,7 +2148,9 @@ export function ChatInterface({
   }, [previewDocument]);
 
   const isComplexExcelPrompt = (prompt: string): boolean => {
-    return /completo|análisis|análisis completo|4 hojas|gráficos?|gráfica|grafica|gr[aá]fico de barras|gr[aá]fico de lineas|gr[aá]fico de pastel|charts?|bar chart|line chart|pie chart|dashboard|resumen ejecutivo|fórmulas múltiples|ventas.*gráfico|workbook|crea.*gr[aá]fic|genera.*gr[aá]fic|insert.*chart/i.test(prompt.toLowerCase());
+    return /completo|análisis|análisis completo|4 hojas|gráficos?|gráfica|grafica|gr[aá]fico de barras|gr[aá]fico de lineas|gr[aá]fico de pastel|charts?|bar chart|line chart|pie chart|dashboard|resumen ejecutivo|fórmulas múltiples|ventas.*gráfico|workbook|crea.*gr[aá]fic|genera.*gr[aá]fic|insert.*chart/i.test(
+      prompt.toLowerCase(),
+    );
   };
 
   // Document editor is now only opened manually by the user clicking the buttons
@@ -1801,16 +2198,19 @@ export function ChatInterface({
   };
 
   // Function to open blank document editor - preserves existing messages
-  const openBlankDocEditor = (type: "word" | "excel" | "ppt", options?: { showInstructions?: boolean }) => {
+  const openBlankDocEditor = (
+    type: "word" | "excel" | "ppt",
+    options?: { showInstructions?: boolean },
+  ) => {
     const titles = {
       word: "Nuevo Documento Word",
       excel: "Nueva Hoja de Cálculo",
-      ppt: "Nueva Presentación"
+      ppt: "Nueva Presentación",
     };
     const templates = {
       word: "", // Blank canvas - content will stream in real-time
       excel: "",
-      ppt: "<h1>Título de la Presentación</h1><p>Haz clic para agregar subtítulo</p>"
+      ppt: "<h1>Título de la Presentación</h1><p>Haz clic para agregar subtítulo</p>",
     };
 
     // Only update document editor state - DO NOT clear messages
@@ -1819,7 +2219,7 @@ export function ChatInterface({
       type,
       title: titles[type],
       content: templates[type],
-      showInstructions: options?.showInstructions
+      showInstructions: options?.showInstructions,
     });
     setEditedDocumentContent(templates[type]);
 
@@ -1835,34 +2235,48 @@ export function ChatInterface({
       hasChatId: !!chatId,
       chatId,
       hasDoc: !!currentDoc,
-      contentLength: currentContent?.length || 0
+      contentLength: currentContent?.length || 0,
     });
 
-    const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '').trim();
+    const stripHtml = (html: string) => html.replace(/<[^>]*>/g, "").trim();
     const plainText = stripHtml(currentContent);
     const placeholderPhrases = [
       "comienza a escribir tu documento aquí",
       "generación inteligente de documentos",
       "escribe tu solicitud en el chat",
       "título de la presentación",
-      "haz clic para agregar"
+      "haz clic para agregar",
     ];
-    const isPlaceholder = placeholderPhrases.some(p => plainText.toLowerCase().includes(p)) || plainText.length < 20;
+    const isPlaceholder =
+      placeholderPhrases.some((p) => plainText.toLowerCase().includes(p)) ||
+      plainText.length < 20;
 
     console.log("[closeDocEditor] Validation", {
       plainTextLength: plainText.length,
       isPlaceholder,
-      willSave: !!(chatId && currentDoc && currentContent && !isPlaceholder && plainText.length > 20)
+      willSave: !!(
+        chatId &&
+        currentDoc &&
+        currentContent &&
+        !isPlaceholder &&
+        plainText.length > 20
+      ),
     });
 
-    if (chatId && currentDoc && currentContent && !isPlaceholder && plainText.length > 20) {
+    if (
+      chatId &&
+      currentDoc &&
+      currentContent &&
+      !isPlaceholder &&
+      plainText.length > 20
+    ) {
       let realChatId = resolveRealChatId(chatId);
 
       if (isPendingChat(chatId)) {
         let attempts = 0;
         const maxAttempts = 10;
         while (isPendingChat(chatId) && attempts < maxAttempts) {
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await new Promise((resolve) => setTimeout(resolve, 500));
           realChatId = resolveRealChatId(chatId);
           attempts++;
         }
@@ -1870,29 +2284,45 @@ export function ChatInterface({
 
       if (!isPendingChat(chatId) && !realChatId.startsWith("pending-")) {
         try {
-          const response = await apiFetch(`/api/chats/${realChatId}/documents`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              type: currentDoc.type,
-              title: currentDoc.title,
-              content: currentContent
-            })
-          });
+          const response = await apiFetch(
+            `/api/chats/${realChatId}/documents`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                type: currentDoc.type,
+                title: currentDoc.title,
+                content: currentContent,
+              }),
+            },
+          );
           if (response.ok) {
             const updatedMessage = await response.json();
-            if (updatedMessage && updatedMessage.id && updatedMessage.attachments && onUpdateMessageAttachments) {
+            if (
+              updatedMessage &&
+              updatedMessage.id &&
+              updatedMessage.attachments &&
+              onUpdateMessageAttachments
+            ) {
               const newMessage: Message = {
                 id: updatedMessage.id,
                 role: updatedMessage.role || "system",
                 content: updatedMessage.content || "",
                 timestamp: new Date(updatedMessage.createdAt || Date.now()),
-                attachments: updatedMessage.attachments
+                attachments: updatedMessage.attachments,
               };
-              onUpdateMessageAttachments(realChatId, updatedMessage.id, updatedMessage.attachments, newMessage);
+              onUpdateMessageAttachments(
+                realChatId,
+                updatedMessage.id,
+                updatedMessage.attachments,
+                newMessage,
+              );
             }
           } else {
-            console.error("Error saving document: server returned", response.status);
+            console.error(
+              "Error saving document: server returned",
+              response.status,
+            );
           }
         } catch (err) {
           console.error("Error saving document:", err);
@@ -1908,12 +2338,16 @@ export function ChatInterface({
     docInsertContentRef.current = null;
   };
 
-  const handleReopenDocument = (doc: { type: "word" | "excel" | "ppt"; title: string; content: string }) => {
+  const handleReopenDocument = (doc: {
+    type: "word" | "excel" | "ppt";
+    title: string;
+    content: string;
+  }) => {
     setSelectedDocTool(doc.type);
     setActiveDocEditor({
       type: doc.type,
       title: doc.title,
-      content: doc.content
+      content: doc.content,
     });
     setEditedDocumentContent(doc.content);
     setMinimizedDocument(null);
@@ -1923,13 +2357,15 @@ export function ChatInterface({
   const minimizeDocEditor = () => {
     if (!activeDocEditor) return;
 
-    const lastAssistantMessage = [...messages].reverse().find(m => m.role === "assistant");
+    const lastAssistantMessage = [...messages]
+      .reverse()
+      .find((m) => m.role === "assistant");
 
     setMinimizedDocument({
       type: activeDocEditor.type,
       title: activeDocEditor.title,
       content: editedDocumentContent || activeDocEditor.content,
-      messageId: lastAssistantMessage?.id
+      messageId: lastAssistantMessage?.id,
     });
     setActiveDocEditor(null);
     setSelectedDocTool(null);
@@ -1941,7 +2377,7 @@ export function ChatInterface({
     setActiveDocEditor({
       type: minimizedDocument.type,
       title: minimizedDocument.title,
-      content: minimizedDocument.content
+      content: minimizedDocument.content,
     });
     setSelectedDocTool(minimizedDocument.type);
     setEditedDocumentContent(minimizedDocument.content);
@@ -1950,24 +2386,27 @@ export function ChatInterface({
   };
 
   // Handle new chat - reset all document state before calling parent handler
-  const handleNewChat = useCallback((options?: { preserveGpt?: boolean }) => {
-    // Reset document tool selection
-    setSelectedDocTool(null);
-    setActiveDocEditor(null);
-    setMinimizedDocument(null);
-    setEditedDocumentContent('');
-    // Reset document generation state
-    setDocGenerationState({
-      status: 'idle',
-      progress: 0,
-      stage: '',
-      downloadUrl: null,
-      fileName: null,
-      fileSize: null
-    });
-    // Call original onNewChat
-    onNewChat?.(options);
-  }, [onNewChat]);
+  const handleNewChat = useCallback(
+    (options?: { preserveGpt?: boolean }) => {
+      // Reset document tool selection
+      setSelectedDocTool(null);
+      setActiveDocEditor(null);
+      setMinimizedDocument(null);
+      setEditedDocumentContent("");
+      // Reset document generation state
+      setDocGenerationState({
+        status: "idle",
+        progress: 0,
+        stage: "",
+        downloadUrl: null,
+        fileName: null,
+        fileSize: null,
+      });
+      // Call original onNewChat
+      onNewChat?.(options);
+    },
+    [onNewChat],
+  );
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -1989,24 +2428,30 @@ export function ChatInterface({
   const isScopedConversation = useCallback((conversationId?: string | null) => {
     const activeConversationId = latestChatIdRef.current;
     if (!conversationId || !activeConversationId) return true;
-    return resolveRealChatId(activeConversationId) === resolveRealChatId(conversationId);
+    return (
+      resolveRealChatId(activeConversationId) ===
+      resolveRealChatId(conversationId)
+    );
   }, []);
 
-  const setAiStateForChat = useCallback((
-    value: React.SetStateAction<AiState>,
-    conversationId?: string | null
-  ) => {
-    if (!isScopedConversation(conversationId)) return;
-    setAiState(value);
-  }, [isScopedConversation, setAiState]);
+  const setAiStateForChat = useCallback(
+    (value: React.SetStateAction<AiState>, conversationId?: string | null) => {
+      if (!isScopedConversation(conversationId)) return;
+      setAiState(value);
+    },
+    [isScopedConversation, setAiState],
+  );
 
-  const setAiProcessStepsForChat = useCallback((
-    value: React.SetStateAction<AiProcessStep[]>,
-    conversationId?: string | null
-  ) => {
-    if (!isScopedConversation(conversationId)) return;
-    setAiProcessSteps(value);
-  }, [isScopedConversation, setAiProcessSteps]);
+  const setAiProcessStepsForChat = useCallback(
+    (
+      value: React.SetStateAction<AiProcessStep[]>,
+      conversationId?: string | null,
+    ) => {
+      if (!isScopedConversation(conversationId)) return;
+      setAiProcessSteps(value);
+    },
+    [isScopedConversation, setAiProcessSteps],
+  );
 
   // Centralized streaming→message transition manager.
   // Guarantees the message is visible in the DOM before streaming is cleared.
@@ -2047,8 +2492,18 @@ export function ChatInterface({
     const MAX_STUCK_MS = 120_000; // 2 minutes absolute maximum for thinking state
     const timer = setTimeout(() => {
       // Double-check: only reset if still stuck (no content arrived meanwhile)
-      if (aiStateRef.current !== "idle" && aiStateRef.current !== "done" && !streamingContentRef.current) {
-        console.warn("[Watchdog] aiState stuck at", aiStateRef.current, "for", MAX_STUCK_MS, "ms — forcing idle");
+      if (
+        aiStateRef.current !== "idle" &&
+        aiStateRef.current !== "done" &&
+        !streamingContentRef.current
+      ) {
+        console.warn(
+          "[Watchdog] aiState stuck at",
+          aiStateRef.current,
+          "for",
+          MAX_STUCK_MS,
+          "ms — forcing idle",
+        );
         setAiState("idle");
         setAiProcessSteps([]);
       }
@@ -2059,36 +2514,59 @@ export function ChatInterface({
 
   // Request a refresh of the AI-generated title after streaming completes.
   // The server generates the title asynchronously, so we delay the fetch.
-  const requestTitleRefresh = useCallback((targetChatId: string | null | undefined) => {
-    if (!targetChatId || targetChatId.startsWith("pending-")) return;
-    window.dispatchEvent(new CustomEvent("refresh-chat-title", {
-      detail: { chatId: targetChatId, delay: 2500 }
-    }));
-  }, []);
+  const requestTitleRefresh = useCallback(
+    (targetChatId: string | null | undefined) => {
+      if (!targetChatId || targetChatId.startsWith("pending-")) return;
+      window.dispatchEvent(
+        new CustomEvent("refresh-chat-title", {
+          detail: { chatId: targetChatId, delay: 2500 },
+        }),
+      );
+    },
+    [],
+  );
 
-  const resolveStreamChatId = useCallback((ack?: SendMessageAck | undefined, fallbackChatId?: string | null): string | null => {
-    const fallback = fallbackChatId ? resolveRealChatId(fallbackChatId) : null;
-    const ackChatId = ack?.chatId;
-    if (ackChatId && !ackChatId.startsWith("pending-")) return ackChatId;
-    if (fallback && !fallback.startsWith("pending-")) return fallback;
-    return ackChatId || fallback || null;
-  }, []);
+  const resolveStreamChatId = useCallback(
+    (
+      ack?: SendMessageAck | undefined,
+      fallbackChatId?: string | null,
+    ): string | null => {
+      const fallback = fallbackChatId
+        ? resolveRealChatId(fallbackChatId)
+        : null;
+      const ackChatId = ack?.chatId;
+      if (ackChatId && !ackChatId.startsWith("pending-")) return ackChatId;
+      if (fallback && !fallback.startsWith("pending-")) return fallback;
+      return ackChatId || fallback || null;
+    },
+    [],
+  );
 
-  const buildStreamRunContext = useCallback((msg: Message, persistedAck?: SendMessageAck | undefined): {
-    runId?: string;
-    clientRequestId?: string;
-    userRequestId?: string;
-  } => {
-    return {
-      runId: persistedAck?.run?.id,
-      // Always pass clientRequestId so /api/chat/stream can do idempotent run resolution
-      // even on the very first message where no chat ACK is available yet.
-      clientRequestId: msg.clientRequestId,
-      userRequestId: msg.requestId,
-    };
-  }, []);
+  const buildStreamRunContext = useCallback(
+    (
+      msg: Message,
+      persistedAck?: SendMessageAck | undefined,
+    ): {
+      runId?: string;
+      clientRequestId?: string;
+      userRequestId?: string;
+    } => {
+      return {
+        runId: persistedAck?.run?.id,
+        // Always pass clientRequestId so /api/chat/stream can do idempotent run resolution
+        // even on the very first message where no chat ACK is available yet.
+        clientRequestId: msg.clientRequestId,
+        userRequestId: msg.requestId,
+      };
+    },
+    [],
+  );
 
-  const isDocumentFile = (mimeType: string, fileName: string, type?: string): boolean => {
+  const isDocumentFile = (
+    mimeType: string,
+    fileName: string,
+    type?: string,
+  ): boolean => {
     const lowerMime = (mimeType || "").toLowerCase();
     const lowerName = (fileName || "").toLowerCase();
     const lowerType = (type || "").toLowerCase();
@@ -2109,15 +2587,39 @@ export function ChatInterface({
       "text/csv",
       "application/json",
     ];
-    if (docMimePatterns.some(p => lowerMime.includes(p))) return true;
+    if (docMimePatterns.some((p) => lowerMime.includes(p))) return true;
 
-    const docExtensions = [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv", ".txt", ".json", ".rtf", ".odt", ".ods", ".odp"];
-    if (docExtensions.some(ext => lowerName.endsWith(ext))) return true;
+    const docExtensions = [
+      ".pdf",
+      ".doc",
+      ".docx",
+      ".xls",
+      ".xlsx",
+      ".ppt",
+      ".pptx",
+      ".csv",
+      ".txt",
+      ".json",
+      ".rtf",
+      ".odt",
+      ".ods",
+      ".odp",
+    ];
+    if (docExtensions.some((ext) => lowerName.endsWith(ext))) return true;
 
-    if (["pdf", "word", "excel", "ppt", "document"].includes(lowerType)) return true;
+    if (["pdf", "word", "excel", "ppt", "document"].includes(lowerType))
+      return true;
 
     if (!lowerMime || lowerMime === "application/octet-stream") {
-      const hasImageExt = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp"].some(ext => lowerName.endsWith(ext));
+      const hasImageExt = [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".webp",
+        ".svg",
+        ".bmp",
+      ].some((ext) => lowerName.endsWith(ext));
       return !hasImageExt;
     }
 
@@ -2126,7 +2628,17 @@ export function ChatInterface({
 
   const toAnalyzePayloadAttachment = (att: any) => {
     const rest = { ...(att || {}) };
-    const normalizedType = ["word", "excel", "pdf", "text", "csv", "presentation", "ppt", "image", "document"].includes((rest.type || "").toLowerCase())
+    const normalizedType = [
+      "word",
+      "excel",
+      "pdf",
+      "text",
+      "csv",
+      "presentation",
+      "ppt",
+      "image",
+      "document",
+    ].includes((rest.type || "").toLowerCase())
       ? rest.type
       : "document";
 
@@ -2140,236 +2652,312 @@ export function ChatInterface({
     };
   };
 
-  const normalizeLocalExecArtifact = useCallback((rawArtifact: any, rawPayload?: any): Message["artifact"] | undefined => {
-    const source = rawArtifact && typeof rawArtifact === "object"
-      ? rawArtifact
-      : rawPayload && typeof rawPayload === "object"
-        ? rawPayload
-        : null;
-    if (!source) return undefined;
+  const normalizeLocalExecArtifact = useCallback(
+    (rawArtifact: any, rawPayload?: any): Message["artifact"] | undefined => {
+      const source =
+        rawArtifact && typeof rawArtifact === "object"
+          ? rawArtifact
+          : rawPayload && typeof rawPayload === "object"
+            ? rawPayload
+            : null;
+      if (!source) return undefined;
 
-    const localPath = typeof source.path === "string" ? source.path.trim() : "";
-    const directDownloadUrl = typeof source.downloadUrl === "string" ? source.downloadUrl.trim() : "";
-    const downloadUrl = directDownloadUrl || (localPath ? `/api/local/file?path=${encodeURIComponent(localPath)}` : "");
-    if (!downloadUrl) return undefined;
+      const localPath =
+        typeof source.path === "string" ? source.path.trim() : "";
+      const directDownloadUrl =
+        typeof source.downloadUrl === "string" ? source.downloadUrl.trim() : "";
+      const downloadUrl =
+        directDownloadUrl ||
+        (localPath
+          ? `/api/local/file?path=${encodeURIComponent(localPath)}`
+          : "");
+      if (!downloadUrl) return undefined;
 
-    const mimeType = typeof source.mimeType === "string" && source.mimeType.trim()
-      ? source.mimeType.trim()
-      : "application/octet-stream";
-    const filename = typeof source.filename === "string" && source.filename.trim()
-      ? source.filename.trim()
-      : typeof source.fileName === "string" && source.fileName.trim()
-        ? source.fileName.trim()
-        : localPath
-          ? localPath.split("/").pop() || "archivo_local"
-          : "archivo_local";
+      const mimeType =
+        typeof source.mimeType === "string" && source.mimeType.trim()
+          ? source.mimeType.trim()
+          : "application/octet-stream";
+      const filename =
+        typeof source.filename === "string" && source.filename.trim()
+          ? source.filename.trim()
+          : typeof source.fileName === "string" && source.fileName.trim()
+            ? source.fileName.trim()
+            : localPath
+              ? localPath.split("/").pop() || "archivo_local"
+              : "archivo_local";
 
-    const rawType = typeof source.type === "string" ? source.type.toLowerCase() : "";
-    const resolvedType: Message["artifact"]["type"] =
-      rawType === "image" || mimeType.startsWith("image/")
-        ? "image"
-        : rawType === "spreadsheet" || mimeType.includes("spreadsheet") || mimeType.includes("excel") || mimeType.includes("csv")
-          ? "spreadsheet"
-          : rawType === "presentation" || mimeType.includes("presentation") || mimeType.includes("powerpoint")
-            ? "presentation"
-            : rawType === "pdf" || mimeType === "application/pdf"
-              ? "pdf"
-              : "document";
+      const rawType =
+        typeof source.type === "string" ? source.type.toLowerCase() : "";
+      const resolvedType: Message["artifact"]["type"] =
+        rawType === "image" || mimeType.startsWith("image/")
+          ? "image"
+          : rawType === "spreadsheet" ||
+              mimeType.includes("spreadsheet") ||
+              mimeType.includes("excel") ||
+              mimeType.includes("csv")
+            ? "spreadsheet"
+            : rawType === "presentation" ||
+                mimeType.includes("presentation") ||
+                mimeType.includes("powerpoint")
+              ? "presentation"
+              : rawType === "pdf" || mimeType === "application/pdf"
+                ? "pdf"
+                : "document";
 
-    return {
-      artifactId: typeof source.artifactId === "string" && source.artifactId.trim()
-        ? source.artifactId.trim()
-        : `local_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
-      type: resolvedType,
-      mimeType,
-      sizeBytes: typeof source.sizeBytes === "number" && Number.isFinite(source.sizeBytes)
-        ? source.sizeBytes
-        : typeof source.bytes === "number" && Number.isFinite(source.bytes)
-          ? source.bytes
-          : undefined,
-      downloadUrl,
-      previewUrl: resolvedType === "image"
-        ? (
-          typeof source.previewUrl === "string" && source.previewUrl.trim()
-            ? source.previewUrl.trim()
-            : downloadUrl
-        )
-        : undefined,
-    };
-  }, []);
+      return {
+        artifactId:
+          typeof source.artifactId === "string" && source.artifactId.trim()
+            ? source.artifactId.trim()
+            : `local_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+        type: resolvedType,
+        mimeType,
+        sizeBytes:
+          typeof source.sizeBytes === "number" &&
+          Number.isFinite(source.sizeBytes)
+            ? source.sizeBytes
+            : typeof source.bytes === "number" && Number.isFinite(source.bytes)
+              ? source.bytes
+              : undefined,
+        downloadUrl,
+        previewUrl:
+          resolvedType === "image"
+            ? typeof source.previewUrl === "string" && source.previewUrl.trim()
+              ? source.previewUrl.trim()
+              : downloadUrl
+            : undefined,
+      };
+    },
+    [],
+  );
 
-  const markMessageDeliveryError = useCallback((messageKey: string, errorMessage: string) => {
-    setOptimisticMessages((prev) => prev.map((m: Message) =>
-      (m.id === messageKey || m.clientTempId === messageKey)
-        ? { ...m, deliveryStatus: "error", deliveryError: errorMessage }
-        : m
-    ));
-  }, [setOptimisticMessages]);
+  const markMessageDeliveryError = useCallback(
+    (messageKey: string, errorMessage: string) => {
+      setOptimisticMessages((prev) =>
+        prev.map((m: Message) =>
+          m.id === messageKey || m.clientTempId === messageKey
+            ? { ...m, deliveryStatus: "error", deliveryError: errorMessage }
+            : m,
+        ),
+      );
+    },
+    [setOptimisticMessages],
+  );
 
-  const runDocumentAnalysisAsync = useCallback(async (opts: {
-    userMessageId: string;
-    conversationId?: string | null;
-    history: { role: string; content: string }[];
-    attachments: any[];
-    sourceLabel?: string;
-  }): Promise<void> => {
-    const clientSendTs = Date.now();
-    const normalizedConversationId = (opts.conversationId && !opts.conversationId.startsWith("pending-"))
-      ? opts.conversationId
-      : `temp_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
-    const analysisConversationId = opts.conversationId || chatId || latestChatIdRef.current;
+  const runDocumentAnalysisAsync = useCallback(
+    async (opts: {
+      userMessageId: string;
+      conversationId?: string | null;
+      history: { role: string; content: string }[];
+      attachments: any[];
+      sourceLabel?: string;
+    }): Promise<void> => {
+      const clientSendTs = Date.now();
+      const normalizedConversationId =
+        opts.conversationId && !opts.conversationId.startsWith("pending-")
+          ? opts.conversationId
+          : `temp_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+      const analysisConversationId =
+        opts.conversationId || chatId || latestChatIdRef.current;
 
-    const analysisAttachmentPayload = opts.attachments
-      .map(toAnalyzePayloadAttachment)
-      .filter((att: any) => !!att.name && !!att.mimeType);
+      const analysisAttachmentPayload = opts.attachments
+        .map(toAnalyzePayloadAttachment)
+        .filter((att: any) => !!att.name && !!att.mimeType);
 
-    if (analysisAttachmentPayload.length === 0) {
-      markMessageDeliveryError(opts.userMessageId, "No se encontraron adjuntos de documento para analizar.");
-      return;
-    }
-
-    const analysisMessageId = `analysis-${opts.userMessageId}`;
-    const userFriendlySource = opts.sourceLabel || "envío";
-    const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
-
-    const placeholder: Message = {
-      id: analysisMessageId,
-      clientTempId: analysisMessageId,
-      role: "assistant",
-      content: "Analizando documentos adjuntos…",
-      timestamp: new Date(),
-      requestId: generateRequestId(),
-      userMessageId: opts.userMessageId,
-      deliveryStatus: "sending",
-      deliveryError: undefined,
-    };
-
-    setOptimisticMessages((prev) => {
-      const hasPlaceholder = prev.some((m: Message) => m.id === analysisMessageId || m.clientTempId === analysisMessageId);
-      if (hasPlaceholder) {
-        return prev.map((m: Message) => {
-          if (m.id !== analysisMessageId && m.clientTempId !== analysisMessageId) return m;
-          return { ...m, ...placeholder, deliveryError: undefined, deliveryStatus: "sending" };
-        });
-      }
-      return [...prev, placeholder];
-    });
-
-    analysisAbortControllerRef.current = new AbortController();
-    try {
-      const response = await apiFetch("/api/analyze", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-client-send-ts": String(clientSendTs),
-        },
-        body: JSON.stringify({
-          messages: opts.history,
-          attachments: analysisAttachmentPayload,
-          conversationId: normalizedConversationId,
-        }),
-        signal: analysisAbortControllerRef.current.signal,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: "Unknown error" }));
-        const message = errorData?.error?.message || errorData?.message || errorData?.error || `Analyze failed: ${response.status}`;
-        throw new Error(message);
+      if (analysisAttachmentPayload.length === 0) {
+        markMessageDeliveryError(
+          opts.userMessageId,
+          "No se encontraron adjuntos de documento para analizar.",
+        );
+        return;
       }
 
-      const analyzeResult = await response.json();
-      const analysisResultMsg: Message = {
+      const analysisMessageId = `analysis-${opts.userMessageId}`;
+      const userFriendlySource = opts.sourceLabel || "envío";
+      const startedAt =
+        typeof performance !== "undefined" ? performance.now() : Date.now();
+
+      const placeholder: Message = {
         id: analysisMessageId,
         clientTempId: analysisMessageId,
         role: "assistant",
-        content: analyzeResult.answer_text || "No se pudo analizar el documento.",
+        content: "Analizando documentos adjuntos…",
         timestamp: new Date(),
         requestId: generateRequestId(),
         userMessageId: opts.userMessageId,
-        deliveryStatus: "sent",
-        ui_components: analyzeResult.ui_components || [],
-        documentAnalysis: analyzeResult.documentModel ? {
-          documentModel: analyzeResult.documentModel,
-          insights: analyzeResult.insights || [],
-          suggestedQuestions: analyzeResult.suggestedQuestions || [],
-        } : undefined,
+        deliveryStatus: "sending",
+        deliveryError: undefined,
       };
 
-      // Persist final analysis result and replace placeholder.
-      onSendMessage(analysisResultMsg).catch((err) => {
-        const errorMessage = err instanceof Error ? err.message : "No se pudo guardar el resultado del análisis.";
-        markMessageDeliveryError(analysisMessageId, errorMessage);
+      setOptimisticMessages((prev) => {
+        const hasPlaceholder = prev.some(
+          (m: Message) =>
+            m.id === analysisMessageId || m.clientTempId === analysisMessageId,
+        );
+        if (hasPlaceholder) {
+          return prev.map((m: Message) => {
+            if (
+              m.id !== analysisMessageId &&
+              m.clientTempId !== analysisMessageId
+            )
+              return m;
+            return {
+              ...m,
+              ...placeholder,
+              deliveryError: undefined,
+              deliveryStatus: "sending",
+            };
+          });
+        }
+        return [...prev, placeholder];
       });
 
-      if (import.meta.env.DEV) {
-        console.debug("[Perf][doc-analyze]", {
-          source: userFriendlySource,
-          userMessageId: opts.userMessageId,
-          conversationId: normalizedConversationId,
-          totalMs: typeof performance !== "undefined" ? Math.max(0, performance.now() - startedAt).toFixed(1) : null,
+      analysisAbortControllerRef.current = new AbortController();
+      try {
+        const response = await apiFetch("/api/analyze", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-client-send-ts": String(clientSendTs),
+          },
+          body: JSON.stringify({
+            messages: opts.history,
+            attachments: analysisAttachmentPayload,
+            conversationId: normalizedConversationId,
+          }),
+          signal: analysisAbortControllerRef.current.signal,
         });
-      }
 
-      setOptimisticMessages((prev) => prev.map((m: Message) =>
-        (m.id === opts.userMessageId || m.clientTempId === opts.userMessageId)
-          ? { ...m, deliveryStatus: "sent", deliveryError: undefined }
-          : m
-      ));
-      if (aiStateRef.current === "thinking") {
-        setAiStateForChat("idle", analysisConversationId);
-        setAiProcessStepsForChat([], analysisConversationId);
-      }
-    } catch (analysisError: any) {
-      if (analysisError?.name === "AbortError") {
-        return;
-      }
-      const errorMessage = analysisError?.message || "No se pudo analizar el documento.";
-      markMessageDeliveryError(opts.userMessageId, errorMessage);
-      setOptimisticMessages((prev) => prev.map((m: Message) => {
-        if (m.id !== analysisMessageId && m.clientTempId !== analysisMessageId) return m;
-        return {
-          ...m,
-          deliveryStatus: "error",
-          deliveryError: errorMessage,
-          content: `No se pudo analizar el documento. ${errorMessage}`,
+        if (!response.ok) {
+          const errorData = await response
+            .json()
+            .catch(() => ({ error: "Unknown error" }));
+          const message =
+            errorData?.error?.message ||
+            errorData?.message ||
+            errorData?.error ||
+            `Analyze failed: ${response.status}`;
+          throw new Error(message);
+        }
+
+        const analyzeResult = await response.json();
+        const analysisResultMsg: Message = {
+          id: analysisMessageId,
+          clientTempId: analysisMessageId,
+          role: "assistant",
+          content:
+            analyzeResult.answer_text || "No se pudo analizar el documento.",
+          timestamp: new Date(),
+          requestId: generateRequestId(),
+          userMessageId: opts.userMessageId,
+          deliveryStatus: "sent",
+          ui_components: analyzeResult.ui_components || [],
+          documentAnalysis: analyzeResult.documentModel
+            ? {
+                documentModel: analyzeResult.documentModel,
+                insights: analyzeResult.insights || [],
+                suggestedQuestions: analyzeResult.suggestedQuestions || [],
+              }
+            : undefined,
         };
-      }));
-      if (aiStateRef.current === "thinking") {
-        setAiStateForChat("idle", analysisConversationId);
-        setAiProcessStepsForChat([], analysisConversationId);
+
+        // Persist final analysis result and replace placeholder.
+        onSendMessage(analysisResultMsg).catch((err) => {
+          const errorMessage =
+            err instanceof Error
+              ? err.message
+              : "No se pudo guardar el resultado del análisis.";
+          markMessageDeliveryError(analysisMessageId, errorMessage);
+        });
+
+        if (import.meta.env.DEV) {
+          console.debug("[Perf][doc-analyze]", {
+            source: userFriendlySource,
+            userMessageId: opts.userMessageId,
+            conversationId: normalizedConversationId,
+            totalMs:
+              typeof performance !== "undefined"
+                ? Math.max(0, performance.now() - startedAt).toFixed(1)
+                : null,
+          });
+        }
+
+        setOptimisticMessages((prev) =>
+          prev.map((m: Message) =>
+            m.id === opts.userMessageId || m.clientTempId === opts.userMessageId
+              ? { ...m, deliveryStatus: "sent", deliveryError: undefined }
+              : m,
+          ),
+        );
+        if (aiStateRef.current === "thinking") {
+          setAiStateForChat("idle", analysisConversationId);
+          setAiProcessStepsForChat([], analysisConversationId);
+        }
+      } catch (analysisError: any) {
+        if (analysisError?.name === "AbortError") {
+          return;
+        }
+        const errorMessage =
+          analysisError?.message || "No se pudo analizar el documento.";
+        markMessageDeliveryError(opts.userMessageId, errorMessage);
+        setOptimisticMessages((prev) =>
+          prev.map((m: Message) => {
+            if (
+              m.id !== analysisMessageId &&
+              m.clientTempId !== analysisMessageId
+            )
+              return m;
+            return {
+              ...m,
+              deliveryStatus: "error",
+              deliveryError: errorMessage,
+              content: `No se pudo analizar el documento. ${errorMessage}`,
+            };
+          }),
+        );
+        if (aiStateRef.current === "thinking") {
+          setAiStateForChat("idle", analysisConversationId);
+          setAiProcessStepsForChat([], analysisConversationId);
+        }
+        console.error(
+          `[Document Analysis] (${userFriendlySource}) failed for userMessage ${opts.userMessageId}:`,
+          analysisError,
+        );
+        throw analysisError;
+      } finally {
+        if (analysisAbortControllerRef.current) {
+          analysisAbortControllerRef.current = null;
+        }
       }
-      console.error(`[Document Analysis] (${userFriendlySource}) failed for userMessage ${opts.userMessageId}:`, analysisError);
-      throw analysisError;
-    } finally {
-      if (analysisAbortControllerRef.current) {
-        analysisAbortControllerRef.current = null;
-      }
-    }
-  }, [
-    markMessageDeliveryError,
-    onSendMessage,
-    setAiProcessStepsForChat,
-    setAiStateForChat,
-    setOptimisticMessages,
-    chatId,
-  ]);
+    },
+    [
+      markMessageDeliveryError,
+      onSendMessage,
+      setAiProcessStepsForChat,
+      setAiStateForChat,
+      setOptimisticMessages,
+      chatId,
+    ],
+  );
 
   // Measure composer height and set CSS variable for proper layout
   useEffect(() => {
     const updateComposerHeight = () => {
       if (composerRef.current) {
         const h = composerRef.current.getBoundingClientRect().height;
-        document.documentElement.style.setProperty('--composer-height', `${h}px`);
+        document.documentElement.style.setProperty(
+          "--composer-height",
+          `${h}px`,
+        );
       }
     };
 
     updateComposerHeight();
-    window.addEventListener('resize', updateComposerHeight);
-    window.addEventListener('orientationchange', updateComposerHeight);
+    window.addEventListener("resize", updateComposerHeight);
+    window.addEventListener("orientationchange", updateComposerHeight);
 
     return () => {
-      window.removeEventListener('resize', updateComposerHeight);
-      window.removeEventListener('orientationchange', updateComposerHeight);
+      window.removeEventListener("resize", updateComposerHeight);
+      window.removeEventListener("orientationchange", updateComposerHeight);
     };
   }, []);
 
@@ -2384,8 +2972,19 @@ export function ChatInterface({
     if (streamingContent || streamingContentRef.current) return;
     if (uiPhase === "console") return;
 
-    const activeAgentStatuses = new Set(["starting", "queued", "planning", "running", "replanning", "verifying"]);
-    if (activeAgentRun?.status && activeAgentStatuses.has(activeAgentRun.status)) return;
+    const activeAgentStatuses = new Set([
+      "starting",
+      "queued",
+      "planning",
+      "running",
+      "replanning",
+      "verifying",
+    ]);
+    if (
+      activeAgentRun?.status &&
+      activeAgentStatuses.has(activeAgentRun.status)
+    )
+      return;
 
     const lastMessage = displayMessages[displayMessages.length - 1];
     if (!lastMessage || lastMessage.role !== "assistant") return;
@@ -2413,7 +3012,11 @@ export function ChatInterface({
       setScreenReaderAnnouncement("Procesando tu mensaje...");
     } else if (aiState === "responding") {
       setScreenReaderAnnouncement("Generando respuesta...");
-    } else if (aiState === "idle" && screenReaderAnnouncement && !screenReaderAnnouncement.includes("cancelada")) {
+    } else if (
+      aiState === "idle" &&
+      screenReaderAnnouncement &&
+      !screenReaderAnnouncement.includes("cancelada")
+    ) {
       setScreenReaderAnnouncement("Respuesta completada");
     }
   }, [aiState]);
@@ -2426,10 +3029,20 @@ export function ChatInterface({
   const browserSession = useBrowserSession();
 
   useEffect(() => {
-    if (agent.state.browserSessionId && browserSession.state.sessionId !== agent.state.browserSessionId) {
-      browserSession.subscribeToSession(agent.state.browserSessionId, agent.state.objective || "Navegando web");
+    if (
+      agent.state.browserSessionId &&
+      browserSession.state.sessionId !== agent.state.browserSessionId
+    ) {
+      browserSession.subscribeToSession(
+        agent.state.browserSessionId,
+        agent.state.objective || "Navegando web",
+      );
     }
-  }, [agent.state.browserSessionId, agent.state.objective, browserSession.state.sessionId]);
+  }, [
+    agent.state.browserSessionId,
+    agent.state.objective,
+    browserSession.state.sessionId,
+  ]);
 
   const handleStopChat = () => {
     // Abort active SSE stream from useStreamChat to avoid stray network work.
@@ -2479,9 +3092,9 @@ export function ChatInterface({
     }
 
     // Explicitly reset UI Phase and AI state to clear any stuck indicator banners
-    setUiPhase('idle');
-    setAiStateForChat('idle', chatId || 'default');
-    setAiProcessStepsForChat([], chatId || 'default');
+    setUiPhase("idle");
+    setAiStateForChat("idle", chatId || "default");
+    setAiProcessStepsForChat([], chatId || "default");
   };
 
   // Keep handleStopChatRef in sync for keyboard shortcut access
@@ -2489,171 +3102,200 @@ export function ChatInterface({
     handleStopChatRef.current = handleStopChat;
   });
 
-  const handleCopyMessage = useCallback((content: string, msgId?: string) => {
-    navigator.clipboard.writeText(content);
+  const handleCopyMessage = useCallback(
+    (content: string, msgId?: string) => {
+      navigator.clipboard.writeText(content);
 
-    // Explicitly wipe the AI busy state. The bug causes `aiState` to remain stuck
-    // in `thinking` or `agent_working` after a response finishes. When the user 
-    // clicks copy, the component re-renders and mistakenly shows the PhaseNarrator again.
-    // By forcing it to idle here, we ensure interacting with the message clears the ghost state.
-    setAiStateForChat('idle', chatId || 'default');
-    setAiProcessStepsForChat([], chatId || 'default');
+      // Explicitly wipe the AI busy state. The bug causes `aiState` to remain stuck
+      // in `thinking` or `agent_working` after a response finishes. When the user
+      // clicks copy, the component re-renders and mistakenly shows the PhaseNarrator again.
+      // By forcing it to idle here, we ensure interacting with the message clears the ghost state.
+      setAiStateForChat("idle", chatId || "default");
+      setAiProcessStepsForChat([], chatId || "default");
 
-    if (msgId) {
-      setCopiedMessageId(msgId);
-      setTimeout(() => setCopiedMessageId(null), 2000);
-    }
-  }, [chatId, setAiStateForChat, setAiProcessStepsForChat]);
+      if (msgId) {
+        setCopiedMessageId(msgId);
+        setTimeout(() => setCopiedMessageId(null), 2000);
+      }
+    },
+    [chatId, setAiStateForChat, setAiProcessStepsForChat],
+  );
 
-  const handleUserRetrySend = useCallback(async (msg: Message) => {
-    if (!msg || msg.role !== "user") return;
+  const handleUserRetrySend = useCallback(
+    async (msg: Message) => {
+      if (!msg || msg.role !== "user") return;
 
-    // Avoid starting a second stream while one is active (it will look broken and can abort in-flight work).
-    if (aiStateRef.current !== "idle") {
-      toast({
-        title: "Espera un momento",
-        description: "Hay una respuesta en curso. Cancélala o espera para reintentar.",
-        duration: 3000,
-      });
-      return;
-    }
+      // Avoid starting a second stream while one is active (it will look broken and can abort in-flight work).
+      if (aiStateRef.current !== "idle") {
+        toast({
+          title: "Espera un momento",
+          description:
+            "Hay una respuesta en curso. Cancélala o espera para reintentar.",
+          duration: 3000,
+        });
+        return;
+      }
 
-    const msgKey = msg.clientTempId || msg.id;
-    // 1) Re-persist the user message (idempotent by requestId/clientRequestId) so delivery state updates.
-    const persistPromise = onSendMessage({
-      ...msg,
-      deliveryStatus: "sending",
-      deliveryError: undefined,
-    }).catch((err) => {
-      console.warn("[retry] Failed to persist user message:", err);
-      return undefined;
-    });
-
-    const persisted = await persistPromise;
-    const streamRunContext = buildStreamRunContext(msg, persisted);
-
-    // 2) Ensure we stream against the REAL chatId (never a synthetic fallback).
-    const stableChatId = (persisted?.run?.chatId as string | undefined) || resolveStreamChatId(persisted, chatId);
-    if (!stableChatId) {
-      toast({
-        title: "Error",
-        description: "No se pudo crear/confirmar el chat para reintentar. Verifica tu conexión e intenta de nuevo.",
-        variant: "destructive",
-        duration: 5000,
-      });
-      onSendMessage({
+      const msgKey = msg.clientTempId || msg.id;
+      // 1) Re-persist the user message (idempotent by requestId/clientRequestId) so delivery state updates.
+      const persistPromise = onSendMessage({
         ...msg,
-        deliveryStatus: "error",
-        deliveryError: "No se pudo crear/confirmar el chat para reintentar.",
+        deliveryStatus: "sending",
+        deliveryError: undefined,
+      }).catch((err) => {
+        console.warn("[retry] Failed to persist user message:", err);
+        return undefined;
       });
-      return;
-    }
 
-    const idx = displayMessages.findIndex((m: any) => (m?.clientTempId || m?.id) === msgKey);
-    const historyMsgs = idx >= 0 ? displayMessages.slice(0, idx + 1) : [...displayMessages, msg];
-    const history = historyMsgs.map((m: any) => ({ role: m.role, content: m.content }));
+      const persisted = await persistPromise;
+      const streamRunContext = buildStreamRunContext(msg, persisted);
 
-    const hasDocumentAttachmentsForRetry = (msg.attachments || []).some((att: any) =>
-      isDocumentFile(att?.mimeType || att?.type, att?.name || "", att?.type)
-    );
+      // 2) Ensure we stream against the REAL chatId (never a synthetic fallback).
+      const stableChatId =
+        (persisted?.run?.chatId as string | undefined) ||
+        resolveStreamChatId(persisted, chatId);
+      if (!stableChatId) {
+        toast({
+          title: "Error",
+          description:
+            "No se pudo crear/confirmar el chat para reintentar. Verifica tu conexión e intenta de nuevo.",
+          variant: "destructive",
+          duration: 5000,
+        });
+        onSendMessage({
+          ...msg,
+          deliveryStatus: "error",
+          deliveryError: "No se pudo crear/confirmar el chat para reintentar.",
+        });
+        return;
+      }
 
-    if (hasDocumentAttachmentsForRetry) {
-      void runDocumentAnalysisAsync({
-        userMessageId: msgKey,
-        conversationId: stableChatId,
-        history,
-        attachments: msg.attachments || [],
-        sourceLabel: "reintento",
-      });
-      return;
-    }
+      const idx = displayMessages.findIndex(
+        (m: any) => (m?.clientTempId || m?.id) === msgKey,
+      );
+      const historyMsgs =
+        idx >= 0
+          ? displayMessages.slice(0, idx + 1)
+          : [...displayMessages, msg];
+      const history = historyMsgs.map((m: any) => ({
+        role: m.role,
+        content: m.content,
+      }));
 
-    // Keep attachments lightweight: strip base64/data fields and send only metadata.
-    const streamAttachments = (msg.attachments || [])
-      .map((att: any) => ({
-        type: att?.type === "image" ? "image" : "document",
-        name: att?.name,
-        mimeType: att?.mimeType || att?.type,
-        storagePath: att?.storagePath,
-        fileId: att?.fileId || att?.id,
-        // Do NOT send imageUrl/content/dataUrl here.
-      }))
-      .filter((att: any) => !!att?.name);
+      const hasDocumentAttachmentsForRetry = (msg.attachments || []).some(
+        (att: any) =>
+          isDocumentFile(
+            att?.mimeType || att?.type,
+            att?.name || "",
+            att?.type,
+          ),
+      );
 
-    const result = await streamChat.stream("/api/chat/stream", {
-      chatId: stableChatId,
-      body: withWorkspaceContext({
-        messages: history,
-        conversationId: stableChatId,
+      if (hasDocumentAttachmentsForRetry) {
+        void runDocumentAnalysisAsync({
+          userMessageId: msgKey,
+          conversationId: stableChatId,
+          history,
+          attachments: msg.attachments || [],
+          sourceLabel: "reintento",
+        });
+        return;
+      }
+
+      // Keep attachments lightweight: strip base64/data fields and send only metadata.
+      const streamAttachments = (msg.attachments || [])
+        .map((att: any) => ({
+          type: att?.type === "image" ? "image" : "document",
+          name: att?.name,
+          mimeType: att?.mimeType || att?.type,
+          storagePath: att?.storagePath,
+          fileId: att?.fileId || att?.id,
+          // Do NOT send imageUrl/content/dataUrl here.
+        }))
+        .filter((att: any) => !!att?.name);
+
+      const result = await streamChat.stream("/api/chat/stream", {
         chatId: stableChatId,
-        runId: streamRunContext.runId,
-        clientRequestId: streamRunContext.clientRequestId,
-        userRequestId: streamRunContext.userRequestId,
-        attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
-        docTool: selectedDocTool || null,
-        provider: selectedProvider,
-        model: selectedModel,
-        latencyMode,
-        ...gptSessionPayload,
-      }),
-      onEvent: (_eventType, data) => {
-        syncGptSessionFromEvent(data);
-      },
-      buildFinalMessage: (fullContent, data, messageId) => ({
-        id: messageId || `assistant-${Date.now()}`,
-        role: "assistant",
-        content: fullContent || "No se recibió respuesta del servidor.",
-        timestamp: new Date(),
-        requestId: data?.requestId || generateRequestId(),
-        userMessageId: msgKey,
-        artifact: data?.artifact,
-        webSources: data?.webSources,
-      }),
-      buildErrorMessage: (error, messageId) => ({
-        id: messageId || `error-${Date.now()}`,
-        role: "assistant",
-        content: error.message || "Error de conexión. Por favor, intenta de nuevo.",
-        timestamp: new Date(),
-        requestId: generateRequestId(),
-        userMessageId: msgKey,
-      }),
-    });
+        body: withWorkspaceContext({
+          messages: history,
+          conversationId: stableChatId,
+          chatId: stableChatId,
+          runId: streamRunContext.runId,
+          clientRequestId: streamRunContext.clientRequestId,
+          userRequestId: streamRunContext.userRequestId,
+          attachments:
+            streamAttachments.length > 0 ? streamAttachments : undefined,
+          docTool: selectedDocTool || null,
+          provider: selectedProvider,
+          model: selectedModel,
+          latencyMode,
+          ...gptSessionPayload,
+        }),
+        onEvent: (_eventType, data) => {
+          syncGptSessionFromEvent(data);
+        },
+        buildFinalMessage: (fullContent, data, messageId) => ({
+          id: messageId || `assistant-${Date.now()}`,
+          role: "assistant",
+          content: fullContent || "No se recibió respuesta del servidor.",
+          timestamp: new Date(),
+          requestId: data?.requestId || generateRequestId(),
+          userMessageId: msgKey,
+          artifact: data?.artifact,
+          webSources: data?.webSources,
+        }),
+        buildErrorMessage: (error, messageId) => ({
+          id: messageId || `error-${Date.now()}`,
+          role: "assistant",
+          content:
+            error.message || "Error de conexión. Por favor, intenta de nuevo.",
+          timestamp: new Date(),
+          requestId: generateRequestId(),
+          userMessageId: msgKey,
+        }),
+      });
 
-    if (result.ok) {
-      requestTitleRefresh(stableChatId);
-    }
-  }, [
-    displayMessages,
-    latencyMode,
-    onSendMessage,
-    requestTitleRefresh,
-    runDocumentAnalysisAsync,
-    isDocumentFile,
-    selectedDocTool,
-    selectedModel,
-    selectedProvider,
-    gptSessionPayload,
-    syncGptSessionFromEvent,
-    streamChat,
-    toast,
-    withWorkspaceContext,
-  ]);
+      if (result.ok) {
+        requestTitleRefresh(stableChatId);
+      }
+    },
+    [
+      displayMessages,
+      latencyMode,
+      onSendMessage,
+      requestTitleRefresh,
+      runDocumentAnalysisAsync,
+      isDocumentFile,
+      selectedDocTool,
+      selectedModel,
+      selectedProvider,
+      gptSessionPayload,
+      syncGptSessionFromEvent,
+      streamChat,
+      toast,
+      withWorkspaceContext,
+    ],
+  );
 
   const startVoiceRecording = () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const SpeechRecognition =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      alert("Tu navegador no soporta reconocimiento de voz. Por favor usa Chrome, Edge o Safari.");
+      alert(
+        "Tu navegador no soporta reconocimiento de voz. Por favor usa Chrome, Edge o Safari.",
+      );
       return;
     }
 
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = 'es-ES';
+    recognition.lang = "es-ES";
 
-    let finalTranscript = '';
-    let interimTranscript = '';
+    let finalTranscript = "";
+    let interimTranscript = "";
 
     recognition.onstart = () => {
       setIsRecording(true);
@@ -2663,20 +3305,22 @@ export function ChatInterface({
     };
 
     recognition.onresult = (event: any) => {
-      interimTranscript = '';
+      interimTranscript = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
-          finalTranscript += (finalTranscript ? ' ' : '') + transcript;
+          finalTranscript += (finalTranscript ? " " : "") + transcript;
         } else {
           interimTranscript = transcript;
         }
       }
-      setInput(finalTranscript + (interimTranscript ? ' ' + interimTranscript : ''));
+      setInput(
+        finalTranscript + (interimTranscript ? " " + interimTranscript : ""),
+      );
     };
 
     recognition.onerror = (event: any) => {
-      console.error('Speech recognition error:', event.error);
+      console.error("Speech recognition error:", event.error);
       setIsRecording(false);
       setRecordingTime(0);
       setIsPaused(false);
@@ -2712,13 +3356,15 @@ export function ChatInterface({
 
   const resumeVoiceRecording = () => {
     if (isPaused) {
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      const SpeechRecognition =
+        (window as any).SpeechRecognition ||
+        (window as any).webkitSpeechRecognition;
       if (!SpeechRecognition) return;
 
       const recognition = new SpeechRecognition();
       recognition.continuous = true;
       recognition.interimResults = true;
-      recognition.lang = 'es-ES';
+      recognition.lang = "es-ES";
 
       let currentInput = input;
 
@@ -2727,20 +3373,22 @@ export function ChatInterface({
       };
 
       recognition.onresult = (event: any) => {
-        let interimTranscript = '';
+        let interimTranscript = "";
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const transcript = event.results[i][0].transcript;
           if (event.results[i].isFinal) {
-            currentInput += (currentInput ? ' ' : '') + transcript;
+            currentInput += (currentInput ? " " : "") + transcript;
           } else {
             interimTranscript = transcript;
           }
         }
-        setInput(currentInput + (interimTranscript ? ' ' + interimTranscript : ''));
+        setInput(
+          currentInput + (interimTranscript ? " " + interimTranscript : ""),
+        );
       };
 
       recognition.onerror = (event: any) => {
-        console.error('Speech recognition error:', event.error);
+        console.error("Speech recognition error:", event.error);
         setIsRecording(false);
         setRecordingTime(0);
         setIsPaused(false);
@@ -2828,7 +3476,10 @@ export function ChatInterface({
     setEditingSelectionText(originalSelectionText);
   };
 
-  const handleDocTextSelect = (text: string, applyRewrite: (newText: string) => void) => {
+  const handleDocTextSelect = (
+    text: string,
+    applyRewrite: (newText: string) => void,
+  ) => {
     setSelectedDocText(text);
     applyRewriteRef.current = applyRewrite;
   };
@@ -2838,79 +3489,90 @@ export function ChatInterface({
     applyRewriteRef.current = null;
   };
 
-  const handleDownloadDocument = useCallback(async (doc: DocumentBlock) => {
-    try {
-      const documentToDownload = {
-        ...doc,
-        content: editedDocumentContent || doc.content
-      };
-      const response = await apiFetch("/api/documents/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(documentToDownload),
-      });
+  const handleDownloadDocument = useCallback(
+    async (doc: DocumentBlock) => {
+      try {
+        const documentToDownload = {
+          ...doc,
+          content: editedDocumentContent || doc.content,
+        };
+        const response = await apiFetch("/api/documents/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(documentToDownload),
+        });
 
-      if (!response.ok) {
-        throw new Error("Failed to generate document");
+        if (!response.ok) {
+          throw new Error("Failed to generate document");
+        }
+
+        const blob = await response.blob();
+        const ext =
+          doc.type === "word" ? "docx" : doc.type === "excel" ? "xlsx" : "pptx";
+        const filename = `${doc.title.replace(/[^a-zA-Z0-9]/g, "_")}.${ext}`;
+
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      } catch (error) {
+        console.error("Document download error:", error);
       }
-
-      const blob = await response.blob();
-      const ext = doc.type === "word" ? "docx" : doc.type === "excel" ? "xlsx" : "pptx";
-      const filename = `${doc.title.replace(/[^a-zA-Z0-9]/g, "_")}.${ext}`;
-
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error("Document download error:", error);
-    }
-  }, [editedDocumentContent]);
+    },
+    [editedDocumentContent],
+  );
 
   // Save document to Biblioteca (library) via server endpoint
-  const handleSaveToLibrary = useCallback(async (doc?: { type: string; title: string; content: string }) => {
-    const docToSave = doc || (activeDocEditor ? {
-      type: activeDocEditor.type,
-      title: activeDocEditor.title,
-      content: editedDocumentContent || activeDocEditor.content,
-    } : null);
+  const handleSaveToLibrary = useCallback(
+    async (doc?: { type: string; title: string; content: string }) => {
+      const docToSave =
+        doc ||
+        (activeDocEditor
+          ? {
+              type: activeDocEditor.type,
+              title: activeDocEditor.title,
+              content: editedDocumentContent || activeDocEditor.content,
+            }
+          : null);
 
-    if (!docToSave) return;
+      if (!docToSave) return;
 
-    try {
-      const response = await apiFetch("/api/library/save-from-editor", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          title: docToSave.title,
-          content: docToSave.content,
-          type: docToSave.type,
-        }),
-      });
+      try {
+        const response = await apiFetch("/api/library/save-from-editor", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            title: docToSave.title,
+            content: docToSave.content,
+            type: docToSave.type,
+          }),
+        });
 
-      if (!response.ok) {
-        throw new Error("Failed to save to library");
+        if (!response.ok) {
+          throw new Error("Failed to save to library");
+        }
+
+        const result = await response.json();
+        toast({
+          title: "Guardado en Biblioteca",
+          description: `${result.file?.name || docToSave.title} se ha guardado correctamente.`,
+        });
+      } catch (error) {
+        console.error("Save to library error:", error);
+        toast({
+          title: "Error",
+          description: "No se pudo guardar el documento en la Biblioteca.",
+          variant: "destructive",
+        });
       }
-
-      const result = await response.json();
-      toast({
-        title: "Guardado en Biblioteca",
-        description: `${result.file?.name || docToSave.title} se ha guardado correctamente.`,
-      });
-    } catch (error) {
-      console.error("Save to library error:", error);
-      toast({
-        title: "Error",
-        description: "No se pudo guardar el documento en la Biblioteca.",
-        variant: "destructive",
-      });
-    }
-  }, [activeDocEditor, editedDocumentContent, toast]);
+    },
+    [activeDocEditor, editedDocumentContent, toast],
+  );
 
   const handleDownloadImage = useCallback((imageData: string) => {
     const link = document.createElement("a");
@@ -2921,175 +3583,275 @@ export function ChatInterface({
     document.body.removeChild(link);
   }, []);
 
-  const resolveAttachmentStorageUrl = useCallback((storagePath?: string): string | undefined => {
-    if (!storagePath) return undefined;
-    const trimmedPath = storagePath.trim();
-    if (/^(blob:|data:|https?:\/\/)/i.test(trimmedPath)) {
-      return trimmedPath;
-    }
-
-    const normalizedPath = trimmedPath.startsWith("/") ? trimmedPath : `/${trimmedPath}`;
-
-    if (
-      typeof window !== "undefined" &&
-      window.location.port === "5050" &&
-      (normalizedPath.startsWith("/objects/") || normalizedPath.startsWith("/api/"))
-    ) {
-      // In Vite dev, keep same-origin URLs so /objects and /api go through proxy.
-      // This avoids cross-origin iframe blocks for inline PDF previews.
-      return normalizedPath;
-    }
-
-    const configuredApiBase = String(import.meta.env.VITE_API_URL || "").trim();
-    if (configuredApiBase && normalizedPath.startsWith("/")) {
-      try {
-        return new URL(normalizedPath, configuredApiBase).toString();
-      } catch {
-        // Fall through to local dev fallback.
+  const resolveAttachmentStorageUrl = useCallback(
+    (storagePath?: string): string | undefined => {
+      if (!storagePath) return undefined;
+      const trimmedPath = storagePath.trim();
+      if (/^(blob:|data:|https?:\/\/)/i.test(trimmedPath)) {
+        return trimmedPath;
       }
-    }
 
-    return normalizedPath;
-  }, []);
+      const normalizedPath = trimmedPath.startsWith("/")
+        ? trimmedPath
+        : `/${trimmedPath}`;
 
-  const handleOpenFileAttachmentPreview = useCallback(async (att: {
-    type: string;
-    name: string;
-    mimeType?: string;
-    imageUrl?: string;
-    localUrl?: string;
-    storagePath?: string;
-    fileId?: string;
-    id?: string;
-    content?: string;
-    documentType?: string;
-  }) => {
-    if (att.type === "image" && att.imageUrl) {
+      if (
+        typeof window !== "undefined" &&
+        window.location.port === "5050" &&
+        (normalizedPath.startsWith("/objects/") ||
+          normalizedPath.startsWith("/api/"))
+      ) {
+        // In Vite dev, keep same-origin URLs so /objects and /api go through proxy.
+        // This avoids cross-origin iframe blocks for inline PDF previews.
+        return normalizedPath;
+      }
+
+      const configuredApiBase = String(
+        import.meta.env.VITE_API_URL || "",
+      ).trim();
+      if (configuredApiBase && normalizedPath.startsWith("/")) {
+        try {
+          return new URL(normalizedPath, configuredApiBase).toString();
+        } catch {
+          // Fall through to local dev fallback.
+        }
+      }
+
+      return normalizedPath;
+    },
+    [],
+  );
+
+  const handleOpenFileAttachmentPreview = useCallback(
+    async (att: {
+      type: string;
+      name: string;
+      mimeType?: string;
+      imageUrl?: string;
+      localUrl?: string;
+      storagePath?: string;
+      fileId?: string;
+      id?: string;
+      content?: string;
+      documentType?: string;
+    }) => {
+      if (att.type === "image" && att.imageUrl) {
+        releaseGeneratedAttachmentPreviewUrl();
+        setLightboxImage(att.imageUrl);
+        return;
+      }
+
+      if (att.type === "image" && att.storagePath) {
+        releaseGeneratedAttachmentPreviewUrl();
+        setLightboxImage(
+          resolveAttachmentStorageUrl(att.storagePath) || att.storagePath,
+        );
+        return;
+      }
+
+      const attachmentName = (
+        att.name ||
+        (att as any).title ||
+        "Documento"
+      ).trim();
+      const resolvedStoragePath =
+        resolveAttachmentStorageUrl(att.storagePath) || att.storagePath;
+      const inlineContent =
+        typeof att.content === "string" && att.content.trim().length > 0
+          ? att.content
+          : undefined;
+      const isPdfAttachment =
+        isPdfFile(
+          att.mimeType ||
+            (att.documentType === "pdf" ? "application/pdf" : undefined),
+          attachmentName,
+        ) || att.documentType === "pdf";
+
       releaseGeneratedAttachmentPreviewUrl();
-      setLightboxImage(att.imageUrl);
-      return;
-    }
 
-    if (att.type === "image" && att.storagePath) {
-      releaseGeneratedAttachmentPreviewUrl();
-      setLightboxImage(resolveAttachmentStorageUrl(att.storagePath) || att.storagePath);
-      return;
-    }
+      if (inlineContent) {
+        setPreviewFileAttachment({
+          ...att,
+          name: attachmentName,
+          storagePath: resolvedStoragePath,
+          content: inlineContent,
+          isLoading: false,
+          isProcessing: false,
+        });
+        return;
+      }
 
-    const attachmentName = (att.name || (att as any).title || "Documento").trim();
-    const resolvedStoragePath = resolveAttachmentStorageUrl(att.storagePath) || att.storagePath;
-    const inlineContent = typeof att.content === "string" && att.content.trim().length > 0
-      ? att.content
-      : undefined;
-    const isPdfAttachment =
-      isPdfFile(att.mimeType || (att.documentType === "pdf" ? "application/pdf" : undefined), attachmentName) ||
-      att.documentType === "pdf";
-
-    releaseGeneratedAttachmentPreviewUrl();
-
-    if (inlineContent) {
+      const effectiveFileId = att.fileId || att.id;
       setPreviewFileAttachment({
         ...att,
         name: attachmentName,
         storagePath: resolvedStoragePath,
-        content: inlineContent,
-        isLoading: false,
-        isProcessing: false,
+        isLoading: Boolean(effectiveFileId),
+        isProcessing: !effectiveFileId && !isPdfAttachment,
+        content: undefined,
       });
-      return;
-    }
 
-    const effectiveFileId = att.fileId || att.id;
-    setPreviewFileAttachment({
-      ...att,
-      name: attachmentName,
-      storagePath: resolvedStoragePath,
-      isLoading: Boolean(effectiveFileId),
-      isProcessing: !effectiveFileId && !isPdfAttachment,
-      content: undefined,
-    });
-
-    if (isPdfAttachment && !att.localUrl && resolvedStoragePath) {
-      try {
-        const pdfResponse = await fetch(resolvedStoragePath, { credentials: "include" });
-        if (pdfResponse.ok) {
-          const fetchedBlob = await pdfResponse.blob();
-          const normalizedPdfBlob = fetchedBlob.type.toLowerCase().includes("pdf")
-            ? fetchedBlob
-            : new Blob([await fetchedBlob.arrayBuffer()], { type: "application/pdf" });
-          const objectUrl = URL.createObjectURL(normalizedPdfBlob);
-          generatedAttachmentPreviewUrlRef.current = objectUrl;
-          setPreviewFileAttachment((prev: any) => prev ? {
-            ...prev,
-            localUrl: objectUrl,
-          } : null);
+      if (isPdfAttachment && !att.localUrl && resolvedStoragePath) {
+        try {
+          const pdfResponse = await fetch(resolvedStoragePath, {
+            credentials: "include",
+          });
+          if (pdfResponse.ok) {
+            const fetchedBlob = await pdfResponse.blob();
+            const normalizedPdfBlob = fetchedBlob.type
+              .toLowerCase()
+              .includes("pdf")
+              ? fetchedBlob
+              : new Blob([await fetchedBlob.arrayBuffer()], {
+                  type: "application/pdf",
+                });
+            const objectUrl = URL.createObjectURL(normalizedPdfBlob);
+            generatedAttachmentPreviewUrlRef.current = objectUrl;
+            setPreviewFileAttachment((prev: any) =>
+              prev
+                ? {
+                    ...prev,
+                    localUrl: objectUrl,
+                  }
+                : null,
+            );
+          }
+        } catch (error) {
+          console.warn("Error creating inline PDF preview URL:", error);
         }
-      } catch (error) {
-        console.warn("Error creating inline PDF preview URL:", error);
       }
-    }
 
-    if (!effectiveFileId) {
-      return;
-    }
+      if (!effectiveFileId) {
+        return;
+      }
 
-    try {
-      const response = await apiFetch(`/api/files/${effectiveFileId}/content`);
-      if (response.ok) {
-        const data = await response.json();
-        if (data.status === "ready" && (data.content || data.previewArtifact)) {
-          if (data.previewArtifact) {
-            setPreviewFileAttachment(null);
-            setDocumentPreviewArtifact({
-              ...data.previewArtifact,
-              url: resolvedStoragePath,
-            });
+      try {
+        const response = await apiFetch(
+          `/api/files/${effectiveFileId}/content`,
+        );
+        if (response.ok) {
+          const data = await response.json();
+          if (
+            data.status === "ready" &&
+            (data.content || data.previewArtifact)
+          ) {
+            if (data.previewArtifact) {
+              setPreviewFileAttachment(null);
+              setDocumentPreviewArtifact({
+                ...data.previewArtifact,
+                url: resolvedStoragePath,
+              });
+              return;
+            }
+            setPreviewFileAttachment((prev: any) =>
+              prev
+                ? {
+                    ...prev,
+                    fileId: effectiveFileId,
+                    content: data.content || "",
+                    isLoading: false,
+                    isProcessing: false,
+                  }
+                : null,
+            );
+            return;
+          } else if (data.status === "processing" || data.status === "queued") {
+            setPreviewFileAttachment((prev: any) =>
+              prev
+                ? {
+                    ...prev,
+                    isLoading: false,
+                    isProcessing: true,
+                    content: undefined,
+                  }
+                : null,
+            );
             return;
           }
-          setPreviewFileAttachment((prev: any) => prev ? {
-            ...prev,
-            fileId: effectiveFileId,
-            content: data.content || "",
-            isLoading: false,
-            isProcessing: false,
-          } : null);
-          return;
-        } else if (data.status === "processing" || data.status === "queued") {
-          setPreviewFileAttachment((prev: any) => prev ? {
-            ...prev,
-            isLoading: false,
-            isProcessing: true,
-            content: undefined,
-          } : null);
-          return;
         }
+      } catch (error) {
+        console.error("Error fetching file content:", error);
       }
-    } catch (error) {
-      console.error("Error fetching file content:", error);
-    }
 
-    setPreviewFileAttachment((prev: any) => prev ? {
-      ...prev,
-      isLoading: false,
-      isProcessing: false,
-      content: "No se pudo cargar el contenido del archivo.",
-    } : null);
-  }, [releaseGeneratedAttachmentPreviewUrl, resolveAttachmentStorageUrl]);
+      setPreviewFileAttachment((prev: any) =>
+        prev
+          ? {
+              ...prev,
+              isLoading: false,
+              isProcessing: false,
+              content: "No se pudo cargar el contenido del archivo.",
+            }
+          : null,
+      );
+    },
+    [releaseGeneratedAttachmentPreviewUrl, resolveAttachmentStorageUrl],
+  );
 
   const isTemporaryUploadId = useCallback((fileId?: string) => {
     if (!fileId) return true;
     return fileId.startsWith("temp-") || fileId.startsWith("temp-url-");
   }, []);
 
-  const handlePreviewUploadedFile = useCallback((file: UploadedFile) => {
-    const mimeType = file.mimeType || file.type || "application/octet-stream";
-    const hasInlineContent = typeof file.content === "string" && file.content.trim().length > 0;
-    const isStillUploading = file.status === "uploading" || file.status === "processing";
-    const isUploadError = file.status === "error";
-    const hasStableFileId = !isTemporaryUploadId(file.id);
+  const handlePreviewUploadedFile = useCallback(
+    (file: UploadedFile) => {
+      const mimeType = file.mimeType || file.type || "application/octet-stream";
+      const hasInlineContent =
+        typeof file.content === "string" && file.content.trim().length > 0;
+      const isStillUploading =
+        file.status === "uploading" || file.status === "processing";
+      const isUploadError = file.status === "error";
+      const hasStableFileId = !isTemporaryUploadId(file.id);
 
-    if (hasInlineContent) {
-      setPreviewFileAttachment({
+      if (hasInlineContent) {
+        setPreviewFileAttachment({
+          type: file.type || "file",
+          name: file.name,
+          mimeType,
+          localUrl: file.localUrl,
+          storagePath: file.storagePath,
+          fileId: file.id,
+          content: file.content,
+          isLoading: false,
+          isProcessing: false,
+        });
+        return;
+      }
+
+      if (isUploadError) {
+        const detail =
+          typeof file.error === "string" && file.error.trim().length > 0
+            ? `\n\nDetalle: ${file.error.trim()}`
+            : "";
+        setPreviewFileAttachment({
+          type: file.type || "file",
+          name: file.name,
+          mimeType,
+          localUrl: file.localUrl,
+          storagePath: file.storagePath,
+          fileId: hasStableFileId ? file.id : undefined,
+          content: `No se pudo procesar este archivo.${detail}`,
+          isLoading: false,
+          isProcessing: false,
+        });
+        return;
+      }
+
+      if (isStillUploading || !hasStableFileId) {
+        setPreviewFileAttachment({
+          type: file.type || "file",
+          name: file.name,
+          mimeType,
+          localUrl: file.localUrl,
+          storagePath: file.storagePath,
+          fileId: hasStableFileId ? file.id : undefined,
+          content: undefined,
+          isLoading: false,
+          isProcessing: true,
+        });
+        return;
+      }
+
+      void handleOpenFileAttachmentPreview({
         type: file.type || "file",
         name: file.name,
         mimeType,
@@ -3097,55 +3859,10 @@ export function ChatInterface({
         storagePath: file.storagePath,
         fileId: file.id,
         content: file.content,
-        isLoading: false,
-        isProcessing: false,
       });
-      return;
-    }
-
-    if (isUploadError) {
-      const detail = typeof file.error === "string" && file.error.trim().length > 0
-        ? `\n\nDetalle: ${file.error.trim()}`
-        : "";
-      setPreviewFileAttachment({
-        type: file.type || "file",
-        name: file.name,
-        mimeType,
-        localUrl: file.localUrl,
-        storagePath: file.storagePath,
-        fileId: hasStableFileId ? file.id : undefined,
-        content: `No se pudo procesar este archivo.${detail}`,
-        isLoading: false,
-        isProcessing: false,
-      });
-      return;
-    }
-
-    if (isStillUploading || !hasStableFileId) {
-      setPreviewFileAttachment({
-        type: file.type || "file",
-        name: file.name,
-        mimeType,
-        localUrl: file.localUrl,
-        storagePath: file.storagePath,
-        fileId: hasStableFileId ? file.id : undefined,
-        content: undefined,
-        isLoading: false,
-        isProcessing: true,
-      });
-      return;
-    }
-
-    void handleOpenFileAttachmentPreview({
-      type: file.type || "file",
-      name: file.name,
-      mimeType,
-      localUrl: file.localUrl,
-      storagePath: file.storagePath,
-      fileId: file.id,
-      content: file.content,
-    });
-  }, [handleOpenFileAttachmentPreview, isTemporaryUploadId]);
+    },
+    [handleOpenFileAttachmentPreview, isTemporaryUploadId],
+  );
 
   const handleCopyAttachmentContent = async () => {
     if (previewFileAttachment?.content) {
@@ -3158,7 +3875,9 @@ export function ChatInterface({
   const handleDownloadFileAttachment = async () => {
     if (!previewFileAttachment?.storagePath) return;
     try {
-      const targetUrl = resolveAttachmentStorageUrl(previewFileAttachment.storagePath) || previewFileAttachment.storagePath;
+      const targetUrl =
+        resolveAttachmentStorageUrl(previewFileAttachment.storagePath) ||
+        previewFileAttachment.storagePath;
       const response = await fetch(targetUrl, { credentials: "include" });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -3180,7 +3899,7 @@ export function ChatInterface({
   const handleFeedback = useCallback((msgId: string, value: "up" | "down") => {
     setMessageFeedback((prev: any) => ({
       ...prev,
-      [msgId]: prev[msgId] === value ? null : value
+      [msgId]: prev[msgId] === value ? null : value,
     }));
   }, []);
 
@@ -3189,7 +3908,7 @@ export function ChatInterface({
       try {
         await navigator.share({
           title: "ILIAGPT Response",
-          text: content
+          text: content,
         });
       } catch (e) {
         navigator.clipboard.writeText(content);
@@ -3199,195 +3918,289 @@ export function ChatInterface({
     }
   }, []);
 
-  const handleReadAloud = useCallback((msgId: string, content: string) => {
-    if (speakingMessageId === msgId) {
-      speechSynthesis.cancel();
-      setSpeakingMessageId(null);
-    } else {
-      speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(content);
-      utterance.onend = () => setSpeakingMessageId(null);
-      utterance.onerror = () => setSpeakingMessageId(null);
-      speechSynthesis.speak(utterance);
-      setSpeakingMessageId(msgId);
-    }
-  }, [speakingMessageId]);
-
-  const handleToolConfirm = useCallback((messageId: string, toolName: string, stepIndex: number) => {
-    chatLogger.info("User confirmed tool execution", { messageId, toolName, stepIndex });
-    toast({
-      title: "Ejecución Aprobada",
-      description: `Se ha autorizado la ejecución de ${toolName}.`,
-    });
-    // In a full implementation, we would call the backend to resume the pending tool call here.
-  }, [toast]);
-
-  const handleToolDeny = useCallback((messageId: string, toolName: string, stepIndex: number) => {
-    chatLogger.info("User denied tool execution", { messageId, toolName, stepIndex });
-    toast({
-      title: "Ejecución Cancelada",
-      description: `Se ha denegado la ejecución de ${toolName}.`,
-      variant: "destructive"
-    });
-    // In a full implementation, we would call the backend to cancel the run or tool call here.
-  }, [toast]);
-
-  const handleRegenerate = useCallback(async (msgIndex: number, instruction?: string) => {
-    const prevMessages = messages.slice(0, msgIndex);
-    const lastUserMsgIndex = [...prevMessages].reverse().findIndex(m => m.role === "user");
-    if (lastUserMsgIndex === -1) return;
-
-    const contextUpToUser = prevMessages.slice(0, prevMessages.length - lastUserMsgIndex);
-
-    if (chatId && onTruncateMessagesAt) {
-      onTruncateMessagesAt(chatId, msgIndex);
-    }
-
-    setRegeneratingMsgIndex(null);
-
-    let chatHistory = contextUpToUser.map(m => ({ role: m.role, content: m.content }));
-    if (instruction) {
-      chatHistory = [...chatHistory, { role: "user" as const, content: `[Instrucción de regeneración: ${instruction}]` }];
-    }
-
-    const regenerateChatId = chatId;
-    const setAiStateForRegenerate = (value: React.SetStateAction<AiState>) =>
-      setAiStateForChat(value, regenerateChatId);
-    const setAiProcessStepsForRegenerate = (value: React.SetStateAction<AiProcessStep[]>) =>
-      setAiProcessStepsForChat(value, regenerateChatId);
-
-    await streamChat.stream("/api/chat/stream", {
-      chatId: regenerateChatId,
-      body: withWorkspaceContext({
-        messages: chatHistory,
-        chatId: regenerateChatId,
-        conversationId: regenerateChatId,
-        provider: selectedProvider,
-        model: selectedModel,
-        latencyMode,
-        ...gptSessionPayload,
-      }),
-      onEvent: (eventType, data) => {
-        syncGptSessionFromEvent(data);
-        if (eventType === "production_start") {
-          setAiStateForRegenerate("agent_working");
-          setAiProcessStepsForRegenerate([{
-            id: "init", step: "init",
-            title: `Iniciando producción: ${data.topic || "Documento"}`,
-            status: "pending",
-            description: `Generando ${data.deliverables?.join(", ") || "archivos"}`,
-          }]);
-        } else if (eventType === "production_event") {
-          setAiProcessStepsForRegenerate((prev: any[]) => {
-            const newSteps = [...prev];
-            const lastStep = newSteps[newSteps.length - 1];
-            if (lastStep?.status === "pending" && data.message) {
-              lastStep.title = data.message;
-            } else {
-              newSteps.push({ id: `step-${Date.now()}`, title: data.message || "Procesando...", status: "pending", description: data.stage });
-            }
-            return newSteps;
-          });
-        } else if (eventType === "production_complete") {
-          setAiProcessStepsForRegenerate((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
-        } else if (eventType === "tool_start" && data.toolName === "browse_and_act") {
-          // Browser automation starting — open the virtual computer panel
-          setAiStateForRegenerate("agent_working");
-          globalStartSseSession(data.args?.goal || "Automatización web");
-          setIsBrowserOpen(true);
-        } else if (eventType === "browser_step") {
-          // Real-time browser step with screenshot — update the virtual computer
-          globalUpdateFromSseStep(data);
-          setAiStateForRegenerate("agent_working");
-          if (!isBrowserOpen) setIsBrowserOpen(true);
-        } else if (eventType === "tool_result" && data.toolName === "browse_and_act") {
-          // Browser automation completed
-          if (data.result?.success) {
-            globalUpdateFromSseStep({
-              stepNumber: data.result.stepsCount || 0,
-              totalSteps: data.result.stepsCount || 0,
-              action: "done",
-              reasoning: "Tarea completada",
-              goalProgress: "100%",
-              screenshot: "",
-              url: "",
-              title: "",
-            });
-          }
-        }
-      },
-      buildFinalMessage: (content, data, messageId) => ({
-        id: messageId || (Date.now() + 1).toString(),
-        role: "assistant",
-        content,
-        timestamp: new Date(),
-        requestId: data?.requestId || generateRequestId(),
-        webSources: data?.webSources,
-        artifact: data?.artifact,
-      }),
-      buildErrorMessage: (error, messageId) => ({
-        id: messageId || (Date.now() + 1).toString(),
-        role: "assistant",
-        content: `Lo siento, hubo un error al regenerar la respuesta: ${error.message || 'Error desconocido'}. Por favor intenta de nuevo.`,
-        timestamp: new Date(),
-        requestId: generateRequestId(),
-      }),
-    });
-  }, [messages, chatId, onTruncateMessagesAt, selectedProvider, selectedModel, latencyMode, withWorkspaceContext, gptSessionPayload, syncGptSessionFromEvent]);
-
-  const handleAgentCancel = useCallback(async (messageId: string, runId: string) => {
-    try {
-      if (runId) {
-        // Cancel via API when we have a runId
-        await cancelAgentRun(messageId, runId);
+  const handleReadAloud = useCallback(
+    (msgId: string, content: string) => {
+      if (speakingMessageId === msgId) {
+        speechSynthesis.cancel();
+        setSpeakingMessageId(null);
       } else {
-        // Cancel locally when no runId yet (starting/queued state)
-        abortPendingAgentStart(messageId);
-        useAgentStore.getState().cancelRun(messageId);
+        speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(content);
+        utterance.onend = () => setSpeakingMessageId(null);
+        utterance.onerror = () => setSpeakingMessageId(null);
+        speechSynthesis.speak(utterance);
+        setSpeakingMessageId(msgId);
       }
-      toast({ title: "Cancelado", description: "La ejecución del agente ha sido cancelada" });
-    } catch (error) {
-      console.error("Failed to cancel agent run:", error);
-      toast({ title: "Error", description: "No se pudo cancelar la ejecución", variant: "destructive" });
-    }
-  }, [cancelAgentRun, toast]);
+    },
+    [speakingMessageId],
+  );
 
-  const handleAgentRetry = useCallback((messageId: string, userMessage: string) => {
-    window.dispatchEvent(new CustomEvent("retry-agent-run", {
-      detail: { messageId, userMessage }
-    }));
-  }, []);
+  const handleToolConfirm = useCallback(
+    (messageId: string, toolName: string, stepIndex: number) => {
+      chatLogger.info("User confirmed tool execution", {
+        messageId,
+        toolName,
+        stepIndex,
+      });
+      toast({
+        title: "Ejecución Aprobada",
+        description: `Se ha autorizado la ejecución de ${toolName}.`,
+      });
+      // In a full implementation, we would call the backend to resume the pending tool call here.
+    },
+    [toast],
+  );
+
+  const handleToolDeny = useCallback(
+    (messageId: string, toolName: string, stepIndex: number) => {
+      chatLogger.info("User denied tool execution", {
+        messageId,
+        toolName,
+        stepIndex,
+      });
+      toast({
+        title: "Ejecución Cancelada",
+        description: `Se ha denegado la ejecución de ${toolName}.`,
+        variant: "destructive",
+      });
+      // In a full implementation, we would call the backend to cancel the run or tool call here.
+    },
+    [toast],
+  );
+
+  const handleRegenerate = useCallback(
+    async (msgIndex: number, instruction?: string) => {
+      const prevMessages = messages.slice(0, msgIndex);
+      const lastUserMsgIndex = [...prevMessages]
+        .reverse()
+        .findIndex((m) => m.role === "user");
+      if (lastUserMsgIndex === -1) return;
+
+      const contextUpToUser = prevMessages.slice(
+        0,
+        prevMessages.length - lastUserMsgIndex,
+      );
+
+      if (chatId && onTruncateMessagesAt) {
+        onTruncateMessagesAt(chatId, msgIndex);
+      }
+
+      setRegeneratingMsgIndex(null);
+
+      let chatHistory = contextUpToUser.map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+      if (instruction) {
+        chatHistory = [
+          ...chatHistory,
+          {
+            role: "user" as const,
+            content: `[Instrucción de regeneración: ${instruction}]`,
+          },
+        ];
+      }
+
+      const regenerateChatId = chatId;
+      const setAiStateForRegenerate = (value: React.SetStateAction<AiState>) =>
+        setAiStateForChat(value, regenerateChatId);
+      const setAiProcessStepsForRegenerate = (
+        value: React.SetStateAction<AiProcessStep[]>,
+      ) => setAiProcessStepsForChat(value, regenerateChatId);
+
+      await streamChat.stream("/api/chat/stream", {
+        chatId: regenerateChatId,
+        body: withWorkspaceContext({
+          messages: chatHistory,
+          chatId: regenerateChatId,
+          conversationId: regenerateChatId,
+          provider: selectedProvider,
+          model: selectedModel,
+          latencyMode,
+          ...gptSessionPayload,
+        }),
+        onEvent: (eventType, data) => {
+          syncGptSessionFromEvent(data);
+          if (eventType === "production_start") {
+            setAiStateForRegenerate("agent_working");
+            setAiProcessStepsForRegenerate([
+              {
+                id: "init",
+                step: "init",
+                title: `Iniciando producción: ${data.topic || "Documento"}`,
+                status: "pending",
+                description: `Generando ${data.deliverables?.join(", ") || "archivos"}`,
+              },
+            ]);
+          } else if (eventType === "production_event") {
+            setAiProcessStepsForRegenerate((prev: any[]) => {
+              const newSteps = [...prev];
+              const lastStep = newSteps[newSteps.length - 1];
+              if (lastStep?.status === "pending" && data.message) {
+                lastStep.title = data.message;
+              } else {
+                newSteps.push({
+                  id: `step-${Date.now()}`,
+                  title: data.message || "Procesando...",
+                  status: "pending",
+                  description: data.stage,
+                });
+              }
+              return newSteps;
+            });
+          } else if (eventType === "production_complete") {
+            setAiProcessStepsForRegenerate((prev: any[]) =>
+              prev.map((s: any) => ({ ...s, status: "done" })),
+            );
+          } else if (
+            eventType === "tool_start" &&
+            data.toolName === "browse_and_act"
+          ) {
+            // Browser automation starting — open the virtual computer panel
+            setAiStateForRegenerate("agent_working");
+            globalStartSseSession(data.args?.goal || "Automatización web");
+            setIsBrowserOpen(true);
+          } else if (eventType === "browser_step") {
+            // Real-time browser step with screenshot — update the virtual computer
+            globalUpdateFromSseStep(data);
+            setAiStateForRegenerate("agent_working");
+            if (!isBrowserOpen) setIsBrowserOpen(true);
+          } else if (
+            eventType === "tool_result" &&
+            data.toolName === "browse_and_act"
+          ) {
+            // Browser automation completed
+            if (data.result?.success) {
+              globalUpdateFromSseStep({
+                stepNumber: data.result.stepsCount || 0,
+                totalSteps: data.result.stepsCount || 0,
+                action: "done",
+                reasoning: "Tarea completada",
+                goalProgress: "100%",
+                screenshot: "",
+                url: "",
+                title: "",
+              });
+            }
+          }
+        },
+        buildFinalMessage: (content, data, messageId) => ({
+          id: messageId || (Date.now() + 1).toString(),
+          role: "assistant",
+          content,
+          timestamp: new Date(),
+          requestId: data?.requestId || generateRequestId(),
+          webSources: data?.webSources,
+          artifact: data?.artifact,
+        }),
+        buildErrorMessage: (error, messageId) => ({
+          id: messageId || (Date.now() + 1).toString(),
+          role: "assistant",
+          content: `Lo siento, hubo un error al regenerar la respuesta: ${error.message || "Error desconocido"}. Por favor intenta de nuevo.`,
+          timestamp: new Date(),
+          requestId: generateRequestId(),
+        }),
+      });
+    },
+    [
+      messages,
+      chatId,
+      onTruncateMessagesAt,
+      selectedProvider,
+      selectedModel,
+      latencyMode,
+      withWorkspaceContext,
+      gptSessionPayload,
+      syncGptSessionFromEvent,
+    ],
+  );
+
+  const handleAgentCancel = useCallback(
+    async (messageId: string, runId: string) => {
+      try {
+        if (runId) {
+          // Cancel via API when we have a runId
+          await cancelAgentRun(messageId, runId);
+        } else {
+          // Cancel locally when no runId yet (starting/queued state)
+          abortPendingAgentStart(messageId);
+          useAgentStore.getState().cancelRun(messageId);
+        }
+        toast({
+          title: "Cancelado",
+          description: "La ejecución del agente ha sido cancelada",
+        });
+      } catch (error) {
+        console.error("Failed to cancel agent run:", error);
+        toast({
+          title: "Error",
+          description: "No se pudo cancelar la ejecución",
+          variant: "destructive",
+        });
+      }
+    },
+    [cancelAgentRun, toast],
+  );
+
+  const handleAgentRetry = useCallback(
+    (messageId: string, userMessage: string) => {
+      window.dispatchEvent(
+        new CustomEvent("retry-agent-run", {
+          detail: { messageId, userMessage },
+        }),
+      );
+    },
+    [],
+  );
 
   const handleRunComplete = useCallback(() => {
-    console.log('[uiPhase] Run completed, uiPhase=done');
-    setUiPhase('done');
+    console.log("[uiPhase] Run completed, uiPhase=done");
+    setUiPhase("done");
     setActiveRunId(null);
   }, [setUiPhase, setActiveRunId]);
 
-  const handleSuperAgentCancel = useCallback((messageId: string) => {
-    const { updateState } = useSuperAgentStore.getState();
-    updateState(messageId, {
-      error: "Cancelado por el usuario",
-      phase: "error",
-      isRunning: false,
-    });
-    toast({ title: "Cancelado", description: "La investigación ha sido cancelada" });
-  }, [toast]);
+  const handleSuperAgentCancel = useCallback(
+    (messageId: string) => {
+      const { updateState } = useSuperAgentStore.getState();
+      updateState(messageId, {
+        error: "Cancelado por el usuario",
+        phase: "error",
+        isRunning: false,
+      });
+      toast({
+        title: "Cancelado",
+        description: "La investigación ha sido cancelada",
+      });
+    },
+    [toast],
+  );
 
-  const handleSuperAgentRetry = useCallback((messageId: string) => {
-    const run = useSuperAgentStore.getState().runs[messageId];
-    if (run?.contract?.original_prompt) {
-      useSuperAgentStore.getState().clearRun(messageId);
-      setInput(run.contract.original_prompt);
-      toast({ title: "Reintentar", description: "Envía el mensaje de nuevo para reintentar" });
-    }
-  }, [toast]);
+  const handleSuperAgentRetry = useCallback(
+    (messageId: string) => {
+      const run = useSuperAgentStore.getState().runs[messageId];
+      if (run?.contract?.original_prompt) {
+        useSuperAgentStore.getState().clearRun(messageId);
+        setInput(run.contract.original_prompt);
+        toast({
+          title: "Reintentar",
+          description: "Envía el mensaje de nuevo para reintentar",
+        });
+      }
+    },
+    [toast],
+  );
 
   useEffect(() => {
-    const handleRetryAgentRun = async (event: CustomEvent<{ messageId: string; userMessage: string }>) => {
+    const handleRetryAgentRun = async (
+      event: CustomEvent<{ messageId: string; userMessage: string }>,
+    ) => {
       const { messageId, userMessage } = event.detail;
       if (!userMessage) {
-        toast({ title: "Error", description: "No se puede reintentar sin el mensaje original", variant: "destructive" });
+        toast({
+          title: "Error",
+          description: "No se puede reintentar sin el mensaje original",
+          variant: "destructive",
+        });
         return;
       }
 
@@ -3402,27 +4215,52 @@ export function ChatInterface({
           userMessage,
           newMessageId,
           [],
-          activeAgentModel,
+          { model: activeAgentModel, provider: selectedProvider },
         );
 
         if (result?.chatId && (!chatId || chatId.startsWith("pending-"))) {
-          window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: result.chatId, preserveKey: true } }));
+          window.dispatchEvent(
+            new CustomEvent("select-chat", {
+              detail: { chatId: result.chatId, preserveKey: true },
+            }),
+          );
         } else if (!result) {
           setCurrentAgentMessageId(null);
-          toast({ title: "Error", description: "No se pudo reiniciar el agente", variant: "destructive" });
+          toast({
+            title: "Error",
+            description: "No se pudo reiniciar el agente",
+            variant: "destructive",
+          });
         }
       } catch (error) {
         console.error("Failed to retry agent run:", error);
         setCurrentAgentMessageId(null);
-        toast({ title: "Error", description: "No se pudo reiniciar el agente", variant: "destructive" });
+        toast({
+          title: "Error",
+          description: "No se pudo reiniciar el agente",
+          variant: "destructive",
+        });
       }
     };
 
-    window.addEventListener("retry-agent-run", handleRetryAgentRun as unknown as EventListener);
+    window.addEventListener(
+      "retry-agent-run",
+      handleRetryAgentRun as unknown as EventListener,
+    );
     return () => {
-      window.removeEventListener("retry-agent-run", handleRetryAgentRun as unknown as EventListener);
+      window.removeEventListener(
+        "retry-agent-run",
+        handleRetryAgentRun as unknown as EventListener,
+      );
     };
-  }, [activeAgentModel, chatId, agentStore, startAgentRun, toast]);
+  }, [
+    activeAgentModel,
+    chatId,
+    agentStore,
+    selectedProvider,
+    startAgentRun,
+    toast,
+  ]);
 
   // Handle tool-selected events from the ToolCatalog dialog
   useEffect(() => {
@@ -3434,15 +4272,25 @@ export function ChatInterface({
         const name = tool.name.toLowerCase();
 
         // Map catalog tool names to Composer tool types
-        if (name.includes("web") || name.includes("browse") || name.includes("search")) {
+        if (
+          name.includes("web") ||
+          name.includes("browse") ||
+          name.includes("search")
+        ) {
           setSelectedTool("web");
         } else if (name.includes("image") || name.includes("vision")) {
           setSelectedTool("image");
-        } else if (name.includes("agent") || name.includes("orchestrat") || name.includes("workflow")) {
+        } else if (
+          name.includes("agent") ||
+          name.includes("orchestrat") ||
+          name.includes("workflow")
+        ) {
           setSelectedTool("agent");
         } else {
           // For other tools, set input with a hint about the tool
-          setInput((prev: string) => prev ? prev : `Usa la herramienta "${tool.name}": `);
+          setInput((prev: string) =>
+            prev ? prev : `Usa la herramienta "${tool.name}": `,
+          );
         }
       } catch (err) {
         console.error("[tool-selected] Error handling tool selection:", err);
@@ -3465,85 +4313,101 @@ export function ChatInterface({
     setEditContent("");
   }, []);
 
-  const handleSendEdit = useCallback(async (msgId: string) => {
-    if (!editContent.trim()) return;
+  const handleSendEdit = useCallback(
+    async (msgId: string) => {
+      if (!editContent.trim()) return;
 
-    const msgIndex = messages.findIndex(m => m.id === msgId);
-    if (msgIndex === -1) return;
-    const editConversationId = chatId || latestChatIdRef.current;
+      const msgIndex = messages.findIndex((m) => m.id === msgId);
+      if (msgIndex === -1) return;
+      const editConversationId = chatId || latestChatIdRef.current;
 
-    const editedContent = editContent.trim();
-    setEditingMessageId(null);
-    setEditContent("");
+      const editedContent = editContent.trim();
+      setEditingMessageId(null);
+      setEditContent("");
 
-    if (chatId && onEditMessageAndTruncate) {
-      onEditMessageAndTruncate(chatId, msgId, editedContent, msgIndex);
-    }
-
-    setAiStateForChat("thinking", editConversationId);
-    streamingContentRef.current = "";
-    setStreamingContent("");
-
-    abortControllerRef.current = new AbortController();
-
-    try {
-      const historyUpToEdit = messages.slice(0, msgIndex).map(m => ({
-        role: m.role as "user" | "assistant",
-        content: m.content
-      }));
-      historyUpToEdit.push({ role: "user", content: editedContent });
-
-      const response = await apiFetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-        credentials: "include",
-        body: JSON.stringify({
-          messages: historyUpToEdit,
-          provider: selectedProvider,
-          model: selectedModel
-        }),
-        signal: abortControllerRef.current.signal
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error: ${response.status}`);
+      if (chatId && onEditMessageAndTruncate) {
+        onEditMessageAndTruncate(chatId, msgId, editedContent, msgIndex);
       }
 
-      const data = await response.json();
+      setAiStateForChat("thinking", editConversationId);
+      streamingContentRef.current = "";
+      setStreamingContent("");
 
-      if (data.content) {
-        const aiMsg: Message = {
+      abortControllerRef.current = new AbortController();
+
+      try {
+        const historyUpToEdit = messages.slice(0, msgIndex).map((m) => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+        }));
+        historyUpToEdit.push({ role: "user", content: editedContent });
+
+        const response = await apiFetch("/api/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...getAnonUserIdHeader(),
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            messages: historyUpToEdit,
+            provider: selectedProvider,
+            model: selectedModel,
+          }),
+          signal: abortControllerRef.current.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (data.content) {
+          const aiMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: data.content,
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+            webSources: data.webSources,
+          };
+          onSendMessage(aiMsg);
+        }
+
+        setAiStateForChat("idle", editConversationId);
+        abortControllerRef.current = null;
+      } catch (error: any) {
+        if (error.name === "AbortError") {
+          setAiStateForChat("idle", editConversationId);
+          return;
+        }
+        console.error("Edit regenerate error:", error);
+
+        const errorMsg: Message = {
           id: (Date.now() + 1).toString(),
           role: "assistant",
-          content: data.content,
+          content:
+            "Lo siento, hubo un error al procesar tu mensaje editado. Por favor intenta de nuevo.",
           timestamp: new Date(),
-          requestId: generateRequestId(),
-          webSources: data.webSources,
         };
-        onSendMessage(aiMsg);
-      }
-
-      setAiStateForChat("idle", editConversationId);
-      abortControllerRef.current = null;
-
-    } catch (error: any) {
-      if (error.name === "AbortError") {
+        onSendMessage(errorMsg);
         setAiStateForChat("idle", editConversationId);
-        return;
+        abortControllerRef.current = null;
       }
-      console.error("Edit regenerate error:", error);
-
-      const errorMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        content: "Lo siento, hubo un error al procesar tu mensaje editado. Por favor intenta de nuevo.",
-        timestamp: new Date(),
-      };
-      onSendMessage(errorMsg);
-      setAiStateForChat("idle", editConversationId);
-      abortControllerRef.current = null;
-    }
-  }, [editContent, messages, chatId, latestChatIdRef, onEditMessageAndTruncate, selectedProvider, selectedModel, onSendMessage, setAiStateForChat]);
+    },
+    [
+      editContent,
+      messages,
+      chatId,
+      latestChatIdRef,
+      onEditMessageAndTruncate,
+      selectedProvider,
+      selectedModel,
+      onSendMessage,
+      setAiStateForChat,
+    ],
+  );
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -3558,21 +4422,35 @@ export function ChatInterface({
 
   // Returns a Promise that resolves when polling completes (ready/error/timeout).
   // This allows callers (and pendingUploadsRef) to properly await the full file lifecycle.
-  const pollFileStatus = (fileId: string, trackingId: string): Promise<void> => {
+  const pollFileStatus = (
+    fileId: string,
+    trackingId: string,
+  ): Promise<void> => {
     return new Promise<void>((resolve) => {
       const maxAttempts = 120; // Aumentado a 30 segundos (120 * 250ms)
       let attempts = 0;
 
       const checkStatus = async () => {
         try {
-          const stillTracked = uploadedFilesRef.current.some((f: UploadedFile) => f.id === fileId || f.id === trackingId);
-          if (!stillTracked) { resolve(); return; }
+          const stillTracked = uploadedFilesRef.current.some(
+            (f: UploadedFile) => f.id === fileId || f.id === trackingId,
+          );
+          if (!stillTracked) {
+            resolve();
+            return;
+          }
 
-          const contentRes = await apiFetch(`/api/files/${fileId}/content`, { timeoutMs: 30000 });
+          const contentRes = await apiFetch(`/api/files/${fileId}/content`, {
+            timeoutMs: 30000,
+          });
 
           if (!contentRes.ok && contentRes.status !== 202) {
             setUploadedFiles((prev: any[]) =>
-              prev.map((f: any) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
+              prev.map((f: any) =>
+                f.id === fileId || f.id === trackingId
+                  ? { ...f, id: fileId, status: "error" }
+                  : f,
+              ),
             );
             resolve();
             return;
@@ -3582,15 +4460,26 @@ export function ChatInterface({
 
           if (contentData.status === "ready") {
             setUploadedFiles((prev: any[]) =>
-              prev.map((f: any) => (f.id === fileId || f.id === trackingId
-                ? { ...f, id: fileId, status: "ready", content: contentData.content }
-                : f))
+              prev.map((f: any) =>
+                f.id === fileId || f.id === trackingId
+                  ? {
+                      ...f,
+                      id: fileId,
+                      status: "ready",
+                      content: contentData.content,
+                    }
+                  : f,
+              ),
             );
             resolve();
             return;
           } else if (contentData.status === "error") {
             setUploadedFiles((prev: UploadedFile[]) =>
-              prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
+              prev.map((f: UploadedFile) =>
+                f.id === fileId || f.id === trackingId
+                  ? { ...f, id: fileId, status: "error" }
+                  : f,
+              ),
             );
             resolve();
             return;
@@ -3599,7 +4488,11 @@ export function ChatInterface({
           attempts++;
           if (attempts >= maxAttempts) {
             setUploadedFiles((prev: UploadedFile[]) =>
-              prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId ? { ...f, status: "error" } : f))
+              prev.map((f: UploadedFile) =>
+                f.id === fileId || f.id === trackingId
+                  ? { ...f, status: "error" }
+                  : f,
+              ),
             );
             console.warn(`File ${fileId} processing timed out`);
             resolve();
@@ -3609,7 +4502,11 @@ export function ChatInterface({
         } catch (error) {
           console.error("Error polling file status:", error);
           setUploadedFiles((prev: UploadedFile[]) =>
-            prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId ? { ...f, status: "error" } : f))
+            prev.map((f: UploadedFile) =>
+              f.id === fileId || f.id === trackingId
+                ? { ...f, status: "error" }
+                : f,
+            ),
           );
           resolve();
         }
@@ -3625,7 +4522,7 @@ export function ChatInterface({
       if (removed?.localUrl) {
         try {
           URL.revokeObjectURL(removed.localUrl);
-        } catch { }
+        } catch {}
       }
       return prev.filter((_, i: number) => i !== index);
     });
@@ -3670,16 +4567,20 @@ export function ChatInterface({
       dedupedFiles.push(f);
     }
 
-    const oversizedFiles = dedupedFiles.filter(file => file.size > MAX_FILE_SIZE_BYTES);
-    const invalidTypeFiles = dedupedFiles.filter(file => {
+    const oversizedFiles = dedupedFiles.filter(
+      (file) => file.size > MAX_FILE_SIZE_BYTES,
+    );
+    const invalidTypeFiles = dedupedFiles.filter((file) => {
       const t = file.type || "";
       if (t.startsWith("image/")) return false;
       return !ALLOWED_TYPES.includes(t);
     });
 
     if (oversizedFiles.length > 0) {
-      const names = oversizedFiles.map(f => f.name).join(", ");
-      const sizes = oversizedFiles.map(f => `${(f.size / (1024 * 1024)).toFixed(1)}MB`).join(", ");
+      const names = oversizedFiles.map((f) => f.name).join(", ");
+      const sizes = oversizedFiles
+        .map((f) => `${(f.size / (1024 * 1024)).toFixed(1)}MB`)
+        .join(", ");
       toast({
         title: "Archivo demasiado grande",
         description: `El archivo "${names}" (${sizes}) excede el límite de ${MAX_FILE_SIZE_MB}MB.`,
@@ -3688,7 +4589,7 @@ export function ChatInterface({
     }
 
     if (invalidTypeFiles.length > 0) {
-      const names = invalidTypeFiles.map(f => f.name).join(", ");
+      const names = invalidTypeFiles.map((f) => f.name).join(", ");
       toast({
         title: "Tipo de archivo no soportado",
         description: `El archivo "${names}" no es un tipo de archivo permitido.`,
@@ -3696,7 +4597,7 @@ export function ChatInterface({
       });
     }
 
-    const validFiles = dedupedFiles.filter(file => {
+    const validFiles = dedupedFiles.filter((file) => {
       const t = file.type || "";
       const typeOk = t.startsWith("image/") || ALLOWED_TYPES.includes(t);
       return typeOk && file.size <= MAX_FILE_SIZE_BYTES;
@@ -3708,18 +4609,22 @@ export function ChatInterface({
       const tempId = `temp-${Date.now()}-${Math.random().toString(36).substring(2)}`;
       const isImage = file.type.startsWith("image/");
       const isPdf = isPdfFile(file.type, file.name);
-      const isExcel = [
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'application/vnd.ms-excel',
-        'text/csv'
-      ].includes(file.type) || !!file.name.match(/\.(xlsx|xls|csv)$/i);
+      const isExcel =
+        [
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "application/vnd.ms-excel",
+          "text/csv",
+        ].includes(file.type) || !!file.name.match(/\.(xlsx|xls|csv)$/i);
 
       let dataUrl: string | undefined;
       if (isImage && file.size <= MAX_IMAGE_PREVIEW_BYTES) {
         try {
           dataUrl = await compressImageToDataUrl(file);
         } catch (e) {
-          console.warn("Failed to compress image, falling back to basic FileReader", e);
+          console.warn(
+            "Failed to compress image, falling back to basic FileReader",
+            e,
+          );
           dataUrl = await new Promise<string>((resolve) => {
             const reader = new FileReader();
             reader.onloadend = () => resolve(reader.result as string);
@@ -3740,7 +4645,8 @@ export function ChatInterface({
       }
 
       if (file.size <= 5 * 1024 * 1024) {
-        const isTextFile = file.type.startsWith("text/") ||
+        const isTextFile =
+          file.type.startsWith("text/") ||
           ["application/json", "application/javascript"].includes(file.type) ||
           !!file.name.match(/\.(txt|md|csv|json|js|jsx|ts|tsx)$/i);
 
@@ -3748,7 +4654,7 @@ export function ChatInterface({
           try {
             content = await new Promise<string>((resolve) => {
               const reader = new FileReader();
-              reader.onloadend = () => resolve(reader.result as string || "");
+              reader.onloadend = () => resolve((reader.result as string) || "");
               reader.readAsText(file);
             });
           } catch (e) {
@@ -3792,37 +4698,54 @@ export function ChatInterface({
       setUploadedFiles((prev: any) => [...prev, tempFile]);
 
       const doUpload = async (): Promise<void> => {
-        const retryFetch = async (fn: () => Promise<Response>, maxRetries = 3, timeoutMs = 15000): Promise<Response> => {
+        const retryFetch = async (
+          fn: () => Promise<Response>,
+          maxRetries = 3,
+          timeoutMs = 15000,
+        ): Promise<Response> => {
           let lastError: Error | null = null;
           for (let attempt = 0; attempt <= maxRetries; attempt++) {
             try {
               const res = await Promise.race([
                 fn(),
-                new Promise<Response>((_, reject) => setTimeout(() => reject(new Error("Request timeout")), timeoutMs))
+                new Promise<Response>((_, reject) =>
+                  setTimeout(
+                    () => reject(new Error("Request timeout")),
+                    timeoutMs,
+                  ),
+                ),
               ]);
               return res;
             } catch (err: any) {
               lastError = err;
               if (attempt < maxRetries) {
                 const jitter = Math.floor(Math.random() * 180);
-                await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt) + jitter));
+                await new Promise((r) =>
+                  setTimeout(r, 1000 * Math.pow(2, attempt) + jitter),
+                );
               }
             }
           }
           throw lastError || new Error("Request failed after retries");
         };
 
-        const retryUpload = async (fn: () => Promise<void>, maxRetries = 3): Promise<void> => {
+        const retryUpload = async (
+          fn: () => Promise<void>,
+          maxRetries = 3,
+        ): Promise<void> => {
           let lastError: Error | null = null;
           for (let attempt = 0; attempt <= maxRetries; attempt++) {
             try {
               await fn();
               return;
             } catch (err: any) {
-              lastError = err instanceof Error ? err : new Error("Upload failed");
+              lastError =
+                err instanceof Error ? err : new Error("Upload failed");
               if (attempt < maxRetries) {
                 const jitter = Math.floor(Math.random() * 180);
-                await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt) + jitter));
+                await new Promise((r) =>
+                  setTimeout(r, 1000 * Math.pow(2, attempt) + jitter),
+                );
               }
             }
           }
@@ -3830,7 +4753,8 @@ export function ChatInterface({
         };
 
         try {
-          const stableConversationId = chatId && !chatId.startsWith("pending-") ? chatId : null;
+          const stableConversationId =
+            chatId && !chatId.startsWith("pending-") ? chatId : null;
           const uploadId = `upload-${tempId}`;
           const uploadHeaders: Record<string, string> = {
             "Content-Type": "application/json",
@@ -3853,31 +4777,46 @@ export function ChatInterface({
           };
 
           await ensureCsrfToken();
-          const urlRes = await retryFetch(() => apiFetch("/api/objects/upload", {
-            method: "POST",
-            headers: uploadHeaders,
-            body: JSON.stringify({
-              uploadId,
-              fileName: file.name,
-              mimeType: file.type,
-              fileSize: file.size,
-              ...(stableConversationId ? { conversationId: stableConversationId } : {}),
-            }),
-          }), 2);
+          const urlRes = await retryFetch(
+            () =>
+              apiFetch("/api/objects/upload", {
+                method: "POST",
+                headers: uploadHeaders,
+                body: JSON.stringify({
+                  uploadId,
+                  fileName: file.name,
+                  mimeType: file.type,
+                  fileSize: file.size,
+                  ...(stableConversationId
+                    ? { conversationId: stableConversationId }
+                    : {}),
+                }),
+              }),
+            2,
+          );
           const urlData = await safeJson(urlRes);
           if (!urlRes.ok) {
-            throw new Error(urlData?.error || `Failed to get upload URL (status ${urlRes.status})`);
+            throw new Error(
+              urlData?.error ||
+                `Failed to get upload URL (status ${urlRes.status})`,
+            );
           }
           const { uploadURL, storagePath } = urlData || {};
-          if (!uploadURL || !storagePath) throw new Error("No upload URL received");
-          const effectiveUploadUrl = resolveUploadUrlForResponse(uploadURL, urlRes.url);
+          if (!uploadURL || !storagePath)
+            throw new Error("No upload URL received");
+          const effectiveUploadUrl = resolveUploadUrlForResponse(
+            uploadURL,
+            urlRes.url,
+          );
 
-          await retryUpload(() => uploadBlobWithProgress(effectiveUploadUrl, file, undefined, {
-            timeoutMs: 120000,
-            skipContentType: true,
-          }));
+          await retryUpload(() =>
+            uploadBlobWithProgress(effectiveUploadUrl, file, undefined, {
+              timeoutMs: 120000,
+              skipContentType: true,
+            }),
+          );
 
-          let spreadsheetData: UploadedFile['spreadsheetData'] | undefined;
+          let spreadsheetData: UploadedFile["spreadsheetData"] | undefined;
 
           await ensureCsrfToken();
           const registerRes = await apiFetch("/api/files", {
@@ -3889,31 +4828,51 @@ export function ChatInterface({
               size: file.size,
               storagePath,
               uploadId,
-              ...(stableConversationId ? { conversationId: stableConversationId } : {}),
+              ...(stableConversationId
+                ? { conversationId: stableConversationId }
+                : {}),
             }),
             timeoutMs: 30000,
           });
           const registeredFile = await safeJson(registerRes);
           if (!registerRes.ok) {
-            throw new Error(registeredFile?.error || `File registration failed (status ${registerRes.status})`);
+            throw new Error(
+              registeredFile?.error ||
+                `File registration failed (status ${registerRes.status})`,
+            );
           }
           if (!registeredFile?.id) {
-            throw new Error("Server returned invalid file registration response");
+            throw new Error(
+              "Server returned invalid file registration response",
+            );
           }
 
           // UX fast-path: once file bytes are persisted and registered, expose it as ready immediately.
           // Backend extraction/analysis continues asynchronously in background.
           setUploadedFiles((prev: any[]) =>
-            prev.map((f: any) => f.id === tempId
-              ? { ...f, id: registeredFile.id, storagePath, status: "ready", spreadsheetData }
-              : f)
+            prev.map((f: any) =>
+              f.id === tempId
+                ? {
+                    ...f,
+                    id: registeredFile.id,
+                    storagePath,
+                    status: "ready",
+                    spreadsheetData,
+                  }
+                : f,
+            ),
           );
 
           if (!isImage) {
             // Keep background extraction for richer context without blocking upload readiness.
-            void pollFileStatusFast(registeredFile.id, tempId).catch((pollError) => {
-              console.warn("Background file status polling failed:", pollError);
-            });
+            void pollFileStatusFast(registeredFile.id, tempId).catch(
+              (pollError) => {
+                console.warn(
+                  "Background file status polling failed:",
+                  pollError,
+                );
+              },
+            );
           }
 
           if (isExcel) {
@@ -3921,15 +4880,18 @@ export function ChatInterface({
             void (async () => {
               try {
                 const formData = new FormData();
-                formData.append('file', file);
+                formData.append("file", file);
 
                 await ensureCsrfToken();
-                const spreadsheetRes = await apiFetch('/api/spreadsheet/upload', {
-                  method: 'POST',
-                  headers: multipartHeaders,
-                  body: formData,
-                  timeoutMs: 30000,
-                });
+                const spreadsheetRes = await apiFetch(
+                  "/api/spreadsheet/upload",
+                  {
+                    method: "POST",
+                    headers: multipartHeaders,
+                    body: formData,
+                    timeoutMs: 30000,
+                  },
+                );
 
                 if (!spreadsheetRes.ok) {
                   return;
@@ -3961,18 +4923,26 @@ export function ChatInterface({
                 }
 
                 setUploadedFiles((prev: any[]) =>
-                  prev.map((f: any) => (f.id === registeredFile.id || f.id === tempId)
-                    ? { ...f, spreadsheetData }
-                    : f)
+                  prev.map((f: any) =>
+                    f.id === registeredFile.id || f.id === tempId
+                      ? { ...f, spreadsheetData }
+                      : f,
+                  ),
                 );
 
-                triggerDocumentAnalysis(spreadsheetUploadId, file.name, (analysisId) => {
-                  setUploadedFiles((prev: any[]) =>
-                    prev.map((f: any) => (f.id === registeredFile.id || f.id === tempId)
-                      ? { ...f, analysisId }
-                      : f)
-                  );
-                });
+                triggerDocumentAnalysis(
+                  spreadsheetUploadId,
+                  file.name,
+                  (analysisId) => {
+                    setUploadedFiles((prev: any[]) =>
+                      prev.map((f: any) =>
+                        f.id === registeredFile.id || f.id === tempId
+                          ? { ...f, analysisId }
+                          : f,
+                      ),
+                    );
+                  },
+                );
               } catch (spreadsheetError) {
                 console.warn("Failed to parse spreadsheet:", spreadsheetError);
               }
@@ -3980,15 +4950,23 @@ export function ChatInterface({
           }
 
           if (isAnalyzableFile(file.name) && !isExcel) {
-            triggerDocumentAnalysis(registeredFile.id, file.name, (analysisId) => {
-              setUploadedFiles((prev: any[]) =>
-                prev.map((f: any) => f.id === registeredFile.id || f.id === tempId ? { ...f, analysisId } : f)
-              );
-            });
+            triggerDocumentAnalysis(
+              registeredFile.id,
+              file.name,
+              (analysisId) => {
+                setUploadedFiles((prev: any[]) =>
+                  prev.map((f: any) =>
+                    f.id === registeredFile.id || f.id === tempId
+                      ? { ...f, analysisId }
+                      : f,
+                  ),
+                );
+              },
+            );
           }
-
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message =
+            error instanceof Error ? error.message : String(error);
           console.error("File upload error:", error);
           toast({
             title: "Error al subir archivo",
@@ -3996,7 +4974,12 @@ export function ChatInterface({
             variant: "destructive",
           });
           setUploadedFiles((prev: any[]) =>
-            prev.map((f: any) => (f.id === tempId || (f.id !== tempId && f.name === file.name && f.size === file.size) ? { ...f, status: "error", error: message } : f))
+            prev.map((f: any) =>
+              f.id === tempId ||
+              (f.id !== tempId && f.name === file.name && f.size === file.size)
+                ? { ...f, status: "error", error: message }
+                : f,
+            ),
           );
         }
       };
@@ -4021,15 +5004,23 @@ export function ChatInterface({
 
   // Returns a Promise that resolves when the file reaches a terminal state (ready/error).
   // Prefer persistent WebSocket status updates; fall back to polling when WS is unavailable.
-  const pollFileStatusFastPolling = (fileId: string, trackingId: string): Promise<void> => {
+  const pollFileStatusFastPolling = (
+    fileId: string,
+    trackingId: string,
+  ): Promise<void> => {
     return new Promise<void>((resolve) => {
       const maxTime = 5000;
       const pollInterval = 250;
       const startTime = Date.now();
 
       const checkStatus = async (): Promise<void> => {
-        const stillTracked = uploadedFilesRef.current.some((f: UploadedFile) => f.id === fileId || f.id === trackingId);
-        if (!stillTracked) { resolve(); return; }
+        const stillTracked = uploadedFilesRef.current.some(
+          (f: UploadedFile) => f.id === fileId || f.id === trackingId,
+        );
+        if (!stillTracked) {
+          resolve();
+          return;
+        }
 
         if (Date.now() - startTime > maxTime) {
           // Fall back to slower polling. Chain the promise so caller awaits the full lifecycle.
@@ -4038,11 +5029,17 @@ export function ChatInterface({
         }
 
         try {
-          const contentRes = await apiFetch(`/api/files/${fileId}/content`, { timeoutMs: 30000 });
+          const contentRes = await apiFetch(`/api/files/${fileId}/content`, {
+            timeoutMs: 30000,
+          });
 
           if (!contentRes.ok && contentRes.status !== 202) {
             setUploadedFiles((prev: any[]) =>
-              prev.map((f: any) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
+              prev.map((f: any) =>
+                f.id === fileId || f.id === trackingId
+                  ? { ...f, id: fileId, status: "error" }
+                  : f,
+              ),
             );
             resolve();
             return;
@@ -4052,15 +5049,26 @@ export function ChatInterface({
 
           if (contentData.status === "ready") {
             setUploadedFiles((prev: any[]) =>
-              prev.map((f: any) => (f.id === fileId || f.id === trackingId
-                ? { ...f, id: fileId, status: "ready", content: contentData.content }
-                : f))
+              prev.map((f: any) =>
+                f.id === fileId || f.id === trackingId
+                  ? {
+                      ...f,
+                      id: fileId,
+                      status: "ready",
+                      content: contentData.content,
+                    }
+                  : f,
+              ),
             );
             resolve();
             return;
           } else if (contentData.status === "error") {
             setUploadedFiles((prev: any[]) =>
-              prev.map((f: any) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
+              prev.map((f: any) =>
+                f.id === fileId || f.id === trackingId
+                  ? { ...f, id: fileId, status: "error" }
+                  : f,
+              ),
             );
             resolve();
             return;
@@ -4078,7 +5086,10 @@ export function ChatInterface({
     });
   };
 
-  const pollFileStatusFast = (fileId: string, trackingId: string): Promise<void> => {
+  const pollFileStatusFast = (
+    fileId: string,
+    trackingId: string,
+  ): Promise<void> => {
     const uploader = getFileUploader();
     const wsTimeoutMs = 500;
 
@@ -4089,7 +5100,10 @@ export function ChatInterface({
       let timeoutId: ReturnType<typeof setTimeout> | null = null;
       let globalTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
-      const stillTracked = () => uploadedFilesRef.current.some((f: UploadedFile) => f.id === fileId || f.id === trackingId);
+      const stillTracked = () =>
+        uploadedFilesRef.current.some(
+          (f: UploadedFile) => f.id === fileId || f.id === trackingId,
+        );
 
       let cleanup = () => {
         if (timeoutId) {
@@ -4122,31 +5136,40 @@ export function ChatInterface({
 
       // AGGRESSIVE SPEED OPTIMIZATION: Check immediately to skip the 2s WS wait if the backend fast-paths the 'ready' state.
       // We parse the JSON body here so we can directly transition the file to 'ready' without an extra round-trip.
-      apiFetch(`/api/files/${fileId}/content`, { timeoutMs: 5000 }).then(async contentRes => {
-        if (settled) return;
-        try {
-          if (contentRes.status === 200) {
-            const contentData = await contentRes.json().catch(() => null);
-            if (contentData?.status === "ready") {
-              setUploadedFiles((prev: UploadedFile[]) =>
-                prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId
-                  ? { ...f, id: fileId, status: "ready", content: contentData.content }
-                  : f))
-              );
-              done();
-              return;
+      apiFetch(`/api/files/${fileId}/content`, { timeoutMs: 5000 })
+        .then(async (contentRes) => {
+          if (settled) return;
+          try {
+            if (contentRes.status === 200) {
+              const contentData = await contentRes.json().catch(() => null);
+              if (contentData?.status === "ready") {
+                setUploadedFiles((prev: UploadedFile[]) =>
+                  prev.map((f: UploadedFile) =>
+                    f.id === fileId || f.id === trackingId
+                      ? {
+                          ...f,
+                          id: fileId,
+                          status: "ready",
+                          content: contentData.content,
+                        }
+                      : f,
+                  ),
+                );
+                done();
+                return;
+              }
+              // File exists but not flagged 'ready' yet — hand off to polling
+              fallback();
+            } else if (contentRes.status !== 202) {
+              // Non-202 non-200 is an error state
+              fallback();
             }
-            // File exists but not flagged 'ready' yet — hand off to polling
-            fallback();
-          } else if (contentRes.status !== 202) {
-            // Non-202 non-200 is an error state
-            fallback();
+            // 202 = still processing, let WS/polling handle it
+          } catch {
+            // ignore parse error, let WS/polling handle it
           }
-          // 202 = still processing, let WS/polling handle it
-        } catch {
-          // ignore parse error, let WS/polling handle it
-        }
-      }).catch(() => { });
+        })
+        .catch(() => {});
 
       // Periodic safety poll every 2 seconds in case WS event drops
       const safetyPollInterval = setInterval(async () => {
@@ -4155,7 +5178,9 @@ export function ChatInterface({
           return;
         }
         try {
-          const contentRes = await apiFetch(`/api/files/${fileId}/content`, { timeoutMs: 5000 });
+          const contentRes = await apiFetch(`/api/files/${fileId}/content`, {
+            timeoutMs: 5000,
+          });
           if (contentRes.status === 200) {
             clearInterval(safetyPollInterval);
             fallback();
@@ -4174,98 +5199,137 @@ export function ChatInterface({
         originalCleanup();
       };
 
-      if (!stillTracked()) { done(); return; }
+      if (!stillTracked()) {
+        done();
+        return;
+      }
 
       try {
-        unsubscribe = uploader.subscribeToProcessingStatus(fileId, async (data: any) => {
-          if (!sawWsEvent) {
-            sawWsEvent = true;
-            if (timeoutId) {
-              clearTimeout(timeoutId);
-              timeoutId = null;
-            }
-          }
-
-          if (!stillTracked()) { done(); return; }
-
-          if (data?.type === "auth_error") {
-            console.warn("[FileStatus] WS auth_error, falling back to polling");
-            fallback();
-            return;
-          }
-
-          if (data?.type !== "file_status" || data.fileId !== fileId) return;
-
-          if (data.status === "failed") {
-            setUploadedFiles((prev: UploadedFile[]) =>
-              prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId
-                ? { ...f, id: fileId, status: "error", error: data.error || (f as any).error }
-                : f))
-            );
-            done();
-            return;
-          }
-
-          if (data.status === "completed") {
-            // Fetch content once (with short retry for eventual consistency).
-            for (let attempt = 0; attempt < 5; attempt++) {
-              try {
-                const contentRes = await apiFetch(`/api/files/${fileId}/content`, { timeoutMs: 30000 });
-                if (contentRes.ok) {
-                  const contentData = await contentRes.json();
-                  if (contentData.status === "ready") {
-                    setUploadedFiles((prev: UploadedFile[]) =>
-                      prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId
-                        ? { ...f, id: fileId, status: "ready", content: contentData.content }
-                        : f))
-                    );
-                    done();
-                    return;
-                  }
-                } else if (contentRes.status !== 202) {
-                  break;
-                }
-              } catch {
-                // ignore and retry
+        unsubscribe = uploader.subscribeToProcessingStatus(
+          fileId,
+          async (data: any) => {
+            if (!sawWsEvent) {
+              sawWsEvent = true;
+              if (timeoutId) {
+                clearTimeout(timeoutId);
+                timeoutId = null;
               }
-              await new Promise(r => setTimeout(r, 250));
             }
 
-            // If content isn't ready yet, fall back to polling as a safety net.
-            fallback();
-            return;
-          }
+            if (!stillTracked()) {
+              done();
+              return;
+            }
 
-          // pending/processing: reflect state (best-effort)
-          setUploadedFiles((prev: UploadedFile[]) =>
-            prev.map((f: UploadedFile) => {
-              if (f.id !== fileId && f.id !== trackingId) return f;
-              const nextStatus = f.status === "ready" ? "ready" : "processing";
-              return { ...f, id: fileId, status: nextStatus };
-            })
-          );
-        });
+            if (data?.type === "auth_error") {
+              console.warn(
+                "[FileStatus] WS auth_error, falling back to polling",
+              );
+              fallback();
+              return;
+            }
+
+            if (data?.type !== "file_status" || data.fileId !== fileId) return;
+
+            if (data.status === "failed") {
+              setUploadedFiles((prev: UploadedFile[]) =>
+                prev.map((f: UploadedFile) =>
+                  f.id === fileId || f.id === trackingId
+                    ? {
+                        ...f,
+                        id: fileId,
+                        status: "error",
+                        error: data.error || (f as any).error,
+                      }
+                    : f,
+                ),
+              );
+              done();
+              return;
+            }
+
+            if (data.status === "completed") {
+              // Fetch content once (with short retry for eventual consistency).
+              for (let attempt = 0; attempt < 5; attempt++) {
+                try {
+                  const contentRes = await apiFetch(
+                    `/api/files/${fileId}/content`,
+                    { timeoutMs: 30000 },
+                  );
+                  if (contentRes.ok) {
+                    const contentData = await contentRes.json();
+                    if (contentData.status === "ready") {
+                      setUploadedFiles((prev: UploadedFile[]) =>
+                        prev.map((f: UploadedFile) =>
+                          f.id === fileId || f.id === trackingId
+                            ? {
+                                ...f,
+                                id: fileId,
+                                status: "ready",
+                                content: contentData.content,
+                              }
+                            : f,
+                        ),
+                      );
+                      done();
+                      return;
+                    }
+                  } else if (contentRes.status !== 202) {
+                    break;
+                  }
+                } catch {
+                  // ignore and retry
+                }
+                await new Promise((r) => setTimeout(r, 250));
+              }
+
+              // If content isn't ready yet, fall back to polling as a safety net.
+              fallback();
+              return;
+            }
+
+            // pending/processing: reflect state (best-effort)
+            setUploadedFiles((prev: UploadedFile[]) =>
+              prev.map((f: UploadedFile) => {
+                if (f.id !== fileId && f.id !== trackingId) return f;
+                const nextStatus =
+                  f.status === "ready" ? "ready" : "processing";
+                return { ...f, id: fileId, status: nextStatus };
+              }),
+            );
+          },
+        );
 
         timeoutId = setTimeout(() => {
           if (!sawWsEvent) {
-            console.warn("[FileStatus] WS initial timeout, falling back to polling");
+            console.warn(
+              "[FileStatus] WS initial timeout, falling back to polling",
+            );
             fallback();
           }
         }, wsTimeoutMs);
 
         // AGGRESSIVE FIX: Max limits on WebSocket listening (60 seconds) to avoid infinite loading.
         globalTimeoutId = setTimeout(() => {
-          console.warn("[FileStatus] WS global wait timeout exceeded, falling back to polling");
+          console.warn(
+            "[FileStatus] WS global wait timeout exceeded, falling back to polling",
+          );
           fallback();
         }, 60000);
       } catch (error) {
-        console.warn("[FileStatus] WS subscribe failed, falling back to polling:", error);
+        console.warn(
+          "[FileStatus] WS subscribe failed, falling back to polling:",
+          error,
+        );
         fallback();
       }
     });
   };
 
-  const fetchUrlAsDataUrl = async (url: string, maxBytes: number): Promise<string | null> => {
+  const fetchUrlAsDataUrl = async (
+    url: string,
+    maxBytes: number,
+  ): Promise<string | null> => {
     try {
       const res = await apiFetch(url);
       if (!res.ok) return null;
@@ -4286,7 +5350,7 @@ export function ChatInterface({
     const normalized = uniq(
       urls
         .map((u) => normalizeHttpUrl(u) || null)
-        .filter((u): u is string => !!u)
+        .filter((u): u is string => !!u),
     ).slice(0, 10);
     if (normalized.length === 0) return;
 
@@ -4313,24 +5377,35 @@ export function ChatInterface({
 
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
-          throw new Error(data?.error || `No se pudo importar (${response.status})`);
+          throw new Error(
+            data?.error || `No se pudo importar (${response.status})`,
+          );
         }
 
-        const importedType: string = data.type || data.mimeType || "application/octet-stream";
+        const importedType: string =
+          data.type || data.mimeType || "application/octet-stream";
         const importedId: string | undefined = data.id;
         const importedName: string = data.name || u;
-        const importedSize: number = typeof data.size === "number" ? data.size : 0;
+        const importedSize: number =
+          typeof data.size === "number" ? data.size : 0;
         const importedStoragePath: string | undefined = data.storagePath;
         const importedStatus: string =
-          data.status || (importedType.startsWith("image/") ? "ready" : "processing");
+          data.status ||
+          (importedType.startsWith("image/") ? "ready" : "processing");
 
         // For images, generate a data URL from same-origin storage so vision works reliably.
         let dataUrl: string | undefined;
         if (importedType.startsWith("image/")) {
-          if (typeof data.dataUrl === "string" && data.dataUrl.startsWith("data:")) {
+          if (
+            typeof data.dataUrl === "string" &&
+            data.dataUrl.startsWith("data:")
+          ) {
             dataUrl = data.dataUrl;
           } else if (importedStoragePath) {
-            const preview = await fetchUrlAsDataUrl(importedStoragePath, 15 * 1024 * 1024);
+            const preview = await fetchUrlAsDataUrl(
+              importedStoragePath,
+              15 * 1024 * 1024,
+            );
             if (preview) dataUrl = preview;
           }
         }
@@ -4349,10 +5424,14 @@ export function ChatInterface({
               status: importedStatus,
               dataUrl: dataUrl || f.dataUrl,
             };
-          })
+          }),
         );
 
-        if (!importedType.startsWith("image/") && importedId && importedStatus === "processing") {
+        if (
+          !importedType.startsWith("image/") &&
+          importedId &&
+          importedStatus === "processing"
+        ) {
           pollFileStatusFast(importedId, trackingId);
         }
       };
@@ -4360,7 +5439,9 @@ export function ChatInterface({
       const promise = doImport().catch((error: any) => {
         console.error("URL import error:", error);
         setUploadedFiles((prev: UploadedFile[]) =>
-          prev.map((f: UploadedFile) => (f.id === trackingId ? { ...f, status: "error" } : f))
+          prev.map((f: UploadedFile) =>
+            f.id === trackingId ? { ...f, status: "error" } : f,
+          ),
         );
         toast({
           title: "No se pudo importar el enlace",
@@ -4392,13 +5473,24 @@ export function ChatInterface({
       const originalName = (file.name || "").trim();
       const declaredType = (file.type || item.type || "").trim();
 
-      const isGenericImageName = !originalName || originalName === "image.png" || originalName === "image.jpg";
-      const subtype = declaredType.includes("/") ? declaredType.split("/")[1] : "";
+      const isGenericImageName =
+        !originalName ||
+        originalName === "image.png" ||
+        originalName === "image.jpg";
+      const subtype = declaredType.includes("/")
+        ? declaredType.split("/")[1]
+        : "";
       const cleanedSubtype = subtype.split("+")[0].split(".")[0];
-      const safeExt = declaredType.startsWith("image/") ? (cleanedSubtype || "png") : "bin";
-      const fileName = isGenericImageName ? `pasted-${Date.now()}.${safeExt}` : originalName;
+      const safeExt = declaredType.startsWith("image/")
+        ? cleanedSubtype || "png"
+        : "bin";
+      const fileName = isGenericImageName
+        ? `pasted-${Date.now()}.${safeExt}`
+        : originalName;
 
-      const normalized = normalizeFileForUpload(new File([file], fileName, { type: declaredType || file.type }));
+      const normalized = normalizeFileForUpload(
+        new File([file], fileName, { type: declaredType || file.type }),
+      );
       filesToUpload.push(normalized);
     }
 
@@ -4425,13 +5517,19 @@ export function ChatInterface({
       const mimeMatch = text.match(/^data:([^;]+);base64,/i);
       const mime = (mimeMatch?.[1] || "image/png").toLowerCase();
       const ext =
-        mime === "image/jpeg" || mime === "image/jpg" ? "jpg" :
-          mime === "image/webp" ? "webp" :
-            mime === "image/gif" ? "gif" :
-              mime === "image/bmp" ? "bmp" :
-                mime === "image/tiff" ? "tiff" :
-                  mime === "image/svg+xml" ? "svg" :
-                    "png";
+        mime === "image/jpeg" || mime === "image/jpg"
+          ? "jpg"
+          : mime === "image/webp"
+            ? "webp"
+            : mime === "image/gif"
+              ? "gif"
+              : mime === "image/bmp"
+                ? "bmp"
+                : mime === "image/tiff"
+                  ? "tiff"
+                  : mime === "image/svg+xml"
+                    ? "svg"
+                    : "png";
       const f = dataImageUrlToFile(text, `pasted-${Date.now()}.${ext}`);
       if (f) {
         e.preventDefault();
@@ -4462,12 +5560,20 @@ export function ChatInterface({
     }
   };
 
-  const isFileOrUrlDragEvent = (dt: DataTransfer | null | undefined): boolean => {
+  const isFileOrUrlDragEvent = (
+    dt: DataTransfer | null | undefined,
+  ): boolean => {
     if (!dt) return false;
     const types = Array.from(dt.types || []);
-    if (types.includes("Files") || types.includes("application/x-moz-file")) return true;
-    if (types.includes("text/uri-list") || types.includes("text/html")) return true;
-    if (dt.items && Array.from(dt.items).some((it) => (it as any).kind === "file")) return true;
+    if (types.includes("Files") || types.includes("application/x-moz-file"))
+      return true;
+    if (types.includes("text/uri-list") || types.includes("text/html"))
+      return true;
+    if (
+      dt.items &&
+      Array.from(dt.items).some((it) => (it as any).kind === "file")
+    )
+      return true;
     if (dt.files && dt.files.length > 0) return true;
     return false;
   };
@@ -4505,7 +5611,9 @@ export function ChatInterface({
 
     e.preventDefault();
 
-    const droppedFiles = await extractFilesFromDataTransfer(dt, { maxFiles: 200 });
+    const droppedFiles = await extractFilesFromDataTransfer(dt, {
+      maxFiles: 200,
+    });
     if (droppedFiles.length > 0) {
       await processFilesForUpload(droppedFiles);
       return;
@@ -4581,14 +5689,22 @@ export function ChatInterface({
     // can cause handleSubmit to be called again before the first async
     // invocation completes. This ref-based lock prevents that entirely.
     if (isSubmitLocked()) {
-      console.log("[handleSubmit] Blocked: already submitting (sessionStorage lock active)");
+      console.log(
+        "[handleSubmit] Blocked: already submitting (sessionStorage lock active)",
+      );
       return;
     }
     // Prevent double-submit while THIS chat has a request in flight.
     // If a DIFFERENT chat is busy (aiStateChatId !== chatId), allow submission.
-    const thisChatBusy = aiState !== "idle" && (!aiStateChatId || aiStateChatId === chatId);
+    const thisChatBusy =
+      aiState !== "idle" && (!aiStateChatId || aiStateChatId === chatId);
     if (thisChatBusy) {
-      console.log("[handleSubmit] Blocked: aiState is", aiState, "for chatId", aiStateChatId);
+      console.log(
+        "[handleSubmit] Blocked: aiState is",
+        aiState,
+        "for chatId",
+        aiStateChatId,
+      );
       return;
     }
     setSubmitLock();
@@ -4597,7 +5713,9 @@ export function ChatInterface({
       const submitConversationId = chatId || latestChatIdRef.current;
       // When sending the very first message, the parent may create a pending chatId asynchronously.
       // We may need to wait briefly for `chatId` (and `latestChatIdRef`) to update before starting SSE.
-      const waitForActiveChatId = async (timeoutMs = 200): Promise<string | null> => {
+      const waitForActiveChatId = async (
+        timeoutMs = 200,
+      ): Promise<string | null> => {
         const started = Date.now();
         while (Date.now() - started < timeoutMs) {
           const id = latestChatIdRef.current;
@@ -4616,9 +5734,16 @@ export function ChatInterface({
         const cleanInput = input.trim().substring(1);
         setInput("");
 
-        const effectiveChatIdForStream = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
+        const effectiveChatIdForStream =
+          chatId && !chatId.startsWith("pending-")
+            ? chatId
+            : `chat_${Date.now()}`;
         if (chatId?.startsWith("pending-")) {
-          window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: effectiveChatIdForStream, preserveKey: true } }));
+          window.dispatchEvent(
+            new CustomEvent("select-chat", {
+              detail: { chatId: effectiveChatIdForStream, preserveKey: true },
+            }),
+          );
         }
 
         const emergencyResult = await streamChat.stream("/api/chat/stream", {
@@ -4633,7 +5758,10 @@ export function ChatInterface({
           }),
           onEvent: (eventType, data) => {
             syncGptSessionFromEvent(data);
-            if (eventType === "tool_start" && data.toolName === "browse_and_act") {
+            if (
+              eventType === "tool_start" &&
+              data.toolName === "browse_and_act"
+            ) {
               setAiStateForChat("agent_working", effectiveChatIdForStream);
               globalStartSseSession(data.args?.goal || "Automatización web");
               setIsBrowserOpen(true);
@@ -4659,7 +5787,8 @@ export function ChatInterface({
         const mockMsg: Message = {
           id: `mock-${Date.now()}`,
           role: "assistant",
-          content: "Aquí hay una respuesta con una cita interna [[FUENTE:Documento de Diseño|http://example.com/doc.pdf]].",
+          content:
+            "Aquí hay una respuesta con una cita interna [[FUENTE:Documento de Diseño|http://example.com/doc.pdf]].",
           timestamp: new Date(),
           webSources: [
             {
@@ -4670,10 +5799,10 @@ export function ChatInterface({
               metadata: {
                 pageNumber: 42,
                 section: "3.5 Arquitectura",
-                totalPages: 100
-              } as any
-            }
-          ]
+                totalPages: 100,
+              } as any,
+            },
+          ],
         };
         onSendMessage(mockMsg);
         setInput("");
@@ -4681,15 +5810,24 @@ export function ChatInterface({
       }
 
       if (import.meta.env.DEV) {
-        chatLogger.debug("handleSubmit called", { inputLength: input.length, selectedTool });
+        chatLogger.debug("handleSubmit called", {
+          inputLength: input.length,
+          selectedTool,
+        });
       }
 
       // Allow submit if: there's input text, OR there are sendable files, OR there's selected doc text with instruction
       const hasInput = input.trim().length > 0;
       const filesAtSubmit = [...uploadedFilesRef.current];
-      const failedFilesAtSubmit = filesAtSubmit.filter((f: UploadedFile) => f?.status === "error");
-      const attachableFilesAtSubmit = filesAtSubmit.filter((f: UploadedFile) => f?.status !== "error");
-      const blockingFilesAtSubmit = attachableFilesAtSubmit.filter(isFileUploadBlockingSend);
+      const failedFilesAtSubmit = filesAtSubmit.filter(
+        (f: UploadedFile) => f?.status === "error",
+      );
+      const attachableFilesAtSubmit = filesAtSubmit.filter(
+        (f: UploadedFile) => f?.status !== "error",
+      );
+      const blockingFilesAtSubmit = attachableFilesAtSubmit.filter(
+        isFileUploadBlockingSend,
+      );
       const hasFiles = attachableFilesAtSubmit.length > 0;
       const hasSelectionWithInstruction = selectedDocText && input.trim();
 
@@ -4706,7 +5844,8 @@ export function ChatInterface({
       if (blockingFilesAtSubmit.length > 0) {
         toast({
           title: "Subida en progreso",
-          description: "Espera un momento a que termine la carga del archivo para enviarlo.",
+          description:
+            "Espera un momento a que termine la carga del archivo para enviarlo.",
           duration: 3000,
         });
         return;
@@ -4715,7 +5854,8 @@ export function ChatInterface({
         if (failedFilesAtSubmit.length > 0) {
           toast({
             title: "No se pudo adjuntar el archivo",
-            description: "La carga falló. Elimina el archivo y vuelve a subirlo para enviarlo.",
+            description:
+              "La carga falló. Elimina el archivo y vuelve a subirlo para enviarlo.",
             variant: "destructive",
             duration: 4000,
           });
@@ -4732,29 +5872,48 @@ export function ChatInterface({
         const userText = input.trim();
 
         // Step 1: Detect intent — does the user want to create a folder on the desktop?
-        const hasCreateVerb = /\b(?:crea|crear|creame|creá|crees|haz|hazme|genera|generar|make|create)\b/i.test(userText);
-        const hasFolderWord = /\b(?:carpeta|caroeta|carepta|carptea|careta|folder|directorio|directory)\b/i.test(userText);
-        const hasDesktopContext = /\b(?:escritorio|excritorio|desktop|mi\s+mac|my\s+mac)\b/i.test(userText);
-        const isMkdirCommand = /^(?:\/?mkdir|local:\s*mkdir)\s+/i.test(userText);
-        const isLocalFolderIntent = (hasCreateVerb && hasFolderWord) || isMkdirCommand;
+        const hasCreateVerb =
+          /\b(?:crea|crear|creame|creá|crees|haz|hazme|genera|generar|make|create)\b/i.test(
+            userText,
+          );
+        const hasFolderWord =
+          /\b(?:carpeta|caroeta|carepta|carptea|careta|folder|directorio|directory)\b/i.test(
+            userText,
+          );
+        const hasDesktopContext =
+          /\b(?:escritorio|excritorio|desktop|mi\s+mac|my\s+mac)\b/i.test(
+            userText,
+          );
+        const isMkdirCommand = /^(?:\/?mkdir|local:\s*mkdir)\s+/i.test(
+          userText,
+        );
+        const isLocalFolderIntent =
+          (hasCreateVerb && hasFolderWord) || isMkdirCommand;
 
         // Step 2: Extract folder name using multiple strategies (order matters — most specific first)
         let folderName: string | null = null;
         if (isLocalFolderIntent) {
           const cleanName = (raw: string): string => {
-            return raw.trim()
-              // eslint-disable-next-line no-useless-escape
-              .replace(/^[\[\s("'`{]+/, "").replace(/[\s)"'`\]},]+$/, "")
-              .replace(/\s+en\s+(?:(?:mi|el|la|tu|su)\s+)?(?:escritorio|excritorio|desktop|mac)\b.*$/i, "")
-              .replace(/\s+on\s+(?:(?:my|the)\s+)?(?:desktop|mac)\b.*$/i, "")
-              .replace(/\s+(?:por\s+favor|gracias|please|thanks)\b.*$/i, "")
-              .replace(/[.,;:!?]+$/, "")
-              .trim();
+            return (
+              raw
+                .trim()
+                // eslint-disable-next-line no-useless-escape
+                .replace(/^[\[\s("'`{]+/, "")
+                .replace(/[\s)"'`\]},]+$/, "")
+                .replace(
+                  /\s+en\s+(?:(?:mi|el|la|tu|su)\s+)?(?:escritorio|excritorio|desktop|mac)\b.*$/i,
+                  "",
+                )
+                .replace(/\s+on\s+(?:(?:my|the)\s+)?(?:desktop|mac)\b.*$/i, "")
+                .replace(/\s+(?:por\s+favor|gracias|please|thanks)\b.*$/i, "")
+                .replace(/[.,;:!?]+$/, "")
+                .trim()
+            );
           };
 
           // Strategy A: Explicit name markers — "llamada X", "con el nombre X", "named X", "que se llame X"
           const nameMarkerMatch = userText.match(
-            /(?:llamada|con\s+(?:el\s+)?nombre|named|que\s+se\s+llame)\s+["']?([^"'\n]{1,160})["']?/i
+            /(?:llamada|con\s+(?:el\s+)?nombre|named|que\s+se\s+llame)\s+["']?([^"'\n]{1,160})["']?/i,
           );
           if (nameMarkerMatch?.[1]) folderName = cleanName(nameMarkerMatch[1]);
 
@@ -4766,13 +5925,18 @@ export function ChatInterface({
             ];
             for (const re of rigidPatterns) {
               const m = userText.match(re);
-              if (m?.[1]) { folderName = cleanName(m[1]); break; }
+              if (m?.[1]) {
+                folderName = cleanName(m[1]);
+                break;
+              }
             }
           }
 
           // Strategy C: /mkdir command
           if (!folderName && isMkdirCommand) {
-            const mkdirMatch = userText.match(/^(?:\/?mkdir|local:\s*mkdir)\s+["']?([^"'\n]{1,120})["']?\s*$/i);
+            const mkdirMatch = userText.match(
+              /^(?:\/?mkdir|local:\s*mkdir)\s+["']?([^"'\n]{1,120})["']?\s*$/i,
+            );
             if (mkdirMatch?.[1]) folderName = cleanName(mkdirMatch[1]);
           }
 
@@ -4780,28 +5944,93 @@ export function ChatInterface({
           // likely proper noun / quoted string as the folder name
           if (!folderName && hasDesktopContext) {
             // Try quoted strings first
-            const quotedMatch = userText.match(/["'""]([^"'""\n]{1,120})["'""]/);
+            const quotedMatch = userText.match(
+              /["'""]([^"'""\n]{1,120})["'""]/,
+            );
             if (quotedMatch?.[1]) {
               folderName = cleanName(quotedMatch[1]);
             } else {
               // Extract the last capitalized word or word sequence that isn't a Spanish/English stop word
               const stopWords = new Set([
-                "en", "mi", "una", "un", "la", "el", "de", "del", "con", "que", "se", "por", "los", "las",
-                "tu", "su", "al", "es", "lo", "le", "da", "di", "si", "no", "ya", "ha", "he", "fue", "ser",
-                "crear", "crea", "creame", "haz", "hazme", "genera", "make", "create",
-                "carpeta", "caroeta", "carepta", "folder", "directorio",
-                "escritorio", "excritorio", "desktop", "mac", "nombre", "llamada",
-                "puedes", "podrias", "porfavor", "favor", "gracias", "please",
-                "otra", "nueva", "nuevo", "quiero", "necesito", "me", "my", "the", "on", "a",
+                "en",
+                "mi",
+                "una",
+                "un",
+                "la",
+                "el",
+                "de",
+                "del",
+                "con",
+                "que",
+                "se",
+                "por",
+                "los",
+                "las",
+                "tu",
+                "su",
+                "al",
+                "es",
+                "lo",
+                "le",
+                "da",
+                "di",
+                "si",
+                "no",
+                "ya",
+                "ha",
+                "he",
+                "fue",
+                "ser",
+                "crear",
+                "crea",
+                "creame",
+                "haz",
+                "hazme",
+                "genera",
+                "make",
+                "create",
+                "carpeta",
+                "caroeta",
+                "carepta",
+                "folder",
+                "directorio",
+                "escritorio",
+                "excritorio",
+                "desktop",
+                "mac",
+                "nombre",
+                "llamada",
+                "puedes",
+                "podrias",
+                "porfavor",
+                "favor",
+                "gracias",
+                "please",
+                "otra",
+                "nueva",
+                "nuevo",
+                "quiero",
+                "necesito",
+                "me",
+                "my",
+                "the",
+                "on",
+                "a",
               ]);
               // Find words that look like a name (start with uppercase or contain numbers/special chars)
               const words = userText.split(/\s+/);
               const candidates: string[] = [];
               for (const w of words) {
-                const plain = w.replace(/^["'`([{]+/, "").replace(/["'`)\]},.:;!?]+$/, "");
+                const plain = w
+                  .replace(/^["'`([{]+/, "")
+                  .replace(/["'`)\]},.:;!?]+$/, "");
                 if (!plain) continue;
                 if (stopWords.has(plain.toLowerCase())) continue;
-                if (/^[A-Z]/.test(plain) || /\d/.test(plain) || /[=_-]/.test(plain)) {
+                if (
+                  /^[A-Z]/.test(plain) ||
+                  /\d/.test(plain) ||
+                  /[=_-]/.test(plain)
+                ) {
                   candidates.push(plain);
                 }
               }
@@ -4812,10 +6041,17 @@ export function ChatInterface({
           }
         }
 
-        console.log("[LocalControl] Folder check:", { isLocalFolderIntent, folderName, hasDesktopContext });
+        console.log("[LocalControl] Folder check:", {
+          isLocalFolderIntent,
+          folderName,
+          hasDesktopContext,
+        });
 
         if (folderName) {
-          console.log("[LocalControl] ✅ FOLDER INTERCEPTED — calling /api/local/create-folder with name:", folderName);
+          console.log(
+            "[LocalControl] ✅ FOLDER INTERCEPTED — calling /api/local/create-folder with name:",
+            folderName,
+          );
           const userMsg: Message = {
             id: `user-${Date.now()}`,
             role: "user",
@@ -4829,7 +6065,10 @@ export function ChatInterface({
           try {
             const res = await apiFetch("/api/local/create-folder", {
               method: "POST",
-              headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+              headers: {
+                "Content-Type": "application/json",
+                ...getAnonUserIdHeader(),
+              },
               credentials: "include",
               body: JSON.stringify({ name: folderName, prompt: userText }),
             });
@@ -4837,7 +6076,9 @@ export function ChatInterface({
             const assistantMsg: Message = {
               id: `assistant-${Date.now()}`,
               role: "assistant",
-              content: data?.message || (data?.path ? `Listo. Carpeta creada: ${data.path}` : "Listo."),
+              content:
+                data?.message ||
+                (data?.path ? `Listo. Carpeta creada: ${data.path}` : "Listo."),
               timestamp: new Date(),
               requestId: generateRequestId(),
             };
@@ -4861,84 +6102,177 @@ export function ChatInterface({
       if (hasInput && !hasFiles) {
         const userText2 = input.trim();
         let isLocalExecIntent = false;
-        console.log("[LocalControl] Checking general interception for:", JSON.stringify(userText2));
+        console.log(
+          "[LocalControl] Checking general interception for:",
+          JSON.stringify(userText2),
+        );
 
         // 1. Prefixed: /local <cmd> (skip mkdir which is handled above via create-folder)
         const isLocalPrefixed = /^(?:\/local|local:)\s+/i.test(userText2);
-        const isLocalMkdirPrefixed = /^(?:\/local|local:)\s+(?:mkdir|carpeta|crear-carpeta)\b/i.test(userText2);
+        const isLocalMkdirPrefixed =
+          /^(?:\/local|local:)\s+(?:mkdir|carpeta|crear-carpeta)\b/i.test(
+            userText2,
+          );
         if (isLocalPrefixed && !isLocalMkdirPrefixed) {
           isLocalExecIntent = true;
         }
 
         // 2. Natural language: "elimina/borra la carpeta X", "elimina el archivo Y"
-        if (!isLocalExecIntent && /\b(?:elimina|eliminar|borra|borrar|delete|remove|quita|quitar)\s+(?:la\s+|el\s+)?(?:carpeta|archivo|folder|file|directorio)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:elimina|eliminar|borra|borrar|delete|remove|quita|quitar)\s+(?:la\s+|el\s+)?(?:carpeta|archivo|folder|file|directorio)\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
 
         // 3. Natural language: "lee/muéstrame/abre el archivo X" / "qué contiene X"
-        if (!isLocalExecIntent && /\b(?:lee|leer|muestra|muéstrame|mostrar|abre|abrir|show|read|open|cat)\s+(?:el\s+)?(?:archivo|file|contenido)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:lee|leer|muestra|muéstrame|mostrar|abre|abrir|show|read|open|cat)\s+(?:el\s+)?(?:archivo|file|contenido)\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
-        if (!isLocalExecIntent && /\b(?:qué|que|what)\s+(?:contiene|tiene|hay\s+en|contains)\s+(?:el\s+)?(?:archivo)?\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:qué|que|what)\s+(?:contiene|tiene|hay\s+en|contains)\s+(?:el\s+)?(?:archivo)?\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
 
         // 4. Natural language: "ejecuta/corre/run el comando X"
-        if (!isLocalExecIntent && /\b(?:ejecuta|ejecutar|corre|correr|run|lanza|lanzar|execute)\s+(?:el\s+)?(?:comando|command)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:ejecuta|ejecutar|corre|correr|run|lanza|lanzar|execute)\s+(?:el\s+)?(?:comando|command)\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
-        if (!isLocalExecIntent && /\b(?:en\s+(?:la\s+)?terminal|in\s+(?:the\s+)?terminal)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:en\s+(?:la\s+)?terminal|in\s+(?:the\s+)?terminal)\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
-        if (!isLocalExecIntent && /\b(?:en\s+)?(?:bash|shell|terminal|consola)\s*[:-]/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:en\s+)?(?:bash|shell|terminal|consola)\s*[:-]/i.test(userText2)
+        ) {
           isLocalExecIntent = true;
         }
 
         // 5. Natural language: sysinfo — "info del sistema" / "cuanta memoria" / "espacio en disco"
-        if (!isLocalExecIntent && /\b(?:info(?:rmacion)?|información)\s+(?:del?\s+)?(?:sistema|equipo|computadora|mac|pc)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:info(?:rmacion)?|información)\s+(?:del?\s+)?(?:sistema|equipo|computadora|mac|pc)\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
-        if (!isLocalExecIntent && /\b(?:cuanta|cuánta|how\s+much)\s+(?:memoria|ram|memory)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:cuanta|cuánta|how\s+much)\s+(?:memoria|ram|memory)\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
-        if (!isLocalExecIntent && /\b(?:espacio|space)\s+(?:en\s+)?(?:disco|disk)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:espacio|space)\s+(?:en\s+)?(?:disco|disk)\b/i.test(userText2)
+        ) {
           isLocalExecIntent = true;
         }
 
         // 6. Natural language: "crea un archivo X con el contenido Y"
-        if (!isLocalExecIntent && /\b(?:crea|crear|make|create|genera)\s+(?:un\s+)?(?:archivo|file)\s+.+(?:con\s+(?:el\s+)?(?:contenido|texto|content)|que\s+(?:contenga|diga|tenga))\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:crea|crear|make|create|genera)\s+(?:un\s+)?(?:archivo|file)\s+.+(?:con\s+(?:el\s+)?(?:contenido|texto|content)|que\s+(?:contenga|diga|tenga))\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
-        if (!isLocalExecIntent && /\b(?:escribe|escribir|guarda|guardar|write|save)\s+(?:en\s+)?(?:el\s+)?(?:archivo)?\b/i.test(userText2) && /[:-]/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:escribe|escribir|guarda|guardar|write|save)\s+(?:en\s+)?(?:el\s+)?(?:archivo)?\b/i.test(
+            userText2,
+          ) &&
+          /[:-]/i.test(userText2)
+        ) {
           isLocalExecIntent = true;
         }
 
         // 7. Natural language: "muéstrame los archivos de mi escritorio" / "lista las carpetas"
-        if (!isLocalExecIntent && /\b(?:muestra|muéstrame|lista|listar|show|list)\s+(?:los\s+|las\s+)?(?:archivos|carpetas|files|folders|contenido)\s+(?:de|del|en|in|from)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:muestra|muéstrame|lista|listar|show|list)\s+(?:los\s+|las\s+)?(?:archivos|carpetas|files|folders|contenido)\s+(?:de|del|en|in|from)\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
-        if (!isLocalExecIntent && /\b(?:qué|que|what)\s+(?:hay|archivos|carpetas|files|folders)\s+(?:en|in|tengo\s+en)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:qué|que|what)\s+(?:hay|archivos|carpetas|files|folders)\s+(?:en|in|tengo\s+en)\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
 
         // 8. Processes: "muéstrame los procesos" / "qué procesos están corriendo"
-        if (!isLocalExecIntent && /\b(?:muestra|muéstrame|show|list|lista)\s+(?:los\s+)?(?:procesos|processes)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:muestra|muéstrame|show|list|lista)\s+(?:los\s+)?(?:procesos|processes)\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
-        if (!isLocalExecIntent && /\b(?:procesos|processes)\s+(?:activos|running|corriendo|en\s+ejecución)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:procesos|processes)\s+(?:activos|running|corriendo|en\s+ejecución)\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
 
         // 9. Kill: "mata el proceso X" / "kill process X"
-        if (!isLocalExecIntent && /\b(?:mata|matar|kill|termina|terminar|detén|para|stop)\s+(?:el\s+)?(?:proceso|process)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:mata|matar|kill|termina|terminar|detén|para|stop)\s+(?:el\s+)?(?:proceso|process)\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
 
         // 10. Ports: "qué puertos están abiertos" / "puertos en uso"
-        if (!isLocalExecIntent && /\b(?:puertos?|ports?)\s+(?:abiertos?|open|en\s+uso|in\s+use|listening|escuchando|activos)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:puertos?|ports?)\s+(?:abiertos?|open|en\s+uso|in\s+use|listening|escuchando|activos)\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
-        if (!isLocalExecIntent && /\b(?:muestra|muéstrame|show|list|lista)\s+(?:los\s+)?(?:puertos|ports)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:muestra|muéstrame|show|list|lista)\s+(?:los\s+)?(?:puertos|ports)\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
 
@@ -4946,10 +6280,18 @@ export function ChatInterface({
         if (!isLocalExecIntent && /^git\s+/i.test(userText2)) {
           isLocalExecIntent = true;
         }
-        if (!isLocalExecIntent && /\b(?:haz|hacer|make|do)\s+(?:un\s+)?commit\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:haz|hacer|make|do)\s+(?:un\s+)?commit\b/i.test(userText2)
+        ) {
           isLocalExecIntent = true;
         }
-        if (!isLocalExecIntent && /\b(?:estado|status)\s+(?:del?\s+)?(?:repositorio|repo)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:estado|status)\s+(?:del?\s+)?(?:repositorio|repo)\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
 
@@ -4957,30 +6299,56 @@ export function ChatInterface({
         if (!isLocalExecIntent && /^docker\s+/i.test(userText2)) {
           isLocalExecIntent = true;
         }
-        if (!isLocalExecIntent && /\b(?:contenedores|containers)\s+(?:activos|running|corriendo)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:contenedores|containers)\s+(?:activos|running|corriendo)\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
 
         // 13. Install: "instala express con npm" / "npm install X" / "pip install X"
-        if (!isLocalExecIntent && /\b(?:instala|instalar|install)\s+.+\b(?:npm|pip|brew)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:instala|instalar|install)\s+.+\b(?:npm|pip|brew)\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
-        if (!isLocalExecIntent && /^(?:npm|pip|pip3|brew)\s+install\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /^(?:npm|pip|pip3|brew)\s+install\b/i.test(userText2)
+        ) {
           isLocalExecIntent = true;
         }
 
         // 14. Script execution: "ejecuta el script test.py" / "corre main.js"
-        if (!isLocalExecIntent && /\b(?:ejecuta|ejecutar|corre|correr|run)\s+(?:el\s+)?(?:script|archivo)\s+\S+\.\w{1,5}\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:ejecuta|ejecutar|corre|correr|run)\s+(?:el\s+)?(?:script|archivo)\s+\S+\.\w{1,5}\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
 
         // 15. Find files: "busca archivos .txt en mi escritorio"
-        if (!isLocalExecIntent && /\b(?:busca|buscar|find|search)\s+(?:todos?\s+(?:los\s+)?)?(?:archivos|files)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:busca|buscar|find|search)\s+(?:todos?\s+(?:los\s+)?)?(?:archivos|files)\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
 
         // 16. Python/Node inline: "python: print(2+2)" / "node: console.log(2)"
-        if (!isLocalExecIntent && /^(?:python3?|py|node|js)\s*[:-]\s*.+/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /^(?:python3?|py|node|js)\s*[:-]\s*.+/i.test(userText2)
+        ) {
           isLocalExecIntent = true;
         }
 
@@ -4988,38 +6356,86 @@ export function ChatInterface({
         if (!isLocalExecIntent && /^cd\s+\S+/i.test(userText2)) {
           isLocalExecIntent = true;
         }
-        if (!isLocalExecIntent && /\b(?:ve|ir|entra|entrar|cambia|cambiar)\s+(?:a\s+(?:la\s+)?|en\s+(?:el\s+)?)(?:carpeta|directorio|folder|directory)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:ve|ir|entra|entrar|cambia|cambiar)\s+(?:a\s+(?:la\s+)?|en\s+(?:el\s+)?)(?:carpeta|directorio|folder|directory)\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
 
         // 18. Direct tool commands: "npm list" / "pip list" / "brew list" / "git status" / "docker ps"
-        if (!isLocalExecIntent && /^(?:npm|pip3?|brew|git|docker|python3?|node|bash|sh)\s+\S+/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /^(?:npm|pip3?|brew|git|docker|python3?|node|bash|sh)\s+\S+/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
 
         // 19. Direct local utility commands: "pwd" / "history" / "top" / "du /tmp" / "which node" / "open /tmp"
-        if (!isLocalExecIntent && /^(?:pwd|history|top|du|which|open|ps|ports|grep|find|tree|chmod|diff|kill)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /^(?:pwd|history|top|du|which|open|ps|ports|grep|find|tree|chmod|diff|kill)\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
 
         // 20. Capability queries: "tienes acceso a mi terminal?" / "puedes ejecutar comandos?"
-        if (!isLocalExecIntent && /\b(?:tienes|tiene|tenés)\s+(?:acceso|conexión|conexion)\b/i.test(userText2) && /\b(?:terminal|computadora|pc|mac|sistema|archivos|shell|consola|equipo|ordenador|laptop|máquina|maquina)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:tienes|tiene|tenés)\s+(?:acceso|conexión|conexion)\b/i.test(
+            userText2,
+          ) &&
+          /\b(?:terminal|computadora|pc|mac|sistema|archivos|shell|consola|equipo|ordenador|laptop|máquina|maquina)\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
-        if (!isLocalExecIntent && /\b(?:puedes|puede|podés|podrías|podrias)\s+(?:acceder|ver|controlar|ejecutar|usar|manejar)\b/i.test(userText2) && /\b(?:terminal|computadora|pc|mac|sistema|archivos|shell|consola|equipo)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:puedes|puede|podés|podrías|podrias)\s+(?:acceder|ver|controlar|ejecutar|usar|manejar)\b/i.test(
+            userText2,
+          ) &&
+          /\b(?:terminal|computadora|pc|mac|sistema|archivos|shell|consola|equipo)\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
-        if (!isLocalExecIntent && /\b(?:qué|que|cuáles|cuales)\s+(?:capacidades|habilidades|poderes|funciones)\s+(?:tienes|tiene)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:qué|que|cuáles|cuales)\s+(?:capacidades|habilidades|poderes|funciones)\s+(?:tienes|tiene)\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
-        if (!isLocalExecIntent && /\b(?:can\s+you|do\s+you)\s+(?:access|control|use|run|execute)\s+(?:my|the)\s+(?:terminal|computer|system|files|shell)\b/i.test(userText2)) {
+        if (
+          !isLocalExecIntent &&
+          /\b(?:can\s+you|do\s+you)\s+(?:access|control|use|run|execute)\s+(?:my|the)\s+(?:terminal|computer|system|files|shell)\b/i.test(
+            userText2,
+          )
+        ) {
           isLocalExecIntent = true;
         }
 
-        console.log("[LocalControl] isLocalExecIntent:", isLocalExecIntent, "| input:", userText2.slice(0, 80));
+        console.log(
+          "[LocalControl] isLocalExecIntent:",
+          isLocalExecIntent,
+          "| input:",
+          userText2.slice(0, 80),
+        );
 
         if (isLocalExecIntent) {
-          console.log("[LocalControl] ✅ INTERCEPTED — calling /api/local/exec");
+          console.log(
+            "[LocalControl] ✅ INTERCEPTED — calling /api/local/exec",
+          );
           const userMsg: Message = {
             id: `user-${Date.now()}`,
             role: "user",
@@ -5033,16 +6449,26 @@ export function ChatInterface({
           try {
             const res = await apiFetch("/api/local/exec", {
               method: "POST",
-              headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+              headers: {
+                "Content-Type": "application/json",
+                ...getAnonUserIdHeader(),
+              },
               credentials: "include",
               body: JSON.stringify({ prompt: userText2, confirm: true }),
             });
             const data = await res.json();
-            const localArtifact = normalizeLocalExecArtifact(data?.artifact, data?.payload);
+            const localArtifact = normalizeLocalExecArtifact(
+              data?.artifact,
+              data?.payload,
+            );
             const assistantMsg: Message = {
               id: `assistant-${Date.now()}`,
               role: "assistant",
-              content: data?.message || (data?.success ? "Listo." : `Error: ${data?.error || "error desconocido"}`),
+              content:
+                data?.message ||
+                (data?.success
+                  ? "Listo."
+                  : `Error: ${data?.error || "error desconocido"}`),
               timestamp: new Date(),
               requestId: generateRequestId(),
               artifact: localArtifact,
@@ -5072,21 +6498,38 @@ export function ChatInterface({
       let autoPromptForFiles = "";
       if (!hasInput && hasFiles) {
         const filesRef = uploadedFilesRef.current;
-        const hasImage = filesRef.some((f: any) => (f.type || "").startsWith("image/"));
-        const hasDoc = filesRef.some((f: any) => !(f.type || "").startsWith("image/"));
-        autoPromptForFiles = hasImage && !hasDoc
-          ? "Describe la imagen adjunta."
-          : hasDoc && !hasImage
-            ? "Analiza los documentos adjuntos y resume lo importante."
-            : "Analiza los archivos adjuntos y dime lo más importante.";
-        console.log("[handleSubmit] No text provided with files, using auto-prompt:", autoPromptForFiles);
+        const hasImage = filesRef.some((f: any) =>
+          (f.type || "").startsWith("image/"),
+        );
+        const hasDoc = filesRef.some(
+          (f: any) => !(f.type || "").startsWith("image/"),
+        );
+        autoPromptForFiles =
+          hasImage && !hasDoc
+            ? "Describe la imagen adjunta."
+            : hasDoc && !hasImage
+              ? "Analiza los documentos adjuntos y resume lo importante."
+              : "Analiza los archivos adjuntos y dime lo más importante.";
+        console.log(
+          "[handleSubmit] No text provided with files, using auto-prompt:",
+          autoPromptForFiles,
+        );
       }
 
       // EMERGENCY BYPASS (DEV-ONLY, DISABLED IN PROD): For simple text messages without files, go directly to streaming API
       // This bypasses normal chat_run creation and WILL break persistence/idempotency if enabled in prod.
       // Keep behind explicit flag for dev troubleshooting only.
-      if (ENABLE_EMERGENCY_BYPASS && hasInput && !hasFiles && (!selectedTool || selectedTool === "web") && !selectedDocText) {
-        console.error("[EMERGENCY BYPASS] Simple text message - going direct to API", selectedTool === "web" ? "(with web search)" : "");
+      if (
+        ENABLE_EMERGENCY_BYPASS &&
+        hasInput &&
+        !hasFiles &&
+        (!selectedTool || selectedTool === "web") &&
+        !selectedDocText
+      ) {
+        console.error(
+          "[EMERGENCY BYPASS] Simple text message - going direct to API",
+          selectedTool === "web" ? "(with web search)" : "",
+        );
         const userInput = input.trim();
         setInput("");
 
@@ -5105,7 +6548,7 @@ export function ChatInterface({
           role: "user",
           content: selectedTool === "web" ? `🌐 ${userInput}` : userInput,
           timestamp: new Date(),
-          requestId: `req_${Date.now()}`
+          requestId: `req_${Date.now()}`,
         };
         // Show user message immediately (optimistic update) — BEFORE any async work
         setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
@@ -5113,12 +6556,20 @@ export function ChatInterface({
 
         // Stream the response using the all-in-one hook
         // Handles: fetch + SSE parsing + RAF-throttled updates + atomic finalize
-        const isWebSearch = selectedTool === "web" || userInput.startsWith("🌐 ");
+        const isWebSearch =
+          selectedTool === "web" || userInput.startsWith("🌐 ");
         const cleanInput = userInput.replace(/^🌐\s*/, "");
 
-        const effectiveChatIdForStream = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
+        const effectiveChatIdForStream =
+          chatId && !chatId.startsWith("pending-")
+            ? chatId
+            : `chat_${Date.now()}`;
         if (chatId?.startsWith("pending-")) {
-          window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: effectiveChatIdForStream, preserveKey: true } }));
+          window.dispatchEvent(
+            new CustomEvent("select-chat", {
+              detail: { chatId: effectiveChatIdForStream, preserveKey: true },
+            }),
+          );
         }
 
         const streamResult = await streamChat.stream("/api/chat/stream", {
@@ -5136,7 +6587,10 @@ export function ChatInterface({
           onEvent: (eventType, data) => {
             syncGptSessionFromEvent(data);
             // Handle browser automation events from agent loop
-            if (eventType === "tool_start" && data.toolName === "browse_and_act") {
+            if (
+              eventType === "tool_start" &&
+              data.toolName === "browse_and_act"
+            ) {
               setAiStateForChat("agent_working", effectiveChatIdForStream);
               globalStartSseSession(data.args?.goal || "Automatización web");
               setIsBrowserOpen(true);
@@ -5144,7 +6598,10 @@ export function ChatInterface({
               globalUpdateFromSseStep(data);
               setAiStateForChat("agent_working", effectiveChatIdForStream);
               if (!isBrowserOpen) setIsBrowserOpen(true);
-            } else if (eventType === "tool_result" && data.toolName === "browse_and_act") {
+            } else if (
+              eventType === "tool_result" &&
+              data.toolName === "browse_and_act"
+            ) {
               if (data.result?.success) {
                 globalUpdateFromSseStep({
                   stepNumber: data.result.stepsCount || 0,
@@ -5169,7 +6626,8 @@ export function ChatInterface({
           buildErrorMessage: (_error, messageId) => ({
             id: messageId || `error-${Date.now()}`,
             role: "assistant",
-            content: "Error de conexión. Por favor, verifica tu conexión e intenta de nuevo.",
+            content:
+              "Error de conexión. Por favor, verifica tu conexión e intenta de nuevo.",
             timestamp: new Date(),
           }),
         });
@@ -5180,8 +6638,13 @@ export function ChatInterface({
       // Handle Agent mode - show in chat, not side panel
       if (selectedTool === "agent") {
         const agentToolMessage = (input || autoPromptForFiles).trim();
-        const readyAgentFiles = uploadedFilesRef.current.filter((f: any) => f.status === "ready");
-        const agentIntentCheck = shouldAutoActivateAgent(agentToolMessage, readyAgentFiles.length > 0);
+        const readyAgentFiles = uploadedFilesRef.current.filter(
+          (f: any) => f.status === "ready",
+        );
+        const agentIntentCheck = shouldAutoActivateAgent(
+          agentToolMessage,
+          readyAgentFiles.length > 0,
+        );
         const shouldBypassExplicitAgent =
           readyAgentFiles.length === 0 &&
           !agentIntentCheck.agent_required &&
@@ -5190,124 +6653,180 @@ export function ChatInterface({
         if (shouldBypassExplicitAgent) {
           setSelectedTool(null);
         } else {
-        // Save files before clearing so we can restore on error
-        const savedAgentFiles = [...uploadedFilesRef.current];
-        try {
-          const userMessageContent = input || autoPromptForFiles;
-          const readyFiles = uploadedFilesRef.current.filter((f: any) => f.status === "ready");
+          // Save files before clearing so we can restore on error
+          const savedAgentFiles = [...uploadedFilesRef.current];
+          try {
+            const userMessageContent = input || autoPromptForFiles;
+            const readyFiles = uploadedFilesRef.current.filter(
+              (f: any) => f.status === "ready",
+            );
 
-          // Agent runner expects rich attachment metadata; include storagePath as both `storagePath` and `path`.
-          const attachments = readyFiles
-            .filter((f: any) => typeof f.id === "string" && f.id.length > 0 && !f.id.startsWith("temp-"))
-            .map((f: any) => ({
-              id: f.id,
-              name: f.name,
-              mimeType: f.type,
-              type: f.type,
-              storagePath: f.storagePath,
-              path: f.storagePath,
-              size: f.size,
-              metadata: {
+            // Agent runner expects rich attachment metadata; include storagePath as both `storagePath` and `path`.
+            const attachments = readyFiles
+              .filter(
+                (f: any) =>
+                  typeof f.id === "string" &&
+                  f.id.length > 0 &&
+                  !f.id.startsWith("temp-"),
+              )
+              .map((f: any) => ({
+                id: f.id,
+                name: f.name,
+                mimeType: f.type,
+                type: f.type,
+                storagePath: f.storagePath,
+                path: f.storagePath,
+                size: f.size,
+                metadata: {
+                  spreadsheetData: f.spreadsheetData,
+                  analysisId: f.analysisId,
+                },
+              }));
+
+            const messageAttachments = readyFiles
+              .filter(
+                (f: any) =>
+                  typeof f.id === "string" &&
+                  f.id.length > 0 &&
+                  !f.id.startsWith("temp-"),
+              )
+              .map((f: any) => ({
+                type: (f.type.startsWith("image/") ? "image" : "document") as
+                  | "image"
+                  | "document",
+                name: f.name,
+                documentType: (() => {
+                  if (f.type.startsWith("image/")) return undefined;
+                  if (
+                    f.type.includes("pdf") ||
+                    f.name.toLowerCase().endsWith(".pdf")
+                  )
+                    return "pdf";
+                  if (
+                    f.type.includes("sheet") ||
+                    f.type.includes("excel") ||
+                    f.type.includes("csv") ||
+                    f.name.match(/\.(xlsx|xls|csv)$/i)
+                  )
+                    return "excel";
+                  if (
+                    f.type.includes("presentation") ||
+                    f.type.includes("powerpoint") ||
+                    f.name.match(/\.(pptx|ppt)$/i)
+                  )
+                    return "ppt";
+                  return "word";
+                })() as "word" | "excel" | "ppt" | "pdf",
+                mimeType: f.type,
+                imageUrl: f.type.startsWith("image/")
+                  ? f.storagePath
+                  : undefined,
+                storagePath: f.storagePath,
+                fileId: f.id,
                 spreadsheetData: f.spreadsheetData,
-                analysisId: f.analysisId,
-              },
-            }));
+              }));
 
-          const messageAttachments = readyFiles
-            .filter((f: any) => typeof f.id === "string" && f.id.length > 0 && !f.id.startsWith("temp-"))
-            .map((f: any) => ({
-              type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
-              name: f.name,
-              documentType: (() => {
-                if (f.type.startsWith("image/")) return undefined;
-                if (f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf")) return "pdf";
-                if (f.type.includes("sheet") || f.type.includes("excel") || f.type.includes("csv") || f.name.match(/\.(xlsx|xls|csv)$/i)) return "excel";
-                if (f.type.includes("presentation") || f.type.includes("powerpoint") || f.name.match(/\.(pptx|ppt)$/i)) return "ppt";
-                return "word";
-              })() as "word" | "excel" | "ppt" | "pdf",
-              mimeType: f.type,
-              imageUrl: f.type.startsWith("image/") ? f.storagePath : undefined,
-              storagePath: f.storagePath,
-              fileId: f.id,
-              spreadsheetData: f.spreadsheetData,
-            }));
+            // Generate a unique message ID for tracking in the store
+            const agentMessageId = `agent-${Date.now()}`;
+            setCurrentAgentMessageId(agentMessageId);
 
-          // Generate a unique message ID for tracking in the store
-          const agentMessageId = `agent-${Date.now()}`;
-          setCurrentAgentMessageId(agentMessageId);
+            // Add user message to chat via the callback
+            const userMessage: Message = {
+              id: `user-${Date.now()}`,
+              role: "user",
+              content: userMessageContent,
+              timestamp: new Date(),
+              requestId: generateRequestId(),
+              skipRun: true, // Agent mode: persist message but don't create a normal chat run
+              attachments:
+                messageAttachments.length > 0 ? messageAttachments : undefined,
+            };
+            // Show message immediately (optimistic update)
+            setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
+            const sendMessageAck = await onSendMessage(userMessage);
+            const resolvedAgentChatId =
+              sendMessageAck?.chatId ||
+              (chatId && !chatId.startsWith("pending-") ? chatId : "");
 
-          // Add user message to chat via the callback
-          const userMessage: Message = {
-            id: `user-${Date.now()}`,
-            role: "user",
-            content: userMessageContent,
-            timestamp: new Date(),
-            requestId: generateRequestId(),
-            skipRun: true, // Agent mode: persist message but don't create a normal chat run
-            attachments: messageAttachments.length > 0 ? messageAttachments : undefined,
-          };
-          // Show message immediately (optimistic update)
-          setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
-          onSendMessage(userMessage);
+            // Clear input IMMEDIATELY after capturing the value to prevent duplicates
+            setInput("");
+            setUploadedFiles([]);
 
-          // Clear input IMMEDIATELY after capturing the value to prevent duplicates
-          setInput("");
-          setUploadedFiles([]);
+            console.log(
+              "[Agent Mode] Starting run with input:",
+              userMessageContent,
+            );
 
-          console.log("[Agent Mode] Starting run with input:", userMessageContent);
-
-          // Use the store-based approach for starting the run
-          // This will create the run in the store and start polling automatically
-        const result = await startAgentRun(
-          chatId || "",
-          userMessageContent,
-          agentMessageId,
-          attachments,
-          activeAgentModel,
-        );
-
-          console.log("[Agent Mode] Run result:", result);
-
-          if (result) {
-            // Tool already cleared above; now clear selected tool
-            setSelectedTool(null);
-
-            // Navigate to new chat if created
-            if (result.chatId && (!chatId || chatId.startsWith("pending-") || chatId === "")) {
-              console.log("[Agent Mode] Navigating to chat:", result.chatId);
-              window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: result.chatId, preserveKey: true } }));
+            // Use the store-based approach for starting the run
+            // This will create the run in the store and start polling automatically
+            if (!resolvedAgentChatId) {
+              throw new Error(
+                "No se pudo resolver el chat para iniciar el modo agente.",
+              );
             }
-            // Polling is handled automatically by useAgentPolling hook
-          } else {
-            // Show error when agent run fails to start
-            console.error("[Agent Mode] Failed to start run, result is null");
+
+            const result = await startAgentRun(
+              resolvedAgentChatId,
+              userMessageContent,
+              agentMessageId,
+              attachments,
+              { model: activeAgentModel, provider: selectedProvider },
+            );
+
+            console.log("[Agent Mode] Run result:", result);
+
+            if (result) {
+              // Tool already cleared above; now clear selected tool
+              setSelectedTool(null);
+
+              // Navigate to new chat if created
+              if (
+                result.chatId &&
+                (!chatId || chatId.startsWith("pending-") || chatId === "")
+              ) {
+                console.log("[Agent Mode] Navigating to chat:", result.chatId);
+                window.dispatchEvent(
+                  new CustomEvent("select-chat", {
+                    detail: { chatId: result.chatId, preserveKey: true },
+                  }),
+                );
+              }
+              // Polling is handled automatically by useAgentPolling hook
+            } else {
+              // Show error when agent run fails to start
+              console.error("[Agent Mode] Failed to start run, result is null");
+              // Remove the optimistic message since the agent failed to start
+              setOptimisticMessages((prev: Message[]) =>
+                prev.filter((m: Message) => m.id !== userMessage.id),
+              );
+              setCurrentAgentMessageId(null);
+              setSelectedTool(null);
+              toast({
+                title: "Modo agente no disponible",
+                description:
+                  "No se pudo iniciar el modo agente para esta solicitud. Intenta nuevamente o enviala en chat normal.",
+                variant: "destructive",
+              });
+            }
+          } catch (error) {
+            console.error("Failed to start agent run:", error);
             // Remove the optimistic message since the agent failed to start
-            setOptimisticMessages((prev: Message[]) => prev.filter((m: Message) => m.id !== userMessage.id));
+            setOptimisticMessages((prev: Message[]) =>
+              prev.filter((m: Message) => !m.id.startsWith("user-")),
+            );
+            // Restore files so user doesn't lose them
+            if (savedAgentFiles.length > 0) {
+              setUploadedFiles(savedAgentFiles);
+            }
             setCurrentAgentMessageId(null);
             setSelectedTool(null);
-            toast({
-              title: "Modo agente no disponible",
-              description: "No se pudo iniciar el modo agente para esta solicitud. Intenta nuevamente o enviala en chat normal.",
-              variant: "destructive"
-            });
+            const description =
+              error instanceof Error && error.message
+                ? error.message
+                : "Error al iniciar el agente. Tus archivos fueron restaurados.";
+            toast({ title: "Error", description, variant: "destructive" });
           }
-        } catch (error) {
-          console.error("Failed to start agent run:", error);
-          // Remove the optimistic message since the agent failed to start
-          setOptimisticMessages((prev: Message[]) => prev.filter((m: Message) => !m.id.startsWith('user-')));
-          // Restore files so user doesn't lose them
-          if (savedAgentFiles.length > 0) {
-            setUploadedFiles(savedAgentFiles);
-          }
-          setCurrentAgentMessageId(null);
-          setSelectedTool(null);
-          const description =
-            error instanceof Error && error.message
-              ? error.message
-              : "Error al iniciar el agente. Tus archivos fueron restaurados.";
-          toast({ title: "Error", description, variant: "destructive" });
-        }
-        return;
+          return;
         }
       }
 
@@ -5324,17 +6843,22 @@ export function ChatInterface({
           abortControllerRef.current = new AbortController();
           const response = await apiFetch("/api/chat", {
             method: "POST",
-            headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+            headers: {
+              "Content-Type": "application/json",
+              ...getAnonUserIdHeader(),
+            },
             credentials: "include",
             body: JSON.stringify({
-              messages: [{
-                role: "user",
-                content: `Reescribe el siguiente texto según esta instrucción: "${rewritePrompt}"\n\nTexto original:\n${selectedDocText}\n\nDevuelve SOLO el texto reescrito, sin explicaciones ni comentarios adicionales.`
-              }],
+              messages: [
+                {
+                  role: "user",
+                  content: `Reescribe el siguiente texto según esta instrucción: "${rewritePrompt}"\n\nTexto original:\n${selectedDocText}\n\nDevuelve SOLO el texto reescrito, sin explicaciones ni comentarios adicionales.`,
+                },
+              ],
               provider: selectedProvider,
-              model: selectedModel
+              model: selectedModel,
             }),
-            signal: abortControllerRef.current.signal
+            signal: abortControllerRef.current.signal,
           });
 
           const data = await response.json();
@@ -5377,50 +6901,78 @@ export function ChatInterface({
         /\bcambia(r|le)?\s+(a\s+)?(la\s+)?imagen/i,
 
         // Spanish - IMPLICIT edit commands (when there's a recent image, these imply editing it)
-        /\bagrega\s+(a\s+)?[A-Z]/i,                   // "agrega a Cristiano", "agrega un árbol"
-        /\bañade\s+(a\s+)?[A-Z]/i,                    // "añade a Messi"
-        /\bpon\s+(a\s+)?[A-Z]/i,                      // "pon a Neymar"
-        /\bquita(r)?\s+(a\s+)?[A-Z]/i,               // "quita a alguien"
-        /\b(al\s+)?(costado|lado|fondo|frente)\b/i,   // "al costado", "al lado", "al fondo"
+        /\bagrega\s+(a\s+)?[A-Z]/i, // "agrega a Cristiano", "agrega un árbol"
+        /\bañade\s+(a\s+)?[A-Z]/i, // "añade a Messi"
+        /\bpon\s+(a\s+)?[A-Z]/i, // "pon a Neymar"
+        /\bquita(r)?\s+(a\s+)?[A-Z]/i, // "quita a alguien"
+        /\b(al\s+)?(costado|lado|fondo|frente)\b/i, // "al costado", "al lado", "al fondo"
         /\b(en\s+el\s+)?(costado|lado|fondo|frente)\b/i,
-        /\bcámbia(le|r)?\s+(el|la|los|las)\s+\w+/i,   // "cámbiale el color", "cambiar el fondo"
-        /\bhaz(le|lo)?\s+más\s+\w+/i,                 // "hazlo más grande", "hazle más brillante"
+        /\bcámbia(le|r)?\s+(el|la|los|las)\s+\w+/i, // "cámbiale el color", "cambiar el fondo"
+        /\bhaz(le|lo)?\s+más\s+\w+/i, // "hazlo más grande", "hazle más brillante"
 
         // English - explicit
         /\b(edit|modify|change|adjust|fix)\s+(the\s+)?(last|previous|that|this)\s*(image|photo)?/i,
 
         // English - implicit edit commands
-        /\badd\s+[A-Z]/i,                             // "add Ronaldo", "add a tree"
-        /\bput\s+[A-Z]/i,                             // "put Messi"
-        /\bremove\s+[A-Z]/i,                          // "remove the person"
+        /\badd\s+[A-Z]/i, // "add Ronaldo", "add a tree"
+        /\bput\s+[A-Z]/i, // "put Messi"
+        /\bremove\s+[A-Z]/i, // "remove the person"
         /\b(on\s+the\s+)?(side|left|right|background|front)\b/i,
-        /\bmake\s+(it|the\s+\w+)\s+more\s+\w+/i,      // "make it more colorful"
+        /\bmake\s+(it|the\s+\w+)\s+more\s+\w+/i, // "make it more colorful"
       ];
 
-      const isGenerationRequest = generationPatterns.some(p => p.test(input));
-      const hasEditPattern = imageEditPatterns.some(p => p.test(input));
+      const isGenerationRequest = generationPatterns.some((p) => p.test(input));
+      const hasEditPattern = imageEditPatterns.some((p) => p.test(input));
 
-      const inferDocToolFromPrompt = (prompt: string): "word" | "excel" | "ppt" | null => {
+      const inferDocToolFromPrompt = (
+        prompt: string,
+      ): "word" | "excel" | "ppt" | null => {
         const normalized = String(prompt || "").trim();
         if (!normalized) return null;
-        if (/\b(excel|hoja de cálculo|spreadsheet|xlsx|tabla de datos)\b/i.test(normalized)) {
-          return gptCapabilityFlags.canvas && gptCapabilityFlags.excelCreation ? "excel" : null;
+        if (
+          /\b(excel|hoja de cálculo|spreadsheet|xlsx|tabla de datos)\b/i.test(
+            normalized,
+          )
+        ) {
+          return gptCapabilityFlags.canvas && gptCapabilityFlags.excelCreation
+            ? "excel"
+            : null;
         }
-        if (/\b(presentación|presentation|ppt|powerpoint|slides|diapositivas)\b/i.test(normalized)) {
-          return gptCapabilityFlags.canvas && gptCapabilityFlags.pptCreation ? "ppt" : null;
+        if (
+          /\b(presentación|presentation|ppt|powerpoint|slides|diapositivas)\b/i.test(
+            normalized,
+          )
+        ) {
+          return gptCapabilityFlags.canvas && gptCapabilityFlags.pptCreation
+            ? "ppt"
+            : null;
         }
-        if (/\b(documento|document|word|docx|informe|reporte|ensayo|tesis)\b/i.test(normalized)) {
-          return gptCapabilityFlags.canvas && gptCapabilityFlags.wordCreation ? "word" : null;
+        if (
+          /\b(documento|document|word|docx|informe|reporte|ensayo|tesis)\b/i.test(
+            normalized,
+          )
+        ) {
+          return gptCapabilityFlags.canvas && gptCapabilityFlags.wordCreation
+            ? "word"
+            : null;
         }
         return null;
       };
 
-      const explicitDocToolSelected = selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)
-        ? (selectedDocTool as "word" | "excel" | "ppt")
-        : null;
-      const inferredDocToolForPrompt = explicitDocToolSelected ? null : inferDocToolFromPrompt(input);
-      const docToolForRequest: "word" | "excel" | "ppt" | null = explicitDocToolSelected || inferredDocToolForPrompt;
-      if (!explicitDocToolSelected && inferredDocToolForPrompt && !activeDocEditorRef.current) {
+      const explicitDocToolSelected =
+        selectedDocTool && ["word", "excel", "ppt"].includes(selectedDocTool)
+          ? (selectedDocTool as "word" | "excel" | "ppt")
+          : null;
+      const inferredDocToolForPrompt = explicitDocToolSelected
+        ? null
+        : inferDocToolFromPrompt(input);
+      const docToolForRequest: "word" | "excel" | "ppt" | null =
+        explicitDocToolSelected || inferredDocToolForPrompt;
+      if (
+        !explicitDocToolSelected &&
+        inferredDocToolForPrompt &&
+        !activeDocEditorRef.current
+      ) {
         openBlankDocEditor(inferredDocToolForPrompt);
       }
 
@@ -5433,18 +6985,28 @@ export function ChatInterface({
       // to let the document analysis path (DATA_MODE / /api/analyze) handle them.
       const hasDocumentFiles = uploadedFilesRef.current.some(
         // Treat uploading/processing docs as present too; otherwise fast-submit can misroute into generation/edit mode.
-        (f: any) => f?.status !== "error" && !(f.type || "").startsWith("image/")
+        (f: any) =>
+          f?.status !== "error" && !(f.type || "").startsWith("image/"),
       );
 
-      if ((isGenerationRequest || hasEditPattern) && !hasDocToolSelected && !hasDocumentFiles) {
-        console.log("[handleSubmit] Generation/Edit pattern detected - checking image context...");
+      if (
+        (isGenerationRequest || hasEditPattern) &&
+        !hasDocToolSelected &&
+        !hasDocumentFiles
+      ) {
+        console.log(
+          "[handleSubmit] Generation/Edit pattern detected - checking image context...",
+        );
 
         // Set thinking state
         setAiStateForChat("thinking", submitConversationId);
-        setAiProcessStepsForChat([
-          { step: "Procesando tu solicitud", status: "active" },
-          { step: "Generando contenido", status: "pending" }
-        ], submitConversationId);
+        setAiProcessStepsForChat(
+          [
+            { step: "Procesando tu solicitud", status: "active" },
+            { step: "Generando contenido", status: "pending" },
+          ],
+          submitConversationId,
+        );
 
         const generationInput = input;
         setInput("");
@@ -5454,7 +7016,8 @@ export function ChatInterface({
 
         // Add user message to chat
         const userMsgId = `temp-gen-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-        const genIntegritySeed = createPendingPromptIntegrityMeta(generationInput);
+        const genIntegritySeed =
+          createPendingPromptIntegrityMeta(generationInput);
         const genIntegrityPromise = computePromptIntegrity(generationInput);
         const userMsg: Message = {
           id: userMsgId,
@@ -5477,8 +7040,13 @@ export function ChatInterface({
         userMsg.clientPromptLen = genIntegrity.clientPromptLen;
         userMsg.clientPromptHash = genIntegrity.clientPromptHash;
         userMsg.promptMessageId = genIntegrity.messageId;
-        const persistGenerationUserMessagePromise = onSendMessage(userMsg).catch((err) => {
-          console.warn("[handleSubmit] Failed to persist generation user message:", err);
+        const persistGenerationUserMessagePromise = onSendMessage(
+          userMsg,
+        ).catch((err) => {
+          console.warn(
+            "[handleSubmit] Failed to persist generation user message:",
+            err,
+          );
           return undefined;
         });
 
@@ -5490,54 +7058,94 @@ export function ChatInterface({
           let isImageEditRequest = false;
 
           if (hasEditPattern) {
-            console.log("[handleSubmit] Edit pattern detected - checking for image context...");
+            console.log(
+              "[handleSubmit] Edit pattern detected - checking for image context...",
+            );
 
             // Strategy 1: Check local memory cache first (fastest)
             const lastImage = getLastGeneratedImage();
             if (lastImage?.base64) {
               lastImageBase64 = lastImage.base64;
               lastImageId = lastImage.artifactId || lastImage.messageId;
-              console.log("[handleSubmit] Found last image in local memory:", lastImageId);
+              console.log(
+                "[handleSubmit] Found last image in local memory:",
+                lastImageId,
+              );
             } else if (lastImage?.previewUrl) {
               lastImageBase64 = await fetchImageAsBase64(lastImage.previewUrl);
               lastImageId = lastImage.artifactId || lastImage.messageId;
-              console.log("[handleSubmit] Fetched last image base64 from local memory:", lastImageId);
+              console.log(
+                "[handleSubmit] Fetched last image base64 from local memory:",
+                lastImageId,
+              );
             } else {
               // Strategy 2: Search visible messages for image artifacts (works after refresh)
-              const messagesWithImages = messages.filter(m => m.artifact?.type === "image" && (m.artifact.previewUrl || m.artifact.downloadUrl));
+              const messagesWithImages = messages.filter(
+                (m) =>
+                  m.artifact?.type === "image" &&
+                  (m.artifact.previewUrl || m.artifact.downloadUrl),
+              );
               if (messagesWithImages.length > 0) {
-                const lastImageMsg = messagesWithImages[messagesWithImages.length - 1];
-                const imageUrl = lastImageMsg.artifact?.previewUrl || lastImageMsg.artifact?.downloadUrl;
+                const lastImageMsg =
+                  messagesWithImages[messagesWithImages.length - 1];
+                const imageUrl =
+                  lastImageMsg.artifact?.previewUrl ||
+                  lastImageMsg.artifact?.downloadUrl;
                 if (imageUrl) {
-                  console.log("[handleSubmit] Found image in chat messages, fetching from URL:", imageUrl);
+                  console.log(
+                    "[handleSubmit] Found image in chat messages, fetching from URL:",
+                    imageUrl,
+                  );
                   try {
                     lastImageBase64 = await fetchImageAsBase64(imageUrl);
-                    lastImageId = lastImageMsg.artifact?.artifactId || lastImageMsg.id;
-                    console.log("[handleSubmit] Fetched last image base64 from chat messages:", lastImageId);
+                    lastImageId =
+                      lastImageMsg.artifact?.artifactId || lastImageMsg.id;
+                    console.log(
+                      "[handleSubmit] Fetched last image base64 from chat messages:",
+                      lastImageId,
+                    );
                   } catch (fetchError) {
-                    console.warn("[handleSubmit] Failed to fetch image from chat messages:", fetchError);
+                    console.warn(
+                      "[handleSubmit] Failed to fetch image from chat messages:",
+                      fetchError,
+                    );
                   }
                 }
               }
 
               // Strategy 3: Try server memory system (last resort)
               if (!lastImageBase64) {
-                console.log("[handleSubmit] No local image, checking server memory...");
+                console.log(
+                  "[handleSubmit] No local image, checking server memory...",
+                );
                 try {
                   const serverImage = await getLatestImageFromServer();
                   if (serverImage?.base64Preview) {
                     lastImageBase64 = serverImage.base64Preview;
                     lastImageId = serverImage.id;
-                    console.log("[handleSubmit] Found last image from server memory:", lastImageId);
+                    console.log(
+                      "[handleSubmit] Found last image from server memory:",
+                      lastImageId,
+                    );
                   } else if (serverImage?.imageUrl) {
-                    lastImageBase64 = await fetchImageAsBase64(serverImage.imageUrl);
+                    lastImageBase64 = await fetchImageAsBase64(
+                      serverImage.imageUrl,
+                    );
                     lastImageId = serverImage.id;
-                    console.log("[handleSubmit] Fetched last image base64 from server:", lastImageId);
+                    console.log(
+                      "[handleSubmit] Fetched last image base64 from server:",
+                      lastImageId,
+                    );
                   } else {
-                    console.log("[handleSubmit] No images found in server memory");
+                    console.log(
+                      "[handleSubmit] No images found in server memory",
+                    );
                   }
                 } catch (serverError) {
-                  console.warn("[handleSubmit] Failed to get image from server:", serverError);
+                  console.warn(
+                    "[handleSubmit] Failed to get image from server:",
+                    serverError,
+                  );
                 }
               }
             }
@@ -5548,30 +7156,43 @@ export function ChatInterface({
 
             // If we retrieved an image from server, persist it to local cache for future use
             if (lastImageBase64 && lastImageId && !getLastGeneratedImage()) {
-              console.log("[handleSubmit] Persisting server image to local cache:", lastImageId);
+              console.log(
+                "[handleSubmit] Persisting server image to local cache:",
+                lastImageId,
+              );
               storeLastGeneratedImageInfo({
                 messageId: lastImageId,
                 base64: lastImageBase64,
                 artifactId: lastImageId,
               });
             }
-
           }
 
           if (isImageEditRequest) {
-            console.log("[handleSubmit] Image edit request confirmed with image context");
+            console.log(
+              "[handleSubmit] Image edit request confirmed with image context",
+            );
             // Update UI to reflect edit mode
-            setAiProcessStepsForChat([
-              { step: "Procesando edición de imagen", status: "active" },
-              { step: "Editando imagen", status: "pending" }
-            ], submitConversationId);
+            setAiProcessStepsForChat(
+              [
+                { step: "Procesando edición de imagen", status: "active" },
+                { step: "Editando imagen", status: "pending" },
+              ],
+              submitConversationId,
+            );
           }
 
           // Direct call to /api/chat/stream for generation - REAL-TIME SSE
           console.log("[handleSubmit] ⚡ Starting standard chat stream...");
-          setAiProcessStepsForChat((prev: any[]) => prev.map((s: any, i: number) =>
-            i === 0 ? { ...s, status: "done" as const } : { ...s, status: "active" as const }
-          ), submitConversationId);
+          setAiProcessStepsForChat(
+            (prev: any[]) =>
+              prev.map((s: any, i: number) =>
+                i === 0
+                  ? { ...s, status: "done" as const }
+                  : { ...s, status: "active" as const },
+              ),
+            submitConversationId,
+          );
 
           // Ensure abort controller is active
           if (!abortControllerRef.current) {
@@ -5581,12 +7202,18 @@ export function ChatInterface({
           try {
             const streamRunContext = buildStreamRunContext(userMsg);
             const fallbackChatId: string | null =
-              latestChatIdRef.current || chatId || (await waitForActiveChatId());
-            const effectiveChatIdForStream = resolveStreamChatId(undefined, fallbackChatId);
+              latestChatIdRef.current ||
+              chatId ||
+              (await waitForActiveChatId());
+            const effectiveChatIdForStream = resolveStreamChatId(
+              undefined,
+              fallbackChatId,
+            );
             if (!effectiveChatIdForStream) {
               toast({
                 title: "Error",
-                description: "No se pudo crear/confirmar el chat para generar contenido. Intenta de nuevo.",
+                description:
+                  "No se pudo crear/confirmar el chat para generar contenido. Intenta de nuevo.",
                 variant: "destructive",
                 duration: 5000,
               });
@@ -5596,99 +7223,142 @@ export function ChatInterface({
               return;
             }
 
-            const generationResult = await streamChat.stream("/api/chat/stream", {
-              chatId: effectiveChatIdForStream,
-              signal: abortControllerRef.current.signal,
-              body: withWorkspaceContext({
-                messages: [...messages.map(m => ({ role: m.role, content: m.content })), { role: "user", content: generationInput }],
+            const generationResult = await streamChat.stream(
+              "/api/chat/stream",
+              {
                 chatId: effectiveChatIdForStream,
-                conversationId: effectiveChatIdForStream,
-                runId: streamRunContext.runId,
-                clientRequestId: streamRunContext.clientRequestId,
-                userRequestId: streamRunContext.userRequestId,
-                provider: selectedProvider,
-                model: selectedModel,
-                lastImageBase64,
-                lastImageId,
-                latencyMode,
-                ...gptSessionPayload,
-                // Prompt integrity metadata
-                clientPromptLen: (userMsg as any).clientPromptLen,
-                clientPromptHash: (userMsg as any).clientPromptHash,
-                promptMessageId: (userMsg as any).promptMessageId,
-              }),
-              onEvent: (eventType, data) => {
-                syncGptSessionFromEvent(data);
-                if (eventType === "tool_start" && data.toolName === "browse_and_act") {
-                  setAiStateForChat("agent_working", effectiveChatIdForStream);
-                  setAiProcessStepsForChat([{
-                    id: "init",
-                    step: "init",
-                    title: `Iniciando producción: ${data.topic || "Documento"}`,
-                    status: "pending",
-                    description: `Generando ${data.deliverables?.join(", ") || "archivos"}`,
-                  }], effectiveChatIdForStream);
-                } else if (eventType === "production_start") {
-                  setAiStateForChat("agent_working", effectiveChatIdForStream);
-                  setAiProcessStepsForChat([{
-                    id: "init",
-                    step: "init",
-                    title: `Iniciando producción: ${data.topic || "Documento"}`,
-                    status: "pending",
-                    description: `Generando ${data.deliverables?.join(", ") || "archivos"}`
-                  }], effectiveChatIdForStream);
-                } else if (eventType === "production_event") {
-                  setAiProcessStepsForChat((prev: any[]) => {
-                    const newSteps = [...prev];
-                    const lastStep = newSteps[newSteps.length - 1];
-                    if (lastStep && lastStep.status === "pending" && data.message) {
-                      // Update generic pending step
-                      lastStep.title = data.message;
-                    } else {
-                      newSteps.push({
-                        id: `step-${Date.now()}`,
-                        title: data.message || "Procesando...",
-                        status: "pending",
-                        description: data.stage,
-                      });
+                signal: abortControllerRef.current.signal,
+                body: withWorkspaceContext({
+                  messages: [
+                    ...messages.map((m) => ({
+                      role: m.role,
+                      content: m.content,
+                    })),
+                    { role: "user", content: generationInput },
+                  ],
+                  chatId: effectiveChatIdForStream,
+                  conversationId: effectiveChatIdForStream,
+                  runId: streamRunContext.runId,
+                  clientRequestId: streamRunContext.clientRequestId,
+                  userRequestId: streamRunContext.userRequestId,
+                  provider: selectedProvider,
+                  model: selectedModel,
+                  lastImageBase64,
+                  lastImageId,
+                  latencyMode,
+                  ...gptSessionPayload,
+                  // Prompt integrity metadata
+                  clientPromptLen: (userMsg as any).clientPromptLen,
+                  clientPromptHash: (userMsg as any).clientPromptHash,
+                  promptMessageId: (userMsg as any).promptMessageId,
+                }),
+                onEvent: (eventType, data) => {
+                  syncGptSessionFromEvent(data);
+                  if (
+                    eventType === "tool_start" &&
+                    data.toolName === "browse_and_act"
+                  ) {
+                    setAiStateForChat(
+                      "agent_working",
+                      effectiveChatIdForStream,
+                    );
+                    setAiProcessStepsForChat(
+                      [
+                        {
+                          id: "init",
+                          step: "init",
+                          title: `Iniciando producción: ${data.topic || "Documento"}`,
+                          status: "pending",
+                          description: `Generando ${data.deliverables?.join(", ") || "archivos"}`,
+                        },
+                      ],
+                      effectiveChatIdForStream,
+                    );
+                  } else if (eventType === "production_start") {
+                    setAiStateForChat(
+                      "agent_working",
+                      effectiveChatIdForStream,
+                    );
+                    setAiProcessStepsForChat(
+                      [
+                        {
+                          id: "init",
+                          step: "init",
+                          title: `Iniciando producción: ${data.topic || "Documento"}`,
+                          status: "pending",
+                          description: `Generando ${data.deliverables?.join(", ") || "archivos"}`,
+                        },
+                      ],
+                      effectiveChatIdForStream,
+                    );
+                  } else if (eventType === "production_event") {
+                    setAiProcessStepsForChat((prev: any[]) => {
+                      const newSteps = [...prev];
+                      const lastStep = newSteps[newSteps.length - 1];
+                      if (
+                        lastStep &&
+                        lastStep.status === "pending" &&
+                        data.message
+                      ) {
+                        // Update generic pending step
+                        lastStep.title = data.message;
+                      } else {
+                        newSteps.push({
+                          id: `step-${Date.now()}`,
+                          title: data.message || "Procesando...",
+                          status: "pending",
+                          description: data.stage,
+                        });
+                      }
+                      return newSteps;
+                    }, effectiveChatIdForStream);
+                  } else if (eventType === "production_complete") {
+                    setAiProcessStepsForChat(
+                      (prev: any[]) =>
+                        prev.map((s: any) => ({ ...s, status: "done" })),
+                      effectiveChatIdForStream,
+                    );
+                  } else if (eventType === "tool_start") {
+                    // keep compatibility with older backend tool events
+                    if (data.toolName === "browse_and_act") {
+                      setAiStateForChat(
+                        "agent_working",
+                        effectiveChatIdForStream,
+                      );
                     }
-                    return newSteps;
-                  }, effectiveChatIdForStream);
-                } else if (eventType === "production_complete") {
-                  setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })), effectiveChatIdForStream);
-                } else if (eventType === "tool_start") {
-                  // keep compatibility with older backend tool events
-                  if (data.toolName === "browse_and_act") {
-                    setAiStateForChat("agent_working", effectiveChatIdForStream);
                   }
-                }
+                },
+                onAiStateChange: (nextState) => {
+                  setAiStateForChat(nextState, effectiveChatIdForStream);
+                },
+                buildFinalMessage: (fullContent, data, messageId) => ({
+                  id: messageId || `assistant-${Date.now()}`,
+                  role: "assistant",
+                  content:
+                    fullContent || "No se recibió respuesta del servidor.",
+                  timestamp: new Date(),
+                  requestId: data?.requestId || generateRequestId(),
+                  userMessageId: userMsgId,
+                  artifact: data?.artifact,
+                  webSources: data?.webSources,
+                }),
+                buildErrorMessage: (_error, messageId) => ({
+                  id: messageId || `error-${Date.now()}`,
+                  role: "assistant",
+                  content: "Error de conexión. Por favor, intenta de nuevo.",
+                  timestamp: new Date(),
+                  requestId: generateRequestId(),
+                  userMessageId: userMsgId,
+                }),
               },
-              onAiStateChange: (nextState) => {
-                setAiStateForChat(nextState, effectiveChatIdForStream);
-              },
-              buildFinalMessage: (fullContent, data, messageId) => ({
-                id: messageId || `assistant-${Date.now()}`,
-                role: "assistant",
-                content: fullContent || "No se recibió respuesta del servidor.",
-                timestamp: new Date(),
-                requestId: data?.requestId || generateRequestId(),
-                userMessageId: userMsgId,
-                artifact: data?.artifact,
-                webSources: data?.webSources,
-              }),
-              buildErrorMessage: (_error, messageId) => ({
-                id: messageId || `error-${Date.now()}`,
-                role: "assistant",
-                content: "Error de conexión. Por favor, intenta de nuevo.",
-                timestamp: new Date(),
-                requestId: generateRequestId(),
-                userMessageId: userMsgId,
-              }),
-            });
+            );
 
             if (!generationResult.ok) {
               const quotaCode = (generationResult.error as any)?.payload?.code;
-              if (generationResult.response?.status === 402 && quotaCode === "QUOTA_EXCEEDED") {
+              if (
+                generationResult.response?.status === 402 &&
+                quotaCode === "QUOTA_EXCEEDED"
+              ) {
                 const quota = (generationResult.error as any)?.payload?.quota;
                 if (quota) {
                   setQuotaInfo(quota);
@@ -5708,7 +7378,9 @@ export function ChatInterface({
             streamTransition.finalize({
               id: (Date.now() + 1).toString(),
               role: "assistant",
-              content: error.message || "Error de conexión. Por favor, intenta de nuevo.",
+              content:
+                error.message ||
+                "Error de conexión. Por favor, intenta de nuevo.",
               timestamp: new Date(),
               requestId: generateRequestId(),
               userMessageId: userMsgId,
@@ -5723,12 +7395,14 @@ export function ChatInterface({
         return;
       } // Close if ((isGenerationRequest ...
 
-
       // Check if this is a Super Agent research request with sources
       const effectiveInputForChecks = input || autoPromptForFiles;
       const superAgentCheck = shouldUseSuperAgent(effectiveInputForChecks);
       if (superAgentCheck.use) {
-        console.log("[handleSubmit] Super Agent detected:", superAgentCheck.reason);
+        console.log(
+          "[handleSubmit] Super Agent detected:",
+          superAgentCheck.reason,
+        );
 
         const userInput = effectiveInputForChecks;
         const superAgentMessageId = `super-agent-${Date.now()}`;
@@ -5769,17 +7443,20 @@ export function ChatInterface({
         setOptimisticMessages((prev: Message[]) => [...prev, assistantMessage]);
 
         // Start Super Agent run in store
-        const { startRun, updateState, completeRun } = useSuperAgentStore.getState();
+        const { startRun, updateState, completeRun } =
+          useSuperAgentStore.getState();
         startRun(superAgentMessageId);
 
         // Generate run ID on frontend to enable immediate LiveExecutionConsole display
         const frontendRunId = `run_${crypto.randomUUID()}`;
-        console.log('[uiPhase] runId created, uiPhase=console (immediate)', { runId: frontendRunId });
+        console.log("[uiPhase] runId created, uiPhase=console (immediate)", {
+          runId: frontendRunId,
+        });
 
         // Set uiPhase to 'console' IMMEDIATELY (no grace window)
         // This ensures LiveExecutionConsole connects to SSE as soon as possible
         // to receive all events from the backend
-        setUiPhase('console');
+        setUiPhase("console");
 
         setActiveRunId(frontendRunId);
 
@@ -5808,7 +7485,9 @@ export function ChatInterface({
               if (rawError) {
                 try {
                   const parsedError = JSON.parse(rawError);
-                  errorDetail = String(parsedError?.error || parsedError?.message || "").trim();
+                  errorDetail = String(
+                    parsedError?.error || parsedError?.message || "",
+                  ).trim();
                 } catch {
                   errorDetail = rawError.trim();
                 }
@@ -5820,7 +7499,7 @@ export function ChatInterface({
             throw new Error(
               compactDetail
                 ? `Super Agent request failed: ${response.status} (${compactDetail})`
-                : `Super Agent request failed: ${response.status}`
+                : `Super Agent request failed: ${response.status}`,
             );
           }
 
@@ -5854,7 +7533,8 @@ export function ChatInterface({
                   const eventType = currentEventType || eventData.type;
 
                   // Update store based on event type
-                  const currentState = useSuperAgentStore.getState().runs[superAgentMessageId];
+                  const currentState =
+                    useSuperAgentStore.getState().runs[superAgentMessageId];
                   if (currentState) {
                     let updates: Partial<SuperAgentState> = {};
 
@@ -5862,7 +7542,8 @@ export function ChatInterface({
                       case "contract": {
                         updates = {
                           contract: eventData,
-                          sourcesTarget: eventData.requirements?.min_sources || 100,
+                          sourcesTarget:
+                            eventData.requirements?.min_sources || 100,
                           phase: "planning",
                         };
                         break;
@@ -5876,28 +7557,38 @@ export function ChatInterface({
                             requirements: {
                               min_sources: 0,
                               must_create: eventData.deliverables || ["word"],
-                              language: "es"
+                              language: "es",
                             },
                             plan: [],
-                            original_prompt: eventData.topic || ""
-                          }
+                            original_prompt: eventData.topic || "",
+                          },
                         };
                         // Document Generation: Set blank page with generating status for any doc type
-                        if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)) {
+                        if (
+                          selectedDocTool &&
+                          ["word", "excel", "ppt"].includes(selectedDocTool)
+                        ) {
                           const deliverables = eventData.deliverables || [];
-                          const deliverableMap: Record<string, string> = { word: 'word', excel: 'excel', ppt: 'ppt' };
+                          const deliverableMap: Record<string, string> = {
+                            word: "word",
+                            excel: "excel",
+                            ppt: "ppt",
+                          };
                           const matchType = deliverableMap[selectedDocTool];
-                          if (deliverables.includes(matchType) || deliverables.length === 0) {
+                          if (
+                            deliverables.includes(matchType) ||
+                            deliverables.length === 0
+                          ) {
                             setDocGenerationState({
-                              status: 'generating',
+                              status: "generating",
                               progress: 0,
-                              stage: 'Iniciando generación...',
+                              stage: "Iniciando generación...",
                               downloadUrl: null,
                               fileName: null,
-                              fileSize: null
+                              fileSize: null,
                             });
                             // Clear editor content to show blank page
-                            setEditedDocumentContent('');
+                            setEditedDocumentContent("");
                           }
                         }
                         break;
@@ -5917,21 +7608,25 @@ export function ChatInterface({
                           writing: "creating",
                           review: "verifying",
                           render: "creating",
-                          final: "finalizing"
+                          final: "finalizing",
                         };
-                        const mappedPhase = stageMap[eventData.stage] || currentState.phase;
+                        const mappedPhase =
+                          stageMap[eventData.stage] || currentState.phase;
                         updates = {
                           phase: mappedPhase,
                           progress: {
                             phase: mappedPhase,
                             status: eventData.message,
                             collected: eventData.progress,
-                            target: 100
-                          }
+                            target: 100,
+                          },
                         };
 
                         // Document Generation: Update progress state for all doc types
-                        if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)) {
+                        if (
+                          selectedDocTool &&
+                          ["word", "excel", "ppt"].includes(selectedDocTool)
+                        ) {
                           const stageLabels: Record<string, string> = {
                             intake: "Procesando solicitud...",
                             blueprint: "Diseñando estructura...",
@@ -5940,64 +7635,101 @@ export function ChatInterface({
                             writing: "Redactando documento...",
                             qa: "Verificando calidad...",
                             consistency: "Validando consistencia...",
-                            render: "Generando documento final..."
+                            render: "Generando documento final...",
                           };
                           const progress = eventData.progress || 0;
                           setDocGenerationState((prev: any) => ({
                             ...prev,
-                            status: 'generating',
+                            status: "generating",
                             progress,
-                            stage: stageLabels[eventData.stage] || eventData.message || prev.stage
+                            stage:
+                              stageLabels[eventData.stage] ||
+                              eventData.message ||
+                              prev.stage,
                           }));
                         }
                         break;
                       }
                       case "source_signal": {
-                        const existingIdx = currentState.sources.findIndex((s: any) => s.id === eventData.id);
+                        const existingIdx = currentState.sources.findIndex(
+                          (s: any) => s.id === eventData.id,
+                        );
                         if (existingIdx >= 0) {
                           const newSources = [...currentState.sources];
                           newSources[existingIdx] = eventData;
                           updates = { sources: newSources };
                         } else {
-                          updates = { sources: [...currentState.sources, eventData] };
+                          updates = {
+                            sources: [...currentState.sources, eventData],
+                          };
                         }
                         break;
                       }
                       case "source_deep": {
-                        const deepIdx = currentState.sources.findIndex((s: any) => s.id === eventData.id);
+                        const deepIdx = currentState.sources.findIndex(
+                          (s: any) => s.id === eventData.id,
+                        );
                         if (deepIdx >= 0) {
                           const newSources = [...currentState.sources];
-                          newSources[deepIdx] = { ...newSources[deepIdx], ...eventData, fetched: true };
+                          newSources[deepIdx] = {
+                            ...newSources[deepIdx],
+                            ...eventData,
+                            fetched: true,
+                          };
                           updates = { sources: newSources };
                         }
                         break;
                       }
                       case "artifact": {
                         const artifactObj = {
-                          id: eventData.id || `art_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                          id:
+                            eventData.id ||
+                            `art_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                           type: eventData.type,
-                          name: eventData.name || eventData.filename || "Documento",
+                          name:
+                            eventData.name || eventData.filename || "Documento",
                           downloadUrl: eventData.downloadUrl,
-                          size: eventData.size
+                          size: eventData.size,
                         };
                         updates = {
                           artifacts: [...currentState.artifacts, artifactObj],
-                          phase: "creating"
+                          phase: "creating",
                         };
 
                         // Document Generation: Set ready status with download info for any doc type
-                        const docTypeMap: Record<string, string> = { word: 'word', excel: 'excel', ppt: 'ppt', xlsx: 'excel', docx: 'word', pptx: 'ppt' };
-                        const artifactDocType = docTypeMap[eventData.type] || eventData.type;
-                        const selectedDocTypeNorm = selectedDocTool ? (docTypeMap[selectedDocTool] || selectedDocTool) : null;
-                        if (selectedDocTypeNorm && artifactDocType === selectedDocTypeNorm) {
-                          const defaultNames: Record<string, string> = { word: 'Documento.docx', excel: 'Hoja.xlsx', ppt: 'Presentación.pptx' };
+                        const docTypeMap: Record<string, string> = {
+                          word: "word",
+                          excel: "excel",
+                          ppt: "ppt",
+                          xlsx: "excel",
+                          docx: "word",
+                          pptx: "ppt",
+                        };
+                        const artifactDocType =
+                          docTypeMap[eventData.type] || eventData.type;
+                        const selectedDocTypeNorm = selectedDocTool
+                          ? docTypeMap[selectedDocTool] || selectedDocTool
+                          : null;
+                        if (
+                          selectedDocTypeNorm &&
+                          artifactDocType === selectedDocTypeNorm
+                        ) {
+                          const defaultNames: Record<string, string> = {
+                            word: "Documento.docx",
+                            excel: "Hoja.xlsx",
+                            ppt: "Presentación.pptx",
+                          };
                           setDocGenerationState({
-                            status: 'ready',
+                            status: "ready",
                             progress: 100,
-                            stage: '¡Documento listo!',
+                            stage: "¡Documento listo!",
                             downloadUrl: eventData.downloadUrl || null,
-                            fileName: eventData.filename || eventData.name || defaultNames[artifactDocType] || 'Documento',
-                            fileSize: eventData.size || null
+                            fileName:
+                              eventData.filename ||
+                              eventData.name ||
+                              defaultNames[artifactDocType] ||
+                              "Documento",
+                            fileSize: eventData.size || null,
                           });
                         }
                         break;
@@ -6021,13 +7753,13 @@ export function ChatInterface({
                           sources_count: 0,
                           artifacts: currentState.artifacts,
                           duration_ms: 0,
-                          iterations: 1
+                          iterations: 1,
                         };
                         finalResult = finalObj;
                         updates = {
                           final: finalObj,
                           phase: "completed",
-                          isRunning: false
+                          isRunning: false,
                         };
                         break;
                       }
@@ -6043,7 +7775,7 @@ export function ChatInterface({
                         updates = {
                           error: eventData.error,
                           phase: "error",
-                          isRunning: false
+                          isRunning: false,
                         };
                         break;
                       }
@@ -6054,7 +7786,10 @@ export function ChatInterface({
                     }
                   }
                 } catch (parseError) {
-                  console.warn("[Super Agent] Failed to parse SSE event:", parseError);
+                  console.warn(
+                    "[Super Agent] Failed to parse SSE event:",
+                    parseError,
+                  );
                 }
               }
             }
@@ -6073,22 +7808,23 @@ export function ChatInterface({
 
             // Update optimistic message
             setOptimisticMessages((prev: Message[]) =>
-              prev.map((m: Message) => m.id === superAgentMessageId ? finalAssistantMessage : m)
+              prev.map((m: Message) =>
+                m.id === superAgentMessageId ? finalAssistantMessage : m,
+              ),
             );
             onSendMessage(finalAssistantMessage);
 
             completeRun(superAgentMessageId, finalResult);
             setActiveRunId(null);
-            setUiPhase('done');
+            setUiPhase("done");
 
             // Request AI-generated title refresh after Super Agent completes
             requestTitleRefresh(chatId);
           } else {
             // No final result — still reset UI to avoid stuck console state
             setActiveRunId(null);
-            setUiPhase('idle');
+            setUiPhase("idle");
           }
-
         } catch (error) {
           console.error("[Super Agent] Stream error:", error);
           updateState(superAgentMessageId, {
@@ -6100,18 +7836,21 @@ export function ChatInterface({
           const errorMessage: Message = {
             id: superAgentMessageId,
             role: "assistant",
-            content: "Error al procesar la investigación. Por favor, intenta de nuevo.",
+            content:
+              "Error al procesar la investigación. Por favor, intenta de nuevo.",
             timestamp: new Date(),
             requestId: generateRequestId(),
             userMessageId: userMsgId,
           };
 
           setOptimisticMessages((prev: Message[]) =>
-            prev.map((m: Message) => m.id === superAgentMessageId ? errorMessage : m)
+            prev.map((m: Message) =>
+              m.id === superAgentMessageId ? errorMessage : m,
+            ),
           );
           onSendMessage(errorMessage);
           setActiveRunId(null);
-          setUiPhase('idle');
+          setUiPhase("idle");
         }
 
         setAiStateForChat("idle", submitConversationId);
@@ -6128,11 +7867,13 @@ export function ChatInterface({
       let currentUploadedFiles = [...uploadedFilesRef.current];
       const userMsgId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const hasUnsettledUploadsAtSubmit = currentUploadedFiles.some(
-        (f: UploadedFile) => isFileUploadBlockingSend(f)
+        (f: UploadedFile) => isFileUploadBlockingSend(f),
       );
       const hadPendingUploadsAtSubmit =
         pendingUploadsRef.current.size > 0 || hasUnsettledUploadsAtSubmit;
-      const failedUploadsAtSubmit = currentUploadedFiles.filter((f: any) => f?.status === "error");
+      const failedUploadsAtSubmit = currentUploadedFiles.filter(
+        (f: any) => f?.status === "error",
+      );
 
       // Reset UI state immediately — save files for restoration on error
       let savedMainFiles = [...uploadedFilesRef.current];
@@ -6158,13 +7899,27 @@ export function ChatInterface({
         // For UI: include anything not in a terminal error state so the message shows files immediately.
         .filter((f: any) => f?.status !== "error")
         .map((f: any) => ({
-          type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
+          type: (f.type.startsWith("image/") ? "image" : "document") as
+            | "image"
+            | "document",
           name: f.name,
           documentType: (() => {
             if (f.type.startsWith("image/")) return undefined;
-            if (f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf")) return "pdf";
-            if (f.type.includes("sheet") || f.type.includes("excel") || f.type.includes("csv") || f.name.match(/\.(xlsx|xls|csv)$/i)) return "excel";
-            if (f.type.includes("presentation") || f.type.includes("powerpoint") || f.name.match(/\.(pptx|ppt)$/i)) return "ppt";
+            if (f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf"))
+              return "pdf";
+            if (
+              f.type.includes("sheet") ||
+              f.type.includes("excel") ||
+              f.type.includes("csv") ||
+              f.name.match(/\.(xlsx|xls|csv)$/i)
+            )
+              return "excel";
+            if (
+              f.type.includes("presentation") ||
+              f.type.includes("powerpoint") ||
+              f.name.match(/\.(pptx|ppt)$/i)
+            )
+              return "ppt";
             return "word"; // default to word for text/docs
           })() as "word" | "excel" | "ppt" | "pdf",
           mimeType: f.type,
@@ -6186,7 +7941,7 @@ export function ChatInterface({
         timestamp: new Date(),
         requestId: generateRequestId(),
         clientRequestId: generateClientRequestId(),
-        status: 'pending',
+        status: "pending",
         deliveryStatus: "sending",
         deliveryError: undefined,
         attachments: attachments.length > 0 ? attachments : undefined,
@@ -6197,12 +7952,18 @@ export function ChatInterface({
       } as any;
 
       // Apply Optimistic Update IMMEDIATELY
-      const optimisticStart = import.meta.env.DEV && typeof performance !== "undefined" ? performance.now() : null;
+      const optimisticStart =
+        import.meta.env.DEV && typeof performance !== "undefined"
+          ? performance.now()
+          : null;
       setOptimisticMessages((prev: Message[]) => [...prev, userMsg]);
       if (optimisticStart !== null) {
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
-            console.debug("[Perf] optimistic_render_ms", Math.max(0, performance.now() - optimisticStart).toFixed(1));
+            console.debug(
+              "[Perf] optimistic_render_ms",
+              Math.max(0, performance.now() - optimisticStart).toFixed(1),
+            );
           });
         });
       }
@@ -6258,17 +8019,36 @@ export function ChatInterface({
 
         currentUploadedFiles = [...uploadedFilesRef.current];
         savedMainFiles = [...currentUploadedFiles]; // updated reference for error recovery
-        const failedAfterWait = currentUploadedFiles.filter((f: any) => f?.status === "error");
+        const failedAfterWait = currentUploadedFiles.filter(
+          (f: any) => f?.status === "error",
+        );
         attachments = currentUploadedFiles
           .filter((f: any) => f.status === "ready" || f.status === "processing")
           .map((f: any) => ({
-            type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
+            type: (f.type.startsWith("image/") ? "image" : "document") as
+              | "image"
+              | "document",
             name: f.name,
             documentType: (() => {
               if (f.type.startsWith("image/")) return undefined;
-              if (f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf")) return "pdf";
-              if (f.type.includes("sheet") || f.type.includes("excel") || f.type.includes("csv") || f.name.match(/\.(xlsx|xls|csv)$/i)) return "excel";
-              if (f.type.includes("presentation") || f.type.includes("powerpoint") || f.name.match(/\.(pptx|ppt)$/i)) return "ppt";
+              if (
+                f.type.includes("pdf") ||
+                f.name.toLowerCase().endsWith(".pdf")
+              )
+                return "pdf";
+              if (
+                f.type.includes("sheet") ||
+                f.type.includes("excel") ||
+                f.type.includes("csv") ||
+                f.name.match(/\.(xlsx|xls|csv)$/i)
+              )
+                return "excel";
+              if (
+                f.type.includes("presentation") ||
+                f.type.includes("powerpoint") ||
+                f.name.match(/\.(pptx|ppt)$/i)
+              )
+                return "ppt";
               return "word";
             })() as "word" | "excel" | "ppt" | "pdf",
             mimeType: f.type,
@@ -6278,10 +8058,13 @@ export function ChatInterface({
             spreadsheetData: f.spreadsheetData,
           }));
 
-        const nextAttachments = attachments.length > 0 ? attachments : undefined;
+        const nextAttachments =
+          attachments.length > 0 ? attachments : undefined;
         userMsg.attachments = nextAttachments;
         setOptimisticMessages((prev: Message[]) =>
-          prev.map((m: Message) => (m.id === userMsgId ? { ...m, attachments: nextAttachments } : m))
+          prev.map((m: Message) =>
+            m.id === userMsgId ? { ...m, attachments: nextAttachments } : m,
+          ),
         );
 
         // Now it's safe to clear successful uploads from the composer (uploads have reached a stable state).
@@ -6297,15 +8080,23 @@ export function ChatInterface({
           });
         }
 
-        hasDocumentAttachments = attachments.some((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
-        documentAttachmentsForAnalysis = attachments.filter((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
+        hasDocumentAttachments = attachments.some((a: any) =>
+          isDocumentFile(a.mimeType || a.type, a.name, a.type),
+        );
+        documentAttachmentsForAnalysis = attachments.filter((a: any) =>
+          isDocumentFile(a.mimeType || a.type, a.name, a.type),
+        );
       } else {
         // If there were no pending uploads at submit, files are already cleared from the UI.
-        // Update savedMainFiles to empty so if standard chat streaming 
+        // Update savedMainFiles to empty so if standard chat streaming
         // fails later, we don't accidentally restore files.
         savedMainFiles = [];
-        hasDocumentAttachments = attachments.some((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
-        documentAttachmentsForAnalysis = attachments.filter((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
+        hasDocumentAttachments = attachments.some((a: any) =>
+          isDocumentFile(a.mimeType || a.type, a.name, a.type),
+        );
+        documentAttachmentsForAnalysis = attachments.filter((a: any) =>
+          isDocumentFile(a.mimeType || a.type, a.name, a.type),
+        );
       }
 
       if (hasDocumentAttachments && documentAttachmentsForAnalysis.length > 0) {
@@ -6313,7 +8104,7 @@ export function ChatInterface({
           userMessageId: userMsgId,
           conversationId: chatId,
           history: [
-            ...messages.map(m => ({
+            ...messages.map((m) => ({
               role: m.role,
               content: m.content,
             })),
@@ -6322,7 +8113,10 @@ export function ChatInterface({
           attachments: documentAttachmentsForAnalysis,
           sourceLabel: "envío",
         }).catch((error) => {
-          console.error("[handleSubmit] DATA_MODE: document analysis bootstrap failed:", error);
+          console.error(
+            "[handleSubmit] DATA_MODE: document analysis bootstrap failed:",
+            error,
+          );
         });
       }
 
@@ -6333,14 +8127,26 @@ export function ChatInterface({
       // Auto-detect if task requires Agent mode (only for non-generation complex tasks)
       // Use captured state (userInput, currentUploadedFiles) not component state
       const hasAttachedFiles = attachments.length > 0;
-      const complexityCheck = shouldAutoActivateAgent(userInput, hasAttachedFiles);
+      const complexityCheck = shouldAutoActivateAgent(
+        userInput,
+        hasAttachedFiles,
+      );
 
-      if (!isGenerationRequest && complexityCheck.agent_required && complexityCheck.confidence === 'high') {
-
-
-        const readyFiles = currentUploadedFiles.filter((f: any) => f.status === "ready");
+      if (
+        !isGenerationRequest &&
+        complexityCheck.agent_required &&
+        complexityCheck.confidence === "high"
+      ) {
+        const readyFiles = currentUploadedFiles.filter(
+          (f: any) => f.status === "ready",
+        );
         const agentAttachments = readyFiles
-          .filter((f: any) => typeof f.id === "string" && f.id.length > 0 && !f.id.startsWith("temp-"))
+          .filter(
+            (f: any) =>
+              typeof f.id === "string" &&
+              f.id.length > 0 &&
+              !f.id.startsWith("temp-"),
+          )
           .map((f: any) => ({
             id: f.id,
             name: f.name,
@@ -6364,7 +8170,7 @@ export function ChatInterface({
             userInput,
             agentMessageId,
             agentAttachments,
-            activeAgentModel,
+            { model: activeAgentModel, provider: selectedProvider },
           );
 
           if (result) {
@@ -6373,13 +8179,20 @@ export function ChatInterface({
             onSendMessage({ ...userMsg, skipRun: true });
 
             setSelectedTool(null);
-            if (result.chatId && (!chatId || chatId.startsWith("pending-") || chatId === "")) {
-              window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: result.chatId, preserveKey: true } }));
+            if (
+              result.chatId &&
+              (!chatId || chatId.startsWith("pending-") || chatId === "")
+            ) {
+              window.dispatchEvent(
+                new CustomEvent("select-chat", {
+                  detail: { chatId: result.chatId, preserveKey: true },
+                }),
+              );
             }
           } else {
             // Agent failed - Fall through to normal chat processing
 
-            // No need to reset input/files, as message is already "sent" optimistically. 
+            // No need to reset input/files, as message is already "sent" optimistically.
             // Just ensure onSendMessage runs below for the normal path.
             setCurrentAgentMessageId(null);
           }
@@ -6395,12 +8208,10 @@ export function ChatInterface({
         }
       }
 
-
       // Regular Chat Flow (or fallback from failed Agent Mode)
       // Reset uiPhase to 'idle' for regular (non-Super Agent) messages
-      if (uiPhase !== 'idle') {
-
-        setUiPhase('idle');
+      if (uiPhase !== "idle") {
+        setUiPhase("idle");
       }
       // Clear any pending uiPhase timer
       if (uiPhaseTimerRef.current) {
@@ -6409,32 +8220,53 @@ export function ChatInterface({
       }
 
       // Initialize process steps based on context (reuse hasAttachedFiles from above)
-      const initialSteps: { step: string; status: "pending" | "active" | "done" }[] = [];
+      const initialSteps: {
+        step: string;
+        status: "pending" | "active" | "done";
+      }[] = [];
       if (hasAttachedFiles) {
-        initialSteps.push({ step: "Analizando archivos adjuntos", status: "active" });
+        initialSteps.push({
+          step: "Analizando archivos adjuntos",
+          status: "active",
+        });
       }
-      initialSteps.push({ step: "Procesando tu mensaje", status: hasAttachedFiles ? "pending" : "active" });
-      initialSteps.push({ step: "Buscando información relevante", status: "pending" });
+      initialSteps.push({
+        step: "Procesando tu mensaje",
+        status: hasAttachedFiles ? "pending" : "active",
+      });
+      initialSteps.push({
+        step: "Buscando información relevante",
+        status: "pending",
+      });
       initialSteps.push({ step: "Generando respuesta", status: "pending" });
       setAiProcessStepsForChat(initialSteps, submitConversationId);
 
       // NOTE: Input/Files already reset and UserMessage already constructed above.
 
-      console.log("[handleSubmit] sending user message:", userMsg, "chatId:", chatId);
+      console.log(
+        "[handleSubmit] sending user message:",
+        userMsg,
+        "chatId:",
+        chatId,
+      );
       // Optimistic update ALREAD done. just send to parent/server.
       // onSendMessage calls useChats.addMessage which handles server request
 
-
-      hasDocumentAttachments = attachments.some((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
+      hasDocumentAttachments = attachments.some((a: any) =>
+        isDocumentFile(a.mimeType || a.type, a.name, a.type),
+      );
       documentAttachmentsForAnalysis = attachments.filter((a: any) =>
-        isDocumentFile(a.mimeType || a.type, a.name, a.type)
+        isDocumentFile(a.mimeType || a.type, a.name, a.type),
       );
 
       // Send user message — await for NEW chats (need chatId), fire-and-forget for existing ones
       let sendMessageAck: SendMessageAck | undefined;
       try {
         const isNewChat = !chatId || chatId.startsWith("pending-");
-        console.log("[handleSubmit] ABOUT TO CALL onSendMessage", isNewChat ? "(await — new chat, need chatId)" : "(fire-and-forget)");
+        console.log(
+          "[handleSubmit] ABOUT TO CALL onSendMessage",
+          isNewChat ? "(await — new chat, need chatId)" : "(fire-and-forget)",
+        );
         await applyPromptIntegrity();
 
         if (isNewChat) {
@@ -6442,14 +8274,23 @@ export function ChatInterface({
           // Without this, the stream has no chatId and silently fails.
           try {
             sendMessageAck = await onSendMessage(userMsg);
-            console.log("[handleSubmit] onSendMessage resolved for new chat:", sendMessageAck?.chatId);
+            console.log(
+              "[handleSubmit] onSendMessage resolved for new chat:",
+              sendMessageAck?.chatId,
+            );
           } catch (err) {
-            console.warn("[handleSubmit] Failed to persist new chat message:", err);
+            console.warn(
+              "[handleSubmit] Failed to persist new chat message:",
+              err,
+            );
           }
         } else {
           // EXISTING CHAT: Fire-and-forget for speed (chatId already known).
           onSendMessage(userMsg).catch((err) => {
-            console.warn("[handleSubmit] Failed to persist user message (will still attempt streaming):", err);
+            console.warn(
+              "[handleSubmit] Failed to persist user message (will still attempt streaming):",
+              err,
+            );
             return undefined;
           });
         }
@@ -6458,40 +8299,45 @@ export function ChatInterface({
         // Previously this was sequential AFTER onSendMessage, adding another 200-500ms.
         const isImageTool = selectedTool === "image";
         const shouldAutoDetectImage =
-          !isImageTool && !selectedTool && !selectedDocTool && !hasAttachedFiles;
+          !isImageTool &&
+          !selectedTool &&
+          !selectedDocTool &&
+          !hasAttachedFiles;
         const imageDetectController =
           shouldAutoDetectImage && typeof AbortController !== "undefined"
             ? new AbortController()
             : null;
-        const imageDetectPromise: Promise<boolean> = (
-          shouldAutoDetectImage
-        )
+        const imageDetectPromise: Promise<boolean> = shouldAutoDetectImage
           ? apiFetch("/api/image/detect", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message: userInput }),
-            signal: imageDetectController?.signal ?? undefined,
-          })
-            .then(r => r.json())
-            .then(d => !!d.isImageRequest)
-            .catch(() => false)
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ message: userInput }),
+              signal: imageDetectController?.signal ?? undefined,
+            })
+              .then((r) => r.json())
+              .then((d) => !!d.isImageRequest)
+              .catch(() => false)
           : Promise.resolve(!!isImageTool);
 
         // Check for Google Forms intent - ONLY trigger on HIGH confidence to prevent false positives
         const { hasMention, cleanPrompt } = extractMentionFromPrompt(userInput);
-        const formIntent = detectFormIntent(cleanPrompt, isGoogleFormsActive, hasMention);
+        const formIntent = detectFormIntent(
+          cleanPrompt,
+          isGoogleFormsActive,
+          hasMention,
+        );
 
         // Only activate Google Forms on HIGH confidence (explicit mention or specific phrase match)
-        if (formIntent.hasFormIntent && formIntent.confidence === 'high') {
+        if (formIntent.hasFormIntent && formIntent.confidence === "high") {
           // Create file context from uploaded files
           if (currentUploadedFiles.length > 0) {
             // Add file context if files are present
             const fileContext = currentUploadedFiles
-              .filter(f => f.content && f.status === "ready")
-              .map(f => ({
+              .filter((f) => f.content && f.status === "ready")
+              .map((f) => ({
                 name: f.name,
                 content: f.content || "",
-                type: f.type
+                type: f.type,
               }));
 
             // Create assistant message with inline form preview
@@ -6505,11 +8351,14 @@ export function ChatInterface({
               googleFormPreview: {
                 prompt: cleanPrompt,
                 fileContext: fileContext.length > 0 ? fileContext : undefined,
-                autoStart: true
-              }
+                autoStart: true,
+              },
             };
 
-            setOptimisticMessages((prev: Message[]) => [...prev, formPreviewMsg]);
+            setOptimisticMessages((prev: Message[]) => [
+              ...prev,
+              formPreviewMsg,
+            ]);
             onSendMessage(formPreviewMsg);
             // Note: markRequestComplete is called inside addMessage after persistence
             setAiStateForChat("idle", submitConversationId);
@@ -6519,23 +8368,38 @@ export function ChatInterface({
         }
 
         // Check for Gmail intent
-        const hasGmailMention = userInput.toLowerCase().includes('@gmail');
-        const gmailIntent = detectGmailIntent(cleanPrompt, isGmailActive, hasGmailMention);
+        const hasGmailMention = userInput.toLowerCase().includes("@gmail");
+        const gmailIntent = detectGmailIntent(
+          cleanPrompt,
+          isGmailActive,
+          hasGmailMention,
+        );
 
-        if (gmailIntent.hasGmailIntent && gmailIntent.confidence !== 'low') {
+        if (gmailIntent.hasGmailIntent && gmailIntent.confidence !== "low") {
           setAiStateForChat("thinking", submitConversationId);
-          setAiProcessStepsForChat([
-            { step: "Buscando en tu correo electrónico", status: "active" },
-            { step: "Analizando correos encontrados", status: "pending" },
-            { step: "Generando respuesta inteligente", status: "pending" }
-          ], submitConversationId);
+          setAiProcessStepsForChat(
+            [
+              { step: "Buscando en tu correo electrónico", status: "active" },
+              { step: "Analizando correos encontrados", status: "pending" },
+              { step: "Generando respuesta inteligente", status: "pending" },
+            ],
+            submitConversationId,
+          );
 
           try {
-            const fullMessages = messages.map(m => ({ role: m.role, content: m.content }));
+            const fullMessages = messages.map((m) => ({
+              role: m.role,
+              content: m.content,
+            }));
             fullMessages.push({ role: "user", content: cleanPrompt });
             const fallbackChatId: string | null =
-              latestChatIdRef.current || chatId || (await waitForActiveChatId());
-            const gmailConversationId = resolveStreamChatId(undefined, fallbackChatId);
+              latestChatIdRef.current ||
+              chatId ||
+              (await waitForActiveChatId());
+            const gmailConversationId = resolveStreamChatId(
+              undefined,
+              fallbackChatId,
+            );
             if (!gmailConversationId) {
               throw new Error("No se pudo confirmar la sesión del chat.");
             }
@@ -6551,19 +8415,30 @@ export function ChatInterface({
               body: JSON.stringify({
                 messages: fullMessages,
                 conversationId: gmailConversationId,
-                useRag: true
-              })
+                useRag: true,
+              }),
             });
 
-            setAiProcessStepsForChat((prev: any[]) => prev.map((s: any, i: number) =>
-              i === 0 ? { ...s, status: "done" as const } :
-                i === 1 ? { ...s, status: "active" as const } : s
-            ), gmailConversationId || submitConversationId);
+            setAiProcessStepsForChat(
+              (prev: any[]) =>
+                prev.map((s: any, i: number) =>
+                  i === 0
+                    ? { ...s, status: "done" as const }
+                    : i === 1
+                      ? { ...s, status: "active" as const }
+                      : s,
+                ),
+              gmailConversationId || submitConversationId,
+            );
 
             if (chatResponse.ok) {
               const data = await chatResponse.json();
 
-              setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })), gmailConversationId || submitConversationId);
+              setAiProcessStepsForChat(
+                (prev: any[]) =>
+                  prev.map((s: any) => ({ ...s, status: "done" as const })),
+                gmailConversationId || submitConversationId,
+              );
 
               const gmailResponseMsg: Message = {
                 id: (Date.now() + 1).toString(),
@@ -6574,18 +8449,25 @@ export function ChatInterface({
                 userMessageId: userMsgId,
                 webSources: data.webSources,
               };
-              setOptimisticMessages((prev: Message[]) => [...prev, gmailResponseMsg]);
+              setOptimisticMessages((prev: Message[]) => [
+                ...prev,
+                gmailResponseMsg,
+              ]);
               onSendMessage(gmailResponseMsg);
             } else {
               const gmailErrorMsg: Message = {
                 id: (Date.now() + 1).toString(),
                 role: "assistant",
-                content: "❌ Error al analizar tus correos. Por favor, verifica que Gmail esté conectado e intenta de nuevo.",
+                content:
+                  "❌ Error al analizar tus correos. Por favor, verifica que Gmail esté conectado e intenta de nuevo.",
                 timestamp: new Date(),
                 requestId: generateRequestId(),
-                userMessageId: userMsgId
+                userMessageId: userMsgId,
               };
-              setOptimisticMessages((prev: Message[]) => [...prev, gmailErrorMsg]);
+              setOptimisticMessages((prev: Message[]) => [
+                ...prev,
+                gmailErrorMsg,
+              ]);
               onSendMessage(gmailErrorMsg);
             }
           } catch (error) {
@@ -6593,12 +8475,16 @@ export function ChatInterface({
             const gmailErrorMsg: Message = {
               id: (Date.now() + 1).toString(),
               role: "assistant",
-              content: "❌ Error al procesar tu solicitud de correos. Por favor, intenta de nuevo.",
+              content:
+                "❌ Error al procesar tu solicitud de correos. Por favor, intenta de nuevo.",
               timestamp: new Date(),
               requestId: generateRequestId(),
-              userMessageId: userMsgId
+              userMessageId: userMsgId,
             };
-            setOptimisticMessages((prev: Message[]) => [...prev, gmailErrorMsg]);
+            setOptimisticMessages((prev: Message[]) => [
+              ...prev,
+              gmailErrorMsg,
+            ]);
             onSendMessage(gmailErrorMsg);
           }
 
@@ -6608,39 +8494,57 @@ export function ChatInterface({
         }
 
         // Check if Excel is open and prompt is complex - route through orchestrator
-        const isExcelEditorOpen = (activeDocEditorRef.current?.type === "excel") || (previewDocumentRef.current?.type === "excel");
-        if (isExcelEditorOpen && isComplexExcelPrompt(cleanPrompt) && orchestratorRef.current) {
+        const isExcelEditorOpen =
+          activeDocEditorRef.current?.type === "excel" ||
+          previewDocumentRef.current?.type === "excel";
+        if (
+          isExcelEditorOpen &&
+          isComplexExcelPrompt(cleanPrompt) &&
+          orchestratorRef.current
+        ) {
           setAiStateForChat("thinking", submitConversationId);
-          setAiProcessStepsForChat([
-            { step: "Analizando estructura del workbook", status: "active" },
-            { step: "Creando hojas y datos", status: "pending" },
-            { step: "Aplicando fórmulas y gráficos", status: "pending" }
-          ], submitConversationId);
+          setAiProcessStepsForChat(
+            [
+              { step: "Analizando estructura del workbook", status: "active" },
+              { step: "Creando hojas y datos", status: "pending" },
+              { step: "Aplicando fórmulas y gráficos", status: "pending" },
+            ],
+            submitConversationId,
+          );
 
           try {
             await orchestratorRef.current.runOrchestrator(cleanPrompt);
 
-            setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })), submitConversationId);
+            setAiProcessStepsForChat(
+              (prev: any[]) =>
+                prev.map((s: any) => ({ ...s, status: "done" as const })),
+              submitConversationId,
+            );
 
             const orchestratorMsg: Message = {
               id: (Date.now() + 1).toString(),
               role: "assistant",
-              content: "✅ Workbook generado exitosamente con múltiples hojas, datos, fórmulas y gráficos. Revisa el editor de Excel para ver los resultados.",
+              content:
+                "✅ Workbook generado exitosamente con múltiples hojas, datos, fórmulas y gráficos. Revisa el editor de Excel para ver los resultados.",
               timestamp: new Date(),
               requestId: generateRequestId(),
-              userMessageId: userMsgId
+              userMessageId: userMsgId,
             };
-            setOptimisticMessages((prev: Message[]) => [...prev, orchestratorMsg]);
+            setOptimisticMessages((prev: Message[]) => [
+              ...prev,
+              orchestratorMsg,
+            ]);
             onSendMessage(orchestratorMsg);
           } catch (err) {
             console.error("[Orchestrator] Error:", err);
             const errorMsg: Message = {
               id: (Date.now() + 1).toString(),
               role: "assistant",
-              content: "❌ Error al generar el workbook. Por favor, intenta de nuevo.",
+              content:
+                "❌ Error al generar el workbook. Por favor, intenta de nuevo.",
               timestamp: new Date(),
               requestId: generateRequestId(),
-              userMessageId: userMsgId
+              userMessageId: userMsgId,
             };
             setOptimisticMessages((prev: Message[]) => [...prev, errorMsg]);
             onSendMessage(errorMsg);
@@ -6659,41 +8563,59 @@ export function ChatInterface({
           const IMAGE_DETECT_TIMEOUT_MS = 180;
           const detectResult = await Promise.race<boolean | null>([
             imageDetectPromise,
-            new Promise<boolean | null>((resolve) => setTimeout(() => resolve(null), IMAGE_DETECT_TIMEOUT_MS)),
+            new Promise<boolean | null>((resolve) =>
+              setTimeout(() => resolve(null), IMAGE_DETECT_TIMEOUT_MS),
+            ),
           ]);
           const imageDetectTimedOut = detectResult === null;
-          const shouldGenerateImage = (detectResult ?? false) && gptCapabilityFlags.imageGeneration;
+          const shouldGenerateImage =
+            (detectResult ?? false) && gptCapabilityFlags.imageGeneration;
           if (imageDetectTimedOut) {
             imageDetectController?.abort();
-            console.debug("[Perf] image_detect_timeout_ms", IMAGE_DETECT_TIMEOUT_MS);
+            console.debug(
+              "[Perf] image_detect_timeout_ms",
+              IMAGE_DETECT_TIMEOUT_MS,
+            );
           }
 
           // If files are attached, log that we're skipping image detection
           if (hasAttachedFiles && !isImageTool) {
-            console.log(`[ChatInterface] Files attached (${currentUploadedFiles.length}), skipping image auto-detection - will process as document analysis`);
+            console.log(
+              `[ChatInterface] Files attached (${currentUploadedFiles.length}), skipping image auto-detection - will process as document analysis`,
+            );
           }
 
           // Generate image if needed
           if (shouldGenerateImage) {
             setIsGeneratingImage(true);
-            setAiProcessStepsForChat([
-              { step: "Analizando tu petición", status: "done" },
-              { step: "Generando imagen con IA", status: "active" },
-              { step: "Procesando resultado", status: "pending" }
-            ], submitConversationId);
+            setAiProcessStepsForChat(
+              [
+                { step: "Analizando tu petición", status: "done" },
+                { step: "Generando imagen con IA", status: "active" },
+                { step: "Procesando resultado", status: "pending" },
+              ],
+              submitConversationId,
+            );
 
             try {
               const imageRes = await apiFetch("/api/image/generate", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ prompt: userInput }),
-                signal: abortControllerRef.current.signal
+                signal: abortControllerRef.current.signal,
               });
 
               const imageData = await imageRes.json();
 
               if (imageRes.ok && imageData.success) {
-                setAiProcessStepsForChat((prev: AiProcessStep[]) => prev.map((s: AiProcessStep) => ({ ...s, status: "done" as const })), submitConversationId);
+                setAiProcessStepsForChat(
+                  (prev: AiProcessStep[]) =>
+                    prev.map((s: AiProcessStep) => ({
+                      ...s,
+                      status: "done" as const,
+                    })),
+                  submitConversationId,
+                );
 
                 const msgId = (Date.now() + 1).toString();
 
@@ -6716,25 +8638,31 @@ export function ChatInterface({
                     credentials: "include",
                     body: JSON.stringify({
                       mediaType: "image",
-                      title: `Imagen generada - ${new Date().toLocaleDateString('es-ES')}`,
+                      title: `Imagen generada - ${new Date().toLocaleDateString("es-ES")}`,
                       description: userInput.slice(0, 200),
                       storagePath: imageData.imageData,
                       mimeType: "image/png",
                       sourceChatId: chatId || null,
-                      metadata: { prompt: userInput }
-                    })
-                  }).catch(err => console.error("Failed to save image to library:", err));
+                      metadata: { prompt: userInput },
+                    }),
+                  }).catch((err) =>
+                    console.error("Failed to save image to library:", err),
+                  );
                 }
 
                 // Also store in local component state and ref for persistence across remounts
-                const pendingImage = { messageId: msgId, imageData: imageData.imageData };
+                const pendingImage = {
+                  messageId: msgId,
+                  imageData: imageData.imageData,
+                };
                 setPendingGeneratedImage(pendingImage);
                 latestGeneratedImageRef.current = pendingImage;
 
                 const aiMsg: Message = {
                   id: msgId,
                   role: "assistant",
-                  content: "Aquí está la imagen que generé basada en tu descripción:",
+                  content:
+                    "Aquí está la imagen que generé basada en tu descripción:",
                   generatedImage: imageData.imageData,
                   timestamp: new Date(),
                   requestId: generateRequestId(),
@@ -6768,52 +8696,77 @@ export function ChatInterface({
           // ── SSE STREAMING (runs for ALL messages, not just image fallback) ──
           {
             const fileContents = currentUploadedFiles
-              .filter(f => f.content && f.status === "ready")
-              .map(f => `[ARCHIVO ADJUNTO: "${f.name}"]\n${f.content}\n[FIN DEL ARCHIVO]`)
+              .filter((f) => f.content && f.status === "ready")
+              .map(
+                (f) =>
+                  `[ARCHIVO ADJUNTO: "${f.name}"]\n${f.content}\n[FIN DEL ARCHIVO]`,
+              )
               .join("\n\n");
 
             const messageWithFiles = fileContents
               ? `${fileContents}\n\n[SOLICITUD DEL USUARIO]: ${userInput}`
               : userInput;
 
-            const chatHistory = [...messages, { ...userMsg, content: messageWithFiles }].map(m => ({
+            const chatHistory = [
+              ...messages,
+              { ...userMsg, content: messageWithFiles },
+            ].map((m) => ({
               role: m.role,
-              content: m.content
+              content: m.content,
             }));
 
             // Extract image data URLs from current files
             // Only include images that successfully uploaded or are processing, so failed
             // local uploads don't secretly succeed in chat (causing severe UI/UX desync)
             const imageDataUrls = currentUploadedFiles
-              .filter(f => f.type.startsWith("image/") && f.dataUrl && (f.status === "ready" || f.status === "processing"))
-              .map(f => f.dataUrl as string);
+              .filter(
+                (f) =>
+                  f.type.startsWith("image/") &&
+                  f.dataUrl &&
+                  (f.status === "ready" || f.status === "processing"),
+              )
+              .map((f) => f.dataUrl as string);
 
             // Determine if we're in document mode for special AI behavior
             // Check both activeDocEditor and previewDocument for Excel mode
             const forcedDocType = docToolForRequest;
-            const isDocumentMode = !!activeDocEditorRef.current || !!previewDocumentRef.current || !!forcedDocType;
-            const documentType = activeDocEditorRef.current?.type || previewDocumentRef.current?.type || forcedDocType || null;
+            const isDocumentMode =
+              !!activeDocEditorRef.current ||
+              !!previewDocumentRef.current ||
+              !!forcedDocType;
+            const documentType =
+              activeDocEditorRef.current?.type ||
+              previewDocumentRef.current?.type ||
+              forcedDocType ||
+              null;
             const isFigmaMode = selectedDocTool === "figma";
             const isPptMode = documentType === "ppt";
             const isWordMode = documentType === "word";
             const isExcelMode = documentType === "excel";
 
-            console.log('[ChatInterface] Document mode detection:', { isDocumentMode, documentType, isExcelMode, hasInsertFn: !!docInsertContentRef.current });
+            console.log("[ChatInterface] Document mode detection:", {
+              isDocumentMode,
+              documentType,
+              isExcelMode,
+              hasInsertFn: !!docInsertContentRef.current,
+            });
 
             // Check if document has existing content (not just placeholder)
             const currentDocContent = editedDocumentContent || "";
-            const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '').trim();
+            const stripHtml = (html: string) =>
+              html.replace(/<[^>]*>/g, "").trim();
             const plainTextContent = stripHtml(currentDocContent);
             const placeholderPhrases = [
               "comienza a escribir tu documento aquí",
               "comienza a escribir",
-              "escribe aquí"
+              "escribe aquí",
             ];
-            const isPlaceholder = placeholderPhrases.some(p =>
-              plainTextContent.toLowerCase().includes(p)
+            const isPlaceholder = placeholderPhrases.some((p) =>
+              plainTextContent.toLowerCase().includes(p),
             );
             // Any non-empty, non-placeholder content should be preserved
-            const hasExistingContent = isWordMode && !isPlaceholder && plainTextContent.length > 0;
+            const hasExistingContent =
+              isWordMode && !isPlaceholder && plainTextContent.length > 0;
 
             // Build system prompt for Word document mode (cumulative - each response adds to document)
             let wordSystemPrompt = "";
@@ -6822,7 +8775,7 @@ export function ChatInterface({
                 wordSystemPrompt = `Eres un asistente de edición de documentos. El usuario tiene un documento con contenido previo y quiere AÑADIR más contenido.
 
 CONTEXTO DEL DOCUMENTO EXISTENTE (para referencia):
-${plainTextContent.slice(0, 500)}${plainTextContent.length > 500 ? '...' : ''}
+${plainTextContent.slice(0, 500)}${plainTextContent.length > 500 ? "..." : ""}
 
 INSTRUCCIONES IMPORTANTES:
 1. Genera SOLO el nuevo contenido que el usuario solicita
@@ -6858,34 +8811,58 @@ IMPORTANTE:
 - Los datos numéricos sin formato de moneda (solo números)`;
 
             // Build chat history with appropriate system prompt
-            let finalChatHistory: Array<{ role: string; content: string }> = chatHistory;
+            let finalChatHistory: Array<{ role: string; content: string }> =
+              chatHistory;
             if (isPptMode) {
-              finalChatHistory = [{ role: "system", content: PPT_STREAMING_SYSTEM_PROMPT }, ...chatHistory];
+              finalChatHistory = [
+                { role: "system", content: PPT_STREAMING_SYSTEM_PROMPT },
+                ...chatHistory,
+              ];
             } else if (isExcelMode) {
-              finalChatHistory = [{ role: "system", content: excelSystemPrompt }, ...chatHistory];
+              finalChatHistory = [
+                { role: "system", content: excelSystemPrompt },
+                ...chatHistory,
+              ];
             } else if (isWordMode) {
-              finalChatHistory = [{ role: "system", content: wordSystemPrompt }, ...chatHistory];
+              finalChatHistory = [
+                { role: "system", content: wordSystemPrompt },
+                ...chatHistory,
+              ];
             }
 
             // Capture document mode state NOW using ref (avoids closure issues)
             // For Excel, also check previewDocument since Excel can be opened via preview
-            const shouldWriteToDoc = !!activeDocEditorRef.current || (isExcelMode && !!docInsertContentRef.current);
+            const shouldWriteToDoc =
+              !!activeDocEditorRef.current ||
+              (isExcelMode && !!docInsertContentRef.current);
 
             // Capture existing document HTML for cumulative mode (shared between SSE and legacy)
             // Note: currentDocContent is HTML from the editor
-            const existingDocHTML = isWordMode && hasExistingContent ? currentDocContent : "";
+            const existingDocHTML =
+              isWordMode && hasExistingContent ? currentDocContent : "";
             const separatorHTML = existingDocHTML ? '<hr class="my-4" />' : "";
 
             // Use latest available chatId for stream routing; fallback to resolved persistent id when available.
-            const streamRunContext = buildStreamRunContext(userMsg, sendMessageAck);
-            const ackChatId = sendMessageAck?.chatId || sendMessageAck?.run?.chatId;
+            const streamRunContext = buildStreamRunContext(
+              userMsg,
+              sendMessageAck,
+            );
+            const ackChatId =
+              sendMessageAck?.chatId || sendMessageAck?.run?.chatId;
             const fallbackChatId: string | null =
-              ackChatId || latestChatIdRef.current || chatId || (await waitForActiveChatId());
-            const effectiveStreamChatId = resolveStreamChatId(sendMessageAck, fallbackChatId);
+              ackChatId ||
+              latestChatIdRef.current ||
+              chatId ||
+              (await waitForActiveChatId());
+            const effectiveStreamChatId = resolveStreamChatId(
+              sendMessageAck,
+              fallbackChatId,
+            );
             if (!effectiveStreamChatId) {
               toast({
                 title: "Error",
-                description: "No se pudo crear/confirmar el chat para enviar este mensaje. Intenta de nuevo.",
+                description:
+                  "No se pudo crear/confirmar el chat para enviar este mensaje. Intenta de nuevo.",
                 variant: "destructive",
                 duration: 5000,
               });
@@ -6899,45 +8876,79 @@ IMPORTANTE:
               setAiStateForChat("responding", effectiveStreamChatId);
 
               // Update steps: mark processing done, searching active
-              setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => {
-                // Guard against undefined step or s
-                if (!s || !s.step) return s;
+              setAiProcessStepsForChat(
+                (prev: any[]) =>
+                  prev.map((s: any) => {
+                    // Guard against undefined step or s
+                    if (!s || !s.step) return s;
 
-                if (s.step.includes("Analizando")) return { ...s, status: "done" };
-                if (s.step.includes("Procesando")) return { ...s, status: "done" };
-                if (s.step.includes("Buscando")) return { ...s, status: "active" };
-                return s;
-              }), effectiveStreamChatId);
-
+                    if (s.step.includes("Analizando"))
+                      return { ...s, status: "done" };
+                    if (s.step.includes("Procesando"))
+                      return { ...s, status: "done" };
+                    if (s.step.includes("Buscando"))
+                      return { ...s, status: "active" };
+                    return s;
+                  }),
+                effectiveStreamChatId,
+              );
 
               // Build attachments array for streaming endpoint
               // FIX: Normalize type to match backend schema: "document" | "image" | "file"
-              console.log("[handleSubmit] currentUploadedFiles:", currentUploadedFiles.map(f => ({
-                id: f.id, name: f.name, type: f.type, status: f.status,
-                storagePath: f.storagePath, hasContent: !!f.content,
-              })));
+              console.log(
+                "[handleSubmit] currentUploadedFiles:",
+                currentUploadedFiles.map((f) => ({
+                  id: f.id,
+                  name: f.name,
+                  type: f.type,
+                  status: f.status,
+                  storagePath: f.storagePath,
+                  hasContent: !!f.content,
+                })),
+              );
               const streamAttachments = currentUploadedFiles
-                .filter(f => f.status === "ready" || f.status === "processing")
-                .map(f => ({
-                  type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
+                .filter(
+                  (f) => f.status === "ready" || f.status === "processing",
+                )
+                .map((f) => ({
+                  type: (f.type.startsWith("image/") ? "image" : "document") as
+                    | "image"
+                    | "document",
                   name: f.name,
                   mimeType: f.type,
                   storagePath: f.storagePath,
                   fileId: f.id,
                   content: f.content,
                 }));
-              console.log("[handleSubmit] streamAttachments:", JSON.stringify(streamAttachments.map(a => ({
-                type: a.type, name: a.name, mimeType: a.mimeType, storagePath: a.storagePath,
-                fileId: a.fileId, hasContent: !!a.content,
-              }))));
+              console.log(
+                "[handleSubmit] streamAttachments:",
+                JSON.stringify(
+                  streamAttachments.map((a) => ({
+                    type: a.type,
+                    name: a.name,
+                    mimeType: a.mimeType,
+                    storagePath: a.storagePath,
+                    fileId: a.fileId,
+                    hasContent: !!a.content,
+                  })),
+                ),
+              );
 
-              if (hasDocumentAttachments && documentAttachmentsForAnalysis.length > 0) {
-                console.log("[handleSubmit] DATA_MODE (SSE): document attachments detected, async analysis running");
+              if (
+                hasDocumentAttachments &&
+                documentAttachmentsForAnalysis.length > 0
+              ) {
+                console.log(
+                  "[handleSubmit] DATA_MODE (SSE): document attachments detected, async analysis running",
+                );
                 return;
               }
 
               if (import.meta.env.DEV) {
-                chatLogger.debug("handleSubmit docTool", { selectedDocTool: docToolForRequest, isWordMode });
+                chatLogger.debug("handleSubmit docTool", {
+                  selectedDocTool: docToolForRequest,
+                  isWordMode,
+                });
               }
 
               // NOTE: Previously there was a redundant raw `apiFetch("/api/chat/stream")` here
@@ -6946,11 +8957,20 @@ IMPORTANTE:
               //   2. The first response body was never consumed (SSE stream abandoned)
               // Removed: the single `streamChat.stream()` call below handles everything.
 
-              const firstImageDataUrl = imageDataUrls.length > 0 ? imageDataUrls[0] : undefined;
-              const artifactTypeMap: Record<string, string> = { word: 'document', excel: 'spreadsheet', ppt: 'presentation', docx: 'document', xlsx: 'spreadsheet', pptx: 'presentation' };
+              const firstImageDataUrl =
+                imageDataUrls.length > 0 ? imageDataUrls[0] : undefined;
+              const artifactTypeMap: Record<string, string> = {
+                word: "document",
+                excel: "spreadsheet",
+                ppt: "presentation",
+                docx: "document",
+                xlsx: "spreadsheet",
+                pptx: "presentation",
+              };
               const artifactMimeTypeMap: Record<string, string> = {
                 word: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                excel: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                excel:
+                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ppt: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -6974,14 +8994,18 @@ IMPORTANTE:
               let streamWebSources: any[] | undefined;
               let isProductionStream = false;
 
-              const setAiStateForStream = (value: React.SetStateAction<AiState>) =>
-                setAiStateForChat(value, effectiveStreamChatId);
-              const setAiProcessStepsForStream = (value: React.SetStateAction<AiProcessStep[]>) =>
-                setAiProcessStepsForChat(value, effectiveStreamChatId);
+              const setAiStateForStream = (
+                value: React.SetStateAction<AiState>,
+              ) => setAiStateForChat(value, effectiveStreamChatId);
+              const setAiProcessStepsForStream = (
+                value: React.SetStateAction<AiProcessStep[]>,
+              ) => setAiProcessStepsForChat(value, effectiveStreamChatId);
               const forceWebSearch = selectedTool === "web";
               // For custom GPTs, honor the GPT capability as an auto-search hint.
               // Server-side heuristics decide whether a web call is actually needed.
-              const webSearchAuto = forceWebSearch || (!!activeGptId && gptCapabilityFlags.webBrowsing);
+              const webSearchAuto =
+                forceWebSearch ||
+                (!!activeGptId && gptCapabilityFlags.webBrowsing);
 
               const streamResult = await streamChat.stream("/api/chat/stream", {
                 chatId: effectiveStreamChatId,
@@ -6993,7 +9017,10 @@ IMPORTANTE:
                   runId: streamRunContext.runId,
                   clientRequestId: streamRunContext.clientRequestId,
                   userRequestId: userMsg.requestId,
-                  attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
+                  attachments:
+                    streamAttachments.length > 0
+                      ? streamAttachments
+                      : undefined,
                   // Send image base64 directly for vision fallback if storagePath resolution fails
                   lastImageBase64: firstImageDataUrl,
                   docTool: docToolForRequest,
@@ -7012,7 +9039,10 @@ IMPORTANTE:
                 onEvent: (eventType, data) => {
                   syncGptSessionFromEvent(data);
                   // Handle context truncation/compression notices
-                  if (eventType === "notice" && data?.type === "context_truncated") {
+                  if (
+                    eventType === "notice" &&
+                    data?.type === "context_truncated"
+                  ) {
                     setContextNotice({
                       type: data.type,
                       originalTokens: data.originalTokens,
@@ -7023,7 +9053,10 @@ IMPORTANTE:
                   }
 
                   // Handle low-confidence prompt notice
-                  if (eventType === "notice" && data?.type === "low_confidence_prompt") {
+                  if (
+                    eventType === "notice" &&
+                    data?.type === "low_confidence_prompt"
+                  ) {
                     setContextNotice({
                       type: data.type,
                       originalTokens: 0,
@@ -7039,14 +9072,14 @@ IMPORTANTE:
                     setAiStateForStream("agent_working");
                     if (docToolForRequest) {
                       setDocGenerationState({
-                        status: 'generating',
+                        status: "generating",
                         progress: 0,
-                        stage: data?.topic || 'Iniciando generación...',
+                        stage: data?.topic || "Iniciando generación...",
                         downloadUrl: null,
                         fileName: null,
                         fileSize: null,
                       });
-                      setEditedDocumentContent('');
+                      setEditedDocumentContent("");
                     }
                     return;
                   }
@@ -7067,9 +9100,12 @@ IMPORTANTE:
                       };
                       setDocGenerationState((prev: any) => ({
                         ...prev,
-                        status: 'generating',
+                        status: "generating",
                         progress: data?.progress || prev.progress,
-                        stage: stageLabels[data?.stage] || data?.message || prev.stage,
+                        stage:
+                          stageLabels[data?.stage] ||
+                          data?.message ||
+                          prev.stage,
                       }));
                     }
                     return;
@@ -7079,9 +9115,9 @@ IMPORTANTE:
                     isProductionStream = true;
                     setDocGenerationState((prev: any) => ({
                       ...prev,
-                      status: 'complete',
+                      status: "complete",
                       progress: 100,
-                      stage: data?.summary || prev.stage || '¡Documento listo!',
+                      stage: data?.summary || prev.stage || "¡Documento listo!",
                     }));
                     return;
                   }
@@ -7095,19 +9131,33 @@ IMPORTANTE:
                       library: data?.library,
                     });
                     if (data?.type) {
-                      streamArtifactMimeTypes.set(String(data.type), artifactMimeTypeMap[data.type] || data?.mimeType || "application/octet-stream");
+                      streamArtifactMimeTypes.set(
+                        String(data.type),
+                        artifactMimeTypeMap[data.type] ||
+                          data?.mimeType ||
+                          "application/octet-stream",
+                      );
                     }
                     if (docToolForRequest) {
-                      const docTypeMap: Record<string, string> = { word: 'word', excel: 'excel', ppt: 'ppt', xlsx: 'excel', docx: 'word', pptx: 'ppt' };
-                      const artifactDocType = docTypeMap[data?.type] || String(data?.type || "");
-                      const selectedDocTypeNorm = docTypeMap[docToolForRequest] || docToolForRequest;
+                      const docTypeMap: Record<string, string> = {
+                        word: "word",
+                        excel: "excel",
+                        ppt: "ppt",
+                        xlsx: "excel",
+                        docx: "word",
+                        pptx: "ppt",
+                      };
+                      const artifactDocType =
+                        docTypeMap[data?.type] || String(data?.type || "");
+                      const selectedDocTypeNorm =
+                        docTypeMap[docToolForRequest] || docToolForRequest;
                       if (artifactDocType === selectedDocTypeNorm) {
                         setDocGenerationState({
-                          status: 'ready',
+                          status: "ready",
                           progress: 100,
-                          stage: data?.summary || '¡Documento listo!',
+                          stage: data?.summary || "¡Documento listo!",
                           downloadUrl: data?.downloadUrl || null,
-                          fileName: data?.filename || data?.name || 'Documento',
+                          fileName: data?.filename || data?.name || "Documento",
                           fileSize: data?.size || null,
                         });
                       }
@@ -7115,10 +9165,15 @@ IMPORTANTE:
                     return;
                   }
 
-                  if (eventType === "tool_start" && data?.toolName === "browse_and_act") {
+                  if (
+                    eventType === "tool_start" &&
+                    data?.toolName === "browse_and_act"
+                  ) {
                     setAiStateForStream("agent_working");
                     setIsBrowserOpen(true);
-                    globalStartSseSession(data?.args?.goal || "Automatización web");
+                    globalStartSseSession(
+                      data?.args?.goal || "Automatización web",
+                    );
                     return;
                   }
 
@@ -7129,7 +9184,10 @@ IMPORTANTE:
                     return;
                   }
 
-                  if (eventType === "tool_result" && data?.toolName === "browse_and_act") {
+                  if (
+                    eventType === "tool_result" &&
+                    data?.toolName === "browse_and_act"
+                  ) {
                     if (data?.result?.success) {
                       globalUpdateFromSseStep({
                         stepNumber: data.result.stepsCount || 0,
@@ -7145,14 +9203,19 @@ IMPORTANTE:
                     return;
                   }
 
-                  if (eventType === "tool_start" || eventType === "tool_result") {
+                  if (
+                    eventType === "tool_start" ||
+                    eventType === "tool_result"
+                  ) {
                     return;
                   }
 
                   if (eventType === "context") {
                     setAiStateForStream("responding");
                     if (data?.isAgenticMode === true) {
-                      setAiProcessStepsForStream((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
+                      setAiProcessStepsForStream((prev: any[]) =>
+                        prev.map((s: any) => ({ ...s, status: "done" })),
+                      );
                     }
                     if (Array.isArray(data?.webSources)) {
                       streamWebSources = data.webSources;
@@ -7163,21 +9226,30 @@ IMPORTANTE:
                   if (eventType === "thinking") {
                     if (data?.step && data?.message) {
                       setAiProcessStepsForStream((prev: any[]) => {
-                        const exists = prev.find((s: any) => s.id === data.step);
+                        const exists = prev.find(
+                          (s: any) => s.id === data.step,
+                        );
                         if (exists) return prev;
-                        return [...prev, {
-                          id: data.step,
-                          step: data.step,
-                          title: data.message,
-                          status: "pending",
-                        }];
+                        return [
+                          ...prev,
+                          {
+                            id: data.step,
+                            step: data.step,
+                            title: data.message,
+                            status: "pending",
+                          },
+                        ];
                       });
                     }
                     return;
                   }
 
                   if (eventType === "intent") {
-                    console.log('[SSE] Intent:', data?.intent, data?.confidence);
+                    console.log(
+                      "[SSE] Intent:",
+                      data?.intent,
+                      data?.confidence,
+                    );
                   }
                 },
                 onChunk: (chunk, _chunkEventData, fullContent) => {
@@ -7192,14 +9264,22 @@ IMPORTANTE:
                     return true;
                   }
 
-                  if (isWordMode && shouldWriteToDoc && docInsertContentRef.current) {
+                  if (
+                    isWordMode &&
+                    shouldWriteToDoc &&
+                    docInsertContentRef.current
+                  ) {
                     try {
                       const newContentHTML = markdownToTipTap(fullContent);
-                      const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
-                      docInsertContentRef.current(cumulativeHTML, 'html');
+                      const cumulativeHTML =
+                        existingDocHTML + separatorHTML + newContentHTML;
+                      docInsertContentRef.current(cumulativeHTML, "html");
                       setEditedDocumentContent(cumulativeHTML);
                     } catch (err) {
-                      console.error('[ChatInterface] Error streaming to document:', err);
+                      console.error(
+                        "[ChatInterface] Error streaming to document:",
+                        err,
+                      );
                     }
                     return false;
                   }
@@ -7209,18 +9289,39 @@ IMPORTANTE:
                   return true;
                 },
                 buildFinalMessage: (fullContent, data, messageId) => {
-                  const uncertainty = (!isProductionStream && !isWordMode && !isExcelMode && !isPptMode)
-                    ? detectUncertainty(fullContent)
-                    : null;
+                  const uncertainty =
+                    !isProductionStream &&
+                    !isWordMode &&
+                    !isExcelMode &&
+                    !isPptMode
+                      ? detectUncertainty(fullContent)
+                      : null;
 
                   if (isProductionStream && productionArtifacts.length > 0) {
                     const primaryArtifact = productionArtifacts[0];
-                    const type = artifactTypeMap[primaryArtifact.type] || primaryArtifact.type || "document";
-                    const typeConfirm: Record<string, string> = { word: 'Documento generado correctamente', excel: 'Hoja de cálculo generada correctamente', presentation: 'Presentación generada correctamente', ppt: 'Presentación generada correctamente', doc: 'Documento generado correctamente', spreadsheet: 'Hoja de cálculo generada correctamente' };
-                    const friendlyType = docToolForRequest || selectedDocTool || 'word';
-                    const messageContent = `✓ ${typeConfirm[friendlyType] || 'Documento generado correctamente'}`;
-                    const artifactMimeType = primaryArtifact.type ? (artifactMimeTypeMap[primaryArtifact.type] || streamArtifactMimeTypes.get(primaryArtifact.type) || "application/octet-stream") : "application/octet-stream";
-                    const artifactName = primaryArtifact.filename || `${friendlyType}.${friendlyType === "word" ? "docx" : friendlyType === "excel" ? "xlsx" : friendlyType === "ppt" ? "pptx" : "bin"}`;
+                    const type =
+                      artifactTypeMap[primaryArtifact.type] ||
+                      primaryArtifact.type ||
+                      "document";
+                    const typeConfirm: Record<string, string> = {
+                      word: "Documento generado correctamente",
+                      excel: "Hoja de cálculo generada correctamente",
+                      presentation: "Presentación generada correctamente",
+                      ppt: "Presentación generada correctamente",
+                      doc: "Documento generado correctamente",
+                      spreadsheet: "Hoja de cálculo generada correctamente",
+                    };
+                    const friendlyType =
+                      docToolForRequest || selectedDocTool || "word";
+                    const messageContent = `✓ ${typeConfirm[friendlyType] || "Documento generado correctamente"}`;
+                    const artifactMimeType = primaryArtifact.type
+                      ? artifactMimeTypeMap[primaryArtifact.type] ||
+                        streamArtifactMimeTypes.get(primaryArtifact.type) ||
+                        "application/octet-stream"
+                      : "application/octet-stream";
+                    const artifactName =
+                      primaryArtifact.filename ||
+                      `${friendlyType}.${friendlyType === "word" ? "docx" : friendlyType === "excel" ? "xlsx" : friendlyType === "ppt" ? "pptx" : "bin"}`;
 
                     return {
                       id: messageId || `assistant-${Date.now()}`,
@@ -7253,14 +9354,22 @@ IMPORTANTE:
                     };
                   }
 
-                  if (isExcelMode && shouldWriteToDoc && docInsertContentRef.current && !isProductionStream) {
+                  if (
+                    isExcelMode &&
+                    shouldWriteToDoc &&
+                    docInsertContentRef.current &&
+                    !isProductionStream
+                  ) {
                     if (docInsertContentRef.current) {
                       try {
                         streamingContentRef.current = "";
                         setStreamingContent("");
                         docInsertContentRef.current(fullContent);
                       } catch (err) {
-                        console.error('[ChatInterface] Error streaming to Excel:', err);
+                        console.error(
+                          "[ChatInterface] Error streaming to Excel:",
+                          err,
+                        );
                       }
                     }
                     return {
@@ -7273,15 +9382,24 @@ IMPORTANTE:
                     };
                   }
 
-                  if (isWordMode && shouldWriteToDoc && docInsertContentRef.current && !isProductionStream) {
+                  if (
+                    isWordMode &&
+                    shouldWriteToDoc &&
+                    docInsertContentRef.current &&
+                    !isProductionStream
+                  ) {
                     if (docInsertContentRef.current) {
                       try {
                         const newContentHTML = markdownToTipTap(fullContent);
-                        const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
-                        docInsertContentRef.current(cumulativeHTML, 'html');
+                        const cumulativeHTML =
+                          existingDocHTML + separatorHTML + newContentHTML;
+                        docInsertContentRef.current(cumulativeHTML, "html");
                         setEditedDocumentContent(cumulativeHTML);
                       } catch (err) {
-                        console.error('[ChatInterface] Error finalizing document:', err);
+                        console.error(
+                          "[ChatInterface] Error finalizing document:",
+                          err,
+                        );
                       }
                     }
                     return {
@@ -7297,7 +9415,8 @@ IMPORTANTE:
                   return {
                     id: messageId || `assistant-${Date.now()}`,
                     role: "assistant",
-                    content: fullContent || "No se recibió respuesta del servidor.",
+                    content:
+                      fullContent || "No se recibió respuesta del servidor.",
                     timestamp: new Date(),
                     requestId: data?.requestId || generateRequestId(),
                     userMessageId: userMsgId,
@@ -7310,7 +9429,9 @@ IMPORTANTE:
                 buildErrorMessage: (error, messageId) => ({
                   id: messageId || `error-${Date.now()}`,
                   role: "assistant",
-                  content: error?.message || "Error de conexión. Por favor, intenta de nuevo.",
+                  content:
+                    error?.message ||
+                    "Error de conexión. Por favor, intenta de nuevo.",
                   timestamp: new Date(),
                   requestId: generateRequestId(),
                   userMessageId: userMsgId,
@@ -7320,7 +9441,11 @@ IMPORTANTE:
               if (streamResult.ok) {
                 requestTitleRefresh(effectiveStreamChatId);
               } else {
-                if (streamResult.response?.status === 402 && (streamResult.error as any)?.payload?.code === "QUOTA_EXCEEDED") {
+                if (
+                  streamResult.response?.status === 402 &&
+                  (streamResult.error as any)?.payload?.code ===
+                    "QUOTA_EXCEEDED"
+                ) {
                   const quota = (streamResult.error as any)?.payload?.quota;
                   if (quota) {
                     setQuotaInfo(quota);
@@ -7330,23 +9455,32 @@ IMPORTANTE:
               }
               agent.complete();
               abortControllerRef.current = null;
-
             } else {
               // Legacy mode - fall back to non-streaming /api/chat for Figma diagrams or when no run info
-              if (hasDocumentAttachments && documentAttachmentsForAnalysis.length > 0) {
-                console.log("[handleSubmit] DATA_MODE (Legacy): document attachments detected, async analysis running");
+              if (
+                hasDocumentAttachments &&
+                documentAttachmentsForAnalysis.length > 0
+              ) {
+                console.log(
+                  "[handleSubmit] DATA_MODE (Legacy): document attachments detected, async analysis running",
+                );
                 return;
               }
 
-
               const response = await apiFetch("/api/chat", {
                 method: "POST",
-                headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+                headers: {
+                  "Content-Type": "application/json",
+                  ...getAnonUserIdHeader(),
+                },
                 credentials: "include",
                 body: JSON.stringify({
                   messages: finalChatHistory,
                   images: imageDataUrls.length > 0 ? imageDataUrls : undefined,
-                  documentMode: isDocumentMode && !isPptMode ? { type: documentType } : undefined,
+                  documentMode:
+                    isDocumentMode && !isPptMode
+                      ? { type: documentType }
+                      : undefined,
                   figmaMode: isFigmaMode,
                   pptMode: isPptMode,
                   provider: selectedProvider,
@@ -7354,17 +9488,24 @@ IMPORTANTE:
                   attachments: attachments.length > 0 ? attachments : undefined,
                   ...gptSessionPayload,
                 }),
-                signal: abortControllerRef.current?.signal
+                signal: abortControllerRef.current?.signal,
               });
 
               // Update steps: mark processing done, searching active
-              setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => {
-                if (!s || !s.step) return s;
-                if (s.step.includes("Analizando")) return { ...s, status: "done" };
-                if (s.step.includes("Procesando")) return { ...s, status: "done" };
-                if (s.step.includes("Buscando")) return { ...s, status: "active" };
-                return s;
-              }), effectiveStreamChatId);
+              setAiProcessStepsForChat(
+                (prev: any[]) =>
+                  prev.map((s: any) => {
+                    if (!s || !s.step) return s;
+                    if (s.step.includes("Analizando"))
+                      return { ...s, status: "done" };
+                    if (s.step.includes("Procesando"))
+                      return { ...s, status: "done" };
+                    if (s.step.includes("Buscando"))
+                      return { ...s, status: "active" };
+                    return s;
+                  }),
+                effectiveStreamChatId,
+              );
 
               const data = await response.json();
 
@@ -7375,25 +9516,36 @@ IMPORTANTE:
               // Save and log GPT session metadata from server
               if (data.session_id) {
                 setGptSessionId(data.session_id);
-                console.log('[Chat] Using GPT session:', {
+                console.log("[Chat] Using GPT session:", {
                   sessionId: data.session_id,
                   gptId: data.gpt_id,
                   configVersion: data.config_version,
-                  toolPermissions: data.tool_permissions
+                  toolPermissions: data.tool_permissions,
                 });
               }
 
               // Update steps: mark searching done, generating active
-              setAiProcessStepsForChat((prev: any[]) => prev.map((s: any) => {
-                if (!s || !s.step) return s;
-                if (s.step.includes("Buscando")) return { ...s, status: "done" };
-                if (s.step.includes("Generando")) return { ...s, status: "active" };
-                return { ...s, status: s.status === "pending" ? "pending" : "done" };
-              }), effectiveStreamChatId);
+              setAiProcessStepsForChat(
+                (prev: any[]) =>
+                  prev.map((s: any) => {
+                    if (!s || !s.step) return s;
+                    if (s.step.includes("Buscando"))
+                      return { ...s, status: "done" };
+                    if (s.step.includes("Generando"))
+                      return { ...s, status: "active" };
+                    return {
+                      ...s,
+                      status: s.status === "pending" ? "pending" : "done",
+                    };
+                  }),
+                effectiveStreamChatId,
+              );
 
               const fullContent = data.content;
               const responseSources = data.sources || [];
-              const figmaDiagram = data.figmaDiagram as FigmaDiagram | undefined;
+              const figmaDiagram = data.figmaDiagram as
+                | FigmaDiagram
+                | undefined;
               const responseArtifact = data.artifact;
               const responseWebSources = data.webSources;
 
@@ -7405,8 +9557,14 @@ IMPORTANTE:
                 streamIntervalRef.current = setInterval(() => {
                   if (currentIndex < fullContent.length) {
                     const chunkSize = Math.floor(Math.random() * 5) + 3;
-                    currentIndex = Math.min(currentIndex + chunkSize, fullContent.length);
-                    streamingContentRef.current = fullContent.slice(0, currentIndex);
+                    currentIndex = Math.min(
+                      currentIndex + chunkSize,
+                      fullContent.length,
+                    );
+                    streamingContentRef.current = fullContent.slice(
+                      0,
+                      currentIndex,
+                    );
                     setStreamingContent(fullContent.slice(0, currentIndex));
                   } else {
                     if (streamIntervalRef.current) {
@@ -7442,15 +9600,27 @@ IMPORTANTE:
               setAiStateForChat("responding", effectiveStreamChatId);
 
               // Check document modes
-              const isExcelModeLegacy = (activeDocEditorRef.current?.type === "excel") || (previewDocumentRef.current?.type === "excel");
-              const isWordModeLegacy = activeDocEditorRef.current?.type === "word";
-              const shouldWriteToDocLegacy = !!activeDocEditorRef.current && isWordModeLegacy;
+              const isExcelModeLegacy =
+                activeDocEditorRef.current?.type === "excel" ||
+                previewDocumentRef.current?.type === "excel";
+              const isWordModeLegacy =
+                activeDocEditorRef.current?.type === "word";
+              const shouldWriteToDocLegacy =
+                !!activeDocEditorRef.current && isWordModeLegacy;
 
-              console.log('[ChatInterface] Legacy mode:', { isExcelModeLegacy, isWordModeLegacy, hasInsertFn: !!docInsertContentRef.current });
+              console.log("[ChatInterface] Legacy mode:", {
+                isExcelModeLegacy,
+                isWordModeLegacy,
+                hasInsertFn: !!docInsertContentRef.current,
+              });
 
               // Excel mode: send data directly to Excel at the end (no progressive streaming in chat)
               if (isExcelModeLegacy && docInsertContentRef.current) {
-                console.log('[ChatInterface] Excel mode (legacy): sending', fullContent.length, 'chars to Excel');
+                console.log(
+                  "[ChatInterface] Excel mode (legacy): sending",
+                  fullContent.length,
+                  "chars to Excel",
+                );
                 try {
                   await docInsertContentRef.current(fullContent);
                   streamTransition.finalize({
@@ -7462,7 +9632,10 @@ IMPORTANTE:
                     userMessageId: userMsgId,
                   });
                 } catch (err) {
-                  console.error('[ChatInterface] Error streaming to Excel (legacy):', err);
+                  console.error(
+                    "[ChatInterface] Error streaming to Excel (legacy):",
+                    err,
+                  );
                   streamTransition.finalize({
                     id: (Date.now() + 1).toString(),
                     role: "assistant",
@@ -7483,24 +9656,38 @@ IMPORTANTE:
               streamIntervalRef.current = setInterval(() => {
                 if (currentIndex < fullContent.length) {
                   const chunkSize = Math.floor(Math.random() * 3) + 1;
-                  const newContent = fullContent.slice(0, currentIndex + chunkSize);
+                  const newContent = fullContent.slice(
+                    0,
+                    currentIndex + chunkSize,
+                  );
 
                   // Write to document if in document mode (cumulative)
                   if (shouldWriteToDocLegacy && docInsertContentRef.current) {
                     try {
                       const newContentHTML = markdownToTipTap(newContent);
-                      const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
-                      docInsertContentRef.current(cumulativeHTML, 'html');
+                      const cumulativeHTML =
+                        existingDocHTML + separatorHTML + newContentHTML;
+                      docInsertContentRef.current(cumulativeHTML, "html");
                       // Update state so subsequent instructions have the current content
                       setEditedDocumentContent(cumulativeHTML);
                     } catch (err) {
-                      console.error('[ChatInterface] Error streaming to document (legacy):', err);
+                      console.error(
+                        "[ChatInterface] Error streaming to document (legacy):",
+                        err,
+                      );
                     }
                   } else {
                     // Store content in streaming store for conversation affinity
                     const originalChatId = streamingChatIdRef.current;
                     if (originalChatId) {
-                      appendContent(originalChatId, fullContent.slice(currentIndex, currentIndex + chunkSize), currentIndex);
+                      appendContent(
+                        originalChatId,
+                        fullContent.slice(
+                          currentIndex,
+                          currentIndex + chunkSize,
+                        ),
+                        currentIndex,
+                      );
                     }
                     streamingContentRef.current = newContent;
                     setStreamingContent(newContent);
@@ -7516,12 +9703,16 @@ IMPORTANTE:
                   if (shouldWriteToDocLegacy && docInsertContentRef.current) {
                     try {
                       const newContentHTML = markdownToTipTap(fullContent);
-                      const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
-                      docInsertContentRef.current(cumulativeHTML, 'html');
+                      const cumulativeHTML =
+                        existingDocHTML + separatorHTML + newContentHTML;
+                      docInsertContentRef.current(cumulativeHTML, "html");
                       // Update state so subsequent instructions have the current content
                       setEditedDocumentContent(cumulativeHTML);
                     } catch (err) {
-                      console.error('[ChatInterface] Error finalizing document (legacy):', err);
+                      console.error(
+                        "[ChatInterface] Error finalizing document (legacy):",
+                        err,
+                      );
                     }
 
                     streamTransition.finalize({
@@ -7541,7 +9732,10 @@ IMPORTANTE:
                       timestamp: new Date(),
                       requestId: generateRequestId(),
                       userMessageId: userMsgId,
-                      sources: responseSources.length > 0 ? responseSources : undefined,
+                      sources:
+                        responseSources.length > 0
+                          ? responseSources
+                          : undefined,
                       artifact: responseArtifact,
                       webSources: responseWebSources,
                       confidence: uncertainty.confidence,
@@ -7553,10 +9747,8 @@ IMPORTANTE:
                   abortControllerRef.current = null;
                 }
               }, 15);
-
             }
           }
-
         } catch (error: any) {
           console.error("[handleSubmit] Error:", error);
           // Restore files on error so user doesn't lose them
@@ -7566,7 +9758,8 @@ IMPORTANTE:
           if (error?.name !== "AbortError") {
             toast({
               title: "Error al procesar",
-              description: "Hubo un error al enviar tu mensaje. Tus archivos fueron restaurados.",
+              description:
+                "Hubo un error al enviar tu mensaje. Tus archivos fueron restaurados.",
               variant: "destructive",
               duration: 5000,
             });
@@ -7602,40 +9795,40 @@ IMPORTANTE:
   return (
     <>
       {/* Welcome Explosion for first-time visitors */}
-      {showExplosion && (
-        <WelcomeExplosion onComplete={completeWelcome} />
-      )}
+      {showExplosion && <WelcomeExplosion onComplete={completeWelcome} />}
 
       <div className="flex h-full flex-col bg-transparent relative">
         {/* Header */}
         <ChatHeader
           chatId={chatId || null}
-          activeGpt={activeGpt || {
-            id: 'default',
-            name: 'ILIAGPT',
-            description: 'Asistente IA',
-            systemPrompt: '',
-            model: 'gpt-4o',
-            temperature: 0.7,
-            maxTokens: 4096,
-            topP: 1,
-            frequencyPenalty: 0,
-            presencePenalty: 0,
-            isPublic: false,
-            userId: 'system',
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            welcomeMessage: '',
-            conversationStarters: [],
-            avatar: ''
-          }}
+          activeGpt={
+            activeGpt || {
+              id: "default",
+              name: "ILIAGPT",
+              description: "Asistente IA",
+              systemPrompt: "",
+              model: "gpt-4o",
+              temperature: 0.7,
+              maxTokens: 4096,
+              topP: 1,
+              frequencyPenalty: 0,
+              presencePenalty: 0,
+              isPublic: false,
+              userId: "system",
+              createdAt: new Date(),
+              updatedAt: new Date(),
+              welcomeMessage: "",
+              conversationStarters: [],
+              avatar: "",
+            }
+          }
           messages={displayMessages}
           folders={folders}
           currentFolderId={currentFolderId}
           isPinned={isPinned}
           isArchived={isArchived}
           isSidebarOpen={isSidebarOpen}
-          onToggleSidebar={onToggleSidebar || (() => { })}
+          onToggleSidebar={onToggleSidebar || (() => {})}
           onNewChat={handleNewChat}
           onEditGpt={onEditGpt}
           onHideGptFromSidebar={onHideGptFromSidebar}
@@ -7653,28 +9846,45 @@ IMPORTANTE:
           userPlanInfo={effectiveUserPlanInfo}
         />
         {/* Main Content Area with Side Panel */}
-        {(previewDocument || activeDocEditor || (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool))) ? (
+        {previewDocument ||
+        activeDocEditor ||
+        (selectedDocTool &&
+          ["word", "excel", "ppt"].includes(selectedDocTool)) ? (
           <PanelGroup direction="horizontal" className="flex-1">
             {/* Left Panel: Minimized Chat for Document Mode */}
-            <Panel defaultSize={(activeDocEditor || selectedDocTool) ? 25 : 50} minSize={20} maxSize={(activeDocEditor || selectedDocTool) ? 35 : 70}>
+            <Panel
+              defaultSize={activeDocEditor || selectedDocTool ? 25 : 50}
+              minSize={20}
+              maxSize={activeDocEditor || selectedDocTool ? 35 : 70}
+            >
               <div className="flex flex-col min-w-0 h-full bg-background/50">
                 {/* Compact Header for Document Mode */}
                 {activeDocEditor && (
                   <div className="p-3 border-b border-border/50 bg-muted/30">
                     <div className="flex items-center gap-2">
-                      <div className={cn(
-                        "w-8 h-8 rounded-lg flex items-center justify-center",
-                        activeDocEditor.type === "word" && "bg-blue-600",
-                        activeDocEditor.type === "excel" && "bg-green-600",
-                        activeDocEditor.type === "ppt" && "bg-orange-500"
-                      )}>
+                      <div
+                        className={cn(
+                          "w-8 h-8 rounded-lg flex items-center justify-center",
+                          activeDocEditor.type === "word" && "bg-blue-600",
+                          activeDocEditor.type === "excel" && "bg-green-600",
+                          activeDocEditor.type === "ppt" && "bg-orange-500",
+                        )}
+                      >
                         <span className="text-white text-sm font-bold">
-                          {activeDocEditor.type === "word" ? "W" : activeDocEditor.type === "excel" ? "E" : "P"}
+                          {activeDocEditor.type === "word"
+                            ? "W"
+                            : activeDocEditor.type === "excel"
+                              ? "E"
+                              : "P"}
                         </span>
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">Instrucciones</p>
-                        <p className="text-xs text-muted-foreground">El AI escribe directo al documento</p>
+                        <p className="text-sm font-medium truncate">
+                          Instrucciones
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          El AI escribe directo al documento
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -7685,175 +9895,237 @@ IMPORTANTE:
                   <div
                     className={cn(
                       "flex-1 overflow-y-auto space-y-3 overscroll-contain pb-[var(--composer-height,120px)]",
-                      activeDocEditor ? "p-3" : "p-4 sm:p-6 md:p-10 space-y-6"
+                      activeDocEditor ? "p-3" : "p-4 sm:p-6 md:p-10 space-y-6",
                     )}
                   >
                     <SkeletonChatMessages count={3} />
                   </div>
-                ) : hasMessages && (
-                  <div
-                    className={cn(
-                      "flex-1 overflow-y-auto space-y-3 overscroll-contain pb-[var(--composer-height,120px)]",
-                      activeDocEditor ? "p-3" : "p-4 sm:p-6 md:p-10 space-y-6"
-                    )}
-                  >
-                    <ChatMessageList
-                      messages={displayMessages}
-                      onUserRetrySend={handleUserRetrySend}
-                      variant={activeDocEditor ? "compact" : "default"}
-                      editingMessageId={editingMessageId}
-                      editContent={editContent}
-                      setEditContent={setEditContent}
-                      copiedMessageId={copiedMessageId}
-                      messageFeedback={messageFeedback}
-                      speakingMessageId={speakingMessageId}
-                      isGeneratingImage={isGeneratingImage}
-                      pendingGeneratedImage={pendingGeneratedImage}
-                      latestGeneratedImageRef={latestGeneratedImageRef}
-                      streamingContent={streamingContent}
-                      streamingMsgId={streamChat.nextMessageIdRef.current}
-                      aiState={aiState}
-                      regeneratingMsgIndex={regeneratingMsgIndex}
-                      handleCopyMessage={handleCopyMessage}
-                      handleStartEdit={handleStartEdit}
-                      handleCancelEdit={handleCancelEdit}
-                      handleSendEdit={handleSendEdit}
-                      handleFeedback={handleFeedback}
-                      handleRegenerate={handleRegenerate}
-                      handleShare={handleShare}
-                      handleReadAloud={handleReadAloud}
-                      handleOpenDocumentPreview={handleOpenDocumentPreview}
-                      handleOpenFileAttachmentPreview={handleOpenFileAttachmentPreview}
-                      handleDownloadImage={handleDownloadImage}
-                      setLightboxImage={setLightboxImage}
-                      handleReopenDocument={handleReopenDocument}
-                      minimizedDocument={minimizedDocument}
-                      onRestoreDocument={restoreDocEditor}
-                      onSelectSuggestedReply={(text) => setInput(text)}
-                      onAgentCancel={handleAgentCancel}
-                      onAgentRetry={handleAgentRetry}
-                      onAgentArtifactPreview={(artifact) => setDocumentPreviewArtifact(artifact as DocumentPreviewArtifact)}
-                      onSuperAgentCancel={handleSuperAgentCancel}
-                      onSuperAgentRetry={handleSuperAgentRetry}
-                      onQuestionClick={(text) => setInput(text)}
-                      onToolConfirm={handleToolConfirm}
-                      onToolDeny={handleToolDeny}
-                      activeRunId={activeRunId}
-                      onRunComplete={handleRunComplete}
-                      uiPhase={uiPhase}
-                      aiProcessSteps={aiProcessSteps}
-                    />
+                ) : (
+                  hasMessages && (
+                    <div
+                      className={cn(
+                        "flex-1 overflow-y-auto space-y-3 overscroll-contain pb-[var(--composer-height,120px)]",
+                        activeDocEditor
+                          ? "p-3"
+                          : "p-4 sm:p-6 md:p-10 space-y-6",
+                      )}
+                    >
+                      <ChatMessageList
+                        messages={displayMessages}
+                        onUserRetrySend={handleUserRetrySend}
+                        variant={activeDocEditor ? "compact" : "default"}
+                        editingMessageId={editingMessageId}
+                        editContent={editContent}
+                        setEditContent={setEditContent}
+                        copiedMessageId={copiedMessageId}
+                        messageFeedback={messageFeedback}
+                        speakingMessageId={speakingMessageId}
+                        isGeneratingImage={isGeneratingImage}
+                        pendingGeneratedImage={pendingGeneratedImage}
+                        latestGeneratedImageRef={latestGeneratedImageRef}
+                        streamingContent={streamingContent}
+                        streamingMsgId={streamChat.nextMessageIdRef.current}
+                        aiState={aiState}
+                        regeneratingMsgIndex={regeneratingMsgIndex}
+                        handleCopyMessage={handleCopyMessage}
+                        handleStartEdit={handleStartEdit}
+                        handleCancelEdit={handleCancelEdit}
+                        handleSendEdit={handleSendEdit}
+                        handleFeedback={handleFeedback}
+                        handleRegenerate={handleRegenerate}
+                        handleShare={handleShare}
+                        handleReadAloud={handleReadAloud}
+                        handleOpenDocumentPreview={handleOpenDocumentPreview}
+                        handleOpenFileAttachmentPreview={
+                          handleOpenFileAttachmentPreview
+                        }
+                        handleDownloadImage={handleDownloadImage}
+                        setLightboxImage={setLightboxImage}
+                        handleReopenDocument={handleReopenDocument}
+                        minimizedDocument={minimizedDocument}
+                        onRestoreDocument={restoreDocEditor}
+                        onSelectSuggestedReply={(text) => setInput(text)}
+                        onAgentCancel={handleAgentCancel}
+                        onAgentRetry={handleAgentRetry}
+                        onAgentArtifactPreview={(artifact) =>
+                          setDocumentPreviewArtifact(
+                            artifact as DocumentPreviewArtifact,
+                          )
+                        }
+                        onSuperAgentCancel={handleSuperAgentCancel}
+                        onSuperAgentRetry={handleSuperAgentRetry}
+                        onQuestionClick={(text) => setInput(text)}
+                        onToolConfirm={handleToolConfirm}
+                        onToolDeny={handleToolDeny}
+                        activeRunId={activeRunId}
+                        onRunComplete={handleRunComplete}
+                        uiPhase={uiPhase}
+                        aiProcessSteps={aiProcessSteps}
+                      />
 
-                    {/* Agent Observer - Show when agent is running */}
-                    {agent.state.status !== "idle" && (
-                      <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
-                        <AgentObserver
-                          steps={agent.state.steps}
-                          objective={agent.state.objective}
-                          status={agent.state.status}
-                          onCancel={agent.cancel}
-                        />
-                      </div>
-                    )}
+                      {/* Agent Observer - Show when agent is running */}
+                      {agent.state.status !== "idle" && (
+                        <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
+                          <AgentObserver
+                            steps={agent.state.steps}
+                            objective={agent.state.objective}
+                            status={agent.state.status}
+                            onCancel={agent.cancel}
+                          />
+                        </div>
+                      )}
 
-                    {/* Production Mode Progress */}
-                    {aiState === "agent_working" && aiProcessSteps.length > 0 && (
-                      <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start mb-4">
-                        <ProductionProgress steps={aiProcessSteps} />
-                      </div>
-                    )}
-
-                    {/* Image Generation Loading Skeleton */}
-                    {isGeneratingImage && (
-                      <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
-                        <div className="flex flex-col gap-2 items-start">
-                          <div className="liquid-message-ai-light px-4 py-3 text-sm mb-2">
-                            <div className="flex items-center gap-2">
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              <span>Generando imagen...</span>
-                            </div>
+                      {/* Production Mode Progress */}
+                      {aiState === "agent_working" &&
+                        aiProcessSteps.length > 0 && (
+                          <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start mb-4">
+                            <ProductionProgress steps={aiProcessSteps} />
                           </div>
-                          <div className="px-4">
-                            <div className="w-64 h-64 bg-muted rounded-lg animate-pulse flex items-center justify-center">
-                              <Image className="h-8 w-8 text-muted-foreground" />
+                        )}
+
+                      {/* Image Generation Loading Skeleton */}
+                      {isGeneratingImage && (
+                        <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
+                          <div className="flex flex-col gap-2 items-start">
+                            <div className="liquid-message-ai-light px-4 py-3 text-sm mb-2">
+                              <div className="flex items-center gap-2">
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                <span>Generando imagen...</span>
+                              </div>
+                            </div>
+                            <div className="px-4">
+                              <div className="w-64 h-64 bg-muted rounded-lg animate-pulse flex items-center justify-center">
+                                <Image className="h-8 w-8 text-muted-foreground" />
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    )}
+                      )}
 
-                    {/* Thinking/Responding State - only show if aiState belongs to current chat and uiPhase is not 'console' */}
-                    {aiState !== "idle" && !isGeneratingImage && (!aiStateChatId || chatId === aiStateChatId) && uiPhase !== 'console' && (
-                      <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
-                        {/* Streaming Indicator with cancel button */}
-                        <StreamingIndicator
-                          aiState={aiState}
-                          streamingContent={streamingContent}
-                          onCancel={handleStopChat}
-                          uiPhase={uiPhase}
-                        />
+                      {/* Thinking/Responding State - only show if aiState belongs to current chat and uiPhase is not 'console' */}
+                      {aiState !== "idle" &&
+                        !isGeneratingImage &&
+                        (!aiStateChatId || chatId === aiStateChatId) &&
+                        uiPhase !== "console" && (
+                          <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
+                            {/* Streaming Indicator with cancel button */}
+                            <StreamingIndicator
+                              aiState={aiState}
+                              streamingContent={streamingContent}
+                              onCancel={handleStopChat}
+                              uiPhase={uiPhase}
+                            />
 
-                        {/* Context truncation notice */}
-                        {contextNotice && (
-                          <div className="mx-4 my-2 flex items-center gap-2 rounded-md bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-xs text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/40">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 flex-shrink-0">
-                              <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-                            </svg>
-                            <span>
-                              {contextNotice.type === "context_truncated" ? (
-                                <>Contexto comprimido: {contextNotice.droppedMessages} mensaje{contextNotice.droppedMessages !== 1 ? 's' : ''} anterior{contextNotice.droppedMessages !== 1 ? 'es' : ''} omitido{contextNotice.droppedMessages !== 1 ? 's' : ''} para ajustar al límite del modelo ({contextNotice.originalTokens.toLocaleString()} &rarr; {contextNotice.finalTokens.toLocaleString()} tokens).</>
-                              ) : contextNotice.type === "low_confidence_prompt" ? (
-                                <>Prompt ambiguo (confianza: {((contextNotice as any).confidence * 100).toFixed(0)}%). {(contextNotice as any).clarificationQuestions?.[0] || "Intenta ser más específico."}</>
-                              ) : (
-                                <>Aviso del sistema.</>
-                              )}
-                            </span>
-                            <button
-                              onClick={() => setContextNotice(null)}
-                              className="ml-auto flex-shrink-0 text-amber-500 hover:text-amber-700 dark:hover:text-amber-300"
-                              aria-label="Cerrar aviso"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
-                                <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-                              </svg>
-                            </button>
+                            {/* Context truncation notice */}
+                            {contextNotice && (
+                              <div className="mx-4 my-2 flex items-center gap-2 rounded-md bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-xs text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/40">
+                                <svg
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  viewBox="0 0 20 20"
+                                  fill="currentColor"
+                                  className="h-4 w-4 flex-shrink-0"
+                                >
+                                  <path
+                                    fillRule="evenodd"
+                                    d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z"
+                                    clipRule="evenodd"
+                                  />
+                                </svg>
+                                <span>
+                                  {contextNotice.type ===
+                                  "context_truncated" ? (
+                                    <>
+                                      Contexto comprimido:{" "}
+                                      {contextNotice.droppedMessages} mensaje
+                                      {contextNotice.droppedMessages !== 1
+                                        ? "s"
+                                        : ""}{" "}
+                                      anterior
+                                      {contextNotice.droppedMessages !== 1
+                                        ? "es"
+                                        : ""}{" "}
+                                      omitido
+                                      {contextNotice.droppedMessages !== 1
+                                        ? "s"
+                                        : ""}{" "}
+                                      para ajustar al límite del modelo (
+                                      {contextNotice.originalTokens.toLocaleString()}{" "}
+                                      &rarr;{" "}
+                                      {contextNotice.finalTokens.toLocaleString()}{" "}
+                                      tokens).
+                                    </>
+                                  ) : contextNotice.type ===
+                                    "low_confidence_prompt" ? (
+                                    <>
+                                      Prompt ambiguo (confianza:{" "}
+                                      {(
+                                        (contextNotice as any).confidence * 100
+                                      ).toFixed(0)}
+                                      %).{" "}
+                                      {(contextNotice as any)
+                                        .clarificationQuestions?.[0] ||
+                                        "Intenta ser más específico."}
+                                    </>
+                                  ) : (
+                                    <>Aviso del sistema.</>
+                                  )}
+                                </span>
+                                <button
+                                  onClick={() => setContextNotice(null)}
+                                  className="ml-auto flex-shrink-0 text-amber-500 hover:text-amber-700 dark:hover:text-amber-300"
+                                  aria-label="Cerrar aviso"
+                                >
+                                  <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    viewBox="0 0 20 20"
+                                    fill="currentColor"
+                                    className="h-3.5 w-3.5"
+                                  >
+                                    <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                                  </svg>
+                                </button>
+                              </div>
+                            )}
+
+                            {/* Streaming content with fade-in animation */}
+                            {aiState === "responding" && streamingContent && (
+                              <div className="animate-content-fade-in px-4 py-3 text-foreground min-w-0 font-sans text-base leading-relaxed font-normal">
+                                <MarkdownErrorBoundary
+                                  fallbackContent={streamingContent}
+                                >
+                                  <MarkdownRenderer
+                                    content={streamingContent}
+                                    customComponents={{
+                                      ...CleanDataTableComponents,
+                                    }}
+                                  />
+                                </MarkdownErrorBoundary>
+                                <span className="typing-cursor">|</span>
+                              </div>
+                            )}
                           </div>
                         )}
 
-                        {/* Streaming content with fade-in animation */}
-                        {aiState === "responding" && streamingContent && (
-                          <div className="animate-content-fade-in px-4 py-3 text-foreground min-w-0 font-sans text-base leading-relaxed font-normal">
-                            <MarkdownErrorBoundary fallbackContent={streamingContent}>
-                              <MarkdownRenderer
-                                content={streamingContent}
-                                customComponents={{ ...CleanDataTableComponents }}
-                              />
-                            </MarkdownErrorBoundary>
-                            <span className="typing-cursor">|</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                      {/* Execution Console - Show UniversalExecutionConsole when state is available, fallback to LiveExecutionConsole */}
+                      {uiPhase === "console" && activeRunId && (
+                        <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
+                          {executionRunState ? (
+                            <UniversalExecutionConsole
+                              runState={executionRunState as any}
+                              className="mb-4"
+                            />
+                          ) : (
+                            <LiveExecutionConsole
+                              runId={activeRunId}
+                              forceShow={true}
+                            />
+                          )}
+                        </div>
+                      )}
 
-                    {/* Execution Console - Show UniversalExecutionConsole when state is available, fallback to LiveExecutionConsole */}
-                    {uiPhase === 'console' && activeRunId && (
-                      <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
-                        {executionRunState ? (
-                          <UniversalExecutionConsole
-                            runState={executionRunState as any}
-                            className="mb-4"
-                          />
-                        ) : (
-                          <LiveExecutionConsole
-                            runId={activeRunId}
-                            forceShow={true}
-                          />
-                        )}
-                      </div>
-                    )}
-
-                    <div ref={bottomRef} />
-                  </div>
+                      <div ref={bottomRef} />
+                    </div>
+                  )
                 )}
 
                 {/* Centered content when no messages - Futuristic Welcome */}
@@ -7863,24 +10135,36 @@ IMPORTANTE:
                       <div className="flex flex-col items-center justify-center text-center space-y-4 mb-6">
                         <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mb-2">
                           {activeGpt.avatar ? (
-                            <img src={activeGpt.avatar} alt={activeGpt.name} className="w-full h-full rounded-2xl object-cover" />
+                            <img
+                              src={activeGpt.avatar}
+                              alt={activeGpt.name}
+                              className="w-full h-full rounded-2xl object-cover"
+                            />
                           ) : (
                             <Bot className="h-8 w-8 text-muted-foreground" />
                           )}
                         </div>
-                        <h2 className="text-xl font-semibold">{activeGpt.name}</h2>
-                        <p className="text-muted-foreground max-w-md">{activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?"}</p>
+                        <h2 className="text-xl font-semibold">
+                          {activeGpt.name}
+                        </h2>
+                        <p className="text-muted-foreground max-w-md">
+                          {activeGpt.welcomeMessage ||
+                            activeGpt.description ||
+                            "¿En qué puedo ayudarte?"}
+                        </p>
                         {activeGptConversationStarters.length > 0 && (
                           <div className="flex flex-wrap gap-2 mt-4 justify-center max-w-xl">
-                            {activeGptConversationStarters.map((starter, idx) => (
-                              <button
-                                key={idx}
-                                onClick={() => setInput(starter)}
-                                className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50 transition-colors text-left"
-                              >
-                                {starter}
-                              </button>
-                            ))}
+                            {activeGptConversationStarters.map(
+                              (starter, idx) => (
+                                <button
+                                  key={idx}
+                                  onClick={() => setInput(starter)}
+                                  className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50 transition-colors text-left"
+                                >
+                                  {starter}
+                                </button>
+                              ),
+                            )}
                           </div>
                         )}
                       </div>
@@ -7933,12 +10217,18 @@ IMPORTANTE:
                   setIsBrowserMaximized={setIsBrowserMaximized}
                   browserUrl={browserUrl}
                   variant="document"
-                  placeholder={selectedDocText ? "Escribe cómo mejorar el texto..." : "Type your message here..."}
+                  placeholder={
+                    selectedDocText
+                      ? "Escribe cómo mejorar el texto..."
+                      : "Type your message here..."
+                  }
                   selectedDocText={selectedDocText}
                   handleDocTextDeselect={handleDocTextDeselect}
                   onPreviewUploadedFile={handlePreviewUploadedFile}
                   onTextareaFocus={handleCloseModelSelector}
-                  isFilesLoading={uploadedFiles.some((f: UploadedFile) => isFileUploadBlockingSend(f))}
+                  isFilesLoading={uploadedFiles.some((f: UploadedFile) =>
+                    isFileUploadBlockingSend(f),
+                  )}
                   latencyMode={latencyMode}
                   setLatencyMode={setLatencyMode}
                   runtimeTarget={runtimeTarget}
@@ -7965,52 +10255,88 @@ IMPORTANTE:
             </PanelResizeHandle>
 
             {/* Right: Document Editor Panel */}
-            <Panel defaultSize={(activeDocEditor || selectedDocTool) ? 75 : 50} minSize={25}>
+            <Panel
+              defaultSize={activeDocEditor || selectedDocTool ? 75 : 50}
+              minSize={25}
+            >
               <EditorErrorBoundary>
                 <div className="h-full animate-in slide-in-from-right duration-300">
-                  {(activeDocEditor?.type === "ppt") ? (
+                  {activeDocEditor?.type === "ppt" ? (
                     <PPTEditorShellLazy
                       onClose={closeDocEditor}
-                      onInsertContent={(insertFn) => { docInsertContentRef.current = insertFn; }}
-                      initialShowInstructions={activeDocEditor?.showInstructions}
+                      onInsertContent={(insertFn) => {
+                        docInsertContentRef.current = insertFn;
+                      }}
+                      initialShowInstructions={
+                        activeDocEditor?.showInstructions
+                      }
                       initialContent={activeDocEditor?.content}
                     />
-                  ) : (activeDocEditor?.type === "excel" || previewDocument?.type === "excel") ? (
+                  ) : activeDocEditor?.type === "excel" ||
+                    previewDocument?.type === "excel" ? (
                     <SpreadsheetEditorLazy
                       key="excel-editor-stable"
-                      title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
+                      title={
+                        activeDocEditor
+                          ? activeDocEditor.title
+                          : previewDocument?.title || ""
+                      }
                       content={editedDocumentContent}
                       onChange={setEditedDocumentContent}
-                      onClose={activeDocEditor ? closeDocEditor : handleCloseDocumentPreview}
+                      onClose={
+                        activeDocEditor
+                          ? closeDocEditor
+                          : handleCloseDocumentPreview
+                      }
                       onDownload={() => {
                         if (activeDocEditor) {
                           handleDownloadDocument({
                             type: activeDocEditor.type,
                             title: activeDocEditor.title,
-                            content: editedDocumentContent
+                            content: editedDocumentContent,
                           });
                         } else if (previewDocument) {
                           handleDownloadDocument(previewDocument);
                         }
                       }}
-                      onInsertContent={(insertFn: (content: string) => void) => { docInsertContentRef.current = insertFn; }}
-                      onOrchestratorReady={(orch: { runOrchestrator: (prompt: string) => Promise<void> }) => { orchestratorRef.current = orch; }}
+                      onInsertContent={(
+                        insertFn: (content: string) => void,
+                      ) => {
+                        docInsertContentRef.current = insertFn;
+                      }}
+                      onOrchestratorReady={(orch: {
+                        runOrchestrator: (prompt: string) => Promise<void>;
+                      }) => {
+                        orchestratorRef.current = orch;
+                      }}
                     />
                   ) : (
                     <div className="relative h-full">
                       {/* Word/generic document editor — always visible when activeDocEditor or previewDocument exists */}
                       <EnhancedDocumentEditorLazy
-                        key={activeDocEditor ? `new-${activeDocEditor.type}` : previewDocument?.title}
-                        title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
+                        key={
+                          activeDocEditor
+                            ? `new-${activeDocEditor.type}`
+                            : previewDocument?.title
+                        }
+                        title={
+                          activeDocEditor
+                            ? activeDocEditor.title
+                            : previewDocument?.title || ""
+                        }
                         content={editedDocumentContent}
                         onChange={setEditedDocumentContent}
-                        onClose={activeDocEditor ? minimizeDocEditor : handleCloseDocumentPreview}
+                        onClose={
+                          activeDocEditor
+                            ? minimizeDocEditor
+                            : handleCloseDocumentPreview
+                        }
                         onDownload={() => {
                           if (activeDocEditor) {
                             handleDownloadDocument({
                               type: activeDocEditor.type,
                               title: activeDocEditor.title,
-                              content: editedDocumentContent
+                              content: editedDocumentContent,
                             });
                           } else if (previewDocument) {
                             handleDownloadDocument(previewDocument);
@@ -8019,7 +10345,11 @@ IMPORTANTE:
                         onSaveToLibrary={() => handleSaveToLibrary()}
                         onTextSelect={handleDocTextSelect}
                         onTextDeselect={handleDocTextDeselect}
-                        onInsertContent={(insertFn: (content: string) => void) => { docInsertContentRef.current = insertFn; }}
+                        onInsertContent={(
+                          insertFn: (content: string) => void,
+                        ) => {
+                          docInsertContentRef.current = insertFn;
+                        }}
                       />
                     </div>
                   )}
@@ -8067,7 +10397,9 @@ IMPORTANTE:
                     handleShare={handleShare}
                     handleReadAloud={handleReadAloud}
                     handleOpenDocumentPreview={handleOpenDocumentPreview}
-                    handleOpenFileAttachmentPreview={handleOpenFileAttachmentPreview}
+                    handleOpenFileAttachmentPreview={
+                      handleOpenFileAttachmentPreview
+                    }
                     handleDownloadImage={handleDownloadImage}
                     setLightboxImage={setLightboxImage}
                     handleReopenDocument={handleReopenDocument}
@@ -8076,7 +10408,11 @@ IMPORTANTE:
                     onSelectSuggestedReply={(text) => setInput(text)}
                     onAgentCancel={handleAgentCancel}
                     onAgentRetry={handleAgentRetry}
-                    onAgentArtifactPreview={(artifact) => setDocumentPreviewArtifact(artifact as DocumentPreviewArtifact)}
+                    onAgentArtifactPreview={(artifact) =>
+                      setDocumentPreviewArtifact(
+                        artifact as DocumentPreviewArtifact,
+                      )
+                    }
                     onSuperAgentCancel={handleSuperAgentCancel}
                     onSuperAgentRetry={handleSuperAgentRetry}
                     onQuestionClick={(text) => setInput(text)}
@@ -8084,8 +10420,8 @@ IMPORTANTE:
                     onToolDeny={handleToolDeny}
                     activeRunId={activeRunId}
                     onRunComplete={() => {
-                      console.log('[uiPhase] Run completed, uiPhase=done');
-                      setUiPhase('done');
+                      console.log("[uiPhase] Run completed, uiPhase=done");
+                      setUiPhase("done");
                       setActiveRunId(null);
                     }}
                     uiPhase={uiPhase}
@@ -8115,7 +10451,9 @@ IMPORTANTE:
             ) : (
               /* No messages - center content vertically */
               <div className="flex-1 min-h-0 flex flex-col items-center justify-center px-4">
-                {aiState !== "idle" && (!aiStateChatId || chatId === aiStateChatId) && uiPhase !== 'console' ? (
+                {aiState !== "idle" &&
+                (!aiStateChatId || chatId === aiStateChatId) &&
+                uiPhase !== "console" ? (
                   /* Processing indicators when AI is working */
                   <div className="w-full max-w-3xl mx-auto flex flex-col gap-4">
                     <StreamingIndicator
@@ -8127,7 +10465,9 @@ IMPORTANTE:
                     {streamingContent && (
                       <div className="animate-content-fade-in flex flex-col gap-2 max-w-[85%] items-start min-w-0">
                         <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
-                          <MarkdownErrorBoundary fallbackContent={streamingContent}>
+                          <MarkdownErrorBoundary
+                            fallbackContent={streamingContent}
+                          >
                             <MarkdownRenderer
                               content={streamingContent}
                               customComponents={{ ...CleanDataTableComponents }}
@@ -8147,7 +10487,11 @@ IMPORTANTE:
                     <motion.div
                       initial={{ scale: 0.9, opacity: 0, y: 10 }}
                       animate={{ scale: 1, opacity: 1, y: 0 }}
-                      transition={{ type: "spring", stiffness: 200, damping: 20 }}
+                      transition={{
+                        type: "spring",
+                        stiffness: 200,
+                        damping: 20,
+                      }}
                       className="mb-8 relative z-10"
                     >
                       {activeGpt?.avatar ? (
@@ -8170,7 +10514,11 @@ IMPORTANTE:
                     <motion.h1
                       initial={{ y: 20, opacity: 0 }}
                       animate={{ y: 0, opacity: 1 }}
-                      transition={{ duration: 0.5, delay: 0.1, ease: "easeOut" }}
+                      transition={{
+                        duration: 0.5,
+                        delay: 0.1,
+                        ease: "easeOut",
+                      }}
                       className="text-3xl sm:text-4xl font-semibold text-center mb-4 tracking-tight text-foreground relative z-10"
                     >
                       {activeGpt ? activeGpt.name : "¿En qué puedo ayudarte?"}
@@ -8179,19 +10527,28 @@ IMPORTANTE:
                     <motion.p
                       initial={{ y: 20, opacity: 0 }}
                       animate={{ y: 0, opacity: 1 }}
-                      transition={{ duration: 0.5, delay: 0.2, ease: "easeOut" }}
+                      transition={{
+                        duration: 0.5,
+                        delay: 0.2,
+                        ease: "easeOut",
+                      }}
                       className="text-muted-foreground text-center max-w-lg text-sm sm:text-base mb-10 leading-relaxed relative z-10 font-normal"
                     >
-                      {activeGpt
-                        ? (activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?")
-                        : selectedProject
-                          ? (
-                            <span>
-                              <span className="font-semibold text-foreground">{selectedProject.name}</span> lista para chartear con esta carpeta. Manten el contexto al alcance.
-                            </span>
-                          )
-                          : "Soy ILIAGPT, tu asistente de IA. Explora capacidades avanzadas como generación de código, diseño y análisis."
-                      }
+                      {activeGpt ? (
+                        activeGpt.welcomeMessage ||
+                        activeGpt.description ||
+                        "¿En qué puedo ayudarte?"
+                      ) : selectedProject ? (
+                        <span>
+                          <span className="font-semibold text-foreground">
+                            {selectedProject.name}
+                          </span>{" "}
+                          lista para chartear con esta carpeta. Manten el
+                          contexto al alcance.
+                        </span>
+                      ) : (
+                        "Soy ILIAGPT, tu asistente de IA. Explora capacidades avanzadas como generación de código, diseño y análisis."
+                      )}
                     </motion.p>
 
                     {activeGptConversationStarters.length > 0 && (
@@ -8295,7 +10652,9 @@ IMPORTANTE:
               isGoogleFormsActive={isGoogleFormsActive}
               setIsGoogleFormsActive={setIsGoogleFormsActive}
               onTextareaFocus={handleCloseModelSelector}
-              isFilesLoading={uploadedFiles.some((f: UploadedFile) => isFileUploadBlockingSend(f))}
+              isFilesLoading={uploadedFiles.some((f: UploadedFile) =>
+                isFileUploadBlockingSend(f),
+              )}
               latencyMode={latencyMode}
               setLatencyMode={setLatencyMode}
               runtimeTarget={runtimeTarget}
@@ -8323,7 +10682,7 @@ IMPORTANTE:
               id: `etl-${Date.now()}`,
               role: "assistant",
               content: `ETL Agent completed. ${summary}`,
-              timestamp: new Date()
+              timestamp: new Date(),
             });
           }}
         />
@@ -8336,7 +10695,7 @@ IMPORTANTE:
               id: `doc-gen-${Date.now()}`,
               role: "assistant",
               content: message,
-              timestamp: new Date()
+              timestamp: new Date(),
             });
           }}
         />
@@ -8351,8 +10710,10 @@ IMPORTANTE:
             onSendMessage({
               id: `forms-gen-${Date.now()}`,
               role: "assistant",
-              content: message + (formUrl ? `\n\n[Abrir en Google Forms](${formUrl})` : ""),
-              timestamp: new Date()
+              content:
+                message +
+                (formUrl ? `\n\n[Abrir en Google Forms](${formUrl})` : ""),
+              timestamp: new Date(),
             });
           }}
         />
@@ -8388,7 +10749,10 @@ IMPORTANTE:
                 variant="secondary"
                 size="icon"
                 className="absolute top-4 right-16 h-10 w-10 bg-black/60 hover:bg-black/80 text-white"
-                onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleDownloadImage(lightboxImage); }}
+                onClick={(e: React.MouseEvent) => {
+                  e.stopPropagation();
+                  handleDownloadImage(lightboxImage);
+                }}
                 data-testid="button-download-lightbox"
                 aria-label="Descargar imagen"
               >
@@ -8420,7 +10784,10 @@ IMPORTANTE:
               <div className="flex items-center justify-between px-6 py-4 border-b border-border">
                 <div className="flex items-center gap-3">
                   {(() => {
-                    const attTheme = getFileTheme(previewFileAttachment.name, previewFileAttachment.mimeType);
+                    const attTheme = getFileTheme(
+                      previewFileAttachment.name,
+                      previewFileAttachment.mimeType,
+                    );
                     return (
                       <motion.div
                         initial={{ scale: 0.8 }}
@@ -8428,7 +10795,7 @@ IMPORTANTE:
                         transition={{ delay: 0.1, duration: 0.2 }}
                         className={cn(
                           "flex items-center justify-center w-10 h-10 rounded-lg",
-                          attTheme.bgColor
+                          attTheme.bgColor,
                         )}
                       >
                         <span className="text-white text-sm font-bold">
@@ -8438,7 +10805,10 @@ IMPORTANTE:
                     );
                   })()}
                   <div>
-                    <h3 className="font-semibold text-lg text-foreground truncate max-w-md" data-testid="preview-file-name">
+                    <h3
+                      className="font-semibold text-lg text-foreground truncate max-w-md"
+                      data-testid="preview-file-name"
+                    >
                       {previewFileAttachment.name}
                     </h3>
                     <p className="text-sm text-muted-foreground">
@@ -8447,31 +10817,35 @@ IMPORTANTE:
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {previewFileAttachment.content && !previewFileAttachment.isLoading && !previewFileAttachment.isProcessing && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleCopyAttachmentContent}
-                          data-testid="button-copy-attachment-content"
-                        >
-                          {copiedAttachmentContent ? (
-                            <>
-                              <Check className="h-4 w-4 mr-2 text-green-500" />
-                              Copiado
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="h-4 w-4 mr-2" />
-                              Copiar
-                            </>
-                          )}
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Copiar contenido al portapapeles</TooltipContent>
-                    </Tooltip>
-                  )}
+                  {previewFileAttachment.content &&
+                    !previewFileAttachment.isLoading &&
+                    !previewFileAttachment.isProcessing && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleCopyAttachmentContent}
+                            data-testid="button-copy-attachment-content"
+                          >
+                            {copiedAttachmentContent ? (
+                              <>
+                                <Check className="h-4 w-4 mr-2 text-green-500" />
+                                Copiado
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="h-4 w-4 mr-2" />
+                                Copiar
+                              </>
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          Copiar contenido al portapapeles
+                        </TooltipContent>
+                      </Tooltip>
+                    )}
                   {previewFileAttachment.storagePath && (
                     <Button
                       variant="outline"
@@ -8506,7 +10880,11 @@ IMPORTANTE:
                     <div className="flex flex-col items-center gap-3">
                       <motion.div
                         animate={{ rotate: 360 }}
-                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                        transition={{
+                          duration: 1,
+                          repeat: Infinity,
+                          ease: "linear",
+                        }}
                       >
                         <Loader2 className="h-8 w-8 text-primary" />
                       </motion.div>
@@ -8520,7 +10898,12 @@ IMPORTANTE:
                       </motion.p>
                     </div>
                   </motion.div>
-                ) : isPdfFile(previewFileAttachment.mimeType, previewFileAttachment.name) && (previewFileAttachment.localUrl || previewFileAttachment.storagePath) ? (
+                ) : isPdfFile(
+                    previewFileAttachment.mimeType,
+                    previewFileAttachment.name,
+                  ) &&
+                  (previewFileAttachment.localUrl ||
+                    previewFileAttachment.storagePath) ? (
                   <motion.div
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -8529,12 +10912,18 @@ IMPORTANTE:
                   >
                     {previewFileAttachment.isProcessing && (
                       <div className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md px-3 py-2">
-                        Mostrando PDF original. El texto extraído se sigue procesando en segundo plano.
+                        Mostrando PDF original. El texto extraído se sigue
+                        procesando en segundo plano.
                       </div>
                     )}
                     <div className="rounded-lg overflow-hidden border border-border bg-background h-[65vh] min-h-[420px]">
                       <iframe
-                        src={previewFileAttachment.localUrl || resolveAttachmentStorageUrl(previewFileAttachment.storagePath)}
+                        src={
+                          previewFileAttachment.localUrl ||
+                          resolveAttachmentStorageUrl(
+                            previewFileAttachment.storagePath,
+                          )
+                        }
                         title={previewFileAttachment.name}
                         className="w-full h-full"
                       />
@@ -8550,9 +10939,13 @@ IMPORTANTE:
                       <motion.div
                         animate={{
                           scale: [1, 1.1, 1],
-                          rotate: [0, 5, -5, 0]
+                          rotate: [0, 5, -5, 0],
                         }}
-                        transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                        transition={{
+                          duration: 2,
+                          repeat: Infinity,
+                          ease: "easeInOut",
+                        }}
                       >
                         <RefreshCw className="h-10 w-10 text-amber-600 dark:text-amber-400" />
                       </motion.div>
@@ -8574,8 +10967,12 @@ IMPORTANTE:
                     className="prose prose-sm dark:prose-invert max-w-none"
                   >
                     <div className="bg-muted/30 p-4 rounded-lg overflow-auto max-h-[60vh]">
-                      <MarkdownErrorBoundary fallbackContent={previewFileAttachment.content}>
-                        <MarkdownRenderer content={previewFileAttachment.content} />
+                      <MarkdownErrorBoundary
+                        fallbackContent={previewFileAttachment.content}
+                      >
+                        <MarkdownRenderer
+                          content={previewFileAttachment.content}
+                        />
                       </MarkdownErrorBoundary>
                     </div>
                   </motion.div>
@@ -8588,7 +10985,8 @@ IMPORTANTE:
                   >
                     <FileText className="h-16 w-16 text-muted-foreground/50 mb-4" />
                     <p className="text-muted-foreground">
-                      La vista previa no está disponible para este tipo de archivo.
+                      La vista previa no está disponible para este tipo de
+                      archivo.
                     </p>
                     {previewFileAttachment.storagePath && (
                       <Button
@@ -8636,7 +11034,9 @@ IMPORTANTE:
                 <X className="h-5 w-5" />
               </button>
               <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-4">
-                <p className="text-white text-sm truncate">{previewUploadedImage.name}</p>
+                <p className="text-white text-sm truncate">
+                  {previewUploadedImage.name}
+                </p>
               </div>
             </motion.div>
           </motion.div>
@@ -8677,9 +11077,11 @@ IMPORTANTE:
                 byteNumbers[i] = byteCharacters.charCodeAt(i);
               }
               const byteArray = new Uint8Array(byteNumbers);
-              const blob = new Blob([byteArray], { type: artifact.mimeType || 'application/octet-stream' });
+              const blob = new Blob([byteArray], {
+                type: artifact.mimeType || "application/octet-stream",
+              });
               const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
+              const a = document.createElement("a");
               a.href = url;
               a.download = artifact.name;
               document.body.appendChild(a);
@@ -8694,7 +11096,9 @@ IMPORTANTE:
         <PricingModal
           open={showPricingModal}
           onClose={() => setShowPricingModal(false)}
-          quota={quotaInfo || { remaining: 0, limit: 3, resetAt: null, plan: "free" }}
+          quota={
+            quotaInfo || { remaining: 0, limit: 3, resetAt: null, plan: "free" }
+          }
         />
 
         {/* Upgrade Prompt Modal for free users after 3rd query */}

@@ -1,6 +1,13 @@
 import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, ExternalLink, Link2, Loader2, Plus } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ExternalLink,
+  Link2,
+  Loader2,
+  Plus,
+} from "lucide-react";
 import { apiFetch } from "@/lib/apiClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -113,14 +120,18 @@ function readStoredFlowDraft(): StoredGeminiCliFlowDraft | null {
       window.sessionStorage.removeItem(FLOW_STORAGE_KEY);
       return null;
     }
-    const freshness = typeof parsed.updatedAt === "number" ? parsed.updatedAt : parsed.createdAt;
+    const freshness =
+      typeof parsed.updatedAt === "number"
+        ? parsed.updatedAt
+        : parsed.createdAt;
     if (Date.now() - freshness > FLOW_STORAGE_TTL_MS) {
       window.sessionStorage.removeItem(FLOW_STORAGE_KEY);
       return null;
     }
     return {
       ...(parsed as StoredGeminiCliFlowDraft),
-      callbackUrl: typeof parsed.callbackUrl === "string" ? parsed.callbackUrl : "",
+      callbackUrl:
+        typeof parsed.callbackUrl === "string" ? parsed.callbackUrl : "",
       updatedAt: freshness,
     };
   } catch {
@@ -159,7 +170,34 @@ function clearStoredFlowDraft(): void {
   }
 }
 
-export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps) {
+function resolveFlowForCallbackInput(params: {
+  callbackUrl: string;
+  currentFlowId: string | null;
+  storedFlow: StoredGeminiCliFlowDraft | null;
+}): {
+  flowId: string;
+  flowProof?: GeminiCliFlowProof;
+} | null {
+  const callbackFlowId = extractFlowIdFromCallbackValue(params.callbackUrl);
+  const resolvedFlowId =
+    callbackFlowId || params.currentFlowId || params.storedFlow?.flowId || "";
+
+  if (!resolvedFlowId) {
+    return null;
+  }
+
+  return {
+    flowId: resolvedFlowId,
+    flowProof:
+      params.storedFlow?.flowId === resolvedFlowId
+        ? params.storedFlow.flowProof
+        : undefined,
+  };
+}
+
+export function GeminiCliOAuthButton({
+  onConnected,
+}: GeminiCliOAuthButtonProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [open, setOpen] = React.useState(false);
@@ -171,19 +209,24 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
   const popupRef = React.useRef<Window | null>(null);
   const lastAutoCompletedCallbackRef = React.useRef<string | null>(null);
 
-  const { data: status, isLoading: isStatusLoading } = useQuery<GeminiCliStatusResponse>({
-    queryKey: STATUS_QUERY_KEY,
-    queryFn: async () => {
-      const res = await apiFetch("/api/oauth/google/gemini-cli/status", { cache: "no-store" });
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}));
-        throw new Error(payload?.error || "No se pudo consultar Gemini CLI OAuth");
-      }
-      return res.json();
-    },
-    enabled: open,
-    staleTime: 0,
-  });
+  const { data: status, isLoading: isStatusLoading } =
+    useQuery<GeminiCliStatusResponse>({
+      queryKey: STATUS_QUERY_KEY,
+      queryFn: async () => {
+        const res = await apiFetch("/api/oauth/google/gemini-cli/status", {
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(
+            payload?.error || "No se pudo consultar Gemini CLI OAuth",
+          );
+        }
+        return res.json();
+      },
+      enabled: open,
+      staleTime: 0,
+    });
 
   const startMutation = useMutation<GeminiCliStartResponse, Error>({
     mutationFn: async () => {
@@ -194,7 +237,9 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
       });
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(payload?.error || "No se pudo iniciar Gemini CLI OAuth");
+        throw new Error(
+          payload?.error || "No se pudo iniciar Gemini CLI OAuth",
+        );
       }
       return payload;
     },
@@ -223,7 +268,8 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
       if (!popup) {
         toast({
           title: "Ventana bloqueada",
-          description: "Abre manualmente la URL del flujo o habilita popups para continuar.",
+          description:
+            "Abre manualmente la URL del flujo o habilita popups para continuar.",
         });
         return;
       }
@@ -255,7 +301,9 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
       });
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(payload?.error || "No se pudo completar Gemini CLI OAuth");
+        throw new Error(
+          payload?.error || "No se pudo completar Gemini CLI OAuth",
+        );
       }
       return payload;
     },
@@ -263,7 +311,9 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
       popupRef.current?.close();
       popupRef.current = null;
       await queryClient.invalidateQueries({ queryKey: STATUS_QUERY_KEY });
-      await queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+      await queryClient.invalidateQueries({
+        queryKey: ["/api/models/available"],
+      });
       await Promise.resolve(onConnected?.(payload.selectedModelId));
       setOpen(false);
       setAcceptedRisk(false);
@@ -295,7 +345,9 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
       popupRef.current?.close();
       popupRef.current = null;
       await queryClient.invalidateQueries({ queryKey: STATUS_QUERY_KEY });
-      await queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+      await queryClient.invalidateQueries({
+        queryKey: ["/api/models/available"],
+      });
       await Promise.resolve(onConnected?.(payload.selectedModelId));
       setOpen(false);
       setAcceptedRisk(false);
@@ -326,7 +378,8 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
         const url = new URL(trimmed);
         const isAuthorizationUrl =
           url.hostname === "accounts.google.com" &&
-          (url.pathname === "/o/oauth2/v2/auth" || url.pathname === "/o/oauth2/auth");
+          (url.pathname === "/o/oauth2/v2/auth" ||
+            url.pathname === "/o/oauth2/auth");
         if (isAuthorizationUrl) {
           return "Pegaste la URL de autorización de Google. Debes completar el login y usar la URL final que vuelve a ILIAGPT.";
         }
@@ -337,7 +390,9 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
         const normalized = trimmed.startsWith("?") ? trimmed.slice(1) : trimmed;
         const params = new URLSearchParams(normalized);
         const looksLikeAuthorizationUrl =
-          params.has("response_type") || params.has("code_challenge") || params.has("code_challenge_method");
+          params.has("response_type") ||
+          params.has("code_challenge") ||
+          params.has("code_challenge_method");
         if (looksLikeAuthorizationUrl && !params.has("code")) {
           return "Pegaste la URL de autorización de Google. Debes completar el login y usar la URL final que vuelve a ILIAGPT.";
         }
@@ -361,9 +416,13 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
       });
       return;
     }
-    const resolvedFlowId =
-      flowId || extractFlowIdFromCallbackValue(callbackUrl) || readStoredFlowDraft()?.flowId || "";
-    if (!resolvedFlowId) {
+    const storedFlow = readStoredFlowDraft();
+    const resolvedFlow = resolveFlowForCallbackInput({
+      callbackUrl,
+      currentFlowId: flowId,
+      storedFlow,
+    });
+    if (!resolvedFlow) {
       toast({
         title: "Sesion OAuth no encontrada",
         description: "Inicia nuevamente la vinculacion para continuar.",
@@ -371,15 +430,22 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
       });
       return;
     }
-    if (!flowId) {
-      setFlowId(resolvedFlowId);
+    if (!flowId || flowId !== resolvedFlow.flowId) {
+      setFlowId(resolvedFlow.flowId);
     }
     completeMutation.mutate({
-      flowId: resolvedFlowId,
+      flowId: resolvedFlow.flowId,
       callbackUrl: normalizeCallbackInput(callbackUrl, redirectUri),
-      flowProof: readStoredFlowDraft()?.flowProof,
+      flowProof: resolvedFlow.flowProof,
     });
-  }, [callbackUrl, completeMutation, flowId, getManualCallbackValidationError, redirectUri, toast]);
+  }, [
+    callbackUrl,
+    completeMutation,
+    flowId,
+    getManualCallbackValidationError,
+    redirectUri,
+    toast,
+  ]);
 
   const handleCopyUrl = React.useCallback(async () => {
     if (!authUrl) return;
@@ -405,7 +471,8 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
     if (!popup) {
       toast({
         title: "Ventana bloqueada",
-        description: "No se pudo abrir la URL automaticamente. Copiala manualmente.",
+        description:
+          "No se pudo abrir la URL automaticamente. Copiala manualmente.",
       });
       return;
     }
@@ -413,24 +480,32 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
     popup.focus();
   }, [authUrl, flowId, toast]);
 
-  const resetLocalState = React.useCallback((nextOpen: boolean) => {
-    setOpen(nextOpen);
-    if (!nextOpen) {
-      popupRef.current?.close();
-      popupRef.current = null;
-      setAcceptedRisk(false);
-      setFlowId(null);
-      setAuthUrl("");
-      setRedirectUri("");
-      setCallbackUrl("");
-      lastAutoCompletedCallbackRef.current = null;
-      startMutation.reset();
-      completeMutation.reset();
-    }
-  }, [completeMutation, startMutation]);
+  const resetLocalState = React.useCallback(
+    (nextOpen: boolean) => {
+      setOpen(nextOpen);
+      if (!nextOpen) {
+        popupRef.current?.close();
+        popupRef.current = null;
+        setAcceptedRisk(false);
+        setFlowId(null);
+        setAuthUrl("");
+        setRedirectUri("");
+        setCallbackUrl("");
+        lastAutoCompletedCallbackRef.current = null;
+        startMutation.reset();
+        completeMutation.reset();
+      }
+    },
+    [completeMutation, startMutation],
+  );
 
   React.useEffect(() => {
-    if (!open || flowId || startMutation.isPending || completeMutation.isPending) {
+    if (
+      !open ||
+      flowId ||
+      startMutation.isPending ||
+      completeMutation.isPending
+    ) {
       return;
     }
     const storedFlow = readStoredFlowDraft();
@@ -475,15 +550,30 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
 
       const payload = event.data as GeminiCliResultMessage | undefined;
 
-      if (payload?.type !== "gemini-cli-oauth-callback" && payload?.type !== "gemini-cli-oauth-result") {
+      if (
+        payload?.type !== "gemini-cli-oauth-callback" &&
+        payload?.type !== "gemini-cli-oauth-result"
+      ) {
         return;
       }
-      const activeFlowId = flowId || readStoredFlowDraft()?.flowId || null;
-      if (!payload.flowId || !activeFlowId || payload.flowId !== activeFlowId) {
+      const storedFlow = readStoredFlowDraft();
+      const payloadCallbackUrl =
+        "callbackUrl" in payload && typeof payload.callbackUrl === "string"
+          ? payload.callbackUrl.trim()
+          : "";
+      const callbackFlowId = payloadCallbackUrl
+        ? extractFlowIdFromCallbackValue(payloadCallbackUrl)
+        : null;
+      const payloadFlowId =
+        (typeof payload.flowId === "string" ? payload.flowId.trim() : "") ||
+        callbackFlowId ||
+        "";
+
+      if (!payloadFlowId) {
         return;
       }
-      if (!flowId) {
-        setFlowId(payload.flowId);
+      if (!flowId || flowId !== payloadFlowId) {
+        setFlowId(payloadFlowId);
       }
 
       if (payload.type === "gemini-cli-oauth-result") {
@@ -502,7 +592,10 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
           lastAutoCompletedCallbackRef.current = null;
           toast({
             title: "No se pudo completar la vinculacion",
-            description: payload.errorDescription || payload.error || "No se pudo completar Gemini CLI OAuth.",
+            description:
+              payload.errorDescription ||
+              payload.error ||
+              "No se pudo completar Gemini CLI OAuth.",
             variant: "destructive",
           });
           return;
@@ -510,7 +603,11 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
       }
 
       if ("error" in payload && payload.error) {
-        if ("callbackUrl" in payload && typeof payload.callbackUrl === "string" && payload.callbackUrl.trim()) {
+        if (
+          "callbackUrl" in payload &&
+          typeof payload.callbackUrl === "string" &&
+          payload.callbackUrl.trim()
+        ) {
           setCallbackUrl(payload.callbackUrl.trim());
         }
         if (payload.error === "gemini_cli_invalid_state") {
@@ -526,7 +623,9 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
       }
 
       const nextCallbackUrl =
-        "callbackUrl" in payload && typeof payload.callbackUrl === "string" ? payload.callbackUrl.trim() : "";
+        "callbackUrl" in payload && typeof payload.callbackUrl === "string"
+          ? payload.callbackUrl.trim()
+          : "";
       if (!nextCallbackUrl || completeMutation.isPending) {
         return;
       }
@@ -547,16 +646,37 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
         return;
       }
 
-      completeMutation.mutate({
-        flowId: payload.flowId,
+      const resolvedFlow = resolveFlowForCallbackInput({
         callbackUrl: nextCallbackUrl,
-        flowProof: readStoredFlowDraft()?.flowProof,
+        currentFlowId: payloadFlowId,
+        storedFlow,
+      });
+      if (!resolvedFlow) {
+        lastAutoCompletedCallbackRef.current = null;
+        toast({
+          title: "Sesion OAuth no encontrada",
+          description: "Inicia nuevamente la vinculacion para continuar.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      completeMutation.mutate({
+        flowId: resolvedFlow.flowId,
+        callbackUrl: nextCallbackUrl,
+        flowProof: resolvedFlow.flowProof,
       });
     };
 
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [completeMutation, finishConnectedState, flowId, getManualCallbackValidationError, toast]);
+  }, [
+    completeMutation,
+    finishConnectedState,
+    flowId,
+    getManualCallbackValidationError,
+    toast,
+  ]);
 
   const isBusy = startMutation.isPending || completeMutation.isPending;
   const isConnected = Boolean(status?.connected);
@@ -569,10 +689,18 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
         size="icon"
         className="h-8 w-8 rounded-full border-primary/25 bg-background/80"
         onClick={() => setOpen(true)}
-        title={isConnected ? "Gemini CLI OAuth vinculado" : "Vincular Gemini CLI OAuth"}
+        title={
+          isConnected
+            ? "Gemini CLI OAuth vinculado"
+            : "Vincular Gemini CLI OAuth"
+        }
         data-testid="button-gemini-cli-oauth"
       >
-        {isConnected ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <Plus className="h-4 w-4" />}
+        {isConnected ? (
+          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+        ) : (
+          <Plus className="h-4 w-4" />
+        )}
       </Button>
 
       <Dialog open={open} onOpenChange={resetLocalState}>
@@ -580,7 +708,8 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
           <DialogHeader>
             <DialogTitle>Google Gemini CLI OAuth</DialogTitle>
             <DialogDescription>
-              Vincula tu cuenta de Google de pago para usar <strong>Gemini 3.1 Pro</strong> desde ILIAGPT.
+              Vincula tu cuenta de Google de pago para usar{" "}
+              <strong>Gemini 3.1 Pro</strong> desde ILIAGPT.
             </DialogDescription>
           </DialogHeader>
 
@@ -591,8 +720,10 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
                 <div className="space-y-1 text-sm">
                   <p className="font-medium">Advertencia de riesgo</p>
                   <p className="text-muted-foreground">
-                    Este es un flujo <strong>no oficial</strong>. Google puede limitar o restringir cuentas usadas
-                    con clientes Gemini CLI de terceros. Usa una cuenta que controles y asume ese riesgo antes de continuar.
+                    Este es un flujo <strong>no oficial</strong>. Google puede
+                    limitar o restringir cuentas usadas con clientes Gemini CLI
+                    de terceros. Usa una cuenta que controles y asume ese riesgo
+                    antes de continuar.
                   </p>
                 </div>
               </div>
@@ -615,7 +746,8 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
                         : "Gemini CLI OAuth ya esta configurado en el gateway."}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      Puedes volver a vincular si deseas cambiar la cuenta conectada.
+                      Puedes volver a vincular si deseas cambiar la cuenta
+                      conectada.
                     </p>
                   </div>
                 </div>
@@ -625,8 +757,12 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
                   <div className="space-y-1">
                     <p className="font-medium">Sin vinculacion activa</p>
                     <p className="text-muted-foreground">
-                      Al completar este flujo se guardara un auth profile oficial de OpenClaw y se expondra
-                      <code className="ml-1 rounded bg-background px-1 py-0.5 text-xs">google-gemini-cli/gemini-3.1-pro-preview</code>.
+                      Al completar este flujo se guardara un auth profile
+                      oficial de OpenClaw y se expondra
+                      <code className="ml-1 rounded bg-background px-1 py-0.5 text-xs">
+                        google-gemini-cli/gemini-3.1-pro-preview
+                      </code>
+                      .
                     </p>
                   </div>
                 </div>
@@ -640,8 +776,9 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
                 className="mt-0.5"
               />
               <span className="text-muted-foreground">
-                Entiendo que este flujo es no oficial, que puede implicar riesgo para la cuenta y que el gateway
-                guardara tokens OAuth para habilitar Gemini 3.1 Pro.
+                Entiendo que este flujo es no oficial, que puede implicar riesgo
+                para la cuenta y que el gateway guardara tokens OAuth para
+                habilitar Gemini 3.1 Pro.
               </span>
             </label>
 
@@ -650,22 +787,50 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
                 <div className="space-y-2 text-sm">
                   <p className="font-medium">Sigue estos pasos</p>
                   <ol className="space-y-1 text-muted-foreground">
-                    <li>1. Abre la URL de autorizacion en una pestaña nueva.</li>
+                    <li>
+                      1. Abre la URL de autorizacion en una pestaña nueva.
+                    </li>
                     <li>2. Inicia sesion con tu cuenta de Google de pago.</li>
-                    <li>3. Google volvera a <code>{redirectUri || "https://iliagpt.com/api/auth/google/callback"}</code> y la app intentara cerrar el popup automaticamente.</li>
-                    <li>4. Si el popup no se cierra solo, copia esa URL final y pegala aqui para terminar manualmente.</li>
+                    <li>
+                      3. Google volvera a{" "}
+                      <code>
+                        {redirectUri ||
+                          "https://iliagpt.com/api/auth/google/callback"}
+                      </code>{" "}
+                      y la app intentara cerrar el popup automaticamente.
+                    </li>
+                    <li>
+                      4. Si el popup no se cierra solo, copia esa URL final y
+                      pegala aqui para terminar manualmente.
+                    </li>
                   </ol>
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">URL de autorizacion</label>
-                  <Textarea readOnly value={authUrl} className="min-h-[88px] text-xs" />
+                  <label className="text-sm font-medium">
+                    URL de autorizacion
+                  </label>
+                  <Textarea
+                    readOnly
+                    value={authUrl}
+                    className="min-h-[88px] text-xs"
+                  />
                   <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" size="sm" onClick={handleOpenAuthUrl}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleOpenAuthUrl}
+                    >
                       <ExternalLink className="h-4 w-4" />
                       Abrir Google OAuth
                     </Button>
-                    <Button type="button" variant="outline" size="sm" onClick={handleCopyUrl}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleCopyUrl}
+                    >
                       <Link2 className="h-4 w-4" />
                       Copiar URL
                     </Button>
@@ -673,7 +838,10 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
                 </div>
 
                 <div className="space-y-2">
-                  <label htmlFor="gemini-cli-callback" className="text-sm font-medium">
+                  <label
+                    htmlFor="gemini-cli-callback"
+                    className="text-sm font-medium"
+                  >
                     Callback pegado desde el navegador
                   </label>
                   <Textarea
@@ -689,7 +857,11 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => resetLocalState(false)}>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => resetLocalState(false)}
+            >
               Cancelar
             </Button>
             {flowId ? (
@@ -698,7 +870,9 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
                 onClick={handleManualComplete}
                 disabled={!callbackUrl.trim() || isBusy}
               >
-                {completeMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                {completeMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : null}
                 Completar vinculacion
               </Button>
             ) : (
@@ -707,7 +881,9 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
                 onClick={() => startMutation.mutate()}
                 disabled={!acceptedRisk || isBusy}
               >
-                {startMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                {startMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : null}
                 Iniciar Gemini CLI OAuth
               </Button>
             )}

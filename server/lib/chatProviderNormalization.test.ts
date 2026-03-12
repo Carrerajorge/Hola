@@ -10,6 +10,9 @@ describe("normalizeChatRequestProvider", () => {
   it("preserves supported direct providers and auto mode", () => {
     expect(normalizeChatRequestProvider("xai")).toBe("xai");
     expect(normalizeChatRequestProvider("openai")).toBe("openai");
+    expect(normalizeChatRequestProvider("google-gemini-cli")).toBe(
+      "google-gemini-cli",
+    );
     expect(normalizeChatRequestProvider("auto")).toBe("auto");
   });
 

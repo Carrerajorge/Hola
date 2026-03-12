@@ -9,10 +9,13 @@ import { env } from "./config/env";
 import { chunkText, generateEmbeddingsBatch } from "./embeddingService";
 import { StepUpdate } from "./agent";
 import { browserSessionManager, SessionEvent } from "./agent/browser";
-import { fileProcessingQueue, FileStatusUpdate } from "./lib/fileProcessingQueue";
+import {
+  fileProcessingQueue,
+  FileStatusUpdate,
+} from "./lib/fileProcessingQueue";
 import { globalAuditMiddleware } from "./middleware/audit";
 import { pptExportRouter } from "./routes/pptExport";
-import swaggerUi from 'swagger-ui-express';
+import swaggerUi from "swagger-ui-express";
 import { passport } from "./lib/auth/passport";
 import { swaggerSpec } from "./lib/swagger";
 import { createChatsRouter } from "./routes/chatsRouter";
@@ -44,7 +47,10 @@ import powerRouter from "./routes/powerRouter";
 import { hitlRouter } from "./agent/tenaga/hitl/HitlRouter";
 import multiAgentRouter from "./routes/multiAgentRouter";
 import { metricsHandler, getMetricsJson } from "./lib/parePrometheusMetrics";
-import { createHealthRouter as createPareHealthRouter, getHealthSummary as getPareHealthSummary } from "./lib/pareHealthChecks";
+import {
+  createHealthRouter as createPareHealthRouter,
+  getHealthSummary as getPareHealthSummary,
+} from "./lib/pareHealthChecks";
 import { getMetricsSummary as getPareMetricsSummary } from "./lib/pareMetrics";
 import errorRouter from "./routes/errorRouter";
 import { createSpreadsheetRouter } from "./routes/spreadsheetRoutes";
@@ -88,30 +94,66 @@ import requestUnderstandingRoutes from "./routes/requestUnderstandingRoutes";
 import { createRunController } from "./agent/superAgent/tracing/RunController";
 import { createAuditDashboardRouter } from "./routes/auditDashboardRouter";
 import { createSuperIntelligenceRouter } from "./routes/superIntelligenceRouter";
-import { initializeAuditSystem, auditMiddleware } from "./services/superIntelligence/audit";
+import {
+  initializeAuditSystem,
+  auditMiddleware,
+} from "./services/superIntelligence/audit";
 import { initializeSuperIntelligence } from "./services/superIntelligence";
-import { initializeEventStore, getEventStore } from "./agent/superAgent/tracing/EventStore";
-import type { ExecutionEvent, ExecutionEventType } from "@shared/executionProtocol";
+import {
+  initializeEventStore,
+  getEventStore,
+} from "./agent/superAgent/tracing/EventStore";
+import type {
+  ExecutionEvent,
+  ExecutionEventType,
+} from "@shared/executionProtocol";
 import type { TraceEvent } from "./agent/superAgent/tracing/types";
 import { getStreamGateway } from "./agent/superAgent/tracing/StreamGateway";
 import type { TraceEmitter } from "./agent/superAgent/tracing/TraceEmitter";
 import { initializeRedisSSE } from "./lib/redisSSE";
 import { initializeAgentSystem } from "./agent/registry";
 import { ALL_TOOLS, SAFE_TOOLS, SYSTEM_TOOLS } from "./agent/langgraph/tools";
-import { getAllAgents, getAgentSummary, SPECIALIZED_AGENTS } from "./agent/langgraph/agents";
-import { getSuperAgentCoverageReport, type SuperAgentCoverageSource } from "./services/superAgentCoverage";
-import { listOpenClaw1000Capabilities, getOpenClaw1000QuickStats } from "./services/openClaw1000Service";
+import {
+  getAllAgents,
+  getAgentSummary,
+  SPECIALIZED_AGENTS,
+} from "./agent/langgraph/agents";
+import {
+  getSuperAgentCoverageReport,
+  type SuperAgentCoverageSource,
+} from "./services/superAgentCoverage";
+import {
+  listOpenClaw1000Capabilities,
+  getOpenClaw1000QuickStats,
+} from "./services/openClaw1000Service";
 import { buildOpenClaw1000CapabilityProfile } from "./services/openClaw1000CapabilityProfiler";
-import { createAuthenticatedWebSocketHandler, AuthenticatedWebSocket } from "./lib/wsAuth";
+import {
+  createAuthenticatedWebSocketHandler,
+  AuthenticatedWebSocket,
+} from "./lib/wsAuth";
 import { llmGateway } from "./lib/llmGateway";
 import { generateAnonToken } from "./lib/anonToken";
-import { getUserConfig, setUserConfig, getDefaultConfig, validatePatterns, getFilterStats } from "./services/contentFilter";
+import {
+  getUserConfig,
+  setUserConfig,
+  getDefaultConfig,
+  validatePatterns,
+  getFilterStats,
+} from "./services/contentFilter";
 import { isModelEligibleForPublic } from "./services/modelIntegration";
 import { GEMINI_MODELS_REGISTRY, XAI_MODELS } from "./lib/modelRegistry";
 import { getGoogleGeminiCliBootstrapModel } from "./services/googleGeminiCliOAuthService";
+import {
+  extractGeminiCliFlowIdFromState,
+  getGeminiCliOAuthFlow,
+} from "./lib/geminiCliOAuthFlowStore";
 import { getLogs, getLogStats, type LogFilters } from "./lib/structuredLogger";
 import { getActiveRequests, getRequestStats } from "./lib/requestTracer";
-import { getAllServicesHealth, getOverallStatus, initializeHealthMonitoring } from "./lib/healthMonitor";
+import {
+  getAllServicesHealth,
+  getOverallStatus,
+  initializeHealthMonitoring,
+} from "./lib/healthMonitor";
 import { getHealthStatus as getDbHealthStatus } from "./db";
 import { getRateLimiterStatus } from "./middleware/rateLimiter";
 import { templatesRouter } from "./routes/templatesRouter";
@@ -127,29 +169,194 @@ import { createSecurityRouter } from "./routes/securityRouter";
 import { createMfaRouter } from "./routes/mfaRouter";
 import { createPackagesRouter } from "./routes/packagesRouter";
 import { computeMfaForUser, startMfaLoginChallenge } from "./services/mfaLogin";
-import { getActiveAlerts, getAlertHistory, getAlertStats, resolveAlert } from "./lib/alertManager";
-import { recordConnectorUsage, getConnectorStats, getAllConnectorStats, resetConnectorStats, isValidConnector, type ConnectorName } from "./lib/connectorMetrics";
-import { checkConnectorHealth, checkAllConnectorsHealth, getHealthSummary, startPeriodicHealthCheck } from "./lib/connectorAlerting";
-import { getExecutionIntentGuardStatus, preExecutionIntentGuard } from "./middleware/preExecutionIntentGuard";
+import {
+  getActiveAlerts,
+  getAlertHistory,
+  getAlertStats,
+  resolveAlert,
+} from "./lib/alertManager";
+import {
+  recordConnectorUsage,
+  getConnectorStats,
+  getAllConnectorStats,
+  resetConnectorStats,
+  isValidConnector,
+  type ConnectorName,
+} from "./lib/connectorMetrics";
+import {
+  checkConnectorHealth,
+  checkAllConnectorsHealth,
+  getHealthSummary,
+  startPeriodicHealthCheck,
+} from "./lib/connectorAlerting";
+import {
+  getExecutionIntentGuardStatus,
+  preExecutionIntentGuard,
+} from "./middleware/preExecutionIntentGuard";
 import { require2FA } from "./middleware/auth";
 import {
-  runAgent, getTools, healthCheck as pythonAgentHealthCheck, isServiceAvailable, PythonAgentClientError,
-  browse as pythonAgentBrowse, search as pythonAgentSearch, createDocument as pythonAgentCreateDocument,
-  executeTool as pythonAgentExecuteTool, listFiles as pythonAgentListFiles, getStatus as pythonAgentGetStatus
+  runAgent,
+  getTools,
+  healthCheck as pythonAgentHealthCheck,
+  isServiceAvailable,
+  PythonAgentClientError,
+  browse as pythonAgentBrowse,
+  search as pythonAgentSearch,
+  createDocument as pythonAgentCreateDocument,
+  executeTool as pythonAgentExecuteTool,
+  listFiles as pythonAgentListFiles,
+  getStatus as pythonAgentGetStatus,
 } from "./services/pythonAgentClient";
 import express from "express";
+
+type GeminiCliFlowSessionEntry = {
+  verifier: string;
+  createdAt: number;
+  userId: string;
+  oauthState: string;
+  redirectUri: string;
+};
+
+type GeminiCliSessionState = {
+  geminiCliOAuthFlows?: Record<string, GeminiCliFlowSessionEntry>;
+};
+
+function buildGoogleCallbackUrl(req: Request): string {
+  const canonicalDomain = process.env.CANONICAL_DOMAIN || "iliagpt.com";
+  const callbackUrl = new URL(
+    env.NODE_ENV === "production"
+      ? `https://${canonicalDomain}/api/auth/google/callback`
+      : `${req.protocol}://${req.get("host")}/api/auth/google/callback`,
+  );
+
+  for (const [key, value] of Object.entries(req.query)) {
+    if (typeof value === "string") {
+      callbackUrl.searchParams.set(key, value);
+      continue;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        callbackUrl.searchParams.append(key, String(item));
+      }
+    }
+  }
+
+  return callbackUrl.toString();
+}
+
+function renderGeminiCliOAuthBridge(
+  res: Response,
+  payload: {
+    flowId: string;
+    callbackUrl?: string;
+    error?: string;
+    errorDescription?: string;
+  },
+): void {
+  const serializedPayload = JSON.stringify(payload).replace(/</g, "\\u003c");
+  res
+    .status(payload.error ? 400 : 200)
+    .setHeader("Content-Type", "text/html; charset=utf-8").send(`<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gemini CLI OAuth</title>
+    <style>
+      body { font-family: system-ui, sans-serif; background: #0b1020; color: #f8fafc; display: grid; place-items: center; min-height: 100vh; margin: 0; padding: 24px; }
+      .card { max-width: 520px; background: rgba(15, 23, 42, 0.92); border: 1px solid rgba(148, 163, 184, 0.22); border-radius: 20px; padding: 24px; box-shadow: 0 24px 80px rgba(15, 23, 42, 0.35); }
+      h1 { margin: 0 0 12px; font-size: 22px; }
+      p { margin: 0 0 12px; line-height: 1.55; color: #cbd5e1; }
+      #status { color: #93c5fd; }
+      code { display: block; margin-top: 12px; padding: 12px; background: rgba(15, 23, 42, 0.8); border-radius: 12px; color: #e2e8f0; word-break: break-all; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>${payload.error ? "No se pudo completar Gemini CLI OAuth" : "Gemini CLI OAuth completado"}</h1>
+      <p>${payload.error ? "Vuelve a ILIAGPT. El modal recibirá el error y podrás reintentar." : "Puedes volver a ILIAGPT. Esta ventana se cerrará automáticamente si el navegador lo permite."}</p>
+      <p id="status">${payload.error ? "Error devuelto por Google." : "Completando la vinculación en ILIAGPT..."}</p>
+      ${payload.callbackUrl ? `<code>${payload.callbackUrl.replace(/</g, "&lt;")}</code>` : ""}
+    </div>
+    <script>
+      (async function () {
+        const payload = ${serializedPayload};
+        const statusNode = document.getElementById("status");
+        const postToOpener = (message) => {
+          try {
+            if (window.opener && !window.opener.closed) {
+              window.opener.postMessage(
+                { type: "gemini-cli-oauth-result", ...message },
+                window.location.origin
+              );
+            }
+          } catch {}
+        };
+
+        try {
+          if (!payload.error && payload.flowId && payload.callbackUrl) {
+            if (statusNode) {
+              statusNode.textContent = "Código recibido. Volviendo a ILIAGPT para completar la vinculación...";
+            }
+            postToOpener({
+              type: "gemini-cli-oauth-callback",
+              flowId: payload.flowId,
+              callbackUrl: payload.callbackUrl,
+            });
+          } else {
+            postToOpener({
+              type: "gemini-cli-oauth-result",
+              flowId: payload.flowId,
+              status: "error",
+              error: payload.error,
+              errorDescription: payload.errorDescription,
+              callbackUrl: payload.callbackUrl,
+            });
+          }
+        } catch (error) {
+          const message =
+            error && typeof error === "object" && "message" in error
+              ? String((error as { message?: unknown }).message)
+              : "No se pudo completar Gemini CLI OAuth";
+          if (statusNode) {
+            statusNode.textContent = message;
+          }
+          postToOpener({
+            type: "gemini-cli-oauth-result",
+            flowId: payload.flowId,
+            status: "error",
+            error: "gemini_cli_complete_failed",
+            errorDescription: message,
+            callbackUrl: payload.callbackUrl,
+          });
+        }
+        setTimeout(() => {
+          try { window.close(); } catch {}
+        }, 400);
+      })();
+    </script>
+  </body>
+</html>`);
+}
 import path from "path";
 import fs from "fs";
 
 import { createRunRouter } from "./routes/runRouter";
 import { createBrowserControlRouter } from "./routes/browserControlRouter";
-import { createTerminalControlRouter, terminalClients } from "./routes/terminalControlRouter";
+import {
+  createTerminalControlRouter,
+  terminalClients,
+} from "./routes/terminalControlRouter";
 import { createWorkflowRouter } from "./routes/workflowRouter";
 import { createDeviceControlRouter } from "./routes/deviceControlRouter";
 import openClawRouter from "./routes/openClawRouter";
 import { createSuperProgrammingAgentRouter } from "./routes/superProgrammingAgentRouter";
 import { createSkillPlatformRouter } from "./routes/skillPlatformRouter";
-import { CSRF_COOKIE_NAME, CSRF_TOKEN_PATTERN, issueCsrfCookie } from "./middleware/csrf";
+import {
+  CSRF_COOKIE_NAME,
+  CSRF_TOKEN_PATTERN,
+  issueCsrfCookie,
+} from "./middleware/csrf";
 import { finopsRouter } from "./routes/finopsRouter";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
@@ -182,7 +389,9 @@ async function getConfiguredBootstrapModels(): Promise<PublicModelSummary[]> {
       name: isReasoner ? "DeepSeek Reasoner" : "DeepSeek Chat",
       provider: "deepseek",
       modelId: configuredModelId || "deepseek-chat",
-      description: isReasoner ? "Modelo DeepSeek para razonamiento" : "Modelo DeepSeek para chat general",
+      description: isReasoner
+        ? "Modelo DeepSeek para razonamiento"
+        : "Modelo DeepSeek para chat general",
       isEnabled: "true",
       enabledAt: null,
       displayOrder: 2,
@@ -232,12 +441,15 @@ async function getPublicModelFallbacks(): Promise<PublicModelSummary[]> {
   ];
 }
 
-async function mergeConfiguredBootstrapModels(models: PublicModelSummary[]): Promise<PublicModelSummary[]> {
+async function mergeConfiguredBootstrapModels(
+  models: PublicModelSummary[],
+): Promise<PublicModelSummary[]> {
   const merged = [...models];
 
   for (const bootstrap of await getConfiguredBootstrapModels()) {
-    const alreadyVisible = merged.some((model) =>
-      model.id === bootstrap.id || model.provider === bootstrap.provider
+    const alreadyVisible = merged.some(
+      (model) =>
+        model.id === bootstrap.id || model.provider === bootstrap.provider,
     );
 
     if (!alreadyVisible) {
@@ -266,16 +478,21 @@ function toPublicModelSummary(model: any): PublicModelSummary {
 
 export async function registerRoutes(
   httpServer: Server,
-  app: Express
+  app: Express,
 ): Promise<Server> {
   // Session + Passport are initialized in server/index.ts (before csrf/rateLimiter).
 
   // Passport Auth Routes
   // Google (always register to prevent 404, throw helpful errors internally if misconfigured)
   app.get("/api/auth/google", (req, res, next) => {
-    console.log("[Auth] Hit /api/auth/google endpoint", { id: !!env.GOOGLE_CLIENT_ID, secret: !!env.GOOGLE_CLIENT_SECRET });
+    console.log("[Auth] Hit /api/auth/google endpoint", {
+      id: !!env.GOOGLE_CLIENT_ID,
+      secret: !!env.GOOGLE_CLIENT_SECRET,
+    });
     if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
-      return res.status(503).json({ error: "Google authentication is not configured on this server" });
+      return res.status(503).json({
+        error: "Google authentication is not configured on this server",
+      });
     }
     passport.authenticate("google", {
       scope: ["openid", "email", "profile"],
@@ -283,11 +500,56 @@ export async function registerRoutes(
       prompt: "consent select_account",
     })(req, res, next);
   });
-  
+
   if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
-    app.get("/api/auth/google/callback",
-      (req, res, next) => {
-        passport.authenticate("google", { failureRedirect: "/login?error=google_failed" }, (err: any, user: any) => {
+    app.get("/api/auth/google/callback", (req, res, next) => {
+      const stateValue =
+        typeof req.query.state === "string" ? req.query.state.trim() : "";
+      const geminiFlowId = extractGeminiCliFlowIdFromState(stateValue) || "";
+      if (geminiFlowId) {
+        const session = ((req as any).session ?? {}) as GeminiCliSessionState;
+        const flow =
+          session.geminiCliOAuthFlows?.[geminiFlowId] ??
+          getGeminiCliOAuthFlow(geminiFlowId);
+
+        if (req.query.error) {
+          return renderGeminiCliOAuthBridge(res, {
+            flowId: geminiFlowId,
+            error: String(req.query.error),
+            errorDescription:
+              typeof req.query.error_description === "string"
+                ? req.query.error_description
+                : "",
+          });
+        }
+
+        if (typeof req.query.code !== "string" || !req.query.code.trim()) {
+          return renderGeminiCliOAuthBridge(res, {
+            flowId: geminiFlowId,
+            error: "gemini_cli_missing_code",
+            errorDescription: "Google no devolvió el código de autorización.",
+          });
+        }
+
+        if (flow && flow.oauthState !== stateValue) {
+          return renderGeminiCliOAuthBridge(res, {
+            flowId: geminiFlowId,
+            error: "gemini_cli_invalid_state",
+            errorDescription:
+              "El callback OAuth no coincide con la sesión iniciada.",
+          });
+        }
+
+        return renderGeminiCliOAuthBridge(res, {
+          flowId: geminiFlowId,
+          callbackUrl: buildGoogleCallbackUrl(req),
+        });
+      }
+
+      passport.authenticate(
+        "google",
+        { failureRedirect: "/login?error=google_failed" },
+        (err: any, user: any) => {
           (async () => {
             if (err || !user) {
               return res.redirect("/login?error=google_failed");
@@ -299,7 +561,10 @@ export async function registerRoutes(
               return res.redirect("/login?error=login_failed");
             }
 
-            const mfa = await computeMfaForUser({ userId, excludeSid: req.sessionID || null });
+            const mfa = await computeMfaForUser({
+              userId,
+              excludeSid: req.sessionID || null,
+            });
             if (mfa.requiresMfa) {
               try {
                 await startMfaLoginChallenge({
@@ -313,7 +578,10 @@ export async function registerRoutes(
                 });
                 return res.redirect("/login?mfa=1");
               } catch (e: any) {
-                console.warn("[Auth] Google callback MFA failed:", e?.message || e);
+                console.warn(
+                  "[Auth] Google callback MFA failed:",
+                  e?.message || e,
+                );
                 return res.redirect("/login?error=login_failed");
               }
             }
@@ -350,22 +618,42 @@ export async function registerRoutes(
               res.redirect("/?auth=success");
             });
           })().catch(next);
-        })(req, res, next);
-      }
-    );
+        },
+      )(req, res, next);
+    });
   } else {
     // Return a helpful error when Google auth is not configured
     app.get("/api/auth/google", (req, res) => {
-      res.status(503).json({ error: "Google authentication is not configured on this server" });
+      res.status(503).json({
+        error: "Google authentication is not configured on this server",
+      });
+    });
+    app.get("/api/auth/google/callback", (req, res) => {
+      const stateValue =
+        typeof req.query.state === "string" ? req.query.state.trim() : "";
+      const geminiFlowId = extractGeminiCliFlowIdFromState(stateValue) || "";
+      if (geminiFlowId) {
+        return renderGeminiCliOAuthBridge(res, {
+          flowId: geminiFlowId,
+          error: "google_auth_not_configured",
+          errorDescription:
+            "Google OAuth general no está configurado en este servidor.",
+        });
+      }
+      res.status(503).json({
+        error: "Google authentication is not configured on this server",
+      });
     });
   }
 
   // Microsoft (only register if credentials are configured)
   if (env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET) {
     app.get("/api/auth/microsoft", passport.authenticate("microsoft"));
-    app.get("/api/auth/microsoft/callback",
-      (req, res, next) => {
-        passport.authenticate("microsoft", { failureRedirect: "/login?error=microsoft_failed" }, (err: any, user: any) => {
+    app.get("/api/auth/microsoft/callback", (req, res, next) => {
+      passport.authenticate(
+        "microsoft",
+        { failureRedirect: "/login?error=microsoft_failed" },
+        (err: any, user: any) => {
           (async () => {
             if (err || !user) {
               return res.redirect("/login?error=microsoft_failed");
@@ -377,7 +665,10 @@ export async function registerRoutes(
               return res.redirect("/login?error=login_failed");
             }
 
-            const mfa = await computeMfaForUser({ userId, excludeSid: req.sessionID || null });
+            const mfa = await computeMfaForUser({
+              userId,
+              excludeSid: req.sessionID || null,
+            });
             if (mfa.requiresMfa) {
               try {
                 await startMfaLoginChallenge({
@@ -391,7 +682,10 @@ export async function registerRoutes(
                 });
                 return res.redirect("/login?mfa=1");
               } catch (e: any) {
-                console.warn("[Auth] Microsoft callback MFA failed:", e?.message || e);
+                console.warn(
+                  "[Auth] Microsoft callback MFA failed:",
+                  e?.message || e,
+                );
                 return res.redirect("/login?error=login_failed");
               }
             }
@@ -417,7 +711,10 @@ export async function registerRoutes(
               if (sess?.save) {
                 sess.save((saveErr: any) => {
                   if (saveErr) {
-                    console.error("[Auth] Microsoft session save error:", saveErr);
+                    console.error(
+                      "[Auth] Microsoft session save error:",
+                      saveErr,
+                    );
                     return res.redirect("/login?error=session_error");
                   }
                   res.redirect("/?auth=success");
@@ -428,21 +725,30 @@ export async function registerRoutes(
               res.redirect("/?auth=success");
             });
           })().catch(next);
-        })(req, res, next);
-      }
-    );
+        },
+      )(req, res, next);
+    });
   } else {
     app.get("/api/auth/microsoft", (req, res) => {
-      res.status(503).json({ error: "Microsoft authentication is not configured on this server" });
+      res.status(503).json({
+        error: "Microsoft authentication is not configured on this server",
+      });
     });
   }
 
   // Auth0 (only register if credentials are configured)
   if (env.AUTH0_DOMAIN && env.AUTH0_CLIENT_ID && env.AUTH0_CLIENT_SECRET) {
-    app.get("/api/auth/auth0", passport.authenticate("auth0", { scope: "openid email profile offline_access" }));
-    app.get("/api/auth/auth0/callback",
-      (req, res, next) => {
-        passport.authenticate("auth0", { failureRedirect: "/login?error=auth0_failed" }, (err: any, user: any) => {
+    app.get(
+      "/api/auth/auth0",
+      passport.authenticate("auth0", {
+        scope: "openid email profile offline_access",
+      }),
+    );
+    app.get("/api/auth/auth0/callback", (req, res, next) => {
+      passport.authenticate(
+        "auth0",
+        { failureRedirect: "/login?error=auth0_failed" },
+        (err: any, user: any) => {
           (async () => {
             if (err || !user) {
               return res.redirect("/login?error=auth0_failed");
@@ -454,7 +760,10 @@ export async function registerRoutes(
               return res.redirect("/login?error=login_failed");
             }
 
-            const mfa = await computeMfaForUser({ userId, excludeSid: req.sessionID || null });
+            const mfa = await computeMfaForUser({
+              userId,
+              excludeSid: req.sessionID || null,
+            });
             if (mfa.requiresMfa) {
               try {
                 await startMfaLoginChallenge({
@@ -468,7 +777,10 @@ export async function registerRoutes(
                 });
                 return res.redirect("/login?mfa=1");
               } catch (e: any) {
-                console.warn("[Auth] Auth0 callback MFA failed:", e?.message || e);
+                console.warn(
+                  "[Auth] Auth0 callback MFA failed:",
+                  e?.message || e,
+                );
                 return res.redirect("/login?error=login_failed");
               }
             }
@@ -505,12 +817,14 @@ export async function registerRoutes(
               res.redirect("/?auth=success");
             });
           })().catch(next);
-        })(req, res, next);
-      }
-    );
+        },
+      )(req, res, next);
+    });
   } else {
     app.get("/api/auth/auth0", (req, res) => {
-      res.status(503).json({ error: "Auth0 authentication is not configured on this server" });
+      res.status(503).json({
+        error: "Auth0 authentication is not configured on this server",
+      });
     });
   }
 
@@ -519,7 +833,10 @@ export async function registerRoutes(
   app.use("/api/auth/phone", phoneAuthRouter);
 
   // Global Audit Middleware (Logs mutations)
-  if (process.env.NODE_ENV !== "test" || process.env.ENABLE_AUDIT_IN_TEST === "true") {
+  if (
+    process.env.NODE_ENV !== "test" ||
+    process.env.ENABLE_AUDIT_IN_TEST === "true"
+  ) {
     app.use(globalAuditMiddleware);
     // Capture additional audit signals as early as possible.
     app.use(auditMiddleware);
@@ -552,20 +869,20 @@ export async function registerRoutes(
       // Get fresh role from database
       try {
         const dbUser = await storage.getUser(authUserId);
-        const role = dbUser?.role || 'user';
+        const role = dbUser?.role || "user";
         return res.json({
           userId: authUserId,
           email: authEmail || dbUser?.email,
           role: role,
-          isAnonymous: false
+          isAnonymous: false,
         });
       } catch (e) {
         // Fallback if DB lookup fails
         return res.json({
           userId: authUserId,
           email: authEmail,
-          role: 'user',
-          isAnonymous: false
+          role: "user",
+          isAnonymous: false,
         });
       }
     }
@@ -589,20 +906,26 @@ export async function registerRoutes(
       userId: anonUserId,
       token: anonUserId ? generateAnonToken(anonUserId) : null,
       email: null,
-      isAnonymous: true
+      isAnonymous: true,
     });
   });
 
   app.get("/api/csrf/token", (req: Request, res: Response) => {
-    const wantRotate = String(req.query.rotate || req.query.force || "").toLowerCase() === "1"
-      || String(req.query.refresh || "").toLowerCase() === "1"
-      || String(req.query.rotate || req.query.force || "").toLowerCase() === "true";
+    const wantRotate =
+      String(req.query.rotate || req.query.force || "").toLowerCase() === "1" ||
+      String(req.query.refresh || "").toLowerCase() === "1" ||
+      String(req.query.rotate || req.query.force || "").toLowerCase() ===
+        "true";
 
     const isReplitDeployment = !!process.env.REPL_SLUG;
-    const isProduction = process.env.NODE_ENV === "production" || isReplitDeployment;
+    const isProduction =
+      process.env.NODE_ENV === "production" || isReplitDeployment;
     const existing = req.cookies?.[CSRF_COOKIE_NAME];
 
-    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    res.setHeader(
+      "Cache-Control",
+      "no-store, no-cache, must-revalidate, max-age=0",
+    );
     res.setHeader("Pragma", "no-cache");
 
     if (!wantRotate && existing && CSRF_TOKEN_PATTERN.test(existing)) {
@@ -631,20 +954,32 @@ export async function registerRoutes(
         const ext = path.extname(filePath).toLowerCase();
         const stats = fs.statSync(filePath);
         if (ext === ".pptx") {
-          res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+          res.setHeader(
+            "Content-Type",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+          );
         } else if (ext === ".docx") {
-          res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+          res.setHeader(
+            "Content-Type",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          );
         } else if (ext === ".xlsx") {
-          res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+          res.setHeader(
+            "Content-Type",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          );
         } else if (ext === ".pdf") {
           res.setHeader("Content-Type", "application/pdf");
         } else if (ext === ".png") {
           res.setHeader("Content-Type", "image/png");
         }
         res.setHeader("Content-Length", stats.size);
-        res.setHeader("Content-Disposition", `attachment; filename="${path.basename(filePath)}"`);
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${path.basename(filePath)}"`,
+        );
         res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-      }
+      },
     }),
   );
 
@@ -660,10 +995,11 @@ export async function registerRoutes(
   app.use("/api", createAgentRouter(broadcastBrowserEvent));
 
   // Telemetry Dashboard
-  const { createTelemetryRouter } = await import('./telemetry/telemetryRouter');
+  const { createTelemetryRouter } = await import("./telemetry/telemetryRouter");
   app.use("/api/telemetry", createTelemetryRouter());
 
-  const { createPublicReleasesRouter } = await import("./routes/releasesRouter");
+  const { createPublicReleasesRouter } =
+    await import("./routes/releasesRouter");
   app.use("/api/public/releases", createPublicReleasesRouter());
 
   app.use(createFigmaRouter());
@@ -677,19 +1013,30 @@ export async function registerRoutes(
   // Integration Kernel OAuth routes (generic connector flow).
   // Mount one router per connectorId loaded into the ConnectorRegistry.
   try {
-    const { connectorRegistry } = await import("./integrations/kernel/connectorRegistry");
+    const { connectorRegistry } =
+      await import("./integrations/kernel/connectorRegistry");
     for (const connectorId of connectorRegistry.listIds()) {
-      app.use(`/api/connectors/oauth/${connectorId}`, createConnectorOAuthRouter(connectorId));
+      app.use(
+        `/api/connectors/oauth/${connectorId}`,
+        createConnectorOAuthRouter(connectorId),
+      );
     }
   } catch (err: any) {
-    console.warn("[Routes] Failed to mount connector OAuth routers:", err?.message || err);
+    console.warn(
+      "[Routes] Failed to mount connector OAuth routers:",
+      err?.message || err,
+    );
   }
 
   app.use("/api/integrations/google/forms", createGoogleFormsRouter());
   app.use("/api/integrations/google/gmail", createGmailRouter());
-  const { createWhatsAppWebRouter } = await import('./routes/whatsappWebRouter');
-  app.use('/api/integrations/whatsapp/web', createWhatsAppWebRouter());
-  app.use("/api/integrations/whatsapp/cloud", createWhatsAppCloudIntegrationRouter());
+  const { createWhatsAppWebRouter } =
+    await import("./routes/whatsappWebRouter");
+  app.use("/api/integrations/whatsapp/web", createWhatsAppWebRouter());
+  app.use(
+    "/api/integrations/whatsapp/cloud",
+    createWhatsAppCloudIntegrationRouter(),
+  );
   app.use("/api/integrations/telegram", createTelegramIntegrationRouter());
   app.use("/api/integrations/messenger", createMessengerIntegrationRouter());
   app.use("/api/integrations/wechat", createWeChatIntegrationRouter());
@@ -723,7 +1070,6 @@ export async function registerRoutes(
     app.use(prefix, preExecutionIntentGuard);
   }
 
-
   // ... existing imports ...
 
   app.use("/health", healthRouter);
@@ -732,7 +1078,8 @@ export async function registerRoutes(
   // Simple API health check (used by clients and local smoke checks)
   app.get("/api/health", (req, res) => {
     const mem = process.memoryUsage();
-    const appVersion = process.env.APP_VERSION || process.env.npm_package_version || "unknown";
+    const appVersion =
+      process.env.APP_VERSION || process.env.npm_package_version || "unknown";
     const packageVersion = process.env.npm_package_version || "unknown";
     res.json({
       status: "ok",
@@ -771,7 +1118,12 @@ export async function registerRoutes(
     // flap the slot on a single failed sample. Only mark not-ready once the DB
     // health monitor escalates to UNHEALTHY after consecutive failures.
     const dbReady = db.status !== "UNHEALTHY";
-    const status = db.status === "HEALTHY" ? "ready" : db.status === "DEGRADED" ? "degraded" : "not_ready";
+    const status =
+      db.status === "HEALTHY"
+        ? "ready"
+        : db.status === "DEGRADED"
+          ? "degraded"
+          : "not_ready";
     const httpStatus = dbReady ? 200 : 503;
 
     res.status(httpStatus).json({
@@ -804,12 +1156,15 @@ export async function registerRoutes(
     });
   });
 
-  app.get("/api/audit/execution-guard/status", (_req: Request, res: Response) => {
-    res.json(getExecutionIntentGuardStatus());
-  });
+  app.get(
+    "/api/audit/execution-guard/status",
+    (_req: Request, res: Response) => {
+      res.json(getExecutionIntentGuardStatus());
+    },
+  );
 
   // API Documentation
-  app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+  app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
   const metricsPublic = process.env.METRICS_PUBLIC === "true";
   if (metricsPublic) {
@@ -821,7 +1176,7 @@ export async function registerRoutes(
     res.json({
       prometheus: getMetricsJson(),
       internal: getPareMetricsSummary(),
-      health: getPareHealthSummary()
+      health: getPareHealthSummary(),
     });
   });
   app.use("/api/ai", aiExcelRouter);
@@ -888,13 +1243,22 @@ export async function registerRoutes(
 
   // ===== Browser & Terminal Control =====
   app.use("/api/browser-control", createBrowserControlRouter());
-  app.use("/api/terminal", requireAdminMiddleware, require2FA, createTerminalControlRouter());
+  app.use(
+    "/api/terminal",
+    requireAdminMiddleware,
+    require2FA,
+    createTerminalControlRouter(),
+  );
 
   // ===== macOS Native Control (AppleScript, System, Apps, Calendar, etc.) =====
   app.use("/api/macos", requireAdminMiddleware, createMacOSControlRouter());
 
   // ===== Automation Triggers (Cron, File Watch, Webhooks, System Events) =====
-  app.use("/api/triggers", requireAdminMiddleware, createAutomationTriggersRouter());
+  app.use(
+    "/api/triggers",
+    requireAdminMiddleware,
+    createAutomationTriggersRouter(),
+  );
 
   // ===== Voice & Audio (TTS, STT, Recording) =====
   app.use("/api/voice", requireAdminMiddleware, createVoiceRouter());
@@ -913,51 +1277,81 @@ export async function registerRoutes(
   initializeEventStore().catch(console.error);
 
   // ===== Start Persistent Trigger Engine =====
-  import("./services/persistentTriggerEngine").then(({ triggerEngine }) => {
-    triggerEngine.start().then(() => {
-      console.log("[TriggerEngine] Started");
-    }).catch(err => {
-      console.warn("[TriggerEngine] Start failed:", err.message);
-    });
-  }).catch(() => { });
+  import("./services/persistentTriggerEngine")
+    .then(({ triggerEngine }) => {
+      triggerEngine
+        .start()
+        .then(() => {
+          console.log("[TriggerEngine] Started");
+        })
+        .catch((err) => {
+          console.warn("[TriggerEngine] Start failed:", err.message);
+        });
+    })
+    .catch(() => {});
 
   // ===== Start Analytics Service =====
-  import("./services/advancedAnalytics").then(({ analyticsService }) => {
-    analyticsService.start();
-    console.log("[Analytics] Cost tracking started");
-  }).catch(() => { });
+  import("./services/advancedAnalytics")
+    .then(({ analyticsService }) => {
+      analyticsService.start();
+      console.log("[Analytics] Cost tracking started");
+    })
+    .catch(() => {});
 
-  initializeRedisSSE().then(() => {
-    console.log("[RedisSSE] Initialized");
-  }).catch(err => {
-    console.warn("[RedisSSE] Not available (Redis may not be configured):", err.message);
-  });
+  initializeRedisSSE()
+    .then(() => {
+      console.log("[RedisSSE] Initialized");
+    })
+    .catch((err) => {
+      console.warn(
+        "[RedisSSE] Not available (Redis may not be configured):",
+        err.message,
+      );
+    });
 
-  initializeAgentSystem({ runSmokeTest: false }).then(result => {
-    console.log(`[AgentSystem] Initialized: ${result.toolCount} tools, ${result.agentCount} agents`);
-  }).catch(err => {
-    console.error("[AgentSystem] Initialization failed:", err.message);
-  });
+  initializeAgentSystem({ runSmokeTest: false })
+    .then((result) => {
+      console.log(
+        `[AgentSystem] Initialized: ${result.toolCount} tools, ${result.agentCount} agents`,
+      );
+    })
+    .catch((err) => {
+      console.error("[AgentSystem] Initialization failed:", err.message);
+    });
 
   // Initialize SuperIntelligence System (includes all phases)
-  initializeSuperIntelligence().then((status) => {
-    console.log(`[SuperIntelligence] System initialized - Health: ${status.stats.healthScore.toFixed(1)}%`);
-  }).catch(err => {
-    console.error("[SuperIntelligence] System initialization failed:", err.message);
-    // Fall back to just audit system
-    initializeAuditSystem().then(() => {
-      console.log("[SuperIntelligence] Audit System initialized (fallback)");
-    }).catch(e => {
-      console.error("[SuperIntelligence] Audit System fallback failed:", e.message);
+  initializeSuperIntelligence()
+    .then((status) => {
+      console.log(
+        `[SuperIntelligence] System initialized - Health: ${status.stats.healthScore.toFixed(1)}%`,
+      );
+    })
+    .catch((err) => {
+      console.error(
+        "[SuperIntelligence] System initialization failed:",
+        err.message,
+      );
+      // Fall back to just audit system
+      initializeAuditSystem()
+        .then(() => {
+          console.log(
+            "[SuperIntelligence] Audit System initialized (fallback)",
+          );
+        })
+        .catch((e) => {
+          console.error(
+            "[SuperIntelligence] Audit System fallback failed:",
+            e.message,
+          );
+        });
     });
-  });
 
   // ===== Simple Tools & Agents Endpoints =====
 
   // GET /tools - Return all 100 tools
   app.get("/tools", requireAdminMiddleware, (_req: Request, res: Response) => {
     try {
-      const tools = ALL_TOOLS.map(tool => ({
+      const tools = ALL_TOOLS.map((tool) => ({
         name: tool.name,
         description: tool.description,
       }));
@@ -967,8 +1361,8 @@ export async function registerRoutes(
         count: tools.length,
         tools,
         categories: {
-          safe: SAFE_TOOLS.map(t => t.name),
-          system: SYSTEM_TOOLS.map(t => t.name),
+          safe: SAFE_TOOLS.map((t) => t.name),
+          system: SYSTEM_TOOLS.map((t) => t.name),
         },
       });
     } catch (error: any) {
@@ -983,7 +1377,7 @@ export async function registerRoutes(
   // GET /agents - Return all 10 agents
   app.get("/agents", requireAdminMiddleware, (_req: Request, res: Response) => {
     try {
-      const agents = SPECIALIZED_AGENTS.map(agent => ({
+      const agents = SPECIALIZED_AGENTS.map((agent) => ({
         name: agent.name,
         description: agent.description,
         capabilities: agent.capabilities,
@@ -1006,53 +1400,68 @@ export async function registerRoutes(
 
   // GET /api/super-agent/capabilities - Coverage mapping for Super Agente Digital 100
   // Query: ?source=combined|runtime|langgraph
-  app.get("/api/super-agent/capabilities", requireAdminMiddleware, async (req: Request, res: Response) => {
-    try {
-      const rawSource = typeof req.query.source === "string" ? req.query.source : "combined";
-      const source: SuperAgentCoverageSource =
-        rawSource === "langgraph" || rawSource === "runtime" || rawSource === "combined"
-          ? rawSource
-          : "combined";
+  app.get(
+    "/api/super-agent/capabilities",
+    requireAdminMiddleware,
+    async (req: Request, res: Response) => {
+      try {
+        const rawSource =
+          typeof req.query.source === "string" ? req.query.source : "combined";
+        const source: SuperAgentCoverageSource =
+          rawSource === "langgraph" ||
+          rawSource === "runtime" ||
+          rawSource === "combined"
+            ? rawSource
+            : "combined";
 
-      const report = await getSuperAgentCoverageReport(source);
+        const report = await getSuperAgentCoverageReport(source);
 
-      // Optional filters for quickly spotting gaps:
-      // - ?status=missing|partial|covered
-      // - ?ready=true|false
-      const statusFilter = typeof req.query.status === "string" ? req.query.status : undefined;
-      const readyFilter = typeof req.query.ready === "string" ? req.query.ready : undefined;
+        // Optional filters for quickly spotting gaps:
+        // - ?status=missing|partial|covered
+        // - ?ready=true|false
+        const statusFilter =
+          typeof req.query.status === "string" ? req.query.status : undefined;
+        const readyFilter =
+          typeof req.query.ready === "string" ? req.query.ready : undefined;
 
-      let capabilities = report.capabilities;
-      if (statusFilter === "missing" || statusFilter === "partial" || statusFilter === "covered") {
-        capabilities = capabilities.filter((c) => c.status === statusFilter);
+        let capabilities = report.capabilities;
+        if (
+          statusFilter === "missing" ||
+          statusFilter === "partial" ||
+          statusFilter === "covered"
+        ) {
+          capabilities = capabilities.filter((c) => c.status === statusFilter);
+        }
+        if (readyFilter === "true" || readyFilter === "false") {
+          const wantReady = readyFilter === "true";
+          capabilities = capabilities.filter(
+            (c) => c.availability.ready === wantReady,
+          );
+        }
+
+        const summary = {
+          total: capabilities.length,
+          covered: capabilities.filter((c) => c.status === "covered").length,
+          partial: capabilities.filter((c) => c.status === "partial").length,
+          missing: capabilities.filter((c) => c.status === "missing").length,
+          ready: capabilities.filter((c) => c.availability.ready).length,
+          blocked: capabilities.filter((c) => !c.availability.ready).length,
+        };
+        res.json({
+          success: true,
+          ...report,
+          summary,
+          capabilities,
+        });
+      } catch (error: any) {
+        console.error("[SuperAgentCapabilities] Error:", error);
+        res.status(500).json({
+          success: false,
+          error: error.message || "Failed to compute super agent coverage",
+        });
       }
-      if (readyFilter === "true" || readyFilter === "false") {
-        const wantReady = readyFilter === "true";
-        capabilities = capabilities.filter((c) => c.availability.ready === wantReady);
-      }
-
-      const summary = {
-        total: capabilities.length,
-        covered: capabilities.filter((c) => c.status === "covered").length,
-        partial: capabilities.filter((c) => c.status === "partial").length,
-        missing: capabilities.filter((c) => c.status === "missing").length,
-        ready: capabilities.filter((c) => c.availability.ready).length,
-        blocked: capabilities.filter((c) => !c.availability.ready).length,
-      };
-      res.json({
-        success: true,
-        ...report,
-        summary,
-        capabilities,
-      });
-    } catch (error: any) {
-      console.error("[SuperAgentCapabilities] Error:", error);
-      res.status(500).json({
-        success: false,
-        error: error.message || "Failed to compute super agent coverage",
-      });
-    }
-  });
+    },
+  );
 
   // GET /api/super-agent/capabilities-1000 - Runtime catalog for OpenClaw1000
   // Query:
@@ -1060,141 +1469,240 @@ export async function registerRoutes(
   // - ?status=implemented|partial|stub|missing
   // - ?q=<prompt-like text> (returns capability profile + filtered matches)
   // - ?limit=1..1000
-  app.get("/api/super-agent/capabilities-1000", requireAdminMiddleware, (req: Request, res: Response) => {
-    try {
-      const category = typeof req.query.category === "string" ? req.query.category : undefined;
-      const status = typeof req.query.status === "string" ? req.query.status : undefined;
-      const query = typeof req.query.q === "string" ? req.query.q.trim() : "";
-      const limitRaw = typeof req.query.limit === "string" ? Number.parseInt(req.query.limit, 10) : NaN;
-      const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 1000) : 200;
+  app.get(
+    "/api/super-agent/capabilities-1000",
+    requireAdminMiddleware,
+    (req: Request, res: Response) => {
+      try {
+        const category =
+          typeof req.query.category === "string"
+            ? req.query.category
+            : undefined;
+        const status =
+          typeof req.query.status === "string" ? req.query.status : undefined;
+        const query = typeof req.query.q === "string" ? req.query.q.trim() : "";
+        const limitRaw =
+          typeof req.query.limit === "string"
+            ? Number.parseInt(req.query.limit, 10)
+            : NaN;
+        const limit = Number.isFinite(limitRaw)
+          ? Math.min(Math.max(limitRaw, 1), 1000)
+          : 200;
 
-      let capabilities = listOpenClaw1000Capabilities({ category, status });
-      let profileSummary: any = null;
+        let capabilities = listOpenClaw1000Capabilities({ category, status });
+        let profileSummary: any = null;
 
-      if (query.length > 0) {
-        const profile = buildOpenClaw1000CapabilityProfile(query, {
-          limit: 80,
-          minScore: 0.08,
-          includeStatuses: status
-            ? [status as "implemented" | "partial" | "stub" | "missing"]
-            : ["implemented", "partial"],
+        if (query.length > 0) {
+          const profile = buildOpenClaw1000CapabilityProfile(query, {
+            limit: 80,
+            minScore: 0.08,
+            includeStatuses: status
+              ? [status as "implemented" | "partial" | "stub" | "missing"]
+              : ["implemented", "partial"],
+          });
+          const matchedIds = new Set(
+            profile.matches.map((match) => match.capability.id),
+          );
+          capabilities = capabilities.filter((capability) =>
+            matchedIds.has(capability.id),
+          );
+          profileSummary = {
+            query: profile.query,
+            matched: profile.matches.length,
+            categories: profile.categories,
+            recommendedTools: profile.recommendedTools,
+            top: profile.matches.slice(0, 15).map((match) => ({
+              id: match.capability.id,
+              code: match.capability.code,
+              capability: match.capability.capability,
+              tool: match.capability.toolName,
+              category: match.capability.category,
+              score: match.score,
+            })),
+          };
+        }
+
+        res.json({
+          success: true,
+          catalog: "openclaw1000",
+          stats: getOpenClaw1000QuickStats(),
+          total: capabilities.length,
+          profile: profileSummary,
+          capabilities: capabilities.slice(0, limit),
         });
-        const matchedIds = new Set(profile.matches.map((match) => match.capability.id));
-        capabilities = capabilities.filter((capability) => matchedIds.has(capability.id));
-        profileSummary = {
-          query: profile.query,
-          matched: profile.matches.length,
-          categories: profile.categories,
-          recommendedTools: profile.recommendedTools,
-          top: profile.matches.slice(0, 15).map((match) => ({
-            id: match.capability.id,
-            code: match.capability.code,
-            capability: match.capability.capability,
-            tool: match.capability.toolName,
-            category: match.capability.category,
-            score: match.score,
-          })),
-        };
+      } catch (error: any) {
+        console.error("[SuperAgentCapabilities1000] Error:", error);
+        res.status(500).json({
+          success: false,
+          error: error.message || "Failed to load OpenClaw1000 capabilities",
+        });
       }
-
-      res.json({
-        success: true,
-        catalog: "openclaw1000",
-        stats: getOpenClaw1000QuickStats(),
-        total: capabilities.length,
-        profile: profileSummary,
-        capabilities: capabilities.slice(0, limit),
-      });
-    } catch (error: any) {
-      console.error("[SuperAgentCapabilities1000] Error:", error);
-      res.status(500).json({
-        success: false,
-        error: error.message || "Failed to load OpenClaw1000 capabilities",
-      });
-    }
-  });
+    },
+  );
 
   // GET /api/tools - Enhanced tool catalog with category metadata
-  app.get("/api/tools", requireAdminMiddleware, (_req: Request, res: Response) => {
-    try {
-      const categoryMap: Record<string, string[]> = {
-        "Core": SAFE_TOOLS.map(t => t.name),
-        "System": SYSTEM_TOOLS.map(t => t.name),
-        "Web": ["browserNavigate", "browserClick", "browserType", "browserExtract", "browserScreenshot", "browserScroll", "browserClose", "webSearch", "webFetch", "webCrawl"],
-        "Generation": ["imageGenerate", "codeGenerate", "textGenerate", "dataGenerate", "templateGenerate"],
-        "Processing": ["textProcess", "dataTransform", "fileConvert", "imageProcess", "batchProcess"],
-        "Data": ["dataAnalyze", "dataVisualize", "dataExport", "dataImport", "dataValidate"],
-        "Document": ["documentCreate", "documentEdit", "documentParse", "documentMerge", "documentTemplate"],
-        "Development": ["codeAnalyze", "codeFormat", "codeLint", "codeTest", "codeDebug"],
-        "Diagram": ["diagramCreate", "flowchartGenerate", "mindmapCreate", "orgchartCreate"],
-        "API": ["apiCall", "apiMock", "apiTest", "apiDocument"],
-        "Productivity": ["taskCreate", "reminderSet", "noteCreate", "calendarEvent"],
-        "Security": ["secretsManage", "accessControl", "auditLog", "encryptData"],
-        "Automation": ["workflowCreate", "triggerSet", "scheduleTask", "batchRun"],
-        "Database": ["queryExecute", "schemaManage", "dataBackup", "dataMigrate"],
-        "Monitoring": ["metricsCollect", "alertCreate", "logAnalyze", "healthCheck"],
-        "Memory": ["memoryStore", "memoryRetrieve", "contextManage", "sessionState"],
-        "Reasoning": ["reason", "reflect", "verify"],
-        "Orchestration": ["orchestrate", "workflow", "strategicPlan"],
-        "Communication": ["decide", "clarify", "summarize", "explain"],
-      };
-
-      const categoryIcons: Record<string, string> = {
-        "Core": "zap",
-        "System": "terminal",
-        "Web": "globe",
-        "Generation": "sparkles",
-        "Processing": "cog",
-        "Data": "database",
-        "Document": "file-text",
-        "Development": "code",
-        "Diagram": "git-branch",
-        "API": "plug",
-        "Productivity": "calendar",
-        "Security": "shield",
-        "Automation": "repeat",
-        "Database": "hard-drive",
-        "Monitoring": "activity",
-        "Memory": "brain",
-        "Reasoning": "lightbulb",
-        "Orchestration": "layers",
-        "Communication": "message-circle",
-      };
-
-      const tools = ALL_TOOLS.map(tool => {
-        let category = "Utility";
-        for (const [cat, toolNames] of Object.entries(categoryMap)) {
-          if (toolNames.includes(tool.name)) {
-            category = cat;
-            break;
-          }
-        }
-        return {
-          name: tool.name,
-          description: tool.description,
-          category,
-          icon: categoryIcons[category] || "wrench",
+  app.get(
+    "/api/tools",
+    requireAdminMiddleware,
+    (_req: Request, res: Response) => {
+      try {
+        const categoryMap: Record<string, string[]> = {
+          Core: SAFE_TOOLS.map((t) => t.name),
+          System: SYSTEM_TOOLS.map((t) => t.name),
+          Web: [
+            "browserNavigate",
+            "browserClick",
+            "browserType",
+            "browserExtract",
+            "browserScreenshot",
+            "browserScroll",
+            "browserClose",
+            "webSearch",
+            "webFetch",
+            "webCrawl",
+          ],
+          Generation: [
+            "imageGenerate",
+            "codeGenerate",
+            "textGenerate",
+            "dataGenerate",
+            "templateGenerate",
+          ],
+          Processing: [
+            "textProcess",
+            "dataTransform",
+            "fileConvert",
+            "imageProcess",
+            "batchProcess",
+          ],
+          Data: [
+            "dataAnalyze",
+            "dataVisualize",
+            "dataExport",
+            "dataImport",
+            "dataValidate",
+          ],
+          Document: [
+            "documentCreate",
+            "documentEdit",
+            "documentParse",
+            "documentMerge",
+            "documentTemplate",
+          ],
+          Development: [
+            "codeAnalyze",
+            "codeFormat",
+            "codeLint",
+            "codeTest",
+            "codeDebug",
+          ],
+          Diagram: [
+            "diagramCreate",
+            "flowchartGenerate",
+            "mindmapCreate",
+            "orgchartCreate",
+          ],
+          API: ["apiCall", "apiMock", "apiTest", "apiDocument"],
+          Productivity: [
+            "taskCreate",
+            "reminderSet",
+            "noteCreate",
+            "calendarEvent",
+          ],
+          Security: [
+            "secretsManage",
+            "accessControl",
+            "auditLog",
+            "encryptData",
+          ],
+          Automation: [
+            "workflowCreate",
+            "triggerSet",
+            "scheduleTask",
+            "batchRun",
+          ],
+          Database: [
+            "queryExecute",
+            "schemaManage",
+            "dataBackup",
+            "dataMigrate",
+          ],
+          Monitoring: [
+            "metricsCollect",
+            "alertCreate",
+            "logAnalyze",
+            "healthCheck",
+          ],
+          Memory: [
+            "memoryStore",
+            "memoryRetrieve",
+            "contextManage",
+            "sessionState",
+          ],
+          Reasoning: ["reason", "reflect", "verify"],
+          Orchestration: ["orchestrate", "workflow", "strategicPlan"],
+          Communication: ["decide", "clarify", "summarize", "explain"],
         };
-      });
 
-      const categories = Object.entries(categoryMap)
-        .filter(([_, toolNames]) => toolNames.some(name => ALL_TOOLS.find(t => t.name === name)))
-        .map(([name, _]) => ({
-          name,
-          icon: categoryIcons[name] || "folder",
-          count: tools.filter(t => t.category === name).length,
-        }));
+        const categoryIcons: Record<string, string> = {
+          Core: "zap",
+          System: "terminal",
+          Web: "globe",
+          Generation: "sparkles",
+          Processing: "cog",
+          Data: "database",
+          Document: "file-text",
+          Development: "code",
+          Diagram: "git-branch",
+          API: "plug",
+          Productivity: "calendar",
+          Security: "shield",
+          Automation: "repeat",
+          Database: "hard-drive",
+          Monitoring: "activity",
+          Memory: "brain",
+          Reasoning: "lightbulb",
+          Orchestration: "layers",
+          Communication: "message-circle",
+        };
 
-      res.json({
-        success: true,
-        count: tools.length,
-        tools,
-        categories,
-      });
-    } catch (error: any) {
-      res.status(500).json({ success: false, error: error.message });
-    }
-  });
+        const tools = ALL_TOOLS.map((tool) => {
+          let category = "Utility";
+          for (const [cat, toolNames] of Object.entries(categoryMap)) {
+            if (toolNames.includes(tool.name)) {
+              category = cat;
+              break;
+            }
+          }
+          return {
+            name: tool.name,
+            description: tool.description,
+            category,
+            icon: categoryIcons[category] || "wrench",
+          };
+        });
+
+        const categories = Object.entries(categoryMap)
+          .filter(([_, toolNames]) =>
+            toolNames.some((name) => ALL_TOOLS.find((t) => t.name === name)),
+          )
+          .map(([name, _]) => ({
+            name,
+            icon: categoryIcons[name] || "folder",
+            count: tools.filter((t) => t.category === name).length,
+          }));
+
+        res.json({
+          success: true,
+          count: tools.length,
+          tools,
+          categories,
+        });
+      } catch (error: any) {
+        res.status(500).json({ success: false, error: error.message });
+      }
+    },
+  );
 
   // GET /api/agents - Alias for /agents
   app.get("/api/agents", (_req: Request, res: Response) => {
@@ -1307,7 +1815,9 @@ export async function registerRoutes(
       res.json({ success: true, data: result });
     } catch (error: any) {
       if (error instanceof PythonAgentClientError) {
-        return res.status(error.statusCode || 500).json({ success: false, error: error.message });
+        return res
+          .status(error.statusCode || 500)
+          .json({ success: false, error: error.message });
       }
       res.status(500).json({ success: false, error: error.message });
     }
@@ -1320,24 +1830,31 @@ export async function registerRoutes(
       res.json({ success: true, data: result });
     } catch (error: any) {
       if (error instanceof PythonAgentClientError) {
-        return res.status(error.statusCode || 500).json({ success: false, error: error.message });
+        return res
+          .status(error.statusCode || 500)
+          .json({ success: false, error: error.message });
       }
       res.status(500).json({ success: false, error: error.message });
     }
   });
 
   // POST /api/python-agent/document - Create document with Python agent
-  app.post("/api/python-agent/document", async (req: Request, res: Response) => {
-    try {
-      const result = await pythonAgentCreateDocument(req.body);
-      res.json({ success: true, data: result });
-    } catch (error: any) {
-      if (error instanceof PythonAgentClientError) {
-        return res.status(error.statusCode || 500).json({ success: false, error: error.message });
+  app.post(
+    "/api/python-agent/document",
+    async (req: Request, res: Response) => {
+      try {
+        const result = await pythonAgentCreateDocument(req.body);
+        res.json({ success: true, data: result });
+      } catch (error: any) {
+        if (error instanceof PythonAgentClientError) {
+          return res
+            .status(error.statusCode || 500)
+            .json({ success: false, error: error.message });
+        }
+        res.status(500).json({ success: false, error: error.message });
       }
-      res.status(500).json({ success: false, error: error.message });
-    }
-  });
+    },
+  );
 
   // POST /api/python-agent/execute - Execute specific tool
   app.post("/api/python-agent/execute", async (req: Request, res: Response) => {
@@ -1346,7 +1863,9 @@ export async function registerRoutes(
       res.json({ success: true, data: result });
     } catch (error: any) {
       if (error instanceof PythonAgentClientError) {
-        return res.status(error.statusCode || 500).json({ success: false, error: error.message });
+        return res
+          .status(error.statusCode || 500)
+          .json({ success: false, error: error.message });
       }
       res.status(500).json({ success: false, error: error.message });
     }
@@ -1359,38 +1878,49 @@ export async function registerRoutes(
       res.json({ success: true, data: result });
     } catch (error: any) {
       if (error instanceof PythonAgentClientError) {
-        return res.status(error.statusCode || 500).json({ success: false, error: error.message });
+        return res
+          .status(error.statusCode || 500)
+          .json({ success: false, error: error.message });
       }
       res.status(500).json({ success: false, error: error.message });
     }
   });
 
   // GET /api/python-agent/agent-status - Detailed agent status
-  app.get("/api/python-agent/agent-status", async (_req: Request, res: Response) => {
-    try {
-      const result = await pythonAgentGetStatus();
-      res.json({ success: true, data: result });
-    } catch (error: any) {
-      if (error instanceof PythonAgentClientError) {
-        return res.status(error.statusCode || 500).json({ success: false, error: error.message });
+  app.get(
+    "/api/python-agent/agent-status",
+    async (_req: Request, res: Response) => {
+      try {
+        const result = await pythonAgentGetStatus();
+        res.json({ success: true, data: result });
+      } catch (error: any) {
+        if (error instanceof PythonAgentClientError) {
+          return res
+            .status(error.statusCode || 500)
+            .json({ success: false, error: error.message });
+        }
+        res.status(500).json({ success: false, error: error.message });
       }
-      res.status(500).json({ success: false, error: error.message });
-    }
-  });
+    },
+  );
 
   // ===== Public Models Endpoint (for user-facing selector) =====
   app.get("/api/models/available", async (req: Request, res: Response) => {
     res.set({
       "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
-      "Pragma": "no-cache",
-      "Expires": "0"
+      Pragma: "no-cache",
+      Expires: "0",
     });
     try {
       const allModels = await storage.getAiModels();
-      const models = await mergeConfiguredBootstrapModels(allModels
-        .filter((m: any) => isModelEligibleForPublic(m))
-        .sort((a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0))
-        .map((m: any) => toPublicModelSummary(m)));
+      const models = await mergeConfiguredBootstrapModels(
+        allModels
+          .filter((m: any) => isModelEligibleForPublic(m))
+          .sort(
+            (a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0),
+          )
+          .map((m: any) => toPublicModelSummary(m)),
+      );
       res.json({ models });
     } catch (error: any) {
       console.error("[Models] Error fetching available models:", error);
@@ -1422,7 +1952,7 @@ export async function registerRoutes(
       console.error("[QualityStats] Error getting stats:", error);
       res.status(500).json({
         success: false,
-        error: error.message || "Failed to get quality stats"
+        error: error.message || "Failed to get quality stats",
       });
     }
   });
@@ -1441,7 +1971,7 @@ export async function registerRoutes(
       console.error("[ContentFilter] Error getting config:", error);
       res.status(500).json({
         success: false,
-        error: error.message || "Failed to get filter config"
+        error: error.message || "Failed to get filter config",
       });
     }
   });
@@ -1453,10 +1983,14 @@ export async function registerRoutes(
       const { enabled, sensitivityLevel, customPatterns } = req.body;
 
       // Validate sensitivity level
-      if (sensitivityLevel && !["low", "medium", "high"].includes(sensitivityLevel)) {
+      if (
+        sensitivityLevel &&
+        !["low", "medium", "high"].includes(sensitivityLevel)
+      ) {
         return res.status(400).json({
           success: false,
-          error: "Invalid sensitivity level. Must be 'low', 'medium', or 'high'",
+          error:
+            "Invalid sensitivity level. Must be 'low', 'medium', or 'high'",
         });
       }
 
@@ -1485,7 +2019,7 @@ export async function registerRoutes(
       console.error("[ContentFilter] Error updating config:", error);
       res.status(500).json({
         success: false,
-        error: error.message || "Failed to update filter config"
+        error: error.message || "Failed to update filter config",
       });
     }
   });
@@ -1501,7 +2035,7 @@ export async function registerRoutes(
     } catch (error: any) {
       res.status(500).json({
         success: false,
-        error: error.message || "Failed to get default config"
+        error: error.message || "Failed to get default config",
       });
     }
   });
@@ -1611,30 +2145,33 @@ export async function registerRoutes(
   });
 
   // POST /api/observability/alerts/:id/resolve - Resolve an alert
-  app.post("/api/observability/alerts/:id/resolve", (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const alert = resolveAlert(id);
+  app.post(
+    "/api/observability/alerts/:id/resolve",
+    (req: Request, res: Response) => {
+      try {
+        const { id } = req.params;
+        const alert = resolveAlert(id);
 
-      if (!alert) {
-        return res.status(404).json({
+        if (!alert) {
+          return res.status(404).json({
+            success: false,
+            error: "Alert not found",
+          });
+        }
+
+        res.json({
+          success: true,
+          data: alert,
+        });
+      } catch (error: any) {
+        console.error("[Observability] Error resolving alert:", error);
+        res.status(500).json({
           success: false,
-          error: "Alert not found",
+          error: error.message || "Failed to resolve alert",
         });
       }
-
-      res.json({
-        success: true,
-        data: alert,
-      });
-    } catch (error: any) {
-      console.error("[Observability] Error resolving alert:", error);
-      res.status(500).json({
-        success: false,
-        error: error.message || "Failed to resolve alert",
-      });
-    }
-  });
+    },
+  );
 
   // GET /api/observability/stats - Get request and log stats
   app.get("/api/observability/stats", (_req: Request, res: Response) => {
@@ -1761,94 +2298,112 @@ export async function registerRoutes(
 
   const wss = new WebSocketServer({ server: httpServer, path: "/ws/agent" });
 
-  createAuthenticatedWebSocketHandler(wss, true, (ws: AuthenticatedWebSocket) => {
-    let subscribedRunId: string | null = null;
+  createAuthenticatedWebSocketHandler(
+    wss,
+    true,
+    (ws: AuthenticatedWebSocket) => {
+      let subscribedRunId: string | null = null;
 
-    ws.on("message", (message) => {
-      try {
-        const data = JSON.parse(message.toString());
-        if (data.type === "subscribe" && data.runId) {
-          subscribedRunId = data.runId;
-          if (!agentClients.has(data.runId)) {
-            agentClients.set(data.runId, new Set());
+      ws.on("message", (message) => {
+        try {
+          const data = JSON.parse(message.toString());
+          if (data.type === "subscribe" && data.runId) {
+            subscribedRunId = data.runId;
+            if (!agentClients.has(data.runId)) {
+              agentClients.set(data.runId, new Set());
+            }
+            agentClients.get(data.runId)!.add(ws);
           }
-          agentClients.get(data.runId)!.add(ws);
+        } catch (e) {
+          console.error("WS message parse error:", e);
         }
-      } catch (e) {
-        console.error("WS message parse error:", e);
-      }
-    });
+      });
 
-    ws.on("close", () => {
-      if (subscribedRunId) {
-        const clients = agentClients.get(subscribedRunId);
-        if (clients) {
-          clients.delete(ws);
-          if (clients.size === 0) {
-            agentClients.delete(subscribedRunId);
-          }
-        }
-      }
-    });
-  });
-
-  const browserWss = new WebSocketServer({ server: httpServer, path: "/ws/browser" });
-
-  const fileStatusWss = new WebSocketServer({ server: httpServer, path: "/ws/file-status" });
-
-  createAuthenticatedWebSocketHandler(fileStatusWss, true, (ws: AuthenticatedWebSocket) => {
-    let subscribedFileIds: Set<string> = new Set();
-
-    ws.on("message", (message) => {
-      try {
-        const data = JSON.parse(message.toString());
-        if (data.type === "subscribe" && data.fileId) {
-          subscribedFileIds.add(data.fileId);
-          if (!fileStatusClients.has(data.fileId)) {
-            fileStatusClients.set(data.fileId, new Set());
-          }
-          fileStatusClients.get(data.fileId)!.add(ws);
-
-          ws.send(JSON.stringify({ type: "subscribed", fileId: data.fileId }));
-
-          const job = fileProcessingQueue.getJob(data.fileId);
-          if (job && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({
-              type: 'file_status',
-              fileId: job.fileId,
-              status: job.status,
-              progress: job.progress,
-              error: job.error,
-            }));
-          }
-        } else if (data.type === "unsubscribe" && data.fileId) {
-          subscribedFileIds.delete(data.fileId);
-          const clients = fileStatusClients.get(data.fileId);
+      ws.on("close", () => {
+        if (subscribedRunId) {
+          const clients = agentClients.get(subscribedRunId);
           if (clients) {
             clients.delete(ws);
             if (clients.size === 0) {
-              fileStatusClients.delete(data.fileId);
+              agentClients.delete(subscribedRunId);
             }
           }
         }
-      } catch (e) {
-        console.error("File status WS message parse error:", e);
-      }
-    });
+      });
+    },
+  );
 
-    ws.on("close", () => {
-      const fileIds = Array.from(subscribedFileIds);
-      for (const fileId of fileIds) {
-        const clients = fileStatusClients.get(fileId);
-        if (clients) {
-          clients.delete(ws);
-          if (clients.size === 0) {
-            fileStatusClients.delete(fileId);
+  const browserWss = new WebSocketServer({
+    server: httpServer,
+    path: "/ws/browser",
+  });
+
+  const fileStatusWss = new WebSocketServer({
+    server: httpServer,
+    path: "/ws/file-status",
+  });
+
+  createAuthenticatedWebSocketHandler(
+    fileStatusWss,
+    true,
+    (ws: AuthenticatedWebSocket) => {
+      let subscribedFileIds: Set<string> = new Set();
+
+      ws.on("message", (message) => {
+        try {
+          const data = JSON.parse(message.toString());
+          if (data.type === "subscribe" && data.fileId) {
+            subscribedFileIds.add(data.fileId);
+            if (!fileStatusClients.has(data.fileId)) {
+              fileStatusClients.set(data.fileId, new Set());
+            }
+            fileStatusClients.get(data.fileId)!.add(ws);
+
+            ws.send(
+              JSON.stringify({ type: "subscribed", fileId: data.fileId }),
+            );
+
+            const job = fileProcessingQueue.getJob(data.fileId);
+            if (job && ws.readyState === WebSocket.OPEN) {
+              ws.send(
+                JSON.stringify({
+                  type: "file_status",
+                  fileId: job.fileId,
+                  status: job.status,
+                  progress: job.progress,
+                  error: job.error,
+                }),
+              );
+            }
+          } else if (data.type === "unsubscribe" && data.fileId) {
+            subscribedFileIds.delete(data.fileId);
+            const clients = fileStatusClients.get(data.fileId);
+            if (clients) {
+              clients.delete(ws);
+              if (clients.size === 0) {
+                fileStatusClients.delete(data.fileId);
+              }
+            }
+          }
+        } catch (e) {
+          console.error("File status WS message parse error:", e);
+        }
+      });
+
+      ws.on("close", () => {
+        const fileIds = Array.from(subscribedFileIds);
+        for (const fileId of fileIds) {
+          const clients = fileStatusClients.get(fileId);
+          if (clients) {
+            clients.delete(ws);
+            if (clients.size === 0) {
+              fileStatusClients.delete(fileId);
+            }
           }
         }
-      }
-    });
-  });
+      });
+    },
+  );
 
   fileProcessingQueue.setStatusChangeHandler((update: FileStatusUpdate) => {
     broadcastFileStatus(update);
@@ -1860,7 +2415,9 @@ export async function registerRoutes(
       await storage.updateFileProgress(job.fileId, 10);
       fileProcessingQueue.updateProgress(job.fileId, 10);
 
-      const objectFile = await objectStorageService.getObjectEntityFile(job.storagePath);
+      const objectFile = await objectStorageService.getObjectEntityFile(
+        job.storagePath,
+      );
       const content = await objectStorageService.getFileContent(objectFile);
       await storage.updateFileProgress(job.fileId, 30);
       fileProcessingQueue.updateProgress(job.fileId, 30);
@@ -1873,7 +2430,7 @@ export async function registerRoutes(
       await storage.updateFileProgress(job.fileId, 60);
       fileProcessingQueue.updateProgress(job.fileId, 60);
 
-      const texts = chunks.map(c => c.content);
+      const texts = chunks.map((c) => c.content);
       const embeddings = await generateEmbeddingsBatch(texts);
       await storage.updateFileProgress(job.fileId, 80);
       fileProcessingQueue.updateProgress(job.fileId, 80);
@@ -1894,104 +2451,129 @@ export async function registerRoutes(
       await storage.updateFileCompleted(job.fileId);
       await storage.updateFileJobStatus(job.fileId, "completed");
 
-      console.log(`[FileQueue] File ${job.fileId} processed: ${chunks.length} chunks created`);
+      console.log(
+        `[FileQueue] File ${job.fileId} processed: ${chunks.length} chunks created`,
+      );
     } catch (error: any) {
       console.error(`[FileQueue] Error processing file ${job.fileId}:`, error);
-      await storage.updateFileError(job.fileId, error.message || "Unknown error");
+      await storage.updateFileError(
+        job.fileId,
+        error.message || "Unknown error",
+      );
       await storage.updateFileJobStatus(job.fileId, "failed", error.message);
       throw error;
     }
   });
 
-  createAuthenticatedWebSocketHandler(browserWss, true, (ws: AuthenticatedWebSocket) => {
-    let subscribedSessionId: string | null = null;
+  createAuthenticatedWebSocketHandler(
+    browserWss,
+    true,
+    (ws: AuthenticatedWebSocket) => {
+      let subscribedSessionId: string | null = null;
 
-    ws.on("message", async (message) => {
-      try {
-        const data = JSON.parse(message.toString());
-        if (data.type === "subscribe" && data.sessionId) {
-          subscribedSessionId = data.sessionId;
-          if (!browserClients.has(data.sessionId)) {
-            browserClients.set(data.sessionId, new Set());
-          }
-          browserClients.get(data.sessionId)!.add(ws);
-
-          ws.send(JSON.stringify({ type: "subscribed", sessionId: data.sessionId }));
-
-          try {
-            const screenshot = await browserSessionManager.getScreenshot(data.sessionId);
-            if (screenshot && ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({
-                messageType: "browser_event",
-                eventType: "observation",
-                sessionId: data.sessionId,
-                timestamp: new Date(),
-                data: { type: "screenshot", screenshot }
-              }));
+      ws.on("message", async (message) => {
+        try {
+          const data = JSON.parse(message.toString());
+          if (data.type === "subscribe" && data.sessionId) {
+            subscribedSessionId = data.sessionId;
+            if (!browserClients.has(data.sessionId)) {
+              browserClients.set(data.sessionId, new Set());
             }
-          } catch (e) {
-          }
-        }
-      } catch (e) {
-        console.error("Browser WS message parse error:", e);
-      }
-    });
+            browserClients.get(data.sessionId)!.add(ws);
 
-    ws.on("close", () => {
-      if (subscribedSessionId) {
-        const clients = browserClients.get(subscribedSessionId);
-        if (clients) {
-          clients.delete(ws);
-          if (clients.size === 0) {
-            browserClients.delete(subscribedSessionId);
+            ws.send(
+              JSON.stringify({ type: "subscribed", sessionId: data.sessionId }),
+            );
+
+            try {
+              const screenshot = await browserSessionManager.getScreenshot(
+                data.sessionId,
+              );
+              if (screenshot && ws.readyState === WebSocket.OPEN) {
+                ws.send(
+                  JSON.stringify({
+                    messageType: "browser_event",
+                    eventType: "observation",
+                    sessionId: data.sessionId,
+                    timestamp: new Date(),
+                    data: { type: "screenshot", screenshot },
+                  }),
+                );
+              }
+            } catch (e) {}
+          }
+        } catch (e) {
+          console.error("Browser WS message parse error:", e);
+        }
+      });
+
+      ws.on("close", () => {
+        if (subscribedSessionId) {
+          const clients = browserClients.get(subscribedSessionId);
+          if (clients) {
+            clients.delete(ws);
+            if (clients.size === 0) {
+              browserClients.delete(subscribedSessionId);
+            }
           }
         }
-      }
-    });
-  });
+      });
+    },
+  );
 
   // ===== Terminal WebSocket =====
-  const terminalWss = new WebSocketServer({ server: httpServer, path: "/ws/terminal" });
-
-  createAuthenticatedWebSocketHandler(terminalWss, true, (ws: AuthenticatedWebSocket) => {
-    let subscribedSessionId: string | null = null;
-
-    ws.on("message", (message) => {
-      try {
-        const data = JSON.parse(message.toString());
-
-        if (data.type === "subscribe" && data.sessionId) {
-          subscribedSessionId = data.sessionId;
-          if (!terminalClients.has(data.sessionId)) {
-            terminalClients.set(data.sessionId, new Set());
-          }
-          terminalClients.get(data.sessionId)!.add(ws);
-          ws.send(JSON.stringify({ type: "subscribed", sessionId: data.sessionId }));
-        } else if (data.type === "input" && subscribedSessionId) {
-          // Forward input to terminal session (for interactive commands)
-          ws.send(JSON.stringify({
-            type: "ack",
-            sessionId: subscribedSessionId,
-            timestamp: Date.now(),
-          }));
-        }
-      } catch (e) {
-        console.error("Terminal WS message parse error:", e);
-      }
-    });
-
-    ws.on("close", () => {
-      if (subscribedSessionId) {
-        const clients = terminalClients.get(subscribedSessionId);
-        if (clients) {
-          clients.delete(ws);
-          if (clients.size === 0) {
-            terminalClients.delete(subscribedSessionId);
-          }
-        }
-      }
-    });
+  const terminalWss = new WebSocketServer({
+    server: httpServer,
+    path: "/ws/terminal",
   });
+
+  createAuthenticatedWebSocketHandler(
+    terminalWss,
+    true,
+    (ws: AuthenticatedWebSocket) => {
+      let subscribedSessionId: string | null = null;
+
+      ws.on("message", (message) => {
+        try {
+          const data = JSON.parse(message.toString());
+
+          if (data.type === "subscribe" && data.sessionId) {
+            subscribedSessionId = data.sessionId;
+            if (!terminalClients.has(data.sessionId)) {
+              terminalClients.set(data.sessionId, new Set());
+            }
+            terminalClients.get(data.sessionId)!.add(ws);
+            ws.send(
+              JSON.stringify({ type: "subscribed", sessionId: data.sessionId }),
+            );
+          } else if (data.type === "input" && subscribedSessionId) {
+            // Forward input to terminal session (for interactive commands)
+            ws.send(
+              JSON.stringify({
+                type: "ack",
+                sessionId: subscribedSessionId,
+                timestamp: Date.now(),
+              }),
+            );
+          }
+        } catch (e) {
+          console.error("Terminal WS message parse error:", e);
+        }
+      });
+
+      ws.on("close", () => {
+        if (subscribedSessionId) {
+          const clients = terminalClients.get(subscribedSessionId);
+          if (clients) {
+            clients.delete(ws);
+            if (clients.size === 0) {
+              terminalClients.delete(subscribedSessionId);
+            }
+          }
+        }
+      });
+    },
+  );
 
   return httpServer;
 }
@@ -2005,7 +2587,7 @@ function broadcastBrowserEvent(sessionId: string, event: SessionEvent) {
     eventType: event.type,
     sessionId: event.sessionId,
     timestamp: event.timestamp,
-    data: event.data
+    data: event.data,
   });
   clients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {
