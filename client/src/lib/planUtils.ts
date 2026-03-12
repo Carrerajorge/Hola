@@ -1,6 +1,8 @@
 export type UserPlan = {
   plan?: string | null;
   role?: string | null;
+  isAdmin?: boolean | null;
+  isPaid?: boolean | null;
   subscriptionStatus?: string | null;
   subscriptionPlan?: string | null;
   subscriptionPeriodEnd?: string | Date | null;
@@ -12,6 +14,14 @@ function toLower(value: string | null | undefined): string {
 }
 
 const ACTIVE_PAID_SUBSCRIPTION_STATUSES = new Set(["active", "trialing"]);
+
+function isAdminUser(user?: UserPlan | null): boolean {
+  if (!user) return false;
+  if (user.isAdmin) return true;
+
+  const role = toLower(user.role);
+  return role === "admin" || role === "superadmin";
+}
 
 export function isActivePaidSubscriptionStatus(status: string | null | undefined): boolean {
   return ACTIVE_PAID_SUBSCRIPTION_STATUSES.has(toLower(status));
@@ -25,8 +35,7 @@ function hasSubscriptionMetadata(user?: UserPlan | null): boolean {
 export function getEffectivePlan(user?: UserPlan | null): string {
   if (!user) return "free";
 
-  const role = toLower(user.role);
-  if (role === "admin" || role === "superadmin") return "admin";
+  if (isAdminUser(user)) return "admin";
 
   const subStatus = toLower(user.subscriptionStatus);
   const subPlan = toLower(user.subscriptionPlan);
@@ -63,6 +72,9 @@ export function getPlanLabel(user?: UserPlan | null): string {
 }
 
 export function isPaidPlan(user?: UserPlan | null): boolean {
+  if (isAdminUser(user)) return false;
+  if (typeof user?.isPaid === "boolean") return user.isPaid;
+
   const plan = getEffectivePlan(user);
   return plan !== "free" && plan !== "admin";
 }
@@ -70,9 +82,8 @@ export function isPaidPlan(user?: UserPlan | null): boolean {
 export function shouldShowUpgradeCTA(user?: UserPlan | null): boolean {
   if (!user) return true;
 
-  const role = toLower(user.role);
   const effectivePlan = getEffectivePlan(user);
-  if (role === "admin" || role === "superadmin" || effectivePlan === "admin") {
+  if (isAdminUser(user) || effectivePlan === "admin") {
     return false;
   }
 
@@ -85,6 +96,10 @@ export function shouldShowUpgradeCTA(user?: UserPlan | null): boolean {
       isActivePaidSubscriptionStatus(subscriptionStatus) &&
       (subscriptionPlan ? subscriptionPlan !== "free" : plan !== "free");
     return !hasActivePaidSubscription;
+  }
+
+  if (typeof user.isPaid === "boolean") {
+    return !user.isPaid;
   }
 
   return !isPaidPlan(user);

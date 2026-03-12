@@ -18,6 +18,7 @@ describe("getEffectivePlan", () => {
     expect(getEffectivePlan({ role: "superadmin" })).toBe("admin");
     expect(getEffectivePlan({ role: "ADMIN" })).toBe("admin");
     expect(getEffectivePlan({ role: "  Admin  " })).toBe("admin");
+    expect(getEffectivePlan({ isAdmin: true })).toBe("admin");
   });
 
   it("prefers active subscription plan", () => {
@@ -82,12 +83,14 @@ describe("isPaidPlan", () => {
   });
   it("returns false for admin", () => {
     expect(isPaidPlan({ role: "admin" })).toBe(false);
+    expect(isPaidPlan({ isAdmin: true, isPaid: true })).toBe(false);
   });
   it("returns true for paid plans", () => {
     expect(isPaidPlan({ subscriptionStatus: "active", subscriptionPlan: "pro" })).toBe(true);
     expect(isPaidPlan({ subscriptionStatus: "trialing", subscriptionPlan: "go" })).toBe(true);
     expect(isPaidPlan({ subscriptionStatus: "active", subscriptionPlan: "enterprise" })).toBe(true);
     expect(isPaidPlan({ plan: "go" })).toBe(true);
+    expect(isPaidPlan({ isPaid: true })).toBe(true);
   });
 });
 
@@ -123,6 +126,12 @@ describe("shouldShowUpgradeCTA", () => {
 
   it("hides the CTA for admins", () => {
     expect(shouldShowUpgradeCTA({ role: "admin" })).toBe(false);
+    expect(shouldShowUpgradeCTA({ isAdmin: true })).toBe(false);
+  });
+
+  it("falls back to isPaid when subscription metadata is unavailable", () => {
+    expect(shouldShowUpgradeCTA({ isPaid: true, plan: "free" })).toBe(false);
+    expect(shouldShowUpgradeCTA({ isPaid: false, plan: "free" })).toBe(true);
   });
 });
 

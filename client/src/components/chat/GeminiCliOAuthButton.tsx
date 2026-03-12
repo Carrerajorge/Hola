@@ -176,6 +176,7 @@ function resolveFlowForCallbackInput(params: {
   storedFlow: StoredGeminiCliFlowDraft | null;
 }): {
   flowId: string;
+  redirectUri: string;
   flowProof?: GeminiCliFlowProof;
 } | null {
   const callbackFlowId = extractFlowIdFromCallbackValue(params.callbackUrl);
@@ -188,6 +189,10 @@ function resolveFlowForCallbackInput(params: {
 
   return {
     flowId: resolvedFlowId,
+    redirectUri:
+      params.storedFlow?.flowId === resolvedFlowId
+        ? params.storedFlow.redirectUri
+        : "",
     flowProof:
       params.storedFlow?.flowId === resolvedFlowId
         ? params.storedFlow.flowProof
@@ -433,9 +438,13 @@ export function GeminiCliOAuthButton({
     if (!flowId || flowId !== resolvedFlow.flowId) {
       setFlowId(resolvedFlow.flowId);
     }
+    const normalizedCallbackUrl = normalizeCallbackInput(
+      callbackUrl,
+      resolvedFlow.redirectUri || redirectUri,
+    );
     completeMutation.mutate({
       flowId: resolvedFlow.flowId,
-      callbackUrl: normalizeCallbackInput(callbackUrl, redirectUri),
+      callbackUrl: normalizedCallbackUrl,
       flowProof: resolvedFlow.flowProof,
     });
   }, [
@@ -661,9 +670,18 @@ export function GeminiCliOAuthButton({
         return;
       }
 
+      const normalizedCallbackUrl = normalizeCallbackInput(
+        nextCallbackUrl,
+        resolvedFlow.redirectUri || redirectUri,
+      );
+      if (!normalizedCallbackUrl) {
+        lastAutoCompletedCallbackRef.current = null;
+        return;
+      }
+
       completeMutation.mutate({
         flowId: resolvedFlow.flowId,
-        callbackUrl: nextCallbackUrl,
+        callbackUrl: normalizedCallbackUrl,
         flowProof: resolvedFlow.flowProof,
       });
     };
@@ -675,6 +693,7 @@ export function GeminiCliOAuthButton({
     finishConnectedState,
     flowId,
     getManualCallbackValidationError,
+    redirectUri,
     toast,
   ]);
 

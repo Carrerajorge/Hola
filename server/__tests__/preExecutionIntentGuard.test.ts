@@ -146,4 +146,19 @@ describe("preExecutionIntentGuard", () => {
     expect(res.status).toHaveBeenCalledWith(503);
     expect(res.json).toHaveBeenCalled();
   });
+
+  test("skips the LLM preguard for native agent run creation", async () => {
+    const req = makeReq({
+      path: "/api/agent/runs",
+      originalUrl: "/api/agent/runs",
+      body: { message: "busca openai.com y resume", chatId: "chat_123" },
+    });
+    const res = makeRes();
+    const next = vi.fn();
+
+    await preExecutionIntentGuard(req, res, next);
+
+    expect(next).toHaveBeenCalledOnce();
+    expect(buildBriefMock).not.toHaveBeenCalled();
+  });
 });

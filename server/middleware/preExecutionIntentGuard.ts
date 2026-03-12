@@ -244,6 +244,20 @@ const isSafePythonAgentReadOnly =
 const isSafeReadOnlyHealth =
   req.method === "GET" && (/^\/api\/python-agent\/health$/.test(pathOnly) || /^\/api\/python-agent\/status$/.test(pathOnly));
 
+// Agent-run lifecycle endpoints already go through the native agent planner,
+// policy engine and runtime guardrails. Running the request-understanding LLM
+// here adds a second preflight that can stall POST /api/agent/runs long enough
+// for the UI to time out before the run is even created.
+const isAgentRunCreate =
+  req.method === "POST" &&
+  /^(?:\/api)?\/agent\/runs$/.test(pathOnly);
+
+const isAgentRunControl =
+  req.method === "POST" &&
+  /^(?:\/api)?\/agent\/runs\/[^/]+\/(?:cancel|pause|resume|retry)$/.test(
+    pathOnly,
+  );
+
 if (
   isTerminalSessionCreate ||
   isTerminalExec ||
@@ -251,7 +265,9 @@ if (
   isTerminalExecNoApi ||
   isTerminalFileNoApi ||
   isSafePythonAgentReadOnly ||
-  isSafeReadOnlyHealth
+  isSafeReadOnlyHealth ||
+  isAgentRunCreate ||
+  isAgentRunControl
 ) {
   return next();
 }
