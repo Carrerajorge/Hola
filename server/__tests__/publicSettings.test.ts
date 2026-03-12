@@ -19,6 +19,11 @@ vi.mock("../storage", () => ({
         value: "https://hooks.slack.com/services/SECRET",
         updatedAt: new Date("2026-01-03T00:00:00.000Z"),
       },
+      {
+        key: "default_model",
+        value: "\"grok-4-1-fast-non-reasoning\"",
+        updatedAt: new Date("2026-01-04T00:00:00.000Z"),
+      },
     ]),
   },
 }));
@@ -30,7 +35,7 @@ describe("getPublicSettings", () => {
     const res = await getPublicSettings();
     expect(res.settings.app_name).toBe("My App");
     expect(res.settings.maintenance_mode).toBe(true);
+    expect(res.settings.default_model).toBe("grok-4.1-fast");
     expect((res.settings as any).slack_webhook_url).toBeUndefined();
   });
 });
-

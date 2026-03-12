@@ -8,6 +8,28 @@ type SettingsSnapshot = {
 };
 
 const SNAPSHOT_TTL_MS = 10_000;
+const DEFAULT_CHAT_MODEL = "grok-4.1-fast";
+
+function normalizeDefaultModelSetting(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+
+  const unquoted = value.trim().replace(/^["']+|["']+$/g, "").trim();
+  if (!unquoted) return DEFAULT_CHAT_MODEL;
+
+  if (unquoted === "grok-4-1-fast-non-reasoning") {
+    return DEFAULT_CHAT_MODEL;
+  }
+
+  return unquoted;
+}
+
+function normalizeSettingValue(key: string, value: unknown): unknown {
+  if (key === "default_model") {
+    return normalizeDefaultModelSetting(value);
+  }
+
+  return value;
+}
 
 // NOTE: Keep this in sync with `storage.seedDefaultSettings()` so the app still
 // functions in degraded environments (e.g. DB unavailable).
@@ -31,7 +53,7 @@ const DEFAULT_SETTINGS_MAP: Record<string, any> = {
   session_timeout_minutes: 1440,
 
   // AI models
-  default_model: "grok-4-1-fast-non-reasoning",
+  default_model: DEFAULT_CHAT_MODEL,
   max_tokens_per_request: 4096,
   enable_streaming: true,
 
@@ -108,7 +130,7 @@ export async function getSettingsSnapshot(): Promise<SettingsSnapshot> {
 
     let maxUpdatedAtMs = 0;
     for (const s of settings) {
-      map[s.key] = s.value;
+      map[s.key] = normalizeSettingValue(s.key, s.value);
 
       const updatedAt = (s as any).updatedAt as Date | string | null | undefined;
       const updatedAtMs = updatedAt ? new Date(updatedAt as any).getTime() : 0;
