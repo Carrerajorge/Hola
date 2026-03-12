@@ -1535,6 +1535,16 @@ export function ChatInterface({
     // Override with prop messages (they are the source of truth once available)
     messages.forEach((m: any) => msgMap.set(messageKey(m), m));
 
+    const buildAgentRunPayload = (runState: any) => ({
+      runId: runState.runId,
+      status: runState.status,
+      userMessage: runState.userMessage,
+      steps: runState.steps,
+      eventStream: runState.eventStream,
+      summary: runState.summary,
+      error: runState.error,
+    });
+
     // Merge agent runs from the store into messages (use reactive allAgentRuns)
     Object.entries(allAgentRuns).forEach(
       ([messageId, runState]: [string, any]) => {
@@ -1549,35 +1559,46 @@ export function ChatInterface({
 
         const existingMsg = msgMap.get(messageId);
         if (existingMsg) {
-          // Update existing message with agent run data
-          msgMap.set(messageId, {
-            ...existingMsg,
-            agentRun: {
-              runId: runState.runId,
-              status: runState.status,
-              userMessage: runState.userMessage,
-              steps: runState.steps,
-              eventStream: runState.eventStream,
-              summary: runState.summary,
-              error: runState.error,
-            },
+          if (existingMsg.role === "assistant") {
+            msgMap.set(messageId, {
+              ...existingMsg,
+              agentRun: buildAgentRunPayload(runState),
+            });
+            return;
+          }
+
+          // Agent runs are keyed by the originating user message. Render them as
+          // a synthetic assistant bubble so progress is visible in the transcript.
+          const syntheticAgentMessageKey = `agent-run:${messageId}`;
+          const existingSyntheticMessage = msgMap.get(syntheticAgentMessageKey);
+          const syntheticTimestamp =
+            existingSyntheticMessage?.timestamp ||
+            existingMsg.timestamp ||
+            new Date(runState.createdAt);
+
+          msgMap.set(syntheticAgentMessageKey, {
+            ...(existingSyntheticMessage || {}),
+            id: messageId,
+            clientTempId: syntheticAgentMessageKey,
+            role: "assistant" as const,
+            content: existingSyntheticMessage?.content || "",
+            timestamp:
+              syntheticTimestamp instanceof Date
+                ? syntheticTimestamp
+                : new Date(syntheticTimestamp),
+            userMessageId: messageId,
+            agentRun: buildAgentRunPayload(runState),
           });
         } else {
-          // Create new message for agent run
-          msgMap.set(messageId, {
+          const syntheticAgentMessageKey = `agent-run:${messageId}`;
+          msgMap.set(syntheticAgentMessageKey, {
             id: messageId,
+            clientTempId: syntheticAgentMessageKey,
             role: "assistant" as const,
             content: "",
             timestamp: new Date(runState.createdAt),
-            agentRun: {
-              runId: runState.runId,
-              status: runState.status,
-              userMessage: runState.userMessage,
-              steps: runState.steps,
-              eventStream: runState.eventStream,
-              summary: runState.summary,
-              error: runState.error,
-            },
+            userMessageId: messageId,
+            agentRun: buildAgentRunPayload(runState),
           });
         }
       },

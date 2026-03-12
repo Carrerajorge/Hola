@@ -2,6 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import { secretManager } from "../services/secretManager";
 
 let _client: GoogleGenAI | null = null;
+let _clientApiKey: string | null = null;
 
 function getGeminiApiKey(): string | null {
   try {
@@ -13,9 +14,14 @@ function getGeminiApiKey(): string | null {
 
 export function getGeminiClient(): GoogleGenAI | null {
   const apiKey = getGeminiApiKey();
-  if (!apiKey) return null;
-  if (!_client) {
+  if (!apiKey) {
+    _client = null;
+    _clientApiKey = null;
+    return null;
+  }
+  if (!_client || _clientApiKey !== apiKey) {
     _client = new GoogleGenAI({ apiKey });
+    _clientApiKey = apiKey;
   }
   return _client;
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 const ENV_KEYS = [
   "GEMINI_API_KEY",
@@ -14,6 +14,7 @@ describe("modelIntegration", () => {
   const originalEnv: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
 
   beforeEach(() => {
+    vi.resetModules();
     for (const k of ENV_KEYS) originalEnv[k] = process.env[k];
     for (const k of ENV_KEYS) delete process.env[k];
   });
@@ -24,6 +25,9 @@ describe("modelIntegration", () => {
       if (typeof v === "string") process.env[k] = v;
       else delete process.env[k];
     }
+    return import("../../lib/runtimeProviderHealth").then(({ resetRuntimeProviderSuppressions }) => {
+      resetRuntimeProviderSuppressions();
+    });
   });
 
   it("normalizes provider ids to runtime providers", async () => {
@@ -80,5 +84,24 @@ describe("modelIntegration", () => {
       status: "active",
       isEnabled: "true",
     })).toBe(true);
+  });
+
+  it("hides temporarily suppressed providers from public model exposure", async () => {
+    process.env.GEMINI_API_KEY = "x";
+    const { markRuntimeProviderAuthInvalid } = await import("../../lib/runtimeProviderHealth");
+    const { isModelProviderIntegrated, isModelEligibleForPublic } = await import("../modelIntegration");
+
+    markRuntimeProviderAuthInvalid("gemini", "API_KEY_INVALID");
+
+    expect(isModelProviderIntegrated("google")).toBe(false);
+    expect(
+      isModelEligibleForPublic({
+        provider: "google",
+        modelId: "gemini-2.0-flash",
+        modelType: "TEXT",
+        status: "active",
+        isEnabled: "true",
+      }),
+    ).toBe(false);
   });
 });

@@ -278,7 +278,7 @@ function buildAuthUrl(options: {
     code_challenge_method: "S256",
     state: options.state,
     access_type: "offline",
-    prompt: "consent",
+    prompt: "select_account consent",
   });
   return `${AUTH_URL}?${params.toString()}`;
 }

@@ -14,6 +14,8 @@
  *  7. No throw — every function returns a safe default
  */
 
+import { isRuntimeProviderSuppressed } from "../lib/runtimeProviderHealth";
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type ChatRuntimeProvider = "xai" | "gemini" | "openai" | "anthropic" | "deepseek";
@@ -145,6 +147,7 @@ export function isModelProviderSupported(provider: unknown): boolean {
 export function hasApiKeyForRuntimeProvider(runtime: ChatRuntimeProvider): boolean {
   if (!ALL_RUNTIME_PROVIDERS.includes(runtime)) return false;
   refreshKeyCache();
+  if (isRuntimeProviderSuppressed(runtime)) return false;
   return _keyCache.get(runtime) ?? false;
 }
 
@@ -206,7 +209,7 @@ export function getIntegratedModelProviderIds(): string[] {
   refreshKeyCache();
   const out = new Set<string>();
   for (const [alias, runtime] of Object.entries(PROVIDER_ALIAS_MAP)) {
-    if (_keyCache.get(runtime)) out.add(alias);
+    if (_keyCache.get(runtime) && !isRuntimeProviderSuppressed(runtime)) out.add(alias);
   }
   return Array.from(out);
 }

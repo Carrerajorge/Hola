@@ -263,7 +263,7 @@ router.get("/google", (req: Request, res: Response) => {
         scope: "openid email profile",
         state,
         access_type: "offline",
-        prompt: "consent",
+        prompt: "select_account consent",
     });
 
     const authUrl = `${config.authorizationUrl}?${params.toString()}`;

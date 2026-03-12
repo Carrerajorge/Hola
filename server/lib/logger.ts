@@ -5,6 +5,18 @@ import { logger } from "../utils/logger";
 type LogLevel = 'info' | 'warn' | 'error' | 'debug' | 'security';
 
 export class Logger {
+    private readonly scope?: string;
+
+    constructor(scope?: string) {
+        this.scope = typeof scope === "string" && scope.trim().length > 0
+            ? scope.trim()
+            : undefined;
+    }
+
+    private format(message: string): string {
+        return this.scope ? `[${this.scope}] ${message}` : message;
+    }
+
     static info(message: string, context?: any) {
         logger.info(message, context);
     }
@@ -32,6 +44,26 @@ export class Logger {
     // debug method missing in original but good to have compliant with standard
     static debug(message: string, context?: any) {
         logger.debug(message, context);
+    }
+
+    info(message: string, context?: any) {
+        Logger.info(this.format(message), context);
+    }
+
+    warn(message: string, context?: any) {
+        Logger.warn(this.format(message), context);
+    }
+
+    error(message: string, error?: any) {
+        Logger.error(this.format(message), error);
+    }
+
+    security(message: string, context?: any) {
+        Logger.security(this.format(message), context);
+    }
+
+    debug(message: string, context?: any) {
+        Logger.debug(this.format(message), context);
     }
 }
 

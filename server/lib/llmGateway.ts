@@ -22,6 +22,12 @@ import type { ZodSchema } from "zod";
 import { type AgentEvent } from "./typedStreaming";
 import { costEngine } from "../services/finops/costEngine";
 import { secretManager } from "../services/secretManager";
+import {
+  clearRuntimeProviderSuppression,
+  getRuntimeProviderSuppression,
+  isRuntimeProviderSuppressed,
+  markRuntimeProviderAuthInvalid,
+} from "./runtimeProviderHealth";
 
 interface RateLimitState {
   tokens: number;
@@ -30,6 +36,17 @@ interface RateLimitState {
 
 type LLMProvider = "xai" | "gemini" | "openai" | "anthropic" | "deepseek";
 type LLMProviderOrAuto = LLMProvider | "auto";
+
+const AUTH_INVALID_ERROR_PATTERNS = [
+  "api_key_invalid",
+  "api key not valid",
+  "invalid api key",
+  "incorrect api key",
+  "invalid authentication credentials",
+  "invalid api token",
+  "invalid x-api-key",
+  "authentication failed",
+] as const;
 
 interface LLMRequestOptions {
   model?: string;
@@ -679,7 +696,7 @@ class LLMGateway {
 
   private getConfiguredProvidersInOrder(): LLMProvider[] {
     const order: LLMProvider[] = ["xai", "gemini", "openai", "anthropic", "deepseek"];
-    return order.filter((p) => this.isProviderConfigured(p));
+    return order.filter((p) => this.isProviderReady(p));
   }
 
   private isProviderConfigured(provider: LLMProvider): boolean {
@@ -699,11 +716,42 @@ class LLMGateway {
     }
   }
 
+  private isProviderReady(provider: LLMProvider): boolean {
+    return this.isProviderConfigured(provider) && !isRuntimeProviderSuppressed(provider);
+  }
+
+  private normalizeProviderErrorMessage(error: unknown): string {
+    if (error instanceof Error && typeof error.message === "string") {
+      return error.message.trim();
+    }
+    if (typeof error === "string") {
+      return error.trim();
+    }
+    return String(error ?? "").trim();
+  }
+
+  private isAuthInvalidProviderError(error: unknown): boolean {
+    const normalized = this.normalizeProviderErrorMessage(error).toLowerCase();
+    if (!normalized) return false;
+    return AUTH_INVALID_ERROR_PATTERNS.some((pattern) => normalized.includes(pattern));
+  }
+
+  private handlePermanentProviderError(provider: LLMProvider, error: unknown, requestId: string): void {
+    if (!this.isAuthInvalidProviderError(error)) return;
+
+    const message = this.normalizeProviderErrorMessage(error);
+    const existing = getRuntimeProviderSuppression(provider);
+    markRuntimeProviderAuthInvalid(provider, message);
+    if (!existing) {
+      console.warn(`[LLMGateway] ${requestId} temporarily disabled ${provider} after auth failure`);
+    }
+  }
+
   // T100-7.1: Algoritmo Inteligente de Enrutamiento (Smart Routing)
   // Evalúa dinámicamente Costo, Latencia (Observabilidad) y Tasa de Errores (Breakers)
   private getSmartRoutedProviders(): LLMProvider[] {
     const configured: LLMProvider[] = ["gemini", "deepseek", "xai", "openai", "anthropic"];
-    const active = configured.filter((p) => this.isProviderConfigured(p));
+    const active = configured.filter((p) => this.isProviderReady(p));
 
     return active.sort((a, b) => {
       const latA = this.metrics.byProvider[a]?.latency || Infinity;
@@ -728,7 +776,7 @@ class LLMGateway {
     if (options.provider && options.provider !== "auto") {
       // If a provider is explicitly requested but not configured (missing API key),
       // treat it as "auto" so we can still respond instead of hard-failing.
-      if (this.isProviderConfigured(options.provider)) {
+      if (this.isProviderReady(options.provider)) {
         return options.provider;
       }
       console.warn("[LLMGateway] Requested provider is not configured; falling back to auto.", {
@@ -738,7 +786,7 @@ class LLMGateway {
 
     // Auto-detect provider based on model name.
     const detectedProvider = detectProviderFromModel(options.model);
-    if (detectedProvider && this.isProviderConfigured(detectedProvider)) {
+    if (detectedProvider && this.isProviderReady(detectedProvider)) {
       return detectedProvider;
     }
 
@@ -900,12 +948,22 @@ class LLMGateway {
   ): Promise<LLMResponse> {
     const configuredProviders = this.getSmartRoutedProviders();
     if (configuredProviders.length === 0) {
+      const temporarilyDisabled = (["xai", "gemini", "openai", "anthropic", "deepseek"] as const)
+        .filter((provider) => this.isProviderConfigured(provider) && isRuntimeProviderSuppressed(provider));
+      if (temporarilyDisabled.length > 0) {
+        throw new Error(
+          `No healthy LLM providers available right now. Temporarily disabled: ${temporarilyDisabled.join(", ")}.`
+        );
+      }
       throw new Error(
         "No LLM providers configured. Set at least one of: XAI_API_KEY (or GROK_API_KEY/ILIAGPT_API_KEY), GEMINI_API_KEY (or GOOGLE_API_KEY), OPENAI_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY."
       );
     }
 
-    if (options.provider && options.provider !== "auto" && !this.isProviderConfigured(options.provider)) {
+    if (options.provider && options.provider !== "auto" && !this.isProviderReady(options.provider)) {
+      if (isRuntimeProviderSuppressed(options.provider)) {
+        throw new Error(`Provider '${options.provider}' is temporarily unavailable due to an authentication failure.`);
+      }
       throw new Error(`Provider '${options.provider}' requested but not configured (missing API key).`);
     }
 
@@ -914,7 +972,7 @@ class LLMGateway {
 
     // Respect explicit provider selection / auto selection.
     const selected = this.selectProvider(options);
-    const primaryProvider = this.isProviderConfigured(selected) ? selected : configuredProviders[0];
+    const primaryProvider = this.isProviderReady(selected) ? selected : configuredProviders[0];
 
     const providers: LLMProvider[] = enableFallback
       ? [primaryProvider, ...configuredProviders.filter((p) => p !== primaryProvider)]
@@ -990,15 +1048,23 @@ class LLMGateway {
 
     for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
       try {
+        let result: LLMResponse;
         if (provider === "gemini") {
-          return await this.executeGemini(messages, options, model, startTime);
+          result = await this.executeGemini(messages, options, model, startTime);
+        } else if (provider === "anthropic") {
+          result = await this.executeAnthropic(messages, options, model, startTime);
+        } else {
+          // xai / openai / deepseek
+          result = await this.executeOpenAICompatible(provider, messages, options, model, startTime);
         }
-        if (provider === "anthropic") {
-          return await this.executeAnthropic(messages, options, model, startTime);
-        }
-        // xai / openai / deepseek
-        return await this.executeOpenAICompatible(provider, messages, options, model, startTime);
+        clearRuntimeProviderSuppression(provider);
+        return result;
       } catch (error: any) {
+        this.handlePermanentProviderError(provider, error, options.requestId);
+        if (this.isAuthInvalidProviderError(error)) {
+          throw error;
+        }
+
         const isRetryable =
           error.status === 429 ||
           error.status === 500 ||
@@ -1524,17 +1590,27 @@ class LLMGateway {
     let accumulatedContent = "";
     const configuredProviders = this.getSmartRoutedProviders();
     if (configuredProviders.length === 0) {
+      const temporarilyDisabled = (["xai", "gemini", "openai", "anthropic", "deepseek"] as const)
+        .filter((provider) => this.isProviderConfigured(provider) && isRuntimeProviderSuppressed(provider));
+      if (temporarilyDisabled.length > 0) {
+        throw new Error(
+          `No healthy LLM providers available right now. Temporarily disabled: ${temporarilyDisabled.join(", ")}.`
+        );
+      }
       throw new Error(
         "No LLM providers configured. Set at least one of: XAI_API_KEY (or GROK_API_KEY/ILIAGPT_API_KEY), GEMINI_API_KEY (or GOOGLE_API_KEY), OPENAI_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY."
       );
     }
 
-    if (options.provider && options.provider !== "auto" && !this.isProviderConfigured(options.provider)) {
+    if (options.provider && options.provider !== "auto" && !this.isProviderReady(options.provider)) {
+      if (isRuntimeProviderSuppressed(options.provider)) {
+        throw new Error(`Provider '${options.provider}' is temporarily unavailable due to an authentication failure.`);
+      }
       throw new Error(`Provider '${options.provider}' requested but not configured (missing API key).`);
     }
 
     const selected = this.selectProvider(options);
-    let currentProvider: LLMProvider = this.isProviderConfigured(selected) ? selected : configuredProviders[0];
+    let currentProvider: LLMProvider = this.isProviderReady(selected) ? selected : configuredProviders[0];
 
     this.metrics.totalRequests++;
 
@@ -1609,6 +1685,7 @@ class LLMGateway {
 
           if (chunk.done) {
             this.streamCheckpoints.delete(requestId);
+            clearRuntimeProviderSuppression(provider);
             getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG).recordSuccess();
             return;
           }
@@ -1623,6 +1700,7 @@ class LLMGateway {
         });
 
         getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG).recordFailure();
+        this.handlePermanentProviderError(provider, error, requestId);
         console.warn(`[LLMGateway] ${requestId} stream failed on ${provider}: ${error.message}`);
 
         if (!enableFallback || providers.indexOf(provider) === providers.length - 1) {
@@ -2172,4 +2250,3 @@ class LLMGateway {
 export const llmGateway = new LLMGateway();
 
 export type { LLMRequestOptions, LLMResponse, StreamChunk, StreamCheckpoint, TokenUsageRecord };
-
