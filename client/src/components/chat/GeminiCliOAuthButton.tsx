@@ -173,6 +173,7 @@ function clearStoredFlowDraft(): void {
 function resolveFlowForCallbackInput(params: {
   callbackUrl: string;
   currentFlowId: string | null;
+  currentFlowProof: GeminiCliFlowProof | null;
   storedFlow: StoredGeminiCliFlowDraft | null;
 }): {
   flowId: string;
@@ -189,14 +190,24 @@ function resolveFlowForCallbackInput(params: {
 
   return {
     flowId: resolvedFlowId,
-    redirectUri:
-      params.storedFlow?.flowId === resolvedFlowId
-        ? params.storedFlow.redirectUri
-        : "",
-    flowProof:
-      params.storedFlow?.flowId === resolvedFlowId
-        ? params.storedFlow.flowProof
-        : undefined,
+    redirectUri: (() => {
+      if (params.storedFlow?.flowId === resolvedFlowId) {
+        return params.storedFlow.redirectUri;
+      }
+      if (params.currentFlowId === resolvedFlowId) {
+        return params.currentFlowProof?.redirectUri || "";
+      }
+      return "";
+    })(),
+    flowProof: (() => {
+      if (params.storedFlow?.flowId === resolvedFlowId) {
+        return params.storedFlow.flowProof;
+      }
+      if (params.currentFlowId === resolvedFlowId) {
+        return params.currentFlowProof || undefined;
+      }
+      return undefined;
+    })(),
   };
 }
 
@@ -210,6 +221,9 @@ export function GeminiCliOAuthButton({
   const [flowId, setFlowId] = React.useState<string | null>(null);
   const [authUrl, setAuthUrl] = React.useState("");
   const [redirectUri, setRedirectUri] = React.useState("");
+  const [flowProof, setFlowProof] = React.useState<GeminiCliFlowProof | null>(
+    null,
+  );
   const [callbackUrl, setCallbackUrl] = React.useState("");
   const popupRef = React.useRef<Window | null>(null);
   const lastAutoCompletedCallbackRef = React.useRef<string | null>(null);
@@ -252,6 +266,7 @@ export function GeminiCliOAuthButton({
       setFlowId(payload.flowId);
       setAuthUrl(payload.authUrl);
       setRedirectUri(payload.redirectUri);
+      setFlowProof(payload.flowProof);
       setCallbackUrl("");
       lastAutoCompletedCallbackRef.current = null;
       writeStoredFlowDraft({
@@ -325,6 +340,7 @@ export function GeminiCliOAuthButton({
       setFlowId(null);
       setAuthUrl("");
       setRedirectUri("");
+      setFlowProof(null);
       setCallbackUrl("");
       lastAutoCompletedCallbackRef.current = null;
       clearStoredFlowDraft();
@@ -359,6 +375,7 @@ export function GeminiCliOAuthButton({
       setFlowId(null);
       setAuthUrl("");
       setRedirectUri("");
+      setFlowProof(null);
       setCallbackUrl("");
       lastAutoCompletedCallbackRef.current = null;
       clearStoredFlowDraft();
@@ -425,6 +442,7 @@ export function GeminiCliOAuthButton({
     const resolvedFlow = resolveFlowForCallbackInput({
       callbackUrl,
       currentFlowId: flowId,
+      currentFlowProof: flowProof,
       storedFlow,
     });
     if (!resolvedFlow) {
@@ -451,6 +469,7 @@ export function GeminiCliOAuthButton({
     callbackUrl,
     completeMutation,
     flowId,
+    flowProof,
     getManualCallbackValidationError,
     redirectUri,
     toast,
@@ -499,6 +518,7 @@ export function GeminiCliOAuthButton({
         setFlowId(null);
         setAuthUrl("");
         setRedirectUri("");
+        setFlowProof(null);
         setCallbackUrl("");
         lastAutoCompletedCallbackRef.current = null;
         startMutation.reset();
@@ -524,6 +544,7 @@ export function GeminiCliOAuthButton({
     setFlowId(storedFlow.flowId);
     setAuthUrl(storedFlow.authUrl);
     setRedirectUri(storedFlow.redirectUri);
+    setFlowProof(storedFlow.flowProof);
     setCallbackUrl(storedFlow.callbackUrl);
   }, [completeMutation.isPending, flowId, open, startMutation.isPending]);
 
@@ -547,9 +568,10 @@ export function GeminiCliOAuthButton({
       authUrl,
       redirectUri,
       callbackUrl,
+      flowProof: flowProof ?? storedFlow.flowProof,
       updatedAt: Date.now(),
     });
-  }, [authUrl, callbackUrl, flowId, open, redirectUri]);
+  }, [authUrl, callbackUrl, flowId, flowProof, open, redirectUri]);
 
   React.useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -658,6 +680,7 @@ export function GeminiCliOAuthButton({
       const resolvedFlow = resolveFlowForCallbackInput({
         callbackUrl: nextCallbackUrl,
         currentFlowId: payloadFlowId,
+        currentFlowProof: flowProof,
         storedFlow,
       });
       if (!resolvedFlow) {
@@ -692,6 +715,7 @@ export function GeminiCliOAuthButton({
     completeMutation,
     finishConnectedState,
     flowId,
+    flowProof,
     getManualCallbackValidationError,
     redirectUri,
     toast,
