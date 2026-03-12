@@ -86,6 +86,54 @@ function toPercent(value: number, total: number): number {
   return Math.round((value / total) * 10000) / 100;
 }
 
+function normalizeRunPlanForResponse(
+  rawPlan: unknown,
+  runCreatedAt: Date,
+  totalStepsFallback: number,
+): AgentPlan | null {
+  if (!rawPlan || typeof rawPlan !== "object") {
+    return null;
+  }
+
+  const plan = rawPlan as Partial<AgentPlan> & {
+    objective?: string;
+    reasoning?: string | null;
+    steps?: Array<Record<string, unknown>>;
+    phases?: Array<Record<string, unknown>>;
+    currentPhaseIndex?: number | null;
+    estimatedTimeMs?: number | null;
+    createdAt?: Date | string | null;
+  };
+
+  const normalizedSteps = Array.isArray(plan.steps) ? plan.steps : [];
+  const estimatedTimeMs =
+    typeof plan.estimatedTimeMs === "number" && Number.isFinite(plan.estimatedTimeMs) && plan.estimatedTimeMs > 0
+      ? Math.round(plan.estimatedTimeMs)
+      : Math.max(normalizedSteps.length, totalStepsFallback, 1) * 15_000;
+
+  const createdAt =
+    plan.createdAt instanceof Date
+      ? plan.createdAt
+      : typeof plan.createdAt === "string" && plan.createdAt.trim().length > 0
+        ? new Date(plan.createdAt)
+        : runCreatedAt;
+
+  return {
+    objective: typeof plan.objective === "string" && plan.objective.trim().length > 0
+      ? plan.objective
+      : "Completar la tarea solicitada",
+    steps: normalizedSteps as AgentPlan["steps"],
+    phases: Array.isArray(plan.phases) ? (plan.phases as AgentPlan["phases"]) : undefined,
+    currentPhaseIndex:
+      typeof plan.currentPhaseIndex === "number" && Number.isFinite(plan.currentPhaseIndex)
+        ? plan.currentPhaseIndex
+        : undefined,
+    estimatedTimeMs,
+    reasoning: typeof plan.reasoning === "string" ? plan.reasoning : undefined,
+    createdAt: Number.isNaN(createdAt.getTime()) ? runCreatedAt : createdAt,
+  };
+}
+
 export function createAgentModeRouter() {
   const router = Router();
 
@@ -340,7 +388,11 @@ export function createAgentModeRouter() {
         id: effectiveRun.id,
         chatId: effectiveRun.chatId,
         status: effectiveRun.status,
-        plan: effectiveRun.plan,
+        plan: normalizeRunPlanForResponse(
+          effectiveRun.plan,
+          effectiveRun.createdAt,
+          effectiveRun.totalSteps ?? planSteps.length,
+        ),
         currentStepIndex: effectiveRun.currentStepIndex ?? 0,
         totalSteps: effectiveRun.totalSteps ?? planSteps.length,
         completedSteps: effectiveRun.completedSteps ?? 0,
@@ -461,7 +513,11 @@ export function createAgentModeRouter() {
         id: effectiveRun.id,
         chatId: effectiveRun.chatId,
         status: effectiveRun.status,
-        plan: effectiveRun.plan,
+        plan: normalizeRunPlanForResponse(
+          effectiveRun.plan,
+          effectiveRun.createdAt,
+          effectiveRun.totalSteps ?? planSteps.length,
+        ),
         currentStepIndex: effectiveRun.currentStepIndex ?? 0,
         totalSteps: effectiveRun.totalSteps ?? planSteps.length,
         completedSteps: effectiveRun.completedSteps ?? 0,

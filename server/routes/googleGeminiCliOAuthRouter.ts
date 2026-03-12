@@ -9,16 +9,27 @@ import {
 } from "../services/googleGeminiCliOAuthService";
 
 const FLOW_TTL_MS = 10 * 60 * 1000;
+const COMPLETED_FLOW_TTL_MS = 30 * 60 * 1000;
 
 type GeminiCliFlowSessionEntry = {
   verifier: string;
   createdAt: number;
   userId: string;
+  oauthState: string;
+  redirectUri: string;
 };
 
 type GeminiCliSessionState = {
   geminiCliOAuthFlows?: Record<string, GeminiCliFlowSessionEntry>;
 };
+
+type GeminiCliCompletedFlowEntry = {
+  userId: string;
+  completedAt: number;
+  response: Awaited<ReturnType<typeof getGoogleGeminiCliOAuthStatus>>;
+};
+
+const completedFlowStore = new Map<string, GeminiCliCompletedFlowEntry>();
 
 function getFlowStore(req: Request): Record<string, GeminiCliFlowSessionEntry> {
   const session = ((req as any).session ?? {}) as GeminiCliSessionState;
@@ -34,6 +45,27 @@ function clearExpiredFlows(store: Record<string, GeminiCliFlowSessionEntry>): vo
       delete store[flowId];
     }
   }
+}
+
+function getCompletedFlowKey(userId: string, flowId: string): string {
+  return `${userId}:${flowId}`;
+}
+
+function clearExpiredCompletedFlows(): void {
+  const now = Date.now();
+  for (const [key, entry] of completedFlowStore.entries()) {
+    if (now - entry.completedAt > COMPLETED_FLOW_TTL_MS) {
+      completedFlowStore.delete(key);
+    }
+  }
+}
+
+function getCanonicalGoogleCallbackUri(req: Request): string {
+  const canonicalDomain = process.env.CANONICAL_DOMAIN || "iliagpt.com";
+  if (process.env.NODE_ENV === "production") {
+    return `https://${canonicalDomain}/api/auth/google/callback`;
+  }
+  return `${req.protocol}://${req.get("host")}/api/auth/google/callback`;
 }
 
 const googleGeminiCliOAuthRouter = Router();
@@ -56,15 +88,23 @@ googleGeminiCliOAuthRouter.post("/start", async (req: Request, res: Response) =>
       return res.status(401).json({ error: "Authentication required" });
     }
 
-    const flow = beginGoogleGeminiCliOAuthFlow();
     const flowStore = getFlowStore(req);
     clearExpiredFlows(flowStore);
+    clearExpiredCompletedFlows();
 
     const flowId = randomUUID();
+    const redirectUri = getCanonicalGoogleCallbackUri(req);
+    const oauthState = `gemini-cli:${flowId}`;
+    const flow = beginGoogleGeminiCliOAuthFlow({
+      redirectUri,
+      state: oauthState,
+    });
     flowStore[flowId] = {
       verifier: flow.verifier,
       createdAt: Date.now(),
       userId,
+      oauthState,
+      redirectUri,
     };
 
     res.json({
@@ -96,20 +136,36 @@ googleGeminiCliOAuthRouter.post("/complete", async (req: Request, res: Response)
 
     const flowStore = getFlowStore(req);
     clearExpiredFlows(flowStore);
+    clearExpiredCompletedFlows();
+    const completedFlowKey = getCompletedFlowKey(userId, flowId);
 
     const flow = flowStore[flowId];
     if (!flow) {
+      const completed = completedFlowStore.get(completedFlowKey);
+      if (completed) {
+        return res.json({
+          ...completed.response,
+          selectedModelId: completed.response.defaultModelId,
+        });
+      }
       return res.status(400).json({ error: "La sesion OAuth expiro. Inicia la vinculacion otra vez." });
     }
     if (flow.userId !== userId) {
       return res.status(403).json({ error: "La sesion OAuth no pertenece a este usuario" });
     }
 
-    delete flowStore[flowId];
-
     const status = await finishGoogleGeminiCliOAuthFlow({
       verifier: flow.verifier,
       callbackInput: callbackUrl,
+      redirectUri: flow.redirectUri,
+      expectedState: flow.oauthState,
+    });
+
+    delete flowStore[flowId];
+    completedFlowStore.set(completedFlowKey, {
+      userId,
+      completedAt: Date.now(),
+      response: status,
     });
 
     res.json({

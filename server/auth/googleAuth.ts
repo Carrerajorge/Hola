@@ -8,6 +8,19 @@ import { storage } from "../storage";
 import { env } from "../config/env";
 
 const router = Router();
+const GEMINI_CLI_STATE_PREFIX = "gemini-cli:";
+
+type GeminiCliFlowSessionEntry = {
+    verifier: string;
+    createdAt: number;
+    userId: string;
+    oauthState: string;
+    redirectUri: string;
+};
+
+type GeminiCliSessionState = {
+    geminiCliOAuthFlows?: Record<string, GeminiCliFlowSessionEntry>;
+};
 
 // CANONICAL URL for OAuth redirects (avoid www/non-www mismatch)
 // This MUST match exactly what's registered in Google Cloud Console
@@ -59,6 +72,71 @@ const generateState = (): string => {
 
 // Store states temporarily (in production, use Redis)
 const stateStore = new Map<string, { createdAt: number; returnUrl: string }>();
+
+function buildCallbackUrl(req: Request, path: string): string {
+    const callbackUrl = new URL(getCanonicalRedirectUri(req, path));
+    for (const [key, value] of Object.entries(req.query)) {
+        if (typeof value === "string") {
+            callbackUrl.searchParams.set(key, value);
+        } else if (Array.isArray(value)) {
+            for (const item of value) {
+                callbackUrl.searchParams.append(key, String(item));
+            }
+        }
+    }
+    return callbackUrl.toString();
+}
+
+function renderGeminiCliBridge(
+    res: Response,
+    payload: {
+        flowId: string;
+        callbackUrl?: string;
+        error?: string;
+        errorDescription?: string;
+    },
+): void {
+    const serializedPayload = JSON.stringify(payload).replace(/</g, "\\u003c");
+    res
+        .status(payload.error ? 400 : 200)
+        .setHeader("Content-Type", "text/html; charset=utf-8")
+        .send(`<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gemini CLI OAuth</title>
+    <style>
+      body { font-family: system-ui, sans-serif; background: #0b1020; color: #f8fafc; display: grid; place-items: center; min-height: 100vh; margin: 0; padding: 24px; }
+      .card { max-width: 520px; background: rgba(15, 23, 42, 0.92); border: 1px solid rgba(148, 163, 184, 0.22); border-radius: 20px; padding: 24px; box-shadow: 0 24px 80px rgba(15, 23, 42, 0.35); }
+      h1 { margin: 0 0 12px; font-size: 22px; }
+      p { margin: 0 0 12px; line-height: 1.55; color: #cbd5e1; }
+      code { display: block; margin-top: 12px; padding: 12px; background: rgba(15, 23, 42, 0.8); border-radius: 12px; color: #e2e8f0; word-break: break-all; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>${payload.error ? "No se pudo completar Gemini CLI OAuth" : "Gemini CLI OAuth completado"}</h1>
+      <p>${payload.error ? "Vuelve a ILIAGPT. El modal recibirá el error y podrás reintentar." : "Puedes volver a ILIAGPT. Esta ventana se cerrará automáticamente si el navegador lo permite."}</p>
+      ${payload.callbackUrl ? `<code>${payload.callbackUrl.replace(/</g, "&lt;")}</code>` : ""}
+    </div>
+    <script>
+      (function () {
+        const payload = ${serializedPayload};
+        try {
+          if (window.opener && !window.opener.closed) {
+            window.opener.postMessage(
+              { type: "gemini-cli-oauth-callback", ...payload },
+              window.location.origin
+            );
+          }
+        } catch {}
+        try { window.close(); } catch {}
+      })();
+    </script>
+  </body>
+</html>`);
+}
 
 // Cleanup old states every 5 minutes
 setInterval(() => {
@@ -115,6 +193,46 @@ router.get("/google", (req: Request, res: Response) => {
  */
 router.get("/google/callback", async (req: Request, res: Response) => {
     const { code, state, error, error_description } = req.query;
+    const stateValue = typeof state === "string" ? state.trim() : "";
+    const geminiFlowId = stateValue.startsWith(GEMINI_CLI_STATE_PREFIX)
+        ? stateValue.slice(GEMINI_CLI_STATE_PREFIX.length)
+        : "";
+
+    if (geminiFlowId) {
+        if (error) {
+            console.error("[Google Auth] Gemini CLI OAuth error:", error, error_description);
+            return renderGeminiCliBridge(res, {
+                flowId: geminiFlowId,
+                error: String(error),
+                errorDescription: typeof error_description === "string" ? error_description : "",
+            });
+        }
+
+        if (!code) {
+            console.error("[Google Auth] Gemini CLI callback missing code");
+            return renderGeminiCliBridge(res, {
+                flowId: geminiFlowId,
+                error: "gemini_cli_missing_code",
+                errorDescription: "Google no devolvió el código de autorización.",
+            });
+        }
+
+        const session = (((req as any).session ?? {}) as GeminiCliSessionState);
+        const flow = session.geminiCliOAuthFlows?.[geminiFlowId];
+        if (flow && flow.oauthState !== stateValue) {
+            console.error("[Google Auth] Gemini CLI OAuth state mismatch for active flow");
+            return renderGeminiCliBridge(res, {
+                flowId: geminiFlowId,
+                error: "gemini_cli_invalid_state",
+                errorDescription: "El callback OAuth no coincide con la sesión iniciada.",
+            });
+        }
+
+        return renderGeminiCliBridge(res, {
+            flowId: geminiFlowId,
+            callbackUrl: buildCallbackUrl(req, "/api/auth/google/callback"),
+        });
+    }
 
     if (error) {
         console.error("[Google Auth] OAuth error:", error, error_description);

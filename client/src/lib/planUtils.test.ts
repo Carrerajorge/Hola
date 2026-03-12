@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { getEffectivePlan, getPlanLabel, isPaidPlan } from "./planUtils";
+import {
+  getEffectivePlan,
+  getPlanLabel,
+  isActivePaidSubscriptionStatus,
+  isPaidPlan,
+} from "./planUtils";
 
 describe("getEffectivePlan", () => {
   it("returns 'free' for null/undefined user", () => {
@@ -19,6 +24,12 @@ describe("getEffectivePlan", () => {
       getEffectivePlan({ subscriptionStatus: "active", subscriptionPlan: "pro" })
     ).toBe("pro");
     expect(
+      getEffectivePlan({ subscriptionStatus: "trialing", subscriptionPlan: "go" })
+    ).toBe("go");
+    expect(
+      getEffectivePlan({ subscriptionStatus: "active", plan: "plus" })
+    ).toBe("plus");
+    expect(
       getEffectivePlan({ subscriptionStatus: "active", subscriptionPlan: "enterprise" })
     ).toBe("enterprise");
   });
@@ -29,6 +40,9 @@ describe("getEffectivePlan", () => {
     ).toBe("free");
     expect(
       getEffectivePlan({ subscriptionStatus: "past_due", subscriptionPlan: "pro" })
+    ).toBe("free");
+    expect(
+      getEffectivePlan({ subscriptionStatus: "canceled", subscriptionPlan: "plus", plan: "plus" })
     ).toBe("free");
   });
 
@@ -70,7 +84,22 @@ describe("isPaidPlan", () => {
   });
   it("returns true for paid plans", () => {
     expect(isPaidPlan({ subscriptionStatus: "active", subscriptionPlan: "pro" })).toBe(true);
+    expect(isPaidPlan({ subscriptionStatus: "trialing", subscriptionPlan: "go" })).toBe(true);
     expect(isPaidPlan({ subscriptionStatus: "active", subscriptionPlan: "enterprise" })).toBe(true);
     expect(isPaidPlan({ plan: "go" })).toBe(true);
+  });
+});
+
+describe("isActivePaidSubscriptionStatus", () => {
+  it("treats active and trialing as billable states", () => {
+    expect(isActivePaidSubscriptionStatus("active")).toBe(true);
+    expect(isActivePaidSubscriptionStatus("trialing")).toBe(true);
+  });
+
+  it("treats cancelled-like states as unpaid", () => {
+    expect(isActivePaidSubscriptionStatus("canceled")).toBe(false);
+    expect(isActivePaidSubscriptionStatus("cancelled")).toBe(false);
+    expect(isActivePaidSubscriptionStatus("past_due")).toBe(false);
+    expect(isActivePaidSubscriptionStatus(undefined)).toBe(false);
   });
 });

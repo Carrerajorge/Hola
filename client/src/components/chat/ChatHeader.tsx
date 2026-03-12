@@ -197,7 +197,7 @@ export function ChatHeader({
 
             <div className="flex items-center gap-0.5 sm:gap-1">
                 {/* Upgrade button - Show for free users and guests, hide for paid/admin */}
-                {(!userPlanInfo || userPlanInfo.plan === "free") && !userPlanInfo?.isPaid && !userPlanInfo?.isAdmin && (
+                {(!userPlanInfo || (!userPlanInfo.isPaid && !userPlanInfo.isAdmin)) && (
                     <Button
                         variant="outline"
                         size="sm"

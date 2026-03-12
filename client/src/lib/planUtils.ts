@@ -11,19 +11,27 @@ function toLower(value: string | null | undefined): string {
   return (value || "").trim().toLowerCase();
 }
 
+const ACTIVE_PAID_SUBSCRIPTION_STATUSES = new Set(["active", "trialing"]);
+
+export function isActivePaidSubscriptionStatus(status: string | null | undefined): boolean {
+  return ACTIVE_PAID_SUBSCRIPTION_STATUSES.has(toLower(status));
+}
+
 export function getEffectivePlan(user?: UserPlan | null): string {
   if (!user) return "free";
 
   const role = toLower(user.role);
   if (role === "admin" || role === "superadmin") return "admin";
 
-  // If subscription is active and a subscriptionPlan exists, prefer it.
-  // (We keep this conservative: only treat as paid when status is 'active'.)
   const subStatus = toLower(user.subscriptionStatus);
   const subPlan = toLower(user.subscriptionPlan);
-  if (subStatus === "active" && subPlan) return subPlan;
-
   const plan = toLower(user.plan);
+  if (isActivePaidSubscriptionStatus(subStatus)) {
+    if (subPlan) return subPlan;
+    if (plan && plan !== "free") return plan;
+    return "free";
+  }
+  if (subStatus) return "free";
   return plan || "free";
 }
 

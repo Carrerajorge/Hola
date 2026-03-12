@@ -163,6 +163,7 @@ import { UniversalExecutionConsole } from "./universal-execution-console";
 import { ExecutionStreamClient, FlatRunState } from "@/lib/executionStreamClient";
 import { LiveExecutionConsole } from "./live-execution-console";
 import { PricingModal } from "./pricing-modal";
+import { getEffectivePlan, isPaidPlan } from "@/lib/planUtils";
 
 import { SyncStatusIndicator } from "./sync-status-indicator";
 import { ProductionProgress } from "@/components/production-progress";
@@ -754,10 +755,13 @@ export function ChatInterface({
 
   const userPlanInfo = useMemo(() => {
     if (!user) return null;
-    const plan = user.plan || 'free';
-    const isAdmin = Boolean((user as any)?.isAdmin || (user?.email?.toLowerCase() === 'carrerajorge874@gmail.com'));
-    // isPaid = true only if plan is NOT 'free' AND status is 'active'
-    const isPaid = Boolean(plan && plan !== 'free' && (user?.status === 'active'));
+    const plan = getEffectivePlan(user as any);
+    const isAdmin = Boolean(
+      plan === "admin" ||
+      (user as any)?.isAdmin ||
+      (user?.email?.toLowerCase() === "carrerajorge874@gmail.com")
+    );
+    const isPaid = isPaidPlan(user as any);
     return { plan, isAdmin, isPaid };
   }, [user]);
 
@@ -768,7 +772,7 @@ export function ChatInterface({
     incrementQuery,
     closePrompt: closeUpgradePrompt,
     isFreeUser,
-  } = useUpgradePrompt(user?.plan ?? undefined);
+  } = useUpgradePrompt(userPlanInfo?.plan ?? undefined);
 
   const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
 
@@ -998,7 +1002,7 @@ export function ChatInterface({
           setUserPlanState({
             plan: data.plan,
             isAdmin: data.isAdmin,
-            isPaid: data.plan !== "free"
+            isPaid: Boolean(data.isPaid)
           });
         }
       } catch (error) {
@@ -2958,11 +2962,19 @@ export function ChatInterface({
       const response = await apiFetch(`/api/files/${effectiveFileId}/content`);
       if (response.ok) {
         const data = await response.json();
-        if (data.status === "ready" && data.content) {
+        if (data.status === "ready" && (data.content || data.previewArtifact)) {
+          if (data.previewArtifact) {
+            setPreviewFileAttachment(null);
+            setDocumentPreviewArtifact({
+              ...data.previewArtifact,
+              url: resolvedStoragePath,
+            });
+            return;
+          }
           setPreviewFileAttachment((prev: any) => prev ? {
             ...prev,
             fileId: effectiveFileId,
-            content: data.content,
+            content: data.content || "",
             isLoading: false,
             isProcessing: false,
           } : null);
@@ -4505,12 +4517,12 @@ export function ChatInterface({
       const submitConversationId = chatId || latestChatIdRef.current;
       // When sending the very first message, the parent may create a pending chatId asynchronously.
       // We may need to wait briefly for `chatId` (and `latestChatIdRef`) to update before starting SSE.
-      const waitForActiveChatId = async (timeoutMs = 1200): Promise<string | null> => {
+      const waitForActiveChatId = async (timeoutMs = 200): Promise<string | null> => {
         const started = Date.now();
         while (Date.now() - started < timeoutMs) {
           const id = latestChatIdRef.current;
           if (id) return id;
-          await new Promise((resolve) => setTimeout(resolve, 25));
+          await new Promise((resolve) => setTimeout(resolve, 10));
         }
         return latestChatIdRef.current || null;
       };

@@ -209,6 +209,20 @@ function buildUserPrompt(goal: string, memory?: ProcessMemory): string {
   return prompt;
 }
 
+function normalizePlannerJsonPayload(text: string): string {
+  const trimmed = (text || "").trim();
+  if (!trimmed) return trimmed;
+
+  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  const candidate = (fencedMatch?.[1] || trimmed).trim();
+  const firstBrace = candidate.indexOf("{");
+  const lastBrace = candidate.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    return candidate.slice(firstBrace, lastBrace + 1);
+  }
+  return candidate;
+}
+
 // ---------------------------------------------------------------------------
 // decompose — Main entry point
 // ---------------------------------------------------------------------------
@@ -243,7 +257,7 @@ export async function decompose(
     });
 
     const text = result.text ?? "";
-    const parsed = JSON.parse(text) as PlannerOutput;
+    const parsed = JSON.parse(normalizePlannerJsonPayload(text)) as PlannerOutput;
 
     // Validate basic structure
     if (!parsed.subtasks || !Array.isArray(parsed.subtasks) || parsed.subtasks.length === 0) {
