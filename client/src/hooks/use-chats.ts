@@ -1011,6 +1011,8 @@ export function useChats() {
   // Track if user has manually set activeChatId to prevent auto-selection
   const userHasSelectedRef = useRef(false);
   const recoveringFailedQueueRef = useRef(false);
+  const chatDetailInflightRef = useRef<Map<string, Promise<void>>>(new Map());
+  const chatDetailLastFetchAtRef = useRef<Map<string, number>>(new Map());
 
   // Wrapper that tracks user selection intent
   const setActiveChatIdWithTracking = useCallback((id: string | null) => {
@@ -1037,7 +1039,22 @@ export function useChats() {
     // Skip if it's a pending chat or we're already loading
     if (isPendingChat(chatId)) return;
 
-    try {
+    const now = Date.now();
+    const lastFetchedAt = chatDetailLastFetchAtRef.current.get(chatId) || 0;
+    if (now - lastFetchedAt < 2500) {
+      return;
+    }
+
+    const inflight = chatDetailInflightRef.current.get(chatId);
+    if (inflight) {
+      await inflight;
+      return;
+    }
+
+    chatDetailLastFetchAtRef.current.set(chatId, now);
+
+    const fetchPromise = (async () => {
+      try {
       const res = await apiFetch(`/api/chats/${chatId}`, {
         headers: { ...getAnonUserIdHeader() },
         credentials: "include"
@@ -1162,9 +1179,15 @@ export function useChats() {
         c.id === chatId ? { ...c, messages } : c
       ));
 
-    } catch (error) {
-      console.warn(`Failed to fetch details for chat ${chatId}:`, error);
-    }
+      } catch (error) {
+        console.warn(`Failed to fetch details for chat ${chatId}:`, error);
+      } finally {
+        chatDetailInflightRef.current.delete(chatId);
+      }
+    })();
+
+    chatDetailInflightRef.current.set(chatId, fetchPromise);
+    await fetchPromise;
   }, []);
   const loadChatsFromServer = useCallback(async () => {
     try {

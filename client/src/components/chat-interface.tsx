@@ -214,7 +214,6 @@ import {
 import { useAuth } from "@/hooks/use-auth";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useConversationState } from "@/hooks/use-conversation-state";
-import { useAgentMode } from "@/hooks/use-agent-mode";
 import { Database, Sparkles, AudioLines } from "lucide-react";
 import {
   useModelAvailability,
@@ -1276,9 +1275,14 @@ export function ChatInterface({
       }
       const data = await response.json();
       setUserPlanState({
-        plan: data.plan,
-        isAdmin: data.isAdmin,
-        isPaid: Boolean(data.isPaid),
+        plan:
+          typeof data.plan === "string" && data.plan.trim().length > 0
+            ? data.plan
+            : user?.plan || "free",
+        isAdmin:
+          typeof data.isAdmin === "boolean" ? data.isAdmin : undefined,
+        isPaid:
+          typeof data.isPaid === "boolean" ? data.isPaid : undefined,
         subscriptionStatus:
           typeof data.subscriptionStatus === "string"
             ? data.subscriptionStatus
@@ -1291,7 +1295,7 @@ export function ChatInterface({
     } catch (error) {
       console.error("Failed to fetch user plan info:", error);
     }
-  }, [user?.id]);
+  }, [user?.id, user?.plan]);
 
   useEffect(() => {
     void fetchUserPlanInfo();
@@ -1338,7 +1342,7 @@ export function ChatInterface({
         userPlanState?.plan === "admin" ||
         userPlanInfo?.plan === "admin",
       ),
-      isPaid: Boolean(userPlanState?.isPaid ?? userPlanInfo?.isPaid),
+      isPaid: userPlanState?.isPaid ?? userPlanInfo?.isPaid,
       subscriptionStatus:
         userPlanState?.subscriptionStatus ??
         userPlanInfo?.subscriptionStatus ??
@@ -1349,8 +1353,6 @@ export function ChatInterface({
         null,
     };
   }, [user, userPlanInfo, userPlanState]);
-
-  const agentMode = useAgentMode(chatId || "");
 
   // Agent store for persisting agent runs across remounts
   const agentStore = useAgentStore();
@@ -6741,16 +6743,16 @@ export function ChatInterface({
               attachments:
                 messageAttachments.length > 0 ? messageAttachments : undefined,
             };
+            // Clear input IMMEDIATELY after capturing the value to prevent duplicates
+            setInput("");
+            setUploadedFiles([]);
+
             // Show message immediately (optimistic update)
             setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
             const sendMessageAck = await onSendMessage(userMessage);
             const resolvedAgentChatId =
               sendMessageAck?.chatId ||
               (chatId && !chatId.startsWith("pending-") ? chatId : "");
-
-            // Clear input IMMEDIATELY after capturing the value to prevent duplicates
-            setInput("");
-            setUploadedFiles([]);
 
             console.log(
               "[Agent Mode] Starting run with input:",
