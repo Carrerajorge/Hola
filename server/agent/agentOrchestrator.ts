@@ -1965,16 +1965,22 @@ Provide a brief, user-friendly summary (2-4 sentences) of what was accomplished.
       summary: task.description
     });
 
+    const executionInput = enrichToolExecutionInput(
+      task.toolName || "unknown",
+      task.toolParams,
+      this.stepResults,
+    );
+
     // OpenClaw hook: before_tool_call (HTN path)
     await hookSystem.dispatch('before_tool_call', {
       runId: this.runId,
       userId: this.userId,
       toolName: task.toolName || 'unknown',
-      toolInput: task.toolParams,
+      toolInput: executionInput,
     });
 
     try {
-      const result = await toolRegistry.execute(task.toolName || 'unknown', task.toolParams, {
+      const result = await toolRegistry.execute(task.toolName || 'unknown', executionInput, {
         userId: this.userId,
         chatId: this.chatId,
         runId: this.runId,
