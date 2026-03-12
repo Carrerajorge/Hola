@@ -1989,6 +1989,19 @@ Provide a brief, user-friendly summary (2-4 sentences) of what was accomplished.
       task.toolParams,
       dependencyResults.length > 0 ? dependencyResults : this.stepResults,
     );
+    const normalizedToolName = normalizeToolName(task.toolName || "unknown");
+    if (
+      normalizedToolName === "web_search" &&
+      typeof executionInput.query !== "string"
+    ) {
+      const fallbackQuery =
+        (typeof this.userMessage === "string" && this.userMessage.trim()) ||
+        this.plan?.objective ||
+        task.description;
+      if (fallbackQuery) {
+        executionInput.query = fallbackQuery;
+      }
+    }
 
     // OpenClaw hook: before_tool_call (HTN path)
     await hookSystem.dispatch('before_tool_call', {
