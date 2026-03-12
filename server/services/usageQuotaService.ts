@@ -42,6 +42,8 @@ const DEFAULT_MONTHLY_TOKEN_LIMITS: Record<string, number | null> = {
   admin: null,
 };
 
+const ACTIVE_PAID_SUBSCRIPTION_STATUSES = new Set(["active", "trialing"]);
+
 function normalizeRole(value: unknown): string {
   return String(value || "").toLowerCase().trim();
 }
@@ -78,7 +80,12 @@ function getEffectivePlanKey(user: typeof users.$inferSelect, isAdmin: boolean):
   const subscriptionStatus = String((user as any).subscriptionStatus || "").toLowerCase().trim();
   const subscriptionPlan = String((user as any).subscriptionPlan || "").toLowerCase().trim();
   const plan = String((user as any).plan || "free").toLowerCase().trim();
-  if (subscriptionStatus === "active" && subscriptionPlan) return subscriptionPlan;
+  if (ACTIVE_PAID_SUBSCRIPTION_STATUSES.has(subscriptionStatus)) {
+    if (subscriptionPlan) return subscriptionPlan;
+    if (plan && plan !== "free") return plan;
+    return "free";
+  }
+  if (subscriptionStatus) return "free";
   return plan || "free";
 }
 
@@ -129,7 +136,7 @@ export class UsageQuotaService {
 
     // SECURITY: Check admin status using env variable and database role
     const isAdmin = isSystemAdminUser(user);
-    const plan = isAdmin ? "admin" : (user.plan || "free");
+    const plan = getEffectivePlanKey(user, isAdmin);
     const planLimits = PLAN_LIMITS[plan] || PLAN_LIMITS.free;
 
     if (isAdmin || planLimits.dailyRequests === -1) {
@@ -214,12 +221,7 @@ export class UsageQuotaService {
     const isAdmin = isSystemAdminUser(user);
     const subscriptionStatus = String((user as any).subscriptionStatus || "").toLowerCase().trim() || null;
     const subscriptionPlan = String((user as any).subscriptionPlan || "").toLowerCase().trim() || null;
-    const hasSubscriptionMetadata = Boolean(subscriptionStatus || subscriptionPlan);
-    const plan = isAdmin
-      ? "admin"
-      : hasSubscriptionMetadata
-        ? (subscriptionStatus === "active" && subscriptionPlan ? subscriptionPlan : "free")
-        : (user.plan || "free");
+    const plan = getEffectivePlanKey(user, isAdmin);
     const isPaid = plan !== "free" && plan !== "admin";
     const planLimits = PLAN_LIMITS[plan] || PLAN_LIMITS.free;
 
@@ -253,7 +255,7 @@ export class UsageQuotaService {
       limit: planLimits.dailyRequests,
       resetAt: user.dailyRequestsResetAt,
       plan,
-      isAdmin: false,
+      isAdmin,
       isPaid: isPaid,
       subscriptionStatus,
       subscriptionPlan,

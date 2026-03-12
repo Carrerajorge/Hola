@@ -95,6 +95,21 @@ const DEFAULT_MODEL = "grok-4-1-fast-non-reasoning";
 const DEFAULT_TEMPERATURE = 0.7;
 const DEFAULT_TOP_P = 1;
 const DEFAULT_MAX_TOKENS = 4096;
+let missingGptSessionsRelationWarned = false;
+
+function isMissingGptSessionsRelationError(error: unknown): boolean {
+  const asAny = error as any;
+  const code = asAny?.code || asAny?.cause?.code;
+  const message = String(asAny?.message || "");
+  const causeMessage = String(asAny?.cause?.message || "");
+  return code === "42P01" || message.includes("gpt_sessions") || causeMessage.includes("gpt_sessions");
+}
+
+function warnMissingGptSessionsRelationOnce(): void {
+  if (missingGptSessionsRelationWarned) return;
+  missingGptSessionsRelationWarned = true;
+  console.warn("[GPTSession] gpt_sessions relation is unavailable. Falling back to chat metadata only.");
+}
 
 async function resolveGptReference(gptRef: string): Promise<{ id: string; gpt: Gpt }> {
   const normalizedRef = typeof gptRef === "string" ? gptRef.trim() : "";
@@ -528,20 +543,37 @@ export function buildSystemPromptWithContext(contract: GptSessionContract): stri
 }
 
 export async function getSessionByChatId(chatId: string): Promise<GptSession | null> {
-  const [session] = await db
-    .select()
-    .from(gptSessions)
-    .where(eq(gptSessions.chatId, chatId));
-  
-  return session || null;
+  try {
+    const [session] = await db
+      .select()
+      .from(gptSessions)
+      .where(eq(gptSessions.chatId, chatId));
+
+    return session || null;
+  } catch (error) {
+    if (isMissingGptSessionsRelationError(error)) {
+      warnMissingGptSessionsRelationOnce();
+      return null;
+    }
+    throw error;
+  }
 }
 
 export async function getSessionById(sessionId: string): Promise<GptSessionContract | null> {
-  const [session] = await db
-    .select()
-    .from(gptSessions)
-    .where(eq(gptSessions.id, sessionId))
-    .limit(1);
+  let session: GptSession | undefined;
+  try {
+    [session] = await db
+      .select()
+      .from(gptSessions)
+      .where(eq(gptSessions.id, sessionId))
+      .limit(1);
+  } catch (error) {
+    if (isMissingGptSessionsRelationError(error)) {
+      warnMissingGptSessionsRelationOnce();
+      return null;
+    }
+    throw error;
+  }
   
   if (!session) return null;
   
@@ -557,5 +589,13 @@ export async function getSessionById(sessionId: string): Promise<GptSessionContr
 }
 
 export async function deleteSessionByChatId(chatId: string): Promise<void> {
-  await db.delete(gptSessions).where(eq(gptSessions.chatId, chatId));
+  try {
+    await db.delete(gptSessions).where(eq(gptSessions.chatId, chatId));
+  } catch (error) {
+    if (isMissingGptSessionsRelationError(error)) {
+      warnMissingGptSessionsRelationOnce();
+      return;
+    }
+    throw error;
+  }
 }

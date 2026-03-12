@@ -160,11 +160,12 @@ class AgentEventBus extends EventEmitter {
     } catch (error: any) {
       // Silently ignore FK constraint errors (run not persisted yet) and NOT NULL errors
       // These are non-critical for the agent workflow to complete
-      if (error?.code === '23503' || error?.code === '23502') {
+      const constraintCode = error?.code || error?.cause?.code;
+      if (constraintCode === '23503' || constraintCode === '23502') {
         // FK or NOT NULL constraint - run might not be persisted, skip silently
         return;
       }
-      const code = error?.code || error?.cause?.code;
+      const code = constraintCode;
       const message = String(error?.message || error?.cause?.message || "");
       if (code === "ECONNREFUSED" || code === "ECONNRESET" || code === "ETIMEDOUT" || code === "ENOTFOUND" || /ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND/i.test(message)) {
         if (!this.dbUnavailableLogged) {

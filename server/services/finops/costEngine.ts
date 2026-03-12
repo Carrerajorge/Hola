@@ -22,7 +22,11 @@ function isMissingRelationError(error: unknown, relationName: string): boolean {
     const message = String(asAny?.message || "");
     const causeMessage = String(asAny?.cause?.message || "");
     if (code === '42P01') return true;
-    return message.includes(relationName) || causeMessage.includes(relationName);
+  return message.includes(relationName) || causeMessage.includes(relationName);
+}
+
+function isMissingPricingCatalogError(error: unknown): boolean {
+    return isMissingRelationError(error, 'pricing_catalog');
 }
 
 export class CostEngine {
@@ -119,6 +123,10 @@ export class CostEngine {
             return totalCost;
 
         } catch (e) {
+            if (isMissingPricingCatalogError(e) || isMissingRelationError(e, 'token_ledger_usage')) {
+                console.warn(`[FinOps] Cost ledger schema incomplete. Skipping accounting for model ${payload.modelName}.`);
+                return 0;
+            }
             console.error(`[FinOps] Error Crítico insertando Cost Ledger: `, e);
             return 0;
         }

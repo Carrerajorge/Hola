@@ -69,7 +69,9 @@ type StoredGeminiCliFlowDraft = {
   flowId: string;
   authUrl: string;
   redirectUri: string;
+  callbackUrl: string;
   createdAt: number;
+  updatedAt: number;
   flowProof: GeminiCliFlowProof;
 };
 
@@ -111,11 +113,16 @@ function readStoredFlowDraft(): StoredGeminiCliFlowDraft | null {
       window.sessionStorage.removeItem(FLOW_STORAGE_KEY);
       return null;
     }
-    if (Date.now() - parsed.createdAt > FLOW_STORAGE_TTL_MS) {
+    const freshness = typeof parsed.updatedAt === "number" ? parsed.updatedAt : parsed.createdAt;
+    if (Date.now() - freshness > FLOW_STORAGE_TTL_MS) {
       window.sessionStorage.removeItem(FLOW_STORAGE_KEY);
       return null;
     }
-    return parsed as StoredGeminiCliFlowDraft;
+    return {
+      ...(parsed as StoredGeminiCliFlowDraft),
+      callbackUrl: typeof parsed.callbackUrl === "string" ? parsed.callbackUrl : "",
+      updatedAt: freshness,
+    };
   } catch {
     return null;
   }
@@ -128,6 +135,19 @@ function writeStoredFlowDraft(flow: StoredGeminiCliFlowDraft): void {
   } catch {
     // Ignore storage quota/privacy mode failures.
   }
+}
+
+function normalizeCallbackInput(input: string, redirectUri: string): string {
+  const trimmed = input.trim();
+  if (!trimmed) return "";
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (trimmed.startsWith("?")) {
+    return `${redirectUri}${trimmed}`;
+  }
+  if (trimmed.includes("=") && !trimmed.includes("://")) {
+    return `${redirectUri}?${trimmed.replace(/^\?/, "")}`;
+  }
+  return trimmed;
 }
 
 function clearStoredFlowDraft(): void {
@@ -188,7 +208,9 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
         flowId: payload.flowId,
         authUrl: payload.authUrl,
         redirectUri: payload.redirectUri,
+        callbackUrl: "",
         createdAt: Date.now(),
+        updatedAt: Date.now(),
         flowProof: payload.flowProof,
       });
 
@@ -354,10 +376,10 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
     }
     completeMutation.mutate({
       flowId: resolvedFlowId,
-      callbackUrl,
+      callbackUrl: normalizeCallbackInput(callbackUrl, redirectUri),
       flowProof: readStoredFlowDraft()?.flowProof,
     });
-  }, [callbackUrl, completeMutation, flowId, getManualCallbackValidationError, toast]);
+  }, [callbackUrl, completeMutation, flowId, getManualCallbackValidationError, redirectUri, toast]);
 
   const handleCopyUrl = React.useCallback(async () => {
     if (!authUrl) return;
@@ -418,6 +440,7 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
     setFlowId(storedFlow.flowId);
     setAuthUrl(storedFlow.authUrl);
     setRedirectUri(storedFlow.redirectUri);
+    setCallbackUrl(storedFlow.callbackUrl);
   }, [completeMutation.isPending, flowId, open, startMutation.isPending]);
 
   React.useEffect(() => {
@@ -425,6 +448,24 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
       clearStoredFlowDraft();
     }
   }, [status?.connected]);
+
+  React.useEffect(() => {
+    if (!open || !flowId) {
+      return;
+    }
+    const storedFlow = readStoredFlowDraft();
+    if (!storedFlow) {
+      return;
+    }
+    writeStoredFlowDraft({
+      ...storedFlow,
+      flowId,
+      authUrl,
+      redirectUri,
+      callbackUrl,
+      updatedAt: Date.now(),
+    });
+  }, [authUrl, callbackUrl, flowId, open, redirectUri]);
 
   React.useEffect(() => {
     const handleMessage = (event: MessageEvent) => {

@@ -110,6 +110,8 @@ const LOCAL_FILESYSTEM_SIGNAL_REGEX =
 const SKILL_SIGNAL_REGEX = /\b(skill|skills|habilidad|habilidades)\b|\$[a-z0-9_-]{2,80}/i;
 const LANDING_PAGE_SIGNAL_REGEX =
   /\b(landing\s+page|p[aá]gina\s+de\s+aterrizaje|p[aá]gina\s+web|sitio\s+web|website|landing)\b/i;
+const ORCHESTRATION_COMPLEXITY_SIGNAL_REGEX =
+  /\b(c[oó]digo|code|repo|repository|archivo|file|carpeta|folder|documento|document|excel|ppt|presentaci[oó]n|investiga|research|compara|comparison|analiza|an[aá]lisis|workflow|pipeline|automatiza|deploy|proyecto|project)\b/i;
 
 function normalizeWorkspaceSubdir(value: string | null | undefined): string {
   const raw = String(value || ".").trim().replace(/\\/g, "/");
@@ -1327,12 +1329,21 @@ export async function executeAgentLoop(
 
   // ── SuperPlanner Orchestrator intercept ──
   // Route complex multi-step tasks to the intelligent orchestrator instead of
-  // the flat reactive loop. Triggers when intent is multi_step_task OR the
-  // requestBrief has 3+ subtasks.
+  // the flat reactive loop. Keep this strict so simple chats don't get stuck
+  // booting the planner.
   const briefSubtaskCount = requestBrief?.subtasks?.length ?? 0;
+  const normalizedRecentUserText = normalizeSpaces(recentUserText || requestSpec.rawMessage || "");
+  const hasWorkspaceContext = Boolean(options.workspaceContext?.repositoryPath?.trim());
+  const hasComplexitySignals =
+    hasWorkspaceContext ||
+    LOCAL_FILESYSTEM_SIGNAL_REGEX.test(normalizedRecentUserText) ||
+    LANDING_PAGE_SIGNAL_REGEX.test(normalizedRecentUserText) ||
+    SKILL_SIGNAL_REGEX.test(normalizedRecentUserText) ||
+    ORCHESTRATION_COMPLEXITY_SIGNAL_REGEX.test(normalizedRecentUserText);
   const shouldOrchestrate =
-    requestSpec.intent === "multi_step_task" ||
-    briefSubtaskCount >= 3;
+    requestSpec.intent === "multi_step_task" &&
+    briefSubtaskCount >= 3 &&
+    hasComplexitySignals;
 
   if (shouldOrchestrate) {
     console.log(`[AgentExecutor] Routing to SuperPlanner orchestrator (intent=${requestSpec.intent}, subtasks=${briefSubtaskCount})`);

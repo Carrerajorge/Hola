@@ -774,7 +774,7 @@ export function ChatInterface({
     incrementQuery,
     closePrompt: closeUpgradePrompt,
     isFreeUser,
-  } = useUpgradePrompt(user?.plan ?? undefined);
+  } = useUpgradePrompt(userPlanState?.plan ?? userPlanInfo?.plan ?? undefined);
 
   const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
 
@@ -4571,12 +4571,12 @@ export function ChatInterface({
       const submitConversationId = chatId || latestChatIdRef.current;
       // When sending the very first message, the parent may create a pending chatId asynchronously.
       // We may need to wait briefly for `chatId` (and `latestChatIdRef`) to update before starting SSE.
-      const waitForActiveChatId = async (timeoutMs = 1200): Promise<string | null> => {
+      const waitForActiveChatId = async (timeoutMs = 200): Promise<string | null> => {
         const started = Date.now();
         while (Date.now() - started < timeoutMs) {
           const id = latestChatIdRef.current;
           if (id) return id;
-          await new Promise((resolve) => setTimeout(resolve, 25));
+          await new Promise((resolve) => setTimeout(resolve, 10));
         }
         return latestChatIdRef.current || null;
       };

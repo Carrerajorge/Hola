@@ -16,6 +16,9 @@ import {
   getGoogleGeminiCliOAuthStatus,
 } from "../services/googleGeminiCliOAuthService";
 
+const FLOW_TTL_MS = 45 * 60 * 1000;
+const COMPLETED_FLOW_TTL_MS = 30 * 60 * 1000;
+
 type GeminiCliFlowSessionEntry = GeminiCliOAuthFlowRecord;
 
 type GeminiCliFlowProof = {
@@ -29,6 +32,14 @@ type GeminiCliSessionState = {
   geminiCliOAuthFlows?: Record<string, GeminiCliFlowSessionEntry>;
 };
 
+type GeminiCliCompletedFlowEntry = {
+  userId: string;
+  completedAt: number;
+  response: Awaited<ReturnType<typeof getGoogleGeminiCliOAuthStatus>>;
+};
+
+const completedFlowStore = new Map<string, GeminiCliCompletedFlowEntry>();
+
 function getFlowStore(req: Request): Record<string, GeminiCliFlowSessionEntry> {
   const session = ((req as any).session ?? {}) as GeminiCliSessionState;
   session.geminiCliOAuthFlows = session.geminiCliOAuthFlows ?? {};
@@ -40,8 +51,21 @@ function clearExpiredFlows(store: Record<string, GeminiCliFlowSessionEntry>): vo
   clearExpiredGeminiCliOAuthFlows();
   const now = Date.now();
   for (const [flowId, flow] of Object.entries(store)) {
-    if (now - flow.createdAt > 45 * 60 * 1000) {
+    if (now - flow.createdAt > FLOW_TTL_MS) {
       delete store[flowId];
+    }
+  }
+}
+
+function getCompletedFlowKey(userId: string, flowId: string): string {
+  return `${userId}:${flowId}`;
+}
+
+function clearExpiredCompletedFlows(): void {
+  const now = Date.now();
+  for (const [key, entry] of completedFlowStore.entries()) {
+    if (now - entry.completedAt > COMPLETED_FLOW_TTL_MS) {
+      completedFlowStore.delete(key);
     }
   }
 }
@@ -76,6 +100,7 @@ googleGeminiCliOAuthRouter.post("/start", async (req: Request, res: Response) =>
 
     const flowStore = getFlowStore(req);
     clearExpiredFlows(flowStore);
+    clearExpiredCompletedFlows();
 
     const flowId = randomUUID();
     const redirectUri = getCanonicalGoogleCallbackUri(req);
@@ -157,6 +182,8 @@ googleGeminiCliOAuthRouter.post("/complete", async (req: Request, res: Response)
 
     const flowStore = getFlowStore(req);
     clearExpiredFlows(flowStore);
+    clearExpiredCompletedFlows();
+    const completedFlowKey = getCompletedFlowKey(userId, flowId);
 
     const storedFlow = flowStore[flowId] ?? getGeminiCliOAuthFlow(flowId);
     let flow:
@@ -166,7 +193,7 @@ googleGeminiCliOAuthRouter.post("/complete", async (req: Request, res: Response)
       | null = storedFlow;
 
     if (!flow && flowProof) {
-      const isFresh = Date.now() - flowProof.createdAt <= 45 * 60 * 1000;
+      const isFresh = Date.now() - flowProof.createdAt <= FLOW_TTL_MS;
       const expectedState = `gemini-cli:${flowId}`;
       if (isFresh && flowProof.oauthState === expectedState) {
         flow = {
@@ -180,6 +207,13 @@ googleGeminiCliOAuthRouter.post("/complete", async (req: Request, res: Response)
     }
 
     if (!flow) {
+      const completed = completedFlowStore.get(completedFlowKey);
+      if (completed) {
+        return res.json({
+          ...completed.response,
+          selectedModelId: completed.response.defaultModelId,
+        });
+      }
       return res.status(400).json({ error: "La sesion OAuth expiro. Inicia la vinculacion otra vez." });
     }
     if (flow.userId !== userId) {
@@ -195,6 +229,11 @@ googleGeminiCliOAuthRouter.post("/complete", async (req: Request, res: Response)
 
     delete flowStore[flowId];
     deleteGeminiCliOAuthFlow(flowId);
+    completedFlowStore.set(completedFlowKey, {
+      userId,
+      completedAt: Date.now(),
+      response: status,
+    });
 
     res.json({
       ...status,

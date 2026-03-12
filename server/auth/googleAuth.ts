@@ -248,15 +248,6 @@ router.get("/google/callback", async (req: Request, res: Response) => {
         const session = (((req as any).session ?? {}) as GeminiCliSessionState);
         const flow = session.geminiCliOAuthFlows?.[geminiFlowId] || getGeminiCliOAuthFlow(geminiFlowId);
 
-        if (!flow || flow.oauthState !== stateValue) {
-            console.error("[Google Auth] Gemini CLI OAuth flow missing or expired");
-            return renderGeminiCliBridge(res, {
-                flowId: geminiFlowId,
-                error: "gemini_cli_invalid_state",
-                errorDescription: "La sesión OAuth de Gemini expiró o ya no existe.",
-            });
-        }
-
         if (error) {
             console.error("[Google Auth] Gemini CLI OAuth error:", error, error_description);
             return renderGeminiCliBridge(res, {
@@ -272,6 +263,15 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                 flowId: geminiFlowId,
                 error: "gemini_cli_missing_code",
                 errorDescription: "Google no devolvió el código de autorización.",
+            });
+        }
+
+        if (flow && flow.oauthState !== stateValue) {
+            console.error("[Google Auth] Gemini CLI OAuth state mismatch for active flow");
+            return renderGeminiCliBridge(res, {
+                flowId: geminiFlowId,
+                error: "gemini_cli_invalid_state",
+                errorDescription: "El callback OAuth no coincide con la sesión iniciada.",
             });
         }
 
