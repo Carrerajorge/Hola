@@ -402,6 +402,116 @@ export class ToolRegistry {
     return safeInput;
   }
 
+  private inferTextCandidate(value: unknown, seen = new WeakSet<object>()): string | null {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (!trimmed || /^https?:\/\//i.test(trimmed)) {
+        return null;
+      }
+      return trimmed;
+    }
+
+    if (Array.isArray(value)) {
+      for (let i = value.length - 1; i >= 0; i -= 1) {
+        const candidate = this.inferTextCandidate(value[i], seen);
+        if (candidate) {
+          return candidate;
+        }
+      }
+      return null;
+    }
+
+    if (!value || typeof value !== "object") {
+      return null;
+    }
+
+    if (seen.has(value as object)) {
+      return null;
+    }
+    seen.add(value as object);
+
+    const record = value as Record<string, unknown>;
+    if (record.toolName === "fetch_url" && "output" in record) {
+      const candidate = this.inferTextCandidate(record.output, seen);
+      if (candidate) {
+        return candidate;
+      }
+    }
+
+    const preferredKeys = [
+      "textContent",
+      "content",
+      "body",
+      "text",
+      "summary",
+      "excerpt",
+      "response",
+      "message",
+      "result",
+    ];
+
+    for (const key of preferredKeys) {
+      const candidate = this.inferTextCandidate(record[key], seen);
+      if (candidate) {
+        return candidate;
+      }
+    }
+
+    const nestedKeys = [
+      "data",
+      "output",
+      "article",
+      "document",
+      "page",
+      "items",
+      "results",
+      "contents",
+      "sources",
+      "_dependencyResults",
+      "_completedResults",
+      "previousResults",
+      "previousResult",
+    ];
+
+    for (const key of nestedKeys) {
+      const candidate = this.inferTextCandidate(record[key], seen);
+      if (candidate) {
+        return candidate;
+      }
+    }
+
+    for (const child of Object.values(record).reverse()) {
+      const candidate = this.inferTextCandidate(child, seen);
+      if (candidate) {
+        return candidate;
+      }
+    }
+
+    return null;
+  }
+
+  private coerceSummarizeInput(input: any): any {
+    const safeInput = input && typeof input === "object" ? { ...input } : {};
+    const directText =
+      [safeInput.content, safeInput.input, safeInput.text].find(
+        (value) => typeof value === "string" && value.trim().length > 0,
+      ) || null;
+
+    if (directText) {
+      safeInput.content = safeInput.content || directText;
+      safeInput.input = safeInput.input || directText;
+      return safeInput;
+    }
+
+    const inferredText = this.inferTextCandidate(safeInput);
+    if (inferredText) {
+      safeInput.content = inferredText;
+      safeInput.input = inferredText;
+    }
+
+    return safeInput;
+  }
+
   register(tool: ToolDefinition): void {
     const validatedTool = validateOrThrow(
       ToolDefinitionSchema,
@@ -1101,6 +1211,13 @@ export class ToolRegistry {
             });
           }
           Object.assign(safeInput, coercedFetchInput);
+        }
+        if (name === "summarize") {
+          const coercedSummarizeInput = this.coerceSummarizeInput(safeInput);
+          if (!safeInput.content && !safeInput.input && (coercedSummarizeInput.content || coercedSummarizeInput.input)) {
+            addLog("info", "Inferred summarize input from prior tool results");
+          }
+          Object.assign(safeInput, coercedSummarizeInput);
         }
         if (name === 'web_search' && !safeInput.query) {
           safeInput.query = typeof context?.runId === 'string' ? "general search" : "search";

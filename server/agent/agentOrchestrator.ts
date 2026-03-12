@@ -1945,6 +1945,8 @@ Provide a brief, user-friendly summary (2-4 sentences) of what was accomplished.
   async executeHTNTask(task: Task): Promise<any> {
     // Find corresponding step index for UI updates (if strictly mapped)
     const stepIndex = this.plan!.steps.findIndex(s => s.description === task.description && s.toolName === (task.toolName || 'unknown'));
+    const planner = getHTNPlanner();
+    const htnPlan = this.htnPlanId ? planner.getPlan(this.htnPlanId) : undefined;
 
     if (this.isCancelled) {
       throw new Error("Run cancelled");
@@ -1965,10 +1967,27 @@ Provide a brief, user-friendly summary (2-4 sentences) of what was accomplished.
       summary: task.description
     });
 
+    const dependencyResults = (task.dependencies || []).flatMap((dependencyId) => {
+      const dependencyTask = htnPlan?.allTasks.get(dependencyId);
+      if (!dependencyTask || dependencyTask.status !== "completed" || typeof dependencyTask.result === "undefined") {
+        return [];
+      }
+
+      const dependencyStepIndex = htnPlan?.executionOrder.indexOf(dependencyId) ?? -1;
+
+      return [{
+        stepIndex: dependencyStepIndex >= 0 ? dependencyStepIndex : this.stepResults.length,
+        toolName: normalizeToolName(dependencyTask.toolName || "unknown"),
+        success: true,
+        output: dependencyTask.result,
+        error: dependencyTask.error,
+      }];
+    });
+
     const executionInput = enrichToolExecutionInput(
       task.toolName || "unknown",
       task.toolParams,
-      this.stepResults,
+      dependencyResults.length > 0 ? dependencyResults : this.stepResults,
     );
 
     // OpenClaw hook: before_tool_call (HTN path)
