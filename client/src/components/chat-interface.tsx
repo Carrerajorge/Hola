@@ -752,6 +752,13 @@ export function ChatInterface({
 
   // First visit explosion
   const { showExplosion, completeWelcome } = useFirstVisit();
+  const [userPlanState, setUserPlanState] = useState<{
+    plan: string;
+    isAdmin?: boolean;
+    isPaid?: boolean;
+    subscriptionStatus?: string | null;
+    subscriptionPlan?: string | null;
+  } | null>(null);
 
   const userPlanInfo = useMemo(() => {
     if (!user) return null;
@@ -907,13 +914,6 @@ export function ChatInterface({
   const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
   const [showPricingModal, setShowPricingModal] = useState(false);
   const [quotaInfo, setQuotaInfo] = useState<{ remaining: number; limit: number; resetAt: string | null; plan: string } | null>(null);
-  const [userPlanState, setUserPlanState] = useState<{
-    plan: string;
-    isAdmin?: boolean;
-    isPaid?: boolean;
-    subscriptionStatus?: string | null;
-    subscriptionPlan?: string | null;
-  } | null>(null);
   // isAgentPanelOpen removed - agent progress is shown inline in chat
   const modelSelectorRef = useRef<HTMLDivElement>(null);
   const gptCapabilities = activeGpt?.capabilities;
