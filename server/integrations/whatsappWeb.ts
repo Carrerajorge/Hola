@@ -179,6 +179,8 @@ if (!currentSession || currentSession.socket !== sock) return;
 const { connection, qr, lastDisconnect } = update;
 
 if (qr) {
+const current = this.getStatus(userId);
+if (current.state !== "pairing_code") {
 this.setStatus(userId, {
 state: "qr",
 qr,
@@ -187,6 +189,7 @@ me: null,
 error: null,
 phone: phone ?? null,
 });
+}
 }
 
 if (connection === "connecting") {
