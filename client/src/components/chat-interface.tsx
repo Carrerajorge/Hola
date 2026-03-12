@@ -1726,15 +1726,10 @@ export function ChatInterface({
       );
       if (found) return found;
     }
-    // Default: prefer Gemini models over others (Perplexity has no API key)
-    const preferredModel = availableModels.find(
-      (m: any) =>
-        (m.provider === "google-gemini-cli" ||
-          m.provider === "google" ||
-          m.provider === "gemini") &&
-        m.modelId?.includes("gemini"),
-    );
-    return preferredModel || availableModels[0] || null;
+    // Fall back to the catalog order decided by ModelAvailabilityContext/platform settings.
+    // Forcing Gemini here can pin new sessions to an invalid provider and add seconds of delay
+    // before the gateway falls back to a healthy model.
+    return availableModels[0] || null;
   }, [selectedModelId, availableModels]);
 
   const activeAgentModel = useMemo(() => {
