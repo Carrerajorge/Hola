@@ -38,11 +38,24 @@ describe("ModelAvailabilityContext helpers", () => {
     expect(pickPreferredEnabledModel([grok, gemini], "gemini-2.5-flash", null)?.id).toBe("gemini-id");
   });
 
-  it("prefers Google Gemini style providers before xai when no explicit default exists", () => {
+  it("normalizes quoted legacy defaults to the current enabled xai model", () => {
+    const legacyGrok = makeModel({ id: "grok-id", provider: "xai", modelId: "grok-4.1-fast" });
+    const gemini = makeModel({ id: "gemini-id", provider: "google", modelId: "gemini-2.5-flash-lite" });
+
+    expect(
+      pickPreferredEnabledModel(
+        [legacyGrok, gemini],
+        "\"grok-4-1-fast-non-reasoning\"",
+        null,
+      )?.id,
+    ).toBe("grok-id");
+  });
+
+  it("prefers xai before Google when no explicit default exists", () => {
     const grok = makeModel({ id: "grok-id", provider: "xai", modelId: "grok-4-fast" });
     const gemini = makeModel({ id: "gemini-id", provider: "google", modelId: "gemini-2.5-flash" });
 
-    expect(pickPreferredEnabledModel([grok, gemini], null, null)?.id).toBe("gemini-id");
+    expect(pickPreferredEnabledModel([grok, gemini], null, null)?.id).toBe("grok-id");
   });
 
   it("prioritizes Gemini CLI OAuth when it is available", () => {

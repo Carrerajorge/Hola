@@ -22,14 +22,19 @@ export interface AvailableModel {
 
 const PREFERRED_PROVIDER_ORDER = Object.freeze([
   "google-gemini-cli",
-  "google",
-  "gemini",
+  "xai",
   "openai",
   "anthropic",
   "deepseek",
-  "xai",
+  "google",
+  "gemini",
 ]);
 const DEFAULT_VISIBLE_MODEL_LIMIT = 3;
+const LEGACY_MODEL_ID_ALIASES = Object.freeze({
+  "grok-4-1-fast-non-reasoning": ["grok-4.1-fast", "grok-code-fast-1"],
+  "grok-4-1-fast-reasoning": ["grok-4.1-fast-reasoning"],
+  "gemini-2.5-flash": ["gemini-2.5-flash-lite"],
+} satisfies Record<string, string[]>);
 
 export function shouldExposeLocalMockModels(hostname?: string): boolean {
   const host = (hostname || "").trim().toLowerCase();
@@ -50,10 +55,31 @@ export function pickPreferredEnabledModel(
   primaryId?: string | null,
   secondaryId?: string | null
 ): AvailableModel | null {
-  const findEnabled = (id?: string | null) => {
+  const getCandidateIds = (id?: string | null): string[] => {
     const safeId = typeof id === "string" ? id.trim() : "";
-    if (!safeId) return undefined;
-    return enabledModels.find((m) => m.modelId === safeId || m.id === safeId);
+    if (!safeId) return [];
+
+    const unquoted = safeId.replace(/^["']+|["']+$/g, "").trim();
+    if (!unquoted) return [];
+
+    const normalized = unquoted.toLowerCase();
+    const candidates = [
+      unquoted,
+      ...(LEGACY_MODEL_ID_ALIASES[normalized] ?? []),
+    ];
+
+    return Array.from(new Set(candidates));
+  };
+
+  const findEnabled = (id?: string | null) => {
+    const candidates = getCandidateIds(id);
+    if (candidates.length === 0) return undefined;
+
+    return enabledModels.find((model) =>
+      candidates.some(
+        (candidate) => model.modelId === candidate || model.id === candidate,
+      ),
+    );
   };
 
   const explicit = findEnabled(primaryId) || findEnabled(secondaryId);
