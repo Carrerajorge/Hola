@@ -406,6 +406,7 @@ export async function createUnifiedRun(
       messageId: normalizedMessageId,
       userId: request.userId,
       status: 'planning',
+      startedAt: new Date(),
       idempotencyKey: requestSpec.id,
     }).onConflictDoNothing();
   } catch (error) {
@@ -676,7 +677,7 @@ export async function executeUnifiedChat(
     const finalDurationMs = Date.now() - context.startTime;
     await Promise.all([
       db.update(agentModeRuns)
-        .set({ status: 'completed' })
+        .set({ status: 'completed', completedAt: new Date() })
         .where(eq(agentModeRuns.id, runId))
         .catch(err => console.error('[UnifiedChat] Failed to update run status:', err)),
       persistRequestSpec(context, 'completed', finalDurationMs),
@@ -716,7 +717,7 @@ export async function executeUnifiedChat(
     const durationMs = Date.now() - context.startTime;
     await Promise.all([
       db.update(agentModeRuns)
-        .set({ status: 'failed' })
+        .set({ status: 'failed', completedAt: new Date() })
         .where(eq(agentModeRuns.id, runId))
         .catch(err => console.error('[UnifiedChat] Failed to update run status:', err)),
       persistRequestSpec(context, 'failed', durationMs),

@@ -7,10 +7,13 @@ import { authStorage } from "../replit_integrations/auth/storage";
 import { storage } from "../storage";
 import { env } from "../config/env";
 import {
+    clearExpiredGeminiCliOAuthCompletedStore,
     deleteGeminiCliOAuthFlow,
     extractGeminiCliFlowIdFromState,
     getGeminiCliOAuthFlow,
+    saveGeminiCliOAuthCompletedToStore,
     saveGeminiCliOAuthCompleted,
+    type GeminiCliOAuthCompletedSessionStore,
 } from "../lib/geminiCliOAuthFlowStore";
 import { finishGoogleGeminiCliOAuthFlow } from "../services/googleGeminiCliOAuthService";
 
@@ -26,6 +29,7 @@ type GeminiCliFlowSessionEntry = {
 
 type GeminiCliSessionState = {
     geminiCliOAuthFlows?: Record<string, GeminiCliFlowSessionEntry>;
+    geminiCliOAuthCompleted?: GeminiCliOAuthCompletedSessionStore;
 };
 
 // CANONICAL URL for OAuth redirects (avoid www/non-www mismatch)
@@ -278,6 +282,9 @@ router.get("/google/callback", async (req: Request, res: Response) => {
 
     if (geminiFlowId) {
         const session = (((req as any).session ?? {}) as GeminiCliSessionState);
+        session.geminiCliOAuthCompleted =
+            session.geminiCliOAuthCompleted ?? {};
+        clearExpiredGeminiCliOAuthCompletedStore(session.geminiCliOAuthCompleted);
         const flow = session.geminiCliOAuthFlows?.[geminiFlowId] || getGeminiCliOAuthFlow(geminiFlowId);
 
         if (error) {
@@ -321,17 +328,23 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                     delete session.geminiCliOAuthFlows[geminiFlowId];
                 }
                 deleteGeminiCliOAuthFlow(geminiFlowId);
-                await saveSessionIfPossible(req);
 
                 const responsePayload = {
                     ...status,
                     selectedModelId: status.defaultModelId,
                 };
+                saveGeminiCliOAuthCompletedToStore(
+                    session.geminiCliOAuthCompleted,
+                    geminiFlowId,
+                    flow.userId,
+                    responsePayload,
+                );
                 saveGeminiCliOAuthCompleted(
                     geminiFlowId,
                     flow.userId,
                     responsePayload,
                 );
+                await saveSessionIfPossible(req);
 
                 return renderGeminiCliBridge(res, {
                     flowId: geminiFlowId,

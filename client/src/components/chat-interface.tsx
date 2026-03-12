@@ -6647,26 +6647,10 @@ export function ChatInterface({
 
       // Handle Agent mode - show in chat, not side panel
       if (selectedTool === "agent") {
-        const agentToolMessage = (input || autoPromptForFiles).trim();
-        const readyAgentFiles = uploadedFilesRef.current.filter(
-          (f: any) => f.status === "ready",
-        );
-        const agentIntentCheck = shouldAutoActivateAgent(
-          agentToolMessage,
-          readyAgentFiles.length > 0,
-        );
-        const shouldBypassExplicitAgent =
-          readyAgentFiles.length === 0 &&
-          !agentIntentCheck.agent_required &&
-          agentIntentCheck.confidence === "high";
-
-        if (shouldBypassExplicitAgent) {
-          setSelectedTool(null);
-        } else {
-          // Save files before clearing so we can restore on error
-          const savedAgentFiles = [...uploadedFilesRef.current];
-          let explicitAgentUserMessageId: string | null = null;
-          try {
+        // Explicit agent selection must never be downgraded to normal chat.
+        const savedAgentFiles = [...uploadedFilesRef.current];
+        let explicitAgentUserMessageId: string | null = null;
+        try {
             const userMessageContent = input || autoPromptForFiles;
             const readyFiles = uploadedFilesRef.current.filter(
               (f: any) => f.status === "ready",
@@ -6818,30 +6802,29 @@ export function ChatInterface({
                 variant: "destructive",
               });
             }
-          } catch (error) {
-            console.error("Failed to start agent run:", error);
-            // Remove the optimistic message since the agent failed to start
-            setOptimisticMessages((prev: Message[]) =>
-              explicitAgentUserMessageId
-                ? prev.filter(
-                    (m: Message) => m.id !== explicitAgentUserMessageId,
-                  )
-                : prev,
-            );
-            // Restore files so user doesn't lose them
-            if (savedAgentFiles.length > 0) {
-              setUploadedFiles(savedAgentFiles);
-            }
-            setCurrentAgentMessageId(null);
-            setSelectedTool(null);
-            const description =
-              error instanceof Error && error.message
-                ? error.message
-                : "Error al iniciar el agente. Tus archivos fueron restaurados.";
-            toast({ title: "Error", description, variant: "destructive" });
+        } catch (error) {
+          console.error("Failed to start agent run:", error);
+          // Remove the optimistic message since the agent failed to start
+          setOptimisticMessages((prev: Message[]) =>
+            explicitAgentUserMessageId
+              ? prev.filter(
+                  (m: Message) => m.id !== explicitAgentUserMessageId,
+                )
+              : prev,
+          );
+          // Restore files so user doesn't lose them
+          if (savedAgentFiles.length > 0) {
+            setUploadedFiles(savedAgentFiles);
           }
-          return;
+          setCurrentAgentMessageId(null);
+          setSelectedTool(null);
+          const description =
+            error instanceof Error && error.message
+              ? error.message
+              : "Error al iniciar el agente. Tus archivos fueron restaurados.";
+          toast({ title: "Error", description, variant: "destructive" });
         }
+        return;
       }
 
       // If there's selected text from document, rewrite it

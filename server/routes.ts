@@ -148,10 +148,13 @@ import {
   type GoogleGeminiCliOAuthStatus,
 } from "./services/googleGeminiCliOAuthService";
 import {
+  clearExpiredGeminiCliOAuthCompletedStore,
   deleteGeminiCliOAuthFlow,
   extractGeminiCliFlowIdFromState,
+  saveGeminiCliOAuthCompletedToStore,
   getGeminiCliOAuthFlow,
   saveGeminiCliOAuthCompleted,
+  type GeminiCliOAuthCompletedSessionStore,
 } from "./lib/geminiCliOAuthFlowStore";
 import { getLogs, getLogStats, type LogFilters } from "./lib/structuredLogger";
 import { getActiveRequests, getRequestStats } from "./lib/requestTracer";
@@ -225,6 +228,7 @@ type GeminiCliFlowSessionEntry = {
 
 type GeminiCliSessionState = {
   geminiCliOAuthFlows?: Record<string, GeminiCliFlowSessionEntry>;
+  geminiCliOAuthCompleted?: GeminiCliOAuthCompletedSessionStore;
 };
 
 async function saveGeminiCliSession(req: Request): Promise<void> {
@@ -543,6 +547,9 @@ export async function registerRoutes(
       const geminiFlowId = extractGeminiCliFlowIdFromState(stateValue) || "";
       if (geminiFlowId) {
         const session = ((req as any).session ?? {}) as GeminiCliSessionState;
+        session.geminiCliOAuthCompleted =
+          session.geminiCliOAuthCompleted ?? {};
+        clearExpiredGeminiCliOAuthCompletedStore(session.geminiCliOAuthCompleted);
         const flow =
           session.geminiCliOAuthFlows?.[geminiFlowId] ??
           getGeminiCliOAuthFlow(geminiFlowId);
@@ -594,6 +601,12 @@ export async function registerRoutes(
             ...status,
             selectedModelId: status.defaultModelId,
           };
+          saveGeminiCliOAuthCompletedToStore(
+            session.geminiCliOAuthCompleted,
+            geminiFlowId,
+            flow.userId,
+            responsePayload,
+          );
           saveGeminiCliOAuthCompleted(geminiFlowId, flow.userId, responsePayload);
 
           if (session.geminiCliOAuthFlows?.[geminiFlowId]) {

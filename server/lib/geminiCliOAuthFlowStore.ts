@@ -12,6 +12,11 @@ export type GeminiCliOAuthCompletedRecord = {
   response: Record<string, unknown>;
 };
 
+export type GeminiCliOAuthCompletedSessionStore = Record<
+  string,
+  GeminiCliOAuthCompletedRecord
+>;
+
 const GEMINI_CLI_STATE_PREFIX = "gemini-cli:";
 const FLOW_TTL_MS = 45 * 60 * 1000;
 const COMPLETED_FLOW_TTL_MS = 30 * 60 * 1000;
@@ -20,6 +25,52 @@ const globalGeminiCliCompletedStore = new Map<string, GeminiCliOAuthCompletedRec
 
 function getCompletedKey(flowId: string, userId: string): string {
   return `${userId}:${flowId}`;
+}
+
+export function clearExpiredGeminiCliOAuthCompletedStore(
+  store: GeminiCliOAuthCompletedSessionStore,
+  now = Date.now(),
+): void {
+  for (const [key, flow] of Object.entries(store)) {
+    if (now - flow.completedAt > COMPLETED_FLOW_TTL_MS) {
+      delete store[key];
+    }
+  }
+}
+
+export function saveGeminiCliOAuthCompletedToStore(
+  store: GeminiCliOAuthCompletedSessionStore,
+  flowId: string,
+  userId: string,
+  response: Record<string, unknown>,
+  now = Date.now(),
+): GeminiCliOAuthCompletedRecord {
+  clearExpiredGeminiCliOAuthCompletedStore(store, now);
+  const completedRecord: GeminiCliOAuthCompletedRecord = {
+    userId,
+    completedAt: now,
+    response,
+  };
+  store[getCompletedKey(flowId, userId)] = completedRecord;
+  return completedRecord;
+}
+
+export function getGeminiCliOAuthCompletedFromStore(
+  store: GeminiCliOAuthCompletedSessionStore,
+  flowId: string,
+  userId: string,
+  now = Date.now(),
+): GeminiCliOAuthCompletedRecord | null {
+  clearExpiredGeminiCliOAuthCompletedStore(store, now);
+  return store[getCompletedKey(flowId, userId)] ?? null;
+}
+
+export function deleteGeminiCliOAuthCompletedFromStore(
+  store: GeminiCliOAuthCompletedSessionStore,
+  flowId: string,
+  userId: string,
+): void {
+  delete store[getCompletedKey(flowId, userId)];
 }
 
 export function clearExpiredGeminiCliOAuthFlows(now = Date.now()): void {

@@ -3,13 +3,17 @@ import { Router, type Request, type Response } from "express";
 import { requireAdmin } from "./admin/utils";
 import { getUserId } from "../types/express";
 import {
+  clearExpiredGeminiCliOAuthCompletedStore,
   clearExpiredGeminiCliOAuthFlows,
+  getGeminiCliOAuthCompletedFromStore,
   getGeminiCliOAuthCompleted,
   deleteGeminiCliOAuthFlow,
   extractGeminiCliFlowIdFromCallbackInput,
   getGeminiCliOAuthFlow,
+  saveGeminiCliOAuthCompletedToStore,
   saveGeminiCliOAuthCompleted,
   saveGeminiCliOAuthFlow,
+  type GeminiCliOAuthCompletedSessionStore,
   type GeminiCliOAuthFlowRecord,
 } from "../lib/geminiCliOAuthFlowStore";
 import {
@@ -31,6 +35,7 @@ type GeminiCliFlowProof = {
 
 type GeminiCliSessionState = {
   geminiCliOAuthFlows?: Record<string, GeminiCliFlowSessionEntry>;
+  geminiCliOAuthCompleted?: GeminiCliOAuthCompletedSessionStore;
 };
 
 const pendingFlowStore = new Map<string, GeminiCliFlowSessionEntry>();
@@ -40,6 +45,13 @@ function getFlowStore(req: Request): Record<string, GeminiCliFlowSessionEntry> {
   session.geminiCliOAuthFlows = session.geminiCliOAuthFlows ?? {};
   (req as any).session = session;
   return session.geminiCliOAuthFlows;
+}
+
+function getCompletedStore(req: Request): GeminiCliOAuthCompletedSessionStore {
+  const session = ((req as any).session ?? {}) as GeminiCliSessionState;
+  session.geminiCliOAuthCompleted = session.geminiCliOAuthCompleted ?? {};
+  (req as any).session = session;
+  return session.geminiCliOAuthCompleted;
 }
 
 async function saveSession(req: Request): Promise<void> {
@@ -61,6 +73,7 @@ async function saveSession(req: Request): Promise<void> {
 
 function clearExpiredFlows(
   store: Record<string, GeminiCliFlowSessionEntry>,
+  completedStore?: GeminiCliOAuthCompletedSessionStore,
 ): void {
   clearExpiredGeminiCliOAuthFlows();
   const now = Date.now();
@@ -68,6 +81,9 @@ function clearExpiredFlows(
     if (now - flow.createdAt > FLOW_TTL_MS) {
       delete store[flowId];
     }
+  }
+  if (completedStore) {
+    clearExpiredGeminiCliOAuthCompletedStore(completedStore, now);
   }
 }
 
@@ -120,7 +136,8 @@ googleGeminiCliOAuthRouter.post(
       }
 
       const flowStore = getFlowStore(req);
-      clearExpiredFlows(flowStore);
+      const completedStore = getCompletedStore(req);
+      clearExpiredFlows(flowStore, completedStore);
       clearExpiredPendingFlows();
 
       const flowId = randomUUID();
@@ -232,7 +249,8 @@ googleGeminiCliOAuthRouter.post(
       }
 
       const flowStore = getFlowStore(req);
-      clearExpiredFlows(flowStore);
+      const completedStore = getCompletedStore(req);
+      clearExpiredFlows(flowStore, completedStore);
       clearExpiredPendingFlows();
       const pendingFlowKey = getPendingFlowKey(userId, flowId);
 
@@ -260,6 +278,14 @@ googleGeminiCliOAuthRouter.post(
         }
       }
       if (!flow) {
+        const sessionCompleted = getGeminiCliOAuthCompletedFromStore(
+          completedStore,
+          flowId,
+          userId,
+        );
+        if (sessionCompleted) {
+          return res.json(sessionCompleted.response);
+        }
         const completed = getGeminiCliOAuthCompleted(flowId, userId);
         if (completed) {
           return res.json(completed.response);
@@ -284,12 +310,18 @@ googleGeminiCliOAuthRouter.post(
       delete flowStore[flowId];
       pendingFlowStore.delete(pendingFlowKey);
       deleteGeminiCliOAuthFlow(flowId);
-      await saveSession(req);
       const responsePayload = {
         ...status,
         selectedModelId: status.defaultModelId,
       };
+      saveGeminiCliOAuthCompletedToStore(
+        completedStore,
+        flowId,
+        userId,
+        responsePayload,
+      );
       saveGeminiCliOAuthCompleted(flowId, userId, responsePayload);
+      await saveSession(req);
 
       res.json(responsePayload);
     } catch (error) {
