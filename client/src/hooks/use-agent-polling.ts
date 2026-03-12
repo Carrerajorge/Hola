@@ -6,6 +6,41 @@ import { apiFetch } from "@/lib/apiClient";
 // Global map of AbortControllers for pending agent start requests
 const pendingAgentStartControllers = new Map<string, AbortController>();
 
+type AgentStartModelOption =
+  | string
+  | {
+      model?: string;
+      provider?: string;
+    };
+
+function normalizeAgentStartOptions(options?: {
+  model?: AgentStartModelOption;
+  provider?: string;
+}): {
+  model?: string;
+  provider?: string;
+} {
+  const rawModel = options?.model;
+  const normalizedModel =
+    typeof rawModel === "string"
+      ? rawModel
+      : typeof rawModel?.model === "string"
+        ? rawModel.model
+        : undefined;
+  const normalizedProvider =
+    options?.provider ||
+    (typeof rawModel === "object" &&
+    rawModel &&
+    typeof rawModel.provider === "string"
+      ? rawModel.provider
+      : undefined);
+
+  return {
+    model: normalizedModel,
+    provider: normalizedProvider,
+  };
+}
+
 export function abortPendingAgentStart(messageId: string): void {
   const controller = pendingAgentStartControllers.get(messageId);
   if (controller) {
@@ -58,7 +93,7 @@ export function useStartAgentRun() {
     userMessage: string,
     messageId: string,
     attachments?: any[],
-    options?: { model?: string; provider?: string }
+    options?: { model?: AgentStartModelOption; provider?: string }
   ): Promise<{ runId: string; chatId: string } | null> => {
     // Create AbortController for this request
     const abortController = new AbortController();
@@ -66,6 +101,7 @@ export function useStartAgentRun() {
     
     try {
       let resolvedChatId = chatId;
+      const normalizedOptions = normalizeAgentStartOptions(options);
       
       if (!chatId || chatId.startsWith("pending-") || chatId === "") {
         const chatRes = await apiFetch('/api/chats', {
@@ -76,8 +112,8 @@ export function useStartAgentRun() {
           timeoutMs: 10_000,
           body: JSON.stringify({
             title: userMessage.substring(0, 50) + (userMessage.length > 50 ? "..." : ""),
-            model: options?.model || "gemini-3-flash-preview",
-            provider: options?.provider || "google"
+            model: normalizedOptions.model || "gemini-3-flash-preview",
+            provider: normalizedOptions.provider || "google"
           })
         });
         if (!chatRes.ok) throw new Error('Inicia sesión para usar el modo agente');
@@ -104,7 +140,7 @@ export function useStartAgentRun() {
           chatId: resolvedChatId,
           message: userMessage,
           attachments,
-          model: options?.model,
+          model: normalizedOptions.model,
         })
       });
 
