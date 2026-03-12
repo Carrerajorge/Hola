@@ -429,6 +429,16 @@ function clearSubmitLock(): void {
   }
 }
 
+function createPendingPromptIntegrityMeta(content: string) {
+  return {
+    clientPromptLen: new TextEncoder().encode(content).byteLength,
+    clientPromptHash: "",
+    clientPromptCharCount: [...content].length,
+    messageId:
+      crypto.randomUUID?.() ?? `msg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+  };
+}
+
 export function ChatInterface({
   messages,
   setMessages,
@@ -752,6 +762,7 @@ export function ChatInterface({
 
   // First visit explosion
   const { showExplosion, completeWelcome } = useFirstVisit();
+  const [userPlanState, setUserPlanState] = useState<{ plan: string; isAdmin?: boolean; isPaid?: boolean } | null>(null);
 
   const userPlanInfo = useMemo(() => {
     if (!user) return null;
@@ -772,7 +783,7 @@ export function ChatInterface({
     incrementQuery,
     closePrompt: closeUpgradePrompt,
     isFreeUser,
-  } = useUpgradePrompt(userPlanInfo?.plan ?? undefined);
+  } = useUpgradePrompt(userPlanState?.plan ?? userPlanInfo?.plan ?? undefined);
 
   const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
 
@@ -905,7 +916,6 @@ export function ChatInterface({
   const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
   const [showPricingModal, setShowPricingModal] = useState(false);
   const [quotaInfo, setQuotaInfo] = useState<{ remaining: number; limit: number; resetAt: string | null; plan: string } | null>(null);
-  const [userPlanState, setUserPlanState] = useState<{ plan: string; isAdmin?: boolean; isPaid?: boolean } | null>(null);
   // isAgentPanelOpen removed - agent progress is shown inline in chat
   const modelSelectorRef = useRef<HTMLDivElement>(null);
   const gptCapabilities = activeGpt?.capabilities;
@@ -993,24 +1003,60 @@ export function ChatInterface({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvasEnabledForActiveContext]);
 
+  const fetchUserPlanInfo = useCallback(async () => {
+    if (!user?.id) {
+      setUserPlanState(null);
+      return;
+    }
+
+    try {
+      const response = await apiFetch("/api/user/usage", {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setUserPlanState({
+          plan: data.plan,
+          isAdmin: data.isAdmin,
+          isPaid: Boolean(data.isPaid),
+        });
+      }
+    } catch (error) {
+      console.error("Failed to fetch user plan info:", error);
+    }
+  }, [user?.id]);
+
   useEffect(() => {
-    const fetchUserPlanInfo = async () => {
-      try {
-        const response = await apiFetch("/api/user/usage", { credentials: "include" });
-        if (response.ok) {
-          const data = await response.json();
-          setUserPlanState({
-            plan: data.plan,
-            isAdmin: data.isAdmin,
-            isPaid: Boolean(data.isPaid)
-          });
-        }
-      } catch (error) {
-        console.error("Failed to fetch user plan info:", error);
+    void fetchUserPlanInfo();
+  }, [fetchUserPlanInfo]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const refreshPlanState = () => {
+      void fetchUserPlanInfo();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        refreshPlanState();
       }
     };
-    fetchUserPlanInfo();
-  }, [user?.id]);
+
+    window.addEventListener("focus", refreshPlanState);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        refreshPlanState();
+      }
+    }, 60_000);
+
+    return () => {
+      window.removeEventListener("focus", refreshPlanState);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.clearInterval(intervalId);
+    };
+  }, [fetchUserPlanInfo, user?.id]);
 
   const effectiveUserPlanInfo = useMemo(() => {
     if (!userPlanInfo && !userPlanState) return null;
@@ -5355,7 +5401,8 @@ export function ChatInterface({
 
         // Add user message to chat
         const userMsgId = `temp-gen-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-        const genIntegrity = await computePromptIntegrity(generationInput);
+        const genIntegritySeed = createPendingPromptIntegrityMeta(generationInput);
+        const genIntegrityPromise = computePromptIntegrity(generationInput);
         const userMsg: Message = {
           id: userMsgId,
           clientTempId: userMsgId,
@@ -5367,12 +5414,16 @@ export function ChatInterface({
           status: "pending",
           deliveryStatus: "sending",
           deliveryError: undefined,
-          clientPromptLen: genIntegrity.clientPromptLen,
-          clientPromptHash: genIntegrity.clientPromptHash,
-          promptMessageId: genIntegrity.messageId,
+          clientPromptLen: genIntegritySeed.clientPromptLen,
+          clientPromptHash: genIntegritySeed.clientPromptHash,
+          promptMessageId: genIntegritySeed.messageId,
         } as any;
         // Show message immediately (optimistic update)
         setOptimisticMessages((prev: Message[]) => [...prev, userMsg]);
+        const genIntegrity = await genIntegrityPromise;
+        userMsg.clientPromptLen = genIntegrity.clientPromptLen;
+        userMsg.clientPromptHash = genIntegrity.clientPromptHash;
+        userMsg.promptMessageId = genIntegrity.messageId;
         const persistGenerationUserMessagePromise = onSendMessage(userMsg).catch((err) => {
           console.warn("[handleSubmit] Failed to persist generation user message:", err);
           return undefined;
@@ -6070,8 +6121,8 @@ export function ChatInterface({
           spreadsheetData: f.spreadsheetData,
         }));
 
-      // Compute prompt integrity metadata (SHA-256 hash + byte length)
-      const promptIntegrity = await computePromptIntegrity(userInput);
+      const promptIntegritySeed = createPendingPromptIntegrityMeta(userInput);
+      const promptIntegrityPromise = computePromptIntegrity(userInput);
 
       // Construct the User Message object
       const userMsg: Message = {
@@ -6087,9 +6138,9 @@ export function ChatInterface({
         deliveryError: undefined,
         attachments: attachments.length > 0 ? attachments : undefined,
         // Prompt integrity fields — server validates these to detect data loss
-        clientPromptLen: promptIntegrity.clientPromptLen,
-        clientPromptHash: promptIntegrity.clientPromptHash,
-        promptMessageId: promptIntegrity.messageId,
+        clientPromptLen: promptIntegritySeed.clientPromptLen,
+        clientPromptHash: promptIntegritySeed.clientPromptHash,
+        promptMessageId: promptIntegritySeed.messageId,
       } as any;
 
       // Apply Optimistic Update IMMEDIATELY
@@ -6102,6 +6153,11 @@ export function ChatInterface({
           });
         });
       }
+
+      const promptIntegrity = await promptIntegrityPromise;
+      userMsg.clientPromptLen = promptIntegrity.clientPromptLen;
+      userMsg.clientPromptHash = promptIntegrity.clientPromptHash;
+      userMsg.promptMessageId = promptIntegrity.messageId;
 
       // Set initial AI state
       setAiStateForChat("thinking", submitConversationId);

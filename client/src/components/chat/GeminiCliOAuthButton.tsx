@@ -39,7 +39,7 @@ type GeminiCliCompleteResponse = GeminiCliStatusResponse & {
 
 const STATUS_QUERY_KEY = ["/api/oauth/google/gemini-cli/status"];
 const FLOW_DRAFT_STORAGE_KEY = "iliagpt:gemini-cli-oauth-flow";
-const FLOW_DRAFT_TTL_MS = 10 * 60 * 1000;
+const FLOW_DRAFT_TTL_MS = 30 * 60 * 1000;
 
 type StoredFlowDraft = {
   flowId: string;

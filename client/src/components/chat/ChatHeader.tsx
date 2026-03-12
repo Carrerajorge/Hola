@@ -196,7 +196,7 @@ export function ChatHeader({
             </div>
 
             <div className="flex items-center gap-0.5 sm:gap-1">
-                {/* Upgrade button - Show for free users and guests, hide for paid/admin */}
+                {/* Pricing CTA - show for unpaid users, hide for paid/admin */}
                 {(!userPlanInfo || (!userPlanInfo.isPaid && !userPlanInfo.isAdmin)) && (
                     <Button
                         variant="outline"
@@ -206,8 +206,8 @@ export function ChatHeader({
                         data-testid="button-upgrade-header"
                     >
                         <Sparkles className="h-3 w-3 text-primary" />
-                        <span className="hidden sm:inline">Mejorar el plan a Go</span>
-                        <span className="sm:hidden">Go</span>
+                        <span className="hidden sm:inline">Ver precios</span>
+                        <span className="sm:hidden">Precios</span>
                     </Button>
                 )}
 

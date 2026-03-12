@@ -116,7 +116,7 @@ export const useAgentStore = create<AgentStore>()(
           return {
             runs: {
               ...state.runs,
-              [messageId]: { ...existing, runId, chatId, status: 'running' }
+              [messageId]: { ...existing, runId, chatId, status: 'queued' }
             }
           };
         });

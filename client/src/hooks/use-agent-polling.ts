@@ -63,8 +63,6 @@ export function useStartAgentRun() {
     const abortController = new AbortController();
     pendingAgentStartControllers.set(messageId, abortController);
     
-    createRun(chatId, userMessage, messageId);
-    
     try {
       let resolvedChatId = chatId;
       
@@ -91,6 +89,8 @@ export function useStartAgentRun() {
         pendingAgentStartControllers.delete(messageId);
         return null;
       }
+
+      createRun(resolvedChatId, userMessage, messageId);
       
       const runRes = await apiFetch('/api/agent/runs', {
         method: 'POST',
