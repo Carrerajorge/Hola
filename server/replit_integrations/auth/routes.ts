@@ -16,6 +16,7 @@ import { setLogoutMarker, clearLogoutMarker } from "../../lib/logoutMarker";
 import { db } from "../../db";
 import { sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
+import { isAdminRole } from "../../lib/adminRole";
 
 const authLoginLogger = createLogger("auth-login");
 
@@ -65,7 +66,7 @@ export function registerAuthRoutes(app: Express): void {
   app.get("/api/auth/metrics", isAuthenticated, async (req: any, res) => {
     try {
       const user = await authStorage.getUser(req.user?.claims?.sub);
-      if (user?.role !== "admin") {
+      if (!isAdminRole(user?.role)) {
         return res.status(403).json({ message: "Admin access required" });
       }
 

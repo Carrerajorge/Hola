@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { InMemoryClientErrorLogStore } from "../core/errors/infrastructure/inMemoryClientErrorLogStore";
 import { getClientErrorStats, getRecentClientErrors, logClientError } from "../core/errors/application/clientErrorService";
+import { isAdminRole } from "../lib/adminRole";
 
 const router = Router();
 
@@ -25,7 +26,7 @@ function requireAdmin(req: Request, res: Response): boolean {
     res.status(401).json({ error: "Authentication required" });
     return false;
   }
-  if (user.role !== "admin") {
+  if (!isAdminRole(user.role)) {
     res.status(403).json({ error: "Admin access required" });
     return false;
   }

@@ -3,6 +3,7 @@ import { db } from "../db";
 import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { getActorEmailFromRequest, getActorIdFromRequest, getSettingValue } from "../services/settingsConfigService";
+import { isAdminRole } from "../lib/adminRole";
 
 const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "").toLowerCase().trim();
 
@@ -21,7 +22,7 @@ async function isRequestAdmin(req: Request): Promise<boolean> {
     anyReq.session?.passport?.user?.role ||
     null;
 
-  if (role === "admin") return true;
+  if (isAdminRole(role)) return true;
 
   const email = normalizeEmail(getActorEmailFromRequest(req));
   if (ADMIN_EMAIL && email && email === ADMIN_EMAIL) return true;
@@ -32,7 +33,7 @@ async function isRequestAdmin(req: Request): Promise<boolean> {
   try {
     if (userId) {
       const [row] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
-      return row?.role === "admin";
+      return isAdminRole(row?.role);
     }
     if (email) {
       const [row] = await db
@@ -40,7 +41,7 @@ async function isRequestAdmin(req: Request): Promise<boolean> {
         .from(users)
         .where(sql`LOWER(${users.email}) = ${email}`)
         .limit(1);
-      return row?.role === "admin";
+      return isAdminRole(row?.role);
     }
   } catch {
     // If DB is unavailable, fall back to session/email checks only.
@@ -93,4 +94,3 @@ export async function maintenanceModeMiddleware(req: Request, res: Response, nex
     next();
   }
 }
-

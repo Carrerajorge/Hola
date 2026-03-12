@@ -5,6 +5,7 @@ import { getUserId } from "../types/express";
 import { storage } from "../storage";
 import { aiLimiter } from "../middleware/rateLimiter";
 import { connectorRegistry } from "../integrations/kernel/connectorRegistry";
+import { isAdminRole } from "../lib/adminRole";
 
 type McpRequest = {
   jsonrpc: string;
@@ -45,7 +46,7 @@ const toolCallSchema = z.object({
 }));
 
 function resolveUserPlan(user: { role?: string | null; plan?: string | null } | undefined): "free" | "pro" | "admin" {
-  if (user?.role === "admin") return "admin";
+  if (isAdminRole(user?.role)) return "admin";
   const plan = String(user?.plan || "").toLowerCase().trim();
   if (plan === "pro" || plan === "enterprise") return "pro";
   return "free";

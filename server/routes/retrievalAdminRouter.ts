@@ -6,6 +6,7 @@ import { isAuthenticated } from "../replit_integrations/auth/replitAuth";
 import { authStorage } from "../replit_integrations/auth/storage";
 import { storage } from "../storage";
 import { createCustomRateLimiter } from "../middleware/userRateLimiter";
+import { isAdminRole } from "../lib/adminRole";
 import {
   v2MetricsCollector,
   domainCircuitBreaker,
@@ -156,7 +157,7 @@ async function requireAdmin(req: Request, res: Response, next: NextFunction) {
       return res.status(401).json({ error: "Authentication required" });
     }
     const user = await authStorage.getUser(userReq.user.claims.sub);
-    if (!user || user.role !== "admin") {
+    if (!user || !isAdminRole(user.role)) {
       await storage.createAuditLog({
         action: "admin_access_denied",
         resource: "retrieval_admin",

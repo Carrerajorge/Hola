@@ -6,6 +6,7 @@ import { users, excelDocuments } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { auditLog, AuditActions } from "../../services/auditLogger";
+import { isAdminRole } from "../../lib/adminRole";
 
 // SECURITY: Admin emails come from env; DB role is the preferred source of truth.
 const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "").trim().toLowerCase(); // legacy
@@ -61,7 +62,7 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
         // Preferred: DB role check
         if (userId) {
             const [user] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId));
-            isAdmin = user?.role === "admin";
+            isAdmin = isAdminRole(user?.role);
         }
 
         // Fallback: DB role check by email (useful when the session isn't bound to a DB id yet)
@@ -71,7 +72,7 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
                 .from(users)
                 .where(sql`LOWER(${users.email}) = ${userEmail}`)
                 .limit(1);
-            isAdmin = user?.role === "admin";
+            isAdmin = isAdminRole(user?.role);
         }
 
         // Last resort: env allowlist (initial bootstrap)
