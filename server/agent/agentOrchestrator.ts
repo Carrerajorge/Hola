@@ -15,6 +15,7 @@ import { policyEngine } from "./policyEngine";
 import { hookSystem } from "../openclaw/plugins/hookSystem";
 import { detectToolCallLoop, hashToolCall } from "./toolLoopDetection";
 import { hashToolOutcome } from "./toolLoopDetection";
+import { enrichToolExecutionInput } from "./toolExecutionInput";
 
 // Agentic orchestrator bridge
 import {
@@ -1142,12 +1143,14 @@ Respond with ONLY valid JSON in this exact format:
 
     console.log(`[AgentOrchestrator] Executing step ${stepIndex}: ${step.toolName}`);
 
+    const executionInput = enrichToolExecutionInput(step.toolName, step.input, this.stepResults);
+
     // OpenClaw hook: before_tool_call
     await hookSystem.dispatch('before_tool_call', {
       runId: this.runId,
       userId: this.userId,
       toolName: step.toolName,
-      toolInput: step.input,
+      toolInput: executionInput,
     });
 
     // --- CLAWI TOOL LOOP DETECTION ---
@@ -1173,7 +1176,7 @@ Respond with ONLY valid JSON in this exact format:
     if ((this as any).toolCallHistory.length > 30) (this as any).toolCallHistory.shift();
 
     try {
-      const result = await toolRegistry.execute(step.toolName, step.input, {
+      const result = await toolRegistry.execute(step.toolName, executionInput, {
         userId: this.userId,
         chatId: this.chatId,
         runId: this.runId,
