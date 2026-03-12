@@ -1302,10 +1302,16 @@ export function ChatInterface({
   }, [fetchUserPlanInfo]);
 
   useEffect(() => {
+    const AUTH_STORAGE_KEY = "siragpt_auth_user";
     if (!user?.id) return;
 
     const refreshPlanState = () => {
       void fetchUserPlanInfo();
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (!event.key || event.key === AUTH_STORAGE_KEY) {
+        refreshPlanState();
+      }
     };
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
@@ -1315,6 +1321,7 @@ export function ChatInterface({
 
     window.addEventListener("focus", refreshPlanState);
     window.addEventListener("pageshow", refreshPlanState);
+    window.addEventListener("storage", handleStorage);
     document.addEventListener("visibilitychange", handleVisibilityChange);
     const intervalId = window.setInterval(() => {
       if (document.visibilityState === "visible") {
@@ -1325,6 +1332,7 @@ export function ChatInterface({
     return () => {
       window.removeEventListener("focus", refreshPlanState);
       window.removeEventListener("pageshow", refreshPlanState);
+      window.removeEventListener("storage", handleStorage);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.clearInterval(intervalId);
     };
@@ -6657,6 +6665,7 @@ export function ChatInterface({
         } else {
           // Save files before clearing so we can restore on error
           const savedAgentFiles = [...uploadedFilesRef.current];
+          let explicitAgentUserMessageId: string | null = null;
           try {
             const userMessageContent = input || autoPromptForFiles;
             const readyFiles = uploadedFilesRef.current.filter(
@@ -6728,10 +6737,6 @@ export function ChatInterface({
                 spreadsheetData: f.spreadsheetData,
               }));
 
-            // Generate a unique message ID for tracking in the store
-            const agentMessageId = `agent-${Date.now()}`;
-            setCurrentAgentMessageId(agentMessageId);
-
             // Add user message to chat via the callback
             const userMessage: Message = {
               id: `user-${Date.now()}`,
@@ -6743,6 +6748,9 @@ export function ChatInterface({
               attachments:
                 messageAttachments.length > 0 ? messageAttachments : undefined,
             };
+            explicitAgentUserMessageId = userMessage.id;
+            const agentMessageId = userMessage.id;
+            setCurrentAgentMessageId(agentMessageId);
             // Clear input IMMEDIATELY after capturing the value to prevent duplicates
             setInput("");
             setUploadedFiles([]);
@@ -6814,7 +6822,11 @@ export function ChatInterface({
             console.error("Failed to start agent run:", error);
             // Remove the optimistic message since the agent failed to start
             setOptimisticMessages((prev: Message[]) =>
-              prev.filter((m: Message) => !m.id.startsWith("user-")),
+              explicitAgentUserMessageId
+                ? prev.filter(
+                    (m: Message) => m.id !== explicitAgentUserMessageId,
+                  )
+                : prev,
             );
             // Restore files so user doesn't lose them
             if (savedAgentFiles.length > 0) {
@@ -8163,7 +8175,7 @@ export function ChatInterface({
             },
           }));
 
-        const agentMessageId = `agent-${Date.now()}`;
+        const agentMessageId = userMsgId;
         setCurrentAgentMessageId(agentMessageId);
 
         try {
@@ -8261,41 +8273,29 @@ export function ChatInterface({
         isDocumentFile(a.mimeType || a.type, a.name, a.type),
       );
 
-      // Send user message — await for NEW chats (need chatId), fire-and-forget for existing ones
+      // Persist the user message in parallel. New chats already have a provisional
+      // real chatId, so we no longer need to block the first stream on the ACK.
       let sendMessageAck: SendMessageAck | undefined;
       try {
-        const isNewChat = !chatId || chatId.startsWith("pending-");
         console.log(
           "[handleSubmit] ABOUT TO CALL onSendMessage",
-          isNewChat ? "(await — new chat, need chatId)" : "(fire-and-forget)",
+          !chatId || chatId.startsWith("pending-")
+            ? "(fire-and-forget — provisional chatId)"
+            : "(fire-and-forget)",
         );
         await applyPromptIntegrity();
-
-        if (isNewChat) {
-          // NEW CHAT: We MUST await to get the real chatId from the server.
-          // Without this, the stream has no chatId and silently fails.
-          try {
-            sendMessageAck = await onSendMessage(userMsg);
-            console.log(
-              "[handleSubmit] onSendMessage resolved for new chat:",
-              sendMessageAck?.chatId,
-            );
-          } catch (err) {
-            console.warn(
-              "[handleSubmit] Failed to persist new chat message:",
-              err,
-            );
-          }
-        } else {
-          // EXISTING CHAT: Fire-and-forget for speed (chatId already known).
-          onSendMessage(userMsg).catch((err) => {
+        void onSendMessage(userMsg)
+          .then((ack) => {
+            sendMessageAck = ack;
+            return ack;
+          })
+          .catch((err) => {
             console.warn(
               "[handleSubmit] Failed to persist user message (will still attempt streaming):",
               err,
             );
             return undefined;
           });
-        }
 
         // Start image detection early (runs in parallel with intent checks below).
         // Previously this was sequential AFTER onSendMessage, adding another 200-500ms.

@@ -7,6 +7,7 @@ import {
   Link2,
   Loader2,
   Plus,
+  RefreshCw,
 } from "lucide-react";
 import { apiFetch } from "@/lib/apiClient";
 import { useToast } from "@/hooks/use-toast";
@@ -21,6 +22,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { normalizeAppBuildVersion } from "@/lib/chunk-recovery";
 
 type GeminiCliOAuthButtonProps = {
   onConnected?: (modelId: string) => void | Promise<void>;
@@ -70,7 +72,10 @@ type GeminiCliResultMessage =
 
 const STATUS_QUERY_KEY = ["/api/oauth/google/gemini-cli/status"];
 const FLOW_STORAGE_KEY = "iliagpt:gemini-cli-oauth-flow";
-const FLOW_STORAGE_TTL_MS = 2 * 60 * 60 * 1000;
+const FLOW_STORAGE_TTL_MS = 40 * 60 * 1000;
+const FLOW_STORAGE_APP_VERSION = normalizeAppBuildVersion(
+  import.meta.env.VITE_APP_VERSION,
+);
 
 type StoredGeminiCliFlowDraft = {
   flowId: string;
@@ -79,6 +84,7 @@ type StoredGeminiCliFlowDraft = {
   callbackUrl: string;
   createdAt: number;
   updatedAt: number;
+  appVersion: string;
   flowProof: GeminiCliFlowProof;
 };
 
@@ -126,11 +132,16 @@ function readStoredFlowDraft(): StoredGeminiCliFlowDraft | null {
         typeof parsed.authUrl !== "string" ||
         typeof parsed.redirectUri !== "string" ||
         typeof parsed.createdAt !== "number" ||
+        typeof parsed.appVersion !== "string" ||
         typeof parsed.flowProof?.verifier !== "string" ||
         typeof parsed.flowProof?.oauthState !== "string" ||
         typeof parsed.flowProof?.redirectUri !== "string" ||
         typeof parsed.flowProof?.createdAt !== "number"
       ) {
+        removeStoredFlowDraftFrom(storage);
+        continue;
+      }
+      if (parsed.appVersion !== FLOW_STORAGE_APP_VERSION) {
         removeStoredFlowDraftFrom(storage);
         continue;
       }
@@ -182,6 +193,17 @@ function clearStoredFlowDraft(): void {
   for (const storage of getFlowStorageTargets()) {
     removeStoredFlowDraftFrom(storage);
   }
+}
+
+function isExpiredFlowErrorMessage(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  return (
+    normalized.includes("sesion oauth expiro") ||
+    normalized.includes("sesión oauth expiró") ||
+    normalized.includes("session oauth expired") ||
+    normalized.includes("inicia la vinculacion otra vez") ||
+    normalized.includes("inicia la vinculación otra vez")
+  );
 }
 
 function resolveFlowForCallbackInput(params: {
@@ -290,6 +312,7 @@ export function GeminiCliOAuthButton({
         callbackUrl: "",
         createdAt: Date.now(),
         updatedAt: Date.now(),
+        appVersion: FLOW_STORAGE_APP_VERSION,
         flowProof: payload.flowProof,
       });
 
@@ -366,6 +389,16 @@ export function GeminiCliOAuthButton({
       });
     },
     onError: (error) => {
+      if (isExpiredFlowErrorMessage(error.message)) {
+        popupRef.current?.close();
+        popupRef.current = null;
+        clearStoredFlowDraft();
+        setFlowId(null);
+        setAuthUrl("");
+        setRedirectUri("");
+        setFlowProof(null);
+        setCallbackUrl("");
+      }
       lastAutoCompletedCallbackRef.current = null;
       toast({
         title: "No se pudo completar la vinculacion",
@@ -522,6 +555,21 @@ export function GeminiCliOAuthButton({
     popup.focus();
   }, [authUrl, flowId, toast]);
 
+  const handleRestartFlow = React.useCallback(() => {
+    popupRef.current?.close();
+    popupRef.current = null;
+    clearStoredFlowDraft();
+    setFlowId(null);
+    setAuthUrl("");
+    setRedirectUri("");
+    setFlowProof(null);
+    setCallbackUrl("");
+    lastAutoCompletedCallbackRef.current = null;
+    completeMutation.reset();
+    startMutation.reset();
+    startMutation.mutate();
+  }, [completeMutation, startMutation]);
+
   const resetLocalState = React.useCallback(
     (nextOpen: boolean) => {
       setOpen(nextOpen);
@@ -582,6 +630,7 @@ export function GeminiCliOAuthButton({
       authUrl,
       redirectUri,
       callbackUrl,
+      appVersion: FLOW_STORAGE_APP_VERSION,
       flowProof: flowProof ?? storedFlow.flowProof,
       updatedAt: Date.now(),
     });
@@ -631,8 +680,19 @@ export function GeminiCliOAuthButton({
           if (payload.callbackUrl) {
             setCallbackUrl(payload.callbackUrl);
           }
-          if (payload.error === "gemini_cli_invalid_state") {
+          if (
+            payload.error === "gemini_cli_invalid_state" ||
+            isExpiredFlowErrorMessage(payload.errorDescription || "") ||
+            isExpiredFlowErrorMessage(payload.error || "")
+          ) {
+            popupRef.current?.close();
+            popupRef.current = null;
             clearStoredFlowDraft();
+            setFlowId(null);
+            setAuthUrl("");
+            setRedirectUri("");
+            setFlowProof(null);
+            setCallbackUrl("");
           }
           lastAutoCompletedCallbackRef.current = null;
           toast({
@@ -655,8 +715,19 @@ export function GeminiCliOAuthButton({
         ) {
           setCallbackUrl(payload.callbackUrl.trim());
         }
-        if (payload.error === "gemini_cli_invalid_state") {
+        if (
+          payload.error === "gemini_cli_invalid_state" ||
+          isExpiredFlowErrorMessage(payload.errorDescription || "") ||
+          isExpiredFlowErrorMessage(payload.error || "")
+        ) {
+          popupRef.current?.close();
+          popupRef.current = null;
           clearStoredFlowDraft();
+          setFlowId(null);
+          setAuthUrl("");
+          setRedirectUri("");
+          setFlowProof(null);
+          setCallbackUrl("");
         }
         lastAutoCompletedCallbackRef.current = null;
         toast({
@@ -891,6 +962,16 @@ export function GeminiCliOAuthButton({
                       <Link2 className="h-4 w-4" />
                       Copiar URL
                     </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleRestartFlow}
+                      disabled={isBusy}
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                      Reiniciar flujo
+                    </Button>
                   </div>
                 </div>
 
@@ -922,16 +1003,27 @@ export function GeminiCliOAuthButton({
               Cancelar
             </Button>
             {flowId ? (
-              <Button
-                type="button"
-                onClick={handleManualComplete}
-                disabled={!callbackUrl.trim() || isBusy}
-              >
-                {completeMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : null}
-                Completar vinculacion
-              </Button>
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleRestartFlow}
+                  disabled={isBusy}
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Reiniciar
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleManualComplete}
+                  disabled={!callbackUrl.trim() || isBusy}
+                >
+                  {completeMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : null}
+                  Completar vinculacion
+                </Button>
+              </>
             ) : (
               <Button
                 type="button"
