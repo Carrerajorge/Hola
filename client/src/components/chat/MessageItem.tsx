@@ -7,6 +7,7 @@ import { AssistantMessage } from "./AssistantMessage";
 import { AttachmentList, DocumentBlock } from "./MessageParts";
 import { AgentArtifact } from "@/components/agent-steps-display";
 import { type AIState } from "@/components/chat-interface/types";
+import { areAgentRunsEqual } from "./agentRunCompare";
 
 export interface MessageItemProps {
     message: Message;
@@ -191,8 +192,7 @@ export const MessageItem = memo(function MessageItem({
         prevProps.message.role === nextProps.message.role &&
         prevProps.message.deliveryStatus === nextProps.message.deliveryStatus &&
         prevProps.message.deliveryError === nextProps.message.deliveryError &&
-        prevProps.message.agentRun?.status === nextProps.message.agentRun?.status &&
-        prevProps.message.agentRun?.eventStream?.length === nextProps.message.agentRun?.eventStream?.length &&
+        areAgentRunsEqual(prevProps.message.agentRun, nextProps.message.agentRun) &&
         prevProps.message.documentAnalysis === nextProps.message.documentAnalysis &&
         prevProps.msgIndex === nextProps.msgIndex &&
         prevProps.totalMessages === nextProps.totalMessages &&
