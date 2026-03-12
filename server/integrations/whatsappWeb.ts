@@ -307,7 +307,7 @@ return this.getStatus(userId);
 }
 
 return this.getStatus(userId);
-
+}
 async restart(userId: string, options?: StartOptions): Promise<WhatsAppStatus> {
 await this.disconnect(userId, { preserveAuth: false });
 return this.startWithOptions(userId, options);
