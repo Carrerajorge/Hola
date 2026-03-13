@@ -3,35 +3,12 @@
  * Implements OAuth 2.0 for Google account login
  */
 import { Router, Request, Response } from "express";
-import { randomBytes } from "node:crypto";
 import { authStorage } from "../replit_integrations/auth/storage";
 import { storage } from "../storage";
 import { env } from "../config/env";
-import {
-    clearExpiredGeminiCliOAuthCompletedStore,
-    deleteGeminiCliOAuthFlow,
-    extractGeminiCliFlowIdFromState,
-    getGeminiCliOAuthFlow,
-    saveGeminiCliOAuthCompletedToStore,
-    saveGeminiCliOAuthCompleted,
-    type GeminiCliOAuthCompletedSessionStore,
-} from "../lib/geminiCliOAuthFlowStore";
-import { finishGoogleGeminiCliOAuthFlow } from "../services/googleGeminiCliOAuthService";
+import { handleGoogleGeminiCliOAuthCallback } from "./googleGeminiCliBridge";
 
 const router = Router();
-
-type GeminiCliFlowSessionEntry = {
-    verifier: string;
-    createdAt: number;
-    userId: string;
-    oauthState: string;
-    redirectUri: string;
-};
-
-type GeminiCliSessionState = {
-    geminiCliOAuthFlows?: Record<string, GeminiCliFlowSessionEntry>;
-    geminiCliOAuthCompleted?: GeminiCliOAuthCompletedSessionStore;
-};
 
 // CANONICAL URL for OAuth redirects (avoid www/non-www mismatch)
 // This MUST match exactly what's registered in Google Cloud Console
@@ -83,157 +60,6 @@ const generateState = (): string => {
 
 // Store states temporarily (in production, use Redis)
 const stateStore = new Map<string, { createdAt: number; returnUrl: string }>();
-
-function buildCallbackUrl(req: Request, path: string): string {
-    const callbackUrl = new URL(getCanonicalRedirectUri(req, path));
-    for (const [key, value] of Object.entries(req.query)) {
-        if (typeof value === "string") {
-            callbackUrl.searchParams.set(key, value);
-        } else if (Array.isArray(value)) {
-            for (const item of value) {
-                callbackUrl.searchParams.append(key, String(item));
-            }
-        }
-    }
-    return callbackUrl.toString();
-}
-
-async function saveSessionIfPossible(req: Request): Promise<void> {
-    const session = (req as any).session;
-    if (!session || typeof session.save !== "function") {
-        return;
-    }
-
-    await new Promise<void>((resolve, reject) => {
-        session.save((error?: unknown) => {
-            if (error) {
-                reject(error);
-                return;
-            }
-            resolve();
-        });
-    });
-}
-
-function renderGeminiCliBridge(
-    res: Response,
-    payload: {
-        flowId: string;
-        status?: "success" | "error";
-        callbackUrl?: string;
-        error?: string;
-        errorDescription?: string;
-        result?: Record<string, unknown>;
-    },
-): void {
-    const serializedPayload = JSON.stringify(payload).replace(/</g, "\\u003c");
-    const nonce = randomBytes(16).toString("base64");
-    const contentSecurityPolicy = [
-        "default-src 'none'",
-        "base-uri 'none'",
-        "form-action 'none'",
-        "frame-ancestors 'none'",
-        "img-src 'self' data:",
-        "style-src 'unsafe-inline'",
-        `script-src 'nonce-${nonce}'`,
-        "connect-src 'self'",
-    ].join("; ");
-    res
-        .status(payload.status === "error" || payload.error ? 400 : 200)
-        .setHeader("Content-Type", "text/html; charset=utf-8")
-        .setHeader("Content-Security-Policy", contentSecurityPolicy)
-        .send(`<!doctype html>
-<html lang="es">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Gemini CLI OAuth</title>
-    <style>
-      body { font-family: system-ui, sans-serif; background: #0b1020; color: #f8fafc; display: grid; place-items: center; min-height: 100vh; margin: 0; padding: 24px; }
-      .card { max-width: 520px; background: rgba(15, 23, 42, 0.92); border: 1px solid rgba(148, 163, 184, 0.22); border-radius: 20px; padding: 24px; box-shadow: 0 24px 80px rgba(15, 23, 42, 0.35); }
-      h1 { margin: 0 0 12px; font-size: 22px; }
-      p { margin: 0 0 12px; line-height: 1.55; color: #cbd5e1; }
-      #status { color: #93c5fd; }
-      code { display: block; margin-top: 12px; padding: 12px; background: rgba(15, 23, 42, 0.8); border-radius: 12px; color: #e2e8f0; word-break: break-all; }
-    </style>
-  </head>
-  <body>
-    <div class="card">
-      <h1>${payload.error ? "No se pudo completar Gemini CLI OAuth" : "Gemini CLI OAuth completado"}</h1>
-      <p>${payload.error ? "Vuelve a ILIAGPT. El modal recibirá el error y podrás reintentar." : "Puedes volver a ILIAGPT. Esta ventana se cerrará automáticamente si el navegador lo permite."}</p>
-      <p id="status">${payload.error ? "Error devuelto por Google." : "Completando la vinculación en ILIAGPT..."}</p>
-      ${payload.callbackUrl ? `<code>${payload.callbackUrl.replace(/</g, "&lt;")}</code>` : ""}
-    </div>
-    <script nonce="${nonce}">
-      (async function () {
-        const payload = ${serializedPayload};
-        const statusNode = document.getElementById("status");
-        const postToOpener = (message) => {
-          try {
-            if (window.opener && !window.opener.closed) {
-              window.opener.postMessage(
-                { type: "gemini-cli-oauth-result", ...message },
-                window.location.origin
-              );
-            }
-          } catch {}
-        };
-
-        try {
-          if (payload.status === "success" && payload.result) {
-            if (statusNode) {
-              statusNode.textContent = "Vinculación completada. Regresando a ILIAGPT...";
-            }
-            postToOpener({
-              type: "gemini-cli-oauth-result",
-              flowId: payload.flowId,
-              status: "success",
-              result: payload.result,
-            });
-          } else if (!payload.error && payload.flowId && payload.callbackUrl) {
-            if (statusNode) {
-              statusNode.textContent = "Código recibido. Volviendo a ILIAGPT para completar la vinculación...";
-            }
-            postToOpener({
-              type: "gemini-cli-oauth-callback",
-              flowId: payload.flowId,
-              callbackUrl: payload.callbackUrl,
-            });
-          } else {
-            postToOpener({
-              type: "gemini-cli-oauth-result",
-              flowId: payload.flowId,
-              status: "error",
-              error: payload.error,
-              errorDescription: payload.errorDescription,
-              callbackUrl: payload.callbackUrl,
-            });
-          }
-        } catch (error) {
-          const message =
-            error && typeof error === "object" && "message" in error
-              ? String(error.message)
-              : "No se pudo completar Gemini CLI OAuth";
-          if (statusNode) {
-            statusNode.textContent = message;
-          }
-          postToOpener({
-            type: "gemini-cli-oauth-result",
-            flowId: payload.flowId,
-            status: "error",
-            error: "gemini_cli_complete_failed",
-            errorDescription: message,
-            callbackUrl: payload.callbackUrl,
-          });
-        }
-        setTimeout(() => {
-          try { window.close(); } catch {}
-        }, 400);
-      })();
-    </script>
-  </body>
-</html>`);
-}
 
 // Cleanup old states every 5 minutes
 setInterval(() => {
@@ -289,101 +115,11 @@ router.get("/google", (req: Request, res: Response) => {
  * Handles the OAuth callback from Google
  */
 router.get("/google/callback", async (req: Request, res: Response) => {
-    const { code, state, error, error_description } = req.query;
-    const stateValue = typeof state === "string" ? state.trim() : "";
-    const geminiFlowId = extractGeminiCliFlowIdFromState(stateValue) || "";
-
-    if (geminiFlowId) {
-        const session = (((req as any).session ?? {}) as GeminiCliSessionState);
-        session.geminiCliOAuthCompleted =
-            session.geminiCliOAuthCompleted ?? {};
-        clearExpiredGeminiCliOAuthCompletedStore(session.geminiCliOAuthCompleted);
-        const flow = session.geminiCliOAuthFlows?.[geminiFlowId] || getGeminiCliOAuthFlow(geminiFlowId);
-
-        if (error) {
-            console.error("[Google Auth] Gemini CLI OAuth error:", error, error_description);
-            return renderGeminiCliBridge(res, {
-                flowId: geminiFlowId,
-                error: String(error),
-                errorDescription: typeof error_description === "string" ? error_description : "",
-            });
-        }
-
-        if (!code) {
-            console.error("[Google Auth] Gemini CLI callback missing code");
-            return renderGeminiCliBridge(res, {
-                flowId: geminiFlowId,
-                error: "gemini_cli_missing_code",
-                errorDescription: "Google no devolvió el código de autorización.",
-            });
-        }
-
-        if (flow && flow.oauthState !== stateValue) {
-            console.error("[Google Auth] Gemini CLI OAuth state mismatch for active flow");
-            return renderGeminiCliBridge(res, {
-                flowId: geminiFlowId,
-                status: "error",
-                error: "gemini_cli_invalid_state",
-                errorDescription: "El callback OAuth no coincide con la sesión iniciada.",
-            });
-        }
-
-        if (flow) {
-            try {
-                const status = await finishGoogleGeminiCliOAuthFlow({
-                    verifier: flow.verifier,
-                    callbackInput: buildCallbackUrl(req, "/api/auth/google/callback"),
-                    redirectUri: flow.redirectUri,
-                    expectedState: flow.oauthState,
-                });
-
-                if (session.geminiCliOAuthFlows) {
-                    delete session.geminiCliOAuthFlows[geminiFlowId];
-                }
-                deleteGeminiCliOAuthFlow(geminiFlowId);
-
-                const responsePayload = {
-                    ...status,
-                    selectedModelId: status.defaultModelId,
-                };
-                saveGeminiCliOAuthCompletedToStore(
-                    session.geminiCliOAuthCompleted,
-                    geminiFlowId,
-                    flow.userId,
-                    responsePayload,
-                );
-                saveGeminiCliOAuthCompleted(
-                    geminiFlowId,
-                    flow.userId,
-                    responsePayload,
-                );
-                await saveSessionIfPossible(req);
-
-                return renderGeminiCliBridge(res, {
-                    flowId: geminiFlowId,
-                    status: "success",
-                    result: responsePayload,
-                });
-            } catch (callbackError) {
-                console.error("[Google Auth] Gemini CLI OAuth direct completion failed:", callbackError);
-                return renderGeminiCliBridge(res, {
-                    flowId: geminiFlowId,
-                    status: "error",
-                    callbackUrl: buildCallbackUrl(req, "/api/auth/google/callback"),
-                    error: "gemini_cli_complete_failed",
-                    errorDescription:
-                        callbackError instanceof Error
-                            ? callbackError.message
-                            : "No se pudo completar Gemini CLI OAuth.",
-                });
-            }
-        }
-
-        return renderGeminiCliBridge(res, {
-            flowId: geminiFlowId,
-            callbackUrl: buildCallbackUrl(req, "/api/auth/google/callback"),
-        });
+    if (await handleGoogleGeminiCliOAuthCallback(req, res)) {
+        return;
     }
+
+    const { code, state, error, error_description } = req.query;
 
     if (error) {
         console.error("[Google Auth] OAuth error:", error, error_description);
