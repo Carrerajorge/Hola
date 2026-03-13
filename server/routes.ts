@@ -396,7 +396,7 @@ function renderGeminiCliOAuthBridge(
         } catch (error) {
           const message =
             error && typeof error === "object" && "message" in error
-              ? String((error as { message?: unknown }).message)
+              ? String(error.message)
               : "No se pudo completar Gemini CLI OAuth";
           if (statusNode) {
             statusNode.textContent = message;
