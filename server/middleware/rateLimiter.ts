@@ -36,17 +36,52 @@ const MAX_KEY_LENGTH = 256;
 const MAX_IP_LENGTH = 128;
 const MAX_USER_ID_LENGTH = 128;
 
-// Health endpoints must NEVER be blocked by rate limiting
-const RATE_LIMIT_EXEMPT_PREFIXES: ReadonlyArray<string> = [
+// Health endpoints must NEVER be blocked by rate limiting.
+const RATE_LIMIT_ALWAYS_EXEMPT_PREFIXES: ReadonlyArray<string> = [
   "/api/health",
   "/health",
 ];
 
-function isExemptPath(req: Request): boolean {
-  const url = req.originalUrl || req.url;
-  return RATE_LIMIT_EXEMPT_PREFIXES.some(
+// Read-only shell/status endpoints are fan-out heavy on the authenticated home view.
+// Keep write paths protected, but don't let background status fetches starve the UI.
+const RATE_LIMIT_READ_EXEMPT_PREFIXES: ReadonlyArray<string> = [
+  "/api/chats",
+  "/api/models",
+  "/api/settings",
+  "/api/user/usage",
+  "/api/memory",
+  "/api/integrations",
+  "/api/oauth",
+  "/api/figma/status",
+  "/api/agent/runs",
+];
+
+function isRateLimitReadExempt(url: string): boolean {
+  if (
+    url.startsWith("/api/users/") &&
+    (url.includes("/sidebar-gpts") || url.endsWith("/sidebar-gpts"))
+  ) {
+    return true;
+  }
+
+  return RATE_LIMIT_READ_EXEMPT_PREFIXES.some(
     (prefix) => url === prefix || url.startsWith(prefix + "/") || url.startsWith(prefix + "?")
   );
+}
+
+function isExemptPath(req: Request): boolean {
+  const url = req.originalUrl || req.url;
+  if (RATE_LIMIT_ALWAYS_EXEMPT_PREFIXES.some(
+    (prefix) => url === prefix || url.startsWith(prefix + "/") || url.startsWith(prefix + "?")
+  )) {
+    return true;
+  }
+
+  if (req.method === "GET" || req.method === "HEAD") {
+    return isRateLimitReadExempt(url);
+  }
+
+  return false;
 }
 
 // Observability: track which backend is active

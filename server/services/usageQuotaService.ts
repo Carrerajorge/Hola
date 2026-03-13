@@ -76,9 +76,46 @@ function toValidDate(value: unknown): Date | null {
   return null;
 }
 
-function isMissingUsersColumnError(error: unknown, columnName: string): boolean {
-  const message = error instanceof Error ? error.message : String(error || "");
-  return /column .* does not exist/i.test(message) && message.includes(columnName);
+export function isMissingUsersColumnError(error: unknown, columnName: string): boolean {
+  const normalizedColumn = columnName.toLowerCase();
+  const queue: unknown[] = [error];
+  const seen = new Set<unknown>();
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || seen.has(current)) continue;
+    seen.add(current);
+
+    const record =
+      typeof current === "object" && current !== null
+        ? (current as Record<string, unknown>)
+        : null;
+    const message =
+      current instanceof Error
+        ? current.message
+        : typeof record?.message === "string"
+          ? record.message
+          : String(current || "");
+    const query = typeof record?.query === "string" ? record.query : "";
+    const code = typeof record?.code === "string" ? record.code : "";
+    const routine = typeof record?.routine === "string" ? record.routine : "";
+    const combined = `${message}\n${query}`.toLowerCase();
+
+    if (combined.includes(normalizedColumn)) {
+      if (/column .* does not exist/i.test(combined)) {
+        return true;
+      }
+      if (code === "42703" || routine === "errorMissingColumn") {
+        return true;
+      }
+    }
+
+    if (record?.cause) queue.push(record.cause);
+    if (record?.error) queue.push(record.error);
+    if (record?.originalError) queue.push(record.originalError);
+  }
+
+  return false;
 }
 
 async function getUsageStatusUserRow(

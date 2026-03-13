@@ -251,6 +251,15 @@ export function ChatMessageList({
         return visibleMessages;
     }, [visibleMessages, streamingContent, variant, effectiveStreamingId]);
 
+    // Virtuoso occasionally misses the structural insert of synthetic agent
+    // messages during live runs. Remount only when agent bubbles appear/disappear.
+    const agentMessagePresenceKey = useMemo(() => {
+        return mergedMessages
+            .filter((msg) => !!msg.agentRun)
+            .map((msg) => msg.clientTempId || msg.id)
+            .join("|");
+    }, [mergedMessages]);
+
     const isLastMessageAssistant = mergedMessages.length > 0 && mergedMessages[mergedMessages.length - 1].role === "assistant";
     const isIdleLike = aiState === "idle" || aiState === "done";
     const showSuggestedReplies = variant === "default" && isIdleLike && isLastMessageAssistant && lastAssistantMessage && !streamingContent;
@@ -427,6 +436,7 @@ export function ChatMessageList({
     return (
         <div className="h-full w-full flex flex-col">
             <Virtuoso
+                key={agentMessagePresenceKey || "no-agent-messages"}
                 ref={virtuosoRef}
                 data={mergedMessages}
                 computeItemKey={computeItemKey}
