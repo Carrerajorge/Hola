@@ -6,7 +6,7 @@ import {
   createSandbox,
   createSandboxFsBridge,
   expectMkdirpAllowsExistingDirectory,
-  findCallByDockerArg,
+  getScriptsFromCalls,
   installFsBridgeTestHarness,
   mockedExecDockerRaw,
   withTempDir,
@@ -55,7 +55,8 @@ describe("sandbox fs bridge boundary validation", () => {
       await expect(bridge.mkdirp({ filePath: "memory/kemik" })).rejects.toThrow(
         /cannot create directories/i,
       );
-      expect(findCallByDockerArg(1, "mkdirp")).toBeUndefined();
+      const scripts = getScriptsFromCalls();
+      expect(scripts.some((script) => script.includes('mkdir -p -- "$2"'))).toBe(false);
     });
   });
 
@@ -110,6 +111,7 @@ describe("sandbox fs bridge boundary validation", () => {
   it("rejects missing files before any docker read command runs", async () => {
     const bridge = createSandboxFsBridge({ sandbox: createSandbox() });
     await expect(bridge.readFile({ filePath: "a.txt" })).rejects.toThrow(/ENOENT|no such file/i);
-    expect(mockedExecDockerRaw).not.toHaveBeenCalled();
+    const scripts = getScriptsFromCalls();
+    expect(scripts.some((script) => script.includes('cat -- "$1"'))).toBe(false);
   });
 });

@@ -78,7 +78,6 @@ describe("normalizeProviders", () => {
     const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-agent-"));
     const original = process.env.OPENAI_API_KEY;
     process.env.OPENAI_API_KEY = "sk-test-secret-value-12345"; // pragma: allowlist secret
-    const secretRefManagedProviders = new Set<string>();
     try {
       const providers: NonNullable<NonNullable<OpenClawConfig["models"]>["providers"]> = {
         openai: {
@@ -98,9 +97,8 @@ describe("normalizeProviders", () => {
           ],
         },
       };
-      const normalized = normalizeProviders({ providers, agentDir, secretRefManagedProviders });
+      const normalized = normalizeProviders({ providers, agentDir });
       expect(normalized?.openai?.apiKey).toBe("OPENAI_API_KEY");
-      expect(secretRefManagedProviders.has("openai")).toBe(true);
     } finally {
       if (original === undefined) {
         delete process.env.OPENAI_API_KEY;

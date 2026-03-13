@@ -29,7 +29,6 @@ import {
   buildKilocodeProvider,
   buildMinimaxPortalProvider,
   buildMinimaxProvider,
-  buildModelStudioProvider,
   buildMoonshotProvider,
   buildNvidiaProvider,
   buildOpenAICodexProvider,
@@ -47,11 +46,8 @@ export {
   buildKimiCodingProvider,
   buildKilocodeProvider,
   buildNvidiaProvider,
-  buildModelStudioProvider,
   buildQianfanProvider,
   buildXiaomiProvider,
-  MODELSTUDIO_BASE_URL,
-  MODELSTUDIO_DEFAULT_MODEL_ID,
   QIANFAN_BASE_URL,
   QIANFAN_DEFAULT_MODEL_ID,
   XIAOMI_DEFAULT_MODEL_ID,
@@ -347,9 +343,6 @@ export function normalizeProviders(params: {
           apiKey: normalizedConfiguredApiKey,
         };
       }
-      if (isNonSecretApiKeyMarker(normalizedConfiguredApiKey)) {
-        params.secretRefManagedProviders?.add(normalizedKey);
-      }
       if (
         profileApiKey &&
         profileApiKey.source !== "plaintext" &&
@@ -373,7 +366,6 @@ export function normalizeProviders(params: {
       if (envVarName && env[envVarName] === currentApiKey) {
         mutated = true;
         normalizedProvider = { ...normalizedProvider, apiKey: envVarName };
-        params.secretRefManagedProviders?.add(normalizedKey);
       }
     }
 
@@ -520,7 +512,6 @@ const SIMPLE_IMPLICIT_PROVIDER_LOADERS: ImplicitProviderLoader[] = [
     apiKey,
   })),
   withApiKey("qianfan", async ({ apiKey }) => ({ ...buildQianfanProvider(), apiKey })),
-  withApiKey("modelstudio", async ({ apiKey }) => ({ ...buildModelStudioProvider(), apiKey })),
   withApiKey("openrouter", async ({ apiKey }) => ({ ...buildOpenrouterProvider(), apiKey })),
   withApiKey("nvidia", async ({ apiKey }) => ({ ...buildNvidiaProvider(), apiKey })),
   withApiKey("kilocode", async ({ apiKey }) => ({
