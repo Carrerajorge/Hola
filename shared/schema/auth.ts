@@ -116,6 +116,7 @@ export const users = pgTable("users", {
     subscriptionStatus: text("subscription_status"),
     subscriptionPlan: text("subscription_plan"),
     subscriptionPeriodEnd: timestamp("subscription_period_end"),
+    subscriptionCancelAtPeriodEnd: boolean("subscription_cancel_at_period_end").default(false),
     monthlyTokenLimit: integer("monthly_token_limit"),
     monthlyTokensUsed: integer("monthly_tokens_used"),
     tokensResetAt: timestamp("tokens_reset_at"),

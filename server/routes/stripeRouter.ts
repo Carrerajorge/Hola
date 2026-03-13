@@ -880,22 +880,28 @@ export function createStripeRouter() {
       }
 
 	      const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
-	      const subscriptionStatusRaw = (dbUser as any)?.subscriptionStatus || null;
+      const subscriptionStatusRaw = (dbUser as any)?.subscriptionStatus || null;
+      const subscriptionCancelAtPeriodEnd = Boolean(
+        (dbUser as any)?.subscriptionCancelAtPeriodEnd,
+      );
       const inferredStatus =
         subscriptionStatusRaw ||
         ((dbUser as any)?.stripeSubscriptionId ? "active" : null) ||
         ((dbUser as any)?.plan && (dbUser as any).plan !== "free" ? "active" : null);
       const subscriptionStatus = inferredStatus;
-      const subscriptionPeriodEnd = dbUser?.subscriptionPeriodEnd || null;
+      const subscriptionPeriodEnd =
+        dbUser?.subscriptionPeriodEnd || (dbUser as any)?.subscriptionExpiresAt || null;
 
       const now = Date.now();
       const periodEndMs = subscriptionPeriodEnd ? new Date(subscriptionPeriodEnd).getTime() : null;
 
       const willDeactivate =
-        !!subscriptionStatus &&
-        subscriptionStatus !== "active" &&
         !!periodEndMs &&
-        periodEndMs > now;
+        periodEndMs > now &&
+        (
+          subscriptionCancelAtPeriodEnd ||
+          (!!subscriptionStatus && subscriptionStatus !== "active")
+        );
 
 	      const [{ monthsPaid = 0 } = { monthsPaid: 0 }] = await db
 	        .select({
@@ -928,6 +934,7 @@ export function createStripeRouter() {
 	      res.json({
 	        subscriptionStatus,
 	        subscriptionPeriodEnd,
+	        subscriptionCancelAtPeriodEnd,
 	        willDeactivate,
 	        plan: (dbUser as any)?.plan || "free",
 	        monthsPaid,

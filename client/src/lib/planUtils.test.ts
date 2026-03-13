@@ -116,6 +116,14 @@ describe("shouldShowUpgradeCTA", () => {
         willDeactivate: true,
       }),
     ).toBe(true);
+    expect(
+      shouldShowUpgradeCTA({
+        plan: "go",
+        subscriptionPlan: "go",
+        subscriptionStatus: "active",
+        willDeactivate: true,
+      }),
+    ).toBe(true);
   });
 
   it("hides the CTA for active paid subscribers", () => {

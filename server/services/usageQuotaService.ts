@@ -76,6 +76,50 @@ function toValidDate(value: unknown): Date | null {
   return null;
 }
 
+function resolveSubscriptionBoundary(
+  user: Pick<
+    typeof users.$inferSelect,
+    "subscriptionPeriodEnd" | "subscriptionExpiresAt"
+  >,
+): Date | null {
+  const periodEnd = toValidDate((user as any).subscriptionPeriodEnd);
+  const expiresAt = toValidDate((user as any).subscriptionExpiresAt);
+
+  if (periodEnd && expiresAt) {
+    return periodEnd.getTime() >= expiresAt.getTime() ? periodEnd : expiresAt;
+  }
+
+  return periodEnd || expiresAt;
+}
+
+export function computeWillDeactivate(
+  user: Pick<
+    typeof users.$inferSelect,
+    | "subscriptionStatus"
+    | "subscriptionPeriodEnd"
+    | "subscriptionExpiresAt"
+    | "subscriptionCancelAtPeriodEnd"
+  >,
+  now = new Date(),
+): boolean {
+  const subscriptionStatus = String((user as any).subscriptionStatus || "")
+    .toLowerCase()
+    .trim();
+  const boundary = resolveSubscriptionBoundary(user);
+  if (!boundary || boundary.getTime() <= now.getTime()) {
+    return false;
+  }
+
+  if (Boolean((user as any).subscriptionCancelAtPeriodEnd)) {
+    return true;
+  }
+
+  return (
+    !!subscriptionStatus &&
+    !ACTIVE_PAID_SUBSCRIPTION_STATUSES.has(subscriptionStatus)
+  );
+}
+
 function getEffectivePlanKey(user: typeof users.$inferSelect, isAdmin: boolean): string {
   if (isAdmin) return "admin";
   const subscriptionStatus = String((user as any).subscriptionStatus || "").toLowerCase().trim();
@@ -98,7 +142,7 @@ function getMonthlyTokenLimitTokens(user: typeof users.$inferSelect, planKey: st
 }
 
 function getCurrentCycleEnd(user: typeof users.$inferSelect, now: Date): Date {
-  const subscriptionPeriodEnd = toValidDate((user as any).subscriptionPeriodEnd);
+  const subscriptionPeriodEnd = resolveSubscriptionBoundary(user);
   let cycleEnd =
     subscriptionPeriodEnd && subscriptionPeriodEnd.getTime() > now.getTime()
       ? subscriptionPeriodEnd
@@ -222,14 +266,8 @@ export class UsageQuotaService {
     const isAdmin = isSystemAdminUser(user);
     const subscriptionStatus = String((user as any).subscriptionStatus || "").toLowerCase().trim() || null;
     const subscriptionPlan = String((user as any).subscriptionPlan || "").toLowerCase().trim() || null;
-    const subscriptionExpiresAt = toValidDate((user as any).subscriptionExpiresAt);
     const now = new Date();
-    const willDeactivate = Boolean(
-      subscriptionStatus &&
-      !ACTIVE_PAID_SUBSCRIPTION_STATUSES.has(subscriptionStatus) &&
-      subscriptionExpiresAt &&
-      subscriptionExpiresAt.getTime() > now.getTime(),
-    );
+    const willDeactivate = computeWillDeactivate(user, now);
     const plan = getEffectivePlanKey(user, isAdmin);
     const isPaid = plan !== "free" && plan !== "admin";
     const planLimits = PLAN_LIMITS[plan] || PLAN_LIMITS.free;

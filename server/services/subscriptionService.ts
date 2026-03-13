@@ -33,6 +33,7 @@ export interface SubscriptionInfo {
   plan: "free" | "go" | "plus" | "pro" | "business";
   status: "active" | "cancelled" | "past_due" | "trialing" | "inactive";
   currentPeriodEnd?: Date;
+  cancelAtPeriodEnd?: boolean;
   stripeCustomerId?: string;
   stripeSubscriptionId?: string;
 }
@@ -349,6 +350,12 @@ export async function updateUserSubscription(
 
     if ("currentPeriodEnd" in subscription) {
       patch.subscriptionPeriodEnd = subscription.currentPeriodEnd || null;
+      patch.subscriptionExpiresAt = subscription.currentPeriodEnd || null;
+    }
+
+    if ("cancelAtPeriodEnd" in subscription) {
+      patch.subscriptionCancelAtPeriodEnd =
+        subscription.cancelAtPeriodEnd ?? false;
     }
 
     if ("stripeCustomerId" in subscription) {
@@ -682,6 +689,7 @@ export async function handleSubscriptionCreated(subscription: any, eventId?: str
     status: "active",
     stripeSubscriptionId: subscription.id,
     currentPeriodEnd: new Date(((subscription as any).current_period_end ?? 0) * 1000),
+    cancelAtPeriodEnd: Boolean((subscription as any).cancel_at_period_end),
   });
   
   // Get user info for notification
@@ -732,6 +740,7 @@ export async function handleSubscriptionUpdated(subscription: any, eventId?: str
   await updateUserSubscription(userId, {
     status,
     currentPeriodEnd: new Date(((subscription as any).current_period_end ?? 0) * 1000),
+    cancelAtPeriodEnd: Boolean((subscription as any).cancel_at_period_end),
   });
   
   if (eventId) {
@@ -751,6 +760,7 @@ export async function handleSubscriptionDeleted(subscription: any, eventId?: str
   await updateUserSubscription(userId, {
     plan: "free",
     status: "cancelled",
+    cancelAtPeriodEnd: false,
     stripeSubscriptionId: undefined,
   });
   
@@ -784,6 +794,7 @@ export async function handlePaymentSucceeded(invoice: any, eventId?: string): Pr
           currentPeriodEnd: new Date(
             ((subscription as any).current_period_end ?? (subscription as any).currentPeriodEnd ?? 0) * 1000
           ),
+          cancelAtPeriodEnd: Boolean((subscription as any).cancel_at_period_end),
         });
 
         // For recurring payments (not first payment), send notification

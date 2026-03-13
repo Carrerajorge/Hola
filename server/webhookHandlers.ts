@@ -47,8 +47,12 @@ export class WebhookHandlers {
         await usageQuotaService.updateUserPlan(user.id, newPlan);
         await db.update(users)
           .set({ 
+            subscriptionStatus: status,
+            subscriptionPlan: newPlan === 'free' ? null : newPlan,
             stripeSubscriptionId: subscription.id,
-            subscriptionExpiresAt: new Date(subscription.current_period_end * 1000)
+            subscriptionExpiresAt: new Date(subscription.current_period_end * 1000),
+            subscriptionPeriodEnd: new Date(subscription.current_period_end * 1000),
+            subscriptionCancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
           })
           .where(eq(users.id, user.id));
         
@@ -67,8 +71,12 @@ export class WebhookHandlers {
         await usageQuotaService.updateUserPlan(user.id, 'free');
         await db.update(users)
           .set({ 
+            subscriptionStatus: 'cancelled',
+            subscriptionPlan: null,
             stripeSubscriptionId: null,
-            subscriptionExpiresAt: null
+            subscriptionExpiresAt: null,
+            subscriptionPeriodEnd: null,
+            subscriptionCancelAtPeriodEnd: false,
           })
           .where(eq(users.id, user.id));
         
