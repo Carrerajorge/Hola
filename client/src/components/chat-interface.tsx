@@ -152,7 +152,10 @@ import { CodeExecutionBlock } from "@/components/code-execution-block";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { ShareChatDialog, ShareIcon } from "@/components/share-chat-dialog";
 import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
-import { computePromptIntegrity } from "@/lib/promptIntegrity";
+import {
+  computePromptIntegrity,
+  type PromptIntegrityMeta,
+} from "@/lib/promptIntegrity";
 import { getEffectivePlan, isPaidPlan } from "@/lib/planUtils";
 import { DocumentGeneratorDialog } from "@/components/document-generator-dialog";
 import { GoogleFormsDialog } from "@/components/google-forms-dialog";
@@ -6757,10 +6760,27 @@ export function ChatInterface({
 
             // Show message immediately (optimistic update)
             setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
-            const sendMessageAck = await onSendMessage(userMessage);
-            const resolvedAgentChatId =
-              sendMessageAck?.chatId ||
-              (chatId && !chatId.startsWith("pending-") ? chatId : "");
+
+            const existingChatId =
+              chatId && !chatId.startsWith("pending-") ? chatId : "";
+            let sendMessageAck: SendMessageAck | undefined;
+
+            if (existingChatId) {
+              void onSendMessage(userMessage)
+                .then((ack) => {
+                  sendMessageAck = ack;
+                })
+                .catch((persistError) => {
+                  console.warn(
+                    "[Agent Mode] Failed to persist user message while starting agent:",
+                    persistError,
+                  );
+                });
+            } else {
+              sendMessageAck = await onSendMessage(userMessage);
+            }
+
+            const resolvedAgentChatId = sendMessageAck?.chatId || existingChatId;
 
             console.log(
               "[Agent Mode] Starting run with input:",
@@ -7943,7 +7963,13 @@ export function ChatInterface({
         }));
 
       const promptIntegritySeed = createPendingPromptIntegrityMeta(userInput);
-      const promptIntegrityPromise = computePromptIntegrity(userInput);
+      let promptIntegrityPromise: Promise<PromptIntegrityMeta> | null = null;
+      const ensurePromptIntegrityPromise = () => {
+        if (!promptIntegrityPromise) {
+          promptIntegrityPromise = computePromptIntegrity(userInput);
+        }
+        return promptIntegrityPromise;
+      };
 
       // Construct the User Message object
       const userMsg: Message = {
@@ -7992,6 +8018,8 @@ export function ChatInterface({
         setTimeout(resolve, 0);
       });
 
+      void ensurePromptIntegrityPromise();
+
       // Set initial AI state
       setAiStateForChat("thinking", submitConversationId);
       streamingContentRef.current = "";
@@ -8007,7 +8035,7 @@ export function ChatInterface({
           return;
         }
         promptIntegrityApplied = true;
-        const promptIntegrity = await promptIntegrityPromise;
+        const promptIntegrity = await ensurePromptIntegrityPromise();
         userMsg.clientPromptLen = promptIntegrity.clientPromptLen;
         userMsg.clientPromptHash = promptIntegrity.clientPromptHash;
         userMsg.promptMessageId = promptIntegrity.messageId;
