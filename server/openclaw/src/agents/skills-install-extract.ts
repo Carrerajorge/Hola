@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
+import { extractArchive as extractArchiveSafe } from "../infra/archive.js";
 import {
-  createTarEntrySafetyChecker,
-  extractArchive as extractArchiveSafe,
-} from "../infra/archive.js";
+resolveArchiveOutputPath,
+stripArchivePath,
+validateArchiveEntryPath,
+} from "../infra/archive-path.js";
 import { runCommandWithTimeout } from "../process/exec.js";
 import { parseTarVerboseMetadata } from "./skills-install-tar-verbose.js";
 import { hasBinary } from "./skills.js";
@@ -98,26 +100,30 @@ export async function extractArchive(params: {
           code: 1,
         };
       }
-      const checkTarEntrySafety = createTarEntrySafetyChecker({
-        rootDir: targetDir,
-        stripComponents: strip,
-        escapeLabel: "targetDir",
-      });
+      
       for (let i = 0; i < entries.length; i += 1) {
-        const entryPath = entries[i];
-        const entryMeta = metadata[i];
-        if (!entryPath || !entryMeta) {
-          return {
-            stdout: verboseResult.stdout,
-            stderr: "tar metadata parse failure",
-            code: 1,
-          };
-        }
-        checkTarEntrySafety({
-          path: entryPath,
-          type: entryMeta.type,
-          size: entryMeta.size,
-        });
+      const entryPath = entries[i];
+      const entryMeta = metadata[i];
+      if (!entryPath || !entryMeta) {
+      return {
+      stdout: verboseResult.stdout,
+      stderr: "tar metadata parse failure",
+      code: 1,
+      };
+      }
+
+      validateArchiveEntryPath(entryPath, { escapeLabel: "targetDir" });
+
+      const strippedPath = stripArchivePath(entryPath, strip);
+      if (strippedPath) {
+      resolveArchiveOutputPath({
+      rootDir: targetDir,
+      relPath: strippedPath,
+      originalPath: entryPath,
+      escapeLabel: "targetDir",
+      });
+      }
+
       }
 
       const postPreflightHash = await hashFileSha256(archivePath);
