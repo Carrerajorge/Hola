@@ -965,9 +965,12 @@ export default function Home() {
       <Suspense fallback={null}>
         {isWhatsAppConnectOpen ? (
           <ChannelsHubDialogLazy
-            open={isWhatsAppConnectOpen}
-            onOpenChange={setIsWhatsAppConnectOpen}
-          />
+	  open={isWhatsAppConnectOpen}
+	  onOpenChange={(next) => {
+	  console.log('[HOME] ChannelsHubDialog onOpenChange', { next });
+	  setIsWhatsAppConnectOpen(next);
+	  }}
+	  />
         ) : null}
       </Suspense>
 

@@ -210,12 +210,13 @@ export function WhatsAppConnectDialog({
       const cc = codeToUse.trim().replace(/\s+/g, '');
       const num = phoneNumber.trim().replace(/\s+/g, '');
       const phone = `${cc}${num}`;
-
+      console.log('[WA DIALOG] generatePairingCode:start');
       const res = await api<{ success: true; status: WhatsAppWebStatus }>('/api/integrations/whatsapp/web/connect/pairing-code', {
         method: 'POST',
         body: JSON.stringify({ phone }),
       });
       setStatus(res.status);
+      console.log('[WA DIALOG] generatePairingCode:response', res.status);
     } catch (err) {
       const e = err as Error;
       setError(e?.message || 'No se pudo generar el código');
@@ -295,7 +296,13 @@ export function WhatsAppConnectDialog({
   const statusLabel = statusLabelMap[status.state] || status.state;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+    open={open}
+    onOpenChange={(next) => {
+    console.log('[WA DIALOG] Dialog onOpenChange', { next });
+    onOpenChange(next);
+    }}
+    >
         <DialogContent
 	className="liquid-shell max-w-md max-h-[85dvh] overflow-y-auto rounded-[24px] border-0 shadow-2xl p-6"
 	onPointerDownOutside={(e) => e.preventDefault()}
