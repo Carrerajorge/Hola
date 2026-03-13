@@ -283,6 +283,7 @@ function renderGeminiCliOAuthBridge(
   },
 ): void {
   const serializedPayload = JSON.stringify(payload).replace(/</g, "\\u003c");
+  const bridgeStorageKey = "iliagpt:gemini-cli-oauth-bridge-result";
   res
     .status(payload.error ? 400 : 200)
     .setHeader("Content-Type", "text/html; charset=utf-8").send(`<!doctype html>
@@ -318,8 +319,20 @@ function renderGeminiCliOAuthBridge(
                 { type: "gemini-cli-oauth-result", ...message },
                 window.location.origin
               );
+              return true;
             }
           } catch {}
+          return false;
+        };
+        const persistForRecovery = (message) => {
+          try {
+            window.localStorage.setItem(
+              "${bridgeStorageKey}",
+              JSON.stringify({ ...message, createdAt: Date.now() })
+            );
+            return true;
+          } catch {}
+          return false;
         };
 
         try {
@@ -327,30 +340,44 @@ function renderGeminiCliOAuthBridge(
             if (statusNode) {
               statusNode.textContent = "La vinculacion se completo correctamente. Volviendo a ILIAGPT...";
             }
-            postToOpener({
+            const message = {
               type: "gemini-cli-oauth-result",
               flowId: payload.flowId,
               status: "success",
               result: payload.result,
-            });
+            };
+            const deliveredToOpener = postToOpener(message);
+            const persisted = persistForRecovery(message);
+            if (!deliveredToOpener && !persisted && statusNode) {
+              statusNode.textContent = "La vinculación se completó, pero no se pudo notificar a ILIAGPT automáticamente. Vuelve a la app para continuar.";
+              return;
+            }
           } else if (!payload.error && payload.flowId && payload.callbackUrl) {
             if (statusNode) {
               statusNode.textContent = "Código recibido. Volviendo a ILIAGPT para completar la vinculación...";
             }
-            postToOpener({
+            const message = {
               type: "gemini-cli-oauth-callback",
               flowId: payload.flowId,
               callbackUrl: payload.callbackUrl,
-            });
+            };
+            const deliveredToOpener = postToOpener(message);
+            const persisted = persistForRecovery(message);
+            if (!deliveredToOpener && !persisted && statusNode) {
+              statusNode.textContent = "No se pudo notificar a ILIAGPT automáticamente. Copia la URL mostrada y vuelve a la app para completar la vinculación.";
+              return;
+            }
           } else {
-            postToOpener({
+            const message = {
               type: "gemini-cli-oauth-result",
               flowId: payload.flowId,
               status: "error",
               error: payload.error,
               errorDescription: payload.errorDescription,
               callbackUrl: payload.callbackUrl,
-            });
+            };
+            postToOpener(message);
+            persistForRecovery(message);
           }
         } catch (error) {
           const message =
@@ -360,18 +387,20 @@ function renderGeminiCliOAuthBridge(
           if (statusNode) {
             statusNode.textContent = message;
           }
-          postToOpener({
+          const bridgeMessage = {
             type: "gemini-cli-oauth-result",
             flowId: payload.flowId,
             status: "error",
             error: "gemini_cli_complete_failed",
             errorDescription: message,
             callbackUrl: payload.callbackUrl,
-          });
+          };
+          postToOpener(bridgeMessage);
+          persistForRecovery(bridgeMessage);
         }
         setTimeout(() => {
           try { window.close(); } catch {}
-        }, 400);
+        }, 900);
       })();
     </script>
   </body>
