@@ -8,6 +8,7 @@ import { whatsappWebEventStream, type WhatsAppWebStatus } from '@/lib/whatsapp-w
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { COUNTRIES } from '@/lib/countries';
 
+
 // Max time to wait before resetting busy state (safety net)
 const BUSY_TIMEOUT_MS = 20_000;
 
@@ -295,7 +296,12 @@ export function WhatsAppConnectDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="liquid-shell max-w-md max-h-[85dvh] overflow-y-auto rounded-[24px] border-0 shadow-2xl p-6">
+        <DialogContent
+	className="liquid-shell max-w-md max-h-[85dvh] overflow-y-auto rounded-[24px] border-0 shadow-2xl p-6"
+	onPointerDownOutside={(e) => e.preventDefault()}
+	onInteractOutside={(e) => e.preventDefault()}
+	onEscapeKeyDown={(e) => e.preventDefault()} 
+	>
         <DialogHeader>
           <DialogTitle>Conectar WhatsApp (Web QR)</DialogTitle>
           <DialogDescription>
