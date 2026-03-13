@@ -1117,14 +1117,9 @@ export function ChannelsHubDialog({
     return (
       <Suspense fallback={null}>
         <WhatsAppConnectDialogInner
-          open={open}
+          open={showWhatsAppDialog}
           onOpenChange={(isOpen) => {
-            if (!isOpen) {
-              setShowWhatsAppDialog(false);
-              // Keep hub open
-            } else {
-              onOpenChange(isOpen);
-            }
+            setShowWhatsAppDialog(isOpen);
           }}
         />
       </Suspense>
