@@ -7,6 +7,7 @@ export type UserPlan = {
   subscriptionPlan?: string | null;
   subscriptionPeriodEnd?: string | Date | null;
   subscriptionExpiresAt?: string | Date | null;
+  willDeactivate?: boolean | null;
 };
 
 function toLower(value: string | null | undefined): string {
@@ -85,6 +86,10 @@ export function shouldShowUpgradeCTA(user?: UserPlan | null): boolean {
   const effectivePlan = getEffectivePlan(user);
   if (isAdminUser(user) || effectivePlan === "admin") {
     return false;
+  }
+
+  if (user.willDeactivate === true) {
+    return true;
   }
 
   const subscriptionStatus = toLower(user.subscriptionStatus);

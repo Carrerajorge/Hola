@@ -13,6 +13,7 @@ export interface UsageCheckResult {
   isPaid?: boolean;
   subscriptionStatus?: string | null;
   subscriptionPlan?: string | null;
+  willDeactivate?: boolean;
 }
 
 export interface PlanLimits {
@@ -221,6 +222,14 @@ export class UsageQuotaService {
     const isAdmin = isSystemAdminUser(user);
     const subscriptionStatus = String((user as any).subscriptionStatus || "").toLowerCase().trim() || null;
     const subscriptionPlan = String((user as any).subscriptionPlan || "").toLowerCase().trim() || null;
+    const subscriptionExpiresAt = toValidDate((user as any).subscriptionExpiresAt);
+    const now = new Date();
+    const willDeactivate = Boolean(
+      subscriptionStatus &&
+      !ACTIVE_PAID_SUBSCRIPTION_STATUSES.has(subscriptionStatus) &&
+      subscriptionExpiresAt &&
+      subscriptionExpiresAt.getTime() > now.getTime(),
+    );
     const plan = getEffectivePlanKey(user, isAdmin);
     const isPaid = plan !== "free" && plan !== "admin";
     const planLimits = PLAN_LIMITS[plan] || PLAN_LIMITS.free;
@@ -236,10 +245,10 @@ export class UsageQuotaService {
         isPaid: isPaid || isAdmin,
         subscriptionStatus,
         subscriptionPlan,
+        willDeactivate,
       };
     }
 
-    const now = new Date();
     const resetAt = user.dailyRequestsResetAt;
     let currentUsed = user.dailyRequestsUsed || 0;
 
@@ -259,6 +268,7 @@ export class UsageQuotaService {
       isPaid: isPaid,
       subscriptionStatus,
       subscriptionPlan,
+      willDeactivate,
     };
   }
 

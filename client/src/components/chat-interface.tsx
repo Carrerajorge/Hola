@@ -937,6 +937,7 @@ export function ChatInterface({
     isPaid?: boolean;
     subscriptionStatus?: string | null;
     subscriptionPlan?: string | null;
+    willDeactivate?: boolean;
   } | null>(null);
 
   const userPlanInfo = useMemo(() => {
@@ -955,6 +956,10 @@ export function ChatInterface({
       isPaid,
       subscriptionStatus: (user as any)?.subscriptionStatus ?? null,
       subscriptionPlan: (user as any)?.subscriptionPlan ?? null,
+      willDeactivate:
+        typeof (user as any)?.willDeactivate === "boolean"
+          ? (user as any).willDeactivate
+          : null,
     };
   }, [user]);
 
@@ -1294,6 +1299,10 @@ export function ChatInterface({
           typeof data.subscriptionPlan === "string"
             ? data.subscriptionPlan
             : null,
+        willDeactivate:
+          typeof data.willDeactivate === "boolean"
+            ? data.willDeactivate
+            : undefined,
       });
     } catch (error) {
       console.error("Failed to fetch user plan info:", error);
@@ -1362,6 +1371,10 @@ export function ChatInterface({
         userPlanState?.subscriptionPlan ??
         userPlanInfo?.subscriptionPlan ??
         null,
+      willDeactivate:
+        userPlanState?.willDeactivate ??
+        userPlanInfo?.willDeactivate ??
+        false,
     };
   }, [user, userPlanInfo, userPlanState]);
 

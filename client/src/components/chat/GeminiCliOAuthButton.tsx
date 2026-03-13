@@ -79,6 +79,34 @@ const FLOW_STORAGE_APP_VERSION = normalizeAppBuildVersion(
   import.meta.env.VITE_APP_VERSION,
 );
 
+function GoogleLogoMark(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      viewBox="0 0 18 18"
+      aria-hidden="true"
+      focusable="false"
+      {...props}
+    >
+      <path
+        fill="#4285F4"
+        d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.56 2.68-3.86 2.68-6.62Z"
+      />
+      <path
+        fill="#34A853"
+        d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.02-3.7H.96v2.34A9 9 0 0 0 9 18Z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M3.98 10.72A5.4 5.4 0 0 1 3.7 9c0-.6.1-1.18.28-1.72V4.94H.96A9 9 0 0 0 0 9c0 1.45.35 2.82.96 4.06l3.02-2.34Z"
+      />
+      <path
+        fill="#EA4335"
+        d="M9 3.58c1.32 0 2.5.46 3.44 1.36l2.58-2.58C13.46.9 11.42 0 9 0A9 9 0 0 0 .96 4.94l3.02 2.34C4.68 5.16 6.66 3.58 9 3.58Z"
+      />
+    </svg>
+  );
+}
+
 type StoredGeminiCliFlowDraft = {
   flowId: string;
   authUrl: string;
@@ -1020,6 +1048,7 @@ export function GeminiCliOAuthButton({
             </DialogDescription>
             <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-muted-foreground">
               <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-muted/30 px-2.5 py-1">
+                <GoogleLogoMark className="h-3.5 w-3.5" />
                 <span className="font-semibold text-sky-600">Google</span>
                 Cuenta Gmail
               </span>
@@ -1109,7 +1138,8 @@ export function GeminiCliOAuthButton({
                     </li>
                     <li>
                       2. Elige la cuenta de Gmail que deseas vincular e inicia
-                      sesion.
+                      sesion. Google abrira el selector de cuentas
+                      automaticamente.
                     </li>
                     <li>
                       3. Google volvera a{" "}
@@ -1142,6 +1172,7 @@ export function GeminiCliOAuthButton({
                       size="sm"
                       onClick={handleOpenAuthUrl}
                     >
+                      <GoogleLogoMark className="h-4 w-4" />
                       <ExternalLink className="h-4 w-4" />
                       Abrir Google OAuth
                     </Button>
@@ -1225,6 +1256,7 @@ export function GeminiCliOAuthButton({
                 {startMutation.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : null}
+                <GoogleLogoMark className="h-4 w-4" />
                 Continuar con Google
               </Button>
             )}

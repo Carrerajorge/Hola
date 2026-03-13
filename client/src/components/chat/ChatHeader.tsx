@@ -71,6 +71,7 @@ interface ChatHeaderProps {
         isPaid?: boolean;
         subscriptionStatus?: string | null;
         subscriptionPlan?: string | null;
+        willDeactivate?: boolean;
     } | null;
 }
 
