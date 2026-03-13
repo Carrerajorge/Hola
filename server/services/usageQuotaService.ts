@@ -76,6 +76,72 @@ function toValidDate(value: unknown): Date | null {
   return null;
 }
 
+function isMissingUsersColumnError(error: unknown, columnName: string): boolean {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return /column .* does not exist/i.test(message) && message.includes(columnName);
+}
+
+async function getUsageStatusUserRow(
+  userId: string,
+): Promise<
+  | Pick<
+      typeof users.$inferSelect,
+      | "id"
+      | "email"
+      | "role"
+      | "plan"
+      | "dailyRequestsUsed"
+      | "dailyRequestsResetAt"
+      | "subscriptionStatus"
+      | "subscriptionPlan"
+      | "subscriptionPeriodEnd"
+      | "subscriptionExpiresAt"
+      | "subscriptionCancelAtPeriodEnd"
+    >
+  | undefined
+> {
+  const baseSelection = {
+    id: users.id,
+    email: users.email,
+    role: users.role,
+    plan: users.plan,
+    dailyRequestsUsed: users.dailyRequestsUsed,
+    dailyRequestsResetAt: users.dailyRequestsResetAt,
+    subscriptionStatus: users.subscriptionStatus,
+    subscriptionPlan: users.subscriptionPlan,
+    subscriptionPeriodEnd: users.subscriptionPeriodEnd,
+    subscriptionExpiresAt: users.subscriptionExpiresAt,
+  };
+
+  try {
+    const [user] = await db
+      .select({
+        ...baseSelection,
+        subscriptionCancelAtPeriodEnd: users.subscriptionCancelAtPeriodEnd,
+      })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    return user;
+  } catch (error) {
+    if (!isMissingUsersColumnError(error, "subscription_cancel_at_period_end")) {
+      throw error;
+    }
+
+    const [user] = await db
+      .select(baseSelection)
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    if (!user) return undefined;
+    return {
+      ...user,
+      subscriptionCancelAtPeriodEnd: false,
+    };
+  }
+}
+
 function resolveSubscriptionBoundary(
   user: Pick<
     typeof users.$inferSelect,
@@ -251,7 +317,7 @@ export class UsageQuotaService {
   }
 
   async getUsageStatus(userId: string): Promise<UsageCheckResult> {
-    const [user] = await db.select().from(users).where(eq(users.id, userId));
+    const user = await getUsageStatusUserRow(userId);
 
     if (!user) {
       return {

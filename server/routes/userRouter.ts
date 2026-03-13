@@ -1624,7 +1624,15 @@ export function createUserRouter() {
         return res.status(401).json({ error: "Authentication required" });
       }
 
-      const user = await storage.getUser(userId);
+      const [user] = await db
+        .select({
+          id: users.id,
+          preferences: users.preferences,
+        })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
@@ -1651,7 +1659,15 @@ export function createUserRouter() {
         return res.status(400).json({ error: "Invalid preferences" });
       }
 
-      const user = await storage.getUser(userId);
+      const [user] = await db
+        .select({
+          id: users.id,
+          preferences: users.preferences,
+        })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
