@@ -1,4 +1,5 @@
 import type { Express, Request, Response } from "express";
+import { randomBytes } from "node:crypto";
 import { type AuthenticatedRequest, getUserId } from "./types/express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
@@ -284,9 +285,22 @@ function renderGeminiCliOAuthBridge(
 ): void {
   const serializedPayload = JSON.stringify(payload).replace(/</g, "\\u003c");
   const bridgeStorageKey = "iliagpt:gemini-cli-oauth-bridge-result";
+  const nonce = randomBytes(16).toString("base64");
+  const contentSecurityPolicy = [
+    "default-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+    "img-src 'self' data:",
+    "style-src 'unsafe-inline'",
+    `script-src 'nonce-${nonce}'`,
+    "connect-src 'self'",
+  ].join("; ");
   res
     .status(payload.error ? 400 : 200)
-    .setHeader("Content-Type", "text/html; charset=utf-8").send(`<!doctype html>
+    .setHeader("Content-Type", "text/html; charset=utf-8")
+    .setHeader("Content-Security-Policy", contentSecurityPolicy)
+    .send(`<!doctype html>
 <html lang="es">
   <head>
     <meta charset="utf-8" />
@@ -308,7 +322,7 @@ function renderGeminiCliOAuthBridge(
       <p id="status">${payload.error ? "Error devuelto por Google." : "Completando la vinculación en ILIAGPT..."}</p>
       ${payload.callbackUrl ? `<code>${payload.callbackUrl.replace(/</g, "&lt;")}</code>` : ""}
     </div>
-    <script>
+    <script nonce="${nonce}">
       (async function () {
         const payload = ${serializedPayload};
         const statusNode = document.getElementById("status");

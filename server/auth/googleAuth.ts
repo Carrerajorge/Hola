@@ -3,6 +3,7 @@
  * Implements OAuth 2.0 for Google account login
  */
 import { Router, Request, Response } from "express";
+import { randomBytes } from "node:crypto";
 import { authStorage } from "../replit_integrations/auth/storage";
 import { storage } from "../storage";
 import { env } from "../config/env";
@@ -126,9 +127,21 @@ function renderGeminiCliBridge(
     },
 ): void {
     const serializedPayload = JSON.stringify(payload).replace(/</g, "\\u003c");
+    const nonce = randomBytes(16).toString("base64");
+    const contentSecurityPolicy = [
+        "default-src 'none'",
+        "base-uri 'none'",
+        "form-action 'none'",
+        "frame-ancestors 'none'",
+        "img-src 'self' data:",
+        "style-src 'unsafe-inline'",
+        `script-src 'nonce-${nonce}'`,
+        "connect-src 'self'",
+    ].join("; ");
     res
         .status(payload.status === "error" || payload.error ? 400 : 200)
         .setHeader("Content-Type", "text/html; charset=utf-8")
+        .setHeader("Content-Security-Policy", contentSecurityPolicy)
         .send(`<!doctype html>
 <html lang="es">
   <head>
@@ -151,7 +164,7 @@ function renderGeminiCliBridge(
       <p id="status">${payload.error ? "Error devuelto por Google." : "Completando la vinculación en ILIAGPT..."}</p>
       ${payload.callbackUrl ? `<code>${payload.callbackUrl.replace(/</g, "&lt;")}</code>` : ""}
     </div>
-    <script>
+    <script nonce="${nonce}">
       (async function () {
         const payload = ${serializedPayload};
         const statusNode = document.getElementById("status");
