@@ -136,6 +136,9 @@ export default function Home() {
   const [isCodexOpen, setIsCodexOpen] = useState(false);
   const [isAppsDialogOpen, setIsAppsDialogOpen] = useState(false);
   const [isWhatsAppConnectOpen, setIsWhatsAppConnectOpen] = useState(false);
+  useEffect(() => {
+  console.log('[HOME] isWhatsAppConnectOpen changed', { isWhatsAppConnectOpen });
+  }, [isWhatsAppConnectOpen]);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);

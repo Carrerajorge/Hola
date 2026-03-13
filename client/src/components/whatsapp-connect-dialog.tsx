@@ -50,6 +50,21 @@ export function WhatsAppConnectDialog({
   const [autoReply, setAutoReply] = useState(true);
   const lastQrRef = useRef<string | null>(null);
   const busyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
+  useEffect(() => {
+  console.log('[WA DIALOG] mount');
+  return () => {
+  console.log('[WA DIALOG] unmount');
+  };
+  }, []);
+  
+  useEffect(() => {
+  console.log('[WA DIALOG] prop open changed', { open });
+  }, [open]);
+
+  useEffect(() => {
+  console.log('[WA DIALOG] status changed', status);
+  }, [status]);
 
   // Safety net: clear busy after BUSY_TIMEOUT_MS
   const startBusy = useCallback(() => {

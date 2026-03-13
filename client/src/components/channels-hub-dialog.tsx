@@ -652,6 +652,15 @@ export function ChannelsHubDialog({
 
   const [activeChannel, setActiveChannel] = useState<ChannelId | null>(null);
   const [showWhatsAppDialog, setShowWhatsAppDialog] = useState(false);
+  
+  useEffect(() => {
+  console.log('[HUB] prop open changed', { open });
+  }, [open]);
+
+  useEffect(() => {
+  console.log('[HUB] showWhatsAppDialog changed', { showWhatsAppDialog });
+  }, [showWhatsAppDialog]);
+
   const { status: waStatus } = useWhatsAppWebStatus(open);
   const tgStatus = useChannelStatus("telegram", open);
   const msgStatus = useChannelStatus("messenger", open);
