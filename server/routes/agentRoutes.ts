@@ -48,6 +48,40 @@ const AGENT_ROBUSTNESS_POLICY = {
   defaultHoursWindow: 24,
 };
 
+const VALID_RUN_STATUSES = new Set([
+  "queued",
+  "planning",
+  "running",
+  "verifying",
+  "replanning",
+  "awaiting_confirmation",
+  "cancelling",
+  "completed",
+  "failed",
+  "cancelled",
+  "paused",
+  "compensated",
+]);
+
+const VALID_STEP_STATUSES = new Set([
+  "pending",
+  "running",
+  "verifying",
+  "succeeded",
+  "failed",
+  "skipped",
+  "cancelled",
+  "compensated",
+]);
+
+const VALID_PHASE_STATUSES = new Set([
+  "pending",
+  "in_progress",
+  "completed",
+  "failed",
+  "skipped",
+]);
+
 function clampNumber(value: number, min: number, max: number, fallback: number): number {
   if (!Number.isFinite(value)) {
     return fallback;
@@ -86,6 +120,214 @@ function toPercent(value: number, total: number): number {
   return Math.round((value / total) * 10000) / 100;
 }
 
+function toIsoDateString(value: unknown): string | undefined {
+  if (!value) return undefined;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    const parsed = new Date(trimmed);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+  }
+  return undefined;
+}
+
+function normalizeText(value: unknown, fallback = ""): string {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : fallback;
+  }
+  if (value == null) {
+    return fallback;
+  }
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized && serialized !== "null" ? serialized : fallback;
+  } catch {
+    return String(value);
+  }
+}
+
+function normalizeOptionalText(value: unknown): string | null {
+  if (value == null) return null;
+  const normalized = normalizeText(value, "");
+  return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeRunStatus(value: unknown): string {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) return "queued";
+  if (VALID_RUN_STATUSES.has(normalized)) return normalized;
+  if (normalized === "executing" || normalized === "in_progress" || normalized === "retrying") return "running";
+  if (normalized === "succeeded" || normalized === "success" || normalized === "done") return "completed";
+  if (normalized === "error") return "failed";
+  return "queued";
+}
+
+function normalizeStepStatus(value: unknown): string {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) return "pending";
+  if (VALID_STEP_STATUSES.has(normalized)) return normalized;
+  if (normalized === "queued" || normalized === "created") return "pending";
+  if (normalized === "retrying" || normalized === "in_progress" || normalized === "processing") return "running";
+  if (normalized === "completed" || normalized === "success" || normalized === "done") return "succeeded";
+  if (normalized === "error") return "failed";
+  return "pending";
+}
+
+function normalizeArtifactsForResponse(rawArtifacts: unknown): Array<{
+  id: string;
+  type: string;
+  name: string;
+  url?: string;
+}> {
+  if (!Array.isArray(rawArtifacts)) {
+    return [];
+  }
+
+  return rawArtifacts.map((artifact, index) => {
+    const record = artifact && typeof artifact === "object"
+      ? artifact as Record<string, unknown>
+      : {};
+
+    const fallbackName =
+      typeof artifact === "string" && artifact.trim().length > 0
+        ? artifact.trim()
+        : `artifact-${index + 1}`;
+
+    const type = normalizeText(record.type ?? record.artifactType, "file");
+    const name = normalizeText(record.name ?? record.filename ?? record.path ?? record.title, fallbackName);
+    const url = normalizeOptionalText(record.url ?? record.href) ?? undefined;
+
+    return {
+      id: normalizeText(record.id, randomUUID()),
+      type,
+      name,
+      ...(url ? { url } : {}),
+    };
+  });
+}
+
+function normalizeWorkspaceFilesForResponse(rawWorkspaceFiles: unknown): Record<string, string> | undefined {
+  if (!rawWorkspaceFiles || typeof rawWorkspaceFiles !== "object" || Array.isArray(rawWorkspaceFiles)) {
+    return undefined;
+  }
+
+  const entries = Object.entries(rawWorkspaceFiles as Record<string, unknown>);
+  if (entries.length === 0) {
+    return undefined;
+  }
+
+  return Object.fromEntries(
+    entries.map(([key, value]) => [key, normalizeText(value, "")]),
+  );
+}
+
+function normalizeStepsForResponse(rawSteps: unknown) {
+  if (!Array.isArray(rawSteps)) {
+    return [];
+  }
+
+  return rawSteps.map((step, index) => {
+    const record = step && typeof step === "object"
+      ? step as Record<string, unknown>
+      : {};
+
+    return {
+      stepIndex:
+        typeof record.stepIndex === "number" && Number.isFinite(record.stepIndex) && record.stepIndex >= 0
+          ? record.stepIndex
+          : index,
+      toolName: normalizeText(record.toolName, "unknown"),
+      description:
+        typeof record.description === "string" && record.description.trim().length > 0
+          ? record.description
+          : null,
+      status: normalizeStepStatus(record.status),
+      output: record.output ?? null,
+      error: normalizeOptionalText(record.error),
+      startedAt: toIsoDateString(record.startedAt) ?? null,
+      completedAt: toIsoDateString(record.completedAt) ?? null,
+    };
+  });
+}
+
+function finalizeRunResponse(rawResponse: Record<string, any>, contextLabel: string) {
+  const normalized = {
+    id: normalizeText(rawResponse.id, randomUUID()),
+    chatId: normalizeText(rawResponse.chatId, ""),
+    status: normalizeRunStatus(rawResponse.status),
+    plan: rawResponse.plan ?? null,
+    steps: normalizeStepsForResponse(rawResponse.steps),
+    artifacts: normalizeArtifactsForResponse(rawResponse.artifacts),
+    summary: normalizeOptionalText(rawResponse.summary),
+    error: normalizeOptionalText(rawResponse.error),
+    eventStream: Array.isArray(rawResponse.eventStream) ? rawResponse.eventStream : undefined,
+    todoList: Array.isArray(rawResponse.todoList) ? rawResponse.todoList : undefined,
+    workspaceFiles: normalizeWorkspaceFilesForResponse(rawResponse.workspaceFiles),
+    currentStepIndex:
+      typeof rawResponse.currentStepIndex === "number" && Number.isFinite(rawResponse.currentStepIndex)
+        ? rawResponse.currentStepIndex
+        : 0,
+    totalSteps:
+      typeof rawResponse.totalSteps === "number" && Number.isFinite(rawResponse.totalSteps)
+        ? rawResponse.totalSteps
+        : Array.isArray(rawResponse.steps) ? rawResponse.steps.length : 0,
+    completedSteps:
+      typeof rawResponse.completedSteps === "number" && Number.isFinite(rawResponse.completedSteps)
+        ? rawResponse.completedSteps
+        : 0,
+    startedAt: toIsoDateString(rawResponse.startedAt),
+    completedAt: toIsoDateString(rawResponse.completedAt),
+    createdAt: toIsoDateString(rawResponse.createdAt) || new Date().toISOString(),
+  };
+
+  const parsed = RunResponseSchema.safeParse(normalized);
+  if (parsed.success) {
+    return parsed.data;
+  }
+
+  console.warn(`[AgentRoutes] Run response validation failed for ${contextLabel}:`, parsed.error.flatten());
+
+  const degraded = {
+    ...normalized,
+    plan: null,
+    eventStream: undefined,
+    todoList: undefined,
+    workspaceFiles: undefined,
+  };
+
+  const reparsed = RunResponseSchema.safeParse(degraded);
+  if (reparsed.success) {
+    return reparsed.data;
+  }
+
+  console.error(`[AgentRoutes] Fallback run response validation failed for ${contextLabel}:`, reparsed.error.flatten());
+
+  return {
+    id: degraded.id,
+    chatId: degraded.chatId,
+    status: degraded.status,
+    plan: null,
+    steps: degraded.steps,
+    artifacts: degraded.artifacts,
+    summary: degraded.summary,
+    error: degraded.error,
+    currentStepIndex: degraded.currentStepIndex,
+    totalSteps: degraded.totalSteps,
+    completedSteps: degraded.completedSteps,
+    ...(degraded.startedAt ? { startedAt: degraded.startedAt } : {}),
+    ...(degraded.completedAt ? { completedAt: degraded.completedAt } : {}),
+    createdAt: degraded.createdAt,
+  };
+}
+
 function normalizeRunPlanForResponse(
   rawPlan: unknown,
   runCreatedAt: Date,
@@ -105,7 +347,67 @@ function normalizeRunPlanForResponse(
     createdAt?: Date | string | null;
   };
 
-  const normalizedSteps = Array.isArray(plan.steps) ? plan.steps : [];
+  const normalizedSteps = (Array.isArray(plan.steps) ? plan.steps : [])
+    .slice(0, 20)
+    .map((step, index) => {
+      const record = step && typeof step === "object"
+        ? step as Record<string, unknown>
+        : {};
+
+      const dependencies = Array.isArray(record.dependencies)
+        ? record.dependencies
+          .map((dependency) => Number(dependency))
+          .filter((dependency) => Number.isInteger(dependency) && dependency >= 0)
+        : [];
+
+      const timeoutMs = Number(record.timeoutMs);
+
+      return {
+        index:
+          typeof record.index === "number" && Number.isFinite(record.index) && record.index >= 0
+            ? record.index
+            : index,
+        toolName: normalizeText(record.toolName, "unknown"),
+        description: normalizeText(record.description, `Paso ${index + 1}`),
+        input: record.input && typeof record.input === "object" && !Array.isArray(record.input)
+          ? record.input as Record<string, unknown>
+          : {},
+        expectedOutput: normalizeText(record.expectedOutput, "Task completion"),
+        dependencies,
+        optional: Boolean(record.optional),
+        ...(Number.isFinite(timeoutMs) && timeoutMs > 0 ? { timeoutMs: Math.round(timeoutMs) } : {}),
+        ...(typeof record.phaseId === "string" && record.phaseId.trim().length > 0 ? { phaseId: record.phaseId.trim() } : {}),
+      };
+    });
+
+  if (normalizedSteps.length === 0) {
+    return null;
+  }
+
+  const normalizedPhases = Array.isArray(plan.phases)
+    ? plan.phases.map((phase, index) => {
+      const record = phase && typeof phase === "object"
+        ? phase as Record<string, unknown>
+        : {};
+      const stepIndices = Array.isArray(record.stepIndices)
+        ? record.stepIndices
+          .map((value) => Number(value))
+          .filter((value) => Number.isInteger(value) && value >= 0)
+        : [];
+      const status = String(record.status ?? "").trim().toLowerCase();
+
+      return {
+        id: normalizeText(record.id, `phase-${index + 1}`),
+        name: normalizeText(record.name, `Fase ${index + 1}`),
+        ...(typeof record.description === "string" && record.description.trim().length > 0
+          ? { description: record.description.trim() }
+          : {}),
+        status: VALID_PHASE_STATUSES.has(status) ? status : "pending",
+        stepIndices,
+      };
+    })
+    : undefined;
+
   const estimatedTimeMs =
     typeof plan.estimatedTimeMs === "number" && Number.isFinite(plan.estimatedTimeMs) && plan.estimatedTimeMs > 0
       ? Math.round(plan.estimatedTimeMs)
@@ -123,7 +425,7 @@ function normalizeRunPlanForResponse(
       ? plan.objective
       : "Completar la tarea solicitada",
     steps: normalizedSteps as AgentPlan["steps"],
-    phases: Array.isArray(plan.phases) ? (plan.phases as AgentPlan["phases"]) : undefined,
+    phases: normalizedPhases as AgentPlan["phases"] | undefined,
     currentPhaseIndex:
       typeof plan.currentPhaseIndex === "number" && Number.isFinite(plan.currentPhaseIndex)
         ? plan.currentPhaseIndex
@@ -433,8 +735,7 @@ export function createAgentModeRouter() {
         }));
       }
 
-      const validatedResponse = validateOrThrow(RunResponseSchema, response, `GET /runs/chat/${chatId} response`);
-      res.json(validatedResponse);
+      res.json(finalizeRunResponse(response, `GET /runs/chat/${chatId}`));
     } catch (error: any) {
       console.error("[AgentRoutes] Error getting chat run:", error);
       res.status(500).json({ error: "Failed to get agent run for chat" });
@@ -557,8 +858,7 @@ export function createAgentModeRouter() {
         }));
       }
 
-      const validatedResponse = validateOrThrow(RunResponseSchema, response, `GET /runs/${id} response`);
-      res.json(validatedResponse);
+      res.json(finalizeRunResponse(response, `GET /runs/${id}`));
     } catch (error: any) {
       console.error("[AgentRoutes] Error getting run:", error);
       res.status(500).json({ error: "Failed to get agent run" });

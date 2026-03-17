@@ -220,7 +220,7 @@ class PollingManager {
 
       console.warn(`[PollingManager] No SSE events received for run ${runId}; switching to HTTP polling`);
       this.fallbackToPolling(runId);
-    }, 4000);
+    }, 8000);
   }
 
   private handleSSEMessage(runId: string, event: MessageEvent, eventType?: string): void {
@@ -558,6 +558,50 @@ class PollingManager {
     this.poll(runId);
   }
 
+  private async fetchRunSnapshot(runId: string, signal: AbortSignal): Promise<any> {
+    const fullResponse = await fetch(`/api/agent/runs/${runId}`, {
+      signal,
+      credentials: 'include',
+    });
+
+    if (fullResponse.ok) {
+      return fullResponse.json();
+    }
+
+    const statusResponse = await fetch(`/api/agent/runs/${runId}/status`, {
+      signal,
+      credentials: 'include',
+    });
+
+    if (statusResponse.ok) {
+      const statusData = await statusResponse.json();
+      console.warn(
+        `[PollingManager] Full run snapshot failed for ${runId} with HTTP ${fullResponse.status}; using /status fallback`,
+      );
+      return {
+        id: runId,
+        chatId: '',
+        status: statusData.status,
+        plan: null,
+        steps: [],
+        artifacts: [],
+        eventStream: [],
+        todoList: [],
+        workspaceFiles: {},
+        summary: statusData.summary || '',
+        error: statusData.error || '',
+        currentStepIndex: statusData.currentStep || 0,
+        totalSteps: statusData.totalSteps || 0,
+        completedSteps: statusData.completedSteps || 0,
+        startedAt: statusData.startedAt,
+        completedAt: statusData.completedAt,
+        createdAt: statusData.startedAt || new Date().toISOString(),
+      };
+    }
+
+    throw new Error(`HTTP ${fullResponse.status} / status ${statusResponse.status}`);
+  }
+
   private async poll(runId: string): Promise<void> {
     const instance = this.instances.get(runId);
     if (!instance || instance.isUsingSSE) return;
@@ -565,23 +609,21 @@ class PollingManager {
     instance.abortController = new AbortController();
 
     try {
-      const response = await fetch(`/api/agent/runs/${runId}`, {
-        signal: instance.abortController.signal,
-        credentials: 'include',
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
+      const data = await this.fetchRunSnapshot(runId, instance.abortController.signal);
       const store = useAgentStore.getState();
+      const currentRun = store.runs[instance.messageId];
+      const nextSteps = Array.isArray(data.steps) && data.steps.length > 0
+        ? data.steps
+        : currentRun?.steps || [];
+      const nextEventStream = Array.isArray(data.eventStream) && data.eventStream.length > 0
+        ? data.eventStream
+        : currentRun?.eventStream || [];
 
       if (data.status === 'completed') {
         let summary = data.summary || data.result || '';
         
-        if (!summary && data.eventStream?.length > 0) {
-          const events = data.eventStream;
+        if (!summary && nextEventStream.length > 0) {
+          const events = nextEventStream;
           
           const completionEvent = events.find((e: any) => 
             e.type === 'done' || e.type === 'run_completed' ||
@@ -610,7 +652,7 @@ class PollingManager {
         
         store.updateRun(instance.messageId, {
           status: 'completed',
-          eventStream: data.eventStream || [],
+          eventStream: nextEventStream,
           summary: summary,
         });
         store.stopPolling(instance.messageId);
@@ -621,7 +663,7 @@ class PollingManager {
       if (data.status === 'failed' || data.status === 'cancelled') {
         store.updateRun(instance.messageId, {
           status: data.status,
-          eventStream: data.eventStream || [],
+          eventStream: nextEventStream,
           error: data.error || 'Run ended',
         });
         store.stopPolling(instance.messageId);
@@ -631,12 +673,12 @@ class PollingManager {
 
       store.updateRun(instance.messageId, {
         status: data.status,
-        eventStream: data.eventStream || [],
-        steps: data.steps || [],
+        eventStream: nextEventStream,
+        steps: nextSteps,
         summary: data.summary,
       });
 
-      const newEventCount = data.eventStream?.length || 0;
+      const newEventCount = nextEventStream.length;
       if (newEventCount > instance.lastEventCount) {
         instance.currentInterval = this.options.initialInterval;
         instance.lastEventCount = newEventCount;
