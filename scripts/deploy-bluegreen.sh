@@ -759,6 +759,145 @@ slot() {
     docker compose -p "hola-${slot_name}" -f "${SLOT_COMPOSE}" "$@"
 }
 
+wait_for_redis_ping() {
+  local attempts="${1:-15}"
+  local sleep_seconds="${2:-2}"
+  local i
+
+  for i in $(seq 1 "${attempts}"); do
+    if docker exec hola-redis redis-cli -a "${REDIS_PASSWORD}" ping 2>/dev/null | grep -q PONG; then
+      return 0
+    fi
+    sleep "${sleep_seconds}"
+  done
+
+  return 1
+}
+
+capture_redis_logs() {
+  local tail_lines="${1:-120}"
+  docker logs --tail="${tail_lines}" hola-redis 2>&1 || true
+}
+
+redis_logs_indicate_aof_corruption() {
+  local redis_logs="$1"
+  printf '%s\n' "${redis_logs}" | grep -Eqi \
+    'Bad file format reading the append only file|redis-check-aof --fix|aof-load-corrupt-tail-max-size'
+}
+
+resolve_redis_repair_image() {
+  docker inspect --format '{{.Config.Image}}' hola-redis 2>/dev/null || echo "redis:alpine"
+}
+
+find_redis_aof_manifest() {
+  local repair_image="$1"
+
+  docker run --rm \
+    -v hola_redis_data:/data \
+    "${repair_image}" \
+    sh -eu -c '
+      if [ -f /data/appendonlydir/appendonly.aof.manifest ]; then
+        echo /data/appendonlydir/appendonly.aof.manifest
+        exit 0
+      fi
+
+      find /data -maxdepth 3 -type f \
+        \( -name "appendonly*.manifest" -o -name "*.manifest" \) \
+        | sort | head -n 1
+    '
+}
+
+backup_redis_aof_files() {
+  local repair_image="$1"
+  local manifest_path="$2"
+  local backup_root="${DEPLOY_PATH}/backups/redis-aof"
+
+  mkdir -p "${backup_root}"
+
+  docker run --rm \
+    -e REDIS_AOF_MANIFEST="${manifest_path}" \
+    -v hola_redis_data:/data \
+    -v "${backup_root}:/backup" \
+    "${repair_image}" \
+    sh -eu -c '
+      stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+      dest="/backup/${stamp}"
+      mkdir -p "${dest}"
+
+      manifest_dir="$(dirname "${REDIS_AOF_MANIFEST}")"
+      cp "${REDIS_AOF_MANIFEST}" "${dest}/"
+      find "${manifest_dir}" -maxdepth 1 -type f \
+        \( -name "*.manifest" -o -name "*.aof" -o -name "*.aof.*" -o -name "*.rdb" \) \
+        -exec cp {} "${dest}/" \;
+
+      echo "${dest}"
+    '
+}
+
+repair_redis_aof_corruption() {
+  local redis_logs="$1"
+  local repair_image
+  local manifest_path
+  local backup_dir
+
+  repair_image="$(resolve_redis_repair_image)"
+
+  logw "Detected Redis AOF corruption. Attempting automatic repair with ${repair_image}."
+  printf '%s\n' "${redis_logs}" >&2
+
+  docker rm -f hola-redis >/dev/null 2>&1 || true
+
+  manifest_path="$(find_redis_aof_manifest "${repair_image}")"
+  if [ -z "${manifest_path}" ]; then
+    loge "Redis AOF manifest not found inside volume hola_redis_data."
+    return 1
+  fi
+
+  log "  Backing up Redis AOF files from ${manifest_path}..."
+  backup_dir="$(backup_redis_aof_files "${repair_image}" "${manifest_path}")"
+  logok "Redis AOF backup created at ${backup_dir}"
+
+  log "  Repairing Redis AOF manifest..."
+  if ! docker run --rm \
+    -e REDIS_AOF_MANIFEST="${manifest_path}" \
+    -v hola_redis_data:/data \
+    "${repair_image}" \
+    sh -eu -c 'printf "y\n" | redis-check-aof --fix "${REDIS_AOF_MANIFEST}"'; then
+    loge "redis-check-aof failed for ${manifest_path}"
+    return 1
+  fi
+
+  log "  Restarting Redis after AOF repair..."
+  infra up -d --force-recreate redis >/dev/null
+  return 0
+}
+
+ensure_redis_ready() {
+  local redis_logs=""
+
+  log "  Waiting for Redis..."
+  if wait_for_redis_ping 15 2; then
+    logok "Redis ready."
+    return 0
+  fi
+
+  redis_logs="$(capture_redis_logs 120)"
+  if redis_logs_indicate_aof_corruption "${redis_logs}"; then
+    if repair_redis_aof_corruption "${redis_logs}"; then
+      log "  Waiting for Redis after AOF repair..."
+      if wait_for_redis_ping 20 2; then
+        logok "Redis ready after AOF repair."
+        return 0
+      fi
+      redis_logs="$(capture_redis_logs 120)"
+    fi
+  fi
+
+  loge "Redis not ready after automatic recovery attempts"
+  printf '%s\n' "${redis_logs}" >&2
+  return 1
+}
+
 list_slot_container_ids() {
   local slot_name="$1"
 
@@ -989,19 +1128,9 @@ for i in $(seq 1 30); do
   sleep 2
 done
 
-log "  Waiting for Redis..."
-for i in $(seq 1 15); do
-  if docker exec hola-redis redis-cli -a "${REDIS_PASSWORD}" ping 2>/dev/null | grep -q PONG; then
-    logok "Redis ready."
-    break
-  fi
-  if [ "$i" -eq 15 ]; then
-    loge "Redis not ready after 30s"
-    docker logs --tail=20 hola-redis 2>&1 || true
-    exit 1
-  fi
-  sleep 2
-done
+if ! ensure_redis_ready; then
+  exit 1
+fi
 echo ""
 
 # ── Step 3: Verify current slot is actually serving (pre-deploy sanity) ──
