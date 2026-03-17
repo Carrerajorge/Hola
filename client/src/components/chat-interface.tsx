@@ -377,6 +377,10 @@ interface ChatInterfaceProps {
   messages: Message[];
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   onSendMessage: (message: Message) => Promise<SendMessageAck | undefined>;
+  onSendMessageToChat?: (
+    chatId: string,
+    message: Message,
+  ) => Promise<SendMessageAck | undefined>;
   isSidebarOpen?: boolean;
   onToggleSidebar?: () => void;
   onCloseSidebar?: () => void;
@@ -572,6 +576,7 @@ export function ChatInterface({
   messages,
   setMessages,
   onSendMessage,
+  onSendMessageToChat,
   isSidebarOpen = true,
   onToggleSidebar,
   onCloseSidebar,
@@ -675,6 +680,32 @@ export function ChatInterface({
   const [selectedCodingAgents, setSelectedCodingAgents] = useState<
     CodingAgentProfile[]
   >(["coder"]);
+
+  const persistMessageToTargetChat = useCallback(
+    async (
+      targetChatId: string,
+      message: Message,
+    ): Promise<SendMessageAck | undefined> => {
+      const normalizedTargetChatId = targetChatId.trim();
+      if (!normalizedTargetChatId) {
+        return onSendMessage(message);
+      }
+
+      if (onSendMessageToChat) {
+        return onSendMessageToChat(normalizedTargetChatId, message);
+      }
+
+      const currentResolvedChatId = chatId ? resolveRealChatId(chatId) : "";
+      if (currentResolvedChatId === normalizedTargetChatId) {
+        return onSendMessage(message);
+      }
+
+      throw new Error(
+        "No se pudo persistir el mensaje en el chat del agente.",
+      );
+    },
+    [chatId, onSendMessage, onSendMessageToChat],
+  );
 
   const refreshRepositoryWorkspace = useCallback(
     async (repositoryPath: string, preferredFolder?: string) => {
@@ -6764,32 +6795,26 @@ export function ChatInterface({
             explicitAgentUserMessageId = userMessage.id;
             const agentMessageId = userMessage.id;
             setCurrentAgentMessageId(agentMessageId);
+            const initialAgentChatId = chatId ? resolveRealChatId(chatId) : "";
+            const stableAgentChatId =
+              initialAgentChatId &&
+              !initialAgentChatId.startsWith("pending-")
+                ? initialAgentChatId
+                : "";
             // Clear input IMMEDIATELY after capturing the value to prevent duplicates
             setInput("");
             setUploadedFiles([]);
 
             // Show message immediately (optimistic update)
             setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
-            const sendMessageAck = await onSendMessage(userMessage);
-            const resolvedAgentChatId =
-              sendMessageAck?.chatId ||
-              (chatId && !chatId.startsWith("pending-") ? chatId : "");
 
             console.log(
               "[Agent Mode] Starting run with input:",
               userMessageContent,
             );
 
-            // Use the store-based approach for starting the run
-            // This will create the run in the store and start polling automatically
-            if (!resolvedAgentChatId) {
-              throw new Error(
-                "No se pudo resolver el chat para iniciar el modo agente.",
-              );
-            }
-
             const result = await startAgentRun(
-              resolvedAgentChatId,
+              stableAgentChatId,
               userMessageContent,
               agentMessageId,
               attachments,
@@ -6799,6 +6824,25 @@ export function ChatInterface({
             console.log("[Agent Mode] Run result:", result);
 
             if (result) {
+              const persistTargetChatId = result.chatId || stableAgentChatId;
+              void persistMessageToTargetChat(
+                persistTargetChatId,
+                userMessage,
+              ).catch((persistError) => {
+                console.error(
+                  "[Agent Mode] Failed to persist user message:",
+                  persistError,
+                );
+                toast({
+                  title: "Mensaje pendiente de sincronizar",
+                  description:
+                    persistError instanceof Error && persistError.message
+                      ? persistError.message
+                      : "El agente inició, pero no se pudo guardar el mensaje en el chat.",
+                  variant: "destructive",
+                });
+              });
+
               // Tool already cleared above; now clear selected tool
               setSelectedTool(null);
 
@@ -8189,10 +8233,15 @@ export function ChatInterface({
 
         const agentMessageId = userMsgId;
         setCurrentAgentMessageId(agentMessageId);
+        const initialAgentChatId = chatId ? resolveRealChatId(chatId) : "";
+        const stableAgentChatId =
+          initialAgentChatId && !initialAgentChatId.startsWith("pending-")
+            ? initialAgentChatId
+            : "";
 
         try {
           const result = await startAgentRun(
-            chatId || "",
+            stableAgentChatId,
             userInput,
             agentMessageId,
             agentAttachments,
@@ -8202,7 +8251,25 @@ export function ChatInterface({
           if (result) {
             // Optimistic message already added above! just notify parent/server if needed
             await applyPromptIntegrity();
-            onSendMessage({ ...userMsg, skipRun: true });
+            const agentUserMessage = { ...userMsg, skipRun: true };
+            const persistTargetChatId = result.chatId || stableAgentChatId;
+            void persistMessageToTargetChat(
+              persistTargetChatId,
+              agentUserMessage,
+            ).catch((persistError) => {
+              console.error(
+                "[Agent Auto] Failed to persist user message:",
+                persistError,
+              );
+              toast({
+                title: "Mensaje pendiente de sincronizar",
+                description:
+                  persistError instanceof Error && persistError.message
+                    ? persistError.message
+                    : "El agente inició, pero no se pudo guardar el mensaje en el chat.",
+                variant: "destructive",
+              });
+            });
 
             setSelectedTool(null);
             if (

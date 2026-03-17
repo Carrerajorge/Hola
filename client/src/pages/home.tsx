@@ -994,6 +994,7 @@ export default function Home() {
               messages={currentMessages}
               setMessages={noopSetMessages}
               onSendMessage={handleSendMessage}
+              onSendMessageToChat={addMessage}
               isSidebarOpen={isSidebarOpen}
               onToggleSidebar={() => setIsSidebarOpen(true)}
               onCloseSidebar={() => setIsSidebarOpen(false)}

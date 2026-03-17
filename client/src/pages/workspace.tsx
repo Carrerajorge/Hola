@@ -381,6 +381,7 @@ function WorkspaceContent() {
               messages={displayMessages}
               setMessages={setDisplayMessages}
               onSendMessage={handleSendMessage}
+              onSendMessageToChat={addMessage}
               chatId={activeChat?.id || pendingChatIdRef.current}
               aiState={aiState}
               setAiState={setAiState}
@@ -454,6 +455,7 @@ function WorkspaceContent() {
                     messages={displayMessages}
                     setMessages={setDisplayMessages}
                     onSendMessage={handleSendMessage}
+                    onSendMessageToChat={addMessage}
                     chatId={activeChat?.id || pendingChatIdRef.current}
                     aiState={aiState}
                     setAiState={setAiState}
