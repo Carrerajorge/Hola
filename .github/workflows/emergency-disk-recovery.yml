@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 env:
   VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
@@ -99,12 +100,14 @@ jobs:
             -o PubkeyAcceptedAlgorithms=+ssh-rsa \
             -o HostKeyAlgorithms=+ssh-rsa \
             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }} \
-            "DEPLOY_PATH='${{ env.DEPLOY_PATH }}' bash -s" <<'ENDSSH'
+            "DEPLOY_PATH='${{ env.DEPLOY_PATH }}' GHCR_USERNAME='${{ github.actor }}' GHCR_TOKEN='${{ github.token }}' bash -s" <<'ENDSSH'
           set -euo pipefail
 
           DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
           STATE_FILE="${DEPLOY_PATH}/deploy-state.json"
           SLOT_COMPOSE="${DEPLOY_PATH}/docker-compose.slot.yml"
+          GHCR_USERNAME="${GHCR_USERNAME:-}"
+          GHCR_TOKEN="${GHCR_TOKEN:-}"
 
           extract_env_value() {
             local file="$1"
@@ -156,6 +159,9 @@ jobs:
 
           echo "=== recreating active slot ${ACTIVE_SLOT} ==="
           cd "${DEPLOY_PATH}"
+          if [ -n "${GHCR_TOKEN}" ] && [ -n "${GHCR_USERNAME}" ]; then
+            echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin >/dev/null
+          fi
           SANDBOX_RUNNER_TOKEN="$(extract_env_value .env.production SANDBOX_RUNNER_TOKEN || true)"
           REDIS_PASSWORD="$(extract_env_value .env.production REDIS_PASSWORD || true)"
           timeout 30 docker rm -f \
