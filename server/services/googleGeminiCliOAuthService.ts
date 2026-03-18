@@ -128,6 +128,7 @@ async function persistGeminiCliOAuthCredentials(credentials: GeminiCliOAuthCrede
 export function beginGoogleGeminiCliOAuthFlow(params?: {
   redirectUri?: string;
   state?: string;
+  loginHint?: string;
 }) {
   return startGeminiCliOAuthSession(params);
 }

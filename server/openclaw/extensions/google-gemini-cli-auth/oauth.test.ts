@@ -280,6 +280,23 @@ describe("Gemini web OAuth flow", () => {
     expect(authUrl.searchParams.get("state")).toBe("gemini-cli:test-flow");
   });
 
+  it("includes a login hint when a preferred Google account is provided", async () => {
+    const { startGeminiCliOAuthSession } = await import("./oauth.js");
+    const flow = startGeminiCliOAuthSession({
+      redirectUri: "https://iliagpt.com/api/auth/google/callback",
+      state: "gemini-cli:test-flow",
+      loginHint: "desired.user@gmail.com",
+    });
+
+    const authUrl = new URL(flow.authUrl);
+    expect(authUrl.searchParams.get("login_hint")).toBe(
+      "desired.user@gmail.com",
+    );
+    expect(authUrl.searchParams.get("prompt")).toBe(
+      "select_account consent",
+    );
+  });
+
   it("exchanges a web callback using the provided production redirect URI", async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     vi.stubGlobal(

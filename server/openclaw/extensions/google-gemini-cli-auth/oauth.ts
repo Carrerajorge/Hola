@@ -268,6 +268,7 @@ function buildAuthUrl(options: {
   challenge: string;
   redirectUri: string;
   state: string;
+  loginHint?: string;
 }): string {
   const { clientId } = resolveOAuthClientConfig();
   const params = new URLSearchParams({
@@ -281,6 +282,10 @@ function buildAuthUrl(options: {
     access_type: "offline",
     prompt: "select_account consent",
   });
+  const loginHint = options.loginHint?.trim();
+  if (loginHint) {
+    params.set("login_hint", loginHint);
+  }
   return `${AUTH_URL}?${params.toString()}`;
 }
 
@@ -293,6 +298,7 @@ export function startGeminiCliOAuthSession(): {
 export function startGeminiCliOAuthSession(options: {
   redirectUri?: string;
   state?: string;
+  loginHint?: string;
 }): {
   verifier: string;
   state: string;
@@ -303,6 +309,7 @@ export function startGeminiCliOAuthSession(
   options: {
     redirectUri?: string;
     state?: string;
+    loginHint?: string;
   } = {},
 ): {
   verifier: string;
@@ -320,6 +327,7 @@ export function startGeminiCliOAuthSession(
       challenge,
       redirectUri,
       state,
+      loginHint: options.loginHint,
     }),
     redirectUri,
   };

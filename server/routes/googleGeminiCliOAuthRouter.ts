@@ -108,6 +108,29 @@ function getCanonicalGoogleCallbackUri(req: Request): string {
   return `${req.protocol}://${req.get("host")}/api/auth/google/callback`;
 }
 
+function normalizeLoginHint(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+
+  if (
+    normalized.length > 320 ||
+    /\s/.test(normalized) ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)
+  ) {
+    throw new Error(
+      "Ingresa un correo Gmail valido para sugerir la cuenta que deseas vincular.",
+    );
+  }
+
+  return normalized;
+}
+
 const googleGeminiCliOAuthRouter = Router();
 
 googleGeminiCliOAuthRouter.use(requireAdmin);
@@ -143,9 +166,11 @@ googleGeminiCliOAuthRouter.post(
       const flowId = randomUUID();
       const redirectUri = getCanonicalGoogleCallbackUri(req);
       const oauthState = `gemini-cli:${flowId}`;
+      const loginHint = normalizeLoginHint(req.body?.loginHint);
       const flow = beginGoogleGeminiCliOAuthFlow({
         redirectUri,
         state: oauthState,
+        loginHint,
       });
       const flowRecord: GeminiCliFlowSessionEntry = {
         verifier: flow.verifier,

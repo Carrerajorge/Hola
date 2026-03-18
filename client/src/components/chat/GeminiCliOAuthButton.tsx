@@ -22,6 +22,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { normalizeAppBuildVersion } from "@/lib/chunk-recovery";
 
@@ -370,6 +371,7 @@ export function GeminiCliOAuthButton({
     null,
   );
   const [callbackUrl, setCallbackUrl] = React.useState("");
+  const [preferredEmail, setPreferredEmail] = React.useState("");
   const popupRef = React.useRef<Window | null>(null);
   const lastAutoCompletedCallbackRef = React.useRef<string | null>(null);
   const lastBridgePayloadSignatureRef = React.useRef<string | null>(null);
@@ -395,10 +397,11 @@ export function GeminiCliOAuthButton({
 
   const startMutation = useMutation<GeminiCliStartResponse, Error>({
     mutationFn: async () => {
+      const loginHint = preferredEmail.trim().toLowerCase();
       const res = await apiFetch("/api/oauth/google/gemini-cli/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify(loginHint ? { loginHint } : {}),
       });
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -1128,6 +1131,31 @@ export function GeminiCliOAuthButton({
               </span>
             </label>
 
+            <div className="space-y-2 rounded-2xl border border-border/70 p-4 text-sm">
+              <label
+                htmlFor="gemini-cli-login-hint"
+                className="font-medium"
+              >
+                Correo Gmail a vincular
+              </label>
+              <Input
+                id="gemini-cli-login-hint"
+                type="email"
+                inputMode="email"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder="tu-correo@gmail.com"
+                value={preferredEmail}
+                onChange={(event) => setPreferredEmail(event.target.value)}
+                disabled={Boolean(flowId) || isBusy}
+              />
+              <p className="text-xs text-muted-foreground">
+                Opcional. Si lo indicas, Google intentara abrir directamente esa
+                cuenta o sugerirla durante la vinculacion.
+              </p>
+            </div>
+
             {flowId ? (
               <div className="space-y-4 rounded-2xl border border-primary/20 bg-primary/5 p-4">
                 <div className="space-y-2 text-sm">
@@ -1138,8 +1166,8 @@ export function GeminiCliOAuthButton({
                     </li>
                     <li>
                       2. Elige la cuenta de Gmail que deseas vincular e inicia
-                      sesion. Google abrira el selector de cuentas
-                      automaticamente.
+                      sesion. Si escribiste un correo arriba, Google intentara
+                      sugerir esa cuenta primero.
                     </li>
                     <li>
                       3. Google volvera a{" "}
