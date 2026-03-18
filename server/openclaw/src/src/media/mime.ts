@@ -1,8 +1,27 @@
 import path from "node:path";
-import fileType from "file-type";
 import { type MediaKind, mediaKindFromMime } from "./constants.js";
 
-const { fileTypeFromBuffer } = fileType as typeof import("file-type");
+type FileTypeModule = typeof import("file-type");
+type FileTypeFromBufferFn = (buffer: Buffer) => Promise<{ mime?: string } | undefined>;
+
+let fileTypeFromBufferPromise: Promise<FileTypeFromBufferFn | undefined> | undefined;
+
+async function loadFileTypeFromBuffer(): Promise<FileTypeFromBufferFn | undefined> {
+  if (!fileTypeFromBufferPromise) {
+    fileTypeFromBufferPromise = import("file-type")
+      .then((mod: FileTypeModule & { default?: Record<string, unknown> }) => {
+        const candidate =
+          (mod as Record<string, unknown>).fileTypeFromBuffer ??
+          (mod.default as Record<string, unknown> | undefined)?.fileTypeFromBuffer ??
+          (mod.default as Record<string, unknown> | undefined)?.fromBuffer ??
+          (mod as Record<string, unknown>).fromBuffer;
+
+        return typeof candidate === "function" ? (candidate as FileTypeFromBufferFn) : undefined;
+      })
+      .catch(() => undefined);
+  }
+  return fileTypeFromBufferPromise;
+}
 
 // Map common mimes to preferred file extensions.
 const EXT_BY_MIME: Record<string, string> = {
@@ -68,6 +87,10 @@ async function sniffMime(buffer?: Buffer): Promise<string | undefined> {
     return undefined;
   }
   try {
+    const fileTypeFromBuffer = await loadFileTypeFromBuffer();
+    if (!fileTypeFromBuffer) {
+      return undefined;
+    }
     const type = await fileTypeFromBuffer(buffer);
     return type?.mime ?? undefined;
   } catch {

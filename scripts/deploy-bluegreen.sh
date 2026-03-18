@@ -36,7 +36,7 @@ readonly STOP_TIMEOUT=15
 readonly MIGRATION_TIMEOUT=120
 readonly PULL_TIMEOUT=300
 readonly MIN_DISK_MB=2048
-readonly MIN_PULL_HEADROOM_MB=4096
+readonly MIN_PULL_HEADROOM_MB=16384
 readonly MIN_DISK_INODES_K=100
 readonly STATE_FILE_MAX_BYTES=65536
 
@@ -554,6 +554,7 @@ cleanup_on_failure() {
   if [ "${NEW_SLOT_STARTED}" = "true" ] && [ "${NGINX_SWAPPED}" = "false" ] && [ -n "${NEW_SLOT}" ]; then
     log "  Stopping partially-deployed ${NEW_SLOT} slot..."
     slot "${NEW_SLOT}" down --remove-orphans 2>/dev/null || true
+    docker rm -f "hola-${NEW_SLOT}-app" "hola-${NEW_SLOT}-worker" "hola-${NEW_SLOT}-sandbox" >/dev/null 2>&1 || true
   fi
 
   # If we swapped Nginx but something failed after, revert to old port
@@ -565,7 +566,7 @@ cleanup_on_failure() {
 
   # Restore state file backup if it exists and we haven't completed
   if [ -f "${STATE_FILE_BAK}" ]; then
-    cp "${STATE_FILE_BAK}" "${STATE_FILE}" 2>/dev/null || true
+    mv -f "${STATE_FILE_BAK}" "${STATE_FILE}" 2>/dev/null || cp "${STATE_FILE_BAK}" "${STATE_FILE}" 2>/dev/null || true
   fi
 
   # Log the failed deploy
@@ -675,6 +676,16 @@ fi
 logok "Secrets loaded from .env.production"
 
 # ── Determine active/inactive slot ─────────────────────────
+if [ -f "${STATE_FILE}" ] && ! validate_state_file_schema "${STATE_FILE}" >/dev/null 2>&1; then
+  if [ -f "${STATE_FILE_BAK}" ] && validate_state_file_schema "${STATE_FILE_BAK}" >/dev/null 2>&1; then
+    logw "Primary deploy state is invalid; restoring backup copy before continuing."
+    mv -f "${STATE_FILE_BAK}" "${STATE_FILE}" 2>/dev/null || cp "${STATE_FILE_BAK}" "${STATE_FILE}" 2>/dev/null || true
+  else
+    logw "Primary deploy state is invalid and no valid backup is available; treating deploy state as absent."
+    rm -f "${STATE_FILE}" 2>/dev/null || true
+  fi
+fi
+
 if [ -f "${STATE_FILE}" ]; then
   if ! validate_state_file_schema "${STATE_FILE}"; then
     loge "Deploy state schema validation failed."
@@ -1496,6 +1507,7 @@ import hashlib
 import hmac
 import json
 import os
+import tempfile
 
 state = {
     'active_slot': '${NEW_SLOT}',
@@ -1523,9 +1535,12 @@ if state_key:
         hashlib.sha256
     ).hexdigest()
 
-with open('${STATE_FILE}', 'w') as f:
+state_dir = os.path.dirname('${STATE_FILE}') or '.'
+fd, temp_path = tempfile.mkstemp(prefix='.deploy-state.', suffix='.tmp', dir=state_dir)
+with os.fdopen(fd, 'w') as f:
     json.dump(state, f, indent=2)
-os.chmod('${STATE_FILE}', 0o600)
+os.chmod(temp_path, 0o600)
+os.replace(temp_path, '${STATE_FILE}')
 print(json.dumps(state, indent=2))
 "
 
