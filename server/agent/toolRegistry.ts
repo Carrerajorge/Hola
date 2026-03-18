@@ -2629,7 +2629,7 @@ toolRegistry.register(writeFileTool);
 toolRegistry.register(shellCommandTool);
 toolRegistry.register(listFilesTool);
 
-import { fetchUrlTool } from "./langgraph/webTools";
+import { fetchUrlTool, researchDeepTool } from "./langgraph/webTools";
 
 toolRegistry.register({
   name: fetchUrlTool.name,
@@ -2657,6 +2657,38 @@ toolRegistry.register({
         success: false,
         output: null,
         error: { code: "FETCH_URL_FAILED", message: err.message, retryable: true },
+        metrics: { durationMs: Date.now() - startTime }
+      };
+    }
+  }
+});
+
+toolRegistry.register({
+  name: researchDeepTool.name,
+  description: researchDeepTool.description,
+  inputSchema: (researchDeepTool as any).schema || z.any(),
+  execute: async (input: any, _context: ToolContext) => {
+    const startTime = Date.now();
+    try {
+      const result = await researchDeepTool.invoke(input);
+      let output = result;
+      if (typeof result === "string") {
+        try {
+          output = JSON.parse(result);
+        } catch {
+          // Ignore JSON parse errors for plain-text fallback output.
+        }
+      }
+      return {
+        success: output?.success !== false,
+        output,
+        metrics: { durationMs: Date.now() - startTime }
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        output: null,
+        error: { code: "RESEARCH_DEEP_FAILED", message: err.message, retryable: true },
         metrics: { durationMs: Date.now() - startTime }
       };
     }
