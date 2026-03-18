@@ -16,7 +16,7 @@ IFS=$'\n\t'
 #    DRY_RUN              — set to "true" for preflight only (no deploy)
 # ═══════════════════════════════════════════════════════════
 
-readonly SCRIPT_VERSION="3.3.0"
+readonly SCRIPT_VERSION="3.3.1"
 
 # ── Configuration ───────────────────────────────────────────
 DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
@@ -310,10 +310,49 @@ measure_available_inodes_k() {
 
 reclaim_docker_space() {
   logw "Reclaiming Docker disk space from unused containers, images, and cache..."
-  docker container prune -f >/dev/null 2>&1 || true
+  docker container prune -f --filter "label!=iliagpt.deploy.preserve=true" >/dev/null 2>&1 || true
   docker image prune -af >/dev/null 2>&1 || true
   docker builder prune -af >/dev/null 2>&1 || true
   docker network prune -f >/dev/null 2>&1 || true
+}
+
+IMAGE_PIN_IDS=()
+
+pin_image_locally() {
+  local image_ref="$1"
+  local pin_name
+  local pin_id
+
+  pin_name="iliagpt-deploy-pin-$(printf '%s' "${image_ref}" | sha256sum | awk '{print substr($1,1,12)}')"
+
+  docker rm -f "${pin_name}" >/dev/null 2>&1 || true
+
+  pin_id="$(
+    docker create \
+      --label "iliagpt.deploy.preserve=true" \
+      --name "${pin_name}" \
+      "${image_ref}" >/dev/null && docker inspect -f '{{.Id}}' "${pin_name}"
+  )"
+
+  if [ -n "${pin_id}" ]; then
+    IMAGE_PIN_IDS+=("${pin_id}")
+    logok "Pinned image locally: ${image_ref}"
+  else
+    logw "Could not pin image locally: ${image_ref}"
+  fi
+}
+
+release_image_pins() {
+  local cid
+
+  if [ "${#IMAGE_PIN_IDS[@]}" -eq 0 ]; then
+    return 0
+  fi
+
+  for cid in "${IMAGE_PIN_IDS[@]}"; do
+    [ -n "${cid}" ] && docker rm -f "${cid}" >/dev/null 2>&1 || true
+  done
+  IMAGE_PIN_IDS=()
 }
 
 wait_for_docker_daemon() {
@@ -571,6 +610,7 @@ cleanup_on_failure() {
   # Log the failed deploy
   echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') FAILED slot=${NEW_SLOT:-?} image=${IMAGE_TAG} version=${APP_VERSION} exit=${exit_code} elapsed=$(elapsed)" >> "${DEPLOY_LOG}" 2>/dev/null || true
 
+  release_image_pins
   release_lock
   log "  Cleanup done."
 }
@@ -1083,7 +1123,6 @@ ensure_pull_headroom
 IMAGES=(
   "${REGISTRY}/iliagpt-app:${IMAGE_TAG}"
   "${REGISTRY}/iliagpt-sandbox:${IMAGE_TAG}"
-  "${REGISTRY}/iliagpt-ocr:${IMAGE_TAG}"
 )
 
 for img in "${IMAGES[@]}"; do
@@ -1091,6 +1130,7 @@ for img in "${IMAGES[@]}"; do
     loge "Failed to pull ${img}"
     exit 1
   fi
+  pin_image_locally "${img}"
 done
 
 # Verify digests are present (proves images are authentic from registry)
@@ -1179,7 +1219,7 @@ docker exec hola-postgres psql -U postgres -d iliagpt -c \
 PG_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' hola-postgres)
 log "  Resolved hola-postgres IP: ${PG_IP}"
 
-if ! timeout "${MIGRATION_TIMEOUT}" docker run --rm --network hola-net \
+if ! timeout "${MIGRATION_TIMEOUT}" docker run --rm --pull never --network hola-net \
   --env-file .env.production \
   -e DATABASE_URL="postgres://postgres:postgres@${PG_IP}:5432/iliagpt" \
   -e NODE_ENV=production \
@@ -1615,6 +1655,7 @@ fi
 
 # ── Cleanup old images (keep last 3 tags) ─────────────────
 log "Cleaning up unused Docker images..."
+release_image_pins
 docker image prune -f 2>/dev/null || true
 # Keep only last 3 versions of each image
 for base in app sandbox ocr; do
