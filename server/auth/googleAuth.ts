@@ -7,6 +7,7 @@ import { authStorage } from "../replit_integrations/auth/storage";
 import { storage } from "../storage";
 import { env } from "../config/env";
 import { handleGoogleGeminiCliOAuthCallback } from "./googleGeminiCliBridge";
+import { buildSessionUserFromDbUser } from "../lib/sessionUser";
 
 const router = Router();
 
@@ -58,6 +59,27 @@ const generateState = (): string => {
     return Array.from(array, (byte) => byte.toString(16).padStart(2, "0")).join("");
 };
 
+function normalizeLoginHint(value: unknown): string | null {
+    if (typeof value !== "string") {
+        return null;
+    }
+
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) {
+        return null;
+    }
+
+    if (
+        normalized.length > 320 ||
+        /\s/.test(normalized) ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)
+    ) {
+        return null;
+    }
+
+    return normalized;
+}
+
 // Store states temporarily (in production, use Redis)
 const stateStore = new Map<string, { createdAt: number; returnUrl: string }>();
 
@@ -104,6 +126,12 @@ router.get("/google", (req: Request, res: Response) => {
         access_type: "offline",
         prompt: "select_account consent",
     });
+    const loginHint =
+        normalizeLoginHint(req.query.loginHint) ??
+        normalizeLoginHint(req.query.login_hint);
+    if (loginHint) {
+        params.set("login_hint", loginHint);
+    }
 
     const authUrl = `${config.authorizationUrl}?${params.toString()}`;
     console.log("[Google Auth] Redirecting to Google login");
@@ -197,7 +225,7 @@ router.get("/google/callback", async (req: Request, res: Response) => {
         const lastName = googleUser.family_name || googleUser.name?.split(" ").slice(1).join(" ") || "";
         const fullName = googleUser.name || [firstName, lastName].filter(Boolean).join(" ") || null;
 
-        await authStorage.upsertUser({
+        const resolvedUser = await authStorage.upsertUser({
             id: `google_${googleUser.id}`,
             email,
             username: email ? email.split("@")[0] : null,
@@ -210,12 +238,11 @@ router.get("/google/callback", async (req: Request, res: Response) => {
         });
 
         // Create session
+        const baseSessionUser = buildSessionUserFromDbUser(resolvedUser);
         const sessionUser = {
+            ...baseSessionUser,
             claims: {
-                sub: `google_${googleUser.id}`,
-                email,
-                first_name: firstName,
-                last_name: lastName,
+                ...baseSessionUser.claims,
                 name: fullName,
                 picture: googleUser.picture,
             },
@@ -234,13 +261,13 @@ router.get("/google/callback", async (req: Request, res: Response) => {
 
             // Update last login
             try {
-                await authStorage.updateUserLogin(`google_${googleUser.id}`, {
+                await authStorage.updateUserLogin(resolvedUser.id, {
                     ipAddress: req.ip || req.socket.remoteAddress || null,
                     userAgent: req.headers["user-agent"] || null,
                 });
 
                 await storage.createAuditLog({
-                    userId: `google_${googleUser.id}`,
+                    userId: resolvedUser.id,
                     action: "user_login",
                     resource: "auth",
                     details: {

@@ -292,7 +292,11 @@ export default function LoginPage() {
     clearForcedSignedOutFlag();
     setIsGoogleLoading(true);
     setError("");
-    window.location.href = "/api/auth/google";
+    const loginHint = email.trim().toLowerCase();
+    const target = loginHint
+      ? `/api/auth/google?loginHint=${encodeURIComponent(loginHint)}`
+      : "/api/auth/google";
+    window.location.href = target;
   };
 
   const handleMagicLink = async () => {

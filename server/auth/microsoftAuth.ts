@@ -6,6 +6,7 @@ import { Router, Request, Response } from "express";
 import { authStorage } from "../replit_integrations/auth/storage";
 import { storage } from "../storage";
 import { env } from "../config/env";
+import { buildSessionUserFromDbUser } from "../lib/sessionUser";
 
 const router = Router();
 
@@ -172,7 +173,7 @@ router.get("/microsoft/callback", async (req: Request, res: Response) => {
         const lastName = nameParts.slice(1).join(" ") || "";
         const fullName = msUser.displayName || [firstName, lastName].filter(Boolean).join(" ") || null;
 
-        await authStorage.upsertUser({
+        const resolvedUser = await authStorage.upsertUser({
             id: `ms_${msUser.id}`,
             email,
             username: email ? email.split("@")[0] : null,
@@ -185,12 +186,11 @@ router.get("/microsoft/callback", async (req: Request, res: Response) => {
         });
 
         // Create session
+        const baseSessionUser = buildSessionUserFromDbUser(resolvedUser);
         const sessionUser = {
+            ...baseSessionUser,
             claims: {
-                sub: `ms_${msUser.id}`,
-                email,
-                first_name: firstName,
-                last_name: lastName,
+                ...baseSessionUser.claims,
                 name: fullName,
             },
             access_token: tokens.access_token,
@@ -208,13 +208,13 @@ router.get("/microsoft/callback", async (req: Request, res: Response) => {
 
             // Update last login
             try {
-                await authStorage.updateUserLogin(`ms_${msUser.id}`, {
+                await authStorage.updateUserLogin(resolvedUser.id, {
                     ipAddress: req.ip || req.socket.remoteAddress || null,
                     userAgent: req.headers["user-agent"] || null,
                 });
 
                 await storage.createAuditLog({
-                    userId: `ms_${msUser.id}`,
+                    userId: resolvedUser.id,
                     action: "user_login",
                     resource: "auth",
                     details: {
