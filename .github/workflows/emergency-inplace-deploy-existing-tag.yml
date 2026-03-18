@@ -1,0 +1,264 @@
+name: Emergency In-Place Deploy Existing Tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "DEPLOY" to confirm downtime-capable deploy'
+        required: true
+        default: ""
+        type: string
+      image_tag:
+        description: "Existing GHCR image tag to deploy (e.g. sha-7e0587f8)"
+        required: true
+        default: "sha-7e0587f8"
+        type: string
+      app_version:
+        description: "8-char app version / short SHA (e.g. 7e0587f8)"
+        required: true
+        default: "7e0587f8"
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
+  VPS_USER: ${{ secrets.VPS_USER || 'root' }}
+  VPS_PORT: ${{ secrets.VPS_PORT || '8022' }}
+  DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/hola' }}
+
+jobs:
+  deploy:
+    name: Replace active slot with existing production image
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment:
+      name: production
+      url: https://iliagpt.com
+
+    steps:
+      - name: Validate inputs
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event.inputs.confirm }}" != "DEPLOY" ]; then
+            echo "::error::Confirmation required. Type DEPLOY to proceed."
+            exit 1
+          fi
+
+          if ! printf '%s' "${{ github.event.inputs.image_tag }}" | grep -Eq '^sha-[0-9a-f]{8}$'; then
+            echo "::error::image_tag must look like sha-7e0587f8"
+            exit 1
+          fi
+
+          if ! printf '%s' "${{ github.event.inputs.app_version }}" | grep -Eq '^[0-9a-f]{8}$'; then
+            echo "::error::app_version must be an 8-char short SHA"
+            exit 1
+          fi
+
+          if [ "${{ github.event.inputs.image_tag }}" != "sha-${{ github.event.inputs.app_version }}" ]; then
+            echo "::error::image_tag and app_version do not match"
+            exit 1
+          fi
+
+      - name: Setup SSH key
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s' "${{ secrets.VPS_SSH_KEY_B64 }}" | base64 -d > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null
+          {
+            echo "Host *"
+            echo "  StrictHostKeyChecking accept-new"
+            echo "  PubkeyAcceptedKeyTypes +ssh-rsa"
+            echo "  HostKeyAlgorithms +ssh-rsa"
+          } > ~/.ssh/config
+          chmod 600 ~/.ssh/config
+
+      - name: Resolve reachable deploy endpoint
+        id: target
+        run: |
+          set -euo pipefail
+          DEFAULT_HOST="69.62.98.126"
+          HOSTS=()
+          if [ -n "${{ secrets.VPS_HOST }}" ]; then HOSTS+=("${{ secrets.VPS_HOST }}"); fi
+          HOSTS+=("${VPS_HOST}" "${DEFAULT_HOST}")
+          PORTS=("${VPS_PORT}" "8022" "22" "2222")
+
+          mapfile -t uniq_hosts < <(printf "%s\n" "${HOSTS[@]}" | awk 'NF' | awk '!seen[$0]++')
+          mapfile -t uniq_ports < <(printf "%s\n" "${PORTS[@]}" | awk 'NF' | awk '!seen[$0]++')
+
+          for host in "${uniq_hosts[@]}"; do
+            for port in "${uniq_ports[@]}"; do
+              echo "Trying ${VPS_USER}@${host}:${port}..."
+              ssh-keyscan -p "$port" -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
+              ssh_probe_opts=(
+                -i ~/.ssh/deploy_key
+                -p "$port"
+                -o StrictHostKeyChecking=accept-new
+                -o BatchMode=yes
+                -o ConnectTimeout=8
+                -o PubkeyAcceptedAlgorithms=+ssh-rsa
+                -o HostKeyAlgorithms=+ssh-rsa
+              )
+              if ssh "${ssh_probe_opts[@]}" -4 "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1 || \
+                 ssh "${ssh_probe_opts[@]}" "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1; then
+                echo "host=${host}" >> "$GITHUB_OUTPUT"
+                echo "port=${port}" >> "$GITHUB_OUTPUT"
+                echo "✓ Selected endpoint ${host}:${port}"
+                exit 0
+              fi
+            done
+          done
+
+          echo "::error::No reachable VPS endpoint found"
+          exit 1
+
+      - name: Replace active slot in-place
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }} \
+            -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ConnectionAttempts=3 \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes \
+            ${{ env.VPS_USER }}@${{ steps.target.outputs.host }} \
+            "DEPLOY_PATH='${{ env.DEPLOY_PATH }}' IMAGE_TAG='${{ github.event.inputs.image_tag }}' APP_VERSION='${{ github.event.inputs.app_version }}' GHCR_USERNAME='${{ github.actor }}' GHCR_TOKEN='${{ github.token }}' bash -s" <<'ENDSSH'
+          set -euo pipefail
+
+          DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
+          IMAGE_TAG="${IMAGE_TAG:?IMAGE_TAG required}"
+          APP_VERSION="${APP_VERSION:?APP_VERSION required}"
+          STATE_FILE="${DEPLOY_PATH}/deploy-state.json"
+          SLOT_COMPOSE="${DEPLOY_PATH}/docker-compose.slot.yml"
+          GHCR_USERNAME="${GHCR_USERNAME:-}"
+          GHCR_TOKEN="${GHCR_TOKEN:-}"
+
+          extract_env_value() {
+            local file="$1"
+            local key="$2"
+            local line
+            line="$(grep -m1 -E "^${key}=" "$file" 2>/dev/null || true)"
+            if [ -z "$line" ]; then
+              return 1
+            fi
+            line="${line#*=}"
+            line="${line%$'\r'}"
+            line="${line%\"}"
+            line="${line#\"}"
+            line="${line%\'}"
+            line="${line#\'}"
+            echo "$line"
+          }
+
+          if [ ! -f "${STATE_FILE}" ]; then
+            echo "ERROR: state file not found"
+            exit 1
+          fi
+
+          ACTIVE_SLOT="$(python3 -c "import json; d=json.load(open('${STATE_FILE}')); print(d['active_slot'])")"
+          ACTIVE_PORT="$(python3 -c "import json; d=json.load(open('${STATE_FILE}')); print(d['active_port'])")"
+          if [ "${ACTIVE_SLOT}" = "blue" ]; then
+            INACTIVE_SLOT="green"
+          else
+            INACTIVE_SLOT="blue"
+          fi
+
+          SANDBOX_RUNNER_TOKEN="$(extract_env_value "${DEPLOY_PATH}/.env.production" SANDBOX_RUNNER_TOKEN || true)"
+          REDIS_PASSWORD="$(extract_env_value "${DEPLOY_PATH}/.env.production" REDIS_PASSWORD || true)"
+
+          echo "=== active slot before in-place deploy ==="
+          echo "ACTIVE_SLOT=${ACTIVE_SLOT}"
+          echo "ACTIVE_PORT=${ACTIVE_PORT}"
+          df -h "${DEPLOY_PATH}" || true
+          docker system df || true
+
+          if [ -n "${GHCR_TOKEN}" ] && [ -n "${GHCR_USERNAME}" ]; then
+            echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin >/dev/null
+          fi
+
+          echo "=== removing inactive slot to free headroom ==="
+          timeout 30 docker rm -f \
+            "hola-${INACTIVE_SLOT}-app" \
+            "hola-${INACTIVE_SLOT}-worker" \
+            "hola-${INACTIVE_SLOT}-sandbox" >/dev/null 2>&1 || true
+
+          docker container prune -f || true
+          docker image prune -af || true
+          docker builder prune -af || true
+          find /var/lib/docker/containers -type f -name '*-json.log' -exec truncate -s 0 {} + 2>/dev/null || true
+          journalctl --vacuum-size=200M || true
+          apt-get clean || true
+
+          echo "=== stopping active slot for in-place replace ==="
+          timeout 60 docker rm -f \
+            "hola-${ACTIVE_SLOT}-app" \
+            "hola-${ACTIVE_SLOT}-worker" \
+            "hola-${ACTIVE_SLOT}-sandbox" >/dev/null 2>&1 || true
+
+          docker image prune -af || true
+          docker builder prune -af || true
+
+          echo "=== recreating active slot ${ACTIVE_SLOT} with ${IMAGE_TAG} ==="
+          cd "${DEPLOY_PATH}"
+          SLOT="${ACTIVE_SLOT}" \
+          HOST_PORT="${ACTIVE_PORT}" \
+          IMAGE_TAG="${IMAGE_TAG}" \
+          APP_VERSION="${APP_VERSION}" \
+          SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN}" \
+          REDIS_PASSWORD="${REDIS_PASSWORD}" \
+            timeout 600 docker compose -p "hola-${ACTIVE_SLOT}" -f "${SLOT_COMPOSE}" up -d --force-recreate app worker sandbox-runner
+
+          echo "=== waiting for local readiness ==="
+          for i in $(seq 1 60); do
+            HTTP_CODE="$(curl -sf -o /dev/null -w '%{http_code}' "http://127.0.0.1:${ACTIVE_PORT}/api/health/ready" 2>/dev/null || echo "000")"
+            if [ "${HTTP_CODE}" = "200" ]; then
+              echo "Local readiness OK on attempt ${i}"
+              break
+            fi
+            echo "Attempt ${i}/60 local readiness HTTP ${HTTP_CODE}"
+            sleep 5
+          done
+
+          python3 - <<PY
+          import json, time
+          path = "${STATE_FILE}"
+          with open(path, "r", encoding="utf-8") as fh:
+              state = json.load(fh)
+          state["image_tag"] = "${IMAGE_TAG}"
+          state["app_version"] = "${APP_VERSION}"
+          state["updated_at"] = int(time.time())
+          with open(path, "w", encoding="utf-8") as fh:
+              json.dump(state, fh, indent=2)
+          PY
+
+          echo "=== final status ==="
+          df -h "${DEPLOY_PATH}" || true
+          docker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' | grep -E 'hola-|iliagpt|NAMES' || true
+          curl -sS "http://127.0.0.1:${ACTIVE_PORT}/api/health" || true
+          ENDSSH
+
+      - name: Verify production
+        run: |
+          set -euo pipefail
+          EXPECTED="${{ github.event.inputs.app_version }}"
+          echo "Verifying https://iliagpt.com (expecting version ${EXPECTED})..."
+          for i in $(seq 1 40); do
+            HEALTH_JSON="$(curl -sf --max-time 10 https://iliagpt.com/api/health 2>/dev/null || echo '{}')"
+            if echo "${HEALTH_JSON}" | grep -q "\"version\":\"${EXPECTED}\""; then
+              echo "Production verified: version ${EXPECTED}"
+              echo "${HEALTH_JSON}"
+              exit 0
+            fi
+            echo "Attempt ${i}/40..."
+            sleep 3
+          done
+
+          echo "::error::Production version mismatch after in-place deploy"
+          curl -sS https://iliagpt.com/api/health || true
+          exit 1
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key ~/.ssh/config
