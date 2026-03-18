@@ -18,6 +18,7 @@ import { policyEngine } from "./policyEngine";
 import { hookSystem } from "../openclaw/plugins/hookSystem";
 import { enrichToolExecutionInput } from "./toolExecutionInput";
 import { ObjectStorageService } from "../replit_integrations/object_storage/objectStorage";
+import { generateDirectDocumentResponse } from "./documentDirectResponse";
 
 // Agentic orchestrator bridge
 import {
@@ -1015,6 +1016,30 @@ No uses markdown ni emojis.${userProfileLine ? `\n${userProfileLine}` : ""}${cus
     }
   }
 
+  private validatePlannedSteps(plan: AgentPlan): void {
+    for (let index = 0; index < plan.steps.length; index++) {
+      const step = plan.steps[index];
+      const toolName = normalizeToolName(step.toolName || "unknown");
+      const tool = toolRegistry.get(toolName);
+
+      if (!tool) {
+        throw new Error(`Plan step ${index + 1} uses unknown tool "${toolName}"`);
+      }
+
+      const validation = tool.inputSchema.safeParse(step.input || {});
+      if (!validation.success) {
+        const issue = validation.error.issues[0];
+        const field = issue?.path?.join(".") || "input";
+        throw new Error(
+          `Plan step ${index + 1} has invalid input for "${toolName}" at "${field}": ${issue?.message || "Invalid input"}`
+        );
+      }
+
+      step.toolName = toolName;
+      step.input = validation.data;
+    }
+  }
+
   async generatePlan(userMessage: string, attachments?: any[]): Promise<AgentPlan> {
     this.userMessage = userMessage;
     this.attachments = attachments || [];
@@ -1060,6 +1085,31 @@ No uses markdown ni emojis.${userProfileLine ? `\n${userProfileLine}` : ""}${cus
       return this.plan;
     }
 
+    if (!this.explicitWebSearch) {
+      const response = await generateDirectDocumentResponse({
+        userMessage,
+        attachments: this.attachments,
+        userId: this.userId,
+        modelId: this.modelId,
+      });
+
+      if (response) {
+        this.plan = {
+          objective: userMessage,
+          steps: [],
+          estimatedTime: "0 seconds",
+          conversationalResponse: response,
+        };
+        this.logEvent('observation', {
+          type: 'document_reasoning_response',
+          response: response.substring(0, 200),
+          attachmentCount: this.attachments.length,
+        });
+        this.emitProgress();
+        return this.plan;
+      }
+    }
+
     // Try HTN Planner first (Batch 4 Upgrade)
     try {
       const planner = getHTNPlanner();
@@ -1089,11 +1139,14 @@ No uses markdown ni emojis.${userProfileLine ? `\n${userProfileLine}` : ""}${cus
           };
         });
 
-        this.plan = {
+        const nextPlan: AgentPlan = {
           objective: userMessage,
           steps,
           estimatedTime: `${Math.ceil((planningResult.plan.metadata.estimatedDuration || 60000) / 60000)} minutes`
         };
+        this.validatePlannedSteps(nextPlan);
+
+        this.plan = nextPlan;
 
         this.logEvent('plan', {
           type: 'htn_plan_generated',
@@ -1193,6 +1246,8 @@ Respond with ONLY valid JSON in this exact format:
         plan.steps[i].index = i;
         plan.steps[i].toolName = normalizeToolName(plan.steps[i].toolName || "unknown");
       }
+
+      this.validatePlannedSteps(plan);
 
       this.plan = plan;
       this.logEvent('plan', { objective: plan.objective, steps: plan.steps.length, estimatedTime: plan.estimatedTime });
