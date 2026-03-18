@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { createServer } from "node:http";
 import { delimiter, dirname, join } from "node:path";
-import { fetchWithSsrFGuard, isWSL2Sync } from "openclaw/plugin-sdk/google-gemini-cli-auth";
+import { fetchWithSsrFGuard, isWSL2Sync } from "../../src/plugin-sdk/google-gemini-cli-auth.js";
 
 const CLIENT_ID_KEYS = [
   "OPENCLAW_GEMINI_OAUTH_CLIENT_ID",
@@ -195,8 +195,9 @@ function findFile(dir: string, name: string, depth: number): string | null {
         }
       }
     }
-  } catch {}
-  return null;
+  } catch (_error) {
+    return null;
+  }
 }
 
 function resolveOAuthClientConfig(): { clientId: string; clientSecret?: string } {
