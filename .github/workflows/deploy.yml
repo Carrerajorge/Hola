@@ -33,7 +33,7 @@ jobs:
   # ── CI Gate ──────────────────────────────────────────────
   ci:
     name: CI Checks
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
     uses: ./.github/workflows/ci.yml
 
   # ── CI Gate (push) ────────────────────────────────────
@@ -120,7 +120,11 @@ jobs:
   # ── Build & Push Docker Images to GHCR ─────────────────
   build_images:
     name: Build Docker Images
-    if: always()
+    if: >-
+      ${{
+        github.event_name == 'push' ||
+        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+      }}
     uses: ./.github/workflows/build-images.yml
     with:
       sha: ${{ github.sha }}
@@ -138,6 +142,7 @@ jobs:
       ${{
         always() &&
         github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
         needs.ci.result == 'success' &&
         needs.build_images.result == 'success'
       }}
