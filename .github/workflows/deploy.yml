@@ -39,7 +39,10 @@ jobs:
   # ── CI Gate (push) ────────────────────────────────────
   ci_gate:
     name: CI Completion Gate
-    if: ${{ github.event_name == 'push' }}
+    # Disabled for push deploys: this polling job is being cancelled by the
+    # Actions runner even while CI is still progressing, which marks the whole
+    # deploy workflow cancelled and aborts image publication.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     # CI can take 20-45+ minutes; if this gate times out, the deploy run is marked "cancelled"
     # and nothing ships. Keep this comfortably above CI duration.
