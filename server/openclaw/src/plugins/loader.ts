@@ -70,13 +70,27 @@ function listPluginSdkAliasCandidates(params: {
   });
   let cursor = path.dirname(params.modulePath);
   const candidates: string[] = [];
+  const seen = new Set<string>();
   for (let i = 0; i < 6; i += 1) {
-    const candidateMap = {
-      src: path.join(cursor, "src", "plugin-sdk", params.srcFile),
-      dist: path.join(cursor, "dist", "plugin-sdk", params.distFile),
-    } as const;
-    for (const kind of orderedKinds) {
-      candidates.push(candidateMap[kind]);
+    const roots = [
+      cursor,
+      path.join(cursor, "server", "openclaw"),
+      path.join(cursor, "node_modules", "openclaw"),
+      path.join(cursor, "node_modules", "@hola", "openclaw"),
+    ];
+    for (const root of roots) {
+      const candidateMap = {
+        src: path.join(root, "src", "plugin-sdk", params.srcFile),
+        dist: path.join(root, "dist", "plugin-sdk", params.distFile),
+      } as const;
+      for (const kind of orderedKinds) {
+        const candidate = path.resolve(candidateMap[kind]);
+        if (seen.has(candidate)) {
+          continue;
+        }
+        seen.add(candidate);
+        candidates.push(candidate);
+      }
     }
     const parent = path.dirname(cursor);
     if (parent === cursor) {

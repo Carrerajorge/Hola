@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const CORE_PACKAGE_NAMES = new Set(["openclaw"]);
+const CORE_PACKAGE_NAMES = new Set(["openclaw", "@hola/openclaw"]);
 
 async function readPackageName(dir: string): Promise<string | null> {
   try {
@@ -26,7 +26,7 @@ function readPackageNameSync(dir: string): string | null {
 }
 
 async function findPackageRoot(startDir: string, maxDepth = 12): Promise<string | null> {
-  for (const current of iterAncestorDirs(startDir, maxDepth)) {
+  for (const current of iterCandidatePackageDirs(startDir, maxDepth)) {
     const name = await readPackageName(current);
     if (name && CORE_PACKAGE_NAMES.has(name)) {
       return current;
@@ -36,7 +36,7 @@ async function findPackageRoot(startDir: string, maxDepth = 12): Promise<string 
 }
 
 function findPackageRootSync(startDir: string, maxDepth = 12): string | null {
-  for (const current of iterAncestorDirs(startDir, maxDepth)) {
+  for (const current of iterCandidatePackageDirs(startDir, maxDepth)) {
     const name = readPackageNameSync(current);
     if (name && CORE_PACKAGE_NAMES.has(name)) {
       return current;
@@ -54,6 +54,26 @@ function* iterAncestorDirs(startDir: string, maxDepth: number): Generator<string
       break;
     }
     current = parent;
+  }
+}
+
+function* iterCandidatePackageDirs(startDir: string, maxDepth: number): Generator<string> {
+  const seen = new Set<string>();
+  for (const current of iterAncestorDirs(startDir, maxDepth)) {
+    const candidates = [
+      current,
+      path.join(current, "server", "openclaw"),
+      path.join(current, "node_modules", "openclaw"),
+      path.join(current, "node_modules", "@hola", "openclaw"),
+    ];
+    for (const candidate of candidates) {
+      const resolved = path.resolve(candidate);
+      if (seen.has(resolved)) {
+        continue;
+      }
+      seen.add(resolved);
+      yield resolved;
+    }
   }
 }
 

@@ -141,6 +141,16 @@ describe("resolveOpenClawPackageRoot", () => {
     expect(resolveOpenClawPackageRootSync({ moduleUrl })).toBe(pkgRoot);
   });
 
+  it("finds embedded @hola/openclaw roots from a bundled app runtime", async () => {
+    const appRoot = fx("embedded-app");
+    const embeddedRoot = path.join(appRoot, "server", "openclaw");
+    const moduleUrl = pathToFileURL(path.join(appRoot, "dist", "index.mjs")).toString();
+    setFile(path.join(embeddedRoot, "package.json"), JSON.stringify({ name: "@hola/openclaw" }));
+
+    expect(resolveOpenClawPackageRootSync({ moduleUrl })).toBe(embeddedRoot);
+    await expect(resolveOpenClawPackageRoot({ moduleUrl })).resolves.toBe(embeddedRoot);
+  });
+
   it("ignores invalid moduleUrl values and falls back to cwd", async () => {
     const pkgRoot = fx("invalid-moduleurl");
     setFile(path.join(pkgRoot, "package.json"), JSON.stringify({ name: "openclaw" }));

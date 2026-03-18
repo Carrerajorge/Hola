@@ -1476,6 +1476,49 @@ describe("loadOpenClawPlugins", () => {
     expect(resolved).toBe(distFile);
   });
 
+  it("finds embedded server/openclaw shims from a bundled app dist", () => {
+    const root = makeTempDir();
+    const embeddedRoot = path.join(root, "server", "openclaw");
+    const rootAliasFile = path.join(embeddedRoot, "src", "plugin-sdk", "root-alias.cjs");
+    const compatFile = path.join(embeddedRoot, "src", "plugin-sdk", "compat.ts");
+    const modulePath = path.join(root, "dist", "plugins", "loader.js");
+    fs.mkdirSync(path.dirname(rootAliasFile), { recursive: true });
+    fs.writeFileSync(
+      path.join(embeddedRoot, "package.json"),
+      JSON.stringify(
+        {
+          name: "@hola/openclaw",
+          exports: {
+            "./plugin-sdk/compat": {
+              default: "./dist/plugin-sdk/compat.js",
+            },
+          },
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+    fs.writeFileSync(rootAliasFile, "module.exports = {};\n", "utf-8");
+    fs.writeFileSync(compatFile, "export {};\n", "utf-8");
+
+    expect(
+      __testing.resolvePluginSdkAliasFile({
+        srcFile: "root-alias.cjs",
+        distFile: "root-alias.cjs",
+        modulePath,
+      }),
+    ).toBe(rootAliasFile);
+    expect(
+      __testing.resolvePluginSdkAliasFile({
+        srcFile: "compat.ts",
+        distFile: "compat.js",
+        modulePath,
+      }),
+    ).toBe(compatFile);
+    expect(__testing.listPluginSdkExportedSubpaths({ modulePath })).toContain("compat");
+  });
+
   it("prefers src root-alias shim when loader runs from src in non-production", () => {
     const { root, srcFile } = createPluginSdkAliasFixture({
       srcFile: "root-alias.cjs",

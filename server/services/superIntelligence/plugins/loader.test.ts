@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { withEnv } from "../test-utils/env.js";
-import { loadOpenClawPlugins } from "./loader.js";
+import { __testing, loadOpenClawPlugins } from "./loader.js";
 
 type TempPlugin = { dir: string; file: string; id: string };
 
@@ -649,5 +649,55 @@ describe("loadOpenClawPlugins", () => {
     const record = registry.plugins.find((entry) => entry.id === "symlinked");
     expect(record?.status).not.toBe("loaded");
     expect(registry.diagnostics.some((entry) => entry.message.includes("escapes"))).toBe(true);
+  });
+
+  it("resolves embedded @hola/openclaw plugin-sdk aliases from bundled dist", () => {
+    const root = makeTempDir();
+    const embeddedRoot = path.join(root, "server", "openclaw");
+    const rootAliasFile = path.join(embeddedRoot, "src", "plugin-sdk", "root-alias.cjs");
+    const geminiSubpathFile = path.join(
+      embeddedRoot,
+      "src",
+      "plugin-sdk",
+      "google-gemini-cli-auth.ts",
+    );
+    const modulePath = path.join(root, "dist", "plugins", "loader.js");
+    fs.mkdirSync(path.dirname(rootAliasFile), { recursive: true });
+    fs.writeFileSync(
+      path.join(embeddedRoot, "package.json"),
+      JSON.stringify(
+        {
+          name: "@hola/openclaw",
+          exports: {
+            "./plugin-sdk/google-gemini-cli-auth": {
+              default: "./dist/plugin-sdk/google-gemini-cli-auth.js",
+            },
+          },
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+    fs.writeFileSync(rootAliasFile, "module.exports = {};\n", "utf-8");
+    fs.writeFileSync(geminiSubpathFile, "export {};\n", "utf-8");
+
+    expect(
+      __testing.resolvePluginSdkAliasFile({
+        srcFile: "root-alias.cjs",
+        distFile: "root-alias.cjs",
+        modulePath,
+      }),
+    ).toBe(rootAliasFile);
+    expect(
+      __testing.resolvePluginSdkAliasFile({
+        srcFile: "google-gemini-cli-auth.ts",
+        distFile: "google-gemini-cli-auth.js",
+        modulePath,
+      }),
+    ).toBe(geminiSubpathFile);
+    expect(__testing.listPluginSdkExportedSubpaths({ modulePath })).toContain(
+      "google-gemini-cli-auth",
+    );
   });
 });

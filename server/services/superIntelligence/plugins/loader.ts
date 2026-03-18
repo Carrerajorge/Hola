@@ -5,6 +5,7 @@ import { createJiti } from "jiti";
 import type { OpenClawConfig } from "../config/config.js";
 import type { GatewayRequestHandler } from "../gateway/server-methods/types.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import { resolveOpenClawPackageRootSync } from "../infra/openclaw-root.js";
 import { isPathInsideWithRealpath } from "../security/scan-paths.js";
 import { resolveUserPath } from "../utils.js";
 import { clearPluginCommands } from "./commands.js";
@@ -45,33 +46,74 @@ const registryCache = new Map<string, PluginRegistry>();
 
 const defaultLogger = () => createSubsystemLogger("plugins");
 
+type PluginSdkAliasCandidateKind = "dist" | "src";
+
+function resolvePluginSdkAliasCandidateOrder(params: {
+  modulePath: string;
+  isProduction: boolean;
+}): PluginSdkAliasCandidateKind[] {
+  const normalizedModulePath = params.modulePath.replace(/\\/g, "/");
+  const isDistRuntime = normalizedModulePath.includes("/dist/");
+  return isDistRuntime || params.isProduction ? ["dist", "src"] : ["src", "dist"];
+}
+
+function listPluginSdkAliasCandidates(params: {
+  srcFile: string;
+  distFile: string;
+  modulePath: string;
+}) {
+  const orderedKinds = resolvePluginSdkAliasCandidateOrder({
+    modulePath: params.modulePath,
+    isProduction: process.env.NODE_ENV === "production",
+  });
+  let cursor = path.dirname(params.modulePath);
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < 6; i += 1) {
+    const roots = [
+      cursor,
+      path.join(cursor, "server", "openclaw"),
+      path.join(cursor, "node_modules", "openclaw"),
+      path.join(cursor, "node_modules", "@hola", "openclaw"),
+    ];
+    for (const root of roots) {
+      const candidateMap = {
+        src: path.join(root, "src", "plugin-sdk", params.srcFile),
+        dist: path.join(root, "dist", "plugin-sdk", params.distFile),
+      } as const;
+      for (const kind of orderedKinds) {
+        const candidate = path.resolve(candidateMap[kind]);
+        if (seen.has(candidate)) {
+          continue;
+        }
+        seen.add(candidate);
+        candidates.push(candidate);
+      }
+    }
+    const parent = path.dirname(cursor);
+    if (parent === cursor) {
+      break;
+    }
+    cursor = parent;
+  }
+  return candidates;
+}
+
 const resolvePluginSdkAliasFile = (params: {
   srcFile: string;
   distFile: string;
+  modulePath?: string;
 }): string | null => {
   try {
-    const modulePath = fileURLToPath(import.meta.url);
-    const isProduction = process.env.NODE_ENV === "production";
-    const isTest = process.env.VITEST || process.env.NODE_ENV === "test";
-    let cursor = path.dirname(modulePath);
-    for (let i = 0; i < 6; i += 1) {
-      const srcCandidate = path.join(cursor, "src", "plugin-sdk", params.srcFile);
-      const distCandidate = path.join(cursor, "dist", "plugin-sdk", params.distFile);
-      const orderedCandidates = isProduction
-        ? isTest
-          ? [distCandidate, srcCandidate]
-          : [distCandidate]
-        : [srcCandidate, distCandidate];
-      for (const candidate of orderedCandidates) {
-        if (fs.existsSync(candidate)) {
-          return candidate;
-        }
+    const modulePath = params.modulePath ?? fileURLToPath(import.meta.url);
+    for (const candidate of listPluginSdkAliasCandidates({
+      srcFile: params.srcFile,
+      distFile: params.distFile,
+      modulePath,
+    })) {
+      if (fs.existsSync(candidate)) {
+        return candidate;
       }
-      const parent = path.dirname(cursor);
-      if (parent === cursor) {
-        break;
-      }
-      cursor = parent;
     }
   } catch {
     // ignore
@@ -80,10 +122,56 @@ const resolvePluginSdkAliasFile = (params: {
 };
 
 const resolvePluginSdkAlias = (): string | null =>
-  resolvePluginSdkAliasFile({ srcFile: "index.ts", distFile: "index.js" });
+  resolvePluginSdkAliasFile({ srcFile: "root-alias.cjs", distFile: "root-alias.cjs" });
 
-const resolvePluginSdkAccountIdAlias = (): string | null => {
-  return resolvePluginSdkAliasFile({ srcFile: "account-id.ts", distFile: "account-id.js" });
+const cachedPluginSdkExportedSubpaths = new Map<string, string[]>();
+
+function listPluginSdkExportedSubpaths(params: { modulePath?: string } = {}): string[] {
+  const modulePath = params.modulePath ?? fileURLToPath(import.meta.url);
+  const packageRoot = resolveOpenClawPackageRootSync({
+    cwd: path.dirname(modulePath),
+  });
+  if (!packageRoot) {
+    return [];
+  }
+  const cached = cachedPluginSdkExportedSubpaths.get(packageRoot);
+  if (cached) {
+    return cached;
+  }
+  try {
+    const pkgRaw = fs.readFileSync(path.join(packageRoot, "package.json"), "utf-8");
+    const pkg = JSON.parse(pkgRaw) as { exports?: Record<string, unknown> };
+    const subpaths = Object.keys(pkg.exports ?? {})
+      .filter((key) => key.startsWith("./plugin-sdk/"))
+      .map((key) => key.slice("./plugin-sdk/".length))
+      .filter((subpath) => Boolean(subpath) && !subpath.includes("/"))
+      .toSorted();
+    cachedPluginSdkExportedSubpaths.set(packageRoot, subpaths);
+    return subpaths;
+  } catch {
+    return [];
+  }
+}
+
+const resolvePluginSdkScopedAliasMap = (): Record<string, string> => {
+  const aliasMap: Record<string, string> = {};
+  for (const subpath of listPluginSdkExportedSubpaths()) {
+    const resolved = resolvePluginSdkAliasFile({
+      srcFile: `${subpath}.ts`,
+      distFile: `${subpath}.js`,
+    });
+    if (resolved) {
+      aliasMap[`openclaw/plugin-sdk/${subpath}`] = resolved;
+    }
+  }
+  return aliasMap;
+};
+
+export const __testing = {
+  listPluginSdkAliasCandidates,
+  listPluginSdkExportedSubpaths,
+  resolvePluginSdkAliasCandidateOrder,
+  resolvePluginSdkAliasFile,
 };
 
 function buildCacheKey(params: {
@@ -420,17 +508,15 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
       return jitiLoader;
     }
     const pluginSdkAlias = resolvePluginSdkAlias();
-    const pluginSdkAccountIdAlias = resolvePluginSdkAccountIdAlias();
+    const pluginSdkScopedAliasMap = resolvePluginSdkScopedAliasMap();
     jitiLoader = createJiti(import.meta.url, {
       interopDefault: true,
       extensions: [".ts", ".tsx", ".mts", ".cts", ".mtsx", ".ctsx", ".js", ".mjs", ".cjs", ".json"],
-      ...(pluginSdkAlias || pluginSdkAccountIdAlias
+      ...(pluginSdkAlias || Object.keys(pluginSdkScopedAliasMap).length > 0
         ? {
             alias: {
               ...(pluginSdkAlias ? { "openclaw/plugin-sdk": pluginSdkAlias } : {}),
-              ...(pluginSdkAccountIdAlias
-                ? { "openclaw/plugin-sdk/account-id": pluginSdkAccountIdAlias }
-                : {}),
+              ...pluginSdkScopedAliasMap,
             },
           }
         : {}),
