@@ -357,6 +357,27 @@ export async function registerRoutes(
 ): Promise<Server> {
   // Session + Passport are initialized in server/index.ts (before csrf/rateLimiter).
 
+  const normalizeGoogleLoginHint = (value: unknown): string | undefined => {
+    if (typeof value !== "string") {
+      return undefined;
+    }
+
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) {
+      return undefined;
+    }
+
+    if (
+      normalized.length > 320 ||
+      /\s/.test(normalized) ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)
+    ) {
+      return undefined;
+    }
+
+    return normalized;
+  };
+
   // Passport Auth Routes
   // Google (always register to prevent 404, throw helpful errors internally if misconfigured)
   app.get("/api/auth/google", (req, res, next) => {
@@ -369,10 +390,14 @@ export async function registerRoutes(
         error: "Google authentication is not configured on this server",
       });
     }
+    const loginHint =
+      normalizeGoogleLoginHint(req.query.loginHint) ??
+      normalizeGoogleLoginHint(req.query.login_hint);
     passport.authenticate("google", {
       scope: ["openid", "email", "profile"],
       accessType: "offline",
       prompt: "consent select_account",
+      ...(loginHint ? { loginHint } : {}),
     })(req, res, next);
   });
 
