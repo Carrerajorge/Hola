@@ -4,7 +4,7 @@ import { MANIFEST_KEY } from "../../compat/legacy-names.js";
 import { discoverOpenClawPlugins } from "../../plugins/discovery.js";
 import type { OpenClawPackageManifest } from "../../plugins/manifest.js";
 import type { PluginOrigin } from "../../plugins/types.js";
-import { CONFIG_DIR, isRecord, resolveUserPath } from "../../utils.js";
+import { isRecord, resolveConfigDir, resolveUserPath } from "../../utils.js";
 import type { ChannelMeta } from "./types.js";
 
 export type ChannelUiMetaEntry = {
@@ -36,6 +36,7 @@ export type ChannelPluginCatalogEntry = {
 type CatalogOptions = {
   workspaceDir?: string;
   catalogPaths?: string[];
+  env?: NodeJS.ProcessEnv;
 };
 
 const ORIGIN_PRIORITY: Record<PluginOrigin, number> = {
@@ -50,12 +51,6 @@ type ExternalCatalogEntry = {
   version?: string;
   description?: string;
 } & Partial<Record<ManifestKey, OpenClawPackageManifest>>;
-
-const DEFAULT_CATALOG_PATHS = [
-  path.join(CONFIG_DIR, "mpm", "plugins.json"),
-  path.join(CONFIG_DIR, "mpm", "catalog.json"),
-  path.join(CONFIG_DIR, "plugins", "catalog.json"),
-];
 
 const ENV_CATALOG_PATHS = ["OPENCLAW_PLUGIN_CATALOG_PATHS", "OPENCLAW_MPM_CATALOG_PATHS"];
 
@@ -87,17 +82,27 @@ function splitEnvPaths(value: string): string[] {
     .filter(Boolean);
 }
 
+function resolveDefaultCatalogPaths(env: NodeJS.ProcessEnv): string[] {
+  const configDir = resolveConfigDir(env);
+  return [
+    path.join(configDir, "mpm", "plugins.json"),
+    path.join(configDir, "mpm", "catalog.json"),
+    path.join(configDir, "plugins", "catalog.json"),
+  ];
+}
+
 function resolveExternalCatalogPaths(options: CatalogOptions): string[] {
   if (options.catalogPaths && options.catalogPaths.length > 0) {
     return options.catalogPaths.map((entry) => entry.trim()).filter(Boolean);
   }
+  const env = options.env ?? process.env;
   for (const key of ENV_CATALOG_PATHS) {
-    const raw = process.env[key];
+    const raw = env[key];
     if (raw && raw.trim()) {
       return splitEnvPaths(raw);
     }
   }
-  return DEFAULT_CATALOG_PATHS;
+  return resolveDefaultCatalogPaths(env);
 }
 
 function loadExternalCatalogEntries(options: CatalogOptions): ExternalCatalogEntry[] {
@@ -259,7 +264,10 @@ export function buildChannelUiCatalog(
 export function listChannelPluginCatalogEntries(
   options: CatalogOptions = {},
 ): ChannelPluginCatalogEntry[] {
-  const discovery = discoverOpenClawPlugins({ workspaceDir: options.workspaceDir });
+  const discovery = discoverOpenClawPlugins({
+    workspaceDir: options.workspaceDir,
+    env: options.env,
+  });
   const resolved = new Map<string, { entry: ChannelPluginCatalogEntry; priority: number }>();
 
   for (const candidate of discovery.candidates) {

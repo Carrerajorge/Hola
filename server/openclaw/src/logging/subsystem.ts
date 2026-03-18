@@ -1,4 +1,4 @@
-import chalk from "chalk";
+import { Chalk } from "chalk";
 import type { Logger as TsLogger } from "tslog";
 import { isVerbose } from "../globals.js";
 import { defaultRuntime, type RuntimeEnv } from "../runtime.js";
@@ -36,22 +36,7 @@ function shouldLogToConsole(level: LogLevel, settings: { level: LogLevel }): boo
   return current <= min;
 }
 
-type ChalkInstance = any;
-type ChalkLike = ChalkInstance;
-
-const passthrough = (value: unknown) => String(value ?? "");
-let noColorChalk: ChalkLike;
-noColorChalk = new Proxy(passthrough as ChalkLike, {
-  get(_target, prop) {
-    if (prop === "level") {
-      return 0;
-    }
-    return noColorChalk;
-  },
-  apply(_target, _thisArg, args) {
-    return passthrough(args[0]);
-  },
-});
+type ChalkInstance = InstanceType<typeof Chalk>;
 
 const inspectValue: ((value: unknown) => string) | null = (() => {
   const getBuiltinModule = (
@@ -100,10 +85,10 @@ function getColorForConsole(): ChalkInstance {
     process.env.FORCE_COLOR.trim().length > 0 &&
     process.env.FORCE_COLOR.trim() !== "0";
   if (process.env.NO_COLOR && !hasForceColor) {
-    return noColorChalk;
+    return new Chalk({ level: 0 });
   }
   const hasTty = Boolean(process.stdout.isTTY || process.stderr.isTTY);
-  return hasTty || isRichConsoleEnv() ? chalk : noColorChalk;
+  return hasTty || isRichConsoleEnv() ? new Chalk({ level: 1 }) : new Chalk({ level: 0 });
 }
 
 const SUBSYSTEM_COLORS = ["cyan", "green", "yellow", "blue", "magenta", "red"] as const;
@@ -265,6 +250,38 @@ function writeConsoleLine(level: LogLevel, line: string) {
   }
 }
 
+function shouldSuppressProbeConsoleLine(params: {
+  level: LogLevel;
+  subsystem: string;
+  message: string;
+  meta?: Record<string, unknown>;
+}): boolean {
+  if (isVerbose()) {
+    return false;
+  }
+  if (params.level === "error" || params.level === "fatal") {
+    return false;
+  }
+  const isProbeSuppressedSubsystem =
+    params.subsystem === "agent/embedded" ||
+    params.subsystem.startsWith("agent/embedded/") ||
+    params.subsystem === "model-fallback" ||
+    params.subsystem.startsWith("model-fallback/");
+  if (!isProbeSuppressedSubsystem) {
+    return false;
+  }
+  const runLikeId =
+    typeof params.meta?.runId === "string"
+      ? params.meta.runId
+      : typeof params.meta?.sessionId === "string"
+        ? params.meta.sessionId
+        : undefined;
+  if (runLikeId?.startsWith("probe-")) {
+    return true;
+  }
+  return /(sessionId|runId)=probe-/.test(params.message);
+}
+
 function logToFile(
   fileLogger: TsLogger<LogObj>,
   level: LogLevel,
@@ -324,9 +341,12 @@ export function createSubsystemLogger(subsystem: string): SubsystemLogger {
     }
     const consoleMessage = consoleMessageOverride ?? message;
     if (
-      !isVerbose() &&
-      subsystem === "agent/embedded" &&
-      /(sessionId|runId)=probe-/.test(consoleMessage)
+      shouldSuppressProbeConsoleLine({
+        level,
+        subsystem,
+        message: consoleMessage,
+        meta: fileMeta,
+      })
     ) {
       return;
     }
@@ -370,11 +390,7 @@ export function createSubsystemLogger(subsystem: string): SubsystemLogger {
         logToFile(getFileLogger(), "info", message, { raw: true });
       }
       if (isConsoleEnabled("info")) {
-        if (
-          !isVerbose() &&
-          subsystem === "agent/embedded" &&
-          /(sessionId|runId)=probe-/.test(message)
-        ) {
+        if (shouldSuppressProbeConsoleLine({ level: "info", subsystem, message })) {
           return;
         }
         writeConsoleLine("info", message);
