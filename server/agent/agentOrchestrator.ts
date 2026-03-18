@@ -1,4 +1,4 @@
-import { detectToolCallLoop, hashToolCall } from "./toolLoopDetection";
+import { detectToolCallLoop, hashToolCall, hashToolOutcome } from "./toolLoopDetection";
 import { toolRegistry, type ToolResult, type ToolArtifact } from "./toolRegistry";
 import { llmGateway } from "../lib/llmGateway";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
@@ -13,9 +13,8 @@ import { eq } from "drizzle-orm";
 import { getUserSettingsCached } from "../services/userSettingsCache";
 import { policyEngine } from "./policyEngine";
 import { hookSystem } from "../openclaw/plugins/hookSystem";
-import { detectToolCallLoop, hashToolCall } from "./toolLoopDetection";
-import { hashToolOutcome } from "./toolLoopDetection";
 import { enrichToolExecutionInput } from "./toolExecutionInput";
+import { generateDirectDocumentResponse } from "./documentDirectResponse";
 
 // Agentic orchestrator bridge
 import {
@@ -49,6 +48,7 @@ export interface AgentPlan {
   objective: string;
   steps: PlanStep[];
   estimatedTime: string;
+  conversationalResponse?: string;
 }
 
 export type AgentStatus =
@@ -899,6 +899,30 @@ No uses markdown ni emojis.${userProfileLine ? `\n${userProfileLine}` : ""}${cus
     }
   }
 
+  private validatePlannedSteps(plan: AgentPlan): void {
+    for (let index = 0; index < plan.steps.length; index++) {
+      const step = plan.steps[index];
+      const toolName = normalizeToolName(step.toolName || "unknown");
+      const tool = toolRegistry.get(toolName);
+
+      if (!tool) {
+        throw new Error(`Plan step ${index + 1} uses unknown tool "${toolName}"`);
+      }
+
+      const validation = tool.inputSchema.safeParse(step.input || {});
+      if (!validation.success) {
+        const issue = validation.error.issues[0];
+        const field = issue?.path?.join(".") || "input";
+        throw new Error(
+          `Plan step ${index + 1} has invalid input for "${toolName}" at "${field}": ${issue?.message || "Invalid input"}`
+        );
+      }
+
+      step.toolName = toolName;
+      step.input = validation.data;
+    }
+  }
+
   async generatePlan(userMessage: string, attachments?: any[]): Promise<AgentPlan> {
     this.userMessage = userMessage;
     this.attachments = attachments || [];
@@ -921,18 +945,46 @@ No uses markdown ni emojis.${userProfileLine ? `\n${userProfileLine}` : ""}${cus
         steps: [],
         estimatedTime: "0 seconds",
         conversationalResponse: response
-      } as AgentPlan & { conversationalResponse?: string };
-      this.status = "completed";
+      };
       this.logEvent('observation', { type: 'conversational_response', response: response.substring(0, 200) });
       this.emitProgress();
       return this.plan;
+    }
+
+    if (!this.explicitWebSearch) {
+      const response = await generateDirectDocumentResponse({
+        userMessage,
+        attachments: this.attachments,
+        userId: this.userId,
+        modelId: this.modelId,
+      });
+
+      if (response) {
+        this.plan = {
+          objective: userMessage,
+          steps: [],
+          estimatedTime: "0 seconds",
+          conversationalResponse: response,
+        };
+        this.logEvent('observation', {
+          type: 'document_reasoning_response',
+          response: response.substring(0, 200),
+          attachmentCount: this.attachments.length,
+        });
+        this.emitProgress();
+        return this.plan;
+      }
     }
 
     // Try HTN Planner first (Batch 4 Upgrade)
     try {
       const planner = getHTNPlanner();
       // Simple context for now
-      const context = { attachments: this.attachments };
+      const context = {
+        attachments: this.attachments,
+        query: userMessage,
+        topic: userMessage,
+      };
       const planningResult = await planner.plan(userMessage, context);
 
       if (planningResult.success && planningResult.plan) {
@@ -953,11 +1005,14 @@ No uses markdown ni emojis.${userProfileLine ? `\n${userProfileLine}` : ""}${cus
           };
         });
 
-        this.plan = {
+        const nextPlan: AgentPlan = {
           objective: userMessage,
           steps,
           estimatedTime: `${Math.ceil((planningResult.plan.metadata.estimatedDuration || 60000) / 60000)} minutes`
         };
+        this.validatePlannedSteps(nextPlan);
+
+        this.plan = nextPlan;
 
         this.logEvent('plan', {
           type: 'htn_plan_generated',
@@ -1052,10 +1107,10 @@ Respond with ONLY valid JSON in this exact format:
       }
 
       plan.steps = plan.steps.slice(0, 8);
+      this.validatePlannedSteps(plan);
 
       for (let i = 0; i < plan.steps.length; i++) {
         plan.steps[i].index = i;
-        plan.steps[i].toolName = normalizeToolName(plan.steps[i].toolName || "unknown");
       }
 
       this.plan = plan;
@@ -1777,6 +1832,10 @@ Respond with ONLY valid JSON in this exact format:
   async generateSummary(): Promise<string> {
     if (!this.plan) {
       return "No plan was executed.";
+    }
+
+    if (this.plan.conversationalResponse) {
+      return this.plan.conversationalResponse;
     }
 
     const completedSteps = this.stepResults.filter((r) => r.success);
