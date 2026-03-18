@@ -558,10 +558,12 @@ export function discoverOpenClawPlugins(params: {
   workspaceDir?: string;
   extraPaths?: string[];
   ownershipUid?: number | null;
+  env?: NodeJS.ProcessEnv;
 }): PluginDiscoveryResult {
   const candidates: PluginCandidate[] = [];
   const diagnostics: PluginDiagnostic[] = [];
   const seen = new Set<string>();
+  const env = params.env ?? process.env;
   const workspaceDir = params.workspaceDir?.trim();
 
   const extra = params.extraPaths ?? [];
@@ -599,7 +601,7 @@ export function discoverOpenClawPlugins(params: {
     }
   }
 
-  const globalDir = path.join(resolveConfigDir(), "extensions");
+  const globalDir = path.join(resolveConfigDir(env), "extensions");
   discoverInDirectory({
     dir: globalDir,
     origin: "global",
@@ -609,7 +611,7 @@ export function discoverOpenClawPlugins(params: {
     seen,
   });
 
-  const bundledDir = resolveBundledPluginsDir();
+  const bundledDir = resolveBundledPluginsDir(env);
   if (bundledDir) {
     discoverInDirectory({
       dir: bundledDir,

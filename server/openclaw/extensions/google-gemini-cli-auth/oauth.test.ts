@@ -1,7 +1,7 @@
 import { join, parse } from "node:path";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("../../src/plugin-sdk/google-gemini-cli-auth.js", () => ({
+vi.mock("openclaw/plugin-sdk/google-gemini-cli-auth", () => ({
   isWSL2Sync: () => false,
   fetchWithSsrFGuard: async (params: {
     url: string;
@@ -144,6 +144,13 @@ describe("extractGeminiCliCredentials", () => {
     }
   }
 
+  function expectFakeCliCredentials(result: unknown) {
+    expect(result).toEqual({
+      clientId: FAKE_CLIENT_ID,
+      clientSecret: FAKE_CLIENT_SECRET,
+    });
+  }
+
   beforeEach(async () => {
     vi.clearAllMocks();
     originalPath = process.env.PATH;
@@ -169,10 +176,7 @@ describe("extractGeminiCliCredentials", () => {
     clearCredentialsCache();
     const result = extractGeminiCliCredentials();
 
-    expect(result).toEqual({
-      clientId: FAKE_CLIENT_ID,
-      clientSecret: FAKE_CLIENT_SECRET,
-    });
+    expectFakeCliCredentials(result);
   });
 
   it("extracts credentials when PATH entry is an npm global shim", async () => {
@@ -182,10 +186,7 @@ describe("extractGeminiCliCredentials", () => {
     clearCredentialsCache();
     const result = extractGeminiCliCredentials();
 
-    expect(result).toEqual({
-      clientId: FAKE_CLIENT_ID,
-      clientSecret: FAKE_CLIENT_SECRET,
-    });
+    expectFakeCliCredentials(result);
   });
 
   it("returns null when oauth2.js cannot be found", async () => {
@@ -219,6 +220,132 @@ describe("extractGeminiCliCredentials", () => {
     const result2 = extractGeminiCliCredentials();
     expect(result2).toEqual(result1);
     expect(mockReadFileSync.mock.calls.length).toBe(readCount);
+  });
+});
+
+describe("Gemini web OAuth flow", () => {
+  const TOKEN_URL = "https://oauth2.googleapis.com/token";
+  const USERINFO_URL = "https://www.googleapis.com/oauth2/v1/userinfo?alt=json";
+  const LOAD_PROD = "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist";
+  const ENV_KEYS = [
+    "OPENCLAW_GEMINI_OAUTH_CLIENT_ID",
+    "OPENCLAW_GEMINI_OAUTH_CLIENT_SECRET",
+    "GEMINI_CLI_OAUTH_CLIENT_ID",
+    "GEMINI_CLI_OAUTH_CLIENT_SECRET",
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+    "GOOGLE_CLOUD_PROJECT",
+    "GOOGLE_CLOUD_PROJECT_ID",
+  ] as const;
+
+  let envSnapshot: Partial<Record<(typeof ENV_KEYS)[number], string>>;
+
+  beforeEach(() => {
+    envSnapshot = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
+    process.env.OPENCLAW_GEMINI_OAUTH_CLIENT_ID = "test-client-id.apps.googleusercontent.com";
+    process.env.OPENCLAW_GEMINI_OAUTH_CLIENT_SECRET = "GOCSPX-test-client-secret"; // pragma: allowlist secret
+    delete process.env.GEMINI_CLI_OAUTH_CLIENT_ID;
+    delete process.env.GEMINI_CLI_OAUTH_CLIENT_SECRET;
+    delete process.env.GOOGLE_CLIENT_ID;
+    delete process.env.GOOGLE_CLIENT_SECRET;
+    delete process.env.GOOGLE_CLOUD_PROJECT;
+    delete process.env.GOOGLE_CLOUD_PROJECT_ID;
+  });
+
+  afterEach(() => {
+    for (const key of ENV_KEYS) {
+      const value = envSnapshot[key];
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+    vi.unstubAllGlobals();
+  });
+
+  it("builds a start session with custom redirect URI and state", async () => {
+    const { startGeminiCliOAuthSession } = await import("./oauth.js");
+    const flow = startGeminiCliOAuthSession({
+      redirectUri: "https://iliagpt.com/api/auth/google/callback",
+      state: "gemini-cli:test-flow",
+    });
+
+    const authUrl = new URL(flow.authUrl);
+    expect(flow.redirectUri).toBe("https://iliagpt.com/api/auth/google/callback");
+    expect(flow.state).toBe("gemini-cli:test-flow");
+    expect(authUrl.searchParams.get("redirect_uri")).toBe(
+      "https://iliagpt.com/api/auth/google/callback",
+    );
+    expect(authUrl.searchParams.get("state")).toBe("gemini-cli:test-flow");
+  });
+
+  it("exchanges a web callback using the provided production redirect URI", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url =
+          typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+        requests.push({ url, init });
+
+        if (url === TOKEN_URL) {
+          return new Response(
+            JSON.stringify({
+              access_token: "access-token",
+              refresh_token: "refresh-token",
+              expires_in: 3600,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
+        if (url === USERINFO_URL) {
+          return new Response(JSON.stringify({ email: "admin@iliagpt.com" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (url === LOAD_PROD) {
+          return new Response(
+            JSON.stringify({
+              currentTier: { id: "standard-tier" },
+              cloudaicompanionProject: { id: "iliagpt-project" },
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    const { startGeminiCliOAuthSession, completeGeminiCliOAuthSession } = await import(
+      "./oauth.js"
+    );
+    const flow = startGeminiCliOAuthSession({
+      redirectUri: "https://iliagpt.com/api/auth/google/callback",
+      state: "gemini-cli:test-flow",
+    });
+
+    const result = await completeGeminiCliOAuthSession({
+      callbackInput:
+        "https://iliagpt.com/api/auth/google/callback?code=oauth-code&state=gemini-cli:test-flow",
+      verifier: flow.verifier,
+      redirectUri: flow.redirectUri,
+      expectedState: flow.state,
+    });
+
+    const tokenRequest = requests.find((request) => request.url === TOKEN_URL);
+    expect(tokenRequest).toBeDefined();
+    const tokenBody = new URLSearchParams(String(tokenRequest?.init?.body));
+    expect(tokenBody.get("redirect_uri")).toBe("https://iliagpt.com/api/auth/google/callback");
+    expect(result.projectId).toBe("iliagpt-project");
+    expect(result.email).toBe("admin@iliagpt.com");
   });
 });
 
@@ -276,16 +403,16 @@ describe("loginGeminiCliOAuth", () => {
     });
   }
 
-  async function runRemoteLoginWithCapturedAuthUrl(
-    loginGeminiCliOAuth: (options: {
-      isRemote: boolean;
-      openUrl: () => Promise<void>;
-      log: (msg: string) => void;
-      note: () => Promise<void>;
-      prompt: () => Promise<string>;
-      progress: { update: () => void; stop: () => void };
-    }) => Promise<{ projectId: string }>,
-  ) {
+  type LoginGeminiCliOAuthFn = (options: {
+    isRemote: boolean;
+    openUrl: () => Promise<void>;
+    log: (msg: string) => void;
+    note: () => Promise<void>;
+    prompt: () => Promise<string>;
+    progress: { update: () => void; stop: () => void };
+  }) => Promise<{ projectId: string }>;
+
+  async function runRemoteLoginWithCapturedAuthUrl(loginGeminiCliOAuth: LoginGeminiCliOAuthFn) {
     let authUrl = "";
     const result = await loginGeminiCliOAuth({
       isRemote: true,
@@ -304,6 +431,14 @@ describe("loginGeminiCliOAuth", () => {
       progress: { update: () => {}, stop: () => {} },
     });
     return { result, authUrl };
+  }
+
+  async function runRemoteLoginExpectingProjectId(
+    loginGeminiCliOAuth: LoginGeminiCliOAuthFn,
+    projectId: string,
+  ) {
+    const { result } = await runRemoteLoginWithCapturedAuthUrl(loginGeminiCliOAuth);
+    expect(result.projectId).toBe(projectId);
   }
 
   let envSnapshot: Partial<Record<(typeof ENV_KEYS)[number], string>>;
@@ -361,9 +496,7 @@ describe("loginGeminiCliOAuth", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const { loginGeminiCliOAuth } = await import("./oauth.js");
-    const { result } = await runRemoteLoginWithCapturedAuthUrl(loginGeminiCliOAuth);
-
-    expect(result.projectId).toBe("daily-project");
+    await runRemoteLoginExpectingProjectId(loginGeminiCliOAuth, "daily-project");
     const loadRequests = requests.filter((request) =>
       request.url.includes("v1internal:loadCodeAssist"),
     );
@@ -392,42 +525,6 @@ describe("loginGeminiCliOAuth", () => {
     });
   });
 
-  it("falls back to GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET when Gemini-specific vars are absent", async () => {
-    delete process.env.OPENCLAW_GEMINI_OAUTH_CLIENT_ID;
-    delete process.env.OPENCLAW_GEMINI_OAUTH_CLIENT_SECRET;
-    process.env.GOOGLE_CLIENT_ID = "google-client-id.apps.googleusercontent.com";
-    process.env.GOOGLE_CLIENT_SECRET = "GOCSPX-google-client-secret";
-
-    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
-      const url = getRequestUrl(input);
-      if (url === TOKEN_URL) {
-        return responseJson({
-          access_token: "access-token",
-          refresh_token: "refresh-token",
-          expires_in: 3600,
-        });
-      }
-      if (url === USERINFO_URL) {
-        return responseJson({ email: "admin@iliagpt.com" });
-      }
-      if (url === LOAD_PROD) {
-        return responseJson({
-          currentTier: { id: "standard-tier" },
-          cloudaicompanionProject: { id: "google-fallback-project" },
-        });
-      }
-      throw new Error(`Unexpected request: ${url}`);
-    }));
-
-    const { loginGeminiCliOAuth } = await import("./oauth.js");
-    const { authUrl, result } = await runRemoteLoginWithCapturedAuthUrl(loginGeminiCliOAuth);
-    const url = new URL(authUrl);
-
-    expect(url.searchParams.get("client_id")).toBe("google-client-id.apps.googleusercontent.com");
-    expect(result.projectId).toBe("google-fallback-project");
-    expect(result.email).toBe("admin@iliagpt.com");
-  });
-
   it("falls back to GOOGLE_CLOUD_PROJECT when all loadCodeAssist endpoints fail", async () => {
     process.env.GOOGLE_CLOUD_PROJECT = "env-project";
 
@@ -454,10 +551,47 @@ describe("loginGeminiCliOAuth", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const { loginGeminiCliOAuth } = await import("./oauth.js");
-    const { result } = await runRemoteLoginWithCapturedAuthUrl(loginGeminiCliOAuth);
-
-    expect(result.projectId).toBe("env-project");
+    await runRemoteLoginExpectingProjectId(loginGeminiCliOAuth, "env-project");
     expect(requests.filter((url) => url.includes("v1internal:loadCodeAssist"))).toHaveLength(3);
     expect(requests.some((url) => url.includes("v1internal:onboardUser"))).toBe(false);
+  });
+
+  it("falls back to GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET when Gemini-specific vars are absent", async () => {
+    delete process.env.OPENCLAW_GEMINI_OAUTH_CLIENT_ID;
+    delete process.env.OPENCLAW_GEMINI_OAUTH_CLIENT_SECRET;
+    process.env.GOOGLE_CLIENT_ID = "google-client-id.apps.googleusercontent.com";
+    process.env.GOOGLE_CLIENT_SECRET = "GOCSPX-google-client-secret";
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = getRequestUrl(input);
+        if (url === TOKEN_URL) {
+          return responseJson({
+            access_token: "access-token",
+            refresh_token: "refresh-token",
+            expires_in: 3600,
+          });
+        }
+        if (url === USERINFO_URL) {
+          return responseJson({ email: "admin@iliagpt.com" });
+        }
+        if (url === LOAD_PROD) {
+          return responseJson({
+            currentTier: { id: "standard-tier" },
+            cloudaicompanionProject: { id: "google-fallback-project" },
+          });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    const { loginGeminiCliOAuth } = await import("./oauth.js");
+    const { authUrl, result } = await runRemoteLoginWithCapturedAuthUrl(loginGeminiCliOAuth);
+    const url = new URL(authUrl);
+
+    expect(url.searchParams.get("client_id")).toBe("google-client-id.apps.googleusercontent.com");
+    expect(result.projectId).toBe("google-fallback-project");
+    expect(result.email).toBe("admin@iliagpt.com");
   });
 });

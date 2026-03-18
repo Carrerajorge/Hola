@@ -125,17 +125,24 @@ async function persistGeminiCliOAuthCredentials(credentials: GeminiCliOAuthCrede
   });
 }
 
-export function beginGoogleGeminiCliOAuthFlow() {
-  return startGeminiCliOAuthSession();
+export function beginGoogleGeminiCliOAuthFlow(options?: {
+  redirectUri?: string;
+  state?: string;
+}) {
+  return startGeminiCliOAuthSession(options);
 }
 
 export async function finishGoogleGeminiCliOAuthFlow(params: {
   callbackInput: string;
   verifier: string;
+  redirectUri?: string;
+  expectedState?: string;
 }): Promise<GoogleGeminiCliOAuthStatus> {
   const credentials = await completeGeminiCliOAuthSession({
     callbackInput: params.callbackInput,
     verifier: params.verifier,
+    redirectUri: params.redirectUri,
+    expectedState: params.expectedState,
   });
   await persistGeminiCliOAuthCredentials(credentials);
   return await getGoogleGeminiCliOAuthStatus();

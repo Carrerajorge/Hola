@@ -354,6 +354,16 @@ function resolveConfiguredPlugins(
       });
     }
   }
+  const backendRaw =
+    typeof cfg.acp?.backend === "string" ? cfg.acp.backend.trim().toLowerCase() : "";
+  const acpConfigured =
+    cfg.acp?.enabled === true || cfg.acp?.dispatch?.enabled === true || backendRaw === "acpx";
+  if (acpConfigured && (!backendRaw || backendRaw === "acpx")) {
+    changes.push({
+      pluginId: "acpx",
+      reason: "ACP runtime configured",
+    });
+  }
   return changes;
 }
 
@@ -380,12 +390,12 @@ function isPluginDenied(cfg: OpenClawConfig, pluginId: string): boolean {
   return Array.isArray(deny) && deny.includes(pluginId);
 }
 
-function resolvePreferredOverIds(pluginId: string): string[] {
+function resolvePreferredOverIds(pluginId: string, env: NodeJS.ProcessEnv): string[] {
   const normalized = normalizeChatChannelId(pluginId);
   if (normalized) {
     return getChatChannelMeta(normalized).preferOver ?? [];
   }
-  const catalogEntry = getChannelPluginCatalogEntry(pluginId);
+  const catalogEntry = getChannelPluginCatalogEntry(pluginId, { env });
   return catalogEntry?.meta.preferOver ?? [];
 }
 
@@ -393,6 +403,7 @@ function shouldSkipPreferredPluginAutoEnable(
   cfg: OpenClawConfig,
   entry: PluginEnableChange,
   configured: PluginEnableChange[],
+  env: NodeJS.ProcessEnv,
 ): boolean {
   for (const other of configured) {
     if (other.pluginId === entry.pluginId) {
@@ -404,7 +415,7 @@ function shouldSkipPreferredPluginAutoEnable(
     if (isPluginExplicitlyDisabled(cfg, other.pluginId)) {
       continue;
     }
-    const preferOver = resolvePreferredOverIds(other.pluginId);
+    const preferOver = resolvePreferredOverIds(other.pluginId, env);
     if (preferOver.includes(entry.pluginId)) {
       return true;
     }
@@ -467,7 +478,8 @@ export function applyPluginAutoEnable(params: {
   manifestRegistry?: PluginManifestRegistry;
 }): PluginAutoEnableResult {
   const env = params.env ?? process.env;
-  const registry = params.manifestRegistry ?? loadPluginManifestRegistry({ config: params.config });
+  const registry =
+    params.manifestRegistry ?? loadPluginManifestRegistry({ config: params.config, env });
   const configured = resolveConfiguredPlugins(params.config, env, registry);
   if (configured.length === 0) {
     return { config: params.config, changes: [] };
@@ -488,7 +500,7 @@ export function applyPluginAutoEnable(params: {
     if (isPluginExplicitlyDisabled(next, entry.pluginId)) {
       continue;
     }
-    if (shouldSkipPreferredPluginAutoEnable(next, entry, configured)) {
+    if (shouldSkipPreferredPluginAutoEnable(next, entry, configured, env)) {
       continue;
     }
     const allow = next.plugins?.allow;
