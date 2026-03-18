@@ -9,7 +9,6 @@ import {
   Plug,
   Globe,
   FileText,
-  ChevronRight,
   ChevronDown,
   X,
   Loader2,
@@ -26,7 +25,6 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { cn } from "@/lib/utils";
 import {
   SILVER_BORDER_DIVIDER,
@@ -195,7 +193,6 @@ export function Composer({
   setSelectedDocTool,
   gptCapabilities,
   closeDocEditor,
-  openBlankDocEditor,
   aiState,
   isRecording,
   isPaused,
@@ -254,22 +251,12 @@ export function Composer({
   const hasContent = input.trim().length > 0 || hasAttachableFiles;
   const { settings } = useSettingsContext();
   const webSearchEnabled = !!settings.webSearch;
-  const canvasEnabled = !!settings.canvas;
   const hasGptCapabilities = !!gptCapabilities;
   const gptWebBrowsingEnabled = gptCapabilities ? !!gptCapabilities.webBrowsing : true;
   const gptImageGenerationEnabled = gptCapabilities ? !!gptCapabilities.imageGeneration : true;
-  const gptCanvasEnabled = gptCapabilities ? !!gptCapabilities.canvas : true;
-  const gptWordEnabled = gptCapabilities ? !!gptCapabilities.wordCreation : true;
-  const gptExcelEnabled = gptCapabilities ? !!gptCapabilities.excelCreation : true;
-  const gptPptEnabled = gptCapabilities ? !!gptCapabilities.pptCreation : true;
   // For custom GPTs, capabilities configured in the GPT are the source of truth.
   const canUseWebTool = hasGptCapabilities ? gptWebBrowsingEnabled : webSearchEnabled;
   const canUseImageTool = gptImageGenerationEnabled;
-  const canUseDocumentTools = hasGptCapabilities ? gptCanvasEnabled : canvasEnabled;
-  const canUseWordTool = canUseDocumentTools && gptWordEnabled;
-  const canUseExcelTool = canUseDocumentTools && gptExcelEnabled;
-  const canUsePptTool = canUseDocumentTools && gptPptEnabled;
-  const hasAnyDocumentToolEnabled = canUseWordTool || canUseExcelTool || canUsePptTool;
 
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
   const [toolsPopoverOpen, setToolsPopoverOpen] = useState(false);
@@ -776,120 +763,6 @@ export function Composer({
                 </div>
                 Generar imagen
               </Button>
-              {canUseDocumentTools ? (
-                <HoverCard openDelay={100} closeDelay={100}>
-                  <HoverCardTrigger asChild>
-                    <Button variant="ghost" className="justify-between gap-2 text-sm h-9 w-full glass-menu-item">
-                      <span className="flex items-center gap-2">
-                        <FileText className="h-4 w-4" />
-                        Crear documento
-                      </span>
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                  </HoverCardTrigger>
-                  <HoverCardContent side="right" align="start" className="w-48 p-2">
-                    <div className="grid gap-1">
-                      <Button
-                        variant="ghost"
-                        className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                        disabled={!canUseWordTool}
-                        onClick={() => {
-                          try {
-                            if (!canUseWordTool) return;
-                            closeToolsPopover();
-                            openBlankDocEditor("word");
-                          } catch (err) {
-                            console.error("[Composer] Error opening Word editor:", err);
-                          }
-                        }}
-                        data-testid="button-create-word"
-                      >
-                        <div className="flex items-center justify-center w-5 h-5 rounded bg-blue-600">
-                          <span className="text-white text-xs font-bold">W</span>
-                        </div>
-                        Documento Word
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                        disabled={!canUseExcelTool}
-                        onClick={() => {
-                          try {
-                            if (!canUseExcelTool) return;
-                            closeToolsPopover();
-                            openBlankDocEditor("excel");
-                          } catch (err) {
-                            console.error("[Composer] Error opening Excel editor:", err);
-                          }
-                        }}
-                        data-testid="button-create-excel"
-                      >
-                        <div className="flex items-center justify-center w-5 h-5 rounded bg-green-600">
-                          <span className="text-white text-xs font-bold">X</span>
-                        </div>
-                        Hoja Excel
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                        disabled={!canUsePptTool}
-                        onClick={() => {
-                          try {
-                            if (!canUsePptTool) return;
-                            closeToolsPopover();
-                            openBlankDocEditor("ppt");
-                          } catch (err) {
-                            console.error("[Composer] Error opening PPT editor:", err);
-                          }
-                        }}
-                        data-testid="button-create-ppt"
-                      >
-                        <div className="flex items-center justify-center w-5 h-5 rounded bg-orange-500">
-                          <span className="text-white text-xs font-bold">P</span>
-                        </div>
-                        Presentación PPT
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                        onClick={() => {
-                          try {
-                            closeToolsPopover();
-                            setSelectedDocTool("figma");
-                            onCloseSidebar?.();
-                          } catch (err) {
-                            console.error("[Composer] Error selecting Figma tool:", err);
-                          }
-                        }}
-                      >
-                        <div className="flex items-center justify-center w-5 h-5 rounded bg-card border border-border">
-                          <svg width="10" height="14" viewBox="0 0 38 57" fill="none">
-                            <path d="M19 28.5C19 23.2533 23.2533 19 28.5 19C33.7467 19 38 23.2533 38 28.5C38 33.7467 33.7467 38 28.5 38C23.2533 38 19 33.7467 19 28.5Z" fill="#1ABCFE" />
-                            <path d="M0 47.5C0 42.2533 4.25329 38 9.5 38H19V47.5C19 52.7467 14.7467 57 9.5 57C4.25329 57 0 52.7467 0 47.5Z" fill="#0ACF83" />
-                            <path d="M19 0V19H28.5C33.7467 19 38 14.7467 38 9.5C38 4.25329 33.7467 0 28.5 0H19Z" fill="#FF7262" />
-                            <path d="M0 9.5C0 14.7467 4.25329 19 9.5 19H19V0H9.5C4.25329 0 0 4.25329 0 9.5Z" fill="#F24E1E" />
-                            <path d="M0 28.5C0 33.7467 4.25329 38 9.5 38H19V19H9.5C4.25329 19 0 23.2533 0 28.5Z" fill="#A259FF" />
-                          </svg>
-                        </div>
-                        Diagrama Figma
-                      </Button>
-                    </div>
-                    {!hasAnyDocumentToolEnabled && (
-                      <p className="px-2 pt-1 text-xs text-muted-foreground">
-                        Este GPT no tiene Word/Excel/PPT habilitados.
-                      </p>
-                    )}
-                  </HoverCardContent>
-                </HoverCard>
-              ) : (
-                <Button variant="ghost" className="justify-between gap-2 text-sm h-9 w-full glass-menu-item" disabled>
-                  <span className="flex items-center gap-2">
-                    <FileText className="h-4 w-4" />
-                    Crear documento
-                  </span>
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              )}
 
               <Button
                 variant="ghost"
