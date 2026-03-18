@@ -1,6 +1,7 @@
 import { detectToolCallLoop, hashToolCall, hashToolOutcome } from "./toolLoopDetection";
 import { toolRegistry, type ToolResult, type ToolArtifact } from "./toolRegistry";
 import { llmGateway } from "../lib/llmGateway";
+import { GEMINI_MODELS, getGeminiClient } from "../lib/gemini";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import type { User, TraceEventType, TraceEvent } from "@shared/schema";
 import { EventEmitter } from "events";
@@ -931,6 +932,10 @@ Si falta nitidez o información, dilo explícitamente.
 No inventes texto que no puedas leer.`;
 
     const textPrompt = String(message || "").trim() || "Analiza la imagen adjunta y responde.";
+    const selectedModel =
+      getGeminiClient() && !String(this.modelId || "").toLowerCase().includes("gemini")
+        ? GEMINI_MODELS.FLASH
+        : this.modelId;
     const messages: ChatCompletionMessageParam[] = [
       { role: "system", content: systemPrompt },
       {
@@ -946,7 +951,7 @@ No inventes texto que no puedas leer.`;
       temperature: 0.2,
       maxTokens: 2000,
       userId: this.userId,
-      model: this.modelId,
+      model: selectedModel,
     });
 
     return response.content;

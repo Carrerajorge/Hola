@@ -139,6 +139,9 @@ jobs:
         needs.build_images.result == 'success'
       }}
     timeout-minutes: 20
+    concurrency:
+      group: production-vps-deploy
+      cancel-in-progress: false
     env:
       VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
       VPS_USER: ${{ secrets.VPS_USER || 'root' }}
@@ -174,13 +177,14 @@ jobs:
             scripts/deploy-bluegreen.sh \
             scripts/rollback-bluegreen.sh \
             scripts/health-dashboard.sh \
+            scripts/prod/remote-deploy-lock.sh \
             scripts/vps-bootstrap-bluegreen.sh \
             scripts/prod-rigorous-checks.sh
           do
             fetch_asset "${asset}"
           done
 
-          chmod +x scripts/*.sh
+          chmod +x scripts/*.sh scripts/prod/*.sh
 
       - name: Validate deployment prerequisites
         env:
@@ -404,6 +408,17 @@ jobs:
           echo "▸ Deploy target: ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ steps.target.outputs.port }}"
           nc -vz -w 5 "${{ steps.target.outputs.host }}" "${{ steps.target.outputs.port }}" || echo "⚠️ TCP probe failed (continuing to SSH)"
 
+      - name: Acquire host deploy lock
+        run: |
+          set -euo pipefail
+          bash scripts/prod/remote-deploy-lock.sh acquire \
+            "${{ steps.target.outputs.host }}" \
+            "${{ steps.target.outputs.port }}" \
+            "${{ env.VPS_USER }}" \
+            ~/.ssh/deploy_key \
+            "${{ env.DEPLOY_PATH }}/.deploy-sync.lock" \
+            "gha-${{ github.run_id }}-${{ github.job }}-${{ github.sha }}"
+
       - name: Sync deploy scripts to VPS
         run: |
           set -euo pipefail
@@ -517,6 +532,21 @@ jobs:
           echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
           echo "| URL | https://iliagpt.com |" >> $GITHUB_STEP_SUMMARY
 
+      - name: Release host deploy lock
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ ! -f ~/.ssh/deploy_key ] || [ -z "${{ steps.target.outputs.host }}" ] || [ -z "${{ steps.target.outputs.port }}" ]; then
+            exit 0
+          fi
+          bash scripts/prod/remote-deploy-lock.sh release \
+            "${{ steps.target.outputs.host }}" \
+            "${{ steps.target.outputs.port }}" \
+            "${{ env.VPS_USER }}" \
+            ~/.ssh/deploy_key \
+            "${{ env.DEPLOY_PATH }}/.deploy-sync.lock" \
+            "gha-${{ github.run_id }}-${{ github.job }}-${{ github.sha }}"
+
       - name: Cleanup SSH key
         if: always()
         run: rm -f ~/.ssh/deploy_key
@@ -541,12 +571,11 @@ jobs:
         needs.build_images.result == 'success'
       }}
     timeout-minutes: 25
-    # Job-level concurrency: if a newer deploy is queued, cancel this one.
-    # This ensures the most recent commit always ships, without blocking the queue.
-    # The VPS-level deploy script itself is idempotent and rolls back on failure.
+    # Serialize all production deploy jobs before they touch the VPS.
+    # The host-level lock below still protects against out-of-band/manual runs.
     concurrency:
-      group: deploy-auto-vps
-      cancel-in-progress: true
+      group: production-vps-deploy
+      cancel-in-progress: false
     env:
       VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
       VPS_USER: ${{ secrets.VPS_USER || 'root' }}
@@ -582,13 +611,14 @@ jobs:
             scripts/deploy-bluegreen.sh \
             scripts/rollback-bluegreen.sh \
             scripts/health-dashboard.sh \
+            scripts/prod/remote-deploy-lock.sh \
             scripts/vps-bootstrap-bluegreen.sh \
             scripts/prod-rigorous-checks.sh
           do
             fetch_asset "${asset}"
           done
 
-          chmod +x scripts/*.sh
+          chmod +x scripts/*.sh scripts/prod/*.sh
 
       - name: Validate deployment prerequisites
         env:
@@ -834,6 +864,18 @@ jobs:
           echo "▸ Deploy target: ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ steps.target.outputs.port }}"
           nc -vz -w 5 "${{ steps.target.outputs.host }}" "${{ steps.target.outputs.port }}" || echo "⚠️ TCP probe failed (continuing to SSH)"
 
+      - name: Acquire host deploy lock
+        if: steps.production_state.outputs.already_deployed != 'true'
+        run: |
+          set -euo pipefail
+          bash scripts/prod/remote-deploy-lock.sh acquire \
+            "${{ steps.target.outputs.host }}" \
+            "${{ steps.target.outputs.port }}" \
+            "${{ env.VPS_USER }}" \
+            ~/.ssh/deploy_key \
+            "${{ env.DEPLOY_PATH }}/.deploy-sync.lock" \
+            "gha-${{ github.run_id }}-${{ github.job }}-${{ github.sha }}"
+
       - name: Sync deploy scripts to VPS
         if: steps.production_state.outputs.already_deployed != 'true'
         run: |
@@ -943,6 +985,21 @@ jobs:
           echo "| Trigger | push(main) |" >> $GITHUB_STEP_SUMMARY
           echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
           echo "| URL | https://iliagpt.com |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Release host deploy lock
+        if: always() && steps.production_state.outputs.already_deployed != 'true'
+        run: |
+          set -euo pipefail
+          if [ ! -f ~/.ssh/deploy_key ] || [ -z "${{ steps.target.outputs.host }}" ] || [ -z "${{ steps.target.outputs.port }}" ]; then
+            exit 0
+          fi
+          bash scripts/prod/remote-deploy-lock.sh release \
+            "${{ steps.target.outputs.host }}" \
+            "${{ steps.target.outputs.port }}" \
+            "${{ env.VPS_USER }}" \
+            ~/.ssh/deploy_key \
+            "${{ env.DEPLOY_PATH }}/.deploy-sync.lock" \
+            "gha-${{ github.run_id }}-${{ github.job }}-${{ github.sha }}"
 
       - name: Cleanup SSH key
         if: always()

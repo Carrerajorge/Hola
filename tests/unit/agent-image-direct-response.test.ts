@@ -17,6 +17,13 @@ vi.mock("../../server/lib/llmGateway", () => ({
   },
 }));
 
+vi.mock("../../server/lib/gemini", () => ({
+  GEMINI_MODELS: {
+    FLASH: "gemini-2.5-flash",
+  },
+  getGeminiClient: () => ({}),
+}));
+
 const getObjectEntityBufferMock = vi.fn();
 vi.mock("../../server/replit_integrations/object_storage/objectStorage", () => ({
   ObjectStorageService: class {
@@ -54,8 +61,10 @@ describe("AgentOrchestrator image direct response", () => {
     expect(chatMock).toHaveBeenCalledTimes(1);
 
     const messages = chatMock.mock.calls[0][0];
+    const options = chatMock.mock.calls[0][1];
     const userMessage = messages[1];
     expect(Array.isArray(userMessage.content)).toBe(true);
     expect(userMessage.content.some((part: any) => part.type === "image_url")).toBe(true);
+    expect(options.model).toBe("gemini-2.5-flash");
   });
 });
