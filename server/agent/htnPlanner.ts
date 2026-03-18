@@ -140,24 +140,14 @@ const TASK_TEMPLATES: Record<string, Omit<Task, 'id' | 'status' | 'retryCount'>>
 
     'research_deep': {
         name: 'Deep Research',
-        type: 'compound',
+        type: 'primitive',
         description: 'Conduct thorough research on a topic',
         preconditions: [],
         effects: [{ type: 'set_fact', key: 'research_complete', value: true }],
         cost: 10,
         estimatedDuration: 60000,
         priority: 5,
-        decompositionMethods: [{
-            id: 'research_standard',
-            name: 'Standard Research',
-            applicabilityConditions: [],
-            subtasks: [
-                { name: 'Search', type: 'primitive', description: 'Search', preconditions: [], effects: [], cost: 1, estimatedDuration: 5000, priority: 5, toolName: 'search_web', dependencies: [], dependents: [], maxRetries: 3 },
-                { name: 'Fetch Sources', type: 'primitive', description: 'Fetch', preconditions: [], effects: [], cost: 3, estimatedDuration: 15000, priority: 4, toolName: 'fetch_url', dependencies: [], dependents: [], maxRetries: 2 },
-                { name: 'Summarize', type: 'primitive', description: 'Summarize', preconditions: [], effects: [], cost: 2, estimatedDuration: 10000, priority: 3, toolName: 'summarize', dependencies: [], dependents: [], maxRetries: 2 }
-            ],
-            priority: 5
-        }],
+        toolName: 'research_deep',
         dependencies: [],
         dependents: [],
         maxRetries: 2
@@ -472,7 +462,12 @@ export class HTNPlanner extends EventEmitter {
             description: goal,
             status: 'pending',
             retryCount: 0,
-            toolParams: context
+            toolParams: {
+                goal,
+                query: goal,
+                topic: goal,
+                ...context,
+            }
         };
     }
 
@@ -523,6 +518,10 @@ export class HTNPlanner extends EventEmitter {
                 id: randomUUID(),
                 status: 'pending',
                 retryCount: 0,
+                toolParams: {
+                    ...(task.toolParams || {}),
+                    ...(subtaskSpec.toolParams || {}),
+                },
                 dependencies: prevTaskId ? [prevTaskId] : [],
                 dependents: []
             };
