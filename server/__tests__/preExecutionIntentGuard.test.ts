@@ -73,6 +73,8 @@ describe("preExecutionIntentGuard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.EXECUTION_INTENT_GUARD_MODE = "enforce";
+    delete process.env.EXECUTION_INTENT_GUARD_TIMEOUT_MS;
+    vi.useRealTimers();
   });
 
   test("allows execution when brief passes guardrails", async () => {
@@ -86,6 +88,71 @@ describe("preExecutionIntentGuard", () => {
     expect(next).toHaveBeenCalledOnce();
     expect(req.executionIntentGuard?.decision.allowed).toBe(true);
     expect(res.status).not.toHaveBeenCalled();
+  });
+
+  test("passes attachment context into the brief builder", async () => {
+    buildBriefMock.mockResolvedValueOnce(makeBrief() as any);
+    const req = makeReq({
+      body: {
+        message: "transcribir",
+        attachments: [
+          {
+            name: "scan.png",
+            mimeType: "image/png",
+            storagePath: "/objects/uploads/scan.png",
+          },
+        ],
+      },
+    });
+    const res = makeRes();
+    const next = vi.fn();
+
+    await preExecutionIntentGuard(req, res, next);
+
+    expect(buildBriefMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachments: [
+          expect.objectContaining({
+            type: "image",
+            name: "scan.png",
+            extractedText: expect.stringContaining("scan.png"),
+          }),
+        ],
+      }),
+    );
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  test("allows attachment transcription requests when the only blocker is missing source material", async () => {
+    buildBriefMock.mockResolvedValueOnce(
+      makeBrief({
+        blocker: {
+          is_blocked: true,
+          question: "¿Qué contenido específico necesitas transcribir? Por favor, proporciona el archivo, enlace o describe el material que quieres convertir a texto.",
+        },
+      }) as any,
+    );
+
+    const req = makeReq({
+      body: {
+        message: "transcribir",
+        attachments: [
+          {
+            name: "scan.png",
+            mimeType: "image/png",
+            storagePath: "/objects/uploads/scan.png",
+          },
+        ],
+      },
+    });
+    const res = makeRes();
+    const next = vi.fn();
+
+    await preExecutionIntentGuard(req, res, next);
+
+    expect(next).toHaveBeenCalledOnce();
+    expect(res.status).not.toHaveBeenCalled();
+    expect(req.executionIntentGuard?.decision.allowed).toBe(true);
   });
 
   test("blocks execution in enforce mode when brief is blocked", async () => {
@@ -147,11 +214,11 @@ describe("preExecutionIntentGuard", () => {
     expect(res.json).toHaveBeenCalled();
   });
 
-  test("skips the LLM preguard for native agent run creation", async () => {
+  test("bypasses the guard for agent run creation requests", async () => {
     const req = makeReq({
       path: "/api/agent/runs",
       originalUrl: "/api/agent/runs",
-      body: { message: "busca openai.com y resume", chatId: "chat_123" },
+      body: { message: "Resuelve este ejercicio", attachments: [{ mimeType: "image/png" }] },
     });
     const res = makeRes();
     const next = vi.fn();
@@ -160,5 +227,26 @@ describe("preExecutionIntentGuard", () => {
 
     expect(next).toHaveBeenCalledOnce();
     expect(buildBriefMock).not.toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  test("fails closed quickly when analyzer exceeds the timeout", async () => {
+    process.env.EXECUTION_INTENT_GUARD_TIMEOUT_MS = "250";
+    buildBriefMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(() => resolve(makeBrief() as any), 400);
+        }),
+    );
+
+    const req = makeReq();
+    const res = makeRes();
+    const next = vi.fn();
+
+    await preExecutionIntentGuard(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(503);
+    expect(res.json).toHaveBeenCalled();
   });
 });

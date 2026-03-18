@@ -22,6 +22,10 @@ type GuardStats = {
   unavailable: number;
 };
 
+type GuardAttachmentContext = NonNullable<
+  Parameters<typeof requestUnderstandingAgent.buildBrief>[0]["attachments"]
+>;
+
 export type ExecutionIntentGuardContext = {
   brief: RequestBrief;
   decision: GuardDecision;
@@ -38,6 +42,17 @@ declare global {
 
 const executionIntentLogger = createLogger("execution-intent-guard");
 const mutationMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const DEFAULT_GUARD_TIMEOUT_MS = 8_000;
+const ATTACHMENT_EXTRACTION_PATTERNS = [
+  /\btranscrib(?:e|ir|elo|ela|an|eme)?\b/i,
+  /\bocr\b/i,
+  /\bextra(?:e|er)\b.*\btexto\b/i,
+  /\blee\b.*\b(?:adjunto|archivo|imagen|documento)\b/i,
+  /\bdescribe\b.*\b(?:adjunta|adjunto|imagen|documento)\b/i,
+  /\b(?:texto|contenido)\b.*\b(?:imagen|documento|archivo|adjunto)\b/i,
+];
+const MISSING_SOURCE_HINT_PATTERN =
+  /\b(archivo|file|adjunto|attachment|imagen|image|documento|document|material|fuente|source|enlace|link)\b/i;
 
 const guardStats: GuardStats = {
   analyzed: 0,
@@ -139,6 +154,55 @@ function extractAvailableTools(req: Request): string[] {
   return dedupe(tools.map((tool) => normalizeText(tool)));
 }
 
+function extractAttachmentContext(req: Request): GuardAttachmentContext {
+  const rawAttachments = Array.isArray((req.body as any)?.attachments)
+    ? ((req.body as any).attachments as Array<Record<string, unknown>>)
+    : [];
+
+  return rawAttachments
+    .map((attachment) => {
+      const name = normalizeText(attachment?.name);
+      const mimeType = normalizeText(attachment?.mimeType || attachment?.type).toLowerCase();
+      const type = mimeType.startsWith("image/") ? "image" : "document";
+      const providedText =
+        normalizeText(attachment?.extractedText) ||
+        normalizeText(attachment?.content) ||
+        normalizeText(attachment?.text);
+
+      return {
+        type,
+        name: name || undefined,
+        extractedText:
+          providedText ||
+          `User provided attached ${type}${name ? ` "${name}"` : ""}.`,
+      } as const;
+    })
+    .filter((attachment) => attachment.extractedText.length > 0);
+}
+
+function isAttachmentExtractionRequest(userText: string): boolean {
+  return ATTACHMENT_EXTRACTION_PATTERNS.some((pattern) => pattern.test(userText));
+}
+
+function shouldAllowAttachmentExtractionRequest(params: {
+  userText: string;
+  attachments: GuardAttachmentContext;
+  brief: RequestBrief;
+  decision: GuardDecision;
+}): boolean {
+  const { userText, attachments, brief, decision } = params;
+
+  if (attachments.length === 0) return false;
+  if (!isAttachmentExtractionRequest(userText)) return false;
+  if (!brief.blocker?.is_blocked) return false;
+  if (!brief.guardrails.policy_ok || !brief.guardrails.privacy_ok || !brief.guardrails.security_ok) return false;
+  if (!brief.self_check.passed) return false;
+  if (decision.reasons.some((reason) => reason !== "blocker_requires_clarification")) return false;
+
+  const blockerQuestion = normalizeText(brief.blocker.question || "");
+  return blockerQuestion.length === 0 || MISSING_SOURCE_HINT_PATTERN.test(blockerQuestion);
+}
+
 function evaluateBrief(brief: RequestBrief): GuardDecision {
   const reasons: string[] = [];
 
@@ -183,6 +247,33 @@ function buildBlockedResponse(brief: RequestBrief, decision: GuardDecision, mode
   };
 }
 
+function resolveGuardTimeoutMs(): number {
+  const raw = Number(process.env.EXECUTION_INTENT_GUARD_TIMEOUT_MS || DEFAULT_GUARD_TIMEOUT_MS);
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return DEFAULT_GUARD_TIMEOUT_MS;
+  }
+  return Math.min(Math.max(Math.trunc(raw), 250), 30_000);
+}
+
+async function withGuardTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new Error(`execution intent guard timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+}
+
 export function getExecutionIntentGuardStatus() {
   return {
     mode: resolveGuardMode(),
@@ -213,6 +304,7 @@ export async function preExecutionIntentGuard(
   const userId = getSecureUserId(req) || undefined;
   const chatId = normalizeText((req.body as any)?.chatId) || undefined;
   const availableTools = extractAvailableTools(req);
+  const attachments = extractAttachmentContext(req);
 
   guardStats.analyzed += 1;
 
@@ -244,73 +336,73 @@ const isSafePythonAgentReadOnly =
 const isSafeReadOnlyHealth =
   req.method === "GET" && (/^\/api\/python-agent\/health$/.test(pathOnly) || /^\/api\/python-agent\/status$/.test(pathOnly));
 
-// Agent-run lifecycle endpoints already go through the native agent planner,
-// policy engine and runtime guardrails. Running the request-understanding LLM
-// here adds a second preflight that can stall POST /api/agent/runs long enough
-// for the UI to time out before the run is even created.
-const isAgentRunCreate =
-  req.method === "POST" &&
-  /^(?:\/api)?\/agent\/runs$/.test(pathOnly);
-
-const isAgentRunControl =
-  req.method === "POST" &&
-  /^(?:\/api)?\/agent\/runs\/[^/]+\/(?:cancel|pause|resume|retry)$/.test(
-    pathOnly,
-  );
+const isAgentRunControlPlaneRequest =
+  req.method === "POST" && /^\/(?:api\/)?agent\/runs(?:\/[^/]+\/(?:cancel|pause|resume|confirm|retry))?$/.test(pathOnly);
 
 if (
+  isAgentRunControlPlaneRequest ||
   isTerminalSessionCreate ||
   isTerminalExec ||
   isTerminalFileOp ||
   isTerminalExecNoApi ||
   isTerminalFileNoApi ||
   isSafePythonAgentReadOnly ||
-  isSafeReadOnlyHealth ||
-  isAgentRunCreate ||
-  isAgentRunControl
+  isSafeReadOnlyHealth
 ) {
   return next();
 }
 
   try {
-    const brief = await withSpan(
-      "execution.intent_guard",
-      async (span) => {
-        span.setAttribute("guard.mode", mode);
-        span.setAttribute("guard.path", req.path);
-        span.setAttribute("guard.method", req.method);
-        span.setAttribute("guard.has_user_id", Boolean(userId));
-        span.setAttribute("guard.input_length", userText.length);
+    const brief = await withGuardTimeout(
+      withSpan(
+        "execution.intent_guard",
+        async (span) => {
+          span.setAttribute("guard.mode", mode);
+          span.setAttribute("guard.path", req.path);
+          span.setAttribute("guard.method", req.method);
+          span.setAttribute("guard.has_user_id", Boolean(userId));
+          span.setAttribute("guard.input_length", userText.length);
+          span.setAttribute("guard.attachments_count", attachments.length);
 
-        const result = await requestUnderstandingAgent.buildBrief({
-          text: userText,
-          conversationHistory: Array.isArray((req.body as any)?.messages)
-            ? ((req.body as any).messages as any[])
-              .slice(-6)
-              .map((entry) => ({
-                role: String(entry?.role || "user").toLowerCase() === "assistant" ? "assistant" : "user",
-                content: normalizeText(entry?.content || entry?.text || entry?.message),
-              }))
-            : undefined,
-          availableTools,
-          userId,
-          chatId,
+          const result = await requestUnderstandingAgent.buildBrief({
+            text: userText,
+            attachments,
+            conversationHistory: Array.isArray((req.body as any)?.messages)
+              ? ((req.body as any).messages as any[])
+                .slice(-6)
+                .map((entry) => ({
+                  role: String(entry?.role || "user").toLowerCase() === "assistant" ? "assistant" : "user",
+                  content: normalizeText(entry?.content || entry?.text || entry?.message),
+                }))
+              : undefined,
+            availableTools,
+            userId,
+            chatId,
+            requestId: (res.locals?.traceId as string) || undefined,
+            userPlan: "free",
+          });
+
+          span.setAttribute("guard.intent_confidence", result.intent.confidence);
+          span.setAttribute("guard.blocked_by_brief", result.blocker.is_blocked);
+          span.setAttribute("guard.self_check_passed", result.self_check.passed);
+          return result;
+        },
+        {
           requestId: (res.locals?.traceId as string) || undefined,
-          userPlan: "free",
-        });
-
-        span.setAttribute("guard.intent_confidence", result.intent.confidence);
-        span.setAttribute("guard.blocked_by_brief", result.blocker.is_blocked);
-        span.setAttribute("guard.self_check_passed", result.self_check.passed);
-        return result;
-      },
-      {
-        requestId: (res.locals?.traceId as string) || undefined,
-        userId,
-      },
+          userId,
+        },
+      ),
+      resolveGuardTimeoutMs(),
     );
 
-    const decision = evaluateBrief(brief);
+    let decision = evaluateBrief(brief);
+    if (shouldAllowAttachmentExtractionRequest({ userText, attachments, brief, decision })) {
+      decision = {
+        allowed: true,
+        reasons: [],
+        message: "Execution allowed because the source attachment is already present.",
+      };
+    }
     req.executionIntentGuard = { brief, decision, mode };
 
     if (decision.allowed) {

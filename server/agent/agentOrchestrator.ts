@@ -1,7 +1,6 @@
 import { detectToolCallLoop, hashToolCall, hashToolOutcome } from "./toolLoopDetection";
 import { toolRegistry, type ToolResult, type ToolArtifact } from "./toolRegistry";
 import { llmGateway } from "../lib/llmGateway";
-import { GEMINI_MODELS, getGeminiClient } from "../lib/gemini";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import type { User, TraceEventType, TraceEvent } from "@shared/schema";
 import { EventEmitter } from "events";
@@ -16,9 +15,12 @@ import { eq } from "drizzle-orm";
 import { getUserSettingsCached } from "../services/userSettingsCache";
 import { policyEngine } from "./policyEngine";
 import { hookSystem } from "../openclaw/plugins/hookSystem";
-import { enrichToolExecutionInput } from "./toolExecutionInput";
 import { ObjectStorageService } from "../replit_integrations/object_storage/objectStorage";
-import { generateDirectDocumentResponse } from "./documentDirectResponse";
+import {
+  buildDocumentAttachmentContext,
+  generateDirectAttachmentTranscriptionResponse,
+  generateDirectDocumentResponse,
+} from "./documentDirectResponse";
 
 // Agentic orchestrator bridge
 import {
@@ -856,6 +858,15 @@ Respond with ONLY valid JSON:
       return false;
     }
 
+    const hasOnlyImages =
+      attachments.length > 0 &&
+      attachments.every((attachment) =>
+        String(attachment?.mimeType || attachment?.type || "").toLowerCase().startsWith("image/")
+      );
+    if (!hasOnlyImages) {
+      return false;
+    }
+
     const lowerMessage = String(message || "").toLowerCase();
     const toolIntentPatterns = [
       /\b(busca|buscar|search|web|internet|url|navega|browse|abre|open)\b/,
@@ -927,24 +938,35 @@ Respond with ONLY valid JSON:
       return this.generateConversationalResponse(message);
     }
 
+    const ocrContext = await buildDocumentAttachmentContext(attachments);
+    const trimmedOcrContext = ocrContext.trim().slice(0, 20_000);
+
     const systemPrompt = `Eres un tutor experto que analiza imágenes adjuntas y responde en español.
 Si la imagen contiene un ejercicio, resuélvelo paso a paso.
 Si falta nitidez o información, dilo explícitamente.
-No inventes texto que no puedas leer.`;
+No inventes texto que no puedas leer.
+Si recibes OCR de apoyo, úsalo como respaldo para leer texto pequeño, borroso o documentos escaneados.`;
 
     const textPrompt = String(message || "").trim() || "Analiza la imagen adjunta y responde.";
-    const selectedModel =
-      getGeminiClient() && !String(this.modelId || "").toLowerCase().includes("gemini")
-        ? GEMINI_MODELS.FLASH
-        : this.modelId;
+    const userContent: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [
+      { type: "text", text: textPrompt },
+    ];
+
+    if (trimmedOcrContext) {
+      userContent.push({
+        type: "text",
+        text:
+          "OCR de apoyo extraido automaticamente de las imagenes adjuntas. " +
+          "Usalo como referencia textual cuando ayude a leer mejor el contenido:\n\n" +
+          trimmedOcrContext,
+      });
+    }
+
     const messages: ChatCompletionMessageParam[] = [
       { role: "system", content: systemPrompt },
       {
         role: "user",
-        content: [
-          { type: "text", text: textPrompt },
-          ...imageParts,
-        ] as any,
+        content: [...userContent, ...imageParts] as any,
       },
     ];
 
@@ -952,7 +974,7 @@ No inventes texto que no puedas leer.`;
       temperature: 0.2,
       maxTokens: 2000,
       userId: this.userId,
-      model: selectedModel,
+      model: this.modelId,
     });
 
     return response.content;
@@ -1054,21 +1076,27 @@ No uses markdown ni emojis.${userProfileLine ? `\n${userProfileLine}` : ""}${cus
       attachmentCount: this.attachments.length,
     });
 
-    const isConversational = await this.checkIfConversational(userMessage);
-    if (isConversational && (!attachments || attachments.length === 0)) {
-      const response = await this.generateConversationalResponse(userMessage);
-      this.plan = {
-        objective: "Respond to conversational message",
-        steps: [],
-        estimatedTime: "0 seconds",
-        conversationalResponse: response
-      };
-      this.logEvent('observation', { type: 'conversational_response', response: response.substring(0, 200) });
-      this.emitProgress();
-      return this.plan;
-    }
-
     if (this.shouldUseDirectImageResponse(userMessage, this.attachments)) {
+      const transcriptionResponse = await generateDirectAttachmentTranscriptionResponse({
+        userMessage,
+        attachments: this.attachments,
+      });
+      if (transcriptionResponse) {
+        this.plan = {
+          objective: userMessage,
+          steps: [],
+          estimatedTime: "0 seconds",
+          conversationalResponse: transcriptionResponse,
+        };
+        this.logEvent('observation', {
+          type: 'attachment_transcription_response',
+          response: transcriptionResponse.substring(0, 200),
+          attachmentCount: this.attachments.length,
+        });
+        this.emitProgress();
+        return this.plan;
+      }
+
       const response = await this.generateImageReasoningResponse(userMessage, this.attachments);
       this.plan = {
         objective: userMessage,
@@ -1086,6 +1114,27 @@ No uses markdown ni emojis.${userProfileLine ? `\n${userProfileLine}` : ""}${cus
     }
 
     if (!this.explicitWebSearch) {
+      const transcriptionResponse = await generateDirectAttachmentTranscriptionResponse({
+        userMessage,
+        attachments: this.attachments,
+      });
+
+      if (transcriptionResponse) {
+        this.plan = {
+          objective: userMessage,
+          steps: [],
+          estimatedTime: "0 seconds",
+          conversationalResponse: transcriptionResponse,
+        };
+        this.logEvent('observation', {
+          type: 'attachment_transcription_response',
+          response: transcriptionResponse.substring(0, 200),
+          attachmentCount: this.attachments.length,
+        });
+        this.emitProgress();
+        return this.plan;
+      }
+
       const response = await generateDirectDocumentResponse({
         userMessage,
         attachments: this.attachments,
@@ -1108,6 +1157,20 @@ No uses markdown ni emojis.${userProfileLine ? `\n${userProfileLine}` : ""}${cus
         this.emitProgress();
         return this.plan;
       }
+    }
+
+    const isConversational = await this.checkIfConversational(userMessage);
+    if (isConversational && (!attachments || attachments.length === 0)) {
+      const response = await this.generateConversationalResponse(userMessage);
+      this.plan = {
+        objective: "Respond to conversational message",
+        steps: [],
+        estimatedTime: "0 seconds",
+        conversationalResponse: response
+      };
+      this.logEvent('observation', { type: 'conversational_response', response: response.substring(0, 200) });
+      this.emitProgress();
+      return this.plan;
     }
 
     // Try HTN Planner first (Batch 4 Upgrade)
@@ -1241,13 +1304,11 @@ Respond with ONLY valid JSON in this exact format:
       }
 
       plan.steps = plan.steps.slice(0, 8);
+      this.validatePlannedSteps(plan);
 
       for (let i = 0; i < plan.steps.length; i++) {
         plan.steps[i].index = i;
-        plan.steps[i].toolName = normalizeToolName(plan.steps[i].toolName || "unknown");
       }
-
-      this.validatePlannedSteps(plan);
 
       this.plan = plan;
       this.logEvent('plan', { objective: plan.objective, steps: plan.steps.length, estimatedTime: plan.estimatedTime });
@@ -1334,14 +1395,12 @@ Respond with ONLY valid JSON in this exact format:
 
     console.log(`[AgentOrchestrator] Executing step ${stepIndex}: ${step.toolName}`);
 
-    const executionInput = enrichToolExecutionInput(step.toolName, step.input, this.stepResults);
-
     // OpenClaw hook: before_tool_call
     await hookSystem.dispatch('before_tool_call', {
       runId: this.runId,
       userId: this.userId,
       toolName: step.toolName,
-      toolInput: executionInput,
+      toolInput: step.input,
     });
 
     // --- CLAWI TOOL LOOP DETECTION ---
@@ -1367,7 +1426,7 @@ Respond with ONLY valid JSON in this exact format:
     if ((this as any).toolCallHistory.length > 30) (this as any).toolCallHistory.shift();
 
     try {
-      const result = await toolRegistry.execute(step.toolName, executionInput, {
+      const result = await toolRegistry.execute(step.toolName, step.input, {
         userId: this.userId,
         chatId: this.chatId,
         runId: this.runId,
@@ -2140,8 +2199,6 @@ Provide a brief, user-friendly summary (2-4 sentences) of what was accomplished.
   async executeHTNTask(task: Task): Promise<any> {
     // Find corresponding step index for UI updates (if strictly mapped)
     const stepIndex = this.plan!.steps.findIndex(s => s.description === task.description && s.toolName === (task.toolName || 'unknown'));
-    const planner = getHTNPlanner();
-    const htnPlan = this.htnPlanId ? planner.getPlan(this.htnPlanId) : undefined;
 
     if (this.isCancelled) {
       throw new Error("Run cancelled");
@@ -2162,52 +2219,16 @@ Provide a brief, user-friendly summary (2-4 sentences) of what was accomplished.
       summary: task.description
     });
 
-    const dependencyResults = (task.dependencies || []).flatMap((dependencyId) => {
-      const dependencyTask = htnPlan?.allTasks.get(dependencyId);
-      if (!dependencyTask || dependencyTask.status !== "completed" || typeof dependencyTask.result === "undefined") {
-        return [];
-      }
-
-      const dependencyStepIndex = htnPlan?.executionOrder.indexOf(dependencyId) ?? -1;
-
-      return [{
-        stepIndex: dependencyStepIndex >= 0 ? dependencyStepIndex : this.stepResults.length,
-        toolName: normalizeToolName(dependencyTask.toolName || "unknown"),
-        success: true,
-        output: dependencyTask.result,
-        error: dependencyTask.error,
-      }];
-    });
-
-    const executionInput = enrichToolExecutionInput(
-      task.toolName || "unknown",
-      task.toolParams,
-      dependencyResults.length > 0 ? dependencyResults : this.stepResults,
-    );
-    const normalizedToolName = normalizeToolName(task.toolName || "unknown");
-    if (
-      normalizedToolName === "web_search" &&
-      typeof executionInput.query !== "string"
-    ) {
-      const fallbackQuery =
-        (typeof this.userMessage === "string" && this.userMessage.trim()) ||
-        this.plan?.objective ||
-        task.description;
-      if (fallbackQuery) {
-        executionInput.query = fallbackQuery;
-      }
-    }
-
     // OpenClaw hook: before_tool_call (HTN path)
     await hookSystem.dispatch('before_tool_call', {
       runId: this.runId,
       userId: this.userId,
       toolName: task.toolName || 'unknown',
-      toolInput: executionInput,
+      toolInput: task.toolParams,
     });
 
     try {
-      const result = await toolRegistry.execute(task.toolName || 'unknown', executionInput, {
+      const result = await toolRegistry.execute(task.toolName || 'unknown', task.toolParams, {
         userId: this.userId,
         chatId: this.chatId,
         runId: this.runId,
@@ -2281,19 +2302,8 @@ class AgentManager {
     modelId?: string
   ): Promise<AgentOrchestrator> {
     const orchestrator = await this.createRun(runId, chatId, userId, message, attachments, userPlan, modelId);
-    setImmediate(() => {
-      (async () => {
-        await orchestrator.generatePlan(message, attachments);
-
-        // Conversational requests can finish during plan generation without entering the executor.
-        if (orchestrator.status === "completed" || orchestrator.status === "failed" || orchestrator.status === "cancelled") {
-          return;
-        }
-
-        await this.executeRun(runId);
-      })().catch((error) => {
-        console.error(`[AgentManager] Run ${runId} failed:`, error.message);
-      });
+    this.executeRun(runId).catch((error) => {
+      console.error(`[AgentManager] Run ${runId} failed:`, error.message);
     });
     return orchestrator;
   }
@@ -2313,6 +2323,9 @@ class AgentManager {
 
     const orchestrator = new AgentOrchestrator(runId, chatId, userId, userPlan, modelId);
     this.activeRuns.set(runId, orchestrator);
+
+    // Generate initial plan synchronously so UI has something to show
+    await orchestrator.generatePlan(message, attachments);
 
     return orchestrator;
   }
