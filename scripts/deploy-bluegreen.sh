@@ -1490,7 +1490,20 @@ log "[15/15] Updating deploy state..."
 PREV_IMAGE="$([ -f "${STATE_FILE}" ] && python3 -c "import json; print(json.load(open('${STATE_FILE}')).get('image_tag','unknown'))" 2>/dev/null || echo "unknown")"
 PREV_VERSION="$([ -f "${STATE_FILE}" ] && python3 -c "import json; print(json.load(open('${STATE_FILE}')).get('app_version','unknown'))" 2>/dev/null || echo "unknown")"
 
-python3 -c "
+DEPLOY_DURATION_SEC="$(( $(date +%s) - DEPLOY_START_EPOCH ))"
+DEPLOY_STATE_ACTIVE_SLOT="${NEW_SLOT}" \
+DEPLOY_STATE_ACTIVE_PORT="${NEW_PORT}" \
+DEPLOY_STATE_IMAGE_TAG="${IMAGE_TAG}" \
+DEPLOY_STATE_APP_VERSION="${APP_VERSION}" \
+DEPLOY_STATE_PREVIOUS_SLOT="${ACTIVE_SLOT}" \
+DEPLOY_STATE_PREVIOUS_PORT="${OLD_PORT}" \
+DEPLOY_STATE_PREVIOUS_IMAGE="${PREV_IMAGE}" \
+DEPLOY_STATE_PREVIOUS_VERSION="${PREV_VERSION}" \
+DEPLOY_STATE_APP_IMAGE_DIGEST="${APP_DIGEST}" \
+DEPLOY_STATE_SCRIPT_VERSION="${SCRIPT_VERSION}" \
+DEPLOY_STATE_DURATION_SEC="${DEPLOY_DURATION_SEC}" \
+DEPLOY_STATE_FILE="${STATE_FILE}" \
+python3 - <<'PY'
 import datetime
 import hashlib
 import hmac
@@ -1498,36 +1511,37 @@ import json
 import os
 
 state = {
-    'active_slot': '${NEW_SLOT}',
-    'active_port': ${NEW_PORT},
-    'image_tag': '${IMAGE_TAG}',
-    'app_version': '${APP_VERSION}',
-    'deployed_at': datetime.datetime.utcnow().isoformat() + 'Z',
-    'previous_slot': '${ACTIVE_SLOT}',
-    'previous_port': ${OLD_PORT},
-    'previous_image': '${PREV_IMAGE}',
-    'previous_version': '${PREV_VERSION}',
-    'app_image_digest': '${APP_DIGEST}',
-    'deploy_script_version': '${SCRIPT_VERSION}',
-    'deploy_duration_sec': $(( $(date +%s) - DEPLOY_START_EPOCH )),
-    'state_format_version': 2,
-    'state_signature_alg': 'hmac-sha256'
+    "active_slot": os.environ["DEPLOY_STATE_ACTIVE_SLOT"],
+    "active_port": int(os.environ["DEPLOY_STATE_ACTIVE_PORT"]),
+    "image_tag": os.environ["DEPLOY_STATE_IMAGE_TAG"],
+    "app_version": os.environ["DEPLOY_STATE_APP_VERSION"],
+    "deployed_at": datetime.datetime.utcnow().isoformat() + "Z",
+    "previous_slot": os.environ["DEPLOY_STATE_PREVIOUS_SLOT"],
+    "previous_port": int(os.environ["DEPLOY_STATE_PREVIOUS_PORT"]),
+    "previous_image": os.environ["DEPLOY_STATE_PREVIOUS_IMAGE"],
+    "previous_version": os.environ["DEPLOY_STATE_PREVIOUS_VERSION"],
+    "app_image_digest": os.environ.get("DEPLOY_STATE_APP_IMAGE_DIGEST", ""),
+    "deploy_script_version": os.environ["DEPLOY_STATE_SCRIPT_VERSION"],
+    "deploy_duration_sec": int(os.environ["DEPLOY_STATE_DURATION_SEC"]),
+    "state_format_version": 2,
+    "state_signature_alg": "hmac-sha256",
 }
 
-state_key = os.environ.get('DEPLOY_STATE_HMAC_KEY', '')
+state_key = os.environ.get("DEPLOY_STATE_HMAC_KEY", "")
 if state_key:
-    canonical = json.dumps(state, sort_keys=True, separators=(',', ':')).encode('utf-8')
-    state['state_signature'] = hmac.new(
-        state_key.encode('utf-8'),
+    canonical = json.dumps(state, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    state["state_signature"] = hmac.new(
+        state_key.encode("utf-8"),
         canonical,
-        hashlib.sha256
+        hashlib.sha256,
     ).hexdigest()
 
-with open('${STATE_FILE}', 'w') as f:
-    json.dump(state, f, indent=2)
-os.chmod('${STATE_FILE}', 0o600)
+state_path = os.environ["DEPLOY_STATE_FILE"]
+with open(state_path, "w", encoding="utf-8") as fh:
+    json.dump(state, fh, indent=2)
+os.chmod(state_path, 0o600)
 print(json.dumps(state, indent=2))
-"
+PY
 
 # Remove state backup (deploy succeeded)
 rm -f "${STATE_FILE_BAK}"
