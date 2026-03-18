@@ -1119,6 +1119,14 @@ ensure_legacy_upstream_file() {
 
 # ── Step 1: Pull images from GHCR (with timeout + digest verification) ──
 log "[1/14] Pulling images from GHCR (timeout: ${PULL_TIMEOUT}s)..."
+
+# Reclaim space from the inactive slot before pulling new images. This frees
+# old slot containers so image prune can actually drop their unreferenced layers.
+log "  Preparing inactive ${NEW_SLOT} slot for image pull..."
+slot "${NEW_SLOT}" down --remove-orphans >/dev/null 2>&1 || true
+remove_slot_containers "${NEW_SLOT}"
+reclaim_docker_space
+
 ensure_pull_headroom
 IMAGES=(
   "${REGISTRY}/iliagpt-app:${IMAGE_TAG}"
