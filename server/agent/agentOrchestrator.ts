@@ -268,6 +268,7 @@ function normalizeToolName(toolName: string): string {
 
 const MAX_RETRY_ATTEMPTS = 2;
 const MAX_REPLAN_ATTEMPTS = 2;
+const DEFAULT_IMAGE_OCR_SUPPORT_TIMEOUT_MS = 3_500;
 
 export class AgentOrchestrator extends EventEmitter {
   public runId: string;
@@ -938,7 +939,7 @@ Respond with ONLY valid JSON:
       return this.generateConversationalResponse(message);
     }
 
-    const ocrContext = await buildDocumentAttachmentContext(attachments);
+    const ocrContext = await this.buildImageOcrSupportContext(attachments);
     const trimmedOcrContext = ocrContext.trim().slice(0, 20_000);
 
     const systemPrompt = `Eres un tutor experto que analiza imágenes adjuntas y responde en español.
@@ -978,6 +979,50 @@ Si recibes OCR de apoyo, úsalo como respaldo para leer texto pequeño, borroso 
     });
 
     return response.content;
+  }
+
+  private resolveImageOcrSupportTimeoutMs(): number {
+    const raw = Number(process.env.AGENT_IMAGE_OCR_SUPPORT_TIMEOUT_MS || DEFAULT_IMAGE_OCR_SUPPORT_TIMEOUT_MS);
+    if (!Number.isFinite(raw) || raw <= 0) {
+      return DEFAULT_IMAGE_OCR_SUPPORT_TIMEOUT_MS;
+    }
+    return Math.min(Math.max(Math.trunc(raw), 100), 15_000);
+  }
+
+  private async buildImageOcrSupportContext(attachments: any[]): Promise<string> {
+    const timeoutMs = this.resolveImageOcrSupportTimeoutMs();
+    let timedOut = false;
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+    try {
+      const context = await Promise.race<string>([
+        buildDocumentAttachmentContext(attachments),
+        new Promise<string>((resolve) => {
+          timeoutHandle = setTimeout(() => {
+            timedOut = true;
+            resolve("");
+          }, timeoutMs);
+        }),
+      ]);
+
+      if (timedOut) {
+        console.warn(
+          `[AgentOrchestrator] OCR support context timed out after ${timeoutMs}ms for run ${this.runId}; continuing with image reasoning only.`,
+        );
+      }
+
+      return typeof context === "string" ? context : "";
+    } catch (error: any) {
+      console.warn(
+        `[AgentOrchestrator] Failed to build OCR support context for run ${this.runId}:`,
+        error?.message || error,
+      );
+      return "";
+    } finally {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+    }
   }
 
   private async generateConversationalResponse(message: string): Promise<string> {

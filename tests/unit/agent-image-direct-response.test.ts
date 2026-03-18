@@ -1,5 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const {
+  buildDocumentAttachmentContextMock,
+  generateDirectAttachmentTranscriptionResponseMock,
+  generateDirectDocumentResponseMock,
+} = vi.hoisted(() => ({
+  buildDocumentAttachmentContextMock: vi.fn(),
+  generateDirectAttachmentTranscriptionResponseMock: vi.fn(),
+  generateDirectDocumentResponseMock: vi.fn(),
+}));
+
 vi.mock("../../server/db", () => ({
   db: {
     update: () => ({
@@ -33,9 +43,9 @@ vi.mock("../../server/agent/documentDirectResponse", async () => {
 
   return {
     ...actual,
-    buildDocumentAttachmentContext: vi.fn().mockResolvedValue(""),
-    generateDirectAttachmentTranscriptionResponse: vi.fn().mockResolvedValue(null),
-    generateDirectDocumentResponse: vi.fn().mockResolvedValue(null),
+    buildDocumentAttachmentContext: buildDocumentAttachmentContextMock,
+    generateDirectAttachmentTranscriptionResponse: generateDirectAttachmentTranscriptionResponseMock,
+    generateDirectDocumentResponse: generateDirectDocumentResponseMock,
   };
 });
 
@@ -45,6 +55,13 @@ describe("AgentOrchestrator image direct response", () => {
   beforeEach(() => {
     chatMock.mockReset();
     getObjectEntityBufferMock.mockReset();
+    buildDocumentAttachmentContextMock.mockReset();
+    generateDirectAttachmentTranscriptionResponseMock.mockReset();
+    generateDirectDocumentResponseMock.mockReset();
+    buildDocumentAttachmentContextMock.mockResolvedValue("");
+    generateDirectAttachmentTranscriptionResponseMock.mockResolvedValue(null);
+    generateDirectDocumentResponseMock.mockResolvedValue(null);
+    delete process.env.AGENT_IMAGE_OCR_SUPPORT_TIMEOUT_MS;
   });
 
   it("responds directly with vision when the user attaches an image exercise", async () => {
@@ -70,5 +87,29 @@ describe("AgentOrchestrator image direct response", () => {
     const userMessage = messages[1];
     expect(Array.isArray(userMessage.content)).toBe(true);
     expect(userMessage.content.some((part: any) => part.type === "image_url")).toBe(true);
+  });
+
+  it("does not block direct image responses when OCR support stalls", async () => {
+    process.env.AGENT_IMAGE_OCR_SUPPORT_TIMEOUT_MS = "10";
+    chatMock.mockResolvedValue({ content: "Respuesta con vision sin esperar OCR." });
+    getObjectEntityBufferMock.mockResolvedValue(Buffer.from("fake-image-binary"));
+    buildDocumentAttachmentContextMock.mockImplementation(
+      () => new Promise<string>(() => undefined),
+    );
+
+    const orchestrator = new AgentOrchestrator("run-image-timeout", "chat-image", "user-image", "pro");
+
+    const plan = await orchestrator.generatePlan("Resuelve este ejercicio", [
+      {
+        name: "ejercicio.png",
+        type: "image",
+        mimeType: "image/png",
+        storagePath: "exercise-image",
+      },
+    ]);
+
+    expect(plan.steps).toHaveLength(0);
+    expect(plan.conversationalResponse).toBe("Respuesta con vision sin esperar OCR.");
+    expect(chatMock).toHaveBeenCalledTimes(1);
   });
 });
