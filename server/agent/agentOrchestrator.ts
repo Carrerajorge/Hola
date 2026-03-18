@@ -1,9 +1,11 @@
-import { detectToolCallLoop, hashToolCall } from "./toolLoopDetection";
+import { detectToolCallLoop, hashToolCall, hashToolOutcome } from "./toolLoopDetection";
 import { toolRegistry, type ToolResult, type ToolArtifact } from "./toolRegistry";
 import { llmGateway } from "../lib/llmGateway";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import type { User, TraceEventType, TraceEvent } from "@shared/schema";
 import { EventEmitter } from "events";
+import fs from "fs/promises";
+import path from "path";
 import { agentEventBus } from "./eventBus";
 import { defaultToolRegistry as sandboxToolRegistry } from "./sandbox/tools";
 import { getHTNPlanner, type Task } from "./htnPlanner";
@@ -13,8 +15,12 @@ import { eq } from "drizzle-orm";
 import { getUserSettingsCached } from "../services/userSettingsCache";
 import { policyEngine } from "./policyEngine";
 import { hookSystem } from "../openclaw/plugins/hookSystem";
-import { detectToolCallLoop, hashToolCall } from "./toolLoopDetection";
-import { hashToolOutcome } from "./toolLoopDetection";
+import { ObjectStorageService } from "../replit_integrations/object_storage/objectStorage";
+import {
+  buildDocumentAttachmentContext,
+  generateDirectAttachmentTranscriptionResponse,
+  generateDirectDocumentResponse,
+} from "./documentDirectResponse";
 
 // Agentic orchestrator bridge
 import {
@@ -48,6 +54,7 @@ export interface AgentPlan {
   objective: string;
   steps: PlanStep[];
   estimatedTime: string;
+  conversationalResponse?: string;
 }
 
 export type AgentStatus =
@@ -840,6 +847,139 @@ Respond with ONLY valid JSON:
     return false;
   }
 
+  private hasImageAttachments(attachments: any[]): boolean {
+    return attachments.some((attachment) =>
+      String(attachment?.mimeType || attachment?.type || "").toLowerCase().startsWith("image/")
+    );
+  }
+
+  private shouldUseDirectImageResponse(message: string, attachments: any[]): boolean {
+    if (!this.hasImageAttachments(attachments)) {
+      return false;
+    }
+
+    const hasOnlyImages =
+      attachments.length > 0 &&
+      attachments.every((attachment) =>
+        String(attachment?.mimeType || attachment?.type || "").toLowerCase().startsWith("image/")
+      );
+    if (!hasOnlyImages) {
+      return false;
+    }
+
+    const lowerMessage = String(message || "").toLowerCase();
+    const toolIntentPatterns = [
+      /\b(busca|buscar|search|web|internet|url|navega|browse|abre|open)\b/,
+      /\b(descarga|download|scrape|extrae\s+datos|fetch)\b/,
+      /\b(crea|create|genera|generate)\b.*\b(pdf|doc|docx|excel|ppt|archivo|file)\b/,
+      /\b(shell|terminal|comando|command|script)\b/,
+    ];
+
+    return !toolIntentPatterns.some((pattern) => pattern.test(lowerMessage));
+  }
+
+  private resolveAttachmentLocalPath(storagePath: string): string {
+    const cwd = process.cwd();
+    if (storagePath.startsWith("/objects/uploads/")) {
+      return path.join(cwd, storagePath.replace("/objects/", ""));
+    }
+    if (storagePath.startsWith("/objects/")) {
+      return path.join(cwd, storagePath.replace("/objects/", ""));
+    }
+    if (path.isAbsolute(storagePath)) {
+      return storagePath;
+    }
+    return path.join(cwd, "uploads", storagePath);
+  }
+
+  private async buildImagePartsForVision(attachments: any[]): Promise<Array<{ type: "image_url"; image_url: { url: string } }>> {
+    const imageParts: Array<{ type: "image_url"; image_url: { url: string } }> = [];
+    const objectStorage = new ObjectStorageService();
+
+    for (const attachment of attachments) {
+      const mimeType = String(attachment?.mimeType || attachment?.type || "").toLowerCase();
+      if (!mimeType.startsWith("image/")) {
+        continue;
+      }
+
+      const storagePath = String(attachment?.storagePath || "").trim();
+      let imageBuffer: Buffer | null = null;
+
+      if (storagePath) {
+        try {
+          imageBuffer = await objectStorage.getObjectEntityBuffer(storagePath);
+        } catch {
+          try {
+            imageBuffer = await fs.readFile(this.resolveAttachmentLocalPath(storagePath));
+          } catch {
+            imageBuffer = null;
+          }
+        }
+      }
+
+      if (!imageBuffer) {
+        continue;
+      }
+
+      imageParts.push({
+        type: "image_url",
+        image_url: {
+          url: `data:${mimeType};base64,${imageBuffer.toString("base64")}`,
+        },
+      });
+    }
+
+    return imageParts;
+  }
+
+  private async generateImageReasoningResponse(message: string, attachments: any[]): Promise<string> {
+    const imageParts = await this.buildImagePartsForVision(attachments);
+    if (imageParts.length === 0) {
+      return this.generateConversationalResponse(message);
+    }
+
+    const ocrContext = await buildDocumentAttachmentContext(attachments);
+    const trimmedOcrContext = ocrContext.trim().slice(0, 20_000);
+
+    const systemPrompt = `Eres un tutor experto que analiza imágenes adjuntas y responde en español.
+Si la imagen contiene un ejercicio, resuélvelo paso a paso.
+Si falta nitidez o información, dilo explícitamente.
+No inventes texto que no puedas leer.
+Si recibes OCR de apoyo, úsalo como respaldo para leer texto pequeño, borroso o documentos escaneados.`;
+
+    const textPrompt = String(message || "").trim() || "Analiza la imagen adjunta y responde.";
+    const userContent: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [
+      { type: "text", text: textPrompt },
+    ];
+
+    if (trimmedOcrContext) {
+      userContent.push({
+        type: "text",
+        text:
+          "OCR de apoyo extraido automaticamente de las imagenes adjuntas. " +
+          "Usalo como referencia textual cuando ayude a leer mejor el contenido:\n\n" +
+          trimmedOcrContext,
+      });
+    }
+
+    const messages: ChatCompletionMessageParam[] = [
+      { role: "system", content: systemPrompt },
+      {
+        role: "user",
+        content: [...userContent, ...imageParts] as any,
+      },
+    ];
+
+    const response = await llmGateway.chat(messages, {
+      temperature: 0.2,
+      maxTokens: 2000,
+      userId: this.userId,
+      model: this.modelId,
+    });
+
+    return response.content;
+  }
+
   private async generateConversationalResponse(message: string): Promise<string> {
     const userSettings = await getUserSettingsCached(this.userId);
     const featureFlags = getUserFeatureFlagsFromSettings(userSettings);
@@ -898,6 +1038,30 @@ No uses markdown ni emojis.${userProfileLine ? `\n${userProfileLine}` : ""}${cus
     }
   }
 
+  private validatePlannedSteps(plan: AgentPlan): void {
+    for (let index = 0; index < plan.steps.length; index++) {
+      const step = plan.steps[index];
+      const toolName = normalizeToolName(step.toolName || "unknown");
+      const tool = toolRegistry.get(toolName);
+
+      if (!tool) {
+        throw new Error(`Plan step ${index + 1} uses unknown tool "${toolName}"`);
+      }
+
+      const validation = tool.inputSchema.safeParse(step.input || {});
+      if (!validation.success) {
+        const issue = validation.error.issues[0];
+        const field = issue?.path?.join(".") || "input";
+        throw new Error(
+          `Plan step ${index + 1} has invalid input for "${toolName}" at "${field}": ${issue?.message || "Invalid input"}`
+        );
+      }
+
+      step.toolName = toolName;
+      step.input = validation.data;
+    }
+  }
+
   async generatePlan(userMessage: string, attachments?: any[]): Promise<AgentPlan> {
     this.userMessage = userMessage;
     this.attachments = attachments || [];
@@ -912,6 +1076,89 @@ No uses markdown ni emojis.${userProfileLine ? `\n${userProfileLine}` : ""}${cus
       attachmentCount: this.attachments.length,
     });
 
+    if (this.shouldUseDirectImageResponse(userMessage, this.attachments)) {
+      const transcriptionResponse = await generateDirectAttachmentTranscriptionResponse({
+        userMessage,
+        attachments: this.attachments,
+      });
+      if (transcriptionResponse) {
+        this.plan = {
+          objective: userMessage,
+          steps: [],
+          estimatedTime: "0 seconds",
+          conversationalResponse: transcriptionResponse,
+        };
+        this.logEvent('observation', {
+          type: 'attachment_transcription_response',
+          response: transcriptionResponse.substring(0, 200),
+          attachmentCount: this.attachments.length,
+        });
+        this.emitProgress();
+        return this.plan;
+      }
+
+      const response = await this.generateImageReasoningResponse(userMessage, this.attachments);
+      this.plan = {
+        objective: userMessage,
+        steps: [],
+        estimatedTime: "0 seconds",
+        conversationalResponse: response,
+      };
+      this.logEvent('observation', {
+        type: 'image_reasoning_response',
+        response: response.substring(0, 200),
+        attachmentCount: this.attachments.length,
+      });
+      this.emitProgress();
+      return this.plan;
+    }
+
+    if (!this.explicitWebSearch) {
+      const transcriptionResponse = await generateDirectAttachmentTranscriptionResponse({
+        userMessage,
+        attachments: this.attachments,
+      });
+
+      if (transcriptionResponse) {
+        this.plan = {
+          objective: userMessage,
+          steps: [],
+          estimatedTime: "0 seconds",
+          conversationalResponse: transcriptionResponse,
+        };
+        this.logEvent('observation', {
+          type: 'attachment_transcription_response',
+          response: transcriptionResponse.substring(0, 200),
+          attachmentCount: this.attachments.length,
+        });
+        this.emitProgress();
+        return this.plan;
+      }
+
+      const response = await generateDirectDocumentResponse({
+        userMessage,
+        attachments: this.attachments,
+        userId: this.userId,
+        modelId: this.modelId,
+      });
+
+      if (response) {
+        this.plan = {
+          objective: userMessage,
+          steps: [],
+          estimatedTime: "0 seconds",
+          conversationalResponse: response,
+        };
+        this.logEvent('observation', {
+          type: 'document_reasoning_response',
+          response: response.substring(0, 200),
+          attachmentCount: this.attachments.length,
+        });
+        this.emitProgress();
+        return this.plan;
+      }
+    }
+
     const isConversational = await this.checkIfConversational(userMessage);
     if (isConversational && (!attachments || attachments.length === 0)) {
       const response = await this.generateConversationalResponse(userMessage);
@@ -920,8 +1167,7 @@ No uses markdown ni emojis.${userProfileLine ? `\n${userProfileLine}` : ""}${cus
         steps: [],
         estimatedTime: "0 seconds",
         conversationalResponse: response
-      } as AgentPlan & { conversationalResponse?: string };
-      this.status = "completed";
+      };
       this.logEvent('observation', { type: 'conversational_response', response: response.substring(0, 200) });
       this.emitProgress();
       return this.plan;
@@ -931,7 +1177,11 @@ No uses markdown ni emojis.${userProfileLine ? `\n${userProfileLine}` : ""}${cus
     try {
       const planner = getHTNPlanner();
       // Simple context for now
-      const context = { attachments: this.attachments };
+      const context = {
+        attachments: this.attachments,
+        query: userMessage,
+        topic: userMessage,
+      };
       const planningResult = await planner.plan(userMessage, context);
 
       if (planningResult.success && planningResult.plan) {
@@ -952,11 +1202,14 @@ No uses markdown ni emojis.${userProfileLine ? `\n${userProfileLine}` : ""}${cus
           };
         });
 
-        this.plan = {
+        const nextPlan: AgentPlan = {
           objective: userMessage,
           steps,
           estimatedTime: `${Math.ceil((planningResult.plan.metadata.estimatedDuration || 60000) / 60000)} minutes`
         };
+        this.validatePlannedSteps(nextPlan);
+
+        this.plan = nextPlan;
 
         this.logEvent('plan', {
           type: 'htn_plan_generated',
@@ -1051,10 +1304,10 @@ Respond with ONLY valid JSON in this exact format:
       }
 
       plan.steps = plan.steps.slice(0, 8);
+      this.validatePlannedSteps(plan);
 
       for (let i = 0; i < plan.steps.length; i++) {
         plan.steps[i].index = i;
-        plan.steps[i].toolName = normalizeToolName(plan.steps[i].toolName || "unknown");
       }
 
       this.plan = plan;
@@ -1774,6 +2027,10 @@ Respond with ONLY valid JSON in this exact format:
   async generateSummary(): Promise<string> {
     if (!this.plan) {
       return "No plan was executed.";
+    }
+
+    if (this.plan.conversationalResponse) {
+      return this.plan.conversationalResponse;
     }
 
     const completedSteps = this.stepResults.filter((r) => r.success);
