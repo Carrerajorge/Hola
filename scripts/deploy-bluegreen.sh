@@ -1095,6 +1095,7 @@ done
 
 # Verify digests are present (proves images are authentic from registry)
 APP_DIGEST="none"
+LOCAL_APP_IMAGE_ID=""
 for img in "${IMAGES[@]}"; do
   DIGEST="$(docker inspect --format='{{index .RepoDigests 0}}' "${img}" 2>/dev/null || echo "none")"
   if [ "${DIGEST}" = "none" ]; then
@@ -1107,6 +1108,13 @@ for img in "${IMAGES[@]}"; do
     fi
   fi
 done
+
+LOCAL_APP_IMAGE_ID="$(docker image inspect --format='{{.Id}}' "${REGISTRY}/iliagpt-app:${IMAGE_TAG}" 2>/dev/null || true)"
+if [ -z "${LOCAL_APP_IMAGE_ID}" ]; then
+  loge "Unable to resolve local app image ID for ${REGISTRY}/iliagpt-app:${IMAGE_TAG}"
+  exit 1
+fi
+
 logok "All images pulled and verified. ($(elapsed))"
 echo ""
 
@@ -1176,7 +1184,7 @@ if ! timeout "${MIGRATION_TIMEOUT}" docker run --rm --network hola-net \
   -e DATABASE_URL="postgres://postgres:postgres@${PG_IP}:5432/iliagpt" \
   -e NODE_ENV=production \
   --memory=512m --cpus=1 \
-  "${REGISTRY}/iliagpt-app:${IMAGE_TAG}" \
+  "${LOCAL_APP_IMAGE_ID}" \
   node dist/migrate.cjs 2>&1; then
   loge "Database migration failed or timed out."
   exit 1
