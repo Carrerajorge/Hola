@@ -1,20 +1,15 @@
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { createServer } from "node:http";
-import { join as joinPath, delimiter, dirname, join } from "node:path";
-import { fetchWithSsrFGuard, isWSL2Sync } from "../../src/plugin-sdk/google-gemini-cli-auth.js";
+import { delimiter, dirname, join } from "node:path";
+import { fetchWithSsrFGuard, isWSL2Sync } from "openclaw/plugin-sdk/google-gemini-cli-auth";
 
-const CLIENT_ID_KEYS = [
-  "OPENCLAW_GEMINI_OAUTH_CLIENT_ID",
-  "GEMINI_CLI_OAUTH_CLIENT_ID",
-];
+const CLIENT_ID_KEYS = ["OPENCLAW_GEMINI_OAUTH_CLIENT_ID", "GEMINI_CLI_OAUTH_CLIENT_ID"];
 const CLIENT_SECRET_KEYS = [
   "OPENCLAW_GEMINI_OAUTH_CLIENT_SECRET",
   "GEMINI_CLI_OAUTH_CLIENT_SECRET",
 ];
-const SITE_CLIENT_ID_KEYS = ["GOOGLE_CLIENT_ID"];
-const SITE_CLIENT_SECRET_KEYS = ["GOOGLE_CLIENT_SECRET"];
-const LOCAL_REDIRECT_URI = "http://localhost:8085/oauth2callback";
+const REDIRECT_URI = "http://localhost:8085/oauth2callback";
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const USERINFO_URL = "https://www.googleapis.com/oauth2/v1/userinfo?alt=json";
@@ -141,39 +136,6 @@ export function extractGeminiCliCredentials(): { clientId: string; clientSecret:
   return null;
 }
 
-function extractBundledPiAiGeminiCliCredentials(): { clientId: string; clientSecret: string } | null {
-  try {
-    const packagePath = joinPath(
-      process.cwd(),
-      "node_modules",
-      "@mariozechner",
-      "pi-ai",
-      "dist",
-      "utils",
-      "oauth",
-      "google-gemini-cli.js",
-    );
-    if (!existsSync(packagePath)) {
-      return null;
-    }
-
-    const content = readFileSync(packagePath, "utf8");
-    const clientIdMatch = content.match(/const CLIENT_ID = decode\("([^"]+)"\)/);
-    const clientSecretMatch = content.match(/const CLIENT_SECRET = decode\("([^"]+)"\)/);
-    if (!clientIdMatch || !clientSecretMatch) {
-      return null;
-    }
-
-    const decode = (value: string) => Buffer.from(value, "base64").toString("utf8");
-    return {
-      clientId: decode(clientIdMatch[1]),
-      clientSecret: decode(clientSecretMatch[1]),
-    };
-  } catch {
-    return null;
-  }
-}
-
 function resolveGeminiCliDirs(geminiPath: string, resolvedPath: string): string[] {
   const binDir = dirname(geminiPath);
   const candidates = [
@@ -232,52 +194,23 @@ function findFile(dir: string, name: string, depth: number): string | null {
   return null;
 }
 
-function isLocalRedirectUri(redirectUri?: string): boolean {
-  const normalized = redirectUri?.trim();
-  if (!normalized) {
-    return true;
-  }
-  return normalized === LOCAL_REDIRECT_URI;
-}
-
-function resolveOAuthClientConfig(options?: {
-  redirectUri?: string;
-}): { clientId: string; clientSecret?: string } {
-  const isLocalRedirect = isLocalRedirectUri(options?.redirectUri);
-
-  // 1. Check Gemini-specific env vars first (user override)
+function resolveOAuthClientConfig(): { clientId: string; clientSecret?: string } {
+  // 1. Check env vars first (user override)
   const envClientId = resolveEnv(CLIENT_ID_KEYS);
   const envClientSecret = resolveEnv(CLIENT_SECRET_KEYS);
   if (envClientId) {
     return { clientId: envClientId, clientSecret: envClientSecret };
   }
 
-  // 2. For hosted/browser flows, fall back to the site's web OAuth client when
-  // no Gemini-specific client is configured. The bundled Gemini CLI client is
-  // registered only for localhost and causes redirect_uri_mismatch on web callbacks.
-  if (!isLocalRedirect) {
-    const siteClientId = resolveEnv(SITE_CLIENT_ID_KEYS);
-    const siteClientSecret = resolveEnv(SITE_CLIENT_SECRET_KEYS);
-    if (siteClientId) {
-      return { clientId: siteClientId, clientSecret: siteClientSecret };
-    }
-  }
-
-  // 3. Try to extract from installed Gemini CLI for localhost flows.
+  // 2. Try to extract from installed Gemini CLI
   const extracted = extractGeminiCliCredentials();
   if (extracted) {
     return extracted;
   }
 
-  // 4. Fall back to the dedicated Gemini OAuth client bundled in pi-ai.
-  const bundled = extractBundledPiAiGeminiCliCredentials();
-  if (bundled) {
-    return bundled;
-  }
-
-  // 5. No Gemini-compatible credentials available
+  // 3. No credentials available
   throw new Error(
-    "Gemini CLI OAuth credentials not found. Install gemini-cli, keep @mariozechner/pi-ai available, or set GEMINI_CLI_OAUTH_CLIENT_ID.",
+    "Gemini CLI not found. Install it first: brew install gemini-cli (or npm install -g @google/gemini-cli), or set GEMINI_CLI_OAUTH_CLIENT_ID.",
   );
 }
 
@@ -325,60 +258,20 @@ async function fetchWithTimeout(
   }
 }
 
-function buildAuthUrl(options: {
-  challenge: string;
-  redirectUri: string;
-  state: string;
-  loginHint?: string;
-}): string {
-  const { clientId } = resolveOAuthClientConfig({ redirectUri: options.redirectUri });
+function buildAuthUrl(challenge: string, verifier: string): string {
+  const { clientId } = resolveOAuthClientConfig();
   const params = new URLSearchParams({
     client_id: clientId,
     response_type: "code",
-    redirect_uri: options.redirectUri,
+    redirect_uri: REDIRECT_URI,
     scope: SCOPES.join(" "),
-    code_challenge: options.challenge,
+    code_challenge: challenge,
     code_challenge_method: "S256",
-    state: options.state,
+    state: verifier,
     access_type: "offline",
     prompt: "consent",
   });
-  if (options.loginHint?.trim()) {
-    params.set("login_hint", options.loginHint.trim());
-  }
   return `${AUTH_URL}?${params.toString()}`;
-}
-
-export function startGeminiCliOAuthSession(): {
-  verifier: string;
-  state: string;
-  authUrl: string;
-  redirectUri: string;
-};
-export function startGeminiCliOAuthSession(options: {
-  redirectUri?: string;
-  state?: string;
-  loginHint?: string;
-} = {}): {
-  verifier: string;
-  state: string;
-  authUrl: string;
-  redirectUri: string;
-} {
-  const { verifier, challenge } = generatePkce();
-  const redirectUri = options.redirectUri?.trim() || LOCAL_REDIRECT_URI;
-  const state = options.state?.trim() || verifier;
-  return {
-    verifier,
-    state,
-    authUrl: buildAuthUrl({
-      challenge,
-      redirectUri,
-      state,
-      loginHint: options.loginHint,
-    }),
-    redirectUri,
-  };
 }
 
 function parseCallbackInput(
@@ -390,9 +283,10 @@ function parseCallbackInput(
     return { error: "No input provided" };
   }
 
-  const parseParams = (params: URLSearchParams): { code: string; state: string } | { error: string } => {
-    const code = params.get("code")?.trim();
-    const state = params.get("state")?.trim() || expectedState;
+  try {
+    const url = new URL(trimmed);
+    const code = url.searchParams.get("code");
+    const state = url.searchParams.get("state") ?? expectedState;
     if (!code) {
       return { error: "Missing 'code' parameter in URL" };
     }
@@ -400,16 +294,7 @@ function parseCallbackInput(
       return { error: "Missing 'state' parameter. Paste the full URL." };
     }
     return { code, state };
-  };
-
-  try {
-    const url = new URL(trimmed);
-    return parseParams(url.searchParams);
   } catch {
-    const normalizedQuery = trimmed.startsWith("?") ? trimmed.slice(1) : trimmed;
-    if (normalizedQuery.includes("=") && !normalizedQuery.includes("://")) {
-      return parseParams(new URLSearchParams(normalizedQuery));
-    }
     if (!expectedState) {
       return { error: "Paste the full redirect URL, not just the code." };
     }
@@ -501,7 +386,7 @@ async function waitForLocalCallback(params: {
     });
 
     server.listen(port, hostname, () => {
-      params.onProgress?.(`Waiting for OAuth callback on ${LOCAL_REDIRECT_URI}…`);
+      params.onProgress?.(`Waiting for OAuth callback on ${REDIRECT_URI}…`);
     });
 
     timeout = setTimeout(() => {
@@ -513,14 +398,13 @@ async function waitForLocalCallback(params: {
 async function exchangeCodeForTokens(
   code: string,
   verifier: string,
-  redirectUri: string,
 ): Promise<GeminiCliOAuthCredentials> {
-  const { clientId, clientSecret } = resolveOAuthClientConfig({ redirectUri });
+  const { clientId, clientSecret } = resolveOAuthClientConfig();
   const body = new URLSearchParams({
     client_id: clientId,
     code,
     grant_type: "authorization_code",
-    redirect_uri: redirectUri,
+    redirect_uri: REDIRECT_URI,
     code_verifier: verifier,
   });
   if (clientSecret) {
@@ -563,24 +447,6 @@ async function exchangeCodeForTokens(
     projectId,
     email,
   };
-}
-
-export async function completeGeminiCliOAuthSession(params: {
-  callbackInput: string;
-  verifier: string;
-  redirectUri?: string;
-  expectedState?: string;
-}): Promise<GeminiCliOAuthCredentials> {
-  const expectedState = params.expectedState?.trim() || params.verifier;
-  const redirectUri = params.redirectUri?.trim() || LOCAL_REDIRECT_URI;
-  const parsed = parseCallbackInput(params.callbackInput, expectedState);
-  if ("error" in parsed) {
-    throw new Error(parsed.error);
-  }
-  if (parsed.state !== expectedState) {
-    throw new Error("OAuth state mismatch - please try again");
-  }
-  return await exchangeCodeForTokens(parsed.code, params.verifier, redirectUri);
 }
 
 async function getUserEmail(accessToken: string): Promise<string | undefined> {
@@ -790,6 +656,164 @@ async function pollOperation(
   throw new Error("Operation polling timeout");
 }
 
+/**
+ * Resolves OAuth client credentials for a given redirect URI.
+ * For web (non-localhost) redirects, falls back to GOOGLE_CLIENT_ID when no
+ * Gemini-specific client is configured — the site's web client has the server
+ * callback registered, while Gemini CLI's client only allows localhost:8085.
+ */
+function resolveClientConfigForRedirectUri(redirectUri: string): { clientId: string; clientSecret?: string } {
+  const isLocal =
+    redirectUri.startsWith("http://localhost") || redirectUri.startsWith("http://127.0.0.1");
+
+  // Gemini-specific env vars always win
+  const envClientId = resolveEnv(CLIENT_ID_KEYS);
+  const envClientSecret = resolveEnv(CLIENT_SECRET_KEYS);
+  if (envClientId) {
+    return { clientId: envClientId, clientSecret: envClientSecret };
+  }
+
+  // For local redirects, try to extract from installed Gemini CLI binary
+  if (isLocal) {
+    const extracted = extractGeminiCliCredentials();
+    if (extracted) {
+      return extracted;
+    }
+    throw new Error(
+      "Gemini CLI not found. Install it first: brew install gemini-cli (or npm install -g @google/gemini-cli), or set GEMINI_CLI_OAUTH_CLIENT_ID.",
+    );
+  }
+
+  // For web (non-localhost) redirects, fall back to site's Google OAuth client.
+  // The Gemini CLI's bundled client ID is only registered for localhost callbacks,
+  // so using it against the server callback causes redirect_uri_mismatch.
+  const siteClientId = process.env.GOOGLE_CLIENT_ID?.trim();
+  const siteClientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
+  if (siteClientId) {
+    return { clientId: siteClientId, clientSecret: siteClientSecret };
+  }
+
+  throw new Error(
+    "No OAuth credentials available for web Gemini CLI flow. Set GEMINI_CLI_OAUTH_CLIENT_ID or GOOGLE_CLIENT_ID.",
+  );
+}
+
+/**
+ * Starts a web-based Gemini CLI OAuth session.
+ * Unlike loginGeminiCliOAuth (CLI/terminal), this does not open a local server.
+ * Instead it returns the auth URL and verifier for the browser popup + postMessage flow.
+ */
+export function startGeminiCliOAuthSession(params?: {
+  redirectUri?: string;
+  state?: string;
+  loginHint?: string;
+}): { verifier: string; authUrl: string; redirectUri: string } {
+  const { verifier, challenge } = generatePkce();
+  const redirectUri = params?.redirectUri ?? REDIRECT_URI;
+  const state = params?.state ?? verifier;
+
+  const { clientId } = resolveClientConfigForRedirectUri(redirectUri);
+  const urlParams = new URLSearchParams({
+    client_id: clientId,
+    response_type: "code",
+    redirect_uri: redirectUri,
+    scope: SCOPES.join(" "),
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+    state,
+    access_type: "offline",
+    prompt: "consent",
+  });
+  if (params?.loginHint) {
+    urlParams.set("login_hint", params.loginHint);
+  }
+
+  return {
+    verifier,
+    authUrl: `${AUTH_URL}?${urlParams.toString()}`,
+    redirectUri,
+  };
+}
+
+/**
+ * Completes a web-based Gemini CLI OAuth session.
+ * Parses the callback URL, validates the state, and exchanges the code for tokens.
+ */
+export async function completeGeminiCliOAuthSession(params: {
+  callbackInput: string;
+  verifier: string;
+  redirectUri?: string;
+  expectedState?: string;
+}): Promise<GeminiCliOAuthCredentials> {
+  const redirectUri = params.redirectUri ?? REDIRECT_URI;
+  const expectedState = params.expectedState ?? params.verifier;
+
+  const parsed = parseCallbackInput(params.callbackInput, expectedState);
+  if ("error" in parsed) {
+    throw new Error(parsed.error);
+  }
+  if (parsed.state !== expectedState) {
+    throw new Error("OAuth state mismatch - please try again");
+  }
+
+  return exchangeCodeForTokensWithRedirectUri(parsed.code, params.verifier, redirectUri);
+}
+
+async function exchangeCodeForTokensWithRedirectUri(
+  code: string,
+  verifier: string,
+  redirectUri: string,
+): Promise<GeminiCliOAuthCredentials> {
+  const { clientId, clientSecret } = resolveClientConfigForRedirectUri(redirectUri);
+  const body = new URLSearchParams({
+    client_id: clientId,
+    code,
+    grant_type: "authorization_code",
+    redirect_uri: redirectUri,
+    code_verifier: verifier,
+  });
+  if (clientSecret) {
+    body.set("client_secret", clientSecret);
+  }
+
+  const response = await fetchWithTimeout(TOKEN_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+      Accept: "*/*",
+      "User-Agent": "google-api-nodejs-client/9.15.1",
+    },
+    body,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Token exchange failed: ${errorText}`);
+  }
+
+  const data = (await response.json()) as {
+    access_token: string;
+    refresh_token: string;
+    expires_in: number;
+  };
+
+  if (!data.refresh_token) {
+    throw new Error("No refresh token received. Please try again.");
+  }
+
+  const email = await getUserEmail(data.access_token);
+  const projectId = await discoverProject(data.access_token);
+  const expiresAt = Date.now() + data.expires_in * 1000 - 5 * 60 * 1000;
+
+  return {
+    refresh: data.refresh_token,
+    access: data.access_token,
+    expires: expiresAt,
+    projectId,
+    email,
+  };
+}
+
 export async function loginGeminiCliOAuth(
   ctx: GeminiCliOAuthContext,
 ): Promise<GeminiCliOAuthCredentials> {
@@ -809,8 +833,8 @@ export async function loginGeminiCliOAuth(
     "Gemini CLI OAuth",
   );
 
-  const flow = startGeminiCliOAuthSession();
-  const { verifier, state, authUrl, redirectUri } = flow;
+  const { verifier, challenge } = generatePkce();
+  const authUrl = buildAuthUrl(challenge, verifier);
 
   if (needsManual) {
     ctx.progress.update("OAuth URL ready");
@@ -821,11 +845,11 @@ export async function loginGeminiCliOAuth(
     if ("error" in parsed) {
       throw new Error(parsed.error);
     }
-    if (parsed.state !== state) {
+    if (parsed.state !== verifier) {
       throw new Error("OAuth state mismatch - please try again");
     }
     ctx.progress.update("Exchanging authorization code for tokens...");
-    return exchangeCodeForTokens(parsed.code, verifier, redirectUri);
+    return exchangeCodeForTokens(parsed.code, verifier);
   }
 
   ctx.progress.update("Complete sign-in in browser...");
@@ -837,12 +861,12 @@ export async function loginGeminiCliOAuth(
 
   try {
     const { code } = await waitForLocalCallback({
-      expectedState: state,
+      expectedState: verifier,
       timeoutMs: 5 * 60 * 1000,
       onProgress: (msg) => ctx.progress.update(msg),
     });
     ctx.progress.update("Exchanging authorization code for tokens...");
-    return await exchangeCodeForTokens(code, verifier, redirectUri);
+    return await exchangeCodeForTokens(code, verifier);
   } catch (err) {
     if (
       err instanceof Error &&
@@ -857,11 +881,11 @@ export async function loginGeminiCliOAuth(
       if ("error" in parsed) {
         throw new Error(parsed.error, { cause: err });
       }
-      if (parsed.state !== state) {
+      if (parsed.state !== verifier) {
         throw new Error("OAuth state mismatch - please try again", { cause: err });
       }
       ctx.progress.update("Exchanging authorization code for tokens...");
-      return exchangeCodeForTokens(parsed.code, verifier, redirectUri);
+      return exchangeCodeForTokens(parsed.code, verifier);
     }
     throw err;
   }

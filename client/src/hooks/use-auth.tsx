@@ -164,9 +164,58 @@ function setForcedSignedOut(enabled: boolean): void {
 
 async function fetchUser(): Promise<User | null> {
   const storedAnonId = getStoredAnonUserId();
+  const storedAnonToken = getStoredAnonToken();
   const headers: HeadersInit = {};
   if (storedAnonId) {
     headers['X-Anonymous-User-Id'] = storedAnonId;
+  }
+  if (storedAnonToken) {
+    headers["X-Anonymous-Token"] = storedAnonToken;
+  }
+
+  const tryAnonymousIdentity = async (): Promise<User | null> => {
+    try {
+      const identityRes = await fetch("/api/session/identity", {
+        credentials: "include",
+        headers,
+      });
+      if (identityRes.ok) {
+        const identity = await identityRes.json();
+        if (identity.userId && identity.isAnonymous) {
+          setStoredAnonUserId(identity.userId);
+          if (identity.token) {
+            setStoredAnonToken(identity.token);
+          }
+          return {
+            id: identity.userId,
+            isAnonymous: true,
+            username: `Guest-${identity.userId.slice(0, 4)}`,
+            role: 'user',
+          } as User;
+        }
+      }
+    } catch (e) {
+      console.error("Failed to get session identity:", e);
+    }
+    return null;
+  };
+
+  // After OAuth redirect (?auth=success), skip anonymous identity and go
+  // straight to /api/auth/user.  The PG session store may have write latency
+  // that causes /api/session/identity to return isAnonymous:true before the
+  // authenticated session is readable, which short-circuits into guest mode
+  // and makes the OAuth sync loop fail after 4 retries.
+  const isOAuthCallback = hasOAuthSuccessMarker(window.location.search);
+
+  if (!isOAuthCallback) {
+    // Prefer the session identity contract so guest mode does not emit a noisy
+    // unauthorized probe before the anonymous identity is established.
+    const sessionIdentityUser = await tryAnonymousIdentity();
+    if (sessionIdentityUser) {
+      clearOldUserData();
+      setForcedSignedOut(false);
+      return sessionIdentityUser;
+    }
   }
 
   const response = await fetch("/api/auth/user", {
@@ -186,33 +235,6 @@ async function fetchUser(): Promise<User | null> {
     return user;
   }
 
-  const tryAnonymousIdentity = async (): Promise<User | null> => {
-    try {
-      const identityRes = await fetch("/api/session/identity", {
-        credentials: "include",
-        headers,
-      });
-      if (identityRes.ok) {
-        const identity = await identityRes.json();
-        if (identity.userId) {
-          setStoredAnonUserId(identity.userId);
-          if (identity.token) {
-            setStoredAnonToken(identity.token);
-          }
-          return {
-            id: identity.userId,
-            isAnonymous: true,
-            username: `Guest-${identity.userId.slice(0, 4)}`,
-            role: 'user',
-          } as User;
-        }
-      }
-    } catch (e) {
-      console.error("Failed to get session identity:", e);
-    }
-    return null;
-  };
-  
   if (response.status === 401 || response.status === 403) {
     clearOldUserData();
 
@@ -304,7 +326,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const syncOAuthSession = async () => {
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
 
-      for (let attempt = 0; attempt < 4; attempt++) {
+      // Give the PG session store a moment to propagate the write from the
+      // OAuth callback handler before we start polling /api/auth/user.
+      await new Promise((resolve) => window.setTimeout(resolve, 300));
+
+      for (let attempt = 0; attempt < 6; attempt++) {
+        if (cancelled) return;
         const result = await refetch();
         if (cancelled) return;
 
@@ -317,8 +344,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        if (attempt < 3) {
-          await new Promise((resolve) => window.setTimeout(resolve, 250 * (attempt + 1)));
+        if (attempt < 5) {
+          await new Promise((resolve) => window.setTimeout(resolve, 400 * (attempt + 1)));
         }
       }
 

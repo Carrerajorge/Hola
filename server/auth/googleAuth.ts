@@ -169,7 +169,13 @@ router.get("/google", (req: Request, res: Response) => {
     }
 
     const state = generateState();
-    const returnUrl = (req.query.returnUrl as string) || "/";
+    // Default to /?auth=success so the frontend detects the OAuth callback
+    // and runs the session sync loop.  Custom returnUrl values are preserved
+    // but if the caller just wants "go home after login", we append the marker.
+    let returnUrl = (req.query.returnUrl as string) || "/?auth=success";
+    if (returnUrl === "/") {
+        returnUrl = "/?auth=success";
+    }
     stateStore.set(state, { createdAt: Date.now(), returnUrl });
 
     // Use canonical redirect URI to match Google Cloud Console configuration
@@ -352,6 +358,13 @@ router.get("/google/callback", async (req: Request, res: Response) => {
             if (loginErr) {
                 console.error("[Google Auth] Session creation failed:", loginErr);
                 return res.redirect("/login?error=session_error");
+            }
+
+            // Persist authUserId in the session so /api/session/identity and
+            // /api/auth/user can resolve the user even when Passport
+            // deserialization hasn't run yet (e.g. first request after login).
+            if (req.session) {
+                (req.session as any).authUserId = `google_${googleUser.id}`;
             }
 
             console.log("[Google Auth] req.login() successful, sessionID:", req.sessionID);
