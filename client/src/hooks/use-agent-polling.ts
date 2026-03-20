@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from "react";
 import { useAgentStore, useAgentRun } from "@/stores/agent-store";
 import { pollingManager } from "@/lib/polling-manager";
 import { apiFetch } from "@/lib/apiClient";
+import { normalizeAgentRunAttachments } from "@/lib/agentAttachments";
 
 // Global map of AbortControllers for pending agent start requests
 const pendingAgentStartControllers = new Map<string, AbortController>();
@@ -102,6 +103,7 @@ export function useStartAgentRun() {
     try {
       let resolvedChatId = chatId;
       const normalizedOptions = normalizeAgentStartOptions(options);
+      const normalizedAttachments = normalizeAgentRunAttachments(attachments) || attachments;
       
       if (!chatId || chatId.startsWith("pending-") || chatId === "") {
         const chatRes = await apiFetch('/api/chats', {
@@ -139,7 +141,7 @@ export function useStartAgentRun() {
         body: JSON.stringify({
           chatId: resolvedChatId,
           message: userMessage,
-          attachments,
+          attachments: normalizedAttachments,
           model: normalizedOptions.model,
         })
       });

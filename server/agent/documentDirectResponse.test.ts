@@ -1,9 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { llmChatMock, extractAllAttachmentsContentMock, getFileMock, getFileChunksMock } = vi.hoisted(() => ({
+const {
+  llmChatMock,
+  extractAllAttachmentsContentMock,
+  getFileMock,
+  getFileByStoragePathMock,
+  getFileChunksMock,
+} = vi.hoisted(() => ({
   llmChatMock: vi.fn(),
   extractAllAttachmentsContentMock: vi.fn(),
   getFileMock: vi.fn(),
+  getFileByStoragePathMock: vi.fn(),
   getFileChunksMock: vi.fn(),
 }));
 
@@ -27,6 +34,7 @@ vi.mock("../services/attachmentService", async () => {
 vi.mock("../storage", () => ({
   storage: {
     getFile: getFileMock,
+    getFileByStoragePath: getFileByStoragePathMock,
     getFileChunks: getFileChunksMock,
   },
 }));
@@ -101,6 +109,74 @@ describe("generateDirectDocumentResponse", () => {
     ]);
     expect(context).toContain("captura.png");
     expect(context).toContain("Texto extraido por OCR");
+  });
+
+  it("accepts OpenClaw-style attachments that only provide path", async () => {
+    getFileByStoragePathMock.mockResolvedValue(undefined);
+    extractAllAttachmentsContentMock.mockResolvedValue([
+      {
+        fileName: "prompt.csv",
+        content: "columna,valor\nobjetivo,analizar documentos",
+        mimeType: "text/csv",
+        documentType: "CSV",
+      },
+    ]);
+
+    const context = await buildDocumentAttachmentContext([
+      {
+        name: "prompt.csv",
+        path: "/objects/uploads/prompt.csv",
+        mimeType: "text/csv",
+      },
+    ]);
+
+    expect(getFileByStoragePathMock).toHaveBeenCalledWith("/objects/uploads/prompt.csv");
+    expect(extractAllAttachmentsContentMock).toHaveBeenCalledWith([
+      expect.objectContaining({
+        name: "prompt.csv",
+        storagePath: "/objects/uploads/prompt.csv",
+        mimeType: "text/csv",
+      }),
+    ]);
+    expect(context).toContain("prompt.csv");
+    expect(context).toContain("objetivo,analizar documentos");
+  });
+
+  it("backfills storagePath and normalizes csv mime types from file metadata", async () => {
+    getFileMock.mockResolvedValue({
+      id: "file-csv",
+      name: "prompt.csv",
+      type: "application/vnd.ms-excel",
+      storagePath: "/objects/uploads/prompt.csv",
+      status: "ready",
+    });
+    extractAllAttachmentsContentMock.mockResolvedValue([
+      {
+        fileName: "prompt.csv",
+        content: "task,priority\nfix,high",
+        mimeType: "text/csv",
+        documentType: "CSV",
+      },
+    ]);
+
+    const context = await buildDocumentAttachmentContext([
+      {
+        fileId: "file-csv",
+        name: "prompt.csv",
+        mimeType: "application/vnd.ms-excel",
+      },
+    ]);
+
+    expect(getFileMock).toHaveBeenCalledWith("file-csv");
+    expect(extractAllAttachmentsContentMock).toHaveBeenCalledWith([
+      expect.objectContaining({
+        fileId: "file-csv",
+        name: "prompt.csv",
+        storagePath: "/objects/uploads/prompt.csv",
+        mimeType: "text/csv",
+      }),
+    ]);
+    expect(context).toContain("task,priority");
   });
 
   it("detects explicit OCR or transcription requests", () => {
