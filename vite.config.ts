@@ -1,10 +1,13 @@
+import { createRequire } from "node:module";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
-import { VitePWA } from "vite-plugin-pwa";
 import { metaImagesPlugin } from "./vite-plugin-meta-images";
+
+const require = createRequire(import.meta.url);
+const { VitePWA } = require("vite-plugin-pwa") as typeof import("vite-plugin-pwa");
 
 export default defineConfig(async () => {
   const isProd = process.env.NODE_ENV === "production";

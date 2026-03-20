@@ -3,6 +3,7 @@ import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AvailableModel } from "@/contexts/ModelAvailabilityContext";
 import { GeminiCliOAuthButton } from "./GeminiCliOAuthButton";
+import { OpenAICodexOAuthButton } from "./OpenAICodexOAuthButton";
 
 interface StandardModelSelectorProps {
     availableModels: AvailableModel[];
@@ -13,6 +14,7 @@ interface StandardModelSelectorProps {
     onModelChange?: (id: string) => void;
     modelChangeDisabled?: boolean;
     refetchModels?: () => Promise<unknown> | unknown;
+    showOAuthProviderButtons?: boolean;
     showGeminiCliOAuthButton?: boolean;
 }
 
@@ -31,10 +33,20 @@ export function StandardModelSelector({
     onModelChange,
     modelChangeDisabled = false,
     refetchModels,
+    showOAuthProviderButtons,
     showGeminiCliOAuthButton = false
 }: StandardModelSelectorProps) {
     const isAnyModelAvailable = availableModels.length > 0;
     const isDisabled = !!activeGptName || modelChangeDisabled;
+    const showProviderButtons = showOAuthProviderButtons ?? showGeminiCliOAuthButton;
+
+    const handleConnectedModel = React.useCallback(async (modelId: string) => {
+        await Promise.resolve(refetchModels?.());
+        window.setTimeout(() => {
+            const handler = onModelChange ?? setSelectedModelId;
+            handler(modelId);
+        }, 0);
+    }, [onModelChange, refetchModels, setSelectedModelId]);
 
     // Derived selected model data
     const selectedModelData = React.useMemo(() => {
@@ -47,6 +59,7 @@ export function StandardModelSelector({
         if (providerText === "xai") return "xAI";
         if (providerText === "google" || providerText === "gemini") return "Google Gemini";
         if (providerText === "google-gemini-cli") return "Gemini CLI OAuth";
+        if (providerText === "openai-codex") return "ChatGPT OAuth";
         return safeText(provider, "Proveedor");
     };
 
@@ -68,17 +81,8 @@ export function StandardModelSelector({
                     </select>
                     <ChevronDown className="pointer-events-none absolute right-2 h-3 w-3 text-gray-400 flex-shrink-0" />
                 </div>
-                {showGeminiCliOAuthButton ? (
-                    <GeminiCliOAuthButton
-                        onConnected={async (modelId) => {
-                            await Promise.resolve(refetchModels?.());
-                            window.setTimeout(() => {
-                                const handler = onModelChange ?? setSelectedModelId;
-                                handler(modelId);
-                            }, 0);
-                        }}
-                    />
-                ) : null}
+                {showProviderButtons ? <OpenAICodexOAuthButton onConnected={handleConnectedModel} /> : null}
+                {showProviderButtons ? <GeminiCliOAuthButton onConnected={handleConnectedModel} /> : null}
             </div>
         );
     }
@@ -122,17 +126,8 @@ export function StandardModelSelector({
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-2 h-3 w-3 text-muted-foreground flex-shrink-0" />
             </div>
-            {showGeminiCliOAuthButton ? (
-                <GeminiCliOAuthButton
-                    onConnected={async (modelId) => {
-                        await Promise.resolve(refetchModels?.());
-                        window.setTimeout(() => {
-                            const handler = onModelChange ?? setSelectedModelId;
-                            handler(modelId);
-                        }, 0);
-                    }}
-                />
-            ) : null}
+            {showProviderButtons ? <OpenAICodexOAuthButton onConnected={handleConnectedModel} /> : null}
+            {showProviderButtons ? <GeminiCliOAuthButton onConnected={handleConnectedModel} /> : null}
         </div>
     );
 }
