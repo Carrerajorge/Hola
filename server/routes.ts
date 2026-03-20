@@ -39,6 +39,7 @@ import { createConnectorOAuthRouter } from "./routes/connectorOAuthRouter";
 import gmailOAuthRouter from "./routes/gmailOAuthRouter";
 import calendarOAuthRouter from "./routes/calendarOAuthRouter";
 import googleGeminiCliOAuthRouter from "./routes/googleGeminiCliOAuthRouter";
+import openAICodexOAuthRouter from "./routes/openAICodexOAuthRouter";
 import outlookOAuthRouter from "./routes/outlookOAuthRouter";
 import { createGmailMcpRouter } from "./mcp/gmailMcpServer";
 import healthRouter from "./routes/healthRouter";
@@ -145,6 +146,7 @@ import { GEMINI_MODELS_REGISTRY, XAI_MODELS } from "./lib/modelRegistry";
 import {
   getGoogleGeminiCliBootstrapModel,
 } from "./services/googleGeminiCliOAuthService";
+import { getOpenAICodexBootstrapModel } from "./services/openAICodexOAuthService";
 import {
   extractGeminiCliFlowIdFromState,
 } from "./lib/geminiCliOAuthFlowStore";
@@ -279,6 +281,11 @@ async function getConfiguredBootstrapModels(): Promise<PublicModelSummary[]> {
   const geminiCliBootstrap = await getGoogleGeminiCliBootstrapModel();
   if (geminiCliBootstrap) {
     models.push(geminiCliBootstrap);
+  }
+
+  const openAICodexBootstrap = await getOpenAICodexBootstrapModel();
+  if (openAICodexBootstrap) {
+    models.push(openAICodexBootstrap);
   }
 
   return models;
@@ -904,6 +911,7 @@ export async function registerRoutes(
   app.use("/api/oauth/google/gmail", gmailOAuthRouter);
   app.use("/api/oauth/google/calendar", calendarOAuthRouter);
   app.use("/api/oauth/google/gemini-cli", googleGeminiCliOAuthRouter);
+  app.use("/api/oauth/openai/codex", openAICodexOAuthRouter);
   app.use("/api/oauth/microsoft", outlookOAuthRouter);
   app.use("/api/mcp/gmail", createGmailMcpRouter());
   app.use("/mcp/gmail", createGmailMcpRouter()); // Backward compatibility
