@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
+import { normalizeAgentRunAttachments } from "@/lib/agentAttachments";
 
 export type AgentModeStatus = 'idle' | 'queued' | 'planning' | 'running' | 'verifying' | 'paused' | 'cancelling' | 'completed' | 'failed' | 'cancelled' | 'replanning';
 
@@ -167,6 +168,7 @@ export function useAgentMode(chatId: string) {
 
   const startRunMutation = useMutation({
     mutationFn: async ({ message, attachments }: { message: string; attachments?: any[] }) => {
+      const normalizedAttachments = normalizeAgentRunAttachments(attachments) || attachments;
       let resolvedChatId = chatId;
 
       // If chatId is pending or empty, create a new chat first
@@ -183,7 +185,7 @@ export function useAgentMode(chatId: string) {
       const res = await apiRequest('POST', `/api/agent/runs`, {
         chatId: resolvedChatId,
         message,
-        attachments
+        attachments: normalizedAttachments
       });
       return res.json() as Promise<AgentRunResponse>;
     },
@@ -278,6 +280,7 @@ export function useAgentMode(chatId: string) {
   const retryRunMutation = useMutation({
     mutationFn: async () => {
       if (!lastMessageRef.current) throw new Error('No previous message to retry');
+      const normalizedAttachments = normalizeAgentRunAttachments(lastAttachmentsRef.current) || lastAttachmentsRef.current;
 
       let resolvedChatId = chatId;
       if (!chatId || chatId.startsWith("pending-") || chatId === "") {
@@ -293,7 +296,7 @@ export function useAgentMode(chatId: string) {
       const res = await apiRequest('POST', `/api/agent/runs`, {
         chatId: resolvedChatId,
         message: lastMessageRef.current,
-        attachments: lastAttachmentsRef.current
+        attachments: normalizedAttachments
       });
       return res.json() as Promise<AgentRunResponse>;
     },
@@ -321,10 +324,12 @@ export function useAgentMode(chatId: string) {
   });
 
   const startRun = useCallback(async (message: string, attachments?: any[]): Promise<{ runId: string; chatId: string }> => {
-    lastMessageRef.current = message;
-    lastAttachmentsRef.current = attachments;
+    const normalizedAttachments = normalizeAgentRunAttachments(attachments) || attachments;
 
-    const result = await startRunMutation.mutateAsync({ message, attachments });
+    lastMessageRef.current = message;
+    lastAttachmentsRef.current = normalizedAttachments;
+
+    const result = await startRunMutation.mutateAsync({ message, attachments: normalizedAttachments });
     return { runId: result.id, chatId: result.chatId };
   }, [startRunMutation]);
 

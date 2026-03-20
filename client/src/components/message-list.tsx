@@ -77,7 +77,6 @@ import { getFileTheme } from "@/lib/fileTypeTheme";
 import { ChatSpreadsheetViewer } from "@/components/chat/ChatSpreadsheetViewer";
 import { DocumentAnalysisResults } from "@/components/chat/DocumentAnalysisResults";
 import { DocumentAnalysisResults as SemanticDocumentAnalysisResults } from "@/components/DocumentAnalysisResults";
-import { areAgentRunsEqual } from "@/components/chat/agentRunCompare";
 import { normalizeAgentEvent, hasPayloadDetails, type MappedAgentEvent } from "@/lib/agent-event-mapper";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { AgentStepsDisplay, type AgentArtifact } from "@/components/agent-steps-display";
@@ -2197,7 +2196,11 @@ const AssistantMessage = memo(function AssistantMessage({
     prevProps.message.id === nextProps.message.id &&
     prevProps.message.content === nextProps.message.content &&
     prevProps.message.isThinking === nextProps.message.isThinking &&
-    areAgentRunsEqual(prevProps.message.agentRun, nextProps.message.agentRun) &&
+    prevProps.message.agentRun?.runId === nextProps.message.agentRun?.runId &&
+    prevProps.message.agentRun?.status === nextProps.message.agentRun?.status &&
+    prevProps.message.agentRun?.eventStream?.length === nextProps.message.agentRun?.eventStream?.length &&
+    prevProps.message.agentRun?.summary === nextProps.message.agentRun?.summary &&
+    prevProps.message.agentRun?.error === nextProps.message.agentRun?.error &&
     prevProps.message.webSources === nextProps.message.webSources &&
     prevProps.msgIndex === nextProps.msgIndex &&
     prevProps.totalMessages === nextProps.totalMessages &&
