@@ -2,66 +2,6 @@ import type { Request, Response } from "express";
 
 const GEMINI_CLI_STATE_PREFIX = "gemini-cli:";
 const GEMINI_CLI_BRIDGE_STORAGE_KEY = "iliagpt:gemini-cli-oauth-bridge-result";
-const GEMINI_CLI_BRIDGE_SCRIPT_PATH = "/api/auth/google/gemini-cli-bridge.js";
-const GEMINI_CLI_BRIDGE_SCRIPT = `(() => {
-  const root = document.getElementById("gemini-cli-oauth-bridge-root");
-  const encodedPayload = root?.getAttribute("data-payload") || "";
-  const fallbackPayload = (error, errorDescription) => ({
-    flowId: "",
-    error,
-    errorDescription,
-  });
-
-  let payload;
-  try {
-    payload = encodedPayload
-      ? JSON.parse(decodeURIComponent(encodedPayload))
-      : fallbackPayload(
-          "gemini_cli_bridge_missing_payload",
-          "No se pudo leer la respuesta OAuth.",
-        );
-  } catch {
-    payload = fallbackPayload(
-      "gemini_cli_bridge_invalid_payload",
-      "No se pudo leer la respuesta OAuth.",
-    );
-  }
-
-  const message =
-    payload.error
-      ? {
-          type: "gemini-cli-oauth-result",
-          flowId: payload.flowId,
-          status: "error",
-          error: payload.error,
-          errorDescription: payload.errorDescription,
-          callbackUrl: payload.callbackUrl,
-        }
-      : {
-          type: "gemini-cli-oauth-callback",
-          flowId: payload.flowId,
-          callbackUrl: payload.callbackUrl,
-          error: payload.error,
-          errorDescription: payload.errorDescription,
-        };
-
-  try {
-    if (window.opener && !window.opener.closed) {
-      window.opener.postMessage(message, window.location.origin);
-    }
-  } catch {}
-
-  try {
-    window.localStorage.setItem(
-      "${GEMINI_CLI_BRIDGE_STORAGE_KEY}",
-      JSON.stringify({ ...message, createdAt: Date.now() }),
-    );
-  } catch {}
-
-  setTimeout(() => {
-    try { window.close(); } catch {}
-  }, 150);
-})();`;
 
 type GeminiCliFlowSessionEntry = {
   verifier: string;
@@ -105,9 +45,19 @@ function renderGeminiCliBridge(
     errorDescription?: string;
   },
 ): void {
-  const encodedPayload = encodeURIComponent(
-    JSON.stringify(payload).replace(/</g, "\\u003c"),
-  );
+  // Serialize payload with XSS-safe escaping for embedding directly in a <script> tag.
+  // Inline script avoids the extra /gemini-cli-bridge.js request that could fail due
+  // to CSP, network errors, or popup timing issues.
+  const safeJson = JSON.stringify(payload)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026");
+
+  const storageKey = JSON.stringify(GEMINI_CLI_BRIDGE_STORAGE_KEY);
+  const safeCallbackUrl = payload.callbackUrl
+    ? payload.callbackUrl.replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    : "";
+
   res
     .status(payload.error ? 400 : 200)
     .setHeader("Content-Type", "text/html; charset=utf-8")
@@ -126,23 +76,30 @@ function renderGeminiCliBridge(
     </style>
   </head>
   <body>
-    <div id="gemini-cli-oauth-bridge-root" data-payload="${encodedPayload}"></div>
     <div class="card">
       <h1>${payload.error ? "No se pudo completar Gemini CLI OAuth" : "Gemini CLI OAuth completado"}</h1>
       <p>${payload.error ? "Vuelve a ILIAGPT. El modal recibirá el error y podrás reintentar." : "Puedes volver a ILIAGPT. Esta ventana se cerrará automáticamente si el navegador lo permite."}</p>
-      ${payload.callbackUrl ? `<code>${payload.callbackUrl.replace(/</g, "&lt;")}</code>` : ""}
+      ${safeCallbackUrl ? `<code>${safeCallbackUrl}</code>` : ""}
     </div>
-    <script src="${GEMINI_CLI_BRIDGE_SCRIPT_PATH}"></script>
+    <script>
+    (function () {
+      var payload = ${safeJson};
+      var message = payload.error
+        ? { type: "gemini-cli-oauth-result", flowId: payload.flowId, status: "error", error: payload.error, errorDescription: payload.errorDescription, callbackUrl: payload.callbackUrl }
+        : { type: "gemini-cli-oauth-callback", flowId: payload.flowId, callbackUrl: payload.callbackUrl };
+      try {
+        if (window.opener && !window.opener.closed) {
+          window.opener.postMessage(message, window.location.origin);
+        }
+      } catch (e) {}
+      try {
+        window.localStorage.setItem(${storageKey}, JSON.stringify(Object.assign({}, message, { createdAt: Date.now() })));
+      } catch (e) {}
+      setTimeout(function () { try { window.close(); } catch (e) {} }, 150);
+    })();
+    </script>
   </body>
 </html>`);
-}
-
-export function sendGeminiCliOAuthBridgeScript(res: Response): void {
-  res
-    .status(200)
-    .setHeader("Content-Type", "application/javascript; charset=utf-8")
-    .setHeader("Cache-Control", "no-store")
-    .send(GEMINI_CLI_BRIDGE_SCRIPT);
 }
 
 export function isGeminiCliOAuthCallback(req: Request): boolean {

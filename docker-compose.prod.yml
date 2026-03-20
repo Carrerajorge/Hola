@@ -23,6 +23,8 @@ services:
 
       NODE_ENV: production
 
+      CANONICAL_DOMAIN: iliagpt.com
+
       # Exposed via /api/health for deploy verification (set by deploy workflow).
       APP_VERSION: ${APP_VERSION:-dev}
 

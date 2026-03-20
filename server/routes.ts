@@ -114,7 +114,6 @@ import { getGoogleGeminiCliBootstrapModel } from "./services/googleGeminiCliOAut
 import {
   handleGeminiCliOAuthCallback,
   isGeminiCliOAuthCallback,
-  sendGeminiCliOAuthBridgeScript,
 } from "./services/googleGeminiCliOAuthCallbackBridge";
 import { getOpenAICodexBootstrapModel } from "./services/openAICodexOAuthService";
 import { getLogs, getLogStats, type LogFilters } from "./lib/structuredLogger";
@@ -308,8 +307,14 @@ export async function registerRoutes(
     })(req, res, next);
   });
 
+  // Bridge script is now inlined in the OAuth callback HTML response.
+  // Keep the route alive so old cached pages don't 404, but return an empty no-op.
   app.get("/api/auth/google/gemini-cli-bridge.js", (_req, res) => {
-    sendGeminiCliOAuthBridgeScript(res);
+    res
+      .status(200)
+      .setHeader("Content-Type", "application/javascript; charset=utf-8")
+      .setHeader("Cache-Control", "no-store")
+      .send("/* bridge script inlined — this endpoint is deprecated */");
   });
   
   if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
