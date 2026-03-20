@@ -1,19 +1,19 @@
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { createServer } from "node:http";
-import { delimiter, dirname, join } from "node:path";
+import { join as joinPath, delimiter, dirname, join } from "node:path";
 import { fetchWithSsrFGuard, isWSL2Sync } from "../../src/plugin-sdk/google-gemini-cli-auth.js";
 
 const CLIENT_ID_KEYS = [
   "OPENCLAW_GEMINI_OAUTH_CLIENT_ID",
   "GEMINI_CLI_OAUTH_CLIENT_ID",
-  "GOOGLE_CLIENT_ID",
 ];
 const CLIENT_SECRET_KEYS = [
   "OPENCLAW_GEMINI_OAUTH_CLIENT_SECRET",
   "GEMINI_CLI_OAUTH_CLIENT_SECRET",
-  "GOOGLE_CLIENT_SECRET",
 ];
+const SITE_CLIENT_ID_KEYS = ["GOOGLE_CLIENT_ID"];
+const SITE_CLIENT_SECRET_KEYS = ["GOOGLE_CLIENT_SECRET"];
 const LOCAL_REDIRECT_URI = "http://localhost:8085/oauth2callback";
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -141,6 +141,39 @@ export function extractGeminiCliCredentials(): { clientId: string; clientSecret:
   return null;
 }
 
+function extractBundledPiAiGeminiCliCredentials(): { clientId: string; clientSecret: string } | null {
+  try {
+    const packagePath = joinPath(
+      process.cwd(),
+      "node_modules",
+      "@mariozechner",
+      "pi-ai",
+      "dist",
+      "utils",
+      "oauth",
+      "google-gemini-cli.js",
+    );
+    if (!existsSync(packagePath)) {
+      return null;
+    }
+
+    const content = readFileSync(packagePath, "utf8");
+    const clientIdMatch = content.match(/const CLIENT_ID = decode\("([^"]+)"\)/);
+    const clientSecretMatch = content.match(/const CLIENT_SECRET = decode\("([^"]+)"\)/);
+    if (!clientIdMatch || !clientSecretMatch) {
+      return null;
+    }
+
+    const decode = (value: string) => Buffer.from(value, "base64").toString("utf8");
+    return {
+      clientId: decode(clientIdMatch[1]),
+      clientSecret: decode(clientSecretMatch[1]),
+    };
+  } catch {
+    return null;
+  }
+}
+
 function resolveGeminiCliDirs(geminiPath: string, resolvedPath: string): string[] {
   const binDir = dirname(geminiPath);
   const candidates = [
@@ -199,23 +232,52 @@ function findFile(dir: string, name: string, depth: number): string | null {
   return null;
 }
 
-function resolveOAuthClientConfig(): { clientId: string; clientSecret?: string } {
-  // 1. Check env vars first (user override)
+function isLocalRedirectUri(redirectUri?: string): boolean {
+  const normalized = redirectUri?.trim();
+  if (!normalized) {
+    return true;
+  }
+  return normalized === LOCAL_REDIRECT_URI;
+}
+
+function resolveOAuthClientConfig(options?: {
+  redirectUri?: string;
+}): { clientId: string; clientSecret?: string } {
+  const isLocalRedirect = isLocalRedirectUri(options?.redirectUri);
+
+  // 1. Check Gemini-specific env vars first (user override)
   const envClientId = resolveEnv(CLIENT_ID_KEYS);
   const envClientSecret = resolveEnv(CLIENT_SECRET_KEYS);
   if (envClientId) {
     return { clientId: envClientId, clientSecret: envClientSecret };
   }
 
-  // 2. Try to extract from installed Gemini CLI
+  // 2. For hosted/browser flows, fall back to the site's web OAuth client when
+  // no Gemini-specific client is configured. The bundled Gemini CLI client is
+  // registered only for localhost and causes redirect_uri_mismatch on web callbacks.
+  if (!isLocalRedirect) {
+    const siteClientId = resolveEnv(SITE_CLIENT_ID_KEYS);
+    const siteClientSecret = resolveEnv(SITE_CLIENT_SECRET_KEYS);
+    if (siteClientId) {
+      return { clientId: siteClientId, clientSecret: siteClientSecret };
+    }
+  }
+
+  // 3. Try to extract from installed Gemini CLI for localhost flows.
   const extracted = extractGeminiCliCredentials();
   if (extracted) {
     return extracted;
   }
 
-  // 3. No credentials available
+  // 4. Fall back to the dedicated Gemini OAuth client bundled in pi-ai.
+  const bundled = extractBundledPiAiGeminiCliCredentials();
+  if (bundled) {
+    return bundled;
+  }
+
+  // 5. No Gemini-compatible credentials available
   throw new Error(
-    "Gemini CLI not found. Install it first: brew install gemini-cli (or npm install -g @google/gemini-cli), or set GEMINI_CLI_OAUTH_CLIENT_ID.",
+    "Gemini CLI OAuth credentials not found. Install gemini-cli, keep @mariozechner/pi-ai available, or set GEMINI_CLI_OAUTH_CLIENT_ID.",
   );
 }
 
@@ -267,8 +329,9 @@ function buildAuthUrl(options: {
   challenge: string;
   redirectUri: string;
   state: string;
+  loginHint?: string;
 }): string {
-  const { clientId } = resolveOAuthClientConfig();
+  const { clientId } = resolveOAuthClientConfig({ redirectUri: options.redirectUri });
   const params = new URLSearchParams({
     client_id: clientId,
     response_type: "code",
@@ -280,6 +343,9 @@ function buildAuthUrl(options: {
     access_type: "offline",
     prompt: "consent",
   });
+  if (options.loginHint?.trim()) {
+    params.set("login_hint", options.loginHint.trim());
+  }
   return `${AUTH_URL}?${params.toString()}`;
 }
 
@@ -292,6 +358,7 @@ export function startGeminiCliOAuthSession(): {
 export function startGeminiCliOAuthSession(options: {
   redirectUri?: string;
   state?: string;
+  loginHint?: string;
 } = {}): {
   verifier: string;
   state: string;
@@ -308,6 +375,7 @@ export function startGeminiCliOAuthSession(options: {
       challenge,
       redirectUri,
       state,
+      loginHint: options.loginHint,
     }),
     redirectUri,
   };
@@ -447,7 +515,7 @@ async function exchangeCodeForTokens(
   verifier: string,
   redirectUri: string,
 ): Promise<GeminiCliOAuthCredentials> {
-  const { clientId, clientSecret } = resolveOAuthClientConfig();
+  const { clientId, clientSecret } = resolveOAuthClientConfig({ redirectUri });
   const body = new URLSearchParams({
     client_id: clientId,
     code,

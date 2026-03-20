@@ -1,6 +1,6 @@
 import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, ExternalLink, Link2, Loader2, Plus } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ExternalLink, Link2, Loader2 } from "lucide-react";
 import { apiFetch } from "@/lib/apiClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { GeminiLogoIcon } from "./OAuthProviderLogos";
+import {
+  clearGeminiCliBridgePayload,
+  parseGeminiCliBridgePayload,
+  readGeminiCliBridgePayload,
+  type GeminiCliBridgePayload,
+} from "./geminiCliOAuthBridge";
 
 type GeminiCliOAuthButtonProps = {
   onConnected?: (modelId: string) => void | Promise<void>;
@@ -108,6 +116,16 @@ function normalizeCallbackInput(input: string, redirectUri: string): string {
   return trimmed;
 }
 
+function isGoogleAuthorizationUrl(input: string): boolean {
+  return /accounts\.google\.com\/o\/oauth2/i.test(input);
+}
+
+function normalizeLoginHint(input: string): string {
+  const trimmed = input.trim().toLowerCase();
+  if (!trimmed) return "";
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) ? trimmed : "";
+}
+
 export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -117,6 +135,8 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
   const [authUrl, setAuthUrl] = React.useState("");
   const [redirectUri, setRedirectUri] = React.useState("");
   const [callbackUrl, setCallbackUrl] = React.useState("");
+  const [loginHint, setLoginHint] = React.useState("");
+  const [showManualFallback, setShowManualFallback] = React.useState(false);
   const popupRef = React.useRef<Window | null>(null);
   const lastAutoCompletedCallbackRef = React.useRef<string | null>(null);
 
@@ -130,16 +150,18 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
       }
       return res.json();
     },
-    enabled: open,
-    staleTime: 0,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 
-  const startMutation = useMutation<GeminiCliStartResponse, Error>({
-    mutationFn: async () => {
+  const startMutation = useMutation<GeminiCliStartResponse, Error, { loginHint?: string }>({
+    mutationFn: async (variables) => {
       const res = await apiFetch("/api/oauth/google/gemini-cli/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          loginHint: variables?.loginHint,
+        }),
       });
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -148,10 +170,12 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
       return payload;
     },
     onSuccess: (payload) => {
+      clearGeminiCliBridgePayload();
       setFlowId(payload.flowId);
       setAuthUrl(payload.authUrl);
       setRedirectUri(payload.redirectUri);
       setCallbackUrl("");
+      setShowManualFallback(false);
       lastAutoCompletedCallbackRef.current = null;
 
       const popup = window.open(
@@ -161,6 +185,7 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
       );
       popupRef.current = popup;
       if (!popup) {
+        setShowManualFallback(true);
         toast({
           title: "Ventana bloqueada",
           description: "Abre manualmente la URL del flujo o habilita popups para continuar.",
@@ -251,6 +276,7 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
       "popup=yes,width=640,height=820,resizable=yes,scrollbars=yes",
     );
     if (!popup) {
+      setShowManualFallback(true);
       toast({
         title: "Ventana bloqueada",
         description: "No se pudo abrir la URL automaticamente. Copiala manualmente.",
@@ -271,6 +297,8 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
       setAuthUrl("");
       setRedirectUri("");
       setCallbackUrl("");
+      setLoginHint("");
+      setShowManualFallback(false);
       lastAutoCompletedCallbackRef.current = null;
       startMutation.reset();
       completeMutation.reset();
@@ -285,7 +313,13 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
     setAuthUrl(draft.authUrl);
     setRedirectUri(draft.redirectUri);
     setCallbackUrl(draft.callbackUrl);
+    setShowManualFallback(Boolean(draft.callbackUrl));
   }, [flowId, open]);
+
+  React.useEffect(() => {
+    if (!open || loginHint || !status?.email) return;
+    setLoginHint(status.email);
+  }, [loginHint, open, status?.email]);
 
   React.useEffect(() => {
     if (!flowId || !open) return;
@@ -298,6 +332,46 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
     });
   }, [authUrl, callbackUrl, flowId, open, redirectUri]);
 
+  const handleBridgePayload = React.useCallback((payload: GeminiCliBridgePayload | null): boolean => {
+    if (!payload || !payload.flowId || !flowId || payload.flowId !== flowId) {
+      return false;
+    }
+
+    clearGeminiCliBridgePayload();
+
+    if (payload.error || payload.status === "error") {
+      setShowManualFallback(true);
+      toast({
+        title: "Google devolvió un error",
+        description: payload.errorDescription || payload.error || "No se pudo finalizar la autenticación.",
+        variant: "destructive",
+      });
+      return true;
+    }
+
+    const nextCallbackUrl = typeof payload.callbackUrl === "string" ? payload.callbackUrl.trim() : "";
+    if (!nextCallbackUrl || completeMutation.isPending) {
+      return false;
+    }
+    if (lastAutoCompletedCallbackRef.current === nextCallbackUrl) {
+      return true;
+    }
+
+    lastAutoCompletedCallbackRef.current = nextCallbackUrl;
+    setCallbackUrl(nextCallbackUrl);
+    setShowManualFallback(false);
+    completeMutation.mutate({
+      flowId: payload.flowId,
+      callbackUrl: nextCallbackUrl,
+    });
+    return true;
+  }, [completeMutation, flowId, toast]);
+
+  React.useEffect(() => {
+    if (!flowId || !open) return;
+    handleBridgePayload(readGeminiCliBridgePayload());
+  }, [flowId, handleBridgePayload, open]);
+
   React.useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) {
@@ -309,45 +383,61 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
             type?: string;
             flowId?: string;
             callbackUrl?: string;
+            status?: string;
             error?: string;
             errorDescription?: string;
           }
         | undefined;
 
-      if (payload?.type !== "gemini-cli-oauth-callback") {
-        return;
-      }
-      if (!payload.flowId || !flowId || payload.flowId !== flowId) {
-        return;
-      }
-      if (payload.error) {
-        toast({
-          title: "Google devolvió un error",
-          description: payload.errorDescription || payload.error,
-          variant: "destructive",
-        });
+      if (
+        payload?.type !== "gemini-cli-oauth-callback" &&
+        payload?.type !== "gemini-cli-oauth-result"
+      ) {
         return;
       }
 
-      const nextCallbackUrl = typeof payload.callbackUrl === "string" ? payload.callbackUrl.trim() : "";
-      if (!nextCallbackUrl || completeMutation.isPending) {
-        return;
-      }
-      if (lastAutoCompletedCallbackRef.current === nextCallbackUrl) {
-        return;
-      }
-
-      lastAutoCompletedCallbackRef.current = nextCallbackUrl;
-      setCallbackUrl(nextCallbackUrl);
-      completeMutation.mutate({
-        flowId: payload.flowId,
-        callbackUrl: nextCallbackUrl,
+      handleBridgePayload({
+        type: payload.type,
+        flowId: payload.flowId || "",
+        callbackUrl: payload.callbackUrl,
+        status: payload.status,
+        error: payload.error,
+        errorDescription: payload.errorDescription,
+        createdAt: Date.now(),
       });
     };
 
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [completeMutation, flowId, toast]);
+  }, [handleBridgePayload]);
+
+  React.useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== null && event.key !== "iliagpt:gemini-cli-oauth-bridge-result") {
+        return;
+      }
+      handleBridgePayload(parseGeminiCliBridgePayload(event.newValue));
+    };
+
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, [handleBridgePayload]);
+
+  const handleStartFlow = React.useCallback(() => {
+    const normalizedLoginHint = normalizeLoginHint(loginHint);
+    if (loginHint.trim() && !normalizedLoginHint) {
+      toast({
+        title: "Correo inválido",
+        description: "Ingresa un correo Gmail válido para sugerir la cuenta en Google.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    startMutation.mutate({
+      loginHint: normalizedLoginHint || undefined,
+    });
+  }, [loginHint, startMutation, toast]);
 
   const isBusy = startMutation.isPending || completeMutation.isPending;
   const isConnected = Boolean(status?.connected);
@@ -356,20 +446,21 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
     <>
       <Button
         type="button"
-        variant="outline"
+        variant="ghost"
         size="icon"
-        className="h-8 w-8 rounded-full border-primary/25 bg-background/80"
+        className="h-8 w-8 rounded-full p-0 hover:bg-muted/60"
         onClick={() => setOpen(true)}
-        title={isConnected ? "Gemini CLI OAuth vinculado" : "Vincular Gemini CLI OAuth"}
+        title={isConnected ? "Gemini conectado" : "Conectar Gemini"}
+        aria-label={isConnected ? "Gemini conectado" : "Conectar Gemini"}
         data-testid="button-gemini-cli-oauth"
       >
-        {isConnected ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <Plus className="h-4 w-4" />}
+        <GeminiLogoIcon className={isConnected ? "text-violet-600" : "text-foreground"} />
       </Button>
 
       <Dialog open={open} onOpenChange={resetLocalState}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>Google Gemini CLI OAuth</DialogTitle>
+            <DialogTitle>Conectar Gemini</DialogTitle>
             <DialogDescription>
               Vincula tu cuenta de Google de pago para usar <strong>Gemini 3.1 Pro</strong> desde ILIAGPT.
             </DialogDescription>
@@ -403,7 +494,7 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
                     <p className="text-muted-foreground">
                       {status?.email
                         ? `Perfil activo: ${status.email}`
-                        : "Gemini CLI OAuth ya esta configurado en el gateway."}
+                        : "Gemini ya está configurado en el gateway."}
                     </p>
                     <p className="text-xs text-muted-foreground">
                       Puedes volver a vincular si deseas cambiar la cuenta conectada.
@@ -436,45 +527,85 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
               </span>
             </label>
 
+            {!flowId ? (
+              <div className="space-y-2">
+                <label htmlFor="gemini-cli-login-hint" className="text-sm font-medium">
+                  Correo Gmail a vincular (opcional)
+                </label>
+                <Input
+                  id="gemini-cli-login-hint"
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  placeholder="tu-cuenta@gmail.com"
+                  value={loginHint}
+                  onChange={(event) => setLoginHint(event.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Si lo indicas, Google intentará abrir directamente con esa cuenta.
+                </p>
+              </div>
+            ) : null}
+
             {flowId ? (
-              <div className="space-y-4 rounded-2xl border border-primary/20 bg-primary/5 p-4">
+              <div className="space-y-4 rounded-2xl border border-violet-500/20 bg-violet-500/5 p-4">
                 <div className="space-y-2 text-sm">
                   <p className="font-medium">Sigue estos pasos</p>
                   <ol className="space-y-1 text-muted-foreground">
                     <li>1. Abre la URL de autorizacion en una pestaña nueva.</li>
-                    <li>2. Inicia sesion con tu cuenta de Google de pago.</li>
+                    <li>
+                      2. Inicia sesion con tu cuenta de Google de pago
+                      {normalizeLoginHint(loginHint) ? ` (${normalizeLoginHint(loginHint)})` : ""}.
+                    </li>
                     <li>3. Google volvera a <code>{redirectUri || "https://iliagpt.com/api/auth/google/callback"}</code> y la app intentara cerrar el popup automaticamente.</li>
-                    <li>4. Si el popup no se cierra solo, copia esa URL final y pegala aqui para terminar manualmente.</li>
+                    <li>4. Solo si falla el autocierre, abre la recuperacion manual y pega la URL final.</li>
                   </ol>
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">URL de autorizacion</label>
-                  <Textarea readOnly value={authUrl} className="min-h-[88px] text-xs" />
-                  <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" size="sm" onClick={handleOpenAuthUrl}>
-                      <ExternalLink className="h-4 w-4" />
-                      Abrir Google OAuth
-                    </Button>
-                    <Button type="button" variant="outline" size="sm" onClick={handleCopyUrl}>
-                      <Link2 className="h-4 w-4" />
-                      Copiar URL
-                    </Button>
-                  </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" size="sm" onClick={handleOpenAuthUrl}>
+                    <ExternalLink className="h-4 w-4" />
+                    Abrir Google OAuth
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" onClick={handleCopyUrl}>
+                    <Link2 className="h-4 w-4" />
+                    Copiar URL
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowManualFallback((current) => !current)}
+                  >
+                    {showManualFallback ? "Ocultar recuperacion manual" : "Mostrar recuperacion manual"}
+                  </Button>
                 </div>
 
-                <div className="space-y-2">
-                  <label htmlFor="gemini-cli-callback" className="text-sm font-medium">
-                    Callback pegado desde el navegador
-                  </label>
-                  <Textarea
-                    id="gemini-cli-callback"
-                    placeholder="Pega aqui la URL que termina en /oauth2callback?code=...&state=..."
-                    value={callbackUrl}
-                    onChange={(event) => setCallbackUrl(event.target.value)}
-                    className="min-h-[120px]"
-                  />
-                </div>
+                {showManualFallback ? (
+                  <>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">URL de autorizacion</label>
+                      <Textarea readOnly value={authUrl} className="min-h-[88px] text-xs" />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label htmlFor="gemini-cli-callback" className="text-sm font-medium">
+                        Callback pegado desde el navegador
+                      </label>
+                      <Textarea
+                        id="gemini-cli-callback"
+                        placeholder="Pega aqui la URL final que vuelve a ILIAGPT con code=...&state=..."
+                        value={callbackUrl}
+                        onChange={(event) => setCallbackUrl(event.target.value)}
+                        className="min-h-[120px]"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="rounded-xl border border-border/60 bg-background/70 p-3 text-sm text-muted-foreground">
+                    Esperando el regreso automático desde Google. Si no se completa, usa la recuperacion manual.
+                  </div>
+                )}
               </div>
             ) : null}
           </div>
@@ -484,28 +615,43 @@ export function GeminiCliOAuthButton({ onConnected }: GeminiCliOAuthButtonProps)
               Cancelar
             </Button>
             {flowId ? (
-              <Button
-                type="button"
-                onClick={() => {
-                  if (!flowId) return;
-                  completeMutation.mutate({
-                    flowId,
-                    callbackUrl: normalizeCallbackInput(callbackUrl, redirectUri),
-                  });
-                }}
-                disabled={!callbackUrl.trim() || isBusy}
-              >
-                {completeMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                Completar vinculacion
-              </Button>
+              showManualFallback ? (
+                <Button
+                  type="button"
+                  onClick={() => {
+                    if (!flowId) return;
+                    const normalizedCallbackUrl = normalizeCallbackInput(callbackUrl, redirectUri);
+                    if (isGoogleAuthorizationUrl(normalizedCallbackUrl)) {
+                      toast({
+                        title: "URL incorrecta",
+                        description: "Pega la URL final que vuelve a ILIAGPT, no la URL inicial de Google.",
+                        variant: "destructive",
+                      });
+                      return;
+                    }
+                    completeMutation.mutate({
+                      flowId,
+                      callbackUrl: normalizedCallbackUrl,
+                    });
+                  }}
+                  disabled={!callbackUrl.trim() || isBusy}
+                >
+                  {completeMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  Completar vinculacion
+                </Button>
+              ) : (
+                <Button type="button" variant="outline" onClick={() => setShowManualFallback(true)}>
+                  Mostrar recuperacion manual
+                </Button>
+              )
             ) : (
               <Button
                 type="button"
-                onClick={() => startMutation.mutate()}
+                onClick={handleStartFlow}
                 disabled={!acceptedRisk || isBusy}
               >
                 {startMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                Iniciar Gemini CLI OAuth
+                Continuar con Google
               </Button>
             )}
           </DialogFooter>

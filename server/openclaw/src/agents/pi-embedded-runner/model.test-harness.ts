@@ -37,13 +37,15 @@ export function buildOpenAICodexForwardCompatExpectation(
   id: string = "gpt-5.3-codex",
 ): Partial<typeof OPENAI_CODEX_TEMPLATE_MODEL> & { provider: string; id: string } {
   const isGpt54 = id === "gpt-5.4";
+  const isSpark = id === "gpt-5.3-codex-spark";
   return {
     provider: "openai-codex",
     id,
     api: "openai-codex-responses",
     baseUrl: "https://chatgpt.com/backend-api",
     reasoning: true,
-    contextWindow: isGpt54 ? 1_050_000 : 272000,
+    input: isSpark ? ["text"] : ["text", "image"],
+    contextWindow: isGpt54 ? 1_050_000 : isSpark ? 128_000 : 272000,
     maxTokens: 128000,
   };
 }

@@ -28,6 +28,7 @@ import { createLibraryRouter } from "./routes/libraryRouter";
 import { createWorkspaceRouter } from "./routes/workspaceRouter";
 import { createCodeRouter } from "./routes/codeRouter";
 import { createUserRouter } from "./routes/userRouter";
+import { createSkillsRouter } from "./routes/skillsRouter";
 import { createChatAiRouter } from "./routes/chatAiRouter";
 import { createGoogleFormsRouter } from "./routes/googleFormsRouter";
 import { createGmailRouter } from "./routes/gmailRouter";
@@ -36,6 +37,7 @@ import { createConnectorOAuthRouter } from "./routes/connectorOAuthRouter";
 import gmailOAuthRouter from "./routes/gmailOAuthRouter";
 import calendarOAuthRouter from "./routes/calendarOAuthRouter";
 import googleGeminiCliOAuthRouter from "./routes/googleGeminiCliOAuthRouter";
+import openAICodexOAuthRouter from "./routes/openAICodexOAuthRouter";
 import outlookOAuthRouter from "./routes/outlookOAuthRouter";
 import { createGmailMcpRouter } from "./mcp/gmailMcpServer";
 import healthRouter from "./routes/healthRouter";
@@ -109,6 +111,12 @@ import { getUserConfig, setUserConfig, getDefaultConfig, validatePatterns, getFi
 import { isModelEligibleForPublic } from "./services/modelIntegration";
 import { GEMINI_MODELS_REGISTRY, XAI_MODELS } from "./lib/modelRegistry";
 import { getGoogleGeminiCliBootstrapModel } from "./services/googleGeminiCliOAuthService";
+import {
+  handleGeminiCliOAuthCallback,
+  isGeminiCliOAuthCallback,
+  sendGeminiCliOAuthBridgeScript,
+} from "./services/googleGeminiCliOAuthCallbackBridge";
+import { getOpenAICodexBootstrapModel } from "./services/openAICodexOAuthService";
 import { getLogs, getLogStats, type LogFilters } from "./lib/structuredLogger";
 import { getActiveRequests, getRequestStats } from "./lib/requestTracer";
 import { getAllServicesHealth, getOverallStatus, initializeHealthMonitoring } from "./lib/healthMonitor";
@@ -197,6 +205,11 @@ async function getConfiguredBootstrapModels(): Promise<PublicModelSummary[]> {
     models.push(geminiCliBootstrap);
   }
 
+  const openAICodexBootstrap = await getOpenAICodexBootstrapModel();
+  if (openAICodexBootstrap) {
+    models.push(openAICodexBootstrap);
+  }
+
   return models;
 }
 
@@ -277,16 +290,35 @@ export async function registerRoutes(
     if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
       return res.status(503).json({ error: "Google authentication is not configured on this server" });
     }
+    const rawLoginHint =
+      typeof req.query.login_hint === "string"
+        ? req.query.login_hint
+        : typeof req.query.loginHint === "string"
+          ? req.query.loginHint
+          : "";
+    const loginHint =
+      rawLoginHint.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawLoginHint.trim())
+        ? rawLoginHint.trim().toLowerCase()
+        : undefined;
     passport.authenticate("google", {
       scope: ["openid", "email", "profile"],
       accessType: "offline",
       prompt: "consent select_account",
+      ...(loginHint ? { loginHint } : {}),
     })(req, res, next);
+  });
+
+  app.get("/api/auth/google/gemini-cli-bridge.js", (_req, res) => {
+    sendGeminiCliOAuthBridgeScript(res);
   });
   
   if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
     app.get("/api/auth/google/callback",
       (req, res, next) => {
+        if (isGeminiCliOAuthCallback(req)) {
+          handleGeminiCliOAuthCallback(req, res);
+          return;
+        }
         passport.authenticate("google", { failureRedirect: "/login?error=google_failed" }, (err: any, user: any) => {
           (async () => {
             if (err || !user) {
@@ -671,6 +703,7 @@ export async function registerRoutes(
   app.use(createWorkspaceRouter());
   app.use(createCodeRouter());
   app.use(createUserRouter());
+  app.use("/api/skills", createSkillsRouter());
   app.use("/api", createChatAiRouter(broadcastAgentUpdate));
   app.use("/api/apps", createAppsIntegrationRouter());
 
@@ -696,6 +729,7 @@ export async function registerRoutes(
   app.use("/api/oauth/google/gmail", gmailOAuthRouter);
   app.use("/api/oauth/google/calendar", calendarOAuthRouter);
   app.use("/api/oauth/google/gemini-cli", googleGeminiCliOAuthRouter);
+  app.use("/api/oauth/openai/codex", openAICodexOAuthRouter);
   app.use("/api/oauth/microsoft", outlookOAuthRouter);
   app.use("/api/mcp/gmail", createGmailMcpRouter());
   app.use("/mcp/gmail", createGmailMcpRouter()); // Backward compatibility

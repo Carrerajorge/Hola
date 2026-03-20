@@ -83,7 +83,11 @@ export default function SignupPage() {
   const handleSocialSignup = () => {
     // Direct Google OAuth entrypoint (first-party), avoiding legacy Replit OIDC redirects.
     clearForcedSignedOutFlag();
-    window.location.href = "/api/auth/google";
+    const trimmedEmail = email.trim().toLowerCase();
+    const loginHint = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail) ? trimmedEmail : "";
+    window.location.href = loginHint
+      ? `/api/auth/google?login_hint=${encodeURIComponent(loginHint)}`
+      : "/api/auth/google";
   };
 
   if (!platformLoading && !allowRegistration) {

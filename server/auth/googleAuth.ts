@@ -70,6 +70,13 @@ const generateState = (): string => {
     return Array.from(array, (byte) => byte.toString(16).padStart(2, "0")).join("");
 };
 
+const resolveGoogleLoginHint = (value: unknown): string | null => {
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim().toLowerCase();
+    if (!trimmed || trimmed.length > 320) return null;
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) ? trimmed : null;
+};
+
 // Store states temporarily (in production, use Redis)
 const stateStore = new Map<string, { createdAt: number; returnUrl: string }>();
 
@@ -181,6 +188,10 @@ router.get("/google", (req: Request, res: Response) => {
         access_type: "offline",
         prompt: "consent",
     });
+    const loginHint = resolveGoogleLoginHint(req.query.login_hint ?? req.query.loginHint);
+    if (loginHint) {
+        params.set("login_hint", loginHint);
+    }
 
     const authUrl = `${config.authorizationUrl}?${params.toString()}`;
     console.log("[Google Auth] Redirecting to Google login");

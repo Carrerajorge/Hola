@@ -99,6 +99,17 @@ function getCanonicalGoogleCallbackUri(req: Request): string {
   return `${req.protocol}://${req.get("host")}/api/auth/google/callback`;
 }
 
+function normalizeLoginHint(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed || trimmed.length > 320) {
+    return undefined;
+  }
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) ? trimmed : undefined;
+}
+
 const googleGeminiCliOAuthRouter = Router();
 
 googleGeminiCliOAuthRouter.use(requireAdmin);
@@ -127,9 +138,11 @@ googleGeminiCliOAuthRouter.post("/start", async (req: Request, res: Response) =>
     const flowId = randomUUID();
     const redirectUri = getCanonicalGoogleCallbackUri(req);
     const oauthState = `gemini-cli:${flowId}`;
+    const loginHint = normalizeLoginHint(req.body?.loginHint);
     const flow = beginGoogleGeminiCliOAuthFlow({
       redirectUri,
       state: oauthState,
+      loginHint,
     });
     const flowEntry = {
       verifier: flow.verifier,
