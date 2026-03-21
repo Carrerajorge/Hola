@@ -385,8 +385,8 @@ export function Sidebar({
     <div
       key={chat.id}
       className={cn(
-        "group relative flex w-full items-center px-2 py-2 rounded-lg cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-all duration-300 liquid-button",
-        activeChatId === chat.id && "bg-gradient-to-r from-primary/10 to-transparent border-l-2 border-primary text-foreground shadow-sm",
+        "group relative flex min-h-11 w-full items-center rounded-[16px] border border-transparent px-2.5 py-2.5 cursor-pointer transition-all duration-300 hover:border-white/35 hover:bg-white/55 dark:hover:border-white/10 dark:hover:bg-white/5 liquid-button",
+        activeChatId === chat.id && "border-[#A5A0FF]/35 bg-[linear-gradient(135deg,rgba(165,160,255,0.18),rgba(255,255,255,0.72))] text-foreground shadow-[0_14px_30px_rgba(96,90,190,0.12)] dark:bg-[linear-gradient(135deg,rgba(165,160,255,0.16),rgba(255,255,255,0.06))]",
         chat.archived && "opacity-70",
         indented && "ml-4"
       )}
@@ -612,23 +612,23 @@ export function Sidebar({
   });
 
   const minimalSectionButtonClass =
-    "w-full justify-start gap-1.5 rounded-xl border border-white/35 bg-white/55 px-2.5 py-[0.375rem] text-[12.5px] font-normal shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-[#A5A0FF]/30 hover:bg-white/80 hover:shadow-[0_16px_34px_rgba(96,90,190,0.10)] dark:border-white/8 dark:bg-white/5 dark:hover:bg-white/8 liquid-button";
+    "w-full justify-start gap-2.5 rounded-[16px] border border-white/35 bg-white/60 px-2.5 py-2 text-sm font-medium transition-all duration-200 hover:border-[#A5A0FF]/40 hover:bg-white/86 hover:shadow-[0_14px_28px_rgba(96,90,190,0.12)] focus-visible:ring-2 focus-visible:ring-[#A5A0FF]/25 dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.08] liquid-button";
   const minimalIconChipClass =
-    "rounded-lg border border-white/40 bg-white/70 p-[0.3125rem] text-muted-foreground shadow-sm transition-all duration-300 group-hover:scale-110 group-hover:border-[#A5A0FF]/35 group-hover:text-foreground group-hover:shadow-[0_10px_24px_rgba(96,90,190,0.12)] dark:border-white/8 dark:bg-white/6";
+    "flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] border border-white/40 bg-white/78 text-muted-foreground transition-all duration-200 group-hover:border-[#A5A0FF]/36 group-hover:bg-white/95 group-hover:text-foreground group-hover:shadow-[0_10px_22px_rgba(96,90,190,0.12)] dark:border-white/10 dark:bg-white/[0.06]";
 
   return (
     <nav
-      className={cn("relative flex h-screen w-[280px] flex-col overflow-hidden border-r border-white/40 bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.18),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.88),rgba(248,250,252,0.74))] text-sidebar-foreground shadow-[0_24px_60px_rgba(15,23,42,0.08)] backdrop-blur-3xl transition-all duration-300 dark:border-white/10 dark:bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.16),transparent_28%),linear-gradient(180deg,rgba(10,12,18,0.92),rgba(6,8,14,0.84))] dark:shadow-[0_24px_70px_rgba(2,6,23,0.38)]", className)}
+      className={cn("relative flex h-screen w-[280px] flex-col overflow-hidden border-r border-white/40 bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.14),transparent_24%),linear-gradient(180deg,rgba(255,255,255,0.88),rgba(248,250,252,0.78))] text-sidebar-foreground shadow-[0_10px_28px_rgba(15,23,42,0.04)] backdrop-blur-3xl transition-all duration-300 dark:border-white/10 dark:bg-[radial-gradient(circle_at_top_left,rgba(165,160,255,0.12),transparent_24%),linear-gradient(180deg,rgba(10,12,18,0.9),rgba(6,8,14,0.84))] dark:shadow-[0_12px_30px_rgba(2,6,23,0.18)]", className)}
       aria-label="Navegación principal y chats"
       role="navigation"
     >
-      <div className="flex h-14 items-center justify-between border-b border-white/35 px-4 py-2 dark:border-white/10">
-        <div className="flex items-center gap-3 group cursor-pointer transition-all duration-300 hover:drop-shadow-[0_0_10px_currentColor]">
-          <IliaGPTLogo size={30} />
-          <div className="flex flex-col min-w-0">
-            <span className="text-sm font-semibold tracking-tight leading-none">{appName}</span>
-            <div className="flex items-center gap-2 min-w-0 mt-0.5">
-              <span className="text-[10px] text-muted-foreground truncate">{appDescription}</span>
+      <div className="flex h-12 items-center justify-between border-b border-white/35 px-3 py-1.5 dark:border-white/10">
+        <div className="group flex items-center gap-2.5 cursor-pointer transition-all duration-300 hover:drop-shadow-[0_0_8px_currentColor]">
+          <IliaGPTLogo size={26} />
+          <div className="flex min-w-0 flex-col">
+            <span className="text-[13px] font-semibold tracking-tight leading-none">{appName}</span>
+            <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
+              <span className="truncate text-[10px] text-muted-foreground">{appDescription}</span>
               {isAdmin && platformSettings.maintenance_mode ? (
                 <span className="shrink-0 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 px-2 py-0.5 text-[10px] font-medium">
                   Mantenimiento
@@ -646,25 +646,25 @@ export function Sidebar({
         </Button>
       </div>
 
-      <div className="px-3 py-2 flex flex-col gap-0.5">
+      <div className="flex flex-col gap-1 px-2.5 py-2.5">
         <NewChatButton onNewChat={onNewChat} variant="full" showTooltip={false} />
 
         <button
           ref={searchButtonRef}
           onClick={() => setIsSearchModalOpen(true)}
-          className="group mb-1 mt-0.5 flex w-full items-center justify-between gap-2 rounded-full border border-white/45 bg-white/72 px-4 py-[0.375rem] text-sm text-muted-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.85),0_14px_28px_rgba(15,23,42,0.06)] backdrop-blur-md transition-all duration-300 hover:border-[#A5A0FF]/30 hover:bg-white/88 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/8 focus:outline-none focus:ring-2 focus:ring-primary/20 liquid-button"
+          className="group mb-1.5 mt-0.5 flex min-h-11 w-full items-center justify-between gap-2.5 rounded-[18px] border border-white/40 bg-white/68 px-3 py-2 text-sm text-muted-foreground backdrop-blur-md transition-all duration-200 hover:border-[#A5A0FF]/40 hover:bg-white/88 hover:shadow-[0_14px_30px_rgba(96,90,190,0.12)] dark:border-white/10 dark:bg-white/[0.05] dark:hover:bg-white/[0.08] focus:outline-none focus:ring-2 focus:ring-primary/20 liquid-button"
           data-testid="button-search-chats"
         >
           <div className="flex items-center gap-2">
             <Search className="h-4 w-4 text-muted-foreground/70" />
             <span className="font-medium text-[13px]">Buscar chats...</span>
           </div>
-          <kbd className="hidden lg:inline-flex h-5 items-center gap-1 rounded bg-black/5 dark:bg-white/10 px-1.5 font-mono text-[10px] text-muted-foreground">
+          <kbd className="hidden lg:inline-flex h-5 items-center gap-1 rounded-md bg-black/5 px-1.5 font-mono text-[10px] text-muted-foreground dark:bg-white/10">
             <span className="text-[10px]">⌘</span>K
           </kbd>
         </button>
 
-        <div className="space-y-px mt-0.5">
+        <div className="mt-0.5 space-y-0">
           <Button
             variant="ghost"
             className={cn(minimalSectionButtonClass, "group")}
@@ -689,14 +689,14 @@ export function Sidebar({
           </Button>
           <Button
             variant="ghost"
-            className={cn(minimalSectionButtonClass, "group h-auto py-[0.375rem]")}
+            className={cn(minimalSectionButtonClass, "group h-auto py-1.5")}
             onClick={onOpenSkills}
             data-testid="button-skills"
           >
-            <div className={cn(minimalIconChipClass, "mt-0.5 shrink-0")}>
+            <div className={cn(minimalIconChipClass, "shrink-0")}>
               <PremiumIcons.Skills className="h-4 w-4" />
             </div>
-            <span className="flex flex-col items-start leading-tight">
+            <span className="flex flex-col items-start leading-[1.1]">
               <span>Skills</span>
               <span className="text-[9px] font-normal text-muted-foreground/70">Capacidades modulares</span>
             </span>
@@ -746,7 +746,7 @@ export function Sidebar({
         </div>
       </div>
 
-      <Separator className="mx-4 my-1.5 w-auto" />
+      <Separator className="mx-3.5 my-1.5 w-auto" />
 
       <ScrollArea className="flex-1 px-2 liquid-scroll [&_[data-radix-scroll-area-viewport]]:scrollbar-thin [&_[data-radix-scroll-area-viewport]]:scrollbar-thumb-muted-foreground/30 [&_[data-radix-scroll-area-viewport]]:scrollbar-track-transparent hover:[&_[data-radix-scroll-area-viewport]]:scrollbar-thumb-muted-foreground/50">
         <div className="flex flex-col gap-4 pb-4">
