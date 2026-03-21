@@ -291,7 +291,7 @@ jobs:
               exit 1
             fi
             if [ "${actual}" != "${expected}" ]; then
-              echo "::warning::Digest mismatch for ${label}. expected=${expected} actual=${actual} (concurrent build may have overwritten tag)"
+              echo "::warning::Digest mismatch for ${label}. expected=${expected} actual=${actual} (build output digest and remote manifest digest can differ when attestations are enabled)"
             fi
             echo "  ✓ ${label} digest pinned to ${actual}"
           }
@@ -684,7 +684,7 @@ jobs:
               exit 1
             fi
             if [ "${actual}" != "${expected}" ]; then
-              echo "::warning::Digest mismatch for ${label}. expected=${expected} actual=${actual} (concurrent build may have overwritten tag)"
+              echo "::warning::Digest mismatch for ${label}. expected=${expected} actual=${actual} (build output digest and remote manifest digest can differ when attestations are enabled)"
             fi
             echo "  ✓ ${label} digest pinned to ${actual}"
           }
