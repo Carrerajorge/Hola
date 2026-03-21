@@ -400,10 +400,20 @@ export async function registerRoutes(
     const loginHint =
       normalizeGoogleLoginHint(req.query.loginHint) ??
       normalizeGoogleLoginHint(req.query.login_hint);
+
+    // Preserve provider_hint (gemini, openai, etc.) in session so we can act
+    // on it after the OAuth callback completes (e.g. auto-initiate Gemini CLI).
+    const providerHint = typeof req.query.provider_hint === "string"
+      ? req.query.provider_hint.trim().toLowerCase()
+      : "";
+    if (providerHint && (req as any).session) {
+      (req as any).session.providerHint = providerHint;
+    }
+
     passport.authenticate("google", {
       scope: ["openid", "email", "profile"],
       accessType: "offline",
-      prompt: "consent select_account",
+      prompt: "select_account consent",
       ...(loginHint ? { loginHint } : {}),
     })(req, res, next);
   });
@@ -471,19 +481,35 @@ export async function registerRoutes(
                 }
               }
 
+              // Determine redirect based on provider_hint saved before OAuth.
               const sess = (req as any).session;
+              const providerHint = sess?.providerHint || "";
+              // Clear after use so it doesn't persist across sessions.
+              if (sess) {
+                delete sess.providerHint;
+              }
+
+              // Build redirect URL: if the user came from a specific provider button,
+              // include it so the client can auto-trigger the relevant connection flow.
+              let redirectTarget = "/?auth=success";
+              if (providerHint === "gemini") {
+                redirectTarget = "/?auth=success&provider=gemini";
+              } else if (providerHint === "openai") {
+                redirectTarget = "/?auth=success&provider=openai";
+              }
+
               if (sess?.save) {
                 sess.save((saveErr: any) => {
                   if (saveErr) {
                     console.error("[Auth] Google session save error:", saveErr);
                     return res.redirect("/login?error=session_error");
                   }
-                  res.redirect("/?auth=success");
+                  res.redirect(redirectTarget);
                 });
                 return;
               }
 
-              res.redirect("/?auth=success");
+              res.redirect(redirectTarget);
             });
           })().catch(next);
         },

@@ -51,12 +51,22 @@ passport.deserializeUser(async (id: string, done) => {
 
 // --- Google Strategy ---
 if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
+    // In production, always use the canonical domain to avoid redirect_uri_mismatch with
+    // the URL registered in Google Cloud Console. Fall back to BASE_URL for development.
+    const canonicalDomain = process.env.CANONICAL_DOMAIN || "iliagpt.com";
+    const googleCallbackURL =
+        env.NODE_ENV === "production"
+            ? `https://${canonicalDomain}/api/auth/google/callback`
+            : `${env.BASE_URL}/api/auth/google/callback`;
+
+    Logger.info(`[Passport] Google OAuth callbackURL: ${googleCallbackURL}`);
+
     passport.use(
         new GoogleStrategy(
             {
                 clientID: env.GOOGLE_CLIENT_ID,
                 clientSecret: env.GOOGLE_CLIENT_SECRET,
-                callbackURL: `${env.BASE_URL}/api/auth/google/callback`,
+                callbackURL: googleCallbackURL,
                 scope: ["openid", "email", "profile"],
                 // Request refresh tokens (Google often only returns refresh_token on the first consent)
                 accessType: "offline",

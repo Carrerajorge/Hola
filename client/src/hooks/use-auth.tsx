@@ -328,7 +328,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (nextUser && !isAnonymousUser(nextUser)) {
           setStoredUser(nextUser);
           setForcedSignedOut(false);
-          window.history.replaceState({}, "", window.location.pathname);
+
+          // Preserve provider param from OAuth callback for client-side handling
+          // (e.g. auto-trigger Gemini CLI connection after login).
+          const params = new URLSearchParams(window.location.search);
+          const provider = params.get("provider");
+          if (provider) {
+            window.history.replaceState({}, "", `${window.location.pathname}?provider=${provider}`);
+          } else {
+            window.history.replaceState({}, "", window.location.pathname);
+          }
           setIsOAuthSyncing(false);
           return;
         }
