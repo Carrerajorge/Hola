@@ -22,6 +22,13 @@ import type { ZodSchema } from "zod";
 import { type AgentEvent } from "./typedStreaming";
 import { costEngine } from "../services/finops/costEngine";
 import { secretManager } from "../services/secretManager";
+import {
+  getOpenAICompatibleApiKey,
+  getOpenAICompatibleBaseUrl,
+  getOpenAICompatibleDefaultModel,
+  hasConfiguredOpenAICompatibleProvider,
+  isCerebrasBaseUrl,
+} from "./openaiCompatible";
 
 interface RateLimitState {
   tokens: number;
@@ -688,10 +695,12 @@ class LLMGateway {
         return Boolean(this.getXaiApiKey() && this.getXaiApiKey()!.trim());
       case "gemini":
         return Boolean(this.getGeminiApiKey() && this.getGeminiApiKey()!.trim());
-      case "openai":
-        // Si hay un BASE_URL customizado, está preconfigurado para Local Host (Ollama/LM Studio)
-        if (Boolean(process.env.OPENAI_BASE_URL)) return true;
-        return Boolean(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim());
+      case "openai": {
+        const compatibleBaseUrl = getOpenAICompatibleBaseUrl();
+        // Si hay un BASE_URL customizado local, permitimos arrancar sin API key.
+        if (compatibleBaseUrl && !isCerebrasBaseUrl(compatibleBaseUrl)) return true;
+        return hasConfiguredOpenAICompatibleProvider();
+      }
       case "anthropic":
         return Boolean(process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.trim());
       case "deepseek":
@@ -901,7 +910,7 @@ class LLMGateway {
     const configuredProviders = this.getSmartRoutedProviders();
     if (configuredProviders.length === 0) {
       throw new Error(
-        "No LLM providers configured. Set at least one of: XAI_API_KEY (or GROK_API_KEY/ILIAGPT_API_KEY), GEMINI_API_KEY (or GOOGLE_API_KEY), OPENAI_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY."
+        "No LLM providers configured. Set at least one of: XAI_API_KEY (or GROK_API_KEY/ILIAGPT_API_KEY), GEMINI_API_KEY (or GOOGLE_API_KEY), OPENAI_API_KEY/CEREBRAS_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY."
       );
     }
 
@@ -980,7 +989,7 @@ class LLMGateway {
     } else if (provider === "gemini") {
       model = modelProvider === "gemini" ? options.model! : GEMINI_MODELS.FLASH;
     } else if (provider === "openai") {
-      model = modelProvider === "openai" ? options.model! : (process.env.OPENAI_MODEL || "gpt-4o-mini");
+      model = modelProvider === "openai" ? options.model! : getOpenAICompatibleDefaultModel();
     } else if (provider === "deepseek") {
       model = modelProvider === "deepseek" ? options.model! : (process.env.DEEPSEEK_MODEL || "deepseek-chat");
     } else {
@@ -1033,9 +1042,10 @@ class LLMGateway {
 
     if (provider === "openai") {
       if (!this.openaiClient) {
+        const compatibleBaseUrl = getOpenAICompatibleBaseUrl();
         this.openaiClient = new OpenAI({
-          apiKey: process.env.OPENAI_BASE_URL ? (process.env.OPENAI_API_KEY || "dummy-key") : secretManager.getLLMProviderKey("openai"),
-          baseURL: process.env.OPENAI_BASE_URL || undefined,
+          apiKey: compatibleBaseUrl ? (getOpenAICompatibleApiKey() || "dummy-key") : secretManager.getLLMProviderKey("openai"),
+          baseURL: compatibleBaseUrl,
         });
       }
       return this.openaiClient;
@@ -1525,7 +1535,7 @@ class LLMGateway {
     const configuredProviders = this.getSmartRoutedProviders();
     if (configuredProviders.length === 0) {
       throw new Error(
-        "No LLM providers configured. Set at least one of: XAI_API_KEY (or GROK_API_KEY/ILIAGPT_API_KEY), GEMINI_API_KEY (or GOOGLE_API_KEY), OPENAI_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY."
+        "No LLM providers configured. Set at least one of: XAI_API_KEY (or GROK_API_KEY/ILIAGPT_API_KEY), GEMINI_API_KEY (or GOOGLE_API_KEY), OPENAI_API_KEY/CEREBRAS_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY."
       );
     }
 
@@ -1754,7 +1764,7 @@ class LLMGateway {
     if (provider === "xai") {
       model = modelProvider === "xai" ? options.model! : MODELS.TEXT;
     } else if (provider === "openai") {
-      model = modelProvider === "openai" ? options.model! : (process.env.OPENAI_MODEL || "gpt-4o-mini");
+      model = modelProvider === "openai" ? options.model! : getOpenAICompatibleDefaultModel();
     } else {
       model = modelProvider === "deepseek" ? options.model! : (process.env.DEEPSEEK_MODEL || "deepseek-chat");
     }
@@ -2107,16 +2117,18 @@ class LLMGateway {
       }
     }
 
-    // Test OpenAI with quick timeout
-    if (process.env.OPENAI_API_KEY) {
+    // Test OpenAI-compatible providers (OpenAI / Cerebras / local router) with quick timeout
+    if (hasConfiguredOpenAICompatibleProvider()) {
       try {
         const start = Date.now();
+        const compatibleBaseUrl = getOpenAICompatibleBaseUrl();
         const client = new OpenAI({
-          apiKey: process.env.OPENAI_API_KEY || "missing",
+          apiKey: compatibleBaseUrl ? (getOpenAICompatibleApiKey() || "dummy-key") : secretManager.getLLMProviderKey("openai"),
+          baseURL: compatibleBaseUrl,
           timeout: 5000,
         });
         await client.chat.completions.create({
-          model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+          model: getOpenAICompatibleDefaultModel(),
           messages: [{ role: "user", content: "hi" }],
           max_tokens: 5,
         });
@@ -2172,4 +2184,3 @@ class LLMGateway {
 export const llmGateway = new LLMGateway();
 
 export type { LLMRequestOptions, LLMResponse, StreamChunk, StreamCheckpoint, TokenUsageRecord };
-

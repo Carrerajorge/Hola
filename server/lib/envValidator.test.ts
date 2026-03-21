@@ -21,6 +21,10 @@ describe("envValidator", () => {
     delete process.env.XAI_API_KEY;
     delete process.env.GEMINI_API_KEY;
     delete process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_BASE_URL;
+    delete process.env.CEREBRAS_API_KEY;
+    delete process.env.CEREBRAS_BASE_URL;
+    delete process.env.CEREBRAS_MODEL;
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.DEEPSEEK_API_KEY;
     delete process.env.SESSION_SECRET;
@@ -47,6 +51,21 @@ describe("envValidator", () => {
       expect(config.DATABASE_URL).toBe("postgres://localhost/testdb");
       expect(config.PORT).toBe(3000);
       expect(config.LOG_LEVEL).toBe("debug");
+      logSpy.mockRestore();
+    });
+
+    it("accepts CEREBRAS_API_KEY as an OpenAI-compatible LLM config", async () => {
+      process.env.NODE_ENV = "test";
+      process.env.DATABASE_URL = "postgres://localhost/testdb";
+      process.env.CEREBRAS_API_KEY = "csk-test-key-12345";
+      process.env.CEREBRAS_MODEL = "gpt-oss-120b";
+
+      const { validateEnv, hasFeature } = await import("./envValidator");
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const config = validateEnv();
+
+      expect(config.CEREBRAS_API_KEY).toBe("csk-test-key-12345");
+      expect(hasFeature("llm")).toBe(true);
       logSpy.mockRestore();
     });
 

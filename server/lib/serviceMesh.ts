@@ -299,7 +299,15 @@ export function registerCoreServices(): void {
             // LLM is considered healthy if we have at least one working provider
             try {
                 const { env } = await import('../config/env');
-                return !!(env.GOOGLE_API_KEY || env.GEMINI_API_KEY || env.OPENAI_API_KEY);
+                const { hasConfiguredOpenAICompatibleProvider } = await import('./openaiCompatible');
+                return !!(
+                  env.XAI_API_KEY ||
+                  env.GOOGLE_API_KEY ||
+                  env.GEMINI_API_KEY ||
+                  env.ANTHROPIC_API_KEY ||
+                  env.DEEPSEEK_API_KEY ||
+                  hasConfiguredOpenAICompatibleProvider(env as NodeJS.ProcessEnv)
+                );
             } catch {
                 return false;
             }

@@ -24,8 +24,11 @@ const LLMEnvSchema = z.object({
     GOOGLE_API_KEY: z.string().min(1, 'GOOGLE_API_KEY is required').optional(),
     ANTHROPIC_API_KEY: z.string().min(1, 'ANTHROPIC_API_KEY is required').optional(),
     OPENAI_API_KEY: z.string().min(1, 'OPENAI_API_KEY is required').optional(),
+    OPENAI_BASE_URL: z.string().url('OPENAI_BASE_URL must be a valid URL').optional(),
+    CEREBRAS_API_KEY: z.string().min(1, 'CEREBRAS_API_KEY is required').optional(),
+    CEREBRAS_BASE_URL: z.string().url('CEREBRAS_BASE_URL must be a valid URL').optional(),
 }).refine(
-    (data) => data.XAI_API_KEY || data.GOOGLE_API_KEY || data.ANTHROPIC_API_KEY || data.OPENAI_API_KEY,
+    (data) => data.XAI_API_KEY || data.GOOGLE_API_KEY || data.ANTHROPIC_API_KEY || data.OPENAI_API_KEY || data.CEREBRAS_API_KEY,
     'At least one LLM API key must be configured'
 );
 
