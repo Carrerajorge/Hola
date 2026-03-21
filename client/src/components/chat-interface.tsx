@@ -429,6 +429,7 @@ interface ChatInterfaceProps {
   ) => void;
   onTruncateMessagesAt?: (chatId: string, messageIndex: number) => void;
   onNewChat?: (options?: { preserveGpt?: boolean }) => void;
+  newChatResetNonce?: number;
   onEditGpt?: (gpt: ActiveGpt) => void;
   onHideGptFromSidebar?: (gptId: string) => void;
   onPinGptToSidebar?: (gptId: string) => void;
@@ -484,7 +485,6 @@ interface ChatInterfaceProps {
       error?: string;
     }>
   >;
-  newChatResetNonce?: number;
 }
 
 interface UploadedFile {
@@ -616,6 +616,7 @@ export function ChatInterface({
   onTruncateAndReplaceMessage,
   onTruncateMessagesAt,
   onNewChat,
+  newChatResetNonce,
   onEditGpt,
   onHideGptFromSidebar,
   onPinGptToSidebar,
@@ -644,7 +645,6 @@ export function ChatInterface({
   setSelectedDocTool: setSelectedDocToolProp,
   docGenerationState: docGenerationStateProp,
   setDocGenerationState: setDocGenerationStateProp,
-  newChatResetNonce,
 }: ChatInterfaceProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { settings } = useSettingsContext();
@@ -2502,6 +2502,7 @@ export function ChatInterface({
     setActiveDocEditor(null);
     setMinimizedDocument(null);
     setEditedDocumentContent("");
+    // Reset document generation state
     setDocGenerationState({
       status: "idle",
       progress: 0,
@@ -2510,17 +2511,8 @@ export function ChatInterface({
       fileName: null,
       fileSize: null,
     });
-  }, [setAiProcessStepsForChat, setAiStateForChat, setDocGenerationState, setSelectedDocTool]);
+  }, []);
 
-  const lastNewChatResetNonceRef = useRef(newChatResetNonce);
-  useEffect(() => {
-    if (newChatResetNonce == null) return;
-    if (lastNewChatResetNonceRef.current === newChatResetNonce) return;
-    lastNewChatResetNonceRef.current = newChatResetNonce;
-    resetForNewChat();
-  }, [newChatResetNonce, resetForNewChat]);
-
-  // Handle new chat - reset all document state before calling parent handler
   const handleNewChat = useCallback(
     (options?: { preserveGpt?: boolean }) => {
       resetForNewChat();
@@ -2537,6 +2529,7 @@ export function ChatInterface({
   // Avoid stale `chatId` captures inside long async flows.
   const latestChatIdRef = useRef<string | null>(chatId || null);
   latestChatIdRef.current = chatId || null;
+  const lastNewChatResetNonceRef = useRef(newChatResetNonce);
   const streamIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamingContentRef = useRef<string>("");
   const aiStateRef = useRef<AiState>("idle");
@@ -2554,6 +2547,13 @@ export function ChatInterface({
       resolveRealChatId(conversationId)
     );
   }, []);
+
+  useEffect(() => {
+    if (newChatResetNonce === undefined) return;
+    if (newChatResetNonce === lastNewChatResetNonceRef.current) return;
+    lastNewChatResetNonceRef.current = newChatResetNonce;
+    resetForNewChat();
+  }, [newChatResetNonce, resetForNewChat]);
 
   const setAiStateForChat = useCallback(
     (value: React.SetStateAction<AiState>, conversationId?: string | null) => {
@@ -2864,15 +2864,18 @@ export function ChatInterface({
     [setOptimisticMessages],
   );
 
-  const markMessageDeliverySent = useCallback((messageKey: string) => {
-    setOptimisticMessages((prev) =>
-      prev.map((m: Message) =>
-        m.id === messageKey || m.clientTempId === messageKey
-          ? { ...m, deliveryStatus: "sent", deliveryError: undefined }
-          : m,
-      ),
-    );
-  }, [setOptimisticMessages]);
+  const markMessageDeliverySent = useCallback(
+    (messageKey: string) => {
+      setOptimisticMessages((prev) =>
+        prev.map((m: Message) =>
+          m.id === messageKey || m.clientTempId === messageKey
+            ? { ...m, deliveryStatus: "sent", deliveryError: undefined }
+            : m,
+        ),
+      );
+    },
+    [setOptimisticMessages],
+  );
 
   const runDocumentAnalysisAsync = useCallback(
     async (opts: {
