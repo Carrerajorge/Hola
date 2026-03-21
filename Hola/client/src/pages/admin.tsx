@@ -3235,11 +3235,16 @@ function InvoicesSection() {
     queryKey: ["/api/admin/finance/invoices"],
     queryFn: async () => {
       const res = await fetch("/api/admin/finance/invoices", { credentials: "include" });
-      return res.json();
+      const data = await res.json();
+      if (Array.isArray(data)) return data;
+      if (data?.invoices && Array.isArray(data.invoices)) return data.invoices;
+      if (data?.data?.invoices && Array.isArray(data.data.invoices)) return data.data.invoices;
+      if (data?.data && Array.isArray(data.data)) return data.data;
+      return [];
     }
   });
 
-  const invoices = invoicesData?.invoices || invoicesData || [];
+  const invoices = Array.isArray(invoicesData) ? invoicesData : [];
 
   const createInvoiceMutation = useMutation({
     mutationFn: async (invoice: any) => {
