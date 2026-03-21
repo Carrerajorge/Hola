@@ -214,9 +214,11 @@ function resolveOAuthClientConfig(): { clientId: string; clientSecret?: string }
     return extracted;
   }
 
-  // 3. No credentials available
+  // 3. Fallback: use GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET from env
+  // (already checked in step 1 via CLIENT_ID_KEYS which includes GOOGLE_CLIENT_ID)
+  // If we reach here, no credentials are available at all
   throw new Error(
-    "Gemini CLI not found. Install it first: brew install gemini-cli (or npm install -g @google/gemini-cli), or set GEMINI_CLI_OAUTH_CLIENT_ID.",
+    "No se encontraron credenciales OAuth para Gemini CLI. Configura GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET, o instala Gemini CLI: npm install -g @google/gemini-cli",
   );
 }
 
