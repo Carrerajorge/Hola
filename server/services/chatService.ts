@@ -1749,7 +1749,7 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
   const documentModeInstructions = `
 REGLAS DE ESCRITURA DE DOCUMENTOS:
 1. Escribe SOLO el contenido solicitado, sin explicaciones ni introducciones.
-2. NO incluyas frases como "Aquí está...", "A continuación...", "Claro, te escribo...", etc.
+2. NO incluyas frases como "Aquí está...", "A continuación...", "Claro, te escribo...", "El título del documento Word sería...", "Título sugerido:", etc.
 3. NO hagas preguntas de seguimiento ni pidas confirmación.
 4. NO incluyas comentarios sobre lo que vas a hacer o has hecho.
 5. Escribe el contenido directamente como si estuvieras escribiendo en el documento.
@@ -1782,6 +1782,8 @@ IMPORTANTE: SIEMPRE usa $ para envolver fórmulas matemáticas:
 - INCORRECTO: "La función f(x) = x²" (NO uses caracteres Unicode como ², ³, ⁴)
 - INCORRECTO: "f(x) = 8x⁴ - 6x³" (NO uses superíndices Unicode)
 - CORRECTO: "$f(x) = 8x^4 - 6x^3$" (USA LaTeX con $...$)
+
+Si el documento necesita un título, escríbelo directamente como encabezado, no lo describas.
 
 Escribe contenido limpio y directo.`;
 

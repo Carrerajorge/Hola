@@ -129,6 +129,7 @@ export default function Home() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile);
   const [isNewChatMode, setIsNewChatMode] = useState(false);
   const [newChatStableKey, setNewChatStableKey] = useState<string | null>(null);
+  const [newChatResetNonce, setNewChatResetNonce] = useState(0);
   const [isGptExplorerOpen, setIsGptExplorerOpen] = useState(false);
   const [isGptBuilderOpen, setIsGptBuilderOpen] = useState(false);
   const [aboutGptId, setAboutGptId] = useState<string | null>(null);
@@ -521,6 +522,7 @@ export default function Home() {
 
     // Clear chat references - this triggers new chat mode
     const newConversationId = `new-chat-${Date.now()}`;
+    setNewChatResetNonce((prev) => prev + 1);
     setActiveChatId(null);
     setSelectedProjectId(null);
     setIsNewChatMode(true);
@@ -1050,6 +1052,7 @@ export default function Home() {
             setSelectedDocTool={setSelectedDocTool}
             docGenerationState={docGenerationState}
             setDocGenerationState={setDocGenerationState}
+            newChatResetNonce={newChatResetNonce}
           />
           </ChatErrorBoundary>
         )}

@@ -49,13 +49,8 @@ export function checkComplexityLocally(message: string, hasAttachments: boolean 
     }
   }
 
-  if (hasAttachments) {
-    return {
-      agent_required: true,
-      agent_reason: "Modo agente por adjuntos",
-      confidence: "high",
-    };
-  }
+  // Images and other attachments are handled by the normal streaming path
+  // (vision / multimodal) — no need to activate agent mode for them.
 
   // 4) Conversational/general prompts should stay in standard chat mode.
   if (trimmed.length <= 140 && SIMPLE_CHAT_PATTERNS.some((pattern) => pattern.test(trimmed))) {
