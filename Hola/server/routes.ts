@@ -34,6 +34,7 @@ import { createGmailRouter } from "./routes/gmailRouter";
 import gmailOAuthRouter from "./routes/gmailOAuthRouter";
 import calendarOAuthRouter from "./routes/calendarOAuthRouter";
 import outlookOAuthRouter from "./routes/outlookOAuthRouter";
+import geminiCliOAuthRouter from "./routes/geminiCliOAuthRouter";
 import { createGmailMcpRouter } from "./mcp/gmailMcpServer";
 import healthRouter from "./routes/healthRouter";
 import aiExcelRouter from "./routes/aiExcelRouter";
@@ -202,13 +203,23 @@ export async function registerRoutes(
   // Passport Auth Routes
   // Google (only register if credentials are configured)
   if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
-    app.get("/api/auth/google", passport.authenticate("google", {
-      scope: ["openid", "email", "profile"],
-      // Ensure Google issues a refresh_token (needed for long-lived access).
-      // Note: Google may still only return refresh_token on first consent unless prompt includes "consent".
-      accessType: "offline",
-      prompt: "consent select_account",
-    }));
+    app.get("/api/auth/google", (req, res, next) => {
+      const loginHint = typeof req.query.login_hint === "string" ? req.query.login_hint : undefined;
+      const providerHint = typeof req.query.provider_hint === "string" ? req.query.provider_hint : undefined;
+      // Store provider_hint in session so callback knows the source (e.g. "openai")
+      if (providerHint && (req as any).session) {
+        (req as any).session.providerHint = providerHint;
+      }
+      const authOptions: Record<string, any> = {
+        scope: ["openid", "email", "profile"],
+        accessType: "offline",
+        prompt: "consent select_account",
+      };
+      if (loginHint) {
+        authOptions.loginHint = loginHint;
+      }
+      passport.authenticate("google", authOptions)(req, res, next);
+    });
     app.get("/api/auth/google/callback",
       (req, res, next) => {
         passport.authenticate("google", { failureRedirect: "/login?error=google_failed" }, (err: any, user: any) => {
@@ -566,6 +577,7 @@ export async function registerRoutes(
   app.use("/api/oauth/google/gmail", gmailOAuthRouter);
   app.use("/api/oauth/google/calendar", calendarOAuthRouter);
   app.use("/api/oauth/microsoft", outlookOAuthRouter);
+  app.use("/api/gemini-cli-oauth", geminiCliOAuthRouter);
   app.use("/mcp/gmail", createGmailMcpRouter());
 
   // Pre-execution intent guard for high-impact mutation endpoints.

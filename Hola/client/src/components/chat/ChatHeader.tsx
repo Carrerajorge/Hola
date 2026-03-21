@@ -36,6 +36,7 @@ import { useMemo, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { StandardModelSelector } from './StandardModelSelector';
 import { GptActionMenu } from './GptActionMenu';
+import { GeminiOAuthDialog } from './GeminiOAuthDialog';
 
 interface ChatHeaderProps {
     chatId: string | null;
@@ -94,6 +95,7 @@ export function ChatHeader({
     const { toast } = useToast();
     const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
     const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
+    const [isGeminiOAuthDialogOpen, setIsGeminiOAuthDialogOpen] = useState(false);
     const currentInput = useChatStore((s) => s.input);
     const { availableModels, isAnyModelAvailable, selectedModelId, setSelectedModelId } = useModelAvailability();
 
@@ -163,6 +165,7 @@ export function ChatHeader({
                         setSelectedModelId={setSelectedModelId}
                         modelsByProvider={modelsByProvider}
                         activeGptName={activeGpt?.name === 'ILIAGPT' ? undefined : activeGpt?.name}
+                        onAddModel={() => setIsGeminiOAuthDialogOpen(true)}
                     />
                 )}
             </div>
@@ -333,6 +336,7 @@ export function ChatHeader({
                 </DropdownMenu>
             </div>
             <UpgradePlanDialog open={isUpgradeDialogOpen} onOpenChange={setIsUpgradeDialogOpen} />
+            <GeminiOAuthDialog open={isGeminiOAuthDialogOpen} onOpenChange={setIsGeminiOAuthDialogOpen} />
         </header>
         {chatId && !chatId.startsWith("pending-") && (
             <ScheduleDialog
