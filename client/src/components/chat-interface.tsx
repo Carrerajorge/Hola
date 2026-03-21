@@ -76,6 +76,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { chatLogger } from "@/lib/logger";
+import { isAdminUser } from "@/lib/admin";
 import {
   Popover,
   PopoverContent,
@@ -971,12 +972,7 @@ export function ChatInterface({
   const userPlanInfo = useMemo(() => {
     if (!user) return null;
     const plan = getEffectivePlan(user as any);
-    const isAdmin =
-      plan === "admin" ||
-      Boolean(
-        (user as any)?.isAdmin ||
-        user?.email?.toLowerCase() === "carrerajorge874@gmail.com",
-      );
+    const isAdmin = plan === "admin" || isAdminUser(user as any);
     const isPaid = isPaidPlan(user as any);
     return {
       plan,

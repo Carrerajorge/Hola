@@ -1,3 +1,5 @@
+import { isPrivilegedAdminEmail } from "@shared/adminIdentity";
+
 export type AdminCheckUser =
   | {
       role?: string | null;
@@ -12,7 +14,7 @@ function isSuperAdminEmail(user: AdminCheckUser): boolean {
   if (!user) return false;
   const anyUser = user as any;
   const email = String(anyUser.email ?? anyUser.claims?.email ?? "").toLowerCase().trim();
-  return email === "carrerajorge874@gmail.com";
+  return isPrivilegedAdminEmail(email);
 }
 
 export function isAdminUser(user: AdminCheckUser): boolean {

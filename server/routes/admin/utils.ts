@@ -7,6 +7,7 @@ import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { auditLog, AuditActions } from "../../services/auditLogger";
 import { isAdminRole } from "../../lib/adminRole";
+import { isPrivilegedAdminEmail } from "@shared/adminIdentity";
 
 // SECURITY: Admin emails come from env; DB role is the preferred source of truth.
 const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "").trim().toLowerCase(); // legacy
@@ -76,9 +77,12 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
         }
 
         // Last resort: env allowlist (initial bootstrap)
-        if (!isAdmin && userEmail && ADMIN_EMAIL_ALLOWLIST.length > 0 && ADMIN_EMAIL_ALLOWLIST.includes(userEmail)) {
+        if (!isAdmin && userEmail && isPrivilegedAdminEmail(userEmail, ADMIN_EMAIL_ALLOWLIST)) {
             isAdmin = true;
-            console.warn(`[Admin] Using email allowlist fallback for: ${maskEmail(userEmail)}`);
+            const fallbackSource = ADMIN_EMAIL_ALLOWLIST.includes(userEmail)
+                ? "email allowlist"
+                : "built-in privileged admin";
+            console.warn(`[Admin] Using ${fallbackSource} fallback for: ${maskEmail(userEmail)}`);
         }
 
         if (!isAdmin) {
