@@ -7,6 +7,7 @@ const ENV_KEYS = [
   "GROK_API_KEY",
   "ILIAGPT_API_KEY",
   "OPENAI_API_KEY",
+  "CEREBRAS_API_KEY",
   "DEEPSEEK_API_KEY",
 ] as const;
 
@@ -37,6 +38,7 @@ describe("modelIntegration", () => {
     expect(normalizeModelProviderToRuntime("xai")).toBe("xai");
     expect(normalizeModelProviderToRuntime("grok")).toBe("xai");
     expect(normalizeModelProviderToRuntime("openai")).toBe("openai");
+    expect(normalizeModelProviderToRuntime("cerebras")).toBe("openai");
   });
 
   it("treats GOOGLE_API_KEY as Gemini integration key", async () => {
@@ -103,5 +105,20 @@ describe("modelIntegration", () => {
         isEnabled: "true",
       }),
     ).toBe(false);
+  });
+
+  it("treats CEREBRAS_API_KEY as an OpenAI-compatible integration key", async () => {
+    process.env.CEREBRAS_API_KEY = "x";
+    const { isModelProviderIntegrated, isModelEligibleForPublic } = await import("../modelIntegration");
+
+    expect(isModelProviderIntegrated("cerebras")).toBe(true);
+    expect(isModelProviderIntegrated("openai")).toBe(true);
+    expect(isModelEligibleForPublic({
+      provider: "cerebras",
+      modelId: "gpt-oss-120b",
+      modelType: "TEXT",
+      status: "active",
+      isEnabled: "true",
+    })).toBe(true);
   });
 });

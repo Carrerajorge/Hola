@@ -21,6 +21,7 @@ import { redis } from "../lib/redis";
 import { env } from "../config/env";
 import { Logger } from "../lib/logger";
 import os from "os";
+import { getOpenAICompatibleBaseUrl, isCerebrasBaseUrl, usesCerebrasOpenAICompatibility } from "../lib/openaiCompatible";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -71,10 +72,13 @@ async function checkRedis(): Promise<ComponentHealth> {
 
 function checkLLMProviders(): ComponentHealth {
     const configured: string[] = [];
-    if (env.OPENAI_API_KEY) configured.push("openai");
+    if (env.XAI_API_KEY) configured.push("xai");
+    const compatibleBaseUrl = getOpenAICompatibleBaseUrl(env as NodeJS.ProcessEnv);
+    if (usesCerebrasOpenAICompatibility(env as NodeJS.ProcessEnv)) configured.push("cerebras");
+    else if (env.OPENAI_API_KEY || (compatibleBaseUrl && !isCerebrasBaseUrl(compatibleBaseUrl))) configured.push("openai");
     if (env.ANTHROPIC_API_KEY) configured.push("anthropic");
-    if ((env as any).GEMINI_API_KEY) configured.push("gemini");
-    if ((env as any).GROQ_API_KEY) configured.push("groq");
+    if (env.GEMINI_API_KEY || env.GOOGLE_API_KEY) configured.push("gemini");
+    if (env.DEEPSEEK_API_KEY) configured.push("deepseek");
 
     if (configured.length === 0) {
         return { status: "down", message: "No LLM providers configured", details: { configured } };

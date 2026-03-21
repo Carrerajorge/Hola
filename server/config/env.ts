@@ -1,5 +1,6 @@
 import * as dotenv from "dotenv";
 import { z } from "zod";
+import { normalizeOpenAICompatibleEnv, usesCerebrasOpenAICompatibility } from "../lib/openaiCompatible";
 
 const nodeEnv = process.env.NODE_ENV || "development";
 const loadEnvLocal = process.env.LOAD_ENV_LOCAL === "true";
@@ -15,6 +16,7 @@ if (!envLoadedByBootstrap) {
 }
 // Backward compatible aliases for xAI keys used across different parts of the codebase.
 process.env.XAI_API_KEY = process.env.XAI_API_KEY || process.env.GROK_API_KEY || process.env.ILIAGPT_API_KEY;
+normalizeOpenAICompatibleEnv(process.env);
 
 const boolish = z
   .preprocess((v) => {
@@ -38,12 +40,15 @@ const envSchema = z.object({
   GOOGLE_API_KEY: z.string().optional(), // backward/alternate name used in parts of the codebase
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_BASE_URL: z.string().optional(),
+  CEREBRAS_API_KEY: z.string().optional(),
+  CEREBRAS_BASE_URL: z.string().optional(),
   XAI_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
   DEEPSEEK_API_KEY: z.string().optional(),
 
   // Optional model/baseURL overrides
   OPENAI_MODEL: z.string().optional(),
+  CEREBRAS_MODEL: z.string().optional(),
   ANTHROPIC_MODEL: z.string().optional(),
   DEEPSEEK_MODEL: z.string().optional(),
   DEEPSEEK_BASE_URL: z.string().optional(),
@@ -140,18 +145,19 @@ function validateEnv() {
   const hasAnyLlm =
     Boolean(data.XAI_API_KEY) ||
     Boolean(data.GEMINI_API_KEY || data.GOOGLE_API_KEY) ||
-    Boolean(data.OPENAI_API_KEY) ||
+    Boolean(data.OPENAI_API_KEY || data.OPENAI_BASE_URL || data.CEREBRAS_API_KEY) ||
     Boolean(data.ANTHROPIC_API_KEY) ||
     Boolean(data.DEEPSEEK_API_KEY);
 
   if (!hasAnyLlm) {
-    console.warn("⚠️  WARNING: No LLM API keys configured (XAI_API_KEY, GEMINI_API_KEY/GOOGLE_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY)");
+    console.warn("⚠️  WARNING: No LLM API keys configured (XAI_API_KEY, GEMINI_API_KEY/GOOGLE_API_KEY, OPENAI_API_KEY/CEREBRAS_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY)");
     console.warn("   Chat functionality will not work without at least one LLM provider.");
   } else {
     const providers = [];
     if (data.XAI_API_KEY) providers.push("xAI");
     if (data.GEMINI_API_KEY || data.GOOGLE_API_KEY) providers.push("Gemini");
-    if (data.OPENAI_API_KEY) providers.push("OpenAI");
+    if (usesCerebrasOpenAICompatibility(data as NodeJS.ProcessEnv)) providers.push("Cerebras (OpenAI-compatible)");
+    else if (data.OPENAI_API_KEY || data.OPENAI_BASE_URL) providers.push("OpenAI");
     if (data.ANTHROPIC_API_KEY) providers.push("Anthropic");
     if (data.DEEPSEEK_API_KEY) providers.push("DeepSeek");
     console.log(`✅ LLM Providers configured: ${providers.join(", ")}`);

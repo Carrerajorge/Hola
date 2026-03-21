@@ -33,6 +33,7 @@ const PROVIDER_ALIAS_MAP: Readonly<Record<string, ChatRuntimeProvider>> = Object
   xai: "xai",
   grok: "xai",
   openai: "openai",
+  cerebras: "openai",
   anthropic: "anthropic",
   deepseek: "deepseek",
 });
@@ -41,7 +42,7 @@ const PROVIDER_ALIAS_MAP: Readonly<Record<string, ChatRuntimeProvider>> = Object
 const API_KEY_ENV_VARS: Readonly<Record<ChatRuntimeProvider, readonly string[]>> = Object.freeze({
   xai: Object.freeze(["XAI_API_KEY", "GROK_API_KEY", "ILIAGPT_API_KEY"]),
   gemini: Object.freeze(["GEMINI_API_KEY", "GOOGLE_API_KEY"]),
-  openai: Object.freeze(["OPENAI_API_KEY"]),
+  openai: Object.freeze(["OPENAI_API_KEY", "CEREBRAS_API_KEY"]),
   anthropic: Object.freeze(["ANTHROPIC_API_KEY"]),
   deepseek: Object.freeze(["DEEPSEEK_API_KEY"]),
 });
