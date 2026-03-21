@@ -6,9 +6,7 @@ import {
     ThumbsUp,
     ThumbsDown,
     RefreshCw,
-    Archive,
     Download,
-    Share2,
     Maximize2,
     Minimize2,
     Check,
@@ -16,8 +14,8 @@ import {
     ArrowUp,
     ListPlus,
     Minus,
-    Globe,
-    MoreHorizontal
+    Volume2,
+    VolumeX
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -177,7 +175,9 @@ export const AttachmentImage = memo(function AttachmentImage({
                         setIsLoading(false);
                         return;
                     }
-                } catch {}
+                } catch (_error) {
+                    void _error;
+                }
             }
 
             // Fall back to storagePath (network request)
@@ -215,7 +215,9 @@ export const AttachmentImage = memo(function AttachmentImage({
                             storeImage({ id: `att_${cacheKey}`, messageId: '', chatId: '', base64, mimeType: 'image/jpeg' }).catch(() => {});
                         }).catch(() => {});
                     }
-                } catch {}
+                } catch (_error) {
+                    void _error;
+                }
             };
             img.src = storagePath;
         }
@@ -471,7 +473,8 @@ export const parseDocumentBlocks = (
                 documents.push(doc);
                 successfulBlocks.push(match[0]);
             }
-        } catch (e) {
+        } catch (_error) {
+            void _error;
             // Regex fallback logic omitted for brevity as typically not needed if valid JSON
             try {
                 const blockContent = match[1];
@@ -495,8 +498,8 @@ export const parseDocumentBlocks = (
                     });
                     successfulBlocks.push(match[0]);
                 }
-            } catch (fallbackError) {
-                // ignore
+            } catch (_fallbackError) {
+                void _fallbackError;
             }
         }
     }
@@ -718,7 +721,7 @@ export const ActionToolbar = memo(function ActionToolbar({
     onCopy,
     onFeedback,
     onRegenerate,
-    onShare,
+    onShare: _onShare,
     onReadAloud,
     onViewSources
 }: ActionToolbarProps) {
@@ -741,7 +744,7 @@ export const ActionToolbar = memo(function ActionToolbar({
     return (
         <TooltipProvider delayDuration={300}>
             <div
-                className="flex items-center gap-0.5"
+                className="flex items-center gap-0.5 rounded-full border border-border/60 bg-background/80 px-1.5 py-1 shadow-sm backdrop-blur-sm"
                 data-testid={`message-actions-${testIdSuffix}`}
             >
                 <Tooltip>
@@ -889,6 +892,36 @@ export const ActionToolbar = memo(function ActionToolbar({
                         </div>
                     </PopoverContent>
                 </Popover>
+
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                            onClick={() => onReadAloud(messageId, content)}
+                            data-testid={`button-read-aloud-${testIdSuffix}`}
+                            aria-label={
+                                speakingMessageId === messageId
+                                    ? "Detener lectura"
+                                    : "Leer en voz alta"
+                            }
+                        >
+                            {speakingMessageId === messageId ? (
+                                <VolumeX className="h-4 w-4" />
+                            ) : (
+                                <Volume2 className="h-4 w-4" />
+                            )}
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                        <p>
+                            {speakingMessageId === messageId
+                                ? "Detener lectura"
+                                : "Leer en voz alta"}
+                        </p>
+                    </TooltipContent>
+                </Tooltip>
 
                 {/* Sources / Fuentes button - only when webSources exist */}
                 {webSources && webSources.length > 0 && onViewSources && (

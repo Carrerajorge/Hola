@@ -16,7 +16,6 @@ import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import {
     Message,
-    WebSource,
     storeGeneratedImage,
     getGeneratedImage,
     storeLastGeneratedImageInfo
@@ -116,7 +115,7 @@ export const AssistantMessage = memo(function AssistantMessage({
     onAgentCancel,
     onAgentRetry,
     onAgentArtifactPreview,
-    onQuestionClick,
+    onQuestionClick: _onQuestionClick,
     onSuperAgentCancel,
     onSuperAgentRetry,
     onToolConfirm,
@@ -163,6 +162,20 @@ export const AssistantMessage = memo(function AssistantMessage({
 
         return result;
     }, [message.id, message.generatedImage, pendingGeneratedImage, latestGeneratedImageRef]);
+
+    const actionContent = useMemo(() => {
+        const directContent =
+            typeof message.content === "string" ? message.content.trim() : "";
+        if (directContent.length > 0) {
+            return message.content;
+        }
+
+        const agentSummary =
+            typeof message.agentRun?.summary === "string"
+                ? message.agentRun.summary.trim()
+                : "";
+        return agentSummary;
+    }, [message.content, message.agentRun?.summary]);
 
     if (variant === "compact") {
         return (
@@ -540,7 +553,7 @@ export const AssistantMessage = memo(function AssistantMessage({
                 </div>
             )}
 
-            {message.content && !message.isThinking && (
+            {actionContent && !message.isThinking && (
                 <div className="flex items-center gap-3 mt-4">
                     {message.timestamp && (
                         <span className="text-[10px] text-muted-foreground/60">
@@ -549,7 +562,7 @@ export const AssistantMessage = memo(function AssistantMessage({
                     )}
                     <ActionToolbar
                         messageId={message.id}
-                        content={message.content}
+                        content={actionContent}
                         msgIndex={msgIndex}
                         copiedMessageId={copiedMessageId}
                         messageFeedback={messageFeedback}
