@@ -8,6 +8,26 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import { apiFetch } from "@/lib/apiClient";
 
+/* ── SVG Logo Components ── */
+const GeminiLogo = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="M12 2C12 2 14.5 7.5 17 10C19.5 12.5 22 12 22 12C22 12 19.5 11.5 17 14C14.5 16.5 12 22 12 22C12 22 9.5 16.5 7 14C4.5 11.5 2 12 2 12C2 12 4.5 12.5 7 10C9.5 7.5 12 2 12 2Z" fill="url(#gemini-gradient)" />
+    <defs>
+      <linearGradient id="gemini-gradient" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
+        <stop stopColor="#4285F4" />
+        <stop offset="0.5" stopColor="#9B72CB" />
+        <stop offset="1" stopColor="#D96570" />
+      </linearGradient>
+    </defs>
+  </svg>
+);
+
+const OpenAILogo = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364l2.0201-1.1638a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.4114-.6813zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0974-2.3616l2.603-1.5018 2.6032 1.5018v3.0036l-2.6032 1.5018-2.603-1.5018z" />
+  </svg>
+);
+
 const COUNTRY_CODES = [
   { code: "+1", country: "US", flag: "\u{1F1FA}\u{1F1F8}", name: "Estados Unidos" },
   { code: "+52", country: "MX", flag: "\u{1F1F2}\u{1F1FD}", name: "M\u00e9xico" },
@@ -45,6 +65,8 @@ const OAUTH_ERROR_MESSAGES: Record<string, string> = {
   microsoft_failed: "Error al iniciar sesi\u00f3n con Microsoft. Por favor intenta de nuevo.",
   auth0_failed: "Error al iniciar sesi\u00f3n con Auth0. Por favor intenta de nuevo.",
   replit_disabled: "El inicio de sesi\u00f3n con Replit fue desactivado. Usa Google, tel\u00e9fono o correo.",
+  gemini_failed: "Error al iniciar sesi\u00f3n con Gemini. Por favor intenta de nuevo.",
+  openai_failed: "Error al iniciar sesi\u00f3n con OpenAI. Por favor intenta de nuevo.",
 };
 
 export default function LoginPage() {
@@ -57,6 +79,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [isGeminiLoading, setIsGeminiLoading] = useState(false);
+  const [isOpenAILoading, setIsOpenAILoading] = useState(false);
 
   const [isMagicLinkLoading, setIsMagicLinkLoading] = useState(false);
   const [magicLinkSent, setMagicLinkSent] = useState(false);
@@ -292,6 +316,30 @@ export default function LoginPage() {
     window.location.href = "/api/auth/google";
   };
 
+  const handleGeminiLogin = async () => {
+    setIsGeminiLoading(true);
+    setError("");
+    try {
+      const res = await apiFetch("/api/gemini-cli-oauth/initiate", { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({} as any));
+        throw new Error((data as any)?.error || "No se pudo iniciar Gemini OAuth");
+      }
+      const { authUrl } = await res.json();
+      window.location.href = authUrl;
+    } catch (err: any) {
+      setError(err.message || "Error al iniciar Gemini OAuth");
+      setIsGeminiLoading(false);
+    }
+  };
+
+  const handleOpenAILogin = () => {
+    setIsOpenAILoading(true);
+    setError("");
+    // OpenAI uses Google OAuth under the hood — redirect to Google with select_account
+    window.location.href = "/api/auth/google?provider_hint=openai";
+  };
+
   const handleMagicLink = async () => {
     if (!email) {
       setError("Ingresa tu correo electr\u00f3nico para recibir el enlace m\u00e1gico");
@@ -507,6 +555,38 @@ export default function LoginPage() {
                   </svg>
                 )}
                 {isGoogleLoading ? "Conectando..." : "Continuar con Google"}
+              </Button>
+
+              {/* Gemini - Google AI */}
+              <Button
+                variant="outline"
+                className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-2"
+                onClick={handleGeminiLogin}
+                disabled={isGeminiLoading}
+                data-testid="button-login-gemini"
+              >
+                {isGeminiLoading ? (
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                ) : (
+                  <GeminiLogo className="h-6 w-6" />
+                )}
+                {isGeminiLoading ? "Conectando..." : "Continuar con Gemini"}
+              </Button>
+
+              {/* OpenAI - via Google OAuth */}
+              <Button
+                variant="outline"
+                className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-2"
+                onClick={handleOpenAILogin}
+                disabled={isOpenAILoading}
+                data-testid="button-login-openai"
+              >
+                {isOpenAILoading ? (
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                ) : (
+                  <OpenAILogo className="h-6 w-6" />
+                )}
+                {isOpenAILoading ? "Conectando..." : "Continuar con OpenAI"}
               </Button>
 
               {/* Coming Soon Options */}
