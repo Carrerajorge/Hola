@@ -17,15 +17,23 @@ import { db } from "../../db";
 import { sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { isAdminRole } from "../../lib/adminRole";
+import { isPrivilegedAdminEmail } from "@shared/adminIdentity";
 
 const authLoginLogger = createLogger("auth-login");
 
 // Admin credentials from environment variables - REQUIRED, no fallback for security
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
+  .split(",")
+  .map((email) => email.trim().toLowerCase())
+  .filter(Boolean);
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
 const ALLOW_LEGACY_ENV_ADMIN_LOGIN = process.env.ALLOW_LEGACY_ENV_ADMIN_LOGIN === "true";
 const ALLOW_LEGACY_PLAINTEXT_PASSWORD_LOGIN = process.env.ALLOW_LEGACY_PLAINTEXT_PASSWORD_LOGIN === "true";
+const AUTH_ADMIN_EMAIL_ALLOWLIST = Array.from(
+  new Set([ADMIN_EMAIL, ...ADMIN_EMAILS].map((email) => (email || "").trim().toLowerCase()).filter(Boolean)),
+);
 
 if (ADMIN_EMAIL && ADMIN_PASSWORD && !ADMIN_PASSWORD_HASH && !ALLOW_LEGACY_ENV_ADMIN_LOGIN) {
   console.warn("[Auth] ADMIN_PASSWORD is set but ADMIN_PASSWORD_HASH is missing; env-admin login is disabled.");
@@ -51,7 +59,13 @@ async function verifyEnvAdminPassword(password: string): Promise<boolean> {
 function sanitizeUser(user: any): any {
   if (!user) return user;
   const { password, ...safeUser } = user;
-  return safeUser;
+  return {
+    ...safeUser,
+    isAdmin:
+      Boolean(safeUser.isAdmin) ||
+      isAdminRole(safeUser.role) ||
+      isPrivilegedAdminEmail(safeUser.email, AUTH_ADMIN_EMAIL_ALLOWLIST),
+  };
 }
 
 // MFA + WebPush helpers live in ../../services/mfaLogin
