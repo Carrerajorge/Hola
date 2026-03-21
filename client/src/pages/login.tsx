@@ -502,13 +502,14 @@ export default function LoginPage() {
                   window.location.href = "/api/auth/google";
                 }}
                 disabled={isGoogleLoading}
+                data-testid="button-login-apple"
               >
                 {isGoogleLoading ? (
-                  <Loader2 className="h-6 w-6 animate-spin" />
+                  <Loader2 className="h-5 w-5 animate-spin" />
                 ) : (
                   <Apple className="h-5 w-5" />
                 )}
-                {isGoogleLoading ? "Conectando..." : "Continuar con Apple"}
+                Continuar con Apple
               </Button>
 
               {/* Microsoft */}
@@ -522,9 +523,10 @@ export default function LoginPage() {
                   window.location.href = "/api/auth/google";
                 }}
                 disabled={isGoogleLoading}
+                data-testid="button-login-microsoft"
               >
                 {isGoogleLoading ? (
-                  <Loader2 className="h-6 w-6 animate-spin" />
+                  <Loader2 className="h-5 w-5 animate-spin" />
                 ) : (
                   <svg className="h-5 w-5" viewBox="0 0 23 23" aria-hidden="true">
                     <path fill="#f35325" d="M1 1h10v10H1z" />
@@ -533,7 +535,7 @@ export default function LoginPage() {
                     <path fill="#ffba08" d="M12 12h10v10H12z" />
                   </svg>
                 )}
-                {isGoogleLoading ? "Conectando..." : "Continuar con Microsoft"}
+                Continuar con Microsoft
               </Button>
 
               {/* Phone Authentication */}
