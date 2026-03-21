@@ -317,6 +317,9 @@ reclaim_docker_space() {
 }
 
 IMAGE_PIN_IDS=()
+ACTIVE_SLOT_SANDBOX_EVICTED=false
+ACTIVE_IMAGE_TAG=""
+ACTIVE_APP_VERSION=""
 
 pin_image_locally() {
   local image_ref="$1"
@@ -474,7 +477,7 @@ pull_image_with_retry() {
   local attempt
   local output_file
 
-  for attempt in 1 2; do
+  for attempt in 1 2 3; do
     output_file="$(mktemp)"
     if timeout "${PULL_TIMEOUT}" docker pull "${image_ref}" 2>&1 | tee "${output_file}"; then
       rm -f "${output_file}"
@@ -482,10 +485,16 @@ pull_image_with_retry() {
     fi
 
     if grep -qi "no space left on device" "${output_file}"; then
+      if [ "${ACTIVE_SLOT_SANDBOX_EVICTED}" != "true" ] && evict_active_slot_sandbox_for_pull; then
+        logw "Recovered disk by removing the active ${ACTIVE_SLOT} sandbox service. Retrying pull for ${image_ref}."
+        rm -f "${output_file}"
+        continue
+      fi
+
       logw "Pull for ${image_ref} exhausted disk space on attempt ${attempt}. Running Docker cleanup before retry."
       reclaim_docker_space
       rm -f "${output_file}"
-      if [ "${attempt}" -lt 2 ]; then
+      if [ "${attempt}" -lt 3 ]; then
         continue
       fi
     else
@@ -602,6 +611,15 @@ cleanup_on_failure() {
     nginx -s reload 2>/dev/null || true
   fi
 
+  if [ "${ACTIVE_SLOT_SANDBOX_EVICTED}" = "true" ] && [ "${NGINX_SWAPPED}" = "false" ]; then
+    log "  Restoring the active ${ACTIVE_SLOT} sandbox service after failed deploy..."
+    if restore_active_slot_sandbox >/dev/null 2>&1; then
+      logok "Active ${ACTIVE_SLOT} sandbox service restored."
+    else
+      logw "Automatic restore of the active ${ACTIVE_SLOT} sandbox service failed."
+    fi
+  fi
+
   # Restore state file backup if it exists and we haven't completed
   if [ -f "${STATE_FILE_BAK}" ]; then
     cp "${STATE_FILE_BAK}" "${STATE_FILE}" 2>/dev/null || true
@@ -708,7 +726,7 @@ if [ "${IMAGE_TAG}" != "${BUILD_IMAGE_TAG:-${IMAGE_TAG}}" ]; then
   logw "Deploy tag does not match provided build artifact tag (${BUILD_IMAGE_TAG:-unknown}); skipping digest pinning."
 else
   if ! validate_image_digests "${EXPECTED_APP_DIGEST:-}" "${EXPECTED_SANDBOX_DIGEST:-}"; then
-    logw "Digest verification failed — continuing with latest image on registry (tag race is expected with concurrent builds)."
+    logw "Digest verification failed — continuing with the requested registry tag. Build output digests and remote manifest digests can differ when attestations are enabled."
   fi
 fi
 
@@ -725,6 +743,8 @@ if [ -f "${STATE_FILE}" ]; then
     exit 1
   fi
   ACTIVE_SLOT="$(python3 -c "import json; print(json.load(open('${STATE_FILE}'))['active_slot'])" 2>/dev/null || echo "blue")"
+  ACTIVE_IMAGE_TAG="$(python3 -c "import json; print(json.load(open('${STATE_FILE}')).get('image_tag',''))" 2>/dev/null || echo "")"
+  ACTIVE_APP_VERSION="$(python3 -c "import json; print(json.load(open('${STATE_FILE}')).get('app_version',''))" 2>/dev/null || echo "")"
 else
   ACTIVE_SLOT="blue"
 fi
@@ -787,16 +807,25 @@ ensure_infra_up() {
   return 1
 }
 
-slot() {
-  local slot_name="$1"; shift
+slot_compose() {
+  local slot_name="$1"
+  local image_tag="$2"
+  local app_version="$3"
+  shift 3
   local port
   if [ "${slot_name}" = "blue" ]; then port=5000; else port=5001; fi
 
   SLOT="${slot_name}" HOST_PORT="${port}" \
-    IMAGE_TAG="${IMAGE_TAG}" APP_VERSION="${APP_VERSION}" \
+    IMAGE_TAG="${image_tag}" APP_VERSION="${app_version}" \
     SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN}" \
     REDIS_PASSWORD="${REDIS_PASSWORD}" \
     docker compose -p "hola-${slot_name}" -f "${SLOT_COMPOSE}" "$@"
+}
+
+slot() {
+  local slot_name="$1"
+  shift
+  slot_compose "${slot_name}" "${IMAGE_TAG}" "${APP_VERSION}" "$@"
 }
 
 wait_for_redis_ping() {
@@ -949,6 +978,16 @@ list_slot_container_ids() {
   } | awk 'NF' | sort -u
 }
 
+list_slot_service_container_ids() {
+  local slot_name="$1"
+  local service_name="$2"
+
+  {
+    docker ps -aq --no-trunc --filter "label=com.docker.compose.project=hola-${slot_name}" --filter "label=com.docker.compose.service=${service_name}" 2>/dev/null || true
+    docker ps -aq --no-trunc --filter "name=hola-${slot_name}-${service_name}" 2>/dev/null || true
+  } | awk 'NF' | sort -u
+}
+
 remove_slot_containers() {
   local slot_name="$1"
   local ids
@@ -990,6 +1029,40 @@ remove_slot_containers() {
   fi
 
   logok "${slot_name} slot containers removed."
+}
+
+restore_active_slot_sandbox() {
+  if [ -z "${ACTIVE_SLOT}" ] || [ -z "${ACTIVE_IMAGE_TAG}" ] || [ -z "${ACTIVE_APP_VERSION}" ]; then
+    logw "Cannot restore the active slot sandbox automatically because the previous slot image metadata is unavailable."
+    return 1
+  fi
+
+  slot_compose "${ACTIVE_SLOT}" "${ACTIVE_IMAGE_TAG}" "${ACTIVE_APP_VERSION}" up -d sandbox-runner
+}
+
+evict_active_slot_sandbox_for_pull() {
+  local ids
+  local cid
+
+  if [ "${ACTIVE_SLOT_SANDBOX_EVICTED}" = "true" ] || [ -z "${ACTIVE_SLOT:-}" ]; then
+    return 1
+  fi
+
+  ids="$(list_slot_service_container_ids "${ACTIVE_SLOT}" "sandbox")"
+  if [ -z "${ids}" ]; then
+    logw "No active ${ACTIVE_SLOT} sandbox container was found to free disk space."
+    return 1
+  fi
+
+  logw "Temporarily removing the active ${ACTIVE_SLOT} sandbox container to recover disk for the new image pull. Main web traffic stays on port ${OLD_PORT}."
+  while IFS= read -r cid; do
+    [ -z "${cid}" ] && continue
+    docker rm -f -v "${cid}" >/dev/null 2>&1 || true
+  done <<< "${ids}"
+
+  reclaim_docker_space
+  ACTIVE_SLOT_SANDBOX_EVICTED=true
+  return 0
 }
 
 
