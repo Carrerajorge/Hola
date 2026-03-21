@@ -101,7 +101,7 @@ export const UserMessage = memo(function UserMessage({
                         <Button
                             variant="ghost"
                             size="sm"
-                            className="h-8 px-3 text-sm text-muted-foreground hover:text-foreground"
+                            className="h-10 rounded-xl px-4 text-sm text-muted-foreground hover:text-foreground"
                             onClick={onCancelEdit}
                         >
                             <X className="h-4 w-4 mr-1" />
@@ -110,7 +110,7 @@ export const UserMessage = memo(function UserMessage({
                         <Button
                             variant="ghost"
                             size="sm"
-                            className="h-8 px-3 text-sm text-muted-foreground hover:text-foreground"
+                            className="h-10 rounded-xl px-4 text-sm text-muted-foreground hover:text-foreground"
                             onClick={() => onSendEdit(message.id)}
                         >
                             <Send className="h-4 w-4 mr-1" />
@@ -130,7 +130,7 @@ export const UserMessage = memo(function UserMessage({
                         <DocumentAnalysisInlineStatus text={documentAnalysisStatus.text} />
                     )}
                     {message.content && (
-                        <div className="liquid-message-user px-4 py-2.5 text-sm break-words leading-relaxed">
+                        <div className="liquid-message-user border border-primary/15 bg-gradient-to-br from-primary via-primary to-primary/90 px-4 py-3 text-sm break-words leading-relaxed shadow-[0_18px_36px_rgba(99,102,241,0.18)]">
                             {message.content}
                         </div>
                     )}
@@ -175,11 +175,11 @@ export const UserMessage = memo(function UserMessage({
                                 )}
                             </div>
                         )}
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center gap-1.5 opacity-80 transition-opacity md:opacity-0 md:group-hover:opacity-100">
                             <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                                className="h-9 w-9 rounded-xl border border-white/45 bg-white/75 text-muted-foreground shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/25 hover:text-foreground hover:shadow-md dark:border-white/10 dark:bg-white/5"
                                 onClick={() => onCopyMessage(message.content, message.id)}
                                 data-testid={`button-copy-user-${message.id}`}
                                 title="Copiar mensaje"
@@ -194,7 +194,7 @@ export const UserMessage = memo(function UserMessage({
                             <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                                className="h-9 w-9 rounded-xl border border-white/45 bg-white/75 text-muted-foreground shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/25 hover:text-foreground hover:shadow-md dark:border-white/10 dark:bg-white/5"
                                 onClick={() => onStartEdit(message)}
                                 data-testid={`button-edit-user-${message.id}`}
                                 title="Editar mensaje"

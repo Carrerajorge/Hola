@@ -14,7 +14,7 @@ export const SuggestedReplies = memo(function SuggestedReplies({
 
   return (
     <div 
-      className="flex flex-wrap gap-2 overflow-x-auto scrollbar-hide"
+      className="flex flex-wrap gap-2.5 overflow-x-auto scrollbar-hide"
       data-testid="suggested-replies-container"
     >
       {suggestions.slice(0, 4).map((suggestion, index) => (
@@ -22,11 +22,11 @@ export const SuggestedReplies = memo(function SuggestedReplies({
           key={index}
           onClick={() => onSelect(suggestion)}
           className={cn(
-            "px-3 py-1.5 text-xs rounded-full",
-            "bg-muted/60 hover:bg-muted border border-border/50",
+            "min-h-10 rounded-full px-4 py-2 text-[13px] font-medium",
+            "border border-white/45 bg-[linear-gradient(135deg,rgba(255,255,255,0.94),rgba(247,249,255,0.82))] shadow-[0_10px_22px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-[linear-gradient(135deg,rgba(255,255,255,0.08),rgba(255,255,255,0.05))]",
             "text-muted-foreground hover:text-foreground",
             "transition-all duration-200 ease-in-out",
-            "hover:shadow-sm hover:border-border",
+            "hover:-translate-y-0.5 hover:border-[#A5A0FF]/35 hover:shadow-[0_16px_28px_rgba(96,90,190,0.14)]",
             "whitespace-nowrap flex-shrink-0"
           )}
           data-testid={`suggested-reply-${index}`}

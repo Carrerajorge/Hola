@@ -617,7 +617,7 @@ export function Composer({
           aria-label="Open tools menu"
           title="Open tools menu"
           className={cn(
-            isDocumentMode ? "h-10 w-10 rounded-full" : "h-9 w-9 sm:h-8 sm:w-8 rounded-full",
+            isDocumentMode ? "h-11 w-11 rounded-full" : "h-10 w-10 rounded-full",
             "flex-shrink-0",
             SILVER_ICON_BUTTON_BASE,
             SILVER_ICON_BUTTON_TONE
@@ -792,6 +792,8 @@ export function Composer({
   const branchOptions = (branchOptionsProp && branchOptionsProp.length > 0)
     ? branchOptionsProp
     : ["main", "develop", "feature/codex"];
+  const programmingPillClass =
+    "inline-flex min-h-8 items-center gap-1.5 rounded-full border border-white/45 bg-white/72 px-2.5 text-[11px] text-zinc-600 shadow-[0_10px_20px_rgba(15,23,42,0.06)] transition-all hover:-translate-y-0.5 hover:border-[#A5A0FF]/35 hover:bg-white/90 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-300 dark:hover:bg-white/[0.08]";
 
   const renderProgrammingModeBar = () => {
     if (isDocumentMode) return null;
@@ -803,7 +805,7 @@ export function Composer({
             <PopoverTrigger asChild>
               <button
                 type="button"
-                className="inline-flex h-5 items-center gap-1 rounded-md px-1.5 text-[10px] text-zinc-500 transition-colors hover:bg-zinc-100/60 dark:text-zinc-400 dark:hover:bg-zinc-800/40"
+                className={programmingPillClass}
                 data-testid="programming-runtime-selector"
               >
                 <Laptop className="h-3 w-3" />
@@ -837,7 +839,7 @@ export function Composer({
             <PopoverTrigger asChild>
               <button
                 type="button"
-                className="inline-flex h-5 items-center gap-1 rounded-md px-1.5 text-[10px] text-zinc-500 transition-colors hover:bg-zinc-100/60 dark:text-zinc-400 dark:hover:bg-zinc-800/40"
+                className={programmingPillClass}
                 data-testid="programming-access-selector"
               >
                 <ShieldAlert className="h-3 w-3" />
@@ -873,7 +875,7 @@ export function Composer({
                 <PopoverTrigger asChild>
                   <button
                     type="button"
-                    className="inline-flex h-5 items-center gap-1 rounded-md px-1.5 text-[10px] text-zinc-500 transition-colors hover:bg-zinc-100/60 dark:text-zinc-400 dark:hover:bg-zinc-800/40"
+                    className={programmingPillClass}
                     data-testid="programming-folder-selector"
                     title={repositoryPath}
                   >
@@ -930,7 +932,7 @@ export function Composer({
                 <PopoverTrigger asChild>
                   <button
                     type="button"
-                    className="inline-flex h-5 items-center gap-1 rounded-md px-1.5 text-[10px] text-zinc-500 transition-colors hover:bg-zinc-100/60 dark:text-zinc-400 dark:hover:bg-zinc-800/40"
+                    className={programmingPillClass}
                     data-testid="programming-agents-selector"
                   >
                     <Bot className="h-3 w-3" />
@@ -971,7 +973,7 @@ export function Composer({
           <PopoverTrigger asChild>
             <button
               type="button"
-              className="inline-flex h-5 shrink-0 items-center gap-1 rounded-md px-1.5 text-[10px] text-zinc-500 transition-colors hover:bg-zinc-100/60 dark:text-zinc-400 dark:hover:bg-zinc-800/40"
+              className={cn(programmingPillClass, "shrink-0")}
               data-testid="programming-branch-selector"
             >
               <GitBranch className="h-3 w-3" />
@@ -1134,12 +1136,12 @@ export function Composer({
       )
       : cn(
         "liquid-shell max-w-3xl mx-auto relative transition-all duration-300 ease-out overflow-visible",
-        "bg-white/40 dark:bg-[#0d0d0d]/40 backdrop-blur-2xl",
-        "border border-[#A5A0FF]/30",
-        "hover:border-[#A5A0FF]/50",
-        "rounded-[28px] p-2",
-        "shadow-xl shadow-[#A5A0FF]/10",
-        "focus-within:ring-4 focus-within:ring-[#A5A0FF]/20 focus-within:border-[#A5A0FF]/70"
+        "bg-[linear-gradient(180deg,rgba(255,255,255,0.88),rgba(245,247,255,0.76))] dark:bg-[linear-gradient(180deg,rgba(13,13,13,0.64),rgba(13,13,13,0.5))] backdrop-blur-2xl",
+        "border border-[#A5A0FF]/32",
+        "hover:border-[#A5A0FF]/52",
+        "rounded-[32px] px-2.5 py-2",
+        "shadow-[0_26px_60px_rgba(96,90,190,0.12)]",
+        "focus-within:ring-4 focus-within:ring-[#A5A0FF]/18 focus-within:border-[#A5A0FF]/72"
       ),
     // Keep these highlights in document mode too
     selectedDocText && "border-primary/20",
@@ -1310,11 +1312,11 @@ export function Composer({
           {/* Inner input contour (thin, minimalist, silver) */}
           <div
             className={cn(
-              "rounded-[20px] bg-white/40 dark:bg-zinc-950/10 backdrop-blur-sm",
+              "rounded-[24px] bg-white/55 dark:bg-zinc-950/10 backdrop-blur-sm",
               SILVER_HAIRLINE,
               "border-[#c7c7c7]/80 dark:border-white/20",
               SILVER_HOVER_BORDER_INNER,
-              "px-3 py-1",
+              "px-4 py-2",
               "transition-colors duration-150",
               "focus-within:border-[#b0b0b0]/95 dark:focus-within:border-white/35"
             )}
@@ -1343,12 +1345,12 @@ export function Composer({
               placeholder={placeholder}
               aria-label="Message input"
               aria-describedby="composer-hint"
-              className="min-h-[22px] max-h-[180px] w-full resize-none border-0 bg-transparent p-0 shadow-none outline-none focus-visible:!outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[15px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400/70 dark:placeholder:text-zinc-500/60 leading-[1.4] overflow-y-auto scrollbar-none"
+              className="min-h-[28px] max-h-[220px] w-full resize-none border-0 bg-transparent p-0 shadow-none outline-none focus-visible:!outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[15px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400/70 dark:placeholder:text-zinc-500/60 leading-[1.5] overflow-y-auto scrollbar-none"
               rows={1}
             />
           </div>
 
-          <div className={cn("flex items-center justify-between mt-0.5 pt-0.5 border-t-[0.5px]", SILVER_BORDER_DIVIDER)}>
+          <div className={cn("mt-1.5 flex items-center justify-between border-t-[0.5px] pt-1.5", SILVER_BORDER_DIVIDER)}>
             <div className="flex items-center gap-1.5">
               {renderToolsPopover()}
               {!isDocumentMode && renderSelectedToolLogo()}

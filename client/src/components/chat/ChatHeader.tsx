@@ -156,13 +156,13 @@ export function ChatHeader({
 
     return (
         <>
-        <header className="sticky top-0 z-20 flex items-center justify-between px-3 md:px-4 py-2 border-b border-border/50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 h-14">
+        <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-border/50 bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/60 md:px-4">
             <div className="flex items-center gap-2">
                 {!isSidebarOpen && (
                     <TooltipProvider>
                         <Tooltip>
                             <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" onClick={onToggleSidebar} className="-ml-2 h-9 w-9">
+                                <Button variant="ghost" size="icon" onClick={onToggleSidebar} className="-ml-2 h-10 w-10 rounded-full border border-white/40 bg-white/70 shadow-sm dark:border-white/10 dark:bg-white/5">
                                     <PanelLeftOpen className="h-5 w-5 text-muted-foreground" />
                                 </Button>
                             </TooltipTrigger>
@@ -210,7 +210,7 @@ export function ChatHeader({
                     <Button
                         variant="outline"
                         size="sm"
-                        className="flex rounded-full text-xs gap-1.5 px-2 sm:px-3 border-primary/30 bg-primary/5 hover:bg-primary/10"
+                        className="flex min-h-10 rounded-full border-primary/30 bg-primary/5 px-2.5 text-xs shadow-sm hover:bg-primary/10 sm:px-3"
                         onClick={() => setIsUpgradeDialogOpen(true)}
                         data-testid="button-upgrade-header"
                     >
@@ -222,7 +222,7 @@ export function ChatHeader({
 
                 {chatId && !chatId.startsWith("pending-") ? (
                     <ShareChatDialog chatId={chatId} chatTitle={firstMessageSnippet.slice(0, 30) || "Chat"}>
-                        <Button variant="ghost" size="icon" data-testid="button-share-chat">
+                        <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full border border-white/40 bg-white/70 shadow-sm dark:border-white/10 dark:bg-white/5" data-testid="button-share-chat">
                             <ShareIcon size={20} />
                         </Button>
                     </ShareChatDialog>
@@ -230,6 +230,7 @@ export function ChatHeader({
                     <Button
                         variant="ghost"
                         size="icon"
+                        className="h-10 w-10 rounded-full border border-white/40 bg-white/70 shadow-sm dark:border-white/10 dark:bg-white/5"
                         data-testid="button-share-chat-disabled"
                         disabled
                         title="Envía un mensaje para poder compartir este chat"
@@ -240,7 +241,7 @@ export function ChatHeader({
 
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" data-testid="button-chat-options">
+                        <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full border border-white/40 bg-white/70 shadow-sm dark:border-white/10 dark:bg-white/5" data-testid="button-chat-options">
                             <MoreHorizontal className="h-5 w-5 text-muted-foreground" />
                         </Button>
                     </DropdownMenuTrigger>

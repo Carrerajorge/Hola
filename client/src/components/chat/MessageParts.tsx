@@ -725,6 +725,8 @@ export const ActionToolbar = memo(function ActionToolbar({
     const testIdSuffix = variant === "compact" ? messageId : `main-${messageId}`;
     const [regenerateOpen, setRegenerateOpen] = useState(false);
     const [customInstruction, setCustomInstruction] = useState("");
+    const toolbarButtonClass =
+        "h-9 w-9 rounded-xl border border-white/45 bg-white/80 shadow-[0_10px_22px_rgba(15,23,42,0.06)] backdrop-blur-md transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/25 hover:text-foreground hover:shadow-md dark:border-white/10 dark:bg-white/5";
 
     const handleRegenerateOption = useCallback((instruction?: string) => {
         setRegenerateOpen(false);
@@ -741,7 +743,7 @@ export const ActionToolbar = memo(function ActionToolbar({
     return (
         <TooltipProvider delayDuration={300}>
             <div
-                className="flex items-center gap-0.5"
+                className="flex items-center gap-1 rounded-[18px] border border-white/40 bg-white/68 px-1.5 py-1 shadow-[0_14px_28px_rgba(15,23,42,0.06)] backdrop-blur-md dark:border-white/10 dark:bg-white/[0.04]"
                 data-testid={`message-actions-${testIdSuffix}`}
             >
                 <Tooltip>
@@ -749,7 +751,7 @@ export const ActionToolbar = memo(function ActionToolbar({
                         <Button
                             variant="ghost"
                             size="icon"
-                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                            className={cn(toolbarButtonClass, "text-muted-foreground")}
                             onClick={() => onCopy(content, messageId)}
                             data-testid={`button-copy-${testIdSuffix}`}
                             aria-label="Copiar respuesta"
@@ -772,10 +774,10 @@ export const ActionToolbar = memo(function ActionToolbar({
                             variant="ghost"
                             size="icon"
                             className={cn(
-                                "h-7 w-7",
+                                toolbarButtonClass,
                                 messageFeedback[messageId] === "up"
-                                    ? "text-green-500"
-                                    : "text-muted-foreground hover:text-foreground"
+                                    ? "border-green-200/70 bg-green-50/80 text-green-500 dark:border-green-400/20 dark:bg-green-950/25"
+                                    : "text-muted-foreground"
                             )}
                             onClick={() => onFeedback(messageId, "up")}
                             data-testid={`button-like-${testIdSuffix}`}
@@ -795,10 +797,10 @@ export const ActionToolbar = memo(function ActionToolbar({
                             variant="ghost"
                             size="icon"
                             className={cn(
-                                "h-7 w-7",
+                                toolbarButtonClass,
                                 messageFeedback[messageId] === "down"
-                                    ? "text-red-500"
-                                    : "text-muted-foreground hover:text-foreground"
+                                    ? "border-red-200/70 bg-red-50/80 text-red-500 dark:border-red-400/20 dark:bg-red-950/25"
+                                    : "text-muted-foreground"
                             )}
                             onClick={() => onFeedback(messageId, "down")}
                             data-testid={`button-dislike-${testIdSuffix}`}
@@ -819,7 +821,7 @@ export const ActionToolbar = memo(function ActionToolbar({
                                 <Button
                                     variant="ghost"
                                     size="icon"
-                                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                    className={cn(toolbarButtonClass, "text-muted-foreground")}
                                     disabled={aiState !== "idle"}
                                     data-testid={`button-regenerate-${testIdSuffix}`}
                                     aria-label="Regenerar respuesta"
@@ -848,13 +850,13 @@ export const ActionToolbar = memo(function ActionToolbar({
                                     value={customInstruction}
                                     onChange={(e) => setCustomInstruction(e.target.value)}
                                     onKeyDown={(e) => e.key === "Enter" && handleCustomSubmit()}
-                                    className="flex-1 h-7 px-2 text-[13px] bg-transparent border-none outline-none placeholder:text-muted-foreground/50"
+                                    className="flex-1 h-8 px-2 text-[13px] bg-transparent border-none outline-none placeholder:text-muted-foreground/50"
                                     data-testid={`input-custom-regenerate-${testIdSuffix}`}
                                 />
                                 <button
                                     onClick={handleCustomSubmit}
                                     disabled={!customInstruction.trim()}
-                                    className="h-6 w-6 flex items-center justify-center rounded-full bg-foreground/10 hover:bg-foreground/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                                    className="flex h-8 w-8 items-center justify-center rounded-full bg-foreground/10 transition-all hover:bg-foreground/20 disabled:cursor-not-allowed disabled:opacity-30"
                                     data-testid={`button-submit-custom-${testIdSuffix}`}
                                     aria-label="Enviar instrucción"
                                     title="Enviar instrucción"
@@ -863,7 +865,7 @@ export const ActionToolbar = memo(function ActionToolbar({
                                 </button>
                             </div>
                             <button
-                                className="w-full flex items-center gap-2.5 px-2 py-1.5 text-[13px] text-left hover:bg-muted/60 rounded transition-colors"
+                                className="w-full flex min-h-9 items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] text-left transition-colors hover:bg-muted/60"
                                 onClick={() => handleRegenerateOption()}
                                 data-testid={`option-retry-${testIdSuffix}`}
                             >
@@ -871,7 +873,7 @@ export const ActionToolbar = memo(function ActionToolbar({
                                 <span>Inténtalo nuevamente</span>
                             </button>
                             <button
-                                className="w-full flex items-center gap-2.5 px-2 py-1.5 text-[13px] text-left hover:bg-muted/60 rounded transition-colors"
+                                className="w-full flex min-h-9 items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] text-left transition-colors hover:bg-muted/60"
                                 onClick={() => handleRegenerateOption("Agrega más detalles y explicaciones a tu respuesta")}
                                 data-testid={`option-details-${testIdSuffix}`}
                             >
@@ -879,7 +881,7 @@ export const ActionToolbar = memo(function ActionToolbar({
                                 <span>Agregar detalles</span>
                             </button>
                             <button
-                                className="w-full flex items-center gap-2.5 px-2 py-1.5 text-[13px] text-left hover:bg-muted/60 rounded transition-colors"
+                                className="w-full flex min-h-9 items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] text-left transition-colors hover:bg-muted/60"
                                 onClick={() => handleRegenerateOption("Hazlo más conciso y breve, elimina redundancias")}
                                 data-testid={`option-concise-${testIdSuffix}`}
                             >
@@ -908,7 +910,7 @@ export const ActionToolbar = memo(function ActionToolbar({
                                         <TooltipTrigger asChild>
                                             <button
                                                 onClick={onViewSources}
-                                                className="w-5 h-5 rounded-full border border-border bg-muted hover:border-primary transition-all flex items-center justify-center overflow-hidden"
+                                                className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border border-border bg-muted shadow-sm transition-all hover:border-primary"
                                             >
                                                 <img
                                                     src={`https://www.google.com/s2/favicons?domain=${source.domain?.replace(/^www\./, "")}&sz=32`}
@@ -928,7 +930,7 @@ export const ActionToolbar = memo(function ActionToolbar({
                             <TooltipTrigger asChild>
                                 <button
                                     onClick={onViewSources}
-                                    className="flex items-center gap-1 px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground transition-colors rounded hover:bg-muted"
+                                    className="flex min-h-8 items-center gap-1 rounded-full px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                                 >
                                     Fuentes
                                 </button>

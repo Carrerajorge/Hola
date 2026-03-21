@@ -91,15 +91,15 @@ export function StandardModelSelector({
         <div className="flex items-center gap-2">
             <div
                 className={cn(
-                    "relative flex items-center gap-1 sm:gap-2 rounded-md transition-colors mt-[-5px] mb-[-5px] pt-[8px] pb-[8px] pl-[7px] pr-[7px]",
-                    isDisabled ? "cursor-not-allowed opacity-60" : "hover:bg-muted/50"
+                    "relative flex min-h-11 items-center gap-2 rounded-full border border-white/45 bg-[linear-gradient(135deg,rgba(255,255,255,0.9),rgba(245,247,255,0.82))] px-3 py-2 shadow-[0_14px_30px_rgba(15,23,42,0.08)] transition-all dark:border-white/10 dark:bg-[linear-gradient(135deg,rgba(255,255,255,0.08),rgba(255,255,255,0.05))]",
+                    isDisabled ? "cursor-not-allowed opacity-60" : "hover:-translate-y-0.5 hover:border-[#A5A0FF]/35 hover:shadow-[0_18px_34px_rgba(96,90,190,0.12)]"
                 )}
                 data-testid="button-model-selector"
                 title={activeGptName ? `Modelo fijado por GPT: ${activeGptName}` : modelChangeDisabled ? "Respuesta en curso" : "Seleccionar modelo"}
             >
                 <select
                     className={cn(
-                        "appearance-none bg-transparent pr-6 font-semibold text-xs sm:text-sm truncate max-w-[160px] sm:max-w-none outline-none",
+                        "appearance-none bg-transparent pr-6 font-semibold text-xs sm:text-sm text-foreground truncate max-w-[160px] sm:max-w-none outline-none",
                         isDisabled && "pointer-events-none"
                     )}
                     value={selectedModelData?.id || ""}
@@ -124,7 +124,7 @@ export function StandardModelSelector({
                         </optgroup>
                     ))}
                 </select>
-                <ChevronDown className="pointer-events-none absolute right-2 h-3 w-3 text-muted-foreground flex-shrink-0" />
+                <ChevronDown className="pointer-events-none absolute right-3 h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
             </div>
             {showProviderButtons ? <OpenAICodexOAuthButton onConnected={handleConnectedModel} /> : null}
             {showProviderButtons ? <GeminiCliOAuthButton onConnected={handleConnectedModel} /> : null}
