@@ -268,7 +268,8 @@ export function checkApiKeyExists(provider: string): boolean {
 
     const normalized = String(provider).toLowerCase();
     const keyMap: Record<string, string | undefined> = {
-        'openai': process.env.OPENAI_API_KEY,
+        'openai': process.env.OPENAI_API_KEY || process.env.CEREBRAS_API_KEY,
+        'cerebras': process.env.CEREBRAS_API_KEY || process.env.OPENAI_API_KEY,
         'anthropic': process.env.ANTHROPIC_API_KEY,
         'google': process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
         'gemini': process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,

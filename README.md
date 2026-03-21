@@ -34,7 +34,7 @@ Minimum required:
 
 - `DATABASE_URL`
 - `SESSION_SECRET`
-- at least one LLM key: `XAI_API_KEY` or `GEMINI_API_KEY` or `OPENAI_API_KEY`
+- at least one LLM key: `XAI_API_KEY` or `GEMINI_API_KEY` or `OPENAI_API_KEY` or `CEREBRAS_API_KEY`
 
 ### Start Local Services (Recommended)
 

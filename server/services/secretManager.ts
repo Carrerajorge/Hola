@@ -1,5 +1,6 @@
 import { env } from "../config/env";
 import * as crypto from "crypto";
+import { getOpenAICompatibleApiKey } from "../lib/openaiCompatible";
 
 export class SecretManager {
     /**
@@ -22,7 +23,7 @@ export class SecretManager {
     getLLMProviderKey(provider: 'openai' | 'anthropic' | 'gemini' | 'xai' | 'deepseek'): string {
         switch (provider) {
             case 'openai':
-                return this.requireSecret(env.OPENAI_API_KEY, "OPENAI_API_KEY");
+                return this.requireSecret(getOpenAICompatibleApiKey(env as NodeJS.ProcessEnv), "OPENAI_API_KEY/CEREBRAS_API_KEY");
             case 'anthropic':
                 return this.requireSecret(env.ANTHROPIC_API_KEY, "ANTHROPIC_API_KEY");
             case 'gemini':

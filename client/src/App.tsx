@@ -19,7 +19,7 @@ import { OfflineIndicator } from "@/components/OfflineIndicator";
 import { SkipLink } from "@/lib/accessibility";
 import { trackWorkspaceEvent } from "@/lib/analytics";
 import { normalizeAppBuildVersion, shouldAttemptChunkRecovery } from "@/lib/chunk-recovery";
-import { Loader2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Info, Loader2, XCircle } from "lucide-react";
 import LoginPage from "@/pages/login";
 import LoginApprovePage from "@/pages/login-approve";
 import SignupPage from "@/pages/signup";
@@ -49,13 +49,76 @@ import { PlatformSettingsProvider, usePlatformSettings } from "@/contexts/Platfo
 import { isAdminUser } from "@/lib/admin";
 const MaintenancePage = lazyWithRetry(() => import("@/pages/maintenance"));
 const LandingPage = lazyWithRetry(() => import("@/pages/landing"));
-import type { ComponentType } from "react";
+import type { ComponentType, ReactNode } from "react";
 
 const PageLoader = () => (
   <div className="flex items-center justify-center min-h-screen">
     <Loader2 className="h-8 w-8 animate-spin text-primary" />
   </div>
 );
+
+function ToastIconFrame({
+  tone,
+  children,
+}: {
+  tone: string;
+  children: ReactNode;
+}) {
+  return (
+    <span
+      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border shadow-[inset_0_1px_0_rgba(255,255,255,0.35)] ${tone}`}
+    >
+      {children}
+    </span>
+  );
+}
+
+const sonnerIcons = {
+  success: (
+    <ToastIconFrame tone="border-emerald-200/90 bg-emerald-500/12 text-emerald-600 dark:border-emerald-500/30 dark:bg-emerald-500/18 dark:text-emerald-300">
+      <CheckCircle2 className="h-5 w-5" />
+    </ToastIconFrame>
+  ),
+  error: (
+    <ToastIconFrame tone="border-rose-200/90 bg-rose-500/12 text-rose-600 dark:border-rose-500/30 dark:bg-rose-500/18 dark:text-rose-300">
+      <XCircle className="h-5 w-5" />
+    </ToastIconFrame>
+  ),
+  warning: (
+    <ToastIconFrame tone="border-amber-200/90 bg-amber-500/12 text-amber-600 dark:border-amber-500/30 dark:bg-amber-500/18 dark:text-amber-200">
+      <AlertTriangle className="h-5 w-5" />
+    </ToastIconFrame>
+  ),
+  info: (
+    <ToastIconFrame tone="border-sky-200/90 bg-sky-500/12 text-sky-600 dark:border-sky-500/30 dark:bg-sky-500/18 dark:text-sky-300">
+      <Info className="h-5 w-5" />
+    </ToastIconFrame>
+  ),
+  loading: (
+    <ToastIconFrame tone="border-violet-200/90 bg-violet-500/12 text-violet-600 dark:border-violet-500/30 dark:bg-violet-500/18 dark:text-violet-300">
+      <Loader2 className="h-5 w-5 animate-spin" />
+    </ToastIconFrame>
+  ),
+};
+
+const sonnerToastOptions = {
+  unstyled: true,
+  duration: 5000,
+  classNames: {
+    toast: "iliagpt-toast",
+    success: "iliagpt-toast--success",
+    error: "iliagpt-toast--error",
+    warning: "iliagpt-toast--warning",
+    info: "iliagpt-toast--info",
+    loading: "iliagpt-toast--loading",
+    content: "iliagpt-toast__content",
+    title: "iliagpt-toast__title",
+    description: "iliagpt-toast__description",
+    closeButton: "iliagpt-toast__close",
+    actionButton: "iliagpt-toast__action",
+    cancelButton: "iliagpt-toast__cancel",
+  },
+} as const;
 
 const isLocalDevHost = () => {
   if (typeof window === "undefined") return false;
@@ -361,15 +424,13 @@ function AppContent() {
       <WorkspaceAnalyticsTracker />
       <Toaster />
       <SonnerToaster
-        position="bottom-right"
-        richColors
+        position="top-right"
         closeButton
-        toastOptions={{
-          classNames: {
-            toast: "text-sm",
-            actionButton: "text-xs font-medium",
-          },
-        }}
+        visibleToasts={4}
+        expand
+        icons={sonnerIcons}
+        toastOptions={sonnerToastOptions}
+        className="iliagpt-sonner"
       />
       <Router />
       <BackgroundNotificationContainer onNavigateToChat={() => { }} />
