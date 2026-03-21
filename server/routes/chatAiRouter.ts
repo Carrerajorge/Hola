@@ -210,7 +210,8 @@ const VALID_STREAM_SCOPE_SET = new Set<SkillScope>([
   "system",
 ]);
 const STREAM_IDENTIFIER_RE = /^[a-zA-Z0-9._-]{1,140}$/;
-const STREAM_ATTACHMENT_NAME_RE = /^[^<>:\"/\\|?*\u0000-\u001f]{1,220}$/;
+// eslint-disable-next-line no-control-regex
+const STREAM_ATTACHMENT_NAME_RE = /^[^<>:"\\|?*\u0000-\u001f]{1,220}$/;
 const STREAM_MIME_RE = /^[a-zA-Z0-9][a-zA-Z0-9.+-\/]*/;
 const GOOGLE_GEMINI_CLI_PROVIDER = "google-gemini-cli";
 const OPENCLAW_WEBCHAT_SESSION_DIR = "iliagpt-openclaw-chat";
@@ -678,7 +679,7 @@ function extractNaturalRmIntent(input: string): string | null {
   for (const re of patterns) {
     const m = prompt.match(re);
     if (m?.[1]) {
-      let name = m[1]
+      const name = m[1]
         .trim()
         .replace(
           /\s+(?:de|del|from)\s+(?:(?:mi|my)\s+)?(?:escritorio|desktop)\b.*$/i,
@@ -707,7 +708,7 @@ function extractNaturalReadIntent(input: string): string | null {
   for (const re of patterns) {
     const m = prompt.match(re);
     if (m?.[1]) {
-      let name = m[1]
+      const name = m[1]
         .trim()
         .replace(/[.,;:!?]+$/, "")
         .trim();
@@ -6930,16 +6931,8 @@ export function createChatAiRouter(
             )
           : false;
 
-      if (hasDocumentAttachments) {
-        console.log(
-          `[Chat API] DATA_MODE: Rejecting document attachments - must use /analyze endpoint`,
-        );
-        return res.status(400).json({
-          error:
-            "Document attachments must be processed via /api/analyze endpoint for proper analysis",
-          code: "USE_ANALYZE_ENDPOINT",
-        });
-      }
+      // Document attachments are now processed inline via the attachment extraction pipeline.
+      // The /api/chat/analyze endpoint remains available for dedicated document analysis.
 
       let attachmentContext = "";
       const hasAttachments = normalizedChatAttachments.length > 0;
@@ -8019,8 +8012,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
             try {
               // 1) Prefer linking the run to an already-persisted user message
               // when /chats/:id/messages used skipRun mode.
-              let runMessageIdStart = performance.now();
-              let runMessageId = userRequestId
+              const runMessageIdStart = performance.now();
+              const runMessageId = userRequestId
                 ? await storage.findMessageByRequestId(userRequestId)
                 : null;
               recordStage("user_message_lookup_ms", runMessageIdStart);
@@ -9098,16 +9091,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
               )
             : false;
 
-        if (hasDocumentAttachments) {
-          console.log(
-            `[Stream API] DATA_MODE: Rejecting document attachments - must use /analyze endpoint`,
-          );
-          return res.status(400).json({
-            error:
-              "Document attachments must be processed via /api/analyze endpoint for proper analysis",
-            code: "USE_ANALYZE_ENDPOINT",
-          });
-        }
+        // Document attachments are now processed inline via the attachment extraction pipeline.
 
         // Get the last user message for PARE routing
         const lastUserMessage = [...messages]
@@ -11995,7 +11979,7 @@ ${documentText}`;
         pareMetrics.recordRequestDuration(requestDurationMs);
 
         // Only generate enrichment UI components when explicitly requested
-        let actionableInsights: Array<{
+        const actionableInsights: Array<{
           id: string;
           type: "finding" | "risk" | "opportunity" | "recommendation";
           title: string;

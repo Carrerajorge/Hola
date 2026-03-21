@@ -1276,7 +1276,7 @@ export function ChatInterface({
       if (isVoiceChatOpen) setIsVoiceChatOpen(false);
       if (isRecording || isPaused) stopVoiceRecording();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [settings.voiceMode]);
 
   useEffect(() => {
@@ -1288,7 +1288,7 @@ export function ChatInterface({
       }
       if (minimizedDocument) setMinimizedDocument(null);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [canvasEnabledForActiveContext]);
 
   const fetchUserPlanInfo = useCallback(async () => {
@@ -1870,7 +1870,7 @@ export function ChatInterface({
     if (!url) return;
     try {
       URL.revokeObjectURL(url);
-    } catch {}
+    } catch (_e) { /* ignore */ }
     generatedAttachmentPreviewUrlRef.current = null;
   }, []);
 
@@ -1880,7 +1880,7 @@ export function ChatInterface({
         if (file.localUrl) {
           try {
             URL.revokeObjectURL(file.localUrl);
-          } catch {}
+          } catch (_e) { /* ignore */ }
         }
       });
       releaseGeneratedAttachmentPreviewUrl();
@@ -2879,7 +2879,7 @@ export function ChatInterface({
 
       analysisAbortControllerRef.current = new AbortController();
       try {
-        const response = await apiFetch("/api/analyze", {
+        const response = await apiFetch("/api/chat/analyze", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -4588,7 +4588,7 @@ export function ChatInterface({
       if (removed?.localUrl) {
         try {
           URL.revokeObjectURL(removed.localUrl);
-        } catch {}
+        } catch (_e) { /* ignore */ }
       }
       return prev.filter((_, i: number) => i !== index);
     });
