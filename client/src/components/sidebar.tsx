@@ -735,7 +735,13 @@ export function Sidebar({
           <Button
             variant="ghost"
             className={cn(minimalSectionButtonClass, "group mt-0.5")}
-            onClick={onOpenCodex}
+            onClick={() => {
+              if (onOpenCodex) {
+                onOpenCodex();
+                return;
+              }
+              setLocation("/codex");
+            }}
             data-testid="button-codex"
           >
             <div className={minimalIconChipClass}>

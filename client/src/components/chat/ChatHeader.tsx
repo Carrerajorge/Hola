@@ -222,26 +222,27 @@ export function ChatHeader({
 
                 {chatId && !chatId.startsWith("pending-") ? (
                     <ShareChatDialog chatId={chatId} chatTitle={firstMessageSnippet.slice(0, 30) || "Chat"}>
-                        <Button variant="ghost" size="icon" data-testid="button-share-chat">
-                            <ShareIcon size={20} />
+                        <Button variant="ghost" size="icon" className="h-11 w-11" data-testid="button-share-chat">
+                            <ShareIcon size={28} />
                         </Button>
                     </ShareChatDialog>
                 ) : (
                     <Button
                         variant="ghost"
                         size="icon"
+                        className="h-11 w-11"
                         data-testid="button-share-chat-disabled"
                         disabled
                         title="Envía un mensaje para poder compartir este chat"
                     >
-                        <ShareIcon size={20} />
+                        <ShareIcon size={28} />
                     </Button>
                 )}
 
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" data-testid="button-chat-options">
-                            <MoreHorizontal className="h-5 w-5 text-muted-foreground" />
+                        <Button variant="ghost" size="icon" className="h-11 w-11" data-testid="button-chat-options">
+                            <MoreHorizontal className="h-7 w-7 text-muted-foreground" />
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-52" sideOffset={5}>
