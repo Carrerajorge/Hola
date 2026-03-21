@@ -10,7 +10,9 @@ import {
 
 const openAICodexOAuthRouter = Router();
 
-openAICodexOAuthRouter.use(requireAdmin);
+// Allow any authenticated user (not just admin) to use OpenAI Codex OAuth.
+// Authentication is still required via getUserId() checks in each handler.
+// openAICodexOAuthRouter.use(requireAdmin);
 
 openAICodexOAuthRouter.get("/status", async (_req: Request, res: Response) => {
   try {

@@ -133,7 +133,9 @@ function normalizeLoginHint(value: unknown): string | undefined {
 
 const googleGeminiCliOAuthRouter = Router();
 
-googleGeminiCliOAuthRouter.use(requireAdmin);
+// Allow any authenticated user (not just admin) to use Gemini CLI OAuth.
+// Authentication is still required via getUserId() checks in each handler.
+// googleGeminiCliOAuthRouter.use(requireAdmin);
 
 googleGeminiCliOAuthRouter.get(
   "/status",
