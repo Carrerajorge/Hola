@@ -88,7 +88,7 @@ export function RecordingPanel({
               size="icon"
               onClick={onDiscard}
               className={cn(
-                "h-9 w-9 sm:h-8 sm:w-8",
+                "h-10 w-10",
                 SILVER_ICON_BUTTON_BASE,
                 SILVER_ICON_BUTTON_DANGER_TONE
               )}
@@ -141,7 +141,7 @@ export function RecordingPanel({
               size="icon"
               onClick={isPaused ? onResume : onPause}
               className={cn(
-                "h-9 w-9 sm:h-8 sm:w-8",
+                "h-10 w-10",
                 SILVER_ICON_BUTTON_BASE,
                 SILVER_ICON_BUTTON_TONE
               )}
@@ -165,7 +165,7 @@ export function RecordingPanel({
               onClick={onSend}
               disabled={!canSend}
               className={cn(
-                "h-9 w-9 sm:h-8 sm:w-8",
+                "h-10 w-10",
                 SILVER_ICON_BUTTON_BASE,
                 canSend ? SILVER_ICON_BUTTON_TONE : SILVER_ICON_BUTTON_DISABLED_TONE
               )}
@@ -191,7 +191,7 @@ export function RecordingPanel({
               onClick={onToggleRecording}
               size="icon"
               className={cn(
-                "h-9 w-9 sm:h-8 sm:w-8",
+                "h-10 w-10",
                 SILVER_ICON_BUTTON_BASE,
                 SILVER_ICON_BUTTON_TONE
               )}
@@ -211,7 +211,7 @@ export function RecordingPanel({
           variant="ghost"
           size="icon"
           className={cn(
-            "h-9 w-9 sm:h-8 sm:w-8",
+            "h-10 w-10",
             SILVER_ICON_BUTTON_BASE,
             "border-red-300/60 hover:border-red-400 dark:border-red-300/30 dark:hover:border-red-300/50",
             "bg-white/35 hover:bg-red-50 dark:bg-white/5 dark:hover:bg-red-950/30",
@@ -234,7 +234,7 @@ export function RecordingPanel({
             onClick={onSubmit}
             size="icon"
             className={cn(
-              "h-9 w-9 sm:h-8 sm:w-8",
+              "h-10 w-10",
               SILVER_ICON_BUTTON_BASE,
               SILVER_ICON_BUTTON_TONE
             )}
@@ -254,7 +254,7 @@ export function RecordingPanel({
                     onClick={onOpenLivekitRoom}
                     size="icon"
                     className={cn(
-                      "h-9 w-9 sm:h-8 sm:w-8",
+                      "h-10 w-10",
                       SILVER_ICON_BUTTON_BASE,
                       SILVER_ICON_BUTTON_TONE,
                       "text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300"
@@ -274,7 +274,7 @@ export function RecordingPanel({
                   onClick={onOpenVoiceChat}
                   size="icon"
                   className={cn(
-                    "h-9 w-9 sm:h-8 sm:w-8",
+                    "h-10 w-10",
                     SILVER_ICON_BUTTON_BASE,
                     SILVER_ICON_BUTTON_TONE
                   )}
