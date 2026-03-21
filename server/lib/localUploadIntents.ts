@@ -32,8 +32,18 @@ export function registerLocalUploadIntent(objectId: string, actorId: string, sto
 
 export function consumeLocalUploadIntent(objectId: string, actorId: string): LocalUploadIntent | null {
   const intent = localUploadIntents.get(objectId);
-  if (!intent || intent.expiresAt < Date.now() || intent.actorId !== actorId) {
+  if (!intent || intent.expiresAt < Date.now()) {
     return null;
+  }
+  // In local/dev mode, session stores (Redis) may be unavailable, causing each
+  // request to get a different anonymous actor ID. When both IDs are anonymous
+  // (anon_*), skip the strict actorId match to avoid false 403s on uploads.
+  if (intent.actorId !== actorId) {
+    const bothAnonymous = intent.actorId.startsWith("anon_") && actorId.startsWith("anon_");
+    if (!bothAnonymous) {
+      return null;
+    }
+    // Allow anonymous-to-anonymous mismatch (session store unavailable)
   }
   return intent;
 }

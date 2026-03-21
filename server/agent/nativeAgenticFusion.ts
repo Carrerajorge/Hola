@@ -43,6 +43,7 @@ export function hasNativeAgenticSignal(rawMessage: string): boolean {
     planningSignalRegex.test(message) ||
     memorySignalRegex.test(message) ||
     skillsSignalRegex.test(message) ||
+    channelsSignalRegex.test(message) ||
     localFsSignalRegex.test(message)
   );
 }

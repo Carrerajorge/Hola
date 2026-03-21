@@ -83,6 +83,10 @@ import type {
   UnifiedChatContext,
   LatencyMode,
 } from "../agent/unifiedChatHandler";
+import {
+  buildNativeAgenticFusion,
+  hasNativeAgenticSignal,
+} from "../agent/nativeAgenticFusion";
 import { createRequestSpec, AttachmentSpecSchema } from "../agent/requestSpec";
 import { routeIntent, type IntentResult } from "../services/intentRouter";
 import {
@@ -10106,7 +10110,32 @@ Si el usuario pregunta si tienes acceso a su terminal/computadora/archivos, conf
 INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directamente en esta carpeta objetivo usando herramientas nativas.`
           : "";
 
-        systemContent += `${currentDateTimeContext}${localControlSystemPrompt}${workspaceSystemPrompt}${userProfileContext}${customInstructionsSection}${responseStyleModifier}${semanticMemoryContext ? `\n\n${semanticMemoryContext}` : ""}${codeInterpreterPrompt}${webSearchContextForLLM}${skillSystemSection}`;
+        // ── OpenClaw Native Agentic Fusion ──
+        // Enrich system prompt with RAG memory, orchestration plans, skills, and channel catalog
+        // when the user message contains agentic signals (planning, memory, skills, channels).
+        let openclawFusionContext = "";
+        if (userMessageText && hasNativeAgenticSignal(userMessageText)) {
+          try {
+            const fusionResult = await buildNativeAgenticFusion({
+              userId: userId || effectiveUserId,
+              chatId: chatId || streamConversationId,
+              message: userMessageText,
+            });
+            if (fusionResult.promptAddendum) {
+              openclawFusionContext = `\n\n${fusionResult.promptAddendum}`;
+              console.log(
+                `[Stream] OpenClaw fusion applied: ${fusionResult.appliedModules.join(", ")}`,
+              );
+            }
+          } catch (fusionErr) {
+            console.warn(
+              "[Stream] OpenClaw fusion failed (non-blocking):",
+              (fusionErr as any)?.message || fusionErr,
+            );
+          }
+        }
+
+        systemContent += `${currentDateTimeContext}${localControlSystemPrompt}${workspaceSystemPrompt}${userProfileContext}${customInstructionsSection}${responseStyleModifier}${semanticMemoryContext ? `\n\n${semanticMemoryContext}` : ""}${codeInterpreterPrompt}${webSearchContextForLLM}${skillSystemSection}${openclawFusionContext}`;
 
         // DOC TOOL: Add format-specific system prompt so the LLM outputs structured content
         // that the client-side editors can render (markdown for Word, CSV for Excel, JSON for PPT)
@@ -11075,7 +11104,7 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
   // PARE Phase 1: Request contract, rate limiting, and quota guard middlewares applied
   // ============================================================================================
   router.post(
-    "/analyze",
+    "/chat/analyze",
     pareRequestContract,
     pareAnalyzeSchemaValidator,
     pareRateLimiter(),

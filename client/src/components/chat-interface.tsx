@@ -493,7 +493,11 @@ interface UploadedFile {
 
 function isAnalyzableFile(filename: string): boolean {
   const ext = filename.toLowerCase().split(".").pop();
-  return ["xlsx", "xls", "csv", "pdf", "doc", "docx"].includes(ext || "");
+  return [
+    "xlsx", "xls", "csv", "pdf", "doc", "docx",
+    "ppt", "pptx", "txt", "json", "rtf", "odt", "ods", "odp",
+    "png", "jpg", "jpeg", "gif", "bmp", "webp", "tiff",
+  ].includes(ext || "");
 }
 
 function isPdfFile(mimeType?: string, fileName?: string): boolean {
