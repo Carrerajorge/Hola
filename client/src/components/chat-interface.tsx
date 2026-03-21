@@ -2454,6 +2454,30 @@ export function ChatInterface({
   // Handle new chat - reset all document state before calling parent handler
   const handleNewChat = useCallback(
     (options?: { preserveGpt?: boolean }) => {
+      // Reset ephemeral chat/composer state even if we're already in "new chat"
+      // mode. In that case chatId stays null, so chatId-based cleanup effects do
+      // not run and previews/optimistic bubbles can otherwise stick around.
+      setInput("");
+      setOptimisticMessages([]);
+      setStreamingContent("");
+      streamingContentRef.current = "";
+      setContextNotice(null);
+      setUploadedFiles([]);
+      pendingUploadsRef.current.clear();
+      setPreviewUploadedImage(null);
+      setPreviewFileAttachment(null);
+      setCopiedAttachmentContent(false);
+      setLightboxImage(null);
+      setPendingGeneratedImage(null);
+      latestGeneratedImageRef.current = null;
+      setIsDraggingOver(false);
+      dragCounterRef.current = 0;
+      setSelectedTool(null);
+      setAiStateForChat("idle", latestChatIdRef.current);
+      setAiProcessStepsForChat([], latestChatIdRef.current);
+      clearSubmitLock();
+      isSubmittingRef.current = false;
+
       // Reset document tool selection
       setSelectedDocTool(null);
       setActiveDocEditor(null);
