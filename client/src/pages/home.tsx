@@ -57,7 +57,6 @@ const AboutGptDialogLazy = lazy(() =>
 );
 const GptBuilderLazy = lazy(() => import("@/components/gpt-builder").then((m) => ({ default: m.GptBuilder })));
 const UserLibraryLazy = lazy(() => import("@/components/user-library").then((m) => ({ default: m.UserLibrary })));
-const CodexDialogLazy = lazy(() => import("@/components/codex-dialog").then((m) => ({ default: m.CodexDialog })));
 const SearchModalLazy = lazy(() => import("@/components/search-modal").then((m) => ({ default: m.SearchModal })));
 const SettingsDialogLazy = lazy(() => import("@/components/settings-dialog").then((m) => ({ default: m.SettingsDialog })));
 const KeyboardShortcutsDialogLazy = lazy(() =>
@@ -134,7 +133,6 @@ export default function Home() {
   const [isGptBuilderOpen, setIsGptBuilderOpen] = useState(false);
   const [aboutGptId, setAboutGptId] = useState<string | null>(null);
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
-  const [isCodexOpen, setIsCodexOpen] = useState(false);
   const [isAppsDialogOpen, setIsAppsDialogOpen] = useState(false);
   const [isWhatsAppConnectOpen, setIsWhatsAppConnectOpen] = useState(false);
   useEffect(() => {
@@ -742,7 +740,7 @@ export default function Home() {
   };
 
   const handleOpenCodex = () => {
-    setIsCodexOpen(true);
+    setLocation("/codex");
   };
 
   const handleSelectGpt = (gpt: Gpt) => {
@@ -964,6 +962,7 @@ export default function Home() {
                 onOpenApps={handleOpenApps}
                 onOpenSkills={handleOpenSkills}
                 onOpenWhatsAppConnect={() => setIsWhatsAppConnectOpen(true)}
+                onOpenCodex={handleOpenCodex}
                 onOpenLibrary={handleOpenLibrary}
                 processingChatIds={processingChatIds}
                 pendingResponseCounts={pendingResponseCounts}
@@ -1128,12 +1127,6 @@ export default function Home() {
       <Suspense fallback={null}>
         {isLibraryOpen ? (
           <UserLibraryLazy open={isLibraryOpen} onOpenChange={setIsLibraryOpen} />
-        ) : null}
-      </Suspense>
-      {/* Codex Dialog */}
-      <Suspense fallback={null}>
-        {isCodexOpen ? (
-          <CodexDialogLazy isOpen={isCodexOpen} onClose={() => setIsCodexOpen(false)} />
         ) : null}
       </Suspense>
 
