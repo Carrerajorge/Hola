@@ -182,6 +182,17 @@ router.get("/google", (req: Request, res: Response) => {
         prompt: "consent",
     });
 
+    // Allow login_hint from query param so the frontend can pre-select a Gmail account
+    const loginHint = (req.query.login_hint as string) || "";
+    if (loginHint) {
+        params.set("login_hint", loginHint);
+    }
+    // Allow hd (hosted domain) to restrict to Gmail accounts
+    const hd = (req.query.hd as string) || "";
+    if (hd) {
+        params.set("hd", hd);
+    }
+
     const authUrl = `${config.authorizationUrl}?${params.toString()}`;
     console.log("[Google Auth] Redirecting to Google login");
     res.redirect(authUrl);

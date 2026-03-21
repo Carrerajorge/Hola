@@ -1,6 +1,6 @@
 {
   "name": "@hola/openclaw",
-  "version": "2026.3.8",
+  "version": "2026.3.13",
   "private": true,
   "description": "Multi-channel AI gateway with extensible messaging integrations",
   "keywords": [],
