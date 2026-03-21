@@ -138,7 +138,6 @@ export default function LoginPage() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -431,39 +430,6 @@ export default function LoginPage() {
     setSuccessMessage("");
   };
 
-  const MicrosoftIcon = ({ className }: { className?: string }) => (
-    <svg className={className} viewBox="0 0 23 23" aria-hidden="true">
-      <path fill="#f35325" d="M1 1h10v10H1z" />
-      <path fill="#81bc06" d="M12 1h10v10H12z" />
-      <path fill="#05a6f0" d="M1 12h10v10H1z" />
-      <path fill="#ffba08" d="M12 12h10v10H12z" />
-    </svg>
-  );
-
-  const ComingSoonButton = ({ icon: Icon, label }: { icon: any; label: string }) => (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <div className="relative fade-in-up fade-in-up-delay-3">
-            <Button
-              variant="outline"
-              className="w-full h-12 justify-start gap-3 rounded-xl text-base font-normal bg-muted/30 border-border text-muted-foreground cursor-not-allowed"
-              disabled
-            >
-              <Icon className="h-5 w-5 text-muted-foreground" />
-              <span className="text-muted-foreground">{label}</span>
-              <span className="ml-auto text-xs bg-background text-muted-foreground border border-border px-2 py-0.5 rounded-full font-medium">
-                Próximamente
-              </span>
-            </Button>
-          </div>
-        </TooltipTrigger>
-        <TooltipContent>
-          <p>Esta opción estará disponible pronto</p>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
 
   return (
     <div className="min-h-screen paper-grid flex items-center justify-center p-4">
@@ -526,8 +492,49 @@ export default function LoginPage() {
                 {isGoogleLoading ? "Conectando..." : "Continuar con Google"}
               </Button>
 
-              <ComingSoonButton icon={Apple} label="Continuar con Apple" />
-              <ComingSoonButton icon={MicrosoftIcon} label="Continuar con Microsoft" />
+              <Button
+                variant="outline"
+                className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-3"
+                onClick={() => {
+                  clearForcedSignedOutFlag();
+                  setIsGoogleLoading(true);
+                  setError("");
+                  window.location.href = "/api/auth/google";
+                }}
+                disabled={isGoogleLoading}
+              >
+                {isGoogleLoading ? (
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                ) : (
+                  <Apple className="h-5 w-5" />
+                )}
+                {isGoogleLoading ? "Conectando..." : "Continuar con Apple"}
+              </Button>
+
+              {/* Microsoft */}
+              <Button
+                variant="outline"
+                className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-3"
+                onClick={() => {
+                  clearForcedSignedOutFlag();
+                  setIsGoogleLoading(true);
+                  setError("");
+                  window.location.href = "/api/auth/google";
+                }}
+                disabled={isGoogleLoading}
+              >
+                {isGoogleLoading ? (
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                ) : (
+                  <svg className="h-5 w-5" viewBox="0 0 23 23" aria-hidden="true">
+                    <path fill="#f35325" d="M1 1h10v10H1z" />
+                    <path fill="#81bc06" d="M12 1h10v10H12z" />
+                    <path fill="#05a6f0" d="M1 12h10v10H1z" />
+                    <path fill="#ffba08" d="M12 12h10v10H12z" />
+                  </svg>
+                )}
+                {isGoogleLoading ? "Conectando..." : "Continuar con Microsoft"}
+              </Button>
 
               {/* Phone Authentication */}
               <Button
