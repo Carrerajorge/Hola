@@ -359,6 +359,21 @@ function detectUncertainty(content: string): {
   return { confidence: "high" };
 }
 
+function sanitizeGeneratedWordContent(content: string): string {
+  if (!content) return "";
+
+  return content
+    .replace(
+      /^\s*El t[ií]tulo del documento Word ser[ií]a\s+["“][^"”]+["”]\.?\s*/i,
+      "",
+    )
+    .replace(
+      /^\s*The Word document title would be\s+["“][^"”]+["”]\.?\s*/i,
+      "",
+    )
+    .trimStart();
+}
+
 type AiState = AIState;
 
 type CodingAgentProfile = "coder" | "reviewer" | "improver";
@@ -469,6 +484,7 @@ interface ChatInterfaceProps {
       error?: string;
     }>
   >;
+  newChatResetNonce?: number;
 }
 
 interface UploadedFile {
@@ -628,6 +644,7 @@ export function ChatInterface({
   setSelectedDocTool: setSelectedDocToolProp,
   docGenerationState: docGenerationStateProp,
   setDocGenerationState: setDocGenerationStateProp,
+  newChatResetNonce,
 }: ChatInterfaceProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { settings } = useSettingsContext();
@@ -2455,51 +2472,61 @@ export function ChatInterface({
     onCloseSidebar?.();
   };
 
+  const resetForNewChat = useCallback(() => {
+    // Reset ephemeral chat/composer state even if we're already in "new chat"
+    // mode. In that case chatId stays null, so chatId-based cleanup effects do
+    // not run and previews/optimistic bubbles can otherwise stick around.
+    setInput("");
+    setOptimisticMessages([]);
+    setStreamingContent("");
+    streamingContentRef.current = "";
+    setContextNotice(null);
+    setUploadedFiles([]);
+    pendingUploadsRef.current.clear();
+    setPreviewUploadedImage(null);
+    setPreviewFileAttachment(null);
+    setCopiedAttachmentContent(false);
+    setLightboxImage(null);
+    setPendingGeneratedImage(null);
+    latestGeneratedImageRef.current = null;
+    setIsDraggingOver(false);
+    dragCounterRef.current = 0;
+    setSelectedTool(null);
+    setAiStateForChat("idle", latestChatIdRef.current);
+    setAiProcessStepsForChat([], latestChatIdRef.current);
+    clearSubmitLock();
+    isSubmittingRef.current = false;
+
+    // Reset document tool selection
+    setSelectedDocTool(null);
+    setActiveDocEditor(null);
+    setMinimizedDocument(null);
+    setEditedDocumentContent("");
+    setDocGenerationState({
+      status: "idle",
+      progress: 0,
+      stage: "",
+      downloadUrl: null,
+      fileName: null,
+      fileSize: null,
+    });
+  }, [setAiProcessStepsForChat, setAiStateForChat, setDocGenerationState, setSelectedDocTool]);
+
+  const lastNewChatResetNonceRef = useRef(newChatResetNonce);
+  useEffect(() => {
+    if (newChatResetNonce == null) return;
+    if (lastNewChatResetNonceRef.current === newChatResetNonce) return;
+    lastNewChatResetNonceRef.current = newChatResetNonce;
+    resetForNewChat();
+  }, [newChatResetNonce, resetForNewChat]);
+
   // Handle new chat - reset all document state before calling parent handler
   const handleNewChat = useCallback(
     (options?: { preserveGpt?: boolean }) => {
-      // Reset ephemeral chat/composer state even if we're already in "new chat"
-      // mode. In that case chatId stays null, so chatId-based cleanup effects do
-      // not run and previews/optimistic bubbles can otherwise stick around.
-      setInput("");
-      setOptimisticMessages([]);
-      setStreamingContent("");
-      streamingContentRef.current = "";
-      setContextNotice(null);
-      setUploadedFiles([]);
-      pendingUploadsRef.current.clear();
-      setPreviewUploadedImage(null);
-      setPreviewFileAttachment(null);
-      setCopiedAttachmentContent(false);
-      setLightboxImage(null);
-      setPendingGeneratedImage(null);
-      latestGeneratedImageRef.current = null;
-      setIsDraggingOver(false);
-      dragCounterRef.current = 0;
-      setSelectedTool(null);
-      setAiStateForChat("idle", latestChatIdRef.current);
-      setAiProcessStepsForChat([], latestChatIdRef.current);
-      clearSubmitLock();
-      isSubmittingRef.current = false;
-
-      // Reset document tool selection
-      setSelectedDocTool(null);
-      setActiveDocEditor(null);
-      setMinimizedDocument(null);
-      setEditedDocumentContent("");
-      // Reset document generation state
-      setDocGenerationState({
-        status: "idle",
-        progress: 0,
-        stage: "",
-        downloadUrl: null,
-        fileName: null,
-        fileSize: null,
-      });
-      // Call original onNewChat
+      resetForNewChat();
       onNewChat?.(options);
     },
-    [onNewChat],
+    [onNewChat, resetForNewChat],
   );
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -2836,6 +2863,16 @@ export function ChatInterface({
     },
     [setOptimisticMessages],
   );
+
+  const markMessageDeliverySent = useCallback((messageKey: string) => {
+    setOptimisticMessages((prev) =>
+      prev.map((m: Message) =>
+        m.id === messageKey || m.clientTempId === messageKey
+          ? { ...m, deliveryStatus: "sent", deliveryError: undefined }
+          : m,
+      ),
+    );
+  }, [setOptimisticMessages]);
 
   const runDocumentAnalysisAsync = useCallback(
     async (opts: {
@@ -8390,6 +8427,7 @@ export function ChatInterface({
         void onSendMessage(userMsg)
           .then((ack) => {
             sendMessageAck = ack;
+            markMessageDeliverySent(userMsgId);
             return ack;
           })
           .catch((err) => {
@@ -8886,10 +8924,14 @@ INSTRUCCIONES IMPORTANTES:
 1. Genera SOLO el nuevo contenido que el usuario solicita
 2. NO repitas ni incluyas el contenido existente del documento
 3. Tu respuesta se AÑADIRÁ automáticamente al final del documento existente
-4. Responde SOLO con el nuevo contenido en formato Markdown, sin explicaciones adicionales`;
+4. Responde SOLO con el nuevo contenido en formato Markdown, sin explicaciones adicionales
+5. NO escribas frases meta como "El título del documento Word sería...", "Título sugerido:", "A continuación..." o explicaciones sobre lo que vas a escribir
+6. Si el documento necesita un título, escribe el título directamente como encabezado, no lo describas`;
               } else {
                 wordSystemPrompt = `Eres un asistente de creación de documentos. Genera el contenido del documento según las instrucciones del usuario.
-Responde SOLO con el contenido del documento en formato Markdown, sin explicaciones adicionales.`;
+Responde SOLO con el contenido del documento en formato Markdown, sin explicaciones adicionales.
+NO escribas frases meta como "El título del documento Word sería...", "Título sugerido:", "A continuación..." o explicaciones sobre el documento.
+Si el documento necesita un título, escribe el título directamente como encabezado.`;
               }
             }
 
@@ -9375,7 +9417,10 @@ IMPORTANTE:
                     docInsertContentRef.current
                   ) {
                     try {
-                      const newContentHTML = markdownToTipTap(fullContent);
+                      const sanitizedContent =
+                        sanitizeGeneratedWordContent(fullContent);
+                      const newContentHTML =
+                        markdownToTipTap(sanitizedContent);
                       const cumulativeHTML =
                         existingDocHTML + separatorHTML + newContentHTML;
                       docInsertContentRef.current(cumulativeHTML, "html");
@@ -9495,7 +9540,10 @@ IMPORTANTE:
                   ) {
                     if (docInsertContentRef.current) {
                       try {
-                        const newContentHTML = markdownToTipTap(fullContent);
+                        const sanitizedContent =
+                          sanitizeGeneratedWordContent(fullContent);
+                        const newContentHTML =
+                          markdownToTipTap(sanitizedContent);
                         const cumulativeHTML =
                           existingDocHTML + separatorHTML + newContentHTML;
                         docInsertContentRef.current(cumulativeHTML, "html");
@@ -9769,7 +9817,10 @@ IMPORTANTE:
                   // Write to document if in document mode (cumulative)
                   if (shouldWriteToDocLegacy && docInsertContentRef.current) {
                     try {
-                      const newContentHTML = markdownToTipTap(newContent);
+                      const sanitizedContent =
+                        sanitizeGeneratedWordContent(newContent);
+                      const newContentHTML =
+                        markdownToTipTap(sanitizedContent);
                       const cumulativeHTML =
                         existingDocHTML + separatorHTML + newContentHTML;
                       docInsertContentRef.current(cumulativeHTML, "html");
@@ -9807,7 +9858,10 @@ IMPORTANTE:
                   // Finalize document or create message (cumulative)
                   if (shouldWriteToDocLegacy && docInsertContentRef.current) {
                     try {
-                      const newContentHTML = markdownToTipTap(fullContent);
+                      const sanitizedContent =
+                        sanitizeGeneratedWordContent(fullContent);
+                      const newContentHTML =
+                        markdownToTipTap(sanitizedContent);
                       const cumulativeHTML =
                         existingDocHTML + separatorHTML + newContentHTML;
                       docInsertContentRef.current(cumulativeHTML, "html");
