@@ -4,6 +4,7 @@ import { DocxParser } from "../parsers/docxParser";
 import { XlsxParser } from "../parsers/xlsxParser";
 import { PptxParser } from "../parsers/pptxParser";
 import { TextParser } from "../parsers/textParser";
+import { ImageParser } from "../parsers/imageParser";
 import type { DetectedFileType } from "../parsers/base";
 
 export interface Attachment {
@@ -29,6 +30,7 @@ const docxParser = new DocxParser();
 const xlsxParser = new XlsxParser();
 const pptxParser = new PptxParser();
 const textParser = new TextParser();
+const imageParser = new ImageParser();
 
 const MIME_TYPE_MAP: Record<string, { parser: any; docType: string; ext: string }> = {
   "application/pdf": { parser: pdfParser, docType: "PDF", ext: "pdf" },
@@ -44,6 +46,14 @@ const MIME_TYPE_MAP: Record<string, { parser: any; docType: string; ext: string 
   "text/csv": { parser: textParser, docType: "CSV", ext: "csv" },
   "text/html": { parser: textParser, docType: "HTML", ext: "html" },
   "application/json": { parser: textParser, docType: "JSON", ext: "json" },
+  // Image types - OCR via AI Vision + Tesseract fallback
+  "image/png": { parser: imageParser, docType: "Image OCR", ext: "png" },
+  "image/jpeg": { parser: imageParser, docType: "Image OCR", ext: "jpg" },
+  "image/jpg": { parser: imageParser, docType: "Image OCR", ext: "jpg" },
+  "image/gif": { parser: imageParser, docType: "Image OCR", ext: "gif" },
+  "image/bmp": { parser: imageParser, docType: "Image OCR", ext: "bmp" },
+  "image/webp": { parser: imageParser, docType: "Image OCR", ext: "webp" },
+  "image/tiff": { parser: imageParser, docType: "Image OCR", ext: "tiff" },
 };
 
 function getExtensionFromFileName(fileName: string): string {
@@ -67,6 +77,15 @@ function inferMimeTypeFromExtension(ext: string): string | null {
     'html': 'text/html',
     'htm': 'text/html',
     'json': 'application/json',
+    // Image types
+    'png': 'image/png',
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'gif': 'image/gif',
+    'bmp': 'image/bmp',
+    'webp': 'image/webp',
+    'tif': 'image/tiff',
+    'tiff': 'image/tiff',
   };
   return extMap[ext] || null;
 }

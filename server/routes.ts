@@ -227,6 +227,7 @@ import {
 import { createWorkflowRouter } from "./routes/workflowRouter";
 import { createDeviceControlRouter } from "./routes/deviceControlRouter";
 import openClawRouter from "./routes/openClawRouter";
+import { createOpenClawRuntimeRouter } from "./routes/openclawRuntimeRouter";
 import { createSuperProgrammingAgentRouter } from "./routes/superProgrammingAgentRouter";
 import { createSkillPlatformRouter } from "./routes/skillPlatformRouter";
 import {
@@ -1165,6 +1166,7 @@ export async function registerRoutes(
 
   // OpenClaw runtime capabilities are fused directly into the native agent pipeline.
   app.use("/api/openclaw", openClawRouter);
+  app.use("/api/openclaw/runtime", createOpenClawRuntimeRouter());
 
   // ===== Run Detail Endpoints =====
   app.use("/api/runs", createRunRouter());
@@ -2242,7 +2244,7 @@ export async function registerRoutes(
     fileStatusWss,
     true,
     (ws: AuthenticatedWebSocket) => {
-      let subscribedFileIds: Set<string> = new Set();
+      const subscribedFileIds: Set<string> = new Set();
 
       ws.on("message", (message) => {
         try {
@@ -2395,7 +2397,7 @@ export async function registerRoutes(
                   }),
                 );
               }
-            } catch (e) {}
+            } catch (_e) { /* ignore screenshot errors */ }
           }
         } catch (e) {
           console.error("Browser WS message parse error:", e);

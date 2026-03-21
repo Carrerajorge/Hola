@@ -53,8 +53,7 @@ const AGENT_ROLE_TO_NAME: Record<SpecializedAgent, string> = {
   document: "DocumentAgent",
   qa: "QAAgent",
   security: "SecurityAgent",
-  // Computer use is disabled; route to the safer BrowserAgent.
-  computer_use: "BrowserAgent"
+  computer_use: "ComputerUseAgent"
 };
 
 const AGENT_TO_TOOLS: Record<SpecializedAgent, string[]> = {
