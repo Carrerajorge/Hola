@@ -36,6 +36,7 @@ import { createConnectorOAuthRouter } from "./routes/connectorOAuthRouter";
 import gmailOAuthRouter from "./routes/gmailOAuthRouter";
 import calendarOAuthRouter from "./routes/calendarOAuthRouter";
 import outlookOAuthRouter from "./routes/outlookOAuthRouter";
+import geminiCliOAuthRouter from "./routes/geminiCliOAuthRouter";
 import { createGmailMcpRouter } from "./mcp/gmailMcpServer";
 import healthRouter from "./routes/healthRouter";
 import aiExcelRouter from "./routes/aiExcelRouter";
@@ -691,6 +692,7 @@ export async function registerRoutes(
   app.use("/api/oauth/google/gmail", gmailOAuthRouter);
   app.use("/api/oauth/google/calendar", calendarOAuthRouter);
   app.use("/api/oauth/microsoft", outlookOAuthRouter);
+  app.use("/api/gemini-cli-oauth", geminiCliOAuthRouter);
   app.use("/api/mcp/gmail", createGmailMcpRouter());
   app.use("/mcp/gmail", createGmailMcpRouter()); // Backward compatibility
 
