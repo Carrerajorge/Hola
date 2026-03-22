@@ -12,6 +12,7 @@ const spawnCodexSubagentsMock = vi.fn();
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
 const addChatToProjectMock = vi.fn();
+const apiFetchMock = vi.fn();
 
 vi.mock("wouter", () => ({
   useLocation: () => ["/codex", setLocationMock],
@@ -27,6 +28,10 @@ vi.mock("@/hooks/use-chats", () => ({
 
 vi.mock("@/hooks/use-projects", () => ({
   useProjects: () => useProjectsMock(),
+}));
+
+vi.mock("@/lib/apiClient", () => ({
+  apiFetch: (...args: unknown[]) => apiFetchMock(...args),
 }));
 
 vi.mock("@/services/codexRuntime", () => ({
@@ -52,6 +57,7 @@ describe("CodexPage", () => {
     toastSuccessMock.mockReset();
     toastErrorMock.mockReset();
     addChatToProjectMock.mockReset();
+    apiFetchMock.mockReset();
 
     useAuthMock.mockReturnValue({
       user: {
@@ -155,6 +161,62 @@ describe("CodexPage", () => {
       chatId: "chat-new",
       prompt: "prompt",
     });
+
+    apiFetchMock.mockImplementation(async (url: string, options?: { method?: string }) => {
+      if (url.startsWith("/api/local/repo/branches?")) {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            branches: ["main", "codex/sidebar-compact-prod-20260321", "fix/document-upload-403-openclaw-fix"],
+            current: "main",
+            summary: {
+              modifiedFiles: 185,
+              insertions: 10354,
+              deletions: 10397,
+              label: "Sin confirmar: 185 archivos +10.354 -10.397",
+            },
+          }),
+        };
+      }
+
+      if (url === "/api/local/repo/branches/switch" && options?.method === "POST") {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            branches: ["main", "codex/sidebar-compact-prod-20260321", "fix/document-upload-403-openclaw-fix"],
+            current: "codex/sidebar-compact-prod-20260321",
+            summary: {
+              modifiedFiles: 40,
+              insertions: 240,
+              deletions: 12,
+              label: "Sin confirmar: 40 archivos +240 -12",
+            },
+          }),
+        };
+      }
+
+      if (url === "/api/local/repo/branches/create" && options?.method === "POST") {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            branches: ["main", "codex/nueva-tarea-20260321"],
+            current: "codex/nueva-tarea-20260321",
+            summary: {
+              modifiedFiles: 0,
+              insertions: 0,
+              deletions: 0,
+              label: "Sin cambios pendientes",
+            },
+          }),
+        };
+      }
+
+      throw new Error(`Unexpected apiFetch call: ${url}`);
+    });
+
     spawnCodexSubagentsMock.mockResolvedValue([
       {
         id: "subagent-1",
@@ -168,21 +230,48 @@ describe("CodexPage", () => {
     ]);
   });
 
-  it("renders the dedicated Codex workspace and opens the selected chat", () => {
+  it("renders the dedicated Codex workspace and opens the selected chat", async () => {
     render(<CodexPage />);
 
-    expect(screen.getByText("Todos los proyectos")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(apiFetchMock).toHaveBeenCalledWith(
+        "/api/local/repo/branches?rootPath=%2Fworkspace%2Fhola",
+        expect.objectContaining({ method: "GET", credentials: "include" }),
+      );
+    });
+
+    expect(screen.getByText("ILIAGPT")).toBeInTheDocument();
     expect(screen.getByTestId("codex-session-title")).toHaveTextContent("Polish Codex screen");
+    expect(screen.getAllByText("/workspace/hola").length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByTestId("codex-session-chat-1"));
 
     expect(screen.getByTestId("codex-session-title")).toHaveTextContent("Fix upload error");
     expect(screen.getAllByText("Document hotfix").length).toBeGreaterThan(0);
-    expect(screen.getByText("Workspace conectado")).toBeInTheDocument();
+    expect(screen.getByText("Workspace")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("codex-open-chat"));
 
     expect(setLocationMock).toHaveBeenCalledWith("/chat/chat-1");
+  });
+
+  it("opens the branch picker from the main trigger", async () => {
+    render(<CodexPage />);
+
+    await waitFor(() => {
+      expect(apiFetchMock).toHaveBeenCalledWith(
+        "/api/local/repo/branches?rootPath=%2Fworkspace%2Fhola",
+        expect.objectContaining({ method: "GET", credentials: "include" }),
+      );
+    });
+
+    fireEvent.click(screen.getByTestId("codex-branch-trigger"));
+
+    expect(await screen.findByPlaceholderText("Buscar ramas")).toBeInTheDocument();
+    expect(screen.getByText("Ramas")).toBeInTheDocument();
+    expect(screen.getAllByText("main").length).toBeGreaterThan(1);
+    expect(screen.getByText("codex/sidebar-compact-prod-20260321")).toBeInTheDocument();
+    expect(screen.getByText("Crear y cambiar a una rama nueva...")).toBeInTheDocument();
   });
 
   it("shows the empty workspace state when there are no sessions yet", () => {

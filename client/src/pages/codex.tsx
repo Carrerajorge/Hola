@@ -1,15 +1,23 @@
-import { useEffect, useMemo, useState, type CSSProperties, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+} from "react";
 import { useLocation } from "wouter";
 import {
   ArrowLeft,
   ArrowUpRight,
   Bot,
+  Check,
   CheckCircle2,
   ChevronDown,
   Clock3,
   Code2,
   Command,
-  FileCode2,
   FolderOpen,
   GitBranch,
   Layers3,
@@ -29,12 +37,16 @@ import { toast } from "sonner";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { PromptDialog } from "@/components/ui/prompt-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
 import { useChats, type Chat, type Message } from "@/hooks/use-chats";
 import { useProjects, type Project } from "@/hooks/use-projects";
+import { apiFetch } from "@/lib/apiClient";
 import { cn } from "@/lib/utils";
 import { createCodexRun, spawnCodexSubagents } from "@/services/codexRuntime";
 
@@ -66,29 +78,37 @@ interface ActivityItem {
   icon: LucideIcon;
 }
 
+interface BranchSummary {
+  modifiedFiles: number;
+  insertions: number;
+  deletions: number;
+  label: string;
+}
+
 const shellStyle: CSSProperties = {
-  "--codex-bg": "#f7f5f0",
-  "--codex-sidebar": "#f3eee4",
-  "--codex-panel": "rgba(255,255,255,0.8)",
-  "--codex-border": "rgba(25,23,18,0.12)",
+  "--codex-bg": "#f6f3ec",
+  "--codex-sidebar": "#e8f0f1",
+  "--codex-panel": "rgba(255,255,255,0.92)",
+  "--codex-panel-soft": "rgba(255,255,255,0.72)",
+  "--codex-border": "rgba(22,31,36,0.11)",
   "--codex-ink": "#171512",
-  "--codex-muted": "#726b60",
+  "--codex-muted": "#6f6a61",
   "--codex-accent": "#1f7a55",
   "--codex-accent-soft": "rgba(31,122,85,0.12)",
   "--codex-accent-ink": "#174f39",
+  "--codex-shadow": "0 28px 80px -48px rgba(21,19,16,0.45)",
 } as CSSProperties;
 
 const primaryNav = [
-  { id: "new", label: "Nueva sesión", icon: Plus },
-  { id: "scheduled", label: "Programado", icon: Clock3 },
-  { id: "dispatch", label: "Despachar", icon: Layers3 },
-  { id: "customize", label: "Personalizar", icon: Settings2 },
+  { id: "new", label: "Nuevo hilo", icon: Plus },
+  { id: "scheduled", label: "Automatizaciones", icon: Clock3 },
+  { id: "dispatch", label: "Habilidades", icon: Sparkles },
 ] as const;
 
 const quickActions = [
-  "Revisar el último cambio",
-  "Diseñar una migración segura",
-  "Resumir el contexto técnico",
+  "Revisar cambios pendientes y proponer commit",
+  "Crear un worktree aislado para esta tarea",
+  "Resumir el contexto técnico del chat",
 ] as const;
 
 function normalizeText(value?: string | null): string {
@@ -157,34 +177,22 @@ function getInitials(value?: string | null): string {
   if (!source) return "IL";
 
   const parts = source.split(" ").filter(Boolean);
-  if (parts.length === 1) {
-    return parts[0].slice(0, 2).toUpperCase();
-  }
-
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase();
 }
 
 function getSessionStatus(chat: Chat): SessionStatus {
   const lastAssistant = [...chat.messages].reverse().find((message) => message.role === "assistant");
   if (!lastAssistant) return "waiting";
-
-  if (lastAssistant.agentRun?.status === "processing" || lastAssistant.status === "processing") {
-    return "running";
-  }
-
-  if (lastAssistant.agentRun?.status === "failed" || lastAssistant.status === "failed") {
-    return "waiting";
-  }
-
+  if (lastAssistant.agentRun?.status === "processing" || lastAssistant.status === "processing") return "running";
+  if (lastAssistant.agentRun?.status === "failed" || lastAssistant.status === "failed") return "waiting";
   return "ready";
 }
 
 function getLatestRunId(chat: Chat): string | null {
   for (let index = chat.messages.length - 1; index >= 0; index -= 1) {
     const runId = chat.messages[index]?.agentRun?.runId;
-    if (typeof runId === "string" && runId.trim().length > 0) {
-      return runId;
-    }
+    if (typeof runId === "string" && runId.trim().length > 0) return runId;
   }
   return null;
 }
@@ -215,29 +223,7 @@ function buildActivity(session: CodexSession | null): ActivityItem[] {
   if (!session) return [];
 
   const items: ActivityItem[] = [];
-
-  if (session.project) {
-    const workspaceSummary = [
-      session.project.repositoryPath ? `Repositorio: ${session.project.repositoryPath}` : "Workspace local listo",
-      session.project.defaultCodeFolder ? `Carpeta base: ${session.project.defaultCodeFolder}` : null,
-      session.project.files.length > 0 ? `${session.project.files.length} archivo(s) en contexto` : "Sin archivos extra cargados",
-    ]
-      .filter(Boolean)
-      .join(" · ");
-
-    items.push({
-      id: `${session.id}-workspace`,
-      title: "Workspace conectado",
-      body: workspaceSummary,
-      meta: session.updatedLabel,
-      tone: "neutral",
-      icon: FolderOpen,
-    });
-  }
-
-  const recentMessages = session.chat.messages
-    .filter((message) => message.role !== "system")
-    .slice(-4);
+  const recentMessages = session.chat.messages.filter((message) => message.role !== "system").slice(-4);
 
   for (const message of recentMessages) {
     const timestamp = formatClock(toMessageTimestamp(message));
@@ -265,36 +251,34 @@ function buildActivity(session: CodexSession | null): ActivityItem[] {
         icon: message.agentRun?.status === "processing" ? Bot : CheckCircle2,
       });
     }
-
-    if (message.role === "assistant" && Array.isArray(message.agentRun?.steps)) {
-      for (const step of message.agentRun.steps.slice(0, 2)) {
-        const outputSummary = normalizeText(
-          typeof step.output === "string" ? step.output : JSON.stringify(step.output ?? "")
-        );
-        items.push({
-          id: `${message.id}-${step.stepIndex}`,
-          title: truncateText(step.toolName || "Acción del agente", 48),
-          body: truncateText(outputSummary || "Paso preparado para esta sesión.", 180),
-          meta: step.status === "complete" ? "Paso completado" : "Paso registrado",
-          tone: step.status === "complete" ? "success" : "neutral",
-          icon: FileCode2,
-        });
-      }
-    }
   }
 
-  if (items.length === 0) {
-    items.push({
-      id: `${session.id}-placeholder`,
-      title: "Sesión lista para continuar",
-      body: "Codex ya tiene el contexto principal cargado. Puedes abrir el chat y seguir desde el último punto de trabajo.",
-      meta: session.updatedLabel,
-      tone: "neutral",
-      icon: Bot,
-    });
-  }
+  return items.slice(0, 3);
+}
 
-  return items.slice(0, 6);
+function validateBranchName(value: string): string | null {
+  const branch = value.trim();
+  if (!branch) return "El nombre de la rama es obligatorio.";
+  if (
+    branch.startsWith("-") ||
+    branch.includes("..") ||
+    branch.includes("@{") ||
+    branch.includes("\\") ||
+    branch.includes(" ") ||
+    branch.endsWith("/") ||
+    branch.endsWith(".lock") ||
+    branch.includes("//")
+  ) {
+    return "Usa un nombre de rama válido de Git.";
+  }
+  if (!/^[A-Za-z0-9._/-]+$/.test(branch)) {
+    return "Solo se permiten letras, números, puntos, guiones y slash.";
+  }
+  return null;
+}
+
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat("es-BO").format(value);
 }
 
 export default function CodexPage() {
@@ -309,6 +293,15 @@ export default function CodexPage() {
   const [marathonMode, setMarathonMode] = useState(false);
   const [maxSubagents, setMaxSubagents] = useState(3);
   const [isLaunching, setIsLaunching] = useState(false);
+  const [repoBranches, setRepoBranches] = useState<string[]>(["main"]);
+  const [activeRepoBranch, setActiveRepoBranch] = useState("main");
+  const [branchSummary, setBranchSummary] = useState<BranchSummary | null>(null);
+  const [branchQuery, setBranchQuery] = useState("");
+  const [isBranchMenuOpen, setIsBranchMenuOpen] = useState(false);
+  const [isCreateBranchDialogOpen, setIsCreateBranchDialogOpen] = useState(false);
+  const [isBranchLoading, setIsBranchLoading] = useState(false);
+  const [isBranchActionLoading, setIsBranchActionLoading] = useState(false);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
 
   const sessions = useMemo<CodexSession[]>(() => {
     const projectLookup = buildProjectLookup(projects);
@@ -350,9 +343,7 @@ export default function CodexPage() {
         attachmentCount,
         timeLabel: formatClock(chat.timestamp),
         updatedLabel: formatRelativeLabel(chat.timestamp),
-        branchLabel: project?.defaultCodeFolder
-          ? project.defaultCodeFolder.split(/[\\/]/).filter(Boolean).slice(-1)[0] || "main"
-          : "main",
+        branchLabel: "main",
       };
     });
   }, [allChats, projects]);
@@ -410,9 +401,190 @@ export default function CodexPage() {
   const composerTarget = selectedSession ? `/chat/${selectedSession.id}` : "/";
   const launchRunId = selectedSession ? getLatestRunId(selectedSession.chat) : null;
 
+  const transcriptMessages = useMemo(
+    () =>
+      (selectedSession?.chat.messages || [])
+        .filter((message) => message.role !== "system")
+        .sort((left, right) => toMessageTimestamp(left) - toMessageTimestamp(right)),
+    [selectedSession],
+  );
+
+  const workspaceLabel = useMemo(() => {
+    const pathSource = selectedProject?.repositoryPath || selectedProject?.name || "";
+    const tail = pathSource.split(/[\\/]/).filter(Boolean).slice(-1)[0];
+    return tail || selectedProject?.name || "Hola";
+  }, [selectedProject]);
+
+  const branchButtonLabel = activeRepoBranch || selectedSession?.branchLabel || "main";
+
+  const filteredBranches = useMemo(() => {
+    const query = branchQuery.trim().toLowerCase();
+    const ordered = [...repoBranches].sort((left, right) => {
+      if (left === activeRepoBranch) return -1;
+      if (right === activeRepoBranch) return 1;
+      return left.localeCompare(right);
+    });
+    if (!query) return ordered;
+    return ordered.filter((branch) => branch.toLowerCase().includes(query));
+  }, [activeRepoBranch, branchQuery, repoBranches]);
+
   const openSelectedChat = () => {
     setLocation(composerTarget);
   };
+
+  const focusComposer = () => {
+    window.requestAnimationFrame(() => composerRef.current?.focus());
+  };
+
+  const loadRepositoryBranches = useCallback(async (project: Project | null) => {
+    if (!project?.repositoryPath) {
+      setRepoBranches(["main"]);
+      setActiveRepoBranch("main");
+      setBranchSummary(null);
+      return;
+    }
+
+    setIsBranchLoading(true);
+    try {
+      const params = new URLSearchParams({ rootPath: project.repositoryPath });
+      const response = await apiFetch(`/api/local/repo/branches?${params.toString()}`, {
+        method: "GET",
+        credentials: "include",
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload?.error || "No se pudieron cargar las ramas del repositorio.");
+      }
+
+      const payload = await response.json();
+      const nextBranches = Array.isArray(payload?.branches)
+        ? payload.branches.filter((item: unknown): item is string => typeof item === "string" && item.trim().length > 0)
+        : [];
+      const normalizedBranches = nextBranches.length > 0 ? nextBranches : ["main"];
+      setRepoBranches(normalizedBranches);
+      setActiveRepoBranch(
+        typeof payload?.current === "string" && normalizedBranches.includes(payload.current)
+          ? payload.current
+          : normalizedBranches[0],
+      );
+      setBranchSummary(
+        payload?.summary && typeof payload.summary === "object"
+          ? {
+              modifiedFiles: Number(payload.summary.modifiedFiles || 0),
+              insertions: Number(payload.summary.insertions || 0),
+              deletions: Number(payload.summary.deletions || 0),
+              label: String(payload.summary.label || "Sin cambios pendientes"),
+            }
+          : null,
+      );
+    } catch (error) {
+      console.warn("[codex] Failed to load branches:", error);
+      setRepoBranches(["main"]);
+      setActiveRepoBranch("main");
+      setBranchSummary(null);
+    } finally {
+      setIsBranchLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadRepositoryBranches(selectedProject);
+  }, [loadRepositoryBranches, selectedProject]);
+
+  const handleSelectBranch = useCallback(
+    async (branch: string) => {
+      if (!selectedProject?.repositoryPath || branch === activeRepoBranch) {
+        setIsBranchMenuOpen(false);
+        return;
+      }
+
+      setIsBranchActionLoading(true);
+      try {
+        const response = await apiFetch("/api/local/repo/branches/switch", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            rootPath: selectedProject.repositoryPath,
+            branch,
+          }),
+        });
+
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error || "No se pudo cambiar de rama.");
+        }
+
+        setRepoBranches(Array.isArray(payload?.branches) ? payload.branches : [branch]);
+        setActiveRepoBranch(typeof payload?.current === "string" ? payload.current : branch);
+        setBranchSummary(
+          payload?.summary && typeof payload.summary === "object"
+            ? {
+                modifiedFiles: Number(payload.summary.modifiedFiles || 0),
+                insertions: Number(payload.summary.insertions || 0),
+                deletions: Number(payload.summary.deletions || 0),
+                label: String(payload.summary.label || "Sin cambios pendientes"),
+              }
+            : null,
+        );
+        setIsBranchMenuOpen(false);
+        setBranchQuery("");
+        toast.success("Rama actualizada", {
+          description: `Ahora estás trabajando en ${branch}.`,
+        });
+      } catch (error) {
+        toast.error("No se pudo cambiar de rama", {
+          description: error instanceof Error ? error.message : "Error inesperado al cambiar la rama.",
+        });
+      } finally {
+        setIsBranchActionLoading(false);
+      }
+    },
+    [activeRepoBranch, selectedProject?.repositoryPath],
+  );
+
+  const handleCreateBranch = useCallback(
+    async (branch: string) => {
+      if (!selectedProject?.repositoryPath) {
+        throw new Error("Primero conecta un repositorio al proyecto.");
+      }
+
+      const response = await apiFetch("/api/local/repo/branches/create", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rootPath: selectedProject.repositoryPath,
+          branch,
+          checkout: true,
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "No se pudo crear la rama.");
+      }
+
+      setRepoBranches(Array.isArray(payload?.branches) ? payload.branches : [branch]);
+      setActiveRepoBranch(typeof payload?.current === "string" ? payload.current : branch);
+      setBranchSummary(
+        payload?.summary && typeof payload.summary === "object"
+          ? {
+              modifiedFiles: Number(payload.summary.modifiedFiles || 0),
+              insertions: Number(payload.summary.insertions || 0),
+              deletions: Number(payload.summary.deletions || 0),
+              label: String(payload.summary.label || "Sin cambios pendientes"),
+            }
+          : null,
+      );
+      setBranchQuery("");
+      toast.success("Rama creada", {
+        description: `Quedó creada y activa: ${branch}.`,
+      });
+    },
+    [selectedProject?.repositoryPath],
+  );
 
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
@@ -423,9 +595,7 @@ export default function CodexPage() {
 
   const handleLaunch = async () => {
     const task = draft.trim();
-    if (!task || isLaunching) {
-      return;
-    }
+    if (!task || isLaunching) return;
 
     const shouldReuseSelectedChat =
       !!selectedSession &&
@@ -478,6 +648,20 @@ export default function CodexPage() {
     }
   };
 
+  const handleWorktreeShortcut = () => {
+    setDraft(`Crea un worktree aislado para la rama ${branchButtonLabel} y mueve allí esta tarea con todo el contexto necesario.`);
+    focusComposer();
+  };
+
+  const handleCommitShortcut = () => {
+    if (draft.trim()) {
+      void handleLaunch();
+      return;
+    }
+    setDraft(`Confirma los cambios pendientes de la rama ${branchButtonLabel} con un commit claro, seguro y listo para revisión.`);
+    focusComposer();
+  };
+
   return (
     <div
       className="min-h-screen bg-[var(--codex-bg)] text-[var(--codex-ink)]"
@@ -485,432 +669,365 @@ export default function CodexPage() {
       data-testid="codex-page"
     >
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute inset-x-0 top-0 h-[340px] bg-[radial-gradient(circle_at_top,_rgba(210,228,218,0.85),_transparent_62%)]" />
-        <div className="absolute left-[-10%] top-[18%] h-72 w-72 rounded-full bg-[rgba(221,210,180,0.22)] blur-3xl" />
+        <div className="absolute inset-x-0 top-0 h-[320px] bg-[radial-gradient(circle_at_top,_rgba(205,223,226,0.85),_transparent_62%)]" />
+        <div className="absolute right-[-8%] top-[18%] h-80 w-80 rounded-full bg-[rgba(230,222,200,0.32)] blur-3xl" />
       </div>
 
       <div className="relative flex min-h-screen">
-        <aside className="hidden w-[320px] shrink-0 border-r border-[var(--codex-border)] bg-[var(--codex-sidebar)]/95 backdrop-blur-xl md:flex md:flex-col">
-          <div className="px-5 pb-4 pt-6">
-            <div className="flex items-center justify-between">
+        <aside className="hidden w-[320px] shrink-0 border-r border-[var(--codex-border)] bg-[var(--codex-sidebar)]/92 px-4 py-6 backdrop-blur-xl md:flex md:flex-col">
+          <div className="flex items-center justify-between gap-3 px-2">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-[var(--codex-border)] bg-white/80 shadow-sm">
+                <Code2 className="h-5 w-5 text-[var(--codex-accent)]" />
+              </div>
               <div>
-                <p className="text-xs uppercase tracking-[0.26em] text-[var(--codex-muted)]">ILIAGPT</p>
-                <div className="mt-2 flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-[var(--codex-border)] bg-white/80 shadow-sm">
-                    <Code2 className="h-5 w-5 text-[var(--codex-accent)]" />
+                <p className="text-xs uppercase tracking-[0.24em] text-[var(--codex-muted)]">ILIAGPT</p>
+                <p className="text-lg font-semibold">Codex</p>
+              </div>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="rounded-full border border-[var(--codex-border)] bg-white/80"
+              onClick={() => setLocation("/")}
+              aria-label="Volver al chat principal"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          </div>
+
+          <div className="mt-7 space-y-1.5">
+            {primaryNav.map((item, index) => {
+              const Icon = item.icon;
+              const isActive = index === 0;
+              const action =
+                item.id === "new"
+                  ? () => setLocation("/")
+                  : item.id === "scheduled"
+                    ? () => setLocation("/settings")
+                    : () => setLocation("/skills");
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={action}
+                  className={cn(
+                    "flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-base transition-all duration-200 hover:bg-white/75",
+                    isActive && "bg-white/88 shadow-sm",
+                  )}
+                >
+                  <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[var(--codex-border)] bg-white/80 text-[var(--codex-muted)]">
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <span className="font-medium">{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-7 flex items-center justify-between px-2">
+            <p className="text-xs uppercase tracking-[0.22em] text-[var(--codex-muted)]">Hilos</p>
+            <span className="text-xs text-[var(--codex-muted)]">{sessions.length}</span>
+          </div>
+
+          <ScrollArea className="mt-4 flex-1 pr-1">
+            <div className="space-y-5">
+              <div className="rounded-[24px] border border-[var(--codex-border)] bg-white/72 p-4 shadow-sm">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--codex-accent-soft)] text-[var(--codex-accent-ink)]">
+                    <FolderOpen className="h-5 w-5" />
                   </div>
-                  <div>
-                    <p className="text-lg font-semibold">Codex</p>
-                    <p className="text-sm text-[var(--codex-muted)]">Workspace técnico dedicado</p>
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold">{selectedProject?.name || workspaceLabel}</p>
+                    <p className="truncate text-sm text-[var(--codex-muted)]">{selectedProject?.repositoryPath || "Workspace listo"}</p>
                   </div>
                 </div>
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="rounded-full text-[var(--codex-muted)] hover:bg-white/80"
-                onClick={() => setLocation("/")}
-                aria-label="Volver al chat principal"
-              >
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
 
-          <div className="px-3">
-            <div className="space-y-1">
-              {primaryNav.map((item, index) => {
-                const Icon = item.icon;
-                const isActive = index === 0;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={cn(
-                      "flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-white/80",
-                      isActive && "bg-white/90 shadow-sm",
-                    )}
-                  >
-                    <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[var(--codex-border)] bg-white/80 text-[var(--codex-muted)]">
-                      <Icon className="h-4 w-4" />
-                    </span>
-                    <span className="font-medium">{item.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <Separator className="mx-4 my-4 bg-[var(--codex-border)]" />
-
-          <ScrollArea className="flex-1 px-4 pb-4">
-            <div className="space-y-7">
-              <section>
-                <div className="mb-3 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.22em] text-[var(--codex-muted)]">Todos los proyectos</p>
-                    <p className="mt-1 text-sm text-[var(--codex-muted)]">Contexto listo para sesiones agenticas</p>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full hover:bg-white/80">
-                      <Search className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full hover:bg-white/80">
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  {projects.length > 0 ? (
-                    projects.slice(0, 6).map((project) => {
-                      const isSelected = selectedProject?.id === project.id;
-                      return (
-                        <button
-                          key={project.id}
-                          type="button"
-                          onClick={() => setSelectedProjectId(project.id)}
-                          className={cn(
-                            "flex w-full items-center justify-between rounded-2xl border border-transparent px-4 py-3 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--codex-border)] hover:bg-white/80",
-                            isSelected && "border-[var(--codex-border)] bg-white/90 shadow-sm",
-                          )}
-                        >
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-medium">{project.name}</p>
-                            <p className="mt-1 text-xs text-[var(--codex-muted)]">
-                              {project.chatIds.length} sesiones · {project.files.length} archivo(s)
-                            </p>
+              {groupedSessions.length > 0 ? (
+                groupedSessions.map((group) => (
+                  <div key={group.label} className="space-y-2">
+                    <p className="px-2 text-xs font-medium text-[var(--codex-muted)]">{group.label}</p>
+                    {group.items.map((session) => (
+                      <button
+                        key={session.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedSessionId(session.id);
+                          if (session.project?.id) setSelectedProjectId(session.project.id);
+                        }}
+                        className={cn(
+                          "group flex w-full items-start gap-3 rounded-2xl border border-transparent px-3 py-3 text-left transition-all duration-200 hover:border-[var(--codex-border)] hover:bg-white/78",
+                          selectedSessionId === session.id && "border-[var(--codex-border)] bg-white/88 shadow-sm",
+                        )}
+                        data-testid={`codex-session-${session.id}`}
+                      >
+                        <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--codex-accent)]" />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="truncate text-base font-medium">{session.title}</p>
+                            <span className="text-xs text-[var(--codex-muted)]">{session.timeLabel}</span>
                           </div>
-                          <span
-                            className="h-3 w-3 shrink-0 rounded-full border border-white/80"
-                            style={{ backgroundColor: project.color }}
-                          />
-                        </button>
-                      );
-                    })
-                  ) : (
-                    <div className="rounded-3xl border border-dashed border-[var(--codex-border)] px-4 py-5 text-sm text-[var(--codex-muted)]">
-                      Tus proyectos aparecerán aquí para abrir sesiones con contexto técnico.
-                    </div>
-                  )}
+                          <p className="mt-1 line-clamp-2 text-sm leading-6 text-[var(--codex-muted)]">
+                            {session.preview || "Sesión lista para retomarse desde Codex."}
+                          </p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-[24px] border border-dashed border-[var(--codex-border)] px-4 py-5 text-sm text-[var(--codex-muted)]">
+                  Todavía no hay sesiones recientes. Crea una conversación y aquí aparecerá el historial.
                 </div>
-              </section>
-
-              <section>
-                <div className="mb-3 flex items-center justify-between">
-                  <p className="text-xs uppercase tracking-[0.22em] text-[var(--codex-muted)]">Sesiones</p>
-                  <span className="text-xs text-[var(--codex-muted)]">{sessions.length} activas</span>
-                </div>
-
-                <div className="space-y-5">
-                  {groupedSessions.length > 0 ? (
-                    groupedSessions.map((group) => (
-                      <div key={group.label} className="space-y-2">
-                        <p className="px-1 text-xs font-medium text-[var(--codex-muted)]">{group.label}</p>
-                        {group.items.map((session) => (
-                          <button
-                            key={session.id}
-                            type="button"
-                            onClick={() => setSelectedSessionId(session.id)}
-                            className={cn(
-                              "group flex w-full items-start gap-3 rounded-2xl border border-transparent px-3 py-3 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--codex-border)] hover:bg-white/85",
-                              selectedSessionId === session.id && "border-[var(--codex-border)] bg-white/92 shadow-sm",
-                            )}
-                            data-testid={`codex-session-${session.id}`}
-                          >
-                            <div className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--codex-accent)]" />
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center justify-between gap-3">
-                                <p className="truncate text-sm font-medium">{session.title}</p>
-                                <span className="text-xs text-[var(--codex-muted)]">{session.timeLabel}</span>
-                              </div>
-                              <p className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--codex-muted)]">
-                                {session.preview || "Sesión lista para retomarse desde Codex."}
-                              </p>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    ))
-                  ) : (
-                    <div className="rounded-3xl border border-dashed border-[var(--codex-border)] px-4 py-5 text-sm text-[var(--codex-muted)]">
-                      Todavía no hay sesiones recientes. Crea una conversación y aquí aparecerá el historial.
-                    </div>
-                  )}
-                </div>
-              </section>
+              )}
             </div>
           </ScrollArea>
 
-          <div className="border-t border-[var(--codex-border)] p-4">
-            <div className="flex items-center gap-3 rounded-3xl bg-white/85 px-4 py-3 shadow-sm">
-              <Avatar className="h-10 w-10 border border-[var(--codex-border)] bg-[#ebe6d9]">
-                <AvatarFallback className="bg-transparent text-sm font-semibold text-[var(--codex-accent-ink)]">
-                  {getInitials(profileName)}
-                </AvatarFallback>
-              </Avatar>
+          <div className="mt-5 border-t border-[var(--codex-border)] pt-4">
+            <button
+              type="button"
+              onClick={() => setLocation("/settings")}
+              className="flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors hover:bg-white/75"
+            >
+              <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[var(--codex-border)] bg-white/80 text-[var(--codex-muted)]">
+                <Settings2 className="h-4 w-4" />
+              </span>
               <div className="min-w-0">
-                <p className="truncate text-sm font-semibold">{profileName}</p>
-                <p className="truncate text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">Cuenta activa</p>
+                <p className="font-medium">Configuración</p>
+                <p className="truncate text-sm text-[var(--codex-muted)]">{profileName}</p>
               </div>
-            </div>
+            </button>
           </div>
         </aside>
 
         <main className="flex min-w-0 flex-1 flex-col">
-          <header className="border-b border-[var(--codex-border)] bg-[rgba(247,245,240,0.82)] backdrop-blur-xl">
-            <div className="flex items-center justify-between gap-4 px-4 py-4 md:px-6 lg:px-8">
-              <div className="flex min-w-0 items-center gap-3">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="rounded-full border border-[var(--codex-border)] bg-white/80 md:hidden"
-                  onClick={() => setLocation("/")}
-                  aria-label="Volver"
-                >
-                  <ArrowLeft className="h-4 w-4" />
-                </Button>
-                <div className="min-w-0">
-                  <p className="text-xs uppercase tracking-[0.24em] text-[var(--codex-muted)]">Codex workspace</p>
+          <header className="border-b border-[var(--codex-border)] bg-[rgba(247,245,240,0.78)] backdrop-blur-xl">
+            <div className="flex flex-wrap items-start justify-between gap-4 px-4 py-4 md:px-6 lg:px-8">
+              <div className="min-w-0">
+                <div className="flex items-center gap-3">
                   <button
                     type="button"
-                    className="mt-1 flex max-w-full items-center gap-2 text-left"
-                    data-testid="codex-session-title"
+                    className="rounded-full border border-[var(--codex-border)] bg-white/80 p-2 md:hidden"
+                    onClick={() => setLocation("/")}
+                    aria-label="Volver"
                   >
-                    <span className="truncate text-xl font-semibold">
-                      {selectedSession?.title || "Nueva sesión"}
-                    </span>
-                    <ChevronDown className="h-4 w-4 shrink-0 text-[var(--codex-muted)]" />
+                    <ArrowLeft className="h-4 w-4" />
                   </button>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <div className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/80 px-3 py-1.5 text-sm">
-                  <span className="h-2.5 w-2.5 rounded-full bg-[var(--codex-accent)]" />
-                  {multiAgentEnabled ? "Modo multi-agent" : "Modo single-agent"}
-                </div>
-                <Button variant="ghost" size="icon" className="rounded-full border border-[var(--codex-border)] bg-white/80">
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-
-            <div className="border-t border-[var(--codex-border)] bg-[#f2ead6]/85 px-4 py-3 text-sm text-[#544d40] md:px-6 lg:px-8">
-              <span className="font-semibold">Modo operativo activo:</span> esta vista ya puede lanzar runs reales, adjuntar contexto del proyecto y despachar subagentes de programación.
-            </div>
-
-            <div className="border-t border-[var(--codex-border)] px-4 py-3 md:hidden">
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                {primaryNav.map((item, index) => {
-                  const Icon = item.icon;
-                  return (
-                    <span
-                      key={item.id}
-                      className={cn(
-                        "inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-[var(--codex-border)] px-3 py-2 text-sm",
-                        index === 0 ? "bg-white/90 shadow-sm" : "bg-[rgba(255,255,255,0.65)]",
-                      )}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-3 text-sm text-[var(--codex-muted)]">
+                      <span className="truncate">{workspaceLabel}</span>
+                      <span>•</span>
+                      <span>{selectedProject?.name || "Workspace general"}</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="mt-1 flex max-w-full items-center gap-2 text-left"
+                      data-testid="codex-session-title"
                     >
-                      <Icon className="h-4 w-4" />
-                      {item.label}
-                    </span>
-                  );
-                })}
+                      <span className="truncate text-2xl font-semibold md:text-[2rem]">
+                        {selectedSession?.title || "Crear agente Iliagpt programador"}
+                      </span>
+                      <ChevronDown className="h-4 w-4 shrink-0 text-[var(--codex-muted)]" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button variant="ghost" size="icon" className="rounded-full border border-[var(--codex-border)] bg-white/82">
+                  <Settings2 className="h-4 w-4" />
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => setMultiAgentEnabled((current) => !current)}
+                  className={cn(
+                    "inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm transition-colors",
+                    multiAgentEnabled
+                      ? "border-[var(--codex-accent)] bg-[var(--codex-accent-soft)] text-[var(--codex-accent-ink)]"
+                      : "border-[var(--codex-border)] bg-white/82 text-[var(--codex-muted)]",
+                  )}
+                >
+                  <Users2 className="h-4 w-4" />
+                  {multiAgentEnabled ? `Multi-agent x${maxSubagents}` : "Single-agent"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleWorktreeShortcut}
+                  className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/82 px-4 py-2 text-sm"
+                >
+                  <FolderOpen className="h-4 w-4" />
+                  Mover al worktree
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCommitShortcut}
+                  className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/82 px-4 py-2 text-sm"
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  Confirmar
+                </button>
+                <div className="inline-flex items-center gap-3 rounded-full border border-[var(--codex-border)] bg-white/82 px-4 py-2 text-sm tabular-nums">
+                  <span className="text-[var(--codex-accent)]">+{formatNumber(branchSummary?.insertions || 0)}</span>
+                  <span className="text-[#b64034]">-{formatNumber(branchSummary?.deletions || 0)}</span>
+                </div>
               </div>
             </div>
           </header>
 
           <div className="flex-1 overflow-hidden">
             <ScrollArea className="h-full">
-              <div className="mx-auto flex w-full max-w-6xl flex-col gap-10 px-4 pb-40 pt-8 md:px-6 lg:px-8">
+              <div className="mx-auto w-full max-w-5xl px-4 pb-40 pt-8 md:px-6 lg:px-8">
                 {selectedSession ? (
-                  <>
-                    <section className="grid gap-10 xl:grid-cols-[minmax(0,1fr)_320px]">
-                      <div className="space-y-8" data-testid="codex-main-panel">
-                        <div className="max-w-3xl">
-                          <div className="inline-flex items-center gap-2 rounded-full bg-[var(--codex-accent-soft)] px-3 py-1 text-sm font-medium text-[var(--codex-accent-ink)]">
-                            <Bot className="h-4 w-4" />
-                            Sesión activa
+                  <div className="space-y-6">
+                    <section className="grid gap-4 rounded-[32px] border border-[var(--codex-border)] bg-[var(--codex-panel-soft)] p-5 shadow-[var(--codex-shadow)] md:grid-cols-[1.4fr_1fr_1fr]">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">Contexto activo</p>
+                        <p className="mt-3 text-base leading-7 text-[var(--codex-ink)]">
+                          {selectedSession.assistantOutput || selectedSession.preview || "Sesión lista para continuar."}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">Workspace</p>
+                        <div className="mt-3 space-y-2 text-sm text-[var(--codex-muted)]">
+                          <p className="font-medium text-[var(--codex-ink)]">{selectedProject?.repositoryPath || "Sin repositorio conectado"}</p>
+                          <p>{branchSummary?.label || "Sin cambios pendientes"}</p>
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">Perfil operativo</p>
+                        <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                          <div className="rounded-2xl border border-[var(--codex-border)] bg-white/80 px-4 py-3">
+                            <p className="text-[var(--codex-muted)]">Run</p>
+                            <p className="mt-1 font-semibold">{launchRunId ? "Activo" : "Listo"}</p>
                           </div>
-                          <h1 className="mt-4 text-4xl font-semibold tracking-tight md:text-5xl">
-                            {selectedSession.title}
-                          </h1>
-                          <p className="mt-4 max-w-2xl text-lg leading-8 text-[var(--codex-muted)]">
-                            {selectedSession.assistantOutput || selectedSession.preview}
-                          </p>
+                          <div className="rounded-2xl border border-[var(--codex-border)] bg-white/80 px-4 py-3">
+                            <p className="text-[var(--codex-muted)]">Ventana</p>
+                            <p className="mt-1 font-semibold">{marathonMode ? "12h" : "Normal"}</p>
+                          </div>
                         </div>
+                      </div>
+                    </section>
 
-                        <div className="flex flex-wrap gap-3">
-                          <span className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/75 px-3 py-2 text-sm">
-                            <Clock3 className="h-4 w-4 text-[var(--codex-muted)]" />
-                            {selectedSession.updatedLabel}
-                          </span>
-                          <span className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/75 px-3 py-2 text-sm">
-                            <Sparkles className="h-4 w-4 text-[var(--codex-muted)]" />
-                            {selectedSession.messageCount} eventos
-                          </span>
-                          <span className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/75 px-3 py-2 text-sm">
-                            <FileCode2 className="h-4 w-4 text-[var(--codex-muted)]" />
-                            {selectedSession.attachmentCount} adjunto(s)
-                          </span>
-                          <span
-                            className={cn(
-                              "inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm",
-                              getStatusTone(selectedSession.status),
-                            )}
-                          >
-                            <CheckCircle2 className="h-4 w-4" />
-                            {getStatusLabel(selectedSession.status)}
-                          </span>
-                        </div>
-
-                        <section className="space-y-5">
-                          <div className="flex items-center justify-between border-b border-[var(--codex-border)] pb-4">
-                            <div>
-                              <p className="text-xs uppercase tracking-[0.22em] text-[var(--codex-muted)]">Actividad reciente</p>
-                              <p className="mt-1 text-sm text-[var(--codex-muted)]">
-                                Trazabilidad clara para retomar el trabajo sin ruido visual.
-                              </p>
-                            </div>
-                            <Button
-                              variant="ghost"
-                              className="rounded-full border border-[var(--codex-border)] bg-white/80 px-4"
-                              onClick={openSelectedChat}
-                              data-testid="codex-open-chat"
+                    <section className="overflow-hidden rounded-[34px] border border-[var(--codex-border)] bg-[var(--codex-panel)] shadow-[var(--codex-shadow)]">
+                      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--codex-border)] px-6 py-5">
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.22em] text-[var(--codex-muted)]">Sesión Codex</p>
+                          <div className="mt-2 flex flex-wrap items-center gap-3">
+                            <span
+                              className={cn(
+                                "inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm",
+                                getStatusTone(selectedSession.status),
+                              )}
                             >
-                              Abrir chat
-                            </Button>
+                              <CheckCircle2 className="h-4 w-4" />
+                              {getStatusLabel(selectedSession.status)}
+                            </span>
+                            <span className="text-sm text-[var(--codex-muted)]">
+                              {selectedSession.messageCount} eventos · {selectedSession.attachmentCount} adjunto(s)
+                            </span>
                           </div>
-
-                          <div className="space-y-4">
-                            {activityItems.map((item) => {
-                              const Icon = item.icon;
-                              const toneClasses =
-                                item.tone === "success"
-                                  ? "bg-[#e9f4ee] text-[var(--codex-accent-ink)]"
-                                  : item.tone === "accent"
-                                    ? "bg-[#f1eadc] text-[#6f5630]"
-                                    : "bg-[#f4f0e8] text-[var(--codex-muted)]";
-
-                              return (
-                                <article
-                                  key={item.id}
-                                  className="rounded-[28px] border border-[var(--codex-border)] bg-[var(--codex-panel)] px-5 py-5 shadow-[0_18px_55px_-40px_rgba(23,21,18,0.32)]"
-                                >
-                                  <div className="flex items-start gap-4">
-                                    <div className={cn("flex h-11 w-11 items-center justify-center rounded-2xl", toneClasses)}>
-                                      <Icon className="h-5 w-5" />
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                      <div className="flex flex-wrap items-center gap-3">
-                                        <h2 className="text-lg font-semibold">{item.title}</h2>
-                                        <span className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">
-                                          {item.meta}
-                                        </span>
-                                      </div>
-                                      <p className="mt-2 text-base leading-7 text-[var(--codex-muted)]">
-                                        {item.body}
-                                      </p>
-                                    </div>
-                                  </div>
-                                </article>
-                              );
-                            })}
-                          </div>
-                        </section>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          className="rounded-full border border-[var(--codex-border)] bg-white/82 px-4"
+                          onClick={openSelectedChat}
+                          data-testid="codex-open-chat"
+                        >
+                          Abrir chat
+                          <ArrowUpRight className="ml-2 h-4 w-4" />
+                        </Button>
                       </div>
 
-                      <aside className="space-y-8 xl:sticky xl:top-6 xl:self-start">
-                        <section className="border-b border-[var(--codex-border)] pb-6">
-                          <p className="text-xs uppercase tracking-[0.22em] text-[var(--codex-muted)]">Workspace activo</p>
-                          <div className="mt-4 space-y-4">
-                            <div>
-                              <p className="text-sm text-[var(--codex-muted)]">Proyecto</p>
-                              <p className="mt-1 text-lg font-semibold">
-                                {selectedProject?.name || "Sesión general"}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-sm text-[var(--codex-muted)]">Prompt base</p>
-                              <p className="mt-1 text-sm leading-7 text-[var(--codex-ink)]">
-                                {selectedProject?.systemPrompt || selectedSession.userPrompt || "Listo para recibir una nueva instrucción técnica."}
-                              </p>
-                            </div>
-                            <div className="grid grid-cols-2 gap-3 text-sm">
-                              <div className="rounded-2xl border border-[var(--codex-border)] bg-white/70 px-4 py-3">
-                                <p className="text-[var(--codex-muted)]">Archivos</p>
-                                <p className="mt-1 text-xl font-semibold">
-                                  {selectedProject?.files.length || selectedSession.attachmentCount}
-                                </p>
+                      <div className="space-y-8 px-6 py-6">
+                        {transcriptMessages.map((message) => {
+                          const timestamp = formatClock(toMessageTimestamp(message));
+                          const summary = normalizeText(message.agentRun?.summary || message.content) || "Sin contenido visible.";
+                          const isUser = message.role === "user";
+                          const stepPreview = Array.isArray(message.agentRun?.steps)
+                            ? message.agentRun.steps
+                                .slice(0, 2)
+                                .map((step) => ({
+                                  key: `${message.id}-${step.stepIndex}`,
+                                  title: step.toolName || "Paso registrado",
+                                  body: truncateText(
+                                    normalizeText(typeof step.output === "string" ? step.output : JSON.stringify(step.output ?? "")) ||
+                                      "Actividad registrada por el agente.",
+                                    120,
+                                  ),
+                                }))
+                            : [];
+
+                          return (
+                            <article key={message.id} className="space-y-3">
+                              <div className="flex items-center gap-3 text-sm text-[var(--codex-muted)]">
+                                <span className="font-medium text-[var(--codex-ink)]">
+                                  {isUser ? profileName : "Codex"}
+                                </span>
+                                <span>{timestamp}</span>
+                                {!isUser && message.agentRun?.status ? (
+                                  <span
+                                    className={cn(
+                                      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs",
+                                      getStatusTone(getSessionStatus({ ...selectedSession.chat, messages: [message] } as Chat)),
+                                    )}
+                                  >
+                                    {message.agentRun.status}
+                                  </span>
+                                ) : null}
                               </div>
-                              <div className="rounded-2xl border border-[var(--codex-border)] bg-white/70 px-4 py-3">
-                                <p className="text-[var(--codex-muted)]">Rama</p>
-                                <p className="mt-1 text-xl font-semibold">
-                                  {selectedProject?.defaultCodeFolder?.split(/[\\/]/).filter(Boolean).slice(-1)[0] || selectedSession.branchLabel}
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        </section>
-
-                        <section className="border-b border-[var(--codex-border)] pb-6">
-                          <p className="text-xs uppercase tracking-[0.22em] text-[var(--codex-muted)]">Perfil operativo</p>
-                          <div className="mt-4 space-y-3 text-sm">
-                            <div className="flex items-center justify-between gap-3">
-                              <span className="text-[var(--codex-muted)]">Run activo</span>
-                              <span className="font-semibold">{launchRunId ? "Disponible" : "Pendiente"}</span>
-                            </div>
-                            <div className="flex items-center justify-between gap-3">
-                              <span className="text-[var(--codex-muted)]">Subagentes</span>
-                              <span className="font-semibold">{multiAgentEnabled ? `${maxSubagents} habilitados` : "Desactivados"}</span>
-                            </div>
-                            <div className="flex items-center justify-between gap-3">
-                              <span className="text-[var(--codex-muted)]">Ventana intensiva</span>
-                              <span className="font-semibold">{marathonMode ? "12 horas" : "Estándar"}</span>
-                            </div>
-                          </div>
-                        </section>
-
-                        <section className="border-b border-[var(--codex-border)] pb-6">
-                          <p className="text-xs uppercase tracking-[0.22em] text-[var(--codex-muted)]">Estado rápido</p>
-                          <div className="mt-4 space-y-3 text-sm">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[var(--codex-muted)]">Sesiones visibles</span>
-                              <span className="font-semibold">{sessions.length}</span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-[var(--codex-muted)]">Proyectos</span>
-                              <span className="font-semibold">{projects.length}</span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-[var(--codex-muted)]">Última actualización</span>
-                              <span className="font-semibold">{selectedSession.updatedLabel}</span>
-                            </div>
-                          </div>
-                        </section>
-
-                        <section className="space-y-3">
-                          <p className="text-xs uppercase tracking-[0.22em] text-[var(--codex-muted)]">Atajos</p>
-                          <div className="flex flex-wrap gap-2">
-                            {quickActions.map((action) => (
-                              <button
-                                key={action}
-                                type="button"
-                                onClick={() => setDraft(action)}
-                                className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/75 px-3 py-2 text-sm text-[var(--codex-ink)] transition-colors hover:bg-white"
+                              <div
+                                className={cn(
+                                  "max-w-[88%] rounded-[28px] border px-5 py-4 shadow-sm",
+                                  isUser
+                                    ? "border-[var(--codex-border)] bg-[#f7f2e8] ml-auto"
+                                    : "border-[var(--codex-border)] bg-white",
+                                )}
                               >
-                                <Sparkles className="h-3.5 w-3.5 text-[var(--codex-accent)]" />
-                                {action}
-                              </button>
-                            ))}
+                                <p className="text-[15px] leading-8 text-[var(--codex-ink)]">{summary}</p>
+                                {stepPreview.length > 0 ? (
+                                  <div className="mt-4 space-y-2 border-t border-[var(--codex-border)] pt-4">
+                                    {stepPreview.map((step) => (
+                                      <div key={step.key} className="rounded-2xl bg-[#f6f4ee] px-4 py-3">
+                                        <p className="text-sm font-medium">{step.title}</p>
+                                        <p className="mt-1 text-sm leading-6 text-[var(--codex-muted)]">{step.body}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : null}
+                              </div>
+                            </article>
+                          );
+                        })}
+
+                        {activityItems.length > 0 ? (
+                          <div className="border-t border-[var(--codex-border)] pt-6">
+                            <div className="space-y-3">
+                              {activityItems.map((item) => {
+                                const Icon = item.icon;
+                                return (
+                                  <div key={item.id} className="flex items-start gap-3 rounded-2xl bg-[#f7f5ef] px-4 py-4">
+                                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-[var(--codex-accent-ink)]">
+                                      <Icon className="h-4 w-4" />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <p className="font-medium">{item.title}</p>
+                                        <span className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">{item.meta}</span>
+                                      </div>
+                                      <p className="mt-1 text-sm leading-6 text-[var(--codex-muted)]">{item.body}</p>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
-                        </section>
-                      </aside>
+                        ) : null}
+                      </div>
                     </section>
-                  </>
+                  </div>
                 ) : (
-                  <section className="mx-auto flex w-full max-w-4xl flex-col items-center py-12 text-center">
+                  <section className="mx-auto flex w-full max-w-4xl flex-col items-center rounded-[34px] border border-[var(--codex-border)] bg-[var(--codex-panel)] px-6 py-16 text-center shadow-[var(--codex-shadow)]">
                     <div className="flex h-20 w-20 items-center justify-center rounded-[28px] border border-[var(--codex-border)] bg-white/80 shadow-sm">
                       <Code2 className="h-9 w-9 text-[var(--codex-accent)]" />
                     </div>
@@ -918,22 +1035,12 @@ export default function CodexPage() {
                       Nueva sesión lista para arrancar
                     </h1>
                     <p className="mt-4 max-w-2xl text-lg leading-8 text-[var(--codex-muted)]">
-                      Al entrar a Codex verás una superficie dedicada para sesiones técnicas, revisión de contexto y continuidad de trabajo sin depender de un modal.
+                      Codex queda dentro de un workspace dedicado para ejecutar tareas de programación, revisar el contexto y lanzar runs con agentes reales.
                     </p>
-                    <div className="mt-8 flex flex-wrap justify-center gap-3">
-                      {quickActions.map((action) => (
-                        <button
-                          key={action}
-                          type="button"
-                          onClick={() => setDraft(action)}
-                          className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/75 px-4 py-2 text-sm transition-colors hover:bg-white"
-                        >
-                          <Sparkles className="h-4 w-4 text-[var(--codex-accent)]" />
-                          {action}
-                        </button>
-                      ))}
-                    </div>
-                    <Button className="mt-10 rounded-full bg-[var(--codex-accent)] px-6 text-white hover:bg-[var(--codex-accent)]/90" onClick={() => setLocation("/")}>
+                    <Button
+                      className="mt-10 rounded-full bg-[var(--codex-accent)] px-6 text-white hover:bg-[var(--codex-accent)]/90"
+                      onClick={() => setLocation("/")}
+                    >
                       Abrir chat principal
                     </Button>
                   </section>
@@ -942,17 +1049,18 @@ export default function CodexPage() {
             </ScrollArea>
           </div>
 
-          <div className="sticky bottom-0 border-t border-[var(--codex-border)] bg-[rgba(247,245,240,0.9)] backdrop-blur-xl">
-            <div className="mx-auto w-full max-w-6xl px-4 pb-4 pt-4 md:px-6 lg:px-8">
-              <div className="rounded-[30px] border border-[var(--codex-border)] bg-white/88 p-2 shadow-[0_20px_60px_-42px_rgba(23,21,18,0.4)]">
+          <div className="sticky bottom-0 border-t border-[var(--codex-border)] bg-[rgba(247,245,240,0.88)] backdrop-blur-xl">
+            <div className="mx-auto w-full max-w-5xl px-4 pb-4 pt-4 md:px-6 lg:px-8">
+              <div className="rounded-[30px] border border-[var(--codex-border)] bg-white/92 p-3 shadow-[var(--codex-shadow)]">
                 <Textarea
+                  ref={composerRef}
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
                   onKeyDown={handleComposerKeyDown}
-                  placeholder="Describe la tarea técnica y Codex lanzará un run real con contexto del proyecto, agentes y seguimiento."
-                  className="min-h-[78px] resize-none border-0 bg-transparent px-4 py-4 text-base leading-7 shadow-none focus-visible:ring-0"
+                  placeholder="Describe la tarea técnica y Codex lanzará un run real con contexto del proyecto, ramas y subagentes."
+                  className="min-h-[96px] resize-none border-0 bg-transparent px-4 py-4 text-base leading-7 shadow-none focus-visible:ring-0"
                 />
-                <div className="flex flex-wrap items-center justify-between gap-3 px-2 pb-1">
+                <div className="flex flex-wrap items-center justify-between gap-3 px-2 pt-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
@@ -990,13 +1098,14 @@ export default function CodexPage() {
                       <Command className="h-4 w-4" />
                       Subagentes: {maxSubagents}
                     </button>
-                    {selectedProject && (
+                    {selectedProject ? (
                       <span className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] px-3 py-2 text-sm text-[var(--codex-muted)]">
                         <FolderOpen className="h-4 w-4" />
                         {selectedProject.name}
                       </span>
-                    )}
+                    ) : null}
                   </div>
+
                   <div className="flex items-center gap-2">
                     <Button
                       variant="ghost"
@@ -1023,20 +1132,108 @@ export default function CodexPage() {
               <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-[var(--codex-muted)]">
                 <div className="flex flex-wrap items-center gap-4">
                   <span>Local</span>
-                  <span>Full access</span>
+                  <span>Acceso completo</span>
                   <span>{multiAgentEnabled ? `Multi-agent x${maxSubagents}` : "Single-agent"}</span>
                   <span>{marathonMode ? "Ventana 12h" : "Ventana estándar"}</span>
-                  <span>{chatsLoading || projectsLoading ? "Sincronizando…" : "Workspace listo"}</span>
+                  <span>{chatsLoading || projectsLoading || isBranchLoading ? "Sincronizando…" : "Workspace listo"}</span>
                 </div>
-                <div className="inline-flex items-center gap-1.5">
-                  <GitBranch className="h-3.5 w-3.5" />
-                  {selectedProject?.defaultCodeFolder?.split(/[\\/]/).filter(Boolean).slice(-1)[0] || selectedSession?.branchLabel || "main"}
-                </div>
+
+                <Popover open={isBranchMenuOpen} onOpenChange={setIsBranchMenuOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/88 px-4 py-2 text-sm text-[var(--codex-ink)] shadow-sm transition-colors hover:bg-white"
+                      data-testid="codex-branch-trigger"
+                    >
+                      <GitBranch className="h-4 w-4 text-[var(--codex-muted)]" />
+                      <span>{branchButtonLabel}</span>
+                      <ChevronDown className="h-4 w-4 text-[var(--codex-muted)]" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" side="top" className="w-[23rem] overflow-hidden rounded-[30px] p-0">
+                    <div className="border-b border-[var(--codex-border)] p-4">
+                      <div className="flex items-center gap-3 rounded-2xl border border-[var(--codex-border)] bg-[#fbfaf6] px-3 py-2">
+                        <Search className="h-4 w-4 text-[var(--codex-muted)]" />
+                        <Input
+                          value={branchQuery}
+                          onChange={(event) => setBranchQuery(event.target.value)}
+                          placeholder="Buscar ramas"
+                          className="h-auto border-0 bg-transparent px-0 py-0 text-sm shadow-none focus-visible:ring-0"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="px-5 pt-4 text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">Ramas</div>
+                    <ScrollArea className="max-h-[22rem] px-2 pb-3 pt-2">
+                      <div className="space-y-1 px-2">
+                        {filteredBranches.length > 0 ? (
+                          filteredBranches.map((branch) => {
+                            const isActive = branch === activeRepoBranch;
+                            return (
+                              <button
+                                key={branch}
+                                type="button"
+                                onClick={() => void handleSelectBranch(branch)}
+                                disabled={isBranchActionLoading}
+                                className={cn(
+                                  "flex w-full items-start justify-between gap-3 rounded-[22px] px-4 py-3 text-left transition-colors hover:bg-[#f7f5ef]",
+                                  isActive && "bg-[#f7f5ef]",
+                                  isBranchActionLoading && "cursor-wait opacity-70",
+                                )}
+                              >
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-3">
+                                    <GitBranch className="mt-0.5 h-4 w-4 shrink-0 text-[var(--codex-muted)]" />
+                                    <p className="truncate text-base font-medium">{branch}</p>
+                                  </div>
+                                  <p className="mt-2 pl-7 text-sm leading-6 text-[var(--codex-muted)]">
+                                    {isActive ? branchSummary?.label || "Sin cambios pendientes" : "Cambiar a esta rama"}
+                                  </p>
+                                </div>
+                                {isActive ? <Check className="mt-1 h-5 w-5 shrink-0 text-[var(--codex-accent)]" /> : null}
+                              </button>
+                            );
+                          })
+                        ) : (
+                          <div className="px-4 py-8 text-sm text-[var(--codex-muted)]">
+                            No encontré ramas que coincidan con “{branchQuery}”.
+                          </div>
+                        )}
+                      </div>
+                    </ScrollArea>
+
+                    <div className="border-t border-[var(--codex-border)] p-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsBranchMenuOpen(false);
+                          setIsCreateBranchDialogOpen(true);
+                        }}
+                        className="flex w-full items-center gap-3 rounded-[22px] px-4 py-3 text-left text-base transition-colors hover:bg-[#f7f5ef]"
+                      >
+                        <Plus className="h-5 w-5 text-[var(--codex-ink)]" />
+                        Crear y cambiar a una rama nueva...
+                      </button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
             </div>
           </div>
         </main>
       </div>
+
+      <PromptDialog
+        open={isCreateBranchDialogOpen}
+        onOpenChange={setIsCreateBranchDialogOpen}
+        title="Crear y cambiar a una rama nueva"
+        description="La rama se crea en el repositorio activo y queda seleccionada de inmediato dentro de Codex."
+        label="Nombre de la rama"
+        placeholder="codex/nueva-tarea-20260321"
+        confirmText="Crear rama"
+        validate={validateBranchName}
+        onConfirm={handleCreateBranch}
+      />
     </div>
   );
 }

@@ -8,6 +8,21 @@ import { vi, beforeAll, afterEach, afterAll } from 'vitest';
 
 // Mock window.matchMedia
 beforeAll(() => {
+  class ResizeObserverMock {
+    observe = vi.fn();
+    unobserve = vi.fn();
+    disconnect = vi.fn();
+  }
+
+  class IntersectionObserverMock {
+    readonly root = null;
+    readonly rootMargin = '';
+    readonly thresholds: number[] = [];
+    observe = vi.fn();
+    unobserve = vi.fn();
+    disconnect = vi.fn();
+  }
+
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
     value: vi.fn().mockImplementation((query: string) => ({
@@ -23,21 +38,10 @@ beforeAll(() => {
   });
 
   // Mock ResizeObserver
-  window.ResizeObserver = vi.fn().mockImplementation(() => ({
-    observe: vi.fn(),
-    unobserve: vi.fn(),
-    disconnect: vi.fn(),
-  }));
+  window.ResizeObserver = ResizeObserverMock as typeof ResizeObserver;
 
   // Mock IntersectionObserver
-  window.IntersectionObserver = vi.fn().mockImplementation(() => ({
-    observe: vi.fn(),
-    unobserve: vi.fn(),
-    disconnect: vi.fn(),
-    root: null,
-    rootMargin: '',
-    thresholds: [],
-  }));
+  window.IntersectionObserver = IntersectionObserverMock as typeof IntersectionObserver;
 
   // Mock scrollIntoView
   Element.prototype.scrollIntoView = vi.fn();

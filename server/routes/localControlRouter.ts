@@ -115,6 +115,96 @@ function sanitizeRelativeFolderPath(inputPath: string): string {
   return raw.replace(/^\.\/+/, "");
 }
 
+function runGitCommand(rootPath: string, args: string[]): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    execFile("git", args, { cwd: rootPath }, (error, stdout, stderr) => {
+      if (error) {
+        const enriched = new Error((stderr || stdout || error.message || "Git command failed").trim());
+        (enriched as Error & { cause?: unknown }).cause = error;
+        return reject(enriched);
+      }
+      resolve(String(stdout || ""));
+    });
+  });
+}
+
+async function ensureGitRepository(rootPath: string): Promise<void> {
+  const insideWorkTree = await runGitCommand(rootPath, ["rev-parse", "--is-inside-work-tree"]);
+  if (insideWorkTree.trim() !== "true") {
+    throw new Error("The selected path is not a git repository");
+  }
+}
+
+function parseGitNumstat(rawOutput: string): { insertions: number; deletions: number } {
+  let insertions = 0;
+  let deletions = 0;
+
+  for (const line of String(rawOutput || "").split("\n")) {
+    const [addedRaw, deletedRaw] = line.trim().split("\t");
+    const added = Number(addedRaw);
+    const deleted = Number(deletedRaw);
+    if (Number.isFinite(added)) insertions += added;
+    if (Number.isFinite(deleted)) deletions += deleted;
+  }
+
+  return { insertions, deletions };
+}
+
+async function readWorkingTreeSummary(rootPath: string): Promise<{
+  modifiedFiles: number;
+  insertions: number;
+  deletions: number;
+  label: string;
+}> {
+  const statusOutput = await runGitCommand(rootPath, ["status", "--porcelain=v1"]);
+  const unstagedDiff = await runGitCommand(rootPath, ["diff", "--numstat"]);
+  const stagedDiff = await runGitCommand(rootPath, ["diff", "--cached", "--numstat"]);
+
+  const modifiedFiles = statusOutput
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean).length;
+
+  const unstagedStats = parseGitNumstat(unstagedDiff);
+  const stagedStats = parseGitNumstat(stagedDiff);
+  const insertions = unstagedStats.insertions + stagedStats.insertions;
+  const deletions = unstagedStats.deletions + stagedStats.deletions;
+  const formatNumber = (value: number) => new Intl.NumberFormat("es-BO").format(value);
+
+  return {
+    modifiedFiles,
+    insertions,
+    deletions,
+    label:
+      modifiedFiles > 0
+        ? `Sin confirmar: ${formatNumber(modifiedFiles)} archivos +${formatNumber(insertions)} -${formatNumber(deletions)}`
+        : "Sin cambios pendientes",
+  };
+}
+
+function validateBranchName(input: string): string {
+  const branch = String(input || "").trim();
+  if (!branch) {
+    throw new Error("Branch name is required");
+  }
+  if (
+    branch.startsWith("-") ||
+    branch.includes("..") ||
+    branch.includes("@{") ||
+    branch.includes("\\") ||
+    branch.includes(" ") ||
+    branch.endsWith("/") ||
+    branch.endsWith(".lock") ||
+    branch.includes("//")
+  ) {
+    throw new Error("Branch name is invalid");
+  }
+  if (!/^[A-Za-z0-9._/-]+$/.test(branch)) {
+    throw new Error("Branch name contains unsupported characters");
+  }
+  return branch;
+}
+
 async function collectRepositoryFolders(rootPath: string, maxDepth: number, maxEntries: number, includeHidden: boolean): Promise<string[]> {
   const folders: string[] = [];
   const queue: Array<{ absPath: string; depth: number; relativePath: string }> = [
@@ -251,25 +341,15 @@ router.post("/local/repo/folders", async (req, res) => {
 router.get("/local/repo/branches", async (req, res) => {
   try {
     const rootPath = await resolveRepositoryRoot(String(req.query.rootPath || ""));
-    const gitDir = path.join(rootPath, ".git");
-    const gitStat = await fs.stat(gitDir).catch(() => null);
-    if (!gitStat || !gitStat.isDirectory()) {
+    try {
+      await ensureGitRepository(rootPath);
+    } catch {
       return res.json({ success: true, rootPath, branches: [], current: null, isGitRepo: false });
     }
 
-    const branchesOutput = await new Promise<string>((resolve, reject) => {
-      execFile("git", ["branch", "--format", "%(refname:short)"], { cwd: rootPath }, (error, stdout) => {
-        if (error) return reject(error);
-        resolve(stdout || "");
-      });
-    });
-
-    const currentBranch = await new Promise<string>((resolve, reject) => {
-      execFile("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: rootPath }, (error, stdout) => {
-        if (error) return reject(error);
-        resolve((stdout || "").trim());
-      });
-    });
+    const branchesOutput = await runGitCommand(rootPath, ["branch", "--format", "%(refname:short)"]);
+    const currentBranch = (await runGitCommand(rootPath, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
+    const summary = await readWorkingTreeSummary(rootPath);
 
     const branches = branchesOutput
       .split("\n")
@@ -282,9 +362,83 @@ router.get("/local/repo/branches", async (req, res) => {
       branches,
       current: currentBranch || null,
       isGitRepo: true,
+      summary,
     });
   } catch (error: any) {
     return res.status(400).json({ success: false, error: error?.message || "Failed to read repository branches" });
+  }
+});
+
+router.post("/local/repo/branches/switch", async (req, res) => {
+  try {
+    const rootPath = await resolveRepositoryRoot(String(req.body?.rootPath || ""));
+    const branch = validateBranchName(String(req.body?.branch || ""));
+
+    await ensureGitRepository(rootPath);
+
+    try {
+      await runGitCommand(rootPath, ["switch", branch]);
+    } catch {
+      await runGitCommand(rootPath, ["checkout", branch]);
+    }
+
+    const branchesOutput = await runGitCommand(rootPath, ["branch", "--format", "%(refname:short)"]);
+    const currentBranch = (await runGitCommand(rootPath, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
+    const summary = await readWorkingTreeSummary(rootPath);
+
+    return res.json({
+      success: true,
+      rootPath,
+      branch: currentBranch,
+      current: currentBranch,
+      branches: branchesOutput
+        .split("\n")
+        .map((item) => item.trim())
+        .filter(Boolean),
+      summary,
+      message: `Switched to ${branch}`,
+    });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error?.message || "Failed to switch branch" });
+  }
+});
+
+router.post("/local/repo/branches/create", async (req, res) => {
+  try {
+    const rootPath = await resolveRepositoryRoot(String(req.body?.rootPath || ""));
+    const branch = validateBranchName(String(req.body?.branch || ""));
+    const checkout = req.body?.checkout !== false;
+
+    await ensureGitRepository(rootPath);
+
+    if (checkout) {
+      try {
+        await runGitCommand(rootPath, ["switch", "-c", branch]);
+      } catch {
+        await runGitCommand(rootPath, ["checkout", "-b", branch]);
+      }
+    } else {
+      await runGitCommand(rootPath, ["branch", branch]);
+    }
+
+    const branchesOutput = await runGitCommand(rootPath, ["branch", "--format", "%(refname:short)"]);
+    const currentBranch = (await runGitCommand(rootPath, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
+    const summary = await readWorkingTreeSummary(rootPath);
+
+    return res.json({
+      success: true,
+      rootPath,
+      branch: checkout ? currentBranch : branch,
+      current: currentBranch,
+      branches: branchesOutput
+        .split("\n")
+        .map((item) => item.trim())
+        .filter(Boolean),
+      summary,
+      message: checkout ? `Created and switched to ${branch}` : `Created ${branch}`,
+    });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error?.message || "Failed to create branch" });
   }
 });
 
