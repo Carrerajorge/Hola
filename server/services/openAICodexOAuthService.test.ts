@@ -49,7 +49,6 @@ vi.mock("./userScopedAgentDir.js", () => ({
 }));
 
 import {
-  completeOpenAICodexOAuthFlowFromCallback,
   getOpenAICodexOAuthFlowState,
   startOpenAICodexOAuthFlow,
 } from "./openAICodexOAuthService.js";
@@ -84,71 +83,123 @@ describe("openAICodexOAuthService", () => {
       delete authProfileState.profiles[key];
     }
     vi.clearAllMocks();
+    vi.useRealTimers();
     globalThis.fetch = originalFetch;
   });
 
   afterAll(() => {
+    vi.useRealTimers();
     globalThis.fetch = originalFetch;
   });
 
-  it("builds ChatGPT auth URLs with the hosted callback instead of localhost", async () => {
-    const redirectUri = "https://iliagpt.com/api/oauth/openai/codex/callback";
-
-    const flow = await startOpenAICodexOAuthFlow({
-      userId: "user-hosted-callback",
-      redirectUri,
-    });
-
-    const authUrl = new URL(flow.authUrl);
-    expect(flow.redirectUri).toBe(redirectUri);
-    expect(authUrl.searchParams.get("redirect_uri")).toBe(redirectUri);
-    expect(authUrl.searchParams.get("redirect_uri")).not.toContain("localhost");
-    expect(authUrl.searchParams.get("state")).toBeTruthy();
-  });
-
-  it("completes the callback using the hosted redirect URI during token exchange", async () => {
-    const redirectUri = "https://iliagpt.com/api/oauth/openai/codex/callback";
-    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      const body = init?.body as URLSearchParams;
-      expect(body.get("redirect_uri")).toBe(redirectUri);
-      expect(body.get("code")).toBe("auth-code-123");
-
-      return new Response(
+  it("starts ChatGPT web auth with device code instead of localhost callback", async () => {
+    const fetchSpy = vi.fn(async () =>
+      new Response(
         JSON.stringify({
-          access_token: createAccessToken("acct-123"),
-          refresh_token: "refresh-token-123",
-          expires_in: 3600,
+          device_auth_id: "deviceauth_123",
+          user_code: "ABCD-12345",
+          interval: "5",
+          expires_at: "2026-03-22T06:33:14.799616+00:00",
         }),
         {
           status: 200,
           headers: { "Content-Type": "application/json" },
         },
-      );
+      ),
+    );
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    const flow = await startOpenAICodexOAuthFlow({
+      userId: "user-device-code-start",
+    });
+
+    expect(flow.authMode).toBe("device_code");
+    expect(flow.authUrl).toBe("https://auth.openai.com/codex/device");
+    expect(flow.redirectUri).toBe("https://auth.openai.com/deviceauth/callback");
+    expect(flow.userCode).toBe("ABCD-12345");
+    expect(flow.expiresAt).toBeTruthy();
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe(
+      "https://auth.openai.com/api/accounts/deviceauth/usercode",
+    );
+  });
+
+  it("polls the device code flow and exchanges tokens with the official device callback", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-22T06:18:14.000Z"));
+
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url === "https://auth.openai.com/api/accounts/deviceauth/usercode") {
+        return new Response(
+          JSON.stringify({
+            device_auth_id: "deviceauth_456",
+            user_code: "AEUE-007MM",
+            interval: "1",
+            expires_at: "2026-03-22T06:33:14.799616+00:00",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+
+      if (url === "https://auth.openai.com/api/accounts/deviceauth/token") {
+        return new Response(
+          JSON.stringify({
+            authorization_code: "auth-code-123",
+            code_verifier: "device-verifier-123",
+            code_challenge: "device-challenge-123",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+
+      if (url === "https://auth.openai.com/oauth/token") {
+        const body = init?.body as URLSearchParams;
+        expect(body.get("redirect_uri")).toBe(
+          "https://auth.openai.com/deviceauth/callback",
+        );
+        expect(body.get("code")).toBe("auth-code-123");
+        expect(body.get("code_verifier")).toBe("device-verifier-123");
+
+        return new Response(
+          JSON.stringify({
+            access_token: createAccessToken("acct-device-123"),
+            refresh_token: "refresh-token-123",
+            expires_in: 3600,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`);
     });
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
     const flow = await startOpenAICodexOAuthFlow({
-      userId: "user-callback-complete",
-      redirectUri,
-    });
-    const authUrl = new URL(flow.authUrl);
-    const oauthState = authUrl.searchParams.get("state");
-    expect(oauthState).toBeTruthy();
-
-    const result = await completeOpenAICodexOAuthFlowFromCallback({
-      oauthState: oauthState!,
-      code: "auth-code-123",
+      userId: "user-device-code-complete",
     });
 
-    expect(result.status).toBe("success");
-    expect(result.result?.connected).toBe(true);
-    expect(result.result?.accountId).toBe("acct-123");
-    expect(fetchSpy).toHaveBeenCalledOnce();
-    expect(
-      getOpenAICodexOAuthFlowState({
-        flowId: flow.flowId,
-        userId: "user-callback-complete",
-      }).status,
-    ).toBe("completed");
+    vi.setSystemTime(new Date("2026-03-22T06:18:16.000Z"));
+
+    const state = await getOpenAICodexOAuthFlowState({
+      flowId: flow.flowId,
+      userId: "user-device-code-complete",
+    });
+
+    expect(state.status).toBe("completed");
+    expect(state.result?.connected).toBe(true);
+    expect(state.result?.accountId).toBe("acct-device-123");
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
   });
 });
+

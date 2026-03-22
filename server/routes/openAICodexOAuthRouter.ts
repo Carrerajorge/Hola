@@ -15,14 +15,6 @@ const openAICodexOAuthRouter = Router();
 // Authentication is still required via getUserId() checks in each handler.
 // openAICodexOAuthRouter.use(requireAdmin);
 
-function getCanonicalOpenAICodexCallbackUri(req: Request): string {
-  const canonicalDomain = process.env.CANONICAL_DOMAIN || "iliagpt.com";
-  if (process.env.NODE_ENV === "production") {
-    return `https://${canonicalDomain}/api/oauth/openai/codex/callback`;
-  }
-  return `${req.protocol}://${req.get("host")}/api/oauth/openai/codex/callback`;
-}
-
 function buildObservedCallbackUrl(req: Request): string {
   const canonicalBase =
     process.env.NODE_ENV === "production"
@@ -131,14 +123,13 @@ openAICodexOAuthRouter.post("/start", async (req: Request, res: Response) => {
       return res.status(401).json({ error: "Authentication required" });
     }
 
-    const flow = await startOpenAICodexOAuthFlow({
-      userId,
-      redirectUri: getCanonicalOpenAICodexCallbackUri(req),
-    });
+    const flow = await startOpenAICodexOAuthFlow({ userId });
     res.json({
       ...flow,
       instructions:
-        "Inicia sesión con tu cuenta de ChatGPT Plus/Pro. ILIAGPT completará el callback automáticamente al regresar a este dominio.",
+        flow.authMode === "device_code"
+          ? "Abre la pagina de ChatGPT, ingresa el codigo de un solo uso y vuelve a ILIAGPT. La vinculacion se completa automaticamente en cuanto OpenAI confirme el codigo."
+          : "Inicia sesión con tu cuenta de ChatGPT Plus/Pro. Si el callback local no se completa, pega la URL final de localhost o el código.",
     });
   } catch (error) {
     console.error("[OpenAICodexOAuth] start failed:", error);
@@ -150,7 +141,7 @@ openAICodexOAuthRouter.post("/start", async (req: Request, res: Response) => {
   }
 });
 
-openAICodexOAuthRouter.get("/flow/:flowId", (req: Request, res: Response) => {
+openAICodexOAuthRouter.get("/flow/:flowId", async (req: Request, res: Response) => {
   try {
     const userId = getUserId(req);
     if (!userId) {
@@ -158,7 +149,7 @@ openAICodexOAuthRouter.get("/flow/:flowId", (req: Request, res: Response) => {
     }
 
     res.json(
-      getOpenAICodexOAuthFlowState({
+      await getOpenAICodexOAuthFlowState({
         flowId: String(req.params.flowId || "").trim(),
         userId,
       }),

@@ -51,6 +51,24 @@ export function ChatGptLogoIcon({ className, ...props }: LogoProps) {
   );
 }
 
+export function ClaudeLogoIcon({ className, ...props }: LogoProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      className={cn("h-5 w-5", className)}
+      {...props}
+    >
+      <path
+        d="M16.98 5.47L12 2 7.02 5.47 2 8.53v6.94l5.02 3.06L12 22l4.98-3.47L22 15.47V8.53l-5.02-3.06zM12 16.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5z"
+        fill="currentColor"
+        opacity="0.9"
+      />
+    </svg>
+  );
+}
+
 export function AntigravityLogoIcon({ className, ...props }: LogoProps) {
   return (
     <svg

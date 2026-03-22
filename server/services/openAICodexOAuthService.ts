@@ -16,9 +16,14 @@ const DEFAULT_MODEL_REF = OPENAI_CODEX_DEFAULT_MODEL;
 const DEFAULT_MODEL_ID = DEFAULT_MODEL_REF.replace(`${PROVIDER_ID}/`, "");
 const FLOW_TTL_MS = 30 * 60 * 1000;
 const OPENAI_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
-const OPENAI_AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize";
-const OPENAI_TOKEN_URL = "https://auth.openai.com/oauth/token";
+const OPENAI_ISSUER = "https://auth.openai.com";
+const OPENAI_AUTHORIZE_URL = `${OPENAI_ISSUER}/oauth/authorize`;
+const OPENAI_TOKEN_URL = `${OPENAI_ISSUER}/oauth/token`;
 const OPENAI_SCOPE = "openid profile email offline_access";
+const OPENAI_DEVICE_CODE_REQUEST_URL = `${OPENAI_ISSUER}/api/accounts/deviceauth/usercode`;
+const OPENAI_DEVICE_CODE_POLL_URL = `${OPENAI_ISSUER}/api/accounts/deviceauth/token`;
+const OPENAI_DEVICE_VERIFICATION_URL = `${OPENAI_ISSUER}/codex/device`;
+const OPENAI_DEVICE_CALLBACK_URL = `${OPENAI_ISSUER}/deviceauth/callback`;
 const JWT_CLAIM_PATH = "https://api.openai.com/auth";
 
 type OpenAICodexCredentials = {
@@ -28,21 +33,55 @@ type OpenAICodexCredentials = {
   accountId: string;
 };
 
-type OpenAICodexFlowRecord = {
+type OpenAICodexFlowBase = {
   id: string;
   userId: string;
   createdAt: number;
-  authUrl: string;
-  redirectUri: string;
-  oauthState: string;
-  codeVerifier: string;
   completed: boolean;
   error: string | null;
   result: OpenAICodexOAuthStatus | null;
 };
 
+type OpenAICodexDeviceCodeFlowRecord = OpenAICodexFlowBase & {
+  kind: "device_code";
+  authUrl: string;
+  redirectUri: string;
+  userCode: string;
+  deviceAuthId: string;
+  intervalSeconds: number;
+  expiresAt: number;
+  nextPollAt: number;
+};
+
+type OpenAICodexBrowserFlowRecord = OpenAICodexFlowBase & {
+  kind: "browser";
+  authUrl: string;
+  redirectUri: string;
+  oauthState: string;
+  codeVerifier: string;
+};
+
+type OpenAICodexFlowRecord =
+  | OpenAICodexDeviceCodeFlowRecord
+  | OpenAICodexBrowserFlowRecord;
+
+type OpenAICodexDeviceCodeStartResponse = {
+  device_auth_id?: string;
+  user_code?: string;
+  interval?: string | number;
+  expires_at?: string;
+};
+
+type OpenAICodexDeviceCodePollResponse = {
+  authorization_code?: string;
+  code_verifier?: string;
+  code_challenge?: string;
+};
+
 const flowStore = new Map<string, OpenAICodexFlowRecord>();
 const flowIdByState = new Map<string, string>();
+
+export type OpenAICodexAuthMode = "device_code" | "browser";
 
 export type OpenAICodexOAuthStatus = {
   connected: boolean;
@@ -65,6 +104,18 @@ export type OpenAICodexBootstrapModel = {
   icon: null;
   modelType: "TEXT";
   contextWindow: number;
+};
+
+export type OpenAICodexOAuthFlowState = {
+  flowId: string;
+  authMode: OpenAICodexAuthMode;
+  status: "pending" | "completed" | "failed";
+  authUrl: string;
+  redirectUri: string;
+  userCode: string | null;
+  expiresAt: string | null;
+  result: OpenAICodexOAuthStatus | null;
+  error: string | null;
 };
 
 function buildProfileId(credentials: OpenAICodexCredentials): string {
@@ -105,8 +156,14 @@ async function resolveStoredProfile(userId?: string | null) {
 function clearExpiredFlows(): void {
   const now = Date.now();
   for (const [flowId, flow] of flowStore.entries()) {
-    if (now - flow.createdAt > FLOW_TTL_MS) {
-      flowIdByState.delete(flow.oauthState);
+    const hardExpiry =
+      flow.kind === "device_code"
+        ? Math.max(flow.createdAt + FLOW_TTL_MS, flow.expiresAt + 60_000)
+        : flow.createdAt + FLOW_TTL_MS;
+    if (now > hardExpiry) {
+      if (flow.kind === "browser") {
+        flowIdByState.delete(flow.oauthState);
+      }
       flowStore.delete(flowId);
     }
   }
@@ -317,22 +374,144 @@ async function exchangeAuthorizationCode(params: {
   };
 }
 
-async function completeFlowWithCode(
-  flow: OpenAICodexFlowRecord,
-  code: string,
-): Promise<OpenAICodexOAuthStatus> {
-  if (flow.completed && flow.result) {
-    return flow.result;
+async function completeFlowWithAuthorizationCode(params: {
+  flow: OpenAICodexFlowRecord;
+  code: string;
+  redirectUri: string;
+  codeVerifier: string;
+}): Promise<OpenAICodexOAuthStatus> {
+  if (params.flow.completed && params.flow.result) {
+    return params.flow.result;
   }
 
   const credentials = await exchangeAuthorizationCode({
-    code,
-    redirectUri: flow.redirectUri,
-    codeVerifier: flow.codeVerifier,
+    code: params.code,
+    redirectUri: params.redirectUri,
+    codeVerifier: params.codeVerifier,
   });
-  await persistOpenAICodexOAuthCredentials(credentials, flow.userId);
-  await markFlowCompleted(flow);
-  return flow.result ?? (await getOpenAICodexOAuthStatus(flow.userId));
+  await persistOpenAICodexOAuthCredentials(credentials, params.flow.userId);
+  await markFlowCompleted(params.flow);
+  return params.flow.result ?? (await getOpenAICodexOAuthStatus(params.flow.userId));
+}
+
+async function requestOpenAICodexDeviceCode(): Promise<{
+  authUrl: string;
+  redirectUri: string;
+  userCode: string;
+  deviceAuthId: string;
+  intervalSeconds: number;
+  expiresAt: number;
+}> {
+  const response = await fetch(OPENAI_DEVICE_CODE_REQUEST_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ client_id: OPENAI_CLIENT_ID }),
+  });
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error(
+        "ChatGPT no habilito el login con codigo de dispositivo para este flujo.",
+      );
+    }
+    throw new Error(
+      `No se pudo iniciar el codigo de dispositivo de ChatGPT (${response.status}).`,
+    );
+  }
+
+  const payload = (await response.json()) as OpenAICodexDeviceCodeStartResponse;
+  const deviceAuthId = payload.device_auth_id?.trim() || "";
+  const userCode = payload.user_code?.trim() || "";
+  const intervalSeconds = Math.max(1, Number.parseInt(String(payload.interval ?? "5"), 10) || 5);
+  const expiresAtValue = payload.expires_at ? Date.parse(payload.expires_at) : Number.NaN;
+  const expiresAt = Number.isFinite(expiresAtValue)
+    ? expiresAtValue
+    : Date.now() + 15 * 60 * 1000;
+
+  if (!deviceAuthId || !userCode) {
+    throw new Error("ChatGPT no devolvio el codigo de dispositivo esperado.");
+  }
+
+  return {
+    authUrl: OPENAI_DEVICE_VERIFICATION_URL,
+    redirectUri: OPENAI_DEVICE_CALLBACK_URL,
+    userCode,
+    deviceAuthId,
+    intervalSeconds,
+    expiresAt,
+  };
+}
+
+async function pollOpenAICodexDeviceCodeFlow(
+  flow: OpenAICodexDeviceCodeFlowRecord,
+): Promise<void> {
+  if (flow.completed) {
+    return;
+  }
+
+  const now = Date.now();
+  if (now >= flow.expiresAt) {
+    markFlowFailed(
+      flow,
+      "El codigo de ChatGPT expiro. Inicia la vinculacion otra vez.",
+    );
+    return;
+  }
+
+  if (now < flow.nextPollAt) {
+    return;
+  }
+
+  flow.nextPollAt = now + flow.intervalSeconds * 1000;
+
+  const response = await fetch(OPENAI_DEVICE_CODE_POLL_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      device_auth_id: flow.deviceAuthId,
+      user_code: flow.userCode,
+    }),
+  });
+
+  if (response.status === 403 || response.status === 404) {
+    return;
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `ChatGPT no pudo confirmar el codigo del dispositivo (${response.status}).`,
+    );
+  }
+
+  const payload = (await response.json()) as OpenAICodexDeviceCodePollResponse;
+  const authorizationCode = payload.authorization_code?.trim() || "";
+  const codeVerifier = payload.code_verifier?.trim() || "";
+
+  if (!authorizationCode || !codeVerifier) {
+    throw new Error("ChatGPT devolvio una respuesta incompleta para el codigo de dispositivo.");
+  }
+
+  await completeFlowWithAuthorizationCode({
+    flow,
+    code: authorizationCode,
+    redirectUri: OPENAI_DEVICE_CALLBACK_URL,
+    codeVerifier,
+  });
+}
+
+function serializeFlow(flow: OpenAICodexFlowRecord): OpenAICodexOAuthFlowState {
+  return {
+    flowId: flow.id,
+    authMode: flow.kind,
+    status: flow.completed ? (flow.error ? "failed" : "completed") : "pending",
+    authUrl: flow.authUrl,
+    redirectUri: flow.redirectUri,
+    userCode: flow.kind === "device_code" ? flow.userCode : null,
+    expiresAt:
+      flow.kind === "device_code" ? new Date(flow.expiresAt).toISOString() : null,
+    result: flow.result,
+    error: flow.error,
+  };
 }
 
 export async function getOpenAICodexOAuthStatus(
@@ -364,10 +543,10 @@ export async function getOpenAICodexBootstrapModel(
 
   return {
     id: "bootstrap-openai-codex-primary",
-    name: "GPT-5.3 Codex (ChatGPT)",
+    name: "GPT-5.4 (ChatGPT)",
     provider: PROVIDER_ID,
     modelId: DEFAULT_MODEL_ID,
-    description: "GPT-5.3 Codex usando tu cuenta de ChatGPT con OAuth",
+    description: "GPT-5.4 usando tu cuenta de ChatGPT con OAuth",
     isEnabled: "true",
     enabledAt: null,
     displayOrder: 1,
@@ -377,69 +556,60 @@ export async function getOpenAICodexBootstrapModel(
   };
 }
 
-export async function startOpenAICodexOAuthFlow(params: {
+async function startOpenAICodexDeviceCodeFlow(params: {
   userId: string;
-  redirectUri: string;
-  originator?: string;
-}): Promise<{
-  flowId: string;
-  authUrl: string;
-  redirectUri: string;
-}> {
-  clearExpiredFlows();
-
-  const flowId = randomUUID();
-  const { verifier, challenge } = createPkcePair();
-  const oauthState = createOAuthState();
-  const flow: OpenAICodexFlowRecord = {
-    id: flowId,
+}): Promise<OpenAICodexOAuthFlowState> {
+  const deviceCode = await requestOpenAICodexDeviceCode();
+  const flow: OpenAICodexDeviceCodeFlowRecord = {
+    id: randomUUID(),
+    kind: "device_code",
     userId: params.userId,
     createdAt: Date.now(),
-    authUrl: buildOpenAICodexAuthUrl({
-      redirectUri: params.redirectUri,
-      oauthState,
-      codeChallenge: challenge,
-      originator: params.originator,
-    }),
-    redirectUri: params.redirectUri,
-    oauthState,
-    codeVerifier: verifier,
+    authUrl: deviceCode.authUrl,
+    redirectUri: deviceCode.redirectUri,
+    userCode: deviceCode.userCode,
+    deviceAuthId: deviceCode.deviceAuthId,
+    intervalSeconds: deviceCode.intervalSeconds,
+    expiresAt: deviceCode.expiresAt,
+    nextPollAt: Date.now() + deviceCode.intervalSeconds * 1000,
     completed: false,
     error: null,
     result: null,
   };
-  flowStore.set(flowId, flow);
-  flowIdByState.set(oauthState, flowId);
 
-  return {
-    flowId,
-    authUrl: flow.authUrl,
-    redirectUri: flow.redirectUri,
-  };
+  flowStore.set(flow.id, flow);
+  return serializeFlow(flow);
+}
+
+export async function startOpenAICodexOAuthFlow(params: {
+  userId: string;
+}): Promise<OpenAICodexOAuthFlowState> {
+  clearExpiredFlows();
+  return startOpenAICodexDeviceCodeFlow(params);
 }
 
 function getOwnedFlow(flowId: string, userId: string): OpenAICodexFlowRecord {
   clearExpiredFlows();
   const flow = flowStore.get(flowId);
   if (!flow) {
-    throw new Error("La sesión OAuth expiró. Inicia la vinculación otra vez.");
+    throw new Error("La sesion OAuth expiro. Inicia la vinculacion otra vez.");
   }
   if (flow.userId !== userId) {
-    throw new Error("La sesión OAuth no pertenece a este usuario.");
+    throw new Error("La sesion OAuth no pertenece a este usuario.");
   }
   return flow;
 }
 
-function getFlowByState(oauthState: string): OpenAICodexFlowRecord {
+function getFlowByState(oauthState: string): OpenAICodexBrowserFlowRecord {
   clearExpiredFlows();
   const flowId = flowIdByState.get(oauthState);
   if (!flowId) {
-    throw new Error("La sesión OAuth expiró. Inicia la vinculación otra vez.");
+    throw new Error("La sesion OAuth expiro. Inicia la vinculacion otra vez.");
   }
 
   const flow = flowStore.get(flowId);
-  if (!flow) {
-    throw new Error("La sesión OAuth expiró. Inicia la vinculación otra vez.");
+  if (!flow || flow.kind !== "browser") {
+    throw new Error("La sesion OAuth expiro. Inicia la vinculacion otra vez.");
   }
 
   return flow;
@@ -451,6 +621,12 @@ export async function submitOpenAICodexOAuthManualInput(params: {
   input: string;
 }): Promise<OpenAICodexOAuthStatus | null> {
   const flow = getOwnedFlow(params.flowId, params.userId);
+  if (flow.kind !== "browser") {
+    throw new Error(
+      "Este flujo de ChatGPT usa codigo de dispositivo. Reinicia la vinculacion y usa el codigo mostrado.",
+    );
+  }
+
   if (flow.completed) {
     if (flow.error) {
       throw new Error(flow.error);
@@ -460,19 +636,24 @@ export async function submitOpenAICodexOAuthManualInput(params: {
 
   const value = params.input.trim();
   if (!value) {
-    throw new Error("Debes pegar la URL final del callback o el código.");
+    throw new Error("Debes pegar la URL final del callback o el codigo.");
   }
 
   const parsed = parseAuthorizationInput(value);
   if (parsed.state && parsed.state !== flow.oauthState) {
-    throw new Error("La URL final no pertenece a esta sesión de ChatGPT OAuth.");
+    throw new Error("La URL final no pertenece a esta sesion de ChatGPT OAuth.");
   }
   if (!parsed.code) {
-    throw new Error("No se encontró el código de autorización de ChatGPT.");
+    throw new Error("No se encontro el codigo de autorizacion de ChatGPT.");
   }
 
   try {
-    return await completeFlowWithCode(flow, parsed.code);
+    return await completeFlowWithAuthorizationCode({
+      flow,
+      code: parsed.code,
+      redirectUri: flow.redirectUri,
+      codeVerifier: flow.codeVerifier,
+    });
   } catch (error) {
     markFlowFailed(flow, error);
     throw error;
@@ -505,7 +686,7 @@ export async function completeOpenAICodexOAuthFlowFromCallback(params: {
   if (params.error) {
     const description =
       params.errorDescription?.trim() ||
-      "ChatGPT canceló o rechazó la autenticación.";
+      "ChatGPT cancelo o rechazo la autenticacion.";
     markFlowFailed(flow, description);
     return {
       flowId: flow.id,
@@ -518,7 +699,7 @@ export async function completeOpenAICodexOAuthFlowFromCallback(params: {
 
   const code = params.code?.trim() || "";
   if (!code) {
-    const description = "ChatGPT no devolvió un código de autorización válido.";
+    const description = "ChatGPT no devolvio un codigo de autorizacion valido.";
     markFlowFailed(flow, description);
     return {
       flowId: flow.id,
@@ -530,7 +711,12 @@ export async function completeOpenAICodexOAuthFlowFromCallback(params: {
   }
 
   try {
-    const result = await completeFlowWithCode(flow, code);
+    const result = await completeFlowWithAuthorizationCode({
+      flow,
+      code,
+      redirectUri: flow.redirectUri,
+      codeVerifier: flow.codeVerifier,
+    });
     return {
       flowId: flow.id,
       status: "success",
@@ -550,24 +736,20 @@ export async function completeOpenAICodexOAuthFlowFromCallback(params: {
   }
 }
 
-export function getOpenAICodexOAuthFlowState(params: {
+export async function getOpenAICodexOAuthFlowState(params: {
   flowId: string;
   userId: string;
-}): {
-  flowId: string;
-  status: "pending" | "completed" | "failed";
-  authUrl: string;
-  redirectUri: string;
-  result: OpenAICodexOAuthStatus | null;
-  error: string | null;
-} {
+}): Promise<OpenAICodexOAuthFlowState> {
   const flow = getOwnedFlow(params.flowId, params.userId);
-  return {
-    flowId: flow.id,
-    status: flow.completed ? (flow.error ? "failed" : "completed") : "pending",
-    authUrl: flow.authUrl,
-    redirectUri: flow.redirectUri,
-    result: flow.result,
-    error: flow.error,
-  };
+
+  if (flow.kind === "device_code" && !flow.completed) {
+    try {
+      await pollOpenAICodexDeviceCodeFlow(flow);
+    } catch (error) {
+      markFlowFailed(flow, error);
+    }
+  }
+
+  return serializeFlow(flow);
 }
+

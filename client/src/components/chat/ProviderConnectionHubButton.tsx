@@ -1,12 +1,15 @@
 import * as React from "react";
-import { CheckCircle2, Key, LockKeyhole, Plus } from "lucide-react";
+import { CheckCircle2, Key, LockKeyhole, Loader2, Plus, Unplug } from "lucide-react";
 import type { AvailableModel } from "@/contexts/ModelAvailabilityContext";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/apiClient";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -19,6 +22,15 @@ import {
   ClaudeLogoIcon,
   GeminiLogoIcon,
 } from "./OAuthProviderLogos";
+import {
+  useAllProvidersStatus,
+  useProviderOAuthStart,
+  useAnthropicKeySubmit,
+  useProviderDisconnect,
+  openOAuthPopup,
+  type OAuthProvider,
+} from "@/hooks/use-provider-oauth";
+import { useQueryClient } from "@tanstack/react-query";
 
 type ProviderConnectionHubButtonProps = {
   availableModels: AvailableModel[];
@@ -37,12 +49,11 @@ type ProviderCardProps = {
   isBusy?: boolean;
   isConnected?: boolean;
   testId?: string;
+  onDisconnect?: () => void;
 };
 
 function countLabel(count: number): string {
-  if (count <= 0) {
-    return "sin modelos visibles";
-  }
+  if (count <= 0) return "sin modelos visibles";
   return count === 1 ? "1 modelo visible" : `${count} modelos visibles`;
 }
 
@@ -62,66 +73,94 @@ function ProviderCard({
   isBusy = false,
   isConnected = false,
   testId,
+  onDisconnect,
 }: ProviderCardProps) {
   return (
-    <button
-      type="button"
+    <div
       className={cn(
-        "flex w-full items-start gap-4 rounded-3xl border p-4 text-left transition-colors",
+        "flex w-full flex-col rounded-3xl border transition-colors",
         highlighted
           ? "border-emerald-500/35 bg-emerald-500/5"
-          : "border-border/70 bg-background hover:bg-muted/35",
-        disabled && "cursor-not-allowed opacity-70 hover:bg-background",
+          : "border-border/70 bg-background",
       )}
-      onClick={disabled ? undefined : onClick}
-      disabled={disabled || isBusy}
-      data-testid={testId}
     >
-      <div
+      <button
+        type="button"
         className={cn(
-          "flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border",
-          highlighted
-            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700"
-            : "border-border/70 bg-muted/40 text-foreground",
+          "flex w-full items-start gap-4 p-4 text-left transition-colors rounded-3xl",
+          !disabled && "hover:bg-muted/35",
+          disabled && "cursor-not-allowed opacity-70",
         )}
+        onClick={disabled ? undefined : onClick}
+        disabled={disabled || isBusy}
+        data-testid={testId}
       >
-        {icon}
-      </div>
+        <div
+          className={cn(
+            "flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border",
+            highlighted
+              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700"
+              : "border-border/70 bg-muted/40 text-foreground",
+          )}
+        >
+          {icon}
+        </div>
 
-      <div className="min-w-0 flex-1 space-y-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-sm font-semibold">{title}</h3>
-          {isConnected ? (
-            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              Conectado
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-semibold">{title}</h3>
+            {isConnected ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Conectado
+              </span>
+            ) : null}
+            {disabled ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-muted/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                <LockKeyhole className="h-3.5 w-3.5" />
+                Manual
+              </span>
+            ) : null}
+          </div>
+          <p className="text-sm text-muted-foreground">{description}</p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="text-xs text-muted-foreground">{meta}</span>
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium",
+                disabled
+                  ? "border border-border/70 bg-muted/50 text-muted-foreground"
+                  : highlighted
+                    ? "bg-emerald-600 text-white"
+                    : "bg-primary text-primary-foreground",
+              )}
+            >
+              {isBusy ? (
+                <>
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                  Conectando...
+                </>
+              ) : (
+                actionLabel
+              )}
             </span>
-          ) : null}
-          {disabled ? (
-            <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-muted/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-              <LockKeyhole className="h-3.5 w-3.5" />
-              Manual
-            </span>
-          ) : null}
+          </div>
         </div>
-        <p className="text-sm text-muted-foreground">{description}</p>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <span className="text-xs text-muted-foreground">{meta}</span>
-          <span
-            className={cn(
-              "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium",
-              disabled
-                ? "border border-border/70 bg-muted/50 text-muted-foreground"
-                : highlighted
-                  ? "bg-emerald-600 text-white"
-                  : "bg-primary text-primary-foreground",
-            )}
+      </button>
+
+      {isConnected && onDisconnect ? (
+        <div className="border-t border-border/50 px-4 py-2">
+          <button
+            type="button"
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-destructive transition-colors"
+            onClick={onDisconnect}
           >
-            {isBusy ? "Abriendo..." : actionLabel}
-          </span>
+            <Unplug className="h-3 w-3" />
+            Desconectar
+          </button>
         </div>
-      </div>
-    </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -129,8 +168,23 @@ export function ProviderConnectionHubButton({
   availableModels,
   onConnected,
 }: ProviderConnectionHubButtonProps) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [open, setOpen] = React.useState(false);
+  const [anthropicKeyOpen, setAnthropicKeyOpen] = React.useState(false);
+  const [anthropicKey, setAnthropicKey] = React.useState("");
+  const [oauthBusy, setOauthBusy] = React.useState<OAuthProvider | null>(null);
 
+  // New multi-provider status
+  const { data: providerStatus, refetch: refetchStatus } = useAllProvidersStatus();
+  const openaiOAuthStart = useProviderOAuthStart("openai");
+  const geminiOAuthStart = useProviderOAuthStart("gemini");
+  const anthropicKeyMutation = useAnthropicKeySubmit();
+  const openaiDisconnect = useProviderDisconnect("openai");
+  const geminiDisconnect = useProviderDisconnect("gemini");
+  const anthropicDisconnect = useProviderDisconnect("anthropic");
+
+  // Model counts from existing system
   const openAiModels = React.useMemo(
     () => getProviderModels(availableModels, "openai-codex"),
     [availableModels],
@@ -143,79 +197,103 @@ export function ProviderConnectionHubButton({
     () => getProviderModels(availableModels, "google-antigravity"),
     [availableModels],
   );
-  // DB-backed multi-provider models
-  const oauthOpenaiModels = React.useMemo(
-    () => getProviderModels(availableModels, "openai"),
-    [availableModels],
-  );
-  const oauthGeminiModels = React.useMemo(
-    () => getProviderModels(availableModels, "gemini"),
-    [availableModels],
-  );
-  const anthropicModels = React.useMemo(
-    () => getProviderModels(availableModels, "anthropic"),
-    [availableModels],
-  );
+
+  // New system statuses
+  const openaiConnected = providerStatus?.providers?.openai?.connected || false;
+  const geminiConnected = providerStatus?.providers?.gemini?.connected || false;
+  const anthropicConnected = providerStatus?.providers?.anthropic?.connected || false;
 
   const connectedProviders = React.useMemo(() => {
     let count = 0;
-    if (openAiModels.length > 0 || oauthOpenaiModels.length > 0) count += 1;
-    if (geminiModels.length > 0 || oauthGeminiModels.length > 0) count += 1;
+    if (openAiModels.length > 0 || openaiConnected) count += 1;
+    if (geminiModels.length > 0 || geminiConnected) count += 1;
     if (antigravityModels.length > 0) count += 1;
-    if (anthropicModels.length > 0) count += 1;
+    if (anthropicConnected) count += 1;
     return count;
-  }, [antigravityModels.length, geminiModels.length, openAiModels.length, oauthOpenaiModels.length, oauthGeminiModels.length, anthropicModels.length]);
-
-  // Anthropic API key state
-  const [anthropicKeyOpen, setAnthropicKeyOpen] = React.useState(false);
-  const [anthropicKey, setAnthropicKey] = React.useState("");
-  const [anthropicLoading, setAnthropicLoading] = React.useState(false);
-  const [anthropicError, setAnthropicError] = React.useState<string | null>(null);
-  const [anthropicConnected, setAnthropicConnected] = React.useState(false);
-
-  // Check Anthropic status on mount
-  React.useEffect(() => {
-    fetch("/api/oauth/providers/anthropic/status")
-      .then((r) => r.json())
-      .then((data: any) => setAnthropicConnected(data?.connected || false))
-      .catch(() => {});
-  }, []);
-
-  const handleAnthropicSubmit = React.useCallback(async () => {
-    if (!anthropicKey.trim()) return;
-    setAnthropicLoading(true);
-    setAnthropicError(null);
-    try {
-      const res = await fetch("/api/oauth/providers/anthropic/key", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: anthropicKey.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setAnthropicError(data.error || "Error al validar la clave");
-        return;
-      }
-      setAnthropicConnected(true);
-      setAnthropicKeyOpen(false);
-      setAnthropicKey("");
-      // Invalidate model cache
-      const { queryClient } = await import("@/lib/queryClient");
-      queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
-      handleConnected("claude-sonnet-4-6-20250514");
-    } catch (err: any) {
-      setAnthropicError(err.message || "Error de red");
-    } finally {
-      setAnthropicLoading(false);
-    }
-  }, [anthropicKey, handleConnected]);
+  }, [openAiModels.length, geminiModels.length, antigravityModels.length, openaiConnected, geminiConnected, anthropicConnected]);
 
   const handleConnected = React.useCallback(
     async (modelId: string) => {
       setOpen(false);
+      await refetchStatus();
+      queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
       await Promise.resolve(onConnected?.(modelId));
     },
-    [onConnected],
+    [onConnected, refetchStatus, queryClient],
+  );
+
+  const handleOAuthFlow = React.useCallback(
+    async (provider: "openai" | "gemini") => {
+      setOauthBusy(provider);
+      try {
+        const startMutation = provider === "openai" ? openaiOAuthStart : geminiOAuthStart;
+        const result = await startMutation.mutateAsync({ isGlobal: false });
+
+        const popupResult = await openOAuthPopup(result.authUrl);
+
+        if (popupResult.status === "success") {
+          toast({ description: `${provider === "openai" ? "OpenAI" : "Gemini"} conectado exitosamente` });
+          await refetchStatus();
+          queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+          handleConnected(provider === "openai" ? "gpt-4o" : "gemini-2.5-flash");
+        } else {
+          if (popupResult.message !== "Ventana cerrada por el usuario") {
+            toast({
+              title: "Error de conexion",
+              description: popupResult.message,
+              variant: "destructive",
+            });
+          }
+        }
+      } catch (err: any) {
+        toast({
+          title: "Error",
+          description: err.message || `No se pudo conectar ${provider}`,
+          variant: "destructive",
+        });
+      } finally {
+        setOauthBusy(null);
+      }
+    },
+    [openaiOAuthStart, geminiOAuthStart, toast, refetchStatus, queryClient, handleConnected],
+  );
+
+  const handleAnthropicSubmit = React.useCallback(async () => {
+    if (!anthropicKey.trim()) return;
+    try {
+      await anthropicKeyMutation.mutateAsync({
+        apiKey: anthropicKey.trim(),
+        label: "ILIAGPT User Key",
+      });
+      setAnthropicKeyOpen(false);
+      setAnthropicKey("");
+      toast({ description: "Anthropic conectado exitosamente" });
+      queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+      handleConnected("claude-sonnet-4-6-20250514");
+    } catch (err: any) {
+      toast({
+        title: "Error al validar la clave",
+        description: err.message,
+        variant: "destructive",
+      });
+    }
+  }, [anthropicKey, anthropicKeyMutation, toast, queryClient, handleConnected]);
+
+  const handleDisconnect = React.useCallback(
+    async (provider: OAuthProvider) => {
+      try {
+        if (provider === "openai") await openaiDisconnect.mutateAsync({ isGlobal: false });
+        else if (provider === "gemini") await geminiDisconnect.mutateAsync({ isGlobal: false });
+        else if (provider === "anthropic") await anthropicDisconnect.mutateAsync({ isGlobal: false });
+
+        toast({ description: `${provider} desconectado` });
+        refetchStatus();
+        queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+      } catch (err: any) {
+        toast({ title: "Error", description: err.message, variant: "destructive" });
+      }
+    },
+    [openaiDisconnect, geminiDisconnect, anthropicDisconnect, toast, refetchStatus, queryClient],
   );
 
   return (
@@ -237,108 +315,166 @@ export function ProviderConnectionHubButton({
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Conectar proveedores y traer modelos</DialogTitle>
             <DialogDescription>
-              Vincula tus cuentas para usar sus modelos desde ILIAGPT. ChatGPT
-              y Gemini ya tienen OAuth directo en esta plataforma; Antigravity
-              solo aparece si el gateway ya fue configurado manualmente.
+              Vincula tus cuentas para usar sus modelos desde ILIAGPT. Los tokens
+              se almacenan cifrados con AES-256. Puedes conectar multiples proveedores.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-3 md:grid-cols-3">
-            <OpenAICodexOAuthButton
-              onConnected={handleConnected}
-              renderTrigger={({ isBusy, isConnected, openDialog }) => (
-                <ProviderCard
-                  title="Loguear ChatGPT"
-                  description="Conecta tu cuenta de ChatGPT para traer los modelos compatibles con OpenClaw al selector."
-                  meta={countLabel(openAiModels.length)}
-                  actionLabel={isConnected ? "Revisar cuenta" : "Continuar con ChatGPT"}
-                  highlighted={isConnected || openAiModels.length > 0}
-                  icon={<ChatGptLogoIcon className="h-5 w-5" />}
-                  onClick={openDialog}
-                  isBusy={isBusy}
-                  isConnected={isConnected}
-                  testId="provider-card-openai-codex"
-                />
-              )}
-            />
+          {/* Legacy connections (Codex + Gemini CLI) */}
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Conexiones directas (OpenClaw)
+            </h3>
+            <div className="grid gap-3 md:grid-cols-2">
+              <OpenAICodexOAuthButton
+                onConnected={handleConnected}
+                renderTrigger={({ isBusy, isConnected, openDialog }) => (
+                  <ProviderCard
+                    title="Loguear ChatGPT"
+                    description="Conecta tu cuenta de ChatGPT para traer los modelos compatibles con OpenClaw al selector."
+                    meta={countLabel(openAiModels.length)}
+                    actionLabel={isConnected ? "Revisar cuenta" : "Continuar con ChatGPT"}
+                    highlighted={isConnected || openAiModels.length > 0}
+                    icon={<ChatGptLogoIcon className="h-5 w-5" />}
+                    onClick={openDialog}
+                    isBusy={isBusy}
+                    isConnected={isConnected}
+                    testId="provider-card-openai-codex"
+                  />
+                )}
+              />
 
-            <GeminiCliOAuthButton
-              onConnected={handleConnected}
-              renderTrigger={({ isBusy, isConnected, openDialog }) => (
-                <ProviderCard
-                  title="Loguear con Gemini"
-                  description="Vincula Google Gemini CLI OAuth y expone sus modelos compatibles dentro de ILIAGPT."
-                  meta={countLabel(geminiModels.length)}
-                  actionLabel={isConnected ? "Revisar cuenta" : "Continuar con Google"}
-                  highlighted={isConnected || geminiModels.length > 0}
-                  icon={<GeminiLogoIcon className="h-5 w-5" />}
-                  onClick={openDialog}
-                  isBusy={isBusy}
-                  isConnected={isConnected}
-                  testId="provider-card-gemini-cli"
-                />
-              )}
-            />
-
-            {/* Anthropic API Key */}
-            <ProviderCard
-              title="Conectar Claude (Anthropic)"
-              description="Ingresa tu API Key de Anthropic para usar los modelos Claude directamente desde ILIAGPT."
-              meta={countLabel(anthropicModels.length)}
-              actionLabel={anthropicConnected ? "Conectado" : "Agregar API Key"}
-              highlighted={anthropicConnected || anthropicModels.length > 0}
-              isConnected={anthropicConnected}
-              icon={<ClaudeLogoIcon className="h-5 w-5" />}
-              onClick={() => setAnthropicKeyOpen(true)}
-              testId="provider-card-anthropic"
-            />
+              <GeminiCliOAuthButton
+                onConnected={handleConnected}
+                renderTrigger={({ isBusy, isConnected, openDialog }) => (
+                  <ProviderCard
+                    title="Loguear con Gemini CLI"
+                    description="Vincula Google Gemini CLI OAuth y expone sus modelos compatibles dentro de ILIAGPT."
+                    meta={countLabel(geminiModels.length)}
+                    actionLabel={isConnected ? "Revisar cuenta" : "Continuar con Google"}
+                    highlighted={isConnected || geminiModels.length > 0}
+                    icon={<GeminiLogoIcon className="h-5 w-5" />}
+                    onClick={openDialog}
+                    isBusy={isBusy}
+                    isConnected={isConnected}
+                    testId="provider-card-gemini-cli"
+                  />
+                )}
+              />
+            </div>
           </div>
 
-          {/* Anthropic API Key Dialog */}
-          <Dialog open={anthropicKeyOpen} onOpenChange={setAnthropicKeyOpen}>
-            <DialogContent className="max-w-md">
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  <Key className="h-5 w-5" />
-                  Clave API de Anthropic
-                </DialogTitle>
-                <DialogDescription>
-                  Ingresa tu clave API de Anthropic. Se validara con una llamada de prueba y se almacenara cifrada con AES-256.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4">
-                <Input
-                  type="password"
-                  placeholder="sk-ant-..."
-                  value={anthropicKey}
-                  onChange={(e) => setAnthropicKey(e.target.value)}
-                  disabled={anthropicLoading}
-                />
-                {anthropicError && (
-                  <p className="text-sm text-destructive">{anthropicError}</p>
-                )}
-                <div className="flex justify-end gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => setAnthropicKeyOpen(false)}
-                    disabled={anthropicLoading}
-                  >
-                    Cancelar
-                  </Button>
-                  <Button
-                    onClick={handleAnthropicSubmit}
-                    disabled={anthropicLoading || !anthropicKey.trim()}
-                  >
-                    {anthropicLoading ? "Validando..." : "Guardar"}
-                  </Button>
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
+          {/* New multi-provider OAuth */}
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Proveedores OAuth / API Key
+            </h3>
+            <div className="grid gap-3 md:grid-cols-3">
+              {/* OpenAI Direct OAuth */}
+              <ProviderCard
+                title="OpenAI (OAuth directo)"
+                description="Conecta via OAuth con tu cuenta de OpenAI para acceder a GPT-4o, o1, y otros modelos."
+                meta={openaiConnected ? "Conectado via OAuth" : "OAuth PKCE"}
+                actionLabel={openaiConnected ? "Conectado" : "Conectar OpenAI"}
+                highlighted={openaiConnected}
+                isConnected={openaiConnected}
+                icon={<ChatGptLogoIcon className="h-5 w-5" />}
+                onClick={() => handleOAuthFlow("openai")}
+                isBusy={oauthBusy === "openai"}
+                onDisconnect={openaiConnected ? () => handleDisconnect("openai") : undefined}
+                testId="provider-card-openai-oauth"
+              />
+
+              {/* Gemini Direct OAuth */}
+              <ProviderCard
+                title="Google Gemini (OAuth)"
+                description="Conecta con Google OAuth para usar Gemini 2.5 Pro, Flash y otros modelos."
+                meta={geminiConnected ? "Conectado via Google" : "Google OAuth2"}
+                actionLabel={geminiConnected ? "Conectado" : "Conectar Gemini"}
+                highlighted={geminiConnected}
+                isConnected={geminiConnected}
+                icon={<GeminiLogoIcon className="h-5 w-5" />}
+                onClick={() => handleOAuthFlow("gemini")}
+                isBusy={oauthBusy === "gemini"}
+                onDisconnect={geminiConnected ? () => handleDisconnect("gemini") : undefined}
+                testId="provider-card-gemini-oauth"
+              />
+
+              {/* Anthropic API Key */}
+              <ProviderCard
+                title="Claude (Anthropic)"
+                description="Ingresa tu API Key de Anthropic para usar Claude Opus, Sonnet y Haiku."
+                meta={anthropicConnected ? "API Key guardada" : "API Key manual"}
+                actionLabel={anthropicConnected ? "Conectado" : "Agregar API Key"}
+                highlighted={anthropicConnected}
+                isConnected={anthropicConnected}
+                icon={<ClaudeLogoIcon className="h-5 w-5" />}
+                onClick={() => setAnthropicKeyOpen(true)}
+                testId="provider-card-anthropic"
+                onDisconnect={anthropicConnected ? () => handleDisconnect("anthropic") : undefined}
+              />
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Anthropic API Key Dialog */}
+      <Dialog open={anthropicKeyOpen} onOpenChange={setAnthropicKeyOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Key className="h-5 w-5" />
+              Clave API de Anthropic
+            </DialogTitle>
+            <DialogDescription>
+              Ingresa tu clave API de Anthropic. Se validara con una llamada de
+              prueba y se almacenara cifrada con AES-256-GCM.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Input
+              type="password"
+              placeholder="sk-ant-api03-..."
+              value={anthropicKey}
+              onChange={(e) => setAnthropicKey(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && anthropicKey.trim()) handleAnthropicSubmit();
+              }}
+              disabled={anthropicKeyMutation.isPending}
+              autoFocus
+            />
+            {anthropicKeyMutation.error && (
+              <p className="text-sm text-destructive">
+                {anthropicKeyMutation.error.message}
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setAnthropicKeyOpen(false)}
+              disabled={anthropicKeyMutation.isPending}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleAnthropicSubmit}
+              disabled={anthropicKeyMutation.isPending || !anthropicKey.trim()}
+            >
+              {anthropicKeyMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Validando...
+                </>
+              ) : (
+                "Guardar"
+              )}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
