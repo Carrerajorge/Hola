@@ -302,7 +302,18 @@ interface UploadedFile {
 
 function isAnalyzableFile(filename: string): boolean {
   const ext = filename.toLowerCase().split('.').pop();
-  return ['xlsx', 'xls', 'csv', 'pdf', 'docx'].includes(ext || '');
+  return [
+    // Spreadsheets
+    'xlsx', 'xls', 'csv', 'tsv',
+    // Documents
+    'pdf', 'doc', 'docx', 'rtf', 'odt',
+    // Presentations
+    'ppt', 'pptx', 'odp',
+    // Text/Data
+    'txt', 'json', 'html', 'md', 'xml',
+    // Images (OCR)
+    'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'tiff',
+  ].includes(ext || '');
 }
 
 async function triggerDocumentAnalysis(
@@ -4163,7 +4174,7 @@ export function ChatInterface({
 
         // Await the image detection that was started in parallel above.
         // By now it has had time to run during intent checks (~0ms extra wait).
-        let shouldGenerateImage = await imageDetectPromise;
+        const shouldGenerateImage = await imageDetectPromise;
 
         // If files are attached, log that we're skipping image detection
         if (hasAttachedFiles && !isImageTool) {
@@ -4384,7 +4395,7 @@ IMPORTANTE:
             }));
 
             let fullContent = "";
-            let sseError: Error | null = null;
+            const sseError: Error | null = null;
 
             // try {
             // Helper function to robustly detect if a file is a document (not an image)
