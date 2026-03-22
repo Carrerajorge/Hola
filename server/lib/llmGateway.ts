@@ -704,7 +704,7 @@ class LLMGateway {
   }
 
   private getConfiguredProvidersInOrder(): LLMProvider[] {
-    const order: LLMProvider[] = ["xai", "gemini", "openai", "anthropic", "deepseek"];
+    const order: LLMProvider[] = ["openai", "gemini", "deepseek", "anthropic", "xai"];
     return order.filter((p) => this.isProviderReady(p));
   }
 
