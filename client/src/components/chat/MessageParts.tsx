@@ -15,7 +15,8 @@ import {
     ListPlus,
     Minus,
     Volume2,
-    VolumeX
+    VolumeX,
+    Share2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -705,6 +706,7 @@ export interface ActionToolbarProps {
     onShare: (content: string) => void;
     onReadAloud: (id: string, content: string) => void;
     onViewSources?: () => void;
+    onDownload?: (content: string, id: string) => void;
 }
 
 export const ActionToolbar = memo(function ActionToolbar({
@@ -721,9 +723,10 @@ export const ActionToolbar = memo(function ActionToolbar({
     onCopy,
     onFeedback,
     onRegenerate,
-    onShare: _onShare,
+    onShare,
     onReadAloud,
-    onViewSources
+    onViewSources,
+    onDownload
 }: ActionToolbarProps) {
     const testIdSuffix = variant === "compact" ? messageId : `main-${messageId}`;
     const [regenerateOpen, setRegenerateOpen] = useState(false);
@@ -741,32 +744,50 @@ export const ActionToolbar = memo(function ActionToolbar({
         }
     }, [customInstruction, handleRegenerateOption]);
 
+    const handleDownload = useCallback(() => {
+        if (onDownload) {
+            onDownload(content, messageId);
+        } else {
+            const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `respuesta-${messageId.slice(0, 8)}.md`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+    }, [content, messageId, onDownload]);
+
+    const iconClass = "h-3.5 w-3.5";
+    const btnClass = "h-6 w-6 rounded-md text-muted-foreground/70 hover:text-foreground hover:bg-muted/50 transition-all duration-150";
+
     return (
-        <TooltipProvider delayDuration={300}>
+        <TooltipProvider delayDuration={400}>
             <div
-                className="flex items-center gap-0.5 rounded-full border border-border/60 bg-background/80 px-1.5 py-1 shadow-sm backdrop-blur-sm"
+                className="flex items-center gap-px"
                 data-testid={`message-actions-${testIdSuffix}`}
             >
+                {/* Primary actions */}
                 <Tooltip>
                     <TooltipTrigger asChild>
                         <Button
                             variant="ghost"
                             size="icon"
-                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                            className={btnClass}
                             onClick={() => onCopy(content, messageId)}
                             data-testid={`button-copy-${testIdSuffix}`}
-                            aria-label="Copiar respuesta"
+                            aria-label="Copiar"
                         >
                             {copiedMessageId === messageId ? (
-                                <CheckCircle2 className="h-4 w-4 text-green-500" />
+                                <Check className={cn(iconClass, "text-emerald-500")} />
                             ) : (
-                                <Copy className="h-4 w-4" />
+                                <Copy className={iconClass} />
                             )}
                         </Button>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                        <p>Copiar respuesta</p>
-                    </TooltipContent>
+                    <TooltipContent side="bottom" className="text-xs px-2 py-1">Copiar</TooltipContent>
                 </Tooltip>
 
                 <Tooltip>
@@ -775,21 +796,17 @@ export const ActionToolbar = memo(function ActionToolbar({
                             variant="ghost"
                             size="icon"
                             className={cn(
-                                "h-7 w-7",
-                                messageFeedback[messageId] === "up"
-                                    ? "text-green-500"
-                                    : "text-muted-foreground hover:text-foreground"
+                                btnClass,
+                                messageFeedback[messageId] === "up" && "text-emerald-500 hover:text-emerald-600"
                             )}
                             onClick={() => onFeedback(messageId, "up")}
                             data-testid={`button-like-${testIdSuffix}`}
-                            aria-label="Me gusta"
+                            aria-label="Útil"
                         >
-                            <ThumbsUp className="h-4 w-4" />
+                            <ThumbsUp className={iconClass} />
                         </Button>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                        <p>Me gusta</p>
-                    </TooltipContent>
+                    <TooltipContent side="bottom" className="text-xs px-2 py-1">Útil</TooltipContent>
                 </Tooltip>
 
                 <Tooltip>
@@ -798,21 +815,17 @@ export const ActionToolbar = memo(function ActionToolbar({
                             variant="ghost"
                             size="icon"
                             className={cn(
-                                "h-7 w-7",
-                                messageFeedback[messageId] === "down"
-                                    ? "text-red-500"
-                                    : "text-muted-foreground hover:text-foreground"
+                                btnClass,
+                                messageFeedback[messageId] === "down" && "text-red-400 hover:text-red-500"
                             )}
                             onClick={() => onFeedback(messageId, "down")}
                             data-testid={`button-dislike-${testIdSuffix}`}
-                            aria-label="No me gusta"
+                            aria-label="No útil"
                         >
-                            <ThumbsDown className="h-4 w-4" />
+                            <ThumbsDown className={iconClass} />
                         </Button>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                        <p>No me gusta</p>
-                    </TooltipContent>
+                    <TooltipContent side="bottom" className="text-xs px-2 py-1">No útil</TooltipContent>
                 </Tooltip>
 
                 <Popover open={regenerateOpen} onOpenChange={setRegenerateOpen}>
@@ -822,72 +835,69 @@ export const ActionToolbar = memo(function ActionToolbar({
                                 <Button
                                     variant="ghost"
                                     size="icon"
-                                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                    className={btnClass}
                                     disabled={aiState !== "idle"}
                                     data-testid={`button-regenerate-${testIdSuffix}`}
-                                    aria-label="Regenerar respuesta"
+                                    aria-label="Regenerar"
                                 >
                                     <RefreshCw
-                                        className={cn("h-4 w-4", isRegenerating && "animate-spin")}
+                                        className={cn(iconClass, isRegenerating && "animate-spin")}
                                     />
                                 </Button>
                             </PopoverTrigger>
                         </TooltipTrigger>
-                        <TooltipContent side="bottom">
-                            <p>Regenerar</p>
-                        </TooltipContent>
+                        <TooltipContent side="bottom" className="text-xs px-2 py-1">Regenerar</TooltipContent>
                     </Tooltip>
                     <PopoverContent
-                        className="w-52 p-1.5 bg-background/95 backdrop-blur-xl border-border/50 shadow-lg"
+                        className="w-56 p-1.5 bg-popover/95 backdrop-blur-xl border-border/40 shadow-xl rounded-lg"
                         align="start"
                         side="top"
-                        sideOffset={8}
+                        sideOffset={6}
                     >
                         <div className="space-y-0.5">
-                            <div className="flex items-center gap-1 px-1 pb-1 border-b border-border/30 mb-1">
+                            <div className="flex items-center gap-1.5 px-1.5 pb-1.5 border-b border-border/20 mb-1">
                                 <input
                                     type="text"
-                                    placeholder="Pedir cambio de respuesta"
+                                    placeholder="Instrucción personalizada..."
                                     value={customInstruction}
                                     onChange={(e) => setCustomInstruction(e.target.value)}
                                     onKeyDown={(e) => e.key === "Enter" && handleCustomSubmit()}
-                                    className="flex-1 h-7 px-2 text-[13px] bg-transparent border-none outline-none placeholder:text-muted-foreground/50"
+                                    className="flex-1 h-7 px-2 text-xs bg-transparent border-none outline-none placeholder:text-muted-foreground/40"
                                     data-testid={`input-custom-regenerate-${testIdSuffix}`}
                                 />
                                 <button
                                     onClick={handleCustomSubmit}
                                     disabled={!customInstruction.trim()}
-                                    className="h-6 w-6 flex items-center justify-center rounded-full bg-foreground/10 hover:bg-foreground/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                                    className="h-5 w-5 flex items-center justify-center rounded-full bg-foreground/10 hover:bg-foreground/20 disabled:opacity-20 disabled:cursor-not-allowed transition-all"
                                     data-testid={`button-submit-custom-${testIdSuffix}`}
-                                    aria-label="Enviar instrucción"
-                                    title="Enviar instrucción"
+                                    aria-label="Enviar"
                                 >
-                                    <ArrowUp className="h-3.5 w-3.5" />
+                                    <ArrowUp className="h-3 w-3" />
                                 </button>
                             </div>
                             <button
-                                className="w-full flex items-center gap-2.5 px-2 py-1.5 text-[13px] text-left hover:bg-muted/60 rounded transition-colors"
+                                className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-left hover:bg-muted/50 rounded-md transition-colors"
                                 onClick={() => handleRegenerateOption()}
                                 data-testid={`option-retry-${testIdSuffix}`}
                             >
-                                <RefreshCw className="h-3.5 w-3.5 text-muted-foreground/70" />
-                                <span>Inténtalo nuevamente</span>
+                                <RefreshCw className="h-3 w-3 text-muted-foreground/60" />
+                                <span>Reintentar</span>
                             </button>
                             <button
-                                className="w-full flex items-center gap-2.5 px-2 py-1.5 text-[13px] text-left hover:bg-muted/60 rounded transition-colors"
+                                className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-left hover:bg-muted/50 rounded-md transition-colors"
                                 onClick={() => handleRegenerateOption("Agrega más detalles y explicaciones a tu respuesta")}
                                 data-testid={`option-details-${testIdSuffix}`}
                             >
-                                <ListPlus className="h-3.5 w-3.5 text-muted-foreground/70" />
-                                <span>Agregar detalles</span>
+                                <ListPlus className="h-3 w-3 text-muted-foreground/60" />
+                                <span>Más detalle</span>
                             </button>
                             <button
-                                className="w-full flex items-center gap-2.5 px-2 py-1.5 text-[13px] text-left hover:bg-muted/60 rounded transition-colors"
+                                className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-left hover:bg-muted/50 rounded-md transition-colors"
                                 onClick={() => handleRegenerateOption("Hazlo más conciso y breve, elimina redundancias")}
                                 data-testid={`option-concise-${testIdSuffix}`}
                             >
-                                <Minus className="h-3.5 w-3.5 text-muted-foreground/70" />
-                                <span>Más concisa</span>
+                                <Minus className="h-3 w-3 text-muted-foreground/60" />
+                                <span>Más conciso</span>
                             </button>
                         </div>
                     </PopoverContent>
@@ -898,37 +908,63 @@ export const ActionToolbar = memo(function ActionToolbar({
                         <Button
                             variant="ghost"
                             size="icon"
-                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                            className={btnClass}
                             onClick={() => onReadAloud(messageId, content)}
                             data-testid={`button-read-aloud-${testIdSuffix}`}
-                            aria-label={
-                                speakingMessageId === messageId
-                                    ? "Detener lectura"
-                                    : "Leer en voz alta"
-                            }
+                            aria-label={speakingMessageId === messageId ? "Detener" : "Escuchar"}
                         >
                             {speakingMessageId === messageId ? (
-                                <VolumeX className="h-4 w-4" />
+                                <VolumeX className={iconClass} />
                             ) : (
-                                <Volume2 className="h-4 w-4" />
+                                <Volume2 className={iconClass} />
                             )}
                         </Button>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                        <p>
-                            {speakingMessageId === messageId
-                                ? "Detener lectura"
-                                : "Leer en voz alta"}
-                        </p>
+                    <TooltipContent side="bottom" className="text-xs px-2 py-1">
+                        {speakingMessageId === messageId ? "Detener" : "Escuchar"}
                     </TooltipContent>
                 </Tooltip>
 
-                {/* Sources / Fuentes button - only when webSources exist */}
+                {/* Separator + secondary actions */}
+                <div className="w-px h-3 bg-border/30 mx-1" />
+
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className={btnClass}
+                            onClick={() => onShare(content)}
+                            data-testid={`button-share-${testIdSuffix}`}
+                            aria-label="Compartir"
+                        >
+                            <Share2 className={iconClass} />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="text-xs px-2 py-1">Compartir</TooltipContent>
+                </Tooltip>
+
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className={btnClass}
+                            onClick={handleDownload}
+                            data-testid={`button-download-${testIdSuffix}`}
+                            aria-label="Descargar"
+                        >
+                            <Download className={iconClass} />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="text-xs px-2 py-1">Descargar</TooltipContent>
+                </Tooltip>
+
+                {/* Sources - only when webSources exist */}
                 {webSources && webSources.length > 0 && onViewSources && (
                     <>
-                        <div className="w-px h-4 bg-border/50 mx-1" />
-                        {/* Source favicon badges */}
-                        <div className="flex items-center gap-0.5">
+                        <div className="w-px h-3 bg-border/30 mx-1" />
+                        <div className="flex items-center -space-x-1">
                             {webSources
                                 .reduce((acc: WebSource[], s) => {
                                     const d = s.domain?.replace(/^www\./, "") || "";
@@ -941,12 +977,12 @@ export const ActionToolbar = memo(function ActionToolbar({
                                         <TooltipTrigger asChild>
                                             <button
                                                 onClick={onViewSources}
-                                                className="w-5 h-5 rounded-full border border-border bg-muted hover:border-primary transition-all flex items-center justify-center overflow-hidden"
+                                                className="w-4 h-4 rounded-full border border-background bg-muted hover:ring-1 hover:ring-primary/30 transition-all flex items-center justify-center overflow-hidden"
                                             >
                                                 <img
                                                     src={`https://www.google.com/s2/favicons?domain=${source.domain?.replace(/^www\./, "")}&sz=32`}
                                                     alt=""
-                                                    className="w-3.5 h-3.5 rounded-full"
+                                                    className="w-3 h-3 rounded-full"
                                                     onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                                                 />
                                             </button>
@@ -961,13 +997,13 @@ export const ActionToolbar = memo(function ActionToolbar({
                             <TooltipTrigger asChild>
                                 <button
                                     onClick={onViewSources}
-                                    className="flex items-center gap-1 px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground transition-colors rounded hover:bg-muted"
+                                    className="text-[10px] text-muted-foreground/60 hover:text-foreground transition-colors ml-1"
                                 >
-                                    Fuentes
+                                    {webSources.length}
                                 </button>
                             </TooltipTrigger>
-                            <TooltipContent side="bottom">
-                                <p>Ver fuentes ({webSources.length})</p>
+                            <TooltipContent side="bottom" className="text-xs">
+                                Ver {webSources.length} fuentes
                             </TooltipContent>
                         </Tooltip>
                     </>
