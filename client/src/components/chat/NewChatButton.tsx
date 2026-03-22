@@ -32,8 +32,8 @@ export function NewChatButton({
   const baseClasses = "relative group font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary/20 active:scale-[0.99]";
 
   const variantClasses = {
-    full: "liquid-button flex min-h-10 w-full items-center justify-between gap-2 rounded-[16px] border border-white/40 bg-white/72 px-3 py-2 text-[13px] text-foreground transition-all duration-200 hover:border-[#A5A0FF]/42 hover:bg-white/92 hover:shadow-[0_12px_24px_rgba(96,90,190,0.1)] dark:border-white/10 dark:bg-white/[0.05] dark:hover:bg-white/[0.09]",
-    compact: "liquid-button flex min-h-10 items-center justify-center gap-2 rounded-[16px] border border-white/35 bg-white/70 px-3.5 py-2 text-[13px] text-foreground transition-all duration-200 hover:border-[#A5A0FF]/35 hover:bg-white/88 hover:shadow-[0_10px_22px_rgba(96,90,190,0.1)] dark:border-white/10 dark:bg-white/[0.05] dark:hover:bg-white/[0.08]",
+    full: "liquid-button flex min-h-[38px] w-full items-center justify-between gap-2 rounded-[14px] border border-white/40 bg-white/72 px-3 py-1.5 text-[12.5px] text-foreground transition-all duration-200 hover:border-[#A5A0FF]/42 hover:bg-white/92 hover:shadow-[0_10px_22px_rgba(96,90,190,0.1)] dark:border-white/10 dark:bg-white/[0.05] dark:hover:bg-white/[0.09]",
+    compact: "liquid-button flex min-h-9 items-center justify-center gap-2 rounded-[14px] border border-white/35 bg-white/70 px-3 py-1.5 text-[12.5px] text-foreground transition-all duration-200 hover:border-[#A5A0FF]/35 hover:bg-white/88 hover:shadow-[0_10px_22px_rgba(96,90,190,0.1)] dark:border-white/10 dark:bg-white/[0.05] dark:hover:bg-white/[0.08]",
     fab: "liquid-button fixed bottom-6 right-6 z-50 flex items-center justify-center w-14 h-14 rounded-full border border-border/40 bg-background/80 backdrop-blur-xl text-foreground shadow-lg hover:shadow-xl hover:-translate-y-1 md:hidden transition-all duration-300",
   };
 
@@ -49,11 +49,11 @@ export function NewChatButton({
     >
       <div className="flex items-center gap-2">
         {isCreating ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
         ) : showSuccess ? (
-          <Check className="h-4 w-4" />
+          <Check className="h-3.5 w-3.5" />
         ) : (
-          <SquarePen className="h-4 w-4" />
+          <SquarePen className="h-3.5 w-3.5" />
         )}
 
         {variant !== "fab" && (
@@ -62,7 +62,7 @@ export function NewChatButton({
       </div>
 
       {variant === "full" && (
-        <kbd className="hidden h-[18px] items-center rounded-md border border-border/80 bg-transparent px-1.5 text-[9px] text-muted-foreground lg:inline-flex">
+        <kbd className="hidden h-4 items-center rounded-md border border-border/80 bg-transparent px-1 text-[8px] text-muted-foreground lg:inline-flex">
           ⌘N
         </kbd>
       )}
