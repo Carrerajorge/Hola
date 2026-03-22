@@ -7,7 +7,7 @@ import { ChatErrorBoundary } from "@/components/error-boundaries";
 import type { Gpt } from "@/components/gpt-explorer";
 import { OfflineIndicator, OfflineBanner } from "@/components/offline-indicator";
 import { useMediaLibrary } from "@/hooks/use-media-library";
-import { lazy, Suspense, useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { lazy, Suspense, useState, useCallback, useMemo, useEffect, useRef, type ComponentType } from "react";
 
 import { useFavorites } from "@/hooks/use-favorites";
 import { usePromptTemplates } from "@/hooks/use-prompt-templates";
@@ -30,6 +30,7 @@ import { useSuperAgentStore } from "@/stores/super-agent-store";
 import { pollingManager } from "@/lib/polling-manager";
 import { queryClient } from "@/lib/queryClient";
 import { apiFetch } from "@/lib/apiClient";
+import { normalizeAppBuildVersion, recoverFromChunkError } from "@/lib/chunk-recovery";
 
 const isLocalDevHost = () => {
   if (typeof window === "undefined") return false;
@@ -46,29 +47,49 @@ const isLocalDevHost = () => {
   return false;
 };
 
-const AppsViewLazy = lazy(() => import("@/components/apps-view").then((m) => ({ default: m.AppsView })));
-const ChannelsHubDialogLazy = lazy(() =>
+const APP_VERSION = normalizeAppBuildVersion(import.meta.env.VITE_APP_VERSION);
+const LazyRecoveryFallback = (() => null) as ComponentType<any>;
+
+const lazyWithRetry = <T extends ComponentType<any>>(
+  componentImport: () => Promise<{ default: T }>,
+) =>
+  lazy(async () => {
+    try {
+      return await componentImport();
+    } catch (error) {
+      if (typeof window !== "undefined") {
+        const recovered = await recoverFromChunkError(error, APP_VERSION);
+        if (recovered) {
+          return { default: LazyRecoveryFallback as T };
+        }
+      }
+      throw error;
+    }
+  });
+
+const AppsViewLazy = lazyWithRetry(() => import("@/components/apps-view").then((m) => ({ default: m.AppsView })));
+const ChannelsHubDialogLazy = lazyWithRetry(() =>
   import("@/components/channels-hub-dialog").then((m) => ({ default: m.ChannelsHubDialog }))
 );
 import { whatsappWebEventStream } from "@/lib/whatsapp-web-events";
-const GptExplorerLazy = lazy(() => import("@/components/gpt-explorer").then((m) => ({ default: m.GptExplorer })));
-const AboutGptDialogLazy = lazy(() =>
+const GptExplorerLazy = lazyWithRetry(() => import("@/components/gpt-explorer").then((m) => ({ default: m.GptExplorer })));
+const AboutGptDialogLazy = lazyWithRetry(() =>
   import("@/components/about-gpt-dialog").then((m) => ({ default: m.AboutGptDialog }))
 );
-const GptBuilderLazy = lazy(() => import("@/components/gpt-builder").then((m) => ({ default: m.GptBuilder })));
-const UserLibraryLazy = lazy(() => import("@/components/user-library").then((m) => ({ default: m.UserLibrary })));
-const SearchModalLazy = lazy(() => import("@/components/search-modal").then((m) => ({ default: m.SearchModal })));
-const SettingsDialogLazy = lazy(() => import("@/components/settings-dialog").then((m) => ({ default: m.SettingsDialog })));
-const KeyboardShortcutsDialogLazy = lazy(() =>
+const GptBuilderLazy = lazyWithRetry(() => import("@/components/gpt-builder").then((m) => ({ default: m.GptBuilder })));
+const UserLibraryLazy = lazyWithRetry(() => import("@/components/user-library").then((m) => ({ default: m.UserLibrary })));
+const SearchModalLazy = lazyWithRetry(() => import("@/components/search-modal").then((m) => ({ default: m.SearchModal })));
+const SettingsDialogLazy = lazyWithRetry(() => import("@/components/settings-dialog").then((m) => ({ default: m.SettingsDialog })));
+const KeyboardShortcutsDialogLazy = lazyWithRetry(() =>
   import("@/components/keyboard-shortcuts-dialog").then((m) => ({ default: m.KeyboardShortcutsDialog }))
 );
-const ExportChatDialogLazy = lazy(() =>
+const ExportChatDialogLazy = lazyWithRetry(() =>
   import("@/components/export-chat-dialog").then((m) => ({ default: m.ExportChatDialog }))
 );
-const FavoritesDialogLazy = lazy(() =>
+const FavoritesDialogLazy = lazyWithRetry(() =>
   import("@/components/favorites-dialog").then((m) => ({ default: m.FavoritesDialog }))
 );
-const PromptTemplatesDialogLazy = lazy(() =>
+const PromptTemplatesDialogLazy = lazyWithRetry(() =>
   import("@/components/prompt-templates-dialog").then((m) => ({ default: m.PromptTemplatesDialog }))
 );
 

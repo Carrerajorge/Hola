@@ -2,6 +2,7 @@ import React, { Component, ErrorInfo, ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { normalizeAppBuildVersion, recoverFromChunkError } from "@/lib/chunk-recovery";
 
 interface Props {
     children: ReactNode;
@@ -14,6 +15,8 @@ interface State {
     error: Error | null;
     errorInfo: ErrorInfo | null;
 }
+
+const APP_VERSION = normalizeAppBuildVersion(import.meta.env.VITE_APP_VERSION);
 
 export class GlobalErrorBoundary extends Component<Props, State> {
     public state: State = {
@@ -29,6 +32,7 @@ export class GlobalErrorBoundary extends Component<Props, State> {
     public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
         console.error("Uncaught error:", error, errorInfo);
         this.setState({ errorInfo });
+        void recoverFromChunkError(error, APP_VERSION);
         // Here you would typically log to an error reporting service
     }
 

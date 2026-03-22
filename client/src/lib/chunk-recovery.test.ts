@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  APP_VERSION_STORAGE_KEY,
   CHUNK_RELOAD_VERSION_KEY,
   isChunkLoadError,
   normalizeAppBuildVersion,
+  recoverFromChunkError,
   shouldAttemptChunkRecovery,
 } from "@/lib/chunk-recovery";
 
@@ -50,5 +52,45 @@ describe("chunk recovery helpers", () => {
 
     expect(shouldAttemptChunkRecovery(error, "24860974", storage)).toBe(true);
     expect(storage.getItem(CHUNK_RELOAD_VERSION_KEY)).toBe("24860974");
+  });
+
+  it("clears service workers and caches before reloading on chunk errors", async () => {
+    const sessionStorage = createStorage();
+    const localStorage = createStorage();
+    const deletedCaches: string[] = [];
+    let unregisterCalls = 0;
+    let reloadCalls = 0;
+
+    const recovered = await recoverFromChunkError(
+      new Error("Importing a module script failed"),
+      "24860974",
+      {
+        sessionStorage,
+        localStorage,
+        getRegistrations: async () => [
+          {
+            unregister: async () => {
+              unregisterCalls += 1;
+              return true;
+            },
+          },
+        ],
+        getCacheNames: async () => ["v1", "v2"],
+        deleteCache: async (cacheName) => {
+          deletedCaches.push(cacheName);
+          return true;
+        },
+        reload: () => {
+          reloadCalls += 1;
+        },
+      },
+    );
+
+    expect(recovered).toBe(true);
+    expect(sessionStorage.getItem(CHUNK_RELOAD_VERSION_KEY)).toBe("24860974");
+    expect(localStorage.getItem(APP_VERSION_STORAGE_KEY)).toBe("24860974");
+    expect(unregisterCalls).toBe(1);
+    expect(deletedCaches).toEqual(["v1", "v2"]);
+    expect(reloadCalls).toBe(1);
   });
 });

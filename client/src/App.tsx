@@ -18,7 +18,7 @@ import { KeyboardShortcutsModal } from "@/components/modals/KeyboardShortcutsMod
 import { OfflineIndicator } from "@/components/OfflineIndicator";
 import { SkipLink } from "@/lib/accessibility";
 import { trackWorkspaceEvent } from "@/lib/analytics";
-import { normalizeAppBuildVersion, shouldAttemptChunkRecovery } from "@/lib/chunk-recovery";
+import { normalizeAppBuildVersion, recoverFromChunkError } from "@/lib/chunk-recovery";
 import { AlertTriangle, CheckCircle2, Info, Loader2, XCircle } from "lucide-react";
 import LoginPage from "@/pages/login";
 import LoginApprovePage from "@/pages/login-approve";
@@ -34,8 +34,8 @@ const lazyWithRetry = <T extends React.ComponentType<any>>(
       return await componentImport();
     } catch (error) {
       if (typeof window !== "undefined") {
-        if (shouldAttemptChunkRecovery(error, APP_VERSION)) {
-          window.location.reload();
+        const recovered = await recoverFromChunkError(error, APP_VERSION);
+        if (recovered) {
           return { default: (() => <PageLoader />) as unknown as T };
         }
       }
