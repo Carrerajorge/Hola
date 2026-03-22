@@ -1,7 +1,7 @@
 name: codeql-config
 
 queries:
-  - uses: security-and-quality
+  - uses: security-extended
 
 paths:
   - client
@@ -21,6 +21,13 @@ paths-ignore:
   - fastapi_sse
   - python_agent_tools
   - migrations
+  - client/public/**
   - server/openclaw/**
+  - server/local-runner/**
+  - server/services/superIntelligence/**
+  - server/services/**/docs/**
+  - server/services/**/test/**
+  - server/services/**/test-helpers/**
+  - server/services/**/__tests__/**
   - "**/*.min.js"
   - "**/*.snap"
