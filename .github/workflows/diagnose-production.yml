@@ -122,6 +122,93 @@ jobs:
             echo
           done
 
+          echo "=== active analyze probe ==="
+          ACTIVE_SLOT="$(sed -n 's/.*"active_slot":[[:space:]]*"\([^"]*\)".*/\1/p' "${DEPLOY_PATH}/deploy-state.json" | head -n1)"
+          ACTIVE_PORT="$(sed -n 's/.*"active_port":[[:space:]]*\([0-9][0-9]*\).*/\1/p' "${DEPLOY_PATH}/deploy-state.json" | head -n1)"
+          APP_CONTAINER="hola-${ACTIVE_SLOT}-app"
+          if [ -z "${ACTIVE_PORT}" ]; then
+            ACTIVE_PORT="5001"
+          fi
+          if [ -z "${ACTIVE_SLOT}" ]; then
+            ACTIVE_SLOT="green"
+            APP_CONTAINER="hola-green-app"
+          fi
+
+          echo "active_slot=${ACTIVE_SLOT}"
+          echo "active_port=${ACTIVE_PORT}"
+          echo "app_container=${APP_CONTAINER}"
+
+          TMPDIR="$(mktemp -d)"
+          cleanup() {
+            rm -rf "${TMPDIR}"
+          }
+          trap cleanup EXIT
+
+          timeout 15 curl -sS -D "${TMPDIR}/csrf.headers" -c "${TMPDIR}/cookies" \
+            "http://127.0.0.1:${ACTIVE_PORT}/api/csrf/token?rotate=1" \
+            -o "${TMPDIR}/csrf.json" || true
+          echo "--- csrf response ---"
+          cat "${TMPDIR}/csrf.json" || true
+
+          CSRF_TOKEN="$(grep -o '"csrfToken":"[^"]*"' "${TMPDIR}/csrf.json" | sed 's/.*:"\([^"]*\)"/\1/' | head -n1)"
+          echo "csrf_token_present=$([ -n "${CSRF_TOKEN}" ] && echo yes || echo no)"
+
+          cat > "${TMPDIR}/analyze-payload.json" <<'JSON'
+          {
+            "messages": [
+              {
+                "role": "user",
+                "content": "dame un resumen"
+              }
+            ],
+            "conversationId": "diag-analyze-inline",
+            "attachments": [
+              {
+                "name": "diag-inline.txt",
+                "mimeType": "text/plain",
+                "type": "document",
+                "content": "SG9sYS4gRXN0ZSBkb2N1bWVudG8gZXMgdW5hIHBydWViYSBtaW5pbWEgcGFyYSByZXByb2R1Y2lyIHVuIGVycm9yIDUwMCBlbiBlbCBhbmFsaXphZG8u"
+              }
+            ]
+          }
+          JSON
+
+          ANALYZE_STATUS="$(
+            timeout 30 curl -sS -b "${TMPDIR}/cookies" -c "${TMPDIR}/cookies" \
+              -H "Content-Type: application/json" \
+              -H "Origin: http://127.0.0.1:${ACTIVE_PORT}" \
+              -H "X-CSRF-Token: ${CSRF_TOKEN}" \
+              -H "X-Requested-With: XMLHttpRequest" \
+              -D "${TMPDIR}/analyze.headers" \
+              -o "${TMPDIR}/analyze.body" \
+              -w "%{http_code}" \
+              "http://127.0.0.1:${ACTIVE_PORT}/api/chat/analyze" \
+              --data-binary "@${TMPDIR}/analyze-payload.json" || true
+          )"
+
+          echo "--- analyze status ---"
+          echo "${ANALYZE_STATUS}"
+          echo "--- analyze headers ---"
+          cat "${TMPDIR}/analyze.headers" || true
+          echo "--- analyze body ---"
+          cat "${TMPDIR}/analyze.body" || true
+
+          ANALYZE_REQUEST_ID="$(grep -o '"requestId":"[^"]*"' "${TMPDIR}/analyze.body" | sed 's/.*:"\([^"]*\)"/\1/' | head -n1)"
+          echo "analyze_request_id=${ANALYZE_REQUEST_ID:-missing}"
+
+          echo "=== active app recent logs ==="
+          docker logs --since=5m "${APP_CONTAINER}" 2>&1 | tail -n 500 || true
+
+          echo "=== active app filtered logs ==="
+          FILTER_PATTERN='Analyze|APIErrorHandler|PARE_ERROR|TypeError|ReferenceError|RangeError|RESPONSE_CONTRACT|DATA_MODE_OUTPUT|diag-inline|diag-analyze-inline'
+          if [ -n "${ANALYZE_REQUEST_ID}" ]; then
+            FILTER_PATTERN="${FILTER_PATTERN}|${ANALYZE_REQUEST_ID}"
+          fi
+          docker logs --since=5m "${APP_CONTAINER}" 2>&1 | grep -nE "${FILTER_PATTERN}" || true
+
+          echo "=== nginx error log tail ==="
+          tail -n 80 /var/log/nginx/error.log 2>/dev/null || true
+
           echo "=== app inspect ==="
           for name in hola-blue-app hola-green-app; do
             echo "--- ${name} inspect ---"
