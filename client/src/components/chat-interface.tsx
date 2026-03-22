@@ -9003,23 +9003,19 @@ IMPORTANTE:
               ackChatId ||
               latestChatIdRef.current ||
               chatId ||
-              (await waitForActiveChatId());
-            const effectiveStreamChatId = resolveStreamChatId(
+              (await waitForActiveChatId(hasAttachedFiles ? 2000 : 200));
+            let effectiveStreamChatId = resolveStreamChatId(
               sendMessageAck,
               fallbackChatId,
             );
             if (!effectiveStreamChatId) {
-              toast({
-                title: "Error",
-                description:
-                  "No se pudo crear/confirmar el chat para enviar este mensaje. Intenta de nuevo.",
-                variant: "destructive",
-                duration: 5000,
-              });
-              setAiStateForChat("idle", submitConversationId);
-              setAiProcessStepsForChat([], submitConversationId);
-              abortControllerRef.current = null;
-              return;
+              // Generate a provisional chatId so the stream can proceed even for
+              // brand-new chats where onSendMessage hasn't resolved yet.
+              effectiveStreamChatId = `chat_${Date.now()}`;
+              console.warn(
+                "[handleSubmit] No chatId available yet — using provisional:",
+                effectiveStreamChatId,
+              );
             }
             if (effectiveStreamChatId) {
               // SSE streaming mode - real-time streaming from server
