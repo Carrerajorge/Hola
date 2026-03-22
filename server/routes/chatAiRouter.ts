@@ -57,6 +57,8 @@ import {
   AuditTrailCollector,
   type AuditBatchSummary,
 } from "../lib/pareAuditTrail";
+import { createPareLogger } from "../lib/pareLogger";
+import { pareMetrics } from "../lib/pareMetrics";
 import { createChunkStore } from "../lib/pareChunkStore";
 import { normalizeDocument } from "../services/structuredDocumentNormalizer";
 import { ObjectStorageService } from "../replit_integrations/object_storage/objectStorage";
