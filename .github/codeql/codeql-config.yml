@@ -13,11 +13,14 @@ paths:
 paths-ignore:
   - node_modules
   - dist
+  - "**/node_modules/**"
+  - "**/dist/**"
   - artifacts
   - docs
   - ocr_service
   - fastapi_sse
   - python_agent_tools
   - migrations
+  - server/openclaw/**
   - "**/*.min.js"
   - "**/*.snap"
