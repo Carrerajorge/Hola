@@ -40,37 +40,11 @@ jobs:
       ocr_digest: ${{ steps.build_ocr.outputs.digest }}
 
     steps:
-      - name: Fetch source tarball
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          REF: ${{ inputs.sha }}
-        run: |
-          set -euo pipefail
-
-          tmp_dir="$(mktemp -d)"
-          archive_path="${tmp_dir}/source.tar.gz"
-
-          curl -fsSL \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${REPO}/tarball/${REF}" \
-            -o "${archive_path}"
-
-          tar -xzf "${archive_path}" -C "${tmp_dir}"
-
-          source_root="$(find "${tmp_dir}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
-          if [ -z "${source_root}" ]; then
-            echo "::error::Failed to extract repository archive"
-            exit 1
-          fi
-
-          find "${GITHUB_WORKSPACE}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-          shopt -s dotglob nullglob
-          mv "${source_root}"/* "${GITHUB_WORKSPACE}/"
-          shopt -u dotglob nullglob
-
-          rm -rf "${tmp_dir}"
+      - name: Check out source at requested SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+          fetch-depth: 1
 
       - name: Compute image tag
         id: meta
