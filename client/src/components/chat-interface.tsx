@@ -238,6 +238,10 @@ import {
   uniq,
   compressImageToDataUrl,
 } from "@/lib/attachmentIngest";
+import {
+  isDocumentFile,
+  toAnalyzePayloadAttachment,
+} from "@/lib/documentAnalysisAttachments";
 import { useChats } from "@/hooks/use-chats";
 import {
   useChatFolders,
@@ -2683,96 +2687,6 @@ export function ChatInterface({
     [],
   );
 
-  const isDocumentFile = (
-    mimeType: string,
-    fileName: string,
-    type?: string,
-  ): boolean => {
-    const lowerMime = (mimeType || "").toLowerCase();
-    const lowerName = (fileName || "").toLowerCase();
-    const lowerType = (type || "").toLowerCase();
-
-    if (lowerType === "image" || lowerMime.startsWith("image/")) return false;
-
-    const docMimePatterns = [
-      "pdf",
-      "word",
-      "document",
-      "sheet",
-      "excel",
-      "spreadsheet",
-      "presentation",
-      "powerpoint",
-      "csv",
-      "text/plain",
-      "text/csv",
-      "application/json",
-    ];
-    if (docMimePatterns.some((p) => lowerMime.includes(p))) return true;
-
-    const docExtensions = [
-      ".pdf",
-      ".doc",
-      ".docx",
-      ".xls",
-      ".xlsx",
-      ".ppt",
-      ".pptx",
-      ".csv",
-      ".txt",
-      ".json",
-      ".rtf",
-      ".odt",
-      ".ods",
-      ".odp",
-    ];
-    if (docExtensions.some((ext) => lowerName.endsWith(ext))) return true;
-
-    if (["pdf", "word", "excel", "ppt", "document"].includes(lowerType))
-      return true;
-
-    if (!lowerMime || lowerMime === "application/octet-stream") {
-      const hasImageExt = [
-        ".jpg",
-        ".jpeg",
-        ".png",
-        ".gif",
-        ".webp",
-        ".svg",
-        ".bmp",
-      ].some((ext) => lowerName.endsWith(ext));
-      return !hasImageExt;
-    }
-
-    return false;
-  };
-
-  const toAnalyzePayloadAttachment = (att: any) => {
-    const rest = { ...(att || {}) };
-    const normalizedType = [
-      "word",
-      "excel",
-      "pdf",
-      "text",
-      "csv",
-      "presentation",
-      "ppt",
-      "image",
-      "document",
-    ].includes((rest.type || "").toLowerCase())
-      ? rest.type
-      : "document";
-
-    return {
-      id: rest.id || rest.fileId,
-      name: rest.name || "documento",
-      type: normalizedType === "image" ? "image" : "document",
-      mimeType: rest.mimeType || rest.type || "application/octet-stream",
-      storagePath: rest.storagePath,
-      fileId: rest.fileId || rest.id,
-    };
-  };
-
   const normalizeLocalExecArtifact = useCallback(
     (rawArtifact: any, rawPayload?: any): Message["artifact"] | undefined => {
       const source =
@@ -2881,6 +2795,7 @@ export function ChatInterface({
     async (opts: {
       userMessageId: string;
       conversationId?: string | null;
+      targetChatId?: string | null;
       history: { role: string; content: string }[];
       attachments: any[];
       sourceLabel?: string;
@@ -2892,6 +2807,14 @@ export function ChatInterface({
           : `temp_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
       const analysisConversationId =
         opts.conversationId || chatId || latestChatIdRef.current;
+      const analysisTargetChatId =
+        typeof opts.targetChatId === "string" &&
+        opts.targetChatId.trim().length > 0
+          ? opts.targetChatId.trim()
+          : typeof analysisConversationId === "string" &&
+              analysisConversationId.trim().length > 0
+            ? analysisConversationId.trim()
+            : null;
 
       const analysisAttachmentPayload = opts.attachments
         .map(toAnalyzePayloadAttachment)
@@ -2994,8 +2917,20 @@ export function ChatInterface({
             : undefined,
         };
 
-        // Persist final analysis result and replace placeholder.
-        onSendMessage(analysisResultMsg).catch((err) => {
+        setOptimisticMessages((prev) =>
+          prev.map((m: Message) =>
+            m.id === analysisMessageId || m.clientTempId === analysisMessageId
+              ? analysisResultMsg
+              : m,
+          ),
+        );
+
+        // Persist final analysis result against the resolved target chat so it
+        // survives new-chat remounts and background processing.
+        persistMessageToTargetChat(
+          analysisTargetChatId || "",
+          analysisResultMsg,
+        ).catch((err) => {
           const errorMessage =
             err instanceof Error
               ? err.message
@@ -3033,6 +2968,17 @@ export function ChatInterface({
         const errorMessage =
           analysisError?.message || "No se pudo analizar el documento.";
         markMessageDeliveryError(opts.userMessageId, errorMessage);
+        const analysisErrorMsg: Message = {
+          id: analysisMessageId,
+          clientTempId: analysisMessageId,
+          role: "assistant",
+          content: `No se pudo analizar el documento. ${errorMessage}`,
+          timestamp: new Date(),
+          requestId: generateRequestId(),
+          userMessageId: opts.userMessageId,
+          deliveryStatus: "error",
+          deliveryError: errorMessage,
+        };
         setOptimisticMessages((prev) =>
           prev.map((m: Message) => {
             if (
@@ -3040,14 +2986,18 @@ export function ChatInterface({
               m.clientTempId !== analysisMessageId
             )
               return m;
-            return {
-              ...m,
-              deliveryStatus: "error",
-              deliveryError: errorMessage,
-              content: `No se pudo analizar el documento. ${errorMessage}`,
-            };
+            return analysisErrorMsg;
           }),
         );
+        void persistMessageToTargetChat(
+          analysisTargetChatId || "",
+          analysisErrorMsg,
+        ).catch((persistError) => {
+          console.error(
+            "[Document Analysis] Failed to persist analysis error message:",
+            persistError,
+          );
+        });
         if (aiStateRef.current === "thinking") {
           setAiStateForChat("idle", analysisConversationId);
           setAiProcessStepsForChat([], analysisConversationId);
@@ -3065,7 +3015,7 @@ export function ChatInterface({
     },
     [
       markMessageDeliveryError,
-      onSendMessage,
+      persistMessageToTargetChat,
       setAiProcessStepsForChat,
       setAiStateForChat,
       setOptimisticMessages,
@@ -8233,10 +8183,26 @@ export function ChatInterface({
         );
       }
 
+      const hasAttachedFiles = attachments.length > 0;
       if (hasDocumentAttachments && documentAttachmentsForAnalysis.length > 0) {
+        await applyPromptIntegrity();
+        const documentSendAck = await onSendMessage(userMsg).catch((err) => {
+          console.warn(
+            "[handleSubmit] Failed to persist document user message before analysis:",
+            err,
+          );
+          return undefined;
+        });
+        const analysisTargetChatId =
+          documentSendAck?.chatId ||
+          documentSendAck?.run?.chatId ||
+          submitConversationId ||
+          (await waitForActiveChatId(1200));
+
         void runDocumentAnalysisAsync({
           userMessageId: userMsgId,
-          conversationId: chatId,
+          conversationId: analysisTargetChatId || chatId,
+          targetChatId: analysisTargetChatId,
           history: [
             ...messages.map((m) => ({
               role: m.role,
@@ -8252,6 +8218,7 @@ export function ChatInterface({
             error,
           );
         });
+        return;
       }
 
       // -------------------------------------------------------------------------
@@ -8260,7 +8227,6 @@ export function ChatInterface({
 
       // Auto-detect if task requires Agent mode (only for non-generation complex tasks)
       // Use captured state (userInput, currentUploadedFiles) not component state
-      const hasAttachedFiles = attachments.length > 0;
       const complexityCheck = shouldAutoActivateAgent(
         userInput,
         hasAttachedFiles,
