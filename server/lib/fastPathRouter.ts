@@ -1,4 +1,5 @@
 import { llmGateway } from "./llmGateway";
+import { hasExplicitDocumentArtifactRequest } from "@shared/explicitArtifactRequests";
 
 export type IntentType =
   | "greeting"
@@ -54,8 +55,8 @@ const SIMPLE_QUESTION_PATTERNS = [
 ];
 
 const DOCUMENT_PATTERNS = [
-  /(crear?|genera?r?|hacer?|escribir?)\s*(un|una|el|la)?\s*(documento|word|excel|pdf|informe|reporte|cv|curr[ií]culum)/i,
-  /(make|create|generate|write)\s*(a|an|the)?\s*(document|report|spreadsheet|presentation)/i,
+  /(crear?|genera?r?|hacer?|escribir?)\s*(un|una|el|la)?\s*(documento|word|docx|pdf|archivo)/i,
+  /(make|create|generate|write)\s*(a|an|the)?\s*(document|word|docx|pdf|file)/i,
 ];
 
 const CODE_PATTERNS = [
@@ -147,6 +148,19 @@ export function classifyPromptFast(prompt: string): ClassificationResult {
         recommendedLane: deriveRecommendedLane(codeComplexity, codeSuggestedModel),
       };
     }
+  }
+
+  if (hasExplicitDocumentArtifactRequest(prompt)) {
+    return {
+      intent: "document_generation",
+      complexity: "moderate",
+      confidence: 0.9,
+      suggestedModel: "pro",
+      requiresTools: ["document_generation"],
+      estimatedTokens: 1000,
+      canUseFastPath: false,
+      recommendedLane: "deep" as RecommendedLane,
+    };
   }
 
   for (const pattern of DOCUMENT_PATTERNS) {

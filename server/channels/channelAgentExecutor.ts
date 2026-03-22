@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import type { Response } from 'express';
+import { hasExplicitDocumentArtifactRequest } from '@shared/explicitArtifactRequests';
 import { createUnifiedRun, executeUnifiedChat } from '../agent/unifiedChatHandler';
 import { storage } from '../storage';
 import { MemorySseResponse } from '../integrations/whatsappWebAutoReply';
@@ -62,9 +63,6 @@ const EXT_BY_MIME: Record<string, string> = {
     'image/jpeg': '.jpg',
     'image/webp': '.webp',
 };
-
-const WORD_DOCUMENT_REQUEST_RE = /\b(word|docx|documento|document)\b/i;
-const DOCUMENT_CREATE_ACTION_RE = /\b(crea\w*|genera\w*|env[ií]a\w*|manda\w*|haz|generate|create|send|make)\b/i;
 
 function sanitizeFileName(name: string, fallback = 'artifact.bin'): string {
     const normalized = String(name || '')
@@ -239,8 +237,7 @@ function buildAutoWordTitle(chatTitle: string | undefined, inboundText: string):
 }
 
 function shouldAutoGenerateWordDocument(inboundText: string): boolean {
-    const normalized = String(inboundText || '').normalize('NFKC');
-    return WORD_DOCUMENT_REQUEST_RE.test(normalized) && DOCUMENT_CREATE_ACTION_RE.test(normalized);
+    return hasExplicitDocumentArtifactRequest(inboundText);
 }
 
 async function maybeCreateRequestedWordDocument(input: {

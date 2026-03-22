@@ -90,11 +90,16 @@ describe("classifyPromptFast", () => {
   });
 
   it("classifies document generation prompts", () => {
-    const result = classifyPromptFast("Create a report about sales");
+    const result = classifyPromptFast("Create a Word document about sales");
     expect(result.intent).toBe("document_generation");
     expect(result.complexity).toBe("moderate");
     expect(result.suggestedModel).toBe("pro");
     expect(result.requiresTools).toContain("document_generation");
+  });
+
+  it("does not classify plain writing prompts as document generation", () => {
+    const result = classifyPromptFast("Write a love letter with 400 words");
+    expect(result.intent).not.toBe("document_generation");
   });
 
   it("classifies search-related prompts", () => {

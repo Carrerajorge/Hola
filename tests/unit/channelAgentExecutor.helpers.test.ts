@@ -4,6 +4,7 @@ import { __channelAgentExecutorInternals } from "../../server/channels/channelAg
 describe("channelAgentExecutor internals", () => {
   it("detects explicit word-document requests", () => {
     expect(__channelAgentExecutorInternals.shouldAutoGenerateWordDocument("puedes crear un Word y mandarmelo")).toBe(true);
+    expect(__channelAgentExecutorInternals.shouldAutoGenerateWordDocument("escribe una carta de amor de 400 palabras")).toBe(false);
     expect(__channelAgentExecutorInternals.shouldAutoGenerateWordDocument("resuelve este ejercicio")).toBe(false);
   });
 

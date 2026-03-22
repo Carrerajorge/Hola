@@ -20,4 +20,10 @@ describe("requestSpec.detectIntent (multi-step research + Word)", () => {
     const result = detectIntent(msg, []);
     expect(["document_generation", "multi_step_task", "chat"]).toContain(result.intent);
   });
+
+  it("keeps plain drafting requests in chat when no file is requested", () => {
+    const msg = "Escribe una carta de amor de 400 palabras";
+    const result = detectIntent(msg, []);
+    expect(result.intent).toBe("chat");
+  });
 });

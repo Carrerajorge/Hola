@@ -56,7 +56,7 @@ Analiza el mensaje del usuario y clasifica su intención principal en UNA de est
 - "chat": Conversación casual, saludos, preguntas simples
 - "research": Investigación profunda, búsqueda de información detallada
 - "document_analysis": Análisis de documentos adjuntos
-- "document_generation": Crear documentos Word, informes, cartas
+- "document_generation": Crear archivos Word/PDF/documentos descargables solicitados explícitamente
 - "data_analysis": Análisis de datos, estadísticas
 - "code_generation": Crear código, programas, scripts
 - "web_automation": Navegar web, hacer reservas, compras online
@@ -65,6 +65,8 @@ Analiza el mensaje del usuario y clasifica su intención principal en UNA de est
 - "spreadsheet_creation": Crear hojas Excel
 - "multi_step_task": Tareas complejas combinando investigación + generación
 - "unknown": No determinable
+
+Si el usuario solo pide redactar una carta, informe o texto y NO menciona Word, docx, PDF, documento, archivo, descarga, exportación o formato descargable, clasifica como "chat".
 
 Responde SOLO con JSON válido:
 {"intent":"<tipo>","confidence":<0-1>,"reasoning":"<breve>","deliverableType":"<tipo>","complexityLevel":"<simple|moderate|complex>","requiresWebSearch":<bool>,"requiresDocumentGeneration":<bool>,"requiresBrowserAutomation":<bool>,"ambiguities":[]}`;

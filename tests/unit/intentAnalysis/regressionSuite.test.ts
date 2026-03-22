@@ -41,12 +41,24 @@ describe("Intent Classification - Regression Suite (pinned)", () => {
   it("document creation routes to document_generation", () => {
     const cases = [
       "Crea un documento sobre energía solar",
-      "Escribe un informe de ventas",
-      "Redacta una carta formal",
+      "Genera un archivo Word con el informe de ventas",
+      "Redacta una carta formal en PDF",
     ];
     for (const msg of cases) {
       const result = detectIntent(msg, []);
       expect(result.intent, `"${msg}" should be document_generation`).toBe("document_generation");
+    }
+  });
+
+  it("plain drafting stays in chat when no file was requested", () => {
+    const cases = [
+      "Escribe un informe de ventas",
+      "Redacta una carta formal",
+      "Escribe una carta de amor de 400 palabras",
+    ];
+    for (const msg of cases) {
+      const result = detectIntent(msg, []);
+      expect(result.intent, `"${msg}" should be chat`).toBe("chat");
     }
   });
 

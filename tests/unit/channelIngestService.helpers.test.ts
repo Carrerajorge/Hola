@@ -12,6 +12,7 @@ describe("channelIngestService internals", () => {
 
   it("detects explicit Word document requests", () => {
     expect(__channelIngestServiceInternals.shouldAutoGenerateWordDocument("puedes crear un word y mandarmelo")).toBe(true);
+    expect(__channelIngestServiceInternals.shouldAutoGenerateWordDocument("escribe una carta de amor de 400 palabras")).toBe(false);
     expect(__channelIngestServiceInternals.shouldAutoGenerateWordDocument("resuelve este ejercicio")).toBe(false);
   });
 

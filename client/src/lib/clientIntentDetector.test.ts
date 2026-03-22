@@ -42,11 +42,15 @@ describe("detectClientIntent", () => {
     });
 
     it("detects report generation", () => {
-      expect(detectClientIntent("genera un informe detallado sobre las ventas")).toBe("document_generation");
+      expect(detectClientIntent("genera un informe detallado sobre las ventas en Word")).toBe("document_generation");
     });
 
     it("detects letter drafting", () => {
-      expect(detectClientIntent("escribe una carta formal para el cliente")).toBe("document_generation");
+      expect(detectClientIntent("escribe una carta formal para el cliente en PDF")).toBe("document_generation");
+    });
+
+    it("keeps plain writing requests in chat when no file was requested", () => {
+      expect(detectClientIntent("escribe una carta formal para el cliente")).toBe("chat");
     });
   });
 

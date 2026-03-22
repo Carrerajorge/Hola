@@ -49,7 +49,7 @@ INTENCIONES DISPONIBLES:
 - "chat": Conversación casual, saludos, preguntas simples, opiniones
 - "research": Investigación profunda, búsqueda de información detallada, artículos académicos
 - "document_analysis": Análisis de documentos adjuntos (PDF, Word, Excel)
-- "document_generation": Crear documentos Word, informes, cartas, ensayos
+- "document_generation": Crear archivos Word/PDF/documentos descargables solicitados explícitamente
 - "data_analysis": Análisis de datos, estadísticas, procesamiento numérico
 - "code_generation": Crear código, programas, scripts, funciones
 - "web_automation": Navegar web, hacer reservas, compras online, automatizar browser
@@ -77,6 +77,7 @@ Responde ÚNICAMENTE con un JSON válido siguiendo este esquema exacto:
 REGLAS:
 - Sé conservador con la confianza: solo usa >0.9 cuando la intención es inequívoca
 - Si hay señales mixtas, elige la intención PRIMARIA más probable
+- Si el usuario solo pide redactar una carta, informe, ensayo o texto y no pide Word, docx, PDF, documento, archivo, descarga, exportación o formato descargable, clasifica como "chat"
 - "web_automation" requiere interacción real con un navegador (reservas, compras, navegación)
 - "research" es para búsqueda de información, NO para navegar sitios
 - Las reservas de restaurantes/hoteles/vuelos son SIEMPRE "web_automation"

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { randomUUID } from "crypto";
+import { hasExplicitDocumentArtifactRequest } from "@shared/explicitArtifactRequests";
 
 export const IntentTypeSchema = z.enum([
   "chat",
@@ -135,9 +136,8 @@ const INTENT_PATTERNS: Record<IntentType, RegExp[]> = {
     /\b(resume|summarize|extrae|extract)\b.*\b(de|from)\b/i
   ],
   document_generation: [
-    /\b(crea|create|genera|generate|escribe|write|redacta|draft)\b.*\b(documento|document|informe|report|carta|letter)\b/i,
-    // Broad, but avoid stealing obvious presentation/spreadsheet/image requests.
-    /\b(hazme|make me|prepara|prepare)\b.*\b(un|a)\b(?!.*\b(presentación|presentation|ppt|powerpoint|slides|diapositivas|excel|spreadsheet|hoja de cálculo|hoja de calculo|tabla|table|imagen|image|foto|illustration|ilustración|ilustracion)\b)/i
+    /\b(crea|create|genera|generate|escribe|write|redacta|draft|hazme|make me|prepara|prepare)\b.*\b(documento|document|word|docx|pdf|archivo|file)\b/i,
+    /\b(informe|report|carta|letter|ensayo|essay|cv|curr[ií]culum|curriculum|propuesta)\b.*\b(word|docx|pdf|archivo|file|formato|adjunta|attach|exporta|export|guarda|save|descarga|download)\b/i
   ],
   presentation_creation: [
     /\b(crea|create|genera|generate|hazme|make)\b.*\b(presentación|presentation|ppt|powerpoint|slides|diapositivas)\b/i
@@ -216,6 +216,37 @@ const AGENT_MAPPING: Record<IntentType, SpecializedAgent[]> = {
   unknown: ["content"]
 };
 
+const RESEARCH_SIGNAL_RE = /\b(investiga|busca|encuentra|search|find|research|look up|investigar)\b/i;
+const WRITE_OR_CREATE_SIGNAL_RE =
+  /\b(crea|create|genera|generate|escribe|write|redacta|draft|hazme|make me|prepara|prepare)\b/i;
+const WRITTEN_DELIVERABLE_RE =
+  /\b(documento|document|informe|report|carta|letter|resumen|summary|ensayo|essay|whitepaper|propuesta|memo|memorando)\b/i;
+
+function normalizeDocumentGenerationIntent(
+  intent: IntentType,
+  confidence: number,
+  message: string,
+): { intent: IntentType; confidence: number } {
+  if (intent !== "document_generation") {
+    return { intent, confidence };
+  }
+
+  if (hasExplicitDocumentArtifactRequest(message)) {
+    return { intent, confidence };
+  }
+
+  const normalized = String(message || "").normalize("NFKC");
+  const wantsResearch = RESEARCH_SIGNAL_RE.test(normalized);
+  const wantsCreateOrWrite = WRITE_OR_CREATE_SIGNAL_RE.test(normalized);
+  const wantsWrittenDeliverable = WRITTEN_DELIVERABLE_RE.test(normalized);
+
+  if (wantsResearch && wantsCreateOrWrite && wantsWrittenDeliverable) {
+    return { intent: "multi_step_task", confidence: Math.max(confidence, 0.8) };
+  }
+
+  return { intent: "chat", confidence: Math.min(confidence, 0.65) };
+}
+
 export function detectIntent(message: string, attachments: AttachmentSpec[] = []): { intent: IntentType; confidence: number } {
   const lowerMessage = message.toLowerCase();
 
@@ -240,8 +271,9 @@ export function detectIntent(message: string, attachments: AttachmentSpec[] = []
 
   // Special-case: combined research + document deliverable (e.g., "investiga ... y crea un Word")
   // We treat this as a multi-step task so the agent will both research and generate a DOCX artifact.
-  const wantsResearch = /\b(investiga|busca|encuentra|search|find|research|look up|investigar)\b/i.test(lowerMessage);
-  const wantsWordDoc = /\b(word|docx?|documento|informe|report|whitepaper)\b/i.test(lowerMessage);
+  const wantsResearch = RESEARCH_SIGNAL_RE.test(lowerMessage);
+  const wantsDocArtifact = hasExplicitDocumentArtifactRequest(message);
+  const wantsWrittenDeliverable = WRITTEN_DELIVERABLE_RE.test(lowerMessage);
   const wantsCreateOrWrite = /\b(crea|create|genera|generate|escribe|write|redacta|draft|prepara|prepare)\b/i.test(lowerMessage);
   const wantsSaveFile = /\b(guarda|guardar|save|exporta|export)\b/i.test(lowerMessage);
   const mentionsFile = /\b(archivo|file|txt|documento|report|informe|noticias)\b/i.test(lowerMessage);
@@ -249,7 +281,7 @@ export function detectIntent(message: string, attachments: AttachmentSpec[] = []
   if (wantsResearch && (wantsSaveFile || wantsCreateOrWrite) && (mentionsFile || mentionsDesktop)) {
     return { intent: "multi_step_task", confidence: 0.9 };
   }
-  if (wantsResearch && wantsWordDoc && wantsCreateOrWrite) {
+  if (wantsResearch && wantsCreateOrWrite && (wantsDocArtifact || wantsWrittenDeliverable)) {
     return { intent: "multi_step_task", confidence: 0.9 };
   }
 
@@ -301,6 +333,12 @@ export function detectIntent(message: string, attachments: AttachmentSpec[] = []
     "research",
   ];
   for (const intent of INTENT_CHECK_ORDER) {
+    if (intent === "document_generation") {
+      if (hasExplicitDocumentArtifactRequest(message)) {
+        return { intent: "document_generation", confidence: 0.8 };
+      }
+      continue;
+    }
     const patterns = INTENT_PATTERNS[intent] || [];
     for (const pattern of patterns) {
       if (pattern.test(lowerMessage)) {
@@ -329,9 +367,14 @@ export function createRequestSpec(params: {
   /** Confidence from the planner (used only when intentOverride is set). */
   confidenceOverride?: number;
 }): RequestSpec {
-  const { intent, confidence } = params.intentOverride
+  const detected = params.intentOverride
     ? { intent: params.intentOverride, confidence: params.confidenceOverride ?? 0.8 }
     : detectIntent(params.rawMessage, params.attachments);
+  const { intent, confidence } = normalizeDocumentGenerationIntent(
+    detected.intent,
+    detected.confidence,
+    params.rawMessage,
+  );
   const deliverableType = DELIVERABLE_MAPPING[intent];
   const targetAgents = AGENT_MAPPING[intent];
 

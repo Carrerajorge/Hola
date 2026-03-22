@@ -103,13 +103,13 @@ const GOLDEN_DATASET: GoldenEntry[] = [
     description: "Create Word document",
   },
   {
-    prompt: "Escribe un informe sobre el cambio climático",
+    prompt: "Escribe un informe sobre el cambio climático en Word",
     expectedIntent: "document_generation",
     minConfidence: 0.7,
     description: "Write a report",
   },
   {
-    prompt: "Redacta una carta de presentación para un puesto de ingeniero",
+    prompt: "Redacta una carta de presentación para un puesto de ingeniero en PDF",
     expectedIntent: "document_generation",
     minConfidence: 0.7,
     description: "Draft cover letter",
@@ -244,6 +244,12 @@ const GOLDEN_DATASET: GoldenEntry[] = [
   },
 
   // ─── Edge cases / Ambiguous ───────────────────────────────────
+  {
+    prompt: "Escribe una carta de amor de 400 palabras",
+    expectedIntent: "chat",
+    minConfidence: 0.5,
+    description: "Plain writing request without file output",
+  },
   {
     prompt: "Dame 5 razones para aprender programación",
     expectedIntent: "chat",

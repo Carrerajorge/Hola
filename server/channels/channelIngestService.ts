@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import fs from "fs/promises";
 import path from "path";
+import { hasExplicitDocumentArtifactRequest } from "@shared/explicitArtifactRequests";
 
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
@@ -147,8 +148,6 @@ const MAX_DEDUPE_CONVERSATION_KEY_LENGTH = 512;
 const MAX_CONVERSATION_RESERVATIONS = 20_000;
 const OUTBOUND_UNSAFE_CONTROL_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g;
 const OUTBOUND_BIDI_CONTROL_RE = /[\u202A-\u202E\u2066-\u2069]/g;
-const WORD_DOCUMENT_REQUEST_RE = /\b(word|docx|documento|document)\b/i;
-const DOCUMENT_CREATE_ACTION_RE = /\b(crea\w*|genera\w*|env[ií]a\w*|manda\w*|haz|generate|create|send|make)\b/i;
 const WORD_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const CONVERSATION_RUN_RESERVATION_TTL_MS = parsePositiveInt(
   process.env.CHANNEL_RUN_RESERVATION_TTL_MS,
@@ -1331,8 +1330,7 @@ function sanitizeGeneratedFileName(name: string, fallback: string): string {
 }
 
 function shouldAutoGenerateWordDocument(inboundText: string): boolean {
-  const normalized = String(inboundText || "").normalize("NFKC");
-  return WORD_DOCUMENT_REQUEST_RE.test(normalized) && DOCUMENT_CREATE_ACTION_RE.test(normalized);
+  return hasExplicitDocumentArtifactRequest(inboundText);
 }
 
 function buildAutoWordTitle(context: InboundProcessingContext): string {

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Response } from "express";
+import { hasExplicitDocumentArtifactRequest } from "@shared/explicitArtifactRequests";
 import { toolRegistry, type ToolContext, type ToolResult } from "./toolRegistry";
 import { emitTraceEvent } from "./unifiedChatHandler";
 import type { RequestSpec } from "./requestSpec";
@@ -528,7 +529,9 @@ function getToolsForIntent(
       matchedTools = withToolSubset(toolPool, ["create_presentation", "web_search", "fetch_url"]);
       break;
     case "document_generation":
-      matchedTools = withToolSubset(toolPool, ["create_document", "web_search", "fetch_url", "memory_search"]);
+      matchedTools = hasExplicitDocumentArtifactRequest(rawPrompt)
+        ? withToolSubset(toolPool, ["create_document", "web_search", "fetch_url", "memory_search"])
+        : withToolSubset(toolPool, ["web_search", "fetch_url", "memory_search"]);
       break;
     case "spreadsheet_creation":
       matchedTools = withToolSubset(toolPool, ["create_spreadsheet", "analyze_data", "generate_chart"]);

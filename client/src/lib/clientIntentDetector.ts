@@ -1,4 +1,6 @@
 
+import { hasExplicitDocumentArtifactRequest } from "@shared/explicitArtifactRequests";
+
 export type IntentType =
     | "research"
     | "data_analysis"
@@ -21,8 +23,8 @@ const INTENT_PATTERNS: Record<Exclude<IntentType, "chat">, RegExp[]> = {
         /\b(resume|summarize|extrae|extract)\b.*\b(de|from)\b/i
     ],
     document_generation: [
-        /\b(crea|create|genera|generate|escribe|write|redacta|draft)\b.*\b(documento|document|informe|report|carta|letter)\b/i,
-        /\b(hazme|make me|prepara|prepare)\b.*\b(un|a)\b/i
+        /\b(crea|create|genera|generate|escribe|write|redacta|draft|hazme|make me|prepara|prepare)\b.*\b(documento|document|word|docx|pdf|archivo|file)\b/i,
+        /\b(informe|report|carta|letter|ensayo|essay|cv|curr[ií]culum|curriculum|propuesta)\b.*\b(word|docx|pdf|archivo|file|formato|adjunta|attach|exporta|export|guarda|save|descarga|download)\b/i
     ],
     presentation_creation: [
         /\b(crea|create|genera|generate|hazme|make)\b.*\b(presentación|presentation|ppt|powerpoint|slides|diapositivas)\b/i
@@ -46,6 +48,10 @@ const INTENT_PATTERNS: Record<Exclude<IntentType, "chat">, RegExp[]> = {
 
 export function detectClientIntent(message: string): IntentType {
     const lowerMessage = message.toLowerCase();
+
+    if (hasExplicitDocumentArtifactRequest(message)) {
+        return "document_generation";
+    }
 
     for (const [intent, patterns] of Object.entries(INTENT_PATTERNS)) {
         for (const pattern of patterns) {
