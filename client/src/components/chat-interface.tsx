@@ -1181,6 +1181,7 @@ export function ChatInterface({
     content: string;
     messageId?: string;
   } | null>(null);
+  const showEmbeddedDocumentWorkspace = false;
   // DOCX Generation State - prefer parent prop (survives remount), fallback to local state
   const [docGenerationStateLocal, setDocGenerationStateLocal] = useState<{
     status: "idle" | "generating" | "ready" | "error";
@@ -1277,28 +1278,6 @@ export function ChatInterface({
     gptCapabilityFlags.excelCreation,
     gptCapabilityFlags.pptCreation,
   ]);
-
-  // Auto-open editor when a document tool is selected (Word/Excel/PPT)
-  // This ensures the editor is visible and docInsertContentRef is registered
-  // BEFORE the user sends their first message, so streaming works immediately.
-  useEffect(() => {
-    if (
-      selectedDocTool &&
-      ["word", "excel", "ppt"].includes(selectedDocTool) &&
-      !activeDocEditor
-    ) {
-      const titleMap: Record<string, string> = {
-        word: "Nuevo Documento",
-        excel: "Nueva Hoja de Cálculo",
-        ppt: "Nueva Presentación",
-      };
-      setActiveDocEditor({
-        type: selectedDocTool as "word" | "excel" | "ppt",
-        title: titleMap[selectedDocTool] || "Nuevo Documento",
-        content: "",
-      });
-    }
-  }, [selectedDocTool, activeDocEditor]);
 
   useEffect(() => {
     if (!settings.voiceMode) {
@@ -2292,31 +2271,13 @@ export function ChatInterface({
     }
   };
 
-  // Function to open blank document editor - preserves existing messages
+  // Keep document tools as generation hints, but do not open the embedded
+  // Office workspace that split the chat into two panels.
   const openBlankDocEditor = (
     type: "word" | "excel" | "ppt",
-    options?: { showInstructions?: boolean },
+    _options?: { showInstructions?: boolean },
   ) => {
-    const titles = {
-      word: "Nuevo Documento Word",
-      excel: "Nueva Hoja de Cálculo",
-      ppt: "Nueva Presentación",
-    };
-    const templates = {
-      word: "", // Blank canvas - content will stream in real-time
-      excel: "",
-      ppt: "<h1>Título de la Presentación</h1><p>Haz clic para agregar subtítulo</p>",
-    };
-
-    // Only update document editor state - DO NOT clear messages
     setSelectedDocTool(type);
-    setActiveDocEditor({
-      type,
-      title: titles[type],
-      content: templates[type],
-      showInstructions: options?.showInstructions,
-    });
-    setEditedDocumentContent(templates[type]);
 
     // Close sidebar when opening a document tool
     onCloseSidebar?.();
@@ -2433,21 +2394,40 @@ export function ChatInterface({
     docInsertContentRef.current = null;
   };
 
-  const handleReopenDocument = (doc: {
-    type: "word" | "excel" | "ppt";
-    title: string;
-    content: string;
-  }) => {
-    setSelectedDocTool(doc.type);
-    setActiveDocEditor({
-      type: doc.type,
-      title: doc.title,
-      content: doc.content,
-    });
-    setEditedDocumentContent(doc.content);
+  const openDocumentPreviewModal = useCallback((doc: DocumentBlock) => {
+    const mimeTypeByDocType: Record<DocumentBlock["type"], string> = {
+      word: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      excel:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      ppt: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    };
+
+    setPreviewDocument(null);
+    setActiveDocEditor(null);
     setMinimizedDocument(null);
+    setSelectedDocTool(null);
+    setEditedDocumentContent("");
+    setPreviewFileAttachment({
+      type: "document",
+      name: doc.title,
+      mimeType: mimeTypeByDocType[doc.type],
+      content: doc.content,
+      isLoading: false,
+      isProcessing: false,
+    });
     onCloseSidebar?.();
-  };
+  }, [onCloseSidebar, setSelectedDocTool]);
+
+  const handleReopenDocument = useCallback(
+    (doc: {
+      type: "word" | "excel" | "ppt";
+      title: string;
+      content: string;
+    }) => {
+      openDocumentPreviewModal(doc);
+    },
+    [openDocumentPreviewModal],
+  );
 
   const minimizeDocEditor = () => {
     if (!activeDocEditor) return;
@@ -3517,10 +3497,12 @@ export function ChatInterface({
     }
   };
 
-  const handleOpenDocumentPreview = useCallback((doc: DocumentBlock) => {
-    setPreviewDocument(doc);
-    setEditedDocumentContent(doc.content);
-  }, []);
+  const handleOpenDocumentPreview = useCallback(
+    (doc: DocumentBlock) => {
+      openDocumentPreviewModal(doc);
+    },
+    [openDocumentPreviewModal],
+  );
 
   const handleCloseDocumentPreview = useCallback(() => {
     setPreviewDocument(null);
@@ -7056,14 +7038,6 @@ export function ChatInterface({
         : inferDocToolFromPrompt(input);
       const docToolForRequest: "word" | "excel" | "ppt" | null =
         explicitDocToolSelected || inferredDocToolForPrompt;
-      if (
-        !explicitDocToolSelected &&
-        inferredDocToolForPrompt &&
-        !activeDocEditorRef.current
-      ) {
-        openBlankDocEditor(inferredDocToolForPrompt);
-      }
-
       // IMPORTANT: When a doc tool is explicitly selected (Word/Excel/PPT), we bypass the legacy
       // generation pattern detection and use the new /api/chat/stream flow with docTool parameter,
       // which triggers production mode directly on the backend
@@ -9974,10 +9948,11 @@ IMPORTANTE:
           userPlanInfo={effectiveUserPlanInfo}
         />
         {/* Main Content Area with Side Panel */}
-        {previewDocument ||
+        {showEmbeddedDocumentWorkspace &&
+        (previewDocument ||
         activeDocEditor ||
         (selectedDocTool &&
-          ["word", "excel", "ppt"].includes(selectedDocTool)) ? (
+          ["word", "excel", "ppt"].includes(selectedDocTool))) ? (
           <PanelGroup direction="horizontal" className="flex-1">
             {/* Left Panel: Minimized Chat for Document Mode */}
             <Panel
