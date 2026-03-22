@@ -147,6 +147,7 @@ import {
   getGoogleGeminiCliBootstrapModel,
 } from "./services/googleGeminiCliOAuthService";
 import { getOpenAICodexBootstrapModel } from "./services/openAICodexOAuthService";
+import { getOAuthProviderBootstrapModels } from "./services/oauthProviderCatalog";
 import {
   extractGeminiCliFlowIdFromState,
 } from "./lib/geminiCliOAuthFlowStore";
@@ -279,14 +280,25 @@ async function getConfiguredBootstrapModels(): Promise<PublicModelSummary[]> {
     });
   }
 
-  const geminiCliBootstrap = await getGoogleGeminiCliBootstrapModel();
-  if (geminiCliBootstrap) {
-    models.push(geminiCliBootstrap);
+  const oauthBootstrapModels = await getOAuthProviderBootstrapModels();
+  const includedProviders = new Set<string>();
+  for (const model of oauthBootstrapModels) {
+    models.push(model);
+    includedProviders.add(model.provider);
   }
 
-  const openAICodexBootstrap = await getOpenAICodexBootstrapModel();
-  if (openAICodexBootstrap) {
-    models.push(openAICodexBootstrap);
+  if (!includedProviders.has("google-gemini-cli")) {
+    const geminiCliBootstrap = await getGoogleGeminiCliBootstrapModel();
+    if (geminiCliBootstrap) {
+      models.push(geminiCliBootstrap);
+    }
+  }
+
+  if (!includedProviders.has("openai-codex")) {
+    const openAICodexBootstrap = await getOpenAICodexBootstrapModel();
+    if (openAICodexBootstrap) {
+      models.push(openAICodexBootstrap);
+    }
   }
 
   return models;
@@ -332,7 +344,11 @@ async function mergeConfiguredBootstrapModels(
   for (const bootstrap of await getConfiguredBootstrapModels()) {
     const alreadyVisible = merged.some(
       (model) =>
-        model.id === bootstrap.id || model.provider === bootstrap.provider,
+        model.id === bootstrap.id ||
+        (model.provider.trim().toLowerCase() ===
+          bootstrap.provider.trim().toLowerCase() &&
+          model.modelId.trim().toLowerCase() ===
+            bootstrap.modelId.trim().toLowerCase()),
     );
 
     if (!alreadyVisible) {

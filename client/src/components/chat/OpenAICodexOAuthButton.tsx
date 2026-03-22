@@ -17,6 +17,11 @@ import { ChatGptLogoIcon } from "./OAuthProviderLogos";
 
 type OpenAICodexOAuthButtonProps = {
   onConnected?: (modelId: string) => void | Promise<void>;
+  renderTrigger?: (state: {
+    isBusy: boolean;
+    isConnected: boolean;
+    openDialog: () => void;
+  }) => React.ReactNode;
 };
 
 type OpenAICodexStatusResponse = {
@@ -54,6 +59,7 @@ function isOpenAIAuthorizationUrl(input: string): boolean {
 
 export function OpenAICodexOAuthButton({
   onConnected,
+  renderTrigger,
 }: OpenAICodexOAuthButtonProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -286,23 +292,30 @@ export function OpenAICodexOAuthButton({
 
   const isBusy = startMutation.isPending || completeMutation.isPending;
   const isConnected = Boolean(status?.connected);
+  const openDialog = React.useCallback(() => {
+    setOpen(true);
+  }, []);
 
   return (
     <>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="h-8 w-8 rounded-full p-0 hover:bg-muted/60"
-        onClick={() => setOpen(true)}
-        title={isConnected ? "ChatGPT conectado" : "Conectar ChatGPT"}
-        aria-label={isConnected ? "ChatGPT conectado" : "Conectar ChatGPT"}
-        data-testid="button-openai-codex-oauth"
-      >
-        <ChatGptLogoIcon
-          className={isConnected ? "text-emerald-600" : "text-foreground"}
-        />
-      </Button>
+      {renderTrigger ? (
+        renderTrigger({ isBusy, isConnected, openDialog })
+      ) : (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-full p-0 hover:bg-muted/60"
+          onClick={openDialog}
+          title={isConnected ? "ChatGPT conectado" : "Conectar ChatGPT"}
+          aria-label={isConnected ? "ChatGPT conectado" : "Conectar ChatGPT"}
+          data-testid="button-openai-codex-oauth"
+        >
+          <ChatGptLogoIcon
+            className={isConnected ? "text-emerald-600" : "text-foreground"}
+          />
+        </Button>
+      )}
 
       <Dialog open={open} onOpenChange={resetLocalState}>
         <DialogContent className="max-w-xl">

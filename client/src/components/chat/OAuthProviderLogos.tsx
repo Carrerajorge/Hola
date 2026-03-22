@@ -50,3 +50,34 @@ export function ChatGptLogoIcon({ className, ...props }: LogoProps) {
     </svg>
   );
 }
+
+export function AntigravityLogoIcon({ className, ...props }: LogoProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      className={cn("h-5 w-5", className)}
+      {...props}
+    >
+      <path
+        d="M12 3.25c-4.83 0-8.75 3.92-8.75 8.75S7.17 20.75 12 20.75c2.85 0 5.38-1.37 6.98-3.48"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M14.25 7.25c3.04 0 5.5 2.46 5.5 5.5 0 1.96-1.02 3.67-2.56 4.65"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        opacity="0.72"
+      />
+      <circle cx="12" cy="12" r="2.4" fill="currentColor" opacity="0.92" />
+      <path
+        d="M16.8 6.2l.95 2.05 2.05.95-2.05.95-.95 2.05-.95-2.05-2.05-.95 2.05-.95.95-2.05Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}

@@ -2,8 +2,7 @@ import React from "react";
 import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AvailableModel } from "@/contexts/ModelAvailabilityContext";
-import { GeminiCliOAuthButton } from "./GeminiCliOAuthButton";
-import { OpenAICodexOAuthButton } from "./OpenAICodexOAuthButton";
+import { ProviderConnectionHubButton } from "./ProviderConnectionHubButton";
 
 interface StandardModelSelectorProps {
     availableModels: AvailableModel[];
@@ -81,8 +80,12 @@ export function StandardModelSelector({
                     </select>
                     <ChevronDown className="pointer-events-none absolute right-2 h-3 w-3 text-gray-400 flex-shrink-0" />
                 </div>
-                {showProviderButtons ? <OpenAICodexOAuthButton onConnected={handleConnectedModel} /> : null}
-                {showProviderButtons ? <GeminiCliOAuthButton onConnected={handleConnectedModel} /> : null}
+                {showProviderButtons ? (
+                    <ProviderConnectionHubButton
+                        availableModels={availableModels}
+                        onConnected={handleConnectedModel}
+                    />
+                ) : null}
             </div>
         );
     }
@@ -126,8 +129,12 @@ export function StandardModelSelector({
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-2 h-3 w-3 text-muted-foreground flex-shrink-0" />
             </div>
-            {showProviderButtons ? <OpenAICodexOAuthButton onConnected={handleConnectedModel} /> : null}
-            {showProviderButtons ? <GeminiCliOAuthButton onConnected={handleConnectedModel} /> : null}
+            {showProviderButtons ? (
+                <ProviderConnectionHubButton
+                    availableModels={availableModels}
+                    onConnected={handleConnectedModel}
+                />
+            ) : null}
         </div>
     );
 }

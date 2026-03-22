@@ -198,7 +198,7 @@ export function ChatHeader({
                         modelChangeDisabled={isChatProcessing}
                         modelsByProvider={modelsByProvider}
                         refetchModels={refetch}
-                        showOAuthProviderButtons={Boolean(userPlanInfo?.isAdmin)}
+                        showOAuthProviderButtons
                         activeGptName={activeGpt?.name === 'ILIAGPT' ? undefined : activeGpt?.name}
                     />
                 )}

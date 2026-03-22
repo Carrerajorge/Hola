@@ -28,6 +28,11 @@ import { normalizeAppBuildVersion } from "@/lib/chunk-recovery";
 
 type GeminiCliOAuthButtonProps = {
   onConnected?: (modelId: string) => void | Promise<void>;
+  renderTrigger?: (state: {
+    isBusy: boolean;
+    isConnected: boolean;
+    openDialog: () => void;
+  }) => React.ReactNode;
 };
 
 type GeminiCliStatusResponse = {
@@ -359,6 +364,7 @@ function resolveFlowForCallbackInput(params: {
 
 export function GeminiCliOAuthButton({
   onConnected,
+  renderTrigger,
 }: GeminiCliOAuthButtonProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -391,8 +397,8 @@ export function GeminiCliOAuthButton({
         }
         return res.json();
       },
-      enabled: open,
-      staleTime: 0,
+      staleTime: 30_000,
+      refetchOnWindowFocus: false,
     });
 
   const startMutation = useMutation<GeminiCliStartResponse, Error>({
@@ -1018,28 +1024,35 @@ export function GeminiCliOAuthButton({
 
   const isBusy = startMutation.isPending || completeMutation.isPending;
   const isConnected = Boolean(status?.connected);
+  const openDialog = React.useCallback(() => {
+    setOpen(true);
+  }, []);
 
   return (
     <>
-      <Button
-        type="button"
-        variant="outline"
-        size="icon"
-        className="h-8 w-8 rounded-full border-primary/25 bg-background/80"
-        onClick={() => setOpen(true)}
-        title={
-          isConnected
-            ? "Gemini CLI OAuth vinculado"
-            : "Vincular Gemini CLI OAuth"
-        }
-        data-testid="button-gemini-cli-oauth"
-      >
-        {isConnected ? (
-          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-        ) : (
-          <Plus className="h-4 w-4" />
-        )}
-      </Button>
+      {renderTrigger ? (
+        renderTrigger({ isBusy, isConnected, openDialog })
+      ) : (
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="h-8 w-8 rounded-full border-primary/25 bg-background/80"
+          onClick={openDialog}
+          title={
+            isConnected
+              ? "Gemini CLI OAuth vinculado"
+              : "Vincular Gemini CLI OAuth"
+          }
+          data-testid="button-gemini-cli-oauth"
+        >
+          {isConnected ? (
+            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+          ) : (
+            <Plus className="h-4 w-4" />
+          )}
+        </Button>
+      )}
 
       <Dialog open={open} onOpenChange={resetLocalState}>
         <DialogContent className="max-w-2xl">
