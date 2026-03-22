@@ -29,6 +29,13 @@
       "when": 1771710153585,
       "tag": "0003_glorious_baron_strucker",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1774161316000,
+      "tag": "0027_oauth_provider_tokens",
+      "breakpoints": true
     }
   ]
 }
