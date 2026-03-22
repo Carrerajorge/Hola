@@ -17,13 +17,15 @@ const EXCLUDED_PATHS = [
 ];
 
 export function adminActivityTracker(req: Request, res: Response, next: NextFunction) {
+  const fullPath = getAdminPath(req);
+
   // Only log modifying requests
   if (!LOGGED_METHODS.includes(req.method)) {
     return next();
   }
 
   // Skip excluded paths
-  if (EXCLUDED_PATHS.some(path => req.path.startsWith(path))) {
+  if (EXCLUDED_PATHS.some(path => fullPath.startsWith(path))) {
     return next();
   }
 
@@ -35,15 +37,16 @@ export function adminActivityTracker(req: Request, res: Response, next: NextFunc
     // Log after response is sent
     setImmediate(async () => {
       try {
-        const action = `admin.${req.method.toLowerCase()}.${req.path.replace(/\//g, ".").replace(/^\.api\.admin\./, "")}`;
+        const actionPath = getCanonicalActionPath(fullPath);
+        const action = `admin.${req.method.toLowerCase()}.${actionPath}`.slice(0, 120);
         
         await auditLog(req, {
-          action: action.substring(0, 50), // Truncate if too long
-          resource: extractResource(req.path),
-          resourceId: extractResourceId(req.path),
+          action,
+          resource: extractResource(fullPath),
+          resourceId: extractResourceId(fullPath),
           details: {
             method: req.method,
-            path: req.path,
+            path: fullPath,
             statusCode: res.statusCode,
             body: sanitizeBody(req.body),
           },
@@ -62,11 +65,26 @@ export function adminActivityTracker(req: Request, res: Response, next: NextFunc
   next();
 }
 
+function getAdminPath(req: Request): string {
+  const baseUrl = req.baseUrl || "";
+  const path = req.path || req.originalUrl || "/";
+  const full = `${baseUrl}${path}` || "/";
+  return full.replace(/\/{2,}/g, "/");
+}
+
+function getCanonicalActionPath(path: string): string {
+  return path
+    .replace(/^\/api\/admin\/?/, "")
+    .replace(/\//g, ".")
+    .replace(/^\.+|\.+$/g, "")
+    .replace(/\.{2,}/g, ".");
+}
+
 /**
  * Extract resource type from path
  */
 function extractResource(path: string): string {
-  const parts = path.replace("/api/admin/", "").split("/");
+  const parts = getAdminPathSegments(path);
   return parts[0] || "unknown";
 }
 
@@ -74,12 +92,20 @@ function extractResource(path: string): string {
  * Extract resource ID from path if present
  */
 function extractResourceId(path: string): string | undefined {
-  const parts = path.replace("/api/admin/", "").split("/");
+  const parts = getAdminPathSegments(path);
   // Check if second part looks like an ID
   if (parts[1] && !["stats", "list", "export", "bulk"].includes(parts[1])) {
     return parts[1];
   }
   return undefined;
+}
+
+function getAdminPathSegments(path: string): string[] {
+  return path
+    .replace(/^\/api\/admin\/?/, "")
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
 }
 
 /**

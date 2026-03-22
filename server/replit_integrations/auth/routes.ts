@@ -3,7 +3,7 @@ import { authStorage } from "./storage";
 import { isAuthenticated, getSessionStats } from "./replitAuth";
 import { storage } from "../../storage";
 import { hashPassword, verifyPassword, isHashed } from "../../utils/password";
-import { loginSchema, registerSchema, validate } from "../../validation/schemas";
+import { loginSchema, registerSchema } from "../../validation/schemas";
 import { rateLimiter as authRateLimiter, getRateLimitStats } from "../../middleware/userRateLimiter";
 import { sendMagicLinkEmail } from "../../services/genericEmailService";
 import { getSecureUserId } from "../../lib/anonUserHelper";
@@ -18,6 +18,7 @@ import { sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { isAdminRole } from "../../lib/adminRole";
 import { isPrivilegedAdminEmail } from "@shared/adminIdentity";
+import { authEventBus } from "../../services/authEventBus";
 
 const authLoginLogger = createLogger("auth-login");
 
@@ -65,6 +66,25 @@ function sanitizeUser(user: any): any {
       Boolean(safeUser.isAdmin) ||
       isAdminRole(safeUser.role) ||
       isPrivilegedAdminEmail(safeUser.email, AUTH_ADMIN_EMAIL_ALLOWLIST),
+  };
+}
+
+const compatibleRegisterSchema = registerSchema.pick({ email: true, password: true }).extend({
+  fullName: registerSchema.shape.fullName.optional(),
+  acceptTerms: registerSchema.shape.acceptTerms.optional(),
+});
+
+function splitFullName(fullName: string | null): { firstName: string; lastName: string; fullName: string | null } {
+  const normalized = fullName?.trim() || null;
+  if (!normalized) {
+    return { firstName: "", lastName: "", fullName: null };
+  }
+
+  const parts = normalized.split(/\s+/).filter(Boolean);
+  return {
+    firstName: parts[0] || "",
+    lastName: parts.slice(1).join(" "),
+    fullName: normalized,
   };
 }
 
@@ -418,7 +438,7 @@ export function registerAuthRoutes(app: Express): void {
   // Keeps compatibility with legacy schemas by using minimal SQL columns plus fallback.
   app.post("/api/auth/register", authRateLimiter, async (req: any, res) => {
     try {
-      const validation = loginSchema.safeParse(req.body);
+      const validation = compatibleRegisterSchema.safeParse(req.body);
       if (!validation.success) {
         return res.status(400).json({
           message: "Datos inválidos",
@@ -428,10 +448,8 @@ export function registerAuthRoutes(app: Express): void {
 
       const email = validation.data.email.toLowerCase().trim();
       const password = validation.data.password;
-
-      if (password.length < 6) {
-        return res.status(400).json({ message: "La contraseña debe tener al menos 6 caracteres" });
-      }
+      const fullName = validation.data.fullName?.trim() || null;
+      const nameParts = splitFullName(fullName);
 
       const allowRegistration = await getSettingValue<boolean>("allow_registration", true);
       if (!allowRegistration) {
@@ -454,6 +472,18 @@ export function registerAuthRoutes(app: Express): void {
                 status = 'active',
                 auth_provider = 'email',
                 email_verified = 'true',
+                first_name = CASE
+                  WHEN COALESCE(first_name, '') = '' AND ${nameParts.firstName || null} IS NOT NULL THEN ${nameParts.firstName}
+                  ELSE first_name
+                END,
+                last_name = CASE
+                  WHEN COALESCE(last_name, '') = '' AND ${nameParts.lastName || null} IS NOT NULL THEN ${nameParts.lastName}
+                  ELSE last_name
+                END,
+                full_name = CASE
+                  WHEN COALESCE(full_name, '') = '' AND ${nameParts.fullName} IS NOT NULL THEN ${nameParts.fullName}
+                  ELSE full_name
+                END,
                 updated_at = NOW()
             WHERE id = ${existing.id}
           `);
@@ -471,41 +501,62 @@ export function registerAuthRoutes(app: Express): void {
           }
         }
 
+        authEventBus.publish("USER_UPDATED", existing.id, {
+          email,
+          provider: "email",
+          activated: true,
+        });
+
         return res.json({ success: true, message: "Cuenta activada correctamente" });
       }
 
       const newUserId = randomUUID();
       const username = email.split("@")[0]?.slice(0, 80) || `user_${newUserId.slice(0, 8)}`;
 
+      let insertedUserId: string | null = null;
+
       try {
-        await db.execute(sql`
+        const insertResult = await db.execute(sql`
           INSERT INTO users (
-            id, org_id, email, username, password, first_name, last_name,
+            id, org_id, email, username, password, first_name, last_name, full_name,
             role, plan, status, auth_provider, email_verified, created_at, updated_at
           )
           VALUES (
-            ${newUserId}, ${newUserId}, ${email}, ${username}, ${hashedPassword}, ${username}, '',
-            'free', 'free', 'active', 'email', 'true', NOW(), NOW()
+            ${newUserId}, ${newUserId}, ${email}, ${username}, ${hashedPassword}, ${nameParts.firstName || username}, ${nameParts.lastName}, ${nameParts.fullName},
+            'user', 'free', 'active', 'email', 'true', NOW(), NOW()
           )
           ON CONFLICT (email) DO NOTHING
+          RETURNING id
         `);
+        insertedUserId = (insertResult as any)?.rows?.[0]?.id ?? null;
       } catch (error: any) {
         const sqlCode = error?.cause?.code || error?.code;
         if (sqlCode === "42703") {
-          await db.execute(sql`
+          const insertResult = await db.execute(sql`
             INSERT INTO users (id, email, username, password, role, status, created_at, updated_at)
             VALUES (${newUserId}, ${email}, ${username}, ${hashedPassword}, 'user', 'active', NOW(), NOW())
             ON CONFLICT (email) DO NOTHING
+            RETURNING id
           `);
+          insertedUserId = (insertResult as any)?.rows?.[0]?.id ?? null;
         } else {
           throw error;
         }
       }
 
+      if (!insertedUserId) {
+        const createdOrExisting = await authStorage.getUserByEmail(email);
+        if (!createdOrExisting) {
+          return res.status(409).json({ message: "No se pudo crear la cuenta porque el correo ya existe o hubo un conflicto de registro" });
+        }
+        insertedUserId = createdOrExisting.id;
+      }
+
       try {
         await auditLog(req, {
-          action: AuditActions.AUTH_LOGIN,
+          action: "user.registered",
           resource: "auth",
+          resourceId: insertedUserId,
           details: { email, via: "self_register" },
           category: "auth",
           severity: "info",
@@ -513,6 +564,12 @@ export function registerAuthRoutes(app: Express): void {
       } catch (auditError) {
         console.error("Failed to create audit log:", auditError);
       }
+
+      authEventBus.publish("USER_REGISTERED", insertedUserId, {
+        email,
+        provider: "email",
+        fullName: nameParts.fullName,
+      });
 
       res.json({ success: true, message: "Cuenta creada correctamente" });
     } catch (error) {

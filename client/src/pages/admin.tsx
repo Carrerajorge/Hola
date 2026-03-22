@@ -425,16 +425,87 @@ function UsersSection() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
   const [newUser, setNewUser] = useState({ email: "", password: "", plan: "free", role: "user" });
+  const FILTER_ALL_PLAN = "__all_plans__";
+  const FILTER_ALL_STATUS = "__all_statuses__";
+  const FILTER_ALL_ROLE = "__all_roles__";
 
-  const { data: users = [], isLoading } = useQuery({
-    queryKey: ["/api/admin/users"],
-    queryFn: async () => {
-      const res = await apiFetch("/api/admin/users", { credentials: "include" });
+  const readApiError = async (res: Response, fallback: string) => {
+    try {
       const data = await res.json();
-      // Handle both array response and paginated response
-      if (Array.isArray(data)) return data;
-      if (data?.users && Array.isArray(data.users)) return data.users;
-      return [];
+      return data?.error || data?.message || fallback;
+    } catch {
+      return fallback;
+    }
+  };
+
+  const isTruthyFlag = (value: unknown) => {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "string") {
+      return ["true", "1", "yes", "on"].includes(value.trim().toLowerCase());
+    }
+    return false;
+  };
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, filters.plan, filters.status, filters.role, sortConfig.key, sortConfig.direction]);
+
+  const { data: usersResponse, isLoading, isError, error, refetch } = useQuery({
+    queryKey: [
+      "/api/admin/users",
+      currentPage,
+      itemsPerPage,
+      searchQuery,
+      filters.plan,
+      filters.status,
+      filters.role,
+      sortConfig.key,
+      sortConfig.direction,
+    ],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        page: String(currentPage),
+        limit: String(itemsPerPage),
+        sortBy: sortConfig.key,
+        sortOrder: sortConfig.direction,
+      });
+
+      const trimmedSearch = searchQuery.trim();
+      if (trimmedSearch) params.set("search", trimmedSearch);
+      if (filters.plan) params.set("plan", filters.plan);
+      if (filters.status) params.set("status", filters.status);
+      if (filters.role) params.set("role", filters.role);
+
+      const res = await apiFetch(`/api/admin/users?${params.toString()}`, { credentials: "include" });
+      if (!res.ok) {
+        throw new Error(await readApiError(res, "No se pudieron cargar los usuarios"));
+      }
+      return res.json();
+    }
+  });
+
+  const { data: viewedUserData, isLoading: isLoadingViewedUser } = useQuery({
+    queryKey: ["/api/admin/users/detail", viewingUser?.id],
+    enabled: !!viewingUser?.id,
+    queryFn: async () => {
+      const res = await apiFetch(`/api/admin/users/${viewingUser.id}`, { credentials: "include" });
+      if (!res.ok) {
+        throw new Error(await readApiError(res, "No se pudo cargar el usuario"));
+      }
+      return res.json();
+    }
+  });
+
+  const { data: viewedUserActivity } = useQuery({
+    queryKey: ["/api/admin/dashboard/user-activity", viewingUser?.id],
+    enabled: !!viewingUser?.id,
+    queryFn: async () => {
+      const params = new URLSearchParams({ userId: viewingUser.id });
+      const res = await apiFetch(`/api/admin/dashboard/user-activity?${params.toString()}`, { credentials: "include" });
+      if (!res.ok) {
+        throw new Error(await readApiError(res, "No se pudo cargar la actividad del usuario"));
+      }
+      return res.json();
     }
   });
 
@@ -446,20 +517,42 @@ function UsersSection() {
         body: JSON.stringify(updates),
         credentials: "include"
       });
+      if (!res.ok) {
+        throw new Error(await readApiError(res, "Error al actualizar usuario"));
+      }
       return res.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+    onSuccess: async (_data, variables) => {
+      await queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/admin/users/detail", variables.id] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/admin/dashboard/user-activity", variables.id] });
       setEditingUser(null);
+      toast.success("Usuario actualizado");
+    },
+    onError: (mutationError: Error) => {
+      toast.error(mutationError.message || "No se pudo actualizar el usuario");
     }
   });
 
   const deleteUserMutation = useMutation({
     mutationFn: async (id: string) => {
-      await apiFetch(`/api/admin/users/${id}`, { method: "DELETE", credentials: "include" });
+      const res = await apiFetch(`/api/admin/users/${id}`, { method: "DELETE", credentials: "include" });
+      if (!res.ok) {
+        throw new Error(await readApiError(res, "Error al eliminar usuario"));
+      }
+      return res.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+    onSuccess: async (_data, id) => {
+      await queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/admin/users/detail", id] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/admin/dashboard/user-activity", id] });
+      if (viewingUser?.id === id) {
+        setViewingUser(null);
+      }
+      toast.success("Usuario eliminado");
+    },
+    onError: (mutationError: Error) => {
+      toast.error(mutationError.message || "No se pudo eliminar el usuario");
     }
   });
 
@@ -472,42 +565,48 @@ function UsersSection() {
         credentials: "include"
       });
       if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || "Error al crear usuario");
+        throw new Error(await readApiError(res, "Error al crear usuario"));
       }
       return res.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
       setShowAddUserModal(false);
+      setCurrentPage(1);
       setNewUser({ email: "", password: "", plan: "free", role: "user" });
+      toast.success("Usuario creado");
+    },
+    onError: (mutationError: Error) => {
+      toast.error(mutationError.message || "No se pudo crear el usuario");
     }
   });
 
   const handleExport = (format: "csv" | "json") => {
-    // FRONTEND FIX #34: Add noopener,noreferrer to prevent window.opener attacks
-    window.open(`/api/admin/users/export?format=${format}`, "_blank", "noopener,noreferrer");
+    const params = new URLSearchParams({
+      format,
+      sortBy: sortConfig.key,
+      sortOrder: sortConfig.direction,
+    });
+    const trimmedSearch = searchQuery.trim();
+    if (trimmedSearch) params.set("search", trimmedSearch);
+    if (filters.plan) params.set("plan", filters.plan);
+    if (filters.status) params.set("status", filters.status);
+    if (filters.role) params.set("role", filters.role);
+    window.open(`/api/admin/users/export?${params.toString()}`, "_blank", "noopener,noreferrer");
   };
 
-  const filteredAndSortedUsers = users
-    .filter((u: any) => {
-      const matchesSearch = u.username?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        u.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        u.fullName?.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesPlan = !filters.plan || u.plan === filters.plan;
-      const matchesStatus = !filters.status || u.status === filters.status;
-      const matchesRole = !filters.role || u.role === filters.role;
-      return matchesSearch && matchesPlan && matchesStatus && matchesRole;
-    })
-    .sort((a: any, b: any) => {
-      const aVal = a[sortConfig.key] || "";
-      const bVal = b[sortConfig.key] || "";
-      if (sortConfig.direction === "asc") return aVal > bVal ? 1 : -1;
-      return aVal < bVal ? 1 : -1;
-    });
-
-  const totalPages = Math.ceil(filteredAndSortedUsers.length / itemsPerPage);
-  const paginatedUsers = filteredAndSortedUsers.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  const users = usersResponse?.users || [];
+  const pagination = usersResponse?.pagination || {
+    page: currentPage,
+    limit: itemsPerPage,
+    total: users.length,
+    totalPages: users.length > 0 ? 1 : 0,
+  };
+  const totalPages = Math.max(pagination.totalPages || 1, 1);
+  const usersErrorMessage = error instanceof Error ? error.message : "No se pudieron cargar los usuarios";
+  const viewedUser = viewedUserData || viewingUser;
+  const viewedUserAuditLogs = viewedUserActivity?.activity?.recentAuditLogs || [];
+  const viewedUserConversationCount = viewedUserActivity?.activity?.conversationCount || 0;
 
   const handleSort = (key: string) => {
     setSortConfig(prev => ({
@@ -523,7 +622,7 @@ function UsersSection() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Users ({filteredAndSortedUsers.length})</h2>
+        <h2 className="text-lg font-medium">Users ({isError ? "?" : (pagination.total || 0)})</h2>
         <div className="flex items-center gap-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -601,33 +700,37 @@ function UsersSection() {
           <Filter className="h-4 w-4" />
           Filters
         </Button>
+        <Button variant="ghost" size="sm" onClick={() => refetch()} className="gap-1">
+          <RefreshCw className="h-4 w-4" />
+          Refresh
+        </Button>
       </div>
 
       {showFilters && (
         <div className="flex items-center gap-2 p-3 rounded-lg border bg-muted/30">
-          <Select value={filters.plan} onValueChange={(v) => setFilters({ ...filters, plan: v })}>
+          <Select value={filters.plan || FILTER_ALL_PLAN} onValueChange={(value) => setFilters(prev => ({ ...prev, plan: value === FILTER_ALL_PLAN ? "" : value }))}>
             <SelectTrigger className="w-[130px] h-8"><SelectValue placeholder="Plan" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All Plans</SelectItem>
+              <SelectItem value={FILTER_ALL_PLAN}>All Plans</SelectItem>
               <SelectItem value="free">Free</SelectItem>
               <SelectItem value="pro">Pro</SelectItem>
               <SelectItem value="enterprise">Enterprise</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={filters.status} onValueChange={(v) => setFilters({ ...filters, status: v })}>
+          <Select value={filters.status || FILTER_ALL_STATUS} onValueChange={(value) => setFilters(prev => ({ ...prev, status: value === FILTER_ALL_STATUS ? "" : value }))}>
             <SelectTrigger className="w-[140px] h-8"><SelectValue placeholder="Status" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All Status</SelectItem>
+              <SelectItem value={FILTER_ALL_STATUS}>All Status</SelectItem>
               <SelectItem value="active">Active</SelectItem>
               <SelectItem value="inactive">Inactive</SelectItem>
               <SelectItem value="suspended">Suspended</SelectItem>
               <SelectItem value="pending_verification">Pending</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={filters.role} onValueChange={(v) => setFilters({ ...filters, role: v })}>
+          <Select value={filters.role || FILTER_ALL_ROLE} onValueChange={(value) => setFilters(prev => ({ ...prev, role: value === FILTER_ALL_ROLE ? "" : value }))}>
             <SelectTrigger className="w-[130px] h-8"><SelectValue placeholder="Role" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All Roles</SelectItem>
+              <SelectItem value={FILTER_ALL_ROLE}>All Roles</SelectItem>
               <SelectItem value="user">User</SelectItem>
               <SelectItem value="admin">Admin</SelectItem>
               <SelectItem value="editor">Editor</SelectItem>
@@ -636,6 +739,13 @@ function UsersSection() {
             </SelectContent>
           </Select>
           <Button variant="ghost" size="sm" onClick={() => setFilters({ plan: "", status: "", role: "" })}>Clear</Button>
+        </div>
+      )}
+
+      {isError && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+          <div className="font-medium">No se pudo cargar la lista de usuarios.</div>
+          <div className="mt-1">{usersErrorMessage}</div>
         </div>
       )}
 
@@ -664,9 +774,11 @@ function UsersSection() {
               </tr>
             </thead>
             <tbody>
-              {paginatedUsers.length === 0 ? (
+              {isError ? (
+                <tr><td colSpan={9} className="p-4 text-center text-destructive">No se pudo cargar la lista de usuarios</td></tr>
+              ) : users.length === 0 ? (
                 <tr><td colSpan={9} className="p-4 text-center text-muted-foreground">No users found</td></tr>
-              ) : paginatedUsers.map((user: any) => (
+              ) : users.map((user: any) => (
                 <tr key={user.id} className="border-b last:border-0 hover:bg-muted/30">
                   <td className="p-3">
                     <div className="flex items-center gap-2">
@@ -691,8 +803,13 @@ function UsersSection() {
                   <td className="p-3">
                     <div className="flex items-center gap-1">
                       <span className="text-xs text-muted-foreground">{user.authProvider || "email"}</span>
-                      {user.emailVerified === "true" && <CheckCircle className="h-3 w-3 text-green-500" />}
-                      {user.is2faEnabled === "true" && <Shield className="h-3 w-3 text-blue-500" />}
+                      {isTruthyFlag(user.emailVerified) && <CheckCircle className="h-3 w-3 text-green-500" />}
+                      {isTruthyFlag(user.is2faEnabled) && <Shield className="h-3 w-3 text-blue-500" />}
+                      {Array.isArray(user.linkedProviders) && user.linkedProviders.length > 1 && (
+                        <Badge variant="outline" className="text-[10px]">
+                          {user.linkedProviders.length} providers
+                        </Badge>
+                      )}
                     </div>
                   </td>
                   <td className="p-3 text-xs text-muted-foreground">{user.createdAt ? format(new Date(user.createdAt), "dd/MM/yy") : "-"}</td>
@@ -718,10 +835,10 @@ function UsersSection() {
 
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">Page {currentPage} of {totalPages}</span>
+          <span className="text-sm text-muted-foreground">Page {pagination.page || currentPage} of {totalPages} ({pagination.total || 0} total)</span>
           <div className="flex gap-1">
             <Button variant="outline" size="sm" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>Previous</Button>
-            <Button variant="outline" size="sm" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}>Next</Button>
+            <Button variant="outline" size="sm" disabled={currentPage >= totalPages} onClick={() => setCurrentPage(p => p + 1)}>Next</Button>
           </div>
         </div>
       )}
@@ -731,29 +848,75 @@ function UsersSection() {
           <DialogHeader>
             <DialogTitle>User Details</DialogTitle>
           </DialogHeader>
-          {viewingUser && (
+          {viewedUser && (
             <div className="space-y-4">
+              {isLoadingViewedUser && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Cargando detalle y actividad del usuario...
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-4 text-sm">
-                <div><span className="text-muted-foreground">ID:</span> <span className="font-mono text-xs">{viewingUser.id}</span></div>
-                <div><span className="text-muted-foreground">Email:</span> {viewingUser.email || "-"}</div>
-                <div><span className="text-muted-foreground">Full Name:</span> {viewingUser.fullName || `${viewingUser.firstName || ""} ${viewingUser.lastName || ""}`.trim() || "-"}</div>
-                <div><span className="text-muted-foreground">Plan:</span> <Badge variant="secondary">{viewingUser.plan || "free"}</Badge></div>
-                <div><span className="text-muted-foreground">Role:</span> <Badge variant="outline">{viewingUser.role || "user"}</Badge></div>
-                <div><span className="text-muted-foreground">Status:</span> <Badge variant={viewingUser.status === "active" ? "default" : "outline"}>{viewingUser.status || "active"}</Badge></div>
-                <div><span className="text-muted-foreground">Queries:</span> {(viewingUser.queryCount || 0).toLocaleString()}</div>
-                <div><span className="text-muted-foreground">Tokens Used:</span> {(viewingUser.tokensConsumed || 0).toLocaleString()} / {(viewingUser.tokensLimit || 100000).toLocaleString()}</div>
-                <div><span className="text-muted-foreground">Credits:</span> {(viewingUser.creditsBalance || 0).toLocaleString()}</div>
-                <div><span className="text-muted-foreground">Auth Provider:</span> {viewingUser.authProvider || "email"}</div>
-                <div><span className="text-muted-foreground">Email Verified:</span> {viewingUser.emailVerified === "true" ? "Yes" : "No"}</div>
-                <div><span className="text-muted-foreground">2FA Enabled:</span> {viewingUser.is2faEnabled === "true" ? "Yes" : "No"}</div>
-                <div><span className="text-muted-foreground">Last IP:</span> {viewingUser.lastIp || "-"}</div>
-                <div><span className="text-muted-foreground">Country:</span> {viewingUser.countryCode || "-"}</div>
-                <div><span className="text-muted-foreground">Last Login:</span> {viewingUser.lastLoginAt ? format(new Date(viewingUser.lastLoginAt), "dd/MM/yyyy HH:mm") : "-"}</div>
-                <div><span className="text-muted-foreground">Created:</span> {viewingUser.createdAt ? format(new Date(viewingUser.createdAt), "dd/MM/yyyy HH:mm") : "-"}</div>
-                <div><span className="text-muted-foreground">Referral Code:</span> {viewingUser.referralCode || "-"}</div>
-                <div><span className="text-muted-foreground">Referred By:</span> {viewingUser.referredBy || "-"}</div>
-                <div className="col-span-2"><span className="text-muted-foreground">Tags:</span> {viewingUser.tags?.length ? viewingUser.tags.map((t: string) => <Badge key={t} variant="secondary" className="mr-1">{t}</Badge>) : "-"}</div>
-                <div className="col-span-2"><span className="text-muted-foreground">Internal Notes:</span> <p className="mt-1 text-xs">{viewingUser.internalNotes || "-"}</p></div>
+                <div><span className="text-muted-foreground">ID:</span> <span className="font-mono text-xs">{viewedUser.id}</span></div>
+                <div><span className="text-muted-foreground">Email:</span> {viewedUser.email || "-"}</div>
+                <div><span className="text-muted-foreground">Full Name:</span> {viewedUser.fullName || `${viewedUser.firstName || ""} ${viewedUser.lastName || ""}`.trim() || "-"}</div>
+                <div><span className="text-muted-foreground">Plan:</span> <Badge variant="secondary">{viewedUser.plan || "free"}</Badge></div>
+                <div><span className="text-muted-foreground">Role:</span> <Badge variant="outline">{viewedUser.role || "user"}</Badge></div>
+                <div><span className="text-muted-foreground">Status:</span> <Badge variant={viewedUser.status === "active" ? "default" : "outline"}>{viewedUser.status || "active"}</Badge></div>
+                <div><span className="text-muted-foreground">Queries:</span> {(viewedUser.queryCount || 0).toLocaleString()}</div>
+                <div><span className="text-muted-foreground">Tokens Used:</span> {(viewedUser.tokensConsumed || 0).toLocaleString()} / {(viewedUser.tokensLimit || 100000).toLocaleString()}</div>
+                <div><span className="text-muted-foreground">Credits:</span> {(viewedUser.creditsBalance || 0).toLocaleString()}</div>
+                <div><span className="text-muted-foreground">Auth Provider:</span> {viewedUser.authProvider || "email"}</div>
+                <div><span className="text-muted-foreground">Email Verified:</span> {isTruthyFlag(viewedUser.emailVerified) ? "Yes" : "No"}</div>
+                <div><span className="text-muted-foreground">2FA Enabled:</span> {isTruthyFlag(viewedUser.is2faEnabled) ? "Yes" : "No"}</div>
+                <div><span className="text-muted-foreground">Linked Providers:</span> {viewedUser.linkedProviders?.length ? viewedUser.linkedProviders.join(", ") : "-"}</div>
+                <div><span className="text-muted-foreground">Active Sessions:</span> {(viewedUser.activeSessions || 0).toLocaleString()}</div>
+                <div><span className="text-muted-foreground">Last IP:</span> {viewedUser.lastIp || "-"}</div>
+                <div><span className="text-muted-foreground">Country:</span> {viewedUser.countryCode || "-"}</div>
+                <div><span className="text-muted-foreground">Last Login:</span> {viewedUser.lastLoginAt ? format(new Date(viewedUser.lastLoginAt), "dd/MM/yyyy HH:mm") : "-"}</div>
+                <div><span className="text-muted-foreground">Created:</span> {viewedUser.createdAt ? format(new Date(viewedUser.createdAt), "dd/MM/yyyy HH:mm") : "-"}</div>
+                <div><span className="text-muted-foreground">Referral Code:</span> {viewedUser.referralCode || "-"}</div>
+                <div><span className="text-muted-foreground">Referred By:</span> {viewedUser.referredBy || "-"}</div>
+                <div className="col-span-2"><span className="text-muted-foreground">Tags:</span> {viewedUser.tags?.length ? viewedUser.tags.map((t: string) => <Badge key={t} variant="secondary" className="mr-1">{t}</Badge>) : "-"}</div>
+                <div className="col-span-2"><span className="text-muted-foreground">Internal Notes:</span> <p className="mt-1 text-xs">{viewedUser.internalNotes || "-"}</p></div>
+              </div>
+
+              <Separator />
+
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div className="rounded-lg border p-3">
+                  <div className="text-xs text-muted-foreground">Conversations</div>
+                  <div className="mt-1 text-2xl font-semibold">{viewedUserConversationCount}</div>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <div className="text-xs text-muted-foreground">Recent Audit Events</div>
+                  <div className="mt-1 text-2xl font-semibold">{viewedUserAuditLogs.length}</div>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <div className="text-xs text-muted-foreground">Last Activity</div>
+                  <div className="mt-1 text-sm font-medium">
+                    {viewedUserAuditLogs[0]?.createdAt ? format(new Date(viewedUserAuditLogs[0].createdAt), "dd/MM/yyyy HH:mm") : "No activity"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Audit trail</div>
+                {viewedUserAuditLogs.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No recent audit events for this user.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {viewedUserAuditLogs.slice(0, 5).map((log: any) => (
+                      <div key={log.id} className="rounded-lg border p-3 text-xs">
+                        <div className="font-medium">{log.action || "unknown_action"}</div>
+                        <div className="mt-1 text-muted-foreground">
+                          {log.createdAt ? format(new Date(log.createdAt), "dd/MM/yyyy HH:mm") : "-"}
+                          {log.details?.actorEmail ? ` • ${log.details.actorEmail}` : ""}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}

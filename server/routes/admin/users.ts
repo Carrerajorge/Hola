@@ -8,6 +8,7 @@ import { asyncHandler } from "../../middleware/errorHandler";
 import { createUserBodySchema } from "../../schemas/apiSchemas";
 import { auditLog, AuditActions } from "../../services/auditLogger";
 import { requireRecentAuth } from "../../middleware/jitElevation";
+import { queryAdminUsers } from "../../services/adminProjection";
 
 export const usersRouter = Router();
 const USER_ID_PARAM_PATTERN = /^[a-zA-Z0-9_-]{4,128}$/;
@@ -171,9 +172,10 @@ function parseBooleanInput(value: unknown): boolean | undefined {
 
 function sanitizeCsvField(value: unknown): string {
   if (value === null || value === undefined) return '""';
-  let raw = String(value).replace(/\r/g, " ").replace(/\n/g, " ");
-  raw = raw.replace(/^\s*[@=+\-]/, " ").trim();
-  const normalized = raw.slice(0, MAX_CSV_CELL_LENGTH);
+  const raw = String(value).replace(/\r/g, " ").replace(/\n/g, " ");
+  const trimmed = raw.trim();
+  const neutralized = /^[=@+\-]/.test(trimmed) ? `'${trimmed}` : trimmed;
+  const normalized = neutralized.slice(0, MAX_CSV_CELL_LENGTH);
   if (normalized.includes('"') || normalized.includes(",") || normalized.includes("\n")) {
     return `"${normalized.replace(/"/g, '""')}"`;
   }
@@ -388,7 +390,6 @@ usersRouter.get("/", async (req, res) => {
   try {
     const page = parsePositiveInt(req.query.page, 1, 1, 10000);
     const limit = parsePositiveInt(req.query.limit, 20, 1, MAX_USER_LIST_LIMIT);
-    const offset = (page - 1) * limit;
     const search = sanitizeTextInput(req.query.search, MAX_SEARCH_LENGTH);
     const sortBy = parseSortField(req.query.sortBy);
     const sortOrder = parseSortOrder(req.query.sortOrder);
@@ -396,22 +397,17 @@ usersRouter.get("/", async (req, res) => {
     const role = parseSetValue(req.query.role, VALID_USER_ROLES);
     const plan = parseSetValue(req.query.plan, VALID_USER_PLANS);
 
-    const allUsers = await storage.getAllUsers();
-    const filteredUsers = filterUsers(allUsers, { search, status, role, plan, sortBy, sortOrder });
-    const paginatedUsers = filteredUsers.slice(offset, offset + limit);
-    const total = filteredUsers.length;
-
-    res.json({
-      users: paginatedUsers,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: limit > 0 ? Math.ceil(total / limit) : 0,
-        hasNext: page * limit < total,
-        hasPrev: page > 1,
-      },
+    const result = await queryAdminUsers({
+      page,
+      limit,
+      search,
+      sortBy,
+      sortOrder,
+      status,
+      role,
+      plan,
     });
+    res.json(result);
   } catch (error: unknown) {
     res.status(500).json({ error: safeAdminError(error) });
   }
@@ -434,7 +430,6 @@ usersRouter.get("/export", async (req, res) => {
       : "json";
     const page = parsePositiveInt(req.query.page, 1, 1, 10000);
     const limit = parsePositiveInt(req.query.limit, MAX_USER_EXPORT_LIMIT, 1, MAX_USER_EXPORT_LIMIT);
-    const offset = (page - 1) * limit;
     const search = sanitizeTextInput(req.query.search, MAX_SEARCH_LENGTH);
     const sortBy = parseSortField(req.query.sortBy);
     const sortOrder = parseSortOrder(req.query.sortOrder);
@@ -442,10 +437,18 @@ usersRouter.get("/export", async (req, res) => {
     const role = parseSetValue(req.query.role, VALID_USER_ROLES);
     const plan = parseSetValue(req.query.plan, VALID_USER_PLANS);
 
-    const allUsers = await storage.getAllUsers();
-    const filteredUsers = filterUsers(allUsers, { search, status, role, plan, sortBy, sortOrder });
-    const rows = filteredUsers.slice(offset, offset + limit);
-    const total = filteredUsers.length;
+    const result = await queryAdminUsers({
+      page,
+      limit,
+      search,
+      sortBy,
+      sortOrder,
+      status,
+      role,
+      plan,
+    });
+    const rows = result.users;
+    const total = result.pagination?.total ?? rows.length;
     const filenameBase = `users_${actorId(req) || "admin"}_${new Date().toISOString().replace(/[:.]/g, "-")}`;
 
     if (format === "csv") {
