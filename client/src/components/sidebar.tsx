@@ -385,7 +385,7 @@ export function Sidebar({
     <div
       key={chat.id}
       className={cn(
-        "group relative flex min-h-11 w-full items-center rounded-[16px] border border-transparent px-2.5 py-2.5 cursor-pointer transition-all duration-300 hover:border-white/35 hover:bg-white/55 dark:hover:border-white/10 dark:hover:bg-white/5 liquid-button",
+        "group relative flex min-h-10 w-full items-center rounded-[14px] border border-transparent px-2 py-1.5 cursor-pointer transition-all duration-300 hover:border-white/35 hover:bg-white/55 dark:hover:border-white/10 dark:hover:bg-white/5 liquid-button",
         activeChatId === chat.id && "border-[#A5A0FF]/35 bg-[linear-gradient(135deg,rgba(165,160,255,0.18),rgba(255,255,255,0.72))] text-foreground shadow-[0_14px_30px_rgba(96,90,190,0.12)] dark:bg-[linear-gradient(135deg,rgba(165,160,255,0.16),rgba(255,255,255,0.06))]",
         chat.archived && "opacity-70",
         indented && "ml-4"
@@ -433,11 +433,11 @@ export function Sidebar({
               <button
                 type="button"
                 aria-label="Chat options"
-                className="flex-shrink-0 h-7 w-7 flex items-center justify-center rounded-md opacity-100 hover:bg-muted transition-colors mr-1"
+                className="mr-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md opacity-100 transition-colors hover:bg-muted"
                 onClick={(e) => e.stopPropagation()}
                 data-testid={`button - chat - menu - ${chat.id} `}
               >
-                <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                <MoreHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52" sideOffset={5}>
@@ -580,7 +580,7 @@ export function Sidebar({
             <TooltipProvider delayDuration={500}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="truncate text-sm font-medium cursor-default">{chat.title}</span>
+                  <span className="cursor-default truncate text-[13px] font-medium">{chat.title}</span>
                 </TooltipTrigger>
                 <TooltipContent side="right" className="max-w-xs">
                   <p className="text-xs">{chat.title}</p>
@@ -592,7 +592,7 @@ export function Sidebar({
             )}
             {!processingChatIds.includes(chat.id) && pendingResponseCounts[chat.id] > 0 && (
               <span
-                className="flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-blue-600 text-white text-xs font-medium flex-shrink-0"
+                className="flex h-[18px] min-w-[18px] flex-shrink-0 items-center justify-center rounded-full bg-blue-600 px-1.5 text-[10px] font-medium text-white"
                 data-testid={`badge - pending - ${chat.id} `}
               >
                 {pendingResponseCounts[chat.id]}
@@ -612,9 +612,9 @@ export function Sidebar({
   });
 
   const minimalSectionButtonClass =
-    "w-full justify-start gap-2.5 rounded-[16px] border border-white/35 bg-white/60 px-2.5 py-2 text-sm font-medium transition-all duration-200 hover:border-[#A5A0FF]/40 hover:bg-white/86 hover:shadow-[0_14px_28px_rgba(96,90,190,0.12)] focus-visible:ring-2 focus-visible:ring-[#A5A0FF]/25 dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.08] liquid-button";
+    "min-h-10 w-full justify-start gap-2 rounded-[14px] border border-white/35 bg-white/60 px-2.5 py-1.5 text-[13px] font-medium transition-all duration-200 hover:border-[#A5A0FF]/40 hover:bg-white/86 hover:shadow-[0_12px_24px_rgba(96,90,190,0.1)] focus-visible:ring-2 focus-visible:ring-[#A5A0FF]/25 dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.08] liquid-button";
   const minimalIconChipClass =
-    "flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] border border-white/40 bg-white/78 text-muted-foreground transition-all duration-200 group-hover:border-[#A5A0FF]/36 group-hover:bg-white/95 group-hover:text-foreground group-hover:shadow-[0_10px_22px_rgba(96,90,190,0.12)] dark:border-white/10 dark:bg-white/[0.06]";
+    "flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-white/40 bg-white/78 text-muted-foreground transition-all duration-200 group-hover:border-[#A5A0FF]/36 group-hover:bg-white/95 group-hover:text-foreground group-hover:shadow-[0_8px_18px_rgba(96,90,190,0.1)] dark:border-white/10 dark:bg-white/[0.06]";
 
   return (
     <nav
@@ -622,7 +622,7 @@ export function Sidebar({
       aria-label="Navegación principal y chats"
       role="navigation"
     >
-      <div className="flex h-12 items-center justify-between border-b border-white/35 px-3 py-1.5 dark:border-white/10">
+      <div className="flex h-11 items-center justify-between border-b border-white/35 px-3 py-1 dark:border-white/10">
         <div className="group flex items-center gap-2.5 cursor-pointer transition-all duration-300 hover:drop-shadow-[0_0_8px_currentColor]">
           <IliaGPTLogo size={26} />
           <div className="flex min-w-0 flex-col">
@@ -646,25 +646,25 @@ export function Sidebar({
         </Button>
       </div>
 
-      <div className="flex flex-col gap-1 px-2.5 py-2.5">
+      <div className="flex flex-col gap-1 px-2.5 py-2">
         <NewChatButton onNewChat={onNewChat} variant="full" showTooltip={false} />
 
         <button
           ref={searchButtonRef}
           onClick={() => setIsSearchModalOpen(true)}
-          className="group mb-1.5 mt-0.5 flex min-h-11 w-full items-center justify-between gap-2.5 rounded-[18px] border border-white/40 bg-white/68 px-3 py-2 text-sm text-muted-foreground backdrop-blur-md transition-all duration-200 hover:border-[#A5A0FF]/40 hover:bg-white/88 hover:shadow-[0_14px_30px_rgba(96,90,190,0.12)] dark:border-white/10 dark:bg-white/[0.05] dark:hover:bg-white/[0.08] focus:outline-none focus:ring-2 focus:ring-primary/20 liquid-button"
+          className="group mb-1 mt-0.5 flex min-h-10 w-full items-center justify-between gap-2 rounded-[16px] border border-white/40 bg-white/68 px-3 py-1.5 text-[13px] text-muted-foreground backdrop-blur-md transition-all duration-200 hover:border-[#A5A0FF]/40 hover:bg-white/88 hover:shadow-[0_12px_24px_rgba(96,90,190,0.1)] dark:border-white/10 dark:bg-white/[0.05] dark:hover:bg-white/[0.08] focus:outline-none focus:ring-2 focus:ring-primary/20 liquid-button"
           data-testid="button-search-chats"
         >
           <div className="flex items-center gap-2">
             <Search className="h-4 w-4 text-muted-foreground/70" />
             <span className="font-medium text-[13px]">Buscar chats...</span>
           </div>
-          <kbd className="hidden lg:inline-flex h-5 items-center gap-1 rounded-md bg-black/5 px-1.5 font-mono text-[10px] text-muted-foreground dark:bg-white/10">
-            <span className="text-[10px]">⌘</span>K
+          <kbd className="hidden h-[18px] items-center gap-1 rounded-md bg-black/5 px-1.5 font-mono text-[9px] text-muted-foreground lg:inline-flex dark:bg-white/10">
+            <span className="text-[9px]">⌘</span>K
           </kbd>
         </button>
 
-        <div className="mt-0.5 space-y-0">
+        <div className="mt-0.5 space-y-0.5">
           <Button
             variant="ghost"
             className={cn(minimalSectionButtonClass, "group")}
@@ -689,17 +689,14 @@ export function Sidebar({
           </Button>
           <Button
             variant="ghost"
-            className={cn(minimalSectionButtonClass, "group h-auto py-1.5")}
+            className={cn(minimalSectionButtonClass, "group")}
             onClick={onOpenSkills}
             data-testid="button-skills"
           >
             <div className={cn(minimalIconChipClass, "shrink-0")}>
               <PremiumIcons.Skills className="h-4 w-4" />
             </div>
-            <span className="flex flex-col items-start leading-[1.1]">
-              <span>Skills</span>
-              <span className="text-[9px] font-normal text-muted-foreground/70">Capacidades modulares</span>
-            </span>
+            <span>Skills</span>
           </Button>
           <Button
             variant="ghost"
@@ -752,14 +749,14 @@ export function Sidebar({
         </div>
       </div>
 
-      <Separator className="mx-3.5 my-1.5 w-auto" />
+      <Separator className="mx-3.5 my-1 w-auto" />
 
       <ScrollArea className="flex-1 px-2 liquid-scroll [&_[data-radix-scroll-area-viewport]]:scrollbar-thin [&_[data-radix-scroll-area-viewport]]:scrollbar-thumb-muted-foreground/30 [&_[data-radix-scroll-area-viewport]]:scrollbar-track-transparent hover:[&_[data-radix-scroll-area-viewport]]:scrollbar-thumb-muted-foreground/50">
-        <div className="flex flex-col gap-4 pb-4">
+        <div className="flex flex-col gap-3 pb-3">
 
           {folders.length > 0 && (
             <div className="flex flex-col gap-0.5">
-              <div className="px-2 py-1.5">
+              <div className="px-2 py-1">
                 <h3 className="text-xs font-medium text-muted-foreground">Carpetas</h3>
               </div>
               {folders.map((folder) => {
@@ -769,7 +766,7 @@ export function Sidebar({
                   <Collapsible key={folder.id} open={isExpanded} onOpenChange={() => toggleFolder(folder.id)}>
                     <CollapsibleTrigger asChild>
                       <div
-                        className="flex items-center gap-2 px-2 py-2 rounded-lg cursor-pointer hover:bg-black/5 dark:hover:bg-white/10 transition-all duration-300 liquid-button"
+                        className="flex cursor-pointer items-center gap-2 rounded-[14px] px-2 py-1.5 transition-all duration-300 hover:bg-black/5 dark:hover:bg-white/10 liquid-button"
                         data-testid={`folder - ${folder.id} `}
                       >
                         {isExpanded ? (
@@ -837,7 +834,7 @@ export function Sidebar({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="w-full justify-start gap-2 px-2 text-sm text-muted-foreground hover:text-foreground"
+                  className="min-h-9 w-full justify-start gap-2 rounded-[14px] px-2 text-sm text-muted-foreground hover:text-foreground"
                   onClick={() => setIsCreateProjectOpen(true)}
                   data-testid="button-new-folder"
                 >
@@ -853,7 +850,7 @@ export function Sidebar({
               <Button
                 variant="ghost"
                 size="sm"
-                className="w-full justify-start gap-2 px-2 text-sm text-muted-foreground hover:text-foreground"
+                className="min-h-9 w-full justify-start gap-2 rounded-[14px] px-2 text-sm text-muted-foreground hover:text-foreground"
                 onClick={() => setIsCreateProjectOpen(true)}
                 data-testid="button-new-folder"
               >
@@ -867,9 +864,9 @@ export function Sidebar({
                   {projects.map((project) => {
                     const projectChats = chats.filter(chat => project.chatIds.includes(chat.id));
                     const isExpanded = expandedFolders.has(project.id);
-                    return (
+                  return (
                       <Collapsible key={project.id} open={isExpanded} onOpenChange={() => toggleFolder(project.id)}>
-                        <div className="group flex items-center gap-1 px-2 py-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 transition-all duration-300 liquid-button">
+                        <div className="group flex items-center gap-1 rounded-[14px] px-2 py-1.5 transition-all duration-300 hover:bg-black/5 dark:hover:bg-white/10 liquid-button">
                           <CollapsibleTrigger asChild>
                             <button
                               aria-label="Expand project"
@@ -1021,7 +1018,7 @@ export function Sidebar({
           {/* Pinned Chats Section */}
           {pinnedChats.length > 0 && (
             <div className="flex flex-col gap-0.5">
-              <div className="px-2 py-1.5">
+              <div className="px-2 py-1">
                 <h3 className="text-xs font-medium text-muted-foreground flex items-center gap-1">
                   <Pin className="h-3 w-3" />
                   Fijados
@@ -1034,13 +1031,13 @@ export function Sidebar({
           {/* Pinned GPTs Section */}
           {pinnedGpts.length > 0 && (
             <div className="flex flex-col gap-0.5">
-              <div className="px-2 py-1.5">
+              <div className="px-2 py-1">
                 <h3 className="text-xs font-medium text-muted-foreground">GPTs</h3>
               </div>
               {pinnedGpts.map((pinned) => (
                 <div
                   key={pinned.gptId}
-                  className="group flex w-full items-center justify-between px-2 py-2 rounded-lg cursor-pointer hover:bg-black/5 dark:hover:bg-white/10 transition-all duration-300 liquid-button"
+                  className="group flex w-full cursor-pointer items-center justify-between rounded-[14px] px-2 py-1.5 transition-all duration-300 hover:bg-black/5 dark:hover:bg-white/10 liquid-button"
                   onClick={() => setLocation(`/ gpts / ${pinned.gpt.slug || pinned.gptId} `)}
                   data-testid={`pinned - gpt - ${pinned.gptId} `}
                 >
@@ -1094,7 +1091,7 @@ export function Sidebar({
 
             return (
               <div key={group} className="flex flex-col gap-0.5">
-                <div className="px-2 py-1.5">
+                <div className="px-2 py-1">
                   <h3 className="text-xs font-medium text-muted-foreground">{group}</h3>
                 </div>
                 {groupChats.map((chat) => renderChatItem(chat))}
@@ -1110,7 +1107,7 @@ export function Sidebar({
           <div className="px-2 border-t">
             <Button
               variant="ghost"
-              className="w-full justify-between px-2 py-2 text-sm font-medium text-muted-foreground liquid-button"
+              className="min-h-9 w-full justify-between rounded-[14px] px-2 py-1.5 text-sm font-medium text-muted-foreground liquid-button"
               onClick={() => setShowHidden(!showHidden)}
               data-testid="button-toggle-hidden"
             >
@@ -1125,7 +1122,7 @@ export function Sidebar({
                 {hiddenChats.map((chat) => (
                   <div
                     key={chat.id}
-                    className="group flex w-full items-center justify-between px-2 py-2 rounded-md cursor-pointer hover:bg-accent transition-colors opacity-70"
+                    className="group flex w-full cursor-pointer items-center justify-between rounded-[12px] px-2 py-1.5 opacity-70 transition-colors hover:bg-accent"
                     onClick={() => onSelectChat(chat.id)}
                     data-testid={`hidden - chat - item - ${chat.id} `}
                   >
@@ -1152,14 +1149,14 @@ export function Sidebar({
         )
       }
 
-      <div className="mt-auto border-t border-white/35 p-3 dark:border-white/10">
-        <div className="flex w-full items-center gap-2 rounded-2xl border border-white/35 bg-white/60 p-1.5 shadow-sm backdrop-blur-xl dark:border-white/8 dark:bg-white/5">
+      <div className="mt-auto border-t border-white/35 p-2.5 dark:border-white/10">
+        <div className="flex w-full items-center gap-2 rounded-[18px] border border-white/35 bg-white/60 p-1.5 shadow-sm backdrop-blur-xl dark:border-white/8 dark:bg-white/5">
           <Popover open={isUserMenuOpen} onOpenChange={setIsUserMenuOpen}>
             <PopoverTrigger asChild>
-              <button className="flex flex-1 items-center gap-2 cursor-pointer rounded-lg px-2 py-1.5 hover:bg-white/60 dark:hover:bg-white/10 backdrop-blur-md border border-transparent hover:border-white/20 dark:hover:border-white/10 shadow-sm transition-all duration-300 liquid-button" data-testid="button-user-menu">
+              <button className="flex flex-1 cursor-pointer items-center gap-2 rounded-[14px] border border-transparent px-1.5 py-1 hover:border-white/20 hover:bg-white/60 shadow-sm transition-all duration-300 dark:hover:border-white/10 dark:hover:bg-white/10 backdrop-blur-md liquid-button" data-testid="button-user-menu">
                 <div className="relative">
 
-              <Avatar className="h-9 w-9 border border-black/5 bg-white/90 shadow-inner dark:border-white/10 dark:bg-white/[0.08]">
+              <Avatar className="h-8 w-8 border border-black/5 bg-white/90 shadow-inner dark:border-white/10 dark:bg-white/[0.08]">
 		<AvatarFallback className="bg-transparent text-muted-foreground text-base">
 		{isAdmin
 		? "A"
@@ -1176,7 +1173,7 @@ export function Sidebar({
 		<span className="absolute bottom-0 right-0 block h-2 w-2 rounded-full bg-green-500 ring-2 ring-[#eef3f4] dark:ring-[#111315]" title="En línea" />
 		</div>
 		<div className="flex flex-1 flex-col overflow-hidden text-left">
-		<span className="truncate text-[14px] font-semibold tracking-[-0.02em] leading-tight">
+		<span className="truncate text-[13px] font-semibold tracking-[-0.02em] leading-tight">
 		{isAdmin
 		? "Admin"
 		: (
@@ -1188,7 +1185,7 @@ export function Sidebar({
 		)}
 		</span>
 
-		<span className="truncate text-[10px] uppercase tracking-[0.18em] text-muted-foreground/75">
+		<span className="truncate text-[9px] uppercase tracking-[0.18em] text-muted-foreground/75">
 		{(() => {
 		// Avoid hardcoding plan by email. Use server-provided plan when available.
 		const plan = ((user as any)?.plan || "free").toString().toLowerCase();
