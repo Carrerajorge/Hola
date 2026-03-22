@@ -95,6 +95,10 @@ vi.mock("@shared/adminIdentity", () => ({
   isPrivilegedAdminEmail: vi.fn(() => false),
 }));
 
+vi.mock("../lib/appSessionStore", () => ({
+  APP_SESSION_COOKIE_NAME: "siragpt.sid",
+}));
+
 vi.mock("../services/authEventBus", () => ({
   authEventBus: {
     publish: (...args: any[]) => authEventPublishMock(...args),

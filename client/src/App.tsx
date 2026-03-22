@@ -204,7 +204,7 @@ const SystemHealthPage = lazyWithRetry(() => import("@/pages/admin/SystemHealth"
 const WorkspaceSettingsPage = lazyWithRetry(() => import("@/pages/workspace-settings"));
 const WorkspacePage = lazyWithRetry(() => import("@/pages/workspace"));
 const SkillsPage = lazyWithRetry(() => import("@/pages/skills"));
-const CodexPage = lazyWithRetry(() => import("@/pages/codex"));
+const OpenClawPage = lazyWithRetry(() => import("@/pages/codex"));
 const SpreadsheetAnalyzerPage = lazyWithRetry(() => import("@/pages/SpreadsheetAnalyzer"));
 const MonitoringDashboard = lazyWithRetry(() => import("@/pages/MonitoringDashboard"));
 const RunProgressPage = lazyWithRetry(() => import("@/pages/run-progress"));
@@ -225,7 +225,6 @@ const ProtectedSystemHealthPage = requireAuth(SystemHealthPage);
 const ProtectedWorkspaceSettingsPage = requireAuth(WorkspaceSettingsPage);
 const ProtectedWorkspacePage = requireAuth(WorkspacePage);
 const ProtectedSkillsPage = requireAuth(SkillsPage);
-const ProtectedCodexPage = requireAuth(CodexPage);
 const ProtectedMemoryPage = requireAuth(MemoryPage);
 const ProtectedSpreadsheetAnalyzerPage = requireAuth(SpreadsheetAnalyzerPage);
 const ProtectedMonitoringDashboard = requireAuth(MonitoringDashboard);
@@ -344,6 +343,16 @@ function GlobalKeyboardShortcuts() {
 
 import { GlobalErrorBoundary } from "@/components/global-error-boundary";
 
+function LegacyCodexRedirect() {
+  const [, setLocation] = useLocation();
+
+  useEffect(() => {
+    setLocation("/openclaw");
+  }, [setLocation]);
+
+  return <PageLoader />;
+}
+
 function Router() {
   const HOME_ROUTE_REGEX = /^\/(?:chat(?:\/[^/]+)?)?\/?$/;
   return (
@@ -367,7 +376,8 @@ function Router() {
             <Route path="/workspace-settings" component={ProtectedWorkspaceSettingsPage} />
             <Route path="/workspace" component={ProtectedWorkspacePage} />
             <Route path="/skills" component={ProtectedSkillsPage} />
-            <Route path="/codex" component={ProtectedCodexPage} />
+            <Route path="/codex" component={LegacyCodexRedirect} />
+            <Route path="/openclaw" component={OpenClawPage} />
             <Route path="/memory" component={ProtectedMemoryPage} />
             <Route path="/spreadsheet-analyzer" component={ProtectedSpreadsheetAnalyzerPage} />
             <Route path="/monitoring" component={ProtectedMonitoringDashboard} />

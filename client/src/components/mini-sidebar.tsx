@@ -1,4 +1,4 @@
-import { SquarePen, Search, Library, Bot } from "lucide-react";
+import { SquarePen, Search, Library, Bot, Code } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useAuth } from "@/hooks/use-auth";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { isAdminUser } from "@/lib/admin";
+import { useLocation } from "wouter";
 
 interface MiniSidebarProps {
   className?: string;
@@ -15,6 +16,7 @@ interface MiniSidebarProps {
 
 export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps) {
   const { user } = useAuth();
+  const [, setLocation] = useLocation();
   const isAdmin = isAdminUser(user as any);
   const displayName = isAdmin ? "Admin" : (user?.firstName || user?.email?.split("@")[0] || "Usuario");
   const avatarInitial = isAdmin ? "A" : (user?.firstName?.[0] || user?.email?.[0] || "U").toUpperCase();
@@ -105,6 +107,23 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
             </TooltipTrigger>
             <TooltipContent side="right">
               <p>GPTs</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-10 w-10 rounded-2xl border border-white/40 bg-white/70 shadow-sm transition-colors hover:bg-white dark:border-white/8 dark:bg-white/6 dark:hover:bg-white/10"
+                data-testid="mini-button-openclaw"
+                onClick={() => setLocation("/openclaw")}
+              >
+                <Code className="h-4 w-4 text-foreground" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              <p>OpenClaw</p>
             </TooltipContent>
           </Tooltip>
         </div>

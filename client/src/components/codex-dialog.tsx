@@ -15,10 +15,10 @@ export function CodexDialog({ isOpen, onClose }: CodexDialogProps) {
                 <DialogHeader className="px-6 py-4 border-b border-slate-800 bg-slate-950">
                     <DialogTitle className="flex items-center gap-2 text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
                         <Code className="h-6 w-6 text-blue-400" />
-                        Antigravity Codex
+                        OpenClaw
                     </DialogTitle>
                     <DialogDescription className="text-slate-400">
-                        Advanced Agentic Core & Logic Repository
+                        Workspace visual de OpenClaw integrado en ILIAGPT
                     </DialogDescription>
                 </DialogHeader>
 

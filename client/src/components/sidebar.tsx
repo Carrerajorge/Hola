@@ -129,7 +129,6 @@ interface SidebarProps {
   onOpenApps?: () => void;
   onOpenSkills?: () => void;
   onOpenWhatsAppConnect?: () => void;
-  onOpenCodex?: () => void;
   onOpenLibrary?: () => void;
   processingChatIds?: string[];
   pendingResponseCounts?: Record<string, number>;
@@ -265,7 +264,6 @@ export function Sidebar({
   onOpenApps,
   onOpenSkills,
   onOpenWhatsAppConnect,
-  onOpenCodex,
   onOpenLibrary,
   processingChatIds = [],
   pendingResponseCounts = {},
@@ -732,19 +730,13 @@ export function Sidebar({
           <Button
             variant="ghost"
             className={cn(minimalSectionButtonClass, "group mt-0.5")}
-            onClick={() => {
-              if (onOpenCodex) {
-                onOpenCodex();
-                return;
-              }
-              setLocation("/codex");
-            }}
-            data-testid="button-codex"
+            onClick={() => setLocation("/openclaw")}
+            data-testid="button-openclaw"
           >
             <div className={minimalIconChipClass}>
               <PremiumIcons.Code className="h-[13px] w-[13px]" />
             </div>
-            Codex
+            OpenClaw
           </Button>
         </div>
       </div>

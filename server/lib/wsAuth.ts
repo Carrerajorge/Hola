@@ -1,26 +1,11 @@
 import { IncomingMessage } from "http";
 import { WebSocket, WebSocketServer } from "ws";
-import session from "express-session";
-import connectPg from "connect-pg-simple";
 import cookie from "cookie";
 import cookieSignature from "cookie-signature";
-
-const sessionTtl = 7 * 24 * 60 * 60 * 1000;
-
-let sessionStore: session.Store | null = null;
-
-function getSessionStore(): session.Store {
-  if (!sessionStore) {
-    const PgStore = connectPg(session);
-    sessionStore = new PgStore({
-      conString: process.env.DATABASE_URL,
-      createTableIfMissing: false,
-      ttl: sessionTtl,
-      tableName: "sessions",
-    });
-  }
-  return sessionStore;
-}
+import {
+  APP_SESSION_COOKIE_NAME,
+  getAppSessionStore,
+} from "./appSessionStore";
 
 export interface AuthenticatedWebSocket extends WebSocket {
   userId?: string;
@@ -40,7 +25,7 @@ export async function authenticateWebSocket(
 ): Promise<WsAuthResult> {
   try {
     const cookies = cookie.parse(request.headers.cookie || "");
-    const sessionCookie = cookies["connect.sid"];
+    const sessionCookie = cookies[APP_SESSION_COOKIE_NAME] || cookies["connect.sid"];
 
     if (!sessionCookie) {
       return { isAuthenticated: false, error: "No session cookie" };
@@ -51,7 +36,7 @@ export async function authenticateWebSocket(
       return { isAuthenticated: false, error: "Invalid session cookie format" };
     }
 
-    const store = getSessionStore();
+    const store = getAppSessionStore();
     
     return new Promise((resolve) => {
       store.get(sessionId, (err, sessionData) => {

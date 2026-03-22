@@ -27,6 +27,10 @@ import {
   generateOpenClaw1000Report,
   getOpenClaw1000ExecutionRoadmap,
 } from "../services/openClaw1000Service";
+import {
+  DEFAULT_OPENCLAW_RELEASE_TAG,
+  getOpenClawReleaseSnapshot,
+} from "../services/openClawReleaseService";
 
 // Native OpenClaw Integration
 
@@ -100,6 +104,31 @@ router.get("/stats", (_req: Request, res: Response) => {
   } catch (error: any) {
     console.error("[OpenClaw] Error getting stats:", error);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/openclaw/release
+ * Returns the requested OpenClaw release plus latest-release sync status.
+ */
+router.get("/release", async (req: Request, res: Response) => {
+  try {
+    const tag =
+      typeof req.query.tag === "string" && req.query.tag.trim()
+        ? req.query.tag.trim()
+        : DEFAULT_OPENCLAW_RELEASE_TAG;
+
+    const snapshot = await getOpenClawReleaseSnapshot(tag);
+    res.json({
+      success: true,
+      ...snapshot,
+    });
+  } catch (error: any) {
+    console.error("[OpenClaw] Error fetching release snapshot:", error);
+    res.status(500).json({
+      success: false,
+      error: error?.message || "Failed to fetch OpenClaw release snapshot",
+    });
   }
 });
 

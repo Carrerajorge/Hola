@@ -11,6 +11,7 @@ const PUBLIC_AUTH_ROUTES = Object.freeze([
   "/business",
   "/download",
   "/power",
+  "/openclaw",
 ]);
 
 export const FORCE_SIGNED_OUT_STORAGE_KEY = "siragpt_force_signed_out";

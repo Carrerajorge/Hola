@@ -22,12 +22,14 @@ import {
   GitBranch,
   Layers3,
   Loader2,
-  MoreHorizontal,
+  LogIn,
   Plus,
+  RefreshCw,
   Rocket,
   Search,
   Send,
   Settings2,
+  Shield,
   Sparkles,
   TimerReset,
   Users2,
@@ -85,6 +87,55 @@ interface BranchSummary {
   label: string;
 }
 
+type OpenClawReleaseSyncStatus = "synced" | "update_available" | "tracking_requested" | "offline";
+
+interface OpenClawReleaseInfo {
+  tagName: string;
+  name: string;
+  htmlUrl: string;
+  tarballUrl: string | null;
+  zipballUrl: string | null;
+  publishedAt: string | null;
+  overview: string;
+  importantNotes: string[];
+  highlights: string[];
+  notes: string;
+  reactionCount: number;
+  isLatest: boolean;
+}
+
+interface OpenClawReleaseSnapshot {
+  requestedTag: string;
+  syncedAt: string;
+  bundled: {
+    version: string | null;
+    matchesRequested: boolean;
+  };
+  requestedRelease: OpenClawReleaseInfo | null;
+  latestRelease: OpenClawReleaseInfo | null;
+  sync: {
+    status: OpenClawReleaseSyncStatus;
+    summary: string;
+    autoRefreshMinutes: number;
+    latestMatchesRequested: boolean;
+  };
+  errors: string[];
+}
+
+interface OpenClawCapabilityStats {
+  total: number;
+  implemented: number;
+  partial: number;
+  stub: number;
+  missing: number;
+  coveragePercent: number;
+  gapCount: number;
+  gapsByCategory: Record<string, number>;
+}
+
+const OPENCLAW_RELEASE_TAG = "v2026.3.13-1";
+const OPENCLAW_RELEASE_REFRESH_MS = 15 * 60 * 1000;
+
 const shellStyle: CSSProperties = {
   "--codex-bg": "#f6f3ec",
   "--codex-sidebar": "#e8f0f1",
@@ -105,12 +156,6 @@ const primaryNav = [
   { id: "dispatch", label: "Habilidades", icon: Sparkles },
 ] as const;
 
-const quickActions = [
-  "Revisar cambios pendientes y proponer commit",
-  "Crear un worktree aislado para esta tarea",
-  "Resumir el contexto técnico del chat",
-] as const;
-
 function normalizeText(value?: string | null): string {
   if (!value) return "";
   return value.replace(/\s+/g, " ").trim();
@@ -128,6 +173,19 @@ function toMessageTimestamp(message: Message): number {
 
 function formatClock(timestamp: number): string {
   return new Intl.DateTimeFormat("es-BO", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(timestamp);
+}
+
+function formatFullDate(value?: string | null): string {
+  if (!value) return "Sin fecha remota";
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) return "Sin fecha remota";
+  return new Intl.DateTimeFormat("es-BO", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
   }).format(timestamp);
@@ -281,9 +339,66 @@ function formatNumber(value: number): string {
   return new Intl.NumberFormat("es-BO").format(value);
 }
 
+function getOpenClawSyncTone(status: OpenClawReleaseSyncStatus): string {
+  if (status === "synced") return "bg-[#e9f4ee] text-[var(--codex-accent-ink)]";
+  if (status === "update_available") return "bg-[#efe7d5] text-[#745b2d]";
+  if (status === "tracking_requested") return "bg-[var(--codex-accent-soft)] text-[var(--codex-accent-ink)]";
+  return "bg-[#f1ece3] text-[var(--codex-muted)]";
+}
+
+function getOpenClawSyncLabel(status: OpenClawReleaseSyncStatus): string {
+  if (status === "synced") return "Sincronizado";
+  if (status === "update_available") return "Nueva release detectada";
+  if (status === "tracking_requested") return "Siguiendo release base";
+  return "Modo local";
+}
+
+async function fetchOpenClawReleaseSnapshot(signal?: AbortSignal): Promise<OpenClawReleaseSnapshot> {
+  const query = new URLSearchParams({ tag: OPENCLAW_RELEASE_TAG });
+  const response = await apiFetch(`/api/openclaw/release?${query.toString()}`, {
+    method: "GET",
+    credentials: "include",
+    signal,
+    timeoutMs: 8_000,
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(typeof payload?.error === "string" ? payload.error : "No se pudo sincronizar OpenClaw.");
+  }
+
+  const payload = await response.json();
+  if (!payload?.success) {
+    throw new Error(typeof payload?.error === "string" ? payload.error : "No se pudo sincronizar OpenClaw.");
+  }
+
+  return payload as OpenClawReleaseSnapshot;
+}
+
+async function fetchOpenClawCapabilityStats(signal?: AbortSignal): Promise<OpenClawCapabilityStats> {
+  const response = await apiFetch("/api/openclaw/stats", {
+    method: "GET",
+    credentials: "include",
+    signal,
+    timeoutMs: 8_000,
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(typeof payload?.error === "string" ? payload.error : "No se pudieron cargar las capacidades de OpenClaw.");
+  }
+
+  const payload = await response.json();
+  if (!payload?.success) {
+    throw new Error(typeof payload?.error === "string" ? payload.error : "No se pudieron cargar las capacidades de OpenClaw.");
+  }
+
+  return payload as OpenClawCapabilityStats;
+}
+
 export default function CodexPage() {
   const [, setLocation] = useLocation();
-  const { user } = useAuth();
+  const { user, isAuthenticated, login } = useAuth();
   const { allChats, isLoading: chatsLoading } = useChats();
   const { projects, isLoading: projectsLoading, addChatToProject } = useProjects();
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -301,6 +416,10 @@ export default function CodexPage() {
   const [isCreateBranchDialogOpen, setIsCreateBranchDialogOpen] = useState(false);
   const [isBranchLoading, setIsBranchLoading] = useState(false);
   const [isBranchActionLoading, setIsBranchActionLoading] = useState(false);
+  const [openClawRelease, setOpenClawRelease] = useState<OpenClawReleaseSnapshot | null>(null);
+  const [openClawStats, setOpenClawStats] = useState<OpenClawCapabilityStats | null>(null);
+  const [isOpenClawLoading, setIsOpenClawLoading] = useState(true);
+  const [openClawError, setOpenClawError] = useState<string | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
 
   const sessions = useMemo<CodexSession[]>(() => {
@@ -384,6 +503,61 @@ export default function CodexPage() {
     [safeProjects, selectedProjectId, selectedSession],
   );
 
+  useEffect(() => {
+    let isActive = true;
+    const abortController = new AbortController();
+
+    const loadOpenClawRelease = async (showLoading = true) => {
+      if (showLoading) setIsOpenClawLoading(true);
+
+      try {
+        const [releaseResult, statsResult] = await Promise.allSettled([
+          fetchOpenClawReleaseSnapshot(abortController.signal),
+          fetchOpenClawCapabilityStats(abortController.signal),
+        ]);
+
+        if (!isActive) return;
+
+        const nextErrors: string[] = [];
+
+        if (releaseResult.status === "fulfilled") {
+          setOpenClawRelease(releaseResult.value);
+        } else if (releaseResult.reason?.name !== "AbortError") {
+          nextErrors.push(
+            releaseResult.reason instanceof Error
+              ? releaseResult.reason.message
+              : "No se pudo sincronizar OpenClaw.",
+          );
+        }
+
+        if (statsResult.status === "fulfilled") {
+          setOpenClawStats(statsResult.value);
+        } else if (statsResult.reason?.name !== "AbortError") {
+          nextErrors.push(
+            statsResult.reason instanceof Error
+              ? statsResult.reason.message
+              : "No se pudieron cargar las capacidades de OpenClaw.",
+          );
+        }
+
+        setOpenClawError(nextErrors.length > 0 ? nextErrors[0] : null);
+      } finally {
+        if (isActive) setIsOpenClawLoading(false);
+      }
+    };
+
+    void loadOpenClawRelease(true);
+    const intervalId = window.setInterval(() => {
+      void loadOpenClawRelease(false);
+    }, OPENCLAW_RELEASE_REFRESH_MS);
+
+    return () => {
+      isActive = false;
+      abortController.abort();
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
   const groupedSessions = useMemo(() => {
     const groups = new Map<string, CodexSession[]>();
     for (const session of sessions) {
@@ -396,11 +570,29 @@ export default function CodexPage() {
   }, [sessions]);
 
   const activityItems = useMemo(() => buildActivity(selectedSession), [selectedSession]);
+  const activeRelease = openClawRelease?.requestedRelease;
+  const latestRelease = openClawRelease?.latestRelease;
+  const releaseHighlights = activeRelease?.highlights || [];
+  const releaseNotes = activeRelease?.notes || "";
+  const releaseSyncStatus = openClawRelease?.sync.status || "offline";
+  const releaseSyncLabel = getOpenClawSyncLabel(releaseSyncStatus);
+  const topGapCategories = useMemo(
+    () =>
+      Object.entries(openClawStats?.gapsByCategory || {})
+        .sort((left, right) => right[1] - left[1])
+        .slice(0, 3),
+    [openClawStats],
+  );
 
   const profileName =
-    normalizeText(user?.fullName) ||
-    normalizeText(user?.email?.split("@")[0]) ||
-    "Admin";
+    (isAuthenticated
+      ? normalizeText(user?.fullName) || normalizeText(user?.email?.split("@")[0])
+      : "") || "Invitado";
+  const secureWorkspaceActionLabel = isAuthenticated ? "Abrir chat" : "Entrar al workspace seguro";
+  const launchActionLabel = isAuthenticated ? (isLaunching ? "Lanzando" : "Lanzar run") : "Entrar al workspace seguro";
+  const composerPlaceholder = isAuthenticated
+    ? "Describe la tarea técnica y OpenClaw lanzará un run real con contexto del proyecto, ramas y subagentes."
+    : "Inicia sesión para activar runs reales, ramas seguras y el workspace operativo de OpenClaw.";
 
   const composerTarget = selectedSession ? `/chat/${selectedSession.id}` : "/";
   const launchRunId = selectedSession ? getLatestRunId(selectedSession.chat) : null;
@@ -433,6 +625,10 @@ export default function CodexPage() {
   }, [activeRepoBranch, branchQuery, repoBranches]);
 
   const openSelectedChat = () => {
+    if (!isAuthenticated) {
+      login();
+      return;
+    }
     setLocation(composerTarget);
   };
 
@@ -440,7 +636,37 @@ export default function CodexPage() {
     window.requestAnimationFrame(() => composerRef.current?.focus());
   };
 
+  const refreshOpenClawRelease = useCallback(async () => {
+    setIsOpenClawLoading(true);
+    try {
+      const [snapshot, stats] = await Promise.all([
+        fetchOpenClawReleaseSnapshot(),
+        fetchOpenClawCapabilityStats(),
+      ]);
+      setOpenClawRelease(snapshot);
+      setOpenClawStats(stats);
+      setOpenClawError(null);
+      toast.success("OpenClaw actualizado", {
+        description: "Traje la release, la cobertura y verifiqué si hay cambios nuevos en GitHub.",
+      });
+    } catch (error) {
+      setOpenClawError(error instanceof Error ? error.message : "No se pudo sincronizar OpenClaw.");
+      toast.error("No se pudo sincronizar OpenClaw", {
+        description: error instanceof Error ? error.message : "Error inesperado al consultar la release.",
+      });
+    } finally {
+      setIsOpenClawLoading(false);
+    }
+  }, []);
+
   const loadRepositoryBranches = useCallback(async (project: Project | null) => {
+    if (!isAuthenticated) {
+      setRepoBranches(["main"]);
+      setActiveRepoBranch("main");
+      setBranchSummary(null);
+      return;
+    }
+
     if (!project?.repositoryPath) {
       setRepoBranches(["main"]);
       setActiveRepoBranch("main");
@@ -490,7 +716,7 @@ export default function CodexPage() {
     } finally {
       setIsBranchLoading(false);
     }
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     void loadRepositoryBranches(selectedProject);
@@ -600,6 +826,10 @@ export default function CodexPage() {
   const handleLaunch = async () => {
     const task = draft.trim();
     if (!task || isLaunching) return;
+    if (!isAuthenticated) {
+      login();
+      return;
+    }
 
     const shouldReuseSelectedChat =
       !!selectedSession &&
@@ -637,14 +867,14 @@ export default function CodexPage() {
 
       setDraft("");
       setSelectedSessionId(chatId);
-      toast.success("Codex en ejecución", {
+      toast.success("OpenClaw en ejecución", {
         description: multiAgentEnabled
           ? "Abrí el progreso del run con agentes delegados activos."
           : "Abrí el progreso del run principal.",
       });
       setLocation(`/runs/${runId}/progress`);
     } catch (error) {
-      toast.error("No se pudo iniciar Codex", {
+      toast.error("No se pudo iniciar OpenClaw", {
         description: error instanceof Error ? error.message : "Error inesperado al lanzar el run.",
       });
     } finally {
@@ -686,7 +916,7 @@ export default function CodexPage() {
               </div>
               <div>
                 <p className="text-xs uppercase tracking-[0.24em] text-[var(--codex-muted)]">ILIAGPT</p>
-                <p className="text-lg font-semibold">Codex</p>
+                <p className="text-lg font-semibold">OpenClaw</p>
               </div>
             </div>
             <Button
@@ -773,7 +1003,7 @@ export default function CodexPage() {
                             <span className="text-xs text-[var(--codex-muted)]">{session.timeLabel}</span>
                           </div>
                           <p className="mt-1 line-clamp-2 text-sm leading-6 text-[var(--codex-muted)]">
-                            {session.preview || "Sesión lista para retomarse desde Codex."}
+                            {session.preview || "Sesión lista para retomarse desde OpenClaw."}
                           </p>
                         </div>
                       </button>
@@ -830,7 +1060,7 @@ export default function CodexPage() {
                       data-testid="codex-session-title"
                     >
                       <span className="truncate text-2xl font-semibold md:text-[2rem]">
-                        {selectedSession?.title || "Crear agente Iliagpt programador"}
+                        {selectedSession?.title || "Abrir workspace seguro OpenClaw"}
                       </span>
                       <ChevronDown className="h-4 w-4 shrink-0 text-[var(--codex-muted)]" />
                     </button>
@@ -845,11 +1075,13 @@ export default function CodexPage() {
                 <button
                   type="button"
                   onClick={() => setMultiAgentEnabled((current) => !current)}
+                  disabled={!isAuthenticated}
                   className={cn(
                     "inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm transition-colors",
                     multiAgentEnabled
                       ? "border-[var(--codex-accent)] bg-[var(--codex-accent-soft)] text-[var(--codex-accent-ink)]"
                       : "border-[var(--codex-border)] bg-white/82 text-[var(--codex-muted)]",
+                    !isAuthenticated && "cursor-not-allowed opacity-60",
                   )}
                 >
                   <Users2 className="h-4 w-4" />
@@ -858,7 +1090,11 @@ export default function CodexPage() {
                 <button
                   type="button"
                   onClick={handleWorktreeShortcut}
-                  className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/82 px-4 py-2 text-sm"
+                  disabled={!isAuthenticated}
+                  className={cn(
+                    "inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/82 px-4 py-2 text-sm",
+                    !isAuthenticated && "cursor-not-allowed opacity-60",
+                  )}
                 >
                   <FolderOpen className="h-4 w-4" />
                   Mover al worktree
@@ -866,7 +1102,11 @@ export default function CodexPage() {
                 <button
                   type="button"
                   onClick={handleCommitShortcut}
-                  className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/82 px-4 py-2 text-sm"
+                  disabled={!isAuthenticated}
+                  className={cn(
+                    "inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/82 px-4 py-2 text-sm",
+                    !isAuthenticated && "cursor-not-allowed opacity-60",
+                  )}
                 >
                   <CheckCircle2 className="h-4 w-4" />
                   Confirmar
@@ -882,41 +1122,241 @@ export default function CodexPage() {
           <div className="flex-1 overflow-hidden">
             <ScrollArea className="h-full">
               <div className="mx-auto w-full max-w-5xl px-4 pb-40 pt-8 md:px-6 lg:px-8">
+                {!isAuthenticated ? (
+                  <section className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-[30px] border border-[var(--codex-border)] bg-[rgba(255,255,255,0.86)] px-5 py-4 shadow-[var(--codex-shadow)]">
+                    <div className="max-w-3xl">
+                      <p className="text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">Vista previa abierta</p>
+                      <p className="mt-2 text-base leading-7 text-[var(--codex-ink)]">
+                        Esta ruta deja ver OpenClaw dentro de tu plataforma aun si el login o la base local no estan listos.
+                        Para lanzar runs, abrir chats reales y trabajar en el workspace seguro, inicia sesion.
+                      </p>
+                    </div>
+                    <Button
+                      className="rounded-full bg-[var(--codex-accent)] px-5 text-white hover:bg-[var(--codex-accent)]/90"
+                      onClick={login}
+                    >
+                      <LogIn className="mr-2 h-4 w-4" />
+                      Entrar al workspace seguro
+                    </Button>
+                  </section>
+                ) : null}
+
                 {selectedSession ? (
                   <div className="space-y-6">
-                    <section className="grid gap-4 rounded-[32px] border border-[var(--codex-border)] bg-[var(--codex-panel-soft)] p-5 shadow-[var(--codex-shadow)] md:grid-cols-[1.4fr_1fr_1fr]">
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">Contexto activo</p>
-                        <p className="mt-3 text-base leading-7 text-[var(--codex-ink)]">
-                          {selectedSession.assistantOutput || selectedSession.preview || "Sesión lista para continuar."}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">Workspace</p>
-                        <div className="mt-3 space-y-2 text-sm text-[var(--codex-muted)]">
-                          <p className="font-medium text-[var(--codex-ink)]">{selectedProject?.repositoryPath || "Sin repositorio conectado"}</p>
-                          <p>{branchSummary?.label || "Sin cambios pendientes"}</p>
-                        </div>
-                      </div>
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">Perfil operativo</p>
-                        <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                          <div className="rounded-2xl border border-[var(--codex-border)] bg-white/80 px-4 py-3">
-                            <p className="text-[var(--codex-muted)]">Run</p>
-                            <p className="mt-1 font-semibold">{launchRunId ? "Activo" : "Listo"}</p>
+                    <section className="grid gap-4 md:grid-cols-[1.35fr_0.65fr]">
+                      <div className="rounded-[32px] border border-[var(--codex-border)] bg-[var(--codex-panel)] p-6 shadow-[var(--codex-shadow)]">
+                        <div className="flex flex-wrap items-start justify-between gap-4">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-3">
+                              <span className="inline-flex items-center gap-2 rounded-full bg-[var(--codex-accent-soft)] px-3 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-[var(--codex-accent-ink)]">
+                                <Layers3 className="h-3.5 w-3.5" />
+                                OpenClaw Integrado
+                              </span>
+                              <span className={cn("inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm", getOpenClawSyncTone(releaseSyncStatus))}>
+                                <Shield className="h-4 w-4" />
+                                {releaseSyncLabel}
+                              </span>
+                            </div>
+                            <h2 className="mt-4 text-3xl font-semibold tracking-tight">
+                              {activeRelease?.name || "OpenClaw listo dentro de tu plataforma"}
+                            </h2>
+                            <p className="mt-3 max-w-3xl text-base leading-7 text-[var(--codex-muted)]">
+                              {activeRelease?.overview ||
+                                "OpenClaw queda montado como una experiencia segura dentro de ILIAGPT para que el usuario vea la release, entienda el contexto y use el workspace desde aquí."}
+                            </p>
                           </div>
-                          <div className="rounded-2xl border border-[var(--codex-border)] bg-white/80 px-4 py-3">
-                            <p className="text-[var(--codex-muted)]">Ventana</p>
-                            <p className="mt-1 font-semibold">{marathonMode ? "12h" : "Normal"}</p>
+
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => void refreshOpenClawRelease()}
+                              className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/82 px-4 py-2 text-sm transition-colors hover:bg-white"
+                            >
+                              {isOpenClawLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                              Actualizar
+                            </button>
+                            <a
+                              href={activeRelease?.htmlUrl || `https://github.com/openclaw/openclaw/releases/tag/${OPENCLAW_RELEASE_TAG}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/82 px-4 py-2 text-sm transition-colors hover:bg-white"
+                            >
+                              Ver release
+                              <ArrowUpRight className="h-4 w-4" />
+                            </a>
                           </div>
                         </div>
+
+                        <div className="mt-6 grid gap-3 md:grid-cols-3">
+                          <div className="rounded-2xl border border-[var(--codex-border)] bg-[#fbfaf6] px-4 py-4">
+                            <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Release fijada</p>
+                            <p className="mt-2 text-lg font-semibold">{activeRelease?.tagName || OPENCLAW_RELEASE_TAG}</p>
+                            <p className="mt-1 text-sm text-[var(--codex-muted)]">
+                              Bundle local {openClawRelease?.bundled.version || "sin versión detectada"}
+                            </p>
+                          </div>
+                          <div className="rounded-2xl border border-[var(--codex-border)] bg-[#fbfaf6] px-4 py-4">
+                            <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Publicada</p>
+                            <p className="mt-2 text-lg font-semibold">{formatFullDate(activeRelease?.publishedAt)}</p>
+                            <p className="mt-1 text-sm text-[var(--codex-muted)]">Release oficial consultada desde GitHub</p>
+                          </div>
+                          <div className="rounded-2xl border border-[var(--codex-border)] bg-[#fbfaf6] px-4 py-4">
+                            <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Última detectada</p>
+                            <p className="mt-2 text-lg font-semibold">{latestRelease?.tagName || "Sin señal remota"}</p>
+                            <p className="mt-1 text-sm text-[var(--codex-muted)]">
+                              {latestRelease?.tagName === activeRelease?.tagName ? "Ya está alineada con esta vista." : "Hay cambios nuevos listos para reflejarse."}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 grid gap-3 md:grid-cols-3">
+                          <div className="rounded-2xl border border-[var(--codex-border)] bg-[#fbfaf6] px-4 py-4">
+                            <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Cobertura</p>
+                            <p className="mt-2 text-lg font-semibold">
+                              {typeof openClawStats?.coveragePercent === "number" ? `${openClawStats.coveragePercent}%` : "Sin dato"}
+                            </p>
+                            <p className="mt-1 text-sm text-[var(--codex-muted)]">Mapa OpenClaw 500 dentro de la plataforma</p>
+                          </div>
+                          <div className="rounded-2xl border border-[var(--codex-border)] bg-[#fbfaf6] px-4 py-4">
+                            <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Capacidades</p>
+                            <p className="mt-2 text-lg font-semibold">
+                              {formatNumber(openClawStats?.implemented || 0)} / {formatNumber(openClawStats?.total || 500)}
+                            </p>
+                            <p className="mt-1 text-sm text-[var(--codex-muted)]">Implementadas o visibles en el mapeo actual</p>
+                          </div>
+                          <div className="rounded-2xl border border-[var(--codex-border)] bg-[#fbfaf6] px-4 py-4">
+                            <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Brechas</p>
+                            <p className="mt-2 text-lg font-semibold">{formatNumber(openClawStats?.gapCount || 0)}</p>
+                            <p className="mt-1 text-sm text-[var(--codex-muted)]">Huecos pendientes para cerrar al 100%</p>
+                          </div>
+                        </div>
+
+                        {releaseHighlights.length > 0 ? (
+                          <div className="mt-6 grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+                            <div className="rounded-[24px] border border-[var(--codex-border)] bg-white/82 p-5">
+                              <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Cambios clave</p>
+                              <div className="mt-4 space-y-3">
+                                {releaseHighlights.map((highlight, index) => (
+                                  <div key={`${highlight}-${index}`} className="flex items-start gap-3 rounded-2xl bg-[#f7f5ef] px-4 py-3">
+                                    <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--codex-accent)]" />
+                                    <p className="text-sm leading-6 text-[var(--codex-ink)]">{highlight}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="rounded-[24px] border border-[var(--codex-border)] bg-white/82 p-5">
+                              <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Notas importantes</p>
+                              <div className="mt-4 space-y-3 text-sm leading-6 text-[var(--codex-muted)]">
+                                {(activeRelease?.importantNotes.length ? activeRelease.importantNotes : [
+                                  "La web consulta la release fija y también revisa la última release disponible.",
+                                  "Si OpenClaw cambia en GitHub, esta vista puede mostrar el nuevo estado al refrescarse.",
+                                ]).map((note, index) => (
+                                  <div key={`${note}-${index}`} className="rounded-2xl bg-[#f7f5ef] px-4 py-3 text-[var(--codex-ink)]">
+                                    {note}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className="space-y-4">
+                        <section className="rounded-[32px] border border-[var(--codex-border)] bg-[var(--codex-panel-soft)] p-5 shadow-[var(--codex-shadow)]">
+                          <p className="text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">Sincronización web</p>
+                          <p className="mt-3 text-base leading-7 text-[var(--codex-ink)]">
+                            {openClawRelease?.sync.summary ||
+                              "La vista queda preparada para revisar OpenClaw y detectar cambios remotos automáticamente."}
+                          </p>
+                          <div className="mt-4 space-y-3 text-sm text-[var(--codex-muted)]">
+                            <p>Última revisión: {formatFullDate(openClawRelease?.syncedAt)}</p>
+                            <p>Frecuencia automática: cada {openClawRelease?.sync.autoRefreshMinutes || 15} minutos.</p>
+                            <p>Reacciones en GitHub: {formatNumber(activeRelease?.reactionCount || 0)}</p>
+                            <p>Cobertura verificada: {typeof openClawStats?.coveragePercent === "number" ? `${openClawStats.coveragePercent}%` : "Sin dato"}</p>
+                          </div>
+                          {openClawError ? (
+                            <div className="mt-4 rounded-2xl border border-dashed border-[#d7c6a1] bg-[#f8f1de] px-4 py-3 text-sm text-[#745b2d]">
+                              {openClawError}
+                            </div>
+                          ) : null}
+                          {topGapCategories.length > 0 ? (
+                            <div className="mt-4 rounded-2xl border border-[var(--codex-border)] bg-white/80 px-4 py-3">
+                              <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Brechas mas altas</p>
+                              <div className="mt-3 space-y-2 text-sm text-[var(--codex-ink)]">
+                                {topGapCategories.map(([category, count]) => (
+                                  <div key={category} className="flex items-center justify-between gap-3">
+                                    <span className="truncate">{category.replace(/_/g, " ")}</span>
+                                    <span className="font-medium">{formatNumber(count)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
+                        </section>
+
+                        <section className="rounded-[32px] border border-[var(--codex-border)] bg-[var(--codex-panel-soft)] p-5 shadow-[var(--codex-shadow)]">
+                          <p className="text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">Workspace seguro</p>
+                          <div className="mt-4 space-y-4">
+                            <div>
+                              <p className="text-base leading-7 text-[var(--codex-ink)]">
+                                {isAuthenticated
+                                  ? selectedSession.assistantOutput || selectedSession.preview || "Sesión lista para continuar con OpenClaw."
+                                  : "La vista ya refleja OpenClaw dentro de tu plataforma. Inicia sesion para abrir el workspace seguro, activar runs y operar con ramas reales."}
+                              </p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3 text-sm">
+                              <div className="rounded-2xl border border-[var(--codex-border)] bg-white/80 px-4 py-3">
+                                <p className="text-[var(--codex-muted)]">Run</p>
+                                <p className="mt-1 font-semibold">{launchRunId ? "Activo" : "Listo"}</p>
+                              </div>
+                              <div className="rounded-2xl border border-[var(--codex-border)] bg-white/80 px-4 py-3">
+                                <p className="text-[var(--codex-muted)]">Ventana</p>
+                                <p className="mt-1 font-semibold">{marathonMode ? "12h" : "Normal"}</p>
+                              </div>
+                            </div>
+                            <div className="rounded-2xl border border-[var(--codex-border)] bg-white/80 px-4 py-3 text-sm text-[var(--codex-muted)]">
+                              <p className="font-medium text-[var(--codex-ink)]">{selectedProject?.repositoryPath || "Sin repositorio conectado"}</p>
+                              <p className="mt-1">{branchSummary?.label || "Sin cambios pendientes"}</p>
+                            </div>
+                          </div>
+                        </section>
                       </div>
                     </section>
+
+                    {releaseNotes ? (
+                      <section className="overflow-hidden rounded-[34px] border border-[var(--codex-border)] bg-[var(--codex-panel)] shadow-[var(--codex-shadow)]">
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--codex-border)] px-6 py-5">
+                          <div>
+                            <p className="text-xs uppercase tracking-[0.22em] text-[var(--codex-muted)]">Notas completas de la release</p>
+                            <p className="mt-2 text-sm text-[var(--codex-muted)]">
+                              OpenClaw {activeRelease?.tagName || OPENCLAW_RELEASE_TAG} dentro de ILIAGPT
+                            </p>
+                          </div>
+                          {activeRelease?.tarballUrl ? (
+                            <a
+                              href={activeRelease.tarballUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/82 px-4 py-2 text-sm transition-colors hover:bg-white"
+                            >
+                              Descargar tarball
+                              <ArrowUpRight className="h-4 w-4" />
+                            </a>
+                          ) : null}
+                        </div>
+                        <div className="max-h-[26rem] overflow-y-auto px-6 py-6">
+                          <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-[var(--codex-ink)]">
+                            {releaseNotes}
+                          </pre>
+                        </div>
+                      </section>
+                    ) : null}
 
                     <section className="overflow-hidden rounded-[34px] border border-[var(--codex-border)] bg-[var(--codex-panel)] shadow-[var(--codex-shadow)]">
                       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--codex-border)] px-6 py-5">
                         <div>
-                          <p className="text-xs uppercase tracking-[0.22em] text-[var(--codex-muted)]">Sesión Codex</p>
+                          <p className="text-xs uppercase tracking-[0.22em] text-[var(--codex-muted)]">Sesión OpenClaw</p>
                           <div className="mt-2 flex flex-wrap items-center gap-3">
                             <span
                               className={cn(
@@ -938,7 +1378,7 @@ export default function CodexPage() {
                           onClick={openSelectedChat}
                           data-testid="codex-open-chat"
                         >
-                          Abrir chat
+                          {secureWorkspaceActionLabel}
                           <ArrowUpRight className="ml-2 h-4 w-4" />
                         </Button>
                       </div>
@@ -966,7 +1406,7 @@ export default function CodexPage() {
                             <article key={message.id} className="space-y-3">
                               <div className="flex items-center gap-3 text-sm text-[var(--codex-muted)]">
                                 <span className="font-medium text-[var(--codex-ink)]">
-                                  {isUser ? profileName : "Codex"}
+                                  {isUser ? profileName : "OpenClaw"}
                                 </span>
                                 <span>{timestamp}</span>
                                 {!isUser && message.agentRun?.status ? (
@@ -1036,16 +1476,100 @@ export default function CodexPage() {
                       <Code2 className="h-9 w-9 text-[var(--codex-accent)]" />
                     </div>
                     <h1 className="mt-8 text-4xl font-semibold tracking-tight md:text-5xl">
-                      Nueva sesión lista para arrancar
+                      OpenClaw listo para mostrarse en tu plataforma
                     </h1>
                     <p className="mt-4 max-w-2xl text-lg leading-8 text-[var(--codex-muted)]">
-                      Codex queda dentro de un workspace dedicado para ejecutar tareas de programación, revisar el contexto y lanzar runs con agentes reales.
+                      OpenClaw queda integrado dentro de un workspace dedicado para que el usuario vea la release oficial, entienda sus cambios y use tu plataforma segura desde aquí.
                     </p>
+                    <div className="mt-8 grid w-full gap-3 text-left md:grid-cols-3">
+                      <div className="rounded-2xl border border-[var(--codex-border)] bg-[#fbfaf6] px-4 py-4">
+                        <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Release fijada</p>
+                        <p className="mt-2 text-lg font-semibold">{activeRelease?.tagName || OPENCLAW_RELEASE_TAG}</p>
+                        <p className="mt-1 text-sm text-[var(--codex-muted)]">{activeRelease?.name || "OpenClaw release oficial"}</p>
+                      </div>
+                      <div className="rounded-2xl border border-[var(--codex-border)] bg-[#fbfaf6] px-4 py-4">
+                        <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Estado web</p>
+                        <p className="mt-2 text-lg font-semibold">{releaseSyncLabel}</p>
+                        <p className="mt-1 text-sm text-[var(--codex-muted)]">{openClawRelease?.sync.summary || "Esperando sincronización inicial."}</p>
+                      </div>
+                      <div className="rounded-2xl border border-[var(--codex-border)] bg-[#fbfaf6] px-4 py-4">
+                        <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Publicada</p>
+                        <p className="mt-2 text-lg font-semibold">{formatFullDate(activeRelease?.publishedAt)}</p>
+                        <p className="mt-1 text-sm text-[var(--codex-muted)]">GitHub oficial de OpenClaw</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid w-full gap-3 text-left md:grid-cols-3">
+                      <div className="rounded-2xl border border-[var(--codex-border)] bg-[#fbfaf6] px-4 py-4">
+                        <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Cobertura</p>
+                        <p className="mt-2 text-lg font-semibold">
+                          {typeof openClawStats?.coveragePercent === "number" ? `${openClawStats.coveragePercent}%` : "Sin dato"}
+                        </p>
+                        <p className="mt-1 text-sm text-[var(--codex-muted)]">Estado del mapa OpenClaw 500</p>
+                      </div>
+                      <div className="rounded-2xl border border-[var(--codex-border)] bg-[#fbfaf6] px-4 py-4">
+                        <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Capacidades</p>
+                        <p className="mt-2 text-lg font-semibold">
+                          {formatNumber(openClawStats?.implemented || 0)} / {formatNumber(openClawStats?.total || 500)}
+                        </p>
+                        <p className="mt-1 text-sm text-[var(--codex-muted)]">Implementadas o visibles hoy</p>
+                      </div>
+                      <div className="rounded-2xl border border-[var(--codex-border)] bg-[#fbfaf6] px-4 py-4">
+                        <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Brechas</p>
+                        <p className="mt-2 text-lg font-semibold">{formatNumber(openClawStats?.gapCount || 0)}</p>
+                        <p className="mt-1 text-sm text-[var(--codex-muted)]">Categorias aun por cerrar</p>
+                      </div>
+                    </div>
+                    {releaseHighlights.length > 0 ? (
+                      <div className="mt-8 w-full rounded-[28px] border border-[var(--codex-border)] bg-white/82 p-5 text-left">
+                        <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Cambios clave</p>
+                        <div className="mt-4 space-y-3">
+                          {releaseHighlights.slice(0, 4).map((highlight, index) => (
+                            <div key={`${highlight}-${index}`} className="rounded-2xl bg-[#f7f5ef] px-4 py-3 text-sm leading-6 text-[var(--codex-ink)]">
+                              {highlight}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                    {topGapCategories.length > 0 ? (
+                      <div className="mt-6 w-full rounded-[28px] border border-[var(--codex-border)] bg-white/82 p-5 text-left">
+                        <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Brechas mas altas</p>
+                        <div className="mt-4 grid gap-3 md:grid-cols-3">
+                          {topGapCategories.map(([category, count]) => (
+                            <div key={category} className="rounded-2xl bg-[#f7f5ef] px-4 py-3">
+                              <p className="text-sm font-medium text-[var(--codex-ink)]">{category.replace(/_/g, " ")}</p>
+                              <p className="mt-1 text-sm text-[var(--codex-muted)]">{formatNumber(count)} items pendientes</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                    {releaseNotes ? (
+                      <div className="mt-6 w-full overflow-hidden rounded-[28px] border border-[var(--codex-border)] bg-white/82 text-left">
+                        <div className="border-b border-[var(--codex-border)] px-5 py-4">
+                          <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Notas completas de la release</p>
+                          <p className="mt-2 text-sm text-[var(--codex-muted)]">
+                            OpenClaw {activeRelease?.tagName || OPENCLAW_RELEASE_TAG} dentro de ILIAGPT
+                          </p>
+                        </div>
+                        <div className="max-h-[22rem] overflow-y-auto px-5 py-5">
+                          <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-[var(--codex-ink)]">
+                            {releaseNotes}
+                          </pre>
+                        </div>
+                      </div>
+                    ) : null}
                     <Button
                       className="mt-10 rounded-full bg-[var(--codex-accent)] px-6 text-white hover:bg-[var(--codex-accent)]/90"
-                      onClick={() => setLocation("/")}
+                      onClick={() => {
+                        if (isAuthenticated) {
+                          setLocation("/");
+                          return;
+                        }
+                        login();
+                      }}
                     >
-                      Abrir chat principal
+                      {isAuthenticated ? "Abrir chat principal" : "Entrar al workspace seguro"}
                     </Button>
                   </section>
                 )}
@@ -1061,7 +1585,8 @@ export default function CodexPage() {
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
                   onKeyDown={handleComposerKeyDown}
-                  placeholder="Describe la tarea técnica y Codex lanzará un run real con contexto del proyecto, ramas y subagentes."
+                  placeholder={composerPlaceholder}
+                  disabled={!isAuthenticated}
                   className="min-h-[96px] resize-none border-0 bg-transparent px-4 py-4 text-base leading-7 shadow-none focus-visible:ring-0"
                 />
                 <div className="flex flex-wrap items-center justify-between gap-3 px-2 pt-1">
@@ -1069,11 +1594,13 @@ export default function CodexPage() {
                     <button
                       type="button"
                       onClick={() => setMultiAgentEnabled((value) => !value)}
+                      disabled={!isAuthenticated}
                       className={cn(
                         "inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm transition-colors",
                         multiAgentEnabled
                           ? "border-[var(--codex-accent)] bg-[var(--codex-accent-soft)] text-[var(--codex-accent-ink)]"
                           : "border-[var(--codex-border)] text-[var(--codex-muted)]",
+                        !isAuthenticated && "cursor-not-allowed opacity-60",
                       )}
                       data-testid="codex-multi-agent-toggle"
                     >
@@ -1083,11 +1610,13 @@ export default function CodexPage() {
                     <button
                       type="button"
                       onClick={() => setMarathonMode((value) => !value)}
+                      disabled={!isAuthenticated}
                       className={cn(
                         "inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm transition-colors",
                         marathonMode
                           ? "border-[var(--codex-accent)] bg-[var(--codex-accent-soft)] text-[var(--codex-accent-ink)]"
                           : "border-[var(--codex-border)] text-[var(--codex-muted)]",
+                        !isAuthenticated && "cursor-not-allowed opacity-60",
                       )}
                       data-testid="codex-marathon-toggle"
                     >
@@ -1097,7 +1626,11 @@ export default function CodexPage() {
                     <button
                       type="button"
                       onClick={() => setMaxSubagents((current) => (current >= 4 ? 1 : current + 1))}
-                      className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] px-3 py-2 text-sm text-[var(--codex-muted)] transition-colors hover:bg-[#faf8f3]"
+                      disabled={!isAuthenticated}
+                      className={cn(
+                        "inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] px-3 py-2 text-sm text-[var(--codex-muted)] transition-colors hover:bg-[#faf8f3]",
+                        !isAuthenticated && "cursor-not-allowed opacity-60",
+                      )}
                     >
                       <Command className="h-4 w-4" />
                       Subagentes: {maxSubagents}
@@ -1116,17 +1649,17 @@ export default function CodexPage() {
                       className="rounded-full border border-[var(--codex-border)] bg-[#faf8f3]"
                       onClick={openSelectedChat}
                     >
-                      Abrir chat
+                      {secureWorkspaceActionLabel}
                       <ArrowUpRight className="ml-2 h-4 w-4" />
                     </Button>
                     <Button
                       className="rounded-full bg-[var(--codex-accent)] px-5 text-white hover:bg-[var(--codex-accent)]/90"
                       onClick={() => void handleLaunch()}
-                      disabled={isLaunching || !draft.trim()}
+                      disabled={isAuthenticated ? isLaunching || !draft.trim() : false}
                       data-testid="codex-launch-run"
                     >
-                      {isLaunching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}
-                      {isLaunching ? "Lanzando" : "Lanzar run"}
+                      {isAuthenticated && isLaunching ? <Loader2 className="h-4 w-4 animate-spin" /> : isAuthenticated ? <Rocket className="h-4 w-4" /> : <LogIn className="h-4 w-4" />}
+                      {launchActionLabel}
                       <Send className="ml-2 h-4 w-4" />
                     </Button>
                   </div>
@@ -1136,16 +1669,23 @@ export default function CodexPage() {
               <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-[var(--codex-muted)]">
                 <div className="flex flex-wrap items-center gap-4">
                   <span>Local</span>
-                  <span>Acceso completo</span>
+                  <span>{isAuthenticated ? "Acceso completo" : "Vista previa"}</span>
                   <span>{multiAgentEnabled ? `Multi-agent x${maxSubagents}` : "Single-agent"}</span>
                   <span>{marathonMode ? "Ventana 12h" : "Ventana estándar"}</span>
-                  <span>{chatsLoading || projectsLoading || isBranchLoading ? "Sincronizando…" : "Workspace listo"}</span>
+                  <span>
+                    {chatsLoading || projectsLoading || isBranchLoading
+                      ? "Sincronizando…"
+                      : isAuthenticated
+                        ? "Workspace listo"
+                        : "Preview listo"}
+                  </span>
                 </div>
 
                 <Popover open={isBranchMenuOpen} onOpenChange={setIsBranchMenuOpen}>
                   <PopoverTrigger asChild>
                     <button
                       type="button"
+                      disabled={!isAuthenticated}
                       className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/88 px-4 py-2 text-sm text-[var(--codex-ink)] shadow-sm transition-colors hover:bg-white"
                       data-testid="codex-branch-trigger"
                     >
@@ -1231,9 +1771,9 @@ export default function CodexPage() {
         open={isCreateBranchDialogOpen}
         onOpenChange={setIsCreateBranchDialogOpen}
         title="Crear y cambiar a una rama nueva"
-        description="La rama se crea en el repositorio activo y queda seleccionada de inmediato dentro de Codex."
+        description="La rama se crea en el repositorio activo y queda seleccionada de inmediato dentro de OpenClaw."
         label="Nombre de la rama"
-        placeholder="codex/nueva-tarea-20260321"
+        placeholder="openclaw/nueva-tarea-20260322"
         confirmText="Crear rama"
         validate={validateBranchName}
         onConfirm={handleCreateBranch}

@@ -18,6 +18,7 @@ function handleUnauthorized() {
     '/business',
     '/download',
     '/power',
+    '/openclaw',
     '/terms',
     '/privacy-policy',
   ];

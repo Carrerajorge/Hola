@@ -18,6 +18,7 @@ import { sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { isAdminRole } from "../../lib/adminRole";
 import { isPrivilegedAdminEmail } from "@shared/adminIdentity";
+import { APP_SESSION_COOKIE_NAME } from "../../lib/appSessionStore";
 import { authEventBus } from "../../services/authEventBus";
 
 const authLoginLogger = createLogger("auth-login");
@@ -734,13 +735,13 @@ export function registerAuthRoutes(app: Express): void {
             if (destroyErr) {
               console.error("Session destroy error:", destroyErr);
             }
-            res.clearCookie("siragpt.sid");
+            res.clearCookie(APP_SESSION_COOKIE_NAME);
             setLogoutMarker(res);
             res.json({ success: true });
           });
           return;
         }
-        res.clearCookie("siragpt.sid");
+        res.clearCookie(APP_SESSION_COOKIE_NAME);
         setLogoutMarker(res);
         res.json({ success: true });
       });

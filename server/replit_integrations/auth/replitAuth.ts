@@ -5,7 +5,6 @@ import passport from "passport";
 import session from "express-session";
 import type { Express, Request, RequestHandler, Response } from "express";
 import memoize from "memoizee";
-import connectPg from "connect-pg-simple";
 import { authStorage } from "./storage";
 import { storage } from "../../storage";
 import { withRetry } from "../../utils/retry";
@@ -13,6 +12,11 @@ import { rateLimiter as authRateLimiter } from "../../middleware/userRateLimiter
 import { recordLoginAttempt } from "../../services/twoFactorAuth";
 import { getSettingValue } from "../../services/settingsConfigService";
 import { setLogoutMarker } from "../../lib/logoutMarker";
+import {
+  APP_SESSION_COOKIE_NAME,
+  APP_SESSION_TTL_MS,
+  getAppSessionStore,
+} from "../../lib/appSessionStore";
 
 const PRE_EMPTIVE_REFRESH_THRESHOLD_SECONDS = 300;
 const AUTH_METRICS = {
@@ -55,54 +59,6 @@ function resolveSessionUserId(req: any): string | null {
   }
 
   return null;
-}
-
-function createResilientPgSessionStore(sessionTtl: number) {
-  const pgStore = connectPg(session);
-  const store: any = new pgStore({
-    conString: process.env.DATABASE_URL,
-    createTableIfMissing: false,
-    ttl: sessionTtl,
-    tableName: "sessions",
-  });
-
-  // Guard against malformed/corrupted rows in the sessions table.
-  // Instead of failing the whole request with 500, drop the bad session
-  // and continue as anonymous.
-  const originalGet = typeof store.get === "function" ? store.get.bind(store) : null;
-  if (originalGet) {
-    store.get = (sid: string, cb: (err: any, sessionData?: any) => void) => {
-      originalGet(sid, (err: any, sessionData: any) => {
-        if (!err) {
-          cb(null, sessionData);
-          return;
-        }
-
-        console.error("[Auth] Session store get failed, clearing corrupt session:", {
-          sid,
-          error: err?.message || err,
-        });
-
-        const finish = () => cb(null, null);
-        if (typeof store.destroy === "function") {
-          store.destroy(sid, (destroyErr: any) => {
-            if (destroyErr) {
-              console.error("[Auth] Failed to destroy corrupt session row:", {
-                sid,
-                error: destroyErr?.message || destroyErr,
-              });
-            }
-            finish();
-          });
-          return;
-        }
-
-        finish();
-      });
-    };
-  }
-
-  return store;
 }
 
 const getOidcConfig = memoize(
@@ -174,24 +130,17 @@ const getOidcConfig = memoize(
 );
 
 export function getSession() {
-  const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
   const isProduction = process.env.NODE_ENV === "production" || !!process.env.REPL_SLUG;
-  const isTest = process.env.NODE_ENV === "test";
   const isReplitDeployment = !!process.env.REPL_SLUG;
 
   // SameSite=None is required for some OAuth callback flows (e.g. form_post) where the browser
   // treats the redirect as cross-site. Only use it when the cookie is Secure.
   const useNoneSameSite = isReplitDeployment || isProduction;
 
-  // Tests should be hermetic and must not require DB migrations just to serve a request.
-  // Use the default MemoryStore in test env.
-  const sessionStore = isTest
-    ? undefined
-    : createResilientPgSessionStore(sessionTtl);
   return session({
-    name: "siragpt.sid",
+    name: APP_SESSION_COOKIE_NAME,
     secret: process.env.SESSION_SECRET!,
-    store: sessionStore,
+    store: getAppSessionStore(),
     resave: false,
     saveUninitialized: false,
     rolling: true,
@@ -201,7 +150,7 @@ export function getSession() {
       secure: isProduction,
       // SameSite=None required for OAuth callback to work (cross-origin redirect)
       sameSite: useNoneSameSite ? "none" as const : "lax" as const,
-      maxAge: sessionTtl,
+      maxAge: APP_SESSION_TTL_MS,
       path: "/",
       // Don't set domain - let browser use host-only cookie for iliagpt.com
     },
@@ -300,7 +249,7 @@ function redirectAfterLegacyLogout(req: Request, res: Response, oidcConfig: any)
   }
 
   // Always clear local session cookie.
-  res.clearCookie("siragpt.sid");
+  res.clearCookie(APP_SESSION_COOKIE_NAME);
   setLogoutMarker(res);
 
   try {
@@ -329,7 +278,7 @@ export async function setupAuth(app: Express) {
   app.use(passport.session());
 
   const replitOidcEnabled = isReplitOidcEnabled();
-  let oidcConfig: any = null;
+  const oidcConfig: any = null;
 
   // Legacy logout route kept for backward compatibility with older frontend builds.
   // This must stay available even when Replit OIDC is not configured.

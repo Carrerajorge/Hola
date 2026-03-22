@@ -9,6 +9,7 @@ import {
   normalizeLanguageCode,
   type SupportedLanguage,
 } from "@/locales/registry";
+import { isPublicAuthRoute } from "@/lib/auth-flow";
 
 export type TranslationKeys = Record<string, string>;
 
@@ -527,6 +528,7 @@ function dispatchLanguageChange(language: SupportedLanguage): void {
 
 async function persistLanguageToProfile(language: SupportedLanguage): Promise<void> {
   if (typeof window === "undefined") return;
+  if (isPublicAuthRoute(window.location.pathname)) return;
 
   try {
     await fetch("/api/user/preferences", {
@@ -545,6 +547,7 @@ async function persistLanguageToProfile(language: SupportedLanguage): Promise<vo
 async function syncLanguageFromProfile(): Promise<void> {
   if (typeof window === "undefined") return;
   if (import.meta.env.MODE === "test") return;
+  if (isPublicAuthRoute(window.location.pathname)) return;
 
   if (profileSyncPromise) {
     await profileSyncPromise;

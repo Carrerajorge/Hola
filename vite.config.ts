@@ -1,4 +1,3 @@
-import { createRequire } from "node:module";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -6,17 +5,9 @@ import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 import { metaImagesPlugin } from "./vite-plugin-meta-images";
 
-const require = createRequire(import.meta.url);
-const { VitePWA } = require("vite-plugin-pwa") as typeof import("vite-plugin-pwa");
-
 export default defineConfig(async () => {
   const isProd = process.env.NODE_ENV === "production";
   const isReplit = process.env.REPL_ID !== undefined;
-  const nodeMajor = Number.parseInt(process.versions.node.split(".")[0] || "0", 10);
-  // Workbox bundles/minifies the SW with Rollup+Terser in production mode. That
-  // path can fail under some sandboxed/newer Node runtimes, so we fall back to
-  // development mode there (still generates a valid SW, just not minified).
-  const workboxMode = nodeMajor >= 22 ? "development" : "production";
 
   const replitPlugins =
     !isProd && isReplit
@@ -33,49 +24,6 @@ export default defineConfig(async () => {
       ...(isReplit ? [runtimeErrorOverlay()] : []),
       tailwindcss(),
       metaImagesPlugin(),
-      VitePWA({
-        registerType: "autoUpdate",
-        // Production incident fix: unregister SW + clear caches so users cannot get stuck on stale builds.
-        // This disables PWA caching in prod while we stabilize updates.
-        selfDestroying: isProd,
-        includeAssets: ["favicon.ico", "robots.txt", "apple-touch-icon.png"],
-        manifest: {
-          name: "MICHAT PRO - AI Assistant",
-          short_name: "MICHAT",
-          description: "Advanced AI Assistant Platform with Enterprise Security",
-          theme_color: "#0f172a",
-          background_color: "#0f172a",
-          display: "standalone",
-          orientation: "portrait",
-          icons: [
-            { src: "/pwa-192x192.png", sizes: "192x192", type: "image/png" },
-            { src: "/pwa-512x512.png", sizes: "512x512", type: "image/png" },
-            {
-              src: "/pwa-512x512.png",
-              sizes: "512x512",
-              type: "image/png",
-              purpose: "any maskable",
-            },
-          ],
-        },
-        workbox: {
-          mode: workboxMode,
-          disableDevLogs: true,
-          globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
-          maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5MB
-          // Don't cache API requests - let them pass through to the network
-          navigateFallbackDenylist: [/^\/api\//],
-          runtimeCaching: [
-            {
-              urlPattern: /^\/api\//,
-              handler: "NetworkOnly",
-            },
-          ],
-          // Force new SW on every build
-          skipWaiting: true,
-          clientsClaim: true,
-        },
-      }),
       ...replitPlugins,
     ],
     resolve: {

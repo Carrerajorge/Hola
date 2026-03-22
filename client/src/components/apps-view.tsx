@@ -811,22 +811,6 @@ const apps: App[] = [
     ),
     category: "lifestyle",
   },
-  {
-    id: "codex",
-    name: "Codex",
-    description: "Agente de código para investigación, análisis y ejecución avanzada",
-    longDescription: "Codex es un agente inteligente de código que combina investigación, análisis y ejecución avanzada para resolver tareas complejas de desarrollo. Integra planificación, verificación y herramientas especializadas para acelerar flujos de trabajo técnicos con calidad profesional.",
-    icon: (
-      <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-[#0F172A] via-[#1E293B] to-[#0B1324] flex items-center justify-center">
-        <span className="text-white font-semibold text-sm tracking-wide">CX</span>
-      </div>
-    ),
-    category: "featured",
-    verified: true,
-    developer: "ILIA Lab",
-    websiteUrl: "https://codex.openai.com",
-    privacyUrl: "https://openai.com/policies/privacy-policy"
-  },
 ];
 
 type AppEndpoints = Pick<App, "connectionEndpoint" | "statusEndpoint" | "disconnectEndpoint">;

@@ -51,7 +51,7 @@ async function createProducts() {
     description: 'Maximiza tu productividad',
     metadata: {
       plan_type: 'pro',
-      features: 'Mensajes ilimitados, imágenes de alta calidad, memoria máxima, agentes, videos Sora, Codex'
+      features: 'Mensajes ilimitados, imágenes de alta calidad, memoria máxima, agentes, videos Sora, OpenClaw'
     }
   });
 

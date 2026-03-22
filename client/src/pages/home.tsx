@@ -760,10 +760,6 @@ export default function Home() {
     setIsLibraryOpen(true);
   };
 
-  const handleOpenCodex = () => {
-    setLocation("/codex");
-  };
-
   const handleSelectGpt = (gpt: Gpt) => {
     setActiveGpt(gpt);
     handleNewChat({ preserveGpt: true });
@@ -935,7 +931,6 @@ export default function Home() {
               onOpenApps={handleOpenApps}
               onOpenSkills={handleOpenSkills}
               onOpenWhatsAppConnect={() => setIsWhatsAppConnectOpen(true)}
-              onOpenCodex={handleOpenCodex}
               onOpenLibrary={handleOpenLibrary}
               processingChatIds={processingChatIds}
               pendingResponseCounts={pendingResponseCounts}
@@ -983,7 +978,6 @@ export default function Home() {
                 onOpenApps={handleOpenApps}
                 onOpenSkills={handleOpenSkills}
                 onOpenWhatsAppConnect={() => setIsWhatsAppConnectOpen(true)}
-                onOpenCodex={handleOpenCodex}
                 onOpenLibrary={handleOpenLibrary}
                 processingChatIds={processingChatIds}
                 pendingResponseCounts={pendingResponseCounts}

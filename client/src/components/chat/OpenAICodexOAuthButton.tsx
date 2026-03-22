@@ -66,9 +66,7 @@ export function OpenAICodexOAuthButton({
   const [open, setOpen] = React.useState(false);
   const [flowId, setFlowId] = React.useState<string | null>(null);
   const [authUrl, setAuthUrl] = React.useState("");
-  const [redirectUri, setRedirectUri] = React.useState(
-    "http://localhost:1455/auth/callback",
-  );
+  const [redirectUri, setRedirectUri] = React.useState("");
   const [manualInput, setManualInput] = React.useState("");
   const [showManualFallback, setShowManualFallback] = React.useState(false);
   const popupRef = React.useRef<Window | null>(null);
@@ -200,7 +198,7 @@ export function OpenAICodexOAuthButton({
         popupRef.current = null;
         setFlowId(null);
         setAuthUrl("");
-        setRedirectUri("http://localhost:1455/auth/callback");
+        setRedirectUri("");
         setManualInput("");
         setShowManualFallback(false);
         lastHandledFlowStateRef.current = null;
@@ -367,12 +365,14 @@ export function OpenAICodexOAuthButton({
                   <ol className="space-y-1 text-muted-foreground">
                     <li>1. Abre la ventana de ChatGPT y completa el login.</li>
                     <li>
-                      2. Si este servidor corre localmente, la vinculación se
-                      cerrará sola.
+                      2. Al regresar a ILIAGPT, la vinculación se completará y
+                      la ventana se cerrará sola.
                     </li>
                     <li>
-                      3. Si ves una URL que termina en <code>{redirectUri}</code>,
-                      copia esa URL completa y pégala abajo.
+                      3. Si no vuelve automáticamente, pega la URL final que
+                      termina en{" "}
+                      <code>{redirectUri || "el callback de ILIAGPT"}</code> o
+                      solo el <code>code</code>.
                     </li>
                   </ol>
                 </div>
@@ -414,11 +414,11 @@ export function OpenAICodexOAuthButton({
                       htmlFor="openai-codex-manual"
                       className="text-sm font-medium"
                     >
-                      URL final de localhost o código
+                      URL final del callback o código
                     </label>
                     <Textarea
                       id="openai-codex-manual"
-                      placeholder="Pega aquí http://localhost:1455/auth/callback?code=...&state=... o solo el code"
+                      placeholder="Pega aquí https://iliagpt.com/api/oauth/openai/codex/callback?code=...&state=... o solo el code"
                       value={manualInput}
                       onChange={(event) => setManualInput(event.target.value)}
                       className="min-h-[120px]"

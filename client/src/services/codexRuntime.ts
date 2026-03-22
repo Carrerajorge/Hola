@@ -70,7 +70,7 @@ export function buildCodexPrompt(params: {
     : "Perfil operativo: ejecución estándar con foco en completar la tarea de punta a punta.";
 
   return [
-    "Actúa como un agente de programación autónomo dentro de ILIAGPT.",
+    "Actúa como un agente OpenClaw integrado de forma segura dentro de ILIAGPT.",
     executionProfile,
     workspaceSummary ? `Contexto del workspace:\n${workspaceSummary}` : null,
     "Objetivo principal del usuario:",
@@ -119,7 +119,7 @@ function buildSubagentObjective(params: {
 
 async function createChatForCodex(message: string): Promise<string> {
   const response = await apiRequest("POST", "/api/chats", {
-    title: truncate(message.trim() || "Nueva sesión Codex", 56),
+    title: truncate(message.trim() || "Nueva sesión OpenClaw", 56),
     model: "gemini-3-flash-preview",
     provider: "google",
   });
@@ -134,7 +134,7 @@ export async function createCodexRun(params: CreateCodexRunParams): Promise<{
 }> {
   const trimmedMessage = params.message.trim();
   if (!trimmedMessage) {
-    throw new Error("Describe la tarea antes de lanzar Codex.");
+    throw new Error("Describe la tarea antes de lanzar OpenClaw.");
   }
 
   const chatId = params.chatId?.trim() ? params.chatId.trim() : await createChatForCodex(trimmedMessage);

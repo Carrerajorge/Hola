@@ -13,6 +13,7 @@ const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
 const addChatToProjectMock = vi.fn();
 const apiFetchMock = vi.fn();
+const loginMock = vi.fn();
 
 vi.mock("wouter", () => ({
   useLocation: () => ["/codex", setLocationMock],
@@ -58,12 +59,15 @@ describe("CodexPage", () => {
     toastErrorMock.mockReset();
     addChatToProjectMock.mockReset();
     apiFetchMock.mockReset();
+    loginMock.mockReset();
 
     useAuthMock.mockReturnValue({
       user: {
         fullName: "Admin QA",
         email: "admin@example.com",
       },
+      isAuthenticated: true,
+      login: loginMock,
     });
 
     useChatsMock.mockReturnValue({
@@ -71,7 +75,7 @@ describe("CodexPage", () => {
         {
           id: "chat-2",
           stableKey: "chat-2",
-          title: "Polish Codex screen",
+          title: "Polish OpenClaw screen",
           timestamp: Date.now() - 5 * 60 * 1000,
           messages: [
             {
@@ -83,10 +87,10 @@ describe("CodexPage", () => {
             {
               id: "assistant-2",
               role: "assistant",
-              content: "Preparé una dirección visual más minimalista para Codex.",
+              content: "Preparé una dirección visual más minimalista para OpenClaw.",
               timestamp: new Date(),
               agentRun: {
-                summary: "Preparé una dirección visual más minimalista para Codex.",
+                summary: "Preparé una dirección visual más minimalista para OpenClaw.",
                 status: "done",
                 steps: [],
                 runId: "run-2",
@@ -163,6 +167,80 @@ describe("CodexPage", () => {
     });
 
     apiFetchMock.mockImplementation(async (url: string, options?: { method?: string }) => {
+      if (url.startsWith("/api/openclaw/release?")) {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            requestedTag: "v2026.3.13-1",
+            syncedAt: "2026-03-22T00:00:00.000Z",
+            bundled: {
+              version: "2026.3.13",
+              matchesRequested: true,
+            },
+            requestedRelease: {
+              tagName: "v2026.3.13-1",
+              name: "openclaw 2026.3.13",
+              htmlUrl: "https://github.com/openclaw/openclaw/releases/tag/v2026.3.13-1",
+              tarballUrl: "https://api.github.com/repos/openclaw/openclaw/tarball/v2026.3.13-1",
+              zipballUrl: "https://api.github.com/repos/openclaw/openclaw/zipball/v2026.3.13-1",
+              publishedAt: "2026-03-14T18:04:28Z",
+              overview: "Recovery release for the broken original tag.",
+              importantNotes: ["The npm version remains 2026.3.13."],
+              highlights: [
+                "fix(compaction): use full-session token count",
+                "fix(ui): keep shared auth on insecure control-ui connects",
+              ],
+              notes: "Full release notes",
+              reactionCount: 346,
+              isLatest: true,
+            },
+            latestRelease: {
+              tagName: "v2026.3.13-1",
+              name: "openclaw 2026.3.13",
+              htmlUrl: "https://github.com/openclaw/openclaw/releases/tag/v2026.3.13-1",
+              tarballUrl: "https://api.github.com/repos/openclaw/openclaw/tarball/v2026.3.13-1",
+              zipballUrl: "https://api.github.com/repos/openclaw/openclaw/zipball/v2026.3.13-1",
+              publishedAt: "2026-03-14T18:04:28Z",
+              overview: "Recovery release for the broken original tag.",
+              importantNotes: ["The npm version remains 2026.3.13."],
+              highlights: ["fix(compaction): use full-session token count"],
+              notes: "Full release notes",
+              reactionCount: 346,
+              isLatest: true,
+            },
+            sync: {
+              status: "synced",
+              summary: "OpenClaw v2026.3.13-1 is aligned with the latest release.",
+              autoRefreshMinutes: 15,
+              latestMatchesRequested: true,
+            },
+            errors: [],
+          }),
+        };
+      }
+
+      if (url === "/api/openclaw/stats") {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            total: 500,
+            implemented: 438,
+            partial: 22,
+            stub: 31,
+            missing: 9,
+            coveragePercent: 92,
+            gapCount: 40,
+            gapsByCategory: {
+              platform_messaging_ops_security: 14,
+              local_ops_filesystem_devops: 11,
+              documents_and_library: 8,
+            },
+          }),
+        };
+      }
+
       if (url.startsWith("/api/local/repo/branches?")) {
         return {
           ok: true,
@@ -235,20 +313,31 @@ describe("CodexPage", () => {
 
     await waitFor(() => {
       expect(apiFetchMock).toHaveBeenCalledWith(
+        expect.stringMatching(/^\/api\/openclaw\/release\?/),
+        expect.objectContaining({ method: "GET", credentials: "include" }),
+      );
+      expect(apiFetchMock).toHaveBeenCalledWith(
+        "/api/openclaw/stats",
+        expect.objectContaining({ method: "GET", credentials: "include" }),
+      );
+      expect(apiFetchMock).toHaveBeenCalledWith(
         "/api/local/repo/branches?rootPath=%2Fworkspace%2Fhola",
         expect.objectContaining({ method: "GET", credentials: "include" }),
       );
     });
 
     expect(screen.getByText("ILIAGPT")).toBeInTheDocument();
-    expect(screen.getByTestId("codex-session-title")).toHaveTextContent("Polish Codex screen");
+    expect(screen.getAllByText("OpenClaw").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("v2026.3.13-1").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("codex-session-title")).toHaveTextContent("Polish OpenClaw screen");
     expect(screen.getAllByText("/workspace/hola").length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByTestId("codex-session-chat-1"));
 
     expect(screen.getByTestId("codex-session-title")).toHaveTextContent("Fix upload error");
     expect(screen.getAllByText("Document hotfix").length).toBeGreaterThan(0);
-    expect(screen.getByText("Workspace")).toBeInTheDocument();
+    expect(screen.getByText("Workspace seguro")).toBeInTheDocument();
+    expect(screen.getAllByText("92%").length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByTestId("codex-open-chat"));
 
@@ -274,7 +363,7 @@ describe("CodexPage", () => {
     expect(screen.getByText("Crear y cambiar a una rama nueva...")).toBeInTheDocument();
   });
 
-  it("shows the empty workspace state when there are no sessions yet", () => {
+  it("shows the empty workspace state when there are no sessions yet", async () => {
     useChatsMock.mockReturnValue({
       allChats: [],
       isLoading: false,
@@ -288,8 +377,16 @@ describe("CodexPage", () => {
 
     render(<CodexPage />);
 
-    expect(screen.getByText("Nueva sesión lista para arrancar")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(apiFetchMock).toHaveBeenCalledWith(
+        expect.stringMatching(/^\/api\/openclaw\/release\?/),
+        expect.objectContaining({ method: "GET", credentials: "include" }),
+      );
+    });
+
+    expect(screen.getByText("OpenClaw listo para mostrarse en tu plataforma")).toBeInTheDocument();
     expect(screen.getByText("Abrir chat principal")).toBeInTheDocument();
+    expect(screen.getByText("Notas completas de la release")).toBeInTheDocument();
   });
 
   it("launches a real run with subagents and redirects to progress", async () => {
@@ -324,5 +421,36 @@ describe("CodexPage", () => {
       expect(addChatToProjectMock).toHaveBeenCalledWith("chat-new", "project-1");
       expect(setLocationMock).toHaveBeenCalledWith("/runs/run-new/progress");
     });
+  });
+
+  it("shows the public preview mode and sends secure actions to login", async () => {
+    useAuthMock.mockReturnValue({
+      user: {
+        id: "anon_preview",
+        isAnonymous: true,
+      },
+      isAuthenticated: false,
+      login: loginMock,
+    });
+
+    useChatsMock.mockReturnValue({
+      allChats: [],
+      isLoading: false,
+    });
+
+    useProjectsMock.mockReturnValue({
+      projects: [],
+      isLoading: false,
+      addChatToProject: addChatToProjectMock,
+    });
+
+    render(<CodexPage />);
+
+    expect(await screen.findByText("Vista previa abierta")).toBeInTheDocument();
+    expect(screen.getAllByText("Entrar al workspace seguro").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getAllByRole("button", { name: /Entrar al workspace seguro/i })[0]!);
+
+    expect(loginMock).toHaveBeenCalledTimes(1);
   });
 });

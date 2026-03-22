@@ -99,7 +99,7 @@ const plans: PlanInfo[] = [
       { text: "Planifica viajes y tareas con el modo Agente", included: true },
       { text: "Organiza proyectos y GPT personalizados", included: true },
       { text: "Produce y comparte videos en Sora", included: true },
-      { text: "Escribe código y crea aplicaciones con Codex", included: true },
+      { text: "Escribe código y crea aplicaciones con OpenClaw", included: true },
     ],
   },
   {
@@ -120,7 +120,7 @@ const plans: PlanInfo[] = [
       { text: "Ejecuta investigaciones y planifica tareas con agentes", included: true },
       { text: "Adapta tus proyectos y automatiza flujos de trabajo", included: true },
       { text: "Supera tus límites con la creación de videos en Sora", included: true },
-      { text: "Implementa código más rápido con Codex", included: true },
+      { text: "Implementa código más rápido con OpenClaw", included: true },
       { text: "Obtén acceso anticipado a características experimentales", included: true },
     ],
   },
