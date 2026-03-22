@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ToolContext, ToolDefinition, ToolResult } from "../../agent/toolRegistry";
-import { openclawSubagentService } from "../agents/subagentService";
+import { openclawSubagentService, type SubagentStatusChangeEvent } from "../agents/subagentService";
+import { agentEventBus } from "../../agent/eventBus";
 
 type RagServiceLike = {
   search: (
@@ -49,14 +50,44 @@ export function createAgenticTools(): ToolDefinition[] {
     }),
     capabilities: ["long_running"],
     execute: async (input: any, context: ToolContext): Promise<ToolResult> => {
-      return ok(
-        openclawSubagentService.spawn({
-          requesterUserId: context.userId,
-          objective: input.objective,
-          planHint: input.planHint,
-          parentRunId: input.parentRunId || context.runId,
-        }),
-      );
+      const parentRunId = input.parentRunId || context.runId;
+      const run = openclawSubagentService.spawn({
+        requesterUserId: context.userId,
+        objective: input.objective,
+        planHint: input.planHint,
+        parentRunId,
+      });
+
+      // Emit spawned event to the parent run's SSE stream
+      void agentEventBus.emit(parentRunId, "agent_delegated", {
+        metadata: {
+          subagentId: run.id,
+          objective: run.objective,
+          status: run.status,
+        },
+      });
+
+      // Watch for subagent status changes and forward to parent's SSE stream
+      const onStatusChange = (event: SubagentStatusChangeEvent) => {
+        if (event.runId !== run.id) return;
+        const isTerminal = event.status === "completed" || event.status === "failed" || event.status === "cancelled";
+        void agentEventBus.emit(parentRunId, isTerminal ? "agent_completed" : "progress_update", {
+          metadata: {
+            subagentId: event.runId,
+            objective: event.objective,
+            status: event.status,
+            result: typeof event.result === "string" ? event.result.slice(0, 500) : undefined,
+            error: event.error,
+            elapsedMs: event.elapsedMs,
+          },
+        });
+        if (isTerminal) {
+          openclawSubagentService.removeListener("status_change", onStatusChange);
+        }
+      };
+      openclawSubagentService.on("status_change", onStatusChange);
+
+      return ok(run);
     },
   };
 

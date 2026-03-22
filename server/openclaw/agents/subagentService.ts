@@ -1,7 +1,18 @@
 import { randomUUID } from "crypto";
+import { EventEmitter } from "events";
 import { AgentRunner } from "../../services/agentRunner";
 
 export type SubagentRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+
+export interface SubagentStatusChangeEvent {
+  runId: string;
+  parentRunId?: string;
+  status: SubagentRunStatus;
+  objective: string;
+  result?: unknown;
+  error?: string;
+  elapsedMs?: number;
+}
 
 export interface SubagentRunRecord {
   id: string;
@@ -33,9 +44,27 @@ type ListRunsParams = {
 
 const MAX_RETENTION_RUNS = 500;
 
-class OpenClawSubagentService {
+class OpenClawSubagentService extends EventEmitter {
   private readonly runs = new Map<string, SubagentRunRecord>();
   private readonly runners = new Map<string, AgentRunner>();
+
+  constructor() {
+    super();
+    this.setMaxListeners(50);
+  }
+
+  private emitStatusChange(run: SubagentRunRecord): void {
+    const event: SubagentStatusChangeEvent = {
+      runId: run.id,
+      parentRunId: run.parentRunId,
+      status: run.status,
+      objective: run.objective,
+      result: run.status === "completed" ? run.result : undefined,
+      error: run.error,
+      elapsedMs: run.startedAt ? (run.endedAt || Date.now()) - run.startedAt : undefined,
+    };
+    this.emit("status_change", event);
+  }
 
   spawn(params: SpawnSubagentParams): SubagentRunRecord {
     const runId = `subagent_${randomUUID()}`;
@@ -51,6 +80,7 @@ class OpenClawSubagentService {
 
     this.runs.set(runId, run);
     this.trimRetention();
+    this.emitStatusChange(run);
     void this.execute(runId);
     return run;
   }
@@ -83,6 +113,7 @@ class OpenClawSubagentService {
       run.status = "cancelled";
       run.endedAt = Date.now();
       this.runs.set(runId, run);
+      this.emitStatusChange(run);
     }
     return true;
   }
@@ -98,6 +129,7 @@ class OpenClawSubagentService {
     run.status = "running";
     run.startedAt = Date.now();
     this.runs.set(runId, run);
+    this.emitStatusChange(run);
 
     try {
       const result = await runner.run(run.objective, run.planHint);
@@ -116,6 +148,7 @@ class OpenClawSubagentService {
       next.error = result.success ? undefined : (result.result as any)?.error;
       next.endedAt = Date.now();
       this.runs.set(runId, next);
+      this.emitStatusChange(next);
     } catch (error: any) {
       const next = this.runs.get(runId);
       if (!next) return;
@@ -123,6 +156,7 @@ class OpenClawSubagentService {
       next.error = error?.message || "Subagent execution failed";
       next.endedAt = Date.now();
       this.runs.set(runId, next);
+      this.emitStatusChange(next);
     } finally {
       this.runners.delete(runId);
       this.trimRetention();

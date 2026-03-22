@@ -556,10 +556,10 @@ class LLMGateway {
       return otherMessages.length - 1;
     })();
 
-    let mustKeep: ChatCompletionMessageParam = otherMessages[mustKeepIndex];
+    const mustKeep: ChatCompletionMessageParam = otherMessages[mustKeepIndex];
     const isMultimodal = Array.isArray(mustKeep.content);
-    let mustKeepText = toText(mustKeep);
-    let mustKeepTokens = isMultimodal
+    const mustKeepText = toText(mustKeep);
+    const mustKeepTokens = isMultimodal
       ? 500 // Flat estimate for multimodal messages (image data is not counted as context tokens)
       : estimateTokens(mustKeepText);
 
@@ -1628,7 +1628,7 @@ class LLMGateway {
     }
 
     const selected = this.selectProvider(options);
-    let currentProvider: LLMProvider = this.isProviderReady(selected) ? selected : configuredProviders[0];
+    const currentProvider: LLMProvider = this.isProviderReady(selected) ? selected : configuredProviders[0];
 
     this.metrics.totalRequests++;
 
@@ -1762,11 +1762,11 @@ class LLMGateway {
     // Let's implement a simpler version that wraps streamChat and emits typed events.
     // If the schema is for the FINAL output, we validate at the end.
 
-    let currentMessages = [...augmentedMessages];
+    const currentMessages = [...augmentedMessages];
     const maxRetries = 2; // 0 = initial, 1 = first retry, 2 = second retry
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      let fullContent = "";
+      const fullContent = "";
 
       try {
         if (attempt > 0) {

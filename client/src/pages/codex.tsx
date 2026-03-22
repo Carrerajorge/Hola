@@ -420,6 +420,7 @@ export default function CodexPage() {
   const [openClawStats, setOpenClawStats] = useState<OpenClawCapabilityStats | null>(null);
   const [isOpenClawLoading, setIsOpenClawLoading] = useState(true);
   const [openClawError, setOpenClawError] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<"workspace" | "openclaw-ui">("workspace");
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
 
   const sessions = useMemo<CodexSession[]>(() => {
@@ -1119,6 +1120,52 @@ export default function CodexPage() {
             </div>
           </header>
 
+          {/* View toggle tabs */}
+          <div className="flex items-center gap-1 border-b border-[var(--codex-border)] bg-[rgba(247,245,240,0.6)] px-4 md:px-6 lg:px-8">
+            <button
+              type="button"
+              onClick={() => setActiveView("workspace")}
+              className={cn(
+                "relative px-5 py-3 text-sm font-medium transition-colors",
+                activeView === "workspace"
+                  ? "text-[var(--codex-accent-ink)]"
+                  : "text-[var(--codex-muted)] hover:text-[var(--codex-ink)]",
+              )}
+            >
+              Workspace
+              {activeView === "workspace" && (
+                <span className="absolute inset-x-2 bottom-0 h-[2px] rounded-full bg-[var(--codex-accent)]" />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveView("openclaw-ui")}
+              className={cn(
+                "relative px-5 py-3 text-sm font-medium transition-colors",
+                activeView === "openclaw-ui"
+                  ? "text-[var(--codex-accent-ink)]"
+                  : "text-[var(--codex-muted)] hover:text-[var(--codex-ink)]",
+              )}
+            >
+              OpenClaw UI
+              {activeView === "openclaw-ui" && (
+                <span className="absolute inset-x-2 bottom-0 h-[2px] rounded-full bg-[var(--codex-accent)]" />
+              )}
+            </button>
+          </div>
+
+          {activeView === "openclaw-ui" ? (
+            <div className="flex-1 overflow-hidden">
+              <iframe
+                src="/openclaw-ui/"
+                title="OpenClaw Control UI"
+                className="h-full w-full border-0"
+                style={{ minHeight: "calc(100vh - 160px)" }}
+                allow="clipboard-read; clipboard-write"
+              />
+            </div>
+          ) : (
+          <>
           <div className="flex-1 overflow-hidden">
             <ScrollArea className="h-full">
               <div className="mx-auto w-full max-w-5xl px-4 pb-40 pt-8 md:px-6 lg:px-8">
@@ -1764,6 +1811,8 @@ export default function CodexPage() {
               </div>
             </div>
           </div>
+          </>
+          )}
         </main>
       </div>
 

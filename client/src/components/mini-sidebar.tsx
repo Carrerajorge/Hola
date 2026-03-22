@@ -110,22 +110,6 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
             </TooltipContent>
           </Tooltip>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-10 w-10 rounded-2xl border border-white/40 bg-white/70 shadow-sm transition-colors hover:bg-white dark:border-white/8 dark:bg-white/6 dark:hover:bg-white/10"
-                data-testid="mini-button-openclaw"
-                onClick={() => setLocation("/openclaw")}
-              >
-                <Code className="h-4 w-4 text-foreground" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              <p>OpenClaw</p>
-            </TooltipContent>
-          </Tooltip>
         </div>
 
         <div className="mt-auto">

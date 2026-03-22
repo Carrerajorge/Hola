@@ -727,17 +727,6 @@ export function Sidebar({
               title={`Canales: ${waStatus.state}`}
             />
           </Button>
-          <Button
-            variant="ghost"
-            className={cn(minimalSectionButtonClass, "group mt-0.5")}
-            onClick={() => setLocation("/openclaw")}
-            data-testid="button-openclaw"
-          >
-            <div className={minimalIconChipClass}>
-              <PremiumIcons.Code className="h-[13px] w-[13px]" />
-            </div>
-            OpenClaw
-          </Button>
         </div>
       </div>
 

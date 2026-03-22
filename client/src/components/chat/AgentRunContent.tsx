@@ -211,6 +211,24 @@ export const AgentRunContent = memo(function AgentRunContent({
         return { completed: completedEvents, total: Math.max(totalSteps, completedEvents) };
     }, [mappedEvents, agentRun.steps]);
 
+    // Extract subagent activity from event stream
+    const subagents = useMemo(() => {
+        const map = new Map<string, { id: string; objective: string; status: string; error?: string; elapsedMs?: number }>();
+        for (const event of agentRun.eventStream || []) {
+            const meta = event.content?.metadata;
+            if (!meta?.subagentId) continue;
+            const existing = map.get(meta.subagentId);
+            map.set(meta.subagentId, {
+                id: meta.subagentId,
+                objective: meta.objective || existing?.objective || "Subagente",
+                status: meta.status || existing?.status || "queued",
+                error: meta.error || existing?.error,
+                elapsedMs: meta.elapsedMs || existing?.elapsedMs,
+            });
+        }
+        return Array.from(map.values());
+    }, [agentRun.eventStream]);
+
     const plannedSteps = useMemo(() => {
         const fromEvents = [...(agentRun.eventStream || [])]
             .reverse()
@@ -496,6 +514,45 @@ export const AgentRunContent = memo(function AgentRunContent({
                                         +{skillLoadSequence.length - 6} skills más
                                     </div>
                                 )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Subagent Activity Panel */}
+                    {subagents.length > 0 && (
+                        <div className="rounded-lg border border-border/60 bg-background/60 p-3">
+                            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                <Bot className="h-3.5 w-3.5 text-violet-500" />
+                                Subagentes ({subagents.filter(s => s.status === "completed").length}/{subagents.length})
+                            </div>
+                            <div className="mt-2 space-y-1.5 border-l border-border/60 pl-3">
+                                {subagents.map((sa) => {
+                                    const isDone = sa.status === "completed";
+                                    const isFailed = sa.status === "failed" || sa.status === "cancelled";
+                                    const isRunning = sa.status === "running";
+                                    return (
+                                        <div key={sa.id} className="flex items-start gap-2 text-xs">
+                                            {isDone ? (
+                                                <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-green-500" />
+                                            ) : isFailed ? (
+                                                <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-500" />
+                                            ) : isRunning ? (
+                                                <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-violet-500" />
+                                            ) : (
+                                                <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                            )}
+                                            <div className="min-w-0 flex-1">
+                                                <span className="text-foreground/85 line-clamp-1">{sa.objective}</span>
+                                                {sa.error && (
+                                                    <span className="text-red-500 line-clamp-1">{sa.error}</span>
+                                                )}
+                                                {sa.elapsedMs != null && isDone && (
+                                                    <span className="text-muted-foreground"> ({Math.round(sa.elapsedMs / 1000)}s)</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
                     )}
