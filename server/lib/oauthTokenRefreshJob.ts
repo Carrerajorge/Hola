@@ -8,6 +8,7 @@
 
 import { decrypt } from "../services/encryption";
 import { providersService } from "../services/providersService";
+import { getOpenAIWebOAuthAvailability } from "../services/providerOAuthAvailability";
 
 const REFRESH_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 const EXPIRY_BUFFER_MS = 10 * 60 * 1000; // 10 minutes
@@ -15,7 +16,6 @@ const EXPIRY_BUFFER_MS = 10 * 60 * 1000; // 10 minutes
 // ─── Provider-Specific Refresh Logic ─────────────────────────────────────────
 
 const OPENAI_TOKEN_URL = "https://auth.openai.com/oauth/token";
-const OPENAI_CLIENT_ID = process.env.OPENAI_OAUTH_CLIENT_ID || "app_EMoamEEZ73f0CkXaXp7hrann";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 
 async function refreshOpenAIToken(refreshToken: string): Promise<{
@@ -24,13 +24,21 @@ async function refreshOpenAIToken(refreshToken: string): Promise<{
   expiresIn: number | null;
 } | null> {
   try {
+    const openAIWebOAuth = getOpenAIWebOAuthAvailability();
+    if (!openAIWebOAuth.available || !openAIWebOAuth.clientId) {
+      console.warn(
+        "[TokenRefresh] OpenAI direct OAuth is not configured for web refresh, skipping token refresh",
+      );
+      return null;
+    }
+
     const response = await fetch(OPENAI_TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         grant_type: "refresh_token",
         refresh_token: refreshToken,
-        client_id: OPENAI_CLIENT_ID,
+        client_id: openAIWebOAuth.clientId,
       }),
     });
 

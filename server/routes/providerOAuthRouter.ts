@@ -11,9 +11,12 @@
 import { Router, type Request, type Response } from "express";
 import crypto from "crypto";
 import { getUserId } from "../types/express";
-import { requireAdmin } from "../routes/admin/utils";
 import { providersService } from "../services/providersService";
 import type { OAuthProvider } from "../services/providerAdapters";
+import {
+  getOpenAIWebOAuthAvailability,
+  isGoogleGeminiDirectOAuthAvailable,
+} from "../services/providerOAuthAvailability";
 
 const router = Router();
 
@@ -65,7 +68,6 @@ function isGlobalScope(req: Request): boolean {
 
 // ─── OpenAI OAuth (PKCE) ─────────────────────────────────────────────────────
 
-const OPENAI_CLIENT_ID = process.env.OPENAI_OAUTH_CLIENT_ID || "app_EMoamEEZ73f0CkXaXp7hrann";
 const OPENAI_AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize";
 const OPENAI_TOKEN_URL = "https://auth.openai.com/oauth/token";
 
@@ -83,6 +85,15 @@ router.post("/openai/start", async (req: Request, res: Response) => {
       }
     }
 
+    const openAIWebOAuth = getOpenAIWebOAuthAvailability();
+    if (!openAIWebOAuth.available || !openAIWebOAuth.clientId) {
+      return res.status(400).json({
+        error:
+          openAIWebOAuth.reason ||
+          "OpenAI OAuth directo no está disponible en este despliegue.",
+      });
+    }
+
     const codeVerifier = generateCodeVerifier();
     const codeChallenge = generateCodeChallenge(codeVerifier);
     const oauthState = crypto.randomBytes(16).toString("hex");
@@ -98,7 +109,7 @@ router.post("/openai/start", async (req: Request, res: Response) => {
     });
 
     const params = new URLSearchParams({
-      client_id: OPENAI_CLIENT_ID,
+      client_id: openAIWebOAuth.clientId,
       redirect_uri: redirectUri,
       response_type: "code",
       scope: "openai.model.read openai.chat.completions.create",
@@ -129,6 +140,20 @@ router.get("/openai/callback", async (req: Request, res: Response) => {
       return res.status(400).send(renderCallbackPage("error", "Invalid or expired state"));
     }
 
+    const openAIWebOAuth = getOpenAIWebOAuthAvailability();
+    if (!openAIWebOAuth.available || !openAIWebOAuth.clientId) {
+      pkceFlowStore.delete(state as string);
+      return res
+        .status(400)
+        .send(
+          renderCallbackPage(
+            "error",
+            openAIWebOAuth.reason ||
+              "OpenAI OAuth directo no está disponible en este despliegue.",
+          ),
+        );
+    }
+
     pkceFlowStore.delete(state as string);
 
     const redirectUri = getCallbackUrl(req, "openai");
@@ -141,7 +166,7 @@ router.get("/openai/callback", async (req: Request, res: Response) => {
         grant_type: "authorization_code",
         code: code as string,
         redirect_uri: redirectUri,
-        client_id: OPENAI_CLIENT_ID,
+        client_id: openAIWebOAuth.clientId,
         code_verifier: flow.codeVerifier,
       }),
     });
@@ -198,6 +223,7 @@ router.get("/openai/status", async (req: Request, res: Response) => {
     const userStatus = userId
       ? await providersService.getUserTokenStatus(userId, "openai")
       : { connected: false };
+    const openAIWebOAuth = getOpenAIWebOAuthAvailability();
 
     res.json({
       provider: "openai",
@@ -205,6 +231,8 @@ router.get("/openai/status", async (req: Request, res: Response) => {
       globalLabel: globalStatus.label,
       userConnected: userStatus.connected,
       connected: userStatus.connected || globalStatus.connected,
+      available: openAIWebOAuth.available,
+      availabilityReason: openAIWebOAuth.reason,
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -374,6 +402,7 @@ router.get("/gemini/status", async (req: Request, res: Response) => {
       globalLabel: globalStatus.label,
       userConnected: userStatus.connected,
       connected: userStatus.connected || globalStatus.connected,
+      available: isGoogleGeminiDirectOAuthAvailable(),
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -485,6 +514,7 @@ router.get("/anthropic/status", async (req: Request, res: Response) => {
       globalLabel: globalStatus.label,
       userConnected: userStatus.connected,
       connected: userStatus.connected || globalStatus.connected,
+      available: true,
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -522,12 +552,22 @@ router.get("/status", async (req: Request, res: Response) => {
       const userStatus = userId
         ? await providersService.getUserTokenStatus(userId, provider)
         : { connected: false };
+      const openAIWebOAuth =
+        provider === "openai" ? getOpenAIWebOAuthAvailability() : null;
 
       statuses[provider] = {
         globalConnected: globalStatus.connected,
         globalLabel: globalStatus.label,
         userConnected: userStatus.connected,
         connected: userStatus.connected || globalStatus.connected,
+        available:
+          provider === "openai"
+            ? openAIWebOAuth?.available ?? false
+            : provider === "gemini"
+              ? isGoogleGeminiDirectOAuthAvailable()
+              : true,
+        availabilityReason:
+          provider === "openai" ? openAIWebOAuth?.reason ?? null : null,
       };
     }
 

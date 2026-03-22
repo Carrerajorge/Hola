@@ -2,7 +2,6 @@ import * as React from "react";
 import { CheckCircle2, Key, LockKeyhole, Loader2, Plus, Unplug } from "lucide-react";
 import type { AvailableModel } from "@/contexts/ModelAvailabilityContext";
 import { cn } from "@/lib/utils";
-import { apiFetch } from "@/lib/apiClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,11 +23,8 @@ import {
 } from "./OAuthProviderLogos";
 import {
   useAllProvidersStatus,
-  useProviderOAuthStart,
   useAnthropicKeySubmit,
   useProviderDisconnect,
-  openOAuthPopup,
-  type OAuthProvider,
 } from "@/hooks/use-provider-oauth";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -173,18 +169,11 @@ export function ProviderConnectionHubButton({
   const [open, setOpen] = React.useState(false);
   const [anthropicKeyOpen, setAnthropicKeyOpen] = React.useState(false);
   const [anthropicKey, setAnthropicKey] = React.useState("");
-  const [oauthBusy, setOauthBusy] = React.useState<OAuthProvider | null>(null);
 
-  // New multi-provider status
   const { data: providerStatus, refetch: refetchStatus } = useAllProvidersStatus();
-  const openaiOAuthStart = useProviderOAuthStart("openai");
-  const geminiOAuthStart = useProviderOAuthStart("gemini");
   const anthropicKeyMutation = useAnthropicKeySubmit();
-  const openaiDisconnect = useProviderDisconnect("openai");
-  const geminiDisconnect = useProviderDisconnect("gemini");
   const anthropicDisconnect = useProviderDisconnect("anthropic");
 
-  // Model counts from existing system
   const openAiModels = React.useMemo(
     () => getProviderModels(availableModels, "openai-codex"),
     [availableModels],
@@ -198,19 +187,19 @@ export function ProviderConnectionHubButton({
     [availableModels],
   );
 
-  // New system statuses
-  const openaiConnected = providerStatus?.providers?.openai?.connected || false;
-  const geminiConnected = providerStatus?.providers?.gemini?.connected || false;
   const anthropicConnected = providerStatus?.providers?.anthropic?.connected || false;
+  const antigravityConnected = antigravityModels.length > 0;
+  const defaultAntigravityModelId =
+    antigravityModels[0]?.modelId || "claude-sonnet-4-5";
 
   const connectedProviders = React.useMemo(() => {
     let count = 0;
-    if (openAiModels.length > 0 || openaiConnected) count += 1;
-    if (geminiModels.length > 0 || geminiConnected) count += 1;
+    if (openAiModels.length > 0) count += 1;
+    if (geminiModels.length > 0) count += 1;
     if (antigravityModels.length > 0) count += 1;
     if (anthropicConnected) count += 1;
     return count;
-  }, [openAiModels.length, geminiModels.length, antigravityModels.length, openaiConnected, geminiConnected, anthropicConnected]);
+  }, [openAiModels.length, geminiModels.length, antigravityModels.length, anthropicConnected]);
 
   const handleConnected = React.useCallback(
     async (modelId: string) => {
@@ -220,42 +209,6 @@ export function ProviderConnectionHubButton({
       await Promise.resolve(onConnected?.(modelId));
     },
     [onConnected, refetchStatus, queryClient],
-  );
-
-  const handleOAuthFlow = React.useCallback(
-    async (provider: "openai" | "gemini") => {
-      setOauthBusy(provider);
-      try {
-        const startMutation = provider === "openai" ? openaiOAuthStart : geminiOAuthStart;
-        const result = await startMutation.mutateAsync({ isGlobal: false });
-
-        const popupResult = await openOAuthPopup(result.authUrl);
-
-        if (popupResult.status === "success") {
-          toast({ description: `${provider === "openai" ? "OpenAI" : "Gemini"} conectado exitosamente` });
-          await refetchStatus();
-          queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
-          handleConnected(provider === "openai" ? "gpt-4o" : "gemini-2.5-flash");
-        } else {
-          if (popupResult.message !== "Ventana cerrada por el usuario") {
-            toast({
-              title: "Error de conexion",
-              description: popupResult.message,
-              variant: "destructive",
-            });
-          }
-        }
-      } catch (err: any) {
-        toast({
-          title: "Error",
-          description: err.message || `No se pudo conectar ${provider}`,
-          variant: "destructive",
-        });
-      } finally {
-        setOauthBusy(null);
-      }
-    },
-    [openaiOAuthStart, geminiOAuthStart, toast, refetchStatus, queryClient, handleConnected],
   );
 
   const handleAnthropicSubmit = React.useCallback(async () => {
@@ -279,22 +232,16 @@ export function ProviderConnectionHubButton({
     }
   }, [anthropicKey, anthropicKeyMutation, toast, queryClient, handleConnected]);
 
-  const handleDisconnect = React.useCallback(
-    async (provider: OAuthProvider) => {
-      try {
-        if (provider === "openai") await openaiDisconnect.mutateAsync({ isGlobal: false });
-        else if (provider === "gemini") await geminiDisconnect.mutateAsync({ isGlobal: false });
-        else if (provider === "anthropic") await anthropicDisconnect.mutateAsync({ isGlobal: false });
-
-        toast({ description: `${provider} desconectado` });
-        refetchStatus();
-        queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
-      } catch (err: any) {
-        toast({ title: "Error", description: err.message, variant: "destructive" });
-      }
-    },
-    [openaiDisconnect, geminiDisconnect, anthropicDisconnect, toast, refetchStatus, queryClient],
-  );
+  const handleAnthropicDisconnect = React.useCallback(async () => {
+    try {
+      await anthropicDisconnect.mutateAsync({ isGlobal: false });
+      toast({ description: "Anthropic desconectado" });
+      await refetchStatus();
+      queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    }
+  }, [anthropicDisconnect, toast, refetchStatus, queryClient]);
 
   return (
     <>
@@ -319,23 +266,23 @@ export function ProviderConnectionHubButton({
           <DialogHeader>
             <DialogTitle>Conectar proveedores y traer modelos</DialogTitle>
             <DialogDescription>
-              Vincula tus cuentas para usar sus modelos desde ILIAGPT. Los tokens
-              se almacenan cifrados con AES-256. Puedes conectar multiples proveedores.
+              Vincula tus cuentas principales para usar sus modelos dentro de
+              ILIAGPT. Cada conexión se maneja por usuario y los accesos se
+              almacenan cifrados.
             </DialogDescription>
           </DialogHeader>
 
-          {/* Legacy connections (Codex + Gemini CLI) */}
           <div className="space-y-2">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Conexiones directas (OpenClaw)
+              Conexiones principales
             </h3>
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-3 md:grid-cols-3">
               <OpenAICodexOAuthButton
                 onConnected={handleConnected}
                 renderTrigger={({ isBusy, isConnected, openDialog }) => (
                   <ProviderCard
                     title="Loguear ChatGPT"
-                    description="Conecta tu cuenta de ChatGPT para traer los modelos compatibles con OpenClaw al selector."
+                    description="Conecta tu cuenta de ChatGPT para traer los modelos compatibles con OpenClaw al selector sin depender de callbacks locales."
                     meta={countLabel(openAiModels.length)}
                     actionLabel={isConnected ? "Revisar cuenta" : "Continuar con ChatGPT"}
                     highlighted={isConnected || openAiModels.length > 0}
@@ -352,7 +299,7 @@ export function ProviderConnectionHubButton({
                 onConnected={handleConnected}
                 renderTrigger={({ isBusy, isConnected, openDialog }) => (
                   <ProviderCard
-                    title="Loguear con Gemini CLI"
+                    title="Loguear con Gemini"
                     description="Vincula Google Gemini CLI OAuth y expone sus modelos compatibles dentro de ILIAGPT."
                     meta={countLabel(geminiModels.length)}
                     actionLabel={isConnected ? "Revisar cuenta" : "Continuar con Google"}
@@ -365,46 +312,39 @@ export function ProviderConnectionHubButton({
                   />
                 )}
               />
+
+              <ProviderCard
+                title="Loguear con Antigravity"
+                description={
+                  antigravityConnected
+                    ? "Antigravity ya está detectado para este usuario y sus modelos ya aparecen en el selector."
+                    : "Antigravity se activa automáticamente cuando el gateway detecta un perfil configurado para este usuario."
+                }
+                meta={countLabel(antigravityModels.length)}
+                actionLabel={
+                  antigravityConnected ? "Usar modelos" : "Pendiente en gateway"
+                }
+                highlighted={antigravityConnected}
+                disabled={!antigravityConnected}
+                isConnected={antigravityConnected}
+                icon={<AntigravityLogoIcon className="h-5 w-5" />}
+                onClick={
+                  antigravityConnected
+                    ? () => {
+                        void handleConnected(defaultAntigravityModelId);
+                      }
+                    : undefined
+                }
+                testId="provider-card-antigravity"
+              />
             </div>
           </div>
 
-          {/* New multi-provider OAuth */}
           <div className="space-y-2">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Proveedores OAuth / API Key
+              Integraciones avanzadas
             </h3>
-            <div className="grid gap-3 md:grid-cols-3">
-              {/* OpenAI Direct OAuth */}
-              <ProviderCard
-                title="OpenAI (OAuth directo)"
-                description="Conecta via OAuth con tu cuenta de OpenAI para acceder a GPT-4o, o1, y otros modelos."
-                meta={openaiConnected ? "Conectado via OAuth" : "OAuth PKCE"}
-                actionLabel={openaiConnected ? "Conectado" : "Conectar OpenAI"}
-                highlighted={openaiConnected}
-                isConnected={openaiConnected}
-                icon={<ChatGptLogoIcon className="h-5 w-5" />}
-                onClick={() => handleOAuthFlow("openai")}
-                isBusy={oauthBusy === "openai"}
-                onDisconnect={openaiConnected ? () => handleDisconnect("openai") : undefined}
-                testId="provider-card-openai-oauth"
-              />
-
-              {/* Gemini Direct OAuth */}
-              <ProviderCard
-                title="Google Gemini (OAuth)"
-                description="Conecta con Google OAuth para usar Gemini 2.5 Pro, Flash y otros modelos."
-                meta={geminiConnected ? "Conectado via Google" : "Google OAuth2"}
-                actionLabel={geminiConnected ? "Conectado" : "Conectar Gemini"}
-                highlighted={geminiConnected}
-                isConnected={geminiConnected}
-                icon={<GeminiLogoIcon className="h-5 w-5" />}
-                onClick={() => handleOAuthFlow("gemini")}
-                isBusy={oauthBusy === "gemini"}
-                onDisconnect={geminiConnected ? () => handleDisconnect("gemini") : undefined}
-                testId="provider-card-gemini-oauth"
-              />
-
-              {/* Anthropic API Key */}
+            <div className="grid gap-3 md:grid-cols-1">
               <ProviderCard
                 title="Claude (Anthropic)"
                 description="Ingresa tu API Key de Anthropic para usar Claude Opus, Sonnet y Haiku."
@@ -415,7 +355,7 @@ export function ProviderConnectionHubButton({
                 icon={<ClaudeLogoIcon className="h-5 w-5" />}
                 onClick={() => setAnthropicKeyOpen(true)}
                 testId="provider-card-anthropic"
-                onDisconnect={anthropicConnected ? () => handleDisconnect("anthropic") : undefined}
+                onDisconnect={anthropicConnected ? handleAnthropicDisconnect : undefined}
               />
             </div>
           </div>

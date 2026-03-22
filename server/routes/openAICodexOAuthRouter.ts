@@ -129,7 +129,7 @@ openAICodexOAuthRouter.post("/start", async (req: Request, res: Response) => {
       instructions:
         flow.authMode === "device_code"
           ? "Abre la pagina de ChatGPT, ingresa el codigo de un solo uso y vuelve a ILIAGPT. La vinculacion se completa automaticamente en cuanto OpenAI confirme el codigo."
-          : "Inicia sesión con tu cuenta de ChatGPT Plus/Pro. Si el callback local no se completa, pega la URL final de localhost o el código.",
+          : "Inicia sesión con tu cuenta de ChatGPT Plus/Pro. Si el callback web no se completa, pega la URL final de ILIAGPT o solo el código.",
     });
   } catch (error) {
     console.error("[OpenAICodexOAuth] start failed:", error);
