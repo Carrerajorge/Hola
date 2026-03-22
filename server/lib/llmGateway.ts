@@ -67,6 +67,8 @@ interface LLMRequestOptions {
   enableFallback?: boolean;
   skipCache?: boolean;
   disableImageGeneration?: boolean;
+  /** Pre-resolved decrypted OAuth token — when set, used instead of env-var API keys. */
+  oauthAccessToken?: string;
 }
 
 interface LLMResponse {
@@ -1137,7 +1139,10 @@ class LLMGateway {
     const timeoutId = setTimeout(() => controller.abort(), options.timeout);
 
     try {
-      const client = this.getOpenAICompatibleClient(provider);
+      // Use OAuth token if provided, otherwise use cached client
+      const client = options.oauthAccessToken && provider === "openai"
+        ? new OpenAI({ apiKey: options.oauthAccessToken })
+        : this.getOpenAICompatibleClient(provider);
       const response = await client.chat.completions.create(
         {
           model,
@@ -1344,7 +1349,10 @@ class LLMGateway {
     const timeoutId = setTimeout(() => controller.abort(), options.timeout);
 
     try {
-      const client = this.getAnthropicClient();
+      // Use OAuth token if provided, otherwise use cached client
+      const client = options.oauthAccessToken
+        ? new Anthropic({ apiKey: options.oauthAccessToken })
+        : this.getAnthropicClient();
       const response = await client.messages.create(
         {
           model,

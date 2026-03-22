@@ -326,6 +326,14 @@ export function log(message: string, source = "express") {
 
   await registerRoutes(httpServer, app);
 
+  // Start OAuth token refresh cron job (every 30 minutes)
+  try {
+    const { startOAuthTokenRefreshJob } = await import("./lib/oauthTokenRefreshJob");
+    startOAuthTokenRefreshJob();
+  } catch (err) {
+    log(`[TokenRefresh] Failed to start: ${String((err as Error)?.message || err)}`);
+  }
+
   // Initialize OpenClaw agentic integration layer (feature-flagged).
   // Fail-open: channel mirror/chat must keep working even if OpenClaw has a runtime issue.
   try {

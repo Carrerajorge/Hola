@@ -13,11 +13,13 @@ export interface AvailableModel {
   description: string | null;
   isEnabled: string;
   enabledAt: string | null;
-  enabledByAdminId: string | null;
+  enabledByAdminId?: string | null;
   displayOrder: number;
   icon: string | null;
   modelType: string;
   contextWindow: number | null;
+  /** Token source: global (admin), user (personal), env (API key), or bootstrap */
+  source?: "global" | "user" | "env" | "bootstrap";
 }
 
 const PREFERRED_PROVIDER_ORDER = Object.freeze([

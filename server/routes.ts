@@ -303,6 +303,34 @@ async function getConfiguredBootstrapModels(
     }
   }
 
+  // Merge DB-backed multi-provider OAuth models
+  try {
+    const { providersService } = await import("./services/providersService");
+    const dbProviderModels = await providersService.getAvailableModels(userId);
+    const existingModelIds = new Set(models.map((m) => m.modelId.toLowerCase()));
+
+    for (const m of dbProviderModels) {
+      if (!existingModelIds.has(m.modelId.toLowerCase())) {
+        models.push({
+          id: m.id,
+          name: m.name,
+          provider: m.provider,
+          modelId: m.modelId,
+          description: m.description,
+          isEnabled: "true",
+          enabledAt: null,
+          displayOrder: 50, // After built-in models
+          icon: null,
+          modelType: m.modelType,
+          contextWindow: m.contextWindow,
+        });
+        existingModelIds.add(m.modelId.toLowerCase());
+      }
+    }
+  } catch (err: any) {
+    console.warn("[Routes] Failed to load DB provider models:", err?.message);
+  }
+
   return models;
 }
 
@@ -961,6 +989,10 @@ export async function registerRoutes(
   app.use("/api/oauth/google/gemini-cli", googleGeminiCliOAuthRouter);
   app.use("/api/oauth/openai/codex", openAICodexOAuthRouter);
   app.use("/api/oauth/microsoft", outlookOAuthRouter);
+
+  // Multi-provider OAuth (OpenAI, Gemini, Anthropic) with DB-backed tokens
+  const providerOAuthRouter = (await import("./routes/providerOAuthRouter")).default;
+  app.use("/api/oauth/providers", providerOAuthRouter);
   app.use("/api/mcp/gmail", createGmailMcpRouter());
   app.use("/mcp/gmail", createGmailMcpRouter()); // Backward compatibility
 
@@ -1188,6 +1220,34 @@ export async function registerRoutes(
   // OpenClaw runtime capabilities are fused directly into the native agent pipeline.
   app.use("/api/openclaw", openClawRouter);
   app.use("/api/openclaw/runtime", createOpenClawRuntimeRouter());
+
+  // Serve the OpenClaw Control UI as embedded static assets.
+  // The built UI lives at server/openclaw/dist/control-ui/ and is mounted at /openclaw-ui/.
+  {
+    const path = await import("path");
+    const express = await import("express");
+    const openClawUiPath = path.default.resolve(
+      path.default.dirname(new URL(import.meta.url).pathname),
+      "openclaw/dist/control-ui",
+    );
+
+    // Serve config stub so the embedded UI can bootstrap itself.
+    app.get("/openclaw-ui/__openclaw/control-ui-config.json", (_req: Request, res: Response) => {
+      res.json({
+        basePath: "/openclaw-ui/",
+        assistantName: "ILIAGPT × OpenClaw",
+        assistantAvatar: "",
+        assistantAgentId: "",
+      });
+    });
+
+    app.use("/openclaw-ui", express.default.static(openClawUiPath));
+
+    // SPA fallback: any deep route inside /openclaw-ui/ serves index.html.
+    app.get("/openclaw-ui/*", (_req: Request, res: Response) => {
+      res.sendFile(path.default.join(openClawUiPath, "index.html"));
+    });
+  }
 
   // ===== Run Detail Endpoints =====
   app.use("/api/runs", createRunRouter());
