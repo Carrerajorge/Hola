@@ -29,7 +29,7 @@ createWorker<UploadJobData, any>(QUEUE_NAMES.UPLOAD, async (job) => {
         const { storage } = await import("./storage");
         const { ObjectStorageService } = await import("./objectStorage");
         const { processDocument } = await import("./services/documentProcessing");
-        const { chunkText } = await import("./services/semanticChunker");
+        const { chunkText } = await import("./embeddingService");
         const { generateEmbeddingsBatch } = await import("./services/embeddings");
 
         await storage.updateFileStatus(fileId, "processing");
