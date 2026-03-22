@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { useShallow } from 'zustand/shallow';
+import { toastDone } from '../lib/toastDone';
 
 export type StreamingStatus = 'idle' | 'started' | 'streaming' | 'completed' | 'failed' | 'aborted';
 
@@ -137,6 +138,11 @@ export const useStreamingStore = create<StreamingState>((set, get) => ({
       const newBadges = isBackground
         ? { ...state.pendingBadges, [chatId]: (state.pendingBadges[chatId] || 0) + 1 }
         : state.pendingBadges;
+
+      // Play ding + pill toast for foreground completions
+      if (!isBackground) {
+        toastDone();
+      }
 
       // Add notification if completing in background
       const newNotifications = isBackground

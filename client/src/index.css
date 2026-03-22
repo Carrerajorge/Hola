@@ -143,6 +143,88 @@
   height: 0.8rem;
 }
 
+/* ── Pill "task done" toast ─────────────────────────── */
+.iliagpt-toast-done.iliagpt-toast-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: auto !important;
+  min-width: 0;
+  max-width: fit-content;
+  padding: 0.5rem 1.1rem 0.5rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  line-height: 1;
+  color: #047857;
+  background: rgba(236, 253, 245, 0.92) !important;
+  border: 1px solid rgba(167, 243, 208, 0.55) !important;
+  box-shadow:
+    0 4px 18px -6px rgba(5, 150, 105, 0.16),
+    0 1px 3px rgba(0, 0, 0, 0.04) !important;
+  backdrop-filter: blur(14px) saturate(1.1);
+  animation: pill-in 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* Hide the colored top-bar from base toast */
+.iliagpt-toast-done.iliagpt-toast-done::before {
+  display: none !important;
+}
+
+/* Checkmark circle via ::after */
+.iliagpt-toast-done.iliagpt-toast-done::after {
+  content: "";
+  order: -1;
+  flex-shrink: 0;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 50%;
+  background-color: rgba(16, 185, 129, 0.12);
+  border: 1.5px solid rgba(16, 185, 129, 0.35);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23059669' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 0.65rem;
+}
+
+/* Dark mode */
+.dark .iliagpt-toast-done.iliagpt-toast-done {
+  color: #6ee7b7;
+  background: rgba(6, 78, 59, 0.72) !important;
+  border-color: rgba(52, 211, 153, 0.25) !important;
+  box-shadow:
+    0 4px 18px -6px rgba(16, 185, 129, 0.22),
+    0 1px 3px rgba(0, 0, 0, 0.15) !important;
+}
+
+.dark .iliagpt-toast-done.iliagpt-toast-done::after {
+  background-color: rgba(52, 211, 153, 0.15);
+  border-color: rgba(52, 211, 153, 0.4);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236ee7b7' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 0.65rem;
+}
+
+/* Hide close button on pill toast */
+.iliagpt-toast-done [data-close-button],
+.iliagpt-toast-done button[aria-label="Close toast"] {
+  display: none !important;
+}
+
+@keyframes pill-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 /* Floating Label Input Styles */
 .floating-label {
   position: relative;

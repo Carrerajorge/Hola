@@ -156,6 +156,42 @@ export async function playErrorSound(): Promise<void> {
 }
 
 /**
+ * Play a two-note ascending ding (880 → 1320 Hz) for task-done pill toast
+ */
+export async function playDing(): Promise<void> {
+    if (!soundEnabled) return;
+
+    const ctx = getAudioContext();
+    if (!ctx) return;
+
+    if (ctx.state === 'suspended') {
+        try {
+            await ctx.resume();
+        } catch {
+            return;
+        }
+    }
+
+    const now = ctx.currentTime;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, now);
+    osc.frequency.exponentialRampToValueAtTime(1320, now + 0.08);
+
+    gain.gain.setValueAtTime(0.18, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.6);
+}
+
+/**
  * Play a subtle notification sound (single soft ping)
  */
 export async function playNotificationPing(): Promise<void> {
