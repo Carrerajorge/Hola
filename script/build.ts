@@ -1,6 +1,7 @@
 import { build as esbuild, BuildResult } from "esbuild";
 import { build as viteBuild } from "vite";
 import { copyFile, mkdir, rm, readFile, writeFile } from "fs/promises";
+import { spawn } from "child_process";
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times.
 const allowlist: string[] = [];
@@ -41,8 +42,34 @@ async function bumpBuiltSwCleanupVersion() {
   console.log(`[build] dist sw-cleanup APP_VERSION -> ${version}`);
 }
 
+async function buildEmbeddedOpenClawControlUi() {
+  console.log("building embedded openclaw control ui...");
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(process.execPath, ["scripts/ui.js", "build"], {
+      cwd: "server/openclaw",
+      stdio: "inherit",
+      env: process.env,
+    });
+
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`[build] OpenClaw Control UI build failed with exit code ${code ?? "unknown"}`));
+    });
+  });
+
+  await readFile("server/openclaw/dist/control-ui/index.html", "utf-8");
+  console.log("[build] embedded openclaw control ui ready");
+}
+
 async function buildAll() {
   await rm("dist", { recursive: true, force: true });
+
+  await buildEmbeddedOpenClawControlUi();
 
   console.log("building client...");
   // Some environments terminate long-running commands that don't emit output.

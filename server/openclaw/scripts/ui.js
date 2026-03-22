@@ -48,7 +48,27 @@ function which(cmd) {
 function resolveRunner() {
   const pnpm = which("pnpm");
   if (pnpm) {
-    return { cmd: pnpm, kind: "pnpm" };
+    return { cmd: pnpm, argsPrefix: [], workspaceArgs: ["--dir", repoRoot, "--filter", "./ui"], kind: "pnpm" };
+  }
+  const npx = which("npx");
+  if (npx) {
+    const packageJsonPath = path.join(repoRoot, "package.json");
+    let packageManager = "pnpm@10.23.0";
+    try {
+      const raw = fs.readFileSync(packageJsonPath, "utf8");
+      const parsed = JSON.parse(raw);
+      if (typeof parsed.packageManager === "string" && parsed.packageManager.startsWith("pnpm@")) {
+        packageManager = parsed.packageManager;
+      }
+    } catch {
+      // Fall back to the pinned default above when package.json cannot be read.
+    }
+    return {
+      cmd: npx,
+      argsPrefix: ["--yes", packageManager],
+      workspaceArgs: ["--dir", repoRoot, "--filter", "./ui"],
+      kind: "pnpm-via-npx",
+    };
   }
   return null;
 }
@@ -82,7 +102,7 @@ function createSpawnOptions(cmd, args, envOverride) {
     assertSafeWindowsShellArgs(args);
   }
   return {
-    cwd: uiDir,
+    cwd: repoRoot,
     stdio: "inherit",
     env: envOverride ?? process.env,
     ...(useShell ? { shell: true } : {}),
@@ -129,13 +149,16 @@ function runSync(cmd, args, envOverride) {
 
 function depsInstalled(kind) {
   try {
-    const require = createRequire(path.join(uiDir, "package.json"));
-    require.resolve("vite");
-    require.resolve("dompurify");
+    const packageJsonPath = path.join(uiDir, "package.json");
+    const require = createRequire(packageJsonPath);
+    const raw = fs.readFileSync(packageJsonPath, "utf8");
+    const pkg = JSON.parse(raw);
+    const requiredPackages = Object.keys(pkg.dependencies ?? {});
     if (kind === "test") {
-      require.resolve("vitest");
-      require.resolve("@vitest/browser-playwright");
-      require.resolve("playwright");
+      requiredPackages.push(...Object.keys(pkg.devDependencies ?? {}));
+    }
+    for (const dep of requiredPackages) {
+      require.resolve(dep);
     }
     return true;
   } catch {
@@ -179,7 +202,7 @@ export function main(argv = process.argv.slice(2)) {
   }
 
   if (action === "install") {
-    run(runner.cmd, ["install", ...rest]);
+    run(runner.cmd, [...runner.argsPrefix, ...runner.workspaceArgs, "install", ...rest]);
     return;
   }
 
@@ -187,10 +210,10 @@ export function main(argv = process.argv.slice(2)) {
     const installEnv =
       action === "build" ? { ...process.env, NODE_ENV: "production" } : process.env;
     const installArgs = action === "build" ? ["install", "--prod"] : ["install"];
-    runSync(runner.cmd, installArgs, installEnv);
+    runSync(runner.cmd, [...runner.argsPrefix, ...runner.workspaceArgs, ...installArgs], installEnv);
   }
 
-  run(runner.cmd, ["run", script, ...rest]);
+  run(runner.cmd, [...runner.argsPrefix, ...runner.workspaceArgs, "run", script, ...rest]);
 }
 
 const isDirectExecution = (() => {
