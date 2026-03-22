@@ -3,9 +3,9 @@ import type { ConnectorManifest } from "../../kernel/types";
 export const codexManifest: ConnectorManifest = {
   connectorId: "codex",
   version: "1.0.0",
-  displayName: "Codex",
+  displayName: "OpenClaw",
   category: "general" as any,
-  description: "Advanced AI integration for Codex",
+  description: "Advanced AI integration for OpenClaw",
   iconUrl: "/assets/icons/codex.svg",
   authType: "oauth2",
   authConfig: {
@@ -23,8 +23,8 @@ export const codexManifest: ConnectorManifest = {
   capabilities: [
     {
       operationId: "codex_search",
-      name: "Search items in Codex",
-      description: "Search items in Codex",
+      name: "Search items in OpenClaw",
+      description: "Search items in OpenClaw",
       requiredScopes: ["codex.read","codex.write"],
       dataAccessLevel: "read",
       confirmationRequired: false,
@@ -43,8 +43,8 @@ export const codexManifest: ConnectorManifest = {
     },
     {
       operationId: "codex_create",
-      name: "Create a new item in Codex",
-      description: "Create a new item in Codex",
+      name: "Create a new item in OpenClaw",
+      description: "Create a new item in OpenClaw",
       requiredScopes: ["codex.read","codex.write"],
       dataAccessLevel: "write",
       confirmationRequired: true,
