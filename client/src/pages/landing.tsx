@@ -303,6 +303,7 @@ export default function LandingPage() {
               <div className="absolute -inset-1 bg-gradient-to-r from-[#A5A0FF]/0 via-[#A5A0FF]/30 to-[#A5A0FF]/0 rounded-[24px] blur-md opacity-0 group-focus-within:opacity-100 transition-opacity duration-500" />
               <div className="relative rounded-2xl border border-white/60 bg-white/70 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.06)] transition-all duration-500 group-focus-within:shadow-[0_8px_40px_rgba(165,160,255,0.25)] group-focus-within:border-white group-focus-within:-translate-y-1 group-hover:-translate-y-0.5 flex items-center overflow-hidden">
                 <Input
+                  id="chat-input"
                   placeholder={typingPlaceholder}
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
