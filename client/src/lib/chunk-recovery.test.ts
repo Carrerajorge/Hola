@@ -93,4 +93,29 @@ describe("chunk recovery helpers", () => {
     expect(deletedCaches).toEqual(["v1", "v2"]);
     expect(reloadCalls).toBe(1);
   });
+
+  it("prevents duplicate recovery attempts for the same build version", async () => {
+    const sessionStorage = createStorage();
+    let reloadCalls = 0;
+
+    const first = await recoverFromChunkError(new Error("Loading chunk 4 failed"), "24860974", {
+      sessionStorage,
+      localStorage: createStorage(),
+      reload: () => {
+        reloadCalls += 1;
+      },
+    });
+
+    const second = await recoverFromChunkError(new Error("Loading chunk 4 failed"), "24860974", {
+      sessionStorage,
+      localStorage: createStorage(),
+      reload: () => {
+        reloadCalls += 1;
+      },
+    });
+
+    expect(first).toBe(true);
+    expect(second).toBe(false);
+    expect(reloadCalls).toBe(1);
+  });
 });

@@ -9,6 +9,9 @@
 
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw, Home } from 'lucide-react';
+import { normalizeAppBuildVersion, recoverFromChunkError } from '@/lib/chunk-recovery';
+
+const APP_VERSION = normalizeAppBuildVersion(import.meta.env.VITE_APP_VERSION);
 
 interface ErrorBoundaryProps {
     children: ReactNode;
@@ -41,6 +44,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
     componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
         this.setState({ errorInfo });
+        void recoverFromChunkError(error, APP_VERSION);
 
         // Log to console in development
         if (import.meta.env.DEV) {

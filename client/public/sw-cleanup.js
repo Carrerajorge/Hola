@@ -7,6 +7,7 @@
   var RELOAD_GUARD_KEY = 'iliagpt_sw_cleanup_reload';
   var stored = localStorage.getItem(VERSION_KEY);
   var reloadGuardVersion = null;
+  var hadPreviousVersion = typeof stored === 'string' && stored.length > 0;
 
   // In development (served by Vite), skip version enforcement to avoid
   // infinite reload loops with main.tsx which uses "dev" as its version.
@@ -23,38 +24,64 @@
     reloadGuardVersion = null;
   }
 
+  function reloadAfterCleanup(registrationCount, cacheCount) {
+    if (reloadGuardVersion === APP_VERSION) {
+      return;
+    }
+    if (!hadPreviousVersion && registrationCount === 0 && cacheCount === 0) {
+      return;
+    }
+    try {
+      sessionStorage.setItem(RELOAD_GUARD_KEY, APP_VERSION);
+    } catch (error) {
+      // Ignore storage errors.
+    }
+    console.log('[IliaGPT Cleanup] Reloading...');
+    window.location.reload();
+  }
+
   if (stored !== APP_VERSION) {
     console.log('[IliaGPT Cleanup] Version changed: ' + stored + ' -> ' + APP_VERSION);
     localStorage.setItem(VERSION_KEY, APP_VERSION);
+    var cleanupTasks = [];
+    var registrationCount = 0;
+    var cacheCount = 0;
 
     // Immediately unregister all service workers
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then(function(registrations) {
-        for (var i = 0; i < registrations.length; i++) {
-          registrations[i].unregister();
-          console.log('[IliaGPT Cleanup] Unregistered SW:', registrations[i].scope);
-        }
-        // Clear all caches
-        if ('caches' in window) {
-          caches.keys().then(function(names) {
-            for (var j = 0; j < names.length; j++) {
-              caches.delete(names[j]);
-              console.log('[IliaGPT Cleanup] Deleted cache:', names[j]);
-            }
-            // Force reload after cleanup
-            if ((registrations.length > 0 || names.length > 0) && reloadGuardVersion !== APP_VERSION) {
-              try {
-                sessionStorage.setItem(RELOAD_GUARD_KEY, APP_VERSION);
-              } catch (error) {
-                // Ignore storage errors.
-              }
-              console.log('[IliaGPT Cleanup] Reloading...');
-              window.location.reload(true);
-            }
-          });
-        }
-      });
+      cleanupTasks.push(
+        navigator.serviceWorker.getRegistrations().then(function(registrations) {
+          registrationCount = registrations.length;
+          for (var i = 0; i < registrations.length; i++) {
+            registrations[i].unregister();
+            console.log('[IliaGPT Cleanup] Unregistered SW:', registrations[i].scope);
+          }
+        }).catch(function(error) {
+          console.warn('[IliaGPT Cleanup] Failed to inspect service workers:', error);
+        })
+      );
     }
+
+    // Clear all caches
+    if ('caches' in window) {
+      cleanupTasks.push(
+        caches.keys().then(function(names) {
+          cacheCount = names.length;
+          for (var j = 0; j < names.length; j++) {
+            caches.delete(names[j]);
+            console.log('[IliaGPT Cleanup] Deleted cache:', names[j]);
+          }
+        }).catch(function(error) {
+          console.warn('[IliaGPT Cleanup] Failed to inspect caches:', error);
+        })
+      );
+    }
+
+    Promise.all(cleanupTasks).catch(function() {
+      // Individual cleanup tasks already log their own failures.
+    }).then(function() {
+      reloadAfterCleanup(registrationCount, cacheCount);
+    });
   } else {
     try {
       sessionStorage.removeItem(RELOAD_GUARD_KEY);

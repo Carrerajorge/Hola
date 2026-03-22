@@ -1,5 +1,8 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw, Bug, Copy, ChevronDown, ChevronUp } from 'lucide-react';
+import { normalizeAppBuildVersion, recoverFromChunkError } from '@/lib/chunk-recovery';
+
+const APP_VERSION = normalizeAppBuildVersion(import.meta.env.VITE_APP_VERSION);
 
 interface ErrorDetails {
   message: string;
@@ -77,6 +80,7 @@ export class BaseErrorBoundary extends Component<Props, State> {
 
     this.setState({ error: errorDetails });
     this.props.onError?.(errorDetails);
+    void recoverFromChunkError(error, APP_VERSION);
 
     console.group(`[ErrorBoundary] ${this.props.componentName || 'Unknown'}`);
     console.error('Error:', error);
