@@ -8,6 +8,8 @@ import { runETLAgent, getAvailableCountries, getAvailableIndicators } from "../e
 import { extractAllAttachmentsContent, extractAttachmentContent, formatAttachmentsAsContext, type Attachment } from "../services/attachmentService";
 import { pareOrchestrator, type RobustRouteResult, type SimpleAttachment } from "../services/pare";
 import { DocumentBatchProcessor, type BatchProcessingResult, type SimpleAttachment as BatchAttachment } from "../services/documentBatchProcessor";
+import { skillRegistry } from "../openclawBridge";
+import { RAGService } from "../services/ragService";
 import { pareRequestContract, pareRateLimiter, pareQuotaGuard, requirePareContext, pareIdempotencyGuard, pareAnalyzeSchemaValidator } from "../middleware";
 import { completeIdempotencyKey, failIdempotencyKey } from "../lib/idempotencyStore";
 import { createPareLogger, type PareLogger } from "../lib/pareLogger";
@@ -292,18 +294,9 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         }
       }
 
-      // DATA_MODE ENFORCEMENT: Reject document attachments - must use /analyze endpoint
-      const hasDocumentAttachments = attachments && Array.isArray(attachments) &&
-        attachments.some((a: any) => isDocumentAttachment(a.mimeType || a.type, a.name, a.type));
-
-      if (hasDocumentAttachments) {
-        console.log(`[Chat API] DATA_MODE: Rejecting document attachments - must use /analyze endpoint`);
-        return res.status(400).json({
-          error: "Document attachments must be processed via /api/analyze endpoint for proper analysis",
-          code: "USE_ANALYZE_ENDPOINT"
-        });
-      }
-
+      // Document attachments are now processed inline via extractAttachmentContent
+      // instead of being rejected. The /api/analyze endpoint remains available for
+      // advanced analysis features (entity extraction, readability, etc.)
       let attachmentContext = "";
       const hasAttachments = attachments && Array.isArray(attachments) && attachments.length > 0;
 
@@ -839,18 +832,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         }
       }
 
-      // DATA_MODE ENFORCEMENT: Reject document attachments - must use /analyze endpoint
-      const hasDocumentAttachments = attachments && Array.isArray(attachments) &&
-        attachments.some((a: any) => isDocumentAttachment(a.mimeType || a.type, a.name, a.type));
-
-      if (hasDocumentAttachments) {
-        console.log(`[Stream API] DATA_MODE: Rejecting document attachments - must use /analyze endpoint`);
-        return res.status(400).json({
-          error: "Document attachments must be processed via /api/analyze endpoint for proper analysis",
-          code: "USE_ANALYZE_ENDPOINT"
-        });
-      }
-
+      // Document attachments are now processed inline in the streaming flow
+      // The /api/analyze endpoint remains available for advanced analysis features
       const userId = effectiveUserId;
 
       // GPT Session Contract Resolution for streaming
@@ -1360,7 +1343,27 @@ ${attachmentContext}`;
       const now = new Date();
       const currentDateTimeContext = `\n\nFECHA Y HORA ACTUAL:\n- ISO: ${now.toISOString()}`;
 
-      systemContent += `${currentDateTimeContext}${userProfileContext}${customInstructionsSection}${responseStyleModifier}${semanticMemoryContext ? `\n\n${semanticMemoryContext}` : ''}${codeInterpreterPrompt}`;
+      // OpenClaw Integration: Inject skills context + RAG into system prompt
+      let openClawContext = "";
+      try {
+        const resolvedSkills = skillRegistry.resolve();
+        if (resolvedSkills.skills.length > 0 && resolvedSkills.prompt) {
+          openClawContext += `\n\nOPENCLAW SKILLS ACTIVAS (${resolvedSkills.skills.length}):\n${resolvedSkills.prompt}`;
+        }
+
+        // RAG context enrichment from OpenClaw
+        if (userMessageText && userId) {
+          const ragService = new RAGService();
+          const ragContext = await ragService.getContextForMessage(userId, userMessageText, chatId || conversationId);
+          if (ragContext && typeof ragContext === 'string' && ragContext.length > 0) {
+            openClawContext += `\n\nCONTEXTO RAG (memoria conversacional):\n${ragContext}`;
+          }
+        }
+      } catch (openClawError: any) {
+        console.warn("[Stream] OpenClaw context injection skipped:", openClawError?.message || openClawError);
+      }
+
+      systemContent += `${currentDateTimeContext}${userProfileContext}${customInstructionsSection}${responseStyleModifier}${semanticMemoryContext ? `\n\n${semanticMemoryContext}` : ''}${codeInterpreterPrompt}${openClawContext}`;
 
       const systemMessage = {
         role: "system" as const,
@@ -2512,7 +2515,7 @@ ${documentText}`;
         pareMetrics.recordRequestDuration(requestDurationMs);
 
         // Only generate enrichment UI components when explicitly requested
-        let actionableInsights: Array<{
+        const actionableInsights: Array<{
           id: string;
           type: 'finding' | 'risk' | 'opportunity' | 'recommendation';
           title: string;
