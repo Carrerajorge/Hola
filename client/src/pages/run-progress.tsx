@@ -18,6 +18,7 @@ import {
   RunResponse,
   RunEventFrame,
 } from "@/services/runProgress";
+import { fetchSubagentRuns, type CodexSubagentRun } from "@/services/codexRuntime";
 
 type RunEventSeverity = "info" | "success" | "warning" | "error";
 
@@ -111,12 +112,36 @@ const formatTimestamp = (value?: number | string | null): string => {
   return new Date(parsed).toLocaleString();
 };
 
+const summarizeObjective = (objective?: string | null, maxLength = 180): string => {
+  const normalized = String(objective || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "Sin objetivo detallado.";
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
+};
+
+const extractSubagentRole = (planHint?: string[] | null): string => {
+  const roleValue = planHint?.find((hint) => hint.startsWith("role:"))?.split(":")[1]?.trim();
+  if (roleValue === "coder") return "Implementador";
+  if (roleValue === "reviewer") return "Revisor";
+  if (roleValue === "improver") return "Mejorador";
+  return "Agente auxiliar";
+};
+
+const subagentStatusVariant = (status: CodexSubagentRun["status"]) => {
+  if (status === "completed") return "success" as const;
+  if (status === "failed" || status === "cancelled") return "destructive" as const;
+  if (status === "queued") return "warning" as const;
+  return "info" as const;
+};
+
 const RunProgressPage = () => {
   const params = useParams<{ id: string }>();
   const [, setLocation] = useLocation();
   const runId = params.id;
   const [run, setRun] = useState<RunResponse | null>(null);
   const [events, setEvents] = useState<Record<string, RunEvent>>({});
+  const [subagents, setSubagents] = useState<CodexSubagentRun[]>([]);
+  const [subagentError, setSubagentError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [streamStatus, setStreamStatus] = useState<"idle" | "connecting" | "connected" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
@@ -209,6 +234,44 @@ const RunProgressPage = () => {
       source.close();
     };
   }, [runId, pushEvent]);
+
+  useEffect(() => {
+    if (!runId) return;
+    let cancelled = false;
+    let timeoutId: number | undefined;
+    setSubagents([]);
+    setSubagentError(null);
+
+    const loadSubagents = async () => {
+      try {
+        const runs = await fetchSubagentRuns(runId);
+        if (cancelled) return;
+
+        setSubagents(runs);
+        setSubagentError(null);
+
+        if (runs.some((candidate) => candidate.status === "queued" || candidate.status === "running")) {
+          timeoutId = window.setTimeout(() => {
+            void loadSubagents();
+          }, 2500);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setSubagentError(
+          err instanceof Error ? err.message : "No se pudieron cargar los subagentes del run."
+        );
+      }
+    };
+
+    void loadSubagents();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [runId]);
 
   const handleAction = useCallback(
     async (action: "cancel" | "retry" | "resume") => {
@@ -484,6 +547,59 @@ const RunProgressPage = () => {
                   <p className="text-sm text-muted-foreground">
                     No hay eventos globales disponibles aun.
                   </p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Subagentes</CardTitle>
+                <CardDescription>Delegaciones activas y resultados asociados a este run</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3 pt-0">
+                {subagentError && (
+                  <Alert variant="destructive">
+                    <AlertTitle>No se pudieron cargar</AlertTitle>
+                    <AlertDescription>{subagentError}</AlertDescription>
+                  </Alert>
+                )}
+                {!subagentError && subagents.length === 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    No hay subagentes asociados a este run.
+                  </p>
+                )}
+                {subagents.length > 0 && (
+                  <div className="space-y-3">
+                    {subagents.map((subagent) => (
+                      <div
+                        key={subagent.id}
+                        className="rounded-lg border border-border p-3"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold">
+                              {extractSubagentRole(subagent.planHint)}
+                            </p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {summarizeObjective(subagent.objective, 150)}
+                            </p>
+                          </div>
+                          <Badge variant={subagentStatusVariant(subagent.status)}>
+                            {subagent.status}
+                          </Badge>
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                          <span>ID: {subagent.id}</span>
+                          <span>Creado: {formatTimestamp(subagent.createdAt)}</span>
+                          <span>Inicio: {formatTimestamp(subagent.startedAt)}</span>
+                          <span>Fin: {formatTimestamp(subagent.endedAt)}</span>
+                        </div>
+                        {subagent.error && (
+                          <p className="mt-2 text-xs text-destructive">{subagent.error}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 )}
               </CardContent>
             </Card>

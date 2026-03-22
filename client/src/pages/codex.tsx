@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties, type KeyboardEvent } 
 import { useLocation } from "wouter";
 import {
   ArrowLeft,
-  AudioLines,
+  ArrowUpRight,
   Bot,
   CheckCircle2,
   ChevronDown,
@@ -13,15 +13,19 @@ import {
   FolderOpen,
   GitBranch,
   Layers3,
-  Mic,
+  Loader2,
   MoreHorizontal,
   Plus,
+  Rocket,
   Search,
   Send,
   Settings2,
   Sparkles,
+  TimerReset,
+  Users2,
   type LucideIcon,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -32,6 +36,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useChats, type Chat, type Message } from "@/hooks/use-chats";
 import { useProjects, type Project } from "@/hooks/use-projects";
 import { cn } from "@/lib/utils";
+import { createCodexRun, spawnCodexSubagents } from "@/services/codexRuntime";
 
 type SessionStatus = "ready" | "running" | "waiting";
 type ActivityTone = "accent" | "success" | "neutral";
@@ -174,6 +179,16 @@ function getSessionStatus(chat: Chat): SessionStatus {
   return "ready";
 }
 
+function getLatestRunId(chat: Chat): string | null {
+  for (let index = chat.messages.length - 1; index >= 0; index -= 1) {
+    const runId = chat.messages[index]?.agentRun?.runId;
+    if (typeof runId === "string" && runId.trim().length > 0) {
+      return runId;
+    }
+  }
+  return null;
+}
+
 function getStatusLabel(status: SessionStatus): string {
   if (status === "running") return "En ejecución";
   if (status === "waiting") return "En espera";
@@ -286,9 +301,14 @@ export default function CodexPage() {
   const [, setLocation] = useLocation();
   const { user } = useAuth();
   const { allChats, isLoading: chatsLoading } = useChats();
-  const { projects, isLoading: projectsLoading } = useProjects();
+  const { projects, isLoading: projectsLoading, addChatToProject } = useProjects();
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [multiAgentEnabled, setMultiAgentEnabled] = useState(true);
+  const [marathonMode, setMarathonMode] = useState(false);
+  const [maxSubagents, setMaxSubagents] = useState(3);
+  const [isLaunching, setIsLaunching] = useState(false);
 
   const sessions = useMemo<CodexSession[]>(() => {
     const projectLookup = buildProjectLookup(projects);
@@ -353,6 +373,22 @@ export default function CodexPage() {
     [selectedSessionId, sessions],
   );
 
+  useEffect(() => {
+    if (selectedProjectId) return;
+    if (selectedSession?.project?.id) {
+      setSelectedProjectId(selectedSession.project.id);
+      return;
+    }
+    if (projects[0]?.id) {
+      setSelectedProjectId(projects[0].id);
+    }
+  }, [projects, selectedProjectId, selectedSession]);
+
+  const selectedProject = useMemo(
+    () => projects.find((project) => project.id === selectedProjectId) ?? selectedSession?.project ?? null,
+    [projects, selectedProjectId, selectedSession],
+  );
+
   const groupedSessions = useMemo(() => {
     const groups = new Map<string, CodexSession[]>();
     for (const session of sessions) {
@@ -372,6 +408,7 @@ export default function CodexPage() {
     "Admin";
 
   const composerTarget = selectedSession ? `/chat/${selectedSession.id}` : "/";
+  const launchRunId = selectedSession ? getLatestRunId(selectedSession.chat) : null;
 
   const openSelectedChat = () => {
     setLocation(composerTarget);
@@ -380,7 +417,64 @@ export default function CodexPage() {
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
       event.preventDefault();
-      openSelectedChat();
+      void handleLaunch();
+    }
+  };
+
+  const handleLaunch = async () => {
+    const task = draft.trim();
+    if (!task || isLaunching) {
+      return;
+    }
+
+    const shouldReuseSelectedChat =
+      !!selectedSession &&
+      (!selectedProject || selectedProject.id === selectedSession.project?.id);
+
+    setIsLaunching(true);
+
+    try {
+      const { runId, chatId } = await createCodexRun({
+        chatId: shouldReuseSelectedChat ? selectedSession?.id : null,
+        message: task,
+        project: selectedProject,
+        marathonMode,
+      });
+
+      if (selectedProject?.id) {
+        addChatToProject(chatId, selectedProject.id);
+      }
+
+      if (multiAgentEnabled) {
+        const spawned = await spawnCodexSubagents({
+          runId,
+          message: task,
+          project: selectedProject,
+          marathonMode,
+          maxSubagents,
+        });
+
+        if (spawned.length > 0) {
+          toast.success("Subagentes lanzados", {
+            description: `${spawned.length} agente(s) de apoyo quedaron trabajando para este run.`,
+          });
+        }
+      }
+
+      setDraft("");
+      setSelectedSessionId(chatId);
+      toast.success("Codex en ejecución", {
+        description: multiAgentEnabled
+          ? "Abrí el progreso del run con agentes delegados activos."
+          : "Abrí el progreso del run principal.",
+      });
+      setLocation(`/runs/${runId}/progress`);
+    } catch (error) {
+      toast.error("No se pudo iniciar Codex", {
+        description: error instanceof Error ? error.message : "Error inesperado al lanzar el run.",
+      });
+    } finally {
+      setIsLaunching(false);
     }
   };
 
@@ -470,11 +564,12 @@ export default function CodexPage() {
                 <div className="space-y-2">
                   {projects.length > 0 ? (
                     projects.slice(0, 6).map((project) => {
-                      const isSelected = selectedSession?.project?.id === project.id;
+                      const isSelected = selectedProject?.id === project.id;
                       return (
                         <button
                           key={project.id}
                           type="button"
+                          onClick={() => setSelectedProjectId(project.id)}
                           className={cn(
                             "flex w-full items-center justify-between rounded-2xl border border-transparent px-4 py-3 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--codex-border)] hover:bg-white/80",
                             isSelected && "border-[var(--codex-border)] bg-white/90 shadow-sm",
@@ -593,7 +688,7 @@ export default function CodexPage() {
               <div className="flex items-center gap-2">
                 <div className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/80 px-3 py-1.5 text-sm">
                   <span className="h-2.5 w-2.5 rounded-full bg-[var(--codex-accent)]" />
-                  Vista previa
+                  {multiAgentEnabled ? "Modo multi-agent" : "Modo single-agent"}
                 </div>
                 <Button variant="ghost" size="icon" className="rounded-full border border-[var(--codex-border)] bg-white/80">
                   <MoreHorizontal className="h-4 w-4" />
@@ -602,7 +697,7 @@ export default function CodexPage() {
             </div>
 
             <div className="border-t border-[var(--codex-border)] bg-[#f2ead6]/85 px-4 py-3 text-sm text-[#544d40] md:px-6 lg:px-8">
-              <span className="font-semibold">Modo de trabajo listo:</span> Codex organiza sesiones, contexto y seguimiento en una superficie dedicada antes de entrar al chat.
+              <span className="font-semibold">Modo operativo activo:</span> esta vista ya puede lanzar runs reales, adjuntar contexto del proyecto y despachar subagentes de programación.
             </div>
 
             <div className="border-t border-[var(--codex-border)] px-4 py-3 md:hidden">
@@ -733,26 +828,46 @@ export default function CodexPage() {
                             <div>
                               <p className="text-sm text-[var(--codex-muted)]">Proyecto</p>
                               <p className="mt-1 text-lg font-semibold">
-                                {selectedSession.project?.name || "Sesión general"}
+                                {selectedProject?.name || "Sesión general"}
                               </p>
                             </div>
                             <div>
                               <p className="text-sm text-[var(--codex-muted)]">Prompt base</p>
                               <p className="mt-1 text-sm leading-7 text-[var(--codex-ink)]">
-                                {selectedSession.userPrompt || "Listo para recibir una nueva instrucción técnica."}
+                                {selectedProject?.systemPrompt || selectedSession.userPrompt || "Listo para recibir una nueva instrucción técnica."}
                               </p>
                             </div>
                             <div className="grid grid-cols-2 gap-3 text-sm">
                               <div className="rounded-2xl border border-[var(--codex-border)] bg-white/70 px-4 py-3">
                                 <p className="text-[var(--codex-muted)]">Archivos</p>
                                 <p className="mt-1 text-xl font-semibold">
-                                  {selectedSession.project?.files.length || selectedSession.attachmentCount}
+                                  {selectedProject?.files.length || selectedSession.attachmentCount}
                                 </p>
                               </div>
                               <div className="rounded-2xl border border-[var(--codex-border)] bg-white/70 px-4 py-3">
                                 <p className="text-[var(--codex-muted)]">Rama</p>
-                                <p className="mt-1 text-xl font-semibold">{selectedSession.branchLabel}</p>
+                                <p className="mt-1 text-xl font-semibold">
+                                  {selectedProject?.defaultCodeFolder?.split(/[\\/]/).filter(Boolean).slice(-1)[0] || selectedSession.branchLabel}
+                                </p>
                               </div>
+                            </div>
+                          </div>
+                        </section>
+
+                        <section className="border-b border-[var(--codex-border)] pb-6">
+                          <p className="text-xs uppercase tracking-[0.22em] text-[var(--codex-muted)]">Perfil operativo</p>
+                          <div className="mt-4 space-y-3 text-sm">
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-[var(--codex-muted)]">Run activo</span>
+                              <span className="font-semibold">{launchRunId ? "Disponible" : "Pendiente"}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-[var(--codex-muted)]">Subagentes</span>
+                              <span className="font-semibold">{multiAgentEnabled ? `${maxSubagents} habilitados` : "Desactivados"}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-[var(--codex-muted)]">Ventana intensiva</span>
+                              <span className="font-semibold">{marathonMode ? "12 horas" : "Estándar"}</span>
                             </div>
                           </div>
                         </section>
@@ -779,13 +894,15 @@ export default function CodexPage() {
                           <p className="text-xs uppercase tracking-[0.22em] text-[var(--codex-muted)]">Atajos</p>
                           <div className="flex flex-wrap gap-2">
                             {quickActions.map((action) => (
-                              <span
+                              <button
                                 key={action}
-                                className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/75 px-3 py-2 text-sm text-[var(--codex-ink)]"
+                                type="button"
+                                onClick={() => setDraft(action)}
+                                className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/75 px-3 py-2 text-sm text-[var(--codex-ink)] transition-colors hover:bg-white"
                               >
                                 <Sparkles className="h-3.5 w-3.5 text-[var(--codex-accent)]" />
                                 {action}
-                              </span>
+                              </button>
                             ))}
                           </div>
                         </section>
@@ -805,13 +922,15 @@ export default function CodexPage() {
                     </p>
                     <div className="mt-8 flex flex-wrap justify-center gap-3">
                       {quickActions.map((action) => (
-                        <span
+                        <button
                           key={action}
-                          className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/75 px-4 py-2 text-sm"
+                          type="button"
+                          onClick={() => setDraft(action)}
+                          className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/75 px-4 py-2 text-sm transition-colors hover:bg-white"
                         >
                           <Sparkles className="h-4 w-4 text-[var(--codex-accent)]" />
                           {action}
-                        </span>
+                        </button>
                       ))}
                     </div>
                     <Button className="mt-10 rounded-full bg-[var(--codex-accent)] px-6 text-white hover:bg-[var(--codex-accent)]/90" onClick={() => setLocation("/")}>
@@ -830,31 +949,71 @@ export default function CodexPage() {
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
                   onKeyDown={handleComposerKeyDown}
-                  placeholder="Describe la tarea para Codex o usa esta vista para retomar una sesión existente."
+                  placeholder="Describe la tarea técnica y Codex lanzará un run real con contexto del proyecto, agentes y seguimiento."
                   className="min-h-[78px] resize-none border-0 bg-transparent px-4 py-4 text-base leading-7 shadow-none focus-visible:ring-0"
                 />
                 <div className="flex flex-wrap items-center justify-between gap-3 px-2 pb-1">
-                  <div className="flex items-center gap-2">
-                    <Button variant="ghost" size="icon" className="h-11 w-11 rounded-full border border-[var(--codex-border)] bg-[#faf8f3]">
-                      <Plus className="h-4 w-4" />
-                    </Button>
-                    <span className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] px-3 py-2 text-sm text-[var(--codex-muted)]">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setMultiAgentEnabled((value) => !value)}
+                      className={cn(
+                        "inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm transition-colors",
+                        multiAgentEnabled
+                          ? "border-[var(--codex-accent)] bg-[var(--codex-accent-soft)] text-[var(--codex-accent-ink)]"
+                          : "border-[var(--codex-border)] text-[var(--codex-muted)]",
+                      )}
+                      data-testid="codex-multi-agent-toggle"
+                    >
+                      <Users2 className="h-4 w-4" />
+                      {multiAgentEnabled ? `Multi-agent x${maxSubagents}` : "Single-agent"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMarathonMode((value) => !value)}
+                      className={cn(
+                        "inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm transition-colors",
+                        marathonMode
+                          ? "border-[var(--codex-accent)] bg-[var(--codex-accent-soft)] text-[var(--codex-accent-ink)]"
+                          : "border-[var(--codex-border)] text-[var(--codex-muted)]",
+                      )}
+                      data-testid="codex-marathon-toggle"
+                    >
+                      <TimerReset className="h-4 w-4" />
+                      {marathonMode ? "Modo 12h" : "Modo estándar"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMaxSubagents((current) => (current >= 4 ? 1 : current + 1))}
+                      className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] px-3 py-2 text-sm text-[var(--codex-muted)] transition-colors hover:bg-[#faf8f3]"
+                    >
                       <Command className="h-4 w-4" />
-                      comandos
-                    </span>
+                      Subagentes: {maxSubagents}
+                    </button>
+                    {selectedProject && (
+                      <span className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] px-3 py-2 text-sm text-[var(--codex-muted)]">
+                        <FolderOpen className="h-4 w-4" />
+                        {selectedProject.name}
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button variant="ghost" size="icon" className="h-11 w-11 rounded-full border border-[var(--codex-border)] bg-[#faf8f3]">
-                      <Mic className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-11 w-11 rounded-full border border-[var(--codex-border)] bg-[#faf8f3]">
-                      <AudioLines className="h-4 w-4" />
-                    </Button>
                     <Button
-                      className="rounded-full bg-[var(--codex-accent)] px-5 text-white hover:bg-[var(--codex-accent)]/90"
+                      variant="ghost"
+                      className="rounded-full border border-[var(--codex-border)] bg-[#faf8f3]"
                       onClick={openSelectedChat}
                     >
                       Abrir chat
+                      <ArrowUpRight className="ml-2 h-4 w-4" />
+                    </Button>
+                    <Button
+                      className="rounded-full bg-[var(--codex-accent)] px-5 text-white hover:bg-[var(--codex-accent)]/90"
+                      onClick={() => void handleLaunch()}
+                      disabled={isLaunching || !draft.trim()}
+                      data-testid="codex-launch-run"
+                    >
+                      {isLaunching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}
+                      {isLaunching ? "Lanzando" : "Lanzar run"}
                       <Send className="ml-2 h-4 w-4" />
                     </Button>
                   </div>
@@ -865,11 +1024,13 @@ export default function CodexPage() {
                 <div className="flex flex-wrap items-center gap-4">
                   <span>Local</span>
                   <span>Full access</span>
+                  <span>{multiAgentEnabled ? `Multi-agent x${maxSubagents}` : "Single-agent"}</span>
+                  <span>{marathonMode ? "Ventana 12h" : "Ventana estándar"}</span>
                   <span>{chatsLoading || projectsLoading ? "Sincronizando…" : "Workspace listo"}</span>
                 </div>
                 <div className="inline-flex items-center gap-1.5">
                   <GitBranch className="h-3.5 w-3.5" />
-                  {selectedSession?.branchLabel || "main"}
+                  {selectedProject?.defaultCodeFolder?.split(/[\\/]/).filter(Boolean).slice(-1)[0] || selectedSession?.branchLabel || "main"}
                 </div>
               </div>
             </div>

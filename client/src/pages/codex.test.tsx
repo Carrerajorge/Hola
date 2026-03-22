@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import CodexPage from "@/pages/codex";
@@ -7,6 +7,11 @@ const setLocationMock = vi.fn();
 const useAuthMock = vi.fn();
 const useChatsMock = vi.fn();
 const useProjectsMock = vi.fn();
+const createCodexRunMock = vi.fn();
+const spawnCodexSubagentsMock = vi.fn();
+const toastSuccessMock = vi.fn();
+const toastErrorMock = vi.fn();
+const addChatToProjectMock = vi.fn();
 
 vi.mock("wouter", () => ({
   useLocation: () => ["/codex", setLocationMock],
@@ -24,12 +29,29 @@ vi.mock("@/hooks/use-projects", () => ({
   useProjects: () => useProjectsMock(),
 }));
 
+vi.mock("@/services/codexRuntime", () => ({
+  createCodexRun: (...args: unknown[]) => createCodexRunMock(...args),
+  spawnCodexSubagents: (...args: unknown[]) => spawnCodexSubagentsMock(...args),
+}));
+
+vi.mock("sonner", () => ({
+  toast: {
+    success: (...args: unknown[]) => toastSuccessMock(...args),
+    error: (...args: unknown[]) => toastErrorMock(...args),
+  },
+}));
+
 describe("CodexPage", () => {
   beforeEach(() => {
     setLocationMock.mockReset();
     useAuthMock.mockReset();
     useChatsMock.mockReset();
     useProjectsMock.mockReset();
+    createCodexRunMock.mockReset();
+    spawnCodexSubagentsMock.mockReset();
+    toastSuccessMock.mockReset();
+    toastErrorMock.mockReset();
+    addChatToProjectMock.mockReset();
 
     useAuthMock.mockReturnValue({
       user: {
@@ -125,7 +147,25 @@ describe("CodexPage", () => {
         },
       ],
       isLoading: false,
+      addChatToProject: addChatToProjectMock,
     });
+
+    createCodexRunMock.mockResolvedValue({
+      runId: "run-new",
+      chatId: "chat-new",
+      prompt: "prompt",
+    });
+    spawnCodexSubagentsMock.mockResolvedValue([
+      {
+        id: "subagent-1",
+        requesterUserId: "user-1",
+        objective: "Implementa la solucion",
+        planHint: ["role:coder"],
+        parentRunId: "run-new",
+        status: "queued",
+        createdAt: Date.now(),
+      },
+    ]);
   });
 
   it("renders the dedicated Codex workspace and opens the selected chat", () => {
@@ -154,11 +194,46 @@ describe("CodexPage", () => {
     useProjectsMock.mockReturnValue({
       projects: [],
       isLoading: false,
+      addChatToProject: addChatToProjectMock,
     });
 
     render(<CodexPage />);
 
     expect(screen.getByText("Nueva sesión lista para arrancar")).toBeInTheDocument();
     expect(screen.getByText("Abrir chat principal")).toBeInTheDocument();
+  });
+
+  it("launches a real run with subagents and redirects to progress", async () => {
+    render(<CodexPage />);
+
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "Implementa el flujo completo de codificacion autonoma." },
+    });
+
+    fireEvent.click(screen.getByTestId("codex-launch-run"));
+
+    await waitFor(() => {
+      expect(createCodexRunMock).toHaveBeenCalledWith({
+        chatId: null,
+        message: "Implementa el flujo completo de codificacion autonoma.",
+        project: expect.objectContaining({ id: "project-1", name: "Document hotfix" }),
+        marathonMode: false,
+      });
+    });
+
+    await waitFor(() => {
+      expect(spawnCodexSubagentsMock).toHaveBeenCalledWith({
+        runId: "run-new",
+        message: "Implementa el flujo completo de codificacion autonoma.",
+        project: expect.objectContaining({ id: "project-1", name: "Document hotfix" }),
+        marathonMode: false,
+        maxSubagents: 3,
+      });
+    });
+
+    await waitFor(() => {
+      expect(addChatToProjectMock).toHaveBeenCalledWith("chat-new", "project-1");
+      expect(setLocationMock).toHaveBeenCalledWith("/runs/run-new/progress");
+    });
   });
 });
