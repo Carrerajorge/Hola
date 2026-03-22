@@ -1,6 +1,6 @@
 import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, ExternalLink, Link2, Loader2 } from "lucide-react";
+import { CheckCircle2, Copy, ExternalLink, Link2, Loader2 } from "lucide-react";
 import { apiFetch } from "@/lib/apiClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -31,18 +31,26 @@ type OpenAICodexStatusResponse = {
   defaultModelId: string;
 };
 
+type OpenAICodexAuthMode = "device_code" | "browser";
+
 type OpenAICodexStartResponse = {
   flowId: string;
+  authMode: OpenAICodexAuthMode;
   authUrl: string;
   redirectUri: string;
+  userCode: string | null;
+  expiresAt: string | null;
   instructions: string;
 };
 
 type OpenAICodexFlowResponse = {
   flowId: string;
+  authMode: OpenAICodexAuthMode;
   status: "pending" | "completed" | "failed";
   authUrl: string;
   redirectUri: string;
+  userCode: string | null;
+  expiresAt: string | null;
   error: string | null;
   result: OpenAICodexStatusResponse | null;
 };
@@ -67,6 +75,10 @@ export function OpenAICodexOAuthButton({
   const [flowId, setFlowId] = React.useState<string | null>(null);
   const [authUrl, setAuthUrl] = React.useState("");
   const [redirectUri, setRedirectUri] = React.useState("");
+  const [authMode, setAuthMode] =
+    React.useState<OpenAICodexAuthMode>("device_code");
+  const [userCode, setUserCode] = React.useState("");
+  const [expiresAt, setExpiresAt] = React.useState<string | null>(null);
   const [manualInput, setManualInput] = React.useState("");
   const [showManualFallback, setShowManualFallback] = React.useState(false);
   const popupRef = React.useRef<Window | null>(null);
@@ -130,6 +142,9 @@ export function OpenAICodexOAuthButton({
       setFlowId(payload.flowId);
       setAuthUrl(payload.authUrl);
       setRedirectUri(payload.redirectUri);
+      setAuthMode(payload.authMode);
+      setUserCode(payload.userCode || "");
+      setExpiresAt(payload.expiresAt);
       setManualInput("");
       setShowManualFallback(false);
       lastHandledFlowStateRef.current = null;
@@ -199,6 +214,9 @@ export function OpenAICodexOAuthButton({
         setFlowId(null);
         setAuthUrl("");
         setRedirectUri("");
+        setAuthMode("device_code");
+        setUserCode("");
+        setExpiresAt(null);
         setManualInput("");
         setShowManualFallback(false);
         lastHandledFlowStateRef.current = null;
@@ -208,6 +226,17 @@ export function OpenAICodexOAuthButton({
     },
     [completeMutation, startMutation],
   );
+
+  React.useEffect(() => {
+    if (!flowQuery.data) {
+      return;
+    }
+    setAuthMode(flowQuery.data.authMode);
+    setAuthUrl(flowQuery.data.authUrl);
+    setRedirectUri(flowQuery.data.redirectUri);
+    setUserCode(flowQuery.data.userCode || "");
+    setExpiresAt(flowQuery.data.expiresAt);
+  }, [flowQuery.data]);
 
   React.useEffect(() => {
     const flowState = flowQuery.data;
@@ -247,8 +276,8 @@ export function OpenAICodexOAuthButton({
       toast({
         title: "ChatGPT conectado",
         description: flowState.result?.accountId
-          ? `Cuenta ${flowState.result.accountId} lista para usar GPT Codex.`
-          : "Tu cuenta de ChatGPT ya puede usar GPT Codex.",
+          ? `Cuenta ${flowState.result.accountId} lista para usar OpenClaw.`
+          : "Tu cuenta de ChatGPT ya puede usar OpenClaw.",
       });
       resetLocalState(false);
     })();
@@ -267,6 +296,20 @@ export function OpenAICodexOAuthButton({
       });
     }
   }, [authUrl, toast]);
+
+  const handleCopyUserCode = React.useCallback(async () => {
+    if (!userCode) return;
+    try {
+      await navigator.clipboard.writeText(userCode);
+      toast({ description: "Codigo copiado al portapapeles." });
+    } catch {
+      toast({
+        title: "No se pudo copiar",
+        description: "Copia el codigo manualmente desde el modal.",
+        variant: "destructive",
+      });
+    }
+  }, [toast, userCode]);
 
   const handleOpenAuthUrl = React.useCallback(() => {
     if (!authUrl) return;
@@ -290,6 +333,7 @@ export function OpenAICodexOAuthButton({
 
   const isBusy = startMutation.isPending || completeMutation.isPending;
   const isConnected = Boolean(status?.connected);
+  const isDeviceCodeFlow = authMode === "device_code";
   const openDialog = React.useCallback(() => {
     setOpen(true);
   }, []);
@@ -321,7 +365,7 @@ export function OpenAICodexOAuthButton({
             <DialogTitle>Conectar ChatGPT</DialogTitle>
             <DialogDescription>
               Usa tu cuenta de <strong>ChatGPT Plus/Pro</strong> para habilitar
-              GPT Codex en ILIAGPT.
+              OpenClaw en ILIAGPT.
             </DialogDescription>
           </DialogHeader>
 
@@ -362,19 +406,33 @@ export function OpenAICodexOAuthButton({
               <div className="space-y-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4">
                 <div className="space-y-2 text-sm">
                   <p className="font-medium">Sigue estos pasos</p>
-                  <ol className="space-y-1 text-muted-foreground">
-                    <li>1. Abre la ventana de ChatGPT y completa el login.</li>
-                    <li>
-                      2. Al regresar a ILIAGPT, la vinculación se completará y
-                      la ventana se cerrará sola.
-                    </li>
-                    <li>
-                      3. Si no vuelve automáticamente, pega la URL final que
-                      termina en{" "}
-                      <code>{redirectUri || "el callback de ILIAGPT"}</code> o
-                      solo el <code>code</code>.
-                    </li>
-                  </ol>
+                  {isDeviceCodeFlow ? (
+                    <ol className="space-y-1 text-muted-foreground">
+                      <li>1. Abre la ventana de ChatGPT.</li>
+                      <li>
+                        2. Ingresa el codigo de un solo uso{" "}
+                        <code>{userCode || "..."}</code>.
+                      </li>
+                      <li>
+                        3. Vuelve a ILIAGPT y espera unos segundos. La
+                        vinculacion se completara automaticamente cuando OpenAI
+                        confirme el codigo.
+                      </li>
+                    </ol>
+                  ) : (
+                    <ol className="space-y-1 text-muted-foreground">
+                      <li>1. Abre la ventana de ChatGPT y completa el login.</li>
+                      <li>
+                        2. Al regresar a ILIAGPT, la vinculacion se completara
+                        y la ventana se cerrara sola.
+                      </li>
+                      <li>
+                        3. Si no vuelve automaticamente, pega la URL final que
+                        termina en <code>{redirectUri || "localhost"}</code> o
+                        solo el <code>code</code>.
+                      </li>
+                    </ol>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap gap-2">
@@ -387,6 +445,17 @@ export function OpenAICodexOAuthButton({
                     <ExternalLink className="h-4 w-4" />
                     Abrir ChatGPT OAuth
                   </Button>
+                  {isDeviceCodeFlow && userCode ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleCopyUserCode}
+                    >
+                      <Copy className="h-4 w-4" />
+                      Copiar codigo
+                    </Button>
+                  ) : null}
                   <Button
                     type="button"
                     variant="outline"
@@ -396,19 +465,37 @@ export function OpenAICodexOAuthButton({
                     <Link2 className="h-4 w-4" />
                     Copiar URL
                   </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setShowManualFallback((current) => !current)}
-                  >
-                    {showManualFallback
-                      ? "Ocultar recuperación manual"
-                      : "Mostrar recuperación manual"}
-                  </Button>
+                  {!isDeviceCodeFlow ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowManualFallback((current) => !current)}
+                    >
+                      {showManualFallback
+                        ? "Ocultar recuperacion manual"
+                        : "Mostrar recuperacion manual"}
+                    </Button>
+                  ) : null}
                 </div>
 
-                {showManualFallback ? (
+                {isDeviceCodeFlow ? (
+                  <div className="rounded-xl border border-border/60 bg-background/80 p-4">
+                    <p className="text-sm font-medium">Codigo de un solo uso</p>
+                    <p className="mt-2 rounded-lg bg-muted px-3 py-3 text-center font-mono text-xl tracking-[0.2em]">
+                      {userCode || "Cargando..."}
+                    </p>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      Abre <code>{authUrl || "https://auth.openai.com/codex/device"}</code>,
+                      inicia sesion y escribe este codigo.
+                    </p>
+                    {expiresAt ? (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Expira: {new Date(expiresAt).toLocaleString()}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : showManualFallback ? (
                   <div className="space-y-2">
                     <label
                       htmlFor="openai-codex-manual"
@@ -442,7 +529,11 @@ export function OpenAICodexOAuthButton({
             >
               Cancelar
             </Button>
-            {flowId ? (
+            {flowId && isDeviceCodeFlow ? (
+              <Button type="button" variant="outline" onClick={handleOpenAuthUrl}>
+                Abrir ChatGPT
+              </Button>
+            ) : flowId ? (
               showManualFallback ? (
                 <Button
                   type="button"

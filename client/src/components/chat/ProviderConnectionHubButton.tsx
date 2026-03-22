@@ -1,5 +1,5 @@
 import * as React from "react";
-import { CheckCircle2, LockKeyhole, Plus } from "lucide-react";
+import { CheckCircle2, Key, LockKeyhole, Plus } from "lucide-react";
 import type { AvailableModel } from "@/contexts/ModelAvailabilityContext";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -10,11 +10,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { GeminiCliOAuthButton } from "./GeminiCliOAuthButton";
 import { OpenAICodexOAuthButton } from "./OpenAICodexOAuthButton";
 import {
   AntigravityLogoIcon,
   ChatGptLogoIcon,
+  ClaudeLogoIcon,
   GeminiLogoIcon,
 } from "./OAuthProviderLogos";
 
@@ -141,14 +143,72 @@ export function ProviderConnectionHubButton({
     () => getProviderModels(availableModels, "google-antigravity"),
     [availableModels],
   );
+  // DB-backed multi-provider models
+  const oauthOpenaiModels = React.useMemo(
+    () => getProviderModels(availableModels, "openai"),
+    [availableModels],
+  );
+  const oauthGeminiModels = React.useMemo(
+    () => getProviderModels(availableModels, "gemini"),
+    [availableModels],
+  );
+  const anthropicModels = React.useMemo(
+    () => getProviderModels(availableModels, "anthropic"),
+    [availableModels],
+  );
 
   const connectedProviders = React.useMemo(() => {
     let count = 0;
-    if (openAiModels.length > 0) count += 1;
-    if (geminiModels.length > 0) count += 1;
+    if (openAiModels.length > 0 || oauthOpenaiModels.length > 0) count += 1;
+    if (geminiModels.length > 0 || oauthGeminiModels.length > 0) count += 1;
     if (antigravityModels.length > 0) count += 1;
+    if (anthropicModels.length > 0) count += 1;
     return count;
-  }, [antigravityModels.length, geminiModels.length, openAiModels.length]);
+  }, [antigravityModels.length, geminiModels.length, openAiModels.length, oauthOpenaiModels.length, oauthGeminiModels.length, anthropicModels.length]);
+
+  // Anthropic API key state
+  const [anthropicKeyOpen, setAnthropicKeyOpen] = React.useState(false);
+  const [anthropicKey, setAnthropicKey] = React.useState("");
+  const [anthropicLoading, setAnthropicLoading] = React.useState(false);
+  const [anthropicError, setAnthropicError] = React.useState<string | null>(null);
+  const [anthropicConnected, setAnthropicConnected] = React.useState(false);
+
+  // Check Anthropic status on mount
+  React.useEffect(() => {
+    fetch("/api/oauth/providers/anthropic/status")
+      .then((r) => r.json())
+      .then((data: any) => setAnthropicConnected(data?.connected || false))
+      .catch(() => {});
+  }, []);
+
+  const handleAnthropicSubmit = React.useCallback(async () => {
+    if (!anthropicKey.trim()) return;
+    setAnthropicLoading(true);
+    setAnthropicError(null);
+    try {
+      const res = await fetch("/api/oauth/providers/anthropic/key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: anthropicKey.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAnthropicError(data.error || "Error al validar la clave");
+        return;
+      }
+      setAnthropicConnected(true);
+      setAnthropicKeyOpen(false);
+      setAnthropicKey("");
+      // Invalidate model cache
+      const { queryClient } = await import("@/lib/queryClient");
+      queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+      handleConnected("claude-sonnet-4-6-20250514");
+    } catch (err: any) {
+      setAnthropicError(err.message || "Error de red");
+    } finally {
+      setAnthropicLoading(false);
+    }
+  }, [anthropicKey, handleConnected]);
 
   const handleConnected = React.useCallback(
     async (modelId: string) => {
@@ -193,7 +253,7 @@ export function ProviderConnectionHubButton({
               renderTrigger={({ isBusy, isConnected, openDialog }) => (
                 <ProviderCard
                   title="Loguear ChatGPT"
-                  description="Conecta tu cuenta de ChatGPT para traer los modelos Codex disponibles al selector."
+                  description="Conecta tu cuenta de ChatGPT para traer los modelos compatibles con OpenClaw al selector."
                   meta={countLabel(openAiModels.length)}
                   actionLabel={isConnected ? "Revisar cuenta" : "Continuar con ChatGPT"}
                   highlighted={isConnected || openAiModels.length > 0}
@@ -224,24 +284,61 @@ export function ProviderConnectionHubButton({
               )}
             />
 
+            {/* Anthropic API Key */}
             <ProviderCard
-              title="Loguear con Antigravity"
-              description={
-                antigravityModels.length > 0
-                  ? "Este gateway ya tiene modelos Antigravity visibles y listos para usar."
-                  : "El login oficial de Antigravity no viene implementado en este repo. Sus modelos apareceran aqui solo si el gateway ya fue configurado por fuera."
-              }
-              meta={countLabel(antigravityModels.length)}
-              actionLabel={
-                antigravityModels.length > 0 ? "Ya disponible" : "Configuracion manual"
-              }
-              disabled
-              highlighted={antigravityModels.length > 0}
-              isConnected={antigravityModels.length > 0}
-              icon={<AntigravityLogoIcon className="h-5 w-5" />}
-              testId="provider-card-antigravity"
+              title="Conectar Claude (Anthropic)"
+              description="Ingresa tu API Key de Anthropic para usar los modelos Claude directamente desde ILIAGPT."
+              meta={countLabel(anthropicModels.length)}
+              actionLabel={anthropicConnected ? "Conectado" : "Agregar API Key"}
+              highlighted={anthropicConnected || anthropicModels.length > 0}
+              isConnected={anthropicConnected}
+              icon={<ClaudeLogoIcon className="h-5 w-5" />}
+              onClick={() => setAnthropicKeyOpen(true)}
+              testId="provider-card-anthropic"
             />
           </div>
+
+          {/* Anthropic API Key Dialog */}
+          <Dialog open={anthropicKeyOpen} onOpenChange={setAnthropicKeyOpen}>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Key className="h-5 w-5" />
+                  Clave API de Anthropic
+                </DialogTitle>
+                <DialogDescription>
+                  Ingresa tu clave API de Anthropic. Se validara con una llamada de prueba y se almacenara cifrada con AES-256.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <Input
+                  type="password"
+                  placeholder="sk-ant-..."
+                  value={anthropicKey}
+                  onChange={(e) => setAnthropicKey(e.target.value)}
+                  disabled={anthropicLoading}
+                />
+                {anthropicError && (
+                  <p className="text-sm text-destructive">{anthropicError}</p>
+                )}
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setAnthropicKeyOpen(false)}
+                    disabled={anthropicLoading}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    onClick={handleAnthropicSubmit}
+                    disabled={anthropicLoading || !anthropicKey.trim()}
+                  >
+                    {anthropicLoading ? "Validando..." : "Guardar"}
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
         </DialogContent>
       </Dialog>
     </>
