@@ -5411,7 +5411,7 @@ function SettingsSection() {
     <div className="space-y-6">
       <div className="space-y-2">
         <Label htmlFor="default_model">Default Model</Label>
-        <Select value={localSettings.default_model || "grok-3-fast"} onValueChange={(v) => updateLocal("default_model", v)}>
+        <Select value={localSettings.default_model || "z-ai/glm-5"} onValueChange={(v) => updateLocal("default_model", v)}>
           <SelectTrigger data-testid="select-default-model">
             <SelectValue />
           </SelectTrigger>

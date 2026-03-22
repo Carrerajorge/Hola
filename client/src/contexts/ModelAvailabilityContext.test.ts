@@ -58,6 +58,13 @@ describe("ModelAvailabilityContext helpers", () => {
     expect(pickPreferredEnabledModel([grok, gemini], null, null)?.id).toBe("grok-id");
   });
 
+  it("prefers OpenRouter when it is the only configured production model", () => {
+    const glm = makeModel({ id: "glm-id", provider: "openrouter", modelId: "z-ai/glm-5" });
+    const gemini = makeModel({ id: "gemini-id", provider: "google", modelId: "gemini-2.5-flash" });
+
+    expect(pickPreferredEnabledModel([gemini, glm], null, null)?.id).toBe("glm-id");
+  });
+
   it("prioritizes Gemini CLI OAuth when it is available", () => {
     const geminiApi = makeModel({ id: "gemini-api-id", provider: "gemini", modelId: "gemini-2.5-flash" });
     const geminiCli = makeModel({

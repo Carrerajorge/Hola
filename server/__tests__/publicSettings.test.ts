@@ -35,7 +35,7 @@ describe("getPublicSettings", () => {
     const res = await getPublicSettings();
     expect(res.settings.app_name).toBe("My App");
     expect(res.settings.maintenance_mode).toBe(true);
-    expect(res.settings.default_model).toBe("grok-4.1-fast");
+    expect(res.settings.default_model).toBe("z-ai/glm-5");
     expect((res.settings as any).slack_webhook_url).toBeUndefined();
   });
 });

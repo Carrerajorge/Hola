@@ -20,7 +20,7 @@ export class SecretManager {
      * Recupera una API Key de forma temporal en memoria. 
      * Nunca debe asignarse a objetos globales o logs.
      */
-    getLLMProviderKey(provider: 'openai' | 'anthropic' | 'gemini' | 'xai' | 'deepseek'): string {
+    getLLMProviderKey(provider: 'openai' | 'anthropic' | 'gemini' | 'xai' | 'deepseek' | 'openrouter'): string {
         switch (provider) {
             case 'openai':
                 return this.requireSecret(getOpenAICompatibleApiKey(env as NodeJS.ProcessEnv), "OPENAI_API_KEY/CEREBRAS_API_KEY");
@@ -32,6 +32,8 @@ export class SecretManager {
                 return this.requireSecret(env.XAI_API_KEY, "XAI_API_KEY");
             case 'deepseek':
                 return this.requireSecret(env.DEEPSEEK_API_KEY, "DEEPSEEK_API_KEY");
+            case 'openrouter':
+                return this.requireSecret(env.OPENROUTER_API_KEY, "OPENROUTER_API_KEY");
             default:
                 throw new Error(`[SecretManager] Proveedor no autorizado: ${provider}`);
         }

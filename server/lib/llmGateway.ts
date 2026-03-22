@@ -41,7 +41,7 @@ interface RateLimitState {
   lastRefill: number;
 }
 
-type LLMProvider = "xai" | "gemini" | "openai" | "anthropic" | "deepseek";
+type LLMProvider = "xai" | "gemini" | "openai" | "anthropic" | "deepseek" | "openrouter";
 type LLMProviderOrAuto = LLMProvider | "auto";
 
 const AUTH_INVALID_ERROR_PATTERNS = [
@@ -200,6 +200,10 @@ function detectProviderFromModel(model: string | undefined): LLMProvider | null 
     return "deepseek";
   }
 
+  if (normalizedModel.includes("/") && !normalizedModel.startsWith("http")) {
+    return "openrouter";
+  }
+
   // Si es un modelo local (llama3, mistral), lo ruteamos via SDK OpenAI compatible
   if (KNOWN_LOCAL_MODEL_IDS.has(normalizedModel) || normalizedModel.includes("llama") || normalizedModel.includes("mistral")) {
     return "openai";
@@ -216,6 +220,9 @@ function detectProviderFromModel(model: string | undefined): LLMProvider | null 
   }
   if (/deepseek/i.test(model)) {
     return "deepseek";
+  }
+  if (model.includes("/")) {
+    return "openrouter";
   }
   if (/^(gpt-|o\d|chatgpt)/i.test(model)) {
     return "openai";
@@ -249,13 +256,14 @@ class LLMGateway {
     fallbackSuccesses: number;
     deduplicatedRequests: number;
     streamRecoveries: number;
-    byProvider: {
-      xai: { requests: number; tokens: number; failures: number; latency?: number };
-      gemini: { requests: number; tokens: number; failures: number; latency?: number };
-      openai: { requests: number; tokens: number; failures: number; latency?: number };
-      anthropic: { requests: number; tokens: number; failures: number; latency?: number };
-      deepseek: { requests: number; tokens: number; failures: number; latency?: number };
-    };
+      byProvider: {
+        xai: { requests: number; tokens: number; failures: number; latency?: number };
+        gemini: { requests: number; tokens: number; failures: number; latency?: number };
+        openai: { requests: number; tokens: number; failures: number; latency?: number };
+        openrouter: { requests: number; tokens: number; failures: number; latency?: number };
+        anthropic: { requests: number; tokens: number; failures: number; latency?: number };
+        deepseek: { requests: number; tokens: number; failures: number; latency?: number };
+      };
   };
 
   constructor() {
@@ -275,6 +283,7 @@ class LLMGateway {
         xai: { requests: 0, tokens: 0, failures: 0 },
         gemini: { requests: 0, tokens: 0, failures: 0 },
         openai: { requests: 0, tokens: 0, failures: 0 },
+        openrouter: { requests: 0, tokens: 0, failures: 0 },
         anthropic: { requests: 0, tokens: 0, failures: 0 },
         deepseek: { requests: 0, tokens: 0, failures: 0 },
       },
@@ -703,8 +712,12 @@ class LLMGateway {
     return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
   }
 
+  private getOpenRouterApiKey(): string | undefined {
+    return process.env.OPENROUTER_API_KEY;
+  }
+
   private getConfiguredProvidersInOrder(): LLMProvider[] {
-    const order: LLMProvider[] = ["openai", "gemini", "deepseek", "anthropic", "xai"];
+    const order: LLMProvider[] = ["openrouter", "openai", "gemini", "deepseek", "anthropic", "xai"];
     return order.filter((p) => this.isProviderReady(p));
   }
 
@@ -720,6 +733,8 @@ class LLMGateway {
         if (compatibleBaseUrl && !isCerebrasBaseUrl(compatibleBaseUrl)) return true;
         return hasConfiguredOpenAICompatibleProvider();
       }
+      case "openrouter":
+        return Boolean(this.getOpenRouterApiKey() && this.getOpenRouterApiKey()!.trim());
       case "anthropic":
         return Boolean(process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.trim());
       case "deepseek":
@@ -761,7 +776,7 @@ class LLMGateway {
   // T100-7.1: Algoritmo Inteligente de Enrutamiento (Smart Routing)
   // Evalúa dinámicamente Costo, Latencia (Observabilidad) y Tasa de Errores (Breakers)
   private getSmartRoutedProviders(): LLMProvider[] {
-    const configured: LLMProvider[] = ["gemini", "deepseek", "xai", "openai", "anthropic"];
+    const configured: LLMProvider[] = ["openrouter", "gemini", "deepseek", "xai", "openai", "anthropic"];
     const active = configured.filter((p) => this.isProviderReady(p));
 
     return active.sort((a, b) => {
@@ -773,7 +788,14 @@ class LLMGateway {
 
       // Hardcoded tier list for cost approximation per 1M tokens (Flash/Haiku/Chat)
       // 1 = Cheapest, 5 = Most Expensive
-      const costTiers: Record<LLMProvider, number> = { deepseek: 1, gemini: 2, xai: 3, openai: 4, anthropic: 5 };
+      const costTiers: Record<LLMProvider, number> = {
+        deepseek: 1,
+        gemini: 2,
+        openrouter: 2,
+        xai: 3,
+        openai: 4,
+        anthropic: 5,
+      };
 
       // Score Heurístico = (Costo * 1000) + Latencia_P95 + Penalización por Errores
       const scoreA = (costTiers[a] * 1000) + (latA === Infinity ? 2000 : latA) + (errA * 5000);
@@ -845,7 +867,14 @@ class LLMGateway {
     const cutoff = since || Date.now() - 3600000; // Last hour by default
     const relevant = this.tokenUsageHistory.filter(r => r.timestamp >= cutoff);
 
-    const byProvider: Record<string, number> = { xai: 0, gemini: 0, openai: 0, anthropic: 0, deepseek: 0 };
+    const byProvider: Record<string, number> = {
+      xai: 0,
+      gemini: 0,
+      openai: 0,
+      openrouter: 0,
+      anthropic: 0,
+      deepseek: 0,
+    };
     const byUser: Record<string, number> = {};
     let total = 0;
 
@@ -959,7 +988,7 @@ class LLMGateway {
   ): Promise<LLMResponse> {
     const configuredProviders = this.getSmartRoutedProviders();
     if (configuredProviders.length === 0) {
-      const temporarilyDisabled = (["xai", "gemini", "openai", "anthropic", "deepseek"] as const)
+      const temporarilyDisabled = (["xai", "gemini", "openai", "openrouter", "anthropic", "deepseek"] as const)
         .filter((provider) => this.isProviderConfigured(provider) && isRuntimeProviderSuppressed(provider));
       if (temporarilyDisabled.length > 0) {
         throw new Error(
@@ -967,7 +996,7 @@ class LLMGateway {
         );
       }
       throw new Error(
-        "No LLM providers configured. Set at least one of: XAI_API_KEY (or GROK_API_KEY/ILIAGPT_API_KEY), GEMINI_API_KEY (or GOOGLE_API_KEY), OPENAI_API_KEY/CEREBRAS_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY."
+        "No LLM providers configured. Set at least one of: XAI_API_KEY (or GROK_API_KEY/ILIAGPT_API_KEY), GEMINI_API_KEY (or GOOGLE_API_KEY), OPENROUTER_API_KEY, OPENAI_API_KEY/CEREBRAS_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY."
       );
     }
 
@@ -985,9 +1014,10 @@ class LLMGateway {
     const selected = this.selectProvider(options);
     const primaryProvider = this.isProviderReady(selected) ? selected : configuredProviders[0];
 
-    const providers: LLMProvider[] = enableFallback
-      ? [primaryProvider, ...configuredProviders.filter((p) => p !== primaryProvider)]
-      : [primaryProvider];
+    const explicitlyPinnedProvider = Boolean(options.provider && options.provider !== "auto");
+    const providers: LLMProvider[] = explicitlyPinnedProvider || !enableFallback
+      ? [primaryProvider]
+      : [primaryProvider, ...configuredProviders.filter((p) => p !== primaryProvider)];
 
     let lastError: Error | null = null;
 
@@ -1048,6 +1078,8 @@ class LLMGateway {
       model = modelProvider === "xai" ? options.model! : MODELS.TEXT;
     } else if (provider === "gemini") {
       model = modelProvider === "gemini" ? options.model! : GEMINI_MODELS.FLASH;
+    } else if (provider === "openrouter") {
+      model = modelProvider === "openrouter" ? options.model! : "z-ai/glm-5";
     } else if (provider === "openai") {
       model = modelProvider === "openai" ? options.model! : getOpenAICompatibleDefaultModel();
     } else if (provider === "deepseek") {
@@ -1065,7 +1097,7 @@ class LLMGateway {
         } else if (provider === "anthropic") {
           result = await this.executeAnthropic(messages, options, model, startTime);
         } else {
-          // xai / openai / deepseek
+          // xai / openrouter / openai / deepseek
           result = await this.executeOpenAICompatible(provider, messages, options, model, startTime);
         }
         clearRuntimeProviderSuppression(provider);
@@ -1097,7 +1129,7 @@ class LLMGateway {
     throw new Error("Max retries exceeded");
   }
 
-  private getOpenAICompatibleClient(provider: "xai" | "openai" | "deepseek"): OpenAI {
+  private getOpenAICompatibleClient(provider: "xai" | "openrouter" | "openai" | "deepseek"): OpenAI {
     if (provider === "xai") {
       if (!this.xaiClient) {
         this.xaiClient = new OpenAI({
@@ -1106,6 +1138,13 @@ class LLMGateway {
         });
       }
       return this.xaiClient;
+    }
+
+    if (provider === "openrouter") {
+      return new OpenAI({
+        baseURL: "https://openrouter.ai/api/v1",
+        apiKey: secretManager.getLLMProviderKey("openrouter"),
+      });
     }
 
     if (provider === "openai") {
@@ -1129,7 +1168,7 @@ class LLMGateway {
   }
 
   private async executeOpenAICompatible(
-    provider: "xai" | "openai" | "deepseek",
+    provider: "xai" | "openrouter" | "openai" | "deepseek",
     messages: ChatCompletionMessageParam[],
     options: LLMRequestOptions & { requestId: string; timeout: number },
     model: string,
@@ -1608,7 +1647,7 @@ class LLMGateway {
     let accumulatedContent = "";
     const configuredProviders = this.getSmartRoutedProviders();
     if (configuredProviders.length === 0) {
-      const temporarilyDisabled = (["xai", "gemini", "openai", "anthropic", "deepseek"] as const)
+      const temporarilyDisabled = (["xai", "gemini", "openai", "openrouter", "anthropic", "deepseek"] as const)
         .filter((provider) => this.isProviderConfigured(provider) && isRuntimeProviderSuppressed(provider));
       if (temporarilyDisabled.length > 0) {
         throw new Error(
@@ -1616,7 +1655,7 @@ class LLMGateway {
         );
       }
       throw new Error(
-        "No LLM providers configured. Set at least one of: XAI_API_KEY (or GROK_API_KEY/ILIAGPT_API_KEY), GEMINI_API_KEY (or GOOGLE_API_KEY), OPENAI_API_KEY/CEREBRAS_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY."
+        "No LLM providers configured. Set at least one of: XAI_API_KEY (or GROK_API_KEY/ILIAGPT_API_KEY), GEMINI_API_KEY (or GOOGLE_API_KEY), OPENROUTER_API_KEY, OPENAI_API_KEY/CEREBRAS_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY."
       );
     }
 
@@ -1653,9 +1692,10 @@ class LLMGateway {
       console.log(`[LLMGateway] ${requestId} recovering from checkpoint at seq ${sequenceId}`);
     }
 
-    const providers: LLMProvider[] = enableFallback
-      ? [currentProvider, ...configuredProviders.filter((p: LLMProvider) => p !== currentProvider)]
-      : [currentProvider];
+    const explicitlyPinnedProvider = Boolean(options.provider && options.provider !== "auto");
+    const providers: LLMProvider[] = explicitlyPinnedProvider || !enableFallback
+      ? [currentProvider]
+      : [currentProvider, ...configuredProviders.filter((p: LLMProvider) => p !== currentProvider)];
 
     for (const provider of providers) {
       const breaker = getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG);
@@ -1839,7 +1879,7 @@ class LLMGateway {
   }
 
   private async * streamOpenAICompatible(
-    provider: "xai" | "openai" | "deepseek",
+    provider: "xai" | "openrouter" | "openai" | "deepseek",
     messages: ChatCompletionMessageParam[],
     options: LLMRequestOptions,
     requestId: string
@@ -1849,6 +1889,8 @@ class LLMGateway {
     let model: string;
     if (provider === "xai") {
       model = modelProvider === "xai" ? options.model! : MODELS.TEXT;
+    } else if (provider === "openrouter") {
+      model = modelProvider === "openrouter" ? options.model! : "z-ai/glm-5";
     } else if (provider === "openai") {
       model = modelProvider === "openai" ? options.model! : getOpenAICompatibleDefaultModel();
     } else {
@@ -2106,6 +2148,7 @@ class LLMGateway {
         xai: getCircuitBreaker("system", "xai").getState(),
         gemini: getCircuitBreaker("system", "gemini").getState(),
         openai: getCircuitBreaker("system", "openai").getState(),
+        openrouter: getCircuitBreaker("system", "openrouter").getState(),
         anthropic: getCircuitBreaker("system", "anthropic").getState(),
         deepseek: getCircuitBreaker("system", "deepseek").getState(),
       },
@@ -2133,6 +2176,7 @@ class LLMGateway {
         xai: { requests: 0, tokens: 0, failures: 0 },
         gemini: { requests: 0, tokens: 0, failures: 0 },
         openai: { requests: 0, tokens: 0, failures: 0 },
+        openrouter: { requests: 0, tokens: 0, failures: 0 },
         anthropic: { requests: 0, tokens: 0, failures: 0 },
         deepseek: { requests: 0, tokens: 0, failures: 0 },
       },
@@ -2150,6 +2194,7 @@ class LLMGateway {
       xai: { available: false },
       gemini: { available: false },
       openai: { available: false },
+      openrouter: { available: false },
       anthropic: { available: false },
       deepseek: { available: false },
     };
@@ -2221,6 +2266,26 @@ class LLMGateway {
         results.openai = { available: true, latencyMs: Date.now() - start };
       } catch (error: any) {
         results.openai = { available: false, error: error.message?.slice(0, 100) };
+      }
+    }
+
+    // Test OpenRouter with quick timeout
+    if (this.getOpenRouterApiKey()) {
+      try {
+        const start = Date.now();
+        const client = new OpenAI({
+          baseURL: "https://openrouter.ai/api/v1",
+          apiKey: this.getOpenRouterApiKey() || "missing",
+          timeout: 5000,
+        });
+        await client.chat.completions.create({
+          model: "z-ai/glm-5",
+          messages: [{ role: "user", content: "hi" }],
+          max_tokens: 5,
+        });
+        results.openrouter = { available: true, latencyMs: Date.now() - start };
+      } catch (error: any) {
+        results.openrouter = { available: false, error: error.message?.slice(0, 100) };
       }
     }
 

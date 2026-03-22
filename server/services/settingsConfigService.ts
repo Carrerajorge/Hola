@@ -1,5 +1,6 @@
 import type { Request } from "express";
 import { storage } from "../storage";
+import { DEFAULT_END_USER_MODEL_ID } from "./modelIntegration";
 
 type SettingsSnapshot = {
   fetchedAt: string;
@@ -8,7 +9,7 @@ type SettingsSnapshot = {
 };
 
 const SNAPSHOT_TTL_MS = 10_000;
-const DEFAULT_CHAT_MODEL = "grok-4.1-fast";
+const DEFAULT_CHAT_MODEL = DEFAULT_END_USER_MODEL_ID;
 
 function normalizeDefaultModelSetting(value: unknown): unknown {
   if (typeof value !== "string") return value;

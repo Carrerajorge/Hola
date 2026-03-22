@@ -40,6 +40,7 @@ const envSchema = z.object({
   GOOGLE_API_KEY: z.string().optional(), // backward/alternate name used in parts of the codebase
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_BASE_URL: z.string().optional(),
+  OPENROUTER_API_KEY: z.string().optional(),
   CEREBRAS_API_KEY: z.string().optional(),
   CEREBRAS_BASE_URL: z.string().optional(),
   XAI_API_KEY: z.string().optional(),
@@ -145,17 +146,19 @@ function validateEnv() {
   const hasAnyLlm =
     Boolean(data.XAI_API_KEY) ||
     Boolean(data.GEMINI_API_KEY || data.GOOGLE_API_KEY) ||
+    Boolean(data.OPENROUTER_API_KEY) ||
     Boolean(data.OPENAI_API_KEY || data.OPENAI_BASE_URL || data.CEREBRAS_API_KEY) ||
     Boolean(data.ANTHROPIC_API_KEY) ||
     Boolean(data.DEEPSEEK_API_KEY);
 
   if (!hasAnyLlm) {
-    console.warn("⚠️  WARNING: No LLM API keys configured (XAI_API_KEY, GEMINI_API_KEY/GOOGLE_API_KEY, OPENAI_API_KEY/CEREBRAS_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY)");
+    console.warn("⚠️  WARNING: No LLM API keys configured (XAI_API_KEY, GEMINI_API_KEY/GOOGLE_API_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY/CEREBRAS_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY)");
     console.warn("   Chat functionality will not work without at least one LLM provider.");
   } else {
     const providers = [];
     if (data.XAI_API_KEY) providers.push("xAI");
     if (data.GEMINI_API_KEY || data.GOOGLE_API_KEY) providers.push("Gemini");
+    if (data.OPENROUTER_API_KEY) providers.push("OpenRouter");
     if (usesCerebrasOpenAICompatibility(data as NodeJS.ProcessEnv)) providers.push("Cerebras (OpenAI-compatible)");
     else if (data.OPENAI_API_KEY || data.OPENAI_BASE_URL) providers.push("OpenAI");
     if (data.ANTHROPIC_API_KEY) providers.push("Anthropic");

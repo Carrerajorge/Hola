@@ -18,10 +18,14 @@ import { isRuntimeProviderSuppressed } from "../lib/runtimeProviderHealth";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type ChatRuntimeProvider = "xai" | "gemini" | "openai" | "anthropic" | "deepseek";
+export type ChatRuntimeProvider = "xai" | "gemini" | "openai" | "anthropic" | "deepseek" | "openrouter";
+
+export const DEFAULT_END_USER_MODEL_PROVIDER = "openrouter" as const;
+export const DEFAULT_END_USER_MODEL_ID = "z-ai/glm-5" as const;
+export const DEFAULT_END_USER_MODEL_NAME = "Z.ai GLM 5" as const;
 
 const ALL_RUNTIME_PROVIDERS: readonly ChatRuntimeProvider[] = Object.freeze([
-  "xai", "gemini", "openai", "anthropic", "deepseek",
+  "xai", "gemini", "openai", "anthropic", "deepseek", "openrouter",
 ]) as readonly ChatRuntimeProvider[];
 
 // ─── Immutable Lookup Maps ────────────────────────────────────────────────────
@@ -36,6 +40,7 @@ const PROVIDER_ALIAS_MAP: Readonly<Record<string, ChatRuntimeProvider>> = Object
   cerebras: "openai",
   anthropic: "anthropic",
   deepseek: "deepseek",
+  openrouter: "openrouter",
 });
 
 /** Every env-var name that proves a provider is configured, grouped by runtime. */
@@ -45,6 +50,7 @@ const API_KEY_ENV_VARS: Readonly<Record<ChatRuntimeProvider, readonly string[]>>
   openai: Object.freeze(["OPENAI_API_KEY", "CEREBRAS_API_KEY"]),
   anthropic: Object.freeze(["ANTHROPIC_API_KEY"]),
   deepseek: Object.freeze(["DEEPSEEK_API_KEY"]),
+  openrouter: Object.freeze(["OPENROUTER_API_KEY"]),
 });
 
 /** Model-ID regex per runtime to detect chat-capable model IDs. */
@@ -54,6 +60,7 @@ const CHAT_MODEL_PATTERNS: Readonly<Record<ChatRuntimeProvider, RegExp>> = Objec
   openai: /^(gpt|o\d|chatgpt|codex-mini)/i,
   anthropic: /^claude/i,
   deepseek: /^deepseek/i,
+  openrouter: /^(auto|[^\s/]+\/[^\s]+)$/i,
 });
 
 /** Model types considered chat-capable. */
@@ -196,6 +203,17 @@ export function isModelProviderIntegrated(provider: unknown): boolean {
   return hasApiKeyForRuntimeProvider(runtime);
 }
 
+export function isDefaultEndUserModel(model: {
+  provider: unknown;
+  modelId?: unknown;
+}): boolean {
+  if (!model || typeof model !== "object") return false;
+  return (
+    sanitize(model.provider) === DEFAULT_END_USER_MODEL_PROVIDER &&
+    sanitize(model.modelId) === DEFAULT_END_USER_MODEL_ID
+  );
+}
+
 /**
  * Return all DB provider strings that map to supported runtimes (incl. aliases).
  */
@@ -232,6 +250,18 @@ export function isModelEligibleForPublic(model: {
 }): boolean {
   if (!model || typeof model !== "object") return false;
   if (sanitize(model.isEnabled) !== "true") return false;
+  if (sanitize(model.status) !== "active") return false;
+  if (!isModelProviderIntegrated(model.provider)) return false;
+  return isModelChatCapable(model);
+}
+
+export function isModelEligibleForAdmin(model: {
+  provider: unknown;
+  modelId?: unknown;
+  modelType?: unknown;
+  status?: unknown;
+}): boolean {
+  if (!model || typeof model !== "object") return false;
   if (sanitize(model.status) !== "active") return false;
   if (!isModelProviderIntegrated(model.provider)) return false;
   return isModelChatCapable(model);

@@ -427,6 +427,16 @@ modelsRouter.get("/health", async (req, res) => {
                 isSupported: isModelProviderSupported("deepseek"),
                 isIntegrated: isModelProviderIntegrated("deepseek"),
                 runtimeProvider: "deepseek",
+            },
+            openrouter: {
+                name: "OpenRouter",
+                available: healthStatus?.openrouter?.available ?? false,
+                latencyMs: healthStatus?.openrouter?.latencyMs ?? null,
+                error: healthStatus?.openrouter?.error ?? null,
+                hasApiKey: checkApiKeyExists("openrouter"),
+                isSupported: isModelProviderSupported("openrouter"),
+                isIntegrated: isModelProviderIntegrated("openrouter"),
+                runtimeProvider: "openrouter",
             }
         };
 

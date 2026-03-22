@@ -1,52 +1,20 @@
 import { storage } from "../storage";
+import {
+    DEFAULT_END_USER_MODEL_ID,
+    DEFAULT_END_USER_MODEL_NAME,
+} from "../services/modelIntegration";
 
 const NEW_MODELS = [
     {
-        name: "Gemini 3.1 Pro",
-        provider: "google",
-        modelId: "gemini-3.1-pro-preview",
-        description: "Google Gemini 3.1 Pro Preview",
+        name: DEFAULT_END_USER_MODEL_NAME,
+        provider: "openrouter",
+        modelId: DEFAULT_END_USER_MODEL_ID,
+        description: "Modelo de producción para usuarios finales vía OpenRouter.",
         isEnabled: "true",
         status: "active",
-        displayOrder: 5,
+        displayOrder: 0,
         modelType: "chat",
-        contextWindow: 2000000,
-        icon: "sparkles"
-    },
-    {
-        name: "Gemini 1.5 Flash",
-        provider: "google",
-        modelId: "gemini-1.5-flash",
-        description: "Google Gemini 1.5 Flash",
-        isEnabled: "true",
-        status: "active",
-        displayOrder: 10,
-        modelType: "chat",
-        contextWindow: 1000000,
-        icon: "sparkles"
-    },
-    {
-        name: "GPT-4o Mini",
-        provider: "openai",
-        modelId: "gpt-4o-mini",
-        description: "OpenAI GPT-4o Mini",
-        isEnabled: "true",
-        status: "active",
-        displayOrder: 11,
-        modelType: "chat",
-        contextWindow: 128000,
-        icon: "sparkles"
-    },
-    {
-        name: "Grok 2.0 (Latest)",
-        provider: "xai",
-        modelId: "grok-3-mini",
-        description: "XAI Grok 2.0 - Fast and capable.",
-        isEnabled: "true",
-        status: "active",
-        displayOrder: 20,
-        modelType: "chat",
-        contextWindow: 128000,
+        contextWindow: 80000,
         icon: "sparkles"
     }
 ];
@@ -72,6 +40,16 @@ async function seedModels() {
                 });
             }
         }
+
+        await storage.upsertSettingsConfig({
+            category: "ai_models",
+            key: "default_model",
+            value: DEFAULT_END_USER_MODEL_ID,
+            defaultValue: DEFAULT_END_USER_MODEL_ID,
+            valueType: "string",
+            description: "Default AI model",
+        });
+
         console.log("✨ Model seeding complete.");
     } catch (error) {
         console.error("❌ Error seeding models:", error);

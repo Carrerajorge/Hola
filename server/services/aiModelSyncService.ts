@@ -210,6 +210,7 @@ const KNOWN_MODELS: Readonly<Record<string, readonly KnownModel[]>> = deepFreeze
   // OPENROUTER MODELS
   // ========================================
   openrouter: [
+    { modelId: "z-ai/glm-5", name: "Z.ai GLM 5", contextWindow: 80000, maxOutput: 8192, type: "TEXT", inputCost: "0.00072", outputCost: "0.0023", description: "Flagship Z.ai model for complex coding and agent workflows" },
     // Meta Llama
     { modelId: "meta-llama/llama-3.3-70b", name: "Llama 3.3 70B", contextWindow: 128000, maxOutput: 8192, type: "TEXT", inputCost: "0.0004", outputCost: "0.0004", description: "Meta's open source model" },
     { modelId: "meta-llama/llama-3.1-405b", name: "Llama 3.1 405B", contextWindow: 128000, maxOutput: 4096, type: "TEXT", inputCost: "0.003", outputCost: "0.003", description: "Largest Llama model" },

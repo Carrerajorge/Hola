@@ -24,6 +24,7 @@ export interface AvailableModel {
 
 const PREFERRED_PROVIDER_ORDER = Object.freeze([
   "google-gemini-cli",
+  "openrouter",
   "xai",
   "openai",
   "anthropic",
@@ -220,27 +221,6 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
     refetchOnWindowFocus: true,
   });
 
-  const localMockModels: AvailableModel[] = shouldExposeLocalMockModels(
-    typeof window !== "undefined" ? window.location.hostname : ""
-  )
-    ? [
-        {
-          id: "llama3-8b",
-          name: "Llama 3 (M\u00e1quina Local / Ollama)",
-          provider: "local",
-          modelId: "llama3-8b",
-          description: "Modelo Llama 3 ejecutado directamente en su hardware local via ollama o LM Studio",
-          isEnabled: "true",
-          enabledAt: new Date().toISOString(),
-          enabledByAdminId: "system",
-          displayOrder: -1,
-          icon: null,
-          modelType: "chat",
-          contextWindow: 128000,
-        },
-      ]
-    : [];
-
   const remoteModels = (modelsData?.models || [])
     .map((model, index) => normalizeAvailableModel(model, index))
     .filter((model): model is AvailableModel => model !== null);
@@ -248,6 +228,28 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
   const dedupedRemoteModels = Array.from(
     new Map(remoteModels.map((model) => [model.id, model])).values()
   );
+
+  const localMockModels: AvailableModel[] =
+    !isLoading &&
+    shouldExposeLocalMockModels(typeof window !== "undefined" ? window.location.hostname : "") &&
+    dedupedRemoteModels.length === 0
+      ? [
+          {
+            id: "llama3-8b",
+            name: "Llama 3 (M\u00e1quina Local / Ollama)",
+            provider: "local",
+            modelId: "llama3-8b",
+            description: "Modelo Llama 3 ejecutado directamente en su hardware local via ollama o LM Studio",
+            isEnabled: "true",
+            enabledAt: new Date().toISOString(),
+            enabledByAdminId: "system",
+            displayOrder: -1,
+            icon: null,
+            modelType: "chat",
+            contextWindow: 128000,
+          },
+        ]
+      : [];
 
   const allModels = [...localMockModels, ...dedupedRemoteModels];
   const enabledModels = allModels

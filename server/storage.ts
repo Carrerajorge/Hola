@@ -92,6 +92,7 @@ import { randomUUID } from "crypto";
 import { db, dbRead } from "./db";
 import { eq, sql, desc, and, isNull, ilike, inArray, or, type SQL } from "drizzle-orm";
 import { knowledgeBaseService } from "./services/knowledgeBase";
+import { DEFAULT_END_USER_MODEL_ID } from "./services/modelIntegration";
 
 function getSqlCode(error: any): string | undefined {
   return error?.cause?.code || error?.code;
@@ -2614,7 +2615,7 @@ export class MemStorage implements IStorage {
   }
 
   async getProviderMetrics(provider?: string, startDate?: Date, endDate?: Date): Promise<ProviderMetrics[]> {
-    let query = dbRead.select().from(providerMetrics);
+    const query = dbRead.select().from(providerMetrics);
     const conditions: any[] = [];
 
     if (provider) {
@@ -2950,7 +2951,7 @@ export class MemStorage implements IStorage {
       { category: "users", key: "allow_registration", value: true, defaultValue: true, valueType: "boolean", description: "Allow user registration" },
       { category: "users", key: "require_email_verification", value: false, defaultValue: false, valueType: "boolean", description: "Require email verification" },
       { category: "users", key: "session_timeout_minutes", value: 1440, defaultValue: 1440, valueType: "number", description: "Session timeout in minutes" },
-      { category: "ai_models", key: "default_model", value: "grok-4.1-fast", defaultValue: "grok-4.1-fast", valueType: "string", description: "Default AI model" },
+      { category: "ai_models", key: "default_model", value: DEFAULT_END_USER_MODEL_ID, defaultValue: DEFAULT_END_USER_MODEL_ID, valueType: "string", description: "Default AI model" },
       { category: "ai_models", key: "max_tokens_per_request", value: 4096, defaultValue: 4096, valueType: "number", description: "Max tokens per request" },
       { category: "ai_models", key: "enable_streaming", value: true, defaultValue: true, valueType: "boolean", description: "Enable streaming responses" },
       { category: "security", key: "max_login_attempts", value: 5, defaultValue: 5, valueType: "number", description: "Max login attempts before lockout" },

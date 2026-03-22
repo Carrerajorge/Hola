@@ -141,8 +141,14 @@ import {
   validatePatterns,
   getFilterStats,
 } from "./services/contentFilter";
-import { isModelEligibleForPublic } from "./services/modelIntegration";
-import { GEMINI_MODELS_REGISTRY, XAI_MODELS } from "./lib/modelRegistry";
+import {
+  DEFAULT_END_USER_MODEL_ID,
+  DEFAULT_END_USER_MODEL_NAME,
+  DEFAULT_END_USER_MODEL_PROVIDER,
+  isDefaultEndUserModel,
+  isModelEligibleForAdmin,
+  isModelEligibleForPublic,
+} from "./services/modelIntegration";
 import {
   getGoogleGeminiCliBootstrapModel,
 } from "./services/googleGeminiCliOAuthService";
@@ -176,6 +182,11 @@ import { academicSearchRouter } from "./routes/academicSearchRouter";
 import { createSecurityRouter } from "./routes/securityRouter";
 import { createMfaRouter } from "./routes/mfaRouter";
 import { createPackagesRouter } from "./routes/packagesRouter";
+import {
+  getActorEmailFromRequest,
+  getActorIdFromRequest,
+} from "./services/settingsConfigService";
+import { isAdminRole } from "./lib/adminRole";
 import { computeMfaForUser, startMfaLoginChallenge } from "./services/mfaLogin";
 import {
   getActiveAlerts,
@@ -255,6 +266,51 @@ type PublicModelSummary = {
   modelType: string;
   contextWindow: number | null;
 };
+
+function sortPublicModels(models: PublicModelSummary[]): PublicModelSummary[] {
+  return [...models].sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
+}
+
+function restrictModelsForEndUsers(models: PublicModelSummary[]): PublicModelSummary[] {
+  return sortPublicModels(models.filter((model) => isDefaultEndUserModel(model)));
+}
+
+async function isRequestAdmin(req: Request): Promise<boolean> {
+  const anyReq = req as any;
+  const role =
+    anyReq.user?.claims?.role ||
+    anyReq.user?.role ||
+    anyReq.session?.passport?.user?.claims?.role ||
+    anyReq.session?.passport?.user?.role ||
+    null;
+
+  if (isAdminRole(role)) {
+    return true;
+  }
+
+  const adminEmail = (env.ADMIN_EMAIL || "").trim().toLowerCase();
+  const actorEmail = (getActorEmailFromRequest(req) || "").trim().toLowerCase();
+  if (adminEmail && actorEmail && actorEmail === adminEmail) {
+    return true;
+  }
+
+  const actorId = getActorIdFromRequest(req) || getUserId(req);
+  if (actorId) {
+    const user = await storage.getUser(actorId);
+    if (isAdminRole(user?.role)) {
+      return true;
+    }
+  }
+
+  if (actorEmail) {
+    const user = await storage.getUserByEmail(actorEmail);
+    if (isAdminRole(user?.role)) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 async function getConfiguredBootstrapModels(
   userId?: string | null,
@@ -339,30 +395,17 @@ async function getPublicModelFallbacks(
 ): Promise<PublicModelSummary[]> {
   return [
     {
-      id: "fallback-gemini-2.5-flash",
-      name: "Gemini 2.5 Flash",
-      provider: "gemini",
-      modelId: GEMINI_MODELS_REGISTRY.FLASH_25,
-      description: "Modelo rapido y estable",
+      id: "fallback-openrouter-glm-5",
+      name: DEFAULT_END_USER_MODEL_NAME,
+      provider: DEFAULT_END_USER_MODEL_PROVIDER,
+      modelId: DEFAULT_END_USER_MODEL_ID,
+      description: "Modelo de producción para usuarios finales vía OpenRouter",
       isEnabled: "true",
       enabledAt: null,
       displayOrder: 0,
       icon: null,
       modelType: "TEXT",
-      contextWindow: 1000000,
-    },
-    {
-      id: "fallback-grok-4.1-fast",
-      name: "Grok 4.1 Fast",
-      provider: "xai",
-      modelId: XAI_MODELS.GROK_4_1_FAST,
-      description: "Modelo rapido con contexto amplio",
-      isEnabled: "true",
-      enabledAt: null,
-      displayOrder: 1,
-      icon: null,
-      modelType: "TEXT",
-      contextWindow: 2000000,
+      contextWindow: 80000,
     },
     ...(await getConfiguredBootstrapModels(userId)),
   ];
@@ -1891,22 +1934,44 @@ export async function registerRoutes(
     });
     try {
       const userId = getUserId(req);
+      const isAdmin = await isRequestAdmin(req);
       const allModels = await storage.getAiModels();
-      const models = await mergeConfiguredBootstrapModels(
+      const mergedModels = await mergeConfiguredBootstrapModels(
         allModels
-          .filter((m: any) => isModelEligibleForPublic(m))
-          .sort(
-            (a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0),
+          .filter((m: any) =>
+            isAdmin ? isModelEligibleForAdmin(m) : isModelEligibleForPublic(m),
           )
+          .sort((a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0))
           .map((m: any) => toPublicModelSummary(m)),
         userId,
       );
+
+      const models = isAdmin
+        ? sortPublicModels(mergedModels)
+        : restrictModelsForEndUsers(mergedModels);
+
+      if (models.length === 0) {
+        const fallbackModels = await getPublicModelFallbacks(userId);
+        return res.json({
+          models: isAdmin
+            ? sortPublicModels(fallbackModels)
+            : restrictModelsForEndUsers(fallbackModels),
+        });
+      }
+
       res.json({ models });
     } catch (error: any) {
       console.error("[Models] Error fetching available models:", error);
       // Defensive fallback for production when DB schema is temporarily behind code.
       // Keep app shell functional (especially after logout) instead of surfacing 500.
-      res.json({ models: await getPublicModelFallbacks(getUserId(req)) });
+      const userId = getUserId(req);
+      const isAdmin = await isRequestAdmin(req).catch(() => false);
+      const fallbackModels = await getPublicModelFallbacks(userId);
+      res.json({
+        models: isAdmin
+          ? sortPublicModels(fallbackModels)
+          : restrictModelsForEndUsers(fallbackModels),
+      });
     }
   });
 
