@@ -1,24 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { loginOpenAICodex, type OAuthCredentials } from "@mariozechner/pi-ai/oauth";
-import { DEFAULT_AGENT_ID } from "./superIntelligence/routing/session-key.js";
-import { resolveOpenClawAgentDir } from "./superIntelligence/agents/agent-paths.js";
-import { resolveAgentDir, resolveDefaultAgentId } from "./superIntelligence/agents/agent-scope.js";
 import {
   ensureAuthProfileStore,
   listProfilesForProvider,
+  setAuthProfileOrder,
+  upsertAuthProfile,
 } from "./superIntelligence/agents/auth-profiles.js";
-import {
-  applyAuthProfileConfig,
-  writeOAuthCredentials,
-} from "./superIntelligence/commands/onboard-auth.js";
-import {
-  loadValidConfigOrThrow,
-  updateConfig,
-} from "./superIntelligence/commands/models/shared.js";
-import {
-  applyOpenAICodexModelDefault,
-  OPENAI_CODEX_DEFAULT_MODEL,
-} from "./superIntelligence/commands/openai-codex-model-default.js";
+import { loadValidConfigOrThrow } from "./superIntelligence/commands/models/shared.js";
+import { OPENAI_CODEX_DEFAULT_MODEL } from "./superIntelligence/commands/openai-codex-model-default.js";
+import { ensureOpenClawModelsJson } from "./superIntelligence/agents/models-config.js";
+import { ensurePiAuthJsonFromAuthProfiles } from "./superIntelligence/agents/pi-auth-json.js";
+import { resolveUserScopedAgentDir } from "./userScopedAgentDir.js";
 
 const PROVIDER_ID = "openai-codex";
 const DEFAULT_MODEL_REF = OPENAI_CODEX_DEFAULT_MODEL;
@@ -63,27 +55,24 @@ export type OpenAICodexBootstrapModel = {
   contextWindow: number;
 };
 
-function resolveScopedAgentDir(
-  config: Awaited<ReturnType<typeof loadValidConfigOrThrow>>,
-): string {
-  const defaultAgentId = resolveDefaultAgentId(config);
-  if (defaultAgentId === DEFAULT_AGENT_ID) {
-    return resolveOpenClawAgentDir();
-  }
-  return resolveAgentDir(config, defaultAgentId);
+function buildProfileId(credentials: OAuthCredentials): string {
+  const rawAccountId =
+    typeof credentials.accountId === "string" ? credentials.accountId.trim() : "";
+  const normalizedAccountId = rawAccountId
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return `${PROVIDER_ID}:${normalizedAccountId || "default"}`;
 }
 
-async function resolveAuthStoreAgentDir(): Promise<string | undefined> {
-  try {
-    const config = await loadValidConfigOrThrow();
-    return resolveScopedAgentDir(config);
-  } catch {
-    return undefined;
+async function resolveStoredProfile(userId?: string | null) {
+  const agentDir = resolveUserScopedAgentDir(userId);
+  if (!agentDir) {
+    return null;
   }
-}
 
-async function resolveStoredProfile() {
-  const agentDir = await resolveAuthStoreAgentDir();
   const store = ensureAuthProfileStore(agentDir, { allowKeychainPrompt: false });
   const profileIds = listProfilesForProvider(store, PROVIDER_ID);
   if (profileIds.length === 0) {
@@ -116,23 +105,38 @@ function clearExpiredFlows(): void {
 
 async function persistOpenAICodexOAuthCredentials(
   credentials: OAuthCredentials,
+  userId: string,
 ): Promise<void> {
-  const config = await loadValidConfigOrThrow();
-  const agentDir = resolveScopedAgentDir(config);
-  const profileId = await writeOAuthCredentials(PROVIDER_ID, credentials, agentDir, {
-    syncSiblingAgents: true,
+  const agentDir = resolveUserScopedAgentDir(userId);
+  if (!agentDir) {
+    throw new Error("No se pudo resolver el almacenamiento OAuth del usuario.");
+  }
+
+  const profileId = buildProfileId(credentials);
+  upsertAuthProfile({
+    profileId,
+    agentDir,
+    credential: {
+      type: "oauth",
+      provider: PROVIDER_ID,
+      access: credentials.access,
+      refresh: credentials.refresh,
+      expires: credentials.expires,
+      ...(typeof credentials.accountId === "string" && credentials.accountId.trim()
+        ? { accountId: credentials.accountId.trim() }
+        : {}),
+    },
   });
 
-  await updateConfig((currentConfig) => {
-    const applied = applyOpenAICodexModelDefault(
-      applyAuthProfileConfig(currentConfig, {
-        profileId,
-        provider: PROVIDER_ID,
-        mode: "oauth",
-      }),
-    );
-    return applied.next;
+  await setAuthProfileOrder({
+    agentDir,
+    provider: PROVIDER_ID,
+    order: [profileId],
   });
+
+  const config = await loadValidConfigOrThrow();
+  await ensureOpenClawModelsJson(config, agentDir);
+  await ensurePiAuthJsonFromAuthProfiles(agentDir);
 }
 
 function markFlowFailed(flow: OpenAICodexFlowRecord, error: unknown): void {
@@ -143,7 +147,7 @@ function markFlowFailed(flow: OpenAICodexFlowRecord, error: unknown): void {
 }
 
 async function markFlowCompleted(flow: OpenAICodexFlowRecord): Promise<void> {
-  flow.result = await getOpenAICodexOAuthStatus();
+  flow.result = await getOpenAICodexOAuthStatus(flow.userId);
   flow.completed = true;
   flow.error = null;
   flow.manualInputResolver = null;
@@ -174,7 +178,7 @@ function startFlowExecution(flow: OpenAICodexFlowRecord): void {
           return await createManualInputPromise(flow);
         },
       });
-      await persistOpenAICodexOAuthCredentials(credentials);
+      await persistOpenAICodexOAuthCredentials(credentials, flow.userId);
       await markFlowCompleted(flow);
     } catch (error) {
       markFlowFailed(flow, error);
@@ -184,8 +188,10 @@ function startFlowExecution(flow: OpenAICodexFlowRecord): void {
   })();
 }
 
-export async function getOpenAICodexOAuthStatus(): Promise<OpenAICodexOAuthStatus> {
-  const storedProfile = await resolveStoredProfile();
+export async function getOpenAICodexOAuthStatus(
+  userId?: string | null,
+): Promise<OpenAICodexOAuthStatus> {
+  const storedProfile = await resolveStoredProfile(userId);
   const accountId =
     storedProfile?.credential && "accountId" in storedProfile.credential
       ? storedProfile.credential.accountId ?? null
@@ -201,8 +207,10 @@ export async function getOpenAICodexOAuthStatus(): Promise<OpenAICodexOAuthStatu
   };
 }
 
-export async function getOpenAICodexBootstrapModel(): Promise<OpenAICodexBootstrapModel | null> {
-  const status = await getOpenAICodexOAuthStatus();
+export async function getOpenAICodexBootstrapModel(
+  userId?: string | null,
+): Promise<OpenAICodexBootstrapModel | null> {
+  const status = await getOpenAICodexOAuthStatus(userId);
   if (!status.connected) {
     return null;
   }

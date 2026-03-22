@@ -25,7 +25,7 @@ type DiscoveredModel = {
 
 type PiSdkModule = typeof import("./pi-model-discovery.js");
 
-let modelCatalogPromise: Promise<ModelCatalogEntry[]> | null = null;
+const modelCatalogPromises = new Map<string, Promise<ModelCatalogEntry[]>>();
 let hasLoggedModelCatalogError = false;
 const defaultImportPiSdk = () => import("./pi-model-discovery.js");
 let importPiSdk = defaultImportPiSdk;
@@ -144,7 +144,7 @@ function mergeConfiguredOptInProviderModels(params: {
 }
 
 export function resetModelCatalogCacheForTest() {
-  modelCatalogPromise = null;
+  modelCatalogPromises.clear();
   hasLoggedModelCatalogError = false;
   importPiSdk = defaultImportPiSdk;
 }
@@ -165,15 +165,20 @@ function createAuthStorage(AuthStorageLike: unknown, path: string) {
 export async function loadModelCatalog(params?: {
   config?: OpenClawConfig;
   useCache?: boolean;
+  agentDir?: string;
 }): Promise<ModelCatalogEntry[]> {
+  const agentDir = params?.agentDir?.trim() || resolveOpenClawAgentDir();
+  const cacheKey = agentDir;
+
   if (params?.useCache === false) {
-    modelCatalogPromise = null;
+    modelCatalogPromises.delete(cacheKey);
   }
-  if (modelCatalogPromise) {
-    return modelCatalogPromise;
+  const cachedPromise = modelCatalogPromises.get(cacheKey);
+  if (cachedPromise) {
+    return cachedPromise;
   }
 
-  modelCatalogPromise = (async () => {
+  const modelCatalogPromise = (async () => {
     const models: ModelCatalogEntry[] = [];
     const sortModels = (entries: ModelCatalogEntry[]) =>
       entries.sort((a, b) => {
@@ -185,16 +190,15 @@ export async function loadModelCatalog(params?: {
       });
     try {
       const cfg = params?.config ?? loadConfig();
-      await ensureOpenClawModelsJson(cfg);
+      await ensureOpenClawModelsJson(cfg, agentDir);
       await (
         await import("./pi-auth-json.js")
-      ).ensurePiAuthJsonFromAuthProfiles(resolveOpenClawAgentDir());
+      ).ensurePiAuthJsonFromAuthProfiles(agentDir);
       // IMPORTANT: keep the dynamic import *inside* the try/catch.
       // If this fails once (e.g. during a pnpm install that temporarily swaps node_modules),
       // we must not poison the cache with a rejected promise (otherwise all channel handlers
       // will keep failing until restart).
       const piSdk = await importPiSdk();
-      const agentDir = resolveOpenClawAgentDir();
       const { join } = await import("node:path");
       const authStorage = createAuthStorage(piSdk.AuthStorage, join(agentDir, "auth.json"));
       const registry = new (piSdk.ModelRegistry as unknown as {
@@ -231,7 +235,7 @@ export async function loadModelCatalog(params?: {
 
       if (models.length === 0) {
         // If we found nothing, don't cache this result so we can try again.
-        modelCatalogPromise = null;
+        modelCatalogPromises.delete(cacheKey);
       }
 
       return sortModels(models);
@@ -241,7 +245,7 @@ export async function loadModelCatalog(params?: {
         log.warn(`Failed to load model catalog: ${String(error)}`);
       }
       // Don't poison the cache on transient dependency/filesystem issues.
-      modelCatalogPromise = null;
+      modelCatalogPromises.delete(cacheKey);
       if (models.length > 0) {
         return sortModels(models);
       }
@@ -249,6 +253,7 @@ export async function loadModelCatalog(params?: {
     }
   })();
 
+  modelCatalogPromises.set(cacheKey, modelCatalogPromise);
   return modelCatalogPromise;
 }
 

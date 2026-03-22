@@ -1,20 +1,19 @@
-import { DEFAULT_AGENT_ID } from "./superIntelligence/routing/session-key.js";
-import { resolveOpenClawAgentDir } from "./superIntelligence/agents/agent-paths.js";
-import { resolveAgentDir, resolveDefaultAgentId } from "./superIntelligence/agents/agent-scope.js";
 import {
   ensureAuthProfileStore,
   listProfilesForProvider,
+  setAuthProfileOrder,
   upsertAuthProfile,
 } from "./superIntelligence/agents/auth-profiles.js";
-import { applyAuthProfileConfig } from "./superIntelligence/commands/onboard-auth.js";
 import { loadValidConfigOrThrow, updateConfig } from "./superIntelligence/commands/models/shared.js";
-import { applyDefaultModel } from "./superIntelligence/commands/provider-auth-helpers.js";
 import { enablePluginInConfig } from "./superIntelligence/plugins/enable.js";
+import { ensureOpenClawModelsJson } from "./superIntelligence/agents/models-config.js";
+import { ensurePiAuthJsonFromAuthProfiles } from "./superIntelligence/agents/pi-auth-json.js";
 import {
   completeGeminiCliOAuthSession,
   startGeminiCliOAuthSession,
   type GeminiCliOAuthCredentials,
 } from "../openclaw/extensions/google-gemini-cli-auth/oauth.js";
+import { resolveUserScopedAgentDir } from "./userScopedAgentDir.js";
 
 const PROVIDER_ID = "google-gemini-cli";
 const PROVIDER_PLUGIN_ID = "google-gemini-cli-auth";
@@ -44,25 +43,12 @@ export type GoogleGeminiCliBootstrapModel = {
   contextWindow: number;
 };
 
-function resolveScopedAgentDir(config: Awaited<ReturnType<typeof loadValidConfigOrThrow>>): string {
-  const defaultAgentId = resolveDefaultAgentId(config);
-  if (defaultAgentId === DEFAULT_AGENT_ID) {
-    return resolveOpenClawAgentDir();
+async function resolveStoredProfile(userId?: string | null) {
+  const agentDir = resolveUserScopedAgentDir(userId);
+  if (!agentDir) {
+    return null;
   }
-  return resolveAgentDir(config, defaultAgentId);
-}
 
-async function resolveAuthStoreAgentDir(): Promise<string | undefined> {
-  try {
-    const config = await loadValidConfigOrThrow();
-    return resolveScopedAgentDir(config);
-  } catch {
-    return undefined;
-  }
-}
-
-async function resolveStoredProfile() {
-  const agentDir = await resolveAuthStoreAgentDir();
   const store = ensureAuthProfileStore(agentDir, { allowKeychainPrompt: false });
   const profileIds = listProfilesForProvider(store, PROVIDER_ID);
   if (profileIds.length === 0) {
@@ -86,9 +72,15 @@ function buildProfileId(email?: string | null): string {
   return `${PROVIDER_ID}:${normalized || "default"}`;
 }
 
-async function persistGeminiCliOAuthCredentials(credentials: GeminiCliOAuthCredentials): Promise<void> {
-  const config = await loadValidConfigOrThrow();
-  const agentDir = resolveScopedAgentDir(config);
+async function persistGeminiCliOAuthCredentials(
+  credentials: GeminiCliOAuthCredentials,
+  userId: string,
+): Promise<void> {
+  const agentDir = resolveUserScopedAgentDir(userId);
+  if (!agentDir) {
+    throw new Error("No se pudo resolver el almacenamiento OAuth del usuario.");
+  }
+
   const profileId = buildProfileId(credentials.email);
 
   await updateConfig((currentConfig) => {
@@ -99,15 +91,7 @@ async function persistGeminiCliOAuthCredentials(credentials: GeminiCliOAuthCrede
       );
     }
 
-    let nextConfig = enabledPluginResult.config;
-    nextConfig = applyAuthProfileConfig(nextConfig, {
-      profileId,
-      provider: PROVIDER_ID,
-      mode: "oauth",
-      ...(credentials.email ? { email: credentials.email } : {}),
-    });
-    nextConfig = applyDefaultModel(nextConfig, DEFAULT_MODEL_REF);
-    return nextConfig;
+    return enabledPluginResult.config;
   });
 
   upsertAuthProfile({
@@ -123,6 +107,16 @@ async function persistGeminiCliOAuthCredentials(credentials: GeminiCliOAuthCrede
       ...(credentials.email ? { email: credentials.email } : {}),
     },
   });
+
+  await setAuthProfileOrder({
+    agentDir,
+    provider: PROVIDER_ID,
+    order: [profileId],
+  });
+
+  const config = await loadValidConfigOrThrow();
+  await ensureOpenClawModelsJson(config, agentDir);
+  await ensurePiAuthJsonFromAuthProfiles(agentDir);
 }
 
 export function beginGoogleGeminiCliOAuthFlow(params?: {
@@ -138,6 +132,7 @@ export async function finishGoogleGeminiCliOAuthFlow(params: {
   verifier: string;
   redirectUri?: string;
   expectedState?: string;
+  userId: string;
 }): Promise<GoogleGeminiCliOAuthStatus> {
   const credentials = await completeGeminiCliOAuthSession({
     callbackInput: params.callbackInput,
@@ -145,12 +140,14 @@ export async function finishGoogleGeminiCliOAuthFlow(params: {
     redirectUri: params.redirectUri,
     expectedState: params.expectedState,
   });
-  await persistGeminiCliOAuthCredentials(credentials);
-  return await getGoogleGeminiCliOAuthStatus();
+  await persistGeminiCliOAuthCredentials(credentials, params.userId);
+  return await getGoogleGeminiCliOAuthStatus(params.userId);
 }
 
-export async function getGoogleGeminiCliOAuthStatus(): Promise<GoogleGeminiCliOAuthStatus> {
-  const storedProfile = await resolveStoredProfile();
+export async function getGoogleGeminiCliOAuthStatus(
+  userId?: string | null,
+): Promise<GoogleGeminiCliOAuthStatus> {
+  const storedProfile = await resolveStoredProfile(userId);
   const email =
     storedProfile?.credential && "email" in storedProfile.credential
       ? storedProfile.credential.email ?? null
@@ -166,8 +163,10 @@ export async function getGoogleGeminiCliOAuthStatus(): Promise<GoogleGeminiCliOA
   };
 }
 
-export async function getGoogleGeminiCliBootstrapModel(): Promise<GoogleGeminiCliBootstrapModel | null> {
-  const status = await getGoogleGeminiCliOAuthStatus();
+export async function getGoogleGeminiCliBootstrapModel(
+  userId?: string | null,
+): Promise<GoogleGeminiCliBootstrapModel | null> {
+  const status = await getGoogleGeminiCliOAuthStatus(userId);
   if (!status.connected) {
     return null;
   }

@@ -14,9 +14,9 @@ const openAICodexOAuthRouter = Router();
 // Authentication is still required via getUserId() checks in each handler.
 // openAICodexOAuthRouter.use(requireAdmin);
 
-openAICodexOAuthRouter.get("/status", async (_req: Request, res: Response) => {
+openAICodexOAuthRouter.get("/status", async (req: Request, res: Response) => {
   try {
-    res.json(await getOpenAICodexOAuthStatus());
+    res.json(await getOpenAICodexOAuthStatus(getUserId(req)));
   } catch (error) {
     console.error("[OpenAICodexOAuth] status failed:", error);
     res

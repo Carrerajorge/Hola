@@ -1,6 +1,3 @@
-import { DEFAULT_AGENT_ID } from "./superIntelligence/routing/session-key.js";
-import { resolveOpenClawAgentDir } from "./superIntelligence/agents/agent-paths.js";
-import { resolveAgentDir, resolveDefaultAgentId } from "./superIntelligence/agents/agent-scope.js";
 import {
   ensureAuthProfileStore,
   listProfilesForProvider,
@@ -9,9 +6,9 @@ import {
   loadModelCatalog,
   type ModelCatalogEntry,
 } from "./superIntelligence/agents/model-catalog.js";
-import { loadValidConfigOrThrow } from "./superIntelligence/commands/models/shared.js";
 import { getGoogleGeminiCliOAuthStatus } from "./googleGeminiCliOAuthService.js";
 import { getOpenAICodexOAuthStatus } from "./openAICodexOAuthService.js";
+import { resolveUserScopedAgentDir } from "./userScopedAgentDir.js";
 
 export type OAuthProviderBootstrapModel = {
   id: string;
@@ -137,38 +134,29 @@ function toBootstrapModels(
   }));
 }
 
-function resolveScopedAgentDir(
-  config: Awaited<ReturnType<typeof loadValidConfigOrThrow>>,
-): string {
-  const defaultAgentId = resolveDefaultAgentId(config);
-  if (defaultAgentId === DEFAULT_AGENT_ID) {
-    return resolveOpenClawAgentDir();
+async function hasConfiguredGoogleAntigravityProfile(
+  userId?: string | null,
+): Promise<boolean> {
+  const agentDir = resolveUserScopedAgentDir(userId);
+  if (!agentDir) {
+    return false;
   }
-  return resolveAgentDir(config, defaultAgentId);
-}
-
-async function resolveAuthStoreAgentDir(): Promise<string | undefined> {
-  try {
-    const config = await loadValidConfigOrThrow();
-    return resolveScopedAgentDir(config);
-  } catch {
-    return undefined;
-  }
-}
-
-async function hasConfiguredGoogleAntigravityProfile(): Promise<boolean> {
-  const agentDir = await resolveAuthStoreAgentDir();
   const store = ensureAuthProfileStore(agentDir, { allowKeychainPrompt: false });
   return listProfilesForProvider(store, "google-antigravity").length > 0;
 }
 
-export async function getOAuthProviderBootstrapModels(): Promise<OAuthProviderBootstrapModel[]> {
+export async function getOAuthProviderBootstrapModels(
+  userId?: string | null,
+): Promise<OAuthProviderBootstrapModel[]> {
+  const agentDir = resolveUserScopedAgentDir(userId);
   const [catalogResult, openAiStatusResult, geminiStatusResult, antigravityStatusResult] =
     await Promise.allSettled([
-      loadModelCatalog(),
-      getOpenAICodexOAuthStatus(),
-      getGoogleGeminiCliOAuthStatus(),
-      hasConfiguredGoogleAntigravityProfile(),
+      agentDir
+        ? loadModelCatalog({ agentDir, useCache: false })
+        : Promise.resolve([] as ModelCatalogEntry[]),
+      getOpenAICodexOAuthStatus(userId),
+      getGoogleGeminiCliOAuthStatus(userId),
+      hasConfiguredGoogleAntigravityProfile(userId),
     ]);
 
   const catalog = catalogResult.status === "fulfilled" ? catalogResult.value : [];

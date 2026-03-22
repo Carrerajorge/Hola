@@ -256,7 +256,9 @@ type PublicModelSummary = {
   contextWindow: number | null;
 };
 
-async function getConfiguredBootstrapModels(): Promise<PublicModelSummary[]> {
+async function getConfiguredBootstrapModels(
+  userId?: string | null,
+): Promise<PublicModelSummary[]> {
   const models: PublicModelSummary[] = [];
 
   if ((env.DEEPSEEK_API_KEY || "").trim()) {
@@ -280,7 +282,7 @@ async function getConfiguredBootstrapModels(): Promise<PublicModelSummary[]> {
     });
   }
 
-  const oauthBootstrapModels = await getOAuthProviderBootstrapModels();
+  const oauthBootstrapModels = await getOAuthProviderBootstrapModels(userId);
   const includedProviders = new Set<string>();
   for (const model of oauthBootstrapModels) {
     models.push(model);
@@ -288,14 +290,14 @@ async function getConfiguredBootstrapModels(): Promise<PublicModelSummary[]> {
   }
 
   if (!includedProviders.has("google-gemini-cli")) {
-    const geminiCliBootstrap = await getGoogleGeminiCliBootstrapModel();
+    const geminiCliBootstrap = await getGoogleGeminiCliBootstrapModel(userId);
     if (geminiCliBootstrap) {
       models.push(geminiCliBootstrap);
     }
   }
 
   if (!includedProviders.has("openai-codex")) {
-    const openAICodexBootstrap = await getOpenAICodexBootstrapModel();
+    const openAICodexBootstrap = await getOpenAICodexBootstrapModel(userId);
     if (openAICodexBootstrap) {
       models.push(openAICodexBootstrap);
     }
@@ -304,7 +306,9 @@ async function getConfiguredBootstrapModels(): Promise<PublicModelSummary[]> {
   return models;
 }
 
-async function getPublicModelFallbacks(): Promise<PublicModelSummary[]> {
+async function getPublicModelFallbacks(
+  userId?: string | null,
+): Promise<PublicModelSummary[]> {
   return [
     {
       id: "fallback-gemini-2.5-flash",
@@ -332,16 +336,17 @@ async function getPublicModelFallbacks(): Promise<PublicModelSummary[]> {
       modelType: "TEXT",
       contextWindow: 2000000,
     },
-    ...(await getConfiguredBootstrapModels()),
+    ...(await getConfiguredBootstrapModels(userId)),
   ];
 }
 
 async function mergeConfiguredBootstrapModels(
   models: PublicModelSummary[],
+  userId?: string | null,
 ): Promise<PublicModelSummary[]> {
   const merged = [...models];
 
-  for (const bootstrap of await getConfiguredBootstrapModels()) {
+  for (const bootstrap of await getConfiguredBootstrapModels(userId)) {
     const alreadyVisible = merged.some(
       (model) =>
         model.id === bootstrap.id ||
@@ -1825,6 +1830,7 @@ export async function registerRoutes(
       Expires: "0",
     });
     try {
+      const userId = getUserId(req);
       const allModels = await storage.getAiModels();
       const models = await mergeConfiguredBootstrapModels(
         allModels
@@ -1833,13 +1839,14 @@ export async function registerRoutes(
             (a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0),
           )
           .map((m: any) => toPublicModelSummary(m)),
+        userId,
       );
       res.json({ models });
     } catch (error: any) {
       console.error("[Models] Error fetching available models:", error);
       // Defensive fallback for production when DB schema is temporarily behind code.
       // Keep app shell functional (especially after logout) instead of surfacing 500.
-      res.json({ models: await getPublicModelFallbacks() });
+      res.json({ models: await getPublicModelFallbacks(getUserId(req)) });
     }
   });
 

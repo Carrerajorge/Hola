@@ -241,4 +241,72 @@ describe("loadModelCatalog", () => {
     expect(matches).toHaveLength(1);
     expect(matches[0]?.name).toBe("Claude Opus 4.6");
   });
+
+  it("keeps a separate cache entry per agentDir", async () => {
+    const loadedModelFiles: string[] = [];
+
+    __setModelCatalogImportForTest(
+      async () =>
+        ({
+          AuthStorage: class {
+            constructor(_path: string) {}
+          },
+          ModelRegistry: class {
+            private readonly modelsFile: string;
+
+            constructor(_authStorage: unknown, modelsFile: string) {
+              this.modelsFile = modelsFile;
+              loadedModelFiles.push(modelsFile);
+            }
+
+            getAll() {
+              const userLabel = this.modelsFile.includes("user-a")
+                ? "user-a"
+                : "user-b";
+              return [
+                {
+                  id: `${userLabel}-model`,
+                  provider: "openai-codex",
+                  name: `Model ${userLabel}`,
+                },
+              ];
+            }
+          },
+        }) as unknown as PiSdkModule,
+    );
+
+    const config = {} as OpenClawConfig;
+    const userAFirst = await loadModelCatalog({
+      config,
+      agentDir: "/tmp/user-a",
+    });
+    const userB = await loadModelCatalog({
+      config,
+      agentDir: "/tmp/user-b",
+    });
+    const userASecond = await loadModelCatalog({
+      config,
+      agentDir: "/tmp/user-a",
+    });
+
+    expect(userAFirst).toEqual([
+      {
+        id: "user-a-model",
+        provider: "openai-codex",
+        name: "Model user-a",
+      },
+    ]);
+    expect(userB).toEqual([
+      {
+        id: "user-b-model",
+        provider: "openai-codex",
+        name: "Model user-b",
+      },
+    ]);
+    expect(userASecond).toEqual(userAFirst);
+    expect(loadedModelFiles).toEqual([
+      "/tmp/user-a/models.json",
+      "/tmp/user-b/models.json",
+    ]);
+  });
 });

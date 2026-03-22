@@ -178,7 +178,9 @@ import { promptAuditStore } from "../lib/promptAuditStore";
 import { promptAnalysisService } from "../services/promptAnalysisService";
 import { normalizeChatRequestProvider } from "../lib/chatProviderNormalization";
 import { getGoogleGeminiCliOAuthStatus } from "../services/googleGeminiCliOAuthService";
+import { getOpenAICodexOAuthStatus } from "../services/openAICodexOAuthService";
 import { runEmbeddedPiAgent } from "../services/superIntelligence/agents/pi-embedded.js";
+import { resolveUserScopedAgentDir } from "../services/userScopedAgentDir.js";
 import * as macos from "../lib/macos";
 import { browserAdapter } from "../agent/webtool/browserAdapter";
 import { browserWorker } from "../agent/browser-worker";
@@ -220,6 +222,7 @@ const STREAM_IDENTIFIER_RE = /^[a-zA-Z0-9._-]{1,140}$/;
 const STREAM_ATTACHMENT_NAME_RE = /^[^<>:"\\|?*\u0000-\u001f]{1,220}$/;
 const STREAM_MIME_RE = /^[a-zA-Z0-9][a-zA-Z0-9.+-\/]*/;
 const GOOGLE_GEMINI_CLI_PROVIDER = "google-gemini-cli";
+const OPENAI_CODEX_PROVIDER = "openai-codex";
 const OPENCLAW_WEBCHAT_SESSION_DIR = "iliagpt-openclaw-chat";
 const OPENCLAW_WEBCHAT_TIMEOUT_MS = 120_000;
 
@@ -6069,6 +6072,14 @@ function isGoogleGeminiCliProvider(
   );
 }
 
+function isOpenAICodexProvider(
+  provider: unknown,
+): provider is typeof OPENAI_CODEX_PROVIDER {
+  return (
+    sanitizeStreamText(provider, 80).toLowerCase() === OPENAI_CODEX_PROVIDER
+  );
+}
+
 function sanitizeOpenClawSessionSegment(
   value: unknown,
   fallbackPrefix = "openclaw",
@@ -6150,46 +6161,62 @@ function buildOpenClawChatPrompt(
   };
 }
 
-async function ensureGoogleGeminiCliConnected(): Promise<void> {
-  const status = await getGoogleGeminiCliOAuthStatus();
-  if (!status.connected) {
-    throw new Error(
-      "Google Gemini CLI OAuth no está vinculado. Completa la vinculación primero.",
-    );
-  }
-}
-
-async function runGoogleGeminiCliCompletion(params: {
+async function runOpenClawOAuthCompletion(params: {
   messages: Array<{ role?: unknown; content?: unknown }>;
   requestId: string;
   model: string;
+  provider: typeof GOOGLE_GEMINI_CLI_PROVIDER | typeof OPENAI_CODEX_PROVIDER;
   userId?: string | null;
   chatId?: string | null;
   conversationId?: string | null;
   timeoutMs?: number;
 }): Promise<{
   content: string;
-  provider: typeof GOOGLE_GEMINI_CLI_PROVIDER;
+  provider: typeof GOOGLE_GEMINI_CLI_PROVIDER | typeof OPENAI_CODEX_PROVIDER;
   model: string;
 }> {
-  await ensureGoogleGeminiCliConnected();
+  const normalizedUserId = params.userId?.trim();
+  if (!normalizedUserId) {
+    throw new Error(
+      `Debes iniciar sesion en ILIAGPT para usar ${params.provider}.`,
+    );
+  }
+
+  if (params.provider === GOOGLE_GEMINI_CLI_PROVIDER) {
+    const status = await getGoogleGeminiCliOAuthStatus(normalizedUserId);
+    if (!status.connected) {
+      throw new Error(
+        "Primero conecta tu cuenta de Gemini desde el boton + para usar este modelo.",
+      );
+    }
+  } else {
+    const status = await getOpenAICodexOAuthStatus(normalizedUserId);
+    if (!status.connected) {
+      throw new Error(
+        "Primero conecta tu cuenta de ChatGPT desde el boton + para usar este modelo.",
+      );
+    }
+  }
 
   const conversationSeed = sanitizeOpenClawSessionSegment(
     params.chatId || params.conversationId || params.requestId,
     "chat",
   );
-  const userSeed = sanitizeOpenClawSessionSegment(
-    params.userId || "anonymous",
-    "user",
-  );
-  const sessionKey = `iliagpt:web:${userSeed}:${conversationSeed}`.slice(
+  const userSeed = sanitizeOpenClawSessionSegment(normalizedUserId, "user");
+  const providerSeed = sanitizeOpenClawSessionSegment(params.provider, "provider");
+  const sessionKey = `iliagpt:web:${providerSeed}:${userSeed}:${conversationSeed}`.slice(
     0,
     180,
   );
-  const sessionId = `iliagpt-${conversationSeed}`.slice(0, 180);
+  const sessionId = `iliagpt-${providerSeed}-${conversationSeed}`.slice(0, 180);
   const sessionDir = path.join(os.tmpdir(), OPENCLAW_WEBCHAT_SESSION_DIR);
-  const sessionFile = path.join(sessionDir, `${conversationSeed}.jsonl`);
+  const sessionFile = path.join(sessionDir, `${providerSeed}-${conversationSeed}.jsonl`);
   const workspaceDir = process.env.OPENCLAW_WORKSPACE_ROOT || process.cwd();
+  const agentDir = resolveUserScopedAgentDir(normalizedUserId);
+
+  if (!agentDir) {
+    throw new Error("No se pudo preparar el contexto OAuth del usuario.");
+  }
 
   await fs.mkdir(sessionDir, { recursive: true });
 
@@ -6211,11 +6238,16 @@ async function runGoogleGeminiCliCompletion(params: {
     sessionId,
     sessionKey,
     sessionFile,
+    agentDir,
     workspaceDir,
     prompt,
     extraSystemPrompt,
-    provider: GOOGLE_GEMINI_CLI_PROVIDER,
-    model: params.model || "gemini-3.1-pro-preview",
+    provider: params.provider,
+    model:
+      params.model ||
+      (params.provider === GOOGLE_GEMINI_CLI_PROVIDER
+        ? "gemini-3.1-pro-preview"
+        : "gpt-5.3-codex"),
     timeoutMs: params.timeoutMs ?? OPENCLAW_WEBCHAT_TIMEOUT_MS,
     runId: params.requestId,
     disableTools: true,
@@ -6234,15 +6266,38 @@ async function runGoogleGeminiCliCompletion(params: {
   if (!content) {
     throw new Error(
       result.meta?.error?.message ||
-        "Gemini CLI OAuth no devolvió contenido útil para esta solicitud.",
+        `${params.provider} no devolvio contenido util para esta solicitud.`,
     );
   }
 
   return {
     content,
-    provider: GOOGLE_GEMINI_CLI_PROVIDER,
-    model: params.model || "gemini-3.1-pro-preview",
+    provider: params.provider,
+    model:
+      params.model ||
+      (params.provider === GOOGLE_GEMINI_CLI_PROVIDER
+        ? "gemini-3.1-pro-preview"
+        : "gpt-5.3-codex"),
   };
+}
+
+async function runGoogleGeminiCliCompletion(params: {
+  messages: Array<{ role?: unknown; content?: unknown }>;
+  requestId: string;
+  model: string;
+  userId?: string | null;
+  chatId?: string | null;
+  conversationId?: string | null;
+  timeoutMs?: number;
+}): Promise<{
+  content: string;
+  provider: typeof GOOGLE_GEMINI_CLI_PROVIDER;
+  model: string;
+}> {
+  return await runOpenClawOAuthCompletion({
+    ...params,
+    provider: GOOGLE_GEMINI_CLI_PROVIDER,
+  });
 }
 
 async function* streamGoogleGeminiCliCompletion(params: {
@@ -6277,6 +6332,44 @@ async function* streamGoogleGeminiCliCompletion(params: {
     done: true,
     requestId: params.requestId,
     provider: completion.provider,
+  };
+}
+
+async function* streamOpenAICodexCompletion(params: {
+  messages: Array<{ role?: unknown; content?: unknown }>;
+  requestId: string;
+  model: string;
+  userId?: string | null;
+  chatId?: string | null;
+  conversationId?: string | null;
+}): AsyncGenerator<{
+  content: string;
+  sequenceId: number;
+  done: boolean;
+  requestId: string;
+  provider: typeof OPENAI_CODEX_PROVIDER;
+}> {
+  const completion = await runOpenClawOAuthCompletion({
+    ...params,
+    provider: OPENAI_CODEX_PROVIDER,
+  });
+
+  if (completion.content) {
+    yield {
+      content: completion.content,
+      sequenceId: 1,
+      done: false,
+      requestId: params.requestId,
+      provider: OPENAI_CODEX_PROVIDER,
+    };
+  }
+
+  yield {
+    content: "",
+    sequenceId: completion.content ? 2 : 1,
+    done: true,
+    requestId: params.requestId,
+    provider: OPENAI_CODEX_PROVIDER,
   };
 }
 
@@ -8568,6 +8661,19 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
                     conversationId || streamConversationId || null,
                   timeoutMs: OPENCLAW_WEBCHAT_TIMEOUT_MS,
                 })
+              : isOpenAICodexProvider(provider)
+                ? await runOpenClawOAuthCompletion({
+                    messages: llmMessages as any,
+                    requestId,
+                    model: model || "gpt-5.3-codex",
+                    provider: OPENAI_CODEX_PROVIDER,
+                    userId:
+                      effectiveUserId || streamConversationId || "anonymous",
+                    chatId: chatId || null,
+                    conversationId:
+                      conversationId || streamConversationId || null,
+                    timeoutMs: OPENCLAW_WEBCHAT_TIMEOUT_MS,
+                  })
               : await llmGateway.chat(llmMessages as any, {
                   userId:
                     effectiveUserId || streamConversationId || "anonymous",
@@ -10688,7 +10794,16 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
                 chatId: chatId || null,
                 conversationId: conversationId || streamConversationId || null,
               })
-            : llmGateway.streamChat(modelMessages, streamLlmOptions);
+            : isOpenAICodexProvider(effectiveProvider)
+              ? streamOpenAICodexCompletion({
+                  messages: modelMessages as any,
+                  requestId,
+                  model: effectiveModel || "gpt-5.3-codex",
+                  userId: userId || streamConversationId || "anonymous",
+                  chatId: chatId || null,
+                  conversationId: conversationId || streamConversationId || null,
+                })
+              : llmGateway.streamChat(modelMessages, streamLlmOptions);
 
           // Emit SSE notice if context was truncated (non-blocking, before streaming tokens)
           const truncationInfo = (streamLlmOptions as any).__truncationResult;

@@ -6,6 +6,8 @@ import {
 export type ChatRequestProvider =
   | ChatRuntimeProvider
   | "google-gemini-cli"
+  | "openai-codex"
+  | "google-antigravity"
   | "auto";
 
 export function normalizeChatRequestProvider(
@@ -15,5 +17,7 @@ export function normalizeChatRequestProvider(
   if (!raw) return undefined;
   if (raw === "auto") return "auto";
   if (raw === "google-gemini-cli") return "google-gemini-cli";
+  if (raw === "openai-codex") return "openai-codex";
+  if (raw === "google-antigravity") return "google-antigravity";
   return normalizeModelProviderToRuntime(raw) ?? undefined;
 }

@@ -139,9 +139,9 @@ const googleGeminiCliOAuthRouter = Router();
 
 googleGeminiCliOAuthRouter.get(
   "/status",
-  async (_req: Request, res: Response) => {
+  async (req: Request, res: Response) => {
     try {
-      res.json(await getGoogleGeminiCliOAuthStatus());
+      res.json(await getGoogleGeminiCliOAuthStatus(getUserId(req)));
     } catch (error) {
       console.error("[GeminiCliOAuth] status failed:", error);
       res
@@ -332,6 +332,7 @@ googleGeminiCliOAuthRouter.post(
         callbackInput: callbackUrl,
         redirectUri: flow.redirectUri,
         expectedState: flow.oauthState,
+        userId,
       });
 
       delete flowStore[flowId];
