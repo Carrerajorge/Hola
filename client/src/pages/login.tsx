@@ -48,6 +48,8 @@ const OAUTH_ERROR_MESSAGES: Record<string, string> = {
   replit_disabled: "El inicio de sesión con Replit fue desactivado. Usa Google, teléfono o correo.",
 };
 
+type SocialProvider = "google" | "openai" | "gemini" | "apple" | "microsoft";
+
 export default function LoginPage() {
   const [, setLocation] = useLocation();
   const { settings: platformSettings } = usePlatformSettings();
@@ -57,7 +59,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [activeSocialProvider, setActiveSocialProvider] = useState<SocialProvider | null>(null);
 
   const [isMagicLinkLoading, setIsMagicLinkLoading] = useState(false);
   const [magicLinkSent, setMagicLinkSent] = useState(false);
@@ -287,9 +289,9 @@ export default function LoginPage() {
     }
   };
 
-  const handleGoogleLogin = (loginHint?: string) => {
+  const handleGoogleLogin = (provider: SocialProvider = "google", loginHint?: string) => {
     clearForcedSignedOutFlag();
-    setIsGoogleLoading(true);
+    setActiveSocialProvider(provider);
     setError("");
     // Build OAuth URL with optional login_hint for Gmail auto-redirect
     const params = new URLSearchParams();
@@ -301,7 +303,7 @@ export default function LoginPage() {
       params.set("login_hint", email);
     }
     const query = params.toString();
-    window.location.href = `/api/auth/google${query ? `?${query}` : ""}`;
+    window.location.assign(`/api/auth/google${query ? `?${query}` : ""}`);
   };
 
   const handleMagicLink = async () => {
@@ -436,6 +438,9 @@ export default function LoginPage() {
     setSuccessMessage("");
   };
 
+  const isSocialProviderLoading = (provider: SocialProvider) => activeSocialProvider === provider;
+  const isAnySocialProviderLoading = activeSocialProvider !== null;
+
 
   return (
     <div className="min-h-screen paper-grid flex items-center justify-center p-4">
@@ -469,11 +474,11 @@ export default function LoginPage() {
               <Button
                 variant="outline"
                 className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-1"
-                onClick={() => handleGoogleLogin()}
-                disabled={isGoogleLoading}
+                onClick={() => handleGoogleLogin("google")}
+                disabled={isAnySocialProviderLoading}
                 data-testid="button-login-google"
               >
-                {isGoogleLoading ? (
+                {isSocialProviderLoading("google") ? (
                   <Loader2 className="h-6 w-6 animate-spin" />
                 ) : (
                   <svg className="h-6 w-6" viewBox="0 0 24 24" aria-hidden="true">
@@ -495,36 +500,36 @@ export default function LoginPage() {
                     />
                   </svg>
                 )}
-                {isGoogleLoading ? "Conectando..." : "Continuar con Google"}
+                {isSocialProviderLoading("google") ? "Conectando..." : "Continuar con Google"}
               </Button>
 
               {/* ChatGPT / OpenAI - uses Google OAuth */}
               <Button
                 variant="outline"
                 className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-2"
-                onClick={() => handleGoogleLogin()}
-                disabled={isGoogleLoading}
+                onClick={() => handleGoogleLogin("openai")}
+                disabled={isAnySocialProviderLoading}
                 data-testid="button-login-openai"
               >
-                {isGoogleLoading ? (
+                {isSocialProviderLoading("openai") ? (
                   <Loader2 className="h-5 w-5 animate-spin" />
                 ) : (
                   <svg className="h-5 w-5" viewBox="0 0 24 24" aria-hidden="true">
                     <path fill="#10A37F" d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z" />
                   </svg>
                 )}
-                Continuar con ChatGPT
+                {isSocialProviderLoading("openai") ? "Conectando..." : "Continuar con ChatGPT"}
               </Button>
 
               {/* Gemini / Google AI - uses Google OAuth */}
               <Button
                 variant="outline"
                 className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-2"
-                onClick={() => handleGoogleLogin()}
-                disabled={isGoogleLoading}
+                onClick={() => handleGoogleLogin("gemini")}
+                disabled={isAnySocialProviderLoading}
                 data-testid="button-login-gemini"
               >
-                {isGoogleLoading ? (
+                {isSocialProviderLoading("gemini") ? (
                   <Loader2 className="h-5 w-5 animate-spin" />
                 ) : (
                   <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -538,34 +543,34 @@ export default function LoginPage() {
                     </defs>
                   </svg>
                 )}
-                Continuar con Gemini
+                {isSocialProviderLoading("gemini") ? "Conectando..." : "Continuar con Gemini"}
               </Button>
 
               {/* Apple - uses Google OAuth */}
               <Button
                 variant="outline"
                 className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-3"
-                onClick={() => handleGoogleLogin()}
-                disabled={isGoogleLoading}
+                onClick={() => handleGoogleLogin("apple")}
+                disabled={isAnySocialProviderLoading}
                 data-testid="button-login-apple"
               >
-                {isGoogleLoading ? (
+                {isSocialProviderLoading("apple") ? (
                   <Loader2 className="h-5 w-5 animate-spin" />
                 ) : (
                   <Apple className="h-5 w-5" />
                 )}
-                Continuar con Apple
+                {isSocialProviderLoading("apple") ? "Conectando..." : "Continuar con Apple"}
               </Button>
 
               {/* Microsoft - uses Google OAuth */}
               <Button
                 variant="outline"
                 className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-3"
-                onClick={() => handleGoogleLogin()}
-                disabled={isGoogleLoading}
+                onClick={() => handleGoogleLogin("microsoft")}
+                disabled={isAnySocialProviderLoading}
                 data-testid="button-login-microsoft"
               >
-                {isGoogleLoading ? (
+                {isSocialProviderLoading("microsoft") ? (
                   <Loader2 className="h-5 w-5 animate-spin" />
                 ) : (
                   <svg className="h-5 w-5" viewBox="0 0 23 23" aria-hidden="true">
@@ -575,7 +580,7 @@ export default function LoginPage() {
                     <path fill="#ffba08" d="M12 12h10v10H12z" />
                   </svg>
                 )}
-                Continuar con Microsoft
+                {isSocialProviderLoading("microsoft") ? "Conectando..." : "Continuar con Microsoft"}
               </Button>
 
               {/* Phone Authentication */}
