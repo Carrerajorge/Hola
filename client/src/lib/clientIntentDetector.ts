@@ -1,5 +1,10 @@
 
-import { hasExplicitDocumentArtifactRequest } from "@shared/explicitArtifactRequests";
+import {
+    hasExplicitDocumentArtifactRequest,
+    hasExplicitSpreadsheetArtifactRequest,
+    hasExplicitPresentationArtifactRequest,
+    classifyOutputFormat,
+} from "@shared/explicitArtifactRequests";
 
 export type IntentType =
     | "research"
@@ -49,13 +54,47 @@ const INTENT_PATTERNS: Record<Exclude<IntentType, "chat">, RegExp[]> = {
 export function detectClientIntent(message: string): IntentType {
     const lowerMessage = message.toLowerCase();
 
-    if (hasExplicitDocumentArtifactRequest(message)) {
-        return "document_generation";
+    // Priority 1: Check document_analysis FIRST — analysis verbs ("analiza",
+    // "revisa", "resume") targeting a file should route to analysis, not creation,
+    // even if the message mentions a file format keyword like "PDF" or "excel".
+    const analysisPatterns = INTENT_PATTERNS.document_analysis || [];
+    for (const pattern of analysisPatterns) {
+        if (pattern.test(lowerMessage)) {
+            return "document_analysis";
+        }
+    }
+
+    // Priority 2: Universal format gate — only route to file-generation intents
+    // when the user explicitly mentioned a file format keyword.
+    const formatGate = classifyOutputFormat(message);
+
+    if (formatGate.action !== "text" && formatGate.confidence >= 0.85) {
+        // User explicitly asked for a file format — route to the right intent
+        if (formatGate.action === "excel" || hasExplicitSpreadsheetArtifactRequest(message)) {
+            return "spreadsheet_creation";
+        }
+        if (formatGate.action === "pptx" || hasExplicitPresentationArtifactRequest(message)) {
+            return "presentation_creation";
+        }
+        if (formatGate.action === "word" || hasExplicitDocumentArtifactRequest(message)) {
+            return "document_generation";
+        }
     }
 
     for (const [intent, patterns] of Object.entries(INTENT_PATTERNS)) {
+        // Skip document_analysis — already handled above
+        if (intent === "document_analysis") continue;
+
         for (const pattern of patterns) {
             if (pattern.test(lowerMessage)) {
+                // Extra safety: if a pattern matched a file-generation intent but
+                // the format gate says "text", downgrade to "chat".
+                // Content words (carta, tabla, presentación) alone must not
+                // trigger file generation.
+                const FILE_INTENTS = new Set(["document_generation", "spreadsheet_creation", "presentation_creation"]);
+                if (FILE_INTENTS.has(intent) && formatGate.action === "text") {
+                    continue;
+                }
                 return intent as IntentType;
             }
         }

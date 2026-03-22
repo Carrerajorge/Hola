@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Response } from "express";
-import { hasExplicitDocumentArtifactRequest } from "@shared/explicitArtifactRequests";
+import { hasExplicitDocumentArtifactRequest, classifyOutputFormat } from "@shared/explicitArtifactRequests";
 import { toolRegistry, type ToolContext, type ToolResult } from "./toolRegistry";
 import { emitTraceEvent } from "./unifiedChatHandler";
 import type { RequestSpec } from "./requestSpec";
@@ -542,9 +542,23 @@ function getToolsForIntent(
     case "web_automation":
       matchedTools = withToolSubset(toolPool, ["web_search", "fetch_url", "browse_and_act"]);
       break;
-    default:
-      matchedTools = toolPool;
+    default: {
+      // Gate: only provide artifact-creation tools when the user explicitly
+      // requested a file format.  Content-type words ("carta", "informe")
+      // alone must NOT trigger file generation.
+      const formatGate = classifyOutputFormat(rawPrompt);
+      if (formatGate.action === "text" || formatGate.confidence < 0.85) {
+        const ARTIFACT_TOOLS = new Set([
+          "create_document", "create_presentation", "create_spreadsheet",
+          "doc_create", "slides_create", "spreadsheet_create",
+          "document_create", "pdf_generate",
+        ]);
+        matchedTools = toolPool.filter((t) => !ARTIFACT_TOOLS.has(t.name));
+      } else {
+        matchedTools = toolPool;
+      }
       break;
+    }
   }
 
   // For local computer/folder requests, force local read-only tools into the set.
@@ -1238,7 +1252,7 @@ export async function executeAgentLoop(
 
   const artifacts: Array<{ type: string; url: string; name: string }> = [];
   let iteration = 0;
-  let conversationHistory = [...messages];
+  const conversationHistory = [...messages];
   let fullResponse = "";
 
   const recentUserText = collectRecentUserText(messages) || requestSpec.rawMessage || "";
@@ -1634,7 +1648,7 @@ ${fsEvidence.evidence}`,
         extraSystemPrompt: systemInstruction
       });
 
-      let hasToolCall = false; // With customCoreTools, tools run synchronously inside OpenClaw. OpenClaw returns the final response.
+      const hasToolCall = false; // With customCoreTools, tools run synchronously inside OpenClaw. OpenClaw returns the final response.
       let textContent = "";
 
       if (response.payloads && response.payloads.length > 0) {

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { randomUUID } from "crypto";
-import { hasExplicitDocumentArtifactRequest } from "@shared/explicitArtifactRequests";
+import { hasExplicitDocumentArtifactRequest, classifyOutputFormat } from "@shared/explicitArtifactRequests";
 
 export const IntentTypeSchema = z.enum([
   "chat",
@@ -228,6 +228,13 @@ function normalizeDocumentGenerationIntent(
   message: string,
 ): { intent: IntentType; confidence: number } {
   if (intent !== "document_generation") {
+    return { intent, confidence };
+  }
+
+  // Universal format gate: only allow document_generation if the user
+  // explicitly mentioned a file format keyword.
+  const formatGate = classifyOutputFormat(message);
+  if (formatGate.action !== "text" && formatGate.confidence >= 0.85) {
     return { intent, confidence };
   }
 

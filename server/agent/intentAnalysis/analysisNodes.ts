@@ -66,7 +66,7 @@ Analiza el mensaje del usuario y clasifica su intención principal en UNA de est
 - "multi_step_task": Tareas complejas combinando investigación + generación
 - "unknown": No determinable
 
-Si el usuario solo pide redactar una carta, informe o texto y NO menciona Word, docx, PDF, documento, archivo, descarga, exportación o formato descargable, clasifica como "chat".
+REGLA CRÍTICA DE FORMATO: Si el usuario solo pide redactar una carta, informe, ensayo, resumen, propuesta o cualquier texto y NO menciona explícitamente las palabras "Word", "docx", "PDF", "documento", "archivo", "file", "descargar", "download", "exportar", "export", "adjuntar", "attach" o "formato descargable", SIEMPRE clasifica como "chat" con deliverableType "text_response". El CONTENIDO del texto (carta, informe, ensayo) NO determina el formato — solo las palabras explícitas de formato/archivo determinan si se genera un archivo.
 
 Responde SOLO con JSON válido:
 {"intent":"<tipo>","confidence":<0-1>,"reasoning":"<breve>","deliverableType":"<tipo>","complexityLevel":"<simple|moderate|complex>","requiresWebSearch":<bool>,"requiresDocumentGeneration":<bool>,"requiresBrowserAutomation":<bool>,"ambiguities":[]}`;

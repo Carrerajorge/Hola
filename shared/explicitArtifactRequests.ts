@@ -77,3 +77,74 @@ export function hasExplicitPresentationArtifactRequest(message: string): boolean
     (hasPresentationFormat && hasDelivery)
   );
 }
+
+// ─── Universal Output-Format Classifier ──────────────────────────────
+//
+// Pre-classification gate that determines the DELIVERY FORMAT independent
+// of content type.  Only returns a file format when the user explicitly
+// mentions file-related keywords (word, docx, excel, pptx, descargar,
+// exportar, archivo, etc.).  Content-type words like "carta", "informe",
+// "ensayo" alone are NOT enough — the user must also signal they want a
+// file.  This prevents the agent from autonomously generating documents
+// when the user just wants a text response.
+
+export type OutputFormat = "text" | "word" | "excel" | "pptx";
+
+export interface OutputFormatClassification {
+  action: OutputFormat;
+  confidence: number;
+}
+
+/** Explicit file-format keywords that unambiguously signal a file output.
+ *  "documento"/"document" are included because they imply a downloadable file,
+ *  unlike content words like "carta", "informe", "ensayo". */
+const EXPLICIT_FILE_FORMAT_RE =
+  /\b(word|docx|\.docx|pdf|\.pdf|documento|document|archivo|file|excel|xlsx|\.xlsx|powerpoint|pptx|\.pptx|ppt|\.ppt|slides|diapositivas)\b/i;
+
+/** Delivery verbs that, combined with a format/content signal, confirm file intent. */
+const DELIVERY_ACTION_RE =
+  /\b(descarga(?:r|lo|la)?|download|exporta(?:r)?|export|adjunta(?:r|lo|la)?|attach|guarda(?:r|lo|la)?\s+(?:como|en)\s+(?:archivo|file|word|docx|excel|pdf|pptx))\b/i;
+
+/** Format-as phrases: "en formato word", "como documento word", etc. */
+const FORMAT_AS_PHRASE_RE =
+  /\b(?:en|como)\s+(?:un\s+)?(?:archivo\s+)?(?:formato\s+)?(?:word|docx|pdf|excel|xlsx|powerpoint|pptx|ppt)\b/i;
+
+export function classifyOutputFormat(message: string): OutputFormatClassification {
+  const normalized = normalizeMessage(message);
+
+  // 1) Explicit file-format keyword → high confidence
+  if (EXPLICIT_FILE_FORMAT_RE.test(normalized) || FORMAT_AS_PHRASE_RE.test(normalized)) {
+    if (/\b(excel|xlsx|\.xlsx|csv)\b/i.test(normalized)) {
+      return { action: "excel", confidence: 0.95 };
+    }
+    if (/\b(powerpoint|pptx|\.pptx|ppt|\.ppt|slides|diapositivas)\b/i.test(normalized)) {
+      return { action: "pptx", confidence: 0.95 };
+    }
+    if (/\b(word|docx|\.docx)\b/i.test(normalized)) {
+      return { action: "word", confidence: 0.95 };
+    }
+    // "documento"/"document"/"archivo"/"file" → word (explicit file intent)
+    if (/\b(documento|document|archivo|file)\b/i.test(normalized)) {
+      return { action: "word", confidence: 0.90 };
+    }
+    // "pdf" → word (closest deliverable)
+    if (/\b(pdf|\.pdf)\b/i.test(normalized)) {
+      return { action: "word", confidence: 0.90 };
+    }
+  }
+
+  // 2) Delivery action + document format keyword → file
+  if (DELIVERY_ACTION_RE.test(normalized) && DOCUMENT_FORMAT_RE.test(normalized)) {
+    return { action: "word", confidence: 0.90 };
+  }
+
+  // 3) Delivery action + spreadsheet/presentation format keyword
+  if (DELIVERY_ACTION_RE.test(normalized)) {
+    if (SPREADSHEET_FORMAT_RE.test(normalized)) return { action: "excel", confidence: 0.90 };
+    if (PRESENTATION_FORMAT_RE.test(normalized)) return { action: "pptx", confidence: 0.90 };
+  }
+
+  // 4) Default: text response — content words like "carta", "informe"
+  //    do NOT trigger file generation on their own.
+  return { action: "text", confidence: 0.95 };
+}

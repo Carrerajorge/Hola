@@ -77,7 +77,7 @@ Responde ÚNICAMENTE con un JSON válido siguiendo este esquema exacto:
 REGLAS:
 - Sé conservador con la confianza: solo usa >0.9 cuando la intención es inequívoca
 - Si hay señales mixtas, elige la intención PRIMARIA más probable
-- Si el usuario solo pide redactar una carta, informe, ensayo o texto y no pide Word, docx, PDF, documento, archivo, descarga, exportación o formato descargable, clasifica como "chat"
+- REGLA CRÍTICA DE FORMATO: Si el usuario solo pide redactar una carta, informe, ensayo, resumen, propuesta o cualquier texto y NO menciona explícitamente las palabras "Word", "docx", "PDF", "documento", "archivo", "file", "descargar", "download", "exportar", "export", "adjuntar", "attach" o "formato descargable", SIEMPRE clasifica como "chat" con deliverableType "text_response". El CONTENIDO del texto (carta, informe, ensayo) NO determina el formato — solo las palabras explícitas de formato/archivo determinan si se genera un archivo
 - "web_automation" requiere interacción real con un navegador (reservas, compras, navegación)
 - "research" es para búsqueda de información, NO para navegar sitios
 - Las reservas de restaurantes/hoteles/vuelos son SIEMPRE "web_automation"
