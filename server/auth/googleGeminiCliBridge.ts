@@ -281,6 +281,7 @@ export async function handleGoogleGeminiCliOAuthCallback(
       callbackInput: callbackUrl,
       redirectUri: flow.redirectUri,
       expectedState: flow.oauthState,
+      userId: flow.userId,
     });
     const responsePayload = {
       ...status,
