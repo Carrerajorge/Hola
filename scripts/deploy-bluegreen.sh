@@ -309,11 +309,58 @@ measure_available_inodes_k() {
 }
 
 reclaim_docker_space() {
+  cleanup_containerd_orphans
   logw "Reclaiming Docker disk space from unused containers, images, and cache..."
   docker container prune -f --filter "label!=iliagpt.deploy.preserve=true" >/dev/null 2>&1 || true
   docker image prune -af >/dev/null 2>&1 || true
   docker builder prune -af >/dev/null 2>&1 || true
   docker network prune -f >/dev/null 2>&1 || true
+}
+
+cleanup_containerd_orphans() {
+  if ! command -v ctr >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local tmpdir container_ids_file task_ids_file orphan_ids_file orphan_id removed failed
+  tmpdir="$(mktemp -d)"
+  container_ids_file="${tmpdir}/containers"
+  task_ids_file="${tmpdir}/tasks"
+  orphan_ids_file="${tmpdir}/orphans"
+  removed=0
+  failed=0
+
+  ctr -n moby containers ls -q 2>/dev/null | sort -u > "${container_ids_file}" || true
+  ctr -n moby tasks ls -q 2>/dev/null | sort -u > "${task_ids_file}" || true
+
+  if [ ! -s "${container_ids_file}" ]; then
+    rm -rf "${tmpdir}"
+    return 0
+  fi
+
+  comm -23 "${container_ids_file}" "${task_ids_file}" > "${orphan_ids_file}" || true
+  if [ ! -s "${orphan_ids_file}" ]; then
+    rm -rf "${tmpdir}"
+    logok "No stopped containerd containers found."
+    return 0
+  fi
+
+  logw "Removing stopped containerd containers that are not tracked by active tasks..."
+  while IFS= read -r orphan_id; do
+    [ -z "${orphan_id}" ] && continue
+    if ctr -n moby containers rm "${orphan_id}" >/dev/null 2>&1; then
+      removed=$(( removed + 1 ))
+    else
+      failed=$(( failed + 1 ))
+      logw "Could not remove containerd orphan ${orphan_id}"
+    fi
+  done < "${orphan_ids_file}"
+
+  rm -rf "${tmpdir}"
+  logok "Removed ${removed} stopped containerd containers."
+  if [ "${failed}" -gt 0 ]; then
+    logw "${failed} containerd orphans could not be removed automatically."
+  fi
 }
 
 IMAGE_PIN_IDS=()
