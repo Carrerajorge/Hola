@@ -385,7 +385,7 @@ export function Sidebar({
     <div
       key={chat.id}
       className={cn(
-        "group relative flex min-h-[30px] w-full items-center rounded-[10px] border border-transparent px-1.5 py-0.5 cursor-pointer transition-all duration-300 hover:border-white/35 hover:bg-white/55 dark:hover:border-white/10 dark:hover:bg-white/5 liquid-button",
+        "group relative flex min-h-[32px] w-full items-center rounded-[10px] border border-transparent px-1.5 py-1 cursor-pointer transition-all duration-300 hover:border-white/35 hover:bg-white/55 dark:hover:border-white/10 dark:hover:bg-white/5 liquid-button",
         activeChatId === chat.id && "border-[#A5A0FF]/35 bg-[linear-gradient(135deg,rgba(165,160,255,0.14),rgba(255,255,255,0.68))] text-foreground shadow-[0_10px_22px_rgba(96,90,190,0.1)] dark:bg-[linear-gradient(135deg,rgba(165,160,255,0.14),rgba(255,255,255,0.05))]",
         chat.archived && "opacity-70",
         indented && "ml-4"
@@ -612,7 +612,7 @@ export function Sidebar({
   });
 
   const minimalSectionButtonClass =
-    "min-h-[30px] w-full justify-start gap-1.5 rounded-[10px] border border-white/35 bg-white/60 px-2 py-0.5 text-[12px] font-medium transition-all duration-200 hover:border-[#A5A0FF]/40 hover:bg-white/86 hover:shadow-[0_8px_18px_rgba(96,90,190,0.09)] focus-visible:ring-2 focus-visible:ring-[#A5A0FF]/25 dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.08] liquid-button";
+    "min-h-[32px] w-full justify-start gap-1.5 rounded-[10px] border border-white/35 bg-white/60 px-2 py-1 text-[12px] font-medium transition-all duration-200 hover:border-[#A5A0FF]/40 hover:bg-white/86 hover:shadow-[0_8px_18px_rgba(96,90,190,0.09)] focus-visible:ring-2 focus-visible:ring-[#A5A0FF]/25 dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.08] liquid-button";
   const minimalIconChipClass =
     "flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[7px] border border-white/40 bg-white/78 text-muted-foreground transition-all duration-200 group-hover:border-[#A5A0FF]/36 group-hover:bg-white/95 group-hover:text-foreground group-hover:shadow-[0_7px_14px_rgba(96,90,190,0.09)] dark:border-white/10 dark:bg-white/[0.06]";
 
@@ -652,14 +652,14 @@ export function Sidebar({
         <button
           ref={searchButtonRef}
           onClick={() => setIsSearchModalOpen(true)}
-          className="group mb-0.5 mt-0 flex min-h-[32px] w-full items-center justify-between gap-1.5 rounded-[12px] border border-white/40 bg-white/68 px-2.5 py-1 text-[12px] text-muted-foreground backdrop-blur-md transition-all duration-200 hover:border-[#A5A0FF]/40 hover:bg-white/88 hover:shadow-[0_8px_18px_rgba(96,90,190,0.09)] dark:border-white/10 dark:bg-white/[0.05] dark:hover:bg-white/[0.08] focus:outline-none focus:ring-2 focus:ring-primary/20 liquid-button"
+          className="group mb-0.5 mt-0 flex min-h-[35px] w-full items-center justify-between gap-1.5 rounded-[12px] border border-white/40 bg-white/68 px-2.5 py-1 text-[12px] text-muted-foreground backdrop-blur-md transition-all duration-200 hover:border-[#A5A0FF]/40 hover:bg-white/88 hover:shadow-[0_8px_18px_rgba(96,90,190,0.09)] dark:border-white/10 dark:bg-white/[0.05] dark:hover:bg-white/[0.08] focus:outline-none focus:ring-2 focus:ring-primary/20 liquid-button"
           data-testid="button-search-chats"
         >
           <div className="flex items-center gap-1.5">
             <Search className="h-[14px] w-[14px] text-muted-foreground/70" />
             <span className="font-medium text-[12px]">Buscar chats...</span>
           </div>
-          <kbd className="hidden h-[18px] items-center gap-1 rounded-md bg-black/5 px-1 font-mono text-[8px] text-muted-foreground lg:inline-flex dark:bg-white/10">
+          <kbd className="hidden h-[19px] items-center gap-1 rounded-md bg-black/5 px-1 font-mono text-[8px] text-muted-foreground lg:inline-flex dark:bg-white/10">
             <span className="text-[8px]">⌘</span>K
           </kbd>
         </button>
@@ -766,7 +766,7 @@ export function Sidebar({
                   <Collapsible key={folder.id} open={isExpanded} onOpenChange={() => toggleFolder(folder.id)}>
                     <CollapsibleTrigger asChild>
                       <div
-                        className="flex cursor-pointer items-center gap-1.5 rounded-[10px] px-2 py-0.5 transition-all duration-300 hover:bg-black/5 dark:hover:bg-white/10 liquid-button"
+                        className="flex min-h-[32px] cursor-pointer items-center gap-1.5 rounded-[10px] px-2 py-1 transition-all duration-300 hover:bg-black/5 dark:hover:bg-white/10 liquid-button"
                         data-testid={`folder - ${folder.id} `}
                       >
                         {isExpanded ? (
@@ -834,7 +834,7 @@ export function Sidebar({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="min-h-7 w-full justify-start gap-1.5 rounded-[10px] px-2 py-0.5 text-[12px] text-muted-foreground hover:text-foreground"
+                  className="min-h-8 w-full justify-start gap-1.5 rounded-[10px] px-2 py-1 text-[12px] text-muted-foreground hover:text-foreground"
                   onClick={() => setIsCreateProjectOpen(true)}
                   data-testid="button-new-folder"
                 >
@@ -850,7 +850,7 @@ export function Sidebar({
               <Button
                 variant="ghost"
                 size="sm"
-                className="min-h-7 w-full justify-start gap-1.5 rounded-[10px] px-2 py-0.5 text-[12px] text-muted-foreground hover:text-foreground"
+                className="min-h-8 w-full justify-start gap-1.5 rounded-[10px] px-2 py-1 text-[12px] text-muted-foreground hover:text-foreground"
                 onClick={() => setIsCreateProjectOpen(true)}
                 data-testid="button-new-folder"
               >
@@ -866,7 +866,7 @@ export function Sidebar({
                     const isExpanded = expandedFolders.has(project.id);
                   return (
                       <Collapsible key={project.id} open={isExpanded} onOpenChange={() => toggleFolder(project.id)}>
-                        <div className="group flex items-center gap-1 rounded-[10px] px-1.5 py-0.5 transition-all duration-300 hover:bg-black/5 dark:hover:bg-white/10 liquid-button">
+                        <div className="group flex min-h-[32px] items-center gap-1 rounded-[10px] px-1.5 py-1 transition-all duration-300 hover:bg-black/5 dark:hover:bg-white/10 liquid-button">
                           <CollapsibleTrigger asChild>
                             <button
                               aria-label="Expand project"
@@ -1037,7 +1037,7 @@ export function Sidebar({
               {pinnedGpts.map((pinned) => (
                 <div
                   key={pinned.gptId}
-                  className="group flex w-full cursor-pointer items-center justify-between rounded-[10px] px-2 py-0.5 transition-all duration-300 hover:bg-black/5 dark:hover:bg-white/10 liquid-button"
+                  className="group flex min-h-[30px] w-full cursor-pointer items-center justify-between rounded-[10px] px-2 py-1 transition-all duration-300 hover:bg-black/5 dark:hover:bg-white/10 liquid-button"
                   onClick={() => setLocation(`/ gpts / ${pinned.gpt.slug || pinned.gptId} `)}
                   data-testid={`pinned - gpt - ${pinned.gptId} `}
                 >
@@ -1107,7 +1107,7 @@ export function Sidebar({
           <div className="px-2 border-t">
             <Button
               variant="ghost"
-              className="min-h-7 w-full justify-between rounded-[10px] px-2 py-0.5 text-[12px] font-medium text-muted-foreground liquid-button"
+              className="min-h-8 w-full justify-between rounded-[10px] px-2 py-1 text-[12px] font-medium text-muted-foreground liquid-button"
               onClick={() => setShowHidden(!showHidden)}
               data-testid="button-toggle-hidden"
             >
@@ -1122,7 +1122,7 @@ export function Sidebar({
                 {hiddenChats.map((chat) => (
                   <div
                     key={chat.id}
-                    className="group flex w-full cursor-pointer items-center justify-between rounded-[10px] px-2 py-0.5 opacity-70 transition-colors hover:bg-accent"
+                    className="group flex min-h-[30px] w-full cursor-pointer items-center justify-between rounded-[10px] px-2 py-1 opacity-70 transition-colors hover:bg-accent"
                     onClick={() => onSelectChat(chat.id)}
                     data-testid={`hidden - chat - item - ${chat.id} `}
                   >
@@ -1153,7 +1153,7 @@ export function Sidebar({
         <div className="flex w-full items-center gap-1 rounded-[14px] border border-white/35 bg-white/60 p-1 shadow-sm backdrop-blur-xl dark:border-white/8 dark:bg-white/5">
           <Popover open={isUserMenuOpen} onOpenChange={setIsUserMenuOpen}>
             <PopoverTrigger asChild>
-              <button className="flex flex-1 cursor-pointer items-center gap-1.5 rounded-[10px] border border-transparent px-1.5 py-0.5 hover:border-white/20 hover:bg-white/60 shadow-sm transition-all duration-300 dark:hover:border-white/10 dark:hover:bg-white/10 backdrop-blur-md liquid-button" data-testid="button-user-menu">
+              <button className="flex min-h-[34px] flex-1 cursor-pointer items-center gap-1.5 rounded-[10px] border border-transparent px-1.5 py-1 hover:border-white/20 hover:bg-white/60 shadow-sm transition-all duration-300 dark:hover:border-white/10 dark:hover:bg-white/10 backdrop-blur-md liquid-button" data-testid="button-user-menu">
                 <div className="relative">
 
               <Avatar className="h-6 w-6 border border-black/5 bg-white/90 shadow-inner dark:border-white/10 dark:bg-white/[0.08]">
