@@ -9,6 +9,30 @@ export interface Folder {
 
 const STORAGE_KEY = "sira-gpt-folders";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeFolder(raw: unknown): Folder | null {
+  if (!isRecord(raw)) return null;
+
+  const id = typeof raw.id === "string" ? raw.id.trim() : "";
+  const name = typeof raw.name === "string" ? raw.name.trim() : "";
+  const color = typeof raw.color === "string" && raw.color.trim().length > 0 ? raw.color : FOLDER_COLORS[0].value;
+  const chatIds = Array.isArray(raw.chatIds)
+    ? raw.chatIds.filter((chatId): chatId is string => typeof chatId === "string" && chatId.trim().length > 0)
+    : [];
+
+  if (!id || !name) return null;
+
+  return {
+    id,
+    name,
+    color,
+    chatIds,
+  };
+}
+
 export const FOLDER_COLORS = [
   { name: "blue", value: "#3b82f6" },
   { name: "green", value: "#22c55e" },
@@ -25,12 +49,15 @@ export function useChatFolders() {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       try {
-        const parsedFolders = JSON.parse(saved) as Folder[];
+        const parsed = JSON.parse(saved);
+        const parsedFolders = Array.isArray(parsed)
+          ? parsed.map(normalizeFolder).filter((folder): folder is Folder => folder !== null)
+          : [];
         // Filter out test folder "luis0"
         const filteredFolders = parsedFolders.filter(f => f.name !== "luis0");
         setFolders(filteredFolders);
         // If we filtered something, save the cleaned data back
-        if (filteredFolders.length !== parsedFolders.length) {
+        if (!Array.isArray(parsed) || filteredFolders.length !== parsed.length) {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(filteredFolders));
         }
       } catch (e) {
@@ -40,7 +67,11 @@ export function useChatFolders() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(folders));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(folders));
+    } catch (error) {
+      console.error("Failed to save folders", error);
+    }
   }, [folders]);
 
   const createFolder = useCallback((name: string, color?: string) => {

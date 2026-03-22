@@ -208,6 +208,425 @@ function sanitizeSendMessage(message: Message): Message {
   };
 }
 
+function isPlainObject(value: unknown): value is Record<string, any> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringifyUnknown(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === null || value === undefined) return "";
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function normalizeDate(value: unknown, fallback: Date = new Date()): Date {
+  const candidate = value instanceof Date ? value : new Date(stringifyUnknown(value) || fallback.toISOString());
+  return Number.isFinite(candidate.getTime()) ? candidate : fallback;
+}
+
+function normalizeRole(value: unknown): Message["role"] {
+  return value === "user" || value === "assistant" || value === "system"
+    ? value
+    : "assistant";
+}
+
+function normalizeAttachmentType(value: unknown): NonNullable<Message["attachments"]>[number]["type"] {
+  switch (value) {
+    case "word":
+    case "excel":
+    case "ppt":
+    case "image":
+    case "pdf":
+    case "text":
+    case "code":
+    case "archive":
+    case "document":
+    case "unknown":
+      return value;
+    default:
+      return "unknown";
+  }
+}
+
+function normalizeDocumentType(value: unknown): NonNullable<Message["attachments"]>[number]["documentType"] {
+  switch (value) {
+    case "word":
+    case "excel":
+    case "ppt":
+    case "pdf":
+      return value;
+    default:
+      return undefined;
+  }
+}
+
+function normalizeAttachmentList(raw: unknown): Message["attachments"] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+
+  const normalized = raw
+    .map((item, index) => {
+      if (!isPlainObject(item)) return null;
+
+      const name = stringifyUnknown(item.name || item.title).trim();
+      if (!name) return null;
+
+      const mimeType = stringifyUnknown(item.mimeType || item.type).trim() || undefined;
+      const normalizedType = normalizeAttachmentType(item.type);
+      const size =
+        typeof item.size === "number" && Number.isFinite(item.size)
+          ? item.size
+          : typeof item.fileSize === "number" && Number.isFinite(item.fileSize)
+            ? item.fileSize
+            : 0;
+
+      return {
+        type: normalizedType,
+        name,
+        mimeType,
+        imageUrl: stringifyUnknown(item.imageUrl).trim() || undefined,
+        storagePath: stringifyUnknown(item.storagePath).trim() || undefined,
+        fileId: stringifyUnknown(item.fileId || item.id).trim() || undefined,
+        documentType: normalizeDocumentType(item.documentType),
+        content: typeof item.content === "string" ? item.content : undefined,
+        title: stringifyUnknown(item.title).trim() || undefined,
+        savedAt: stringifyUnknown(item.savedAt).trim() || undefined,
+        spreadsheetData: isPlainObject(item.spreadsheetData)
+          ? {
+              uploadId: stringifyUnknown(item.spreadsheetData.uploadId).trim(),
+              sheets: Array.isArray(item.spreadsheetData.sheets)
+                ? item.spreadsheetData.sheets
+                    .map((sheet: any) => {
+                      if (!isPlainObject(sheet)) return null;
+                      const sheetName = stringifyUnknown(sheet.name).trim();
+                      if (!sheetName) return null;
+                      return {
+                        name: sheetName,
+                        rowCount:
+                          typeof sheet.rowCount === "number" && Number.isFinite(sheet.rowCount)
+                            ? sheet.rowCount
+                            : 0,
+                        columnCount:
+                          typeof sheet.columnCount === "number" && Number.isFinite(sheet.columnCount)
+                            ? sheet.columnCount
+                            : 0,
+                      };
+                    })
+                    .filter((sheet): sheet is { name: string; rowCount: number; columnCount: number } => sheet !== null)
+                : [],
+              previewData: isPlainObject(item.spreadsheetData.previewData)
+                ? {
+                    headers: Array.isArray(item.spreadsheetData.previewData.headers)
+                      ? item.spreadsheetData.previewData.headers.filter((header: any): header is string => typeof header === "string")
+                      : [],
+                    data: Array.isArray(item.spreadsheetData.previewData.data)
+                      ? item.spreadsheetData.previewData.data.filter((row: any): row is unknown[][][number] => Array.isArray(row))
+                      : [],
+                  }
+                : undefined,
+              analysisId: stringifyUnknown(item.spreadsheetData.analysisId).trim() || undefined,
+              sessionId: stringifyUnknown(item.spreadsheetData.sessionId).trim() || undefined,
+            }
+          : undefined,
+        size,
+      };
+    })
+    .filter((attachment): attachment is NonNullable<Message["attachments"]>[number] => attachment !== null);
+
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeSources(raw: unknown): Message["sources"] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const normalized = raw
+    .map((source) => {
+      if (!isPlainObject(source)) return null;
+      const fileName = stringifyUnknown(source.fileName || source.name).trim();
+      const content = typeof source.content === "string" ? source.content : stringifyUnknown(source.content);
+      if (!fileName) return null;
+      return { fileName, content };
+    })
+    .filter((source): source is NonNullable<Message["sources"]>[number] => source !== null);
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeWebSources(raw: unknown): Message["webSources"] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const normalized = raw
+    .map((source) => {
+      if (!isPlainObject(source)) return null;
+      const url = stringifyUnknown(source.url).trim();
+      if (!url) return null;
+
+      let derivedDomain = stringifyUnknown(source.domain).trim();
+      if (!derivedDomain) {
+        try {
+          derivedDomain = new URL(url).hostname;
+        } catch {
+          derivedDomain = "";
+        }
+      }
+
+      const sourceMeta = isPlainObject(source.source) ? source.source : {};
+
+      return {
+        url,
+        title: stringifyUnknown(source.title).trim() || url,
+        domain: derivedDomain,
+        favicon: stringifyUnknown(source.favicon).trim() || undefined,
+        snippet: typeof source.snippet === "string" ? source.snippet : undefined,
+        date: stringifyUnknown(source.date).trim() || undefined,
+        imageUrl: stringifyUnknown(source.imageUrl).trim() || undefined,
+        canonicalUrl: stringifyUnknown(source.canonicalUrl).trim() || undefined,
+        siteName: stringifyUnknown(source.siteName).trim() || undefined,
+        source: {
+          name: stringifyUnknown(sourceMeta.name).trim() || derivedDomain || "Web",
+          domain: stringifyUnknown(sourceMeta.domain).trim() || derivedDomain,
+        },
+        metadata: isPlainObject(source.metadata) ? source.metadata : undefined,
+      };
+    })
+    .filter((source): source is NonNullable<Message["webSources"]>[number] => source !== null);
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeMessageSteps(raw: unknown): Message["steps"] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const normalized = raw
+    .map((step) => {
+      if (!isPlainObject(step)) return null;
+      const title = stringifyUnknown(step.title).trim();
+      if (!title) return null;
+      const status =
+        step.status === "pending" || step.status === "loading" || step.status === "complete"
+          ? step.status
+          : "pending";
+      return { title, status };
+    })
+    .filter((step): step is NonNullable<Message["steps"]>[number] => step !== null);
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeRetrievalSteps(raw: unknown): Message["retrievalSteps"] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const normalized = raw
+    .map((step) => {
+      if (!isPlainObject(step)) return null;
+      const id = stringifyUnknown(step.id).trim();
+      const label = stringifyUnknown(step.label).trim();
+      if (!id || !label) return null;
+      const status =
+        step.status === "pending" ||
+        step.status === "active" ||
+        step.status === "complete" ||
+        step.status === "error"
+          ? step.status
+          : "pending";
+      return {
+        id,
+        label,
+        status,
+        detail: typeof step.detail === "string" ? step.detail : undefined,
+      };
+    })
+    .filter((step): step is NonNullable<Message["retrievalSteps"]>[number] => step !== null);
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeGoogleFormPreview(raw: unknown): Message["googleFormPreview"] | undefined {
+  if (!isPlainObject(raw)) return undefined;
+  const prompt = typeof raw.prompt === "string" ? raw.prompt : "";
+  const fileContext = Array.isArray(raw.fileContext)
+    ? raw.fileContext
+        .map((item: any) => {
+          if (!isPlainObject(item)) return null;
+          const name = stringifyUnknown(item.name).trim();
+          const content = typeof item.content === "string" ? item.content : stringifyUnknown(item.content);
+          const type = stringifyUnknown(item.type).trim();
+          if (!name) return null;
+          return { name, content, type };
+        })
+        .filter((item): item is NonNullable<NonNullable<Message["googleFormPreview"]>["fileContext"]>[number] => item !== null)
+    : undefined;
+
+  if (!prompt && (!fileContext || fileContext.length === 0)) return undefined;
+
+  return {
+    prompt,
+    fileContext,
+    autoStart: raw.autoStart === true,
+  };
+}
+
+function normalizeGmailPreview(raw: unknown): Message["gmailPreview"] | undefined {
+  if (!isPlainObject(raw)) return undefined;
+  const action =
+    raw.action === "search" || raw.action === "unread" || raw.action === "recent" || raw.action === "thread"
+      ? raw.action
+      : undefined;
+  const query = typeof raw.query === "string" ? raw.query : undefined;
+  const threadId = typeof raw.threadId === "string" ? raw.threadId : undefined;
+  const filters = Array.isArray(raw.filters)
+    ? raw.filters.filter((filter: any): filter is string => typeof filter === "string")
+    : undefined;
+
+  if (!query && !action && !threadId && (!filters || filters.length === 0)) {
+    return undefined;
+  }
+
+  return {
+    query,
+    action,
+    threadId,
+    filters,
+  };
+}
+
+function normalizeDocumentAnalysis(raw: unknown): Message["documentAnalysis"] | undefined {
+  if (!isPlainObject(raw)) return undefined;
+  const documentModel = isPlainObject(raw.documentModel) ? raw.documentModel : null;
+  const insights = Array.isArray(raw.insights) ? raw.insights : [];
+  const suggestedQuestions = Array.isArray(raw.suggestedQuestions) ? raw.suggestedQuestions : [];
+
+  if (!documentModel && insights.length === 0 && suggestedQuestions.length === 0) {
+    return undefined;
+  }
+
+  return {
+    documentModel,
+    insights,
+    suggestedQuestions,
+  };
+}
+
+function normalizeAgentRun(raw: unknown): Message["agentRun"] | undefined {
+  if (!isPlainObject(raw)) return undefined;
+
+  const status =
+    raw.status === "pending" ||
+    raw.status === "running" ||
+    raw.status === "completed" ||
+    raw.status === "failed" ||
+    raw.status === "cancelled"
+      ? raw.status
+      : "pending";
+
+  return {
+    runId: typeof raw.runId === "string" ? raw.runId : null,
+    status,
+    userMessage: typeof raw.userMessage === "string" ? raw.userMessage : undefined,
+    steps: Array.isArray(raw.steps)
+      ? raw.steps
+          .map((step: any, index: number) => {
+            if (!isPlainObject(step)) return null;
+            const toolName = stringifyUnknown(step.toolName || step.title).trim();
+            return {
+              stepIndex:
+                typeof step.stepIndex === "number" && Number.isFinite(step.stepIndex)
+                  ? step.stepIndex
+                  : index,
+              toolName,
+              status: stringifyUnknown(step.status).trim() || "pending",
+              output: step.output,
+              error: typeof step.error === "string" ? step.error : undefined,
+            };
+          })
+          .filter((step): step is NonNullable<Message["agentRun"]>["steps"][number] => step !== null)
+      : [],
+    eventStream: Array.isArray(raw.eventStream)
+      ? raw.eventStream
+          .map((event: any) => {
+            if (!isPlainObject(event)) return null;
+            const type = stringifyUnknown(event.type).trim();
+            if (!type) return null;
+            return {
+              type,
+              content: event.content,
+              timestamp:
+                typeof event.timestamp === "number" && Number.isFinite(event.timestamp)
+                  ? event.timestamp
+                  : Date.now(),
+            };
+          })
+          .filter((event): event is NonNullable<Message["agentRun"]>["eventStream"][number] => event !== null)
+      : [],
+    summary: typeof raw.summary === "string" ? raw.summary : null,
+    error: typeof raw.error === "string" ? raw.error : null,
+  };
+}
+
+function normalizeMessage(raw: unknown, options: {
+  fallbackId: string;
+  fallbackTimestamp?: unknown;
+  attachments?: unknown;
+}): Message {
+  const source = isPlainObject(raw) ? raw : {};
+  const metadata = isPlainObject(source.metadata) ? source.metadata : undefined;
+
+  const confidence =
+    source.confidence === "high" || source.confidence === "medium" || source.confidence === "low"
+      ? source.confidence
+      : metadata?.confidence === "high" || metadata?.confidence === "medium" || metadata?.confidence === "low"
+        ? metadata.confidence
+        : undefined;
+
+  return {
+    id: stringifyUnknown(source.id).trim() || options.fallbackId,
+    clientTempId: stringifyUnknown(source.clientTempId).trim() || undefined,
+    role: normalizeRole(source.role),
+    content: stringifyUnknown(source.content),
+    timestamp: normalizeDate(source.createdAt ?? source.timestamp ?? options.fallbackTimestamp, new Date()),
+    requestId: sanitizeRequestId(typeof source.requestId === "string" ? source.requestId : undefined),
+    clientRequestId: sanitizeRequestId(typeof source.clientRequestId === "string" ? source.clientRequestId : undefined),
+    userMessageId: typeof source.userMessageId === "string" ? source.userMessageId : undefined,
+    runId: typeof source.runId === "string" ? source.runId : undefined,
+    status:
+      source.status === "pending" ||
+      source.status === "processing" ||
+      source.status === "done" ||
+      source.status === "failed"
+        ? source.status
+        : undefined,
+    deliveryStatus:
+      source.deliveryStatus === "sending" ||
+      source.deliveryStatus === "sent" ||
+      source.deliveryStatus === "delivered" ||
+      source.deliveryStatus === "error"
+        ? source.deliveryStatus
+        : undefined,
+    deliveryError: typeof source.deliveryError === "string" ? source.deliveryError : undefined,
+    isThinking: source.isThinking === true,
+    steps: normalizeMessageSteps(source.steps ?? metadata?.steps),
+    attachments: normalizeAttachmentList(options.attachments ?? source.attachments),
+    sources: normalizeSources(source.sources),
+    figmaDiagram: isPlainObject(source.figmaDiagram) ? source.figmaDiagram as FigmaDiagram : undefined,
+    generatedImage: typeof source.generatedImage === "string" ? source.generatedImage : undefined,
+    googleFormPreview: normalizeGoogleFormPreview(source.googleFormPreview),
+    gmailPreview: normalizeGmailPreview(source.gmailPreview),
+    agentRun: normalizeAgentRun(source.agentRun),
+    artifact: isPlainObject(source.artifact) ? source.artifact as MessageArtifact : undefined,
+    webSources: normalizeWebSources(source.webSources ?? metadata?.webSources),
+    documentAnalysis: normalizeDocumentAnalysis(source.documentAnalysis),
+    ui_components: Array.isArray(source.ui_components)
+      ? source.ui_components.filter((component: any): component is string => typeof component === "string")
+      : undefined,
+    confidence,
+    uncertaintyReason:
+      typeof source.uncertaintyReason === "string"
+        ? source.uncertaintyReason
+        : typeof metadata?.uncertaintyReason === "string"
+          ? metadata.uncertaintyReason
+          : undefined,
+    metadata,
+    retrievalSteps: normalizeRetrievalSteps(source.retrievalSteps ?? metadata?.retrievalSteps),
+  };
+}
+
 function safeReadLocalChatsFromStorage(storageKey: string): Chat[] {
   try {
     if (typeof localStorage === "undefined") return [];
@@ -216,12 +635,15 @@ function safeReadLocalChatsFromStorage(storageKey: string): Chat[] {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
 
-    const restored: Chat[] = parsed.map((chat: any) => ({
-      ...chat,
-      stableKey: chat?.stableKey || `stable-${chat?.id}`,
-      gptId: typeof chat?.gptId === "string" && chat.gptId.trim().length > 0 ? chat.gptId.trim() : null,
-      messages: Array.isArray(chat?.messages)
-        ? chat.messages.map((msg: any) => {
+    const restored: Chat[] = parsed
+      .map((chat: any, chatIndex: number) => {
+        if (!isPlainObject(chat)) return null;
+
+        const chatId = stringifyUnknown(chat.id).trim();
+        if (!chatId) return null;
+
+        const restoredMessages: Message[] = Array.isArray(chat.messages)
+          ? chat.messages.map((msg: any, messageIndex: number) => {
           // Hydrate savedRequestIds from localStorage data (best-effort).
           // IMPORTANT: localStorage may include optimistic/failed messages that were never persisted,
           // so only treat requestIds as "persisted" when we have evidence it reached the server.
@@ -243,10 +665,10 @@ function safeReadLocalChatsFromStorage(storageKey: string): Chat[] {
             }
           }
 
-          const hydrated: Message = {
-            ...msg,
-            timestamp: new Date(msg.timestamp),
-          };
+          const hydrated = normalizeMessage(msg, {
+            fallbackId: `${chatId}-local-${messageIndex}`,
+            fallbackTimestamp: msg?.timestamp,
+          });
 
           // A "sending" message can't actually be in-flight across a reload.
           // Treat it as retryable and queue it for recovery so it won't stay stuck forever.
@@ -254,18 +676,34 @@ function safeReadLocalChatsFromStorage(storageKey: string): Chat[] {
             hydrated.role === "user" &&
             hydrated.requestId &&
             hydrated.deliveryStatus === "sending" &&
-            typeof chat?.id === "string" &&
-            !chat.id.startsWith(PENDING_CHAT_PREFIX)
+            !chatId.startsWith(PENDING_CHAT_PREFIX)
           ) {
-            enqueueFailedMessageForRecovery(chat.id, hydrated);
+            enqueueFailedMessageForRecovery(chatId, hydrated);
             hydrated.deliveryStatus = "error";
             hydrated.deliveryError = hydrated.deliveryError || "No se pudo confirmar el envío. Reintenta.";
           }
 
           return hydrated;
         })
-        : [],
-    }));
+          : [];
+
+        return {
+          id: chatId,
+          stableKey: stringifyUnknown(chat.stableKey).trim() || `stable-${chatId}`,
+          title: stringifyUnknown(chat.title).trim() || "Nuevo chat",
+          timestamp:
+            typeof chat.timestamp === "number" && Number.isFinite(chat.timestamp)
+              ? chat.timestamp
+              : normalizeDate(chat.updatedAt ?? chat.createdAt ?? Date.now()).getTime(),
+          messages: restoredMessages,
+          gptId: typeof chat.gptId === "string" && chat.gptId.trim().length > 0 ? chat.gptId.trim() : null,
+          archived: chat.archived === true,
+          hidden: chat.hidden === true,
+          pinned: chat.pinned === true,
+          pinnedAt: typeof chat.pinnedAt === "string" ? chat.pinnedAt : undefined,
+        };
+      })
+      .filter((chat): chat is Chat => chat !== null);
 
     return restored;
   } catch (e) {
@@ -1081,7 +1519,7 @@ export function useChats() {
         }
       }
 
-      let messages: Message[] = (fullChat.messages || []).map((msg: any) => {
+      const messages: Message[] = (Array.isArray(fullChat.messages) ? fullChat.messages : []).map((msg: any, index: number) => {
         if (msg.requestId) markRequestPersisted(msg.requestId);
 
         let hydratedAttachments = msg.attachments;
@@ -1114,25 +1552,11 @@ export function useChats() {
           });
         }
 
-        return {
-          id: msg.id,
-          role: msg.role,
-          content: msg.content,
-          timestamp: new Date(msg.createdAt),
-          requestId: msg.requestId,
-          userMessageId: msg.userMessageId,
+        return normalizeMessage(msg, {
+          fallbackId: `${chatId}-server-${index}`,
+          fallbackTimestamp: msg.createdAt,
           attachments: hydratedAttachments,
-          sources: msg.sources,
-          figmaDiagram: msg.figmaDiagram,
-          googleFormPreview: msg.googleFormPreview,
-          gmailPreview: msg.gmailPreview,
-          generatedImage: msg.generatedImage,
-          webSources: msg.webSources || msg.metadata?.webSources,
-          confidence: msg.confidence || msg.metadata?.confidence,
-          uncertaintyReason: msg.uncertaintyReason || msg.metadata?.uncertaintyReason,
-          retrievalSteps: msg.retrievalSteps || msg.metadata?.retrievalSteps,
-          steps: msg.steps || msg.metadata?.steps,
-        };
+        });
       });
 
       // Merge any locally queued/unsent user messages (persistent outbox) so reloads don't "lose" them
@@ -1199,18 +1623,25 @@ export function useChats() {
       const serverChats = await res.json();
 
       // Only fetch basic metadata for the list. Do not fetch full message history for all chats (N+1 avoidance).
-      const formattedChats: Chat[] = serverChats.map((chat: any) => ({
-        id: chat.id,
-        stableKey: `stable-${chat.id}`,
-        title: chat.title,
-        timestamp: new Date(chat.updatedAt).getTime(),
-        gptId: typeof chat.gptId === "string" && chat.gptId.trim().length > 0 ? chat.gptId.trim() : null,
-        archived: chat.archived === "true",
-        hidden: chat.hidden === "true",
-        pinned: chat.pinned === "true",
-        pinnedAt: chat.pinnedAt,
-        messages: [] // Don't load messages until active
-      }));
+      const formattedChats: Chat[] = (Array.isArray(serverChats) ? serverChats : [])
+        .map((chat: any, index: number) => {
+          const id = stringifyUnknown(chat?.id).trim();
+          if (!id) return null;
+
+          return {
+            id,
+            stableKey: `stable-${id}`,
+            title: stringifyUnknown(chat?.title).trim() || `Chat ${index + 1}`,
+            timestamp: normalizeDate(chat?.updatedAt, new Date()).getTime(),
+            gptId: typeof chat?.gptId === "string" && chat.gptId.trim().length > 0 ? chat.gptId.trim() : null,
+            archived: chat?.archived === "true" || chat?.archived === true,
+            hidden: chat?.hidden === "true" || chat?.hidden === true,
+            pinned: chat?.pinned === "true" || chat?.pinned === true,
+            pinnedAt: typeof chat?.pinnedAt === "string" ? chat.pinnedAt : undefined,
+            messages: [],
+          };
+        })
+        .filter((chat): chat is Chat => chat !== null);
 
       // Return chats sorted by timestamp (no mock data)
       return formattedChats.sort((a, b) => b.timestamp - a.timestamp);

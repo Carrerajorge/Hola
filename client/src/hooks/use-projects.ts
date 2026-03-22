@@ -25,6 +25,71 @@ export interface Project {
 
 const STORAGE_KEY = "iliagpt-projects";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function toSafeString(value: unknown, fallback = ""): string {
+    return typeof value === "string" ? value : fallback;
+}
+
+function toSafeStringArray(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+function normalizeProjectFile(value: unknown): ProjectFile | null {
+    if (!isRecord(value)) return null;
+
+    const id = toSafeString(value.id).trim();
+    const name = toSafeString(value.name).trim();
+    const type = toSafeString(value.type);
+    const size = typeof value.size === "number" && Number.isFinite(value.size) ? value.size : 0;
+    const source = value.source === "upload" || value.source === "knowledge" ? value.source : "upload";
+
+    if (!id || !name) return null;
+
+    return {
+        id,
+        name,
+        type,
+        size,
+        source,
+    };
+}
+
+function normalizeProject(raw: unknown): Project | null {
+    if (!isRecord(raw)) return null;
+
+    const id = toSafeString(raw.id).trim();
+    const name = toSafeString(raw.name).trim();
+    if (!id || !name) return null;
+
+    const createdAt = typeof raw.createdAt === "number" && Number.isFinite(raw.createdAt) ? raw.createdAt : Date.now();
+    const updatedAt = typeof raw.updatedAt === "number" && Number.isFinite(raw.updatedAt) ? raw.updatedAt : createdAt;
+    const codingAgents = Array.isArray(raw.codingAgents)
+        ? raw.codingAgents.filter(
+            (agent): agent is "coder" | "reviewer" | "improver" =>
+                agent === "coder" || agent === "reviewer" || agent === "improver"
+        )
+        : [];
+
+    return {
+        id,
+        name,
+        color: toSafeString(raw.color, "#3b82f6"),
+        backgroundImage: typeof raw.backgroundImage === "string" ? raw.backgroundImage : null,
+        systemPrompt: toSafeString(raw.systemPrompt),
+        repositoryPath: typeof raw.repositoryPath === "string" && raw.repositoryPath.trim().length > 0 ? raw.repositoryPath : null,
+        defaultCodeFolder: typeof raw.defaultCodeFolder === "string" && raw.defaultCodeFolder.trim().length > 0 ? raw.defaultCodeFolder : null,
+        codingAgents: codingAgents.length > 0 ? codingAgents : ["coder"],
+        files: Array.isArray(raw.files) ? raw.files.map(normalizeProjectFile).filter((file): file is ProjectFile => file !== null) : [],
+        chatIds: toSafeStringArray(raw.chatIds),
+        createdAt,
+        updatedAt,
+    };
+}
+
 export function useProjects() {
     const [projects, setProjects] = useState<Project[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -34,8 +99,17 @@ export function useProjects() {
         try {
             const saved = localStorage.getItem(STORAGE_KEY);
             if (saved) {
-                const parsed = JSON.parse(saved) as Project[];
-                setProjects(parsed);
+                const parsed = JSON.parse(saved);
+                const normalizedProjects = Array.isArray(parsed)
+                    ? parsed.map(normalizeProject).filter((project): project is Project => project !== null)
+                    : [];
+                setProjects(normalizedProjects);
+
+                const shouldRewriteStorage =
+                    !Array.isArray(parsed) || normalizedProjects.length !== parsed.length;
+                if (shouldRewriteStorage) {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizedProjects));
+                }
             }
         } catch (error) {
             console.error("[useProjects] Failed to load projects:", error);

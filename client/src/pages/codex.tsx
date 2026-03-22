@@ -363,6 +363,10 @@ export default function CodexPage() {
     () => sessions.find((session) => session.id === selectedSessionId) ?? null,
     [selectedSessionId, sessions],
   );
+  const safeProjects = useMemo(
+    () => (Array.isArray(projects) ? projects : []),
+    [projects],
+  );
 
   useEffect(() => {
     if (selectedProjectId) return;
@@ -370,14 +374,14 @@ export default function CodexPage() {
       setSelectedProjectId(selectedSession.project.id);
       return;
     }
-    if (projects[0]?.id) {
-      setSelectedProjectId(projects[0].id);
+    if (safeProjects[0]?.id) {
+      setSelectedProjectId(safeProjects[0].id);
     }
-  }, [projects, selectedProjectId, selectedSession]);
+  }, [safeProjects, selectedProjectId, selectedSession]);
 
   const selectedProject = useMemo(
-    () => projects.find((project) => project.id === selectedProjectId) ?? selectedSession?.project ?? null,
-    [projects, selectedProjectId, selectedSession],
+    () => safeProjects.find((project) => project.id === selectedProjectId) ?? selectedSession?.project ?? null,
+    [safeProjects, selectedProjectId, selectedSession],
   );
 
   const groupedSessions = useMemo(() => {

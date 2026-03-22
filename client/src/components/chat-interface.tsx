@@ -653,14 +653,18 @@ export function ChatInterface({
   const scrollRef = useRef<HTMLDivElement>(null);
   const { settings } = useSettingsContext();
   const { projects, getProject, updateProject } = useProjects();
+  const safeProjects = useMemo(
+    () => (Array.isArray(projects) ? projects : []),
+    [projects],
+  );
 
   const selectedProject = useMemo(() => {
     if (!selectedProjectId) return null;
     return (
       getProject(selectedProjectId) ||
-      projects.find((p: any) => p.id === selectedProjectId)
+      safeProjects.find((p: any) => p.id === selectedProjectId)
     );
-  }, [selectedProjectId, projects, getProject]);
+  }, [selectedProjectId, safeProjects, getProject]);
 
   const activeGptConversationStarters = useMemo(() => {
     const rawStarters = (activeGpt as any)?.conversationStarters;
