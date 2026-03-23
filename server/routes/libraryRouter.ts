@@ -18,6 +18,7 @@ import {
   type InsertLibraryCollection,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
+import { getLocalUploadsDir } from "../lib/localUploads";
 import { validate } from "../middleware/validateRequest";
 import {
   uploadRequestUrlSchema,
@@ -792,8 +793,7 @@ export function createLibraryRouter() {
       // Sanitize filename: strip unsafe chars, cap at 80 chars to prevent filesystem issues
       const safeTitle = title.replace(/[^a-zA-Z0-9_-]/g, '_').replace(/_+/g, '_').substring(0, 80);
       const filename = `${safeTitle || 'document'}_${fileUuid.slice(0, 8)}.${ext}`;
-      const uploadsDir = path.join(process.cwd(), "uploads");
-      await fs.promises.mkdir(uploadsDir, { recursive: true });
+      const uploadsDir = getLocalUploadsDir();
       const filePath = path.join(uploadsDir, fileUuid);
       const tmpPath = filePath + ".tmp";
 

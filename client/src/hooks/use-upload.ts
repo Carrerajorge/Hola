@@ -1,9 +1,9 @@
 import { useState, useCallback } from "react";
 import type { UppyFile } from "@uppy/core";
-import { apiFetch } from "@/lib/apiClient";
 import { normalizeFileForUpload } from "@/lib/attachmentIngest";
-import { ensureCsrfToken, resolveUploadUrlForResponse, uploadBlobWithProgress } from "@/lib/uploadTransport";
+import { uploadBlobWithProgress } from "@/lib/uploadTransport";
 import type { UploadResponse } from "@shared/uploadContracts";
+import { requestUploadUrl as requestUploadUrlFromServer } from "@/lib/uploadUrlRequest";
 
 interface UseUploadOptions {
   onSuccess?: (response: UploadResponse) => void;
@@ -92,33 +92,13 @@ export function useUpload(options: UseUploadOptions = {}) {
     async (file: File): Promise<UploadResponse> => {
       const normalizedFile = normalizeFileForUpload(file);
       const uploadId = buildUploadId(normalizedFile.name);
-      await ensureCsrfToken();
-      const response = await apiFetch("/api/objects/upload", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Upload-Id": uploadId,
-          ...(options.conversationId ? { "X-Conversation-Id": options.conversationId } : {}),
-        },
-        body: JSON.stringify({
-          uploadId,
-          fileName: normalizedFile.name,
-          mimeType: normalizedFile.type,
-          fileSize: normalizedFile.size,
-          ...(options.conversationId ? { conversationId: options.conversationId } : {}),
-        }),
+      return requestUploadUrlFromServer({
+        uploadId,
+        conversationId: options.conversationId,
+        fileName: normalizedFile.name,
+        mimeType: normalizedFile.type,
+        fileSize: normalizedFile.size,
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || "Failed to get upload URL");
-      }
-
-      const payload = await response.json() as UploadResponse;
-      if (payload?.uploadURL) {
-        payload.uploadURL = resolveUploadUrlForResponse(payload.uploadURL, response.url);
-      }
-      return payload;
     },
     [buildUploadId, options.conversationId]
   );
@@ -203,31 +183,16 @@ export function useUpload(options: UseUploadOptions = {}) {
       // Use the actual file properties to request a per-file presigned URL
       const normalizedFile = normalizeFileForUpload(file as unknown as File);
       const uploadId = buildUploadId(normalizedFile.name);
-      await ensureCsrfToken();
-      const response = await apiFetch("/api/objects/upload", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Upload-Id": uploadId,
-          ...(options.conversationId ? { "X-Conversation-Id": options.conversationId } : {}),
-        },
-        body: JSON.stringify({
-          uploadId,
-          fileName: normalizedFile.name,
-          mimeType: normalizedFile.type,
-          fileSize: normalizedFile.size,
-          ...(options.conversationId ? { conversationId: options.conversationId } : {}),
-        }),
+      const data = await requestUploadUrlFromServer({
+        uploadId,
+        conversationId: options.conversationId,
+        fileName: normalizedFile.name,
+        mimeType: normalizedFile.type,
+        fileSize: normalizedFile.size,
       });
-
-      if (!response.ok) {
-        throw new Error("Failed to get upload URL");
-      }
-
-      const data = await response.json();
       return {
         method: "PUT",
-        url: resolveUploadUrlForResponse(data.uploadURL, response.url),
+        url: data.uploadURL,
         headers: {},
       };
     },

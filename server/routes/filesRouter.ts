@@ -14,6 +14,12 @@ import net from "node:net";
 import path from "node:path";
 import { getUploadActorId } from "../lib/uploadActor";
 import {
+  getLocalUploadsDir,
+  isPathWithinLocalUploadsDir,
+  resolveLocalUploadCandidates,
+  resolveLocalUploadPath,
+} from "../lib/localUploads";
+import {
   registerLocalUploadIntent,
   consumeLocalUploadIntent,
   clearLocalUploadIntents,
@@ -875,34 +881,35 @@ async function readFileBufferFromStoragePath(storagePath: string): Promise<Buffe
   }
 
   const fs = await import("fs/promises");
-  const pathMod = await import("path");
-  const uploadsDir = pathMod.default.resolve(process.cwd(), "uploads");
-  const candidates: string[] = [];
-
-  if (storagePath.startsWith("/objects/uploads/")) {
-    candidates.push(pathMod.default.join(uploadsDir, storagePath.replace("/objects/uploads/", "")));
-  }
-  if (storagePath.startsWith("/objects/")) {
-    candidates.push(pathMod.default.join(uploadsDir, storagePath.replace("/objects/", "")));
-  }
-
-  for (const localPath of candidates) {
-    const resolved = pathMod.default.resolve(localPath);
-    const safePrefix = uploadsDir + pathMod.default.sep;
-    if (!resolved.startsWith(safePrefix) && resolved !== uploadsDir) {
-      continue;
-    }
-
+  for (const localPath of resolveLocalUploadCandidates(storagePath)) {
     try {
-      const stat = await fs.stat(resolved);
+      const stat = await fs.stat(localPath);
       if (stat.size <= 0) continue;
-      return await fs.readFile(resolved);
+      return await fs.readFile(localPath);
     } catch {
       // try next candidate
     }
   }
 
   throw new Error(`File content not found for storagePath: ${storagePath}`);
+}
+
+function createLocalUploadIntentResponse(actorId: string, uploadId?: string | null): {
+  uploadURL: string;
+  storagePath: string;
+  uploadId?: string;
+  localFallback: true;
+} {
+  getLocalUploadsDir();
+  const objectId = uploadId || crypto.randomUUID();
+  const storagePath = `/objects/uploads/${objectId}`;
+  registerLocalUploadIntent(objectId, actorId, storagePath);
+  return {
+    uploadURL: `/api/local-upload/${objectId}`,
+    storagePath,
+    ...(uploadId ? { uploadId } : {}),
+    localFallback: true,
+  };
 }
 
 async function processFileInlineFallback(fileId: string, storagePath: string, mimeType: string, filename?: string): Promise<void> {
@@ -1174,7 +1181,7 @@ async function processFileAsync(fileId: string, storagePath: string, mimeType: s
 export function createFilesRouter() {
   const router = Router();
   const objectStorageService = new ObjectStorageService();
-  const uploadsDir = path.resolve(process.cwd(), "uploads");
+  const uploadsDir = getLocalUploadsDir();
 
   router.use((req, res, next) => {
     const requestId = String((req as any).requestId || req.correlationId || res.locals?.traceId || "").trim();
@@ -1300,86 +1307,44 @@ export function createFilesRouter() {
           return res.json(existingRegistration.response);
         }
 
-        try {
-          const { uploadURL, storagePath } = await objectStorageService.getObjectEntityUploadURLWithPath(uploadId);
-          const response = { uploadURL, storagePath, uploadId };
-          fileRegistrationCache.set(idempotencyKey, {
-            createdAt: Date.now(),
-            fingerprint,
-            response: {
-              uploadURL,
-              storagePath,
-              uploadId,
-            },
-            uploadId,
-            conversationId,
-            userId: actorId,
-          });
-          return res.json(response);
-        } catch (objectStorageError: unknown) {
-          console.warn("[FilesRouter] Error generating upload URL for idempotent request; using local fallback", objectStorageError);
-        }
-      }
-
-      const { uploadURL, storagePath } = await objectStorageService.getObjectEntityUploadURLWithPath(uploadId || undefined);
-      res.json({ uploadURL, storagePath, ...(uploadId ? { uploadId } : {}) });
-    } catch (error: any) {
-      // Fallback to local storage for development
-      console.log("[FilesRouter] Replit object storage unavailable, using local fallback");
-      try {
-        const fs = await import("fs");
-        const path = await import("path");
-        const crypto = await import("crypto");
-
-        const UPLOADS_DIR = path.default.join(process.cwd(), "uploads");
-        if (!fs.default.existsSync(UPLOADS_DIR)) {
-          fs.default.mkdirSync(UPLOADS_DIR, { recursive: true });
-        }
-
-        const objectId = uploadId || crypto.randomUUID();
-        const storagePath = `/objects/uploads/${objectId}`;
-        registerLocalUploadIntent(objectId, actorId, storagePath);
-        const fallbackResponse: { uploadURL: string; storagePath: string; uploadId?: string; localFallback: true } = {
-          uploadURL: `/api/local-upload/${objectId}`,
-          storagePath,
-          localFallback: true,
-        };
-        if (uploadId) {
-          const cacheKey = buildUploadCacheKey(actorId, uploadId, conversationId, "url|");
-          const existingRegistration = fileRegistrationCache.get(cacheKey);
-          const fingerprint = buildRequestFingerprint({
-            route: "/api/objects/upload",
-            localFallback: true,
-            uploadId,
-            conversationId,
-            hasFileMetadata,
-            ...(hasFileMetadata ? { fileName, mimeType: safeMimeType, fileSize } : {}),
-          });
-          if (existingRegistration) {
-            if (existingRegistration.fingerprint !== fingerprint) {
-              return res.status(409).json({ error: "Upload id reused with conflicting request" });
-            }
-            return res.json(existingRegistration.response);
+        let response: { uploadURL: string; storagePath: string; uploadId: string; localFallback?: true };
+        if (!objectStorageService.supportsDirectUploadSigning()) {
+          response = createLocalUploadIntentResponse(actorId, uploadId);
+        } else {
+          try {
+            const { uploadURL, storagePath } = await objectStorageService.getObjectEntityUploadURLWithPath(uploadId);
+            response = { uploadURL, storagePath, uploadId };
+          } catch (objectStorageError: unknown) {
+            console.warn("[FilesRouter] Error generating upload URL for idempotent request; using local fallback", objectStorageError);
+            response = createLocalUploadIntentResponse(actorId, uploadId);
           }
-
-          fileRegistrationCache.set(cacheKey, {
-            createdAt: Date.now(),
-            fingerprint,
-            response: { uploadURL: fallbackResponse.uploadURL, storagePath },
-            uploadId,
-            conversationId,
-            userId: actorId,
-          });
         }
 
-        if (uploadId) {
-          fallbackResponse.uploadId = uploadId;
-        }
-        return res.json(fallbackResponse);
-      } catch (localError: any) {
-        console.error("Error with local fallback:", localError);
-        res.status(500).json({ error: "Failed to get upload URL" });
+        fileRegistrationCache.set(idempotencyKey, {
+          createdAt: Date.now(),
+          fingerprint,
+          response,
+          uploadId,
+          conversationId,
+          userId: actorId,
+        });
+        return res.json(response);
       }
+
+      if (!objectStorageService.supportsDirectUploadSigning()) {
+        return res.json(createLocalUploadIntentResponse(actorId, uploadId));
+      }
+
+      try {
+        const { uploadURL, storagePath } = await objectStorageService.getObjectEntityUploadURLWithPath(uploadId || undefined);
+        return res.json({ uploadURL, storagePath, ...(uploadId ? { uploadId } : {}) });
+      } catch (objectStorageError: unknown) {
+        console.warn("[FilesRouter] Error generating upload URL; using local fallback", objectStorageError);
+        return res.json(createLocalUploadIntentResponse(actorId, uploadId));
+      }
+    } catch (error: any) {
+      console.error("Error generating upload URL:", error);
+      res.status(500).json({ error: "Failed to get upload URL" });
     }
   });
 
@@ -1445,14 +1410,11 @@ export function createFilesRouter() {
         res.setHeader("X-Conversation-Id", conversationId);
       }
 
-      let privateObjectDir: string;
-      let isLocalFallback = false;
-      try {
-        privateObjectDir = objectStorageService.getPrivateObjectDir();
-      } catch {
-        // Local fallback when object storage is unavailable
-        isLocalFallback = true;
-        privateObjectDir = "/local";
+      const isLocalFallback = !objectStorageService.supportsDirectUploadSigning();
+      const privateObjectDir = isLocalFallback
+        ? "/local"
+        : objectStorageService.getPrivateObjectDir();
+      if (isLocalFallback) {
         console.log("[FilesRouter] Multipart: using local fallback for chunked upload");
       }
 
@@ -1669,22 +1631,18 @@ export function createFilesRouter() {
 
         // Local fallback: concatenate part files into a single file
         const fs = await import("fs");
-        const pathMod = await import("path");
         const crypto = await import("crypto");
 
-        const UPLOADS_DIR = pathMod.default.join(process.cwd(), "uploads");
-        if (!fs.default.existsSync(UPLOADS_DIR)) {
-          fs.default.mkdirSync(UPLOADS_DIR, { recursive: true });
-        }
+        const uploadsDir = getLocalUploadsDir();
 
         const finalObjectId = crypto.randomUUID();
-        const finalPath = pathMod.default.join(UPLOADS_DIR, finalObjectId);
+        const finalPath = path.join(uploadsDir, finalObjectId);
 
         // Concatenate all part files into the final file
         const writeStream = fs.default.createWriteStream(finalPath);
         for (const partNumber of parts) {
           const partFileName = `${uploadId}_part_${partNumber}`;
-          const partPath = pathMod.default.join(UPLOADS_DIR, partFileName);
+          const partPath = path.join(uploadsDir, partFileName);
 
           if (!fs.default.existsSync(partPath)) {
             writeStream.destroy();
@@ -1705,7 +1663,7 @@ export function createFilesRouter() {
         // Clean up part files
         for (const partNumber of parts) {
           const partFileName = `${uploadId}_part_${partNumber}`;
-          const partPath = pathMod.default.join(UPLOADS_DIR, partFileName);
+          const partPath = path.join(uploadsDir, partFileName);
           try {
             await fs.promises.unlink(partPath);
           } catch {
@@ -1859,10 +1817,9 @@ export function createFilesRouter() {
       if (isLocalFallback) {
         // Clean up local part files
         const fs = await import("fs");
-        const pathMod = await import("path");
-        const UPLOADS_DIR = pathMod.default.join(process.cwd(), "uploads");
+        const uploadsDir = getLocalUploadsDir();
         for (let i = 1; i <= session.totalChunks; i++) {
-          const partPath = pathMod.default.join(UPLOADS_DIR, `${uploadId}_part_${i}`);
+          const partPath = path.join(uploadsDir, `${uploadId}_part_${i}`);
           try {
             if (fs.default.existsSync(partPath)) {
               await fs.promises.unlink(partPath);
@@ -1999,21 +1956,31 @@ export function createFilesRouter() {
         return res.status(413).json({ error: "File too large" });
       }
 
-      // Upload to object storage (or local fallback).
       let storagePath: string;
-      try {
-        const { uploadURL, storagePath: sp } = await objectStorageService.getObjectEntityUploadURLWithPath();
-        const putRes = await fetch(uploadURL, {
-          method: "PUT",
-          headers: { "Content-Type": mimeType },
-          body: download.buffer as any,
-        });
-        if (!putRes.ok) {
-          throw new Error(`Upload failed with status ${putRes.status}`);
+      if (objectStorageService.supportsDirectUploadSigning()) {
+        try {
+          const { uploadURL, storagePath: sp } = await objectStorageService.getObjectEntityUploadURLWithPath();
+          const putRes = await fetch(uploadURL, {
+            method: "PUT",
+            headers: { "Content-Type": mimeType },
+            body: download.buffer as any,
+          });
+          if (!putRes.ok) {
+            throw new Error(`Upload failed with status ${putRes.status}`);
+          }
+          storagePath = sp;
+        } catch (objectStorageError: unknown) {
+          console.warn("[FilesRouter] Import URL upload failed; using local fallback", objectStorageError);
+          const fs = await import("node:fs/promises");
+          const crypto = await import("node:crypto");
+
+          await fs.mkdir(uploadsDir, { recursive: true });
+          const objectId = crypto.randomUUID();
+          const localFilePath = path.join(uploadsDir, objectId);
+          await fs.writeFile(localFilePath, download.buffer);
+          storagePath = `/objects/uploads/${objectId}`;
         }
-        storagePath = sp;
-      } catch (error: any) {
-        // Local fallback
+      } else {
         const fs = await import("node:fs/promises");
         const crypto = await import("node:crypto");
 
@@ -2440,7 +2407,6 @@ export function createFilesRouter() {
       // Serve those files directly from disk so the client can preview attachments.
       if (req.path.startsWith("/objects/uploads/")) {
         const fs = await import("fs");
-        const pathMod = await import("path");
         const objectId = req.path.replace("/objects/uploads/", "");
 
         // Security: validate objectId to prevent path traversal
@@ -2448,12 +2414,11 @@ export function createFilesRouter() {
           return res.sendStatus(404);
         }
 
-        const localUploadsDir = pathMod.default.resolve(process.cwd(), "uploads");
-        const localFilePath = pathMod.default.resolve(localUploadsDir, objectId);
-        const safePrefix = localUploadsDir + pathMod.default.sep;
+        const localUploadsDir = getLocalUploadsDir();
+        const localFilePath = resolveLocalUploadPath(objectId);
 
         // Prevent path traversal outside uploads/.
-        if (!localFilePath.startsWith(safePrefix)) {
+        if (!isPathWithinLocalUploadsDir(localFilePath, localUploadsDir)) {
           return res.sendStatus(404);
         }
 
@@ -2517,18 +2482,9 @@ export function createFilesRouter() {
       }
 
       const fsSync = await import("fs");
-      const pathMod = await import("path");
-
-      const UPLOADS_DIR = pathMod.default.join(process.cwd(), "uploads");
-      if (!fsSync.default.existsSync(UPLOADS_DIR)) {
-        fsSync.default.mkdirSync(UPLOADS_DIR, { recursive: true });
-      }
-
-      const filePath = pathMod.default.resolve(UPLOADS_DIR, objectId);
-      // Security: ensure resolved path stays within uploads directory
-      const resolvedPath = pathMod.default.resolve(filePath);
-      const uploadsDir = pathMod.default.resolve(UPLOADS_DIR);
-      if (!resolvedPath.startsWith(uploadsDir + pathMod.default.sep) && resolvedPath !== uploadsDir) {
+      const uploadsDir = getLocalUploadsDir();
+      const filePath = resolveLocalUploadPath(objectId);
+      if (!isPathWithinLocalUploadsDir(filePath, uploadsDir)) {
         console.warn(`[Security] Path traversal attempt: ${objectId}`);
         clearLocalUploadIntent(objectId);
         return res.status(400).json({ error: "Invalid path" });
@@ -2601,14 +2557,11 @@ export function createFilesRouter() {
       }
 
       const fsSync = await import("fs");
-      const pathMod = await import("path");
-
-      const uploadsDir = pathMod.default.resolve(process.cwd(), "uploads");
-      const filePath = pathMod.default.resolve(uploadsDir, objectId);
-      const safePrefix = uploadsDir + pathMod.default.sep;
+      const uploadsDir = getLocalUploadsDir();
+      const filePath = resolveLocalUploadPath(objectId);
 
       // Security: ensure resolved path stays within uploads directory
-      if (!filePath.startsWith(safePrefix)) {
+      if (!isPathWithinLocalUploadsDir(filePath, uploadsDir)) {
         console.warn(`[Security] Path traversal attempt in local-files: ${objectId}`);
         return res.status(400).json({ error: "Invalid path" });
       }
@@ -2653,14 +2606,11 @@ export function createFilesRouter() {
       }
 
       const fsSync = await import("fs");
-      const pathMod = await import("path");
-
-      const UPLOADS_DIR = pathMod.default.resolve(process.cwd(), "uploads");
-      const filePath = pathMod.default.resolve(UPLOADS_DIR, objectId);
-      const safePrefix = UPLOADS_DIR + pathMod.default.sep;
+      const uploadsDir = getLocalUploadsDir();
+      const filePath = resolveLocalUploadPath(objectId);
 
       // Security: ensure resolved path stays within uploads directory
-      if (!filePath.startsWith(safePrefix)) {
+      if (!isPathWithinLocalUploadsDir(filePath, uploadsDir)) {
         return res.status(404).json({ error: "File not found" });
       }
 

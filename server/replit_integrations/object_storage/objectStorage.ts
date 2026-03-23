@@ -3,6 +3,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { Readable } from "stream";
+import { resolveLocalUploadPath, isPathWithinLocalUploadsDir } from "../../lib/localUploads";
 
 
 import { Storage, File } from "@google-cloud/storage"; import { Response } from "express"; import { randomUUID } from "crypto"; import {
@@ -356,10 +357,8 @@ async function readLocalUploadFallbackBuffer(objectPath: string): Promise<Buffer
     throw new ObjectNotFoundError();
   }
 
-  const uploadsDir = path.resolve(process.cwd(), "uploads");
-  const localFilePath = path.resolve(uploadsDir, objectId);
-  const safePrefix = `${uploadsDir}${path.sep}`;
-  if (!localFilePath.startsWith(safePrefix)) {
+  const localFilePath = resolveLocalUploadPath(objectId);
+  if (!isPathWithinLocalUploadsDir(localFilePath)) {
     throw new ObjectNotFoundError();
   }
 

@@ -7,7 +7,8 @@ import { cn } from "@/lib/utils";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { normalizeFileForUpload } from "@/lib/attachmentIngest";
 import { apiFetch } from "@/lib/apiClient";
-import { ensureCsrfToken, resolveUploadUrlForResponse, uploadBlobWithProgress } from "@/lib/uploadTransport";
+import { ensureCsrfToken, uploadBlobWithProgress } from "@/lib/uploadTransport";
+import { requestUploadUrl } from "@/lib/uploadUrlRequest";
 
 const VOICE_UPLOAD_ALLOWED_TYPES = new Set([
   "text/plain",
@@ -349,32 +350,16 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
     }
 
     try {
-      // Get signed upload URL from server
-      await ensureCsrfToken();
-      const uploadRes = await apiFetch("/api/objects/upload", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Upload-Id": uploadId,
-        },
-        body: JSON.stringify({
-          uploadId,
-          fileName: normalizedFile.name,
-          mimeType: normalizedType,
-          fileSize: normalizedFile.size,
-        }),
+      const { uploadURL, storagePath } = await requestUploadUrl({
+        uploadId,
+        fileName: normalizedFile.name,
+        mimeType: normalizedType,
+        fileSize: normalizedFile.size,
       });
-
-      if (!uploadRes.ok) {
-        throw new Error("No se pudo obtener la URL de subida");
-      }
-
-      const { uploadURL, storagePath } = await uploadRes.json();
-      const effectiveUploadUrl = resolveUploadUrlForResponse(uploadURL, uploadRes.url);
 
       // Upload file directly to storage
       await retryUpload(() =>
-        uploadBlobWithProgress(effectiveUploadUrl, normalizedFile, undefined, {
+        uploadBlobWithProgress(uploadURL, normalizedFile, undefined, {
           timeoutMs: 120000,
           skipContentType: true,
         })

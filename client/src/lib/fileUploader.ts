@@ -2,6 +2,7 @@ import { normalizeFileForUpload } from "@/lib/attachmentIngest";
 import { apiFetch } from "@/lib/apiClient";
 import { ensureCsrfToken, resolveUploadUrlForResponse, uploadBlobWithProgress } from "@/lib/uploadTransport";
 import type { FileStatusResponse } from "@shared/uploadContracts";
+import { requestUploadUrl } from "@/lib/uploadUrlRequest";
 
 export interface ValidationResult {
   type: 'validation_result';
@@ -352,45 +353,20 @@ export class ChunkedFileUploader {
     options: UploadOptions = {},
     onProgress: (percent: number) => void
   ): Promise<{ storagePath: string }> {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (options.uploadId) {
-      headers["X-Upload-Id"] = options.uploadId;
-    }
-    if (options.conversationId) {
-      headers["X-Conversation-Id"] = options.conversationId;
-    }
-
-    // Get upload URL with retry
-    const { uploadURL, storagePath, responseUrl } = await retryWithBackoff(async () => {
-      await ensureCsrfToken();
-      const response = await apiFetch('/api/objects/upload', {
-        method: 'POST',
-        headers,
-        ...(this.abortController?.signal ? { signal: this.abortController.signal } : {}),
-        body: JSON.stringify({
-          ...(options.uploadId ? { uploadId: options.uploadId } : {}),
-          fileName: file.name,
-          mimeType: file.type,
-          fileSize: file.size,
-          ...(options.conversationId ? { conversationId: options.conversationId } : {}),
-        }),
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to get upload URL (status ${response.status})`);
-      }
-      const data = await response.json();
-      if (!data.uploadURL || !data.storagePath) {
-        throw new Error('Server returned invalid upload configuration');
-      }
-      return { ...data, responseUrl: response.url };
-    }, 2, RETRY_BASE_DELAY_MS, this.abortController?.signal);
-    const effectiveUploadUrl = resolveUploadUrlForResponse(uploadURL, responseUrl);
+    const { uploadURL, storagePath } = await requestUploadUrl({
+      uploadId: options.uploadId,
+      conversationId: options.conversationId,
+      fileName: file.name,
+      mimeType: file.type,
+      fileSize: file.size,
+      signal: this.abortController?.signal || undefined,
+      maxRetries: 2,
+      baseDelayMs: RETRY_BASE_DELAY_MS,
+    });
 
     // Upload file with retry
     await retryWithBackoff(
-      () => uploadBlobWithProgress(effectiveUploadUrl, file, onProgress, {
+      () => uploadBlobWithProgress(uploadURL, file, onProgress, {
         timeoutMs: 90_000,
         skipContentType: true,
       }),

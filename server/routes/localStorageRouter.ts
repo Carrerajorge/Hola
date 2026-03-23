@@ -5,8 +5,8 @@ import path from "path";
 import { Transform } from "stream";
 import { pipeline } from "stream/promises";
 import { LIMITS } from "../lib/constants";
+import { getLocalUploadsDir } from "../lib/localUploads";
 
-const UPLOADS_DIR = path.join(process.cwd(), "uploads");
 const MAX_UPLOAD_SIZE = LIMITS.MAX_FILE_SIZE_BYTES;
 const LOCAL_UPLOAD_TIMEOUT_MS = Number(process.env.LOCAL_UPLOAD_TIMEOUT_MS || "600000");
 
@@ -15,17 +15,16 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0
 
 /** Validate objectId is a safe UUID and resolve path stays within uploads dir */
 function validateObjectId(objectId: string): { valid: boolean; filePath?: string } {
+    const uploadsDir = getLocalUploadsDir();
     if (!UUID_PATTERN.test(objectId)) return { valid: false };
-    const filePath = path.resolve(UPLOADS_DIR, objectId);
-    const safePrefix = path.resolve(UPLOADS_DIR) + path.sep;
+    const filePath = path.resolve(uploadsDir, objectId);
+    const safePrefix = path.resolve(uploadsDir) + path.sep;
     if (!filePath.startsWith(safePrefix)) return { valid: false };
     return { valid: true, filePath };
 }
 
 // Ensure uploads directory exists
-if (!fs.existsSync(UPLOADS_DIR)) {
-    fs.mkdirSync(UPLOADS_DIR, { recursive: true, mode: 0o750 });
-}
+getLocalUploadsDir();
 
 export function createLocalStorageRouter() {
     const router = Router();

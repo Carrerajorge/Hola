@@ -3,6 +3,7 @@ import fs from "fs/promises";
 import fsSync from "fs";
 import path from "path";
 import { randomUUID } from "crypto";
+import { getLocalObjectStorageDir, resolveLocalUploadPath } from "./lib/localUploads";
 
 export class ObjectNotFoundError extends Error {
   constructor() {
@@ -22,8 +23,8 @@ export class File {
     this.name = objectName;
     this.bucketName = bucketName;
     
-    // Default to /uploads/objects inside the project cwd
-    const baseUploadsDir = path.join(process.cwd(), "uploads", "objects");
+    // Keep mock object storage files in a writable local directory.
+    const baseUploadsDir = getLocalObjectStorageDir();
     this.fullPath = path.join(baseUploadsDir, bucketName, objectName);
   }
 
@@ -75,6 +76,10 @@ export class File {
 
 export class ObjectStorageService {
   constructor() {}
+
+  supportsDirectUploadSigning(): boolean {
+    return false;
+  }
 
   getPublicObjectSearchPaths(): Array<string> {
     const pathsStr = process.env.PUBLIC_OBJECT_SEARCH_PATHS || "public-bucket";
@@ -135,15 +140,16 @@ export class ObjectStorageService {
   }
 
   async getObjectEntityUploadURLWithPath(uploadId?: string): Promise<{ uploadURL: string; storagePath: string }> {
+    if (!this.supportsDirectUploadSigning()) {
+      throw new Error("Local fallback triggered intentionally for Native Server deployment.");
+    }
+
     // Generate the path and throw naturally forcing the filesRouter fallback to use local storage mechanism.
     // That route already implements `local-upload` for everything!
     const privateObjectDir = this.getPrivateObjectDir();
     const objectId = uploadId || randomUUID();
     const entityId = `uploads/${objectId}`;
     
-    // We explicitly throw an error here to immediately trigger the local fallback in filesRouter.ts.
-    // The existing filesRouter.ts already gracefully handles local uploads and multipart local chunks perfectly.
-    // By throwing instead of hanging for 3 seconds on Replit API, uploads are instantaneous and local!
     throw new Error("Local fallback triggered intentionally for Native Server deployment.");
   }
 
@@ -168,11 +174,13 @@ export class ObjectStorageService {
     const objectFile = new File(bucketName, objectName);
     const [exists] = await objectFile.exists();
     if (!exists) {
-      // Local fallback in filesRouter saves directly to uploads/objectId, not uploads/objects/bucket/...
-      // So check the fallback path as well!
-      const fallbackFile = new File("..", `../uploads/${entityId.replace('uploads/', '')}`);
-      const [fallbackExists] = await fallbackFile.exists();
-      if(fallbackExists) return fallbackFile;
+      // Local fallback writes directly to the local uploads directory.
+      const fallbackPath = resolveLocalUploadPath(entityId.replace("uploads/", ""));
+      if (fsSync.existsSync(fallbackPath)) {
+        const fallbackFile = new File("..", `../uploads/${entityId.replace("uploads/", "")}`);
+        (fallbackFile as any).fullPath = fallbackPath;
+        return fallbackFile;
+      }
       
       throw new ObjectNotFoundError();
     }

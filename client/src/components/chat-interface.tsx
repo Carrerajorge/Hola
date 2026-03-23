@@ -13,9 +13,9 @@ import { apiFetch, getAnonUserIdHeader } from "@/lib/apiClient";
 import { getFileUploader } from "@/lib/fileUploader";
 import {
   ensureCsrfToken,
-  resolveUploadUrlForResponse,
   uploadBlobWithProgress,
 } from "@/lib/uploadTransport";
+import { requestUploadUrl } from "@/lib/uploadUrlRequest";
 import { WelcomeAnimation } from "@/components/welcome-animation-simple";
 import {
   Plus,
@@ -4840,41 +4840,17 @@ export function ChatInterface({
             }
           };
 
-          await ensureCsrfToken();
-          const urlRes = await retryFetch(
-            () =>
-              apiFetch("/api/objects/upload", {
-                method: "POST",
-                headers: uploadHeaders,
-                body: JSON.stringify({
-                  uploadId,
-                  fileName: file.name,
-                  mimeType: file.type,
-                  fileSize: file.size,
-                  ...(stableConversationId
-                    ? { conversationId: stableConversationId }
-                    : {}),
-                }),
-              }),
-            2,
-          );
-          const urlData = await safeJson(urlRes);
-          if (!urlRes.ok) {
-            throw new Error(
-              urlData?.error ||
-                `Failed to get upload URL (status ${urlRes.status})`,
-            );
-          }
-          const { uploadURL, storagePath } = urlData || {};
-          if (!uploadURL || !storagePath)
-            throw new Error("No upload URL received");
-          const effectiveUploadUrl = resolveUploadUrlForResponse(
-            uploadURL,
-            urlRes.url,
-          );
+          const { uploadURL, storagePath } = await requestUploadUrl({
+            uploadId,
+            conversationId: stableConversationId,
+            fileName: file.name,
+            mimeType: file.type,
+            fileSize: file.size,
+            maxRetries: 2,
+          });
 
           await retryUpload(() =>
-            uploadBlobWithProgress(effectiveUploadUrl, file, undefined, {
+            uploadBlobWithProgress(uploadURL, file, undefined, {
               timeoutMs: 120000,
               skipContentType: true,
             }),
