@@ -5,6 +5,7 @@ import { spawn } from "child_process";
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times.
 const allowlist: string[] = [];
+const buildPhase = process.env.ILIAGPT_BUILD_PHASE ?? "all";
 
 async function bumpBuiltSwCleanupVersion() {
   // Ensure the built SW cleanup script changes on each production build.
@@ -66,25 +67,7 @@ async function buildEmbeddedOpenClawControlUi() {
   console.log("[build] embedded openclaw control ui ready");
 }
 
-async function buildAll() {
-  await rm("dist", { recursive: true, force: true });
-
-  await buildEmbeddedOpenClawControlUi();
-
-  console.log("building client...");
-  // Some environments terminate long-running commands that don't emit output.
-  // Emit a small heartbeat while Vite is working to keep logs alive.
-  const clientHeartbeat = setInterval(() => {
-    console.log("[build] client build still running...");
-  }, 15000);
-  try {
-    await viteBuild();
-  } finally {
-    clearInterval(clientHeartbeat);
-  }
-
-  await bumpBuiltSwCleanupVersion();
-
+async function buildServer(appVersion: string) {
   console.log("building server...");
   const pkg = JSON.parse(await readFile("package.json", "utf-8"));
   const allDeps = [
@@ -92,7 +75,6 @@ async function buildAll() {
     ...Object.keys(pkg.devDependencies || {}),
   ];
   const externals = allDeps.filter((dep) => !allowlist.includes(dep));
-  const appVersion = process.env.VITE_APP_VERSION || process.env.APP_VERSION || `build-${Date.now()}`;
 
   // Common esbuild options for optimal bundle size
   const commonOptions = {
@@ -251,6 +233,62 @@ import(pathToFileURL(join(__dirname, "agent/sandboxRunner/index.mjs")).href).cat
 });
 `;
   await writeFile("dist/sandbox-runner.cjs", sandboxRunnerWrapper, "utf-8");
+}
+
+async function buildServerInFreshProcess(appVersion: string) {
+  console.log("[build] starting fresh server build process...");
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(process.execPath, ["--import", "tsx", "script/build.ts"], {
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        ILIAGPT_BUILD_PHASE: "server",
+        ILIAGPT_BUILD_VERSION: appVersion,
+      },
+    });
+
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`[build] Server build subprocess failed with exit code ${code ?? "unknown"}`));
+    });
+  });
+}
+
+async function buildAll() {
+  if (buildPhase === "server") {
+    const appVersion =
+      process.env.ILIAGPT_BUILD_VERSION ||
+      process.env.VITE_APP_VERSION ||
+      process.env.APP_VERSION ||
+      `build-${Date.now()}`;
+    await buildServer(appVersion);
+    return;
+  }
+
+  await rm("dist", { recursive: true, force: true });
+
+  await buildEmbeddedOpenClawControlUi();
+
+  console.log("building client...");
+  // Some environments terminate long-running commands that don't emit output.
+  // Emit a small heartbeat while Vite is working to keep logs alive.
+  const clientHeartbeat = setInterval(() => {
+    console.log("[build] client build still running...");
+  }, 15000);
+  try {
+    await viteBuild();
+  } finally {
+    clearInterval(clientHeartbeat);
+  }
+
+  const appVersion = process.env.VITE_APP_VERSION || process.env.APP_VERSION || `build-${Date.now()}`;
+  await bumpBuiltSwCleanupVersion();
+  await buildServerInFreshProcess(appVersion);
 }
 
 
