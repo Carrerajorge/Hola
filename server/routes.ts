@@ -1267,12 +1267,20 @@ export async function registerRoutes(
   // Serve the OpenClaw Control UI as embedded static assets.
   // The built UI lives at server/openclaw/dist/control-ui/ and is mounted at /openclaw-ui/.
   {
+    const fs = await import("fs");
     const path = await import("path");
     const express = await import("express");
-    const openClawUiPath = path.default.resolve(
-      path.default.dirname(new URL(import.meta.url).pathname),
-      "openclaw/dist/control-ui",
-    );
+    const runtimeDir = path.default.dirname(new URL(import.meta.url).pathname);
+    const openClawUiCandidates = [
+      path.default.resolve(process.cwd(), "server/openclaw/dist/control-ui"),
+      path.default.resolve(runtimeDir, "../server/openclaw/dist/control-ui"),
+      path.default.resolve(runtimeDir, "openclaw/dist/control-ui"),
+    ];
+    const openClawUiPath =
+      openClawUiCandidates.find((candidate) =>
+        fs.existsSync(path.default.join(candidate, "index.html")),
+      ) ?? openClawUiCandidates[0];
+    const openClawUiIndexPath = path.default.join(openClawUiPath, "index.html");
 
     // Serve config stub so the embedded UI can bootstrap itself.
     app.get("/openclaw-ui/__openclaw/control-ui-config.json", (_req: Request, res: Response) => {
@@ -1284,11 +1292,19 @@ export async function registerRoutes(
       });
     });
 
+    app.get("/openclaw-ui", (_req: Request, res: Response) => {
+      res.sendFile(openClawUiIndexPath);
+    });
+
+    app.get("/openclaw-ui/", (_req: Request, res: Response) => {
+      res.sendFile(openClawUiIndexPath);
+    });
+
     app.use("/openclaw-ui", express.default.static(openClawUiPath));
 
     // SPA fallback: any deep route inside /openclaw-ui/ serves index.html.
     app.get("/openclaw-ui/*", (_req: Request, res: Response) => {
-      res.sendFile(path.default.join(openClawUiPath, "index.html"));
+      res.sendFile(openClawUiIndexPath);
     });
   }
 
