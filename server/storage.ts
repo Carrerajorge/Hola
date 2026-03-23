@@ -115,6 +115,10 @@ function getSqlMessage(error: any): string {
     .join("\n");
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
 function isMissingColumnError(error: any, columnNames: string[] = []): boolean {
   if (getSqlCode(error) === "42703") {
     return true;
@@ -477,6 +481,7 @@ export interface IStorage {
   updateChatMessageAnalysis(id: string, updates: Partial<InsertChatMessageAnalysis>): Promise<ChatMessageAnalysis | undefined>;
   // Conversation Documents - Persistent document context
   createConversationDocument(doc: InsertConversationDocument): Promise<ConversationDocument>;
+  upsertConversationDocument(doc: InsertConversationDocument): Promise<ConversationDocument>;
   getConversationDocuments(chatId: string): Promise<ConversationDocument[]>;
   deleteConversationDocument(id: string): Promise<void>;
   // Admin: User monitoring
@@ -3280,6 +3285,92 @@ export class MemStorage implements IStorage {
       });
     }
     return result;
+  }
+
+  async upsertConversationDocument(doc: InsertConversationDocument): Promise<ConversationDocument> {
+    const normalizedFileName = String(doc.fileName || "document").trim() || "document";
+    const normalizedMessageId =
+      typeof doc.messageId === "string" && doc.messageId.trim().length > 0
+        ? doc.messageId.trim()
+        : null;
+    const normalizedStoragePath =
+      typeof doc.storagePath === "string" && doc.storagePath.trim().length > 0
+        ? doc.storagePath.trim()
+        : null;
+
+    const lookupCondition = normalizedMessageId
+      ? and(
+          eq(conversationDocuments.chatId, doc.chatId),
+          eq(conversationDocuments.messageId, normalizedMessageId),
+          eq(conversationDocuments.fileName, normalizedFileName),
+        )
+      : normalizedStoragePath
+        ? and(
+            eq(conversationDocuments.chatId, doc.chatId),
+            eq(conversationDocuments.storagePath, normalizedStoragePath),
+          )
+        : and(
+            eq(conversationDocuments.chatId, doc.chatId),
+            eq(conversationDocuments.fileName, normalizedFileName),
+          );
+
+    const [existing] = await dbRead
+      .select()
+      .from(conversationDocuments)
+      .where(lookupCondition)
+      .orderBy(desc(conversationDocuments.createdAt))
+      .limit(1);
+
+    if (!existing) {
+      return this.createConversationDocument({
+        ...doc,
+        fileName: normalizedFileName,
+        messageId: normalizedMessageId,
+        storagePath: normalizedStoragePath,
+      });
+    }
+
+    const mergedMetadata =
+      isRecord(existing.metadata) && isRecord(doc.metadata)
+        ? { ...existing.metadata, ...doc.metadata }
+        : doc.metadata ?? existing.metadata;
+    const nextExtractedText =
+      typeof doc.extractedText === "string" && doc.extractedText.trim().length > 0
+        ? doc.extractedText
+        : existing.extractedText;
+
+    const [updated] = await db
+      .update(conversationDocuments)
+      .set({
+        messageId: normalizedMessageId ?? existing.messageId,
+        fileName: normalizedFileName,
+        storagePath: normalizedStoragePath ?? existing.storagePath,
+        mimeType: doc.mimeType || existing.mimeType,
+        fileSize: doc.fileSize ?? existing.fileSize,
+        extractedText: nextExtractedText,
+        metadata: mergedMetadata,
+      })
+      .where(eq(conversationDocuments.id, existing.id))
+      .returning();
+
+    if (
+      typeof doc.extractedText === "string" &&
+      doc.extractedText.trim().length > 0 &&
+      doc.extractedText !== existing.extractedText
+    ) {
+      queueMicrotask(() => {
+        knowledgeBaseService.ingestConversationDocument({
+          chatId: doc.chatId,
+          documentId: updated.id,
+          fileName: normalizedFileName,
+          content: doc.extractedText || "",
+        }).catch((error) => {
+          console.warn("[Knowledge] Failed to ingest conversation document:", error?.message || error);
+        });
+      });
+    }
+
+    return updated;
   }
 
   async getConversationDocuments(chatId: string): Promise<ConversationDocument[]> {

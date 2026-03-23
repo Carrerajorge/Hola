@@ -507,6 +507,27 @@ interface UploadedFile {
   };
 }
 
+const DOC_ANALYSIS_PLACEHOLDER_RE =
+  /^analizando documentos adjuntos[.….\s]*$/i;
+
+function isDocumentAnalysisPlaceholderMessage(message: Message | null | undefined): boolean {
+  if (!message || message.role !== "assistant") return false;
+
+  const normalizedContent = (message.content || "").trim();
+  if (DOC_ANALYSIS_PLACEHOLDER_RE.test(normalizedContent)) return true;
+
+  const messageId = String(message.id || "");
+  const tempId = String(message.clientTempId || "");
+  const isAnalysisMessage =
+    messageId.startsWith("analysis-") || tempId.startsWith("analysis-");
+
+  return (
+    isAnalysisMessage &&
+    !!message.userMessageId &&
+    (message.deliveryStatus === "sending" || message.deliveryStatus === "error")
+  );
+}
+
 function isAnalyzableFile(filename: string): boolean {
   const ext = filename.toLowerCase().split(".").pop();
   return [
@@ -1657,6 +1678,16 @@ export function ChatInterface({
     chatId,
     currentAgentMessageId,
   ]);
+
+  const hasActiveDocumentAnalysis = useMemo(
+    () =>
+      displayMessages.some(
+        (message) =>
+          isDocumentAnalysisPlaceholderMessage(message) &&
+          message.deliveryStatus !== "error",
+      ),
+    [displayMessages],
+  );
 
   // Reset current agent message ID when chatId changes - polling auto-starts via useAgentPolling
   useEffect(() => {
@@ -2858,6 +2889,7 @@ export function ChatInterface({
             messages: opts.history,
             attachments: analysisAttachmentPayload,
             conversationId: normalizedConversationId,
+            userMessageId: opts.userMessageId,
           }),
           signal: analysisAbortControllerRef.current.signal,
         });
@@ -3048,8 +3080,11 @@ export function ChatInterface({
     )
       return;
 
+    if (analysisAbortControllerRef.current) return;
+
     const lastMessage = displayMessages[displayMessages.length - 1];
     if (!lastMessage || lastMessage.role !== "assistant") return;
+    if (isDocumentAnalysisPlaceholderMessage(lastMessage)) return;
     if (aiStateRef.current === "idle") return;
 
     setAiStateForChat("idle", chatId || "default");
@@ -10066,6 +10101,7 @@ IMPORTANTE:
                       {aiState !== "idle" &&
                         !isGeneratingImage &&
                         (!aiStateChatId || chatId === aiStateChatId) &&
+                        !hasActiveDocumentAnalysis &&
                         uiPhase !== "console" && (
                           <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
                             {/* Streaming Indicator with cancel button */}
@@ -10513,6 +10549,7 @@ IMPORTANTE:
               <div className="flex-1 min-h-0 flex flex-col items-center justify-center px-4">
                 {aiState !== "idle" &&
                 (!aiStateChatId || chatId === aiStateChatId) &&
+                !hasActiveDocumentAnalysis &&
                 uiPhase !== "console" ? (
                   /* Processing indicators when AI is working */
                   <div className="w-full max-w-3xl mx-auto flex flex-col gap-4">

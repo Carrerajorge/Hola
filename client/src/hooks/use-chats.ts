@@ -611,9 +611,11 @@ function normalizeMessage(raw: unknown, options: {
     agentRun: normalizeAgentRun(source.agentRun),
     artifact: isPlainObject(source.artifact) ? source.artifact as MessageArtifact : undefined,
     webSources: normalizeWebSources(source.webSources ?? metadata?.webSources),
-    documentAnalysis: normalizeDocumentAnalysis(source.documentAnalysis),
+    documentAnalysis: normalizeDocumentAnalysis(source.documentAnalysis ?? metadata?.documentAnalysis),
     ui_components: Array.isArray(source.ui_components)
       ? source.ui_components.filter((component: any): component is string => typeof component === "string")
+      : Array.isArray(metadata?.ui_components)
+        ? metadata.ui_components.filter((component: any): component is string => typeof component === "string")
       : undefined,
     confidence,
     uncertaintyReason:
@@ -2234,6 +2236,8 @@ export function useChats() {
             gmailPreview: normalizedMessage.gmailPreview,
             generatedImage: normalizedMessage.generatedImage,
             webSources: normalizedMessage.webSources,
+            documentAnalysis: normalizedMessage.documentAnalysis,
+            ui_components: normalizedMessage.ui_components,
             confidence: normalizedMessage.confidence,
             uncertaintyReason: normalizedMessage.uncertaintyReason,
             retrievalSteps: normalizedMessage.retrievalSteps,

@@ -19,7 +19,7 @@ import { AgentArtifact } from "@/components/agent-steps-display";
 // so the streaming message and the finalized message share the SAME key,
 // preventing Virtuoso from unmounting/remounting the DOM node.
 const STREAMING_MSG_ID_FALLBACK = "__streaming__";
-const DOC_ANALYSIS_PLACEHOLDER_RE = /^analizando documentos adjuntos[.…\.\s]*$/i;
+const DOC_ANALYSIS_PLACEHOLDER_RE = /^analizando documentos adjuntos[.….\s]*$/i;
 
 type DocumentAnalysisIndicatorState = {
     state: "processing" | "error";
@@ -200,11 +200,7 @@ export function ChatMessageList({
         return !!activeDocumentAnalysisUserMessageId;
     }, [activeDocumentAnalysisUserMessageId]);
 
-    const visibleMessages = useMemo(() => {
-        return messages.filter((msg) => {
-            return !isDocumentAnalysisPlaceholder(msg);
-        });
-    }, [messages]);
+    const visibleMessages = useMemo(() => messages, [messages]);
 
     const lastAssistantMessage = useMemo(() => {
         return visibleMessages.filter(m => m.role === "assistant").pop();
@@ -350,23 +346,6 @@ export function ChatMessageList({
             );
         }
 
-        const documentAnalysisIndicator =
-            msg.role === "user"
-                ? (() => {
-                    if (!activeDocumentAnalysisUserMessageId) return undefined;
-                    const isActiveMessage =
-                        msg.id === activeDocumentAnalysisUserMessageId ||
-                        msg.clientTempId === activeDocumentAnalysisUserMessageId;
-                    if (!isActiveMessage) return undefined;
-
-                    return (
-                        documentAnalysisStatusByUserMessageId[activeDocumentAnalysisUserMessageId] ||
-                        documentAnalysisStatusByUserMessageId[msg.id] ||
-                        (msg.clientTempId ? documentAnalysisStatusByUserMessageId[msg.clientTempId] : undefined)
-                    );
-                })()
-                : undefined;
-
         // Regular message
         return (
             <div className="pb-4 px-2">
@@ -410,11 +389,6 @@ export function ChatMessageList({
                     onQuestionClick={onQuestionClick}
                     onToolConfirm={onToolConfirm}
                     onToolDeny={onToolDeny}
-                    documentAnalysisStatus={
-                        documentAnalysisIndicator
-                            ? { state: documentAnalysisIndicator.state, text: documentAnalysisIndicator.text }
-                            : undefined
-                    }
                 />
             </div>
         );
@@ -429,8 +403,7 @@ export function ChatMessageList({
         minimizedDocument, onRestoreDocument, setEditContent,
         onAgentCancel, onAgentRetry, onAgentArtifactPreview,
         onSuperAgentCancel, onSuperAgentRetry, onQuestionClick,
-        effectiveStreamingId, streamingContent, onUserRetrySend,
-        documentAnalysisStatusByUserMessageId, activeDocumentAnalysisUserMessageId
+        effectiveStreamingId, streamingContent, onUserRetrySend
     ]);
 
     return (

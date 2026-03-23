@@ -8,6 +8,7 @@ const resolveSkillContextMock = vi.fn();
 const buildSkillSectionMock = vi.fn();
 const normalizeDocumentMock = vi.fn();
 const routeIntentMock = vi.fn();
+const upsertConversationDocumentMock = vi.fn();
 
 vi.mock("../services/ChatServiceV2", () => ({
   chatService: { chat: chatMock },
@@ -31,6 +32,8 @@ vi.mock("../storage", () => ({
     createChat: vi.fn(async () => null),
     createChatMessage: vi.fn(async () => ({ id: "m1" })),
     getFile: vi.fn(async () => null),
+    upsertConversationDocument: upsertConversationDocumentMock,
+    getConversationDocuments: vi.fn(async () => []),
   },
 }));
 
@@ -127,6 +130,7 @@ describe("chat analyze route", () => {
       fallback_used: false,
       clarification_question: null,
     });
+    upsertConversationDocumentMock.mockResolvedValue({ id: "conv_doc_1" });
 
     normalizeDocumentMock.mockResolvedValue({
       version: "1.0",
@@ -204,8 +208,9 @@ describe("chat analyze route", () => {
       expect(response.body.answer_text).toContain("Resumen breve");
       expect(llmStreamChatMock).toHaveBeenCalledOnce();
       expect(normalizeDocumentMock).toHaveBeenCalledOnce();
+      expect(upsertConversationDocumentMock).toHaveBeenCalledOnce();
     } finally {
       await close();
     }
-  }, 60000);
+  }, 120000);
 });

@@ -292,6 +292,53 @@ function buildFallbackKnowledgeContext(
     .join("\n\n");
 }
 
+const MAX_PERSISTENT_CONVERSATION_DOCS = 4;
+const MAX_PERSISTENT_DOC_CONTEXT_CHARS = 24_000;
+const MAX_SINGLE_PERSISTENT_DOC_CHARS = 8_000;
+
+function buildPersistentConversationDocumentContext(
+  docs: Array<{
+    fileName?: string | null;
+    extractedText?: string | null;
+  }>,
+): string {
+  const candidates = docs
+    .filter(
+      (doc) =>
+        typeof doc.extractedText === "string" &&
+        doc.extractedText.trim().length > 0,
+    )
+    .slice(-MAX_PERSISTENT_CONVERSATION_DOCS);
+
+  if (candidates.length === 0) return "";
+
+  let remainingChars = MAX_PERSISTENT_DOC_CONTEXT_CHARS;
+  const parts = [
+    "[CONTEXTO DOCUMENTAL DEL HILO]",
+    "Estos documentos pertenecen a esta misma conversación.",
+    "Úsalos como memoria activa para responder seguimientos sin pedir que el usuario los vuelva a subir.",
+  ];
+
+  for (const [index, doc] of candidates.entries()) {
+    if (remainingChars <= 0) break;
+
+    const safeText = (doc.extractedText || "").trim();
+    if (!safeText) continue;
+
+    const excerpt = safeText.slice(
+      0,
+      Math.min(MAX_SINGLE_PERSISTENT_DOC_CHARS, remainingChars),
+    );
+    remainingChars -= excerpt.length;
+
+    parts.push(
+      `\n--- Documento ${index + 1}: ${doc.fileName || "archivo"} ---\n${excerpt}`,
+    );
+  }
+
+  return parts.join("\n");
+}
+
 function buildFallbackGptSessionContract(
   gpt: any,
   requestId: string,
@@ -9663,6 +9710,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
         // Process attachments using DocumentBatchProcessor for atomic batch handling
         let attachmentContext = "";
+        let persistentConversationDocumentContext = "";
         let batchResult: BatchProcessingResult | null = null;
         const hasAttachments = resolvedAttachments.length > 0;
         const attachmentsCount = hasAttachments
@@ -9788,6 +9836,34 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
             clearInterval(heartbeatInterval);
             clearStreamTimeouts();
             return res.end();
+          }
+        }
+
+        const persistentDocumentChatId = (
+          chatId ||
+          conversationId ||
+          streamConversationId ||
+          ""
+        ).trim();
+        if (!hasAttachments && persistentDocumentChatId) {
+          try {
+            const conversationDocs =
+              await storage.getConversationDocuments(persistentDocumentChatId);
+            persistentConversationDocumentContext =
+              buildPersistentConversationDocumentContext(conversationDocs);
+
+            if (persistentConversationDocumentContext) {
+              console.log("[Stream] Loaded persistent conversation documents", {
+                chatId: persistentDocumentChatId,
+                documents: conversationDocs.length,
+                contextChars: persistentConversationDocumentContext.length,
+              });
+            }
+          } catch (persistentDocError) {
+            console.warn(
+              "[Stream] Failed to load persistent conversation documents:",
+              (persistentDocError as any)?.message || persistentDocError,
+            );
           }
         }
 
@@ -10060,6 +10136,10 @@ ${citationFormats}
 
 CONTENIDO DE LOS DOCUMENTOS:
 ${attachmentContext}`;
+        }
+
+        if (!hasAttachments && persistentConversationDocumentContext) {
+          systemContent += `\n\nDOCUMENTOS PREVIOS DE ESTA CONVERSACION:\n${persistentConversationDocumentContext}`;
         }
 
         // Apply user personalization (style, custom instructions, profile) and semantic memory.
@@ -11261,7 +11341,7 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
       });
 
       try {
-        const { messages, attachments, conversationId } = req.body;
+        const { messages, attachments, conversationId, userMessageId } = req.body;
 
         // GUARD: attachments are REQUIRED for /analyze endpoint
         if (
@@ -11562,6 +11642,57 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
           stats: processingStats,
           documentModels,
         };
+
+        const persistedAnalysisChatId =
+          typeof conversationId === "string" ? conversationId.trim() : "";
+        const persistedAnalysisMessageId =
+          typeof userMessageId === "string" && userMessageId.trim().length > 0
+            ? userMessageId.trim()
+            : null;
+
+        if (
+          persistedAnalysisChatId &&
+          !persistedAnalysisChatId.startsWith("pending-") &&
+          !persistedAnalysisChatId.startsWith("temp_")
+        ) {
+          await Promise.allSettled(
+            resolvedAttachments.map(async (att) => {
+              const matchingDoc = documentModels.find(
+                (doc) => doc.documentMeta.fileName === (att.name || "document"),
+              );
+              if (!matchingDoc) return;
+
+              const extractedText = matchingDoc.sections
+                .map((section) => section.content || "")
+                .filter((content) => content.trim().length > 0)
+                .join("\n\n")
+                .trim();
+
+              await storage.upsertConversationDocument({
+                chatId: persistedAnalysisChatId,
+                messageId: persistedAnalysisMessageId,
+                fileName:
+                  att.name || matchingDoc.documentMeta.fileName || "document",
+                storagePath: att.storagePath || null,
+                mimeType:
+                  att.mimeType ||
+                  att.type ||
+                  matchingDoc.documentMeta.mimeType ||
+                  "application/octet-stream",
+                fileSize:
+                  typeof att.size === "number" && Number.isFinite(att.size)
+                    ? att.size
+                    : matchingDoc.documentMeta.fileSize,
+                extractedText: extractedText || null,
+                metadata: {
+                  fileId: att.fileId || att.id || null,
+                  documentType: matchingDoc.documentMeta.documentType,
+                  source: "chat_analyze",
+                },
+              });
+            }),
+          );
+        }
 
         // Determine parser used based on mimeType/extension
         const getParserInfo = (
