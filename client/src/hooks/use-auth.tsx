@@ -178,11 +178,88 @@ function setForcedSignedOut(enabled: boolean): void {
 
 // --- Fetch Logic ---
 
+type SessionIdentityPayload = {
+  userId?: string | null;
+  email?: string | null;
+  role?: string | null;
+  token?: string | null;
+  isAnonymous?: boolean;
+};
+
+function applyAuthenticatedUser(user: User): User {
+  setStoredUser(user);
+  clearAnonUserId();
+  setForcedSignedOut(false);
+  return user;
+}
+
+function parseSessionIdentityUser(identity: SessionIdentityPayload): User | null {
+  if (!identity.userId || typeof identity.userId !== "string") return null;
+
+  if (identity.isAnonymous) {
+    setStoredAnonUserId(identity.userId);
+    if (identity.token) {
+      setStoredAnonToken(identity.token);
+    }
+    return {
+      id: identity.userId,
+      isAnonymous: true,
+      username: `Guest-${identity.userId.slice(0, 4)}`,
+      role: "user",
+    } as User;
+  }
+
+  return {
+    id: identity.userId,
+    email: typeof identity.email === "string" ? identity.email : undefined,
+    role: typeof identity.role === "string" ? identity.role : "user",
+    isAnonymous: false,
+  } as User;
+}
+
+async function fetchSessionIdentity(headers: HeadersInit): Promise<User | null> {
+  try {
+    const identityRes = await fetch("/api/session/identity", {
+      credentials: "include",
+      headers,
+    });
+    if (!identityRes.ok) return null;
+
+    const identity = (await identityRes.json()) as SessionIdentityPayload;
+    return parseSessionIdentityUser(identity);
+  } catch (e) {
+    console.error("Failed to get session identity:", e);
+    return null;
+  }
+}
+
 async function fetchUser(): Promise<User | null> {
   const storedAnonId = getStoredAnonUserId();
   const headers: HeadersInit = {};
   if (storedAnonId) {
     headers['X-Anonymous-User-Id'] = storedAnonId;
+  }
+
+  const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
+  const search = typeof window !== "undefined" ? window.location.search : "";
+  const forcedSignedOut = isForcedSignedOut();
+  const publicAuthRoute = isPublicAuthRoute(pathname);
+  const loggedOut = hasLoggedOutMarker(search);
+  const oauthSuccess = hasOAuthSuccessMarker(search);
+
+  if (publicAuthRoute && !loggedOut && !oauthSuccess && !forcedSignedOut) {
+    const identityUser = await fetchSessionIdentity(headers);
+    if (!identityUser) {
+      clearOldUserData();
+      return null;
+    }
+
+    if (isAnonymousUser(identityUser)) {
+      clearOldUserData();
+      return null;
+    }
+
+    return applyAuthenticatedUser(identityUser);
   }
 
   const response = await fetch("/api/auth/user", {
@@ -196,57 +273,27 @@ async function fetchUser(): Promise<User | null> {
       clearOldUserData();
       return null;
     }
-    setStoredUser(user);
-    clearAnonUserId();
-    setForcedSignedOut(false);
-    return user;
+    return applyAuthenticatedUser(user);
   }
-
-  const tryAnonymousIdentity = async (): Promise<User | null> => {
-    try {
-      const identityRes = await fetch("/api/session/identity", {
-        credentials: "include",
-        headers,
-      });
-      if (identityRes.ok) {
-        const identity = await identityRes.json();
-        if (identity.userId) {
-          setStoredAnonUserId(identity.userId);
-          if (identity.token) {
-            setStoredAnonToken(identity.token);
-          }
-          return {
-            id: identity.userId,
-            isAnonymous: true,
-            username: `Guest-${identity.userId.slice(0, 4)}`,
-            role: 'user',
-          } as User;
-        }
-      }
-    } catch (e) {
-      console.error("Failed to get session identity:", e);
-    }
-    return null;
-  };
   
   if (response.status === 401 || response.status === 403) {
     clearOldUserData();
 
     // Public/auth routes should stay fast and OAuth callback recovery must not fall back to guest mode.
-    if (shouldSkipAnonymousIdentity(window.location.pathname, window.location.search, isForcedSignedOut())) {
-      if (hasLoggedOutMarker(window.location.search)) setForcedSignedOut(true);
+    if (shouldSkipAnonymousIdentity(pathname, search, forcedSignedOut)) {
+      if (loggedOut) setForcedSignedOut(true);
       return null;
     }
 
-    return await tryAnonymousIdentity();
+    return await fetchSessionIdentity(headers);
   }
 
   console.error("Auth fetch failed:", response.status, response.statusText);
 
   // ✅ Si está forzado signed-out, no intentes Guest tampoco
-  if (isForcedSignedOut()) return null;
+  if (forcedSignedOut) return null;
 
-  return await tryAnonymousIdentity();
+  return await fetchSessionIdentity(headers);
 
 }
 
