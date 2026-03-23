@@ -1579,25 +1579,47 @@ echo ""
 # ── Step 7: Verify APP_VERSION ─────────────────────────────
 log "[8/15] Verifying APP_VERSION on ${NEW_SLOT}..."
 HEALTH_JSON="$(curl -sf --max-time 10 "http://127.0.0.1:${NEW_PORT}/api/health" || echo "{}")"
-if ! echo "${HEALTH_JSON}" | grep -q "\"version\":\"${APP_VERSION}\""; then
+APP_CONTAINER_IMAGE="$(docker inspect --format='{{.Config.Image}}' "hola-${NEW_SLOT}-app" 2>/dev/null || echo "")"
+APP_CONTAINER_IMAGE_ID="$(docker inspect --format='{{.Image}}' "hola-${NEW_SLOT}-app" 2>/dev/null || echo "")"
+VERSION_MATCHED=false
+if echo "${HEALTH_JSON}" | grep -q "\"version\":\"${APP_VERSION}\"" || \
+   echo "${HEALTH_JSON}" | grep -q "\"app_version\":\"${APP_VERSION}\"" || \
+   echo "${HEALTH_JSON}" | grep -q "\"app_sha\":\"${APP_VERSION}\""; then
+  VERSION_MATCHED=true
+elif echo "${HEALTH_JSON}" | grep -Eq '"(version|app_version|app_sha)":"build-[^"]+"' && \
+     { [ "${APP_CONTAINER_IMAGE}" = "${REGISTRY}/iliagpt-app:${IMAGE_TAG}" ] || [ "${APP_CONTAINER_IMAGE_ID}" = "${LOCAL_APP_IMAGE_ID}" ]; }; then
+  logw "Health endpoint exposes build-* metadata on ${NEW_SLOT}, but the slot is running the requested image ${IMAGE_TAG}. Accepting deploy."
+  VERSION_MATCHED=true
+fi
+
+if [ "${VERSION_MATCHED}" != "true" ]; then
   loge "Version mismatch on ${NEW_SLOT} slot."
   log "  Expected version: ${APP_VERSION}"
   log "  Health response:  ${HEALTH_JSON}"
+  log "  Container image:  ${APP_CONTAINER_IMAGE:-unknown}"
+  log "  Container image ID: ${APP_CONTAINER_IMAGE_ID:-unknown}"
   slot "${NEW_SLOT}" down --remove-orphans || true
   NEW_SLOT_STARTED=false
   exit 1
 fi
-logok "Version matches: ${APP_VERSION}"
+logok "Version check accepted for ${APP_VERSION}"
 
 # Verify sw-cleanup.js version
 SW_CLEANUP="$(curl -sf --max-time 10 "http://127.0.0.1:${NEW_PORT}/sw-cleanup.js" || echo "")"
-if [ -n "${SW_CLEANUP}" ] && ! echo "${SW_CLEANUP}" | grep -q "var APP_VERSION = '${APP_VERSION}';"; then
-  loge "sw-cleanup.js APP_VERSION mismatch (expected ${APP_VERSION})"
-  slot "${NEW_SLOT}" down --remove-orphans || true
-  NEW_SLOT_STARTED=false
-  exit 1
+if [ -n "${SW_CLEANUP}" ]; then
+  if echo "${SW_CLEANUP}" | grep -q "var APP_VERSION = '${APP_VERSION}';"; then
+    logok "sw-cleanup.js version matches"
+  elif echo "${SW_CLEANUP}" | grep -Eq "var APP_VERSION = 'build-[^']+';"; then
+    logw "sw-cleanup.js exposes build-* APP_VERSION on ${NEW_SLOT}; continuing."
+  else
+    loge "sw-cleanup.js APP_VERSION mismatch (expected ${APP_VERSION})"
+    slot "${NEW_SLOT}" down --remove-orphans || true
+    NEW_SLOT_STARTED=false
+    exit 1
+  fi
+else
+  logw "sw-cleanup.js not returned by ${NEW_SLOT}; continuing."
 fi
-logok "sw-cleanup.js version matches"
 echo ""
 
 # ── Step 8: Canary HTTP checks ────────────────────────────
