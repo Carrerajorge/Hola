@@ -230,7 +230,7 @@ const ProtectedSpreadsheetAnalyzerPage = requireAuth(SpreadsheetAnalyzerPage);
 const ProtectedMonitoringDashboard = requireAuth(MonitoringDashboard);
 const ProtectedRunProgressPage = requireAuth(RunProgressPage);
 
-function GlobalKeyboardShortcuts() {
+function WorkspaceKeyboardShortcuts() {
   const [, setLocation] = useLocation();
   const [searchOpen, setSearchOpen] = useState(false);
   const [toolCatalogOpen, setToolCatalogOpen] = useState(false);
@@ -339,6 +339,29 @@ function GlobalKeyboardShortcuts() {
       />
     </>
   );
+}
+
+export function shouldEnableGlobalKeyboardShortcuts(
+  location: string,
+  isAuthenticated: boolean,
+): boolean {
+  return (
+    isAuthenticated ||
+    location === "/openclaw" ||
+    location.startsWith("/openclaw/")
+  );
+}
+
+export function GlobalKeyboardShortcuts() {
+  const [location] = useLocation();
+  const { isAuthenticated } = useAuth();
+  const shouldEnableShortcuts = shouldEnableGlobalKeyboardShortcuts(location, isAuthenticated);
+
+  if (!shouldEnableShortcuts) {
+    return null;
+  }
+
+  return <WorkspaceKeyboardShortcuts />;
 }
 
 import { GlobalErrorBoundary } from "@/components/global-error-boundary";
