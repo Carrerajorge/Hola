@@ -37,6 +37,7 @@ readonly MIGRATION_TIMEOUT=120
 readonly PULL_TIMEOUT=300
 readonly MIN_DISK_MB=1024
 readonly MIN_PULL_HEADROOM_MB=4096
+readonly PREFERRED_PULL_HEADROOM_MB=8192
 readonly MIN_DISK_INODES_K=100
 readonly STATE_FILE_MAX_BYTES=65536
 
@@ -304,6 +305,62 @@ measure_available_mb() {
   df -m "${DEPLOY_PATH}" | awk 'NR==2 {print $4}'
 }
 
+measure_available_mb_for_path() {
+  local target_path="$1"
+  df -mP "${target_path}" 2>/dev/null | awk 'NR==2 {print $4}'
+}
+
+list_storage_pressure_paths() {
+  local docker_root_dir
+  local candidates=()
+
+  candidates+=("${DEPLOY_PATH}")
+  docker_root_dir="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || true)"
+  if [ -n "${docker_root_dir}" ]; then
+    candidates+=("${docker_root_dir}")
+  fi
+  if [ -d "/var/lib/containerd" ]; then
+    candidates+=("/var/lib/containerd")
+  fi
+
+  printf '%s\n' "${candidates[@]}" | awk 'NF' | sort -u
+}
+
+measure_min_storage_available_mb() {
+  local min_available=""
+  local target_path
+  local available_mb
+
+  while IFS= read -r target_path; do
+    [ -z "${target_path}" ] && continue
+    available_mb="$(measure_available_mb_for_path "${target_path}")"
+    [ -z "${available_mb}" ] && continue
+    if [ -z "${min_available}" ] || [ "${available_mb}" -lt "${min_available}" ]; then
+      min_available="${available_mb}"
+    fi
+  done < <(list_storage_pressure_paths)
+
+  if [ -z "${min_available}" ]; then
+    measure_available_mb
+    return 0
+  fi
+
+  echo "${min_available}"
+}
+
+log_storage_pressure() {
+  local label="$1"
+  local target_path
+  local available_mb
+
+  while IFS= read -r target_path; do
+    [ -z "${target_path}" ] && continue
+    available_mb="$(measure_available_mb_for_path "${target_path}")"
+    [ -z "${available_mb}" ] && continue
+    log "  ${label}: ${target_path} => ${available_mb}MB free"
+  done < <(list_storage_pressure_paths)
+}
+
 measure_available_inodes_k() {
   df -i "${DEPLOY_PATH}" | awk 'NR==2 {print int($4/1000)}'
 }
@@ -478,45 +535,70 @@ restart_docker_if_dead_metadata_ghosts_detected() {
 
 ensure_min_disk_space() {
   local available_mb
-  available_mb="$(measure_available_mb)"
+  available_mb="$(measure_min_storage_available_mb)"
 
   if [ "${available_mb}" -ge "${MIN_DISK_MB}" ]; then
-    logok "Disk space: ${available_mb}MB available"
+    logok "Disk space across Docker storage paths: ${available_mb}MB available"
+    log_storage_pressure "free space"
     return 0
   fi
 
-  logw "Low disk space: ${available_mb}MB available. Attempting Docker cleanup before aborting."
+  logw "Low disk space across Docker storage paths: ${available_mb}MB available. Attempting Docker cleanup before aborting."
+  log_storage_pressure "free space"
   reclaim_docker_space
-  available_mb="$(measure_available_mb)"
+  available_mb="$(measure_min_storage_available_mb)"
 
   if [ "${available_mb}" -lt "${MIN_DISK_MB}" ]; then
-    loge "Insufficient disk space: ${available_mb}MB available, need ${MIN_DISK_MB}MB"
+    loge "Insufficient disk space across Docker storage paths: ${available_mb}MB available, need ${MIN_DISK_MB}MB"
+    log_storage_pressure "free space"
     loge "Run 'docker system prune -af' to free space."
     exit 1
   fi
 
-  logok "Disk space after cleanup: ${available_mb}MB available"
+  logok "Disk space after cleanup across Docker storage paths: ${available_mb}MB available"
+  log_storage_pressure "free space"
 }
 
 ensure_pull_headroom() {
   local available_mb
-  available_mb="$(measure_available_mb)"
+  available_mb="$(measure_min_storage_available_mb)"
 
-  if [ "${available_mb}" -ge "${MIN_PULL_HEADROOM_MB}" ]; then
+  if [ "${available_mb}" -ge "${PREFERRED_PULL_HEADROOM_MB}" ]; then
     logok "Pull headroom: ${available_mb}MB available"
+    log_storage_pressure "pre-pull free space"
     return 0
   fi
 
-  logw "Limited free space before image pull (${available_mb}MB < ${MIN_PULL_HEADROOM_MB}MB). Running Docker cleanup."
+  logw "Limited free space before image pull (${available_mb}MB < ${PREFERRED_PULL_HEADROOM_MB}MB preferred). Running Docker cleanup."
+  log_storage_pressure "pre-pull free space"
   reclaim_docker_space
-  available_mb="$(measure_available_mb)"
+  available_mb="$(measure_min_storage_available_mb)"
+
+  if [ "${available_mb}" -lt "${PREFERRED_PULL_HEADROOM_MB}" ] && [ "${ACTIVE_SLOT_SANDBOX_EVICTED}" != "true" ]; then
+    if evict_active_slot_sandbox_for_pull; then
+      logw "Recovered additional headroom by removing the active ${ACTIVE_SLOT} sandbox before pulling new images."
+      available_mb="$(measure_min_storage_available_mb)"
+    fi
+  fi
 
   if [ "${available_mb}" -lt "${MIN_DISK_MB}" ]; then
     loge "Insufficient disk space after Docker cleanup: ${available_mb}MB available, need ${MIN_DISK_MB}MB"
+    log_storage_pressure "pre-pull free space"
     exit 1
   fi
 
-  logok "Pull headroom after cleanup: ${available_mb}MB available"
+  if [ "${available_mb}" -lt "${MIN_PULL_HEADROOM_MB}" ]; then
+    loge "Insufficient pull headroom after cleanup: ${available_mb}MB available, need at least ${MIN_PULL_HEADROOM_MB}MB"
+    log_storage_pressure "pre-pull free space"
+    exit 1
+  fi
+
+  if [ "${available_mb}" -lt "${PREFERRED_PULL_HEADROOM_MB}" ]; then
+    logw "Proceeding with reduced pull headroom (${available_mb}MB available, preferred ${PREFERRED_PULL_HEADROOM_MB}MB)."
+  else
+    logok "Pull headroom after cleanup: ${available_mb}MB available"
+  fi
+  log_storage_pressure "pre-pull free space"
 }
 
 pull_image_with_retry() {
@@ -1254,6 +1336,12 @@ IMAGES=(
 )
 
 for img in "${IMAGES[@]}"; do
+  if echo "${img}" | grep -q "iliagpt-sandbox:" && [ "${ACTIVE_SLOT_SANDBOX_EVICTED}" != "true" ]; then
+    if evict_active_slot_sandbox_for_pull; then
+      logw "Freed the active ${ACTIVE_SLOT} sandbox before pulling the new sandbox image."
+      ensure_pull_headroom
+    fi
+  fi
   if ! pull_image_with_retry "${img}"; then
     loge "Failed to pull ${img}"
     exit 1
