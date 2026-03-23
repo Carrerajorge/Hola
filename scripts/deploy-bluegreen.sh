@@ -371,6 +371,7 @@ reclaim_docker_space() {
   docker container prune -f --filter "label!=iliagpt.deploy.preserve=true" >/dev/null 2>&1 || true
   docker image prune -af >/dev/null 2>&1 || true
   docker builder prune -af >/dev/null 2>&1 || true
+  docker volume prune -f >/dev/null 2>&1 || true
   docker network prune -f >/dev/null 2>&1 || true
 }
 
