@@ -16,7 +16,7 @@ IFS=$'\n\t'
 #    DRY_RUN              — set to "true" for preflight only (no deploy)
 # ═══════════════════════════════════════════════════════════
 
-readonly SCRIPT_VERSION="3.3.1"
+readonly SCRIPT_VERSION="3.3.2"
 
 # ── Configuration ───────────────────────────────────────────
 DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
@@ -36,8 +36,8 @@ readonly STOP_TIMEOUT=15
 readonly MIGRATION_TIMEOUT=120
 readonly PULL_TIMEOUT=300
 readonly MIN_DISK_MB=1024
-readonly MIN_PULL_HEADROOM_MB=4096
-readonly PREFERRED_PULL_HEADROOM_MB=8192
+readonly MIN_PULL_HEADROOM_MB=12288
+readonly PREFERRED_PULL_HEADROOM_MB=16384
 readonly MIN_DISK_INODES_K=100
 readonly STATE_FILE_MAX_BYTES=65536
 
@@ -425,6 +425,68 @@ IMAGE_PIN_IDS=()
 ACTIVE_SLOT_SANDBOX_EVICTED=false
 ACTIVE_IMAGE_TAG=""
 ACTIVE_APP_VERSION=""
+STALE_RELEASE_IMAGES_PRUNED=false
+
+prune_stale_release_images() {
+  local keep_tags image_ref tag removed
+
+  if [ "${STALE_RELEASE_IMAGES_PRUNED}" = "true" ]; then
+    return 0
+  fi
+
+  keep_tags="
+${IMAGE_TAG}
+${ACTIVE_IMAGE_TAG:-}
+latest
+"
+  removed=0
+
+  logw "Removing stale local release tags to maximize pull headroom..."
+
+  while IFS= read -r image_ref; do
+    [ -z "${image_ref}" ] && continue
+
+    tag="${image_ref##*:}"
+    if [ "${tag}" = "<none>" ]; then
+      continue
+    fi
+    if printf '%s\n' "${keep_tags}" | grep -Fxq "${tag}"; then
+      continue
+    fi
+
+    if docker image rm -f "${image_ref}" >/dev/null 2>&1; then
+      removed=$(( removed + 1 ))
+    fi
+  done < <(
+    {
+      docker images --format '{{.Repository}}:{{.Tag}}' "${REGISTRY}/iliagpt-app" 2>/dev/null || true
+      docker images --format '{{.Repository}}:{{.Tag}}' "${REGISTRY}/iliagpt-sandbox" 2>/dev/null || true
+      docker images --format '{{.Repository}}:{{.Tag}}' "${REGISTRY}/iliagpt-ocr" 2>/dev/null || true
+    } | awk 'NF' | sort -u
+  )
+
+  STALE_RELEASE_IMAGES_PRUNED=true
+
+  if [ "${removed}" -gt 0 ]; then
+    logw "Removed ${removed} stale release image tag(s) before pull."
+    reclaim_docker_space
+  else
+    logok "No stale release tags needed removal."
+  fi
+}
+
+cleanup_failed_pull_artifacts() {
+  local image_ref="$1"
+
+  logw "Clearing partial artifacts for ${image_ref} before retry."
+  docker image rm -f "${image_ref}" >/dev/null 2>&1 || true
+  reclaim_docker_space
+}
+
+pull_error_is_retryable() {
+  local output_file="$1"
+  grep -Eqi 'no space left on device|unexpected EOF' "${output_file}"
+}
 
 pin_image_locally() {
   local image_ref="$1"
@@ -575,6 +637,11 @@ ensure_pull_headroom() {
   reclaim_docker_space
   available_mb="$(measure_min_storage_available_mb)"
 
+  if [ "${available_mb}" -lt "${PREFERRED_PULL_HEADROOM_MB}" ]; then
+    prune_stale_release_images
+    available_mb="$(measure_min_storage_available_mb)"
+  fi
+
   if [ "${available_mb}" -lt "${PREFERRED_PULL_HEADROOM_MB}" ] && [ "${ACTIVE_SLOT_SANDBOX_EVICTED}" != "true" ]; then
     if evict_active_slot_sandbox_for_pull; then
       logw "Recovered additional headroom by removing the active ${ACTIVE_SLOT} sandbox before pulling new images."
@@ -606,6 +673,7 @@ pull_image_with_retry() {
   local image_ref="$1"
   local attempt
   local output_file
+  local saw_disk_pressure
 
   for attempt in 1 2 3; do
     output_file="$(mktemp)"
@@ -614,15 +682,25 @@ pull_image_with_retry() {
       return 0
     fi
 
+    saw_disk_pressure=false
     if grep -qi "no space left on device" "${output_file}"; then
+      saw_disk_pressure=true
       if [ "${ACTIVE_SLOT_SANDBOX_EVICTED}" != "true" ] && evict_active_slot_sandbox_for_pull; then
         logw "Recovered disk by removing the active ${ACTIVE_SLOT} sandbox service. Retrying pull for ${image_ref}."
+        cleanup_failed_pull_artifacts "${image_ref}"
         rm -f "${output_file}"
         continue
       fi
 
       logw "Pull for ${image_ref} exhausted disk space on attempt ${attempt}. Running Docker cleanup before retry."
-      reclaim_docker_space
+    fi
+
+    if pull_error_is_retryable "${output_file}"; then
+      if [ "${saw_disk_pressure}" != "true" ]; then
+        logw "Pull for ${image_ref} failed with a transient registry/download error on attempt ${attempt}. Retrying after cleanup."
+      fi
+      cleanup_failed_pull_artifacts "${image_ref}"
+      ensure_pull_headroom
       rm -f "${output_file}"
       if [ "${attempt}" -lt 3 ]; then
         continue
