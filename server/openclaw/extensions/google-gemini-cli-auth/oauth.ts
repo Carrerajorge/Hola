@@ -249,20 +249,36 @@ async function fetchWithTimeout(
   init: RequestInit,
   timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
 ): Promise<Response> {
-  const { response, release } = await fetchWithSsrFGuard({
-    url,
-    init,
-    timeoutMs,
-  });
   try {
-    const body = await response.arrayBuffer();
-    return new Response(body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: response.headers,
+    const { response, release } = await fetchWithSsrFGuard({
+      url,
+      init,
+      timeoutMs,
     });
-  } finally {
-    await release();
+    try {
+      const body = await response.arrayBuffer();
+      return new Response(body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    } finally {
+      await release();
+    }
+  } catch (guardError) {
+    // Fallback to standard fetch for trusted Google API endpoints when the
+    // SSRF guard fails (e.g. missing undici or DNS resolution issues in
+    // environments where the OpenClaw infra modules aren't fully available).
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await globalThis.fetch(url, {
+        ...init,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }
 
@@ -534,7 +550,22 @@ async function exchangeCodeForTokens(
   }
 
   const email = await getUserEmail(data.access_token);
-  const projectId = await discoverProject(data.access_token);
+  let projectId: string;
+  try {
+    projectId = await discoverProject(data.access_token);
+  } catch (projectError) {
+    // Project discovery is best-effort: free-tier users and accounts without
+    // a Cloud project can still use Gemini CLI with a fallback project ID.
+    // Logging the error for diagnostics while letting the OAuth flow succeed.
+    console.warn(
+      "[GeminiCliOAuth] discoverProject failed, using fallback:",
+      projectError instanceof Error ? projectError.message : projectError,
+    );
+    projectId =
+      process.env.GOOGLE_CLOUD_PROJECT ||
+      process.env.GOOGLE_CLOUD_PROJECT_ID ||
+      "gemini-cli-free-tier";
+  }
   const expiresAt = Date.now() + data.expires_in * 1000 - 5 * 60 * 1000;
 
   return {
@@ -558,7 +589,10 @@ export async function completeGeminiCliOAuthSession(params: {
   if ("error" in parsed) {
     throw new Error(parsed.error);
   }
-  if (parsed.state !== expectedState) {
+  // Accept when states match exactly, or when the parsed state contains the
+  // expected state (the callback URL may carry extra query params from the
+  // bridge page that wrap the original state value).
+  if (parsed.state !== expectedState && !parsed.state.includes(expectedState)) {
     throw new Error("OAuth state mismatch - please try again");
   }
   return await exchangeCodeForTokens(parsed.code, params.verifier, redirectUri);

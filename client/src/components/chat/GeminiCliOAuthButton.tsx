@@ -1022,6 +1022,23 @@ export function GeminiCliOAuthButton({
     }
   }, [completeMutation.isPending, handleBridgePayload, open]);
 
+  // Poll for popup closure to detect abandoned flows and recover bridge results
+  React.useEffect(() => {
+    if (!flowId || !popupRef.current) return;
+    const interval = setInterval(() => {
+      if (popupRef.current?.closed) {
+        popupRef.current = null;
+        // Check for bridge result that may have been stored before popup closed
+        const bridgeResult = readStoredBridgeResult();
+        if (bridgeResult && !completeMutation.isPending) {
+          handleBridgePayload(bridgeResult);
+        }
+        clearInterval(interval);
+      }
+    }, 800);
+    return () => clearInterval(interval);
+  }, [flowId, completeMutation.isPending, handleBridgePayload]);
+
   const isBusy = startMutation.isPending || completeMutation.isPending;
   const isConnected = Boolean(status?.connected);
   const openDialog = React.useCallback(() => {

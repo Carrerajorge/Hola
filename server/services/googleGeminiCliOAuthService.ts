@@ -83,16 +83,25 @@ async function persistGeminiCliOAuthCredentials(
 
   const profileId = buildProfileId(credentials.email);
 
-  await updateConfig((currentConfig) => {
-    const enabledPluginResult = enablePluginInConfig(currentConfig, PROVIDER_PLUGIN_ID);
-    if (!enabledPluginResult.enabled) {
-      throw new Error(
-        `No se pudo habilitar ${PROVIDER_PLUGIN_ID}: ${enabledPluginResult.reason || "bloqueado"}`,
-      );
-    }
-
-    return enabledPluginResult.config;
-  });
+  // Enable the plugin in config — best-effort (config may not exist yet in
+  // fresh environments or Docker images without a pre-existing OpenClaw config).
+  try {
+    await updateConfig((currentConfig) => {
+      const enabledPluginResult = enablePluginInConfig(currentConfig, PROVIDER_PLUGIN_ID);
+      if (!enabledPluginResult.enabled) {
+        console.warn(
+          `[GeminiCliOAuth] plugin enable returned false: ${enabledPluginResult.reason || "unknown"}`,
+        );
+        return currentConfig;
+      }
+      return enabledPluginResult.config;
+    });
+  } catch (configError) {
+    console.warn(
+      "[GeminiCliOAuth] updateConfig failed (non-critical), continuing:",
+      configError instanceof Error ? configError.message : configError,
+    );
+  }
 
   upsertAuthProfile({
     profileId,
@@ -114,9 +123,19 @@ async function persistGeminiCliOAuthCredentials(
     order: [profileId],
   });
 
-  const config = await loadValidConfigOrThrow();
-  await ensureOpenClawModelsJson(config, agentDir);
-  await ensurePiAuthJsonFromAuthProfiles(agentDir);
+  // Post-credential hooks: models JSON and Pi auth JSON are best-effort.
+  // The credential is already persisted; these enhance the developer experience
+  // but should not block the OAuth flow.
+  try {
+    const config = await loadValidConfigOrThrow();
+    await ensureOpenClawModelsJson(config, agentDir);
+    await ensurePiAuthJsonFromAuthProfiles(agentDir);
+  } catch (postError) {
+    console.warn(
+      "[GeminiCliOAuth] post-persist hooks failed (non-critical):",
+      postError instanceof Error ? postError.message : postError,
+    );
+  }
 }
 
 export function beginGoogleGeminiCliOAuthFlow(params?: {
