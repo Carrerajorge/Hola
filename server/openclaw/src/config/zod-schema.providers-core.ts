@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v4";
 import { isSafeScpRemoteHost } from "../infra/scp-host.js";
 import { isValidInboundPathRootPattern } from "../media/inbound-path-policy.js";
 import {
@@ -672,7 +672,7 @@ export const DiscordAccountSchema = z
     // can inherit top-level allowFrom via runtime shallow merge.
   });
 
-export const DiscordConfigSchema = DiscordAccountSchema.extend({
+export const DiscordConfigSchema = DiscordAccountSchema.safeExtend({
   accounts: z.record(z.string(), DiscordAccountSchema.optional()).optional(),
   defaultAccount: z.string().optional(),
 }).superRefine((value, ctx) => {

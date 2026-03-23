@@ -480,7 +480,7 @@ export const DiscordAccountSchema = z
     });
   });
 
-export const DiscordConfigSchema = DiscordAccountSchema.extend({
+export const DiscordConfigSchema = DiscordAccountSchema.safeExtend({
   accounts: z.record(z.string(), DiscordAccountSchema.optional()).optional(),
 });
 
@@ -686,7 +686,7 @@ export const SlackAccountSchema = z
     });
   });
 
-export const SlackConfigSchema = SlackAccountSchema.extend({
+export const SlackConfigSchema = SlackAccountSchema.safeExtend({
   mode: z.enum(["socket", "http"]).optional().default("socket"),
   signingSecret: z.string().optional().register(sensitive),
   webhookPath: z.string().optional().default("/slack/events"),
