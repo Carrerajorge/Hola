@@ -1,5 +1,13 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:5050';
+const webServerCommand = process.env.PLAYWRIGHT_WEB_SERVER_COMMAND ?? 'npm run dev:test-web';
+const reuseExistingServer =
+  process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER != null
+    ? process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER === 'true'
+    : !process.env.CI;
+const webServerTimeout = Number(process.env.PLAYWRIGHT_WEB_SERVER_TIMEOUT_MS ?? 120_000);
+
 export default defineConfig({
   testDir: './e2e',
   testIgnore: process.env.CI
@@ -14,7 +22,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: 'html',
   use: {
-    baseURL: 'http://localhost:5050',
+    baseURL,
     trace: 'on-first-retry',
   },
   projects: [
@@ -24,9 +32,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npm run dev:test-web',
-    url: 'http://localhost:5050',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120 * 1000,
+    command: webServerCommand,
+    url: baseURL,
+    reuseExistingServer,
+    timeout: webServerTimeout,
   },
 });
