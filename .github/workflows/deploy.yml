@@ -146,7 +146,7 @@ jobs:
         needs.ci.result == 'success' &&
         needs.build_images.result == 'success'
       }}
-    timeout-minutes: 20
+    timeout-minutes: 40
     env:
       VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
       VPS_USER: ${{ secrets.VPS_USER || 'root' }}
@@ -437,6 +437,7 @@ jobs:
             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/nginx/ 2>/dev/null || true
 
       - name: Run blue-green deploy
+        id: deploy_bluegreen
         run: |
           set -euo pipefail
           for attempt in 1 2; do
@@ -451,6 +452,7 @@ jobs:
           done
 
       - name: Verify production
+        id: verify_production
         run: |
           set -euo pipefail
           EXPECTED="${{ steps.tag.outputs.app_version }}"
@@ -500,7 +502,35 @@ jobs:
             echo "::error::Production returned 5xx on root endpoint: ${STATUS_CODE}"
             exit 1
           fi
+
+      - name: Checkout repository for browser smoke
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Setup Node for browser smoke
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install browser smoke dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser smoke against production
+        id: browser_smoke
+        continue-on-error: true
+        env:
+          PLAYWRIGHT_BASE_URL: https://iliagpt.com
+        run: npm run test:smoke:remote
+
       - name: Run rigorous production acceptance checks
+        id: prod_acceptance
+        if: ${{ steps.browser_smoke.outcome == 'success' }}
         env:
           VPS_HOST: ${{ steps.target.outputs.host }}
           VPS_PORT: ${{ steps.target.outputs.port }}
@@ -512,6 +542,45 @@ jobs:
           NGINX_UPSTREAM_CONF: /etc/nginx/conf.d/iliagpt-upstream.conf
         run: |
           bash scripts/prod-rigorous-checks.sh
+
+      - name: Roll back on post-deploy acceptance failure
+        if: ${{ always() && steps.deploy_bluegreen.outcome == 'success' && (steps.verify_production.outcome == 'failure' || steps.browser_smoke.outcome == 'failure' || steps.prod_acceptance.outcome == 'failure') }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }} \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=15 \
+            -o ConnectionAttempts=3 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=20 \
+            -o TCPKeepAlive=yes \
+            ${{ env.VPS_USER }}@${{ steps.target.outputs.host }} \
+            "cd ${{ env.DEPLOY_PATH }} && bash scripts/rollback-bluegreen.sh --force --stop-bad"
+
+      - name: Enforce post-deploy acceptance
+        if: ${{ always() && steps.deploy_bluegreen.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          failed=0
+
+          if [ "${{ steps.verify_production.outcome }}" = "failure" ]; then
+            echo "::error::Public production verification failed."
+            failed=1
+          fi
+
+          if [ "${{ steps.browser_smoke.outcome }}" = "failure" ]; then
+            echo "::error::Browser smoke detected runtime regressions in production."
+            failed=1
+          fi
+
+          if [ "${{ steps.prod_acceptance.outcome }}" = "failure" ]; then
+            echo "::error::Rigorous production acceptance checks failed."
+            failed=1
+          fi
+
+          if [ "${failed}" -ne 0 ]; then
+            exit 1
+          fi
 
       - name: Deploy summary
         if: always()
@@ -548,7 +617,7 @@ jobs:
         github.ref == 'refs/heads/main' &&
         needs.build_images.result == 'success'
       }}
-    timeout-minutes: 25
+    timeout-minutes: 40
     # Job-level concurrency: serialize production deploys on the VPS.
     # Do not cancel an in-flight deploy; interrupting it mid-cutover can leave
     # the public site pinned to the maintenance page until a later run repairs it.
@@ -647,7 +716,44 @@ jobs:
           echo "image_tag=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "app_version=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
 
+      - name: Skip superseded auto deploys
+        id: latest_main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          latest_sha=""
+          for attempt in $(seq 1 6); do
+            latest_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha' 2>/dev/null || true)"
+            if [ -n "${latest_sha}" ]; then
+              break
+            fi
+            echo "Could not resolve latest main SHA yet. Retry ${attempt}/6..."
+            sleep 5
+          done
+
+          if [ -z "${latest_sha}" ]; then
+            echo "::error::Unable to resolve latest main SHA for stale-deploy protection."
+            exit 1
+          fi
+
+          echo "latest_sha=${latest_sha}" >> "$GITHUB_OUTPUT"
+
+          if [ "${latest_sha}" != "${CURRENT_SHA}" ]; then
+            echo "should_deploy=false" >> "$GITHUB_OUTPUT"
+            echo "skip_reason=Superseded by ${latest_sha:0:8}" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping deploy for ${CURRENT_SHA:0:8}; main already advanced to ${latest_sha:0:8}."
+            exit 0
+          fi
+
+          echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+          echo "skip_reason=" >> "$GITHUB_OUTPUT"
+          echo "Deploy is still at the tip of main (${CURRENT_SHA:0:8})."
+
       - name: Verify images are present in GHCR and digest pinned
+        if: steps.latest_main.outputs.should_deploy == 'true'
         id: image_manifest_check
         continue-on-error: true
         env:
@@ -708,6 +814,7 @@ jobs:
           verify_expected_digest "ocr" "${OCR_IMAGE}" "${EXPECTED_OCR_DIGEST}"
 
       - name: Deploy circuit breaker
+        if: steps.latest_main.outputs.should_deploy == 'true'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -720,6 +827,7 @@ jobs:
           fi
 
       - name: Check whether production already serves target version
+        if: steps.latest_main.outputs.should_deploy == 'true'
         id: production_state
         env:
           EXPECTED: ${{ steps.tag.outputs.app_version }}
@@ -741,7 +849,7 @@ jobs:
           fi
 
       - name: Setup SSH key
-        if: steps.production_state.outputs.already_deployed != 'true'
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
@@ -758,7 +866,7 @@ jobs:
           } > ~/.ssh/config
           chmod 600 ~/.ssh/config
       - name: Resolve reachable deploy endpoint
-        if: steps.production_state.outputs.already_deployed != 'true'
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
         id: target
         run: |
           set -euo pipefail
@@ -798,7 +906,7 @@ jobs:
           exit 1
 
       - name: Validate resolved target inputs
-        if: steps.production_state.outputs.already_deployed != 'true'
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
         run: |
           set -euo pipefail
           RESOLVED_HOST="${{ steps.target.outputs.host }}"
@@ -836,14 +944,14 @@ jobs:
           fi
 
       - name: Preflight target host
-        if: steps.production_state.outputs.already_deployed != 'true'
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
         run: |
           set -euo pipefail
           echo "▸ Deploy target: ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ steps.target.outputs.port }}"
           nc -vz -w 5 "${{ steps.target.outputs.host }}" "${{ steps.target.outputs.port }}" || echo "⚠️ TCP probe failed (continuing to SSH)"
 
       - name: Sync deploy scripts to VPS
-        if: steps.production_state.outputs.already_deployed != 'true'
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
         run: |
           set -euo pipefail
           sync_ok=false
@@ -868,7 +976,8 @@ jobs:
             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/nginx/ 2>/dev/null || true
 
       - name: Run blue-green deploy
-        if: steps.production_state.outputs.already_deployed != 'true'
+        id: deploy_bluegreen
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
         run: |
           set -euo pipefail
           for attempt in 1 2; do
@@ -883,6 +992,8 @@ jobs:
           done
 
       - name: Verify production
+        id: verify_production
+        if: steps.latest_main.outputs.should_deploy == 'true'
         run: |
           set -euo pipefail
           EXPECTED="${{ steps.tag.outputs.app_version }}"
@@ -927,8 +1038,40 @@ jobs:
             echo "::error::Production returned 5xx on root endpoint: ${STATUS_CODE}"
             exit 1
           fi
+
+      - name: Checkout repository for browser smoke
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Setup Node for browser smoke
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install browser smoke dependencies
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser smoke against production
+        id: browser_smoke
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
+        continue-on-error: true
+        env:
+          PLAYWRIGHT_BASE_URL: https://iliagpt.com
+        run: npm run test:smoke:remote
+
       - name: Run rigorous production acceptance checks
-        if: steps.production_state.outputs.already_deployed != 'true'
+        id: prod_acceptance
+        if: ${{ steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.browser_smoke.outcome == 'success' }}
         env:
           VPS_HOST: ${{ steps.target.outputs.host }}
           VPS_PORT: ${{ steps.target.outputs.port }}
@@ -941,6 +1084,45 @@ jobs:
         run: |
           bash scripts/prod-rigorous-checks.sh
 
+      - name: Roll back on post-deploy acceptance failure
+        if: ${{ always() && steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.deploy_bluegreen.outcome == 'success' && (steps.verify_production.outcome == 'failure' || steps.browser_smoke.outcome == 'failure' || steps.prod_acceptance.outcome == 'failure') }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }} \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=15 \
+            -o ConnectionAttempts=3 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=20 \
+            -o TCPKeepAlive=yes \
+            ${{ env.VPS_USER }}@${{ steps.target.outputs.host }} \
+            "cd ${{ env.DEPLOY_PATH }} && bash scripts/rollback-bluegreen.sh --force --stop-bad"
+
+      - name: Enforce post-deploy acceptance
+        if: ${{ always() && steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.deploy_bluegreen.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          failed=0
+
+          if [ "${{ steps.verify_production.outcome }}" = "failure" ]; then
+            echo "::error::Public production verification failed."
+            failed=1
+          fi
+
+          if [ "${{ steps.browser_smoke.outcome }}" = "failure" ]; then
+            echo "::error::Browser smoke detected runtime regressions in production."
+            failed=1
+          fi
+
+          if [ "${{ steps.prod_acceptance.outcome }}" = "failure" ]; then
+            echo "::error::Rigorous production acceptance checks failed."
+            failed=1
+          fi
+
+          if [ "${failed}" -ne 0 ]; then
+            exit 1
+          fi
+
       - name: Deploy summary
         if: always()
         run: |
@@ -951,6 +1133,9 @@ jobs:
           echo "| Version | \`${{ steps.tag.outputs.app_version }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Image Tag | \`${{ steps.tag.outputs.image_tag }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Trigger | push(main) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Latest Main SHA | \`${{ steps.latest_main.outputs.latest_sha || 'unknown' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Superseded | \`${{ steps.latest_main.outputs.should_deploy != 'true' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Skip Reason | \`${{ steps.latest_main.outputs.skip_reason || 'n/a' }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
           echo "| URL | https://iliagpt.com |" >> $GITHUB_STEP_SUMMARY
 

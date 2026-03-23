@@ -1,24 +1,15 @@
+import path from "node:path";
 import { readFile } from "node:fs/promises";
-import { resolveEmbeddedOpenClawPackageJsonPathSync } from "./openClawEmbeddedAssets";
+import { DEFAULT_OPENCLAW_RELEASE_TAG } from "@shared/openclawRelease";
+import {
+  resolveEmbeddedOpenClawPackageJsonPathSync,
+  type OpenClawEmbeddedResolveOptions,
+} from "./openClawEmbeddedAssets";
 
 const OPENCLAW_OWNER = "openclaw";
 const OPENCLAW_REPO = "openclaw";
 const OPENCLAW_RELEASE_REFRESH_MINUTES = 15;
-
-export const DEFAULT_OPENCLAW_RELEASE_TAG = "v2026.3.22";
-
-type GitHubReleasePayload = {
-  tag_name?: string;
-  name?: string;
-  html_url?: string;
-  tarball_url?: string | null;
-  zipball_url?: string | null;
-  published_at?: string | null;
-  body?: string | null;
-  reactions?: {
-    total_count?: number;
-  } | null;
-};
+export { DEFAULT_OPENCLAW_RELEASE_TAG };
 
 type OpenClawReleaseInfo = {
   tagName: string;
@@ -34,6 +25,22 @@ type OpenClawReleaseInfo = {
   reactionCount: number;
   isLatest: boolean;
 };
+
+type EmbeddedOpenClawMetadata = {
+  packageRoot: string;
+  packageVersion: string | null;
+  repositoryUrl: string;
+  changelogSections: Map<string, string>;
+};
+
+function normalizeReleaseVersion(value: string): string {
+  return value.trim().replace(/^v/i, "");
+}
+
+function normalizeReleaseTag(value: string): string {
+  const normalized = normalizeReleaseVersion(value);
+  return normalized ? `v${normalized}` : DEFAULT_OPENCLAW_RELEASE_TAG;
+}
 
 function stripMarkdown(value: string): string {
   return value
@@ -64,92 +71,195 @@ function extractHighlights(body: string): string[] {
 }
 
 function extractImportantNotes(body: string): string[] {
-  const candidates = body
+  const collected = new Set<string>();
+  const lines = body
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd());
+
+  let currentSection = "";
+  for (const line of lines) {
+    const headingMatch = line.match(/^###\s+(.+)$/);
+    if (headingMatch) {
+      currentSection = headingMatch[1].trim().toLowerCase();
+      continue;
+    }
+
+    if (!/^[-*]\s+/.test(line)) {
+      continue;
+    }
+
+    if (
+      currentSection.includes("breaking") ||
+      currentSection.includes("security") ||
+      currentSection.includes("fix")
+    ) {
+      collected.add(stripMarkdown(line.replace(/^[-*]\s+/, "")));
+    }
+  }
+
+  if (collected.size > 0) {
+    return [...collected].filter(Boolean).slice(0, 3);
+  }
+
+  return body
     .split(/\r?\n/)
     .map((line) => stripMarkdown(line))
     .filter(Boolean)
-    .filter((line) => /important|note|breaking|compat/i.test(line));
-
-  return candidates.slice(0, 3);
+    .filter((line) => /important|note|breaking|compat|security/i.test(line))
+    .slice(0, 3);
 }
 
-function toReleaseInfo(
-  payload: GitHubReleasePayload,
-  isLatest: boolean,
-): OpenClawReleaseInfo | null {
-  const tagName = payload.tag_name?.trim();
-  if (!tagName) {
+function extractRepositoryUrl(
+  repository: unknown,
+  homepage: unknown,
+): string {
+  const rawValue =
+    typeof repository === "string"
+      ? repository
+      : repository && typeof repository === "object" && typeof (repository as { url?: unknown }).url === "string"
+        ? (repository as { url: string }).url
+        : typeof homepage === "string"
+          ? homepage
+          : `https://github.com/${OPENCLAW_OWNER}/${OPENCLAW_REPO}`;
+
+  const trimmed = rawValue.trim();
+  if (!trimmed) {
+    return `https://github.com/${OPENCLAW_OWNER}/${OPENCLAW_REPO}`;
+  }
+
+  return trimmed
+    .replace(/^git\+/, "")
+    .replace(/^git@github\.com:/, "https://github.com/")
+    .replace(/\.git$/, "");
+}
+
+function parseChangelogSections(changelog: string): Map<string, string> {
+  const sections = new Map<string, string>();
+  const headingMatches = [...changelog.matchAll(/^##\s+(.+)$/gm)];
+
+  for (let index = 0; index < headingMatches.length; index += 1) {
+    const current = headingMatches[index];
+    const heading = current[1]?.trim() || "";
+    if (!/^\d{4}\.\d+\.\d+(?:[-.][A-Za-z0-9]+)*$/.test(heading)) {
+      continue;
+    }
+
+    const start = (current.index ?? 0) + current[0].length;
+    const end = index + 1 < headingMatches.length
+      ? headingMatches[index + 1].index ?? changelog.length
+      : changelog.length;
+    sections.set(normalizeReleaseVersion(heading), changelog.slice(start, end).trim());
+  }
+
+  return sections;
+}
+
+async function loadEmbeddedOpenClawMetadata(
+  resolveOptions: OpenClawEmbeddedResolveOptions = {},
+): Promise<EmbeddedOpenClawMetadata | null> {
+  const packageJsonPath = resolveEmbeddedOpenClawPackageJsonPathSync(resolveOptions);
+  if (!packageJsonPath) {
     return null;
   }
 
-  const notes = (payload.body || "").trim();
-  return {
-    tagName,
-    name: payload.name?.trim() || tagName,
-    htmlUrl:
-      payload.html_url?.trim() ||
-      `https://github.com/${OPENCLAW_OWNER}/${OPENCLAW_REPO}/releases/tag/${tagName}`,
-    tarballUrl: payload.tarball_url?.trim() || null,
-    zipballUrl: payload.zipball_url?.trim() || null,
-    publishedAt: payload.published_at?.trim() || null,
-    overview: extractOverview(notes),
-    importantNotes: extractImportantNotes(notes),
-    highlights: extractHighlights(notes),
-    notes,
-    reactionCount: payload.reactions?.total_count ?? 0,
-    isLatest,
-  };
-}
+  const packageRoot = path.dirname(packageJsonPath);
 
-async function loadBundledOpenClawVersion(): Promise<string | null> {
-  const packageJsonPath = resolveEmbeddedOpenClawPackageJsonPathSync({
-    moduleUrl: import.meta.url,
-    argv1: process.argv[1],
-    cwd: process.cwd(),
-  });
   try {
-    if (!packageJsonPath) {
-      return null;
-    }
-    const raw = await readFile(packageJsonPath, "utf8");
-    const parsed = JSON.parse(raw) as { version?: string };
-    return typeof parsed.version === "string" && parsed.version.trim()
-      ? parsed.version.trim()
-      : null;
+    const [packageJsonRaw, changelogRaw] = await Promise.all([
+      readFile(packageJsonPath, "utf8"),
+      readFile(path.join(packageRoot, "CHANGELOG.md"), "utf8").catch(() => ""),
+    ]);
+
+    const parsed = JSON.parse(packageJsonRaw) as {
+      version?: string;
+      repository?: unknown;
+      homepage?: unknown;
+    };
+
+    return {
+      packageRoot,
+      packageVersion:
+        typeof parsed.version === "string" && parsed.version.trim()
+          ? parsed.version.trim()
+          : null,
+      repositoryUrl: extractRepositoryUrl(parsed.repository, parsed.homepage),
+      changelogSections: parseChangelogSections(changelogRaw),
+    };
   } catch {
     return null;
   }
 }
 
-async function fetchGitHubRelease(
-  path: string,
-  isLatest: boolean,
-): Promise<OpenClawReleaseInfo | null> {
-  const response = await fetch(
-    `https://api.github.com/repos/${OPENCLAW_OWNER}/${OPENCLAW_REPO}${path}`,
-    {
-      headers: {
-        Accept: "application/vnd.github+json",
-        "User-Agent": "iliagpt-openclaw-release-sync",
-      },
-    },
-  );
+function toEmbeddedReleaseInfo(params: {
+  version: string;
+  notes: string;
+  repositoryUrl: string;
+  isLatest: boolean;
+}): OpenClawReleaseInfo {
+  const tagName = normalizeReleaseTag(params.version);
+  return {
+    tagName,
+    name: `openclaw ${normalizeReleaseVersion(tagName)}`,
+    htmlUrl: `${params.repositoryUrl}/releases/tag/${tagName}`,
+    tarballUrl: null,
+    zipballUrl: null,
+    publishedAt: null,
+    overview: extractOverview(params.notes),
+    importantNotes: extractImportantNotes(params.notes),
+    highlights: extractHighlights(params.notes),
+    notes: params.notes,
+    reactionCount: 0,
+    isLatest: params.isLatest,
+  };
+}
 
-  if (response.status === 404) {
+function resolveRequestedRelease(
+  requestedTag: string,
+  metadata: EmbeddedOpenClawMetadata,
+): OpenClawReleaseInfo | null {
+  const requestedVersion = normalizeReleaseVersion(requestedTag);
+  const requestedNotes = metadata.changelogSections.get(requestedVersion);
+
+  if (requestedNotes != null) {
+    return toEmbeddedReleaseInfo({
+      version: requestedVersion,
+      notes: requestedNotes,
+      repositoryUrl: metadata.repositoryUrl,
+      isLatest: metadata.packageVersion === requestedVersion,
+    });
+  }
+
+  if (metadata.packageVersion === requestedVersion) {
+    return toEmbeddedReleaseInfo({
+      version: requestedVersion,
+      notes: "",
+      repositoryUrl: metadata.repositoryUrl,
+      isLatest: true,
+    });
+  }
+
+  return null;
+}
+
+function resolveLatestRelease(
+  metadata: EmbeddedOpenClawMetadata,
+): OpenClawReleaseInfo | null {
+  if (!metadata.packageVersion) {
     return null;
   }
 
-  if (!response.ok) {
-    throw new Error(
-      `GitHub devolvió ${response.status} al consultar ${path}.`,
-    );
-  }
-
-  const payload = (await response.json()) as GitHubReleasePayload;
-  return toReleaseInfo(payload, isLatest);
+  return toEmbeddedReleaseInfo({
+    version: metadata.packageVersion,
+    notes: metadata.changelogSections.get(metadata.packageVersion) || "",
+    repositoryUrl: metadata.repositoryUrl,
+    isLatest: true,
+  });
 }
 
-export async function getOpenClawReleaseSnapshot(tag: string): Promise<{
+export async function getOpenClawReleaseSnapshot(
+  tag: string,
+  resolveOptions: OpenClawEmbeddedResolveOptions = {},
+): Promise<{
   requestedTag: string;
   syncedAt: string;
   bundled: {
@@ -166,59 +276,70 @@ export async function getOpenClawReleaseSnapshot(tag: string): Promise<{
   };
   errors: string[];
 }> {
-  const requestedTag = tag.trim() || DEFAULT_OPENCLAW_RELEASE_TAG;
-  const errors: string[] = [];
-  const bundledVersion = await loadBundledOpenClawVersion();
+  const requestedTag = normalizeReleaseTag(tag.trim() || DEFAULT_OPENCLAW_RELEASE_TAG);
+  const metadata = await loadEmbeddedOpenClawMetadata(resolveOptions);
 
-  const [requestedReleaseResult, latestReleaseResult] = await Promise.allSettled([
-    fetchGitHubRelease(`/releases/tags/${encodeURIComponent(requestedTag)}`, false),
-    fetchGitHubRelease("/releases/latest", true),
-  ]);
-
-  const requestedRelease =
-    requestedReleaseResult.status === "fulfilled"
-      ? requestedReleaseResult.value
-      : null;
-  if (requestedReleaseResult.status === "rejected") {
-    errors.push(requestedReleaseResult.reason?.message || String(requestedReleaseResult.reason));
+  if (!metadata) {
+    return {
+      requestedTag,
+      syncedAt: new Date().toISOString(),
+      bundled: {
+        version: null,
+        matchesRequested: false,
+      },
+      requestedRelease: null,
+      latestRelease: null,
+      sync: {
+        status: "offline",
+        summary:
+          "No se pudo leer el OpenClaw embebido en esta build. La referencia nativa no está disponible.",
+        autoRefreshMinutes: OPENCLAW_RELEASE_REFRESH_MINUTES,
+        latestMatchesRequested: false,
+      },
+      errors: ["Embedded OpenClaw package could not be resolved."],
+    };
   }
 
-  const latestRelease =
-    latestReleaseResult.status === "fulfilled" ? latestReleaseResult.value : null;
-  if (latestReleaseResult.status === "rejected") {
-    errors.push(latestReleaseResult.reason?.message || String(latestReleaseResult.reason));
-  }
-
-  const bundledMatchesRequested = bundledVersion
-    ? requestedTag.replace(/^v/i, "").startsWith(bundledVersion)
-    : false;
+  const requestedRelease = resolveRequestedRelease(requestedTag, metadata);
+  const latestRelease = resolveLatestRelease(metadata);
+  const bundledMatchesRequested =
+    metadata.packageVersion != null &&
+    normalizeReleaseVersion(requestedTag) === metadata.packageVersion;
   const latestMatchesRequested = Boolean(
     requestedRelease &&
       latestRelease &&
       requestedRelease.tagName === latestRelease.tagName,
   );
 
-  let status: "synced" | "update_available" | "tracking_requested" | "offline" =
-    "offline";
+  let status: "synced" | "update_available" | "tracking_requested" | "offline" = "offline";
   let summary =
-    "No se pudo sincronizar la release remota de OpenClaw. Se mostrará la referencia local.";
+    "No se pudo resolver la release nativa embebida de OpenClaw.";
+  const errors: string[] = [];
 
   if (requestedRelease && latestRelease && latestMatchesRequested) {
     status = "synced";
-    summary = `OpenClaw ${requestedRelease.tagName} is aligned with the latest release.`;
+    summary = `OpenClaw ${requestedRelease.tagName} está integrado nativamente en esta build.`;
   } else if (requestedRelease && latestRelease) {
     status = "update_available";
-    summary = `OpenClaw ${requestedRelease.tagName} tiene una release más reciente disponible: ${latestRelease.tagName}.`;
-  } else if (requestedRelease) {
-    status = "tracking_requested";
-    summary = `Se está siguiendo la release solicitada ${requestedRelease.tagName}.`;
+    summary = `Esta build integra OpenClaw ${latestRelease.tagName}; la referencia solicitada ${requestedRelease.tagName} queda documentada en el changelog embebido.`;
+  } else if (latestRelease) {
+    status = bundledMatchesRequested ? "synced" : "tracking_requested";
+    summary = bundledMatchesRequested
+      ? `OpenClaw ${latestRelease.tagName} está integrado nativamente en esta build.`
+      : `ILIAGPT integra OpenClaw ${latestRelease.tagName} nativamente; la tag solicitada ${requestedTag} no está disponible en el changelog embebido.`;
+
+    if (!bundledMatchesRequested) {
+      errors.push(
+        `Requested release ${requestedTag} is not present in the embedded OpenClaw changelog.`,
+      );
+    }
   }
 
   return {
     requestedTag,
     syncedAt: new Date().toISOString(),
     bundled: {
-      version: bundledVersion,
+      version: metadata.packageVersion,
       matchesRequested: bundledMatchesRequested,
     },
     requestedRelease,

@@ -72,6 +72,32 @@ async function installAuthenticatedShellMocks(page: Page) {
     });
   });
 
+  await page.route('**/api/session/identity', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        userId: TEST_USER_ID,
+        email: 'test@example.com',
+        role: 'user',
+        isAnonymous: false,
+      }),
+    });
+  });
+
+  await page.route('**/api/auth/mfa/status', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        active: false,
+        methods: { totp: false, push: false },
+        approvalId: null,
+        status: null,
+      }),
+    });
+  });
+
   await page.route('**/api/settings/public', async (route) => {
     await route.fulfill({
       status: 200,
@@ -209,7 +235,7 @@ async function installSettingsMocks(page: Page) {
 test('home loads without runtime errors', async ({ page }) => {
   const assertNoRuntimeErrors = createRuntimeErrorTracker(page);
 
-  await page.goto('/');
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
   await expect(page).toHaveTitle(/IliaGPT/i);
   await page.waitForTimeout(500);
 
@@ -219,7 +245,7 @@ test('home loads without runtime errors', async ({ page }) => {
 test('login page loads without runtime errors', async ({ page }) => {
   const assertNoRuntimeErrors = createRuntimeErrorTracker(page);
 
-  await page.goto('/login');
+  await page.goto('/login', { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: /Bienvenido/i })).toBeVisible();
   await page.waitForTimeout(500);
 
@@ -235,7 +261,7 @@ test('privacy page loads as authenticated route without runtime errors', async (
   });
   await installPrivacyMocks(page);
 
-  await page.goto('/privacy');
+  await page.goto('/privacy', { waitUntil: 'domcontentloaded' });
 
   await expect(page.getByRole('heading', { name: /Privacy|Privacidad/i })).toBeVisible();
   await expect(page.getByTestId('switch-share-data')).toBeVisible();
@@ -257,11 +283,11 @@ test('settings page loads as authenticated route without runtime errors', async 
   });
   await installSettingsMocks(page);
 
-  await page.goto('/settings');
+  await page.goto('/settings', { waitUntil: 'domcontentloaded' });
 
-  await expect(page.getByTestId('settings-menu-general')).toBeVisible();
-  await expect(page.getByTestId('select-accent-color')).toBeVisible();
-  await expect(page.getByTestId('switch-keyboard')).toBeVisible();
+  await expect(page.getByTestId('settings-menu-general')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('select-accent-color')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('switch-keyboard')).toBeVisible({ timeout: 15_000 });
 
   const keyboardSwitch = page.getByTestId('switch-keyboard');
   const initialState = await keyboardSwitch.getAttribute('data-state');
