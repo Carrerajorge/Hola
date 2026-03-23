@@ -117,6 +117,10 @@ router.get("/google", (req: Request, res: Response) => {
     console.log("[Google Auth] Request host:", req.get("host"));
     console.log("[Google Auth] Canonical domain:", CANONICAL_DOMAIN);
 
+    const loginHint =
+        normalizeLoginHint(req.query.loginHint) ??
+        normalizeLoginHint(req.query.login_hint);
+
     const params = new URLSearchParams({
         client_id: config.clientId,
         response_type: "code",
@@ -124,11 +128,11 @@ router.get("/google", (req: Request, res: Response) => {
         scope: "openid email profile",
         state,
         access_type: "offline",
-        prompt: "select_account consent",
+        // When a login_hint is provided the user already chose an account in the
+        // ILIAGPT UI, so skip the Google account-picker and only ask for consent
+        // if Google requires it (first-time authorization).
+        prompt: loginHint ? "consent" : "select_account consent",
     });
-    const loginHint =
-        normalizeLoginHint(req.query.loginHint) ??
-        normalizeLoginHint(req.query.login_hint);
     if (loginHint) {
         params.set("login_hint", loginHint);
     }
@@ -282,30 +286,13 @@ router.get("/google/callback", async (req: Request, res: Response) => {
             }
 
             // Force session save before redirect (critical for OAuth flow)
-            console.log("[Google Auth] Saving session before redirect...");
-            console.log("[Google Auth] DEBUG - Session cookie settings:", {
-                sessionID: req.sessionID,
-                sessionExists: !!req.session,
-                isSecure: req.secure,
-                protocol: req.protocol,
-                xForwardedProto: req.get('x-forwarded-proto'),
-                host: req.get('host'),
-            });
-
             req.session.save((saveErr: any) => {
                 if (saveErr) {
                     console.error("[Google Auth] Session save failed:", saveErr);
                     return res.redirect("/login?error=session_save_error");
                 }
 
-                // DEBUG: Log response headers to verify Set-Cookie is being sent
-                console.log("[Google Auth] Session saved successfully for:", email);
-                console.log("[Google Auth] DEBUG - Response headers after save:", {
-                    setCookie: res.getHeader('Set-Cookie'),
-                    sessionID: req.sessionID,
-                });
-                console.log("[Google Auth] Redirecting to:", stateData.returnUrl || "/?auth=success");
-
+                console.log("[Google Auth] Login successful for:", email);
                 res.redirect(stateData.returnUrl || "/?auth=success");
             });
         });
@@ -331,48 +318,13 @@ router.get("/google/status", (_req: Request, res: Response) => {
 
 /**
  * GET /api/auth/google/debug
- * DEBUG endpoint to check session/cookie status (temporary - remove in production)
+ * Returns minimal session health info (no sensitive data exposed).
  */
-router.get("/google/debug", (req: Request, res: Response) => {
-    const sessionCookie = req.cookies?.["siragpt.sid"];
-    const hasSession = !!req.session;
-    const hasUser = !!(req as any).user;
-
-    console.log("[Google Auth] DEBUG endpoint called:", {
-        cookies: Object.keys(req.cookies || {}),
-        hasSessionCookie: !!sessionCookie,
-        hasSession,
-        hasUser,
-        sessionID: req.sessionID,
-        isSecure: req.secure,
-        protocol: req.protocol,
-        xForwardedProto: req.get("x-forwarded-proto"),
-        host: req.get("host"),
-        origin: req.get("origin"),
-    });
-
+router.get("/google/debug", (_req: Request, res: Response) => {
     res.json({
-        auth: {
-            hasSession,
-            hasUser,
-            sessionID: req.sessionID,
-            userEmail: hasUser ? (req as any).user?.claims?.email : null,
-        },
-        cookies: {
-            hasSessionCookie: !!sessionCookie,
-            receivedCookies: Object.keys(req.cookies || {}),
-        },
-        request: {
-            isSecure: req.secure,
-            protocol: req.protocol,
-            xForwardedProto: req.get("x-forwarded-proto"),
-            host: req.get("host"),
-            origin: req.get("origin"),
-        },
-        config: {
-            canonicalDomain: CANONICAL_DOMAIN,
-            nodeEnv: env.NODE_ENV,
-        },
+        configured: isGoogleConfigured(),
+        canonicalDomain: CANONICAL_DOMAIN,
+        nodeEnv: env.NODE_ENV,
     });
 });
 
