@@ -128,9 +128,10 @@ export function PlatformSettingsProvider({ children }: { children: ReactNode }) 
     queryKey: ["/api/settings/public"],
     queryFn: async () => {
       const res = await fetch("/api/settings/public", { credentials: "include" });
-      if (!res.ok) throw new Error(`Failed to load public settings: ${res.status}`);
+      if (!res.ok) throw new Error(`${res.status}: Failed to load public settings`);
       return (await res.json()) as PublicSettingsResponse;
     },
+    meta: { suppressGlobalErrorToast: true },
     staleTime: 15_000,
     refetchInterval: 15_000,
     refetchOnWindowFocus: true,

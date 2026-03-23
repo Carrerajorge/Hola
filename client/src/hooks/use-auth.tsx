@@ -259,6 +259,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const { data: user, isLoading, isFetched, refetch } = useQuery<User | null>({
     queryKey: ["/api/auth/user"],
     queryFn: fetchUser,
+    meta: { suppressGlobalErrorToast: true },
     retry: false,
     // Always re-validate on mount so a fresh server session is picked up after login redirects.
     refetchOnMount: "always",

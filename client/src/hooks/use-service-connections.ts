@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { apiFetch } from "@/lib/apiClient";
+import { getErrorMessage, getResponseErrorMessage, SILENT_QUERY_META } from "@/lib/httpErrors";
 
 // ─── Types ───────────────────────────────────────────────────────────
 export type ServiceProvider =
@@ -208,7 +209,7 @@ export function useServiceConnections() {
       const res = await apiFetch(`/api/users/${userId}/integrations`, {
         credentials: "include",
       });
-      if (!res.ok) throw new Error("Failed to fetch integrations");
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, "Failed to fetch integrations"));
       return res.json();
     },
     enabled: !!userId,
@@ -227,6 +228,7 @@ export function useServiceConnections() {
     },
     enabled: !!userId,
     staleTime: 30_000,
+    meta: SILENT_QUERY_META,
   });
 
   // Connect mutation
@@ -240,7 +242,7 @@ export function useServiceConnections() {
           credentials: "include",
         }
       );
-      if (!res.ok) throw new Error("Failed to connect");
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, "Failed to connect"));
       return res.json();
     },
     onSuccess: (_data, providerId) => {
@@ -254,11 +256,11 @@ export function useServiceConnections() {
       });
       setConnectingService(null);
     },
-    onError: (_err, providerId) => {
+    onError: (err, providerId) => {
       const service = SERVICE_CATALOG.find((s) => s.id === providerId);
       toast({
         title: "Error de conexión",
-        description: `No se pudo conectar ${service?.name || providerId}. Intenta de nuevo.`,
+        description: getErrorMessage(err, `No se pudo conectar ${service?.name || providerId}. Intenta de nuevo.`),
         variant: "destructive",
       });
       setConnectingService(null);
@@ -276,7 +278,7 @@ export function useServiceConnections() {
           credentials: "include",
         }
       );
-      if (!res.ok) throw new Error("Failed to disconnect");
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, "Failed to disconnect"));
       return res.json();
     },
     onSuccess: (_data, providerId) => {
@@ -289,11 +291,11 @@ export function useServiceConnections() {
         description: `${service?.name || providerId} ha sido desconectado.`,
       });
     },
-    onError: (_err, providerId) => {
+    onError: (err, providerId) => {
       const service = SERVICE_CATALOG.find((s) => s.id === providerId);
       toast({
         title: "Error",
-        description: `No se pudo desconectar ${service?.name || providerId}.`,
+        description: getErrorMessage(err, `No se pudo desconectar ${service?.name || providerId}.`),
         variant: "destructive",
       });
     },

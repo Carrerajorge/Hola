@@ -156,9 +156,6 @@ export default function Home() {
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [isAppsDialogOpen, setIsAppsDialogOpen] = useState(false);
   const [isWhatsAppConnectOpen, setIsWhatsAppConnectOpen] = useState(false);
-  useEffect(() => {
-  console.log('[HOME] isWhatsAppConnectOpen changed', { isWhatsAppConnectOpen });
-  }, [isWhatsAppConnectOpen]);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
@@ -996,12 +993,11 @@ export default function Home() {
       <Suspense fallback={null}>
         {isWhatsAppConnectOpen ? (
           <ChannelsHubDialogLazy
-	  open={isWhatsAppConnectOpen}
-	  onOpenChange={(next) => {
-	  console.log('[HOME] ChannelsHubDialog onOpenChange', { next });
-	  setIsWhatsAppConnectOpen(next);
-	  }}
-	  />
+            open={isWhatsAppConnectOpen}
+            onOpenChange={(next) => {
+              setIsWhatsAppConnectOpen(next);
+            }}
+          />
         ) : null}
       </Suspense>
 

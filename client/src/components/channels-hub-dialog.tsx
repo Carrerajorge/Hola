@@ -652,14 +652,6 @@ export function ChannelsHubDialog({
 
   const [activeChannel, setActiveChannel] = useState<ChannelId | null>(null);
   const [showWhatsAppDialog, setShowWhatsAppDialog] = useState(false);
-  
-  useEffect(() => {
-  console.log('[HUB] prop open changed', { open });
-  }, [open]);
-
-  useEffect(() => {
-  console.log('[HUB] showWhatsAppDialog changed', { showWhatsAppDialog });
-  }, [showWhatsAppDialog]);
 
   const { status: waStatus } = useWhatsAppWebStatus(open);
   const tgStatus = useChannelStatus("telegram", open);
@@ -1081,12 +1073,11 @@ export function ChannelsHubDialog({
   };
 
   const handleChannelClick = (channelId: ChannelId) => {
-  if (channelId === "whatsapp") {
-  console.log('[HUB] opening WhatsApp dialog');
-  setShowWhatsAppDialog(true);
-  } else {
-  setActiveChannel(channelId);
-  }
+    if (channelId === "whatsapp") {
+      setShowWhatsAppDialog(true);
+    } else {
+      setActiveChannel(channelId);
+    }
   };
 
   const getChannelIntegrationStatus = (channelId: ChannelId): IntegrationStatus => {
@@ -1127,12 +1118,11 @@ export function ChannelsHubDialog({
     return (
       <Suspense fallback={null}>
         <WhatsAppConnectDialogInner
-	open={showWhatsAppDialog}
-	onOpenChange={(isOpen) => {
-	console.log('[HUB] WhatsAppConnectDialog onOpenChange', { isOpen, showWhatsAppDialog });
-	setShowWhatsAppDialog(isOpen);
-	}}
-	/>
+          open={showWhatsAppDialog}
+          onOpenChange={(isOpen) => {
+            setShowWhatsAppDialog(isOpen);
+          }}
+        />
       </Suspense>
     );
   }

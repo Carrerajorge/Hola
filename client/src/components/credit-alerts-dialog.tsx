@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { apiFetch } from "@/lib/apiClient";
 import { useToast } from "@/hooks/use-toast";
+import { getErrorMessage, getResponseErrorMessage } from "@/lib/httpErrors";
 import { Copy, Loader2, Mail } from "lucide-react";
 
 type CreditAlertsSettings = {
@@ -44,10 +45,8 @@ export function CreditAlertsDialog({
     (async () => {
       try {
         const res = await apiFetch("/api/billing/credits/alerts");
+        if (!res.ok) throw new Error(await getResponseErrorMessage(res, "No se pudo cargar la configuración"));
         const data = await res.json().catch(() => null);
-        if (!res.ok) {
-          throw new Error(data?.error || "No se pudo cargar la configuración");
-        }
         if (cancelled) return;
         setSettings({
           enabled: !!data?.enabled,
@@ -55,11 +54,11 @@ export function CreditAlertsDialog({
           recipientEmail: String(data?.recipientEmail || ""),
           canManage: !!data?.canManage,
         });
-      } catch (e: any) {
+      } catch (error) {
         if (!cancelled) {
           toast({
             title: "Error",
-            description: e?.message || "No se pudo cargar la configuración de alertas.",
+            description: getErrorMessage(error, "No se pudo cargar la configuración de alertas."),
             variant: "destructive",
           });
           setSettings({
@@ -91,10 +90,8 @@ export function CreditAlertsDialog({
           thresholdPercent: settings.thresholdPercent,
         }),
       });
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, "No se pudo guardar"));
       const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(data?.error || "No se pudo guardar");
-      }
       setSettings({
         enabled: !!data?.enabled,
         thresholdPercent: typeof data?.thresholdPercent === "number" ? data.thresholdPercent : settings.thresholdPercent,
@@ -105,10 +102,10 @@ export function CreditAlertsDialog({
         title: "Listo",
         description: "Alertas actualizadas.",
       });
-    } catch (e: any) {
+    } catch (error) {
       toast({
         title: "Error",
-        description: e?.message || "No se pudo guardar la configuración.",
+        description: getErrorMessage(error, "No se pudo guardar la configuración."),
         variant: "destructive",
       });
     } finally {
@@ -125,18 +122,16 @@ export function CreditAlertsDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, "No se pudo enviar el correo de prueba"));
       const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(data?.error || "No se pudo enviar el correo de prueba");
-      }
       toast({
         title: "Correo enviado",
         description: `Enviado a ${data?.recipientEmail || settings?.recipientEmail || "tu correo"}.`,
       });
-    } catch (e: any) {
+    } catch (error) {
       toast({
         title: "Error",
-        description: e?.message || "No se pudo enviar el correo de prueba.",
+        description: getErrorMessage(error, "No se pudo enviar el correo de prueba."),
         variant: "destructive",
       });
     } finally {
@@ -266,4 +261,3 @@ export function CreditAlertsDialog({
     </Dialog>
   );
 }
-

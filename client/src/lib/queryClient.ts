@@ -181,6 +181,16 @@ const lastToastAtByKey = new Map<string, number>();
 const OFFLINE_TOAST_ID = "network-offline";
 let hasBoundNetworkListeners = false;
 
+type QueryToastContext = {
+  meta?: unknown;
+  options?: {
+    refetchInterval?: unknown;
+  };
+  state: {
+    data?: unknown;
+  };
+};
+
 function maybeBindNetworkListeners() {
   if (hasBoundNetworkListeners) return;
   hasBoundNetworkListeners = true;
@@ -230,6 +240,21 @@ export function showErrorToast(
   });
 }
 
+export function shouldSuppressQueryErrorToast(query: QueryToastContext): boolean {
+  const meta = query.meta as { suppressGlobalErrorToast?: boolean } | undefined;
+  if (meta?.suppressGlobalErrorToast) return true;
+
+  // Background refreshes should not interrupt the user when we already have usable data.
+  if (query.state.data !== undefined) return true;
+
+  const refetchInterval = query.options?.refetchInterval;
+  if (typeof refetchInterval === "number") {
+    return refetchInterval > 0;
+  }
+
+  return typeof refetchInterval === "function";
+}
+
 type UnauthorizedBehavior = "returnNull" | "throw";
 export const getQueryFn: <T>(options: {
   on401: UnauthorizedBehavior;
@@ -263,10 +288,15 @@ function defaultRetryCondition(failureCount: number, error: unknown): boolean {
 
 export const queryClient = new QueryClient({
   queryCache: new QueryCache({
-    onError: (error) => {
+    onError: (error, query) => {
       const msg = error instanceof Error ? error.message : "Unknown error";
       // Ignore 401 (handled by redirect), 404 (often expected), and 422 (validation)
-      if (!msg.includes("401") && !msg.includes("404") && !msg.includes("422")) {
+      if (
+        !msg.includes("401") &&
+        !msg.includes("404") &&
+        !msg.includes("422") &&
+        !shouldSuppressQueryErrorToast(query)
+      ) {
         // Debounce network errors slightly to avoid spam
         if (!document.hidden) {
           showErrorToast(msg);

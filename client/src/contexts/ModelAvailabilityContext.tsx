@@ -211,9 +211,10 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
         cache: "no-store",
         headers: { "Cache-Control": "no-cache" }
       });
-      if (!res.ok) throw new Error("Failed to fetch models");
+      if (!res.ok) throw new Error(`${res.status}: Failed to fetch models`);
       return res.json();
     },
+    meta: { suppressGlobalErrorToast: true },
     refetchInterval: 30000,
     staleTime: 0,
     gcTime: 0,

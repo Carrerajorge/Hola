@@ -636,7 +636,6 @@ export function SpreadsheetEditor({
   }, [handleSparseGridChange]);
 
   const handleAIGenerate = useCallback(async () => {
-    console.log('[AI Generate] Called with prompt:', aiPrompt);
     if (!aiPrompt.trim()) return;
     setShowAIPrompt(false);
 
@@ -750,11 +749,9 @@ export function SpreadsheetEditor({
 
     const startRow = virtualSelectedCell?.row || 0;
     const startCol = virtualSelectedCell?.col || 0;
-    console.log('[AI Generate] Starting streaming at', startRow, startCol);
 
     try {
       await streaming.simulateStreaming(sampleData, startRow, startCol);
-      console.log('[AI Generate] Streaming completed');
     } catch (err) {
       console.error('[AI Generate] Error:', err);
     }
@@ -795,8 +792,6 @@ export function SpreadsheetEditor({
             activeSheetId: prev.activeSheetId
           } as unknown as OrchestratorWorkbook);
 
-          console.log('[Orchestrator] Updated sheets:', updated.sheets.map(s => ({ name: s.name, chartsCount: s.charts?.length || 0 })));
-
           const newWorkbook = {
             ...prev,
             sheets: updated.sheets.map(sheet => ({
@@ -809,8 +804,6 @@ export function SpreadsheetEditor({
             activeSheetId: updated.activeSheetId
           };
 
-          console.log('[Orchestrator] New workbook sheets:', newWorkbook.sheets.map(s => ({ name: s.name, chartsCount: s.charts?.length || 0 })));
-
           return newWorkbook;
         });
       },
@@ -818,7 +811,6 @@ export function SpreadsheetEditor({
     );
 
     try {
-      console.log('[Orchestrator] Analyzing prompt:', prompt);
       await orchestrator.analyzeAndPlan(prompt);
       await orchestrator.executePlan((progress) => {
         setOrchestratorProgress({
@@ -829,7 +821,6 @@ export function SpreadsheetEditor({
       });
       setOrchestratorProgress(null);
       setGridVersion(v => v + 1);
-      console.log('[Orchestrator] Complete');
     } catch (err) {
       console.error('[Orchestrator] Error:', err);
       setOrchestratorProgress(null);
@@ -1038,8 +1029,6 @@ export function SpreadsheetEditor({
   }, [editingCell]);
 
   const insertContentFn = useCallback(async (text: string) => {
-    console.log('[insertContentFn] Called with text length:', text.length);
-
     // Clean markdown from text
     const cleanMarkdown = (str: string) => str
       .replace(/^\*\*[^*]+\*\*\s*/gm, '')
@@ -1160,7 +1149,6 @@ export function SpreadsheetEditor({
 
         // Use streaming for virtualized mode
         const matrix = linesToMatrix(lines);
-        console.log('[insertContentFn] Streaming', matrix.length, 'rows to active sheet starting at row', startRow);
         await streaming.simulateStreaming(matrix, startRow, 0);
       } else if (lines.length > 0) {
         setData(prev => insertLines(lines, prev));
@@ -1297,7 +1285,6 @@ export function SpreadsheetEditor({
       await new Promise(resolve => setTimeout(resolve, 50));
 
       const matrix = linesToMatrix(lastSheetLines);
-      console.log('[insertContentFn] Streaming', matrix.length, 'rows to new sheet');
       await streaming.simulateStreaming(matrix, 0, 0);
     }
 
@@ -1657,59 +1644,40 @@ export function SpreadsheetEditor({
   }, [applyToSelection]);
 
   const toggleBold = useCallback(() => {
-    console.log('[toggleBold] Called');
     const active = getActiveCell();
-    console.log('[toggleBold] Active cell:', active);
     if (!active) {
-      console.log('[toggleBold] No active cell, returning');
       return;
     }
     const firstCell = useVirtualized ? sparseGrid.getCell(active.row, active.col) : data.cells[active.key];
-    console.log('[toggleBold] First cell:', firstCell);
     const newBold = !(firstCell?.bold);
-    console.log('[toggleBold] Setting bold to:', newBold);
     applyToSelection(() => ({ bold: newBold }));
   }, [getActiveCell, useVirtualized, sparseGrid, data.cells, applyToSelection]);
 
   const toggleItalic = useCallback(() => {
-    console.log('[toggleItalic] Called');
     const active = getActiveCell();
-    console.log('[toggleItalic] Active cell:', active);
     if (!active) {
-      console.log('[toggleItalic] No active cell, returning');
       return;
     }
     const firstCell = useVirtualized ? sparseGrid.getCell(active.row, active.col) : data.cells[active.key];
-    console.log('[toggleItalic] First cell:', firstCell);
     const newItalic = !(firstCell?.italic);
-    console.log('[toggleItalic] Setting italic to:', newItalic);
     applyToSelection(() => ({ italic: newItalic }));
   }, [getActiveCell, useVirtualized, sparseGrid, data.cells, applyToSelection]);
 
   const toggleUnderline = useCallback(() => {
-    console.log('[toggleUnderline] Called');
     const active = getActiveCell();
-    console.log('[toggleUnderline] Active cell:', active);
     if (!active) {
-      console.log('[toggleUnderline] No active cell, returning');
       return;
     }
     const firstCell = useVirtualized ? sparseGrid.getCell(active.row, active.col) : data.cells[active.key];
-    console.log('[toggleUnderline] First cell:', firstCell);
     const newUnderline = !(firstCell?.underline);
-    console.log('[toggleUnderline] Setting underline to:', newUnderline);
     applyToSelection(() => ({ underline: newUnderline }));
   }, [getActiveCell, useVirtualized, sparseGrid, data.cells, applyToSelection]);
 
   const setAlignment = useCallback((align: 'left' | 'center' | 'right') => {
-    console.log('[setAlignment] Called with:', align);
     const active = getActiveCell();
-    console.log('[setAlignment] Active cell:', active);
     if (!active) {
-      console.log('[setAlignment] No active cell, returning');
       return;
     }
-    console.log('[setAlignment] Applying alignment');
     applyToSelection(() => ({ align }));
   }, [getActiveCell, applyToSelection]);
 
@@ -1757,12 +1725,10 @@ export function SpreadsheetEditor({
 
   const mergeCells = useCallback(() => {
     if (!selectionRange) return;
-    console.log('Merge cells:', selectionRange);
   }, [selectionRange]);
 
   const unmergeCells = useCallback(() => {
     if (!selectionRange) return;
-    console.log('Unmerge cells:', selectionRange);
   }, [selectionRange]);
 
   const toggleWrapText = useCallback(() => {
@@ -2178,9 +2144,7 @@ export function SpreadsheetEditor({
     deleteColumn,
     insertChart: (type) => updateChartConfig(type, true),
     sort: sortData,
-    filter: () => {
-      console.log('Filter toggle');
-    },
+    filter: () => {},
     undo: undoRedo.undo,
     redo: undoRedo.redo,
     mergeCells,

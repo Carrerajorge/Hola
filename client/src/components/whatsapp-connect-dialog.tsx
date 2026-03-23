@@ -50,21 +50,6 @@ export function WhatsAppConnectDialog({
   const [autoReply, setAutoReply] = useState(true);
   const lastQrRef = useRef<string | null>(null);
   const busyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  
-  useEffect(() => {
-  console.log('[WA DIALOG] mount');
-  return () => {
-  console.log('[WA DIALOG] unmount');
-  };
-  }, []);
-  
-  useEffect(() => {
-  console.log('[WA DIALOG] prop open changed', { open });
-  }, [open]);
-
-  useEffect(() => {
-  console.log('[WA DIALOG] status changed', status);
-  }, [status]);
 
   // Safety net: clear busy after BUSY_TIMEOUT_MS
   const startBusy = useCallback(() => {
@@ -225,13 +210,11 @@ export function WhatsAppConnectDialog({
       const cc = codeToUse.trim().replace(/\s+/g, '');
       const num = phoneNumber.trim().replace(/\s+/g, '');
       const phone = `${cc}${num}`;
-      console.log('[WA DIALOG] generatePairingCode:start');
       const res = await api<{ success: true; status: WhatsAppWebStatus }>('/api/integrations/whatsapp/web/connect/pairing-code', {
         method: 'POST',
         body: JSON.stringify({ phone }),
       });
       setStatus(res.status);
-      console.log('[WA DIALOG] generatePairingCode:response', res.status);
     } catch (err) {
       const e = err as Error;
       setError(e?.message || 'No se pudo generar el código');
@@ -312,11 +295,10 @@ export function WhatsAppConnectDialog({
 
   return (
     <Dialog
-    open={open}
-    onOpenChange={(next) => {
-    console.log('[WA DIALOG] Dialog onOpenChange', { next });
-    onOpenChange(next);
-    }}
+      open={open}
+      onOpenChange={(next) => {
+        onOpenChange(next);
+      }}
     >
         <DialogContent
 	className="liquid-shell max-w-md max-h-[85dvh] overflow-y-auto rounded-[24px] border-0 shadow-2xl p-6"

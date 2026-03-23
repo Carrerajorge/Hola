@@ -1,12 +1,14 @@
+import * as React from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Card } from "@/components/ui/card";
-import { ArrowLeft, Shield, Eye, Download, Trash2, History, FileText } from "lucide-react";
+import { AlertCircle, ArrowLeft, Shield, Eye, Download, Trash2, History, FileText } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/apiClient";
+import { getErrorMessage, getResponseErrorMessage, SILENT_QUERY_META } from "@/lib/httpErrors";
 import { useToast } from "@/hooks/use-toast";
 import { saveAs } from "file-saver";
 import {
@@ -27,10 +29,15 @@ export default function PrivacyPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const [showClearHistoryConfirm, setShowClearHistoryConfirm] = useState(false);
-  const [showDeleteAccountConfirm, setShowDeleteAccountConfirm] = useState(false);
+  const [showClearHistoryConfirm, setShowClearHistoryConfirm] = React.useState(false);
+  const [showDeleteAccountConfirm, setShowDeleteAccountConfirm] = React.useState(false);
 
-  const { data: privacyData, isLoading: isLoadingPrivacy } = useQuery<{
+  const {
+    data: privacyData,
+    isLoading: isLoadingPrivacy,
+    isError: isPrivacyError,
+    error: privacyError,
+  } = useQuery<{
     privacySettings: {
       trainingOptIn: boolean;
       remoteBrowserDataAccess: boolean;
@@ -41,13 +48,14 @@ export default function PrivacyPage() {
     queryKey: ['/api/users', userId, 'privacy'],
     queryFn: async () => {
       const res = await apiFetch(`/api/users/${userId}/privacy`);
-      if (!res.ok) throw new Error('Failed to fetch privacy settings');
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, 'Failed to fetch privacy settings'));
       return res.json();
     },
+    meta: SILENT_QUERY_META,
     enabled: !!userId,
   });
 
-  const privacySettings = useMemo(() => {
+  const privacySettings = React.useMemo(() => {
     return privacyData?.privacySettings || {
       trainingOptIn: false,
       remoteBrowserDataAccess: false,
@@ -63,16 +71,16 @@ export default function PrivacyPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       });
-      if (!res.ok) throw new Error('Failed to update privacy settings');
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, 'Failed to update privacy settings'));
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'privacy'] });
     },
-    onError: () => {
+    onError: (err: unknown) => {
       toast({
         title: "Error",
-        description: "No se pudo actualizar la configuración.",
+        description: getErrorMessage(err, "No se pudo actualizar la configuración."),
         variant: "destructive",
       });
     },
@@ -81,7 +89,7 @@ export default function PrivacyPage() {
   const clearHistory = useMutation({
     mutationFn: async () => {
       const res = await apiFetch(`/api/users/${userId}/chats/delete-all`, { method: 'POST' });
-      if (!res.ok) throw new Error('Failed to delete chats');
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, 'Failed to delete chats'));
       return res.json();
     },
     onSuccess: (data: { count?: number }) => {
@@ -95,10 +103,10 @@ export default function PrivacyPage() {
       setShowClearHistoryConfirm(false);
       window.dispatchEvent(new CustomEvent("refresh-chats"));
     },
-    onError: () => {
+    onError: (err: unknown) => {
       toast({
         title: "Error",
-        description: "No se pudo borrar el historial.",
+        description: getErrorMessage(err, "No se pudo borrar el historial."),
         variant: "destructive",
       });
     },
@@ -111,13 +119,10 @@ export default function PrivacyPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ confirmation: 'DELETE_MY_ACCOUNT' }),
       });
-      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const err = new Error(data?.error || 'Failed to delete account') as Error & { status?: number };
-        err.status = res.status;
-        throw err;
+        throw new Error(await getResponseErrorMessage(res, 'Failed to delete account'));
       }
-      return data;
+      return res.json().catch(() => ({}));
     },
     onSuccess: async () => {
       toast({
@@ -140,7 +145,7 @@ export default function PrivacyPage() {
   const handleDownloadData = async () => {
     try {
       const res = await apiFetch(`/api/user/export`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, 'Failed to export data'));
 
       const blob = await res.blob();
       const contentDisposition = res.headers.get('Content-Disposition') || '';
@@ -152,7 +157,7 @@ export default function PrivacyPage() {
       console.error('Download export failed:', error);
       toast({
         title: "Error",
-        description: "No se pudo descargar tu información.",
+        description: getErrorMessage(error, "No se pudo descargar tu información."),
         variant: "destructive",
       });
     }
@@ -176,6 +181,20 @@ export default function PrivacyPage() {
       
       <div className="max-w-2xl mx-auto px-4 py-8">
         <div className="space-y-8">
+          {isPrivacyError && (
+            <Card className="rounded-xl border border-red-200 bg-red-50/60 p-4 shadow-sm dark:border-red-900 dark:bg-red-950/20">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="mt-0.5 h-5 w-5 text-red-500" />
+                <div>
+                  <p className="font-medium text-red-700 dark:text-red-300">No se pudo cargar tu configuración de privacidad</p>
+                  <p className="text-sm text-red-600/90 dark:text-red-300/80">
+                    {getErrorMessage(privacyError, "Intenta de nuevo más tarde.")}
+                  </p>
+                </div>
+              </div>
+            </Card>
+          )}
+
           <div className="space-y-4">
             <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Control de datos</h2>
             <Card className="rounded-xl border divide-y overflow-hidden border-0 shadow-md transition-all duration-300 hover:shadow-lg">
@@ -190,7 +209,7 @@ export default function PrivacyPage() {
                 <Switch 
                   checked={privacySettings.trainingOptIn}
                   onCheckedChange={(checked) => updatePrivacy.mutate({ trainingOptIn: checked })}
-                  disabled={!userId || isLoadingPrivacy || updatePrivacy.isPending}
+                  disabled={!userId || isLoadingPrivacy || isPrivacyError || updatePrivacy.isPending}
                   data-testid="switch-share-data"
                 />
               </div>
@@ -205,7 +224,7 @@ export default function PrivacyPage() {
                 <Switch 
                   checked={privacySettings.analyticsTracking}
                   onCheckedChange={(checked) => updatePrivacy.mutate({ analyticsTracking: checked })}
-                  disabled={!userId || isLoadingPrivacy || updatePrivacy.isPending}
+                  disabled={!userId || isLoadingPrivacy || isPrivacyError || updatePrivacy.isPending}
                   data-testid="switch-analytics"
                 />
               </div>
@@ -228,7 +247,7 @@ export default function PrivacyPage() {
                 <Switch 
                   checked={privacySettings.chatHistoryEnabled}
                   onCheckedChange={(checked) => updatePrivacy.mutate({ chatHistoryEnabled: checked })}
-                  disabled={!userId || isLoadingPrivacy || updatePrivacy.isPending}
+                  disabled={!userId || isLoadingPrivacy || isPrivacyError || updatePrivacy.isPending}
                   data-testid="switch-save-history"
                 />
               </div>

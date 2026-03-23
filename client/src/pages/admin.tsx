@@ -2641,7 +2641,7 @@ function PaymentsSection() {
       const res = await apiFetch(`${paymentsEndpoint}?${params.toString()}`, { credentials: "include" });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body?.error || "Failed to fetch payments");
+        throw new Error(body?.error || `${res.status}: Failed to fetch payments`);
       }
       return res.json();
     }
@@ -2713,7 +2713,7 @@ function PaymentsSection() {
     queryFn: async () => {
       const res = await apiFetch(`/api/admin/finance/payments/sync-stripe/jobs/${syncJobId}`, { credentials: "include" });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body?.error || "Failed to fetch sync job");
+      if (!res.ok) throw new Error(body?.error || `${res.status}: Failed to fetch sync job`);
       return body;
     },
     refetchInterval: (q) => {
@@ -2756,7 +2756,7 @@ function PaymentsSection() {
     queryFn: async () => {
       const res = await apiFetch(`/api/admin/finance/payments/${detailsPaymentId}`, { credentials: "include" });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body?.error || "Failed to fetch payment");
+      if (!res.ok) throw new Error(body?.error || `${res.status}: Failed to fetch payment`);
       return body;
     }
   });
