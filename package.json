@@ -54,6 +54,7 @@
     "tool-runner:health": "node --import tsx server/toolRunner/cli.ts --healthcheck",
     "tool-runner:test": "npm run test:run -- server/toolRunner/cli.contract.test.ts server/toolRunner/orchestrator.golden.test.ts",
     "quality:gate": "node --import tsx scripts/quality-gate.ts",
+    "verify:openclaw-upstream": "node scripts/verify-openclaw-upstream-sync.mjs",
     "verify:prod": "bash ./scripts/prod-rigorous-checks.sh",
     "test:prod:agentic100": "node --import tsx scripts/prod-agentic-rigorous-100.ts",
     "test:e2e:prod:rigorous": "npx playwright test e2e/production-rigorous.spec.ts --config=playwright.prod.config.ts",
