@@ -1,6 +1,9 @@
 name: Deploy Branch Hotfix to Production
 
 on:
+  push:
+    branches:
+      - codex/prod-artifact-guard-20260323
   workflow_dispatch:
 
 permissions:
