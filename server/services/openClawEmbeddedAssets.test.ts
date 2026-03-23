@@ -36,7 +36,7 @@ describe("openClawEmbeddedAssets", () => {
       const packageRoot = path.join(appRoot, "server", "openclaw");
       await writeJson(path.join(packageRoot, "package.json"), {
         name: "openclaw",
-        version: "2026.3.13",
+        version: "2026.3.22",
       });
 
       expect(resolveEmbeddedOpenClawPackageRootSync({ cwd: appRoot })).toBe(packageRoot);
@@ -55,7 +55,7 @@ describe("openClawEmbeddedAssets", () => {
 
       await writeJson(path.join(packageRoot, "package.json"), {
         name: "openclaw",
-        version: "2026.3.13",
+        version: "2026.3.22",
       });
       await writeFile(path.join(controlUiRoot, "index.html"), "<html>ok</html>\n");
 

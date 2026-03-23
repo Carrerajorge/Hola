@@ -62,7 +62,7 @@ export class RagflowNativeClient {
         const combinedInput = `[CONTEXT: Datasets ${request.dataset_ids.join(",")}] \n\n[INSTRUCTION]: ${lastMessage}`;
         
         return {
-            response: `Simulated RAG output natively executing OpenClaw logic: Entendido. La instrucción es: "${lastMessage}"`
+            response: `Simulated RAG output natively executing OpenClaw v2026.3.22 logic: Entendido. La instrucción es: "${lastMessage}"`
         };
     }
 

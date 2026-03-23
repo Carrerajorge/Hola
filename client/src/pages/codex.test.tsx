@@ -228,46 +228,46 @@ describe("CodexPage", () => {
           ok: true,
           json: async () => ({
             success: true,
-            requestedTag: "v2026.3.13-1",
+            requestedTag: "v2026.3.22",
             syncedAt: "2026-03-22T00:00:00.000Z",
             bundled: {
-              version: "2026.3.13",
+              version: "2026.3.22",
               matchesRequested: true,
             },
             requestedRelease: {
-              tagName: "v2026.3.13-1",
-              name: "openclaw 2026.3.13",
-              htmlUrl: "https://github.com/openclaw/openclaw/releases/tag/v2026.3.13-1",
-              tarballUrl: "https://api.github.com/repos/openclaw/openclaw/tarball/v2026.3.13-1",
-              zipballUrl: "https://api.github.com/repos/openclaw/openclaw/zipball/v2026.3.13-1",
-              publishedAt: "2026-03-14T18:04:28Z",
-              overview: "Recovery release for the broken original tag.",
-              importantNotes: ["The npm version remains 2026.3.13."],
+              tagName: "v2026.3.22",
+              name: "openclaw 2026.3.22",
+              htmlUrl: "https://github.com/openclaw/openclaw/releases/tag/v2026.3.22",
+              tarballUrl: "https://api.github.com/repos/openclaw/openclaw/tarball/v2026.3.22",
+              zipballUrl: "https://api.github.com/repos/openclaw/openclaw/zipball/v2026.3.22",
+              publishedAt: "2026-03-23T11:11:00Z",
+              overview: "Release with expanded native agent, sandbox, plugin, and control UI capabilities.",
+              importantNotes: ["Breaking changes in plugin SDK, browser relay, and legacy env compatibility."],
               highlights: [
-                "fix(compaction): use full-session token count",
-                "fix(ui): keep shared auth on insecure control-ui connects",
+                "Sandbox runtime adds pluggable backends and SSH support",
+                "Default OpenAI/Codex models move to GPT-5.4",
               ],
               notes: "Full release notes",
               reactionCount: 346,
               isLatest: true,
             },
             latestRelease: {
-              tagName: "v2026.3.13-1",
-              name: "openclaw 2026.3.13",
-              htmlUrl: "https://github.com/openclaw/openclaw/releases/tag/v2026.3.13-1",
-              tarballUrl: "https://api.github.com/repos/openclaw/openclaw/tarball/v2026.3.13-1",
-              zipballUrl: "https://api.github.com/repos/openclaw/openclaw/zipball/v2026.3.13-1",
-              publishedAt: "2026-03-14T18:04:28Z",
-              overview: "Recovery release for the broken original tag.",
-              importantNotes: ["The npm version remains 2026.3.13."],
-              highlights: ["fix(compaction): use full-session token count"],
+              tagName: "v2026.3.22",
+              name: "openclaw 2026.3.22",
+              htmlUrl: "https://github.com/openclaw/openclaw/releases/tag/v2026.3.22",
+              tarballUrl: "https://api.github.com/repos/openclaw/openclaw/tarball/v2026.3.22",
+              zipballUrl: "https://api.github.com/repos/openclaw/openclaw/zipball/v2026.3.22",
+              publishedAt: "2026-03-23T11:11:00Z",
+              overview: "Release with expanded native agent, sandbox, plugin, and control UI capabilities.",
+              importantNotes: ["Breaking changes in plugin SDK, browser relay, and legacy env compatibility."],
+              highlights: ["Sandbox runtime adds pluggable backends and SSH support"],
               notes: "Full release notes",
               reactionCount: 346,
               isLatest: true,
             },
             sync: {
               status: "synced",
-              summary: "OpenClaw v2026.3.13-1 is aligned with the latest release.",
+              summary: "OpenClaw v2026.3.22 is aligned with the latest release.",
               autoRefreshMinutes: 15,
               latestMatchesRequested: true,
             },
@@ -384,7 +384,7 @@ describe("CodexPage", () => {
 
     expect(screen.getByText("ILIAGPT")).toBeInTheDocument();
     expect(screen.getAllByText("OpenClaw").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("v2026.3.13-1").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("v2026.3.22").length).toBeGreaterThan(0);
     expect(screen.getByTestId("codex-session-title")).toHaveTextContent("Polish OpenClaw screen");
     expect(screen.getAllByText("/workspace/hola").length).toBeGreaterThan(0);
 

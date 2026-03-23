@@ -139,7 +139,7 @@ interface OpenClawCapabilityStats {
   gapsByCategory: Record<string, number>;
 }
 
-const OPENCLAW_RELEASE_TAG = "v2026.3.13-1";
+const OPENCLAW_RELEASE_TAG = "v2026.3.22";
 const OPENCLAW_RELEASE_REFRESH_MS = 15 * 60 * 1000;
 const CODEX_PROFILE_SEQUENCE: readonly CodexExecutionProfile[] = CODEX_EXECUTION_PROFILE_OPTIONS.map((option) => option.value);
 

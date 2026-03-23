@@ -5,7 +5,7 @@ const OPENCLAW_OWNER = "openclaw";
 const OPENCLAW_REPO = "openclaw";
 const OPENCLAW_RELEASE_REFRESH_MINUTES = 15;
 
-export const DEFAULT_OPENCLAW_RELEASE_TAG = "v2026.3.13-1";
+export const DEFAULT_OPENCLAW_RELEASE_TAG = "v2026.3.22";
 
 type GitHubReleasePayload = {
   tag_name?: string;

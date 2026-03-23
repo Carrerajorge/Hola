@@ -428,7 +428,7 @@ router.post("/execute", async (req: Request, res: Response) => {
     res.json({
       success: true,
       data: {
-        engine: "OpenClaw v2026.3.8 (Native)",
+        engine: "OpenClaw v2026.3.22 (Native)",
         status: "Understanding Instruction",
         inputProcessed: combinedInput,
         response: `Simulated RAG output natively executing OpenClaw logic: Entendido. La instrucción es: "${prompt}"`,
