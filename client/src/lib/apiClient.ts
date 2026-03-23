@@ -176,7 +176,7 @@ export async function apiFetch(url: string, options: RequestInit & { timeoutMs?:
     const shouldRetryGatewayResponse =
       fallbackUrls.length > 0 &&
       import.meta.env.DEV &&
-      primaryResponse.status >= 500;
+      [502, 503, 504].includes(primaryResponse.status);
     if (!shouldRetryGatewayResponse) {
       return primaryResponse;
     }

@@ -54,6 +54,67 @@ function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex").slice(0, 16);
 }
 
+const missingOauthTablesWarned = new Set<string>();
+
+function getSqlCode(error: unknown): string | undefined {
+  const anyError = error as {
+    code?: string;
+    cause?: { code?: string };
+  } | null;
+  return anyError?.cause?.code || anyError?.code;
+}
+
+function getSqlMessage(error: unknown): string {
+  const anyError = error as {
+    message?: string;
+    detail?: string;
+    cause?: { message?: string; detail?: string };
+  } | null;
+
+  return [
+    anyError?.cause?.message,
+    anyError?.cause?.detail,
+    anyError?.message,
+    anyError?.detail,
+  ]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .join("\n");
+}
+
+function isMissingOauthTokenTableError(error: unknown): boolean {
+  if (getSqlCode(error) === "42P01") {
+    return true;
+  }
+
+  const message = getSqlMessage(error).toLowerCase();
+  return (
+    message.includes('relation "oauth_tokens_global" does not exist') ||
+    message.includes('relation "oauth_tokens_user" does not exist') ||
+    message.includes("oauth_tokens_global") ||
+    message.includes("oauth_tokens_user")
+  );
+}
+
+function warnMissingOauthTableOnce(error: unknown): void {
+  const message = getSqlMessage(error).toLowerCase();
+  const tables = [
+    message.includes("oauth_tokens_global") ? "oauth_tokens_global" : null,
+    message.includes("oauth_tokens_user") ? "oauth_tokens_user" : null,
+  ].filter((value): value is string => !!value);
+
+  if (tables.length === 0) {
+    tables.push("oauth_tokens_global", "oauth_tokens_user");
+  }
+
+  for (const table of tables) {
+    if (missingOauthTablesWarned.has(table)) continue;
+    missingOauthTablesWarned.add(table);
+    console.warn(
+      `[ProvidersService] ${table} is missing; OAuth provider status will be treated as disconnected until migrations run.`,
+    );
+  }
+}
+
 // ─── Service ─────────────────────────────────────────────────────────────────
 
 class ProvidersService {
@@ -69,62 +130,78 @@ class ProvidersService {
   ): Promise<ResolvedToken | null> {
     // 1. Try user-scoped token
     if (userId) {
-      const [userRow] = await db
-        .select()
-        .from(oauthTokensUser)
-        .where(
-          and(
-            eq(oauthTokensUser.userId, userId),
-            eq(oauthTokensUser.provider, provider),
-          ),
-        )
-        .limit(1);
+      try {
+        const [userRow] = await db
+          .select()
+          .from(oauthTokensUser)
+          .where(
+            and(
+              eq(oauthTokensUser.userId, userId),
+              eq(oauthTokensUser.provider, provider),
+            ),
+          )
+          .limit(1);
 
-      if (userRow) {
-        try {
-          return {
-            token: decrypt(userRow.accessToken),
-            source: "user",
-            refreshToken: userRow.refreshToken
-              ? decrypt(userRow.refreshToken)
-              : null,
-            expiresAt: userRow.expiresAt,
-            rowId: userRow.id,
-            isGlobal: false,
-          };
-        } catch (err) {
-          console.error(
-            `[ProvidersService] Failed to decrypt user token for ${provider}:`,
-            (err as Error).message,
-          );
+        if (userRow) {
+          try {
+            return {
+              token: decrypt(userRow.accessToken),
+              source: "user",
+              refreshToken: userRow.refreshToken
+                ? decrypt(userRow.refreshToken)
+                : null,
+              expiresAt: userRow.expiresAt,
+              rowId: userRow.id,
+              isGlobal: false,
+            };
+          } catch (err) {
+            console.error(
+              `[ProvidersService] Failed to decrypt user token for ${provider}:`,
+              (err as Error).message,
+            );
+          }
+        }
+      } catch (error) {
+        if (isMissingOauthTokenTableError(error)) {
+          warnMissingOauthTableOnce(error);
+        } else {
+          throw error;
         }
       }
     }
 
     // 2. Fallback to global token
-    const [globalRow] = await db
-      .select()
-      .from(oauthTokensGlobal)
-      .where(eq(oauthTokensGlobal.provider, provider))
-      .limit(1);
+    try {
+      const [globalRow] = await db
+        .select()
+        .from(oauthTokensGlobal)
+        .where(eq(oauthTokensGlobal.provider, provider))
+        .limit(1);
 
-    if (globalRow) {
-      try {
-        return {
-          token: decrypt(globalRow.accessToken),
-          source: "global",
-          refreshToken: globalRow.refreshToken
-            ? decrypt(globalRow.refreshToken)
-            : null,
-          expiresAt: globalRow.expiresAt,
-          rowId: globalRow.id,
-          isGlobal: true,
-        };
-      } catch (err) {
-        console.error(
-          `[ProvidersService] Failed to decrypt global token for ${provider}:`,
-          (err as Error).message,
-        );
+      if (globalRow) {
+        try {
+          return {
+            token: decrypt(globalRow.accessToken),
+            source: "global",
+            refreshToken: globalRow.refreshToken
+              ? decrypt(globalRow.refreshToken)
+              : null,
+            expiresAt: globalRow.expiresAt,
+            rowId: globalRow.id,
+            isGlobal: true,
+          };
+        } catch (err) {
+          console.error(
+            `[ProvidersService] Failed to decrypt global token for ${provider}:`,
+            (err as Error).message,
+          );
+        }
+      }
+    } catch (error) {
+      if (isMissingOauthTokenTableError(error)) {
+        warnMissingOauthTableOnce(error);
+      } else {
+        throw error;
       }
     }
 
@@ -314,31 +391,47 @@ class ProvidersService {
   async getGlobalTokenStatus(
     provider: OAuthProvider,
   ): Promise<{ connected: boolean; label: string | null }> {
-    const [row] = await db
-      .select({ id: oauthTokensGlobal.id, label: oauthTokensGlobal.label })
-      .from(oauthTokensGlobal)
-      .where(eq(oauthTokensGlobal.provider, provider))
-      .limit(1);
+    try {
+      const [row] = await db
+        .select({ id: oauthTokensGlobal.id, label: oauthTokensGlobal.label })
+        .from(oauthTokensGlobal)
+        .where(eq(oauthTokensGlobal.provider, provider))
+        .limit(1);
 
-    return { connected: !!row, label: row?.label ?? null };
+      return { connected: !!row, label: row?.label ?? null };
+    } catch (error) {
+      if (isMissingOauthTokenTableError(error)) {
+        warnMissingOauthTableOnce(error);
+        return { connected: false, label: null };
+      }
+      throw error;
+    }
   }
 
   async getUserTokenStatus(
     userId: string,
     provider: OAuthProvider,
   ): Promise<{ connected: boolean }> {
-    const [row] = await db
-      .select({ id: oauthTokensUser.id })
-      .from(oauthTokensUser)
-      .where(
-        and(
-          eq(oauthTokensUser.userId, userId),
-          eq(oauthTokensUser.provider, provider),
-        ),
-      )
-      .limit(1);
+    try {
+      const [row] = await db
+        .select({ id: oauthTokensUser.id })
+        .from(oauthTokensUser)
+        .where(
+          and(
+            eq(oauthTokensUser.userId, userId),
+            eq(oauthTokensUser.provider, provider),
+          ),
+        )
+        .limit(1);
 
-    return { connected: !!row };
+      return { connected: !!row };
+    } catch (error) {
+      if (isMissingOauthTokenTableError(error)) {
+        warnMissingOauthTableOnce(error);
+        return { connected: false };
+      }
+      throw error;
+    }
   }
 
   // ─── Token Refresh ───────────────────────────────────────────────────────
@@ -349,27 +442,46 @@ class ProvidersService {
   async getExpiringTokens(withinMs: number = 10 * 60 * 1000) {
     const threshold = Date.now() + withinMs;
 
-    const globalTokens = await db
-      .select()
-      .from(oauthTokensGlobal)
-      .where(
-        and(
-          isNotNull(oauthTokensGlobal.expiresAt),
-          lt(oauthTokensGlobal.expiresAt, threshold),
-          isNotNull(oauthTokensGlobal.refreshToken),
-        ),
-      );
+    let globalTokens: typeof oauthTokensGlobal.$inferSelect[] = [];
+    let userTokens: typeof oauthTokensUser.$inferSelect[] = [];
 
-    const userTokens = await db
-      .select()
-      .from(oauthTokensUser)
-      .where(
-        and(
-          isNotNull(oauthTokensUser.expiresAt),
-          lt(oauthTokensUser.expiresAt, threshold),
-          isNotNull(oauthTokensUser.refreshToken),
-        ),
-      );
+    try {
+      globalTokens = await db
+        .select()
+        .from(oauthTokensGlobal)
+        .where(
+          and(
+            isNotNull(oauthTokensGlobal.expiresAt),
+            lt(oauthTokensGlobal.expiresAt, threshold),
+            isNotNull(oauthTokensGlobal.refreshToken),
+          ),
+        );
+    } catch (error) {
+      if (isMissingOauthTokenTableError(error)) {
+        warnMissingOauthTableOnce(error);
+      } else {
+        throw error;
+      }
+    }
+
+    try {
+      userTokens = await db
+        .select()
+        .from(oauthTokensUser)
+        .where(
+          and(
+            isNotNull(oauthTokensUser.expiresAt),
+            lt(oauthTokensUser.expiresAt, threshold),
+            isNotNull(oauthTokensUser.refreshToken),
+          ),
+        );
+    } catch (error) {
+      if (isMissingOauthTokenTableError(error)) {
+        warnMissingOauthTableOnce(error);
+      } else {
+        throw error;
+      }
+    }
 
     return { globalTokens, userTokens };
   }

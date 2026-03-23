@@ -48,7 +48,8 @@ import { useLanguage } from "@/hooks/use-language";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import { apiFetch } from "@/lib/apiClient";
-import { formatZonedDate, formatZonedTime, normalizeTimeZone } from "@/lib/platformDateTime";
+import { getErrorMessage, getResponseErrorMessage, SILENT_QUERY_META } from "@/lib/httpErrors";
+import { formatZonedDate, formatZonedDateTime, formatZonedTime, normalizeTimeZone } from "@/lib/platformDateTime";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
@@ -232,10 +233,67 @@ interface PrivacySettings {
   chatHistoryEnabled: boolean;
 }
 
+interface ScheduleSummaryRow {
+  id: string;
+  chatId: string | null;
+  chatTitle?: string | null;
+  name: string;
+  prompt: string;
+  scheduleType: "once" | "daily" | "weekly";
+  timeZone: string;
+  isActive: boolean;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  failureCount: number;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 type TwoFactorStatus = {
   enabled: boolean;
   verified: boolean;
 };
+
+function AdminManagedBadge(props: { label?: string; testId?: string }) {
+  return (
+    <span
+      className="inline-flex items-center rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300"
+      data-testid={props.testId}
+    >
+      {props.label || "Gestionado por administrador"}
+    </span>
+  );
+}
+
+function SignInRequiredCard(props: {
+  title: string;
+  description: string;
+  onLogin?: (() => void) | null;
+  testId?: string;
+}) {
+  return (
+    <div
+      className="rounded-xl border border-blue-200 bg-blue-50/80 p-4 text-blue-950 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-100"
+      data-testid={props.testId}
+    >
+      <div className="flex items-start gap-3">
+        <Info className="mt-0.5 h-5 w-5 text-blue-600 dark:text-blue-300" />
+        <div className="flex-1 space-y-2">
+          <div className="space-y-1">
+            <p className="text-sm font-medium">{props.title}</p>
+            <p className="text-xs text-blue-900/75 dark:text-blue-100/80">{props.description}</p>
+          </div>
+          {props.onLogin ? (
+            <Button size="sm" onClick={props.onLogin} data-testid={props.testId ? `${props.testId}-button` : undefined}>
+              Iniciar sesión
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 type TwoFactorSetup = {
   secret: string;
@@ -246,7 +304,7 @@ type TwoFactorSetup = {
 };
 
 function AppsSection() {
-  const { user } = useAuth();
+  const { user, isAuthenticated, login } = useAuth();
   const userId = user?.id;
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -266,20 +324,22 @@ function AppsSection() {
     queryKey: ['/api/users', userId, 'integrations'],
     queryFn: async () => {
       const res = await apiFetch(`/api/users/${userId}/integrations`, { credentials: 'include' });
-      if (!res.ok) throw new Error('Failed to fetch integrations');
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, 'Failed to fetch integrations'));
       return res.json();
     },
-    enabled: !!userId,
+    meta: SILENT_QUERY_META,
+    enabled: !!userId && isAuthenticated,
   });
 
   const { data: logsData, isLoading: isLoadingLogs, isError: isLogsError } = useQuery<ToolCallLog[]>({
     queryKey: ['/api/users', userId, 'integrations', 'logs'],
     queryFn: async () => {
       const res = await apiFetch(`/api/users/${userId}/integrations/logs?limit=10`, { credentials: 'include' });
-      if (!res.ok) throw new Error('Failed to fetch logs');
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, 'Failed to fetch logs'));
       return res.json();
     },
-    enabled: !!userId,
+    meta: SILENT_QUERY_META,
+    enabled: !!userId && isAuthenticated,
   });
 
   const updatePolicy = useMutation({
@@ -290,15 +350,15 @@ function AppsSection() {
         credentials: 'include',
         body: JSON.stringify(data),
       });
-      if (!res.ok) throw new Error('Failed to update policy');
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, 'Failed to update policy'));
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'integrations'] });
       toast({ title: "Configuración actualizada", description: "Los cambios han sido guardados." });
     },
-    onError: () => {
-      toast({ title: "Error", description: "No se pudo actualizar la configuración.", variant: "destructive" });
+    onError: (err: unknown) => {
+      toast({ title: "Error", description: getErrorMessage(err, "No se pudo actualizar la configuración."), variant: "destructive" });
     },
   });
 
@@ -309,15 +369,15 @@ function AppsSection() {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
       });
-      if (!res.ok) throw new Error('Failed to connect');
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, 'Failed to connect'));
       return res.json();
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'integrations'] });
       toast({ title: "Conexión iniciada", description: data.message || "El proceso de conexión ha sido iniciado." });
     },
-    onError: () => {
-      toast({ title: "Error", description: "No se pudo iniciar la conexión.", variant: "destructive" });
+    onError: (err: unknown) => {
+      toast({ title: "Error", description: getErrorMessage(err, "No se pudo iniciar la conexión."), variant: "destructive" });
     },
   });
 
@@ -328,15 +388,15 @@ function AppsSection() {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
       });
-      if (!res.ok) throw new Error('Failed to disconnect');
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, 'Failed to disconnect'));
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'integrations'] });
       toast({ title: "Desconectado", description: "La integración ha sido desconectada." });
     },
-    onError: () => {
-      toast({ title: "Error", description: "No se pudo desconectar la integración.", variant: "destructive" });
+    onError: (err: unknown) => {
+      toast({ title: "Error", description: getErrorMessage(err, "No se pudo desconectar la integración."), variant: "destructive" });
     },
   });
 
@@ -344,6 +404,9 @@ function AppsSection() {
   const accounts = integrationsData?.accounts || [];
   const policy = integrationsData?.policy;
   const logs = logsData || [];
+  const activeProviders = providers.filter(
+    (provider) => String(provider.isActive || "").toLowerCase().trim() === "true",
+  );
 
   useEffect(() => {
     setMaxParallelDraft(String(policy?.maxParallelCalls ?? 3));
@@ -412,6 +475,25 @@ function AppsSection() {
             </div>
           </div>
         </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-xl font-semibold" data-testid="text-apps-title">Aplicaciones e Integraciones</h2>
+          <p className="text-sm text-muted-foreground mt-1" data-testid="text-apps-description">
+            Conecta y administra las aplicaciones que ILIAGPT puede usar
+          </p>
+        </div>
+        <SignInRequiredCard
+          title="Inicia sesión para conectar aplicaciones"
+          description="Necesitas una cuenta real para ver proveedores disponibles, conectar integraciones y revisar el historial de llamadas."
+          onLogin={login}
+          testId="card-integrations-signin-required"
+        />
       </div>
     );
   }
@@ -568,9 +650,29 @@ function AppsSection() {
       ))}
 
       {providers.length === 0 && (
-        <div className="text-center py-8 text-muted-foreground" data-testid="text-no-providers">
-          <AppWindow className="h-8 w-8 mx-auto mb-2 opacity-50" />
-          <p className="text-sm">No hay proveedores de integración disponibles</p>
+        <div className="rounded-xl border border-dashed bg-muted/20 px-4 py-8 text-center text-muted-foreground" data-testid="text-no-providers">
+          <AppWindow className="mx-auto mb-2 h-8 w-8 opacity-50" />
+          <p className="text-sm font-medium text-foreground">No hay proveedores configurados en este entorno</p>
+          <p className="mx-auto mt-1 max-w-md text-xs">
+            El backend no devolvió integraciones disponibles. Si esperabas ver apps aquí, revisa la configuración del servidor o del workspace.
+          </p>
+        </div>
+      )}
+
+      {providers.length > 0 && activeProviders.length === 0 && (
+        <div
+          className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 text-amber-950 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-100"
+          data-testid="card-integrations-admin-disabled"
+        >
+          <div className="flex items-start gap-3">
+            <AlertCircle className="mt-0.5 h-5 w-5 text-amber-600 dark:text-amber-300" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Todos los proveedores visibles están desactivados</p>
+              <p className="text-xs text-amber-900/75 dark:text-amber-100/80">
+                El catálogo existe, pero ninguna integración está habilitada para conectarse en este entorno.
+              </p>
+            </div>
+          </div>
         </div>
       )}
 
@@ -729,9 +831,9 @@ function AppsSection() {
 }
 
 function DataControlsSection() {
-  const { user, logout } = useAuth();
+  const { user, isAuthenticated, login, logout } = useAuth();
   const userId = user?.id;
-  const isAuthed = !!userId;
+  const isAuthed = !!userId && isAuthenticated;
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { settings: platformSettings } = usePlatformSettings();
@@ -751,40 +853,44 @@ function DataControlsSection() {
     queryKey: ['/api/users', userId, 'privacy'],
     queryFn: async () => {
       const res = await apiFetch(`/api/users/${userId}/privacy`, { credentials: 'include' });
-      if (!res.ok) throw new Error('Failed to fetch privacy settings');
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, 'Failed to fetch privacy settings'));
       return res.json();
     },
-    enabled: !!userId,
+    meta: SILENT_QUERY_META,
+    enabled: isAuthed,
   });
 
   const { data: sharedLinks = [], isLoading: isLoadingLinks } = useQuery<SharedLink[]>({
     queryKey: ['/api/users', userId, 'shared-links'],
     queryFn: async () => {
       const res = await apiFetch(`/api/users/${userId}/shared-links`, { credentials: 'include' });
-      if (!res.ok) throw new Error('Failed to fetch shared links');
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, 'Failed to fetch shared links'));
       return res.json();
     },
-    enabled: !!userId,
+    meta: SILENT_QUERY_META,
+    enabled: isAuthed,
   });
 
   const { data: archivedChats = [], isLoading: isLoadingArchived } = useQuery<ArchivedChat[]>({
     queryKey: ['/api/users', userId, 'chats', 'archived'],
     queryFn: async () => {
       const res = await apiFetch(`/api/users/${userId}/chats/archived`, { credentials: 'include' });
-      if (!res.ok) throw new Error('Failed to fetch archived chats');
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, 'Failed to fetch archived chats'));
       return res.json();
     },
-    enabled: !!userId,
+    meta: SILENT_QUERY_META,
+    enabled: isAuthed,
   });
 
   const { data: deletedChats = [], isLoading: isLoadingDeleted } = useQuery<DeletedChat[]>({
     queryKey: ['/api/users', userId, 'chats', 'deleted'],
     queryFn: async () => {
       const res = await apiFetch(`/api/users/${userId}/chats/deleted`, { credentials: 'include' });
-      if (!res.ok) throw new Error('Failed to fetch deleted chats');
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, 'Failed to fetch deleted chats'));
       return res.json();
     },
-    enabled: !!userId,
+    meta: SILENT_QUERY_META,
+    enabled: isAuthed,
   });
 
   const updatePrivacy = useMutation({
@@ -796,15 +902,15 @@ function DataControlsSection() {
         credentials: 'include',
         body: JSON.stringify(data),
       });
-      if (!res.ok) throw new Error('Failed to update');
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, 'Failed to update privacy settings'));
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'privacy'] });
       toast({ title: "Preferencias actualizadas", description: "Tus preferencias de privacidad han sido guardadas." });
     },
-    onError: () => {
-      toast({ title: "Error", description: "No se pudo actualizar la configuración.", variant: "destructive" });
+    onError: (err: unknown) => {
+      toast({ title: "Error", description: getErrorMessage(err, "No se pudo actualizar la configuración."), variant: "destructive" });
     },
   });
 
@@ -812,15 +918,15 @@ function DataControlsSection() {
     mutationFn: async (linkId: string) => {
       if (!userId) throw new Error("Unauthorized");
       const res = await apiFetch(`/api/users/${userId}/shared-links/${linkId}`, { method: 'DELETE', credentials: 'include' });
-      if (!res.ok) throw new Error('Failed to revoke');
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, 'Failed to revoke shared link'));
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'shared-links'] });
       toast({ title: "Enlace revocado", description: "El enlace compartido ha sido revocado." });
     },
-    onError: () => {
-      toast({ title: "Error", description: "No se pudo revocar el enlace.", variant: "destructive" });
+    onError: (err: unknown) => {
+      toast({ title: "Error", description: getErrorMessage(err, "No se pudo revocar el enlace."), variant: "destructive" });
     },
   });
 
@@ -828,7 +934,7 @@ function DataControlsSection() {
     mutationFn: async (chatId: string) => {
       if (!userId) throw new Error("Unauthorized");
       const res = await apiFetch(`/api/users/${userId}/chats/${chatId}/unarchive`, { method: 'POST', credentials: 'include' });
-      if (!res.ok) throw new Error('Failed to unarchive');
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, 'Failed to unarchive chat'));
       return res.json();
     },
     onSuccess: () => {
@@ -837,8 +943,8 @@ function DataControlsSection() {
       toast({ title: "Chat desarchivado", description: "El chat ha sido devuelto a tu lista." });
       window.dispatchEvent(new CustomEvent("refresh-chats"));
     },
-    onError: () => {
-      toast({ title: "Error", description: "No se pudo restaurar el chat.", variant: "destructive" });
+    onError: (err: unknown) => {
+      toast({ title: "Error", description: getErrorMessage(err, "No se pudo restaurar el chat."), variant: "destructive" });
     },
   });
 
@@ -846,7 +952,7 @@ function DataControlsSection() {
     mutationFn: async (chatId: string) => {
       if (!userId) throw new Error("Unauthorized");
       const res = await apiFetch(`/api/users/${userId}/chats/${chatId}/restore`, { method: 'POST', credentials: 'include' });
-      if (!res.ok) throw new Error('Failed to restore');
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, 'Failed to restore chat'));
       return res.json();
     },
     onSuccess: () => {
@@ -855,8 +961,8 @@ function DataControlsSection() {
       queryClient.invalidateQueries({ queryKey: ['/api/chats'] });
       toast({ title: "Chat restaurado", description: "El chat ha sido restaurado." });
     },
-    onError: () => {
-      toast({ title: "Error", description: "No se pudo restaurar el chat.", variant: "destructive" });
+    onError: (err: unknown) => {
+      toast({ title: "Error", description: getErrorMessage(err, "No se pudo restaurar el chat."), variant: "destructive" });
     },
   });
 
@@ -864,7 +970,7 @@ function DataControlsSection() {
     mutationFn: async () => {
       if (!userId) throw new Error("Unauthorized");
       const res = await apiFetch(`/api/users/${userId}/chats/archive-all`, { method: 'POST', credentials: 'include' });
-      if (!res.ok) throw new Error('Failed to archive all');
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, 'Failed to archive all chats'));
       return res.json();
     },
     onSuccess: (data) => {
@@ -874,8 +980,8 @@ function DataControlsSection() {
       setShowArchiveConfirm(false);
       window.dispatchEvent(new CustomEvent("refresh-chats"));
     },
-    onError: () => {
-      toast({ title: "Error", description: "No se pudieron archivar los chats.", variant: "destructive" });
+    onError: (err: unknown) => {
+      toast({ title: "Error", description: getErrorMessage(err, "No se pudieron archivar los chats."), variant: "destructive" });
     },
   });
 
@@ -883,7 +989,7 @@ function DataControlsSection() {
     mutationFn: async () => {
       if (!userId) throw new Error("Unauthorized");
       const res = await apiFetch(`/api/users/${userId}/chats/delete-all`, { method: 'POST', credentials: 'include' });
-      if (!res.ok) throw new Error('Failed to delete all');
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, 'Failed to delete all chats'));
       return res.json();
     },
     onSuccess: (data) => {
@@ -895,15 +1001,16 @@ function DataControlsSection() {
       setShowDeleteConfirm(false);
       window.dispatchEvent(new CustomEvent("refresh-chats"));
     },
-    onError: () => {
-      toast({ title: "Error", description: "No se pudieron eliminar los chats.", variant: "destructive" });
+    onError: (err: unknown) => {
+      toast({ title: "Error", description: getErrorMessage(err, "No se pudieron eliminar los chats."), variant: "destructive" });
     },
   });
 
   const downloadData = useMutation({
     mutationFn: async () => {
+      if (!isAuthed) throw new Error("Unauthorized");
       const res = await apiFetch(`/api/user/export`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, 'Failed to export data'));
 
       const blob = await res.blob();
       const contentDisposition = res.headers.get('Content-Disposition') || '';
@@ -915,10 +1022,10 @@ function DataControlsSection() {
       saveAs(blob, filename);
       toast({ title: "Descarga lista", description: "Tu exportación fue generada." });
     },
-    onError: () => {
+    onError: (err: unknown) => {
       toast({
         title: "Error",
-        description: "No se pudo descargar tu información.",
+        description: getErrorMessage(err, "No se pudo descargar tu información."),
         variant: "destructive",
       });
     },
@@ -926,17 +1033,17 @@ function DataControlsSection() {
 
   const deleteAccount = useMutation({
     mutationFn: async () => {
+      if (!isAuthed) throw new Error("Unauthorized");
       const res = await apiFetch(`/api/user/account`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ confirmation: 'DELETE_MY_ACCOUNT' }),
       });
 
-      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error((data as any)?.error || 'Failed to delete account');
+        throw new Error(await getResponseErrorMessage(res, 'Failed to delete account'));
       }
-      return data;
+      return res.json().catch(() => ({}));
     },
     onSuccess: async () => {
       toast({
@@ -946,10 +1053,10 @@ function DataControlsSection() {
       setShowDeleteAccountConfirm(false);
       await logout();
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       toast({
         title: "Error",
-        description: err?.message || "No se pudo eliminar la cuenta.",
+        description: getErrorMessage(err, "No se pudo eliminar la cuenta."),
         variant: "destructive",
       });
     },
@@ -965,6 +1072,15 @@ function DataControlsSection() {
   return (
     <div className="space-y-6">
       <h2 className="text-xl font-semibold" data-testid="text-data-controls-title">Controles de datos</h2>
+
+      {!isAuthed ? (
+        <SignInRequiredCard
+          title="Inicia sesión para administrar tus datos"
+          description="Necesitas una cuenta para cambiar privacidad, exportar tu información, ver enlaces compartidos y administrar el historial."
+          onLogin={login}
+          testId="card-data-controls-signin-required"
+        />
+      ) : null}
 
       <div className="space-y-1">
         <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Privacidad</h3>
@@ -990,7 +1106,7 @@ function DataControlsSection() {
             <Switch
               checked={privacySettings.analyticsTracking}
               onCheckedChange={(checked) => updatePrivacy.mutate({ analyticsTracking: checked })}
-              disabled={!userId || updatePrivacy.isPending || isLoadingPrivacy}
+              disabled={!isAuthed || updatePrivacy.isPending || isLoadingPrivacy}
               data-testid="switch-analytics-tracking"
             />
           </div>
@@ -1020,7 +1136,9 @@ function DataControlsSection() {
           <div>
             <span className="text-sm block">Administrar enlaces</span>
             <span className="text-xs text-muted-foreground">
-              {sharedLinks.filter(l => l.isRevoked !== 'true').length} enlaces activos
+              {isAuthed
+                ? `${sharedLinks.filter(l => l.isRevoked !== 'true').length} enlaces activos`
+                : "Inicia sesión para revisar y revocar enlaces"}
             </span>
           </div>
           <Button
@@ -1048,7 +1166,7 @@ function DataControlsSection() {
             <Switch
               checked={privacySettings.chatHistoryEnabled}
               onCheckedChange={(checked) => updatePrivacy.mutate({ chatHistoryEnabled: checked })}
-              disabled={!userId || updatePrivacy.isPending || isLoadingPrivacy}
+              disabled={!isAuthed || updatePrivacy.isPending || isLoadingPrivacy}
               data-testid="switch-chat-history"
             />
           </div>
@@ -1057,7 +1175,7 @@ function DataControlsSection() {
             <div>
               <span className="text-sm block">Chats archivados</span>
               <span className="text-xs text-muted-foreground">
-                {archivedChats.length} chats archivados
+                {isAuthed ? `${archivedChats.length} chats archivados` : "Inicia sesión para administrar tu historial"}
               </span>
             </div>
             <Button
@@ -1075,7 +1193,7 @@ function DataControlsSection() {
             <div>
               <span className="text-sm block">Chats eliminados</span>
               <span className="text-xs text-muted-foreground">
-                {deletedChats.length} chats en la papelera
+                {isAuthed ? `${deletedChats.length} chats en la papelera` : "Disponible cuando inicies sesión"}
               </span>
             </div>
             <Button
@@ -1132,7 +1250,7 @@ function DataControlsSection() {
               variant="outline"
               size="sm"
               onClick={() => downloadData.mutate()}
-              disabled={!userId || downloadData.isPending}
+              disabled={!isAuthed || downloadData.isPending}
               data-testid="button-download-data-settings"
             >
               {downloadData.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Descargar"}
@@ -1163,7 +1281,7 @@ function DataControlsSection() {
               variant="destructive"
               size="sm"
               onClick={() => setShowDeleteAccountConfirm(true)}
-              disabled={!userId || deleteAccount.isPending}
+              disabled={!isAuthed || deleteAccount.isPending}
               data-testid="button-delete-account-settings"
             >
               {deleteAccount.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Eliminar"}
@@ -1378,6 +1496,251 @@ function DataControlsSection() {
   );
 }
 
+function SchedulesSection(props: {
+  onOpenManager: () => void;
+  onCreateSchedule: () => void;
+}) {
+  const { user, isAuthenticated, login } = useAuth();
+  const userId = user?.id || null;
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
+
+  const schedulesQuery = useQuery<ScheduleSummaryRow[]>({
+    queryKey: ["/api/users", userId, "schedules"],
+    queryFn: async () => {
+      const res = await apiFetch(`/api/users/${userId}/schedules`, { credentials: "include" });
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, "Failed to fetch schedules"));
+      return res.json();
+    },
+    meta: SILENT_QUERY_META,
+    enabled: !!userId && isAuthenticated,
+  });
+
+  const schedules = schedulesQuery.data || [];
+  const activeCount = schedules.filter((schedule) => !!schedule.isActive).length;
+  const pausedCount = Math.max(0, schedules.length - activeCount);
+  const upcomingSchedules = schedules
+    .slice()
+    .sort((a, b) => {
+      const aNext = a.nextRunAt ? new Date(a.nextRunAt).getTime() : Number.MAX_SAFE_INTEGER;
+      const bNext = b.nextRunAt ? new Date(b.nextRunAt).getTime() : Number.MAX_SAFE_INTEGER;
+      if (aNext !== bNext) return aNext - bNext;
+      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+    });
+  const nextRunAt = upcomingSchedules.find((schedule) => schedule.isActive && schedule.nextRunAt)?.nextRunAt || null;
+  const flaggedSchedules = schedules.filter((schedule) => (schedule.failureCount || 0) > 0 || !!schedule.lastError);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-semibold" data-testid="text-schedules-title">Programaciones</h2>
+          <p className="mt-1 text-sm text-muted-foreground" data-testid="text-schedules-description">
+            Revisa tus tareas programadas, la siguiente ejecución y entra al administrador para crear o ajustar automatizaciones.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={props.onCreateSchedule}
+            disabled={!isAuthenticated}
+            data-testid="button-create-schedule"
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Nueva programación
+          </Button>
+          <Button
+            variant="outline"
+            onClick={props.onOpenManager}
+            disabled={!isAuthenticated}
+            data-testid="button-manage-schedules"
+          >
+            Administrar
+          </Button>
+        </div>
+      </div>
+
+      {!isAuthenticated ? (
+        <SignInRequiredCard
+          title="Inicia sesión para usar programaciones"
+          description="Necesitas una cuenta para revisar ejecuciones futuras, crear nuevas tareas programadas y ver su historial."
+          onLogin={login}
+          testId="card-schedules-signin-required"
+        />
+      ) : null}
+
+      {isAuthenticated && schedulesQuery.isLoading ? (
+        <div className="flex items-center justify-center py-10">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" data-testid="spinner-loading-schedules" />
+        </div>
+      ) : null}
+
+      {isAuthenticated && schedulesQuery.isError ? (
+        <div className="rounded-xl border bg-card p-4" data-testid="card-schedules-error">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="mt-0.5 h-5 w-5 text-red-500" />
+            <div className="space-y-2">
+              <div>
+                <p className="text-sm font-medium">No se pudieron cargar las programaciones</p>
+                <p className="text-xs text-muted-foreground">
+                  {schedulesQuery.error instanceof Error ? schedulesQuery.error.message : "Intenta nuevamente."}
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => schedulesQuery.refetch()} data-testid="button-retry-schedules">
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Reintentar
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isAuthenticated && !schedulesQuery.isLoading && !schedulesQuery.isError ? (
+        <>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border bg-card p-4" data-testid="card-schedules-total">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Calendar className="h-4 w-4" />
+                <span className="text-xs uppercase tracking-wide">Total</span>
+              </div>
+              <p className="mt-3 text-2xl font-semibold">{schedules.length}</p>
+              <p className="mt-1 text-xs text-muted-foreground">Programaciones registradas</p>
+            </div>
+
+            <div className="rounded-xl border bg-card p-4" data-testid="card-schedules-active">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <CheckCircle2 className="h-4 w-4" />
+                <span className="text-xs uppercase tracking-wide">Estado</span>
+              </div>
+              <p className="mt-3 text-2xl font-semibold">{activeCount}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {pausedCount} pausadas
+              </p>
+            </div>
+
+            <div className="rounded-xl border bg-card p-4" data-testid="card-schedules-next-run">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Clock className="h-4 w-4" />
+                <span className="text-xs uppercase tracking-wide">Próxima ejecución</span>
+              </div>
+              <p className="mt-3 text-sm font-semibold">
+                {nextRunAt
+                  ? formatZonedDateTime(nextRunAt, {
+                      timeZone: platformTimeZone,
+                      dateFormat: platformDateFormat,
+                      includeSeconds: false,
+                    })
+                  : "Sin próximas ejecuciones"}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Zona horaria: {platformTimeZone}
+              </p>
+            </div>
+          </div>
+
+          {flaggedSchedules.length > 0 ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 dark:border-amber-900 dark:bg-amber-950/20" data-testid="card-schedules-issues">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="mt-0.5 h-5 w-5 text-amber-600 dark:text-amber-300" />
+                <div>
+                  <p className="text-sm font-medium">Hay programaciones que necesitan atención</p>
+                  <p className="text-xs text-muted-foreground">
+                    {flaggedSchedules.length} {flaggedSchedules.length === 1 ? "programación reportó" : "programaciones reportaron"} errores o reintentos recientes.
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {schedules.length === 0 ? (
+            <div className="rounded-xl border border-dashed bg-muted/20 px-4 py-8 text-center" data-testid="card-schedules-empty">
+              <Calendar className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
+              <p className="text-sm font-medium">Aún no tienes programaciones</p>
+              <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
+                Crea una nueva programación para volver a ejecutar tareas de forma automática o revisar ejecuciones futuras desde un solo lugar.
+              </p>
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <Button onClick={props.onCreateSchedule} data-testid="button-create-first-schedule">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Crear la primera
+                </Button>
+                <Button variant="outline" onClick={props.onOpenManager}>
+                  Abrir administrador
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Próximas o recientes</h3>
+                <Button variant="ghost" size="sm" onClick={props.onOpenManager} data-testid="button-open-schedules-overview">
+                  Ver todo
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                {upcomingSchedules.slice(0, 3).map((schedule) => {
+                  const scheduleTimeZone = normalizeTimeZone(schedule.timeZone || platformTimeZone);
+                  const nextRunLabel = schedule.nextRunAt
+                    ? formatZonedDateTime(schedule.nextRunAt, {
+                        timeZone: scheduleTimeZone,
+                        dateFormat: platformDateFormat,
+                        includeSeconds: false,
+                      })
+                    : "Sin próxima ejecución";
+                  const lastRunLabel = schedule.lastRunAt
+                    ? formatZonedDateTime(schedule.lastRunAt, {
+                        timeZone: scheduleTimeZone,
+                        dateFormat: platformDateFormat,
+                        includeSeconds: false,
+                      })
+                    : null;
+
+                  return (
+                    <div key={schedule.id} className="rounded-xl border bg-card p-4" data-testid={`card-schedule-preview-${schedule.id}`}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="truncate text-sm font-medium">{schedule.name || "Programación"}</p>
+                            <span
+                              className={cn(
+                                "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium",
+                                schedule.isActive
+                                  ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300"
+                                  : "bg-muted text-muted-foreground",
+                              )}
+                            >
+                              {schedule.isActive ? "Activa" : "Pausada"}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {schedule.chatTitle || "Sin chat asociado"}
+                          </p>
+                          <p className="mt-2 text-xs text-muted-foreground">Próxima ejecución: {nextRunLabel}</p>
+                          {lastRunLabel ? (
+                            <p className="mt-1 text-xs text-muted-foreground">Última ejecución: {lastRunLabel}</p>
+                          ) : null}
+                        </div>
+                        {schedule.lastError ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-medium text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                            <AlertCircle className="h-3 w-3" />
+                            Error
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 type TrustedDevice = {
   sid: string;
   isCurrent: boolean;
@@ -1540,7 +1903,7 @@ function SecuritySection(props: {
 }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, login } = useAuth();
 
   const [showTrustedDevices, setShowTrustedDevices] = useState(false);
 
@@ -1548,9 +1911,10 @@ function SecuritySection(props: {
     queryKey: ["/api/security/trusted-devices"],
     queryFn: async () => {
       const res = await apiFetch("/api/security/trusted-devices");
-      if (!res.ok) throw new Error("Failed to fetch trusted devices");
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, "Failed to fetch trusted devices"));
       return res.json();
     },
+    meta: SILENT_QUERY_META,
     enabled: isAuthenticated,
   });
 
@@ -1558,9 +1922,10 @@ function SecuritySection(props: {
     queryKey: ["/api/2fa/status"],
     queryFn: async () => {
       const res = await apiFetch("/api/2fa/status");
-      if (!res.ok) throw new Error("Failed to fetch 2FA status");
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, "Failed to fetch 2FA status"));
       return res.json();
     },
+    meta: SILENT_QUERY_META,
     enabled: isAuthenticated,
   });
 
@@ -1589,8 +1954,7 @@ function SecuritySection(props: {
         body: JSON.stringify({ enabled }),
       });
       if (!res.ok) {
-        const msg = await res.text().catch(() => "");
-        throw new Error(msg || "Failed to update push approvals");
+        throw new Error(await getResponseErrorMessage(res, "Failed to update push approvals"));
       }
       return res.json() as Promise<{ success: boolean; enabled: boolean }>;
     },
@@ -1607,8 +1971,7 @@ function SecuritySection(props: {
         body: JSON.stringify({ sid }),
       });
       if (!res.ok) {
-        const msg = await res.text().catch(() => "");
-        throw new Error(msg || "Failed to revoke session");
+        throw new Error(await getResponseErrorMessage(res, "Failed to revoke session"));
       }
       return res.json() as Promise<{ success: boolean; current?: boolean }>;
     },
@@ -1631,8 +1994,7 @@ function SecuritySection(props: {
     mutationFn: async () => {
       const res = await apiFetch("/api/2fa/setup", { method: "POST" });
       if (!res.ok) {
-        const msg = await res.text().catch(() => "");
-        throw new Error(msg || "Failed to start 2FA setup");
+        throw new Error(await getResponseErrorMessage(res, "Failed to start 2FA setup"));
       }
       return res.json() as Promise<TwoFaSetupResponse>;
     },
@@ -1641,10 +2003,10 @@ function SecuritySection(props: {
       setVerifyCode("");
       setShow2faSetup(true);
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       toast({
         title: "No se pudo iniciar 2FA",
-        description: err?.message || "Error inesperado",
+        description: getErrorMessage(err, "Error inesperado"),
         variant: "destructive" as any,
       });
     },
@@ -1658,8 +2020,7 @@ function SecuritySection(props: {
         body: JSON.stringify({ code }),
       });
       if (!res.ok) {
-        const msg = await res.text().catch(() => "");
-        throw new Error(msg || "Failed to verify 2FA setup");
+        throw new Error(await getResponseErrorMessage(res, "Failed to verify 2FA setup"));
       }
       return res.json() as Promise<{ success: boolean }>;
     },
@@ -1670,10 +2031,10 @@ function SecuritySection(props: {
       queryClient.invalidateQueries({ queryKey: ["/api/2fa/status"] });
       props.updateSetting("authApp", true);
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       toast({
         title: "Código inválido",
-        description: err?.message || "No se pudo verificar el código",
+        description: getErrorMessage(err, "No se pudo verificar el código"),
         variant: "destructive" as any,
       });
     },
@@ -1687,8 +2048,7 @@ function SecuritySection(props: {
         body: JSON.stringify({ code }),
       });
       if (!res.ok) {
-        const msg = await res.text().catch(() => "");
-        throw new Error(msg || "Failed to disable 2FA");
+        throw new Error(await getResponseErrorMessage(res, "Failed to disable 2FA"));
       }
       return res.json() as Promise<{ success: boolean }>;
     },
@@ -1699,10 +2059,10 @@ function SecuritySection(props: {
       queryClient.invalidateQueries({ queryKey: ["/api/2fa/status"] });
       props.updateSetting("authApp", false);
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       toast({
         title: "No se pudo desactivar",
-        description: err?.message || "Revisa el código e inténtalo de nuevo",
+        description: getErrorMessage(err, "Revisa el código e inténtalo de nuevo"),
         variant: "destructive" as any,
       });
     },
@@ -1751,7 +2111,7 @@ function SecuritySection(props: {
 
     const subscribeWebPush = async (): Promise<void> => {
       const keyRes = await apiFetch("/api/security/push/vapid-public-key");
-      if (!keyRes.ok) throw new Error("Failed to get VAPID key");
+      if (!keyRes.ok) throw new Error(await getResponseErrorMessage(keyRes, "Failed to get VAPID key"));
       const keyData = await keyRes.json() as { configured: boolean; publicKey: string; isEphemeral?: boolean };
       if (!keyData.configured || !keyData.publicKey) {
         throw new Error("WEB_PUSH_NOT_CONFIGURED");
@@ -1773,8 +2133,7 @@ function SecuritySection(props: {
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
-        const msg = await res.text().catch(() => "");
-        throw new Error(msg || "Failed to save subscription");
+        throw new Error(await getResponseErrorMessage(res, "Failed to save subscription"));
       }
     };
 
@@ -1840,10 +2199,10 @@ function SecuritySection(props: {
           ? "Este dispositivo puede aprobar inicios de sesión."
           : "Este dispositivo ya no recibirá solicitudes de aprobación.",
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       toast({
         title: "No se pudo actualizar",
-        description: err?.message || "Error inesperado",
+        description: getErrorMessage(err, "Error inesperado"),
         variant: "destructive" as any,
       });
     }
@@ -1852,6 +2211,15 @@ function SecuritySection(props: {
   return (
     <div className="space-y-6">
       <h2 className="text-xl font-semibold">Seguridad</h2>
+
+      {!isAuthenticated ? (
+        <SignInRequiredCard
+          title="Inicia sesión para administrar seguridad avanzada"
+          description="Necesitas una cuenta para usar 2FA, aprobaciones push, dispositivos de confianza y cierre de sesión en todos los dispositivos."
+          onLogin={login}
+          testId="card-security-signin-required"
+        />
+      ) : null}
 
       <div className="space-y-4">
         <h3 className="text-base font-medium">Autenticación multifactor (MFA)</h3>
@@ -1867,7 +2235,7 @@ function SecuritySection(props: {
             checked={authAppEnabled}
             onCheckedChange={(checked) => onToggleAuthApp(checked)}
             data-testid="switch-auth-app"
-            disabled={setup2faMutation.isPending || verify2faSetupMutation.isPending || disable2faMutation.isPending}
+            disabled={!isAuthenticated || setup2faMutation.isPending || verify2faSetupMutation.isPending || disable2faMutation.isPending}
           />
         </div>
 
@@ -1882,18 +2250,19 @@ function SecuritySection(props: {
             checked={pushEnabled}
             onCheckedChange={(checked) => onTogglePushApprovals(checked)}
             data-testid="switch-push-notif"
-            disabled={pushApprovalsMutation.isPending}
+            disabled={!isAuthenticated || pushApprovalsMutation.isPending}
           />
         </div>
 
         <button
-          className="w-full flex items-center justify-between py-3 hover:bg-muted/50 transition-colors rounded-lg px-2"
+          className="w-full flex items-center justify-between rounded-lg px-2 py-3 transition-colors hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent"
           data-testid="security-trusted-devices"
           onClick={() => setShowTrustedDevices(true)}
+          disabled={!isAuthenticated}
         >
           <span className="text-sm">Dispositivos de confianza</span>
           <span className="text-sm text-muted-foreground flex items-center gap-1">
-            {isLoadingDevices ? "..." : trustedDevicesCount} <ChevronRight className="h-4 w-4" />
+            {!isAuthenticated ? "Inicia sesión" : isLoadingDevices ? "..." : trustedDevicesCount} <ChevronRight className="h-4 w-4" />
           </span>
         </button>
 
@@ -1924,6 +2293,7 @@ function SecuritySection(props: {
             className="text-red-500 border-red-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950 whitespace-nowrap"
             onClick={props.onRequestLogoutAll}
             data-testid="button-logout-all"
+            disabled={!isAuthenticated}
           >
             Cerrar todas las sesiones
           </Button>
@@ -1946,8 +2316,8 @@ function SecuritySection(props: {
         isLoading={isLoadingDevices}
         isRevoking={revokeSessionMutation.isPending}
         onRevoke={(sid) => revokeSessionMutation.mutate(sid, {
-          onError: (err: any) => {
-            toast({ title: "No se pudo cerrar la sesión", description: err?.message || "Error inesperado", variant: "destructive" as any });
+          onError: (err: unknown) => {
+            toast({ title: "No se pudo cerrar la sesión", description: getErrorMessage(err, "Error inesperado"), variant: "destructive" as any });
           },
           onSuccess: () => {
             toast({ title: "Sesión cerrada", description: "El dispositivo ya no tiene acceso." });
@@ -2075,6 +2445,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [showLogoutAllConfirm, setShowLogoutAllConfirm] = useState(false);
   const [isLoggingOutAll, setIsLoggingOutAll] = useState(false);
   const [schedulesManagerOpen, setSchedulesManagerOpen] = useState(false);
+  const [scheduleCreateRequestNonce, setScheduleCreateRequestNonce] = useState(0);
   const [sessionsManagerOpen, setSessionsManagerOpen] = useState(false);
   const [editingBuilderLink, setEditingBuilderLink] = useState<BuilderLinkKind | null>(null);
   const [builderLinkDraft, setBuilderLinkDraft] = useState("");
@@ -2083,7 +2454,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const { settings: platformSettings } = usePlatformSettings();
   const { language: currentLanguage, setLanguage: setAppLanguage, supportedLanguages } = useLanguage();
   const { toast } = useToast();
-  const { user, logout } = useAuth();
+  const { user, isAuthenticated, login, logout } = useAuth();
   const { availableModels } = useModelAvailability();
   const platformUserDateFormat = mapPlatformDateFormatToUserDateFormat(platformSettings.date_format);
   const effectiveDefaultModel = settings.defaultModel || platformSettings.default_model;
@@ -2133,6 +2504,15 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     toast({ title: "Todas las sesiones cerradas", description: "Se han cerrado todas las sesiones activas." });
   };
 
+  const openSchedulesManager = () => {
+    setSchedulesManagerOpen(true);
+  };
+
+  const openScheduleCreator = () => {
+    setScheduleCreateRequestNonce((current) => current + 1);
+    setSchedulesManagerOpen(true);
+  };
+
   const renderSectionContent = () => {
     switch (activeSection) {
       case "general":
@@ -2147,10 +2527,15 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex items-center justify-between py-2">
                   <div>
                     <span className="text-sm block">Tema</span>
-                    <span className="text-xs text-muted-foreground">
-                      {themeManagedByPlatform
-                        ? "Gestionado por administrador"
-                        : "Selecciona el aspecto visual de la aplicacion"}
+                    <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      {themeManagedByPlatform ? (
+                        <AdminManagedBadge testId="badge-admin-managed-theme" />
+                      ) : null}
+                      <span>
+                        {themeManagedByPlatform
+                          ? "La apariencia sigue la configuración central de la plataforma."
+                          : "Selecciona el aspecto visual de la aplicacion"}
+                      </span>
                     </span>
                   </div>
                   <Select
@@ -2334,7 +2719,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex items-center justify-between py-2">
                   <div>
                     <span className="text-sm block">Formato de fecha</span>
-                    <span className="text-xs text-muted-foreground">Gestionado por administrador</span>
+                    <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <AdminManagedBadge testId="badge-admin-managed-date-format" />
+                      <span>Se sincroniza con la configuración central de la plataforma.</span>
+                    </span>
                   </div>
                   <Select value={platformUserDateFormat} disabled>
                     <SelectTrigger className="w-40" data-testid="select-date-format">
@@ -2351,7 +2739,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex items-center justify-between py-2">
                   <div>
                     <span className="text-sm block">Zona horaria</span>
-                    <span className="text-xs text-muted-foreground">Gestionado por administrador</span>
+                    <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <AdminManagedBadge testId="badge-admin-managed-timezone" />
+                      <span>Se usa la zona definida por la administración.</span>
+                    </span>
                   </div>
                   <Input
                     className="w-40"
@@ -2504,10 +2895,15 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex items-center justify-between py-2">
                   <div>
                     <span className="text-sm block">Transmitir respuestas</span>
-                    <span className="text-xs text-muted-foreground">
-                      {platformSettings.enable_streaming
-                        ? "Ver las respuestas mientras se generan"
-                        : "Deshabilitado por el administrador"}
+                    <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      {!platformSettings.enable_streaming ? (
+                        <AdminManagedBadge label="Deshabilitado por administrador" testId="badge-admin-managed-streaming" />
+                      ) : null}
+                      <span>
+                        {platformSettings.enable_streaming
+                          ? "Ver las respuestas mientras se generan"
+                          : "La plataforma desactivó esta opción para todos los usuarios."}
+                      </span>
                     </span>
                   </div>
                   <Switch
@@ -2567,7 +2963,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         );
 
       case "notifications":
-        return <NotificationsControlPanels onOpenSchedules={() => setSchedulesManagerOpen(true)} />;
+        return <NotificationsControlPanels onOpenSchedules={openSchedulesManager} />;
 
       case "personalization":
         return (
@@ -2766,20 +3162,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
       case "schedules":
         return (
-          <div className="space-y-6">
-            <h2 className="text-xl font-semibold">Programaciones</h2>
-            <p className="text-sm text-muted-foreground">
-              ILIAGPT puede programarse para ejecutarse nuevamente después de completar una tarea.
-              Selecciona <span className="inline-flex items-center"><Calendar className="h-3 w-3 mx-1" /></span> Programar en el menú de <span className="font-medium">⋯</span> en una conversación para configurar ejecuciones futuras.
-            </p>
-            <Button
-              variant="outline"
-              onClick={() => setSchedulesManagerOpen(true)}
-              data-testid="button-manage-schedules"
-            >
-              Administrar
-            </Button>
-          </div>
+          <SchedulesSection
+            onOpenManager={openSchedulesManager}
+            onCreateSchedule={openScheduleCreator}
+          />
         );
 
       case "data":
@@ -2796,12 +3182,36 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         );
 
       case "account": {
+        if (!isAuthenticated) {
+          return (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-xl font-semibold" data-testid="text-account-title">Cuenta</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Personaliza tu perfil de constructor y administra cómo te verán los usuarios de tus GPT.
+                </p>
+              </div>
+
+              <SignInRequiredCard
+                title="Inicia sesión para editar tu perfil"
+                description="Necesitas una cuenta para configurar el perfil de constructor, tus enlaces públicos y las preferencias de correo."
+                onLogin={login}
+                testId="card-account-signin-required"
+              />
+            </div>
+          );
+        }
+
         const displayName =
           user?.fullName ||
           [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
           user?.username ||
           user?.email?.split("@")[0] ||
           "Usuario";
+        const hasPublicLinks = Boolean(
+          settings.websiteDomain || settings.linkedInUrl || settings.githubUrl,
+        );
+        const hasEmailAddress = Boolean(user?.email);
 
         const previewByline = settings.showName ? displayName : "Usuario";
 
@@ -2925,7 +3335,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
         return (
           <div className="space-y-6">
-            <h2 className="text-xl font-semibold">Perfil de constructor de GPT</h2>
+            <h2 className="text-xl font-semibold" data-testid="text-account-title">Perfil de constructor de GPT</h2>
             <p className="text-sm text-muted-foreground">
               Personaliza tu perfil de constructor para conectarte con usuarios de los GPT.
             </p>
@@ -2988,6 +3398,18 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 </div>
                 {renderLinkActions("github", settings.githubUrl, "button-add-github")}
               </div>
+
+              {!hasPublicLinks ? (
+                <div
+                  className="rounded-xl border border-dashed bg-muted/20 px-4 py-3"
+                  data-testid="card-account-links-empty"
+                >
+                  <p className="text-sm font-medium">Tu perfil público aún no tiene enlaces</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Agrega tu sitio web, LinkedIn o GitHub para que las personas puedan conocerte mejor desde tus GPT.
+                  </p>
+                </div>
+              ) : null}
             </div>
 
             <Separator />
@@ -2997,7 +3419,14 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
               <div className="flex items-center gap-3 py-2">
                 <Mail className="h-5 w-5 text-muted-foreground" />
-                <span className="text-sm">{user?.email || "Sin correo"}</span>
+                <div>
+                  <span className="text-sm">{user?.email || "Sin correo asociado"}</span>
+                  {!hasEmailAddress ? (
+                    <p className="mt-1 text-xs text-muted-foreground" data-testid="text-account-email-unavailable">
+                      Las notificaciones por correo estarán disponibles cuando tu cuenta tenga un email confirmado.
+                    </p>
+                  ) : null}
+                </div>
               </div>
 
               <div className="flex items-center gap-3 py-2">
@@ -3005,9 +3434,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   id="email-comments"
                   checked={settings.receiveEmailComments}
                   onCheckedChange={(checked) => updateSetting("receiveEmailComments", !!checked)}
+                  disabled={!hasEmailAddress}
                   data-testid="checkbox-email-comments"
                 />
-                <label htmlFor="email-comments" className="text-sm">
+                <label htmlFor="email-comments" className={cn("text-sm", !hasEmailAddress && "text-muted-foreground")}>
                   Recibir correos electrónicos con comentarios
                 </label>
               </div>
@@ -3095,6 +3525,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       <SchedulesManagerDialog
         open={schedulesManagerOpen}
         onOpenChange={setSchedulesManagerOpen}
+        createRequestNonce={scheduleCreateRequestNonce}
       />
 
       <SessionsManagerDialog

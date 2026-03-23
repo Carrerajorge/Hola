@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -8,11 +8,12 @@ import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Calendar, Clock, ExternalLink, Loader2, Play, Trash2, AlertCircle, Pencil, Plus } from "lucide-react";
+import { Calendar, Clock, ExternalLink, Loader2, Play, Trash2, AlertCircle, Pencil, Plus, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatZonedDateTime, normalizeTimeZone } from "@/lib/platformDateTime";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import { ScheduleDialog } from "@/components/schedule-dialog";
+import { getErrorMessage, getResponseErrorMessage, SILENT_QUERY_META } from "@/lib/httpErrors";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -49,19 +50,6 @@ type ScheduleRow = {
   chatTitle?: string | null;
 };
 
-async function getApiErrorMessage(res: Response): Promise<string> {
-  const ct = res.headers.get("content-type") || "";
-  try {
-    if (ct.includes("application/json")) {
-      const json = await res.json();
-      return String(json?.error || json?.message || JSON.stringify(json));
-    }
-  } catch {
-    // ignore
-  }
-  return (await res.text()) || res.statusText;
-}
-
 function scheduleTypeLabel(t: ScheduleType): string {
   if (t === "once") return "Una vez";
   if (t === "daily") return "Diario";
@@ -92,8 +80,12 @@ function truncate(s: string, max: number): string {
   return `${t.slice(0, max)}...`;
 }
 
-export function SchedulesManagerDialog(props: { open: boolean; onOpenChange: (open: boolean) => void }) {
-  const { open, onOpenChange } = props;
+export function SchedulesManagerDialog(props: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  createRequestNonce?: number;
+}) {
+  const { open, onOpenChange, createRequestNonce = 0 } = props;
   const [, setLocation] = useLocation();
   const { user, isAuthenticated } = useAuth();
   const userId = user?.id || null;
@@ -109,15 +101,22 @@ export function SchedulesManagerDialog(props: { open: boolean; onOpenChange: (op
       const res = await fetch(`/api/users/${userId}/schedules`, {
         credentials: "include",
       });
-      if (!res.ok) throw new Error(await getApiErrorMessage(res));
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, "No se pudieron cargar las programaciones"));
       return res.json();
     },
     enabled: !!userId && isAuthenticated && open,
+    meta: SILENT_QUERY_META,
   });
 
   const [deleteTarget, setDeleteTarget] = useState<ScheduleRow | null>(null);
   const [editTarget, setEditTarget] = useState<ScheduleRow | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+
+  useEffect(() => {
+    if (open && createRequestNonce > 0) {
+      setCreateOpen(true);
+    }
+  }, [open, createRequestNonce]);
 
   const toggleActive = useMutation({
     mutationFn: async (row: { scheduleId: string; isActive: boolean }) => {
@@ -127,7 +126,7 @@ export function SchedulesManagerDialog(props: { open: boolean; onOpenChange: (op
         credentials: "include",
         body: JSON.stringify({ isActive: row.isActive }),
       });
-      if (!res.ok) throw new Error(await getApiErrorMessage(res));
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, "No se pudo actualizar"));
       return res.json();
     },
     onSuccess: () => {
@@ -144,7 +143,7 @@ export function SchedulesManagerDialog(props: { open: boolean; onOpenChange: (op
         method: "POST",
         credentials: "include",
       });
-      if (!res.ok) throw new Error(await getApiErrorMessage(res));
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, "No se pudo ejecutar"));
       return res.json();
     },
     onSuccess: () => {
@@ -162,7 +161,7 @@ export function SchedulesManagerDialog(props: { open: boolean; onOpenChange: (op
         method: "DELETE",
         credentials: "include",
       });
-      if (!res.ok) throw new Error(await getApiErrorMessage(res));
+      if (!res.ok) throw new Error(await getResponseErrorMessage(res, "No se pudo eliminar"));
       return res.json();
     },
     onSuccess: () => {
@@ -212,7 +211,27 @@ export function SchedulesManagerDialog(props: { open: boolean; onOpenChange: (op
                 </div>
               )}
 
-              {isAuthenticated && !schedulesQuery.isLoading && schedules.length === 0 && (
+              {isAuthenticated && schedulesQuery.isError && (
+                <div className="rounded-xl border bg-card p-4">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="mt-0.5 h-5 w-5 text-red-500" />
+                    <div className="space-y-2">
+                      <div>
+                        <p className="text-sm font-medium">No se pudieron cargar las programaciones</p>
+                        <p className="text-xs text-muted-foreground">
+                          {getErrorMessage(schedulesQuery.error, "Intenta nuevamente.")}
+                        </p>
+                      </div>
+                      <Button variant="outline" size="sm" onClick={() => schedulesQuery.refetch()}>
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                        Reintentar
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {isAuthenticated && !schedulesQuery.isLoading && !schedulesQuery.isError && schedules.length === 0 && (
                 <div className="text-sm text-muted-foreground">
                   Aún no tienes programaciones. Crea una desde el menú <span className="font-medium">⋯</span> en un chat con{" "}
                   <span className="font-medium">Programar</span>.
