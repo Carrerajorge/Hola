@@ -136,6 +136,14 @@ jobs:
           echo "▸ Sandbox digest:   ${{ steps.build_sandbox.outputs.digest }}"
           echo "▸ OCR digest:       ${{ steps.build_ocr.outputs.digest }}"
 
+      - name: Smoke-test production app image boot
+        env:
+          IMAGE_TAG: ${{ steps.meta.outputs.tag }}
+          APP_VERSION: ${{ steps.meta.outputs.short_sha }}
+          APP_IMAGE: ${{ env.IMAGE_BASE }}-app:${{ steps.meta.outputs.tag }}
+        run: |
+          bash ./scripts/ci-container-boot-smoke.sh
+
       - name: Generate build summary
         if: always()
         run: |
