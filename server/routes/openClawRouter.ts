@@ -4,6 +4,7 @@
  */
 
 import { Router, Request, Response } from "express";
+import { z } from "zod";
 import {
   OPENCLAW_500,
   getOpenClawStats,
@@ -31,9 +32,20 @@ import {
   DEFAULT_OPENCLAW_RELEASE_TAG,
   getOpenClawReleaseSnapshot,
 } from "../services/openClawReleaseService";
+import { executeOpenClawNativePrompt } from "../services/openClawNativeExecution";
+import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 
 // Native OpenClaw Integration
 
+const openClawNativeExecuteSchema = z.object({
+  prompt: z.string().trim().min(1, "prompt is required"),
+  context: z.unknown().optional(),
+  chatId: z.string().trim().optional(),
+  provider: z.string().trim().optional(),
+  model: z.string().trim().optional(),
+  timeoutMs: z.coerce.number().int().min(5_000).max(600_000).optional(),
+  enableTools: z.boolean().optional().default(false),
+});
 
 const router = Router();
 
@@ -416,27 +428,31 @@ router.get("/roadmap-1000", (req: Request, res: Response) => {
  */
 router.post("/execute", async (req: Request, res: Response) => {
   try {
-    const { prompt, context } = req.body;
-    // Initialize Native OpenClaw Engine
-    console.log("[OpenClaw Native] Initializing context-engine for RAG...");
-    const { createDefaultDeps } = await import("../openclaw/src/index.ts");
-    const engineDeps = await createDefaultDeps();    
-    
-    // Demonstrate basic simulated RAG & Intent Understanding Native Pipeline
-    const combinedInput = `[CONTEXT]: ${JSON.stringify(context || {})} \n\n[INSTRUCTION]: ${prompt}`;
+    const parsed = openClawNativeExecuteSchema.parse(req.body || {});
+    const userId = getOrCreateSecureUserId(req);
+    const result = await executeOpenClawNativePrompt({
+      prompt: parsed.prompt,
+      context: parsed.context,
+      chatId: parsed.chatId,
+      userId,
+      provider: parsed.provider,
+      model: parsed.model,
+      timeoutMs: parsed.timeoutMs,
+      enableTools: parsed.enableTools,
+    });
 
     res.json({
       success: true,
-      data: {
-        engine: "OpenClaw v2026.3.22 (Native)",
-        status: "Understanding Instruction",
-        inputProcessed: combinedInput,
-        response: `Simulated RAG output natively executing OpenClaw logic: Entendido. La instrucción es: "${prompt}"`,
-        dependenciesLoaded: !!engineDeps
-      }
+      data: result,
     });
-
   } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid request",
+        details: error.flatten(),
+      });
+    }
     console.error("[OpenClaw Native] Error executing native engine:", error);
     res.status(500).json({ success: false, error: error.message });
   }

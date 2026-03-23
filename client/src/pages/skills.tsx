@@ -284,7 +284,8 @@ const getExtraSkillIcon = (id: string) => {
     case "imsg": return <MessageSquare {...props} className="h-6 w-6 text-green-500" />;
     case "mcporter": return <Layers {...props} className="h-6 w-6 text-orange-600" />;
     case "model-usage": return <BarChart2 {...props} className="h-6 w-6 text-indigo-500" />;
-    case "nano-banana-pro": return <ImageIcon {...props} className="h-6 w-6 text-yellow-500" />;
+    case "image-generate-native":
+    case "nano-banana-pro": return <ImageIcon {...props} className="h-6 w-6 text-emerald-500" />;
     case "nano-pdf": return <FileType {...props} className="h-6 w-6 text-red-500" />;
     case "notion": return <FileText {...props} className="h-6 w-6 text-gray-900" />;
     case "obsidian": return <FileEdit {...props} className="h-6 w-6 text-purple-600" />;
