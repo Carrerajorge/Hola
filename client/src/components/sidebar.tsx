@@ -609,6 +609,9 @@ export function Sidebar({
     if (!groupOrder.includes(key)) groupOrder.push(key);
   });
 
+  const primaryActionStackClass = "flex flex-col gap-0.5";
+  const compactSearchButtonClass =
+    "group flex min-h-[35px] w-full items-center justify-between gap-1.5 rounded-[12px] border border-white/40 bg-white/68 px-2.5 py-1 text-[12px] text-muted-foreground backdrop-blur-md transition-all duration-200 hover:border-[#A5A0FF]/40 hover:bg-white/88 hover:shadow-[0_8px_18px_rgba(96,90,190,0.09)] dark:border-white/10 dark:bg-white/[0.05] dark:hover:bg-white/[0.08] focus:outline-none focus:ring-2 focus:ring-primary/20 liquid-button";
   const minimalSectionButtonClass =
     "min-h-[32px] w-full justify-start gap-1.5 rounded-[10px] border border-white/35 bg-white/60 px-2 py-1 text-[12px] font-medium transition-all duration-200 hover:border-[#A5A0FF]/40 hover:bg-white/86 hover:shadow-[0_8px_18px_rgba(96,90,190,0.09)] focus-visible:ring-2 focus-visible:ring-[#A5A0FF]/25 dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.08] liquid-button";
   const minimalIconChipClass =
@@ -644,13 +647,13 @@ export function Sidebar({
         </Button>
       </div>
 
-      <div className="flex flex-col gap-0.5 px-2.5 py-1">
+      <div className={cn(primaryActionStackClass, "px-2.5 py-1")}>
         <NewChatButton onNewChat={onNewChat} variant="full" showTooltip={false} />
 
         <button
           ref={searchButtonRef}
           onClick={() => setIsSearchModalOpen(true)}
-          className="group mb-0.5 mt-0 flex min-h-[35px] w-full items-center justify-between gap-1.5 rounded-[12px] border border-white/40 bg-white/68 px-2.5 py-1 text-[12px] text-muted-foreground backdrop-blur-md transition-all duration-200 hover:border-[#A5A0FF]/40 hover:bg-white/88 hover:shadow-[0_8px_18px_rgba(96,90,190,0.09)] dark:border-white/10 dark:bg-white/[0.05] dark:hover:bg-white/[0.08] focus:outline-none focus:ring-2 focus:ring-primary/20 liquid-button"
+          className={compactSearchButtonClass}
           data-testid="button-search-chats"
         >
           <div className="flex items-center gap-1.5">
@@ -662,7 +665,7 @@ export function Sidebar({
           </kbd>
         </button>
 
-        <div className="mt-0.5 space-y-0.5">
+        <div className={primaryActionStackClass}>
           <Button
             variant="ghost"
             className={cn(minimalSectionButtonClass, "group")}
