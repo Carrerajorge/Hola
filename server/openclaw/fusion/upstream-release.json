@@ -40,6 +40,7 @@
     "src/config/zod-schema.providers-whatsapp.ts",
     "src/config/zod-schema.providers.ts",
     "src/config/zod-schema.secret-input-validation.ts",
+    "src/config/zod-schema.sensitive.ts",
     "src/config/zod-schema.session.ts",
     "src/config/zod-schema.ts",
     "src/logging/subsystem.ts",
