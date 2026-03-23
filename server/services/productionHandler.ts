@@ -20,6 +20,12 @@ import {
 } from '../agent/production';
 import { exportAcademicArticlesFromPrompt } from './academicArticlesExport';
 import { renderDocument } from "./documentService";
+import {
+    classifyOutputFormat,
+    hasExplicitDocumentArtifactRequest,
+    hasExplicitPresentationArtifactRequest,
+    hasExplicitSpreadsheetArtifactRequest,
+} from "@shared/explicitArtifactRequests";
 
 // ============================================================================
 // Types
@@ -102,15 +108,12 @@ function isAcademicArticlesExportRequest(message: string): boolean {
 }
 
 function wantsArtifactOutput(message: string): boolean {
-    const lower = message.toLowerCase();
-    // If user mentions any concrete output format/action, we should allow production pipeline.
+    const outputFormat = classifyOutputFormat(message);
     return (
-        /\b(excel|xlsx|hoja\s+de\s+c[aá]lculo|spreadsheet)\b/i.test(message) ||
-        /\b(pptx?|powerpoint|presentaci[oó]n|diapositivas|slides?)\b/i.test(message) ||
-        /\b(word|docx|documento)\b/i.test(message) ||
-        /\bpdf\b/i.test(message) ||
-        /\b(exporta|exportar|genera|generar|crea|crear|haz|hacer|construye|prepara)\b/i.test(message) &&
-        /(excel|xlsx|ppt|pptx|powerpoint|word|docx|pdf)/i.test(message)
+        outputFormat.action !== "text" ||
+        hasExplicitDocumentArtifactRequest(message) ||
+        hasExplicitSpreadsheetArtifactRequest(message) ||
+        hasExplicitPresentationArtifactRequest(message)
     );
 }
 
@@ -144,12 +147,11 @@ export function isProductionIntent(intentResult: IntentResult | null, message?: 
         return false;
     }
 
-    // Guardrail: many "simple table" prompts are classified as CREATE_SPREADSHEET
-    // by intent routing, but users often expect an inline chat table (not a binary file).
-    // Only force spreadsheet production when the user explicitly requests artifact output.
-    if (message && intentResult.intent === 'CREATE_SPREADSHEET' && !wantsArtifactOutput(message)) {
+    // Universal guardrail: only switch into binary artifact production when the
+    // user explicitly asked for a file/canvas deliverable.
+    if (message && !wantsArtifactOutput(message)) {
         console.log(
-            `[ProductionHandler] CREATE_SPREADSHEET without explicit artifact output, keeping inline chat mode for: "${message.slice(0, 70)}..."`
+            `[ProductionHandler] ${intentResult.intent} without explicit artifact output, keeping inline chat mode for: "${message.slice(0, 70)}..."`
         );
         return false;
     }

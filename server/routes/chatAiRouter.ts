@@ -102,6 +102,7 @@ import {
   handleProductionRequest,
   getDeliverables,
 } from "../services/productionHandler";
+import { classifyOutputFormat } from "@shared/explicitArtifactRequests";
 import type { z } from "zod";
 import { getUserId } from "../types/express";
 import { semanticMemoryStore } from "../memory/SemanticMemoryStore";
@@ -973,25 +974,11 @@ function inferDocToolFromPrompt(
     .trim();
   if (!prompt) return null;
 
-  if (
-    /\b(excel|hoja de cálculo|spreadsheet|xlsx|tabla de datos)\b/i.test(prompt)
-  ) {
-    return "excel";
-  }
-  if (
-    /\b(presentación|presentation|ppt|powerpoint|slides|diapositivas)\b/i.test(
-      prompt,
-    )
-  ) {
-    return "ppt";
-  }
-  if (
-    /\b(documento|document|word|docx|informe|reporte|ensayo|tesis)\b/i.test(
-      prompt,
-    )
-  ) {
-    return "word";
-  }
+  const classified = classifyOutputFormat(prompt);
+  if (classified.confidence < 0.85) return null;
+  if (classified.action === "excel") return "excel";
+  if (classified.action === "pptx") return "ppt";
+  if (classified.action === "word") return "word";
   return null;
 }
 

@@ -9,7 +9,7 @@ describe("explicitArtifactRequests", () => {
   it("requires an explicit file/document signal before treating plain writing as a DOCX request", () => {
     expect(hasExplicitDocumentArtifactRequest("escribe una carta de amor de 400 palabras")).toBe(false);
     expect(hasExplicitDocumentArtifactRequest("redacta una carta formal en Word")).toBe(true);
-    expect(hasExplicitDocumentArtifactRequest("crea un documento sobre energía solar")).toBe(true);
+    expect(hasExplicitDocumentArtifactRequest("crea un documento sobre energía solar")).toBe(false);
   });
 
   it("does not treat a plain table request as an Excel file request", () => {
@@ -31,6 +31,10 @@ describe("classifyOutputFormat — universal format gate", () => {
       "hazme un currículum profesional",
       "escribe un poema de amor",
       "crea una historia de ciencia ficción",
+      "hazme un resumen en formato APA",
+      "crea un documento sobre energía solar",
+      "resume este documento",
+      "analiza este archivo",
     ];
 
     for (const msg of textCases) {
@@ -49,6 +53,7 @@ describe("classifyOutputFormat — universal format gate", () => {
       "escribe un ensayo y expórtalo como .docx",
       "redacta un informe ejecutivo en formato word",
       "hazme un currículum en word",
+      "guárdalo como archivo docx",
     ];
 
     for (const msg of wordCases) {
