@@ -21,6 +21,10 @@ function normalizeDefaultModelSetting(value: unknown): unknown {
     return DEFAULT_CHAT_MODEL;
   }
 
+  if (unquoted === "z-ai/glm-5") {
+    return DEFAULT_CHAT_MODEL;
+  }
+
   return unquoted;
 }
 
