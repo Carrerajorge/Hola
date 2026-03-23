@@ -2,6 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:5050';
 const webServerCommand = process.env.PLAYWRIGHT_WEB_SERVER_COMMAND ?? 'npm run dev:test-web';
+const skipWebServer = process.env.PLAYWRIGHT_SKIP_WEB_SERVER === 'true';
 const reuseExistingServer =
   process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER != null
     ? process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER === 'true'
@@ -23,6 +24,7 @@ export default defineConfig({
   reporter: 'html',
   use: {
     baseURL,
+    serviceWorkers: 'block',
     trace: 'on-first-retry',
   },
   projects: [
@@ -31,10 +33,12 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
-  webServer: {
-    command: webServerCommand,
-    url: baseURL,
-    reuseExistingServer,
-    timeout: webServerTimeout,
-  },
+  webServer: skipWebServer
+    ? undefined
+    : {
+        command: webServerCommand,
+        url: baseURL,
+        reuseExistingServer,
+        timeout: webServerTimeout,
+      },
 });
