@@ -33,7 +33,6 @@ import {
   SILVER_GLASS_BG,
   SILVER_HAIRLINE,
   SILVER_HAIRLINE_DASHED,
-  SILVER_HOVER_BORDER_INNER,
   SILVER_HOVER_BORDER_SOFT,
   SILVER_ICON_BUTTON_BASE,
   SILVER_ICON_BUTTON_TONE,
@@ -1307,18 +1306,7 @@ export function Composer({
 
 
         <div className="flex flex-col relative">
-          {/* Inner input contour (thin, minimalist, silver) */}
-          <div
-            className={cn(
-              "rounded-[20px] bg-white/40 dark:bg-zinc-950/10 backdrop-blur-sm",
-              SILVER_HAIRLINE,
-              "border-[#c7c7c7]/80 dark:border-white/20",
-              SILVER_HOVER_BORDER_INNER,
-              "px-3 py-1",
-              "transition-colors duration-150",
-              "focus-within:border-[#b0b0b0]/95 dark:focus-within:border-white/35"
-            )}
-          >
+          <div className="px-3 py-1">
             <Textarea
               ref={textareaRef}
               value={input}
