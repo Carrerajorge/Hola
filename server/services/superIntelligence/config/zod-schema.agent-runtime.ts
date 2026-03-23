@@ -198,6 +198,7 @@ export const SandboxDockerSchema = z
   })
   .optional();
 
+// Keep strict() before superRefine(); superRefine returns a ZodEffects wrapper.
 export const SandboxBrowserSchema = z
   .object({
     enabled: z.boolean().optional(),
