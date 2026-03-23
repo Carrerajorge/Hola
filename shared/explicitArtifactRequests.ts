@@ -2,9 +2,9 @@ const CREATE_OR_WRITE_RE =
   /\b(crea(?:r)?|create|genera(?:r)?|generate|escribe|write|redacta(?:r)?|draft|haz(?:me)?|make|prepara(?:r)?|prepare|elabora(?:r)?|build)\b/i;
 
 const FILE_DELIVERY_RE =
-  /\b(adjunta(?:r|do|da|lo|la)?|attach|anexa(?:r|do|da)?|descarga(?:r)?|download|exporta(?:r)?|export|guarda(?:r|do|da|lo|la)?|save|sube(?:lo|la)?|upload|formato)\b/i;
+  /\b(adjunta(?:r|do|da|lo|la)?|attach|anexa(?:r|do|da)?|descarga(?:r)?|download|exporta(?:r)?|export|guarda(?:r|do|da|lo|la)?|save|sube(?:lo|la)?|upload)\b/i;
 
-const DOCUMENT_FORMAT_RE = /\b(documento|document|word|docx|pdf|archivo|file)\b/i;
+const DOCUMENT_FORMAT_RE = /\b(word|docx|pdf)\b/i;
 const DOCUMENT_CONTENT_RE =
   /\b(informe|report|carta|letter|ensayo|essay|cv|curr[ií]culum|curriculum|resumen|summary|memorando|memo|propuesta)\b/i;
 
@@ -16,7 +16,7 @@ const PRESENTATION_FORMAT_RE = /\b(powerpoint|pptx|ppt|slides|diapositivas)\b/i;
 const PRESENTATION_CONTENT_RE = /\b(presentaci[oó]n|presentation)\b/i;
 
 const DOCUMENT_FORMAT_PHRASE_RE =
-  /\b(?:en|como)\s+(?:un\s+)?(?:archivo\s+)?(?:formato\s+)?(?:word|docx|pdf|documento|document)\b/i;
+  /\b(?:en|como)\s+(?:un\s+)?(?:(?:archivo|documento|document|file)\s+)?(?:formato\s+)?(?:word|docx|pdf)\b/i;
 const SPREADSHEET_FORMAT_PHRASE_RE =
   /\b(?:en|como)\s+(?:un\s+)?(?:archivo\s+)?(?:formato\s+)?(?:excel|xlsx|spreadsheet|csv)\b/i;
 const PRESENTATION_FORMAT_PHRASE_RE =
@@ -96,10 +96,10 @@ export interface OutputFormatClassification {
 }
 
 /** Explicit file-format keywords that unambiguously signal a file output.
- *  "documento"/"document" are included because they imply a downloadable file,
- *  unlike content words like "carta", "informe", "ensayo". */
+ *  Generic nouns like "documento" or "archivo" are intentionally excluded:
+ *  they appear often in normal chat requests and should not auto-trigger a file. */
 const EXPLICIT_FILE_FORMAT_RE =
-  /\b(word|docx|\.docx|pdf|\.pdf|documento|document|archivo|file|excel|xlsx|\.xlsx|powerpoint|pptx|\.pptx|ppt|\.ppt|slides|diapositivas)\b/i;
+  /\b(word|docx|\.docx|pdf|\.pdf|excel|xlsx|\.xlsx|powerpoint|pptx|\.pptx|ppt|\.ppt|slides|diapositivas)\b/i;
 
 /** Delivery verbs that, combined with a format/content signal, confirm file intent. */
 const DELIVERY_ACTION_RE =
@@ -107,7 +107,7 @@ const DELIVERY_ACTION_RE =
 
 /** Format-as phrases: "en formato word", "como documento word", etc. */
 const FORMAT_AS_PHRASE_RE =
-  /\b(?:en|como)\s+(?:un\s+)?(?:archivo\s+)?(?:formato\s+)?(?:word|docx|pdf|excel|xlsx|powerpoint|pptx|ppt)\b/i;
+  /\b(?:en|como)\s+(?:un\s+)?(?:(?:archivo|documento|document|file)\s+)?(?:formato\s+)?(?:word|docx|pdf|excel|xlsx|powerpoint|pptx|ppt)\b/i;
 
 export function classifyOutputFormat(message: string): OutputFormatClassification {
   const normalized = normalizeMessage(message);
@@ -122,10 +122,6 @@ export function classifyOutputFormat(message: string): OutputFormatClassificatio
     }
     if (/\b(word|docx|\.docx)\b/i.test(normalized)) {
       return { action: "word", confidence: 0.95 };
-    }
-    // "documento"/"document"/"archivo"/"file" → word (explicit file intent)
-    if (/\b(documento|document|archivo|file)\b/i.test(normalized)) {
-      return { action: "word", confidence: 0.90 };
     }
     // "pdf" → word (closest deliverable)
     if (/\b(pdf|\.pdf)\b/i.test(normalized)) {

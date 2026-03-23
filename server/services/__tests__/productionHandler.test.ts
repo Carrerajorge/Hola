@@ -110,4 +110,28 @@ describe("productionHandler", () => {
 
     expect(result).toBe(true);
   });
+
+  it("does not force production mode for generic document wording", () => {
+    const result = isProductionIntent(
+      {
+        intent: "CREATE_DOCUMENT",
+        confidence: 0.9,
+      } as any,
+      "crea un documento sobre energía solar",
+    );
+
+    expect(result).toBe(false);
+  });
+
+  it("does not force production mode for format-only academic style requests", () => {
+    const result = isProductionIntent(
+      {
+        intent: "CREATE_DOCUMENT",
+        confidence: 0.9,
+      } as any,
+      "hazme un resumen en formato APA",
+    );
+
+    expect(result).toBe(false);
+  });
 });

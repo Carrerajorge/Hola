@@ -16,6 +16,7 @@ import {
   uploadBlobWithProgress,
 } from "@/lib/uploadTransport";
 import { requestUploadUrl } from "@/lib/uploadUrlRequest";
+import { classifyOutputFormat } from "@shared/explicitArtifactRequests";
 import { WelcomeAnimation } from "@/components/welcome-animation-simple";
 import {
   Plus,
@@ -6960,9 +6961,9 @@ export function ChatInterface({
       // These are handled directly by /api/chat + ProductionWorkflowRunner - no agent mode or SSE needed
       const generationPatterns = [
         /\b(crea|create|genera|generate|haz|make)\b.*\b(imagen|image|foto|photo|ilustración|illustration)\b/i,
-        /\b(crea|create|genera|generate|haz|make)\b.*\b(documento|document|word|docx)\b/i,
+        /\b(crea|create|genera|generate|haz|make)\b.*\b(word|docx)\b/i,
         /\b(crea|create|genera|generate|haz|make)\b.*\b(excel|hoja de cálculo|spreadsheet|xlsx)\b/i,
-        /\b(crea|create|genera|generate|haz|make)\b.*\b(presentación|presentation|ppt|powerpoint|slides|diapositivas)\b/i,
+        /\b(crea|create|genera|generate|haz|make)\b.*\b(ppt|powerpoint|slides|diapositivas)\b/i,
         /\b(crea|create|genera|generate|haz|make)\b.*\b(pdf)\b/i,
         /\b(cv|curriculum|resume|currículum|carta de presentación|cover letter)\b/i,
       ];
@@ -7004,29 +7005,19 @@ export function ChatInterface({
       ): "word" | "excel" | "ppt" | null => {
         const normalized = String(prompt || "").trim();
         if (!normalized) return null;
-        if (
-          /\b(excel|hoja de cálculo|spreadsheet|xlsx|tabla de datos)\b/i.test(
-            normalized,
-          )
-        ) {
+        const classified = classifyOutputFormat(normalized);
+        if (classified.confidence < 0.85) return null;
+        if (classified.action === "excel") {
           return gptCapabilityFlags.canvas && gptCapabilityFlags.excelCreation
             ? "excel"
             : null;
         }
-        if (
-          /\b(presentación|presentation|ppt|powerpoint|slides|diapositivas)\b/i.test(
-            normalized,
-          )
-        ) {
+        if (classified.action === "pptx") {
           return gptCapabilityFlags.canvas && gptCapabilityFlags.pptCreation
             ? "ppt"
             : null;
         }
-        if (
-          /\b(documento|document|word|docx|informe|reporte|ensayo|tesis)\b/i.test(
-            normalized,
-          )
-        ) {
+        if (classified.action === "word") {
           return gptCapabilityFlags.canvas && gptCapabilityFlags.wordCreation
             ? "word"
             : null;
@@ -7043,9 +7034,9 @@ export function ChatInterface({
         : inferDocToolFromPrompt(input);
       const docToolForRequest: "word" | "excel" | "ppt" | null =
         explicitDocToolSelected || inferredDocToolForPrompt;
-      // IMPORTANT: When a doc tool is explicitly selected (Word/Excel/PPT), we bypass the legacy
-      // generation pattern detection and use the new /api/chat/stream flow with docTool parameter,
-      // which triggers production mode directly on the backend
+      // IMPORTANT: Only explicit file-output requests should auto-enable a doc
+      // tool. Otherwise we stay in normal chat mode and avoid surprising
+      // Word/Excel/PPT generations for plain text requests.
       const hasDocToolSelected = !!docToolForRequest;
 
       // When document files are attached, skip generation pattern detection entirely
