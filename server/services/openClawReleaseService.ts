@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { resolveEmbeddedOpenClawPackageJsonPathSync } from "./openClawEmbeddedAssets";
 
 const OPENCLAW_OWNER = "openclaw";
 const OPENCLAW_REPO = "openclaw";
@@ -101,11 +102,16 @@ function toReleaseInfo(
 }
 
 async function loadBundledOpenClawVersion(): Promise<string | null> {
+  const packageJsonPath = resolveEmbeddedOpenClawPackageJsonPathSync({
+    moduleUrl: import.meta.url,
+    argv1: process.argv[1],
+    cwd: process.cwd(),
+  });
   try {
-    const raw = await readFile(
-      new URL("../openclaw/package.json", import.meta.url),
-      "utf8",
-    );
+    if (!packageJsonPath) {
+      return null;
+    }
+    const raw = await readFile(packageJsonPath, "utf8");
     const parsed = JSON.parse(raw) as { version?: string };
     return typeof parsed.version === "string" && parsed.version.trim()
       ? parsed.version.trim()
