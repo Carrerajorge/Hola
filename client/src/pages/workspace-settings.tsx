@@ -40,7 +40,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { apiFetch } from "@/lib/apiClient";
 import { trackWorkspaceEvent as trackAnalyticsEvent } from "@/lib/analytics";
@@ -58,6 +57,10 @@ import { WorkspaceGroupsSection } from "@/components/workspace-settings/Workspac
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
 
 type WorkspaceSection = "general" | "members" | "permissions" | "billing" | "gpt" | "apps" | "groups" | "analytics" | "identity";
+type MembersTab = "users" | "pending-invites" | "pending-requests";
+type BillingTab = "plan" | "invoices";
+type GptTab = "workspace" | "unassigned";
+type AppsTab = "enabled" | "directory" | "drafts";
 
 type AnalyticsMetricKey = "userMessages" | "chatsCreated" | "tokensUsed" | "pageViews" | "actions";
 
@@ -188,6 +191,9 @@ export default function WorkspaceSettingsPage() {
   const [roleName, setRoleName] = useState("");
   const [roleDescription, setRoleDescription] = useState("");
   const [rolePermissions, setRolePermissions] = useState<string[]>([]);
+  const [permissionsFilter, setPermissionsFilter] = useState("");
+  const [gptSearchQuery, setGptSearchQuery] = useState("");
+  const [appsSearchQuery, setAppsSearchQuery] = useState("");
   const [roleSaving, setRoleSaving] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmails, setInviteEmails] = useState("");
@@ -195,7 +201,10 @@ export default function WorkspaceSettingsPage() {
   const [inviteRole, setInviteRole] = useState<string>("team_member");
   const [inviteSending, setInviteSending] = useState(false);
   const [planSelectKey, setPlanSelectKey] = useState(0);
-  const [billingTab, setBillingTab] = useState<"plan" | "invoices">("plan");
+  const [membersTab, setMembersTab] = useState<MembersTab>("users");
+  const [billingTab, setBillingTab] = useState<BillingTab>("plan");
+  const [gptTab, setGptTab] = useState<GptTab>("workspace");
+  const [appsTab, setAppsTab] = useState<AppsTab>("enabled");
   const [creditsOffset, setCreditsOffset] = useState(0);
   const [creditsUsage, setCreditsUsage] = useState<{
     cycleStart: string;
@@ -284,13 +293,80 @@ export default function WorkspaceSettingsPage() {
       subscriptionPeriodEnd: billingStatus?.subscriptionPeriodEnd,
     });
   }, [billingStatus?.subscriptionStatus, billingStatus?.subscriptionPeriodEnd]);
+  const workspaceDisplayName = workspaceName.trim() || "Espacio de trabajo";
+
+  const updateWorkspaceLocation = useCallback((
+    nextSection: WorkspaceSection,
+    nextTabs?: {
+      membersTab?: MembersTab;
+      billingTab?: BillingTab;
+      gptTab?: GptTab;
+      appsTab?: AppsTab;
+    }
+  ) => {
+    const params = new URLSearchParams(searchString);
+    params.set("section", nextSection);
+
+    const resolvedMembersTab = nextSection === "members"
+      ? (nextTabs?.membersTab ?? (activeSection === "members" ? membersTab : "users"))
+      : null;
+    const resolvedBillingTab = nextSection === "billing"
+      ? (nextTabs?.billingTab ?? (activeSection === "billing" ? billingTab : "plan"))
+      : null;
+    const resolvedGptTab = nextSection === "gpt"
+      ? (nextTabs?.gptTab ?? (activeSection === "gpt" ? gptTab : "workspace"))
+      : null;
+    const resolvedAppsTab = nextSection === "apps"
+      ? (nextTabs?.appsTab ?? (activeSection === "apps" ? appsTab : "enabled"))
+      : null;
+
+    if (resolvedMembersTab) params.set("membersTab", resolvedMembersTab);
+    else params.delete("membersTab");
+
+    if (resolvedBillingTab) params.set("billingTab", resolvedBillingTab);
+    else params.delete("billingTab");
+
+    if (resolvedGptTab) params.set("gptTab", resolvedGptTab);
+    else params.delete("gptTab");
+
+    if (resolvedAppsTab) params.set("appsTab", resolvedAppsTab);
+    else params.delete("appsTab");
+
+    const nextSearch = params.toString();
+    setLocation(`/workspace-settings${nextSearch ? `?${nextSearch}` : ""}`);
+  }, [activeSection, appsTab, billingTab, gptTab, membersTab, searchString, setLocation]);
+
+  const navigateToSection = useCallback((section: WorkspaceSection) => {
+    setActiveSection(section);
+    updateWorkspaceLocation(section);
+  }, [updateWorkspaceLocation]);
 
   useEffect(() => {
     const params = new URLSearchParams(searchString);
     const section = params.get("section") as WorkspaceSection | null;
+    const nextMembersTab = params.get("membersTab");
+    const nextBillingTab = params.get("billingTab");
+    const nextGptTab = params.get("gptTab");
+    const nextAppsTab = params.get("appsTab");
+
     if (section && menuItems.some(item => item.id === section)) {
       setActiveSection(section);
+    } else {
+      setActiveSection("general");
     }
+
+    setMembersTab(
+      nextMembersTab === "pending-invites" || nextMembersTab === "pending-requests" || nextMembersTab === "users"
+        ? nextMembersTab
+        : "users"
+    );
+    setBillingTab(nextBillingTab === "invoices" ? "invoices" : "plan");
+    setGptTab(nextGptTab === "unassigned" ? "unassigned" : "workspace");
+    setAppsTab(
+      nextAppsTab === "directory" || nextAppsTab === "drafts" || nextAppsTab === "enabled"
+        ? nextAppsTab
+        : "enabled"
+    );
   }, [searchString]);
 
   useEffect(() => {
@@ -303,6 +379,10 @@ export default function WorkspaceSettingsPage() {
     // Clear one-time Stripe return params to avoid duplicate toasts on refresh.
     params.delete("subscription");
     params.delete("credits");
+    if (subscription === "success" || credits === "success") {
+      params.set("section", "billing");
+      params.set("billingTab", "plan");
+    }
     const nextSearch = params.toString();
     const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash || ""}`;
     window.history.replaceState({}, "", nextUrl);
@@ -819,6 +899,24 @@ export default function WorkspaceSettingsPage() {
     }
   };
 
+  const normalizedPermissionsFilter = permissionsFilter.trim().toLowerCase();
+  const matchesPermissionsSearch = useCallback((...values: Array<string | null | undefined>) => {
+    if (!normalizedPermissionsFilter) return true;
+    return values.some((value) => String(value || "").toLowerCase().includes(normalizedPermissionsFilter));
+  }, [normalizedPermissionsFilter]);
+
+  const filteredRoles = useMemo(() => {
+    if (!normalizedPermissionsFilter) return roles;
+    return roles.filter((role) =>
+      matchesPermissionsSearch(
+        role.roleKey,
+        roleLabelEs(role.roleKey),
+        role.description,
+        ...role.permissions.map((perm) => permissionLabelById.get(perm) || perm)
+      )
+    );
+  }, [matchesPermissionsSearch, normalizedPermissionsFilter, permissionLabelById, roles]);
+
   const getMemberDisplayName = (member: { fullName?: string | null; firstName?: string | null; lastName?: string | null; email?: string | null; }) => {
     const full = member.fullName?.trim();
     if (full) return full;
@@ -1298,7 +1396,15 @@ export default function WorkspaceSettingsPage() {
               </p>
             </div>
 
-            <Tabs defaultValue="users" className="w-full">
+            <Tabs
+              value={membersTab}
+              onValueChange={(value) => {
+                const nextTab = value as MembersTab;
+                setMembersTab(nextTab);
+                updateWorkspaceLocation("members", { membersTab: nextTab });
+              }}
+              className="w-full"
+            >
               <TabsList className="bg-transparent border-b rounded-none w-full justify-start h-auto p-0 gap-6">
                 <TabsTrigger 
                   value="users" 
@@ -1373,6 +1479,7 @@ export default function WorkspaceSettingsPage() {
                       variant="ghost"
                       size="icon"
                       data-testid="button-members-more"
+                      disabled
                       onClick={() => {
                         void trackWorkspaceEvent({
                           eventType: "action",
@@ -1516,6 +1623,51 @@ export default function WorkspaceSettingsPage() {
       }
 
       case "permissions":
+        const policyControlsReadOnly = true;
+        const showShareSettings = matchesPermissionsSearch(
+          "Compartir",
+          "Permitir que los miembros compartan un chat, canvas o un proyecto",
+          "Solo miembros del espacio de trabajo",
+          "Cualquier persona",
+          "Nadie"
+        );
+        const showMemorySettings = matchesPermissionsSearch(
+          "Memoria",
+          "Permitir a los miembros usar la memoria",
+          "Política de retención del chat",
+          "Infinito"
+        );
+        const showCanvasSettings = matchesPermissionsSearch(
+          "Canvas",
+          "Ejecución del código del lienzo",
+          "Acceso a red del código en Canvas"
+        );
+        const showRecordSettings = matchesPermissionsSearch(
+          "ILIAGPT Record",
+          "Permitir que los miembros usen ILIAGPT Record",
+          "transcribir",
+          "pantalla",
+          "video"
+        );
+        const showMacSettings = matchesPermissionsSearch(
+          "Código en macOS",
+          "Permitir la edición de código en macOS",
+          "Apple Intelligence"
+        );
+        const showModelSettings = matchesPermissionsSearch(
+          "Modelos",
+          "Habilitar modelos adicionales",
+          "Administra el acceso de los miembros a los modelos"
+        );
+        const hasVisiblePolicySections = [
+          showShareSettings,
+          showMemorySettings,
+          showCanvasSettings,
+          showRecordSettings,
+          showMacSettings,
+          showModelSettings,
+        ].some(Boolean);
+
         return (
           <div className="space-y-6">
             <div>
@@ -1555,9 +1707,11 @@ export default function WorkspaceSettingsPage() {
                     <p className="text-sm text-muted-foreground">Cargando roles...</p>
                   ) : roles.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No hay roles configurados.</p>
+                  ) : filteredRoles.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No hay roles que coincidan con la búsqueda.</p>
                   ) : (
                     <div className="space-y-3">
-                      {roles.map((role) => {
+                      {filteredRoles.map((role) => {
                         const labels = role.permissions.map((perm) => permissionLabelById.get(perm) || perm);
                         const visible = labels.slice(0, 4);
                         const extra = labels.length - visible.length;
@@ -1612,166 +1766,198 @@ export default function WorkspaceSettingsPage() {
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input 
-                    placeholder={`Buscar ${permissionsCatalog.length || 0} permisos`} 
+                    placeholder="Buscar roles o ajustes"
                     className="pl-9 w-64"
+                    value={permissionsFilter}
+                    onChange={(e) => setPermissionsFilter(e.target.value)}
                     data-testid="input-search-permissions"
                   />
                 </div>
 
-                <div className="space-y-8">
-                  <div className="space-y-4">
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-medium">Compartir</h3>
-                      <Badge variant="secondary" className="text-xs">Enterprise</Badge>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm">Permitir que los miembros compartan un chat, canvas o un proyecto con...</span>
-                      <Select defaultValue="members">
-                        <SelectTrigger className="w-64" data-testid="select-share-permission">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="members">Solo miembros del espacio de trabajo</SelectItem>
-                          <SelectItem value="anyone">Cualquier persona</SelectItem>
-                          <SelectItem value="none">Nadie</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  <Separator />
-
-                  <div className="space-y-4">
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-medium">Memoria</h3>
-                      <Badge variant="secondary" className="text-xs">Enterprise</Badge>
-                    </div>
-                    <div className="flex items-center justify-between py-2">
-                      <div className="flex-1 pr-4">
-                        <span className="text-sm block">Permitir a los miembros usar la memoria</span>
-                        <span className="text-xs text-muted-foreground">
-                          Administra si los miembros pueden activar la memoria. Esto permite que ILIAGPT se vuelva más útil recordando detalles y preferencias a través de los chats.{" "}
-                          <button className="text-primary hover:underline">Obtener más información</button>
-                        </span>
-                      </div>
-                      <Switch defaultChecked data-testid="switch-memory" />
-                    </div>
-                    <div className="flex items-center justify-between py-2">
-                      <div className="flex-1 pr-4">
-                        <span className="text-sm block">Política de retención del chat</span>
-                        <span className="text-xs text-muted-foreground">
-                          Comunícate con el administrador de la cuenta para modificar esta configuración.
-                        </span>
-                      </div>
-                      <span className="text-sm">Infinito</span>
-                    </div>
-                  </div>
-
-                  <Separator />
-
-                  <div className="space-y-4">
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-medium">Canvas</h3>
-                      <Badge variant="secondary" className="text-xs">Enterprise</Badge>
-                    </div>
-                    <div className="flex items-center justify-between py-2">
-                      <div className="flex-1 pr-4">
-                        <span className="text-sm block">Ejecución del código del lienzo</span>
-                        <span className="text-xs text-muted-foreground">
-                          Permitir que los miembros ejecuten fragmentos de código dentro de Canvas.
-                        </span>
-                      </div>
-                      <Switch defaultChecked data-testid="switch-canvas-code" />
-                    </div>
-                    <div className="flex items-center justify-between py-2">
-                      <div className="flex-1 pr-4">
-                        <span className="text-sm block">Acceso a red del código en Canvas</span>
-                        <span className="text-xs text-muted-foreground">
-                          Permitir que los miembros ejecuten código con acceso a red dentro de Canvas.
-                        </span>
-                      </div>
-                      <Switch defaultChecked data-testid="switch-canvas-network" />
-                    </div>
-                  </div>
-
-                  <Separator />
-
-                  <div className="space-y-4">
-                    <h3 className="font-medium">ILIAGPT Record</h3>
-                    <p className="text-xs text-muted-foreground">
-                      Administra si los usuarios pueden usar ILIAGPT para grabar, transcribir y resumir audio de formato largo. Las grabaciones solo se usarán para fines de transcripción y no las almacenará.{" "}
-                      <button className="text-primary hover:underline">Obtener más información</button>
-                    </p>
-                    <div className="flex items-center justify-between py-2">
-                      <span className="text-sm">Permitir que los miembros usen ILIAGPT Record</span>
-                      <Switch defaultChecked data-testid="switch-record" />
-                    </div>
-                    <div className="flex items-center justify-between py-2">
-                      <div className="flex-1 pr-4">
-                        <span className="text-sm block">Permitir que ILIAGPT consulte notas y transcripciones anteriores.</span>
-                        <span className="text-xs text-muted-foreground">
-                          Permitir que los miembros consulten notas y transcripciones anteriores en ILIAGPT Record.
-                        </span>
-                      </div>
-                      <Switch defaultChecked data-testid="switch-record-notes" />
-                    </div>
-                    <div className="flex items-center justify-between py-2">
-                      <div className="flex-1 pr-4">
-                        <span className="text-sm block">Permite que los miembros compartan su pantalla o video mientras usan el modo de voz.</span>
-                        <span className="text-xs text-muted-foreground">
-                          Permite que los miembros compartan su pantalla o video mientras usan el modo de voz.
-                        </span>
-                      </div>
-                      <Switch defaultChecked data-testid="switch-screen-share" />
-                    </div>
-                  </div>
-
-                  <Separator />
-
-                  <div className="space-y-4">
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-medium">Código en macOS</h3>
-                      <Badge variant="secondary" className="text-xs">Enterprise</Badge>
-                    </div>
-                    <div className="flex items-center justify-between py-2">
-                      <div className="flex-1 pr-4">
-                        <span className="text-sm block">Permitir la edición de código en macOS</span>
-                        <span className="text-xs text-muted-foreground">
-                          Controla si los usuarios de este espacio de trabajo pueden permitir que ILIAGPT edite archivos de código al usar la aplicación de escritorio para macOS. Esto permite que ILIAGPT lea y edite el contenido de aplicaciones específicas en su escritorio para dar mejores respuestas.{" "}
-                          <button className="text-primary hover:underline">Obtener más información</button>
-                        </span>
-                      </div>
-                      <Switch data-testid="switch-macos-code" />
-                    </div>
-                    <div className="flex items-center justify-between py-2">
-                      <div className="flex-1 pr-4">
-                        <span className="text-sm block">Permitir que los miembros vinculen Apple Intelligence</span>
-                        <span className="text-xs text-muted-foreground">
-                          Administra si los miembros pueden vincularse con Apple Intelligence.
-                        </span>
-                      </div>
-                      <Switch defaultChecked data-testid="switch-apple-intelligence" />
-                    </div>
-                  </div>
-
-                  <Separator />
-
-                  <div className="space-y-4">
-                    <div>
-                      <h3 className="font-medium">Modelos</h3>
-                      <p className="text-xs text-muted-foreground">Administra el acceso de los miembros a los modelos</p>
-                    </div>
-                    <div className="flex items-center justify-between py-2">
-                      <div className="flex-1 pr-4">
-                        <span className="text-sm block">Habilitar modelos adicionales</span>
-                        <span className="text-xs text-muted-foreground">
-                          Permite que los miembros usen modelos adicionales.
-                        </span>
-                      </div>
-                      <Switch defaultChecked data-testid="switch-additional-models" />
-                    </div>
-                  </div>
+                <div className="rounded-lg border bg-muted/30 p-4">
+                  <p className="text-sm font-medium">Modo solo vista</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Los roles sí se pueden crear y editar. Los ajustes avanzados de abajo todavía no guardan cambios.
+                  </p>
                 </div>
+
+                {!hasVisiblePolicySections ? (
+                  <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground text-center">
+                    No se encontraron ajustes que coincidan con la búsqueda.
+                  </div>
+                ) : (
+                  <div className="space-y-8">
+                    {showShareSettings && (
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-medium">Compartir</h3>
+                          <Badge variant="secondary" className="text-xs">Enterprise</Badge>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm">Permitir que los miembros compartan un chat, canvas o un proyecto con...</span>
+                          <Select defaultValue="members" disabled={policyControlsReadOnly}>
+                            <SelectTrigger className="w-64" data-testid="select-share-permission">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="members">Solo miembros del espacio de trabajo</SelectItem>
+                              <SelectItem value="anyone">Cualquier persona</SelectItem>
+                              <SelectItem value="none">Nadie</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    )}
+
+                    {showMemorySettings && (
+                      <>
+                        {(showShareSettings) && <Separator />}
+                        <div className="space-y-4">
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-medium">Memoria</h3>
+                            <Badge variant="secondary" className="text-xs">Enterprise</Badge>
+                          </div>
+                          <div className="flex items-center justify-between py-2">
+                            <div className="flex-1 pr-4">
+                              <span className="text-sm block">Permitir a los miembros usar la memoria</span>
+                              <span className="text-xs text-muted-foreground">
+                                Administra si los miembros pueden activar la memoria. Esto permite que ILIAGPT se vuelva más útil recordando detalles y preferencias a través de los chats.{" "}
+                                <button type="button" className="text-primary hover:underline" disabled={policyControlsReadOnly}>Obtener más información</button>
+                              </span>
+                            </div>
+                            <Switch checked disabled data-testid="switch-memory" />
+                          </div>
+                          <div className="flex items-center justify-between py-2">
+                            <div className="flex-1 pr-4">
+                              <span className="text-sm block">Política de retención del chat</span>
+                              <span className="text-xs text-muted-foreground">
+                                Comunícate con el administrador de la cuenta para modificar esta configuración.
+                              </span>
+                            </div>
+                            <span className="text-sm">Infinito</span>
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {showCanvasSettings && (
+                      <>
+                        {(showShareSettings || showMemorySettings) && <Separator />}
+                        <div className="space-y-4">
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-medium">Canvas</h3>
+                            <Badge variant="secondary" className="text-xs">Enterprise</Badge>
+                          </div>
+                          <div className="flex items-center justify-between py-2">
+                            <div className="flex-1 pr-4">
+                              <span className="text-sm block">Ejecución del código del lienzo</span>
+                              <span className="text-xs text-muted-foreground">
+                                Permitir que los miembros ejecuten fragmentos de código dentro de Canvas.
+                              </span>
+                            </div>
+                            <Switch checked disabled data-testid="switch-canvas-code" />
+                          </div>
+                          <div className="flex items-center justify-between py-2">
+                            <div className="flex-1 pr-4">
+                              <span className="text-sm block">Acceso a red del código en Canvas</span>
+                              <span className="text-xs text-muted-foreground">
+                                Permitir que los miembros ejecuten código con acceso a red dentro de Canvas.
+                              </span>
+                            </div>
+                            <Switch checked disabled data-testid="switch-canvas-network" />
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {showRecordSettings && (
+                      <>
+                        {(showShareSettings || showMemorySettings || showCanvasSettings) && <Separator />}
+                        <div className="space-y-4">
+                          <h3 className="font-medium">ILIAGPT Record</h3>
+                          <p className="text-xs text-muted-foreground">
+                            Administra si los usuarios pueden usar ILIAGPT para grabar, transcribir y resumir audio de formato largo. Las grabaciones solo se usarán para fines de transcripción y no las almacenará.{" "}
+                            <button type="button" className="text-primary hover:underline" disabled={policyControlsReadOnly}>Obtener más información</button>
+                          </p>
+                          <div className="flex items-center justify-between py-2">
+                            <span className="text-sm">Permitir que los miembros usen ILIAGPT Record</span>
+                            <Switch checked disabled data-testid="switch-record" />
+                          </div>
+                          <div className="flex items-center justify-between py-2">
+                            <div className="flex-1 pr-4">
+                              <span className="text-sm block">Permitir que ILIAGPT consulte notas y transcripciones anteriores.</span>
+                              <span className="text-xs text-muted-foreground">
+                                Permitir que los miembros consulten notas y transcripciones anteriores en ILIAGPT Record.
+                              </span>
+                            </div>
+                            <Switch checked disabled data-testid="switch-record-notes" />
+                          </div>
+                          <div className="flex items-center justify-between py-2">
+                            <div className="flex-1 pr-4">
+                              <span className="text-sm block">Permite que los miembros compartan su pantalla o video mientras usan el modo de voz.</span>
+                              <span className="text-xs text-muted-foreground">
+                                Permite que los miembros compartan su pantalla o video mientras usan el modo de voz.
+                              </span>
+                            </div>
+                            <Switch checked disabled data-testid="switch-screen-share" />
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {showMacSettings && (
+                      <>
+                        {(showShareSettings || showMemorySettings || showCanvasSettings || showRecordSettings) && <Separator />}
+                        <div className="space-y-4">
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-medium">Código en macOS</h3>
+                            <Badge variant="secondary" className="text-xs">Enterprise</Badge>
+                          </div>
+                          <div className="flex items-center justify-between py-2">
+                            <div className="flex-1 pr-4">
+                              <span className="text-sm block">Permitir la edición de código en macOS</span>
+                              <span className="text-xs text-muted-foreground">
+                                Controla si los usuarios de este espacio de trabajo pueden permitir que ILIAGPT edite archivos de código al usar la aplicación de escritorio para macOS. Esto permite que ILIAGPT lea y edite el contenido de aplicaciones específicas en su escritorio para dar mejores respuestas.{" "}
+                                <button type="button" className="text-primary hover:underline" disabled={policyControlsReadOnly}>Obtener más información</button>
+                              </span>
+                            </div>
+                            <Switch checked={false} disabled data-testid="switch-macos-code" />
+                          </div>
+                          <div className="flex items-center justify-between py-2">
+                            <div className="flex-1 pr-4">
+                              <span className="text-sm block">Permitir que los miembros vinculen Apple Intelligence</span>
+                              <span className="text-xs text-muted-foreground">
+                                Administra si los miembros pueden vincularse con Apple Intelligence.
+                              </span>
+                            </div>
+                            <Switch checked disabled data-testid="switch-apple-intelligence" />
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {showModelSettings && (
+                      <>
+                        {(showShareSettings || showMemorySettings || showCanvasSettings || showRecordSettings || showMacSettings) && <Separator />}
+                        <div className="space-y-4">
+                          <div>
+                            <h3 className="font-medium">Modelos</h3>
+                            <p className="text-xs text-muted-foreground">Administra el acceso de los miembros a los modelos</p>
+                          </div>
+                          <div className="flex items-center justify-between py-2">
+                            <div className="flex-1 pr-4">
+                              <span className="text-sm block">Habilitar modelos adicionales</span>
+                              <span className="text-xs text-muted-foreground">
+                                Permite que los miembros usen modelos adicionales.
+                              </span>
+                            </div>
+                            <Switch checked disabled data-testid="switch-additional-models" />
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
               </TabsContent>
             </Tabs>
           </div>
@@ -1826,7 +2012,11 @@ export default function WorkspaceSettingsPage() {
 
             <Tabs
               value={billingTab}
-              onValueChange={(value) => setBillingTab(value as "plan" | "invoices")}
+              onValueChange={(value) => {
+                const nextTab = value as BillingTab;
+                setBillingTab(nextTab);
+                updateWorkspaceLocation("billing", { billingTab: nextTab });
+              }}
               className="w-full"
             >
               <TabsList className="bg-transparent border-b rounded-none w-full justify-start h-auto p-0">
@@ -2192,16 +2382,30 @@ export default function WorkspaceSettingsPage() {
           { id: 6, name: "TSP CAPÍTULO III. - Problema actual.", constructor: "Jorge Carrera", actions: "—", access: "Enlace", chats: 73, created: "Feb 5", updated: "Dec 17", icon: "doc" },
           { id: 7, name: "1.6. - Justificación", constructor: "Sin asignar", actions: "—", access: "Público", chats: 845, created: "Feb 20", updated: "Dec 17", icon: "doc" },
         ];
+        const normalizedGptSearchQuery = gptSearchQuery.trim().toLowerCase();
+        const filteredGptItems = gptItems.filter((item) => {
+          if (!normalizedGptSearchQuery) return true;
+          return [item.name, item.constructor, item.access]
+            .some((value) => String(value || "").toLowerCase().includes(normalizedGptSearchQuery));
+        });
+        const gptPreviewReadOnly = true;
         return (
           <div className="space-y-8">
             <h1 className="text-2xl font-semibold">GPT</h1>
+
+            <div className="rounded-lg border bg-muted/30 p-4">
+              <p className="text-sm font-medium">Vista previa del catálogo</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Esta sección usa datos locales de referencia. La búsqueda funciona, pero las acciones avanzadas todavía son de solo lectura.
+              </p>
+            </div>
 
             <div className="space-y-4">
               <h2 className="font-medium">Terceros</h2>
               <p className="text-sm text-muted-foreground">
                 Administra si los miembros pueden usar GPT creados fuera de tu espacio de trabajo.
               </p>
-              <Select defaultValue="allow">
+              <Select defaultValue="allow" disabled={gptPreviewReadOnly}>
                 <SelectTrigger className="w-40" data-testid="select-third-party">
                   <SelectValue placeholder="Permitir todo" />
                 </SelectTrigger>
@@ -2216,7 +2420,15 @@ export default function WorkspaceSettingsPage() {
             <div className="space-y-4">
               <h2 className="font-medium">GPT</h2>
               
-              <Tabs defaultValue="workspace" className="w-full">
+              <Tabs
+                value={gptTab}
+                onValueChange={(value) => {
+                  const nextTab = value as GptTab;
+                  setGptTab(nextTab);
+                  updateWorkspaceLocation("gpt", { gptTab: nextTab });
+                }}
+                className="w-full"
+              >
                 <div className="flex items-center justify-between">
                   <TabsList className="bg-transparent border-b rounded-none h-auto p-0">
                     <TabsTrigger 
@@ -2234,13 +2446,15 @@ export default function WorkspaceSettingsPage() {
                       Sin asignar
                     </TabsTrigger>
                   </TabsList>
-                  <div className="flex items-center gap-2">
-                    <Button variant="ghost" size="icon" className="h-8 w-8" data-testid="button-gpt-filter">
-                      <Filter className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8" data-testid="button-gpt-search">
-                      <Search className="h-4 w-4" />
-                    </Button>
+                  <div className="relative w-72">
+                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={gptSearchQuery}
+                      onChange={(e) => setGptSearchQuery(e.target.value)}
+                      placeholder="Buscar GPT"
+                      className="pl-9"
+                      data-testid="input-gpt-search"
+                    />
                   </div>
                 </div>
 
@@ -2260,7 +2474,13 @@ export default function WorkspaceSettingsPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {gptItems.map((item) => (
+                        {filteredGptItems.length === 0 ? (
+                          <tr>
+                            <td colSpan={8} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                              No hay GPT que coincidan con la búsqueda.
+                            </td>
+                          </tr>
+                        ) : filteredGptItems.map((item) => (
                           <tr key={item.id} className="border-t hover:bg-muted/30">
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-3">
@@ -2270,7 +2490,7 @@ export default function WorkspaceSettingsPage() {
                                 )}>
                                   {item.icon === "T20" ? "T20" : "📄"}
                                 </div>
-                                <span className="font-medium text-primary hover:underline cursor-pointer">{item.name}</span>
+                                <span className="font-medium">{item.name}</span>
                               </div>
                             </td>
                             <td className="px-4 py-3 text-muted-foreground">{item.constructor}</td>
@@ -2280,7 +2500,7 @@ export default function WorkspaceSettingsPage() {
                             <td className="px-4 py-3 text-muted-foreground">{item.created}</td>
                             <td className="px-4 py-3 text-muted-foreground">{item.updated}</td>
                             <td className="px-4 py-3">
-                              <Button variant="ghost" size="icon" className="h-8 w-8">
+                              <Button variant="ghost" size="icon" className="h-8 w-8" disabled>
                                 <MoreHorizontal className="h-4 w-4" />
                               </Button>
                             </td>
@@ -2290,10 +2510,8 @@ export default function WorkspaceSettingsPage() {
                     </table>
                   </div>
 
-                  <div className="flex items-center justify-center gap-4 mt-4">
-                    <Button variant="ghost" size="sm" data-testid="button-gpt-prev">Anterior</Button>
-                    <span className="text-sm text-muted-foreground">Página 1</span>
-                    <Button variant="ghost" size="sm" className="font-medium" data-testid="button-gpt-next">Siguiente</Button>
+                  <div className="mt-4 text-sm text-muted-foreground text-center">
+                    Mostrando {filteredGptItems.length} GPT del catálogo local.
                   </div>
                 </TabsContent>
 
@@ -2316,7 +2534,7 @@ export default function WorkspaceSettingsPage() {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">Los GPT se pueden compartir con...</span>
-                <Select defaultValue="anyone">
+                <Select defaultValue="anyone" disabled={gptPreviewReadOnly}>
                   <SelectTrigger className="w-48" data-testid="select-gpt-share">
                     <SelectValue placeholder="Cualquier persona" />
                   </SelectTrigger>
@@ -2340,7 +2558,9 @@ export default function WorkspaceSettingsPage() {
                 <input 
                   type="checkbox" 
                   id="allow-domains" 
-                  defaultChecked 
+                  checked
+                  readOnly
+                  disabled
                   className="h-4 w-4 rounded border-gray-300"
                   data-testid="checkbox-allow-domains"
                 />
@@ -2426,13 +2646,27 @@ export default function WorkspaceSettingsPage() {
           { id: 69, name: "Zoho Desk", description: "Connect to sync Zoho Desk tickets and customer conversations for use in ChatGPT.", icon: "Z", bgColor: "bg-green-600" },
           { id: 70, name: "Zoom", description: "Smart meeting insights from Zoom", icon: "Z", bgColor: "bg-blue-500" },
         ];
+        const normalizedAppsSearchQuery = appsSearchQuery.trim().toLowerCase();
+        const filteredAppItems = appItems.filter((app: any) => {
+          if (!normalizedAppsSearchQuery) return true;
+          return [app.name, app.description, app.badge]
+            .some((value) => String(value || "").toLowerCase().includes(normalizedAppsSearchQuery));
+        });
+        const appsPreviewReadOnly = true;
         return (
           <div className="space-y-6">
             <div>
               <h1 className="text-2xl font-semibold">Aplicaciones</h1>
               <p className="text-sm text-muted-foreground mt-1">
                 Administra a qué aplicaciones pueden conectarse los usuarios de este espacio de trabajo.{" "}
-                <button className="text-primary hover:underline">Obtener más información</button>
+                <button type="button" className="text-primary hover:underline" disabled={appsPreviewReadOnly}>Obtener más información</button>
+              </p>
+            </div>
+
+            <div className="rounded-lg border bg-muted/30 p-4">
+              <p className="text-sm font-medium">Vista previa del directorio</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                La búsqueda ya funciona sobre el catálogo local. Crear, sincronizar y gestionar aplicaciones sigue en modo solo lectura.
               </p>
             </div>
 
@@ -2440,6 +2674,8 @@ export default function WorkspaceSettingsPage() {
               <div className="flex-1 relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input 
+                  value={appsSearchQuery}
+                  onChange={(e) => setAppsSearchQuery(e.target.value)}
                   placeholder="Buscar" 
                   className="pl-9"
                   data-testid="input-apps-search"
@@ -2452,53 +2688,30 @@ export default function WorkspaceSettingsPage() {
                     Filtros
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-72 p-0" align="end">
-                  <div className="p-4 space-y-4">
-                    <Collapsible defaultOpen>
-                      <CollapsibleTrigger className="flex items-center justify-between w-full">
-                        <span className="font-medium">Categorías</span>
-                        <ChevronDown className="h-4 w-4 transition-transform duration-200 [&[data-state=open]]:rotate-180" />
-                      </CollapsibleTrigger>
-                      <CollapsibleContent className="pt-3 space-y-2">
-                        {["Diseño", "Empresa", "Herramientas del desarrollador", "Productividad", "Colaboración", "Finanzas"].map((cat) => (
-                          <label key={cat} className="flex items-center gap-3 cursor-pointer">
-                            <input type="checkbox" className="h-4 w-4 rounded border-gray-300" />
-                            <span className="text-sm">{cat}</span>
-                          </label>
-                        ))}
-                      </CollapsibleContent>
-                    </Collapsible>
-
-                    <Collapsible defaultOpen>
-                      <CollapsibleTrigger className="flex items-center justify-between w-full">
-                        <span className="font-medium">Funcionalidades</span>
-                        <ChevronDown className="h-4 w-4 transition-transform duration-200 [&[data-state=open]]:rotate-180" />
-                      </CollapsibleTrigger>
-                      <CollapsibleContent className="pt-3 space-y-2">
-                        {["Búsqueda de archivos", "Cargas de archivos", "Sincronización", "Capacidad de escritura", "Interactiva"].map((func) => (
-                          <label key={func} className="flex items-center gap-3 cursor-pointer">
-                            <input type="checkbox" className="h-4 w-4 rounded border-gray-300" />
-                            <span className="text-sm">{func}</span>
-                          </label>
-                        ))}
-                      </CollapsibleContent>
-                    </Collapsible>
-
-                    <div className="pt-2 border-t">
-                      <button className="text-sm text-muted-foreground hover:text-foreground w-full text-right">
-                        Borrar todo
-                      </button>
-                    </div>
+                <PopoverContent className="w-72" align="end">
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Filtros aún no conectados</p>
+                    <p className="text-xs text-muted-foreground">
+                      Usa la búsqueda por nombre o descripción mientras se conectan filtros reales del directorio.
+                    </p>
                   </div>
                 </PopoverContent>
               </Popover>
-              <Button className="gap-2" data-testid="button-apps-create">
+              <Button className="gap-2" data-testid="button-apps-create" disabled={appsPreviewReadOnly}>
                 <Plus className="h-4 w-4" />
                 Crear
               </Button>
             </div>
 
-            <Tabs defaultValue="enabled" className="w-full">
+            <Tabs
+              value={appsTab}
+              onValueChange={(value) => {
+                const nextTab = value as AppsTab;
+                setAppsTab(nextTab);
+                updateWorkspaceLocation("apps", { appsTab: nextTab });
+              }}
+              className="w-full"
+            >
               <div className="flex items-center justify-between">
                 <TabsList className="bg-transparent border-b rounded-none h-auto p-0">
                   <TabsTrigger 
@@ -2506,7 +2719,7 @@ export default function WorkspaceSettingsPage() {
                     className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
                     data-testid="tab-apps-enabled"
                   >
-                    Enabled (70)
+                    Enabled ({appItems.length})
                   </TabsTrigger>
                   <TabsTrigger 
                     value="directory" 
@@ -2523,7 +2736,7 @@ export default function WorkspaceSettingsPage() {
                     Drafts (0)
                   </TabsTrigger>
                 </TabsList>
-                <button className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1" data-testid="button-explore-directory">
+                <button type="button" className="text-sm text-muted-foreground flex items-center gap-1" data-testid="button-explore-directory" disabled={appsPreviewReadOnly}>
                   Explorar directorio
                   <span className="text-xs">↗</span>
                 </button>
@@ -2532,16 +2745,20 @@ export default function WorkspaceSettingsPage() {
               <TabsContent value="enabled" className="mt-4">
                 <div className="border rounded-lg overflow-hidden">
                   <div className="flex items-center px-4 py-3 bg-muted/50 border-b">
-                    <input type="checkbox" className="h-4 w-4 rounded border-gray-300 mr-4" data-testid="checkbox-apps-all" />
-                    <button className="flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground">
+                    <input type="checkbox" className="h-4 w-4 rounded border-gray-300 mr-4" data-testid="checkbox-apps-all" checked={false} readOnly disabled />
+                    <button type="button" className="flex items-center gap-1 text-sm font-medium text-muted-foreground" disabled>
                       Nombre
                       <ChevronDown className="h-3 w-3 rotate-180" />
                     </button>
                   </div>
                   <div className="divide-y">
-                    {appItems.map((app: any) => (
+                    {filteredAppItems.length === 0 ? (
+                      <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+                        No hay aplicaciones que coincidan con la búsqueda.
+                      </div>
+                    ) : filteredAppItems.map((app: any) => (
                       <div key={app.id} className="flex items-center px-4 py-3 hover:bg-muted/30">
-                        <input type="checkbox" className="h-4 w-4 rounded border-gray-300 mr-4" data-testid={`checkbox-app-${app.id}`} />
+                        <input type="checkbox" className="h-4 w-4 rounded border-gray-300 mr-4" data-testid={`checkbox-app-${app.id}`} checked={false} readOnly disabled />
                         <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center text-white text-sm font-bold mr-4", app.bgColor)}>
                           {app.icon}
                         </div>
@@ -2554,10 +2771,10 @@ export default function WorkspaceSettingsPage() {
                           </div>
                           <p className="text-sm text-muted-foreground truncate">{app.description}</p>
                           {app.hasSync && (
-                            <button className="text-xs text-primary hover:underline mt-1">Habilitar sincronización</button>
+                            <button type="button" className="text-xs text-primary mt-1" disabled={appsPreviewReadOnly}>Habilitar sincronización</button>
                           )}
                         </div>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
+                        <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0" disabled={appsPreviewReadOnly}>
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </div>
@@ -3232,7 +3449,8 @@ export default function WorkspaceSettingsPage() {
 
       <div className="flex">
         <div className="w-64 border-r min-h-[calc(100vh-49px)] p-4">
-          <button 
+          <button
+            type="button"
             onClick={() => setLocation("/")}
             className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-6"
             data-testid="button-back-to-chat"
@@ -3241,24 +3459,31 @@ export default function WorkspaceSettingsPage() {
             Volver al chat
           </button>
 
-          <div className="flex items-center gap-3 mb-6">
+          <button
+            type="button"
+            onClick={() => navigateToSection("general")}
+            className="flex w-full items-center gap-3 mb-6 rounded-md text-left transition-colors hover:bg-muted/50 px-2 py-1"
+            data-testid="workspace-menu-home"
+          >
             <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center">
               <IliaGPTLogo size={24} />
             </div>
-            <span className="text-sm font-medium truncate">Espacio de trabajo de Jor...</span>
-          </div>
+            <span className="text-sm font-medium truncate">{workspaceDisplayName}</span>
+          </button>
 
           <nav className="space-y-1">
             {menuItems.map((item) => (
               <button
+                type="button"
                 key={item.id}
-                onClick={() => setActiveSection(item.id)}
+                onClick={() => navigateToSection(item.id)}
                 className={cn(
                   "w-full flex items-center gap-3 px-3 py-2 text-sm rounded-md transition-colors",
                   activeSection === item.id 
                     ? "bg-muted font-medium" 
                     : "hover:bg-muted/50 text-muted-foreground"
                 )}
+                aria-current={activeSection === item.id ? "page" : undefined}
                 data-testid={`workspace-menu-${item.id}`}
               >
                 {item.icon}
