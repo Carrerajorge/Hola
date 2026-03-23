@@ -20,6 +20,8 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+      - name: Verify embedded OpenClaw release sync
+        run: npm run verify:openclaw-upstream
       - name: Install dependencies
         run: npm install
       - name: Run production build
@@ -49,6 +51,8 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+      - name: Verify embedded OpenClaw release sync
+        run: npm run verify:openclaw-upstream
       - name: Install dependencies
         run: npm install
       - name: Run integrated OpenClaw smoke tests
