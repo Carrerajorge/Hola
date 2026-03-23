@@ -7956,45 +7956,8 @@ export function ChatInterface({
         }
       }
 
-      // Process attachments for message construction
-      let attachments = currentUploadedFiles
-        // For UI: include anything not in a terminal error state so the message shows files immediately.
-        .filter((f: any) => f?.status !== "error")
-        .map((f: any) => ({
-          type: (f.type.startsWith("image/") ? "image" : "document") as
-            | "image"
-            | "document",
-          name: f.name,
-          documentType: (() => {
-            if (f.type.startsWith("image/")) return undefined;
-            if (f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf"))
-              return "pdf";
-            if (
-              f.type.includes("sheet") ||
-              f.type.includes("excel") ||
-              f.type.includes("csv") ||
-              f.name.match(/\.(xlsx|xls|csv)$/i)
-            )
-              return "excel";
-            if (
-              f.type.includes("presentation") ||
-              f.type.includes("powerpoint") ||
-              f.name.match(/\.(pptx|ppt)$/i)
-            )
-              return "ppt";
-            return "word"; // default to word for text/docs
-          })() as "word" | "excel" | "ppt" | "pdf",
-          mimeType: f.type,
-          imageUrl: f.dataUrl,
-          storagePath: f.storagePath,
-          fileId: f.id,
-          spreadsheetData: f.spreadsheetData,
-        }));
-
-      const promptIntegritySeed = createPendingPromptIntegrityMeta(userInput);
-      const promptIntegrityPromise = computePromptIntegrity(userInput);
-
-      // Construct the User Message object
+      // Construct the minimal optimistic user message first so the UI updates
+      // before we do any heavier attachment/integrity work.
       const userMsg: Message = {
         id: userMsgId,
         clientTempId: userMsgId,
@@ -8006,11 +7969,6 @@ export function ChatInterface({
         status: "pending",
         deliveryStatus: "sending",
         deliveryError: undefined,
-        attachments: attachments.length > 0 ? attachments : undefined,
-        // Prompt integrity fields — server validates these to detect data loss
-        clientPromptLen: promptIntegritySeed.clientPromptLen,
-        clientPromptHash: promptIntegritySeed.clientPromptHash,
-        promptMessageId: promptIntegritySeed.messageId,
       } as any;
 
       // Apply Optimistic Update IMMEDIATELY
@@ -8041,6 +7999,50 @@ export function ChatInterface({
         setTimeout(resolve, 0);
       });
 
+      // Finish enriching the optimistic message after the first paint.
+      let attachments = currentUploadedFiles
+        .filter((f: any) => f?.status !== "error")
+        .map((f: any) => ({
+          type: (f.type.startsWith("image/") ? "image" : "document") as
+            | "image"
+            | "document",
+          name: f.name,
+          documentType: (() => {
+            if (f.type.startsWith("image/")) return undefined;
+            if (f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf"))
+              return "pdf";
+            if (
+              f.type.includes("sheet") ||
+              f.type.includes("excel") ||
+              f.type.includes("csv") ||
+              f.name.match(/\.(xlsx|xls|csv)$/i)
+            )
+              return "excel";
+            if (
+              f.type.includes("presentation") ||
+              f.type.includes("powerpoint") ||
+              f.name.match(/\.(pptx|ppt)$/i)
+            )
+              return "ppt";
+            return "word";
+          })() as "word" | "excel" | "ppt" | "pdf",
+          mimeType: f.type,
+          imageUrl: f.dataUrl,
+          storagePath: f.storagePath,
+          fileId: f.id,
+          spreadsheetData: f.spreadsheetData,
+        }));
+      if (attachments.length > 0) {
+        userMsg.attachments = attachments;
+        setOptimisticMessages((prev: Message[]) =>
+          prev.map((m: Message) =>
+            m.id === userMsgId ? { ...m, attachments } : m,
+          ),
+        );
+      }
+
+      const promptIntegrityPromise = computePromptIntegrity(userInput);
+
       // Set initial AI state
       setAiStateForChat("thinking", submitConversationId);
       streamingContentRef.current = "";
@@ -8060,18 +8062,6 @@ export function ChatInterface({
         userMsg.clientPromptLen = promptIntegrity.clientPromptLen;
         userMsg.clientPromptHash = promptIntegrity.clientPromptHash;
         userMsg.promptMessageId = promptIntegrity.messageId;
-        setOptimisticMessages((prev: Message[]) =>
-          prev.map((m: Message) =>
-            m.id === userMsgId
-              ? {
-                  ...m,
-                  clientPromptLen: promptIntegrity.clientPromptLen,
-                  clientPromptHash: promptIntegrity.clientPromptHash,
-                  promptMessageId: promptIntegrity.messageId,
-                }
-              : m,
-          ),
-        );
       };
 
       // If there are pending uploads, wait for them before kicking off any backend work.
