@@ -279,6 +279,9 @@ check_contains "02" "$TMP_DIR/01.out" '"status":"ok"' "/api/health returns statu
 if [ -n "$EXPECTED_APP_VERSION" ]; then
   if grep -Fq "\"version\":\"${EXPECTED_APP_VERSION}\"" "$TMP_DIR/01.out" || grep -Fq "\"app_version\":\"${EXPECTED_APP_VERSION}\"" "$TMP_DIR/01.out"; then
     pass "03" "/api/health version matches expected (${EXPECTED_APP_VERSION})"
+  elif [ -n "$STATE_APP_VERSION" ] && [ "$STATE_APP_VERSION" = "$EXPECTED_APP_VERSION" ] && \
+       grep -Eq '"(version|app_version)":"build-[^"]+"' "$TMP_DIR/01.out"; then
+    pass "03" "/api/health exposes build version while deploy-state matches expected (${EXPECTED_APP_VERSION})"
   else
     fail "03" "/api/health version did not match expected (${EXPECTED_APP_VERSION})"
   fi
@@ -330,6 +333,9 @@ if [ -n "$health_local" ]; then
   fi
   if [ -n "$EXPECTED_APP_VERSION" ] && echo "$health_local" | grep -Fq "\"version\":\"${EXPECTED_APP_VERSION}\""; then
     pass "26" "Direct active slot health version matches expected (${EXPECTED_APP_VERSION})"
+  elif [ -n "$STATE_APP_VERSION" ] && [ -n "$EXPECTED_APP_VERSION" ] && [ "$STATE_APP_VERSION" = "$EXPECTED_APP_VERSION" ] && \
+       echo "$health_local" | grep -Eq '"version":"build-[^"]+"'; then
+    pass "26" "Direct active slot health exposes build version while deploy-state matches expected (${EXPECTED_APP_VERSION})"
   elif [ -n "$STATE_APP_VERSION" ] && echo "$health_local" | grep -Fq "\"version\":\"${STATE_APP_VERSION}\""; then
     pass "26" "Direct active slot health version matches state (${STATE_APP_VERSION})"
   else

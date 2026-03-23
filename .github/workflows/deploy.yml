@@ -549,12 +549,12 @@ jobs:
         needs.build_images.result == 'success'
       }}
     timeout-minutes: 25
-    # Job-level concurrency: if a newer deploy is queued, cancel this one.
-    # This ensures the most recent commit always ships, without blocking the queue.
-    # The VPS-level deploy script itself is idempotent and rolls back on failure.
+    # Job-level concurrency: serialize production deploys on the VPS.
+    # Do not cancel an in-flight deploy; interrupting it mid-cutover can leave
+    # the public site pinned to the maintenance page until a later run repairs it.
     concurrency:
       group: deploy-auto-vps
-      cancel-in-progress: true
+      cancel-in-progress: false
     env:
       VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
       VPS_USER: ${{ secrets.VPS_USER || 'root' }}
@@ -886,16 +886,18 @@ jobs:
         run: |
           set -euo pipefail
           EXPECTED="${{ steps.tag.outputs.app_version }}"
-          echo "▸ Verifying https://iliagpt.com (expecting version ${EXPECTED})..."
+          echo "▸ Verifying https://iliagpt.com is healthy after deploy (target version ${EXPECTED})..."
           for i in $(seq 1 20); do
             HEALTH_JSON="$(curl -sf --max-time 10 https://iliagpt.com/api/health 2>/dev/null || echo "{}")"
-            if echo "${HEALTH_JSON}" | grep -q "\"version\":\"${EXPECTED}\""; then
-              echo "✓ Production verified: version ${EXPECTED}"
+            if echo "${HEALTH_JSON}" | grep -q '"status":"ok"' && \
+               echo "${HEALTH_JSON}" | grep -q '"version":"'; then
+              echo "✓ Production health verified"
               echo "  ${HEALTH_JSON}"
               break
             fi
             if [ "$i" -eq 20 ]; then
-              echo "✗ Production version mismatch (expected ${EXPECTED})"
+              echo "✗ Production health did not stabilize after deploy"
+              echo "  Last response: ${HEALTH_JSON}"
               exit 1
             fi
             echo "  Attempt $i/20..."

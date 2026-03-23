@@ -1673,25 +1673,29 @@ sleep "${DRAIN_WAIT}"
 echo ""
 
 # ── Step 11: Verify through Nginx (end-to-end) ─────────────
-log "[12/15] Verifying traffic flows through Nginx (port 443)..."
+PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-https://iliagpt.com}"
+PUBLIC_READY_URL="${PUBLIC_READY_URL:-${PUBLIC_BASE_URL}/api/health/ready}"
+PUBLIC_ROOT_URL="${PUBLIC_ROOT_URL:-${PUBLIC_BASE_URL}/}"
+
+log "[12/15] Verifying public traffic flows through Nginx (${PUBLIC_BASE_URL})..."
 NGINX_OK=false
 for i in $(seq 1 15); do
-  # Check via the new slot port directly first
-  HTTP_CODE="$(curl -sf -o /dev/null -w '%{http_code}' "http://127.0.0.1:${NEW_PORT}/api/health/ready" 2>/dev/null || echo "000")"
-  if [ "${HTTP_CODE}" = "200" ]; then
-    logok "Nginx routing confirmed (port ${NEW_PORT})."
+  READY_CODE="$(curl -sf -o /dev/null -w '%{http_code}' --max-time 10 "${PUBLIC_READY_URL}" 2>/dev/null || echo "000")"
+  ROOT_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "${PUBLIC_ROOT_URL}" 2>/dev/null || echo "000")"
+  if [ "${READY_CODE}" = "200" ] && [ "${ROOT_CODE}" -lt 500 ]; then
+    logok "Public Nginx routing confirmed (${PUBLIC_READY_URL} → ${READY_CODE}, root → ${ROOT_CODE})."
     NGINX_OK=true
     break
   fi
   if [ "$i" -eq 15 ]; then break; fi
   if [ $(( i % 5 )) -eq 0 ]; then
-    log "  Retry $i/15 (HTTP ${HTTP_CODE})..."
+    log "  Retry $i/15 (ready=${READY_CODE}, root=${ROOT_CODE})..."
   fi
   sleep 2
 done
 
 if [ "${NGINX_OK}" != "true" ]; then
-  loge "Nginx routing verification failed. Reverting upstream..."
+  loge "Public Nginx routing verification failed. Reverting upstream..."
   printf 'upstream iliagpt {\n    server 127.0.0.1:%s;\n    keepalive 32;\n    keepalive_timeout 60s;\n    keepalive_requests 1000;\n}\n' "${ACTIVE_PORT}" > "${NGINX_CONF_DIR}/iliagpt-upstream.conf"
   nginx -s reload
   NGINX_SWAPPED=false
