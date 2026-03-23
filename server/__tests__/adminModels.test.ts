@@ -9,6 +9,7 @@ const ENV_KEYS = [
   "GROK_API_KEY",
   "ILIAGPT_API_KEY",
   "OPENAI_API_KEY",
+  "OPENROUTER_API_KEY",
 ] as const;
 
 const storageMock = {
@@ -218,6 +219,56 @@ describe("admin models router", () => {
 
       const calledProviders = syncModelsForProviderMock.mock.calls.map((c) => c[0]);
       expect(calledProviders).toEqual(["google"]);
+    } finally {
+      await close();
+    }
+  });
+
+  it("filters non-allowlisted OpenRouter models from the admin catalog", async () => {
+    process.env.OPENROUTER_API_KEY = "x";
+    storageMock.getAiModelsFiltered.mockResolvedValue({
+      models: [
+        {
+          id: "or-kimi",
+          name: "Kimi K2.5",
+          provider: "openrouter",
+          modelId: "moonshotai/kimi-k2.5",
+          modelType: "TEXT",
+          status: "active",
+          isEnabled: "true",
+        },
+        {
+          id: "or-llama",
+          name: "Llama 3.3 70B",
+          provider: "openrouter",
+          modelId: "meta-llama/llama-3.3-70b",
+          modelType: "TEXT",
+          status: "active",
+          isEnabled: "true",
+        },
+        {
+          id: "google-1",
+          name: "Gemini Flash",
+          provider: "google",
+          modelId: "gemini-2.0-flash",
+          modelType: "TEXT",
+          status: "active",
+          isEnabled: "true",
+        },
+      ],
+      total: 3,
+    });
+
+    const app = await buildApp();
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client.get("/api/admin/models/filtered");
+      expect(res.status).toBe(200);
+      expect(res.body.total).toBe(2);
+      expect(res.body.models.map((model: any) => `${model.provider}:${model.modelId}`)).toEqual([
+        "openrouter:moonshotai/kimi-k2.5",
+        "google:gemini-2.0-flash",
+      ]);
     } finally {
       await close();
     }

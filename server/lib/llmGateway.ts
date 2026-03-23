@@ -35,6 +35,7 @@ import {
   hasConfiguredOpenAICompatibleProvider,
   isCerebrasBaseUrl,
 } from "./openaiCompatible";
+import { DEFAULT_END_USER_MODEL_ID } from "../services/modelIntegration";
 
 interface RateLimitState {
   tokens: number;
@@ -1079,7 +1080,7 @@ class LLMGateway {
     } else if (provider === "gemini") {
       model = modelProvider === "gemini" ? options.model! : GEMINI_MODELS.FLASH;
     } else if (provider === "openrouter") {
-      model = modelProvider === "openrouter" ? options.model! : "z-ai/glm-5";
+      model = modelProvider === "openrouter" ? options.model! : DEFAULT_END_USER_MODEL_ID;
     } else if (provider === "openai") {
       model = modelProvider === "openai" ? options.model! : getOpenAICompatibleDefaultModel();
     } else if (provider === "deepseek") {
@@ -1890,7 +1891,7 @@ class LLMGateway {
     if (provider === "xai") {
       model = modelProvider === "xai" ? options.model! : MODELS.TEXT;
     } else if (provider === "openrouter") {
-      model = modelProvider === "openrouter" ? options.model! : "z-ai/glm-5";
+      model = modelProvider === "openrouter" ? options.model! : DEFAULT_END_USER_MODEL_ID;
     } else if (provider === "openai") {
       model = modelProvider === "openai" ? options.model! : getOpenAICompatibleDefaultModel();
     } else {
@@ -2279,7 +2280,7 @@ class LLMGateway {
           timeout: 5000,
         });
         await client.chat.completions.create({
-          model: "z-ai/glm-5",
+          model: DEFAULT_END_USER_MODEL_ID,
           messages: [{ role: "user", content: "hi" }],
           max_tokens: 5,
         });

@@ -7,7 +7,7 @@ describe("modelIntegration", () => {
     invalidateKeyCache();
   });
 
-  it("treats OpenRouter GLM-5 as the default end-user model", async () => {
+  it("treats OpenRouter Kimi as the default end-user model", async () => {
     vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
     const {
       DEFAULT_END_USER_MODEL_ID,
@@ -28,7 +28,7 @@ describe("modelIntegration", () => {
     expect(isModelEligibleForPublic(model)).toBe(true);
   });
 
-  it("lets admins access active OpenRouter chat models even when not publicly enabled", async () => {
+  it("blocks non-Kimi OpenRouter models from admin and public exposure", async () => {
     vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
     const { isModelEligibleForAdmin, isModelEligibleForPublic } = await import("../services/modelIntegration");
 
@@ -40,7 +40,7 @@ describe("modelIntegration", () => {
       isEnabled: "false",
     };
 
-    expect(isModelEligibleForAdmin(model)).toBe(true);
+    expect(isModelEligibleForAdmin(model)).toBe(false);
     expect(isModelEligibleForPublic(model)).toBe(false);
   });
 });

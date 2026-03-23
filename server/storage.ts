@@ -94,6 +94,12 @@ import { eq, sql, desc, and, isNull, ilike, inArray, or, type SQL } from "drizzl
 import { knowledgeBaseService } from "./services/knowledgeBase";
 import { DEFAULT_END_USER_MODEL_ID } from "./services/modelIntegration";
 
+const DEFAULT_END_USER_MODEL_ID_NORMALIZED = DEFAULT_END_USER_MODEL_ID.toLowerCase();
+
+function getVisibleAiModelsCondition(): SQL {
+  return sql`(lower(${aiModels.provider}) <> 'openrouter' OR lower(${aiModels.modelId}) = ${DEFAULT_END_USER_MODEL_ID_NORMALIZED})`;
+}
+
 function getSqlCode(error: any): string | undefined {
   return error?.cause?.code || error?.code;
 }
@@ -1736,12 +1742,16 @@ export class MemStorage implements IStorage {
   }
 
   async getAiModels(): Promise<AiModel[]> {
-    return dbRead.select().from(aiModels).orderBy(desc(aiModels.createdAt));
+    return dbRead
+      .select()
+      .from(aiModels)
+      .where(getVisibleAiModelsCondition())
+      .orderBy(desc(aiModels.createdAt));
   }
 
   async getAiModelsFiltered(filters: { provider?: string; providers?: string[]; type?: string; status?: string; search?: string; sortBy?: string; sortOrder?: string; page?: number; limit?: number }): Promise<{ models: AiModel[]; total: number }> {
     const { provider, providers, type, status, search, sortBy = "name", sortOrder = "asc", page = 1, limit = 20 } = filters;
-    const conditions = [];
+    const conditions: SQL[] = [getVisibleAiModelsCondition()];
 
     if (provider) {
       conditions.push(eq(aiModels.provider, provider.toLowerCase()));

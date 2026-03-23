@@ -45,7 +45,7 @@ const FALLBACK_SETTINGS: PlatformSettings = {
   allow_registration: true,
   require_email_verification: false,
 
-  default_model: "z-ai/glm-5",
+  default_model: "moonshotai/kimi-k2.5",
   max_tokens_per_request: 4096,
   enable_streaming: true,
 

@@ -16,6 +16,11 @@
 
 import { storage } from "../storage";
 import type { InsertAiModel, AiModel } from "@shared/schema";
+import {
+  DEFAULT_END_USER_MODEL_CONTEXT_WINDOW,
+  DEFAULT_END_USER_MODEL_ID,
+  DEFAULT_END_USER_MODEL_NAME,
+} from "./modelIntegration";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -210,28 +215,14 @@ const KNOWN_MODELS: Readonly<Record<string, readonly KnownModel[]>> = deepFreeze
   // OPENROUTER MODELS
   // ========================================
   openrouter: [
-    { modelId: "z-ai/glm-5", name: "Z.ai GLM 5", contextWindow: 80000, maxOutput: 8192, type: "TEXT", inputCost: "0.00072", outputCost: "0.0023", description: "Flagship Z.ai model for complex coding and agent workflows" },
-    // Meta Llama
-    { modelId: "meta-llama/llama-3.3-70b", name: "Llama 3.3 70B", contextWindow: 128000, maxOutput: 8192, type: "TEXT", inputCost: "0.0004", outputCost: "0.0004", description: "Meta's open source model" },
-    { modelId: "meta-llama/llama-3.1-405b", name: "Llama 3.1 405B", contextWindow: 128000, maxOutput: 4096, type: "TEXT", inputCost: "0.003", outputCost: "0.003", description: "Largest Llama model" },
-    { modelId: "meta-llama/llama-3.1-70b", name: "Llama 3.1 70B", contextWindow: 128000, maxOutput: 4096, type: "TEXT", inputCost: "0.0004", outputCost: "0.0004", description: "Medium Llama model" },
-    { modelId: "meta-llama/llama-4-70b", name: "Llama 4 70B", contextWindow: 256000, maxOutput: 16384, type: "TEXT", inputCost: "0.0005", outputCost: "0.0005", description: "Latest Llama model" },
-
-    // Mistral
-    { modelId: "mistralai/mistral-large-2411", name: "Mistral Large 24.11", contextWindow: 128000, maxOutput: 8192, type: "TEXT", inputCost: "0.002", outputCost: "0.006", description: "Mistral flagship model" },
-    { modelId: "mistralai/mistral-medium", name: "Mistral Medium", contextWindow: 32000, maxOutput: 8192, type: "TEXT", inputCost: "0.00275", outputCost: "0.0081", description: "Balanced Mistral model" },
-    { modelId: "mistralai/codestral-2501", name: "Codestral", contextWindow: 256000, maxOutput: 8192, type: "TEXT", inputCost: "0.0003", outputCost: "0.0009", description: "Code-specialized model" },
-
-    // DeepSeek
-    { modelId: "deepseek/deepseek-v3", name: "DeepSeek V3", contextWindow: 64000, maxOutput: 8192, type: "TEXT", inputCost: "0.00014", outputCost: "0.00028", description: "DeepSeek's latest model" },
-    { modelId: "deepseek/deepseek-r1", name: "DeepSeek R1", contextWindow: 64000, maxOutput: 8192, type: "TEXT", inputCost: "0.00055", outputCost: "0.00219", description: "DeepSeek reasoning model" },
-
-    // Qwen
-    { modelId: "qwen/qwen-2.5-72b", name: "Qwen 2.5 72B", contextWindow: 32000, maxOutput: 8192, type: "TEXT", inputCost: "0.0003", outputCost: "0.0003", description: "Alibaba's Qwen model" },
-    { modelId: "qwen/qwq-32b", name: "QwQ 32B", contextWindow: 32000, maxOutput: 8192, type: "TEXT", inputCost: "0.0002", outputCost: "0.0002", description: "Qwen reasoning model" },
-
-    // Cohere
-    { modelId: "cohere/command-r-plus", name: "Command R+", contextWindow: 128000, maxOutput: 4096, type: "TEXT", inputCost: "0.0025", outputCost: "0.01", description: "Cohere's flagship model" },
+    {
+      modelId: DEFAULT_END_USER_MODEL_ID,
+      name: DEFAULT_END_USER_MODEL_NAME,
+      contextWindow: DEFAULT_END_USER_MODEL_CONTEXT_WINDOW,
+      maxOutput: 16384,
+      type: "TEXT",
+      description: "Moonshot Kimi via OpenRouter. Restricted production catalog for end-user chat.",
+    },
   ],
 
   // ========================================

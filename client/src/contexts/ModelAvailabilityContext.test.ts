@@ -59,10 +59,10 @@ describe("ModelAvailabilityContext helpers", () => {
   });
 
   it("prefers OpenRouter when it is the only configured production model", () => {
-    const glm = makeModel({ id: "glm-id", provider: "openrouter", modelId: "z-ai/glm-5" });
+    const kimi = makeModel({ id: "kimi-id", provider: "openrouter", modelId: "moonshotai/kimi-k2.5" });
     const gemini = makeModel({ id: "gemini-id", provider: "google", modelId: "gemini-2.5-flash" });
 
-    expect(pickPreferredEnabledModel([gemini, glm], null, null)?.id).toBe("glm-id");
+    expect(pickPreferredEnabledModel([gemini, kimi], null, null)?.id).toBe("kimi-id");
   });
 
   it("prioritizes Gemini CLI OAuth when it is available", () => {

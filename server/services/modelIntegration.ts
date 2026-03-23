@@ -21,12 +21,17 @@ import { isRuntimeProviderSuppressed } from "../lib/runtimeProviderHealth";
 export type ChatRuntimeProvider = "xai" | "gemini" | "openai" | "anthropic" | "deepseek" | "openrouter";
 
 export const DEFAULT_END_USER_MODEL_PROVIDER = "openrouter" as const;
-export const DEFAULT_END_USER_MODEL_ID = "z-ai/glm-5" as const;
-export const DEFAULT_END_USER_MODEL_NAME = "Z.ai GLM 5" as const;
+export const DEFAULT_END_USER_MODEL_ID = "moonshotai/kimi-k2.5" as const;
+export const DEFAULT_END_USER_MODEL_NAME = "Kimi K2.5" as const;
+export const DEFAULT_END_USER_MODEL_CONTEXT_WINDOW = 262144 as const;
+export const OPENROUTER_ALLOWED_MODEL_IDS = Object.freeze([DEFAULT_END_USER_MODEL_ID] as const);
 
 const ALL_RUNTIME_PROVIDERS: readonly ChatRuntimeProvider[] = Object.freeze([
   "xai", "gemini", "openai", "anthropic", "deepseek", "openrouter",
 ]) as readonly ChatRuntimeProvider[];
+const OPENROUTER_ALLOWED_MODEL_ID_SET = Object.freeze(
+  new Set<string>(OPENROUTER_ALLOWED_MODEL_IDS.map((modelId) => modelId.toLowerCase())),
+);
 
 // ─── Immutable Lookup Maps ────────────────────────────────────────────────────
 
@@ -179,6 +184,18 @@ export function isChatModelIdCompatible(runtime: ChatRuntimeProvider, modelId: u
   return pattern.test(id);
 }
 
+export function isProviderModelVisible(provider: unknown, modelId: unknown): boolean {
+  const providerId = sanitize(provider);
+  const normalizedModelId = sanitize(modelId);
+  const runtime = PROVIDER_ALIAS_MAP[providerId] ?? null;
+
+  if (providerId !== "openrouter" && runtime !== "openrouter") {
+    return normalizedModelId.length > 0;
+  }
+
+  return OPENROUTER_ALLOWED_MODEL_ID_SET.has(normalizedModelId);
+}
+
 /**
  * Composite check: provider + modelType + modelId all qualify for chat.
  */
@@ -190,6 +207,7 @@ export function isModelChatCapable(model: {
   if (!model || typeof model !== "object") return false;
   const runtime = normalizeModelProviderToRuntime(model.provider);
   if (!runtime) return false;
+  if (!isProviderModelVisible(model.provider, model.modelId)) return false;
   if (!isChatModelType(model.modelType)) return false;
   return isChatModelIdCompatible(runtime, model.modelId);
 }

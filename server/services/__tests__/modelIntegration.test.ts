@@ -9,6 +9,7 @@ const ENV_KEYS = [
   "OPENAI_API_KEY",
   "CEREBRAS_API_KEY",
   "DEEPSEEK_API_KEY",
+  "OPENROUTER_API_KEY",
 ] as const;
 
 describe("modelIntegration", () => {
@@ -86,6 +87,27 @@ describe("modelIntegration", () => {
       status: "active",
       isEnabled: "true",
     })).toBe(true);
+  });
+
+  it("only exposes the allowlisted OpenRouter Kimi model", async () => {
+    process.env.OPENROUTER_API_KEY = "x";
+    const { isModelEligibleForPublic } = await import("../modelIntegration");
+
+    expect(isModelEligibleForPublic({
+      provider: "openrouter",
+      modelId: "moonshotai/kimi-k2.5",
+      modelType: "TEXT",
+      status: "active",
+      isEnabled: "true",
+    })).toBe(true);
+
+    expect(isModelEligibleForPublic({
+      provider: "openrouter",
+      modelId: "meta-llama/llama-3.3-70b",
+      modelType: "TEXT",
+      status: "active",
+      isEnabled: "true",
+    })).toBe(false);
   });
 
   it("hides temporarily suppressed providers from public model exposure", async () => {

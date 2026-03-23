@@ -8,6 +8,7 @@ import {
     getIntegratedModelProviderIds,
     getSupportedModelProviderIds,
     isModelChatCapable,
+    isProviderModelVisible,
     isModelProviderIntegrated,
     isModelProviderSupported,
     normalizeModelProviderToRuntime,
@@ -15,9 +16,13 @@ import {
 
 export const modelsRouter = Router();
 
+function filterVisibleCatalogModels<T extends { provider: unknown; modelId?: unknown }>(models: T[]): T[] {
+    return models.filter((model) => isProviderModelVisible(model.provider, model.modelId));
+}
+
 modelsRouter.get("/", async (req, res) => {
     try {
-        const models = await storage.getAiModels();
+        const models = filterVisibleCatalogModels(await storage.getAiModels());
         res.json(models);
     } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -79,19 +84,22 @@ modelsRouter.get("/filtered", async (req, res) => {
             page: parseInt(page as string),
             limit: parseInt(limit as string),
         });
+        const visibleModels = filterVisibleCatalogModels(result.models);
+        const hiddenCount = result.models.length - visibleModels.length;
+        const visibleTotal = Math.max(0, result.total - hiddenCount);
 
         res.json({
-            models: result.models.map((m: any) => ({
+            models: visibleModels.map((m: any) => ({
                 ...m,
                 hasApiKey: checkApiKeyExists(m.provider),
                 isSupported: isModelProviderSupported(m.provider),
                 isIntegrated: isModelProviderIntegrated(m.provider),
                 isChatCapable: isModelChatCapable(m),
             })),
-            total: result.total,
+            total: visibleTotal,
             page: parseInt(page as string),
             limit: parseInt(limit as string),
-            totalPages: Math.ceil(result.total / parseInt(limit as string)),
+            totalPages: Math.ceil(visibleTotal / parseInt(limit as string)),
         });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -102,10 +110,11 @@ modelsRouter.get("/stats", async (req, res) => {
     try {
         const { scope = "all" } = req.query as any;
         const allModelsRaw = await storage.getAiModels();
+        const visibleModels = filterVisibleCatalogModels(allModelsRaw);
         const allModels =
-            scope === "supported" ? allModelsRaw.filter((m) => isModelProviderSupported(m.provider)) :
-                scope === "integrated" ? allModelsRaw.filter((m) => isModelProviderIntegrated(m.provider)) :
-                    allModelsRaw;
+            scope === "supported" ? visibleModels.filter((m) => isModelProviderSupported(m.provider)) :
+                scope === "integrated" ? visibleModels.filter((m) => isModelProviderIntegrated(m.provider)) :
+                    visibleModels;
         const knownStats = getModelStats();
 
         const byProvider: Record<string, number> = {};
@@ -339,7 +348,7 @@ modelsRouter.get("/providers/list", async (req, res) => { // Renamed from /provi
                 scope === "integrated" ? allProviders.filter((p) => isModelProviderIntegrated(p)) :
                     allProviders;
 
-        const allModels = await storage.getAiModels();
+        const allModels = filterVisibleCatalogModels(await storage.getAiModels());
 
         const providerNames: Record<string, string> = {
             google: "Google (Gemini)",

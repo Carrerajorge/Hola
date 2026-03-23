@@ -143,6 +143,7 @@ import {
 } from "./services/contentFilter";
 import {
   DEFAULT_END_USER_MODEL_ID,
+  DEFAULT_END_USER_MODEL_CONTEXT_WINDOW,
   DEFAULT_END_USER_MODEL_NAME,
   DEFAULT_END_USER_MODEL_PROVIDER,
   isDefaultEndUserModel,
@@ -395,7 +396,7 @@ async function getPublicModelFallbacks(
 ): Promise<PublicModelSummary[]> {
   return [
     {
-      id: "fallback-openrouter-glm-5",
+      id: "fallback-openrouter-kimi-k2-5",
       name: DEFAULT_END_USER_MODEL_NAME,
       provider: DEFAULT_END_USER_MODEL_PROVIDER,
       modelId: DEFAULT_END_USER_MODEL_ID,
@@ -405,7 +406,7 @@ async function getPublicModelFallbacks(
       displayOrder: 0,
       icon: null,
       modelType: "TEXT",
-      contextWindow: 80000,
+      contextWindow: DEFAULT_END_USER_MODEL_CONTEXT_WINDOW,
     },
     ...(await getConfiguredBootstrapModels(userId)),
   ];
