@@ -138,6 +138,7 @@ vi.mock("../openclaw/agents/subagentService", () => ({
         objective: params.objective,
         planHint: params.planHint || [],
         parentRunId: params.parentRunId,
+        executionProfile: params.executionProfile || "standard",
         status: "queued",
         createdAt: Date.now(),
       };
@@ -190,9 +191,10 @@ describe("openclawRuntimeRouter smoke flow", () => {
 
       const spawnRes = await client
         .post("/api/openclaw/runtime/subagents")
-        .send({ objective: planRes.body.subtasks[0].description });
+        .send({ objective: planRes.body.subtasks[0].description, executionProfile: "marathon_12h" });
       expect(spawnRes.status).toBe(202);
       expect(spawnRes.body.id).toBeTruthy();
+      expect(spawnRes.body.executionProfile).toBe("marathon_12h");
 
       const listRes = await client.get("/api/openclaw/runtime/subagents");
       expect(listRes.status).toBe(200);
@@ -218,4 +220,3 @@ describe("openclawRuntimeRouter smoke flow", () => {
     }
   });
 });
-

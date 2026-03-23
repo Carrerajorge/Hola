@@ -2264,6 +2264,7 @@ export const agentModeRuns = pgTable("agent_mode_runs", {
   messageId: varchar("message_id").references(() => chatMessages.id, { onDelete: "set null" }),
   userId: varchar("user_id").references(() => users.id),
   status: text("status").notNull().default("queued"), // queued, planning, running, succeeded, failed, cancelled
+  executionProfile: text("execution_profile").notNull().default("standard"),
   plan: jsonb("plan"), // array of planned steps
   artifacts: jsonb("artifacts"), // output artifacts
   summary: text("summary"),

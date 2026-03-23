@@ -70,7 +70,7 @@ export function buildCodexPrompt(params: {
     : "Perfil operativo: ejecución estándar con foco en completar la tarea de punta a punta.";
 
   return [
-    "Actúa como un agente OpenClaw integrado de forma segura dentro de ILIAGPT.",
+    "Actúa como un agente de ingeniería tipo Codex de OpenAI, ejecutado de forma segura sobre OpenClaw dentro de ILIAGPT.",
     executionProfile,
     workspaceSummary ? `Contexto del workspace:\n${workspaceSummary}` : null,
     "Objetivo principal del usuario:",
@@ -119,7 +119,7 @@ function buildSubagentObjective(params: {
 
 async function createChatForCodex(message: string): Promise<string> {
   const response = await apiRequest("POST", "/api/chats", {
-    title: truncate(message.trim() || "Nueva sesión OpenClaw", 56),
+    title: truncate(message.trim() || "Nueva sesión Codex", 56),
     model: "gemini-3-flash-preview",
     provider: "google",
   });
@@ -134,7 +134,7 @@ export async function createCodexRun(params: CreateCodexRunParams): Promise<{
 }> {
   const trimmedMessage = params.message.trim();
   if (!trimmedMessage) {
-    throw new Error("Describe la tarea antes de lanzar OpenClaw.");
+    throw new Error("Describe la tarea antes de lanzar el agente Codex.");
   }
 
   const chatId = params.chatId?.trim() ? params.chatId.trim() : await createChatForCodex(trimmedMessage);
@@ -147,6 +147,7 @@ export async function createCodexRun(params: CreateCodexRunParams): Promise<{
   const response = await apiRequest("POST", "/api/agent/runs", {
     chatId,
     message: prompt,
+    executionProfile: params.marathonMode ? "marathon_12h" : "standard",
   });
   const payload = await response.json();
 
@@ -176,6 +177,7 @@ export async function spawnCodexSubagents(params: SpawnCodexSubagentsParams): Pr
           ...(params.project?.repositoryPath ? [`repo:${params.project.repositoryPath}`] : []),
         ],
         parentRunId: params.runId,
+        executionProfile: params.marathonMode ? "marathon_12h" : "standard",
       });
 
       return response.json() as Promise<CodexSubagentRun>;

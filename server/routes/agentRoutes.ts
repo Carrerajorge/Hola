@@ -9,7 +9,10 @@ import { Router, Request, Response, NextFunction } from "express"; import { Auth
   RunResponseSchema, StepsArrayResponseSchema
 } from "../agent/contracts"; import { validateOrThrow, ValidationError } from "../agent/validation"; import { checkIdempotency } from
   "../agent/idempotency"; import { updateRunWithLock } from "../agent/dbTransactions"; import { toolRegistry, TOOL_CATEGORIES } from "../agent/registry/toolRegistry"; import { ToolArtifact } from
-  "../agent/toolRegistry"; import { agentRegistry } from "../agent/registry/agentRegistry";
+  "../agent/toolRegistry"; import { agentRegistry } from "../agent/registry/agentRegistry"; import {
+  DEFAULT_AGENT_EXECUTION_PROFILE,
+  normalizeAgentExecutionProfile
+} from "@shared/agentExecutionProfile"; import { getAgentExecutionProfileConfig } from "../agent/executionProfiles";
 
 
 
@@ -160,6 +163,22 @@ function normalizeOptionalText(value: unknown): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
+function normalizeOptionalPositiveNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return Math.round(value);
+  }
+
+  return undefined;
+}
+
+function normalizeOptionalNonNegativeNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return Math.round(value);
+  }
+
+  return undefined;
+}
+
 function normalizeRunStatus(value: unknown): string {
   const normalized = String(value ?? "").trim().toLowerCase();
   if (!normalized) return "queued";
@@ -263,6 +282,7 @@ function finalizeRunResponse(rawResponse: Record<string, any>, contextLabel: str
     id: normalizeText(rawResponse.id, randomUUID()),
     chatId: normalizeText(rawResponse.chatId, ""),
     status: normalizeRunStatus(rawResponse.status),
+    executionProfile: normalizeAgentExecutionProfile(rawResponse.executionProfile),
     plan: rawResponse.plan ?? null,
     steps: normalizeStepsForResponse(rawResponse.steps),
     artifacts: normalizeArtifactsForResponse(rawResponse.artifacts),
@@ -283,6 +303,8 @@ function finalizeRunResponse(rawResponse: Record<string, any>, contextLabel: str
       typeof rawResponse.completedSteps === "number" && Number.isFinite(rawResponse.completedSteps)
         ? rawResponse.completedSteps
         : 0,
+    runtimeBudgetMs: normalizeOptionalPositiveNumber(rawResponse.runtimeBudgetMs),
+    runtimeRemainingMs: normalizeOptionalNonNegativeNumber(rawResponse.runtimeRemainingMs),
     startedAt: toIsoDateString(rawResponse.startedAt),
     completedAt: toIsoDateString(rawResponse.completedAt),
     createdAt: toIsoDateString(rawResponse.createdAt) || new Date().toISOString(),
@@ -314,6 +336,7 @@ function finalizeRunResponse(rawResponse: Record<string, any>, contextLabel: str
     id: degraded.id,
     chatId: degraded.chatId,
     status: degraded.status,
+    executionProfile: degraded.executionProfile,
     plan: null,
     steps: degraded.steps,
     artifacts: degraded.artifacts,
@@ -322,6 +345,8 @@ function finalizeRunResponse(rawResponse: Record<string, any>, contextLabel: str
     currentStepIndex: degraded.currentStepIndex,
     totalSteps: degraded.totalSteps,
     completedSteps: degraded.completedSteps,
+    ...(degraded.runtimeBudgetMs !== undefined ? { runtimeBudgetMs: degraded.runtimeBudgetMs } : {}),
+    ...(degraded.runtimeRemainingMs !== undefined ? { runtimeRemainingMs: degraded.runtimeRemainingMs } : {}),
     ...(degraded.startedAt ? { startedAt: degraded.startedAt } : {}),
     ...(degraded.completedAt ? { completedAt: degraded.completedAt } : {}),
     createdAt: degraded.createdAt,
@@ -348,7 +373,7 @@ function normalizeRunPlanForResponse(
   };
 
   const normalizedSteps = (Array.isArray(plan.steps) ? plan.steps : [])
-    .slice(0, 20)
+    .slice(0, 64)
     .map((step, index) => {
       const record = step && typeof step === "object"
         ? step as Record<string, unknown>
@@ -442,10 +467,12 @@ export function createAgentModeRouter() {
   router.post("/runs", requireAuth, async (req: Request, res: Response) => {
     try {
       const validatedBody = validateOrThrow(CreateRunRequestSchema, req.body, "POST /runs request body");
-      const { chatId, messageId, message, model, attachments, idempotencyKey } = validatedBody;
+      const { chatId, messageId, message, model, attachments, executionProfile, idempotencyKey } = validatedBody;
       const user = (req as AuthenticatedRequest).user;
       const userId = user?.claims?.sub || user?.id;
       const userPlan = ((user as any)?.plan === "pro" || (user as any)?.plan === "admin") ? (user as any).plan : "free" as "free" | "pro" | "admin";
+      const normalizedExecutionProfile = normalizeAgentExecutionProfile(executionProfile);
+      const executionProfileConfig = getAgentExecutionProfileConfig(normalizedExecutionProfile);
 
       if (idempotencyKey) {
         const idempotencyResult = await checkIdempotency(idempotencyKey, chatId);
@@ -467,6 +494,7 @@ export function createAgentModeRouter() {
         messageId: messageId || null,
         userId: userId || null,
         status: "queued",
+        executionProfile: normalizedExecutionProfile,
         plan: null,
         artifacts: null,
         summary: null,
@@ -499,7 +527,8 @@ export function createAgentModeRouter() {
             message,
             attachments,
             userPlan,
-            model
+            model,
+            normalizedExecutionProfile,
           );
 
           orchestrator.on("progress", async (progress) => {
@@ -593,9 +622,12 @@ export function createAgentModeRouter() {
         id: newRun.id,
         chatId: newRun.chatId,
         status: "queued",
+        executionProfile: normalizedExecutionProfile,
         currentStepIndex: 0,
         totalSteps: 0,
         completedSteps: 0,
+        runtimeBudgetMs: executionProfileConfig.maxRunDurationMs,
+        runtimeRemainingMs: executionProfileConfig.maxRunDurationMs,
         steps: [],
         artifacts: [],
         plan: null,
@@ -656,6 +688,11 @@ export function createAgentModeRouter() {
         .from(agentModeSteps)
         .where(eq(agentModeSteps.runId, run.id))
         .orderBy(agentModeSteps.stepIndex);
+      const executionProfile = normalizeAgentExecutionProfile((effectiveRun as any).executionProfile);
+      const executionProfileConfig = getAgentExecutionProfileConfig(executionProfile);
+      const runtimeRemainingMs = effectiveRun.startedAt
+        ? Math.max(0, executionProfileConfig.maxRunDurationMs - (Date.now() - effectiveRun.startedAt.getTime()))
+        : executionProfileConfig.maxRunDurationMs;
 
       const planSteps = (effectiveRun.plan as AgentPlan)?.steps || [];
 
@@ -690,6 +727,7 @@ export function createAgentModeRouter() {
         id: effectiveRun.id,
         chatId: effectiveRun.chatId,
         status: effectiveRun.status,
+        executionProfile,
         plan: normalizeRunPlanForResponse(
           effectiveRun.plan,
           effectiveRun.createdAt,
@@ -698,6 +736,8 @@ export function createAgentModeRouter() {
         currentStepIndex: effectiveRun.currentStepIndex ?? 0,
         totalSteps: effectiveRun.totalSteps ?? planSteps.length,
         completedSteps: effectiveRun.completedSteps ?? 0,
+        runtimeBudgetMs: executionProfileConfig.maxRunDurationMs,
+        runtimeRemainingMs,
         steps: mergedSteps.length > 0 ? mergedSteps : steps.map(s => ({
           stepIndex: s.stepIndex,
           toolName: s.toolName,
@@ -724,6 +764,9 @@ export function createAgentModeRouter() {
         response.workspaceFiles = activeOrchestrator.getWorkspaceFiles
           ? Object.fromEntries(activeOrchestrator.getWorkspaceFiles())
           : {};
+        response.executionProfile = activeOrchestrator.getExecutionProfile?.() || executionProfile;
+        response.runtimeBudgetMs = activeOrchestrator.getRuntimeBudgetMs?.() || executionProfileConfig.maxRunDurationMs;
+        response.runtimeRemainingMs = activeOrchestrator.getRuntimeRemainingMs?.() || runtimeRemainingMs;
       }
 
       // Ensure response matches schema: dates must be ISO strings.
@@ -780,6 +823,11 @@ export function createAgentModeRouter() {
         .from(agentModeSteps)
         .where(eq(agentModeSteps.runId, id))
         .orderBy(agentModeSteps.stepIndex);
+      const executionProfile = normalizeAgentExecutionProfile((effectiveRun as any).executionProfile);
+      const executionProfileConfig = getAgentExecutionProfileConfig(executionProfile);
+      const runtimeRemainingMs = effectiveRun.startedAt
+        ? Math.max(0, executionProfileConfig.maxRunDurationMs - (Date.now() - effectiveRun.startedAt.getTime()))
+        : executionProfileConfig.maxRunDurationMs;
 
       const planSteps = (effectiveRun.plan as AgentPlan)?.steps || [];
 
@@ -814,6 +862,7 @@ export function createAgentModeRouter() {
         id: effectiveRun.id,
         chatId: effectiveRun.chatId,
         status: effectiveRun.status,
+        executionProfile,
         plan: normalizeRunPlanForResponse(
           effectiveRun.plan,
           effectiveRun.createdAt,
@@ -822,6 +871,8 @@ export function createAgentModeRouter() {
         currentStepIndex: effectiveRun.currentStepIndex ?? 0,
         totalSteps: effectiveRun.totalSteps ?? planSteps.length,
         completedSteps: effectiveRun.completedSteps ?? 0,
+        runtimeBudgetMs: executionProfileConfig.maxRunDurationMs,
+        runtimeRemainingMs,
         steps: mergedSteps.length > 0 ? mergedSteps : steps.map(s => ({
           stepIndex: s.stepIndex,
           toolName: s.toolName,
@@ -848,6 +899,9 @@ export function createAgentModeRouter() {
         response.workspaceFiles = activeOrchestrator.getWorkspaceFiles
           ? Object.fromEntries(activeOrchestrator.getWorkspaceFiles())
           : {};
+        response.executionProfile = activeOrchestrator.getExecutionProfile?.() || executionProfile;
+        response.runtimeBudgetMs = activeOrchestrator.getRuntimeBudgetMs?.() || executionProfileConfig.maxRunDurationMs;
+        response.runtimeRemainingMs = activeOrchestrator.getRuntimeRemainingMs?.() || runtimeRemainingMs;
       }
       // Ensure response matches schema: dates must be ISO strings.
       if (Array.isArray((response as any).steps)) {
@@ -1386,13 +1440,16 @@ export function createAgentModeRouter() {
         (async () => {
           let currentStatus = "running";
           try {
+            const executionProfile = normalizeAgentExecutionProfile((run as any).executionProfile);
             const orchestrator = await agentManager.startRun(
               id,
               run.chatId,
               userId || "anonymous",
               plan.objective,
               [],
-              userPlan
+              userPlan,
+              undefined,
+              executionProfile,
             );
 
             orchestrator.on("progress", async (progress) => {

@@ -2,6 +2,11 @@ import { EventEmitter } from "events";
 import { nanoid } from "nanoid";
 import { defaultToolRegistry, ToolRegistry } from "../agent/sandbox/tools";
 import type { ToolResult as SandboxToolResult } from "../agent/sandbox/agentTypes";
+import {
+  DEFAULT_AGENT_EXECUTION_PROFILE,
+  type AgentExecutionProfile,
+} from "@shared/agentExecutionProfile";
+import { getAgentExecutionProfileConfig } from "../agent/executionProfiles";
 
 export interface AgentState {
   objective: string;
@@ -26,6 +31,7 @@ export interface AgentStep {
 }
 
 export interface AgentRunnerConfig {
+  executionProfile: AgentExecutionProfile;
   maxSteps: number;
   stepTimeoutMs: number;
   enableLogging: boolean;
@@ -88,6 +94,7 @@ export const runStore: IRunStore = new InMemoryRunStore();
 const DEFAULT_LLM_TIMEOUT_MS = parseInt(process.env.AGENT_LLM_TIMEOUT_MS || "8000", 10);
 
 const DEFAULT_CONFIG: AgentRunnerConfig = {
+  executionProfile: DEFAULT_AGENT_EXECUTION_PROFILE,
   maxSteps: parseInt(process.env.MAX_AGENT_STEPS || "8", 10),
   stepTimeoutMs: 60000,
   enableLogging: true,
@@ -119,8 +126,23 @@ export class AgentRunner extends EventEmitter {
 
   constructor(config: Partial<AgentRunnerConfig> = {}) {
     super();
-    this.config = { ...DEFAULT_CONFIG, ...config };
-    this.logStructured("debug", "initialized", { maxSteps: this.config.maxSteps, maxConsecutiveFailures: this.config.maxConsecutiveFailures });
+    const executionProfile = config.executionProfile || DEFAULT_CONFIG.executionProfile;
+    const profileConfig = getAgentExecutionProfileConfig(executionProfile);
+
+    this.config = {
+      ...DEFAULT_CONFIG,
+      executionProfile,
+      maxSteps: profileConfig.subagent.maxSteps,
+      stepTimeoutMs: profileConfig.subagent.stepTimeoutMs,
+      maxConsecutiveFailures: profileConfig.subagent.maxConsecutiveFailures,
+      ...config,
+    };
+    this.logStructured("debug", "initialized", {
+      executionProfile: this.config.executionProfile,
+      maxSteps: this.config.maxSteps,
+      stepTimeoutMs: this.config.stepTimeoutMs,
+      maxConsecutiveFailures: this.config.maxConsecutiveFailures,
+    });
   }
 
   async run(objective: string, planHint: string[] = []): Promise<{ success: boolean; result: any; state: AgentState; run_id: string }> {
@@ -278,7 +300,11 @@ export class AgentRunner extends EventEmitter {
     let result: ToolResult;
 
     try {
-      result = await this.executeTool(nextAction.tool, nextAction.input);
+      result = await withTimeout(
+        this.executeTool(nextAction.tool, nextAction.input),
+        this.config.stepTimeoutMs,
+        `tool:${nextAction.tool}`,
+      );
     } catch (error: any) {
       result = { success: false, error: error.message };
     }

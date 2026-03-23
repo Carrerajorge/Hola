@@ -1,5 +1,9 @@
 import { z } from "zod";
 import { RunStatusSchema, StepStatusSchema } from "./stateMachine";
+import {
+  AgentExecutionProfileSchema,
+  DEFAULT_AGENT_EXECUTION_PROFILE,
+} from "@shared/agentExecutionProfile";
 
 export const ToolCapabilitySchema = z.enum([
   "requires_network",
@@ -157,7 +161,7 @@ export type AgentTask = z.infer<typeof AgentTaskSchema>;
 
 export const AgentPlanSchema = z.object({
   objective: z.string().min(1),
-  steps: z.array(PlanStepSchema).min(1).max(20),
+  steps: z.array(PlanStepSchema).min(1).max(64),
   phases: z.array(PlanPhaseSchema).optional(),
   currentPhaseIndex: z.number().int().nonnegative().optional(),
   estimatedTimeMs: z.number().int().positive(),
@@ -246,6 +250,7 @@ export const CreateRunRequestSchema = z.object({
   message: z.string().min(1),
   model: z.string().optional(),
   attachments: z.array(z.any()).optional(),
+  executionProfile: AgentExecutionProfileSchema.optional().default(DEFAULT_AGENT_EXECUTION_PROFILE),
   idempotencyKey: z.string().optional(),
 });
 export type CreateRunRequest = z.infer<typeof CreateRunRequestSchema>;
@@ -269,6 +274,7 @@ export const RunResponseSchema = z.object({
   id: z.string().uuid(),
   chatId: z.string(),
   status: RunStatusSchema,
+  executionProfile: AgentExecutionProfileSchema.default(DEFAULT_AGENT_EXECUTION_PROFILE),
   plan: AgentPlanSchema.optional().nullable(),
   steps: z.array(StepResponseSchema),
   artifacts: z.array(z.object({
@@ -286,6 +292,8 @@ export const RunResponseSchema = z.object({
   currentStepIndex: z.number(),
   totalSteps: z.number(),
   completedSteps: z.number(),
+  runtimeBudgetMs: z.number().int().positive().optional(),
+  runtimeRemainingMs: z.number().int().nonnegative().optional(),
   startedAt: z.string().datetime().optional(),
   completedAt: z.string().datetime().optional(),
   createdAt: z.string().datetime(),
@@ -395,4 +403,3 @@ export function validateCancellationToken(data: unknown): CancellationToken {
 export function validateAgentTask(data: unknown): AgentTask {
   return AgentTaskSchema.parse(data);
 }
-

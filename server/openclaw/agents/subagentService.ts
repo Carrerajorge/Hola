@@ -1,6 +1,11 @@
 import { randomUUID } from "crypto";
 import { EventEmitter } from "events";
 import { AgentRunner } from "../../services/agentRunner";
+import {
+  DEFAULT_AGENT_EXECUTION_PROFILE,
+  type AgentExecutionProfile,
+} from "@shared/agentExecutionProfile";
+import { resolveAgentExecutionProfileFromHints } from "../../agent/executionProfiles";
 
 export type SubagentRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
@@ -8,6 +13,7 @@ export interface SubagentStatusChangeEvent {
   runId: string;
   parentRunId?: string;
   status: SubagentRunStatus;
+  executionProfile: AgentExecutionProfile;
   objective: string;
   result?: unknown;
   error?: string;
@@ -20,6 +26,7 @@ export interface SubagentRunRecord {
   objective: string;
   planHint: string[];
   parentRunId?: string;
+  executionProfile: AgentExecutionProfile;
   status: SubagentRunStatus;
   createdAt: number;
   startedAt?: number;
@@ -33,6 +40,7 @@ type SpawnSubagentParams = {
   objective: string;
   planHint?: string[];
   parentRunId?: string;
+  executionProfile?: AgentExecutionProfile;
 };
 
 type ListRunsParams = {
@@ -58,6 +66,7 @@ class OpenClawSubagentService extends EventEmitter {
       runId: run.id,
       parentRunId: run.parentRunId,
       status: run.status,
+      executionProfile: run.executionProfile,
       objective: run.objective,
       result: run.status === "completed" ? run.result : undefined,
       error: run.error,
@@ -68,12 +77,15 @@ class OpenClawSubagentService extends EventEmitter {
 
   spawn(params: SpawnSubagentParams): SubagentRunRecord {
     const runId = `subagent_${randomUUID()}`;
+    const executionProfile =
+      params.executionProfile || resolveAgentExecutionProfileFromHints(params.planHint) || DEFAULT_AGENT_EXECUTION_PROFILE;
     const run: SubagentRunRecord = {
       id: runId,
       requesterUserId: params.requesterUserId,
       objective: params.objective,
       planHint: params.planHint || [],
       parentRunId: params.parentRunId,
+      executionProfile,
       status: "queued",
       createdAt: Date.now(),
     };
@@ -124,7 +136,7 @@ class OpenClawSubagentService extends EventEmitter {
       return;
     }
 
-    const runner = new AgentRunner();
+    const runner = new AgentRunner({ executionProfile: run.executionProfile });
     this.runners.set(runId, runner);
     run.status = "running";
     run.startedAt = Date.now();

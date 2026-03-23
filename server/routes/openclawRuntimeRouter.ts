@@ -7,6 +7,7 @@ import { skillRegistry } from "../openclaw/skills/skillRegistry";
 import { initSkills } from "../openclaw/skills/skillLoader";
 import { RAGService } from "../services/ragService";
 import { orchestrationEngine } from "../services/orchestrationEngine";
+import { AgentExecutionProfileSchema } from "@shared/agentExecutionProfile";
 
 const objectiveSchema = z.object({
   objective: z.string().trim().min(1, "objective is required"),
@@ -33,6 +34,7 @@ const spawnSubagentSchema = z.object({
   objective: z.string().trim().min(1, "objective is required"),
   planHint: z.array(z.string().trim().min(1)).optional(),
   parentRunId: z.string().trim().optional(),
+  executionProfile: AgentExecutionProfileSchema.optional(),
 });
 
 const orchestratorFlowSchema = objectiveSchema.extend({
@@ -266,6 +268,7 @@ export function createOpenClawRuntimeRouter(): Router {
         objective: parsed.objective,
         planHint: parsed.planHint || [],
         parentRunId: parsed.parentRunId,
+        executionProfile: parsed.executionProfile,
       });
       return res.status(202).json(run);
     } catch (error) {
