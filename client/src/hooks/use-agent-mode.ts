@@ -40,7 +40,7 @@ export interface AgentRunResponse {
   id: string;
   chatId: string;
   status: AgentModeStatus;
-  executionProfile?: "standard" | "marathon_12h";
+  executionProfile?: "standard" | "marathon_12h" | "marathon_24h";
   plan?: AgentPlan;
   steps: AgentStep[];
   artifacts: Artifact[];

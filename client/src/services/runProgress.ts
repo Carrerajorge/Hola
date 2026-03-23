@@ -23,6 +23,7 @@ export interface ToolArtifact {
 export interface RunResponse {
   id: string;
   status: string;
+  executionProfile?: "standard" | "marathon_12h" | "marathon_24h";
   plan?: any;
   summary?: string | null;
   error?: string | null;
@@ -34,6 +35,8 @@ export interface RunResponse {
   currentStepIndex?: number;
   totalSteps?: number;
   completedSteps?: number;
+  runtimeBudgetMs?: number;
+  runtimeRemainingMs?: number;
 }
 
 export interface RunEventFrame {

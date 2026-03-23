@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const AGENT_EXECUTION_PROFILES = ["standard", "marathon_12h"] as const;
+export const AGENT_EXECUTION_PROFILES = ["standard", "marathon_12h", "marathon_24h"] as const;
 
 export const AgentExecutionProfileSchema = z.enum(AGENT_EXECUTION_PROFILES);
 export type AgentExecutionProfile = z.infer<typeof AgentExecutionProfileSchema>;
@@ -13,5 +13,5 @@ export function normalizeAgentExecutionProfile(value: unknown): AgentExecutionPr
 }
 
 export function isMarathonExecutionProfile(profile: AgentExecutionProfile): boolean {
-  return profile === "marathon_12h";
+  return profile === "marathon_12h" || profile === "marathon_24h";
 }

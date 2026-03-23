@@ -51,6 +51,20 @@ const PROFILE_CONFIGS: Record<AgentExecutionProfile, AgentExecutionProfileConfig
       maxConsecutiveFailures: 6,
     },
   },
+  marathon_24h: {
+    profile: "marathon_24h",
+    label: "Marathon 24h",
+    minPlanSteps: 8,
+    maxPlanSteps: 40,
+    maxReplanAttempts: 10,
+    maxRunDurationMs: 24 * HOUR_MS,
+    completedRunRetentionMs: 24 * HOUR_MS,
+    subagent: {
+      maxSteps: 160,
+      stepTimeoutMs: 45 * MINUTE_MS,
+      maxConsecutiveFailures: 8,
+    },
+  },
 };
 
 export function getAgentExecutionProfileConfig(profile: AgentExecutionProfile): AgentExecutionProfileConfig {

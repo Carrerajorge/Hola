@@ -36,6 +36,62 @@ vi.mock("@/lib/apiClient", () => ({
 }));
 
 vi.mock("@/services/codexRuntime", () => ({
+  CODEX_EXECUTION_PROFILE_OPTIONS: [
+    {
+      value: "standard",
+      label: "Estándar",
+      shortLabel: "Normal",
+      runtimeLabel: "Ventana estándar",
+      checkpointLabel: "Cierre único al final",
+      resilienceLabel: "Sin cadena prolongada",
+    },
+    {
+      value: "marathon_12h",
+      label: "Marathon 12h",
+      shortLabel: "12h",
+      runtimeLabel: "Cadena 12h",
+      checkpointLabel: "Checkpoint cada entrega",
+      resilienceLabel: "Replanificación extendida",
+    },
+    {
+      value: "marathon_24h",
+      label: "Marathon 24h",
+      shortLabel: "24h",
+      runtimeLabel: "Cadena 24h",
+      checkpointLabel: "Checkpoint cada 60-90 min",
+      resilienceLabel: "Auto-recuperación y handoff",
+    },
+  ],
+  getCodexExecutionProfileOption: (profile: string) => {
+    if (profile === "marathon_24h") {
+      return {
+        value: "marathon_24h",
+        label: "Marathon 24h",
+        shortLabel: "24h",
+        runtimeLabel: "Cadena 24h",
+        checkpointLabel: "Checkpoint cada 60-90 min",
+        resilienceLabel: "Auto-recuperación y handoff",
+      };
+    }
+    if (profile === "marathon_12h") {
+      return {
+        value: "marathon_12h",
+        label: "Marathon 12h",
+        shortLabel: "12h",
+        runtimeLabel: "Cadena 12h",
+        checkpointLabel: "Checkpoint cada entrega",
+        resilienceLabel: "Replanificación extendida",
+      };
+    }
+    return {
+      value: "standard",
+      label: "Estándar",
+      shortLabel: "Normal",
+      runtimeLabel: "Ventana estándar",
+      checkpointLabel: "Cierre único al final",
+      resilienceLabel: "Sin cadena prolongada",
+    };
+  },
   createCodexRun: (...args: unknown[]) => createCodexRunMock(...args),
   spawnCodexSubagents: (...args: unknown[]) => spawnCodexSubagentsMock(...args),
 }));
@@ -403,7 +459,8 @@ describe("CodexPage", () => {
         chatId: null,
         message: "Implementa el flujo completo de codificacion autonoma.",
         project: expect.objectContaining({ id: "project-1", name: "Document hotfix" }),
-        marathonMode: false,
+        executionProfile: "standard",
+        branchName: "main",
       });
     });
 
@@ -412,14 +469,49 @@ describe("CodexPage", () => {
         runId: "run-new",
         message: "Implementa el flujo completo de codificacion autonoma.",
         project: expect.objectContaining({ id: "project-1", name: "Document hotfix" }),
-        marathonMode: false,
+        executionProfile: "standard",
         maxSubagents: 3,
+        branchName: "main",
       });
     });
 
     await waitFor(() => {
       expect(addChatToProjectMock).toHaveBeenCalledWith("chat-new", "project-1");
       expect(setLocationMock).toHaveBeenCalledWith("/runs/run-new/progress");
+    });
+  });
+
+  it("cycles the execution profile up to 24h and launches with that profile", async () => {
+    render(<CodexPage />);
+
+    fireEvent.click(screen.getByTestId("codex-marathon-toggle"));
+    fireEvent.click(screen.getByTestId("codex-marathon-toggle"));
+
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "Mantén una cadena de programación muy larga con checkpoints." },
+    });
+
+    fireEvent.click(screen.getByTestId("codex-launch-run"));
+
+    await waitFor(() => {
+      expect(createCodexRunMock).toHaveBeenCalledWith({
+        chatId: null,
+        message: "Mantén una cadena de programación muy larga con checkpoints.",
+        project: expect.objectContaining({ id: "project-1", name: "Document hotfix" }),
+        executionProfile: "marathon_24h",
+        branchName: "main",
+      });
+    });
+
+    await waitFor(() => {
+      expect(spawnCodexSubagentsMock).toHaveBeenCalledWith({
+        runId: "run-new",
+        message: "Mantén una cadena de programación muy larga con checkpoints.",
+        project: expect.objectContaining({ id: "project-1", name: "Document hotfix" }),
+        executionProfile: "marathon_24h",
+        maxSubagents: 3,
+        branchName: "main",
+      });
     });
   });
 

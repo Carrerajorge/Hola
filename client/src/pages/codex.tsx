@@ -50,7 +50,13 @@ import { useChats, type Chat, type Message } from "@/hooks/use-chats";
 import { useProjects, type Project } from "@/hooks/use-projects";
 import { apiFetch } from "@/lib/apiClient";
 import { cn } from "@/lib/utils";
-import { createCodexRun, spawnCodexSubagents } from "@/services/codexRuntime";
+import {
+  CODEX_EXECUTION_PROFILE_OPTIONS,
+  createCodexRun,
+  getCodexExecutionProfileOption,
+  spawnCodexSubagents,
+  type CodexExecutionProfile,
+} from "@/services/codexRuntime";
 
 type SessionStatus = "ready" | "running" | "waiting";
 type ActivityTone = "accent" | "success" | "neutral";
@@ -135,6 +141,7 @@ interface OpenClawCapabilityStats {
 
 const OPENCLAW_RELEASE_TAG = "v2026.3.13-1";
 const OPENCLAW_RELEASE_REFRESH_MS = 15 * 60 * 1000;
+const CODEX_PROFILE_SEQUENCE: readonly CodexExecutionProfile[] = CODEX_EXECUTION_PROFILE_OPTIONS.map((option) => option.value);
 
 const shellStyle: CSSProperties = {
   "--codex-bg": "#f6f3ec",
@@ -396,6 +403,12 @@ async function fetchOpenClawCapabilityStats(signal?: AbortSignal): Promise<OpenC
   return payload as OpenClawCapabilityStats;
 }
 
+function getNextExecutionProfile(current: CodexExecutionProfile): CodexExecutionProfile {
+  const currentIndex = CODEX_PROFILE_SEQUENCE.indexOf(current);
+  const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % CODEX_PROFILE_SEQUENCE.length : 0;
+  return CODEX_PROFILE_SEQUENCE[nextIndex] || "standard";
+}
+
 export default function CodexPage() {
   const [, setLocation] = useLocation();
   const { user, isAuthenticated, login } = useAuth();
@@ -405,7 +418,7 @@ export default function CodexPage() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [multiAgentEnabled, setMultiAgentEnabled] = useState(true);
-  const [marathonMode, setMarathonMode] = useState(false);
+  const [executionProfile, setExecutionProfile] = useState<CodexExecutionProfile>("standard");
   const [maxSubagents, setMaxSubagents] = useState(3);
   const [isLaunching, setIsLaunching] = useState(false);
   const [repoBranches, setRepoBranches] = useState<string[]>(["main"]);
@@ -571,6 +584,10 @@ export default function CodexPage() {
   }, [sessions]);
 
   const activityItems = useMemo(() => buildActivity(selectedSession), [selectedSession]);
+  const executionProfileOption = useMemo(
+    () => getCodexExecutionProfileOption(executionProfile),
+    [executionProfile],
+  );
   const activeRelease = openClawRelease?.requestedRelease;
   const latestRelease = openClawRelease?.latestRelease;
   const releaseHighlights = activeRelease?.highlights || [];
@@ -590,7 +607,9 @@ export default function CodexPage() {
       ? normalizeText(user?.fullName) || normalizeText(user?.email?.split("@")[0])
       : "") || "Invitado";
   const secureWorkspaceActionLabel = isAuthenticated ? "Abrir chat" : "Entrar al workspace seguro";
-  const launchActionLabel = isAuthenticated ? (isLaunching ? "Lanzando" : "Lanzar run") : "Entrar al workspace seguro";
+  const launchActionLabel = isAuthenticated
+    ? (isLaunching ? "Lanzando" : `Lanzar ${executionProfileOption.shortLabel}`)
+    : "Entrar al workspace seguro";
   const composerPlaceholder = isAuthenticated
     ? "Describe la tarea técnica y OpenClaw lanzará un run real con contexto del proyecto, ramas y subagentes."
     : "Inicia sesión para activar runs reales, ramas seguras y el workspace operativo de OpenClaw.";
@@ -613,6 +632,27 @@ export default function CodexPage() {
   }, [selectedProject]);
 
   const branchButtonLabel = activeRepoBranch || selectedSession?.branchLabel || "main";
+  const runtimeStatusItems = useMemo(
+    () => [
+      isAuthenticated ? "Local · Full access" : "Preview · Acceso limitado",
+      selectedProject?.repositoryPath ? `Git · ${branchButtonLabel}` : "Sin repo git",
+      executionProfile === "marathon_24h"
+        ? "24h · checkpoints + handoff"
+        : executionProfile === "marathon_12h"
+          ? "12h · checkpoints por bloque"
+          : "Estándar · entrega puntual",
+    ],
+    [branchButtonLabel, executionProfile, isAuthenticated, selectedProject?.repositoryPath],
+  );
+  const executionProfileHint = useMemo(() => {
+    if (executionProfile === "marathon_24h") {
+      return "OpenClaw dejará checkpoints verificables y handoff breve al cerrar cada bloque largo.";
+    }
+    if (executionProfile === "marathon_12h") {
+      return "OpenClaw trabajará por bloques largos con validación frecuente y continuidad clara.";
+    }
+    return "OpenClaw intentará cerrar la tarea con el menor ruido operativo posible.";
+  }, [executionProfile]);
 
   const filteredBranches = useMemo(() => {
     const query = branchQuery.trim().toLowerCase();
@@ -843,7 +883,8 @@ export default function CodexPage() {
         chatId: shouldReuseSelectedChat ? selectedSession?.id : null,
         message: task,
         project: selectedProject,
-        marathonMode,
+        executionProfile,
+        branchName: selectedProject?.repositoryPath ? activeRepoBranch : null,
       });
 
       if (selectedProject?.id) {
@@ -855,8 +896,9 @@ export default function CodexPage() {
           runId,
           message: task,
           project: selectedProject,
-          marathonMode,
+          executionProfile,
           maxSubagents,
+          branchName: selectedProject?.repositoryPath ? activeRepoBranch : null,
         });
 
         if (spawned.length > 0) {
@@ -1352,18 +1394,27 @@ export default function CodexPage() {
                                   : "La vista ya refleja OpenClaw dentro de tu plataforma. Inicia sesion para abrir el workspace seguro, activar runs y operar con ramas reales."}
                               </p>
                             </div>
-                            <div className="grid grid-cols-2 gap-3 text-sm">
+                            <div className="grid gap-3 text-sm md:grid-cols-2">
                               <div className="rounded-2xl border border-[var(--codex-border)] bg-white/80 px-4 py-3">
                                 <p className="text-[var(--codex-muted)]">Run</p>
                                 <p className="mt-1 font-semibold">{launchRunId ? "Activo" : "Listo"}</p>
                               </div>
                               <div className="rounded-2xl border border-[var(--codex-border)] bg-white/80 px-4 py-3">
-                                <p className="text-[var(--codex-muted)]">Ventana</p>
-                                <p className="mt-1 font-semibold">{marathonMode ? "12h" : "Normal"}</p>
+                                <p className="text-[var(--codex-muted)]">Perfil</p>
+                                <p className="mt-1 font-semibold">{executionProfileOption.label}</p>
+                              </div>
+                              <div className="rounded-2xl border border-[var(--codex-border)] bg-white/80 px-4 py-3">
+                                <p className="text-[var(--codex-muted)]">Checkpoints</p>
+                                <p className="mt-1 font-semibold">{executionProfileOption.checkpointLabel}</p>
+                              </div>
+                              <div className="rounded-2xl border border-[var(--codex-border)] bg-white/80 px-4 py-3">
+                                <p className="text-[var(--codex-muted)]">Resiliencia</p>
+                                <p className="mt-1 font-semibold">{executionProfileOption.resilienceLabel}</p>
                               </div>
                             </div>
                             <div className="rounded-2xl border border-[var(--codex-border)] bg-white/80 px-4 py-3 text-sm text-[var(--codex-muted)]">
                               <p className="font-medium text-[var(--codex-ink)]">{selectedProject?.repositoryPath || "Sin repositorio conectado"}</p>
+                              <p className="mt-1">Rama activa: {branchButtonLabel}</p>
                               <p className="mt-1">{branchSummary?.label || "Sin cambios pendientes"}</p>
                             </div>
                           </div>
@@ -1627,6 +1678,16 @@ export default function CodexPage() {
           <div className="sticky bottom-0 border-t border-[var(--codex-border)] bg-[rgba(247,245,240,0.88)] backdrop-blur-xl">
             <div className="mx-auto w-full max-w-5xl px-4 pb-4 pt-4 md:px-6 lg:px-8">
               <div className="rounded-[30px] border border-[var(--codex-border)] bg-white/92 p-3 shadow-[var(--codex-shadow)]">
+                <div className="flex flex-wrap gap-2 px-2 pb-2">
+                  {runtimeStatusItems.map((item) => (
+                    <span
+                      key={item}
+                      className="inline-flex items-center rounded-full border border-[var(--codex-border)] bg-[#fbfaf6] px-3 py-1.5 text-xs text-[var(--codex-muted)]"
+                    >
+                      {item}
+                    </span>
+                  ))}
+                </div>
                 <Textarea
                   ref={composerRef}
                   value={draft}
@@ -1636,6 +1697,9 @@ export default function CodexPage() {
                   disabled={!isAuthenticated}
                   className="min-h-[96px] resize-none border-0 bg-transparent px-4 py-4 text-base leading-7 shadow-none focus-visible:ring-0"
                 />
+                <p className="px-4 pb-2 text-sm text-[var(--codex-muted)]">
+                  {executionProfileHint}
+                </p>
                 <div className="flex flex-wrap items-center justify-between gap-3 px-2 pt-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <button
@@ -1656,11 +1720,11 @@ export default function CodexPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setMarathonMode((value) => !value)}
+                      onClick={() => setExecutionProfile((current) => getNextExecutionProfile(current))}
                       disabled={!isAuthenticated}
                       className={cn(
                         "inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm transition-colors",
-                        marathonMode
+                        executionProfile !== "standard"
                           ? "border-[var(--codex-accent)] bg-[var(--codex-accent-soft)] text-[var(--codex-accent-ink)]"
                           : "border-[var(--codex-border)] text-[var(--codex-muted)]",
                         !isAuthenticated && "cursor-not-allowed opacity-60",
@@ -1668,7 +1732,7 @@ export default function CodexPage() {
                       data-testid="codex-marathon-toggle"
                     >
                       <TimerReset className="h-4 w-4" />
-                      {marathonMode ? "Modo 12h" : "Modo estándar"}
+                      {`Perfil ${executionProfileOption.shortLabel}`}
                     </button>
                     <button
                       type="button"
@@ -1715,10 +1779,8 @@ export default function CodexPage() {
 
               <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-[var(--codex-muted)]">
                 <div className="flex flex-wrap items-center gap-4">
-                  <span>Local</span>
-                  <span>{isAuthenticated ? "Acceso completo" : "Vista previa"}</span>
                   <span>{multiAgentEnabled ? `Multi-agent x${maxSubagents}` : "Single-agent"}</span>
-                  <span>{marathonMode ? "Ventana 12h" : "Ventana estándar"}</span>
+                  <span>{executionProfileOption.runtimeLabel}</span>
                   <span>
                     {chatsLoading || projectsLoading || isBranchLoading
                       ? "Sincronizando…"

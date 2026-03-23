@@ -105,6 +105,22 @@ const formatDuration = (start?: string | null, end?: string | null): string => {
   return `${minutes}m ${remainder}s`;
 };
 
+const formatRuntimeBudget = (value?: number | null): string => {
+  if (!value || value <= 0) return "Sin dato";
+  const totalMinutes = Math.round(value / 60000);
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (minutes === 0) return `${hours}h`;
+  return `${hours}h ${minutes}m`;
+};
+
+const getExecutionProfileLabel = (profile?: string | null): string => {
+  if (profile === "marathon_24h") return "Cadena 24h";
+  if (profile === "marathon_12h") return "Cadena 12h";
+  return "Estándar";
+};
+
 const formatTimestamp = (value?: number | string | null): string => {
   if (!value) return "–";
   const parsed = typeof value === "number" ? value : Number(Date.parse(String(value)));
@@ -330,6 +346,11 @@ const RunProgressPage = () => {
               Estado: <span className="ml-1">{run.status}</span>
             </Badge>
           )}
+          {run && (
+            <Badge variant="outline">
+              Perfil: <span className="ml-1">{getExecutionProfileLabel(run.executionProfile)}</span>
+            </Badge>
+          )}
         </div>
       </div>
 
@@ -350,7 +371,7 @@ const RunProgressPage = () => {
               </CardDescription>
             </div>
             <div className="text-sm text-muted-foreground">
-              Inicio: {formatTimestamp(run?.startedAt)} · {run?.steps?.length ?? 0} pasos
+              Inicio: {formatTimestamp(run?.startedAt)} · {run?.steps?.length ?? 0} pasos · Presupuesto restante: {formatRuntimeBudget(run?.runtimeRemainingMs ?? run?.runtimeBudgetMs)}
             </div>
           </CardHeader>
           <CardContent className="space-y-4 pt-0">

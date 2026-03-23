@@ -191,10 +191,10 @@ describe("openclawRuntimeRouter smoke flow", () => {
 
       const spawnRes = await client
         .post("/api/openclaw/runtime/subagents")
-        .send({ objective: planRes.body.subtasks[0].description, executionProfile: "marathon_12h" });
+        .send({ objective: planRes.body.subtasks[0].description, executionProfile: "marathon_24h" });
       expect(spawnRes.status).toBe(202);
       expect(spawnRes.body.id).toBeTruthy();
-      expect(spawnRes.body.executionProfile).toBe("marathon_12h");
+      expect(spawnRes.body.executionProfile).toBe("marathon_24h");
 
       const listRes = await client.get("/api/openclaw/runtime/subagents");
       expect(listRes.status).toBe(200);
