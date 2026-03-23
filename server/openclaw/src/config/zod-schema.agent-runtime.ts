@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v4";
 import { getBlockedNetworkModeReason } from "../agents/sandbox/network-mode.js";
 import { parseDurationMs } from "../cli/parse-duration.js";
 import { AgentModelSchema } from "./zod-schema.agent-model.js";
@@ -204,6 +204,7 @@ export const SandboxDockerSchema = z
   })
   .optional();
 
+// Keep strict() before superRefine(); superRefine returns a ZodEffects wrapper.
 export const SandboxBrowserSchema = z
   .object({
     enabled: z.boolean().optional(),

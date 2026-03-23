@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v4";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import type { ConfigUiHints } from "../shared/config-ui-hints-types.js";
 import { FIELD_HELP } from "./schema.help.js";

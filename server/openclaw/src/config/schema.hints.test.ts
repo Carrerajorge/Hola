@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { __test__, isSensitiveConfigPath } from "./schema.hints.js";
 import { OpenClawSchema } from "./zod-schema.js";
 import { sensitive } from "./zod-schema.sensitive.js";
