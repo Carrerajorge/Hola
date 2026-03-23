@@ -18,10 +18,6 @@ import {
 } from "@/lib/uploadTransport";
 import { WelcomeAnimation } from "@/components/welcome-animation-simple";
 import {
-  WelcomeExplosion,
-  useFirstVisit,
-} from "@/components/welcome-explosion";
-import {
   Plus,
   ArrowUp,
   Mic,
@@ -987,8 +983,6 @@ export function ChatInterface({
     [workspaceContext],
   );
 
-  // First visit explosion
-  const { showExplosion, completeWelcome } = useFirstVisit();
   const [userPlanState, setUserPlanState] = useState<{
     plan: string;
     isAdmin?: boolean;
@@ -9886,9 +9880,6 @@ IMPORTANTE:
 
   return (
     <>
-      {/* Welcome Explosion for first-time visitors */}
-      {showExplosion && <WelcomeExplosion onComplete={completeWelcome} />}
-
       <div className="flex h-full flex-col bg-transparent relative">
         {/* Header */}
         <ChatHeader
