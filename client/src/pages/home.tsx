@@ -106,6 +106,27 @@ export default function Home() {
     }
   }, [user, isLoading, isReady, setLocation]);
 
+  // After OAuth login with provider_hint, auto-trigger the provider connection dialog.
+  // The server redirects to /?auth=success&provider=gemini (or openai) after Google OAuth.
+  useEffect(() => {
+    if (!isReady || !user) return;
+    const params = new URLSearchParams(window.location.search);
+    const provider = params.get("provider");
+    if (provider === "gemini" || provider === "openai") {
+      // Clean up URL first
+      params.delete("provider");
+      params.delete("auth");
+      const rest = params.toString();
+      window.history.replaceState({}, "", rest ? `${window.location.pathname}?${rest}` : window.location.pathname);
+      // Dispatch event so provider dialogs can auto-open
+      // Small delay to let components mount first
+      const timer = window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("auto-connect-provider", { detail: { provider } }));
+      }, 600);
+      return () => window.clearTimeout(timer);
+    }
+  }, [isReady, user]);
+
   useEffect(() => {
     const preload = () => {
       void useMediaLibrary.getState().preload();
