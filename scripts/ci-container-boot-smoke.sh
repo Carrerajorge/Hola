@@ -102,6 +102,9 @@ wait_for_http_ready() {
     fi
 
     if ! docker ps --format '{{.Names}}' | grep -Fxq "${APP_CONTAINER}"; then
+      log "App container state before readiness failure:"
+      docker inspect -f 'status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}} startedAt={{.State.StartedAt}} finishedAt={{.State.FinishedAt}}' "${APP_CONTAINER}" 2>/dev/null || true
+      docker logs --tail=400 "${APP_CONTAINER}" 2>/dev/null || true
       fail "${APP_CONTAINER} stopped before ${url} became ready."
     fi
 
