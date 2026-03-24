@@ -23,7 +23,7 @@ jobs:
       - name: Verify embedded OpenClaw release sync
         run: npm run verify:openclaw-upstream
       - name: Install dependencies
-        run: npm install
+        run: npm install --legacy-peer-deps
       - name: Run production build
         run: npm run build
       - name: Run TypeScript Compiler Check
@@ -54,7 +54,7 @@ jobs:
       - name: Verify embedded OpenClaw release sync
         run: npm run verify:openclaw-upstream
       - name: Install dependencies
-        run: npm install
+        run: npm install --legacy-peer-deps
       - name: Run integrated OpenClaw smoke tests
         run: npm run test:openclaw1000
 
