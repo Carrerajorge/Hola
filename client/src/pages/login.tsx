@@ -307,6 +307,11 @@ export default function LoginPage() {
     if ((provider === "gemini" || provider === "openai") && !params.has("login_hint") && email && email.endsWith("@gmail.com")) {
       params.set("login_hint", email);
     }
+    // Pass provider_hint so the server can redirect to the right flow after Google OAuth
+    // This enables auto-triggering Gemini CLI or OpenAI Codex OAuth after login
+    if (provider !== "google") {
+      params.set("provider_hint", provider);
+    }
     const query = params.toString();
     window.location.assign(`/api/auth/google${query ? `?${query}` : ""}`);
   };

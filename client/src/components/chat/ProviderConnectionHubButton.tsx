@@ -170,6 +170,31 @@ export function ProviderConnectionHubButton({
   const [anthropicKeyOpen, setAnthropicKeyOpen] = React.useState(false);
   const [anthropicKey, setAnthropicKey] = React.useState("");
 
+  // Refs to auto-open specific provider dialogs after OAuth login redirect
+  const geminiOpenDialogRef = React.useRef<(() => void) | null>(null);
+  const openaiOpenDialogRef = React.useRef<(() => void) | null>(null);
+
+  // Listen for auto-connect-provider events dispatched after OAuth login
+  React.useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (!detail?.provider) return;
+      // Open the hub dialog first
+      setOpen(true);
+      // Then auto-open the specific provider dialog after a small delay
+      const timer = window.setTimeout(() => {
+        if (detail.provider === "gemini" && geminiOpenDialogRef.current) {
+          geminiOpenDialogRef.current();
+        } else if (detail.provider === "openai" && openaiOpenDialogRef.current) {
+          openaiOpenDialogRef.current();
+        }
+      }, 400);
+      return () => window.clearTimeout(timer);
+    };
+    window.addEventListener("auto-connect-provider", handler);
+    return () => window.removeEventListener("auto-connect-provider", handler);
+  }, []);
+
   const { data: providerStatus, refetch: refetchStatus } = useAllProvidersStatus();
   const anthropicKeyMutation = useAnthropicKeySubmit();
   const anthropicDisconnect = useProviderDisconnect("anthropic");
@@ -279,38 +304,44 @@ export function ProviderConnectionHubButton({
             <div className="grid gap-3 md:grid-cols-3">
               <OpenAICodexOAuthButton
                 onConnected={handleConnected}
-                renderTrigger={({ isBusy, isConnected, openDialog }) => (
-                  <ProviderCard
-                    title="Loguear ChatGPT"
-                    description="Conecta tu cuenta de ChatGPT para traer los modelos compatibles con OpenClaw al selector sin depender de callbacks locales."
-                    meta={countLabel(openAiModels.length)}
-                    actionLabel={isConnected ? "Revisar cuenta" : "Continuar con ChatGPT"}
-                    highlighted={isConnected || openAiModels.length > 0}
-                    icon={<ChatGptLogoIcon className="h-5 w-5" />}
-                    onClick={openDialog}
-                    isBusy={isBusy}
-                    isConnected={isConnected}
-                    testId="provider-card-openai-codex"
-                  />
-                )}
+                renderTrigger={({ isBusy, isConnected, openDialog }) => {
+                  openaiOpenDialogRef.current = openDialog;
+                  return (
+                    <ProviderCard
+                      title="Loguear ChatGPT"
+                      description="Conecta tu cuenta de ChatGPT para traer los modelos compatibles con OpenClaw al selector sin depender de callbacks locales."
+                      meta={countLabel(openAiModels.length)}
+                      actionLabel={isConnected ? "Revisar cuenta" : "Continuar con ChatGPT"}
+                      highlighted={isConnected || openAiModels.length > 0}
+                      icon={<ChatGptLogoIcon className="h-5 w-5" />}
+                      onClick={openDialog}
+                      isBusy={isBusy}
+                      isConnected={isConnected}
+                      testId="provider-card-openai-codex"
+                    />
+                  );
+                }}
               />
 
               <GeminiCliOAuthButton
                 onConnected={handleConnected}
-                renderTrigger={({ isBusy, isConnected, openDialog }) => (
-                  <ProviderCard
-                    title="Loguear con Gemini"
-                    description="Vincula Google Gemini CLI OAuth y expone sus modelos compatibles dentro de ILIAGPT."
-                    meta={countLabel(geminiModels.length)}
-                    actionLabel={isConnected ? "Revisar cuenta" : "Continuar con Google"}
-                    highlighted={isConnected || geminiModels.length > 0}
-                    icon={<GeminiLogoIcon className="h-5 w-5" />}
-                    onClick={openDialog}
-                    isBusy={isBusy}
-                    isConnected={isConnected}
-                    testId="provider-card-gemini-cli"
-                  />
-                )}
+                renderTrigger={({ isBusy, isConnected, openDialog }) => {
+                  geminiOpenDialogRef.current = openDialog;
+                  return (
+                    <ProviderCard
+                      title="Loguear con Gemini"
+                      description="Vincula Google Gemini CLI OAuth y expone sus modelos compatibles dentro de ILIAGPT."
+                      meta={countLabel(geminiModels.length)}
+                      actionLabel={isConnected ? "Revisar cuenta" : "Continuar con Google"}
+                      highlighted={isConnected || geminiModels.length > 0}
+                      icon={<GeminiLogoIcon className="h-5 w-5" />}
+                      onClick={openDialog}
+                      isBusy={isBusy}
+                      isConnected={isConnected}
+                      testId="provider-card-gemini-cli"
+                    />
+                  );
+                }}
               />
 
               <ProviderCard
