@@ -8,6 +8,7 @@ import {
   hasLoggedOutMarker,
   hasOAuthSuccessMarker,
   isPublicAuthRoute,
+  shouldDeferAuthenticatedBootstrap,
   shouldSkipAnonymousIdentity,
 } from "@/lib/auth-flow";
 
@@ -302,6 +303,9 @@ async function fetchUser(): Promise<User | null> {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [isOAuthSyncing, setIsOAuthSyncing] = useState(false);
+  const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
+  const search = typeof window !== "undefined" ? window.location.search : "";
+  const authQueryEnabled = !shouldDeferAuthenticatedBootstrap(pathname, search);
 
   const { data: user, isLoading, isFetched, refetch } = useQuery<User | null>({
     queryKey: ["/api/auth/user"],
@@ -313,7 +317,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     staleTime: 1000 * 30, // 30 seconds (faster updates in dev/OAuth flows)
     initialData: getStoredUser, // Hydrate from local storage initially
     refetchOnWindowFocus: true,
+    enabled: authQueryEnabled,
   });
+
+  const resolvedUser = authQueryEnabled ? (user ?? null) : null;
+  const isAuthenticated = !!resolvedUser && !isAnonymousUser(resolvedUser);
+  const isReady = (authQueryEnabled ? isFetched : true) && !isOAuthSyncing;
 
   const login = useCallback(() => {
     window.location.href = "/login";
@@ -409,23 +418,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if (!authQueryEnabled) return;
 
     window.dispatchEvent(
       new CustomEvent("auth:changed", {
         detail: {
-          userId: user?.id ?? null,
-          isAuthenticated: !!user && !isAnonymousUser(user),
+          userId: resolvedUser?.id ?? null,
+          isAuthenticated,
         },
       })
     );
-  }, [user]);
+  }, [authQueryEnabled, isAuthenticated, resolvedUser]);
 
   return (
     <AuthContext.Provider value={{
-      user: user ?? null,
-      isLoading,
-      isReady: isFetched && !isOAuthSyncing,
-      isAuthenticated: !!user && !isAnonymousUser(user),
+      user: resolvedUser,
+      isLoading: authQueryEnabled ? isLoading : false,
+      isReady,
+      isAuthenticated,
       login,
       logout,
       refreshAuth

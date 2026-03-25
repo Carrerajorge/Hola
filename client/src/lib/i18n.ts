@@ -9,7 +9,7 @@ import {
   normalizeLanguageCode,
   type SupportedLanguage,
 } from "@/locales/registry";
-import { isPublicAuthRoute } from "@/lib/auth-flow";
+import { isPublicAuthRoute, shouldDeferAuthenticatedBootstrap } from "@/lib/auth-flow";
 
 export type TranslationKeys = Record<string, string>;
 
@@ -528,6 +528,7 @@ function dispatchLanguageChange(language: SupportedLanguage): void {
 
 async function persistLanguageToProfile(language: SupportedLanguage): Promise<void> {
   if (typeof window === "undefined") return;
+  if (shouldDeferAuthenticatedBootstrap(window.location.pathname, window.location.search)) return;
   if (isPublicAuthRoute(window.location.pathname)) return;
 
   try {
@@ -547,6 +548,7 @@ async function persistLanguageToProfile(language: SupportedLanguage): Promise<vo
 async function syncLanguageFromProfile(): Promise<void> {
   if (typeof window === "undefined") return;
   if (import.meta.env.MODE === "test") return;
+  if (shouldDeferAuthenticatedBootstrap(window.location.pathname, window.location.search)) return;
   if (isPublicAuthRoute(window.location.pathname)) return;
 
   if (profileSyncPromise) {
@@ -590,7 +592,9 @@ function attachAuthSyncListener(): void {
   if (authSyncListener) return;
   if (import.meta.env.MODE === "test") return;
 
-  authSyncListener = () => {
+  authSyncListener = (event) => {
+    const detail = (event as CustomEvent<{ isAuthenticated?: boolean }>).detail;
+    if (!detail?.isAuthenticated) return;
     void syncLanguageFromProfile();
   };
 

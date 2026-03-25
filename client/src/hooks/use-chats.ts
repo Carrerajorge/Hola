@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
 import { apiFetch, getAnonUserIdHeader } from "@/lib/apiClient";
 import { trackWorkspaceEvent } from "@/lib/analytics";
+import { shouldBootstrapWorkspaceSurface } from "@/lib/auth-flow";
+import { useAuth } from "@/hooks/use-auth";
 
 import { type AgentRunStatus } from "@/stores/agent-store";
 
@@ -1445,6 +1447,7 @@ export function clearGeneratedImages(): void {
 }
 
 export function useChats() {
+  const { isAuthenticated } = useAuth();
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -1616,6 +1619,11 @@ export function useChats() {
     await fetchPromise;
   }, []);
   const loadChatsFromServer = useCallback(async () => {
+    const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
+    if (!shouldBootstrapWorkspaceSurface(pathname, isAuthenticated)) {
+      return [];
+    }
+
     try {
       const res = await apiFetch("/api/chats", {
         headers: { ...getAnonUserIdHeader() },
@@ -1651,7 +1659,7 @@ export function useChats() {
       console.error("Error loading chats from server:", error);
       return null;
     }
-  }, []);
+  }, [isAuthenticated]);
 
   const recoverFailedMessageQueue = useCallback(async () => {
     if (recoveringFailedQueueRef.current) return;
@@ -1830,6 +1838,12 @@ export function useChats() {
   useEffect(() => {
     let cancelled = false;
     const initChats = async () => {
+      const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
+      if (!shouldBootstrapWorkspaceSurface(pathname, isAuthenticated)) {
+        if (!cancelled) setIsLoading(false);
+        return;
+      }
+
       setIsLoading(true);
 
       // 1) Hydrate from localStorage immediately for instant UI (no blank/skeleton if we have cache).
@@ -1870,7 +1884,7 @@ export function useChats() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isAuthenticated, loadChatsFromServer, recoverFailedMessageQueue]);
 
   // Retry failed (queued) message saves when connectivity is restored or the tab becomes active.
   useEffect(() => {
@@ -1898,6 +1912,9 @@ export function useChats() {
 
   // Allows other parts of the app (settings/privacy) to request a full server refresh.
   useEffect(() => {
+    const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
+    if (!shouldBootstrapWorkspaceSurface(pathname, isAuthenticated)) return;
+
     const handleRefresh = () => {
       void (async () => {
         setIsLoading(true);
@@ -1922,7 +1939,7 @@ export function useChats() {
 
     window.addEventListener("refresh-chats", handleRefresh);
     return () => window.removeEventListener("refresh-chats", handleRefresh);
-  }, [activeChatId, loadChatsFromServer]);
+  }, [activeChatId, isAuthenticated, loadChatsFromServer]);
 
   // Listen for "refresh-chat-title" events dispatched after streaming completes.
   // The server generates an AI-powered title asynchronously; this fetches it

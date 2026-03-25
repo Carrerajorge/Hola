@@ -1,9 +1,12 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, ReactNode, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import { apiFetch } from "@/lib/apiClient";
+import { shouldBootstrapWorkspaceSurface } from "@/lib/auth-flow";
+import { useAuth } from "@/hooks/use-auth";
 
 export interface AvailableModel {
   id: string;
@@ -200,11 +203,14 @@ const ModelAvailabilityContext = createContext<ModelAvailabilityContextType | nu
 export function ModelAvailabilityProvider({ children }: { children: ReactNode }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [location] = useLocation();
+  const { isAuthenticated } = useAuth();
   const [selectedModelId, setSelectedModelIdState] = useState<string | null>(null);
   const { settings, updateSetting } = useSettingsContext();
   const { settings: platformSettings } = usePlatformSettings();
+  const shouldLoadModels = shouldBootstrapWorkspaceSurface(location, isAuthenticated);
 
-  const { data: modelsData, isLoading, refetch } = useQuery<{ models: AvailableModel[] }>({
+  const { data: modelsData, isLoading: isQueryLoading, refetch } = useQuery<{ models: AvailableModel[] }>({
     queryKey: ["/api/models/available"],
     queryFn: async () => {
       const res = await apiFetch("/api/models/available", {
@@ -220,7 +226,9 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
     gcTime: 0,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
+    enabled: shouldLoadModels,
   });
+  const isLoading = shouldLoadModels ? isQueryLoading : false;
 
   const remoteModels = (modelsData?.models || [])
     .map((model, index) => normalizeAvailableModel(model, index))

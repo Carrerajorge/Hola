@@ -92,7 +92,7 @@ describe("LoginPage", () => {
 
     fireEvent.click(openAiButton);
 
-    expect(locationAssignMock).toHaveBeenCalledWith("/api/auth/google");
+    expect(locationAssignMock).toHaveBeenCalledWith("/api/auth/google?provider_hint=openai");
     expect(openAiButton).toHaveTextContent("Conectando...");
     expect(googleButton).toHaveTextContent("Continuar con Google");
     expect(geminiButton).toHaveTextContent("Continuar con Gemini");
