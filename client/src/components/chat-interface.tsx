@@ -403,10 +403,16 @@ interface ChatInterfaceProps {
   onCloseSidebar?: () => void;
   activeGpt?: ActiveGpt | null;
   aiState: AiState;
-  setAiState: React.Dispatch<React.SetStateAction<AiState>>;
+  setAiState: (
+    value: React.SetStateAction<AiState>,
+    conversationId?: string | null,
+  ) => void;
   aiStateChatId?: string | null;
   aiProcessSteps: AiProcessStep[];
-  setAiProcessSteps: React.Dispatch<React.SetStateAction<AiProcessStep[]>>;
+  setAiProcessSteps: (
+    value: React.SetStateAction<AiProcessStep[]>,
+    conversationId?: string | null,
+  ) => void;
   chatId?: string | null;
   chatGptId?: string | null;
   chatTitle?: string | null;
@@ -1881,17 +1887,15 @@ export function ChatInterface({
   const editedDocumentContentRef = useRef<string>("");
   const chatIdRef = useRef<string | null>(null);
   const streamingChatIdRef = useRef<string | null>(null);
-  const prevAiStateRef = useRef<AiState>("idle");
+  const streamChatTitleRef = useRef<Record<string, string>>({});
 
   // Access streaming store actions
   const {
     startRun,
-    updateStatus,
     completeRun,
     failRun,
     abortRun,
     appendContent,
-    clearRun,
   } = useStreamingStore();
 
   // Keep refs in sync with state for cleanup function access
@@ -1931,66 +1935,6 @@ export function ChatInterface({
   }, [chatId]);
 
   // Agent progress is now shown inline in chat messages, no panel needed
-
-  // Update streaming store when aiState changes
-  // This allows tracking of chats processing in background after component unmounts
-  useEffect(() => {
-    const prevState = prevAiStateRef.current;
-    prevAiStateRef.current = aiState;
-    const currentChatId = chatId || null;
-
-    // Start run when streaming begins
-    if (
-      prevState === "idle" &&
-      (aiState === "thinking" ||
-        aiState === "responding" ||
-        aiState === "sending" ||
-        aiState === "streaming")
-    ) {
-      streamingChatIdRef.current = currentChatId;
-      if (currentChatId) {
-        startRun(currentChatId, undefined, undefined, chatTitle || undefined);
-      }
-    }
-
-    // Update to streaming status
-    if (
-      (prevState === "thinking" || prevState === "sending") &&
-      (aiState === "responding" || aiState === "streaming")
-    ) {
-      if (streamingChatIdRef.current) {
-        updateStatus(streamingChatIdRef.current, "streaming");
-      }
-    }
-
-    // Complete run when streaming ends
-    if (
-      (prevState === "thinking" ||
-        prevState === "responding" ||
-        prevState === "sending" ||
-        prevState === "streaming") &&
-      (aiState === "idle" || aiState === "done" || aiState === "error")
-    ) {
-      const completedChatId = streamingChatIdRef.current;
-      if (completedChatId) {
-        // Get the active chat ID from the current prop (may have changed if user switched chats)
-        if (aiState === "error") {
-          failRun(completedChatId, "Stream error", currentChatId);
-        } else {
-          completeRun(completedChatId, currentChatId);
-        }
-        streamingChatIdRef.current = null;
-      }
-    }
-  }, [
-    aiState,
-    chatId,
-    chatTitle,
-    startRun,
-    updateStatus,
-    completeRun,
-    failRun,
-  ]);
 
   // Reset streaming state when chatId changes (switching chats)
   // This ensures the new chat starts clean without interference from previous chat
@@ -2553,15 +2497,6 @@ export function ChatInterface({
   const isSubmittingRef = useRef(false);
   isSubmittingRef.current = isSubmitLocked();
 
-  const isScopedConversation = useCallback((conversationId?: string | null) => {
-    const activeConversationId = latestChatIdRef.current;
-    if (!conversationId || !activeConversationId) return true;
-    return (
-      resolveRealChatId(activeConversationId) ===
-      resolveRealChatId(conversationId)
-    );
-  }, []);
-
   useEffect(() => {
     if (newChatResetNonce === undefined) return;
     if (newChatResetNonce === lastNewChatResetNonceRef.current) return;
@@ -2571,10 +2506,9 @@ export function ChatInterface({
 
   const setAiStateForChat = useCallback(
     (value: React.SetStateAction<AiState>, conversationId?: string | null) => {
-      if (!isScopedConversation(conversationId)) return;
-      setAiState(value);
+      setAiState(value, conversationId ?? latestChatIdRef.current);
     },
-    [isScopedConversation, setAiState],
+    [setAiState],
   );
 
   const setAiProcessStepsForChat = useCallback(
@@ -2582,10 +2516,9 @@ export function ChatInterface({
       value: React.SetStateAction<AiProcessStep[]>,
       conversationId?: string | null,
     ) => {
-      if (!isScopedConversation(conversationId)) return;
-      setAiProcessSteps(value);
+      setAiProcessSteps(value, conversationId ?? latestChatIdRef.current);
     },
-    [isScopedConversation, setAiProcessSteps],
+    [setAiProcessSteps],
   );
 
   // Centralized streaming→message transition manager.
@@ -2609,6 +2542,49 @@ export function ChatInterface({
     setAiState: setAiStateForChat,
     setAiProcessSteps: setAiProcessStepsForChat,
     getActiveConversationId: () => latestChatIdRef.current,
+    onStreamStart: ({ conversationId, requestId, messageId }) => {
+      const title = chatTitle?.trim() || "Conversación";
+      streamingChatIdRef.current = conversationId;
+      streamChatTitleRef.current[conversationId] = title;
+      startRun(conversationId, messageId, requestId, title);
+    },
+    onStreamChunk: ({ conversationId, chunk, seq }) => {
+      appendContent(conversationId, chunk, seq);
+    },
+    onStreamComplete: ({ conversationId, activeConversationId }) => {
+      const title =
+        streamChatTitleRef.current[conversationId] ||
+        chatTitle ||
+        "Conversación";
+      completeRun(conversationId, activeConversationId, title);
+      delete streamChatTitleRef.current[conversationId];
+      if (streamingChatIdRef.current === conversationId) {
+        streamingChatIdRef.current = null;
+      }
+    },
+    onStreamError: ({ conversationId, activeConversationId, error }) => {
+      const title =
+        streamChatTitleRef.current[conversationId] ||
+        chatTitle ||
+        "Conversación";
+      failRun(
+        conversationId,
+        error.message || "Stream error",
+        activeConversationId,
+        title,
+      );
+      delete streamChatTitleRef.current[conversationId];
+      if (streamingChatIdRef.current === conversationId) {
+        streamingChatIdRef.current = null;
+      }
+    },
+    onStreamAbort: ({ conversationId }) => {
+      abortRun(conversationId);
+      delete streamChatTitleRef.current[conversationId];
+      if (streamingChatIdRef.current === conversationId) {
+        streamingChatIdRef.current = null;
+      }
+    },
   });
 
   useEffect(() => {

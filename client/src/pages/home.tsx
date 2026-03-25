@@ -31,6 +31,7 @@ import { pollingManager } from "@/lib/polling-manager";
 import { queryClient } from "@/lib/queryClient";
 import { apiFetch } from "@/lib/apiClient";
 import { normalizeAppBuildVersion, recoverFromChunkError } from "@/lib/chunk-recovery";
+import type { AIState, AiProcessStep } from "@/components/chat-interface/types";
 
 const isLocalDevHost = () => {
   if (typeof window === "undefined") return false;
@@ -278,8 +279,8 @@ export default function Home() {
     }
   }, [moveChatToFolder, removeChatFromFolder]);
 
-  type HomeAiState = "idle" | "thinking" | "responding" | "agent_working";
-  type HomeAiStep = { step: string; status: "pending" | "active" | "done" };
+  type HomeAiState = AIState;
+  type HomeAiStep = AiProcessStep;
   type HomeConversationUiState = {
     aiState: HomeAiState;
     aiProcessSteps: HomeAiStep[];
@@ -410,8 +411,15 @@ export default function Home() {
   const aiProcessSteps: HomeAiStep[] = activeConversationState?.aiProcessSteps || [];
   const aiStateChatId = aiState === "idle" ? null : activeConversationId;
 
-  const setAiState = useCallback((newState: HomeAiState | ((prev: HomeAiState) => HomeAiState)) => {
-    const targetConversationId = activeConversationId || pendingChatIdRef.current || newChatStableKey;
+  const setAiState = useCallback((
+    newState: HomeAiState | ((prev: HomeAiState) => HomeAiState),
+    conversationId?: string | null,
+  ) => {
+    const targetConversationId =
+      (typeof conversationId === "string" && conversationId.trim()) ||
+      activeConversationId ||
+      pendingChatIdRef.current ||
+      newChatStableKey;
     if (!targetConversationId) return;
     setConversationUiStateMap((prev) => {
       const current = prev[targetConversationId] || createHomeConversationUiState();
@@ -429,8 +437,15 @@ export default function Home() {
     });
   }, [activeConversationId, newChatStableKey]);
 
-  const setAiProcessSteps = useCallback((nextSteps: HomeAiStep[] | ((prev: HomeAiStep[]) => HomeAiStep[])) => {
-    const targetConversationId = activeConversationId || pendingChatIdRef.current || newChatStableKey;
+  const setAiProcessSteps = useCallback((
+    nextSteps: HomeAiStep[] | ((prev: HomeAiStep[]) => HomeAiStep[]),
+    conversationId?: string | null,
+  ) => {
+    const targetConversationId =
+      (typeof conversationId === "string" && conversationId.trim()) ||
+      activeConversationId ||
+      pendingChatIdRef.current ||
+      newChatStableKey;
     if (!targetConversationId) return;
     setConversationUiStateMap((prev) => {
       const current = prev[targetConversationId] || createHomeConversationUiState();

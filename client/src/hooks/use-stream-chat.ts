@@ -21,6 +21,46 @@ export interface StreamChatDeps {
   setAiState: (value: React.SetStateAction<AIState>, conversationId?: string | null) => void;
   setAiProcessSteps?: (value: React.SetStateAction<AiProcessStep[]>, conversationId?: string | null) => void;
   getActiveConversationId?: () => string | null;
+  onStreamStart?: (payload: {
+    conversationId: string;
+    activeConversationId: string | null;
+    requestId: string;
+    messageId: string;
+  }) => void;
+  onStreamChunk?: (payload: {
+    conversationId: string;
+    activeConversationId: string | null;
+    requestId: string;
+    messageId: string;
+    chunk: string;
+    fullContent: string;
+    seq: number;
+  }) => void;
+  onStreamComplete?: (payload: {
+    conversationId: string;
+    activeConversationId: string | null;
+    requestId: string;
+    messageId: string;
+    content: string;
+    message: Message;
+  }) => void;
+  onStreamError?: (payload: {
+    conversationId: string;
+    activeConversationId: string | null;
+    requestId: string;
+    messageId: string;
+    content: string;
+    error: Error;
+    message?: Message;
+  }) => void;
+  onStreamAbort?: (payload: {
+    conversationId: string;
+    activeConversationId: string | null;
+    requestId: string;
+    messageId: string;
+    content: string;
+    reason: "cancelled" | "noop";
+  }) => void;
 }
 
 export interface StreamOptions {
@@ -136,15 +176,34 @@ function normalizeConversationId(options: StreamOptions): string | null {
 export function useStreamChat(deps: StreamChatDeps) {
   const depsRef = useRef(deps);
   depsRef.current = deps;
+  const mountedRef = useRef(true);
 
   const { streamingContentRef } = deps;
 
   const setAiState = useCallback<StreamChatDeps["setAiState"]>((...args) => depsRef.current.setAiState(...args), []);
   const setAiProcessSteps = useCallback<NonNullable<StreamChatDeps["setAiProcessSteps"]>>((...args) => depsRef.current.setAiProcessSteps?.(...args), []);
   const getActiveConversationId = useCallback<NonNullable<StreamChatDeps["getActiveConversationId"]>>(() => depsRef.current.getActiveConversationId?.(), []);
-  const setOptimisticMessages = useCallback<StreamChatDeps["setOptimisticMessages"]>((...args) => depsRef.current.setOptimisticMessages(...args), []);
+  const setOptimisticMessages = useCallback<StreamChatDeps["setOptimisticMessages"]>((...args) => {
+    if (!mountedRef.current) return;
+    depsRef.current.setOptimisticMessages(...args);
+  }, []);
   const onSendMessage = useCallback<StreamChatDeps["onSendMessage"]>((...args) => depsRef.current.onSendMessage(...args), []);
-  const setStreamingContent = useCallback<StreamChatDeps["setStreamingContent"]>((...args) => depsRef.current.setStreamingContent(...args), []);
+  const setStreamingContent = useCallback<StreamChatDeps["setStreamingContent"]>((...args) => {
+    if (!mountedRef.current) return;
+    depsRef.current.setStreamingContent(...args);
+  }, []);
+
+  const getStreamCallbacks = useCallback(() => {
+    const activeConversationId = depsRef.current.getActiveConversationId?.() || null;
+    return {
+      activeConversationId,
+      onStreamStart: depsRef.current.onStreamStart,
+      onStreamChunk: depsRef.current.onStreamChunk,
+      onStreamComplete: depsRef.current.onStreamComplete,
+      onStreamError: depsRef.current.onStreamError,
+      onStreamAbort: depsRef.current.onStreamAbort,
+    };
+  }, []);
 
 
   const sessionsRef = useRef<Map<string, ConversationSession>>(new Map());
@@ -500,6 +559,14 @@ export function useStreamChat(deps: StreamChatDeps) {
           setStreamingContent("");
         }
 
+        const { activeConversationId, onStreamStart } = getStreamCallbacks();
+        onStreamStart?.({
+          conversationId,
+          activeConversationId,
+          requestId: streamRequestId,
+          messageId,
+        });
+
         setAiState("thinking", conversationId);
         onAiStateChange?.("thinking");
         setAiProcessSteps?.([], conversationId);
@@ -510,6 +577,7 @@ export function useStreamChat(deps: StreamChatDeps) {
         let timeoutCause: "overall" | "first-token" | "done" | null = null;
         let hasReceivedEvent = false;
         let hasReceivedToken = false;
+        let chunkSeq = 0;
 
         if (session.timeoutId) {
           clearTimeout(session.timeoutId);
@@ -603,6 +671,15 @@ export function useStreamChat(deps: StreamChatDeps) {
               }
               setAiState("idle", conversationId);
               setAiProcessSteps?.([], conversationId);
+              const { activeConversationId, onStreamAbort } = getStreamCallbacks();
+              onStreamAbort?.({
+                conversationId,
+                activeConversationId,
+                requestId: streamRequestId,
+                messageId,
+                content: "",
+                reason: "noop",
+              });
               return { ok: true, content: "", response };
             }
 
@@ -668,10 +745,17 @@ export function useStreamChat(deps: StreamChatDeps) {
                 typeof data.chatId === "string" ? data.chatId.trim() : "";
               const effectiveEventConversationId =
                 eventConversationIdRaw || eventChatIdRaw || conversationId;
+              const isContentEvent =
+                currentEventType === "chunk" || currentEventType === "text";
 
-              // Be tolerant with stream metadata: some backend paths can emit
-              // events without conversationId/chatId. In that case, bind the
-              // event to the current stream conversation.
+              // Content chunks must be explicitly scoped so parallel chats never
+              // bleed text into each other when a backend omits routing fields.
+              if (isContentEvent && !eventConversationIdRaw && !eventChatIdRaw) {
+                continue;
+              }
+
+              // For non-content events, be tolerant with missing routing
+              // metadata and bind them to the current stream conversation.
               if (effectiveEventConversationId !== conversationId) {
                 continue;
               }
@@ -736,6 +820,17 @@ export function useStreamChat(deps: StreamChatDeps) {
                   }
                   fullContent += content;
                   session.fullContent = fullContent;
+                  chunkSeq += 1;
+                  const { activeConversationId, onStreamChunk } = getStreamCallbacks();
+                  onStreamChunk?.({
+                    conversationId,
+                    activeConversationId,
+                    requestId: streamRequestId,
+                    messageId,
+                    chunk: content,
+                    fullContent,
+                    seq: chunkSeq,
+                  });
                   if (isConversationActive(conversationId)) {
                     session.pendingContent = fullContent;
                     scheduleFlush(conversationId);
@@ -799,6 +894,15 @@ export function useStreamChat(deps: StreamChatDeps) {
                 };
 
                 finalize(msg, conversationId, "done");
+                const { activeConversationId, onStreamComplete } = getStreamCallbacks();
+                onStreamComplete?.({
+                  conversationId,
+                  activeConversationId,
+                  requestId: streamRequestId,
+                  messageId,
+                  content: fullContent,
+                  message: msg,
+                });
                 return { ok: true, content: fullContent, message: msg, response };
               }
 
@@ -821,6 +925,15 @@ export function useStreamChat(deps: StreamChatDeps) {
             };
 
             finalize(msg, conversationId, "done");
+            const { activeConversationId, onStreamComplete } = getStreamCallbacks();
+            onStreamComplete?.({
+              conversationId,
+              activeConversationId,
+              requestId: streamRequestId,
+              messageId,
+              content: fullContent,
+              message: msg,
+            });
             return { ok: true, content: fullContent, message: msg, response };
           }
 
@@ -841,6 +954,15 @@ export function useStreamChat(deps: StreamChatDeps) {
               }
               setAiState("idle", conversationId);
               setAiProcessSteps?.([], conversationId);
+              const { activeConversationId, onStreamAbort } = getStreamCallbacks();
+              onStreamAbort?.({
+                conversationId,
+                activeConversationId,
+                requestId: streamRequestId,
+                messageId,
+                content: fullContent,
+                reason: "cancelled",
+              });
               return { ok: false, content: fullContent, response, error: err };
             }
 
@@ -869,6 +991,16 @@ export function useStreamChat(deps: StreamChatDeps) {
               requestId: streamRequestId,
             };
             finalize(timeoutErrorMsg, conversationId, "error");
+            const { activeConversationId, onStreamError } = getStreamCallbacks();
+            onStreamError?.({
+              conversationId,
+              activeConversationId,
+              requestId: streamRequestId,
+              messageId,
+              content: fullContent,
+              error: abortError,
+              message: timeoutErrorMsg,
+            });
 
             return { ok: false, content: fullContent, response, error: abortError };
           }
@@ -897,6 +1029,16 @@ export function useStreamChat(deps: StreamChatDeps) {
           if (!session.finalizing) {
             finalize(errorMsg, conversationId, "error");
           }
+          const { activeConversationId, onStreamError } = getStreamCallbacks();
+          onStreamError?.({
+            conversationId,
+            activeConversationId,
+            requestId: streamRequestId,
+            messageId,
+            content: fullContent,
+            error: normalizedError,
+            message: errorMsg,
+          });
 
           return { ok: false, content: fullContent, message: errorMsg, response, error: normalizedError };
         } finally {
@@ -940,6 +1082,16 @@ export function useStreamChat(deps: StreamChatDeps) {
           requestId: baseRequestId,
         };
         finalize(errorMsg, conversationId, "error");
+        const { activeConversationId, onStreamError } = getStreamCallbacks();
+        onStreamError?.({
+          conversationId,
+          activeConversationId,
+          requestId: baseRequestId,
+          messageId,
+          content: lastContent,
+          error: lastError,
+          message: errorMsg,
+        });
         return { ok: false, content: lastContent, message: errorMsg, response: lastResponse, error: lastError };
       }
 
@@ -950,6 +1102,7 @@ export function useStreamChat(deps: StreamChatDeps) {
       abortConversation,
       finalize,
       flushNow,
+      getStreamCallbacks,
       getSession,
       isConversationActive,
       scheduleFlush,
@@ -959,48 +1112,11 @@ export function useStreamChat(deps: StreamChatDeps) {
   );
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
-      for (const [conversationId, session] of sessionsRef.current.entries()) {
-        if (session.abortController) {
-          session.abortController.abort();
-          session.abortController = null;
-        }
-        if (session.timeoutId) {
-          clearTimeout(session.timeoutId);
-          session.timeoutId = null;
-        }
-        if (session.firstTokenTimeoutId) {
-          clearTimeout(session.firstTokenTimeoutId);
-          session.firstTokenTimeoutId = null;
-        }
-        if (session.doneTimeoutId) {
-          clearTimeout(session.doneTimeoutId);
-          session.doneTimeoutId = null;
-        }
-        if (session.contentTokenTimeoutId) {
-          clearTimeout(session.contentTokenTimeoutId);
-          session.contentTokenTimeoutId = null;
-        }
-        if (session.idleRecoveryTimeoutId) {
-          clearTimeout(session.idleRecoveryTimeoutId);
-          session.idleRecoveryTimeoutId = null;
-        }
-        if (session.rafId !== null) {
-          cancelAnimationFrame(session.rafId);
-          session.rafId = null;
-        }
-        session.pendingRequestId = null;
-        session.pendingContent = null;
-        session.fullContent = "";
-        session.finalizing = false;
-        session.nextMessageId = null;
-      }
-      sessionsRef.current.clear();
-      abortControllerRef.current = null;
-      nextMessageIdRef.current = null;
-      streamingContentRef.current = "";
+      mountedRef.current = false;
     };
-  }, [streamingContentRef]);
+  }, []);
 
   const getPendingRequestId = useCallback((conversationId: string): string | null => {
     return sessionsRef.current.get(conversationId)?.pendingRequestId || null;

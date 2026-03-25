@@ -134,18 +134,21 @@ export const useStreamingStore = create<StreamingState>((set, get) => ({
         chatTitle: chatTitle || run.chatTitle,
       });
 
-      const isBackground = chatId !== activeChatId;
-      const newBadges = isBackground
+      const isHidden =
+        typeof document !== "undefined" && document.visibilityState !== "visible";
+      const isBackgroundChat = chatId !== activeChatId;
+      const shouldNotify = isBackgroundChat || isHidden;
+      const newBadges = isBackgroundChat
         ? { ...state.pendingBadges, [chatId]: (state.pendingBadges[chatId] || 0) + 1 }
         : state.pendingBadges;
 
       // Play ding + pill toast for foreground completions
-      if (!isBackground) {
+      if (!shouldNotify) {
         toastDone();
       }
 
       // Add notification if completing in background
-      const newNotifications = isBackground
+      const newNotifications = shouldNotify
         ? [
           ...state.notifications,
           {
@@ -178,12 +181,15 @@ export const useStreamingStore = create<StreamingState>((set, get) => ({
         chatTitle: chatTitle || run.chatTitle,
       });
 
-      const isBackground = chatId !== activeChatId;
-      const newBadges = isBackground
+      const isHidden =
+        typeof document !== "undefined" && document.visibilityState !== "visible";
+      const isBackgroundChat = chatId !== activeChatId;
+      const shouldNotify = isBackgroundChat || isHidden;
+      const newBadges = isBackgroundChat
         ? { ...state.pendingBadges, [chatId]: (state.pendingBadges[chatId] || 0) + 1 }
         : state.pendingBadges;
 
-      const newNotifications = isBackground
+      const newNotifications = shouldNotify
         ? [
           ...state.notifications,
           {

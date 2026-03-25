@@ -345,4 +345,83 @@ describe("useStreamChat conversation isolation", () => {
 
     vi.useRealTimers();
   });
+
+  it("continues finalizing a background stream after the chat view unmounts", async () => {
+    const sentMessages: any[] = [];
+    const completedRuns: Array<{ conversationId: string; content: string }> =
+      [];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const payload = JSON.parse(String(init?.body || "{}"));
+
+        return makeSseResponse(
+          [
+            {
+              event: "chunk",
+              data: {
+                conversationId: payload.conversationId,
+                requestId: payload.requestId,
+                content: "BACKGROUND_OK",
+              },
+            },
+            {
+              event: "done",
+              data: {
+                conversationId: payload.conversationId,
+                requestId: payload.requestId,
+              },
+            },
+          ],
+          15,
+        );
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => {
+      const [, setOptimisticMessages] = useState<any[]>([]);
+      const [, setStreamingContent] = useState("");
+      const [, setAiState] = useState<any>("idle");
+      const [, setAiProcessSteps] = useState<any[]>([]);
+      const streamingContentRef = useRef("");
+
+      return useStreamChat({
+        setOptimisticMessages,
+        onSendMessage: async (message) => {
+          sentMessages.push(message);
+          return undefined;
+        },
+        setStreamingContent,
+        streamingContentRef,
+        setAiState,
+        setAiProcessSteps,
+        getActiveConversationId: () => "chat_bg",
+        onStreamComplete: ({ conversationId, content }) => {
+          completedRuns.push({ conversationId, content });
+        },
+      });
+    });
+
+    const streamPromise = act(async () => {
+      await result.current.stream("/api/chat/stream", {
+        conversationId: "chat_bg",
+        chatId: "chat_bg",
+        body: {
+          messages: [{ role: "user", content: "sigue" }],
+          conversationId: "chat_bg",
+          requestId: "req_bg",
+        },
+      });
+    });
+
+    unmount();
+    await streamPromise;
+
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0]?.content).toContain("BACKGROUND_OK");
+    expect(completedRuns).toEqual([
+      { conversationId: "chat_bg", content: "BACKGROUND_OK" },
+    ]);
+  });
 });
