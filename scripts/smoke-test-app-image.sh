@@ -66,6 +66,7 @@ PY
 
 APP_PORT="$(pick_free_port)"
 BASE_URL="http://127.0.0.1:${APP_PORT}"
+ALLOWED_HOSTS="${SMOKE_ALLOWED_HOSTS:-127.0.0.1,127.0.0.1:${APP_PORT},localhost,localhost:${APP_PORT}}"
 
 pull_with_retry() {
   local image_ref="$1"
@@ -214,6 +215,8 @@ docker run -d \
   -e NODE_ENV=production \
   -e PORT=5000 \
   -e BASE_URL="${BASE_URL}" \
+  -e APP_URL="${BASE_URL}" \
+  -e ALLOWED_HOSTS="${ALLOWED_HOSTS}" \
   -e APP_VERSION="${APP_VERSION}" \
   -e APP_SHA="${APP_VERSION}" \
   -e DATABASE_URL="postgres://postgres:postgres@${POSTGRES_CONTAINER}:5432/iliagpt" \
