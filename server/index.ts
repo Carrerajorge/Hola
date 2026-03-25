@@ -171,6 +171,15 @@ export function log(message: string, source = "express") {
   Logger.info(`[${source}] ${message}`);
 }
 
+async function bootstrapOpenClawAsync(): Promise<void> {
+  try {
+    const { initializeOpenClaw } = await import("./openclaw/index");
+    await initializeOpenClaw(httpServer);
+  } catch (error) {
+    log(`[OpenClaw] initialization skipped after error: ${String((error as Error)?.message || error)}`);
+  }
+}
+
 (async () => {
   const isProduction = process.env.NODE_ENV === "production";
   const isTest = process.env.NODE_ENV === "test";
@@ -334,15 +343,6 @@ export function log(message: string, source = "express") {
     log(`[TokenRefresh] Failed to start: ${String((err as Error)?.message || err)}`);
   }
 
-  // Initialize OpenClaw agentic integration layer (feature-flagged).
-  // Fail-open: channel mirror/chat must keep working even if OpenClaw has a runtime issue.
-  try {
-    const { initializeOpenClaw } = await import("./openclaw/index");
-    await initializeOpenClaw(httpServer);
-  } catch (error) {
-    log(`[OpenClaw] initialization skipped after error: ${String((error as Error)?.message || error)}`);
-  }
-
   // Ensure unmatched API routes return consistent JSON (instead of Express' default HTML 404).
   // This MUST be registered after all routes, but before the API error handler.
   app.use("/api", (req, _res, next) => {
@@ -485,6 +485,11 @@ export function log(message: string, source = "express") {
           .catch((e) => log(`[Telegram] Webhook auto-config failed: ${e?.message || e}`));
       }, 1500);
     }
+
+    // Keep OpenClaw bootstrap fully off the readiness path.
+    setTimeout(() => {
+      void bootstrapOpenClawAsync();
+    }, 250);
 
     // Local/dev fallback: if webhook isn't publicly reachable, consume updates via getUpdates.
     if (!isProduction) {

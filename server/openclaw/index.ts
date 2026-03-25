@@ -1,7 +1,6 @@
 import type { Server as HttpServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { getOpenClawConfig } from "./config";
-import { initSkills } from "./skills/skillLoader";
 import { skillRegistry } from "./skills/skillRegistry";
 import {
   resolveEmbeddedOpenClawControlUiRootSync,
@@ -70,16 +69,8 @@ export async function initializeOpenClaw(
     // self-resolution edge cases in local/dev packaging layouts.
     const pluginsPreloaded = false;
 
-    try {
-      if (config.skills.enabled) {
-        await initSkills(config);
-      } else {
-        skillRegistry.clear();
-      }
-    } catch (error) {
-      warnings.push(
-        `[skills] ${(error as Error)?.message || String(error)}`,
-      );
+    if (!config.skills.enabled) {
+      skillRegistry.clear();
     }
 
     const state: OpenClawBootstrapState = {
