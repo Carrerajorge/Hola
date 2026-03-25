@@ -22,7 +22,7 @@ services:
       APP_VERSION: ${APP_VERSION:-dev}
       METRICS_PUBLIC: ${METRICS_PUBLIC:-false}
       PORT: "5000"
-      DATABASE_URL: postgres://postgres:postgres@hola-postgres:5432/iliagpt
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@hola-postgres:5432/${POSTGRES_DB:-iliagpt}
       REDIS_URL: redis://:${REDIS_PASSWORD:-redis_secure_password_change_me}@hola-redis:6379
       AGENT_WORKSPACE_ROOT: /app/sandbox_workspace
       SHELL_COMMAND_SANDBOX_MODE: runner
@@ -96,7 +96,7 @@ services:
     environment:
       NODE_ENV: production
       APP_VERSION: ${APP_VERSION:-dev}
-      DATABASE_URL: postgres://postgres:postgres@hola-postgres:5432/iliagpt
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@hola-postgres:5432/${POSTGRES_DB:-iliagpt}
       REDIS_URL: redis://:${REDIS_PASSWORD:-redis_secure_password_change_me}@hola-redis:6379
       OCR_SERVICE_URL: http://hola-ocr:8000
     volumes:

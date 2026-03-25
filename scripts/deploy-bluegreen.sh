@@ -940,6 +940,26 @@ if ! REDIS_PASSWORD="$(validate_secret "REDIS_PASSWORD" "${REDIS_PASSWORD}" 20)"
 fi
 export REDIS_PASSWORD
 
+POSTGRES_USER="$(trim "$(load_env_value "POSTGRES_USER" ".env.production" || true)")"
+POSTGRES_USER="${POSTGRES_USER:-postgres}"
+export POSTGRES_USER
+
+POSTGRES_PASSWORD="$(trim "$(load_env_value "POSTGRES_PASSWORD" ".env.production" || true)")"
+if [ -z "${POSTGRES_PASSWORD}" ]; then
+  loge "POSTGRES_PASSWORD is missing in .env.production"
+  exit 1
+fi
+export POSTGRES_PASSWORD
+
+POSTGRES_DB="$(trim "$(load_env_value "POSTGRES_DB" ".env.production" || true)")"
+POSTGRES_DB="${POSTGRES_DB:-iliagpt}"
+export POSTGRES_DB
+
+POSTGRES_VOLUME_NAME="$(trim "$(load_env_value "POSTGRES_VOLUME_NAME" ".env.production" || true)")"
+if [ -n "${POSTGRES_VOLUME_NAME}" ]; then
+  export POSTGRES_VOLUME_NAME
+fi
+
 DEPLOY_STATE_HMAC_KEY="$(load_env_value "DEPLOY_STATE_HMAC_KEY" ".env.production" || true)"
 if [ -n "${DEPLOY_STATE_HMAC_KEY}" ]; then
   if ! DEPLOY_STATE_HMAC_KEY="$(validate_secret "DEPLOY_STATE_HMAC_KEY" "${DEPLOY_STATE_HMAC_KEY}" 32)"; then
@@ -978,6 +998,35 @@ else
   ACTIVE_SLOT="blue"
 fi
 
+case "${ACTIVE_SLOT}" in
+  blue|green) ;;
+  *)
+    logw "Deploy state reported invalid active slot '${ACTIVE_SLOT}'. Falling back to blue."
+    ACTIVE_SLOT="blue"
+    ACTIVE_IMAGE_TAG=""
+    ACTIVE_APP_VERSION=""
+    ;;
+esac
+
+OBSERVED_ACTIVE_PORT="$(
+  grep -oE 'server 127\\.0\\.0\\.1:[0-9]+' "${NGINX_CONF_DIR}/iliagpt-upstream.conf" 2>/dev/null |
+    sed -E 's/.*://' |
+    head -n 1 ||
+    true
+)"
+if [ "${OBSERVED_ACTIVE_PORT}" = "5000" ] || [ "${OBSERVED_ACTIVE_PORT}" = "5001" ]; then
+  OBSERVED_ACTIVE_SLOT="blue"
+  if [ "${OBSERVED_ACTIVE_PORT}" = "5001" ]; then
+    OBSERVED_ACTIVE_SLOT="green"
+  fi
+  if [ "${OBSERVED_ACTIVE_SLOT}" != "${ACTIVE_SLOT}" ]; then
+    logw "Deploy state says active slot is ${ACTIVE_SLOT}, but Nginx upstream currently points to ${OBSERVED_ACTIVE_SLOT} (${OBSERVED_ACTIVE_PORT}). Reconciling to observed active slot."
+    ACTIVE_SLOT="${OBSERVED_ACTIVE_SLOT}"
+    ACTIVE_IMAGE_TAG=""
+    ACTIVE_APP_VERSION=""
+  fi
+fi
+
 if [ "${ACTIVE_SLOT}" = "blue" ]; then
   NEW_SLOT="green"
   NEW_PORT="5001"
@@ -1009,6 +1058,8 @@ fi
 # ── Compose helpers ─────────────────────────────────────────
 infra() {
   IMAGE_TAG="${IMAGE_TAG}" REDIS_PASSWORD="${REDIS_PASSWORD}" \
+    POSTGRES_USER="${POSTGRES_USER}" POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
+    POSTGRES_DB="${POSTGRES_DB}" POSTGRES_VOLUME_NAME="${POSTGRES_VOLUME_NAME:-}" \
     docker compose -p hola-infra -f "${INFRA_COMPOSE}" "$@"
 }
 
@@ -1049,6 +1100,8 @@ slot_compose() {
     IMAGE_TAG="${image_tag}" APP_VERSION="${app_version}" \
     SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN}" \
     REDIS_PASSWORD="${REDIS_PASSWORD}" \
+    POSTGRES_USER="${POSTGRES_USER}" POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
+    POSTGRES_DB="${POSTGRES_DB}" \
     docker compose -p "hola-${slot_name}" -f "${SLOT_COMPOSE}" "$@"
 }
 
@@ -1623,7 +1676,7 @@ log "[4/14] Running database migrations (timeout: ${MIGRATION_TIMEOUT}s)..."
 
 
 # Create a pre-migration DB snapshot marker
-docker exec hola-postgres psql -U postgres -d iliagpt -c \
+docker exec hola-postgres psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -c \
   "CREATE TABLE IF NOT EXISTS _deploy_migrations_log (ts timestamptz DEFAULT now(), version text, image text);
    INSERT INTO _deploy_migrations_log (version, image) VALUES ('${APP_VERSION}', '${IMAGE_TAG}');" \
   > /dev/null 2>&1 || logw "Could not write migration marker (non-fatal)"
@@ -1634,7 +1687,7 @@ log "  Resolved hola-postgres IP: ${PG_IP}"
 
 if ! timeout "${MIGRATION_TIMEOUT}" docker run --rm --pull never --network hola-net \
   --env-file .env.production \
-  -e DATABASE_URL="postgres://postgres:postgres@${PG_IP}:5432/iliagpt" \
+  -e DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${PG_IP}:5432/${POSTGRES_DB}" \
   -e NODE_ENV=production \
   --memory=512m --cpus=1 \
   "${LOCAL_APP_IMAGE_ID}" \

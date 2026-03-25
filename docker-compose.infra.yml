@@ -8,10 +8,12 @@ services:
     image: pgvector/pgvector:pg15
     container_name: hola-postgres
     hostname: hola-postgres
+    env_file:
+      - .env.production
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: iliagpt
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-iliagpt}
       POSTGRES_INITDB_ARGS: "--data-checksums --encoding=UTF8 --locale=C"
     command:
       - "postgres"
@@ -70,7 +72,7 @@ services:
     networks:
       - hola-net
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres -d iliagpt && psql -U postgres -d iliagpt -c 'SELECT 1' > /dev/null 2>&1" ]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-iliagpt} && psql -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-iliagpt} -c 'SELECT 1' > /dev/null 2>&1" ]
       interval: 10s
       timeout: 5s
       start_period: 30s
@@ -365,7 +367,7 @@ networks:
 
 volumes:
   postgres_data:
-    name: hola_postgres_data
+    name: ${POSTGRES_VOLUME_NAME:-iliagpt_postgres_data}
   redis_data:
     name: hola_redis_data
   ocr_models:
