@@ -302,15 +302,15 @@ export default function LoginPage() {
     if (!loginHint && email && email.includes("@")) {
       params.set("login_hint", email);
     }
-    // For Gemini and OpenAI providers, always hint towards Gmail domain
-    // so Google pre-selects the user's Gmail account automatically
-    if ((provider === "gemini" || provider === "openai") && !params.has("login_hint") && email && email.endsWith("@gmail.com")) {
-      params.set("login_hint", email);
-    }
     // Pass provider_hint so the server can redirect to the right flow after Google OAuth
     // This enables auto-triggering Gemini CLI or OpenAI Codex OAuth after login
     if (provider !== "google") {
       params.set("provider_hint", provider);
+      // Pre-store provider hint in sessionStorage for reliability
+      // in case the server redirect loses the param
+      try {
+        sessionStorage.setItem("iliagpt:pending-provider-connect", provider);
+      } catch {}
     }
     const query = params.toString();
     window.location.assign(`/api/auth/google${query ? `?${query}` : ""}`);

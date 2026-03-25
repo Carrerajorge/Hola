@@ -209,6 +209,12 @@ export function renderGeminiCliOAuthBridge(
         }
         setTimeout(() => {
           try { window.close(); } catch {}
+          // If we couldn't close (same-window navigation), redirect back to ILIAGPT
+          setTimeout(() => {
+            if (!window.closed) {
+              window.location.href = "/?auth=success&provider=gemini";
+            }
+          }, 500);
         }, 900);
       })();
     </script>

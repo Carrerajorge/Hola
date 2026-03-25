@@ -179,13 +179,19 @@ export function ProviderConnectionHubButton({
     const handler = (event: Event) => {
       const detail = (event as CustomEvent).detail;
       if (!detail?.provider) return;
+      const provider = detail.provider;
+      // Only act if the relevant dialog ref is ready
+      if (provider === "gemini" && !geminiOpenDialogRef.current) return;
+      if (provider === "openai" && !openaiOpenDialogRef.current) return;
+      // Clear the pending hint from sessionStorage since we're handling it
+      try { sessionStorage.removeItem("iliagpt:pending-provider-connect"); } catch {}
       // Open the hub dialog first
       setOpen(true);
       // Then auto-open the specific provider dialog after a small delay
       const timer = window.setTimeout(() => {
-        if (detail.provider === "gemini" && geminiOpenDialogRef.current) {
+        if (provider === "gemini" && geminiOpenDialogRef.current) {
           geminiOpenDialogRef.current();
-        } else if (detail.provider === "openai" && openaiOpenDialogRef.current) {
+        } else if (provider === "openai" && openaiOpenDialogRef.current) {
           openaiOpenDialogRef.current();
         }
       }, 400);

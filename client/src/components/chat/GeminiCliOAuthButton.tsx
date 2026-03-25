@@ -444,11 +444,14 @@ export function GeminiCliOAuthButton({
       );
       popupRef.current = popup;
       if (!popup) {
+        // Popup was blocked — fall back to same-window navigation so the user
+        // can still complete the OAuth flow without manual URL pasting.
         toast({
-          title: "Ventana bloqueada",
+          title: "Redirigiendo a Google",
           description:
-            "Abre manualmente la URL del flujo o habilita popups para continuar.",
+            "El popup fue bloqueado. Redirigiendo en la misma ventana...",
         });
+        window.location.assign(payload.authUrl);
         return;
       }
       popup.focus();

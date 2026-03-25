@@ -109,22 +109,47 @@ export default function Home() {
 
   // After OAuth login with provider_hint, auto-trigger the provider connection dialog.
   // The server redirects to /?auth=success&provider=gemini (or openai) after Google OAuth.
+  // We persist the hint in sessionStorage so it survives component re-mounts and lazy loading.
   useEffect(() => {
     if (!isReady || !user) return;
     const params = new URLSearchParams(window.location.search);
-    const provider = params.get("provider");
-    if (provider === "gemini" || provider === "openai") {
-      // Clean up URL first
+    const providerFromUrl = params.get("provider");
+    if (providerFromUrl === "gemini" || providerFromUrl === "openai") {
+      // Persist in sessionStorage so we don't lose it if the component remounts
+      try {
+        sessionStorage.setItem("iliagpt:pending-provider-connect", providerFromUrl);
+      } catch {}
+      // Clean up URL
       params.delete("provider");
       params.delete("auth");
       const rest = params.toString();
       window.history.replaceState({}, "", rest ? `${window.location.pathname}?${rest}` : window.location.pathname);
-      // Dispatch event so provider dialogs can auto-open
-      // Small delay to let components mount first
-      const timer = window.setTimeout(() => {
-        window.dispatchEvent(new CustomEvent("auto-connect-provider", { detail: { provider } }));
-      }, 600);
-      return () => window.clearTimeout(timer);
+    }
+
+    // Check for pending provider connect (from URL or previous sessionStorage)
+    let pendingProvider: string | null = null;
+    try {
+      pendingProvider = sessionStorage.getItem("iliagpt:pending-provider-connect");
+    } catch {}
+
+    if (pendingProvider === "gemini" || pendingProvider === "openai") {
+      // Dispatch event with retry logic - components may not be mounted yet
+      let attempts = 0;
+      const maxAttempts = 5;
+      const dispatch = () => {
+        attempts++;
+        window.dispatchEvent(new CustomEvent("auto-connect-provider", { detail: { provider: pendingProvider } }));
+        if (attempts >= maxAttempts) {
+          // Give up and clean sessionStorage
+          try { sessionStorage.removeItem("iliagpt:pending-provider-connect"); } catch {}
+        }
+      };
+      // Stagger dispatches: 600ms, 1500ms, 3000ms, 5000ms, 8000ms
+      const delays = [600, 1500, 3000, 5000, 8000];
+      const timers = delays.slice(0, maxAttempts).map((delay, i) =>
+        window.setTimeout(dispatch, delay),
+      );
+      return () => timers.forEach((t) => window.clearTimeout(t));
     }
   }, [isReady, user]);
 
