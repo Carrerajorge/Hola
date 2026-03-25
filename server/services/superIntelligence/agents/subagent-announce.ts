@@ -31,7 +31,7 @@ import {
   isEmbeddedPiRunActive,
   queueEmbeddedPiMessage,
   waitForEmbeddedPiRunEnd,
-} from "./pi-embedded.js";
+} from "../../../openclaw/src/agents/pi-embedded-runner/runs.js";
 import {
   runSubagentAnnounceDispatch,
   type SubagentAnnounceDeliveryResult,

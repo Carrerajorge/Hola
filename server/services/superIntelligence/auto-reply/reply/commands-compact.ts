@@ -1,9 +1,9 @@
 import {
   abortEmbeddedPiRun,
-  compactEmbeddedPiSession,
   isEmbeddedPiRunActive,
   waitForEmbeddedPiRunEnd,
-} from "../../agents/pi-embedded.js";
+} from "../../../../openclaw/src/agents/pi-embedded-runner/runs.js";
+import { compactEmbeddedPiSession } from "../../agents/pi-embedded-runner/compact.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import {
   resolveFreshSessionTotalTokens,

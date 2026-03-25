@@ -180,7 +180,7 @@ import { promptAnalysisService } from "../services/promptAnalysisService";
 import { normalizeChatRequestProvider } from "../lib/chatProviderNormalization";
 import { getGoogleGeminiCliOAuthStatus } from "../services/googleGeminiCliOAuthService";
 import { getOpenAICodexOAuthStatus } from "../services/openAICodexOAuthService";
-import { runEmbeddedPiAgent } from "../services/superIntelligence/agents/pi-embedded.js";
+import { runEmbeddedPiAgent } from "../openclaw/src/agents/pi-embedded-runner/run.js";
 import { resolveUserScopedAgentDir } from "../services/userScopedAgentDir.js";
 import * as macos from "../lib/macos";
 import { browserAdapter } from "../agent/webtool/browserAdapter";
