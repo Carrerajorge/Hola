@@ -5,6 +5,8 @@ IFS=$'\n\t'
 IMAGE_TAG="${IMAGE_TAG:?IMAGE_TAG is required}"
 APP_IMAGE="${APP_IMAGE:-ghcr.io/carrerajorge/iliagpt-app:${IMAGE_TAG}}"
 SANDBOX_IMAGE="${SANDBOX_IMAGE:-ghcr.io/carrerajorge/iliagpt-sandbox:${IMAGE_TAG}}"
+POSTGRES_IMAGE="${POSTGRES_IMAGE:-pgvector/pgvector:pg15}"
+REDIS_IMAGE="${REDIS_IMAGE:-redis:alpine}"
 APP_VERSION="${APP_VERSION:-${IMAGE_TAG#sha-}}"
 EXPECTED_OPENCLAW_VERSION="${EXPECTED_OPENCLAW_VERSION:-}"
 IMAGE_PULL_TIMEOUT_SECONDS="${IMAGE_PULL_TIMEOUT_SECONDS:-600}"
@@ -92,15 +94,21 @@ run_with_timeout() {
 
 ensure_image_available() {
   local image_ref="$1"
+  local attempt
   if docker image inspect "${image_ref}" >/dev/null 2>&1; then
     log "Image already available locally: ${image_ref}"
     return 0
   fi
 
-  log "Pulling image ${image_ref}..."
-  if ! run_with_timeout "${IMAGE_PULL_TIMEOUT_SECONDS}" docker pull "${image_ref}"; then
-    fail "Unable to pull required image ${image_ref}."
-  fi
+  for attempt in 1 2 3; do
+    log "Pulling image ${image_ref} (attempt ${attempt}/3)..."
+    if run_with_timeout "${IMAGE_PULL_TIMEOUT_SECONDS}" docker pull "${image_ref}"; then
+      return 0
+    fi
+    sleep $((attempt * 5))
+  done
+
+  fail "Unable to pull required image ${image_ref}."
 }
 
 wait_for_container_health() {
@@ -233,6 +241,11 @@ PY
 log "Creating isolated Docker network ${NETWORK}..."
 docker network create "${NETWORK}" >/dev/null
 
+ensure_image_available "${POSTGRES_IMAGE}"
+ensure_image_available "${REDIS_IMAGE}"
+ensure_image_available "${APP_IMAGE}"
+ensure_image_available "${SANDBOX_IMAGE}"
+
 log "Starting ephemeral Postgres for production boot smoke..."
 docker run -d \
   --name "${POSTGRES_CONTAINER}" \
@@ -245,7 +258,7 @@ docker run -d \
   --health-timeout=5s \
   --health-retries=20 \
   --health-start-period=10s \
-  pgvector/pgvector:pg15 >/dev/null
+  "${POSTGRES_IMAGE}" >/dev/null
 
 log "Starting ephemeral Redis for production boot smoke..."
 docker run -d \
@@ -256,16 +269,13 @@ docker run -d \
   --health-timeout=3s \
   --health-retries=20 \
   --health-start-period=5s \
-  redis:alpine \
+  "${REDIS_IMAGE}" \
   redis-server \
   --requirepass "${REDIS_PASSWORD}" \
   --appendonly no >/dev/null
 
 wait_for_container_health "${POSTGRES_CONTAINER}" 45 2
 wait_for_container_health "${REDIS_CONTAINER}" 45 2
-
-ensure_image_available "${APP_IMAGE}"
-ensure_image_available "${SANDBOX_IMAGE}"
 
 write_env_file
 
