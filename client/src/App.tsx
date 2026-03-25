@@ -19,7 +19,7 @@ import { OfflineIndicator } from "@/components/OfflineIndicator";
 import { SkipLink } from "@/lib/accessibility";
 import { trackWorkspaceEvent } from "@/lib/analytics";
 import { normalizeAppBuildVersion, recoverFromChunkError } from "@/lib/chunk-recovery";
-import { AlertTriangle, CheckCircle2, Info, Loader2, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Info, Loader2, X, XCircle } from "lucide-react";
 import LoginPage from "@/pages/login";
 import LoginApprovePage from "@/pages/login-approve";
 import SignupPage from "@/pages/signup";
@@ -57,7 +57,7 @@ const PageLoader = () => (
   </div>
 );
 
-function ToastIconFrame({
+function ToastGlyph({
   tone,
   children,
 }: {
@@ -66,7 +66,7 @@ function ToastIconFrame({
 }) {
   return (
     <span
-      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border shadow-[inset_0_1px_0_rgba(255,255,255,0.35)] ${tone}`}
+      className={`flex h-4 w-4 shrink-0 items-center justify-center ${tone}`}
     >
       {children}
     </span>
@@ -74,30 +74,31 @@ function ToastIconFrame({
 }
 
 const sonnerIcons = {
+  close: <X className="h-3.5 w-3.5" />,
   success: (
-    <ToastIconFrame tone="border-emerald-200/90 bg-emerald-500/12 text-emerald-600 dark:border-emerald-500/30 dark:bg-emerald-500/18 dark:text-emerald-300">
-      <CheckCircle2 className="h-5 w-5" />
-    </ToastIconFrame>
+    <ToastGlyph tone="text-emerald-600/80 dark:text-emerald-300/85">
+      <CheckCircle2 className="h-4 w-4" />
+    </ToastGlyph>
   ),
   error: (
-    <ToastIconFrame tone="border-rose-200/90 bg-rose-500/12 text-rose-600 dark:border-rose-500/30 dark:bg-rose-500/18 dark:text-rose-300">
-      <XCircle className="h-5 w-5" />
-    </ToastIconFrame>
+    <ToastGlyph tone="text-rose-600/80 dark:text-rose-300/85">
+      <XCircle className="h-4 w-4" />
+    </ToastGlyph>
   ),
   warning: (
-    <ToastIconFrame tone="border-amber-200/90 bg-amber-500/12 text-amber-600 dark:border-amber-500/30 dark:bg-amber-500/18 dark:text-amber-200">
-      <AlertTriangle className="h-5 w-5" />
-    </ToastIconFrame>
+    <ToastGlyph tone="text-amber-600/80 dark:text-amber-200/85">
+      <AlertTriangle className="h-4 w-4" />
+    </ToastGlyph>
   ),
   info: (
-    <ToastIconFrame tone="border-sky-200/90 bg-sky-500/12 text-sky-600 dark:border-sky-500/30 dark:bg-sky-500/18 dark:text-sky-300">
-      <Info className="h-5 w-5" />
-    </ToastIconFrame>
+    <ToastGlyph tone="text-sky-600/80 dark:text-sky-300/85">
+      <Info className="h-4 w-4" />
+    </ToastGlyph>
   ),
   loading: (
-    <ToastIconFrame tone="border-violet-200/90 bg-violet-500/12 text-violet-600 dark:border-violet-500/30 dark:bg-violet-500/18 dark:text-violet-300">
-      <Loader2 className="h-5 w-5 animate-spin" />
-    </ToastIconFrame>
+    <ToastGlyph tone="text-violet-600/80 dark:text-violet-300/85">
+      <Loader2 className="h-4 w-4 animate-spin" />
+    </ToastGlyph>
   ),
 };
 
@@ -114,6 +115,8 @@ const sonnerToastOptions = {
     content: "iliagpt-toast__content",
     title: "iliagpt-toast__title",
     description: "iliagpt-toast__description",
+    icon: "iliagpt-toast__icon",
+    loader: "iliagpt-toast__loader",
     closeButton: "iliagpt-toast__close",
     actionButton: "iliagpt-toast__action",
     cancelButton: "iliagpt-toast__cancel",
@@ -459,8 +462,8 @@ function AppContent() {
       <SonnerToaster
         position="top-right"
         closeButton
-        visibleToasts={4}
-        expand
+        visibleToasts={3}
+        expand={false}
         icons={sonnerIcons}
         toastOptions={sonnerToastOptions}
         className="iliagpt-sonner"
