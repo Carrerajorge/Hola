@@ -37,6 +37,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { DEFAULT_OPENCLAW_RELEASE_TAG } from "@shared/openclawRelease";
+
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -139,7 +141,7 @@ interface OpenClawCapabilityStats {
   gapsByCategory: Record<string, number>;
 }
 
-const OPENCLAW_RELEASE_TAG = "v2026.3.22";
+const OPENCLAW_RELEASE_TAG = DEFAULT_OPENCLAW_RELEASE_TAG;
 const OPENCLAW_RELEASE_REFRESH_MS = 15 * 60 * 1000;
 const CODEX_PROFILE_SEQUENCE: readonly CodexExecutionProfile[] = CODEX_EXECUTION_PROFILE_OPTIONS.map((option) => option.value);
 
@@ -186,9 +188,9 @@ function formatClock(timestamp: number): string {
 }
 
 function formatFullDate(value?: string | null): string {
-  if (!value) return "Sin fecha remota";
+  if (!value) return "Sin fecha disponible";
   const timestamp = new Date(value).getTime();
-  if (!Number.isFinite(timestamp)) return "Sin fecha remota";
+  if (!Number.isFinite(timestamp)) return "Sin fecha disponible";
   return new Intl.DateTimeFormat("es-BO", {
     year: "numeric",
     month: "long",
@@ -354,10 +356,10 @@ function getOpenClawSyncTone(status: OpenClawReleaseSyncStatus): string {
 }
 
 function getOpenClawSyncLabel(status: OpenClawReleaseSyncStatus): string {
-  if (status === "synced") return "Sincronizado";
-  if (status === "update_available") return "Nueva release detectada";
-  if (status === "tracking_requested") return "Siguiendo release base";
-  return "Modo local";
+  if (status === "synced") return "Integrado";
+  if (status === "update_available") return "Referencia embebida";
+  if (status === "tracking_requested") return "Referencia parcial";
+  return "Bundle local";
 }
 
 async function fetchOpenClawReleaseSnapshot(signal?: AbortSignal): Promise<OpenClawReleaseSnapshot> {
@@ -371,12 +373,20 @@ async function fetchOpenClawReleaseSnapshot(signal?: AbortSignal): Promise<OpenC
 
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new Error(typeof payload?.error === "string" ? payload.error : "No se pudo sincronizar OpenClaw.");
+    throw new Error(
+      typeof payload?.error === "string"
+        ? payload.error
+        : "No se pudieron cargar los metadatos nativos de OpenClaw.",
+    );
   }
 
   const payload = await response.json();
   if (!payload?.success) {
-    throw new Error(typeof payload?.error === "string" ? payload.error : "No se pudo sincronizar OpenClaw.");
+    throw new Error(
+      typeof payload?.error === "string"
+        ? payload.error
+        : "No se pudieron cargar los metadatos nativos de OpenClaw.",
+    );
   }
 
   return payload as OpenClawReleaseSnapshot;
@@ -540,7 +550,7 @@ export default function CodexPage() {
           nextErrors.push(
             releaseResult.reason instanceof Error
               ? releaseResult.reason.message
-              : "No se pudo sincronizar OpenClaw.",
+              : "No se pudieron cargar los metadatos nativos de OpenClaw.",
           );
         }
 
@@ -594,6 +604,9 @@ export default function CodexPage() {
   const releaseNotes = activeRelease?.notes || "";
   const releaseSyncStatus = openClawRelease?.sync.status || "offline";
   const releaseSyncLabel = getOpenClawSyncLabel(releaseSyncStatus);
+  const bundledReleaseLabel =
+    latestRelease?.tagName ||
+    (openClawRelease?.bundled.version ? `v${openClawRelease.bundled.version}` : null);
   const topGapCategories = useMemo(
     () =>
       Object.entries(openClawStats?.gapsByCategory || {})
@@ -688,12 +701,12 @@ export default function CodexPage() {
       setOpenClawStats(stats);
       setOpenClawError(null);
       toast.success("OpenClaw actualizado", {
-        description: "Traje la release, la cobertura y verifiqué si hay cambios nuevos en GitHub.",
+        description: "Recargué la metadata embebida y la cobertura local de OpenClaw.",
       });
     } catch (error) {
-      setOpenClawError(error instanceof Error ? error.message : "No se pudo sincronizar OpenClaw.");
-      toast.error("No se pudo sincronizar OpenClaw", {
-        description: error instanceof Error ? error.message : "Error inesperado al consultar la release.",
+      setOpenClawError(error instanceof Error ? error.message : "No se pudieron cargar los metadatos nativos de OpenClaw.");
+      toast.error("No se pudo actualizar la metadata nativa", {
+        description: error instanceof Error ? error.message : "Error inesperado al leer la release embebida.",
       });
     } finally {
       setIsOpenClawLoading(false);
@@ -1285,15 +1298,17 @@ export default function CodexPage() {
                             </p>
                           </div>
                           <div className="rounded-2xl border border-[var(--codex-border)] bg-[#fbfaf6] px-4 py-4">
-                            <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Publicada</p>
+                            <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Referencia local</p>
                             <p className="mt-2 text-lg font-semibold">{formatFullDate(activeRelease?.publishedAt)}</p>
-                            <p className="mt-1 text-sm text-[var(--codex-muted)]">Release oficial consultada desde GitHub</p>
+                            <p className="mt-1 text-sm text-[var(--codex-muted)]">Metadata leída desde el OpenClaw embebido</p>
                           </div>
                           <div className="rounded-2xl border border-[var(--codex-border)] bg-[#fbfaf6] px-4 py-4">
-                            <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Última detectada</p>
-                            <p className="mt-2 text-lg font-semibold">{latestRelease?.tagName || "Sin señal remota"}</p>
+                            <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Build integrada</p>
+                            <p className="mt-2 text-lg font-semibold">{bundledReleaseLabel || "Sin bundle local"}</p>
                             <p className="mt-1 text-sm text-[var(--codex-muted)]">
-                              {latestRelease?.tagName === activeRelease?.tagName ? "Ya está alineada con esta vista." : "Hay cambios nuevos listos para reflejarse."}
+                              {bundledReleaseLabel === activeRelease?.tagName
+                                ? "La build activa ya expone esta misma versión."
+                                : "El bundle local quedó detectado para esta vista."}
                             </p>
                           </div>
                         </div>
@@ -1338,8 +1353,10 @@ export default function CodexPage() {
                               <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Notas importantes</p>
                               <div className="mt-4 space-y-3 text-sm leading-6 text-[var(--codex-muted)]">
                                 {(activeRelease?.importantNotes.length ? activeRelease.importantNotes : [
-                                  "La web consulta la release fija y también revisa la última release disponible.",
-                                  "Si OpenClaw cambia en GitHub, esta vista puede mostrar el nuevo estado al refrescarse.",
+                                  "La vista lee la release fijada desde el OpenClaw embebido en esta build.",
+                                  bundledReleaseLabel
+                                    ? `Bundle detectado: ${bundledReleaseLabel}.`
+                                    : "El bundle local se resuelve desde la instalación embebida de OpenClaw.",
                                 ]).map((note, index) => (
                                   <div key={`${note}-${index}`} className="rounded-2xl bg-[#f7f5ef] px-4 py-3 text-[var(--codex-ink)]">
                                     {note}
@@ -1353,15 +1370,15 @@ export default function CodexPage() {
 
                       <div className="space-y-4">
                         <section className="rounded-[32px] border border-[var(--codex-border)] bg-[var(--codex-panel-soft)] p-5 shadow-[var(--codex-shadow)]">
-                          <p className="text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">Sincronización web</p>
+                          <p className="text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">Referencia nativa</p>
                           <p className="mt-3 text-base leading-7 text-[var(--codex-ink)]">
                             {openClawRelease?.sync.summary ||
-                              "La vista queda preparada para revisar OpenClaw y detectar cambios remotos automáticamente."}
+                              "La vista usa metadata embebida para mostrar OpenClaw sin depender de consultas remotas."}
                           </p>
                           <div className="mt-4 space-y-3 text-sm text-[var(--codex-muted)]">
                             <p>Última revisión: {formatFullDate(openClawRelease?.syncedAt)}</p>
                             <p>Frecuencia automática: cada {openClawRelease?.sync.autoRefreshMinutes || 15} minutos.</p>
-                            <p>Reacciones en GitHub: {formatNumber(activeRelease?.reactionCount || 0)}</p>
+                            <p>Bundle detectado: {bundledReleaseLabel || "Sin bundle local"}</p>
                             <p>Cobertura verificada: {typeof openClawStats?.coveragePercent === "number" ? `${openClawStats.coveragePercent}%` : "Sin dato"}</p>
                           </div>
                           {openClawError ? (
@@ -1577,7 +1594,7 @@ export default function CodexPage() {
                       OpenClaw listo para mostrarse en tu plataforma
                     </h1>
                     <p className="mt-4 max-w-2xl text-lg leading-8 text-[var(--codex-muted)]">
-                      OpenClaw queda integrado dentro de un workspace dedicado para que el usuario vea la release oficial, entienda sus cambios y use tu plataforma segura desde aquí.
+                      OpenClaw queda integrado dentro de un workspace dedicado para que el usuario vea la versión embebida, entienda sus cambios y use tu plataforma segura desde aquí.
                     </p>
                     <div className="mt-8 grid w-full gap-3 text-left md:grid-cols-3">
                       <div className="rounded-2xl border border-[var(--codex-border)] bg-[#fbfaf6] px-4 py-4">
@@ -1591,9 +1608,9 @@ export default function CodexPage() {
                         <p className="mt-1 text-sm text-[var(--codex-muted)]">{openClawRelease?.sync.summary || "Esperando sincronización inicial."}</p>
                       </div>
                       <div className="rounded-2xl border border-[var(--codex-border)] bg-[#fbfaf6] px-4 py-4">
-                        <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Publicada</p>
-                        <p className="mt-2 text-lg font-semibold">{formatFullDate(activeRelease?.publishedAt)}</p>
-                        <p className="mt-1 text-sm text-[var(--codex-muted)]">GitHub oficial de OpenClaw</p>
+                        <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Build integrada</p>
+                        <p className="mt-2 text-lg font-semibold">{bundledReleaseLabel || activeRelease?.tagName || OPENCLAW_RELEASE_TAG}</p>
+                        <p className="mt-1 text-sm text-[var(--codex-muted)]">Bundle local detectado en esta instalación</p>
                       </div>
                     </div>
                     <div className="mt-3 grid w-full gap-3 text-left md:grid-cols-3">
