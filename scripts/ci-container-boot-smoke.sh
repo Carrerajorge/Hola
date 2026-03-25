@@ -43,8 +43,30 @@ s.close()
 PY
 }
 
+reserve_host_port_excluding() {
+  local excluded_port="${1:-}"
+  local candidate=""
+
+  while true; do
+    candidate="$(reserve_host_port)"
+    if [ -z "${candidate}" ]; then
+      continue
+    fi
+    if [ -n "${excluded_port}" ] && [ "${candidate}" = "${excluded_port}" ]; then
+      continue
+    fi
+    printf '%s\n' "${candidate}"
+    return 0
+  done
+}
+
+is_port_bind_error() {
+  local output="${1:-}"
+  printf '%s' "${output}" | grep -Eqi 'port is already allocated|address already in use|bind for 127\.0\.0\.1:'
+}
+
 HOST_PORT="$(reserve_host_port)"
-SANDBOX_HOST_PORT="$(reserve_host_port)"
+SANDBOX_HOST_PORT="$(reserve_host_port_excluding "${HOST_PORT}")"
 
 log() {
   echo "[ci-container-smoke] $*"
@@ -207,6 +229,74 @@ ENABLE_OPENCLAW_STREAMING=true
 EOF
 }
 
+start_sandbox_container() {
+  local attempt=1
+  local docker_error=""
+
+  while [ "${attempt}" -le 3 ]; do
+    log "Booting the sandbox runner image on host port ${SANDBOX_HOST_PORT} (attempt ${attempt}/3)..."
+    if docker_error="$(
+      docker run -d \
+        --name "${SANDBOX_CONTAINER}" \
+        --network "${NETWORK}" \
+        -p "127.0.0.1:${SANDBOX_HOST_PORT}:8080" \
+        --env-file "${ENV_FILE}" \
+        -e SANDBOX_RUNNER_PORT=8080 \
+        -e AGENT_WORKSPACE_ROOT=/workspace_root \
+        -e SHELL_COMMAND_DOCKER_IMAGE=debian:bookworm-slim \
+        -e SHELL_COMMAND_DOCKER_CPUS=1 \
+        -e SHELL_COMMAND_DOCKER_MEMORY=512m \
+        -e SHELL_COMMAND_DOCKER_PIDS=256 \
+        -v /var/run/docker.sock:/var/run/docker.sock:ro \
+        "${SANDBOX_IMAGE}" 2>&1 >/dev/null
+    )"; then
+      return 0
+    fi
+
+    if is_port_bind_error "${docker_error}"; then
+      log "Sandbox host port ${SANDBOX_HOST_PORT} was already in use; reserving a new port and retrying."
+      SANDBOX_HOST_PORT="$(reserve_host_port_excluding "${HOST_PORT}")"
+      attempt=$((attempt + 1))
+      continue
+    fi
+
+    fail "Unable to boot sandbox runner image: ${docker_error}"
+  done
+
+  fail "Unable to boot sandbox runner image after exhausting host port retries."
+}
+
+start_app_container() {
+  local attempt=1
+  local docker_error=""
+
+  while [ "${attempt}" -le 3 ]; do
+    write_env_file
+    log "Booting the production app image on host port ${HOST_PORT} (attempt ${attempt}/3)..."
+    if docker_error="$(
+      docker run -d \
+        --name "${APP_CONTAINER}" \
+        --network "${NETWORK}" \
+        -p "127.0.0.1:${HOST_PORT}:5000" \
+        --env-file "${ENV_FILE}" \
+        "${APP_IMAGE}" 2>&1 >/dev/null
+    )"; then
+      return 0
+    fi
+
+    if is_port_bind_error "${docker_error}"; then
+      log "App host port ${HOST_PORT} was already in use; reserving a new port and retrying."
+      HOST_PORT="$(reserve_host_port_excluding "${SANDBOX_HOST_PORT}")"
+      attempt=$((attempt + 1))
+      continue
+    fi
+
+    fail "Unable to boot production app image: ${docker_error}"
+  done
+
+  fail "Unable to boot production app image after exhausting host port retries."
+}
+
 assert_openclaw_runtime_health() {
   local json_payload="$1"
   if ! JSON_PAYLOAD="${json_payload}" python3 - <<'PY'
@@ -289,30 +379,11 @@ if ! run_with_timeout "${MIGRATION_TIMEOUT_SECONDS}" docker run --rm \
   fail "Production migrations failed inside the built image."
 fi
 
-log "Booting the sandbox runner image..."
-docker run -d \
-  --name "${SANDBOX_CONTAINER}" \
-  --network "${NETWORK}" \
-  -p "127.0.0.1:${SANDBOX_HOST_PORT}:8080" \
-  --env-file "${ENV_FILE}" \
-  -e SANDBOX_RUNNER_PORT=8080 \
-  -e AGENT_WORKSPACE_ROOT=/workspace_root \
-  -e SHELL_COMMAND_DOCKER_IMAGE=debian:bookworm-slim \
-  -e SHELL_COMMAND_DOCKER_CPUS=1 \
-  -e SHELL_COMMAND_DOCKER_MEMORY=512m \
-  -e SHELL_COMMAND_DOCKER_PIDS=256 \
-  -v /var/run/docker.sock:/var/run/docker.sock:ro \
-  "${SANDBOX_IMAGE}" >/dev/null
+start_sandbox_container
 
 wait_for_http_ready "http://127.0.0.1:${SANDBOX_HOST_PORT}/health" "${SANDBOX_CONTAINER}" 200 60 2
 
-log "Booting the production app image..."
-docker run -d \
-  --name "${APP_CONTAINER}" \
-  --network "${NETWORK}" \
-  -p "127.0.0.1:${HOST_PORT}:5000" \
-  --env-file "${ENV_FILE}" \
-  "${APP_IMAGE}" >/dev/null
+start_app_container
 
 log "Booting the production worker image..."
 docker run -d \
