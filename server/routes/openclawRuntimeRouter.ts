@@ -2,11 +2,8 @@ import { Router } from "express";
 import { z } from "zod";
 import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { getOpenClawConfig } from "../openclaw/config";
-import { openclawSubagentService } from "../openclaw/agents/subagentService";
 import { skillRegistry } from "../openclaw/skills/skillRegistry";
 import { initSkills } from "../openclaw/skills/skillLoader";
-import { RAGService } from "../services/ragService";
-import { orchestrationEngine } from "../services/orchestrationEngine";
 import { AgentExecutionProfileSchema } from "@shared/agentExecutionProfile";
 
 const objectiveSchema = z.object({
@@ -82,9 +79,41 @@ function respondError(res: any, error: unknown) {
   });
 }
 
+type RAGServiceInstance = InstanceType<typeof import("../services/ragService").RAGService>;
+type OpenClawSubagentService = typeof import("../openclaw/agents/subagentService").openclawSubagentService;
+type OrchestrationEngine = typeof import("../services/orchestrationEngine").orchestrationEngine;
+
+let ragServicePromise: Promise<RAGServiceInstance> | null = null;
+let subagentServicePromise: Promise<OpenClawSubagentService> | null = null;
+let orchestrationEnginePromise: Promise<OrchestrationEngine> | null = null;
+
+async function getRagService(): Promise<RAGServiceInstance> {
+  if (!ragServicePromise) {
+    ragServicePromise = import("../services/ragService").then(({ RAGService }) => new RAGService());
+  }
+  return ragServicePromise;
+}
+
+async function getSubagentService(): Promise<OpenClawSubagentService> {
+  if (!subagentServicePromise) {
+    subagentServicePromise = import("../openclaw/agents/subagentService").then(
+      ({ openclawSubagentService }) => openclawSubagentService,
+    );
+  }
+  return subagentServicePromise;
+}
+
+async function getOrchestrationEngine(): Promise<OrchestrationEngine> {
+  if (!orchestrationEnginePromise) {
+    orchestrationEnginePromise = import("../services/orchestrationEngine").then(
+      ({ orchestrationEngine }) => orchestrationEngine,
+    );
+  }
+  return orchestrationEnginePromise;
+}
+
 export function createOpenClawRuntimeRouter(): Router {
   const router = Router();
-  const ragService = new RAGService();
 
   router.get("/health", (_req, res) => {
     return res.json({
@@ -154,6 +183,7 @@ export function createOpenClawRuntimeRouter(): Router {
   router.post("/rag/search", async (req, res) => {
     const userId = getOrCreateSecureUserId(req);
     try {
+      const ragService = await getRagService();
       const parsed = ragSearchSchema.parse(req.body || {});
       const results = await ragService.search(userId, parsed.query, {
         limit: parsed.limit,
@@ -172,6 +202,7 @@ export function createOpenClawRuntimeRouter(): Router {
   router.post("/rag/context", async (req, res) => {
     const userId = getOrCreateSecureUserId(req);
     try {
+      const ragService = await getRagService();
       const parsed = ragContextSchema.parse(req.body || {});
       const context = await ragService.getContextForMessage(
         userId,
@@ -186,6 +217,7 @@ export function createOpenClawRuntimeRouter(): Router {
 
   router.post("/orchestrator/plan", async (req, res) => {
     try {
+      const orchestrationEngine = await getOrchestrationEngine();
       const parsed = objectiveSchema.parse(req.body || {});
       const complexity = normalizeComplexity(parsed.objective, parsed.complexity);
       const subtasks = await orchestrationEngine.decomposeTask(parsed.objective, complexity);
@@ -198,6 +230,7 @@ export function createOpenClawRuntimeRouter(): Router {
 
   router.post("/orchestrator/run", async (req, res) => {
     try {
+      const orchestrationEngine = await getOrchestrationEngine();
       const parsed = objectiveSchema.parse(req.body || {});
       const complexity = normalizeComplexity(parsed.objective, parsed.complexity);
       const subtasks = await orchestrationEngine.decomposeTask(parsed.objective, complexity);
@@ -222,6 +255,8 @@ export function createOpenClawRuntimeRouter(): Router {
   router.post("/orchestrator/flow", async (req, res) => {
     const userId = getOrCreateSecureUserId(req);
     try {
+      const orchestrationEngine = await getOrchestrationEngine();
+      const openclawSubagentService = await getSubagentService();
       const parsed = orchestratorFlowSchema.parse(req.body || {});
       const complexity = normalizeComplexity(parsed.objective, parsed.complexity);
       const subtasks = await orchestrationEngine.decomposeTask(parsed.objective, complexity);
@@ -259,9 +294,10 @@ export function createOpenClawRuntimeRouter(): Router {
     }
   });
 
-  router.post("/subagents", (req, res) => {
+  router.post("/subagents", async (req, res) => {
     const userId = getOrCreateSecureUserId(req);
     try {
+      const openclawSubagentService = await getSubagentService();
       const parsed = spawnSubagentSchema.parse(req.body || {});
       const run = openclawSubagentService.spawn({
         requesterUserId: userId,
@@ -276,8 +312,9 @@ export function createOpenClawRuntimeRouter(): Router {
     }
   });
 
-  router.get("/subagents", (req, res) => {
+  router.get("/subagents", async (req, res) => {
     const userId = getOrCreateSecureUserId(req);
+    const openclawSubagentService = await getSubagentService();
     const status = parseSubagentStatus(req.query.status);
     const limit = parseLimit(req.query.limit, 50);
     const parentRunId = typeof req.query.parentRunId === "string" ? req.query.parentRunId : undefined;
@@ -293,8 +330,9 @@ export function createOpenClawRuntimeRouter(): Router {
     });
   });
 
-  router.get("/subagents/:runId", (req, res) => {
+  router.get("/subagents/:runId", async (req, res) => {
     const userId = getOrCreateSecureUserId(req);
+    const openclawSubagentService = await getSubagentService();
     const run = openclawSubagentService.get(req.params.runId);
     if (!run || run.requesterUserId !== userId) {
       return res.status(404).json({ error: "Subagent run not found" });
@@ -302,8 +340,9 @@ export function createOpenClawRuntimeRouter(): Router {
     return res.json(run);
   });
 
-  router.post("/subagents/:runId/cancel", (req, res) => {
+  router.post("/subagents/:runId/cancel", async (req, res) => {
     const userId = getOrCreateSecureUserId(req);
+    const openclawSubagentService = await getSubagentService();
     const run = openclawSubagentService.get(req.params.runId);
     if (!run || run.requesterUserId !== userId) {
       return res.status(404).json({ error: "Subagent run not found" });

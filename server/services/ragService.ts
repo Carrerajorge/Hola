@@ -88,7 +88,14 @@ const ensureTables = async () => {
   }
 };
 
-ensureTables();
+let ensureTablesPromise: Promise<void> | null = null;
+
+function ensureTablesOnce(): Promise<void> {
+  if (!ensureTablesPromise) {
+    ensureTablesPromise = ensureTables().catch(() => undefined);
+  }
+  return ensureTablesPromise;
+}
 
 export class RAGService {
   /**
@@ -100,6 +107,7 @@ export class RAGService {
     content: string,
     role: "user" | "assistant"
   ): Promise<void> {
+    await ensureTablesOnce();
     if (content.length < 20) return; // Skip very short messages
     
     const embedding = simpleEmbed(content);
@@ -123,6 +131,7 @@ export class RAGService {
       minScore?: number;
     } = {}
   ): Promise<Array<{ content: string; score: number; chatId: string }>> {
+    await ensureTablesOnce();
     const { limit = 5, chatId, minScore = 0.3 } = options;
     
     const queryEmbedding = simpleEmbed(query);
@@ -188,6 +197,7 @@ export class UserPersonalizationService {
    * Get or create user preferences
    */
   async getPreferences(userId: string): Promise<Record<string, any>> {
+    await ensureTablesOnce();
     const result = await db.execute(sql`
       SELECT * FROM user_preferences WHERE user_id = ${userId}
     `);
@@ -223,6 +233,7 @@ export class UserPersonalizationService {
       timezone?: string;
     }
   ): Promise<void> {
+    await ensureTablesOnce();
     const { preferences, communicationStyle, topicsOfInterest, language, timezone } = updates;
     
     await db.execute(sql`
@@ -330,6 +341,7 @@ export class WorkspaceContextService {
     content: string,
     fileType: string
   ): Promise<void> {
+    await ensureTablesOnce();
     // Create summary (first 500 chars + key points)
     const summary = content.substring(0, 500);
     const embedding = simpleEmbed(content);
@@ -349,6 +361,7 @@ export class WorkspaceContextService {
     query: string,
     limit = 3
   ): Promise<Array<{ filePath: string; summary: string; score: number }>> {
+    await ensureTablesOnce();
     const queryEmbedding = simpleEmbed(query);
     
     const result = await db.execute(sql`

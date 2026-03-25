@@ -1,6 +1,5 @@
 import { randomUUID } from "crypto";
 import { EventEmitter } from "events";
-import { AgentRunner } from "../../services/agentRunner";
 import {
   DEFAULT_AGENT_EXECUTION_PROFILE,
   type AgentExecutionProfile,
@@ -54,7 +53,7 @@ const MAX_RETENTION_RUNS = 500;
 
 class OpenClawSubagentService extends EventEmitter {
   private readonly runs = new Map<string, SubagentRunRecord>();
-  private readonly runners = new Map<string, AgentRunner>();
+  private readonly runners = new Map<string, { cancel(): void }>();
 
   constructor() {
     super();
@@ -136,15 +135,19 @@ class OpenClawSubagentService extends EventEmitter {
       return;
     }
 
-    const runner = new AgentRunner({ executionProfile: run.executionProfile });
-    this.runners.set(runId, runner);
-    run.status = "running";
-    run.startedAt = Date.now();
-    this.runs.set(runId, run);
-    this.emitStatusChange(run);
+    let runner: { cancel(): void } | null = null;
 
     try {
-      const result = await runner.run(run.objective, run.planHint);
+      const { AgentRunner } = await import("../../services/agentRunner");
+      const activeRunner = new AgentRunner({ executionProfile: run.executionProfile });
+      runner = activeRunner;
+      this.runners.set(runId, activeRunner);
+      run.status = "running";
+      run.startedAt = Date.now();
+      this.runs.set(runId, run);
+      this.emitStatusChange(run);
+
+      const result = await activeRunner.run(run.objective, run.planHint);
       const next = this.runs.get(runId);
       if (!next) return;
 
@@ -170,7 +173,9 @@ class OpenClawSubagentService extends EventEmitter {
       this.runs.set(runId, next);
       this.emitStatusChange(next);
     } finally {
-      this.runners.delete(runId);
+      if (runner) {
+        this.runners.delete(runId);
+      }
       this.trimRetention();
     }
   }
