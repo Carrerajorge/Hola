@@ -169,7 +169,8 @@ import {
   getOverallStatus,
   initializeHealthMonitoring,
 } from "./lib/healthMonitor";
-import { getHealthStatus as getDbHealthStatus } from "./db";
+import { getHealthStatus as getDbHealthStatus, probeHealthStatus } from "./db";
+import { buildReadinessResponse } from "./lib/readinessStatus";
 import { getRateLimiterStatus } from "./middleware/rateLimiter";
 import { templatesRouter } from "./routes/templatesRouter";
 import { webhooksRouter } from "./routes/webhooksRouter";
@@ -1104,51 +1105,23 @@ export async function registerRoutes(
   });
 
   // Readiness probe (best-effort dependency summary, no hard DB query on each call)
-  app.get("/api/health/ready", (_req: Request, res: Response) => {
-    const db = getDbHealthStatus();
+  app.get("/api/health/ready", async (_req: Request, res: Response) => {
+    let db = getDbHealthStatus();
     const mem = process.memoryUsage();
     const rlStatus = getRateLimiterStatus();
 
-    // Treat transient DB degradation as ready so blue/green health probes do not
-    // flap the slot on a single failed sample. Only mark not-ready once the DB
-    // health monitor escalates to UNHEALTHY after consecutive failures.
-    const dbReady = db.status !== "UNHEALTHY";
-    const status =
-      db.status === "HEALTHY"
-        ? "ready"
-        : db.status === "DEGRADED"
-          ? "degraded"
-          : "not_ready";
-    const httpStatus = dbReady ? 200 : 503;
+    if (db.status === "UNHEALTHY") {
+      db = await probeHealthStatus();
+    }
 
-    res.status(httpStatus).json({
-      status,
-      checks: {
-        database: {
-          status: db.status,
-          latencyMs: db.latencyMs,
-          lastCheck: db.lastCheck ? db.lastCheck.toISOString() : null,
-          consecutiveFailures: db.consecutiveFailures,
-        },
-        memory: {
-          status: "ok",
-          rss: mem.rss,
-          heapUsed: mem.heapUsed,
-          heapTotal: mem.heapTotal,
-        },
-        uptime: {
-          status: "ok",
-          seconds: process.uptime(),
-        },
-        rateLimiter: {
-          status: rlStatus.backend === "redis" ? "ok" : "degraded",
-          backend: rlStatus.backend,
-          initialized: rlStatus.initialized,
-        },
-      },
-      uptime: process.uptime(),
-      timestamp: new Date().toISOString(),
+    const readiness = buildReadinessResponse({
+      db,
+      mem,
+      rateLimiter: rlStatus,
+      uptimeSeconds: process.uptime(),
     });
+
+    res.status(readiness.httpStatus).json(readiness.payload);
   });
 
   app.get(
