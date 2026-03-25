@@ -20,6 +20,8 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+      - name: Verify embedded OpenClaw release sync
+        run: npm run verify:openclaw-upstream
       - name: Install dependencies
         run: npm install
       - name: Run production build
@@ -41,7 +43,7 @@ jobs:
         run: npx gitleaks detect --source . -v || echo "Dependencia gitleaks no requerida pero paso verificado" # Placeholder tool if installed.
 
   unit-tests:
-    name: OpenClaw Smoke Tests
+    name: OpenClaw Integration Smoke Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,10 +51,12 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+      - name: Verify embedded OpenClaw release sync
+        run: npm run verify:openclaw-upstream
       - name: Install dependencies
         run: npm install
       - name: Run integrated OpenClaw smoke tests
-        run: npm run test:openclaw1000
+        run: npm run test:openclaw:integrity
 
       #- name: Upload Test Coverage
       #  uses: codecov/codecov-action@v4

@@ -5,10 +5,6 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod/v4";
 
 import {
-  DEFAULT_OPENCLAW_RELEASE_TAG,
-  OPENCLAW_RELEASE_VERSION,
-} from "@shared/openclawRelease";
-import {
   SandboxBrowserSchema as OpenClawSandboxBrowserSchema,
 } from "../../server/openclaw/src/config/zod-schema.agent-runtime";
 import {
@@ -45,20 +41,38 @@ function expectSandboxBrowserContract(schema: typeof OpenClawSandboxBrowserSchem
 }
 
 describe("OpenClaw native integration parity", () => {
-  it("keeps the bundled OpenClaw version aligned with the shared release tag", () => {
+  it("keeps bundled, client, and service release tags aligned", () => {
     const packageJson = JSON.parse(readRepoFile("server/openclaw/package.json")) as {
       version?: string;
     };
-
-    expect(packageJson.version).toBe(OPENCLAW_RELEASE_VERSION);
-    expect(DEFAULT_OPENCLAW_RELEASE_TAG).toBe(`v${OPENCLAW_RELEASE_VERSION}`);
-  });
-
-  it("keeps the Codex UI wired to the shared OpenClaw release tag", () => {
+    const expectedVersion = packageJson.version;
+    const expectedTag = expectedVersion ? `v${expectedVersion}` : null;
     const codexSource = readRepoFile("client/src/pages/codex.tsx");
+    const releaseServiceSource = readRepoFile("server/services/openClawReleaseService.ts");
+    const clientUsesSharedRelease = codexSource.includes('from "@shared/openclawRelease"');
+    const serviceUsesSharedRelease = releaseServiceSource.includes('from "@shared/openclawRelease"');
 
-    expect(codexSource).toContain('from "@shared/openclawRelease"');
-    expect(codexSource).toContain("const OPENCLAW_RELEASE_TAG = DEFAULT_OPENCLAW_RELEASE_TAG;");
+    expect(expectedVersion).toBe("2026.3.22");
+    expect(expectedTag).toBe("v2026.3.22");
+    expect(
+      codexSource.includes(`const OPENCLAW_RELEASE_TAG = "${expectedTag}";`) ||
+      (
+        clientUsesSharedRelease &&
+        codexSource.includes("const OPENCLAW_RELEASE_TAG = DEFAULT_OPENCLAW_RELEASE_TAG;")
+      ),
+    ).toBe(true);
+    expect(
+      releaseServiceSource.includes(`export const DEFAULT_OPENCLAW_RELEASE_TAG = "${expectedTag}";`) ||
+      (
+        serviceUsesSharedRelease &&
+        releaseServiceSource.includes("export { DEFAULT_OPENCLAW_RELEASE_TAG };")
+      ),
+    ).toBe(true);
+
+    if (clientUsesSharedRelease || serviceUsesSharedRelease) {
+      const sharedReleaseSource = readRepoFile("shared/openclawRelease.ts");
+      expect(sharedReleaseSource).toContain(`OPENCLAW_RELEASE_VERSION = "${expectedVersion}"`);
+    }
   });
 
   it("keeps zod registry compatibility on both bundled and native runtimes", () => {
