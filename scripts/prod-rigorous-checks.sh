@@ -51,6 +51,7 @@ PASS_COUNT=0
 TOTAL_COUNT=0
 ACTIVE_SLOT=""
 ACTIVE_PORT=""
+STANDBY_PORT=""
 STATE_APP_VERSION=""
 STATE_APP_TAG=""
 STATE_SOURCE="unknown"
@@ -78,6 +79,44 @@ fail() {
 
 run_ssh() {
   ssh "${SSH_OPTS[@]}" "${VPS_USER}@${VPS_HOST}" "$@"
+}
+
+check_vps_port_free() {
+  local id="$1"
+  local port="$2"
+  local label="$3"
+  local listeners
+
+  listeners="$(
+    run_ssh "if command -v ss >/dev/null 2>&1; then ss -ltnp '( sport = :${port} )' 2>/dev/null | tail -n +2; elif command -v lsof >/dev/null 2>&1; then lsof -nP -iTCP:${port} -sTCP:LISTEN 2>/dev/null | tail -n +2; fi"
+  )"
+
+  if [ -z "$listeners" ]; then
+    pass "$id" "$label"
+    return 0
+  fi
+
+  fail "$id" "$label (listeners: ${listeners//$'\n'/'; '})"
+  return 1
+}
+
+check_service_inactive() {
+  local id="$1"
+  local service_name="$2"
+  local label="$3"
+  local status
+
+  status="$(run_ssh "if command -v systemctl >/dev/null 2>&1; then systemctl is-active '${service_name}' 2>/dev/null || true; fi")"
+  case "$status" in
+    ""|inactive|failed|unknown)
+      pass "$id" "$label"
+      return 0
+      ;;
+    *)
+      fail "$id" "$label (got: ${status})"
+      return 1
+      ;;
+  esac
 }
 
 check_http_code() {
@@ -262,6 +301,7 @@ check_psql_query() {
 }
 
 determine_active_slot
+STANDBY_PORT="$( [ "$ACTIVE_PORT" = "5000" ] && echo 5001 || echo 5000 )"
 
 APP_CONTAINER="hola-${ACTIVE_SLOT}-app"
 WORKER_CONTAINER="hola-${ACTIVE_SLOT}-worker"
@@ -374,13 +414,16 @@ else
   fail "29" "Nginx upstream contains expected active port (${ACTIVE_PORT})"
 fi
 
+check_vps_port_free "30" "${STANDBY_PORT}" "Standby slot port ${STANDBY_PORT} is free"
+check_service_inactive "31" "iliagpt-manual.service" "Manual recovery service is inactive"
+
 echo "Checks completed: ${PASS_COUNT}/${TOTAL_COUNT} passed"
 if [ "${FAILED}" -ne 0 ]; then
   echo "RIGOROUS_CHECKS_FAILED=${FAILED}"
   exit 1
 fi
 
-echo "RIGOROUS_CHECKS_PASSED=29"
+echo "RIGOROUS_CHECKS_PASSED=${PASS_COUNT}"
 echo "ACTIVE_SLOT=${ACTIVE_SLOT}"
 echo "ACTIVE_PORT=${ACTIVE_PORT}"
 echo "STATE_SOURCE=${STATE_SOURCE}"

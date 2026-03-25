@@ -1329,6 +1329,101 @@ run_sql_migrations() {
 
 
 
+list_port_listeners() {
+  local target_port="$1"
+
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnp "( sport = :${target_port} )" 2>/dev/null | tail -n +2 || true
+    return 0
+  fi
+
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"${target_port}" -sTCP:LISTEN 2>/dev/null | tail -n +2 || true
+    return 0
+  fi
+
+  return 0
+}
+
+port_has_listeners() {
+  local target_port="$1"
+  list_port_listeners "${target_port}" | grep -q .
+}
+
+print_port_listener_diagnostics() {
+  local target_port="$1"
+  local listeners
+  listeners="$(list_port_listeners "${target_port}")"
+
+  if [ -z "${listeners}" ]; then
+    log "  No host-level listeners reported for port ${target_port}."
+    return 0
+  fi
+
+  log "  Host-level listeners on port ${target_port}:"
+  while IFS= read -r line; do
+    [ -z "${line}" ] && continue
+    log "    ${line}"
+  done <<< "${listeners}"
+}
+
+known_manual_service_holds_port() {
+  local service_name="$1"
+  local target_port="$2"
+
+  if ! command -v systemctl >/dev/null 2>&1 || ! command -v ss >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if ! systemctl is-active --quiet "${service_name}"; then
+    return 1
+  fi
+
+  local main_pid
+  main_pid="$(systemctl show -p MainPID --value "${service_name}" 2>/dev/null || echo "0")"
+  if ! [[ "${main_pid}" =~ ^[0-9]+$ ]] || [ "${main_pid}" -le 0 ]; then
+    return 1
+  fi
+
+  ss -ltnp "( sport = :${target_port} )" 2>/dev/null | grep -F "pid=${main_pid}," >/dev/null 2>&1
+}
+
+stop_known_manual_services_on_port() {
+  local target_port="$1"
+  local service_name
+  local stopped_any=false
+
+  for service_name in iliagpt-manual.service; do
+    if ! known_manual_service_holds_port "${service_name}" "${target_port}"; then
+      continue
+    fi
+
+    logw "Stopping manual recovery service ${service_name} because it is holding port ${target_port}..."
+    if ! systemctl stop "${service_name}" >/dev/null 2>&1; then
+      loge "Failed to stop manual recovery service ${service_name} on port ${target_port}."
+      exit 1
+    fi
+    sleep 2
+    stopped_any=true
+  done
+
+  if [ "${stopped_any}" = "true" ]; then
+    logok "Known manual recovery services released port ${target_port}."
+  fi
+}
+
+ensure_host_port_free_or_abort() {
+  local target_port="$1"
+
+  stop_known_manual_services_on_port "${target_port}"
+
+  if port_has_listeners "${target_port}"; then
+    loge "Host-level listener still holds port ${target_port} after cleanup."
+    print_port_listener_diagnostics "${target_port}"
+    exit 1
+  fi
+}
+
 free_target_port_if_safe() {
   local target_port="$1"
   local occupied
@@ -1366,6 +1461,7 @@ free_target_port_if_safe() {
     exit 1
   fi
 
+  ensure_host_port_free_or_abort "${target_port}"
   logok "Port ${target_port} is free for slot startup."
 }
 
@@ -1819,6 +1915,11 @@ if [ -n "${OLD_RUNNING}" ]; then
 else
   logok "Old ${ACTIVE_SLOT} slot was not running (nothing to stop)."
 fi
+echo ""
+
+log "[13b/15] Verifying standby port ${ACTIVE_PORT} is free..."
+ensure_host_port_free_or_abort "${ACTIVE_PORT}"
+logok "Standby port ${ACTIVE_PORT} is free."
 echo ""
 
 # ── Step 13: Verify OCR + infrastructure health ──────────
