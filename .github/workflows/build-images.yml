@@ -102,8 +102,10 @@ jobs:
           cache-from: type=gha,scope=app
           # Build provenance (SLSA) — creates attestation for supply chain security
           provenance: true
-          # SBOM generation — creates software bill of materials
-          sbom: true
+          # SBOM generation currently pulls docker/buildkit-syft-scanner from Docker Hub,
+          # and transient Docker Hub OAuth 500s were making production builds red.
+          # Keep provenance enabled and disable SBOM until the external registry path is stable.
+          sbom: false
 
       - name: Build & push sandbox-runner image
         id: build_sandbox
@@ -119,7 +121,7 @@ jobs:
             APP_VERSION=${{ steps.meta.outputs.short_sha }}
           cache-from: type=gha,scope=sandbox
           provenance: true
-          sbom: true
+          sbom: false
 
       - name: Build & push OCR image
         id: build_ocr
@@ -133,7 +135,7 @@ jobs:
             ${{ env.IMAGE_BASE }}-ocr:latest
           cache-from: type=gha,scope=ocr
           provenance: true
-          sbom: true
+          sbom: false
 
       - name: Verify images exist in GHCR
         run: |
