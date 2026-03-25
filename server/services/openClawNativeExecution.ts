@@ -2,7 +2,6 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { runEmbeddedPiAgent } from "./superIntelligence/agents/pi-embedded.js";
 import type { EmbeddedPiRunResult } from "./superIntelligence/agents/pi-embedded.js";
 import { resolveUserScopedAgentDir } from "./userScopedAgentDir.js";
 
@@ -118,6 +117,18 @@ function collectMediaUrls(result: EmbeddedPiRunResult): string[] {
   return [...media];
 }
 
+async function loadEmbeddedPiAgentRunner() {
+  try {
+    const mod = await import("./superIntelligence/agents/pi-embedded.js");
+    return mod.runEmbeddedPiAgent;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Embedded OpenClaw runtime is not ready in this build: ${detail}`,
+    );
+  }
+}
+
 export async function executeOpenClawNativePrompt(
   params: ExecuteOpenClawNativePromptParams,
 ): Promise<ExecuteOpenClawNativePromptResult> {
@@ -143,6 +154,7 @@ export async function executeOpenClawNativePrompt(
   await fs.mkdir(sessionRoot, { recursive: true });
   await fs.mkdir(agentDir, { recursive: true });
 
+  const runEmbeddedPiAgent = await loadEmbeddedPiAgentRunner();
   const result = await runEmbeddedPiAgent({
     sessionId,
     sessionKey,
