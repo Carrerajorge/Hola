@@ -4,8 +4,11 @@ IFS=$'\n\t'
 
 IMAGE_TAG="${IMAGE_TAG:?IMAGE_TAG is required}"
 APP_IMAGE="${APP_IMAGE:-ghcr.io/carrerajorge/iliagpt-app:${IMAGE_TAG}}"
+SANDBOX_IMAGE="${SANDBOX_IMAGE:-ghcr.io/carrerajorge/iliagpt-sandbox:${IMAGE_TAG}}"
 APP_VERSION="${APP_VERSION:-${IMAGE_TAG#sha-}}"
 EXPECTED_OPENCLAW_VERSION="${EXPECTED_OPENCLAW_VERSION:-}"
+IMAGE_PULL_TIMEOUT_SECONDS="${IMAGE_PULL_TIMEOUT_SECONDS:-600}"
+MIGRATION_TIMEOUT_SECONDS="${MIGRATION_TIMEOUT_SECONDS:-300}"
 
 if [ -z "${EXPECTED_OPENCLAW_VERSION}" ] && [ -f "server/openclaw/package.json" ]; then
   EXPECTED_OPENCLAW_VERSION="$(node -p "require('./server/openclaw/package.json').version" 2>/dev/null || true)"
@@ -15,14 +18,20 @@ SUFFIX="${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}-$$"
 NETWORK="hola-smoke-${SUFFIX}"
 POSTGRES_CONTAINER="hola-smoke-postgres-${SUFFIX}"
 REDIS_CONTAINER="hola-smoke-redis-${SUFFIX}"
+SANDBOX_CONTAINER="hola-smoke-sandbox-${SUFFIX}"
 APP_CONTAINER="hola-smoke-app-${SUFFIX}"
+WORKER_CONTAINER="hola-smoke-worker-${SUFFIX}"
 REDIS_PASSWORD="smoke_redis_password_${SUFFIX}"
 SESSION_SECRET="smoke_session_secret_${SUFFIX}_0123456789ABCDEF"
+TOKEN_ENCRYPTION_KEY="smoke_token_encryption_key_${SUFFIX}_0123456789ABCDEF"
+SANDBOX_RUNNER_TOKEN="smoke_sandbox_runner_token_${SUFFIX}"
 ADMIN_EMAIL="smoke-admin@example.com"
 ADMIN_PASSWORD="SmokeAdminPassword-${SUFFIX}"
+ENV_FILE="$(mktemp "/tmp/ci-container-smoke.env.${SUFFIX}.XXXXXX")"
+MIGRATION_LOG="$(mktemp "/tmp/ci-container-migrate.${SUFFIX}.XXXXXX.log")"
 FAILED="false"
 
-HOST_PORT="$(
+reserve_host_port() {
   python3 - <<'PY'
 import socket
 s = socket.socket()
@@ -30,7 +39,10 @@ s.bind(("127.0.0.1", 0))
 print(s.getsockname()[1])
 s.close()
 PY
-)"
+}
+
+HOST_PORT="$(reserve_host_port)"
+SANDBOX_HOST_PORT="$(reserve_host_port)"
 
 log() {
   echo "[ci-container-smoke] $*"
@@ -41,14 +53,23 @@ cleanup() {
   if [ "${FAILED}" = "true" ]; then
     log "Recent app container logs:"
     docker logs --tail=200 "${APP_CONTAINER}" 2>/dev/null || true
+    log "Recent worker container logs:"
+    docker logs --tail=200 "${WORKER_CONTAINER}" 2>/dev/null || true
+    log "Recent sandbox container logs:"
+    docker logs --tail=200 "${SANDBOX_CONTAINER}" 2>/dev/null || true
     log "Recent postgres container logs:"
     docker logs --tail=120 "${POSTGRES_CONTAINER}" 2>/dev/null || true
     log "Recent redis container logs:"
     docker logs --tail=120 "${REDIS_CONTAINER}" 2>/dev/null || true
+    if [ -s "${MIGRATION_LOG}" ]; then
+      log "Migration logs:"
+      cat "${MIGRATION_LOG}" || true
+    fi
   fi
 
-  docker rm -f "${APP_CONTAINER}" "${POSTGRES_CONTAINER}" "${REDIS_CONTAINER}" >/dev/null 2>&1 || true
+  docker rm -f "${APP_CONTAINER}" "${WORKER_CONTAINER}" "${SANDBOX_CONTAINER}" "${POSTGRES_CONTAINER}" "${REDIS_CONTAINER}" >/dev/null 2>&1 || true
   docker network rm "${NETWORK}" >/dev/null 2>&1 || true
+  rm -f "${ENV_FILE}" "${MIGRATION_LOG}"
   exit "${exit_code}"
 }
 trap cleanup EXIT
@@ -57,6 +78,29 @@ fail() {
   FAILED="true"
   log "ERROR: $*"
   exit 1
+}
+
+run_with_timeout() {
+  local timeout_seconds="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "${timeout_seconds}" "$@"
+    return $?
+  fi
+  "$@"
+}
+
+ensure_image_available() {
+  local image_ref="$1"
+  if docker image inspect "${image_ref}" >/dev/null 2>&1; then
+    log "Image already available locally: ${image_ref}"
+    return 0
+  fi
+
+  log "Pulling image ${image_ref}..."
+  if ! run_with_timeout "${IMAGE_PULL_TIMEOUT_SECONDS}" docker pull "${image_ref}"; then
+    fail "Unable to pull required image ${image_ref}."
+  fi
 }
 
 wait_for_container_health() {
@@ -86,11 +130,23 @@ wait_for_container_health() {
   fail "${name} did not become healthy (last status=${status:-unknown}, running=${running:-unknown})."
 }
 
+ensure_container_running() {
+  local name="$1"
+  local label="$2"
+  local status=""
+  status="$(docker inspect -f '{{.State.Status}}' "${name}" 2>/dev/null || true)"
+  if [ "${status}" != "running" ]; then
+    fail "${label} is not running (status=${status:-missing})."
+  fi
+  log "${label} is running."
+}
+
 wait_for_http_ready() {
   local url="$1"
-  local expected_code="${2:-200}"
-  local attempts="${3:-90}"
-  local sleep_seconds="${4:-2}"
+  local container_name="$2"
+  local expected_code="${3:-200}"
+  local attempts="${4:-90}"
+  local sleep_seconds="${5:-2}"
   local code=""
   local i
 
@@ -101,14 +157,77 @@ wait_for_http_ready() {
       return 0
     fi
 
-    if ! docker ps --format '{{.Names}}' | grep -Fxq "${APP_CONTAINER}"; then
-      fail "${APP_CONTAINER} stopped before ${url} became ready."
+    if ! docker ps --format '{{.Names}}' | grep -Fxq "${container_name}"; then
+      fail "${container_name} stopped before ${url} became ready."
     fi
 
     sleep "${sleep_seconds}"
   done
 
   fail "${url} did not return HTTP ${expected_code}."
+}
+
+write_env_file() {
+  cat > "${ENV_FILE}" <<EOF
+NODE_ENV=production
+PORT=5000
+APP_VERSION=${APP_VERSION}
+APP_SHA=${APP_VERSION}
+BASE_URL=http://127.0.0.1:${HOST_PORT}
+ALLOWED_HOSTS=127.0.0.1,127.0.0.1:${HOST_PORT},localhost,localhost:${HOST_PORT}
+DATABASE_URL=postgres://postgres:postgres@${POSTGRES_CONTAINER}:5432/iliagpt
+REDIS_URL=redis://:${REDIS_PASSWORD}@${REDIS_CONTAINER}:6379
+SESSION_SECRET=${SESSION_SECRET}
+TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}
+ADMIN_EMAIL=${ADMIN_EMAIL}
+ADMIN_PASSWORD=${ADMIN_PASSWORD}
+ALLOW_CATALOG_SEEDING=false
+ALLOW_STRIPE_PRODUCT_SEEDING=false
+METRICS_PUBLIC=true
+CHANNEL_INGEST_MODE=queue
+REDIS_PASSWORD=${REDIS_PASSWORD}
+OCR_SERVICE_URL=http://127.0.0.1:65535
+SANDBOX_RUNNER_TOKEN=${SANDBOX_RUNNER_TOKEN}
+SHELL_COMMAND_SANDBOX_MODE=runner
+SHELL_COMMAND_RUNNER_URL=http://${SANDBOX_CONTAINER}:8080
+SHELL_COMMAND_RUNNER_TOKEN=${SANDBOX_RUNNER_TOKEN}
+AGENT_WORKSPACE_ROOT=/tmp/sandbox_workspace
+ENABLE_OPENCLAW_GATEWAY=true
+ENABLE_OPENCLAW_TOOLS=true
+ENABLE_OPENCLAW_SKILLS=true
+ENABLE_OPENCLAW_STREAMING=true
+EOF
+}
+
+assert_openclaw_runtime_health() {
+  local json_payload="$1"
+  if ! JSON_PAYLOAD="${json_payload}" python3 - <<'PY'
+import json
+import os
+payload = json.loads(os.environ["JSON_PAYLOAD"])
+mods = payload.get("modules") or {}
+if payload.get("ok") is not True:
+    raise SystemExit(1)
+for key in ("skills", "tools", "gateway"):
+    if mods.get(key) is not True:
+        raise SystemExit(1)
+PY
+  then
+    fail "OpenClaw runtime health payload did not report all native modules enabled."
+  fi
+}
+
+extract_skill_count() {
+  local json_payload="$1"
+  JSON_PAYLOAD="${json_payload}" python3 - <<'PY'
+import json
+import os
+payload = json.loads(os.environ["JSON_PAYLOAD"])
+count = int(payload.get("count") or 0)
+if count <= 0:
+    raise SystemExit(1)
+print(count)
+PY
 }
 
 log "Creating isolated Docker network ${NETWORK}..."
@@ -145,37 +264,57 @@ docker run -d \
 wait_for_container_health "${POSTGRES_CONTAINER}" 45 2
 wait_for_container_health "${REDIS_CONTAINER}" 45 2
 
+ensure_image_available "${APP_IMAGE}"
+ensure_image_available "${SANDBOX_IMAGE}"
+
+write_env_file
+
 log "Running production migrations inside the built image..."
-docker run --rm \
+if ! run_with_timeout "${MIGRATION_TIMEOUT_SECONDS}" docker run --rm \
   --network "${NETWORK}" \
-  -e NODE_ENV=production \
-  -e APP_VERSION="${APP_VERSION}" \
-  -e DATABASE_URL="postgres://postgres:postgres@${POSTGRES_CONTAINER}:5432/iliagpt" \
-  -e REDIS_URL="redis://:${REDIS_PASSWORD}@${REDIS_CONTAINER}:6379" \
-  -e SESSION_SECRET="${SESSION_SECRET}" \
-  -e ADMIN_EMAIL="${ADMIN_EMAIL}" \
-  -e ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
+  --env-file "${ENV_FILE}" \
   "${APP_IMAGE}" \
-  node dist/migrate.cjs >/dev/null
+  node dist/migrate.cjs >"${MIGRATION_LOG}" 2>&1; then
+  FAILED="true"
+  fail "Production migrations failed inside the built image."
+fi
+
+log "Booting the sandbox runner image..."
+docker run -d \
+  --name "${SANDBOX_CONTAINER}" \
+  --network "${NETWORK}" \
+  -p "127.0.0.1:${SANDBOX_HOST_PORT}:8080" \
+  --env-file "${ENV_FILE}" \
+  -e SANDBOX_RUNNER_PORT=8080 \
+  -e AGENT_WORKSPACE_ROOT=/workspace_root \
+  -e SHELL_COMMAND_DOCKER_IMAGE=debian:bookworm-slim \
+  -e SHELL_COMMAND_DOCKER_CPUS=1 \
+  -e SHELL_COMMAND_DOCKER_MEMORY=512m \
+  -e SHELL_COMMAND_DOCKER_PIDS=256 \
+  -v /var/run/docker.sock:/var/run/docker.sock:ro \
+  "${SANDBOX_IMAGE}" >/dev/null
+
+wait_for_http_ready "http://127.0.0.1:${SANDBOX_HOST_PORT}/health" "${SANDBOX_CONTAINER}" 200 60 2
 
 log "Booting the production app image..."
 docker run -d \
   --name "${APP_CONTAINER}" \
   --network "${NETWORK}" \
   -p "127.0.0.1:${HOST_PORT}:5000" \
-  -e NODE_ENV=production \
-  -e PORT=5000 \
-  -e APP_VERSION="${APP_VERSION}" \
-  -e BASE_URL="http://127.0.0.1:${HOST_PORT}" \
-  -e DATABASE_URL="postgres://postgres:postgres@${POSTGRES_CONTAINER}:5432/iliagpt" \
-  -e REDIS_URL="redis://:${REDIS_PASSWORD}@${REDIS_CONTAINER}:6379" \
-  -e SESSION_SECRET="${SESSION_SECRET}" \
-  -e ADMIN_EMAIL="${ADMIN_EMAIL}" \
-  -e ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
-  -e OCR_SERVICE_URL="http://127.0.0.1:65535" \
+  --env-file "${ENV_FILE}" \
   "${APP_IMAGE}" >/dev/null
 
-wait_for_http_ready "http://127.0.0.1:${HOST_PORT}/api/health/ready" 200 90 2
+log "Booting the production worker image..."
+docker run -d \
+  --name "${WORKER_CONTAINER}" \
+  --network "${NETWORK}" \
+  --env-file "${ENV_FILE}" \
+  "${APP_IMAGE}" \
+  node dist/worker.cjs >/dev/null
+
+wait_for_http_ready "http://127.0.0.1:${HOST_PORT}/api/health/ready" "${APP_CONTAINER}" 200 90 2
+sleep 10
+ensure_container_running "${WORKER_CONTAINER}" "Worker container"
 
 HEALTH_JSON="$(curl -fsS --max-time 5 "http://127.0.0.1:${HOST_PORT}/api/health")"
 log "Health payload: ${HEALTH_JSON}"
@@ -187,6 +326,14 @@ fi
 if ! printf '%s' "${HEALTH_JSON}" | grep -q "\"version\":\"${APP_VERSION}\""; then
   fail "/api/health version does not match expected app version ${APP_VERSION}."
 fi
+
+OPENCLAW_HEALTH_JSON="$(curl -fsS --max-time 5 "http://127.0.0.1:${HOST_PORT}/api/openclaw/runtime/health")"
+log "OpenClaw runtime health payload: ${OPENCLAW_HEALTH_JSON}"
+assert_openclaw_runtime_health "${OPENCLAW_HEALTH_JSON}"
+
+SKILLS_JSON="$(curl -fsS --max-time 5 "http://127.0.0.1:${HOST_PORT}/api/openclaw/runtime/skills")"
+SKILL_COUNT="$(extract_skill_count "${SKILLS_JSON}")" || fail "OpenClaw skills registry came up empty."
+log "OpenClaw runtime reported ${SKILL_COUNT} skills."
 
 APP_LOGS="$(docker logs "${APP_CONTAINER}" 2>&1 || true)"
 if printf '%s' "${APP_LOGS}" | grep -Fq "[OpenClaw] initialization skipped after error"; then
@@ -203,4 +350,16 @@ if [ -n "${EXPECTED_OPENCLAW_VERSION}" ]; then
   log "Embedded OpenClaw version verified: ${ACTUAL_OPENCLAW_VERSION}"
 fi
 
-log "Production container boot smoke passed for ${APP_IMAGE}."
+if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+  {
+    echo "### Runtime Readiness Gate"
+    echo ""
+    echo "- App image: \`${APP_IMAGE}\`"
+    echo "- Sandbox image: \`${SANDBOX_IMAGE}\`"
+    echo "- App version: \`${APP_VERSION}\`"
+    echo "- OpenClaw skills loaded: \`${SKILL_COUNT}\`"
+    echo "- Result: passed"
+  } >> "${GITHUB_STEP_SUMMARY}"
+fi
+
+log "Runtime readiness gate passed for ${APP_IMAGE}."
