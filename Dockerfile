@@ -47,6 +47,32 @@ RUN set -eux; \
   npm rebuild esbuild bcrypt node-pty sharp; \
   node scripts/sync-mathjax-assets.cjs; \
   npm cache clean --force
+RUN set -eux; \
+  corepack enable; \
+  retry_pnpm() { \
+  attempt=1; \
+  while [ "$attempt" -le 3 ]; do \
+  if "$@"; then \
+  return 0; \
+  fi; \
+  if [ "$attempt" -eq 3 ]; then \
+  return 1; \
+  fi; \
+  sleep_seconds=$((attempt * 15)); \
+  echo "pnpm command failed on attempt ${attempt}; retrying in ${sleep_seconds}s..." >&2; \
+  sleep "$sleep_seconds"; \
+  attempt=$((attempt + 1)); \
+  done; \
+  }; \
+  corepack prepare "$(node -p "require('./server/openclaw/package.json').packageManager")" --activate; \
+  retry_pnpm pnpm --dir server/openclaw install --frozen-lockfile; \
+  pnpm --dir server/openclaw canvas:a2ui:bundle || \
+  (echo "A2UI bundle: creating stub (non-fatal)" && \
+  mkdir -p server/openclaw/src/canvas-host/a2ui && \
+  printf '/* A2UI bundle unavailable in this build */\n' > server/openclaw/src/canvas-host/a2ui/a2ui.bundle.js && \
+  printf 'stub\n' > server/openclaw/src/canvas-host/a2ui/.bundle.hash && \
+  rm -rf server/openclaw/vendor/a2ui server/openclaw/apps/shared/OpenClawKit/Tools/CanvasA2UI); \
+  pnpm --dir server/openclaw build:docker
 # Build client and server assets
 ARG APP_VERSION=dev
 ENV NODE_ENV=production
