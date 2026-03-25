@@ -345,6 +345,8 @@ check_http_code "12" "${BASE_URL}/api/user/usage" "401"
 check_http_code_set "13" "${BASE_URL}/api/auth/google" "301" "302" "303" "307" "308" "429"
 check_http_code "14" "${BASE_URL}/sw-cleanup.js" "200"
 check_contains "15" "$TMP_DIR/14.out" "APP_VERSION" "/sw-cleanup.js present"
+check_http_code "30" "${BASE_URL}/openclaw" "200"
+check_http_code_set "31" "${BASE_URL}/codex" "200" "301" "302" "303" "307" "308"
 
 echo "== VPS runtime checks (${VPS_USER}@${VPS_HOST}) =="
 if run_ssh "echo ok >/dev/null"; then

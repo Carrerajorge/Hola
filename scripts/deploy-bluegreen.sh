@@ -14,6 +14,9 @@ IFS=$'\n\t'
 #    DEPLOY_PATH          — defaults to /opt/hola
 #    SKIP_CANARY          — set to "true" to skip canary + smoke checks
 #    DRY_RUN              — set to "true" for preflight only (no deploy)
+#    PREDEPLOY_ONLY       — set to "true" to boot the candidate slot,
+#                           verify health/canary checks, and tear it down
+#                           before swapping public traffic
 # ═══════════════════════════════════════════════════════════
 
 readonly SCRIPT_VERSION="3.3.2"
@@ -854,6 +857,7 @@ echo "  $(date '+%Y-%m-%d %H:%M:%S %Z')"
 echo "  IMAGE_TAG:   ${IMAGE_TAG}"
 echo "  APP_VERSION: ${APP_VERSION}"
 echo "  DRY_RUN:     ${DRY_RUN:-false}"
+echo "  PREDEPLOY_ONLY: ${PREDEPLOY_ONLY:-false}"
 echo "═══════════════════════════════════════════════════"
 echo ""
 
@@ -1740,13 +1744,20 @@ if [ "${SKIP_CANARY:-false}" != "true" ]; then
     fi
   done
 
-  # Test that static assets are served
-  STATIC_CODE="$(curl -sf -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1:${NEW_PORT}/" 2>/dev/null || echo "000")"
-  if [ "${STATIC_CODE}" = "200" ]; then
-    logok "/ (SPA) → HTTP ${STATIC_CODE}"
-  else
-    logw "/ (SPA) → HTTP ${STATIC_CODE} (non-fatal)"
-  fi
+  # Test that the core web shell and integrated OpenClaw route are served
+  APP_ROUTE_CHECKS=(
+    "/"
+    "/openclaw"
+  )
+  for route in "${APP_ROUTE_CHECKS[@]}"; do
+    ROUTE_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1:${NEW_PORT}${route}" 2>/dev/null || echo "000")"
+    if [ "${ROUTE_CODE}" = "200" ]; then
+      logok "${route} → HTTP ${ROUTE_CODE}"
+    else
+      loge "${route} → HTTP ${ROUTE_CODE}"
+      CANARY_OK=false
+    fi
+  done
 
   if [ "${CANARY_OK}" != "true" ]; then
     loge "Canary checks failed. Aborting deploy."
@@ -1769,6 +1780,40 @@ if [ "${SKIP_CANARY:-false}" != "true" ]; then
   done
   logok "Warm-up done."
   echo ""
+fi
+
+# ── Step 8c: Predeploy-only exit before traffic cutover ───────────────
+if [ "${PREDEPLOY_ONLY:-false}" = "true" ]; then
+  log "[PREDEPLOY] Candidate ${NEW_SLOT} passed startup gate. Tearing it down before traffic cutover..."
+  slot "${NEW_SLOT}" down --remove-orphans || true
+  NEW_SLOT_STARTED=false
+
+  if [ "${ACTIVE_SLOT_SANDBOX_EVICTED}" = "true" ] && [ "${NGINX_SWAPPED}" = "false" ]; then
+    log "  Restoring the active ${ACTIVE_SLOT} sandbox service after predeploy gate..."
+    if restore_active_slot_sandbox >/dev/null 2>&1; then
+      logok "Active ${ACTIVE_SLOT} sandbox service restored."
+    else
+      loge "Failed to restore the active ${ACTIVE_SLOT} sandbox service after predeploy gate."
+      exit 1
+    fi
+  fi
+
+  rm -f "${STATE_FILE_BAK}"
+  PREDEPLOY_DURATION="$(( $(date +%s) - DEPLOY_START_EPOCH ))"
+  echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') PREDEPLOY_OK slot=${NEW_SLOT} image=${IMAGE_TAG} version=${APP_VERSION} duration=${PREDEPLOY_DURATION}s" >> "${DEPLOY_LOG}" 2>/dev/null || true
+
+  trap - ERR EXIT INT TERM HUP
+  release_image_pins
+  release_lock
+
+  echo ""
+  echo "═══════════════════════════════════════════════════"
+  echo "  ✓ Predeploy Startup Gate Complete"
+  echo "  Candidate: ${NEW_SLOT} on port ${NEW_PORT}"
+  echo "  Version:   ${APP_VERSION} (${IMAGE_TAG})"
+  echo "  Result:    Booted, passed canary, and was torn down"
+  echo "═══════════════════════════════════════════════════"
+  exit 0
 fi
 
 # ── Step 9a: Install Nginx server config if present ────────

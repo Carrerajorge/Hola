@@ -436,6 +436,20 @@ jobs:
             nginx/maintenance.html \
             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/nginx/ 2>/dev/null || true
 
+      - name: Run predeploy startup gate
+        run: |
+          set -euo pipefail
+          for attempt in 1 2; do
+            if ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ConnectionAttempts=3               -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}               "echo '${{ github.token }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null &&                cd ${{ env.DEPLOY_PATH }} &&                PREDEPLOY_ONLY='true'                IMAGE_TAG='${{ steps.tag.outputs.image_tag }}'                APP_VERSION='${{ steps.tag.outputs.app_version }}'                BUILD_IMAGE_TAG='${{ needs.build_images.outputs.image_tag }}'                EXPECTED_APP_DIGEST='${{ needs.build_images.outputs.app_digest }}'                EXPECTED_SANDBOX_DIGEST='${{ needs.build_images.outputs.sandbox_digest }}'                EXPECTED_OCR_DIGEST='${{ needs.build_images.outputs.ocr_digest }}'                bash scripts/deploy-bluegreen.sh"; then
+              break
+            fi
+            if [ "$attempt" -eq 2 ]; then
+              echo "Predeploy startup gate failed after retry" >&2
+              exit 1
+            fi
+            sleep 10
+          done
+
       - name: Run blue-green deploy
         id: deploy_bluegreen
         run: |
@@ -974,6 +988,21 @@ jobs:
             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12 \
             nginx/maintenance.html \
             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/nginx/ 2>/dev/null || true
+
+      - name: Run predeploy startup gate
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
+        run: |
+          set -euo pipefail
+          for attempt in 1 2; do
+            if ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ConnectionAttempts=3               -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}               "echo '${{ github.token }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null &&                cd ${{ env.DEPLOY_PATH }} &&                PREDEPLOY_ONLY='true'                IMAGE_TAG='${{ steps.tag.outputs.image_tag }}'                APP_VERSION='${{ steps.tag.outputs.app_version }}'                BUILD_IMAGE_TAG='${{ needs.build_images.outputs.image_tag }}'                EXPECTED_APP_DIGEST='${{ needs.build_images.outputs.app_digest }}'                EXPECTED_SANDBOX_DIGEST='${{ needs.build_images.outputs.sandbox_digest }}'                EXPECTED_OCR_DIGEST='${{ needs.build_images.outputs.ocr_digest }}'                bash scripts/deploy-bluegreen.sh"; then
+              break
+            fi
+            if [ "$attempt" -eq 2 ]; then
+              echo "Predeploy startup gate failed after retry" >&2
+              exit 1
+            fi
+            sleep 10
+          done
 
       - name: Run blue-green deploy
         id: deploy_bluegreen
