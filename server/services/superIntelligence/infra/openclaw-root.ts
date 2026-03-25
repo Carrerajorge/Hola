@@ -2,6 +2,7 @@ import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { listEmbeddedOpenClawPackageRootCandidatesSync } from "../../openClawEmbeddedAssets.js";
 
 const CORE_PACKAGE_NAMES = new Set(["openclaw"]);
 
@@ -114,15 +115,40 @@ export function resolveOpenClawPackageRootSync(opts: {
 
 function buildCandidates(opts: { cwd?: string; argv1?: string; moduleUrl?: string }): string[] {
   const candidates: string[] = [];
+  const seen = new Set<string>();
+
+  const addCandidate = (value: string | null | undefined) => {
+    if (!value) {
+      return;
+    }
+    const resolved = path.resolve(value);
+    if (seen.has(resolved)) {
+      return;
+    }
+    seen.add(resolved);
+    candidates.push(resolved);
+  };
 
   if (opts.moduleUrl) {
-    candidates.push(path.dirname(fileURLToPath(opts.moduleUrl)));
+    try {
+      addCandidate(path.dirname(fileURLToPath(opts.moduleUrl)));
+    } catch {
+      // Ignore invalid file:// URLs and keep other package-root hints.
+    }
   }
   if (opts.argv1) {
-    candidates.push(...candidateDirsFromArgv1(opts.argv1));
+    for (const candidate of candidateDirsFromArgv1(opts.argv1)) {
+      addCandidate(candidate);
+    }
   }
   if (opts.cwd) {
-    candidates.push(opts.cwd);
+    addCandidate(opts.cwd);
+  }
+
+  // Hola embeds OpenClaw under layouts like `server/openclaw`, which are siblings
+  // of the current app root instead of ancestors of this helper module.
+  for (const candidate of listEmbeddedOpenClawPackageRootCandidatesSync(opts)) {
+    addCandidate(candidate);
   }
 
   return candidates;
