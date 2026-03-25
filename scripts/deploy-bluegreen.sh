@@ -1969,9 +1969,9 @@ else
 fi
 echo ""
 
-log "[13b/15] Verifying standby port ${ACTIVE_PORT} is free..."
-ensure_host_port_free_or_abort "${ACTIVE_PORT}"
-logok "Standby port ${ACTIVE_PORT} is free."
+log "[13b/15] Verifying retired port ${OLD_PORT} is free..."
+ensure_host_port_free_or_abort "${OLD_PORT}"
+logok "Retired port ${OLD_PORT} is free."
 echo ""
 
 # ── Step 13: Verify OCR + infrastructure health ──────────
