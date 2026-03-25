@@ -11,7 +11,7 @@ import {
   isTransientHttpError,
   sanitizeUserFacingText,
 } from "../../agents/pi-embedded-helpers.js";
-import { runEmbeddedPiAgent } from "../../../../openclaw/src/agents/pi-embedded-runner/run.js";
+import { runEmbeddedPiAgent } from "../../agents/pi-embedded.js";
 import {
   resolveGroupSessionKey,
   resolveSessionTranscriptPath,

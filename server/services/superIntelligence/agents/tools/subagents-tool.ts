@@ -26,7 +26,7 @@ import {
 } from "../../shared/subagents-format.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../../utils/message-channel.js";
 import { AGENT_LANE_SUBAGENT } from "../lanes.js";
-import { abortEmbeddedPiRun } from "../../../../openclaw/src/agents/pi-embedded-runner/runs.js";
+import { abortEmbeddedPiRun } from "../pi-embedded.js";
 import { optionalStringEnum } from "../schema/typebox.js";
 import { getSubagentDepthFromSessionStore } from "../subagent-depth.js";
 import {

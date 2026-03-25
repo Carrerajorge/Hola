@@ -5,8 +5,8 @@ import {
   abortEmbeddedPiRun,
   isEmbeddedPiRunActive,
   isEmbeddedPiRunStreaming,
-} from "../../../../openclaw/src/agents/pi-embedded-runner/runs.js";
-import { resolveEmbeddedSessionLane } from "../../agents/pi-embedded-runner/lanes.js";
+  resolveEmbeddedSessionLane,
+} from "../../agents/pi-embedded.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import {
   resolveGroupSessionKey,

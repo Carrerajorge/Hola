@@ -89,11 +89,11 @@ final class ExecApprovalsGatewayPrompter {
     private static func shouldAsk(security: ExecSecurity, ask: ExecAsk) -> Bool {
         switch ask {
         case .always:
-            return true
+            true
         case .onMiss:
-            return security == .allowlist
+            security == .allowlist
         case .off:
-            return false
+            false
         }
     }
 

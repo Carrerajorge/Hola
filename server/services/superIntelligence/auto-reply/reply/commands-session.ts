@@ -1,4 +1,4 @@
-import { abortEmbeddedPiRun } from "../../../../openclaw/src/agents/pi-embedded-runner/runs.js";
+import { abortEmbeddedPiRun } from "../../agents/pi-embedded.js";
 import { parseDurationMs } from "../../cli/parse-duration.js";
 import { isRestartEnabled } from "../../config/commands.js";
 import type { SessionEntry } from "../../config/sessions.js";

@@ -374,8 +374,6 @@ importers:
 
   extensions/google: {}
 
-  extensions/google-gemini-cli-auth: {}
-
   extensions/googlechat:
     dependencies:
       google-auth-library:
