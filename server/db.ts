@@ -487,6 +487,57 @@ export function getHealthStatus(): HealthCheckResult {
   };
 }
 
+export async function probeHealthStatus(timeoutMs: number = 1500): Promise<HealthCheckResult> {
+  if (isShuttingDown) {
+    return getHealthStatus();
+  }
+
+  const startTime = Date.now();
+  let client: PoolClient | null = null;
+  let timeoutId: NodeJS.Timeout | null = null;
+
+  try {
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error("Readiness probe timeout")), timeoutMs);
+    });
+
+    const queryPromise = (async () => {
+      client = await pool.connect();
+      await client.query("SELECT 1");
+      return true;
+    })();
+
+    await Promise.race([queryPromise, timeoutPromise]);
+
+    healthState.latencyMs = Date.now() - startTime;
+    healthState.lastCheck = new Date();
+    healthState.consecutiveFailures = 0;
+    healthState.consecutiveSuccesses = Math.max(healthState.consecutiveSuccesses, 1);
+
+    // A successful on-demand readiness probe should immediately clear a stale
+    // UNHEALTHY state so deploy health gates do not flap on background monitor lag.
+    if (healthState.status === "UNHEALTHY") {
+      healthState.status = "DEGRADED";
+    }
+
+    updateHealthStatus();
+    return getHealthStatus();
+  } catch {
+    return getHealthStatus();
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+
+    if (client) {
+      try {
+        client.release();
+      } catch {
+      }
+    }
+  }
+}
+
 export function isHealthy(): boolean {
   return healthState.status === 'HEALTHY';
 }
