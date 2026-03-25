@@ -495,24 +495,34 @@ pin_image_locally() {
   local image_ref="$1"
   local pin_name
   local pin_name_base
-  local pin_id
+  local pin_id=""
+  local stale_pin_ids=""
+  local attempt
 
   pin_name_base="iliagpt-deploy-pin-$(printf '%s' "${image_ref}" | sha256sum | awk '{print substr($1,1,12)}')"
-  pin_name="${pin_name_base}"
-
-  docker rm -f "${pin_name}" >/dev/null 2>&1 || true
-
-  if docker ps -aq --filter "name=^/${pin_name}$" | grep -q .; then
-    logw "Pin container ${pin_name} is still reserved after cleanup; using a unique fallback name."
-    pin_name="${pin_name_base}-$$-$(date +%s)"
+  stale_pin_ids="$(docker ps -aq --filter "name=${pin_name_base}" 2>/dev/null || true)"
+  if [ -n "${stale_pin_ids}" ]; then
+    while IFS= read -r stale_pin_id; do
+      [ -n "${stale_pin_id}" ] || continue
+      docker rm -f "${stale_pin_id}" >/dev/null 2>&1 || true
+    done <<EOF
+${stale_pin_ids}
+EOF
   fi
 
-  pin_id="$(
-    docker create \
-      --label "iliagpt.deploy.preserve=true" \
-      --name "${pin_name}" \
-      "${image_ref}" >/dev/null && docker inspect -f '{{.Id}}' "${pin_name}"
-  )"
+  for attempt in 1 2 3; do
+    pin_name="${pin_name_base}-$$-${RANDOM}"
+    pin_id="$(
+      docker create \
+        --label "iliagpt.deploy.preserve=true" \
+        --name "${pin_name}" \
+        "${image_ref}" 2>/dev/null || true
+    )"
+    if [ -n "${pin_id}" ]; then
+      break
+    fi
+    sleep 1
+  done
 
   if [ -n "${pin_id}" ]; then
     IMAGE_PIN_IDS+=("${pin_id}")
@@ -977,6 +987,7 @@ else
   NEW_PORT="5000"
   OLD_PORT="5001"
 fi
+ACTIVE_PORT="${OLD_PORT}"
 
 log "Active slot:  ${ACTIVE_SLOT} (port ${OLD_PORT})"
 log "Deploying to: ${NEW_SLOT} (port ${NEW_PORT})"
