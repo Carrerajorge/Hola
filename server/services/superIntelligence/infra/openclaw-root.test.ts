@@ -141,6 +141,21 @@ describe("resolveOpenClawPackageRoot", () => {
     expect(resolveOpenClawPackageRootSync({ moduleUrl })).toBe(pkgRoot);
   });
 
+  it("resolves embedded server/openclaw roots from an app cwd", async () => {
+    const appRoot = fx("embedded-layout");
+    const embeddedRoot = path.join(appRoot, "server", "openclaw");
+    const moduleUrl = pathToFileURL(
+      path.join(appRoot, "server", "services", "superIntelligence", "infra", "openclaw-root.js"),
+    ).toString();
+
+    setFile(path.join(embeddedRoot, "package.json"), JSON.stringify({ name: "openclaw" }));
+
+    expect(resolveOpenClawPackageRootSync({ cwd: appRoot, moduleUrl })).toBe(embeddedRoot);
+    await expect(resolveOpenClawPackageRoot({ cwd: appRoot, moduleUrl })).resolves.toBe(
+      embeddedRoot,
+    );
+  });
+
   it("returns null for non-openclaw package roots", async () => {
     const pkgRoot = fx("not-openclaw");
     setFile(path.join(pkgRoot, "package.json"), JSON.stringify({ name: "not-openclaw" }));

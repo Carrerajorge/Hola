@@ -54,4 +54,41 @@ describe("resolveBundledSkillsDir", () => {
 
     expect(resolved).toBe(path.join(root, "skills"));
   });
+
+  it("prefers embedded server/openclaw skills from the app root layout", async () => {
+    delete process.env.OPENCLAW_BUNDLED_SKILLS_DIR;
+
+    const appRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-app-root-"));
+    const embeddedRoot = path.join(appRoot, "server", "openclaw");
+    await fs.mkdir(embeddedRoot, { recursive: true });
+    await fs.writeFile(path.join(embeddedRoot, "package.json"), JSON.stringify({ name: "openclaw" }));
+    await writeSkill({
+      dir: path.join(embeddedRoot, "skills", "peekaboo"),
+      name: "peekaboo",
+      description: "peekaboo",
+    });
+
+    // Competing top-level `skills/` paths should not win over the embedded package.
+    await fs.mkdir(path.join(appRoot, "skills"), { recursive: true });
+    await fs.writeFile(path.join(appRoot, "skills", "README.md"), "not the bundled OpenClaw skills");
+
+    const moduleUrl = pathToFileURL(
+      path.join(
+        appRoot,
+        "server",
+        "services",
+        "superIntelligence",
+        "agents",
+        "skills",
+        "bundled-dir.js",
+      ),
+    ).href;
+
+    const resolved = resolveBundledSkillsDir({
+      cwd: appRoot,
+      moduleUrl,
+    });
+
+    expect(resolved).toBe(path.join(embeddedRoot, "skills"));
+  });
 });
