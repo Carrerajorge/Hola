@@ -3,9 +3,9 @@ name: Enterprise Quality Gates (CI)
 on:
   workflow_call:
   push:
-    branches: [ "main", "release/*" ]
+    branches: [ "main", "master", "release/*" ]
   pull_request:
-    branches: [ "main", "release/*" ]
+    branches: [ "main", "master", "release/*" ]
 
 permissions:
   contents: read
