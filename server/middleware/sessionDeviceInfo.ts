@@ -9,6 +9,31 @@ function ipPrefixFromRequest(req: Request): string {
   return raw.split(".").slice(0, 3).join(".");
 }
 
+function hasPersistentSessionIdentity(session: any): boolean {
+  if (!session || typeof session !== "object") return false;
+
+  if (typeof session.authUserId === "string" && session.authUserId) return true;
+  if (typeof session.anonUserId === "string" && session.anonUserId) return true;
+
+  const passportUser = session.passport?.user;
+  if (typeof passportUser === "string" && passportUser) return true;
+  if (passportUser?.claims?.sub || passportUser?.id || passportUser?.sub) return true;
+
+  return false;
+}
+
+export function shouldTrackSessionDeviceInfo(req: Request): boolean {
+  const session = (req as any)?.session as any;
+  if (!session) return false;
+
+  if (hasPersistentSessionIdentity(session)) {
+    return true;
+  }
+
+  const method = String(req.method || "GET").toUpperCase();
+  return !["GET", "HEAD", "OPTIONS"].includes(method);
+}
+
 /**
  * Best-effort device metadata to help users manage active sessions.
  * Stored on the session object and persisted by connect-pg-simple.
@@ -16,6 +41,7 @@ function ipPrefixFromRequest(req: Request): string {
 export function sessionDeviceInfoMiddleware(req: Request, _res: Response, next: NextFunction) {
   const session = (req as any)?.session as any;
   if (!session) return next();
+  if (!shouldTrackSessionDeviceInfo(req)) return next();
 
   const now = Date.now();
   const ua = String(req.headers["user-agent"] || "");

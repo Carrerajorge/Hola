@@ -11,6 +11,39 @@ import { authStorage } from "../../replit_integrations/auth/storage";
 import { Logger } from "../logger";
 import { env } from "../../config/env";
 
+function isRecoverablePassportDeserializeError(error: unknown): boolean {
+    if (!error || typeof error !== "object") {
+        return false;
+    }
+
+    const directCode = "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
+    const causeCode =
+        "cause" in error && typeof (error as { cause?: unknown }).cause === "object"
+            ? String(((error as { cause?: { code?: unknown } }).cause?.code ?? ""))
+            : "";
+    const code = String(directCode || causeCode || "").trim().toLowerCase();
+    if (["28p01", "57p01", "57p02", "57p03", "08001", "08006", "53300", "53400"].includes(code)) {
+        return true;
+    }
+
+    const message = String(
+        error instanceof Error ? error.message : error || "",
+    ).toLowerCase();
+
+    return [
+        "password authentication failed",
+        "connection terminated unexpectedly",
+        "the database system is starting up",
+        "remaining connection slots are reserved",
+        "terminating connection due to administrator command",
+        "connect econnrefused",
+        "connect etimedout",
+        "timeout",
+        "socket hang up",
+        "server closed the connection unexpectedly",
+    ].some((pattern) => message.includes(pattern));
+}
+
 // Serialize user for the session
 passport.serializeUser((user: any, done) => {
     try {
@@ -45,6 +78,10 @@ passport.deserializeUser(async (id: string, done) => {
         }
         done(null, hydratedUser);
     } catch (error) {
+        if (isRecoverablePassportDeserializeError(error)) {
+            Logger.warn("[Passport] deserializeUser degraded; clearing session-backed identity");
+            return done(null, false);
+        }
         done(error);
     }
 });

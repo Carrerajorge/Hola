@@ -19,6 +19,20 @@ const PgStore = connectPgSimple(session);
 let cachedStore: AppSessionStore | null = null;
 let cachedMode: AppSessionStoreMode | null = null;
 
+function getStoreErrorCode(error: unknown): string {
+  if (!error || typeof error !== "object") {
+    return "";
+  }
+
+  const directCode = "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
+  const cause =
+    "cause" in error && typeof (error as { cause?: unknown }).cause === "object"
+      ? ((error as { cause?: { code?: unknown } }).cause?.code ?? "")
+      : "";
+
+  return String(directCode || cause || "").trim().toLowerCase();
+}
+
 function normalizeStoreMode(value?: string | null): AppSessionStoreMode | null {
   const mode = String(value || "").trim().toLowerCase();
   if (!mode) return null;
@@ -45,12 +59,38 @@ function resolveDefaultStoreMode(): AppSessionStoreMode {
   return isProduction ? "postgres" : "memory";
 }
 
-function shouldTreatStoreErrorAsMiss(error: unknown): boolean {
+export function shouldTreatStoreErrorAsMiss(error: unknown): boolean {
+  const code = getStoreErrorCode(error);
+  if (
+    [
+      "28p01",
+      "57p01",
+      "57p02",
+      "57p03",
+      "08001",
+      "08006",
+      "53300",
+      "53400",
+    ].includes(code)
+  ) {
+    return true;
+  }
+
   const message = String(
     error instanceof Error ? error.message : error || "",
   ).toLowerCase();
 
   return [
+    "password authentication failed",
+    "connection terminated unexpectedly",
+    "the database system is starting up",
+    "remaining connection slots are reserved",
+    "terminating connection due to administrator command",
+    "timeout",
+    "connect econnrefused",
+    "connect etimedout",
+    "socket hang up",
+    "server closed the connection unexpectedly",
     "unexpected token",
     "invalid input syntax",
     "json",
@@ -80,7 +120,7 @@ function createPostgresStore(): AppSessionStore {
     originalGet(sid, (error, sessionData) => {
       if (error && shouldTreatStoreErrorAsMiss(error)) {
         console.warn(
-          "[appSessionStore] Ignoring unreadable session payload and treating it as a cache miss.",
+          "[appSessionStore] Session store read degraded; treating it as a cache miss.",
         );
         callback?.(null, null);
         return;
@@ -89,6 +129,23 @@ function createPostgresStore(): AppSessionStore {
       callback?.(error, sessionData);
     });
   };
+
+  const originalTouch = typeof store.touch === "function" ? store.touch.bind(store) : null;
+  if (originalTouch) {
+    store.touch = (sid, sessionData, callback) => {
+      originalTouch(sid, sessionData, (error) => {
+        if (error && shouldTreatStoreErrorAsMiss(error)) {
+          console.warn(
+            "[appSessionStore] Session store touch degraded; skipping rolling update.",
+          );
+          callback?.(null);
+          return;
+        }
+
+        callback?.(error as Error | null | undefined);
+      });
+    };
+  }
 
   return store;
 }
