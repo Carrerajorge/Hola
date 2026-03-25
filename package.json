@@ -227,7 +227,7 @@
     "dockerode": "^4.0.9",
     "docx": "^9.5.3",
     "dompurify": "^3.3.1",
-    "dotenv": "^17.2.4",
+    "dotenv": "^16.4.5",
     "drizzle-orm": "^0.45.1",
     "drizzle-zod": "^0.8.3",
     "duck-duck-scrape": "^2.2.7",
@@ -497,5 +497,10 @@
     "*.{js,ts,tsx}": [
       "eslint --fix"
     ]
+  },
+  "packageManager": "npm@10.8.2",
+  "engines": {
+    "node": ">=20 <23",
+    "npm": ">=10 <11"
   }
 }

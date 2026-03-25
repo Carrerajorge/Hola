@@ -17,6 +17,17 @@ healthRouter.get("/", (req, res) => {
   });
 });
 
+// Readiness check for container/platform boot probes.
+// Keep this lightweight and deterministic so preview/production smoke tests
+// can verify the HTTP server is up without depending on full subsystem health.
+healthRouter.get("/ready", (req, res) => {
+  res.status(200).json({
+    status: "ready",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+  });
+});
+
 healthRouter.get("/detailed", async (req, res) => {
   const status: any = {
     status: "ok",
