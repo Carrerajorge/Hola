@@ -11,7 +11,6 @@ import { lazy, Suspense, useState, useCallback, useMemo, useEffect, useRef, type
 
 import { useFavorites } from "@/hooks/use-favorites";
 import { usePromptTemplates } from "@/hooks/use-prompt-templates";
-import { useNotifications } from "@/hooks/use-notifications";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useLocation, useSearch } from "wouter";
@@ -24,7 +23,7 @@ import { usePinnedGpts } from "@/hooks/use-pinned-gpts";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
-import { useStreamingStore, useProcessingChatIds, usePendingBadges } from "@/stores/streamingStore";
+import { useStreamingStore, useProcessingChatIds, usePendingBadges, usePendingBadgeTotal } from "@/stores/streamingStore";
 import { useAgentStore } from "@/stores/agent-store";
 import { useSuperAgentStore } from "@/stores/super-agent-store";
 import { pollingManager } from "@/lib/polling-manager";
@@ -50,6 +49,7 @@ const isLocalDevHost = () => {
 
 const APP_VERSION = normalizeAppBuildVersion(import.meta.env.VITE_APP_VERSION);
 const LazyRecoveryFallback = (() => null) as ComponentType<any>;
+const DOCUMENT_TITLE_BADGE_PATTERN = /^\(\d+\)\s*/;
 
 const lazyWithRetry = <T extends ComponentType<any>>(
   componentImport: () => Promise<{ default: T }>,
@@ -196,11 +196,11 @@ export default function Home() {
 
   const { favorites, addFavorite, removeFavorite, isFavorite } = useFavorites();
   const { templates, addTemplate, removeTemplate, updateTemplate, incrementUsage, categories } = usePromptTemplates();
-  const { notifyTaskComplete, requestPermission } = useNotifications();
   const { isOnline } = useOnlineStatus();
 
   const {
     chats,
+    allChats,
     hiddenChats,
     pinnedChats,
     activeChat,
@@ -217,6 +217,7 @@ export default function Home() {
     editMessageAndTruncate,
     truncateAndReplaceMessage,
     truncateMessagesAt,
+    refreshChatDetails,
     isLoading: isChatsLoading
   } = useChats();
 
@@ -353,7 +354,53 @@ export default function Home() {
   // Use global streaming store for tracking processing chats and pending badges
   const processingChatIds = useProcessingChatIds();
   const pendingResponseCounts = usePendingBadges();
+  const pendingResponseTotal = usePendingBadgeTotal();
   const { clearBadge } = useStreamingStore();
+  const reconcileRunFromMessages = useStreamingStore((state) => state.reconcileRunFromMessages);
+  const documentTitleRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    const currentBaseTitle = (document.title || documentTitleRef.current || "ILIAGPT")
+      .replace(DOCUMENT_TITLE_BADGE_PATTERN, "")
+      .trim() || "ILIAGPT";
+    documentTitleRef.current = currentBaseTitle;
+
+    document.title = pendingResponseTotal > 0
+      ? `(${pendingResponseTotal}) ${currentBaseTitle}`
+      : currentBaseTitle;
+  }, [pendingResponseTotal]);
+
+  useEffect(() => {
+    if (processingChatIds.length === 0) return;
+
+    const refreshProcessingChats = () => {
+      processingChatIds.forEach((chatId) => {
+        void refreshChatDetails(chatId);
+      });
+    };
+
+    refreshProcessingChats();
+    const intervalId = window.setInterval(refreshProcessingChats, 4000);
+    return () => window.clearInterval(intervalId);
+  }, [processingChatIds, refreshChatDetails]);
+
+  useEffect(() => {
+    if (processingChatIds.length === 0) return;
+
+    const processingChatIdSet = new Set(processingChatIds);
+    allChats.forEach((chat) => {
+      if (!processingChatIdSet.has(chat.id) || chat.messages.length === 0) return;
+
+      reconcileRunFromMessages({
+        chatId: chat.id,
+        chatTitle: chat.title,
+        activeChatId: activeChat?.id || null,
+        messages: chat.messages,
+      });
+    });
+  }, [activeChat?.id, allChats, processingChatIds, reconcileRunFromMessages]);
 
   // WhatsApp: listen for mirrored messages and inject chats into the sidebar in real-time.
   const lastWaRefreshRef = useRef(0);

@@ -2626,6 +2626,7 @@ export function useChats() {
     editMessageAndTruncate,
     truncateAndReplaceMessage,
     truncateMessagesAt,
+    refreshChatDetails: fetchChatDetails,
     getChatDateLabel
   };
 }
