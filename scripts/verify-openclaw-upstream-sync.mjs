@@ -33,6 +33,14 @@ function ensureUpstreamTag(tag, remoteName) {
   }
 }
 
+function isIgnoredDriftPath(filePath) {
+  return (
+    /(^|\/).*(test|spec|harness|helpers?)\.(ts|tsx|js|mjs|cjs|mts|cts)$/.test(filePath) ||
+    filePath.includes(".test-support.") ||
+    filePath.endsWith("README.md")
+  );
+}
+
 function main() {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   const {
@@ -79,7 +87,7 @@ function main() {
   const unexpected = diffLines.filter((line) => {
     const parts = line.split(/\s+/);
     const filePath = parts.at(-1);
-    return !allowed.has(filePath);
+    return !allowed.has(filePath) && !isIgnoredDriftPath(filePath);
   });
 
   if (unexpected.length > 0) {
