@@ -141,13 +141,13 @@ async function buildServer(appVersion: string) {
         },
       },
       {
-        name: "rewrite-openclaw-self-imports",
+        name: "externalize-bare-imports",
         setup(build) {
           // The @hola/openclaw package uses self-referential bare imports
-          // (e.g. "openclaw/plugin-sdk/..."). Rewrite them to the scoped
-          // name so Node.js / esbuild resolves them through the correct
-          // file: dependency at @hola/openclaw.
+          // like "openclaw/plugin-sdk/...". Rewrite them to "@hola/openclaw/..."
+          // so esbuild can resolve and bundle them instead of externalizing.
           build.onResolve({ filter: /^openclaw(\/|$)/ }, (args) => {
+            if (args.pluginData?.rewrittenFromOpenclaw) return;
             const rewritten = args.path.replace(/^openclaw/, "@hola/openclaw");
             return build.resolve(rewritten, {
               kind: args.kind,
@@ -156,14 +156,12 @@ async function buildServer(appVersion: string) {
               pluginData: { rewrittenFromOpenclaw: true },
             });
           });
-        }
-      },
-      {
-        name: "externalize-bare-imports",
-        setup(build) {
+
           build.onResolve({ filter: /^[^./]|^\.[^./]|^\.\.[^/]/ }, (args) => {
             if (args.path.startsWith("@shared")) return;
             if (args.path.startsWith("@hola")) return;
+            // Don't externalize openclaw self-imports (handled above)
+            if (args.path === "openclaw" || args.path.startsWith("openclaw/")) return;
             return { path: args.path, external: true };
           });
         }
