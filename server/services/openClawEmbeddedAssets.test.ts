@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
+import { OPENCLAW_RELEASE_VERSION } from "@shared/openclawRelease";
 import {
   listEmbeddedOpenClawPackageRootCandidatesSync,
   resolveEmbeddedOpenClawControlUiRootSync,
@@ -36,7 +37,7 @@ describe("openClawEmbeddedAssets", () => {
       const packageRoot = path.join(appRoot, "server", "openclaw");
       await writeJson(path.join(packageRoot, "package.json"), {
         name: "openclaw",
-        version: "2026.3.22",
+        version: OPENCLAW_RELEASE_VERSION,
       });
 
       expect(resolveEmbeddedOpenClawPackageRootSync({ cwd: appRoot })).toBe(packageRoot);
@@ -55,7 +56,7 @@ describe("openClawEmbeddedAssets", () => {
 
       await writeJson(path.join(packageRoot, "package.json"), {
         name: "openclaw",
-        version: "2026.3.22",
+        version: OPENCLAW_RELEASE_VERSION,
       });
       await writeFile(path.join(controlUiRoot, "index.html"), "<html>ok</html>\n");
 

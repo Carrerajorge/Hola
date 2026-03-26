@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { OPENCLAW_RELEASE_VERSION } from "@shared/openclawRelease";
 
 const state = vi.hoisted(() => ({
   initSkills: vi.fn(async () => {}),
-  readFile: vi.fn(async () => JSON.stringify({ version: "2026.3.22" })),
+  readFile: vi.fn(async () => JSON.stringify({ version: OPENCLAW_RELEASE_VERSION })),
   resolveEmbeddedOpenClawControlUiRootSync: vi.fn(() => "/tmp/openclaw/dist/control-ui"),
   resolveEmbeddedOpenClawPackageJsonPathSync: vi.fn(() => "/tmp/openclaw/package.json"),
   getOpenClawConfig: vi.fn(() => ({
@@ -79,7 +80,7 @@ describe("initializeOpenClaw", () => {
     expect(state.resolveEmbeddedOpenClawPackageJsonPathSync).toHaveBeenCalledTimes(1);
     expect(state.resolveEmbeddedOpenClawControlUiRootSync).toHaveBeenCalledTimes(1);
     expect(state.readFile).toHaveBeenCalledTimes(1);
-    expect(first.version).toBe("2026.3.22");
+    expect(first.version).toBe(OPENCLAW_RELEASE_VERSION);
     expect(first.controlUiReady).toBe(true);
     expect(first.pluginsPreloaded).toBe(false);
     expect(first.skillsRegistered).toBe(1);

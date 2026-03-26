@@ -2,6 +2,7 @@
 // native integration instead of depending on a packaged @hola/openclaw runtime.
 import { createDefaultDeps } from "../openclaw/src/cli/deps.js";
 import fs from "fs/promises";
+import { OPENCLAW_RELEASE_VERSION } from "@shared/openclawRelease";
 
 export interface CreateDatasetRequest {
     name: string;
@@ -62,7 +63,7 @@ export class RagflowNativeClient {
         const combinedInput = `[CONTEXT: Datasets ${request.dataset_ids.join(",")}] \n\n[INSTRUCTION]: ${lastMessage}`;
         
         return {
-            response: `Simulated RAG output natively executing OpenClaw v2026.3.22 logic: Entendido. La instrucción es: "${lastMessage}"`
+            response: `Simulated RAG output natively executing OpenClaw v${OPENCLAW_RELEASE_VERSION} logic: Entendido. La instrucción es: "${lastMessage}"`
         };
     }
 

@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { DEFAULT_OPENCLAW_RELEASE_TAG, OPENCLAW_RELEASE_VERSION } from "@shared/openclawRelease";
 import { getOpenClawReleaseSnapshot } from "./openClawReleaseService";
 
 async function withTempEmbeddedOpenClaw<T>(fn: (root: string) => Promise<T>) {
@@ -25,7 +26,7 @@ describe("getOpenClawReleaseSnapshot", () => {
         JSON.stringify(
           {
             name: "openclaw",
-            version: "2026.3.22",
+            version: OPENCLAW_RELEASE_VERSION,
             repository: {
               type: "git",
               url: "git+https://github.com/openclaw/openclaw.git",
@@ -42,7 +43,7 @@ describe("getOpenClawReleaseSnapshot", () => {
 
 ## Unreleased
 
-## 2026.3.22
+## ${OPENCLAW_RELEASE_VERSION}
 
 ### Breaking
 
@@ -65,15 +66,15 @@ describe("getOpenClawReleaseSnapshot", () => {
         "utf8",
       );
 
-      const snapshot = await getOpenClawReleaseSnapshot("v2026.3.22", {
+      const snapshot = await getOpenClawReleaseSnapshot(DEFAULT_OPENCLAW_RELEASE_TAG, {
         cwd: appRoot,
         argv1: path.join(appRoot, "dist", "index.mjs"),
       });
 
-      expect(snapshot.bundled.version).toBe("2026.3.22");
+      expect(snapshot.bundled.version).toBe(OPENCLAW_RELEASE_VERSION);
       expect(snapshot.bundled.matchesRequested).toBe(true);
-      expect(snapshot.requestedRelease?.tagName).toBe("v2026.3.22");
-      expect(snapshot.latestRelease?.tagName).toBe("v2026.3.22");
+      expect(snapshot.requestedRelease?.tagName).toBe(DEFAULT_OPENCLAW_RELEASE_TAG);
+      expect(snapshot.latestRelease?.tagName).toBe(DEFAULT_OPENCLAW_RELEASE_TAG);
       expect(snapshot.sync.status).toBe("synced");
       expect(snapshot.sync.latestMatchesRequested).toBe(true);
       expect(snapshot.requestedRelease?.highlights).toContain("Add native skill install flow.");
@@ -90,14 +91,14 @@ describe("getOpenClawReleaseSnapshot", () => {
       await fs.mkdir(packageRoot, { recursive: true });
       await fs.writeFile(
         path.join(packageRoot, "package.json"),
-        JSON.stringify({ name: "openclaw", version: "2026.3.22" }, null, 2),
+        JSON.stringify({ name: "openclaw", version: OPENCLAW_RELEASE_VERSION }, null, 2),
         "utf8",
       );
       await fs.writeFile(
         path.join(packageRoot, "CHANGELOG.md"),
         `# Changelog
 
-## 2026.3.22
+## ${OPENCLAW_RELEASE_VERSION}
 
 ### Changes
 
@@ -117,9 +118,9 @@ describe("getOpenClawReleaseSnapshot", () => {
         argv1: path.join(appRoot, "dist", "index.mjs"),
       });
 
-      expect(snapshot.bundled.version).toBe("2026.3.22");
+      expect(snapshot.bundled.version).toBe(OPENCLAW_RELEASE_VERSION);
       expect(snapshot.requestedRelease?.tagName).toBe("v2026.3.13");
-      expect(snapshot.latestRelease?.tagName).toBe("v2026.3.22");
+      expect(snapshot.latestRelease?.tagName).toBe(DEFAULT_OPENCLAW_RELEASE_TAG);
       expect(snapshot.sync.status).toBe("update_available");
       expect(snapshot.sync.latestMatchesRequested).toBe(false);
     });
