@@ -412,6 +412,17 @@ OPENCLAW_HEALTH_JSON="$(curl -fsS --max-time 5 "http://127.0.0.1:${HOST_PORT}/ap
 log "OpenClaw runtime health payload: ${OPENCLAW_HEALTH_JSON}"
 assert_openclaw_runtime_health "${OPENCLAW_HEALTH_JSON}"
 
+RUNTIME_CONTRACT_LOG="$(
+  node scripts/verify-public-runtime-contract.mjs \
+    --base-url "http://127.0.0.1:${HOST_PORT}" \
+    --label "ci-container-smoke" \
+    --timeout-ms 5000 2>&1
+)" || {
+  printf '%s\n' "${RUNTIME_CONTRACT_LOG}"
+  fail "Public runtime contract verification failed."
+}
+log "${RUNTIME_CONTRACT_LOG}"
+
 SKILLS_JSON="$(curl -fsS --max-time 5 "http://127.0.0.1:${HOST_PORT}/api/openclaw/runtime/skills")"
 SKILL_COUNT="$(extract_skill_count "${SKILLS_JSON}")" || fail "OpenClaw skills registry came up empty."
 log "OpenClaw runtime reported ${SKILL_COUNT} skills."
@@ -439,6 +450,7 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     echo "- Sandbox image: \`${SANDBOX_IMAGE}\`"
     echo "- App version: \`${APP_VERSION}\`"
     echo "- OpenClaw skills loaded: \`${SKILL_COUNT}\`"
+    echo "- Public runtime contract: \`Kimi-only verified\`"
     echo "- Result: passed"
   } >> "${GITHUB_STEP_SUMMARY}"
 fi

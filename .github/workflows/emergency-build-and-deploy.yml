@@ -88,7 +88,8 @@ jobs:
             scripts/rollback-bluegreen.sh \
             scripts/health-dashboard.sh \
             scripts/vps-bootstrap-bluegreen.sh \
-            scripts/prod-rigorous-checks.sh
+            scripts/prod-rigorous-checks.sh \
+            scripts/verify-public-runtime-contract.mjs
           do
             fetch_asset "${asset}"
           done

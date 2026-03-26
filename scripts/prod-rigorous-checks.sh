@@ -21,7 +21,7 @@ if [ -z "$VPS_HOST" ]; then
   exit 1
 fi
 
-for cmd in curl ssh grep awk python3; do
+for cmd in curl ssh grep awk python3 node; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "Missing required command: $cmd"
     exit 1
@@ -513,6 +513,18 @@ fi
 
 check_http_code "33" "${BASE_URL}/openclaw" "200"
 check_http_code_set "34" "${BASE_URL}/codex" "200" "301" "302" "303" "307" "308"
+RUNTIME_CONTRACT_LOG="$(
+  node scripts/verify-public-runtime-contract.mjs \
+    --base-url "${BASE_URL}" \
+    --label "prod-rigorous-checks" \
+    --timeout-ms "$((HTTP_TIMEOUT * 1000))" 2>&1
+)" && {
+  printf '%s\n' "${RUNTIME_CONTRACT_LOG}"
+  pass "35" "Public runtime contract verified"
+} || {
+  printf '%s\n' "${RUNTIME_CONTRACT_LOG}"
+  fail "35" "Public runtime contract verification"
+}
 
 echo "== VPS runtime checks (${VPS_USER}@${VPS_HOST}) =="
 if run_ssh "echo ok >/dev/null"; then

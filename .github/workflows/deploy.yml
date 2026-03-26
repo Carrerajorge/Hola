@@ -186,7 +186,8 @@ jobs:
             scripts/vps-bootstrap-bluegreen.sh \
             scripts/prod-rigorous-checks.sh \
             scripts/collect-prod-deploy-evidence.sh \
-            scripts/latest-main-guard.sh
+            scripts/latest-main-guard.sh \
+            scripts/verify-public-runtime-contract.mjs
           do
             fetch_asset "${asset}"
           done
@@ -725,7 +726,8 @@ jobs:
             scripts/health-dashboard.sh \
             scripts/vps-bootstrap-bluegreen.sh \
             scripts/prod-rigorous-checks.sh \
-            scripts/collect-prod-deploy-evidence.sh
+            scripts/collect-prod-deploy-evidence.sh \
+            scripts/verify-public-runtime-contract.mjs
           do
             fetch_asset "${asset}"
           done
