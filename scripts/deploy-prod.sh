@@ -236,6 +236,75 @@ extract_env_value() {
   echo "$line"
 }
 
+parse_database_url_component() {
+  local database_url="$1"
+  local component="$2"
+
+  python3 - "$database_url" "$component" <<'PY'
+import sys
+from urllib.parse import urlparse, unquote
+
+database_url = sys.argv[1]
+component = sys.argv[2]
+
+if not database_url:
+    print("")
+    raise SystemExit(0)
+
+parsed = urlparse(database_url)
+
+if component == "username":
+    print(unquote(parsed.username or ""))
+elif component == "password":
+    print(unquote(parsed.password or ""))
+elif component == "database":
+    print(unquote((parsed.path or "").lstrip("/")))
+else:
+    print("")
+PY
+}
+
+validate_database_url() {
+  local database_url="$1"
+
+  python3 - "$database_url" <<'PY'
+import sys
+from urllib.parse import urlparse
+
+database_url = sys.argv[1].strip()
+if not database_url:
+    print("DATABASE_URL is empty", file=sys.stderr)
+    sys.exit(1)
+
+parsed = urlparse(database_url)
+if parsed.scheme not in {"postgres", "postgresql"}:
+    print("DATABASE_URL must use postgres:// or postgresql://", file=sys.stderr)
+    sys.exit(1)
+if not parsed.username:
+    print("DATABASE_URL is missing the database username", file=sys.stderr)
+    sys.exit(1)
+if parsed.password in (None, ""):
+    print("DATABASE_URL is missing the database password", file=sys.stderr)
+    sys.exit(1)
+if not parsed.hostname:
+    print("DATABASE_URL is missing the database host", file=sys.stderr)
+    sys.exit(1)
+if not parsed.path or parsed.path == "/":
+    print("DATABASE_URL is missing the database name", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    port = parsed.port
+except ValueError:
+    print("DATABASE_URL has an invalid port", file=sys.stderr)
+    sys.exit(1)
+
+if port is not None and not (1 <= port <= 65535):
+    print("DATABASE_URL port must be between 1 and 65535", file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
 for cmd in git docker python3 curl awk; do
   if ! command -v "${cmd}" >/dev/null 2>&1; then
     echo "${cmd} is not available on VPS"
@@ -295,12 +364,14 @@ if [ ! -f "${COMPOSE_FILE}" ]; then
   exit 1
 fi
 
-if [ ! -f .env.production ]; then
+ENV_FILE=".env.production"
+
+if [ ! -f "${ENV_FILE}" ]; then
   echo "✗ Missing .env.production on VPS"
   exit 1
 fi
 
-SANDBOX_RUNNER_TOKEN="$(extract_env_value .env.production SANDBOX_RUNNER_TOKEN || true)"
+SANDBOX_RUNNER_TOKEN="$(extract_env_value "${ENV_FILE}" SANDBOX_RUNNER_TOKEN || true)"
 if [ -z "${SANDBOX_RUNNER_TOKEN:-}" ]; then
   echo "✗ SANDBOX_RUNNER_TOKEN missing in .env.production"
   exit 1
@@ -311,30 +382,51 @@ if [ "${#SANDBOX_RUNNER_TOKEN}" -lt 32 ] || echo "$SANDBOX_RUNNER_TOKEN" | grep 
   exit 1
 fi
 
-REDIS_PASSWORD="$(extract_env_value .env.production REDIS_PASSWORD || true)"
+REDIS_PASSWORD="$(extract_env_value "${ENV_FILE}" REDIS_PASSWORD || true)"
 if [ -z "${REDIS_PASSWORD:-}" ]; then
   echo "✗ REDIS_PASSWORD missing in .env.production"
   exit 1
 fi
 
-POSTGRES_PASSWORD="$(extract_env_value .env.production POSTGRES_PASSWORD || true)"
-if [ -z "${POSTGRES_PASSWORD:-}" ]; then
-  echo "✗ POSTGRES_PASSWORD missing in .env.production"
+DATABASE_URL="$(extract_env_value "${ENV_FILE}" DATABASE_URL || true)"
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo "✗ DATABASE_URL missing in .env.production"
+  exit 1
+fi
+if ! validate_database_url "${DATABASE_URL}"; then
+  echo "✗ DATABASE_URL in .env.production is invalid"
   exit 1
 fi
 
-POSTGRES_DB="$(extract_env_value .env.production POSTGRES_DB || true)"
-if [ -z "${POSTGRES_DB:-}" ]; then
-  POSTGRES_DB="iliagpt"
+POSTGRES_USER="$(extract_env_value "${ENV_FILE}" POSTGRES_USER || true)"
+if [ -z "${POSTGRES_USER:-}" ]; then
+  POSTGRES_USER="$(parse_database_url_component "${DATABASE_URL}" "username" || true)"
 fi
+POSTGRES_USER="${POSTGRES_USER:-postgres}"
+
+POSTGRES_PASSWORD="$(extract_env_value "${ENV_FILE}" POSTGRES_PASSWORD || true)"
+if [ -z "${POSTGRES_PASSWORD:-}" ]; then
+  POSTGRES_PASSWORD="$(parse_database_url_component "${DATABASE_URL}" "password" || true)"
+fi
+if [ -z "${POSTGRES_PASSWORD:-}" ]; then
+  echo "✗ POSTGRES_PASSWORD missing in .env.production and could not be derived from DATABASE_URL"
+  exit 1
+fi
+
+POSTGRES_DB="$(extract_env_value "${ENV_FILE}" POSTGRES_DB || true)"
+if [ -z "${POSTGRES_DB:-}" ]; then
+  POSTGRES_DB="$(parse_database_url_component "${DATABASE_URL}" "database" || true)"
+fi
+POSTGRES_DB="${POSTGRES_DB:-iliagpt}"
 
 compose() {
   APP_VERSION="$APP_VERSION" \
   SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN}" \
   REDIS_PASSWORD="${REDIS_PASSWORD}" \
+  POSTGRES_USER="${POSTGRES_USER}" \
   POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
   POSTGRES_DB="${POSTGRES_DB}" \
-    docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" "$@"
+    docker compose --env-file "${ENV_FILE}" -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" "$@"
 }
 
 echo "▸ Validating compose..."

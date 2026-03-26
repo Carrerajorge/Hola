@@ -1,5 +1,18 @@
 import type { Request, Response, NextFunction } from "express";
 
+const SESSION_DEVICE_INFO_BYPASS_PATHS = [
+  "/health",
+  "/health/live",
+  "/health/ready",
+  "/api/health",
+  "/api/health/live",
+  "/api/health/ready",
+];
+
+function normalizeRequestPath(pathValue: string): string {
+  return pathValue.split("#", 1)[0]?.split("?", 1)[0] ?? pathValue;
+}
+
 function ipPrefixFromRequest(req: Request): string {
   const raw = String(req.ip || (req.socket as any)?.remoteAddress || "").replace("::ffff:", "");
   if (!raw) return "";
@@ -22,6 +35,18 @@ function hasPersistentSessionIdentity(session: any): boolean {
   return false;
 }
 
+function isHealthRequest(req: Request): boolean {
+  const requestPaths = [req.path, req.originalUrl]
+    .filter((value): value is string => Boolean(value))
+    .map(normalizeRequestPath);
+
+  return requestPaths.some((pathValue) =>
+    SESSION_DEVICE_INFO_BYPASS_PATHS.some(
+      (prefix) => pathValue === prefix || pathValue.startsWith(`${prefix}/`),
+    ),
+  );
+}
+
 export function shouldTrackSessionDeviceInfo(req: Request): boolean {
   const session = (req as any)?.session as any;
   if (!session) return false;
@@ -39,6 +64,10 @@ export function shouldTrackSessionDeviceInfo(req: Request): boolean {
  * Stored on the session object and persisted by connect-pg-simple.
  */
 export function sessionDeviceInfoMiddleware(req: Request, _res: Response, next: NextFunction) {
+  // Health probes must stay side-effect free so readiness never depends on
+  // session persistence or a writable database-backed session store.
+  if (isHealthRequest(req)) return next();
+
   const session = (req as any)?.session as any;
   if (!session) return next();
   if (!shouldTrackSessionDeviceInfo(req)) return next();

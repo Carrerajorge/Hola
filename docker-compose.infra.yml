@@ -64,7 +64,7 @@ services:
       - "-c"
       - "log_disconnections=on"
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     tmpfs:
@@ -72,7 +72,11 @@ services:
     networks:
       - hola-net
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-iliagpt} && psql -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-iliagpt} -c 'SELECT 1' > /dev/null 2>&1" ]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" && psql -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" -c 'SELECT 1' > /dev/null 2>&1",
+        ]
       interval: 10s
       timeout: 5s
       start_period: 30s
@@ -143,7 +147,7 @@ services:
       - "FLUSHDB"
       - "FLUSHDB_CONFIRMED"
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     tmpfs:
