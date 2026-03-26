@@ -620,7 +620,7 @@ jobs:
           echo "::error::Check state: ssh -p ${{ env.VPS_PORT }} ${{ env.VPS_USER }}@${{ env.VPS_HOST }} 'cat /opt/hola/deploy-state.json'"
           echo "::error::Rollback: ssh -p ${{ env.VPS_PORT }} ${{ env.VPS_USER }}@${{ env.VPS_HOST }} 'cd /opt/hola && bash scripts/rollback-bluegreen.sh --force'"
 
-  # ── Auto Deploy (push to main) ──────────────────────────
+  # ── Auto Deploy (push to main/master) ───────────────────
   deploy_auto:
     name: Blue-Green Deploy (Auto)
     runs-on: ubuntu-latest
@@ -629,7 +629,7 @@ jobs:
       ${{
         always() &&
         github.event_name == 'push' &&
-        github.ref == 'refs/heads/main' &&
+        (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') &&
         needs.build_images.result == 'success'
       }}
     timeout-minutes: 40
@@ -736,21 +736,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CURRENT_SHA: ${{ github.sha }}
+          CURRENT_BRANCH: ${{ github.ref_name }}
         run: |
           set -euo pipefail
 
           latest_sha=""
           for attempt in $(seq 1 6); do
-            latest_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha' 2>/dev/null || true)"
+            latest_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${CURRENT_BRANCH}" --jq '.object.sha' 2>/dev/null || true)"
             if [ -n "${latest_sha}" ]; then
               break
             fi
-            echo "Could not resolve latest main SHA yet. Retry ${attempt}/6..."
+            echo "Could not resolve latest ${CURRENT_BRANCH} SHA yet. Retry ${attempt}/6..."
             sleep 5
           done
 
           if [ -z "${latest_sha}" ]; then
-            echo "::error::Unable to resolve latest main SHA for stale-deploy protection."
+            echo "::error::Unable to resolve latest ${CURRENT_BRANCH} SHA for stale-deploy protection."
             exit 1
           fi
 
@@ -759,13 +760,13 @@ jobs:
           if [ "${latest_sha}" != "${CURRENT_SHA}" ]; then
             echo "should_deploy=false" >> "$GITHUB_OUTPUT"
             echo "skip_reason=Superseded by ${latest_sha:0:8}" >> "$GITHUB_OUTPUT"
-            echo "::notice::Skipping deploy for ${CURRENT_SHA:0:8}; main already advanced to ${latest_sha:0:8}."
+            echo "::notice::Skipping deploy for ${CURRENT_SHA:0:8}; ${CURRENT_BRANCH} already advanced to ${latest_sha:0:8}."
             exit 0
           fi
 
           echo "should_deploy=true" >> "$GITHUB_OUTPUT"
           echo "skip_reason=" >> "$GITHUB_OUTPUT"
-          echo "Deploy is still at the tip of main (${CURRENT_SHA:0:8})."
+          echo "Deploy is still at the tip of ${CURRENT_BRANCH} (${CURRENT_SHA:0:8})."
 
       - name: Verify images are present in GHCR and digest pinned
         if: steps.latest_main.outputs.should_deploy == 'true'
@@ -833,9 +834,10 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
+          TARGET_BRANCH: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          failures=$(gh run list --repo ${{ github.repository }} --workflow "Deploy to Production (Blue-Green)" --branch main --limit 8 --json conclusion --jq '[.[] | select(.conclusion=="failure")] | length')
+          failures=$(gh run list --repo ${{ github.repository }} --workflow "Deploy to Production (Blue-Green)" --branch "${TARGET_BRANCH}" --limit 8 --json conclusion --jq '[.[] | select(.conclusion=="failure")] | length')
           echo "Recent deploy failures: ${failures}"
           if [ "${failures}" -ge 5 ]; then
             echo "::warning::Circuit breaker: ${failures}/8 recent deploys failed. Proceeding anyway."
