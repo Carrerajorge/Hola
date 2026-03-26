@@ -69,6 +69,20 @@ async function writeReleaseManifest(appVersion: string) {
 async function buildEmbeddedOpenClawControlUi() {
   console.log("building embedded openclaw control ui...");
 
+  // Ensure UI dependencies are installed before building (CI may not have them)
+  await new Promise<void>((resolve, reject) => {
+    const install = spawn(process.execPath, ["scripts/ui.js", "install"], {
+      cwd: "server/openclaw",
+      stdio: "inherit",
+      env: process.env,
+    });
+    install.on("error", reject);
+    install.on("exit", (code) => {
+      if (code === 0) { resolve(); return; }
+      reject(new Error(`[build] OpenClaw Control UI install failed with exit code ${code ?? "unknown"}`));
+    });
+  });
+
   await new Promise<void>((resolve, reject) => {
     const child = spawn(process.execPath, ["scripts/ui.js", "build"], {
       cwd: "server/openclaw",

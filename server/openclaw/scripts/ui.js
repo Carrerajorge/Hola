@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -155,17 +154,25 @@ function runSync(runner, args, envOverride) {
   }
 }
 
-function depsInstalled(kind) {
+export function hasLocalPackage(packageName, baseDir = uiDir) {
+  const segments = packageName.split("/");
+  const packageDir = path.join(baseDir, "node_modules", ...segments);
+  return fs.existsSync(path.join(packageDir, "package.json")) || fs.existsSync(packageDir);
+}
+
+function requiredUiPackages(_kind, baseDir = uiDir) {
+  const packageJson = JSON.parse(fs.readFileSync(path.join(baseDir, "package.json"), "utf8"));
+  return [
+    ...new Set([
+      ...Object.keys(packageJson.dependencies ?? {}),
+      ...Object.keys(packageJson.devDependencies ?? {}),
+    ]),
+  ];
+}
+
+export function depsInstalled(kind, baseDir = uiDir, requiredPackages = requiredUiPackages(kind, baseDir)) {
   try {
-    const require = createRequire(path.join(uiDir, "package.json"));
-    require.resolve("vite");
-    require.resolve("dompurify");
-    if (kind === "test") {
-      require.resolve("vitest");
-      require.resolve("@vitest/browser-playwright");
-      require.resolve("playwright");
-    }
-    return true;
+    return requiredPackages.every((packageName) => hasLocalPackage(packageName, baseDir));
   } catch {
     return false;
   }
