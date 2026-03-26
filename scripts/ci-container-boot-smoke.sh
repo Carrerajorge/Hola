@@ -77,7 +77,7 @@ cleanup() {
   local exit_code=$?
   if [ "${FAILED}" = "true" ]; then
     log "Recent app container logs:"
-    docker logs --tail=200 "${APP_CONTAINER}" 2>/dev/null || true
+    docker logs --tail=500 "${APP_CONTAINER}" 2>/dev/null || true
     log "Recent worker container logs:"
     docker logs --tail=200 "${WORKER_CONTAINER}" 2>/dev/null || true
     log "Recent sandbox container logs:"
