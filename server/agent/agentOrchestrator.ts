@@ -2,10 +2,11 @@ import { detectToolCallLoop, hashToolCall, hashToolOutcome } from "./toolLoopDet
 import { toolRegistry, type ToolResult, type ToolArtifact } from "./toolRegistry";
 import { llmGateway } from "../lib/llmGateway";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
-import type { User, TraceEventType, TraceEvent } from "@shared/schema";
+import type { TraceEventType } from "@shared/schema";
 import {
   DEFAULT_AGENT_EXECUTION_PROFILE,
   type AgentExecutionProfile,
+  normalizeAgentExecutionProfile,
 } from "@shared/agentExecutionProfile";
 import { EventEmitter } from "events";
 import fs from "fs/promises";
@@ -14,8 +15,8 @@ import { agentEventBus } from "./eventBus";
 import { defaultToolRegistry as sandboxToolRegistry } from "./sandbox/tools";
 import { getHTNPlanner, type Task } from "./htnPlanner";
 import { db } from "../db";
-import { agentModeRuns } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { agentModeEvents, agentModeRuns, agentModeSteps, chatMessages, users } from "@shared/schema";
+import { asc, eq } from "drizzle-orm";
 import { getUserSettingsCached } from "../services/userSettingsCache";
 import { policyEngine } from "./policyEngine";
 import { hookSystem } from "../openclaw/plugins/hookSystem";
@@ -26,6 +27,7 @@ import {
   generateDirectDocumentResponse,
 } from "./documentDirectResponse";
 import { getAgentExecutionProfileConfig } from "./executionProfiles";
+import { updateRunWithLock } from "./dbTransactions";
 
 // Agentic orchestrator bridge
 import {
@@ -277,6 +279,114 @@ function normalizeToolName(toolName: string): string {
 
 const MAX_RETRY_ATTEMPTS = 2;
 const DEFAULT_IMAGE_OCR_SUPPORT_TIMEOUT_MS = 3_500;
+const RECOVERABLE_RUN_STATUSES = new Set<AgentStatus>([
+  "queued",
+  "planning",
+  "running",
+  "verifying",
+  "replanning",
+  "paused",
+  "awaiting_confirmation",
+]);
+const AUTO_RESUME_RUN_STATUSES = new Set<AgentStatus>([
+  "queued",
+  "planning",
+  "running",
+  "verifying",
+  "replanning",
+]);
+
+type PersistedAgentModeRun = typeof agentModeRuns.$inferSelect;
+type PersistedAgentModeStep = typeof agentModeSteps.$inferSelect;
+type PersistedAgentModeEvent = typeof agentModeEvents.$inferSelect;
+
+interface RestoredAgentState {
+  status: AgentStatus;
+  plan?: AgentPlan | null;
+  stepRows?: PersistedAgentModeStep[];
+  eventRows?: PersistedAgentModeEvent[];
+  currentStepIndex?: number | null;
+  artifacts?: ToolArtifact[] | null;
+  summary?: string | null;
+  error?: string | null;
+  startedAt?: Date | null;
+  originalMessage?: string | null;
+}
+
+interface PersistedRecoveryRecord {
+  run: PersistedAgentModeRun;
+  steps: PersistedAgentModeStep[];
+  events: PersistedAgentModeEvent[];
+  originalMessage: string | null;
+  attachments: any[];
+  userPlan: "free" | "pro" | "admin";
+}
+
+interface RecoverySummary {
+  scanned: number;
+  recovered: number;
+  resumed: number;
+  skipped: number;
+  failed: number;
+}
+
+function normalizePersistedRunStatus(status: unknown): AgentStatus {
+  const normalized = String(status ?? "").trim().toLowerCase();
+  if (!normalized) return "queued";
+  if (normalized === "executing" || normalized === "in_progress") return "running";
+  if (normalized === "succeeded" || normalized === "success" || normalized === "done") return "completed";
+  if (normalized === "error") return "failed";
+
+  if (RECOVERABLE_RUN_STATUSES.has(normalized as AgentStatus) || ["completed", "failed", "cancelled", "cancelling"].includes(normalized)) {
+    return normalized as AgentStatus;
+  }
+
+  return "queued";
+}
+
+function mapTraceEventTypeToAgentEventType(eventType: unknown): EventType {
+  const normalized = String(eventType ?? "").trim().toLowerCase();
+
+  if (normalized.includes("plan")) return "plan";
+  if (normalized.includes("verification")) return "verification";
+  if (normalized.includes("retry") || normalized.includes("replan")) return "replan";
+  if (normalized.includes("error") || normalized.includes("fail")) return "error";
+  if (normalized.includes("done") || normalized.includes("completed") || normalized.includes("result")) return "result";
+  if (normalized.includes("progress") || normalized === "heartbeat") return "progress";
+  if (normalized.includes("tool_output") || normalized.includes("output") || normalized.includes("observation")) return "observation";
+  if (normalized.includes("thinking")) return "thinking";
+
+  return "action";
+}
+
+function mapTraceEventStatus(
+  eventType: unknown,
+  payload: Record<string, any>,
+): EventStatus {
+  const explicit = String(payload.status ?? "").trim().toLowerCase();
+  if (explicit === "failed" || explicit === "cancelled") return "fail";
+  if (explicit === "retrying" || explicit === "awaiting_confirmation" || explicit === "paused") return "warn";
+  if (explicit === "completed" || explicit === "running") return "ok";
+
+  const normalized = String(eventType ?? "").trim().toLowerCase();
+  if (normalized.includes("error") || normalized.includes("fail")) return "fail";
+  if (normalized.includes("retry") || normalized.includes("replan") || normalized.includes("warning")) return "warn";
+  return "ok";
+}
+
+function toTimestampMs(value: unknown): number {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? Date.now() : value.getTime();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? Date.now() : parsed;
+  }
+  return Date.now();
+}
 
 export class AgentOrchestrator extends EventEmitter {
   public runId: string;
@@ -364,6 +474,147 @@ export class AgentOrchestrator extends EventEmitter {
 
   getCompletedRetentionMs(): number {
     return this.executionProfileConfig.completedRunRetentionMs;
+  }
+
+  hydrateFromPersistence(params: RestoredAgentState): void {
+    this.status = params.status;
+    this.plan = params.plan ?? this.plan;
+    this.currentStepIndex = Math.max(0, params.currentStepIndex ?? this.currentStepIndex);
+    this.artifacts = Array.isArray(params.artifacts) ? [...params.artifacts] : [];
+    this.summary = params.summary ?? null;
+    this.userMessage = String(params.originalMessage || this.userMessage || this.plan?.objective || "").trim();
+
+    if (params.error) {
+      (this as any).error = params.error;
+    }
+
+    if (params.startedAt instanceof Date && !Number.isNaN(params.startedAt.getTime())) {
+      this.runStartedAtMs = params.startedAt.getTime();
+    }
+
+    const restoredSteps = Array.isArray(params.stepRows)
+      ? [...params.stepRows].sort((left, right) => {
+        if (left.stepIndex !== right.stepIndex) {
+          return left.stepIndex - right.stepIndex;
+        }
+        return toTimestampMs(left.completedAt ?? left.startedAt) - toTimestampMs(right.completedAt ?? right.startedAt);
+      })
+      : [];
+
+    this.stepResults = restoredSteps
+      .filter((step) => ["succeeded", "failed", "cancelled", "skipped"].includes(String(step.status || "").toLowerCase()))
+      .map((step) => ({
+        stepIndex: step.stepIndex,
+        toolName: step.toolName,
+        description: this.plan?.steps[step.stepIndex]?.description || step.toolName,
+        success: String(step.status || "").toLowerCase() === "succeeded",
+        output: step.toolOutput,
+        artifacts: [],
+        error: step.error || undefined,
+        startedAt: toTimestampMs(step.startedAt),
+        completedAt: toTimestampMs(step.completedAt ?? step.startedAt),
+      }));
+
+    this.eventStream = Array.isArray(params.eventRows)
+      ? [...params.eventRows]
+        .sort((left, right) => toTimestampMs(left.timestamp) - toTimestampMs(right.timestamp))
+        .map((eventRow) => {
+          const payload = (eventRow.payload && typeof eventRow.payload === "object")
+            ? eventRow.payload as Record<string, any>
+            : {};
+          const type = mapTraceEventTypeToAgentEventType(eventRow.eventType);
+          return {
+            type,
+            kind: type,
+            status: mapTraceEventStatus(eventRow.eventType, payload),
+            content: payload,
+            timestamp: toTimestampMs(eventRow.timestamp),
+            stepIndex: eventRow.stepIndex ?? undefined,
+            title: typeof payload.summary === "string" && payload.summary.trim().length > 0
+              ? payload.summary.trim()
+              : String(eventRow.eventType || type),
+            summary: typeof payload.summary === "string" ? payload.summary : undefined,
+            confidence: typeof payload.confidence === "number" ? payload.confidence : undefined,
+            metadata: eventRow.metadata && typeof eventRow.metadata === "object"
+              ? eventRow.metadata as Record<string, any>
+              : undefined,
+          } satisfies AgentEvent;
+        })
+      : [];
+
+    if (this.status === "awaiting_confirmation" && this.plan?.steps[this.currentStepIndex]) {
+      const lastFailedStep = [...this.stepResults]
+        .reverse()
+        .find((step) => step.stepIndex === this.currentStepIndex && !step.success);
+
+      this.pendingConfirmation = {
+        stepIndex: this.currentStepIndex,
+        toolName: this.plan.steps[this.currentStepIndex].toolName,
+        toolInput: this.plan.steps[this.currentStepIndex].input,
+        reason: typeof lastFailedStep?.error === "string"
+          ? lastFailedStep.error
+          : (lastFailedStep?.error as any)?.message || "Confirmation required to continue",
+        requestedAt: lastFailedStep?.completedAt || Date.now(),
+      };
+    } else {
+      this.pendingConfirmation = null;
+    }
+
+    this.rebuildTodoListFromState();
+  }
+
+  resumeFromPause(): void {
+    this.status = "running";
+    this.abortController = new AbortController();
+    this.emitProgress();
+  }
+
+  private rebuildTodoListFromState(): void {
+    if (!this.plan) {
+      this.todoList = [];
+      this.workspaceFiles.clear();
+      return;
+    }
+
+    const latestStepByIndex = new Map<number, StepResult>();
+    const attemptsByIndex = new Map<number, number>();
+
+    for (const stepResult of this.stepResults) {
+      attemptsByIndex.set(stepResult.stepIndex, (attemptsByIndex.get(stepResult.stepIndex) || 0) + 1);
+      latestStepByIndex.set(stepResult.stepIndex, stepResult);
+    }
+
+    const activeStatuses = new Set<AgentStatus>(["running", "verifying", "replanning", "awaiting_confirmation"]);
+
+    this.todoList = this.plan.steps.map((step, index) => {
+      const restored = latestStepByIndex.get(index);
+      let status: TodoItem["status"] = "pending";
+      let lastError: TodoItem["lastError"] | undefined;
+
+      if (restored?.success) {
+        status = "completed";
+      } else if (restored && !restored.success) {
+        status = this.status === "awaiting_confirmation" && index === this.currentStepIndex
+          ? "in_progress"
+          : "failed";
+        lastError = restored.error;
+      } else if (activeStatuses.has(this.status) && index === this.currentStepIndex) {
+        status = "in_progress";
+      }
+
+      return {
+        id: `step-${index}`,
+        task: step.description,
+        status,
+        stepIndex: index,
+        attempts: attemptsByIndex.get(index) || 0,
+        lastError,
+        createdAt: this.runStartedAtMs || Date.now(),
+        updatedAt: restored?.completedAt || restored?.startedAt || Date.now(),
+      };
+    });
+
+    this.updateWorkspaceFile("todo.md", this.generateTodoMarkdown());
   }
 
   private ensureRuntimeBudgetAvailable(context: string): void {
@@ -2410,13 +2661,20 @@ Provide a brief, user-friendly summary (2-4 sentences) of what was accomplished.
   }
 }
 
-class AgentManager {
+export class AgentManager {
   private activeRuns: Map<string, AgentOrchestrator> = new Map();
+  private persistenceBoundRuns: Set<string> = new Set();
   private cleanupIntervalMs = 30 * 60 * 1000; // 30 minutes
   private maxRunAgeMs = 2 * 60 * 60 * 1000; // 2 hours
+  private cleanupTimer: NodeJS.Timeout;
 
   constructor() {
-    setInterval(() => this.cleanupOldRuns(), this.cleanupIntervalMs);
+    this.cleanupTimer = setInterval(() => this.cleanupOldRuns(), this.cleanupIntervalMs);
+    this.cleanupTimer.unref?.();
+  }
+
+  shutdown(): void {
+    clearInterval(this.cleanupTimer);
   }
 
   async startRun(
@@ -2428,6 +2686,7 @@ class AgentManager {
     userPlan: "free" | "pro" | "admin" = "free",
     modelId?: string,
     executionProfile: AgentExecutionProfile = DEFAULT_AGENT_EXECUTION_PROFILE,
+    persistedStatus: AgentStatus = "queued",
   ): Promise<AgentOrchestrator> {
     const orchestrator = await this.createRun(
       runId,
@@ -2438,6 +2697,7 @@ class AgentManager {
       userPlan,
       modelId,
       executionProfile,
+      persistedStatus,
     );
     this.executeRun(runId).catch((error) => {
       console.error(`[AgentManager] Run ${runId} failed:`, error.message);
@@ -2454,6 +2714,7 @@ class AgentManager {
     userPlan: "free" | "pro" | "admin" = "free",
     modelId?: string,
     executionProfile: AgentExecutionProfile = DEFAULT_AGENT_EXECUTION_PROFILE,
+    persistedStatus: AgentStatus = "queued",
   ): Promise<AgentOrchestrator> {
     if (this.activeRuns.has(runId)) {
       throw new Error(`Run ${runId} already exists`);
@@ -2461,6 +2722,7 @@ class AgentManager {
 
     const orchestrator = new AgentOrchestrator(runId, chatId, userId, userPlan, modelId, executionProfile);
     this.activeRuns.set(runId, orchestrator);
+    this.attachPersistence(orchestrator, persistedStatus);
 
     // Generate initial plan synchronously so UI has something to show
     await orchestrator.generatePlan(message, attachments);
@@ -2471,15 +2733,9 @@ class AgentManager {
   async executeRun(runId: string, chatId?: string, userId?: string | null, message?: string, attachments?: any[]): Promise<void> {
     const orchestrator = this.activeRuns.get(runId);
     if (!orchestrator) {
-      // If not successfully created (e.g. worker restarted), we might need to recreate?
-      // For now, assume state is in memory (Phase 2 goal is Redis state, but we are just starting migration).
-      // Since we haven't fully moved Orchestrator State to Redis yet, if server restarts, we lose the orchestrator.
-      // The worker will fail. This is acceptable for this intermediate step.
-      // Once RedisCheckpointer is fully integrated into AgentOrchestrator (Phase 3), we can hydrate from Redis.
       throw new Error(`AgentOrchestrator not found for run ${runId}`);
     }
 
-    // In case logic was passed to executeRun but we already have it
     await orchestrator.run();
   }
 
@@ -2496,7 +2752,7 @@ class AgentManager {
   }
 
   async cancelRun(runId: string): Promise<boolean> {
-    const orchestrator = this.activeRuns.get(runId);
+    const orchestrator = await this.ensureHydrated(runId, false);
     if (!orchestrator) {
       return false;
     }
@@ -2504,8 +2760,23 @@ class AgentManager {
     return true;
   }
 
+  async resumeRun(runId: string): Promise<boolean> {
+    const orchestrator = await this.ensureHydrated(runId, false);
+    if (!orchestrator || orchestrator.status !== "paused") {
+      return false;
+    }
+
+    orchestrator.resumeFromPause();
+
+    this.executeRun(runId).catch((error) => {
+      console.error(`[AgentManager] Resumed run ${runId} failed:`, error.message);
+    });
+
+    return true;
+  }
+
   async confirmRun(runId: string): Promise<boolean> {
-    const orchestrator = this.activeRuns.get(runId);
+    const orchestrator = await this.ensureHydrated(runId, false);
     if (!orchestrator) {
       return false;
     }
@@ -2522,11 +2793,301 @@ class AgentManager {
   }
 
   async cancelPendingConfirmation(runId: string): Promise<boolean> {
-    const orchestrator = this.activeRuns.get(runId);
+    const orchestrator = await this.ensureHydrated(runId, false);
     if (!orchestrator) {
       return false;
     }
     return orchestrator.cancelPendingConfirmation();
+  }
+
+  async recoverPersistedRuns(runIds?: string[]): Promise<RecoverySummary> {
+    const summary: RecoverySummary = {
+      scanned: 0,
+      recovered: 0,
+      resumed: 0,
+      skipped: 0,
+      failed: 0,
+    };
+
+    const candidates = runIds && runIds.length > 0
+      ? await Promise.all(runIds.map((runId) => this.loadPersistedRecoveryRecord(runId)))
+      : await this.loadRecoverableRuns();
+
+    for (const record of candidates.filter((candidate): candidate is PersistedRecoveryRecord => Boolean(candidate))) {
+      summary.scanned++;
+
+      if (this.activeRuns.has(record.run.id)) {
+        summary.skipped++;
+        continue;
+      }
+
+      try {
+        const recovered = await this.recoverRun(record, true);
+        if (recovered) {
+          summary.recovered++;
+          if (AUTO_RESUME_RUN_STATUSES.has(normalizePersistedRunStatus(record.run.status))) {
+            summary.resumed++;
+          }
+        } else {
+          summary.skipped++;
+        }
+      } catch (error: any) {
+        summary.failed++;
+        console.error(`[AgentManager] Failed to recover run ${record.run.id}:`, error?.message || error);
+        try {
+          await updateRunWithLock(record.run.id, record.run.status, {
+            status: "failed",
+            error: `Recovery failed: ${error?.message || "unknown error"}`,
+            completedAt: new Date(),
+          });
+        } catch (persistError) {
+          console.error(`[AgentManager] Failed to persist recovery failure for ${record.run.id}:`, persistError);
+        }
+      }
+    }
+
+    return summary;
+  }
+
+  private async loadRecoverableRuns(): Promise<PersistedRecoveryRecord[]> {
+    const runs = await db.select()
+      .from(agentModeRuns)
+      .orderBy(asc(agentModeRuns.createdAt));
+
+    const recoverableRuns = runs.filter((run) => RECOVERABLE_RUN_STATUSES.has(normalizePersistedRunStatus(run.status)));
+    const records = await Promise.all(recoverableRuns.map((run) => this.loadPersistedRecoveryRecord(run.id, run)));
+    return records.filter((record): record is PersistedRecoveryRecord => Boolean(record));
+  }
+
+  private async loadPersistedRecoveryRecord(
+    runId: string,
+    existingRun?: PersistedAgentModeRun,
+  ): Promise<PersistedRecoveryRecord | null> {
+    const run = existingRun || await db.select()
+      .from(agentModeRuns)
+      .where(eq(agentModeRuns.id, runId))
+      .then((rows) => rows[0]);
+
+    if (!run) {
+      return null;
+    }
+
+    const [steps, events, userRows, messageRows] = await Promise.all([
+      db.select().from(agentModeSteps).where(eq(agentModeSteps.runId, run.id)).orderBy(asc(agentModeSteps.stepIndex)),
+      db.select().from(agentModeEvents).where(eq(agentModeEvents.runId, run.id)).orderBy(asc(agentModeEvents.timestamp)),
+      run.userId
+        ? db.select({ plan: users.plan }).from(users).where(eq(users.id, run.userId)).limit(1)
+        : Promise.resolve([]),
+      run.messageId
+        ? db.select({ content: chatMessages.content, attachments: chatMessages.attachments })
+          .from(chatMessages)
+          .where(eq(chatMessages.id, run.messageId))
+          .limit(1)
+        : Promise.resolve([]),
+    ]);
+
+    const rawUserPlan = String(userRows[0]?.plan || "free").trim().toLowerCase();
+    const userPlan: "free" | "pro" | "admin" =
+      rawUserPlan === "pro" || rawUserPlan === "admin" ? rawUserPlan : "free";
+    const plan = run.plan as AgentPlan | null;
+    const originalMessage = typeof messageRows[0]?.content === "string"
+      ? messageRows[0].content
+      : (plan?.objective || null);
+    const attachments = Array.isArray(messageRows[0]?.attachments) ? messageRows[0].attachments : [];
+
+    return {
+      run,
+      steps,
+      events,
+      originalMessage,
+      attachments,
+      userPlan,
+    };
+  }
+
+  private async ensureHydrated(runId: string, autoResume: boolean): Promise<AgentOrchestrator | undefined> {
+    const existing = this.activeRuns.get(runId);
+    if (existing) {
+      return existing;
+    }
+
+    const record = await this.loadPersistedRecoveryRecord(runId);
+    if (!record) {
+      return undefined;
+    }
+
+    await this.recoverRun(record, autoResume);
+    return this.activeRuns.get(runId);
+  }
+
+  private async recoverRun(record: PersistedRecoveryRecord, autoResume: boolean): Promise<boolean> {
+    const normalizedStatus = normalizePersistedRunStatus(record.run.status);
+    if (!RECOVERABLE_RUN_STATUSES.has(normalizedStatus)) {
+      return false;
+    }
+
+    let persistedStatus = normalizedStatus;
+    let startedAt = record.run.startedAt ?? null;
+
+    if ((normalizedStatus === "queued" || normalizedStatus === "planning") && !startedAt) {
+      const planningStartedAt = new Date();
+      const lockResult = await updateRunWithLock(record.run.id, record.run.status, {
+        status: "planning",
+        startedAt: planningStartedAt,
+      });
+      if (lockResult.success) {
+        persistedStatus = "planning";
+        startedAt = planningStartedAt;
+      }
+    }
+
+    const executionProfile = normalizeAgentExecutionProfile(record.run.executionProfile);
+    const orchestrator = new AgentOrchestrator(
+      record.run.id,
+      record.run.chatId,
+      record.run.userId || "anonymous",
+      record.userPlan,
+      undefined,
+      executionProfile,
+    );
+
+    this.activeRuns.set(record.run.id, orchestrator);
+    this.attachPersistence(orchestrator, persistedStatus);
+
+    if (record.run.plan || record.originalMessage) {
+      if (!record.run.plan && record.originalMessage) {
+        await orchestrator.generatePlan(record.originalMessage, record.attachments);
+      }
+
+      orchestrator.hydrateFromPersistence({
+        status: persistedStatus,
+        plan: (record.run.plan as AgentPlan | null) || orchestrator.plan,
+        stepRows: record.steps,
+        eventRows: record.events,
+        currentStepIndex: record.run.currentStepIndex,
+        artifacts: record.run.artifacts as ToolArtifact[] | null,
+        summary: record.run.summary,
+        error: record.run.error,
+        startedAt,
+        originalMessage: record.originalMessage,
+      });
+    } else {
+      this.activeRuns.delete(record.run.id);
+      this.persistenceBoundRuns.delete(record.run.id);
+      throw new Error("Missing both persisted plan and original message");
+    }
+
+    if (autoResume && AUTO_RESUME_RUN_STATUSES.has(persistedStatus)) {
+      this.executeRun(record.run.id).catch((error) => {
+        console.error(`[AgentManager] Recovered run ${record.run.id} failed after restart:`, error.message);
+      });
+    }
+
+    return true;
+  }
+
+  private attachPersistence(orchestrator: AgentOrchestrator, initialStatus: AgentStatus): void {
+    const runId = orchestrator.runId;
+    if (this.persistenceBoundRuns.has(runId)) {
+      return;
+    }
+
+    this.persistenceBoundRuns.add(runId);
+    let currentStatus = initialStatus;
+    const persistedStepsByIndex = new Map<number, string>();
+    let persistedStepsLoaded = false;
+
+    const ensurePersistedStepsLoaded = async () => {
+      if (persistedStepsLoaded) {
+        return;
+      }
+
+      persistedStepsLoaded = true;
+      const rows = await db.select({ id: agentModeSteps.id, stepIndex: agentModeSteps.stepIndex })
+        .from(agentModeSteps)
+        .where(eq(agentModeSteps.runId, runId));
+
+      for (const row of rows) {
+        persistedStepsByIndex.set(row.stepIndex, row.id);
+      }
+    };
+
+    orchestrator.on("progress", async (progress) => {
+      try {
+        const newStatus = progress.status === "running" ? "running" : progress.status;
+        const updateData: Record<string, any> = {
+          status: newStatus,
+          currentStepIndex: progress.currentStepIndex,
+          totalSteps: progress.totalSteps,
+          completedSteps: progress.stepResults.length,
+        };
+
+        if (progress.plan) {
+          updateData.plan = progress.plan;
+        }
+
+        if (progress.artifacts && progress.artifacts.length > 0) {
+          updateData.artifacts = progress.artifacts;
+        }
+
+        if (progress.status === "completed") {
+          updateData.status = "completed";
+          updateData.completedAt = new Date();
+          updateData.summary = await orchestrator.generateSummary();
+        }
+
+        if (progress.status === "failed") {
+          updateData.completedAt = new Date();
+          updateData.error = progress.error || "Unknown error";
+        }
+
+        if (progress.status === "cancelled") {
+          updateData.completedAt = new Date();
+        }
+
+        const lockResult = await updateRunWithLock(runId, currentStatus, updateData);
+        if (lockResult.success) {
+          currentStatus = updateData.status as AgentStatus;
+        } else {
+          console.warn(`[AgentManager] Optimistic lock failed for run ${runId}: ${lockResult.error}`);
+        }
+
+        await ensurePersistedStepsLoaded();
+
+        for (const stepResult of progress.stepResults) {
+          const existingStepId = persistedStepsByIndex.get(stepResult.stepIndex);
+
+          if (!existingStepId) {
+            const [insertedStep] = await db.insert(agentModeSteps).values({
+              runId,
+              stepIndex: stepResult.stepIndex,
+              toolName: stepResult.toolName,
+              toolInput: progress.plan?.steps[stepResult.stepIndex]?.input || null,
+              toolOutput: stepResult.output,
+              status: stepResult.success ? "succeeded" : "failed",
+              error: stepResult.error || null,
+              startedAt: new Date(stepResult.startedAt),
+              completedAt: new Date(stepResult.completedAt),
+            }).returning({ id: agentModeSteps.id });
+
+            if (insertedStep?.id) {
+              persistedStepsByIndex.set(stepResult.stepIndex, insertedStep.id);
+            }
+          } else {
+            await db.update(agentModeSteps)
+              .set({
+                toolOutput: stepResult.output,
+                status: stepResult.success ? "succeeded" : "failed",
+                error: stepResult.error || null,
+                completedAt: new Date(stepResult.completedAt),
+              })
+              .where(eq(agentModeSteps.id, existingStepId));
+          }
+        }
+      } catch (error) {
+        console.error(`[AgentManager] Failed to persist progress for run ${runId}:`, error);
+      }
+    });
   }
 
   private cleanupOldRuns(): void {
@@ -2547,6 +3108,7 @@ class AgentManager {
 
       if (isCompleted && age > retentionMs) {
         this.activeRuns.delete(runId);
+        this.persistenceBoundRuns.delete(runId);
         console.log(`[AgentManager] Cleaned up old run: ${runId}`);
       }
     }

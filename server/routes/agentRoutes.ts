@@ -529,84 +529,9 @@ export function createAgentModeRouter() {
             userPlan,
             model,
             normalizedExecutionProfile,
+            "planning",
           );
-
-          orchestrator.on("progress", async (progress) => {
-            try {
-              const newStatus = progress.status === "executing" ? "running" : progress.status;
-              const updateData: Record<string, any> = {
-                status: newStatus,
-                currentStepIndex: progress.currentStepIndex,
-                totalSteps: progress.totalSteps,
-                // Count finished steps, not just successes (failed steps are also "completed" from a progress POV).
-                completedSteps: progress.stepResults.length,
-              };
-
-              if (progress.plan) {
-                updateData.plan = progress.plan;
-              }
-
-              if (progress.artifacts && progress.artifacts.length > 0) {
-                updateData.artifacts = progress.artifacts;
-              }
-
-              if (progress.status === "completed") {
-                updateData.status = "completed";
-                updateData.completedAt = new Date();
-
-                const summary = await orchestrator.generateSummary();
-                updateData.summary = summary;
-              }
-
-              if (progress.status === "failed") {
-                updateData.completedAt = new Date();
-                updateData.error = progress.error || "Unknown error";
-              }
-
-              if (progress.status === "cancelled") {
-                updateData.completedAt = new Date();
-              }
-
-              const lockResult = await updateRunWithLock(runId, currentStatus, updateData);
-              if (lockResult.success) {
-                currentStatus = newStatus;
-              } else {
-                console.warn(`[AgentRoutes] Optimistic lock failed for run ${runId}: ${lockResult.error}`);
-              }
-
-              for (const stepResult of progress.stepResults) {
-                const existingStep = await db.select()
-                  .from(agentModeSteps)
-                  .where(eq(agentModeSteps.runId, runId))
-                  .then(steps => steps.find(s => s.stepIndex === stepResult.stepIndex));
-
-                if (!existingStep) {
-                  await db.insert(agentModeSteps).values({
-                    runId,
-                    stepIndex: stepResult.stepIndex,
-                    toolName: stepResult.toolName,
-                    toolInput: progress.plan?.steps[stepResult.stepIndex]?.input || null,
-                    toolOutput: stepResult.output,
-                    status: stepResult.success ? "succeeded" : "failed",
-                    error: stepResult.error || null,
-                    startedAt: new Date(stepResult.startedAt),
-                    completedAt: new Date(stepResult.completedAt),
-                  });
-                } else {
-                  await db.update(agentModeSteps)
-                    .set({
-                      toolOutput: stepResult.output,
-                      status: stepResult.success ? "succeeded" : "failed",
-                      error: stepResult.error || null,
-                      completedAt: new Date(stepResult.completedAt),
-                    })
-                    .where(eq(agentModeSteps.id, existingStep.id));
-                }
-              }
-            } catch (err) {
-              console.error(`[AgentRoutes] Error updating run ${runId} progress:`, err);
-            }
-          });
+          void orchestrator;
 
         } catch (err: any) {
           console.error(`[AgentRoutes] Error starting run ${runId}:`, err);
@@ -1321,10 +1246,6 @@ export function createAgentModeRouter() {
         });
       }
 
-      if (typeof (agentManager as unknown as Record<string, any>).resumeRun === 'function') {
-        await (agentManager as unknown as Record<string, any>).resumeRun(id);
-      }
-
       const lockResult = await updateRunWithLock(id, "paused", { status: "running" });
 
       if (!lockResult.success) {
@@ -1332,6 +1253,10 @@ export function createAgentModeRouter() {
           error: "Failed to resume run due to concurrent modification",
           details: lockResult.error,
         });
+      }
+
+      if (typeof (agentManager as unknown as Record<string, any>).resumeRun === 'function') {
+        await (agentManager as unknown as Record<string, any>).resumeRun(id);
       }
 
       res.json({ success: true, status: "running" });
@@ -1450,43 +1375,9 @@ export function createAgentModeRouter() {
               userPlan,
               undefined,
               executionProfile,
+              "running",
             );
-
-            orchestrator.on("progress", async (progress) => {
-              try {
-                const newStatus = progress.status === "executing" ? "running" : progress.status;
-                const updateData: any = {
-                  status: newStatus,
-                  currentStepIndex: progress.currentStepIndex,
-                  completedSteps: progress.stepResults.filter((r: any) => r.success).length,
-                };
-
-                if (progress.artifacts && progress.artifacts.length > 0) {
-                  updateData.artifacts = progress.artifacts;
-                }
-
-                if (progress.status === "completed") {
-                  updateData.status = "completed";
-                  updateData.completedAt = new Date();
-                  const summary = await orchestrator.generateSummary();
-                  updateData.summary = summary;
-                }
-
-                if (progress.status === "failed") {
-                  updateData.completedAt = new Date();
-                  updateData.error = progress.error || "Unknown error";
-                }
-
-                const lockResult = await updateRunWithLock(id, currentStatus, updateData);
-                if (lockResult.success) {
-                  currentStatus = newStatus;
-                } else {
-                  console.warn(`[AgentRoutes] Optimistic lock failed for retry run ${id}: ${lockResult.error}`);
-                }
-              } catch (err) {
-                console.error(`[AgentRoutes] Error updating retry run ${id}:`, err);
-              }
-            });
+            void orchestrator;
           } catch (err: any) {
             console.error(`[AgentRoutes] Error retrying run ${id}:`, err);
             await updateRunWithLock(id, currentStatus, {
