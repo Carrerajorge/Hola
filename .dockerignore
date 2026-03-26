@@ -39,6 +39,9 @@ sandbox_workspace
 uploads
 tmp
 logs
+.playwright-cli
+data
+output
 
 # Backups / archives / local junk that bloat VPS build contexts
 *.log
@@ -69,6 +72,22 @@ external/
 
 native/
 
+apps/
+
+desktop/
+
+dist-desktop/
+
+docs/
+
+e2e/
+
+extension/
+
+fastapi_sse/
+
+fixtures/
+
 Hola/
 
 Hola_wt_github/
@@ -76,6 +95,14 @@ Hola_wt_github/
 Hola_wt_pr/
 
 Hola_wt_super_agent_100/
+
+hola-infra/
+
+monitoring/
+
+observability/
+
+packages/**/node_modules/
 
 dist/
 
