@@ -1,5 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  DEFAULT_OPENCLAW_RELEASE_TAG,
+  OPENCLAW_RELEASE_VERSION,
+} from "@shared/openclawRelease";
 
 import {
   CODEX_RUN_RESUME_STORAGE_KEY,
@@ -19,6 +23,9 @@ const addChatToProjectMock = vi.fn();
 const apiFetchMock = vi.fn();
 const loginMock = vi.fn();
 const localStorageState = new Map<string, string>();
+const OPENCLAW_RELEASE_URL = `https://github.com/openclaw/openclaw/releases/tag/${DEFAULT_OPENCLAW_RELEASE_TAG}`;
+const OPENCLAW_TARBALL_URL = `https://api.github.com/repos/openclaw/openclaw/tarball/${DEFAULT_OPENCLAW_RELEASE_TAG}`;
+const OPENCLAW_ZIPBALL_URL = `https://api.github.com/repos/openclaw/openclaw/zipball/${DEFAULT_OPENCLAW_RELEASE_TAG}`;
 
 const localStorageMock = {
   getItem: (key: string) => localStorageState.get(key) ?? null,
@@ -252,18 +259,18 @@ describe("CodexPage", () => {
           ok: true,
           json: async () => ({
             success: true,
-            requestedTag: "v2026.3.22",
+            requestedTag: DEFAULT_OPENCLAW_RELEASE_TAG,
             syncedAt: "2026-03-22T00:00:00.000Z",
             bundled: {
-              version: "2026.3.22",
+              version: OPENCLAW_RELEASE_VERSION,
               matchesRequested: true,
             },
             requestedRelease: {
-              tagName: "v2026.3.22",
-              name: "openclaw 2026.3.22",
-              htmlUrl: "https://github.com/openclaw/openclaw/releases/tag/v2026.3.22",
-              tarballUrl: "https://api.github.com/repos/openclaw/openclaw/tarball/v2026.3.22",
-              zipballUrl: "https://api.github.com/repos/openclaw/openclaw/zipball/v2026.3.22",
+              tagName: DEFAULT_OPENCLAW_RELEASE_TAG,
+              name: `openclaw ${OPENCLAW_RELEASE_VERSION}`,
+              htmlUrl: OPENCLAW_RELEASE_URL,
+              tarballUrl: OPENCLAW_TARBALL_URL,
+              zipballUrl: OPENCLAW_ZIPBALL_URL,
               publishedAt: "2026-03-23T11:11:00Z",
               overview: "Release with expanded native agent, sandbox, plugin, and control UI capabilities.",
               importantNotes: ["Breaking changes in plugin SDK, browser relay, and legacy env compatibility."],
@@ -276,11 +283,11 @@ describe("CodexPage", () => {
               isLatest: true,
             },
             latestRelease: {
-              tagName: "v2026.3.22",
-              name: "openclaw 2026.3.22",
-              htmlUrl: "https://github.com/openclaw/openclaw/releases/tag/v2026.3.22",
-              tarballUrl: "https://api.github.com/repos/openclaw/openclaw/tarball/v2026.3.22",
-              zipballUrl: "https://api.github.com/repos/openclaw/openclaw/zipball/v2026.3.22",
+              tagName: DEFAULT_OPENCLAW_RELEASE_TAG,
+              name: `openclaw ${OPENCLAW_RELEASE_VERSION}`,
+              htmlUrl: OPENCLAW_RELEASE_URL,
+              tarballUrl: OPENCLAW_TARBALL_URL,
+              zipballUrl: OPENCLAW_ZIPBALL_URL,
               publishedAt: "2026-03-23T11:11:00Z",
               overview: "Release with expanded native agent, sandbox, plugin, and control UI capabilities.",
               importantNotes: ["Breaking changes in plugin SDK, browser relay, and legacy env compatibility."],
@@ -291,7 +298,7 @@ describe("CodexPage", () => {
             },
             sync: {
               status: "synced",
-              summary: "OpenClaw v2026.3.22 is aligned with the latest release.",
+              summary: `OpenClaw ${DEFAULT_OPENCLAW_RELEASE_TAG} is aligned with the latest release.`,
               autoRefreshMinutes: 15,
               latestMatchesRequested: true,
             },
@@ -432,7 +439,7 @@ describe("CodexPage", () => {
 
     expect(screen.getByText("ILIAGPT")).toBeInTheDocument();
     expect(screen.getAllByText("OpenClaw").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("v2026.3.22").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(DEFAULT_OPENCLAW_RELEASE_TAG).length).toBeGreaterThan(0);
     expect(screen.getByTestId("codex-session-title")).toHaveTextContent("Polish OpenClaw screen");
     expect(screen.getAllByText("/workspace/hola").length).toBeGreaterThan(0);
 

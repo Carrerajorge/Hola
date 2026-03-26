@@ -3,6 +3,10 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 import { z } from "zod/v4";
+import {
+  DEFAULT_OPENCLAW_RELEASE_TAG,
+  OPENCLAW_RELEASE_VERSION,
+} from "../../shared/openclawRelease";
 
 import {
   SandboxBrowserSchema as OpenClawSandboxBrowserSchema,
@@ -52,27 +56,13 @@ describe("OpenClaw native integration parity", () => {
     const clientUsesSharedRelease = codexSource.includes('from "@shared/openclawRelease"');
     const serviceUsesSharedRelease = releaseServiceSource.includes('from "@shared/openclawRelease"');
 
-    expect(expectedVersion).toBe("2026.3.22");
-    expect(expectedTag).toBe("v2026.3.22");
-    expect(
-      codexSource.includes(`const OPENCLAW_RELEASE_TAG = "${expectedTag}";`) ||
-      (
-        clientUsesSharedRelease &&
-        codexSource.includes("const OPENCLAW_RELEASE_TAG = DEFAULT_OPENCLAW_RELEASE_TAG;")
-      ),
-    ).toBe(true);
-    expect(
-      releaseServiceSource.includes(`export const DEFAULT_OPENCLAW_RELEASE_TAG = "${expectedTag}";`) ||
-      (
-        serviceUsesSharedRelease &&
-        releaseServiceSource.includes("export { DEFAULT_OPENCLAW_RELEASE_TAG };")
-      ),
-    ).toBe(true);
-
-    if (clientUsesSharedRelease || serviceUsesSharedRelease) {
-      const sharedReleaseSource = readRepoFile("shared/openclawRelease.ts");
-      expect(sharedReleaseSource).toContain(`OPENCLAW_RELEASE_VERSION = "${expectedVersion}"`);
-    }
+    expect(expectedVersion).toMatch(/^\d{4}\.\d+\.\d+(?:[-.][A-Za-z0-9]+)*$/);
+    expect(OPENCLAW_RELEASE_VERSION).toBe(expectedVersion);
+    expect(DEFAULT_OPENCLAW_RELEASE_TAG).toBe(expectedTag);
+    expect(clientUsesSharedRelease).toBe(true);
+    expect(codexSource).toContain("const OPENCLAW_RELEASE_TAG = DEFAULT_OPENCLAW_RELEASE_TAG;");
+    expect(serviceUsesSharedRelease).toBe(true);
+    expect(releaseServiceSource).toContain("export { DEFAULT_OPENCLAW_RELEASE_TAG };");
   });
 
   it("keeps zod registry compatibility on both bundled and native runtimes", () => {

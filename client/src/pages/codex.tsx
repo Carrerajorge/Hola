@@ -57,6 +57,7 @@ import {
   persistCodexWorkspaceDraft,
 } from "@/lib/codexContinuity";
 import { cn } from "@/lib/utils";
+import { DEFAULT_OPENCLAW_RELEASE_TAG } from "@shared/openclawRelease";
 import {
   CODEX_EXECUTION_PROFILE_OPTIONS,
   createCodexRun,
@@ -172,7 +173,7 @@ interface OpenClawControlUiMeta {
   reason?: string;
 }
 
-const OPENCLAW_RELEASE_TAG = "v2026.3.22";
+const OPENCLAW_RELEASE_TAG = DEFAULT_OPENCLAW_RELEASE_TAG;
 const OPENCLAW_RELEASE_REFRESH_MS = 15 * 60 * 1000;
 const OPENCLAW_RUNTIME_REFRESH_MS = 30 * 1000;
 const OPENCLAW_CONTROL_UI_SESSION_KEY = "main";
