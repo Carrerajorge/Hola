@@ -76,16 +76,21 @@ log() {
 cleanup() {
   local exit_code=$?
   if [ "${FAILED}" = "true" ]; then
-    log "Recent app container logs:"
+    log "Recent app container logs (stdout):"
     docker logs --tail=500 "${APP_CONTAINER}" 2>/dev/null || true
+    log "Recent app container logs (stderr):"
+    docker logs --tail=500 "${APP_CONTAINER}" 1>/dev/null 2>&1 || true
+    # Merge stdout+stderr so crash traces on stderr are visible in CI
+    log "Recent app container logs (merged):"
+    docker logs --tail=500 "${APP_CONTAINER}" 2>&1 || true
     log "Recent worker container logs:"
-    docker logs --tail=200 "${WORKER_CONTAINER}" 2>/dev/null || true
+    docker logs --tail=200 "${WORKER_CONTAINER}" 2>&1 || true
     log "Recent sandbox container logs:"
-    docker logs --tail=200 "${SANDBOX_CONTAINER}" 2>/dev/null || true
+    docker logs --tail=200 "${SANDBOX_CONTAINER}" 2>&1 || true
     log "Recent postgres container logs:"
-    docker logs --tail=120 "${POSTGRES_CONTAINER}" 2>/dev/null || true
+    docker logs --tail=120 "${POSTGRES_CONTAINER}" 2>&1 || true
     log "Recent redis container logs:"
-    docker logs --tail=120 "${REDIS_CONTAINER}" 2>/dev/null || true
+    docker logs --tail=120 "${REDIS_CONTAINER}" 2>&1 || true
     if [ -s "${MIGRATION_LOG}" ]; then
       log "Migration logs:"
       cat "${MIGRATION_LOG}" || true
