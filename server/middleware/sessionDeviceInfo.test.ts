@@ -11,6 +11,8 @@ function makeRequest(overrides: Partial<Request> = {}): Request {
     method: "GET",
     headers: {},
     ip: "127.0.0.1",
+    path: "/api/chat",
+    originalUrl: "/api/chat",
     socket: { remoteAddress: "127.0.0.1" } as Request["socket"],
     session: {},
     ...overrides,
@@ -74,6 +76,38 @@ describe("sessionDeviceInfoMiddleware", () => {
       userAgent: "Vitest",
       ip: "127.0.0",
     });
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips health probes without mutating tracked sessions", () => {
+    const next = vi.fn() as unknown as NextFunction;
+    const req = makeRequest({
+      method: "GET",
+      path: "/health/ready",
+      originalUrl: "/api/health/ready",
+      headers: { "user-agent": "Wget/1.21.3" },
+      session: { authUserId: "user-123" },
+    });
+
+    sessionDeviceInfoMiddleware(req, {} as Response, next);
+
+    expect(req.session).toEqual({ authUserId: "user-123" });
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips health probes even when originalUrl includes a query string", () => {
+    const next = vi.fn() as unknown as NextFunction;
+    const req = makeRequest({
+      method: "GET",
+      path: undefined as unknown as Request["path"],
+      originalUrl: "/api/health?format=json",
+      headers: { "user-agent": "Wget/1.21.3" },
+      session: { anonUserId: "anon-123" },
+    });
+
+    sessionDeviceInfoMiddleware(req, {} as Response, next);
+
+    expect(req.session).toEqual({ anonUserId: "anon-123" });
     expect(next).toHaveBeenCalledTimes(1);
   });
 });
