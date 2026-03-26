@@ -6,6 +6,14 @@ on:
       sha:
         required: true
         type: string
+      enforce_latest_main:
+        required: false
+        type: boolean
+        default: false
+      latest_main_branch:
+        required: false
+        type: string
+        default: main
     outputs:
       image_tag:
         description: "The image tag that was pushed"
@@ -45,63 +53,6 @@ jobs:
         with:
           ref: ${{ inputs.sha }}
           fetch-depth: 1
-          filter: blob:none
-          sparse-checkout: |
-            /.dockerignore
-            /.npmrc
-            /Dockerfile
-            /components.json
-            /package.json
-            /package-lock.json
-            /postcss.config.js
-            /tsconfig.json
-            /tsconfig.base.json
-            /vite.config.ts
-            /vite-plugin-meta-images.ts
-            /client/
-            /migrations/
-            /ocr_service/
-            /packages/
-            /script/
-            /scripts/
-            /server/
-            /shared/
-          sparse-checkout-cone-mode: false
-
-      - name: Validate build checkout contents
-        run: |
-          bash ./scripts/ci-assert-required-paths.sh "build checkout" \
-            .dockerignore \
-            Dockerfile \
-            package.json \
-            package-lock.json \
-            postcss.config.js \
-            tsconfig.json \
-            tsconfig.base.json \
-            vite.config.ts \
-            vite-plugin-meta-images.ts \
-            scripts/sync-mathjax-assets.cjs \
-            client/public/sw-cleanup.js \
-            server/openclaw/package.json \
-            packages/flowise-components/package.json \
-            packages/flowise-server/package.json \
-            packages/flowise-server/src/Interface.ts
-
-      - name: Summarize build checkout footprint
-        run: |
-          set -euo pipefail
-          FILE_COUNT="$(git ls-files | wc -l | tr -d ' ')"
-          CHECKOUT_SIZE="$(du -sh . | awk '{print $1}')"
-          echo "▸ Sparse checkout files: ${FILE_COUNT}"
-          echo "▸ Sparse checkout size:  ${CHECKOUT_SIZE}"
-          {
-            echo "## Build Checkout Footprint"
-            echo ""
-            echo "| Metric | Value |"
-            echo "|---|---|"
-            echo "| Files | \`${FILE_COUNT}\` |"
-            echo "| Size | \`${CHECKOUT_SIZE}\` |"
-          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Compute image tag
         id: meta
@@ -112,12 +63,38 @@ jobs:
           echo "tag=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
 
+      - name: Evaluate latest-main build guard
+        id: latest_main_guard
+        env:
+          ENFORCE_LATEST_MAIN: ${{ inputs.enforce_latest_main }}
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_SHA: ${{ inputs.sha }}
+          TARGET_BRANCH: ${{ inputs.latest_main_branch }}
+          FAIL_ON_LOOKUP_ERROR: "false"
+          GUARD_CONTEXT: build-images
+        run: |
+          set -euo pipefail
+          if [ "${ENFORCE_LATEST_MAIN}" != "true" ]; then
+            {
+              echo "is_latest=true"
+              echo "should_deploy=true"
+              echo "latest_sha="
+              echo "skip_reason="
+            } >> "$GITHUB_OUTPUT"
+            echo "Latest-main build guard disabled for this workflow call."
+            exit 0
+          fi
+
+          bash ./scripts/latest-main-guard.sh
+
       - name: Set up Swap Space
+        if: steps.latest_main_guard.outputs.should_deploy == 'true'
         uses: pierotofy/set-swap-space@master
         with:
           swap-size-gb: 10
 
       - name: Log in to GHCR
+        if: steps.latest_main_guard.outputs.should_deploy == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -125,20 +102,19 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Pre-pull BuildKit image with retry
+        if: steps.latest_main_guard.outputs.should_deploy == 'true'
         run: |
-          set -euo pipefail
-          for attempt in 1 2 3; do
-            if docker pull moby/buildkit:buildx-stable-1 >/dev/null 2>&1; then
-              echo "BuildKit image is ready."
-              exit 0
-            fi
-            echo "Retrying BuildKit image pull (${attempt}/3)..."
-            sleep $(( attempt * 5 ))
-          done
-          echo "::error::Unable to pull moby/buildkit:buildx-stable-1 after retries."
-          exit 1
+          bash ./scripts/ci-retry.sh \
+            --label "BuildKit image pull" \
+            --attempts 5 \
+            --base-delay 5 \
+            --max-delay 45 \
+            --transient-only \
+            -- \
+            docker pull moby/buildkit:buildx-stable-1
 
       - name: Set up Docker Buildx
+        if: steps.latest_main_guard.outputs.should_deploy == 'true'
         uses: docker/setup-buildx-action@v3
         with:
           driver-opts: |
@@ -146,6 +122,7 @@ jobs:
 
       - name: Build & push app image (runner stage)
         id: build_app
+        if: steps.latest_main_guard.outputs.should_deploy == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -157,6 +134,7 @@ jobs:
           build-args: |
             APP_VERSION=${{ steps.meta.outputs.short_sha }}
           cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
           # Build provenance (SLSA) — creates attestation for supply chain security
           provenance: true
           # SBOM generation currently pulls docker/buildkit-syft-scanner from Docker Hub,
@@ -166,6 +144,7 @@ jobs:
 
       - name: Build & push sandbox-runner image
         id: build_sandbox
+        if: steps.latest_main_guard.outputs.should_deploy == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -177,11 +156,13 @@ jobs:
           build-args: |
             APP_VERSION=${{ steps.meta.outputs.short_sha }}
           cache-from: type=gha,scope=sandbox
+          cache-to: type=gha,mode=max,scope=sandbox
           provenance: true
           sbom: false
 
       - name: Build & push OCR image
         id: build_ocr
+        if: steps.latest_main_guard.outputs.should_deploy == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -191,10 +172,12 @@ jobs:
             ${{ env.IMAGE_BASE }}-ocr:${{ steps.meta.outputs.tag }}
             ${{ env.IMAGE_BASE }}-ocr:latest
           cache-from: type=gha,scope=ocr
+          cache-to: type=gha,mode=max,scope=ocr
           provenance: true
           sbom: false
 
       - name: Verify images exist in GHCR
+        if: steps.latest_main_guard.outputs.should_deploy == 'true'
         run: |
           set -euo pipefail
           TAG="${{ steps.meta.outputs.tag }}"
@@ -213,6 +196,7 @@ jobs:
           echo "▸ OCR digest:       ${{ steps.build_ocr.outputs.digest }}"
 
       - name: Smoke-test production app image boot
+        if: steps.latest_main_guard.outputs.should_deploy == 'true'
         env:
           IMAGE_TAG: ${{ steps.meta.outputs.tag }}
           APP_VERSION: ${{ steps.meta.outputs.short_sha }}
@@ -230,3 +214,5 @@ jobs:
           echo "| app | \`${{ steps.meta.outputs.tag }}\` | \`${{ steps.build_app.outputs.digest || 'N/A' }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| sandbox | \`${{ steps.meta.outputs.tag }}\` | \`${{ steps.build_sandbox.outputs.digest || 'N/A' }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| ocr | \`${{ steps.meta.outputs.tag }}\` | \`${{ steps.build_ocr.outputs.digest || 'N/A' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| latest-main guard | \`${{ inputs.enforce_latest_main && 'enabled' || 'disabled' }}\` | \`${{ steps.latest_main_guard.outputs.should_deploy || 'n/a' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| latest main sha | \`${{ steps.latest_main_guard.outputs.latest_sha || 'n/a' }}\` | \`${{ steps.latest_main_guard.outputs.skip_reason || 'n/a' }}\` |" >> $GITHUB_STEP_SUMMARY

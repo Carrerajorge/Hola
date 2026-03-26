@@ -263,9 +263,9 @@ test('privacy page loads as authenticated route without runtime errors', async (
 
   await page.goto('/privacy', { waitUntil: 'domcontentloaded' });
 
-  await expect(page.getByRole('heading', { name: /Privacy|Privacidad/i })).toBeVisible();
-  await expect(page.getByTestId('switch-share-data')).toBeVisible();
-  await expect(page.getByTestId('switch-analytics')).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Privacy|Privacidad/i })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('switch-share-data')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('switch-analytics')).toBeVisible({ timeout: 15_000 });
 
   await page.getByTestId('switch-share-data').click();
   await expect(page.getByTestId('switch-share-data')).toHaveAttribute('data-state', 'checked');

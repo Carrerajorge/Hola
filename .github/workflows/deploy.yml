@@ -128,6 +128,7 @@ jobs:
     uses: ./.github/workflows/build-images.yml
     with:
       sha: ${{ github.sha }}
+      enforce_latest_main: ${{ github.event_name == 'push' }}
     permissions:
       contents: read
       packages: write
@@ -180,12 +181,12 @@ jobs:
             nginx.conf \
             nginx/maintenance.html \
             scripts/deploy-bluegreen.sh \
-            scripts/repair-docker-storage-backend.sh \
             scripts/rollback-bluegreen.sh \
             scripts/health-dashboard.sh \
             scripts/vps-bootstrap-bluegreen.sh \
             scripts/prod-rigorous-checks.sh \
-            scripts/collect-prod-deploy-evidence.sh
+            scripts/collect-prod-deploy-evidence.sh \
+            scripts/latest-main-guard.sh
           do
             fetch_asset "${asset}"
           done
@@ -419,7 +420,7 @@ jobs:
           set -euo pipefail
           sync_ok=false
           for attempt in 1 2 3; do
-            if scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12               docker-compose.infra.yml               docker-compose.slot.yml               nginx.conf               scripts/deploy-bluegreen.sh               scripts/repair-docker-storage-backend.sh               scripts/rollback-bluegreen.sh               scripts/health-dashboard.sh               scripts/vps-bootstrap-bluegreen.sh               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/; then
+            if scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12               docker-compose.infra.yml               docker-compose.slot.yml               nginx.conf               scripts/deploy-bluegreen.sh               scripts/rollback-bluegreen.sh               scripts/health-dashboard.sh               scripts/vps-bootstrap-bluegreen.sh               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/; then
               sync_ok=true
               break
             fi
@@ -430,7 +431,7 @@ jobs:
             echo "::warning::Failed to sync deploy scripts after 3 attempts; continuing with scripts already present on VPS"
           fi
 
-          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts ${{ env.DEPLOY_PATH }}/nginx &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/repair-docker-storage-backend.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts ${{ env.DEPLOY_PATH }}/nginx &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
 
           # Copy nginx static assets (maintenance page, custom error pages)
           scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }} \
@@ -524,44 +525,6 @@ jobs:
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
-          filter: blob:none
-          sparse-checkout: |
-            /.npmrc
-            /package.json
-            /package-lock.json
-            /playwright.config.ts
-            /e2e/
-            /scripts/ci-assert-required-paths.sh
-            /scripts/ci-retry.sh
-            /scripts/with-env.cjs
-          sparse-checkout-cone-mode: false
-
-      - name: Validate browser smoke checkout contents
-        run: |
-          bash ./scripts/ci-assert-required-paths.sh "browser smoke checkout" \
-            package.json \
-            package-lock.json \
-            playwright.config.ts \
-            e2e/smoke.spec.ts \
-            scripts/ci-assert-required-paths.sh \
-            scripts/ci-retry.sh \
-            scripts/with-env.cjs
-
-      - name: Summarize browser smoke checkout footprint
-        run: |
-          set -euo pipefail
-          FILE_COUNT="$(git ls-files | wc -l | tr -d ' ')"
-          CHECKOUT_SIZE="$(du -sh . | awk '{print $1}')"
-          echo "▸ Browser smoke checkout files: ${FILE_COUNT}"
-          echo "▸ Browser smoke checkout size:  ${CHECKOUT_SIZE}"
-          {
-            echo "## Browser Smoke Checkout Footprint"
-            echo ""
-            echo "| Metric | Value |"
-            echo "|---|---|"
-            echo "| Files | \`${FILE_COUNT}\` |"
-            echo "| Size | \`${CHECKOUT_SIZE}\` |"
-          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup Node for browser smoke
         uses: actions/setup-node@v4
@@ -573,7 +536,15 @@ jobs:
         run: npm ci
 
       - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+        run: |
+          bash ./scripts/ci-retry.sh \
+            --label "Playwright Chromium install" \
+            --attempts 4 \
+            --base-delay 10 \
+            --max-delay 45 \
+            --transient-only \
+            -- \
+            npx playwright install --with-deps chromium
 
       - name: Browser smoke against production
         id: browser_smoke
@@ -750,7 +721,6 @@ jobs:
             nginx.conf \
             nginx/maintenance.html \
             scripts/deploy-bluegreen.sh \
-            scripts/repair-docker-storage-backend.sh \
             scripts/rollback-bluegreen.sh \
             scripts/health-dashboard.sh \
             scripts/vps-bootstrap-bluegreen.sh \
@@ -816,36 +786,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CURRENT_SHA: ${{ github.sha }}
+          TARGET_BRANCH: main
+          FAIL_ON_LOOKUP_ERROR: "true"
+          GUARD_CONTEXT: deploy-auto
         run: |
-          set -euo pipefail
-
-          latest_sha=""
-          for attempt in $(seq 1 6); do
-            latest_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha' 2>/dev/null || true)"
-            if [ -n "${latest_sha}" ]; then
-              break
-            fi
-            echo "Could not resolve latest main SHA yet. Retry ${attempt}/6..."
-            sleep 5
-          done
-
-          if [ -z "${latest_sha}" ]; then
-            echo "::error::Unable to resolve latest main SHA for stale-deploy protection."
-            exit 1
-          fi
-
-          echo "latest_sha=${latest_sha}" >> "$GITHUB_OUTPUT"
-
-          if [ "${latest_sha}" != "${CURRENT_SHA}" ]; then
-            echo "should_deploy=false" >> "$GITHUB_OUTPUT"
-            echo "skip_reason=Superseded by ${latest_sha:0:8}" >> "$GITHUB_OUTPUT"
-            echo "::notice::Skipping deploy for ${CURRENT_SHA:0:8}; main already advanced to ${latest_sha:0:8}."
-            exit 0
-          fi
-
-          echo "should_deploy=true" >> "$GITHUB_OUTPUT"
-          echo "skip_reason=" >> "$GITHUB_OUTPUT"
-          echo "Deploy is still at the tip of main (${CURRENT_SHA:0:8})."
+          bash ./scripts/latest-main-guard.sh
 
       - name: Verify images are present in GHCR and digest pinned
         if: steps.latest_main.outputs.should_deploy == 'true'
@@ -949,36 +894,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CURRENT_SHA: ${{ github.sha }}
+          TARGET_BRANCH: main
+          FAIL_ON_LOOKUP_ERROR: "true"
+          GUARD_CONTEXT: deploy-auto-cutover
         run: |
-          set -euo pipefail
-
-          latest_sha=""
-          for attempt in $(seq 1 6); do
-            latest_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha' 2>/dev/null || true)"
-            if [ -n "${latest_sha}" ]; then
-              break
-            fi
-            echo "Could not resolve latest main SHA before cutover. Retry ${attempt}/6..."
-            sleep 5
-          done
-
-          if [ -z "${latest_sha}" ]; then
-            echo "::error::Unable to resolve latest main SHA before remote cutover."
-            exit 1
-          fi
-
-          echo "latest_sha=${latest_sha}" >> "$GITHUB_OUTPUT"
-
-          if [ "${latest_sha}" != "${CURRENT_SHA}" ]; then
-            echo "should_deploy=false" >> "$GITHUB_OUTPUT"
-            echo "skip_reason=Superseded before cutover by ${latest_sha:0:8}" >> "$GITHUB_OUTPUT"
-            echo "::notice::Skipping remote cutover for ${CURRENT_SHA:0:8}; main already advanced to ${latest_sha:0:8}."
-            exit 0
-          fi
-
-          echo "should_deploy=true" >> "$GITHUB_OUTPUT"
-          echo "skip_reason=" >> "$GITHUB_OUTPUT"
-          echo "Deploy is still at the tip of main immediately before remote cutover (${CURRENT_SHA:0:8})."
+          bash ./scripts/latest-main-guard.sh
 
       - name: Setup SSH key
         if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true'
@@ -1088,7 +1008,7 @@ jobs:
           set -euo pipefail
           sync_ok=false
           for attempt in 1 2 3; do
-            if scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12               docker-compose.infra.yml               docker-compose.slot.yml               nginx.conf               scripts/deploy-bluegreen.sh               scripts/repair-docker-storage-backend.sh               scripts/rollback-bluegreen.sh               scripts/health-dashboard.sh               scripts/vps-bootstrap-bluegreen.sh               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/; then
+            if scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12               docker-compose.infra.yml               docker-compose.slot.yml               nginx.conf               scripts/deploy-bluegreen.sh               scripts/rollback-bluegreen.sh               scripts/health-dashboard.sh               scripts/vps-bootstrap-bluegreen.sh               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/; then
               sync_ok=true
               break
             fi
@@ -1099,7 +1019,7 @@ jobs:
             echo "::warning::Failed to sync deploy scripts after 3 attempts; continuing with scripts already present on VPS"
           fi
 
-          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts ${{ env.DEPLOY_PATH }}/nginx &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/repair-docker-storage-backend.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts ${{ env.DEPLOY_PATH }}/nginx &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
 
           # Copy nginx static assets (maintenance page, custom error pages)
           scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }} \
@@ -1192,46 +1112,6 @@ jobs:
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
-          filter: blob:none
-          sparse-checkout: |
-            /.npmrc
-            /package.json
-            /package-lock.json
-            /playwright.config.ts
-            /e2e/
-            /scripts/ci-assert-required-paths.sh
-            /scripts/ci-retry.sh
-            /scripts/with-env.cjs
-          sparse-checkout-cone-mode: false
-
-      - name: Validate browser smoke checkout contents
-        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true'
-        run: |
-          bash ./scripts/ci-assert-required-paths.sh "browser smoke checkout" \
-            package.json \
-            package-lock.json \
-            playwright.config.ts \
-            e2e/smoke.spec.ts \
-            scripts/ci-assert-required-paths.sh \
-            scripts/ci-retry.sh \
-            scripts/with-env.cjs
-
-      - name: Summarize browser smoke checkout footprint
-        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true'
-        run: |
-          set -euo pipefail
-          FILE_COUNT="$(git ls-files | wc -l | tr -d ' ')"
-          CHECKOUT_SIZE="$(du -sh . | awk '{print $1}')"
-          echo "▸ Browser smoke checkout files: ${FILE_COUNT}"
-          echo "▸ Browser smoke checkout size:  ${CHECKOUT_SIZE}"
-          {
-            echo "## Browser Smoke Checkout Footprint"
-            echo ""
-            echo "| Metric | Value |"
-            echo "|---|---|"
-            echo "| Files | \`${FILE_COUNT}\` |"
-            echo "| Size | \`${CHECKOUT_SIZE}\` |"
-          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup Node for browser smoke
         if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true'
@@ -1246,7 +1126,15 @@ jobs:
 
       - name: Install Playwright Chromium
         if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true'
-        run: npx playwright install --with-deps chromium
+        run: |
+          bash ./scripts/ci-retry.sh \
+            --label "Playwright Chromium install" \
+            --attempts 4 \
+            --base-delay 10 \
+            --max-delay 45 \
+            --transient-only \
+            -- \
+            npx playwright install --with-deps chromium
 
       - name: Browser smoke against production
         id: browser_smoke
