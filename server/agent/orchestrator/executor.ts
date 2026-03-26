@@ -492,6 +492,8 @@ async function executeBuiltinTool(
           doi: a.doi,
           source: a.source,
           country: a.country,
+          qualityStatus: a.qualityGate?.status,
+          qualityScore: a.qualityGate?.score,
         })),
       };
     }

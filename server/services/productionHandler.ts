@@ -563,7 +563,7 @@ export async function handleProductionRequest(
                 type: 'stage_complete',
                 stage: 'research',
                 progress: 100,
-                message: `Busqueda completada: ${exportResult.stats.totalReturned}/${exportResult.stats.totalRequested} articulos`,
+                message: `Busqueda completada: ${exportResult.stats.totalReturned}/${exportResult.stats.totalRequested} articulos. Quality Gate acepto ${exportResult.stats.quality.accepted} y rechazo ${exportResult.stats.quality.rejected}.`,
                 timestamp: Date.now(),
             });
 

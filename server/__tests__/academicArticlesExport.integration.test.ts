@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import ExcelJS from "exceljs";
 import mammoth from "mammoth";
 
@@ -53,6 +53,23 @@ vi.mock("../agent/superAgent/unifiedArticleSearch", () => {
         language: "es",
       })
     ),
+    // Weak records that should survive region/date filters but fail the quality gate
+    ...Array.from({ length: 5 }, (_, i) =>
+      mk(300 + i, {
+        source: "openalex",
+        title: `Weak quality article ${i}`,
+        authors: [],
+        doi: undefined,
+        url: "",
+        journal: "n.d.",
+        abstract: "short",
+        keywords: [],
+        country: "Mexico",
+        city: "Monterrey",
+        institutionCountryCodes: ["MX"],
+        primaryInstitutionCountryCode: "MX",
+      })
+    ),
     // Failing OpenAlex (mixed US+MX) should be dropped in geoStrict=all
     ...Array.from({ length: 15 }, (_, i) =>
       mk(200 + i, {
@@ -100,6 +117,9 @@ vi.mock("../agent/superAgent/unifiedArticleSearch", () => {
 vi.mock("../agent/superAgent/crossrefClient", () => {
   return {
     searchCrossRef: vi.fn(async (query: string) => {
+      if (/weak quality article/i.test(query)) {
+        return [];
+      }
       const h = Array.from(query).reduce((acc, ch) => ((acc * 31 + ch.charCodeAt(0)) >>> 0), 0);
       const suffix = h.toString(16);
       const doi = `10.1234/resolved.${suffix}`;
@@ -190,6 +210,25 @@ describe("academicArticlesExport (integration-ish)", () => {
     process.env.ACADEMIC_JSON_REPORT_DISABLED = "1";
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("plans up to 500 articles and defaults to a recent 3-year window when no range is provided", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-23T12:00:00.000Z"));
+
+    const { planAcademicArticlesExport } = await import("../services/academicArticlesExport");
+    const plan = planAcademicArticlesExport("buscarme 500 articulos cientificos sobre economía circular");
+
+    expect(plan.requestedCount).toBe(500);
+    expect(plan.yearFrom).toBe(2023);
+    expect(plan.yearTo).toBe(2026);
+    expect(plan.dateFrom).toBe("2023-03-23");
+    expect(plan.dateTo).toBe("2026-03-23");
+    expect(plan.recentWindowApplied).toBe(true);
+  });
+
   it(
     "returns 100 articles with strict geo filtering, enriches missing fields, and writes Excel+Word outputs",
     async () => {
@@ -203,9 +242,13 @@ describe("academicArticlesExport (integration-ish)", () => {
     expect(result.plan.geoStrict).toBe(true);
     expect(result.plan.geoStrictMode).toBe("all");
     expect(result.stats.totalReturned).toBe(100);
+    expect(result.stats.quality.rejected).toBeGreaterThan(0);
+    expect(result.rejectedArticles.length).toBeGreaterThan(0);
+    expect(result.articles.every((a) => a.qualityGate?.status === "accepted")).toBe(true);
 
     // Ensure failing mixed-country OpenAlex works got dropped
     expect(result.articles.some((a) => (a.institutionCountryCodes || []).includes("US"))).toBe(false);
+    expect(result.articles.some((a) => a.title.includes("Weak quality article"))).toBe(false);
 
     // Coverage should improve because verifyDOI provides DOI/abstract/keywords/journal for many.
     expect(result.stats.coverage.doi.present).toBeGreaterThan(0);
@@ -218,6 +261,7 @@ describe("academicArticlesExport (integration-ish)", () => {
     expect(sheetNames).toContain("Articles");
     expect(sheetNames).toContain("Diagnostics");
     expect(sheetNames).toContain("Provenance");
+    expect(sheetNames).toContain("Quality Gate");
 
     const articlesSheet = wb.getWorksheet("Articles");
     expect(articlesSheet).toBeTruthy();
@@ -240,6 +284,9 @@ describe("academicArticlesExport (integration-ish)", () => {
     // Provenance sheet should have at least one row for a field
     const provSheet = wb.getWorksheet("Provenance")!;
     expect(provSheet.rowCount).toBeGreaterThan(1);
+
+    const qualitySheet = wb.getWorksheet("Quality Gate")!;
+    expect(qualitySheet.rowCount).toBeGreaterThan(result.articles.length);
 
     // Word: should contain DOI links in extracted text
     const raw = await mammoth.extractRawText({ buffer: result.wordBuffer });

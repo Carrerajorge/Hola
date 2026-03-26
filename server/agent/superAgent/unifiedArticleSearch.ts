@@ -123,6 +123,17 @@ export interface FieldProvenance {
     note?: string;
 }
 
+export interface AcademicQualityGateAssessment {
+    score: number; // 0..100
+    status: "accepted" | "rejected";
+    reasons: string[];
+    highlights: string[];
+    trustedSources: FieldProvenanceSource[];
+    metadataCompleteness: number; // 0..1
+    verifiedDoi: boolean;
+    exactDateInRange: boolean;
+}
+
 export interface UnifiedArticle {
     id: string;
     source: "scopus" | "wos" | "openalex" | "duckduckgo" | "pubmed" | "scielo" | "redalyc";
@@ -147,6 +158,7 @@ export interface UnifiedArticle {
     citationCount?: number;
     apaCitation: string;
     fieldProvenance?: Partial<Record<ArticleField, FieldProvenance>>;
+    qualityGate?: AcademicQualityGateAssessment;
 }
 
 export interface UnifiedSearchResult {
@@ -377,7 +389,7 @@ function hardenSearchOptions(options: SearchOptions): SearchOptions {
         hardened.maxResults = Math.max(1, Math.min(500, hardened.maxResults));
     }
     if (hardened.maxPerSource !== undefined) {
-        hardened.maxPerSource = Math.max(1, Math.min(100, hardened.maxPerSource));
+        hardened.maxPerSource = Math.max(1, Math.min(250, hardened.maxPerSource));
     }
 
     // Validate year range

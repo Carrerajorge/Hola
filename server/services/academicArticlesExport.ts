@@ -4,6 +4,7 @@ import {
   type ArticleField,
   type FieldProvenance,
   type FieldProvenanceSource,
+  type AcademicQualityGateAssessment,
   type SearchOptions as UnifiedSearchOptions,
 } from "../agent/superAgent/unifiedArticleSearch";
 import { searchCrossRef, verifyDOI, type VerifyDOIResult } from "../agent/superAgent/crossrefClient";
@@ -27,6 +28,9 @@ export interface AcademicArticlesExportPlan {
   requestedCount: number;
   yearFrom?: number;
   yearTo?: number;
+  dateFrom?: string;
+  dateTo?: string;
+  recentWindowApplied?: boolean;
   region: AcademicRegion;
   geoStrict?: boolean;
   geoStrictMode?: AcademicGeoStrictMode;
@@ -44,15 +48,30 @@ export interface AcademicArticlesExportDebug {
     enrichPool: number;
     enrichedDeduped: number;
     enrichedRegionFiltered: number;
+    qualityAccepted: number;
+    qualityRejected: number;
     final: number;
   };
   errors: string[];
   jsonReportPath?: string;
 }
 
+export interface AcademicArticlesQualitySummary {
+  audited: number;
+  accepted: number;
+  rejected: number;
+  returned: number;
+  avgScore: number;
+  avgAcceptedScore: number;
+  avgRejectedScore: number;
+  highConfidenceAccepted: number;
+  rejectedByReason: Record<string, number>;
+}
+
 export interface AcademicArticlesExportResult {
   plan: AcademicArticlesExportPlan;
   articles: UnifiedArticle[];
+  rejectedArticles: UnifiedArticle[];
   excelBuffer: Buffer;
   wordBuffer: Buffer;
   debug?: AcademicArticlesExportDebug;
@@ -64,6 +83,7 @@ export interface AcademicArticlesExportResult {
       "doi" | "abstract" | "keywords" | "journal" | "city" | "country" | "language" | "documentType",
       { present: number; missing: number }
     >;
+    quality: AcademicArticlesQualitySummary;
     notes: string[];
   };
 }
@@ -156,7 +176,7 @@ function extractCount(prompt: string): number {
   const m = prompt.match(/\b(?:buscarme|buscame|dame|necesito|encuentra(?:me)?)\s+(\d{1,3})\s+(?:art[ií]culos?|papers?|estudios?)\b/i);
   if (m) {
     const n = parseInt(m[1], 10);
-    if (!Number.isNaN(n) && n > 0) return Math.min(100, n);
+    if (!Number.isNaN(n) && n > 0) return Math.min(500, n);
   }
   return 50;
 }
@@ -234,12 +254,50 @@ function sanitizeExportPrompt(raw: string): string {
   return sanitizePlainText(raw, { maxLen: 2000, collapseWs: true });
 }
 
+function formatDateOnly(date: Date): string {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function buildDefaultRecentWindow(now: Date = new Date()): { yearFrom: number; yearTo: number; dateFrom: string; dateTo: string } {
+  const utcNow = new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+    23,
+    59,
+    59,
+  ));
+  const utcStart = new Date(Date.UTC(
+    utcNow.getUTCFullYear() - 3,
+    utcNow.getUTCMonth(),
+    utcNow.getUTCDate(),
+    0,
+    0,
+    0,
+  ));
+
+  return {
+    yearFrom: utcStart.getUTCFullYear(),
+    yearTo: utcNow.getUTCFullYear(),
+    dateFrom: formatDateOnly(utcStart),
+    dateTo: formatDateOnly(utcNow),
+  };
+}
+
 export function planAcademicArticlesExport(prompt: string): AcademicArticlesExportPlan {
   const sanitizedPrompt = sanitizeExportPrompt(prompt);
   const region = detectRegion(sanitizedPrompt);
   const geo = detectGeoStrict(sanitizedPrompt);
   const requestedCount = extractCount(sanitizedPrompt);
-  const { yearFrom, yearTo } = extractYearRange(sanitizedPrompt);
+  const explicitYearRange = extractYearRange(sanitizedPrompt);
+  const recentWindow = !explicitYearRange.yearFrom && !explicitYearRange.yearTo
+    ? buildDefaultRecentWindow()
+    : null;
+  const yearFrom = explicitYearRange.yearFrom ?? recentWindow?.yearFrom;
+  const yearTo = explicitYearRange.yearTo ?? recentWindow?.yearTo;
   const topicQuery = extractTopicQuery(sanitizedPrompt);
   const flags = detectSourceFlags(sanitizedPrompt);
 
@@ -269,6 +327,9 @@ export function planAcademicArticlesExport(prompt: string): AcademicArticlesExpo
     requestedCount,
     yearFrom,
     yearTo,
+    dateFrom: recentWindow?.dateFrom,
+    dateTo: recentWindow?.dateTo,
+    recentWindowApplied: !!recentWindow,
     region,
     geoStrict: geo.geoStrict,
     geoStrictMode: geo.geoStrictMode,
@@ -523,6 +584,7 @@ async function generateAcademicArticlesExcel(
     plan?: AcademicArticlesExportPlan;
     stats?: AcademicArticlesExportResult["stats"];
     debug?: AcademicArticlesExportDebug;
+    qualityAuditedArticles?: UnifiedArticle[];
   }
 ): Promise<Buffer> {
   // Columns: Authors Title Year Journal Abstract Keywords Language Document Type DOI City of publication Country of study Scopus
@@ -623,16 +685,19 @@ async function generateAcademicArticlesExcel(
   const plan = options?.plan;
   const stats = options?.stats;
   const debug = options?.debug;
+  const qualityAuditedArticles = options?.qualityAuditedArticles || [];
 
   if (plan) {
     addDiag("plan", "topic", plan.topicQuery || "n.d.");
     addDiag("plan", "requestedCount", String(plan.requestedCount));
     addDiag("plan", "yearRange", plan.yearFrom && plan.yearTo ? `${plan.yearFrom}-${plan.yearTo}` : "n.d.");
+    addDiag("plan", "dateRange", plan.dateFrom && plan.dateTo ? `${plan.dateFrom}..${plan.dateTo}` : "n.d.");
     addDiag("plan", "region", [
       plan.region.latam ? "LatAm" : null,
       plan.region.spain ? "Spain" : null,
     ].filter(Boolean).join(" + ") || "n.d.");
     addDiag("plan", "geoStrict", plan.geoStrict ? "true" : "false", plan.geoStrict ? (plan.geoStrictMode || "all") : "");
+    addDiag("plan", "recentWindowApplied", plan.recentWindowApplied ? "true" : "false");
     addDiag("plan", "sources", (plan.sources || []).join(", ") || "n.d.");
   }
 
@@ -654,6 +719,24 @@ async function generateAcademicArticlesExcel(
       }
     }
 
+    const quality = stats.quality;
+    if (quality) {
+      addDiag("quality", "audited", String(quality.audited));
+      addDiag("quality", "accepted", String(quality.accepted));
+      addDiag("quality", "rejected", String(quality.rejected));
+      addDiag("quality", "returned", String(quality.returned));
+      addDiag("quality", "avgScore", quality.avgScore.toFixed(1));
+      addDiag("quality", "avgAcceptedScore", quality.avgAcceptedScore.toFixed(1));
+      addDiag("quality", "avgRejectedScore", quality.avgRejectedScore.toFixed(1));
+      addDiag("quality", "highConfidenceAccepted", String(quality.highConfidenceAccepted));
+
+      const rejectedReasons = Object.entries(quality.rejectedByReason || {})
+        .sort((a, b) => b[1] - a[1])
+        .map(([reason, count]) => `${reason}:${count}`)
+        .join(", ");
+      if (rejectedReasons) addDiag("quality", "rejectedByReason", rejectedReasons);
+    }
+
     for (const n of stats.notes || []) addDiag("notes", "", n);
   }
 
@@ -663,7 +746,7 @@ async function generateAcademicArticlesExcel(
       "counts",
       "pool",
       `total=${debug.candidateCounts.total}; deduped=${debug.candidateCounts.deduped}; region=${debug.candidateCounts.regionFiltered}`,
-      `enrichPool=${debug.candidateCounts.enrichPool}; enrichedDeduped=${debug.candidateCounts.enrichedDeduped}; enrichedRegion=${debug.candidateCounts.enrichedRegionFiltered}; final=${debug.candidateCounts.final}`
+      `enrichPool=${debug.candidateCounts.enrichPool}; enrichedDeduped=${debug.candidateCounts.enrichedDeduped}; enrichedRegion=${debug.candidateCounts.enrichedRegionFiltered}; accepted=${debug.candidateCounts.qualityAccepted}; rejected=${debug.candidateCounts.qualityRejected}; final=${debug.candidateCounts.final}`
     );
     if (debug.jsonReportPath) addDiag("result", "jsonReportPath", debug.jsonReportPath);
     for (const e of debug.errors || []) addDiag("errors", "", e);
@@ -740,6 +823,83 @@ async function generateAcademicArticlesExcel(
     row.alignment = { vertical: "top", wrapText: true };
   }
 
+  // ---------------------------------------------------------------------------
+  // Quality Gate sheet (accepted vs rejected with audit trail)
+  // ---------------------------------------------------------------------------
+  const qualitySheet = workbook.addWorksheet("Quality Gate", {
+    views: [{ state: "frozen", ySplit: 1 }],
+  });
+
+  qualitySheet.columns = [
+    { header: "Returned", key: "returned", width: 10 },
+    { header: "Status", key: "status", width: 12 },
+    { header: "Score", key: "score", width: 10 },
+    { header: "DOI", key: "doi", width: 28 },
+    { header: "Title", key: "title", width: 60 },
+    { header: "Source", key: "source", width: 14 },
+    { header: "Verified DOI", key: "verifiedDoi", width: 14 },
+    { header: "Exact Date In Range", key: "exactDateInRange", width: 18 },
+    { header: "Metadata Completeness", key: "metadataCompleteness", width: 20 },
+    { header: "Trusted Sources", key: "trustedSources", width: 30 },
+    { header: "Reasons", key: "reasons", width: 60 },
+    { header: "Highlights", key: "highlights", width: 50 },
+  ];
+
+  const qualityHeader = qualitySheet.getRow(1);
+  qualityHeader.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  qualityHeader.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF6B2C00" } };
+  qualityHeader.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+  qualityHeader.height = 20;
+
+  const qualityTitleKey = (title: string): string =>
+    (title || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^\w\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .substring(0, 140);
+
+  const returnedKeys = new Set(
+    articles.map((a) => (a.doi || "").trim().toLowerCase() || qualityTitleKey(a.title))
+  );
+
+  const qualityRows = [...qualityAuditedArticles].sort((a, b) => {
+    const as = a.qualityGate?.status === "accepted" ? 1 : 0;
+    const bs = b.qualityGate?.status === "accepted" ? 1 : 0;
+    if (bs !== as) return bs - as;
+    const aq = a.qualityGate?.score || 0;
+    const bq = b.qualityGate?.score || 0;
+    if (bq !== aq) return bq - aq;
+    return (a.title || "").localeCompare(b.title || "");
+  });
+
+  for (const article of qualityRows) {
+    const q = article.qualityGate;
+    if (!q) continue;
+    const key = (article.doi || "").trim().toLowerCase() || qualityTitleKey(article.title);
+    qualitySheet.addRow({
+      returned: returnedKeys.has(key) ? "Yes" : "No",
+      status: q.status,
+      score: q.score,
+      doi: article.doi || "",
+      title: article.title || "",
+      source: article.source,
+      verifiedDoi: q.verifiedDoi ? "Yes" : "No",
+      exactDateInRange: q.exactDateInRange ? "Yes" : "No",
+      metadataCompleteness: `${Math.round(q.metadataCompleteness * 100)}%`,
+      trustedSources: q.trustedSources.join(", "),
+      reasons: q.reasons.join("; "),
+      highlights: q.highlights.join("; "),
+    });
+  }
+
+  for (let rowIdx = 2; rowIdx <= qualitySheet.rowCount; rowIdx++) {
+    const row = qualitySheet.getRow(rowIdx);
+    row.alignment = { vertical: "top", wrapText: true };
+  }
+
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
@@ -750,6 +910,9 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
   const allowedCountryCodes = allowedCountryCodesArr ? new Set(allowedCountryCodesArr.map((c) => c.toUpperCase())) : null;
 
   const notes: string[] = [];
+  if (plan.recentWindowApplied && plan.dateFrom && plan.dateTo) {
+    notes.push(`Se aplico automaticamente la ventana reciente de articulos: ${plan.dateFrom} a ${plan.dateTo}.`);
+  }
 
   const sources = plan.sources.filter((s) => {
     if (s === "scopus") {
@@ -774,8 +937,16 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
 
   const internalMaxResults = Math.min(1200, Math.max(400, plan.requestedCount * 8));
   const internalMaxPerSource = Math.min(800, Math.max(120, plan.requestedCount * 4));
-  const dateFrom = Number.isFinite(plan.yearFrom as number) ? new Date(Date.UTC(plan.yearFrom as number, 0, 1, 0, 0, 0)) : null;
-  const dateTo = Number.isFinite(plan.yearTo as number) ? new Date(Date.UTC(plan.yearTo as number, 11, 31, 23, 59, 59)) : null;
+  const dateFrom = plan.dateFrom
+    ? new Date(`${plan.dateFrom}T00:00:00.000Z`)
+    : Number.isFinite(plan.yearFrom as number)
+      ? new Date(Date.UTC(plan.yearFrom as number, 0, 1, 0, 0, 0))
+      : null;
+  const dateTo = plan.dateTo
+    ? new Date(`${plan.dateTo}T23:59:59.999Z`)
+    : Number.isFinite(plan.yearTo as number)
+      ? new Date(Date.UTC(plan.yearTo as number, 11, 31, 23, 59, 59))
+      : null;
 
   function normalizeTextKey(text: string): string {
     return (text || "")
@@ -1424,6 +1595,202 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
     return cov;
   }
 
+  function metadataCompletenessRatio(article: UnifiedArticle): number {
+    const checks = [
+      !isMissingScalar(article.title),
+      (article.authors || []).length > 0,
+      !isMissingScalar(article.year),
+      !isMissingScalar(article.publicationDate),
+      !isMissingScalar(article.journal),
+      hasMeaningfulAbstract(article.abstract),
+      (article.keywords || []).length > 0,
+      !isMissingScalar(article.language),
+      !isMissingScalar(article.documentType),
+      !!normalizeDoi(article.doi),
+      !isMissingScalar(article.country),
+    ];
+    const present = checks.filter(Boolean).length;
+    return present / checks.length;
+  }
+
+  function trustedSourcesFromArticle(article: UnifiedArticle): FieldProvenanceSource[] {
+    const trusted = new Set<FieldProvenanceSource>();
+    const fp = article.fieldProvenance || {};
+    for (const prov of Object.values(fp)) {
+      if (!prov) continue;
+      if (["crossref", "openalex", "scopus", "wos", "pubmed", "scielo", "redalyc"].includes(prov.source)) {
+        trusted.add(prov.source);
+      }
+    }
+    if (trusted.size === 0 && article.source && article.source !== "duckduckgo") {
+      trusted.add(article.source as FieldProvenanceSource);
+    }
+    return Array.from(trusted);
+  }
+
+  function evaluateQualityGate(article: UnifiedArticle): AcademicQualityGateAssessment {
+    const reasons: string[] = [];
+    const highlights: string[] = [];
+    let score = 0;
+
+    const doi = normalizeDoi(article.doi);
+    const doiProv = article.fieldProvenance?.doi?.source;
+    const verifiedDoi = Boolean(doi && (doiProv === "crossref" || doiProv === "openalex"));
+    const exactDateInRange = Boolean(parsePublicationDate(article.publicationDate) && isAllowedByDateRange(article));
+    const trustedSources = trustedSourcesFromArticle(article);
+    const metadataCompleteness = metadataCompletenessRatio(article);
+    const keywordProv = article.fieldProvenance?.keywords?.source;
+
+    if (!isMissingScalar(article.title)) score += 14;
+    else reasons.push("titulo ausente");
+
+    if ((article.authors || []).length > 0) score += 8;
+    else reasons.push("sin autores");
+
+    if (!isMissingScalar(article.journal)) score += 10;
+    else reasons.push("sin revista");
+
+    if (doi) {
+      score += 18;
+      highlights.push("DOI presente");
+      if (verifiedDoi) {
+        score += 8;
+        highlights.push("DOI verificado");
+      }
+    } else {
+      reasons.push("sin DOI verificable");
+    }
+
+    if (!isAllowedByDateRange(article)) {
+      reasons.push("fuera del rango temporal");
+    } else if (exactDateInRange) {
+      score += 14;
+      highlights.push("fecha exacta en rango");
+    } else if (!isMissingScalar(article.year)) {
+      score += 7;
+      highlights.push("anio en rango");
+    } else {
+      reasons.push("sin fecha verificable");
+    }
+
+    if (hasMeaningfulAbstract(article.abstract)) {
+      score += 12;
+      highlights.push("abstract util");
+    } else {
+      reasons.push("abstract insuficiente");
+    }
+
+    if ((article.keywords || []).length > 0) {
+      if (keywordProv === "generated") {
+        score += 3;
+        reasons.push("keywords generadas");
+      } else if (keywordProv === "inferred") {
+        score += 5;
+      } else {
+        score += 8;
+        highlights.push("keywords informativas");
+      }
+    } else {
+      reasons.push("sin keywords");
+    }
+
+    if (!isMissingScalar(article.language)) score += 4;
+    if (!isMissingScalar(article.documentType)) score += 4;
+    if (!isMissingScalar(article.country)) score += 4;
+    if (!isMissingScalar(article.city)) score += 2;
+
+    const sourceBoost: Record<UnifiedArticle["source"], number> = {
+      scopus: 8,
+      wos: 7,
+      pubmed: 7,
+      openalex: 5,
+      scielo: 6,
+      redalyc: 6,
+      duckduckgo: 2,
+    };
+    score += sourceBoost[article.source] || 0;
+
+    if (trustedSources.length >= 2) {
+      score += 8;
+      highlights.push("corroborado por multiples fuentes");
+    } else if (trustedSources.length === 1) {
+      score += 4;
+    } else {
+      reasons.push("sin corroboracion confiable");
+    }
+
+    if (metadataCompleteness >= 0.85) {
+      score += 8;
+      highlights.push("metadatos completos");
+    } else if (metadataCompleteness >= 0.65) {
+      score += 4;
+    } else {
+      reasons.push("metadatos incompletos");
+    }
+
+    if (article.source === "duckduckgo" && !doi) {
+      score -= 12;
+      reasons.push("registro web sin DOI");
+    }
+
+    const boundedScore = Math.max(0, Math.min(100, score));
+    const hardReject =
+      isMissingScalar(article.title) ||
+      !isAllowedByDateRange(article) ||
+      (!doi && !hasMeaningfulAbstract(article.abstract) && isMissingScalar(article.journal)) ||
+      boundedScore < 55;
+
+    if (boundedScore < 55) {
+      reasons.push("score de confianza por debajo del umbral");
+    }
+
+    return {
+      score: boundedScore,
+      status: hardReject ? "rejected" : "accepted",
+      reasons: Array.from(new Set(reasons)),
+      highlights: Array.from(new Set(highlights)),
+      trustedSources,
+      metadataCompleteness,
+      verifiedDoi,
+      exactDateInRange,
+    };
+  }
+
+  function attachQualityGate(article: UnifiedArticle): UnifiedArticle {
+    return {
+      ...article,
+      qualityGate: evaluateQualityGate(article),
+    };
+  }
+
+  function buildQualitySummary(accepted: UnifiedArticle[], rejected: UnifiedArticle[]): AcademicArticlesQualitySummary {
+    const audited = accepted.length + rejected.length;
+    const all = [...accepted, ...rejected];
+    const avg = (items: UnifiedArticle[]): number => {
+      if (items.length === 0) return 0;
+      return items.reduce((sum, item) => sum + (item.qualityGate?.score || 0), 0) / items.length;
+    };
+
+    const rejectedByReason: Record<string, number> = {};
+    for (const article of rejected) {
+      for (const reason of article.qualityGate?.reasons || []) {
+        rejectedByReason[reason] = (rejectedByReason[reason] || 0) + 1;
+      }
+    }
+
+    return {
+      audited,
+      accepted: accepted.length,
+      rejected: rejected.length,
+      returned: 0,
+      avgScore: avg(all),
+      avgAcceptedScore: avg(accepted),
+      avgRejectedScore: avg(rejected),
+      highConfidenceAccepted: accepted.filter((article) => (article.qualityGate?.score || 0) >= 85).length,
+      rejectedByReason,
+    };
+  }
+
   // 1) Fetch a large candidate pool (variants help reach 100 under strict geo filters)
   const queries = buildQueryVariants(plan.topicQuery);
   const allCandidates: UnifiedArticle[] = [];
@@ -1473,9 +1840,16 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
     isAllowedByRegion(a, plan, allowedCountries, allowedCountryCodes) && isAllowedByDateRange(a)
   );
 
-  // 3) Rank by completeness, then source preference, then year desc
+  // 3) Apply quality gate, then rank accepted records by confidence/completeness
+  const qualityAuditedPool = enrichedRegionFiltered.map(attachQualityGate);
+  const acceptedCandidates = qualityAuditedPool.filter((a) => a.qualityGate?.status === "accepted");
+  const rejectedCandidates = qualityAuditedPool.filter((a) => a.qualityGate?.status === "rejected");
+
   const sourceRank: Record<string, number> = { scopus: 5, wos: 4, openalex: 3, scielo: 2, redalyc: 2, duckduckgo: 1, pubmed: 1 };
-  const ranked = [...enrichedRegionFiltered].sort((a, b) => {
+  const ranked = [...acceptedCandidates].sort((a, b) => {
+    const qa = a.qualityGate?.score || 0;
+    const qb = b.qualityGate?.score || 0;
+    if (qb !== qa) return qb - qa;
     const sa = completenessScore(a);
     const sb = completenessScore(b);
     if (sb !== sa) return sb - sa;
@@ -1492,10 +1866,15 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
   });
 
   const finalArticles = ranked.slice(0, plan.requestedCount);
+  const qualitySummary = buildQualitySummary(acceptedCandidates, rejectedCandidates);
+  qualitySummary.returned = finalArticles.length;
 
   if (finalArticles.length < plan.requestedCount) {
     notes.push(`No se lograron ${plan.requestedCount} articulos con los filtros; se encontraron ${finalArticles.length}.`);
   }
+  notes.push(
+    `Quality Gate audito ${qualitySummary.audited} candidatos: acepto ${qualitySummary.accepted}, rechazo ${qualitySummary.rejected} y devolvio ${qualitySummary.returned}.`
+  );
 
   const uniqueErrors = Array.from(new Set(allErrors.map((e) => (e || "").trim()).filter(Boolean)));
   for (const e of uniqueErrors.slice(0, 5)) notes.push(e);
@@ -1510,6 +1889,7 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
     totalRequested: plan.requestedCount,
     bySource,
     coverage,
+    quality: qualitySummary,
     notes,
   };
 
@@ -1522,6 +1902,8 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
       enrichPool: enrichPool.length,
       enrichedDeduped: enrichedDeduped.length,
       enrichedRegionFiltered: enrichedRegionFiltered.length,
+      qualityAccepted: acceptedCandidates.length,
+      qualityRejected: rejectedCandidates.length,
       final: finalArticles.length,
     },
     errors: uniqueErrors,
@@ -1534,19 +1916,25 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
       await fs.mkdir(reportDir, { recursive: true });
       const reportPath = path.join(reportDir, `academic_export_${Date.now()}.json`);
       debug.jsonReportPath = reportPath;
-      const payload = JSON.stringify({ plan, stats, debug, articles: finalArticles }, null, 2);
+      const payload = JSON.stringify({ plan, stats, debug, articles: finalArticles, rejectedArticles: rejectedCandidates }, null, 2);
       await fs.writeFile(reportPath, payload, "utf8");
     } catch (err: any) {
       notes.push(`No se pudo guardar el reporte JSON de diagnostico: ${err?.message || String(err)}`);
     }
   }
 
-  const excelBuffer = await generateAcademicArticlesExcel(finalArticles, { plan, stats, debug });
+  const excelBuffer = await generateAcademicArticlesExcel(finalArticles, {
+    plan,
+    stats,
+    debug,
+    qualityAuditedArticles: [...acceptedCandidates, ...rejectedCandidates],
+  });
   const wordBuffer = await generateApaReferencesDocx(plan.topicQuery, finalArticles);
 
   return {
     plan,
     articles: finalArticles,
+    rejectedArticles: rejectedCandidates,
     excelBuffer,
     wordBuffer,
     debug,
