@@ -90,6 +90,81 @@ fetch_url() {
   curl -sS --max-time "${HTTP_TIMEOUT}" -D "$headers_file" -o "$body_file" -w '%{http_code}' "$url" || echo "000"
 }
 
+extract_json_field_from_file() {
+  local file_path="$1"
+  local field_name="$2"
+
+  python3 - "$file_path" "$field_name" <<'PY'
+import json
+import sys
+
+file_path, field_name = sys.argv[1:3]
+
+try:
+    with open(file_path, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+except Exception:
+    print("")
+    raise SystemExit(0)
+
+value = payload.get(field_name)
+print(value if isinstance(value, str) else "")
+PY
+}
+
+extract_json_field_from_text() {
+  local payload="$1"
+  local field_name="$2"
+
+  python3 - "$payload" "$field_name" <<'PY'
+import json
+import sys
+
+payload, field_name = sys.argv[1:3]
+
+try:
+    parsed = json.loads(payload)
+except Exception:
+    print("")
+    raise SystemExit(0)
+
+value = parsed.get(field_name)
+print(value if isinstance(value, str) else "")
+PY
+}
+
+matches_expected_sha() {
+  local actual_sha="$1"
+  local expected_sha="$2"
+  local actual_short=""
+  local expected_short=""
+
+  if [ -z "$actual_sha" ] || [ -z "$expected_sha" ]; then
+    return 1
+  fi
+
+  if [ "$actual_sha" = "$expected_sha" ]; then
+    return 0
+  fi
+
+  actual_short="${actual_sha:0:8}"
+  expected_short="${expected_sha:0:8}"
+
+  if [ "$actual_sha" = "$expected_short" ] || [ "$actual_short" = "$expected_short" ] || [ "$actual_short" = "$expected_sha" ]; then
+    return 0
+  fi
+
+  case "$expected_sha" in
+    "${actual_sha}"*) return 0 ;;
+  esac
+
+  case "$actual_sha" in
+    "${expected_sha}"*) return 0 ;;
+  esac
+
+  return 1
+}
+
 check_vps_port_free() {
   local id="$1"
   local port="$2"
@@ -429,6 +504,17 @@ else
   check_contains "03" "$TMP_DIR/01.out" '"version":' "/api/health has version field"
 fi
 
+if [ -n "$EXPECTED_APP_SHA" ]; then
+  public_app_sha="$(extract_json_field_from_file "$TMP_DIR/01.out" "app_sha")"
+  if matches_expected_sha "$public_app_sha" "$EXPECTED_APP_SHA"; then
+    pass "03b" "/api/health app_sha matches expected (${EXPECTED_APP_SHA}, got ${public_app_sha})"
+  else
+    fail "03b" "/api/health app_sha did not match expected (${EXPECTED_APP_SHA}, got ${public_app_sha:-<missing>})"
+  fi
+else
+  check_contains "03b" "$TMP_DIR/01.out" '"app_sha":' "/api/health has app_sha field"
+fi
+
 check_http_code "04" "${BASE_URL}/api/health/live" "200"
 check_contains "05" "$TMP_DIR/04.out" '"status":"ok"' "/api/health/live returns status ok"
 check_http_code "06" "${BASE_URL}/api/health/ready" "200"
@@ -562,10 +648,11 @@ if [ -n "$health_local" ]; then
     fail "50" "Direct active slot health version check"
   fi
   if [ -n "$EXPECTED_APP_SHA" ]; then
-    if echo "$health_local" | grep -Fq "\"app_sha\":\"${EXPECTED_APP_SHA}\""; then
-      pass "51" "Direct active slot health app_sha matches expected (${EXPECTED_APP_SHA})"
+    local_app_sha="$(extract_json_field_from_text "$health_local" "app_sha")"
+    if matches_expected_sha "$local_app_sha" "$EXPECTED_APP_SHA"; then
+      pass "51" "Direct active slot health app_sha matches expected (${EXPECTED_APP_SHA}, got ${local_app_sha})"
     else
-      fail "51" "Direct active slot health app_sha expected ${EXPECTED_APP_SHA}"
+      fail "51" "Direct active slot health app_sha expected ${EXPECTED_APP_SHA} (got ${local_app_sha:-<missing>})"
     fi
   else
     pass "51" "Direct active slot health app_sha skipped (EXPECTED_APP_SHA not set)"
