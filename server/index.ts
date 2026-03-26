@@ -389,6 +389,18 @@ async function bootstrapOpenClawAsync(): Promise<void> {
     await seedProductionData();
     if (dbConnected) {
       startChatScheduleRunner();
+      setImmediate(() => {
+        import("./agent/agentOrchestrator")
+          .then(({ agentManager }) => agentManager.recoverPersistedRuns())
+          .then((summary) => {
+            log(
+              `[AgentRecovery] scanned=${summary.scanned} recovered=${summary.recovered} resumed=${summary.resumed} skipped=${summary.skipped} failed=${summary.failed}`,
+            );
+          })
+          .catch((error) => {
+            log(`[AgentRecovery] Failed to recover persisted runs: ${String((error as Error)?.message || error)}`);
+          });
+      });
     } else {
       log("[Schedules] Skipping schedule runner start because DB is not connected");
     }
