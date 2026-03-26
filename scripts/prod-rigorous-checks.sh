@@ -81,6 +81,15 @@ run_ssh() {
   ssh "${SSH_OPTS[@]}" "${VPS_USER}@${VPS_HOST}" "$@"
 }
 
+fetch_url() {
+  local id="$1"
+  local url="$2"
+  local body_file="$TMP_DIR/${id}.out"
+  local headers_file="$TMP_DIR/${id}.headers"
+
+  curl -sS --max-time "${HTTP_TIMEOUT}" -D "$headers_file" -o "$body_file" -w '%{http_code}' "$url" || echo "000"
+}
+
 check_vps_port_free() {
   local id="$1"
   local port="$2"
@@ -123,10 +132,9 @@ check_http_code() {
   local id="$1"
   local url="$2"
   local expected="$3"
-  local body_file="$TMP_DIR/${id}.out"
 
   local code
-  code="$(curl -sS --max-time "${HTTP_TIMEOUT}" -o "$body_file" -w '%{http_code}' "$url" || echo "000")"
+  code="$(fetch_url "$id" "$url")"
   if [ "$code" = "$expected" ]; then
     pass "$id" "$url -> HTTP $code"
     return 0
@@ -139,10 +147,9 @@ check_http_code_set() {
   local id="$1"
   local url="$2"
   shift 2
-  local body_file="$TMP_DIR/${id}.out"
   local expected=("$@")
   local code
-  code="$(curl -sS --max-time "${HTTP_TIMEOUT}" -o "$body_file" -w '%{http_code}' "$url" || echo "000")"
+  code="$(fetch_url "$id" "$url")"
   for e in "${expected[@]}"; do
     if [ "$code" = "$e" ]; then
       pass "$id" "$url -> HTTP $code"
@@ -163,6 +170,99 @@ check_contains() {
   else
     fail "$id" "$label"
   fi
+}
+
+check_not_contains() {
+  local id="$1"
+  local file="$2"
+  local needle="$3"
+  local label="$4"
+  if grep -Fq "$needle" "$file" 2>/dev/null; then
+    fail "$id" "$label"
+  else
+    pass "$id" "$label"
+  fi
+}
+
+check_content_type() {
+  local id="$1"
+  local headers_file="$2"
+  local expected_pattern="$3"
+  local label="$4"
+  local content_type
+
+  content_type="$(grep -Ei '^content-type:' "$headers_file" 2>/dev/null | tail -n 1 | tr -d '\r')"
+  if [ -n "$content_type" ] && printf '%s\n' "$content_type" | grep -Eiq "${expected_pattern}"; then
+    pass "$id" "$label"
+  else
+    fail "$id" "$label (got: ${content_type:-<missing>})"
+  fi
+}
+
+extract_html_resources() {
+  local html_file="$1"
+  local base_url="$2"
+  local output_file="$3"
+
+  python3 - "$html_file" "$base_url" "$output_file" <<'PY'
+from html.parser import HTMLParser
+from urllib.parse import urljoin, urlparse
+import sys
+
+html_file, base_url, output_file = sys.argv[1:4]
+base_url = base_url.rstrip("/") + "/"
+base_netloc = urlparse(base_url).netloc
+
+class ResourceParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.resources = []
+        self.seen = set()
+
+    def _record(self, kind, value):
+        resolved = urljoin(base_url, value)
+        parsed = urlparse(resolved)
+        if parsed.scheme not in ("http", "https"):
+            return
+        if parsed.netloc != base_netloc:
+            return
+        key = (kind, resolved)
+        if key in self.seen:
+            return
+        self.seen.add(key)
+        self.resources.append(key)
+
+    def handle_starttag(self, tag, attrs):
+        attr_map = {key.lower(): value for key, value in attrs if key}
+        tag = tag.lower()
+        if tag == "script":
+            src = attr_map.get("src")
+            if src:
+                self._record("script", src)
+            return
+        if tag != "link":
+            return
+        href = attr_map.get("href")
+        if not href:
+            return
+        rels = {part.lower() for part in attr_map.get("rel", "").split()}
+        if "stylesheet" in rels:
+            self._record("stylesheet", href)
+        elif "modulepreload" in rels:
+            self._record("modulepreload", href)
+        elif "manifest" in rels:
+            self._record("manifest", href)
+        elif "icon" in rels or "apple-touch-icon" in rels:
+            self._record("icon", href)
+
+parser = ResourceParser()
+with open(html_file, "r", encoding="utf-8", errors="ignore") as handle:
+    parser.feed(handle.read())
+
+with open(output_file, "w", encoding="utf-8") as handle:
+    for kind, url in parser.resources:
+        handle.write(f"{kind}\t{url}\n")
+PY
 }
 
 load_state_from_vps() {
@@ -345,79 +445,145 @@ check_http_code "12" "${BASE_URL}/api/user/usage" "401"
 check_http_code_set "13" "${BASE_URL}/api/auth/google" "301" "302" "303" "307" "308" "429"
 check_http_code "14" "${BASE_URL}/sw-cleanup.js" "200"
 check_contains "15" "$TMP_DIR/14.out" "APP_VERSION" "/sw-cleanup.js present"
-check_http_code "30" "${BASE_URL}/openclaw" "200"
-check_http_code_set "31" "${BASE_URL}/codex" "200" "301" "302" "303" "307" "308"
+check_http_code "16" "${BASE_URL}/" "200"
+check_content_type "17" "$TMP_DIR/16.headers" 'text/html|application/xhtml\+xml' "/ returns HTML content"
+if grep -Eiq '<!doctype html>' "$TMP_DIR/16.out"; then
+  pass "18" "/ returns a document shell"
+else
+  fail "18" "/ returns a document shell"
+fi
+if grep -Eiq '<title>[^<]*iliagpt' "$TMP_DIR/16.out"; then
+  pass "19" "/ includes an IliaGPT page title"
+else
+  fail "19" "/ includes an IliaGPT page title"
+fi
+if grep -Eiq '<div[^>]+id=["'"'"']root["'"'"']' "$TMP_DIR/16.out"; then
+  pass "20" "/ includes the root mount node"
+else
+  fail "20" "/ includes the root mount node"
+fi
+check_not_contains "21" "$TMP_DIR/16.out" "Volvemos enseguida" "/ is not serving the maintenance page"
+
+ROOT_RESOURCES_FILE="$TMP_DIR/root-resources.tsv"
+if extract_html_resources "$TMP_DIR/16.out" "${BASE_URL}/" "$ROOT_RESOURCES_FILE" && [ -s "$ROOT_RESOURCES_FILE" ]; then
+  pass "22" "/ declares local application resources"
+else
+  fail "22" "/ declares local application resources"
+fi
+
+root_js_url="$(awk -F '\t' '($1 == "script" || $1 == "modulepreload") && $2 ~ /\/assets\/.*\.js([?#].*)?$/ { print $2; exit }' "$ROOT_RESOURCES_FILE" 2>/dev/null)"
+if [ -n "$root_js_url" ]; then
+  pass "23" "/ declares a bundled JavaScript asset"
+  check_http_code "24" "$root_js_url" "200"
+  check_content_type "25" "$TMP_DIR/24.headers" 'javascript|ecmascript' "${root_js_url} serves JavaScript content"
+else
+  fail "23" "/ declares a bundled JavaScript asset"
+  fail "24" "Bundled JavaScript asset is reachable"
+  fail "25" "Bundled JavaScript asset serves JavaScript content"
+fi
+
+root_css_url="$(awk -F '\t' '$1 == "stylesheet" && $2 ~ /\/assets\/.*\.css([?#].*)?$/ { print $2; exit }' "$ROOT_RESOURCES_FILE" 2>/dev/null)"
+if [ -n "$root_css_url" ]; then
+  pass "26" "/ declares a bundled stylesheet asset"
+  check_http_code "27" "$root_css_url" "200"
+  check_content_type "28" "$TMP_DIR/27.headers" 'text/css' "${root_css_url} serves CSS content"
+else
+  fail "26" "/ declares a bundled stylesheet asset"
+  fail "27" "Bundled stylesheet asset is reachable"
+  fail "28" "Bundled stylesheet asset serves CSS content"
+fi
+
+manifest_url="$(awk -F '\t' '$1 == "manifest" { print $2; exit }' "$ROOT_RESOURCES_FILE" 2>/dev/null)"
+if [ -n "$manifest_url" ]; then
+  check_http_code "29" "$manifest_url" "200"
+  check_content_type "30" "$TMP_DIR/29.headers" 'application/manifest\+json|application/json' "${manifest_url} serves manifest JSON"
+else
+  pass "29" "Web manifest not declared in root HTML"
+  pass "30" "Manifest content-type check skipped (manifest not declared)"
+fi
+
+icon_url="$(awk -F '\t' '$1 == "icon" { print $2; exit }' "$ROOT_RESOURCES_FILE" 2>/dev/null)"
+if [ -n "$icon_url" ]; then
+  check_http_code "31" "$icon_url" "200"
+  check_content_type "32" "$TMP_DIR/31.headers" 'image/' "${icon_url} serves an image content type"
+else
+  pass "31" "Favicon not declared in root HTML"
+  pass "32" "Favicon content-type check skipped (favicon not declared)"
+fi
+
+check_http_code "33" "${BASE_URL}/openclaw" "200"
+check_http_code_set "34" "${BASE_URL}/codex" "200" "301" "302" "303" "307" "308"
 
 echo "== VPS runtime checks (${VPS_USER}@${VPS_HOST}) =="
 if run_ssh "echo ok >/dev/null"; then
-  pass "16" "SSH connectivity to VPS"
+  pass "40" "SSH connectivity to VPS"
 else
-  fail "16" "SSH connectivity to VPS"
+  fail "40" "SSH connectivity to VPS"
 fi
 
-check_container_status "17" "${APP_CONTAINER}" "running" "${APP_CONTAINER} container is running"
-check_container_health "18" "${APP_CONTAINER}" "${APP_CONTAINER} health is healthy"
-check_container_status "19" "${WORKER_CONTAINER}" "running" "${WORKER_CONTAINER} container is running"
-check_container_status "20" "${SANDBOX_CONTAINER}" "running" "${SANDBOX_CONTAINER} container is running"
-check_container_status "21" "${OCR_CONTAINER}" "running" "${OCR_CONTAINER} container is running"
-check_container_status "22" "${PG_CONTAINER}" "running" "PostgreSQL container is running"
-check_container_status "23" "${REDIS_CONTAINER}" "running" "Redis container is running"
-check_psql_query "24" "${PG_CONTAINER}" "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='users';" "users table exists"
+check_container_status "41" "${APP_CONTAINER}" "running" "${APP_CONTAINER} container is running"
+check_container_health "42" "${APP_CONTAINER}" "${APP_CONTAINER} health is healthy"
+check_container_status "43" "${WORKER_CONTAINER}" "running" "${WORKER_CONTAINER} container is running"
+check_container_status "44" "${SANDBOX_CONTAINER}" "running" "${SANDBOX_CONTAINER} container is running"
+check_container_status "45" "${OCR_CONTAINER}" "running" "${OCR_CONTAINER} container is running"
+check_container_status "46" "${PG_CONTAINER}" "running" "PostgreSQL container is running"
+check_container_status "47" "${REDIS_CONTAINER}" "running" "Redis container is running"
+check_psql_query "48" "${PG_CONTAINER}" "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='users';" "users table exists"
 
 health_local="$(
   run_ssh "curl -fsS --max-time ${HTTP_TIMEOUT} http://127.0.0.1:${ACTIVE_PORT}/api/health 2>/dev/null || true"
 )"
 if [ -n "$health_local" ]; then
   if echo "$health_local" | grep -Fq '"status":"ok"'; then
-    pass "25" "Direct active slot health is ok (${ACTIVE_SLOT}:${ACTIVE_PORT})"
+    pass "49" "Direct active slot health is ok (${ACTIVE_SLOT}:${ACTIVE_PORT})"
   else
-    fail "25" "Direct active slot health is ok (${ACTIVE_SLOT}:${ACTIVE_PORT})"
+    fail "49" "Direct active slot health is ok (${ACTIVE_SLOT}:${ACTIVE_PORT})"
   fi
   if [ -n "$EXPECTED_APP_VERSION" ] && echo "$health_local" | grep -Fq "\"version\":\"${EXPECTED_APP_VERSION}\""; then
-    pass "26" "Direct active slot health version matches expected (${EXPECTED_APP_VERSION})"
+    pass "50" "Direct active slot health version matches expected (${EXPECTED_APP_VERSION})"
   elif [ -n "$STATE_APP_VERSION" ] && [ -n "$EXPECTED_APP_VERSION" ] && [ "$STATE_APP_VERSION" = "$EXPECTED_APP_VERSION" ] && \
        echo "$health_local" | grep -Eq '"version":"build-[^"]+"'; then
-    pass "26" "Direct active slot health exposes build version while deploy-state matches expected (${EXPECTED_APP_VERSION})"
+    pass "50" "Direct active slot health exposes build version while deploy-state matches expected (${EXPECTED_APP_VERSION})"
   elif [ -n "$STATE_APP_VERSION" ] && echo "$health_local" | grep -Fq "\"version\":\"${STATE_APP_VERSION}\""; then
-    pass "26" "Direct active slot health version matches state (${STATE_APP_VERSION})"
+    pass "50" "Direct active slot health version matches state (${STATE_APP_VERSION})"
   else
-    fail "26" "Direct active slot health version check"
+    fail "50" "Direct active slot health version check"
   fi
   if [ -n "$EXPECTED_APP_SHA" ]; then
     if echo "$health_local" | grep -Fq "\"app_sha\":\"${EXPECTED_APP_SHA}\""; then
-      pass "27" "Direct active slot health app_sha matches expected (${EXPECTED_APP_SHA})"
+      pass "51" "Direct active slot health app_sha matches expected (${EXPECTED_APP_SHA})"
     else
-      fail "27" "Direct active slot health app_sha expected ${EXPECTED_APP_SHA}"
+      fail "51" "Direct active slot health app_sha expected ${EXPECTED_APP_SHA}"
     fi
   else
-    pass "27" "Direct active slot health app_sha skipped (EXPECTED_APP_SHA not set)"
+    pass "51" "Direct active slot health app_sha skipped (EXPECTED_APP_SHA not set)"
   fi
 else
-  fail "25" "Direct active slot health endpoint (http://127.0.0.1:${ACTIVE_PORT}/api/health)"
-  fail "26" "Direct active slot health version check"
-  fail "27" "Direct active slot health app_sha check"
+  fail "49" "Direct active slot health endpoint (http://127.0.0.1:${ACTIVE_PORT}/api/health)"
+  fail "50" "Direct active slot health version check"
+  fail "51" "Direct active slot health app_sha check"
 fi
 
 lock_state="$(run_ssh "if [ ! -f '${DEPLOY_PATH}/.deploy.lock' ]; then echo ABSENT; else lock_pid=\"\$(cat '${DEPLOY_PATH}/.deploy.lock' 2>/dev/null || true)\"; if [ -n \"\$lock_pid\" ] && kill -0 \"\$lock_pid\" 2>/dev/null; then echo ACTIVE:\$lock_pid; else echo STALE:\$lock_pid; fi; fi")"
 if [ "${lock_state}" = "ABSENT" ]; then
-  pass "28" "No active deploy lock file"
+  pass "52" "No active deploy lock file"
 elif printf '%s' "${lock_state}" | grep -Eq '^ACTIVE:'; then
-  fail "28" "Deploy lock file still present"
+  fail "52" "Deploy lock file still present"
 elif printf '%s' "${lock_state}" | grep -Eq '^STALE:'; then
-  pass "28" "Deploy lock file is stale (${lock_state})"
+  pass "52" "Deploy lock file is stale (${lock_state})"
 else
-  fail "28" "Deploy lock status unknown (${lock_state})"
+  fail "52" "Deploy lock status unknown (${lock_state})"
 fi
 
 upstream_cfg="$(run_ssh "cat '${NGINX_UPSTREAM_CONF}' 2>/dev/null || true")"
 if [ -n "$upstream_cfg" ] && echo "$upstream_cfg" | grep -Fq "server 127.0.0.1:${ACTIVE_PORT};"; then
-  pass "29" "Nginx upstream points to active slot port (${ACTIVE_PORT})"
+  pass "53" "Nginx upstream points to active slot port (${ACTIVE_PORT})"
 else
-  fail "29" "Nginx upstream contains expected active port (${ACTIVE_PORT})"
+  fail "53" "Nginx upstream contains expected active port (${ACTIVE_PORT})"
 fi
 
-check_vps_port_free "30" "${STANDBY_PORT}" "Standby slot port ${STANDBY_PORT} is free"
-check_service_inactive "31" "iliagpt-manual.service" "Manual recovery service is inactive"
+check_vps_port_free "54" "${STANDBY_PORT}" "Standby slot port ${STANDBY_PORT} is free"
+check_service_inactive "55" "iliagpt-manual.service" "Manual recovery service is inactive"
 
 echo "Checks completed: ${PASS_COUNT}/${TOTAL_COUNT} passed"
 if [ "${FAILED}" -ne 0 ]; then
