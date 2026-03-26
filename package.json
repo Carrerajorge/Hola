@@ -240,6 +240,7 @@
     "emoji-regex": "^10.6.0",
     "exceljs": "^4.1.1",
     "express": "^4.21.2",
+    "express-rate-limit": "^8.3.1",
     "express-session": "^1.18.2",
     "file-saver": "^2.0.5",
     "file-type": "^21.3.3",

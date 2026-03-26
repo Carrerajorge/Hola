@@ -148,8 +148,21 @@ interface OpenClawCapabilityStats {
   gapsByCategory: Record<string, number>;
 }
 
+type OpenClawControlUiAuthMode = "none" | "token" | "password" | "trusted-proxy";
+
+interface OpenClawControlUiMeta {
+  available: boolean;
+  authMode: OpenClawControlUiAuthMode;
+  basePath: string;
+  manualUrl: string;
+  launchUrl: string;
+  embedding: "same-origin";
+  reason?: string;
+}
+
 const OPENCLAW_RELEASE_TAG = DEFAULT_OPENCLAW_RELEASE_TAG;
 const OPENCLAW_RELEASE_REFRESH_MS = 15 * 60 * 1000;
+const OPENCLAW_CONTROL_UI_SESSION_KEY = "main";
 const CODEX_PROFILE_SEQUENCE: readonly CodexExecutionProfile[] = CODEX_EXECUTION_PROFILE_OPTIONS.map((option) => option.value);
 
 const shellStyle: CSSProperties = {
@@ -441,6 +454,46 @@ async function fetchOpenClawCapabilityStats(signal?: AbortSignal): Promise<OpenC
   return payload as OpenClawCapabilityStats;
 }
 
+async function fetchOpenClawControlUiMeta(signal?: AbortSignal): Promise<OpenClawControlUiMeta> {
+  const params = new URLSearchParams({ session: OPENCLAW_CONTROL_UI_SESSION_KEY });
+  const response = await apiFetch(`/api/openclaw/control-ui/meta?${params.toString()}`, {
+    method: "GET",
+    credentials: "include",
+    signal,
+    timeoutMs: 6_000,
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(
+      typeof payload?.error === "string"
+        ? payload.error
+        : "No se pudo preparar el panel nativo de OpenClaw.",
+    );
+  }
+
+  const payload = await response.json();
+  if (!payload?.success) {
+    throw new Error(
+      typeof payload?.error === "string"
+        ? payload.error
+        : "No se pudo preparar el panel nativo de OpenClaw.",
+    );
+  }
+
+  return payload as OpenClawControlUiMeta;
+}
+
+function buildOpenClawControlUiLaunchUrl(
+  launchUrl: string,
+  sessionKey = OPENCLAW_CONTROL_UI_SESSION_KEY,
+): string {
+  const next = new URL(launchUrl, window.location.origin);
+  next.searchParams.set("session", sessionKey);
+  next.searchParams.set("refresh", String(Date.now()));
+  return `${next.pathname}${next.search}`;
+}
+
 function getNextExecutionProfile(current: CodexExecutionProfile): CodexExecutionProfile {
   const currentIndex = CODEX_PROFILE_SEQUENCE.indexOf(current);
   const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % CODEX_PROFILE_SEQUENCE.length : 0;
@@ -479,6 +532,11 @@ export default function CodexPage() {
   const [openClawStats, setOpenClawStats] = useState<OpenClawCapabilityStats | null>(null);
   const [isOpenClawLoading, setIsOpenClawLoading] = useState(true);
   const [openClawError, setOpenClawError] = useState<string | null>(null);
+  const [openClawControlUiMeta, setOpenClawControlUiMeta] = useState<OpenClawControlUiMeta | null>(null);
+  const [isOpenClawControlUiMetaLoading, setIsOpenClawControlUiMetaLoading] = useState(false);
+  const [openClawControlUiMetaError, setOpenClawControlUiMetaError] = useState<string | null>(null);
+  const [openClawControlUiFrameSrc, setOpenClawControlUiFrameSrc] = useState<string | null>(null);
+  const [isOpenClawControlUiFrameLoading, setIsOpenClawControlUiFrameLoading] = useState(false);
   const [activeView, setActiveView] = useState<"workspace" | "openclaw-ui">(
     initialWorkspaceSnapshot?.activeView ?? "workspace",
   );
@@ -622,6 +680,77 @@ export default function CodexPage() {
       window.clearInterval(intervalId);
     };
   }, []);
+
+  const refreshOpenClawControlUi = useCallback(async (signal?: AbortSignal) => {
+    if (!isAuthenticated) {
+      setOpenClawControlUiMeta(null);
+      setOpenClawControlUiMetaError(null);
+      setOpenClawControlUiFrameSrc(null);
+      setIsOpenClawControlUiFrameLoading(false);
+      return null;
+    }
+
+    setIsOpenClawControlUiMetaLoading(true);
+    try {
+      const meta = await fetchOpenClawControlUiMeta(signal);
+      setOpenClawControlUiMeta(meta);
+      setOpenClawControlUiMetaError(null);
+      if (!meta.available) {
+        setOpenClawControlUiFrameSrc(null);
+        setIsOpenClawControlUiFrameLoading(false);
+      }
+      return meta;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return null;
+      }
+      setOpenClawControlUiMeta(null);
+      setOpenClawControlUiMetaError(
+        error instanceof Error ? error.message : "No se pudo preparar el panel nativo de OpenClaw.",
+      );
+      setOpenClawControlUiFrameSrc(null);
+      setIsOpenClawControlUiFrameLoading(false);
+      return null;
+    } finally {
+      setIsOpenClawControlUiMetaLoading(false);
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (activeView !== "openclaw-ui") {
+      return;
+    }
+
+    if (!isAuthenticated) {
+      setOpenClawControlUiMeta(null);
+      setOpenClawControlUiMetaError(null);
+      setOpenClawControlUiFrameSrc(null);
+      setIsOpenClawControlUiFrameLoading(false);
+      return;
+    }
+
+    const abortController = new AbortController();
+    void refreshOpenClawControlUi(abortController.signal);
+    return () => {
+      abortController.abort();
+    };
+  }, [activeView, isAuthenticated, refreshOpenClawControlUi]);
+
+  useEffect(() => {
+    if (activeView !== "openclaw-ui" || !isAuthenticated || !openClawControlUiMeta?.available) {
+      return;
+    }
+    if (openClawControlUiFrameSrc) {
+      return;
+    }
+    setIsOpenClawControlUiFrameLoading(true);
+    setOpenClawControlUiFrameSrc(
+      buildOpenClawControlUiLaunchUrl(
+        openClawControlUiMeta.launchUrl,
+        OPENCLAW_CONTROL_UI_SESSION_KEY,
+      ),
+    );
+  }, [activeView, isAuthenticated, openClawControlUiFrameSrc, openClawControlUiMeta]);
 
   const groupedSessions = useMemo(() => {
     const groups = new Map<string, CodexSession[]>();
@@ -1033,6 +1162,80 @@ export default function CodexPage() {
     focusComposer();
   };
 
+  const handleOpenClawControlUiInWorkspace = useCallback(async () => {
+    if (!isAuthenticated) {
+      login();
+      return;
+    }
+
+    const meta = openClawControlUiMeta ?? (await refreshOpenClawControlUi());
+    if (!meta?.available) {
+      toast.error("No pude abrir el panel integrado", {
+        description:
+          meta?.reason ||
+          openClawControlUiMetaError ||
+          "El gateway todavía no expone un acceso embebible.",
+      });
+      return;
+    }
+
+    setIsOpenClawControlUiFrameLoading(true);
+    setOpenClawControlUiFrameSrc(
+      buildOpenClawControlUiLaunchUrl(meta.launchUrl, OPENCLAW_CONTROL_UI_SESSION_KEY),
+    );
+    toast.success("Panel OpenClaw reconectado", {
+      description: "Renové el acceso nativo dentro del workspace seguro.",
+    });
+  }, [
+    isAuthenticated,
+    login,
+    openClawControlUiMeta,
+    openClawControlUiMetaError,
+    refreshOpenClawControlUi,
+  ]);
+
+  const handleOpenClawControlUiNewTab = useCallback(async () => {
+    if (!isAuthenticated) {
+      login();
+      return;
+    }
+
+    const meta = openClawControlUiMeta ?? (await refreshOpenClawControlUi());
+    const targetUrl = meta?.available
+      ? buildOpenClawControlUiLaunchUrl(meta.launchUrl, OPENCLAW_CONTROL_UI_SESSION_KEY)
+      : meta?.manualUrl;
+
+    if (!targetUrl) {
+      toast.error("No pude abrir OpenClaw", {
+        description:
+          openClawControlUiMetaError || "El panel nativo todavía no tiene una ruta lista.",
+      });
+      return;
+    }
+
+    const openedWindow = window.open(targetUrl, "_blank", "noopener,noreferrer");
+    if (!openedWindow) {
+      toast.error("El navegador bloqueó la pestaña", {
+        description:
+          "Permite ventanas emergentes para abrir OpenClaw en una pestaña segura.",
+      });
+      return;
+    }
+
+    if (!meta?.available) {
+      toast.error("Abrí la ruta manual de OpenClaw", {
+        description:
+          meta?.reason || "El acceso nativo aún no está disponible para este gateway.",
+      });
+    }
+  }, [
+    isAuthenticated,
+    login,
+    openClawControlUiMeta,
+    openClawControlUiMetaError,
+    refreshOpenClawControlUi,
+  ]);
+
   const handleCommitShortcut = () => {
     if (draft.trim()) {
       void handleLaunch();
@@ -1300,14 +1503,194 @@ export default function CodexPage() {
           </div>
 
           {activeView === "openclaw-ui" ? (
-            <div className="flex-1 overflow-hidden">
-              <iframe
-                src="/openclaw-ui/"
-                title="OpenClaw Control UI"
-                className="h-full w-full border-0"
-                style={{ minHeight: "calc(100vh - 160px)" }}
-                allow="clipboard-read; clipboard-write"
-              />
+            <div className="flex-1 overflow-hidden bg-[rgba(247,245,240,0.6)]">
+              <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-5 px-4 py-6 md:px-6 lg:px-8">
+                {!isAuthenticated ? (
+                  <section className="rounded-[32px] border border-[var(--codex-border)] bg-[rgba(255,255,255,0.9)] p-6 shadow-[var(--codex-shadow)]">
+                    <p className="text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">
+                      OpenClaw Native
+                    </p>
+                    <h2 className="mt-3 text-2xl font-semibold">
+                      Activa el panel operativo seguro
+                    </h2>
+                    <p className="mt-3 max-w-3xl text-sm leading-7 text-[var(--codex-muted)]">
+                      Esta vista ahora prepara OpenClaw con acceso nativo y autenticado dentro
+                      de ILIAGPT. Inicia sesión para abrir el panel ya conectado, sin pegar
+                      tokens manualmente.
+                    </p>
+                    <Button
+                      className="mt-5 rounded-full bg-[var(--codex-accent)] px-5 text-white hover:bg-[var(--codex-accent)]/90"
+                      onClick={login}
+                    >
+                      <LogIn className="mr-2 h-4 w-4" />
+                      Entrar al workspace seguro
+                    </Button>
+                  </section>
+                ) : (
+                  <>
+                    <section className="rounded-[32px] border border-[var(--codex-border)] bg-[rgba(255,255,255,0.92)] p-6 shadow-[var(--codex-shadow)]">
+                      <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="inline-flex items-center gap-2 rounded-full bg-[var(--codex-accent-soft)] px-3 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-[var(--codex-accent-ink)]">
+                              <Shield className="h-3.5 w-3.5" />
+                              Puente nativo OpenClaw
+                            </span>
+                            <span className="inline-flex items-center rounded-full border border-[var(--codex-border)] bg-white/80 px-3 py-1.5 text-xs text-[var(--codex-muted)]">
+                              {openClawControlUiMeta?.authMode || "token"}
+                            </span>
+                            <span className="inline-flex items-center rounded-full border border-[var(--codex-border)] bg-white/80 px-3 py-1.5 text-xs text-[var(--codex-muted)]">
+                              Embed same-origin
+                            </span>
+                          </div>
+                          <h2 className="mt-4 text-2xl font-semibold">
+                            OpenClaw embebido como parte real del workspace
+                          </h2>
+                          <p className="mt-3 max-w-3xl text-sm leading-7 text-[var(--codex-muted)]">
+                            La pestaña ya no depende de una conexión manual. Ahora resuelve si
+                            el gateway puede abrirse en modo nativo y lanza el panel con
+                            autenticación segura dentro de esta misma experiencia.
+                          </p>
+                          {openClawControlUiMetaError ? (
+                            <p className="mt-3 text-sm text-[#8a5f18]">
+                              {openClawControlUiMetaError}
+                            </p>
+                          ) : null}
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            className="rounded-full bg-[var(--codex-accent)] px-5 text-white hover:bg-[var(--codex-accent)]/90"
+                            disabled={isOpenClawControlUiMetaLoading}
+                            onClick={() => void handleOpenClawControlUiInWorkspace()}
+                          >
+                            {isOpenClawControlUiMetaLoading ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <CheckCircle2 className="mr-2 h-4 w-4" />
+                            )}
+                            Abrir panel nativo
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="rounded-full border-[var(--codex-border)] bg-white/82"
+                            disabled={isOpenClawControlUiMetaLoading}
+                            onClick={() => void handleOpenClawControlUiNewTab()}
+                          >
+                            <ArrowUpRight className="mr-2 h-4 w-4" />
+                            Abrir en pestaña
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            className="rounded-full border border-[var(--codex-border)] bg-white/82"
+                            disabled={isOpenClawControlUiMetaLoading}
+                            onClick={() => void refreshOpenClawControlUi()}
+                          >
+                            <RefreshCw
+                              className={cn(
+                                "mr-2 h-4 w-4",
+                                isOpenClawControlUiMetaLoading && "animate-spin",
+                              )}
+                            />
+                            Revisar acceso
+                          </Button>
+                        </div>
+                      </div>
+                    </section>
+
+                    {isOpenClawControlUiMetaLoading && !openClawControlUiMeta ? (
+                      <section className="flex min-h-[320px] items-center justify-center rounded-[32px] border border-[var(--codex-border)] bg-[rgba(255,255,255,0.86)] p-6 shadow-[var(--codex-shadow)]">
+                        <div className="flex items-center gap-3 text-sm text-[var(--codex-muted)]">
+                          <Loader2 className="h-5 w-5 animate-spin text-[var(--codex-accent)]" />
+                          Preparando acceso nativo y verificando cómo autenticar OpenClaw sin
+                          fricción.
+                        </div>
+                      </section>
+                    ) : openClawControlUiMeta && !openClawControlUiMeta.available ? (
+                      <section className="rounded-[32px] border border-[var(--codex-border)] bg-[rgba(255,255,255,0.88)] p-6 shadow-[var(--codex-shadow)]">
+                        <p className="text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">
+                          Acceso parcial
+                        </p>
+                        <h3 className="mt-3 text-xl font-semibold">
+                          El gateway todavía no permite un embed automático completo
+                        </h3>
+                        <p className="mt-3 max-w-3xl text-sm leading-7 text-[var(--codex-muted)]">
+                          {openClawControlUiMeta.reason ||
+                            "OpenClaw necesita un ajuste adicional de autenticación antes de poder abrirse sin intervención manual."}
+                        </p>
+                        <div className="mt-5 flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            className="rounded-full bg-[var(--codex-accent)] px-5 text-white hover:bg-[var(--codex-accent)]/90"
+                            onClick={() => void handleOpenClawControlUiNewTab()}
+                          >
+                            <ArrowUpRight className="mr-2 h-4 w-4" />
+                            Abrir ruta manual
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="rounded-full border-[var(--codex-border)] bg-white/82"
+                            onClick={() => void refreshOpenClawControlUi()}
+                          >
+                            <RefreshCw className="mr-2 h-4 w-4" />
+                            Reintentar
+                          </Button>
+                        </div>
+                      </section>
+                    ) : (
+                      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[32px] border border-[var(--codex-border)] bg-[rgba(255,255,255,0.88)] shadow-[var(--codex-shadow)]">
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--codex-border)] px-5 py-4">
+                          <div>
+                            <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">
+                              Embedded Control UI
+                            </p>
+                            <p className="mt-1 text-sm text-[var(--codex-muted)]">
+                              La sesión se abre en modo {OPENCLAW_CONTROL_UI_SESSION_KEY} y el
+                              token vive solo dentro del panel.
+                            </p>
+                          </div>
+                          <div className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/82 px-3 py-1.5 text-xs text-[var(--codex-muted)]">
+                            <Check className="h-3.5 w-3.5 text-[var(--codex-accent)]" />
+                            Launcher seguro activo
+                          </div>
+                        </div>
+
+                        <div className="relative flex-1 overflow-hidden">
+                          {isOpenClawControlUiFrameLoading ? (
+                            <div className="absolute inset-0 z-10 flex items-center justify-center bg-[rgba(246,243,236,0.82)] backdrop-blur-sm">
+                              <div className="flex items-center gap-3 rounded-full border border-[var(--codex-border)] bg-white/92 px-4 py-2 text-sm text-[var(--codex-muted)] shadow-sm">
+                                <Loader2 className="h-4 w-4 animate-spin text-[var(--codex-accent)]" />
+                                Conectando el panel OpenClaw con acceso seguro...
+                              </div>
+                            </div>
+                          ) : null}
+
+                          {openClawControlUiFrameSrc ? (
+                            <iframe
+                              src={openClawControlUiFrameSrc}
+                              title="OpenClaw Control UI"
+                              className="h-full w-full border-0"
+                              style={{ minHeight: "calc(100vh - 285px)" }}
+                              allow="clipboard-read; clipboard-write"
+                              referrerPolicy="no-referrer"
+                              onLoad={() => setIsOpenClawControlUiFrameLoading(false)}
+                            />
+                          ) : (
+                            <div className="flex h-full min-h-[420px] items-center justify-center px-6 text-center text-sm text-[var(--codex-muted)]">
+                              El panel aparecerá aquí apenas terminemos de resolver el acceso
+                              nativo del gateway.
+                            </div>
+                          )}
+                        </div>
+                      </section>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           ) : (
           <>
