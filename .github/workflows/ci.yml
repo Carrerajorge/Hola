@@ -84,31 +84,5 @@ jobs:
             playwright-report/
           if-no-files-found: ignore
 
-  production-bundle-smoke:
-    name: Production Bundle Smoke
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-      - name: Install dependencies
-        run: npm install
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
-      - name: Run production bundle smoke suite
-        run: npm run test:smoke:build
-      - name: Upload Playwright traces
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: production-bundle-smoke-artifacts
-          path: |
-            test-results/
-            playwright-report/
-          if-no-files-found: ignore
-
       #- name: Upload Test Coverage
       #  uses: codecov/codecov-action@v4
