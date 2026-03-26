@@ -22,6 +22,7 @@ export interface ToolArtifact {
 
 export interface RunResponse {
   id: string;
+  chatId?: string;
   status: string;
   executionProfile?: "standard" | "marathon_12h" | "marathon_24h";
   plan?: any;

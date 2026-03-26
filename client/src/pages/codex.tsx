@@ -51,6 +51,13 @@ import { useAuth } from "@/hooks/use-auth";
 import { useChats, type Chat, type Message } from "@/hooks/use-chats";
 import { useProjects, type Project } from "@/hooks/use-projects";
 import { apiFetch } from "@/lib/apiClient";
+import {
+  clearCodexRunResume,
+  loadCodexRunResume,
+  loadCodexWorkspaceDraft,
+  persistCodexRunResume,
+  persistCodexWorkspaceDraft,
+} from "@/lib/codexContinuity";
 import { cn } from "@/lib/utils";
 import {
   CODEX_EXECUTION_PROFILE_OPTIONS,
@@ -187,6 +194,16 @@ function formatClock(timestamp: number): string {
   }).format(timestamp);
 }
 
+function formatResumeTimestamp(timestamp: number): string {
+  if (!Number.isFinite(timestamp)) return "Sin fecha";
+  return new Intl.DateTimeFormat("es-BO", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(timestamp);
+}
+
 function formatFullDate(value?: string | null): string {
   if (!value) return "Sin fecha disponible";
   const timestamp = new Date(value).getTime();
@@ -262,6 +279,17 @@ function getLatestRunId(chat: Chat): string | null {
     if (typeof runId === "string" && runId.trim().length > 0) return runId;
   }
   return null;
+}
+
+function getRunResumeStatusLabel(status?: string | null): string {
+  if (status === "completed") return "Listo para revisar";
+  if (status === "failed") return "Necesita atención";
+  if (status === "paused") return "Pausado";
+  if (status === "cancelled") return "Cancelado";
+  if (status === "verifying") return "Verificando";
+  if (status === "planning") return "Planificando";
+  if (status === "queued") return "En cola";
+  return "En curso";
 }
 
 function getStatusLabel(status: SessionStatus): string {
@@ -424,15 +452,23 @@ export default function CodexPage() {
   const { user, isAuthenticated, login } = useAuth();
   const { allChats, isLoading: chatsLoading } = useChats();
   const { projects, isLoading: projectsLoading, addChatToProject } = useProjects();
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
-  const [multiAgentEnabled, setMultiAgentEnabled] = useState(true);
-  const [executionProfile, setExecutionProfile] = useState<CodexExecutionProfile>("standard");
-  const [maxSubagents, setMaxSubagents] = useState(3);
+  const initialWorkspaceSnapshotRef = useRef<ReturnType<typeof loadCodexWorkspaceDraft> | undefined>(undefined);
+  if (initialWorkspaceSnapshotRef.current === undefined) {
+    initialWorkspaceSnapshotRef.current = loadCodexWorkspaceDraft();
+  }
+  const initialWorkspaceSnapshot = initialWorkspaceSnapshotRef.current ?? null;
+  const workspaceDraftRef = useRef(initialWorkspaceSnapshot);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(initialWorkspaceSnapshot?.selectedSessionId ?? null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(initialWorkspaceSnapshot?.selectedProjectId ?? null);
+  const [draft, setDraft] = useState(initialWorkspaceSnapshot?.draft ?? "");
+  const [multiAgentEnabled, setMultiAgentEnabled] = useState(initialWorkspaceSnapshot?.multiAgentEnabled ?? true);
+  const [executionProfile, setExecutionProfile] = useState<CodexExecutionProfile>(
+    initialWorkspaceSnapshot?.executionProfile ?? "standard",
+  );
+  const [maxSubagents, setMaxSubagents] = useState(initialWorkspaceSnapshot?.maxSubagents ?? 3);
   const [isLaunching, setIsLaunching] = useState(false);
   const [repoBranches, setRepoBranches] = useState<string[]>(["main"]);
-  const [activeRepoBranch, setActiveRepoBranch] = useState("main");
+  const [activeRepoBranch, setActiveRepoBranch] = useState(initialWorkspaceSnapshot?.activeRepoBranch ?? "main");
   const [branchSummary, setBranchSummary] = useState<BranchSummary | null>(null);
   const [branchQuery, setBranchQuery] = useState("");
   const [isBranchMenuOpen, setIsBranchMenuOpen] = useState(false);
@@ -443,7 +479,10 @@ export default function CodexPage() {
   const [openClawStats, setOpenClawStats] = useState<OpenClawCapabilityStats | null>(null);
   const [isOpenClawLoading, setIsOpenClawLoading] = useState(true);
   const [openClawError, setOpenClawError] = useState<string | null>(null);
-  const [activeView, setActiveView] = useState<"workspace" | "openclaw-ui">("workspace");
+  const [activeView, setActiveView] = useState<"workspace" | "openclaw-ui">(
+    initialWorkspaceSnapshot?.activeView ?? "workspace",
+  );
+  const [resumeSnapshot, setResumeSnapshot] = useState(() => loadCodexRunResume());
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
 
   const sessions = useMemo<CodexSession[]>(() => {
@@ -512,14 +551,16 @@ export default function CodexPage() {
   );
 
   useEffect(() => {
-    if (selectedProjectId) return;
+    if (selectedProjectId && safeProjects.some((project) => project.id === selectedProjectId)) return;
     if (selectedSession?.project?.id) {
       setSelectedProjectId(selectedSession.project.id);
       return;
     }
     if (safeProjects[0]?.id) {
       setSelectedProjectId(safeProjects[0].id);
+      return;
     }
+    setSelectedProjectId(null);
   }, [safeProjects, selectedProjectId, selectedSession]);
 
   const selectedProject = useMemo(
@@ -666,6 +707,38 @@ export default function CodexPage() {
     }
     return "OpenClaw intentará cerrar la tarea con el menor ruido operativo posible.";
   }, [executionProfile]);
+  const resumeTitle = useMemo(() => {
+    if (!resumeSnapshot) return "";
+    const source = normalizeText(resumeSnapshot.objective || resumeSnapshot.summary);
+    return truncateText(source || "Retomar run anterior.", 150);
+  }, [resumeSnapshot]);
+  const resumeMetaLabel = useMemo(() => {
+    if (!resumeSnapshot) return "";
+    return `${getCodexExecutionProfileOption(resumeSnapshot.executionProfile).runtimeLabel} · ${getRunResumeStatusLabel(resumeSnapshot.status)}`;
+  }, [resumeSnapshot]);
+
+  useEffect(() => {
+    const snapshot = persistCodexWorkspaceDraft({
+      draft,
+      multiAgentEnabled,
+      executionProfile,
+      maxSubagents,
+      selectedProjectId,
+      selectedSessionId,
+      activeRepoBranch,
+      activeView,
+    });
+    workspaceDraftRef.current = snapshot;
+  }, [
+    activeRepoBranch,
+    activeView,
+    draft,
+    executionProfile,
+    maxSubagents,
+    multiAgentEnabled,
+    selectedProjectId,
+    selectedSessionId,
+  ]);
 
   const filteredBranches = useMemo(() => {
     const query = branchQuery.trim().toLowerCase();
@@ -746,10 +819,16 @@ export default function CodexPage() {
         ? payload.branches.filter((item: unknown): item is string => typeof item === "string" && item.trim().length > 0)
         : [];
       const normalizedBranches = nextBranches.length > 0 ? nextBranches : ["main"];
+      const preferredBranch =
+        workspaceDraftRef.current?.selectedProjectId === project.id
+          ? workspaceDraftRef.current?.activeRepoBranch
+          : null;
       setRepoBranches(normalizedBranches);
       setActiveRepoBranch(
-        typeof payload?.current === "string" && normalizedBranches.includes(payload.current)
-          ? payload.current
+        preferredBranch && normalizedBranches.includes(preferredBranch)
+          ? preferredBranch
+          : typeof payload?.current === "string" && normalizedBranches.includes(payload.current)
+            ? payload.current
           : normalizedBranches[0],
       );
       setBranchSummary(
@@ -921,6 +1000,17 @@ export default function CodexPage() {
         }
       }
 
+      const nextResumeSnapshot = persistCodexRunResume({
+        runId,
+        chatId,
+        executionProfile,
+        status: "planning",
+        summary: task,
+        objective: task,
+        lastEventTitle: multiAgentEnabled ? "Run lanzado con subagentes activos." : "Run lanzado.",
+        updatedAt: Date.now(),
+      });
+      setResumeSnapshot(nextResumeSnapshot);
       setDraft("");
       setSelectedSessionId(chatId);
       toast.success("OpenClaw en ejecución", {
@@ -1705,6 +1795,45 @@ export default function CodexPage() {
                     </span>
                   ))}
                 </div>
+                {resumeSnapshot ? (
+                  <div className="mx-2 mb-2 flex flex-wrap items-start justify-between gap-3 rounded-[24px] border border-[var(--codex-border)] bg-[#fbfaf6] px-4 py-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Reanudación fuerte</p>
+                      <p className="mt-1 text-sm font-medium text-[var(--codex-ink)]">{resumeTitle}</p>
+                      <p className="mt-1 text-xs text-[var(--codex-muted)]">
+                        {resumeMetaLabel} · {formatResumeTimestamp(resumeSnapshot.updatedAt)}
+                      </p>
+                      {resumeSnapshot.lastEventTitle ? (
+                        <p className="mt-1 text-xs text-[var(--codex-muted)]">{resumeSnapshot.lastEventTitle}</p>
+                      ) : null}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="rounded-full border border-[var(--codex-border)] bg-white/88"
+                        onClick={() => {
+                          setLocation(`/runs/${resumeSnapshot.runId}/progress`);
+                        }}
+                        data-testid="codex-resume-run"
+                      >
+                        Abrir progreso
+                        <ArrowUpRight className="ml-2 h-4 w-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="rounded-full text-[var(--codex-muted)]"
+                        onClick={() => {
+                          clearCodexRunResume();
+                          setResumeSnapshot(null);
+                        }}
+                      >
+                        Ocultar
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
                 <Textarea
                   ref={composerRef}
                   value={draft}

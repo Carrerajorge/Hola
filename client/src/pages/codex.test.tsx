@@ -1,6 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  CODEX_RUN_RESUME_STORAGE_KEY,
+  CODEX_WORKSPACE_DRAFT_STORAGE_KEY,
+} from "@/lib/codexContinuity";
 import CodexPage from "@/pages/codex";
 
 const setLocationMock = vi.fn();
@@ -14,6 +18,25 @@ const toastErrorMock = vi.fn();
 const addChatToProjectMock = vi.fn();
 const apiFetchMock = vi.fn();
 const loginMock = vi.fn();
+const localStorageState = new Map<string, string>();
+
+const localStorageMock = {
+  getItem: (key: string) => localStorageState.get(key) ?? null,
+  setItem: (key: string, value: string) => {
+    localStorageState.set(key, String(value));
+  },
+  removeItem: (key: string) => {
+    localStorageState.delete(key);
+  },
+  clear: () => {
+    localStorageState.clear();
+  },
+};
+
+Object.defineProperty(window, "localStorage", {
+  value: localStorageMock,
+  configurable: true,
+});
 
 vi.mock("wouter", () => ({
   useLocation: () => ["/codex", setLocationMock],
@@ -116,6 +139,7 @@ describe("CodexPage", () => {
     addChatToProjectMock.mockReset();
     apiFetchMock.mockReset();
     loginMock.mockReset();
+    window.localStorage.clear();
 
     useAuthMock.mockReturnValue({
       user: {
@@ -513,6 +537,59 @@ describe("CodexPage", () => {
         branchName: "main",
       });
     });
+  });
+
+  it("rehydrates the long-run workspace state and offers a direct resume entrypoint", async () => {
+    window.localStorage.setItem(
+      CODEX_WORKSPACE_DRAFT_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        draft: "Retoma la cadena 24h con foco en checkpoints y validación.",
+        multiAgentEnabled: false,
+        executionProfile: "marathon_24h",
+        maxSubagents: 4,
+        selectedProjectId: "project-1",
+        selectedSessionId: "chat-1",
+        activeRepoBranch: "fix/document-upload-403-openclaw-fix",
+        activeView: "workspace",
+      }),
+    );
+    window.localStorage.setItem(
+      CODEX_RUN_RESUME_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        runId: "run-marathon",
+        chatId: "chat-1",
+        executionProfile: "marathon_24h",
+        status: "running",
+        summary: "Retomar run largo",
+        objective: "Retoma la cadena 24h con foco en checkpoints y validación.",
+        lastEventTitle: "Checkpoint listo: integración y smoke test parciales.",
+        updatedAt: Date.now(),
+      }),
+    );
+
+    render(<CodexPage />);
+
+    await waitFor(() => {
+      expect(apiFetchMock).toHaveBeenCalledWith(
+        "/api/local/repo/branches?rootPath=%2Fworkspace%2Fhola",
+        expect.objectContaining({ method: "GET", credentials: "include" }),
+      );
+    });
+
+    expect(screen.getByRole("textbox")).toHaveValue(
+      "Retoma la cadena 24h con foco en checkpoints y validación.",
+    );
+    expect(screen.getByTestId("codex-session-title")).toHaveTextContent("Fix upload error");
+    expect(screen.getByText("Reanudación fuerte")).toBeInTheDocument();
+    expect(screen.getByText("Checkpoint listo: integración y smoke test parciales.")).toBeInTheDocument();
+    expect(screen.getByTestId("codex-launch-run")).toHaveTextContent("Lanzar 24h");
+    expect(screen.getByTestId("codex-branch-trigger")).toHaveTextContent("fix/document-upload-403-openclaw-fix");
+
+    fireEvent.click(screen.getByTestId("codex-resume-run"));
+
+    expect(setLocationMock).toHaveBeenCalledWith("/runs/run-marathon/progress");
   });
 
   it("shows the public preview mode and sends secure actions to login", async () => {

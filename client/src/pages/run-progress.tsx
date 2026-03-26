@@ -8,6 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { persistCodexRunResume } from "@/lib/codexContinuity";
 import { cn } from "@/lib/utils";
 import { useAgentStore } from "@/stores/agent-store";
 import {
@@ -34,6 +35,15 @@ interface RunEvent {
   severity: RunEventSeverity;
 }
 
+interface CheckpointHandoffSummary {
+  current: string;
+  latestCheckpoint: string;
+  nextStep: string;
+  risk: string;
+  verification: string;
+  updatedAt: number;
+}
+
 const ACTIVITY_EVENT_TYPES = [
   "run_created",
   "plan_generated",
@@ -47,6 +57,8 @@ const ACTIVITY_EVENT_TYPES = [
   "run_completed",
   "run_failed",
 ] as const;
+const TERMINAL_STEP_STATUSES = new Set(["succeeded", "completed", "skipped"]);
+const IGNORED_ACTIVITY_TYPES = new Set(["heartbeat", "subscribed", "shutdown"]);
 
 const severityFromPayload = (payload: Record<string, any>, eventType: string): RunEventSeverity => {
   if (payload?.status === "failed" || payload?.error) return "error";
@@ -121,6 +133,18 @@ const getExecutionProfileLabel = (profile?: string | null): string => {
   return "Estándar";
 };
 
+const getRunStatusLabel = (status?: string | null): string => {
+  if (status === "completed") return "Completado";
+  if (status === "failed") return "Fallido";
+  if (status === "paused") return "Pausado";
+  if (status === "verifying") return "Verificando";
+  if (status === "running") return "En ejecución";
+  if (status === "planning") return "Planificando";
+  if (status === "queued") return "En cola";
+  if (status === "cancelled") return "Cancelado";
+  return "Listo";
+};
+
 const formatTimestamp = (value?: number | string | null): string => {
   if (!value) return "–";
   const parsed = typeof value === "number" ? value : Number(Date.parse(String(value)));
@@ -133,6 +157,26 @@ const summarizeObjective = (objective?: string | null, maxLength = 180): string 
   if (!normalized) return "Sin objetivo detallado.";
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
+};
+
+const formatActivitySummary = (event?: RunEvent | null): string => {
+  if (!event) return "Sin checkpoint registrado todavía.";
+  if (event.eventType === "artifact_created") {
+    return `Artifact listo: ${event.payload?.name || event.title}`;
+  }
+  if (event.eventType === "qa_passed") {
+    return event.payload?.message || "Verificación aprobada.";
+  }
+  if (event.eventType === "run_completed") {
+    return event.payload?.summary || event.title || "Run completado.";
+  }
+  if (event.eventType === "tool_call_succeeded") {
+    return `${event.payload?.toolName || "Paso"} completado.`;
+  }
+  if (event.eventType === "tool_call_failed") {
+    return event.payload?.error || event.title || "Paso fallido.";
+  }
+  return event.payload?.message || event.title || event.eventType;
 };
 
 const extractSubagentRole = (planHint?: string[] | null): string => {
@@ -314,6 +358,90 @@ const RunProgressPage = () => {
     if (total === 0) return 0;
     return Math.round((completed / total) * 100);
   }, [run]);
+
+  const checkpointSummary = useMemo<CheckpointHandoffSummary | null>(() => {
+    if (!run) return null;
+
+    const meaningfulEvents = sortedEvents.filter((event) => !IGNORED_ACTIVITY_TYPES.has(event.eventType));
+    const latestEvent = meaningfulEvents[meaningfulEvents.length - 1] || null;
+    const latestCheckpoint =
+      [...meaningfulEvents].reverse().find((event) =>
+        ["tool_call_succeeded", "artifact_created", "qa_passed", "run_completed"].includes(event.eventType)
+      ) || latestEvent;
+    const latestFailure = [...meaningfulEvents].reverse().find((event) => event.severity === "error") || null;
+    const latestVerification = [...meaningfulEvents].reverse().find((event) => event.eventType === "qa_passed") || null;
+    const activeStep =
+      run.steps.find((step) => step.status === "running" || step.status === "in_progress") || null;
+    const nextPendingStep =
+      activeStep ||
+      run.steps.find((step) => !TERMINAL_STEP_STATUSES.has(step.status) && step.status !== "failed") ||
+      null;
+    const phases = Array.isArray(run.plan?.phases) ? run.plan.phases : [];
+    const currentPhase =
+      typeof run.plan?.currentPhaseIndex === "number"
+        ? phases[run.plan.currentPhaseIndex] || null
+        : phases.find((phase: any) => phase?.status === "in_progress") || null;
+    const failedSubagents = subagents.filter((subagent) => subagent.status === "failed" || subagent.status === "cancelled");
+    const artifactsLabel =
+      (run.artifacts || []).length > 0
+        ? `Artifacts listos: ${(run.artifacts || [])
+            .slice(0, 2)
+            .map((artifact) => artifact.name || artifact.type || "artifact")
+            .join(", ")}`
+        : "Sin artifact verificable todavía.";
+
+    const current = [
+      getRunStatusLabel(run.status),
+      currentPhase?.name ? `Fase: ${currentPhase.name}` : null,
+      activeStep?.description || activeStep?.toolName ? `Paso: ${activeStep?.description || activeStep?.toolName}` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+    let risk = "Sin riesgo fuerte detectado.";
+    if (run.status === "failed") {
+      risk = run.error || formatActivitySummary(latestFailure) || "El run terminó con error.";
+    } else if (latestFailure) {
+      risk = formatActivitySummary(latestFailure);
+    } else if (failedSubagents.length > 0) {
+      risk = `${failedSubagents.length} subagente(s) quedaron con error o cancelados.`;
+    } else if (
+      typeof run.runtimeRemainingMs === "number" &&
+      typeof run.runtimeBudgetMs === "number" &&
+      run.runtimeRemainingMs <= Math.max(15 * 60 * 1000, run.runtimeBudgetMs * 0.12)
+    ) {
+      risk = `Presupuesto restante bajo: ${formatRuntimeBudget(run.runtimeRemainingMs)}.`;
+    }
+
+    return {
+      current: current || getRunStatusLabel(run.status),
+      latestCheckpoint: formatActivitySummary(latestCheckpoint),
+      nextStep:
+        run.status === "completed"
+          ? "Sin siguientes pasos pendientes."
+          : nextPendingStep?.description || nextPendingStep?.toolName || "Esperando el próximo bloque del plan.",
+      risk,
+      verification: latestVerification ? formatActivitySummary(latestVerification) : artifactsLabel,
+      updatedAt:
+        latestEvent?.timestamp ||
+        Number(new Date(run.completedAt || run.startedAt || run.createdAt).getTime()) ||
+        Date.now(),
+    };
+  }, [run, sortedEvents, subagents]);
+
+  useEffect(() => {
+    if (!runId || !run || !checkpointSummary) return;
+    persistCodexRunResume({
+      runId,
+      chatId: run.chatId ?? null,
+      executionProfile: run.executionProfile || "standard",
+      status: run.status,
+      summary: run.summary || checkpointSummary.current,
+      objective: run.plan?.objective || run.summary || "",
+      lastEventTitle: checkpointSummary.latestCheckpoint,
+      updatedAt: checkpointSummary.updatedAt,
+    });
+  }, [checkpointSummary, run, runId]);
 
   if (!runId) {
     return (
@@ -535,6 +663,42 @@ const RunProgressPage = () => {
           </div>
 
           <div className="space-y-4">
+            {checkpointSummary && (
+              <Card data-testid="run-checkpoint-handoff">
+                <CardHeader>
+                  <CardTitle>Checkpoint / Handoff</CardTitle>
+                  <CardDescription>
+                    Resumen operativo para retomar el run sin releer todo el timeline.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3 pt-0">
+                  <div className="rounded-lg border border-border px-3 py-3">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Estado actual</p>
+                    <p className="mt-1 text-sm font-medium">{checkpointSummary.current}</p>
+                  </div>
+                  <div className="rounded-lg border border-border px-3 py-3">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Último hito</p>
+                    <p className="mt-1 text-sm">{checkpointSummary.latestCheckpoint}</p>
+                  </div>
+                  <div className="rounded-lg border border-border px-3 py-3">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Siguiente paso</p>
+                    <p className="mt-1 text-sm">{checkpointSummary.nextStep}</p>
+                  </div>
+                  <div className="rounded-lg border border-border px-3 py-3">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Riesgo</p>
+                    <p className="mt-1 text-sm">{checkpointSummary.risk}</p>
+                  </div>
+                  <div className="rounded-lg border border-border px-3 py-3">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Verificación</p>
+                    <p className="mt-1 text-sm">{checkpointSummary.verification}</p>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Actualizado: {formatTimestamp(checkpointSummary.updatedAt)}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             <Card>
               <CardHeader>
                 <CardTitle>Actividad del run</CardTitle>
