@@ -14,12 +14,14 @@ IFS=$'\n\t'
 #    bash scripts/vps-bootstrap-bluegreen.sh --force
 # ═══════════════════════════════════════════════════════════
 
-readonly SCRIPT_VERSION="2.0.1"
+readonly SCRIPT_VERSION="2.1.0"
 
 DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
 NGINX_CONF_DIR="/etc/nginx/conf.d"
 STATE_FILE="${DEPLOY_PATH}/deploy-state.json"
 FORCE=false
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+REPAIR_DOCKER_BACKEND_SCRIPT="${SCRIPT_DIR}/repair-docker-storage-backend.sh"
 
 for arg in "$@"; do
   case "${arg}" in
@@ -45,7 +47,7 @@ echo "════════════════════════�
 echo ""
 
 # ── Preflight ──────────────────────────────────────────────
-log "[0/6] Preflight checks..."
+log "[0/7] Preflight checks..."
 
 if ! command -v nginx > /dev/null 2>&1; then
   loge "nginx not found. Install nginx first."
@@ -79,7 +81,21 @@ logok "Nginx conf.d exists"
 echo ""
 
 # ── 1. Create Nginx upstream config ───────────────────────
-log "[1/6] Creating Nginx upstream config..."
+log "[1/7] Ensuring Docker uses overlay2 backend..."
+if [ ! -f "${REPAIR_DOCKER_BACKEND_SCRIPT}" ]; then
+  loge "Missing repair helper: ${REPAIR_DOCKER_BACKEND_SCRIPT}"
+  exit 1
+fi
+if bash "${REPAIR_DOCKER_BACKEND_SCRIPT}" --skip-infra-restore; then
+  logok "Docker backend ready for blue-green deploys."
+else
+  loge "Docker backend preparation failed."
+  exit 1
+fi
+echo ""
+
+# ── 2. Create Nginx upstream config ───────────────────────
+log "[2/7] Creating Nginx upstream config..."
 
 UPSTREAM_CONF="${NGINX_CONF_DIR}/iliagpt-upstream.conf"
 
@@ -108,8 +124,8 @@ else
 fi
 echo ""
 
-# ── 2. Verify upstream config ─────────────────────────────
-log "[2/6] Verifying upstream config..."
+# ── 3. Verify upstream config ─────────────────────────────
+log "[3/7] Verifying upstream config..."
 if [ -f "${UPSTREAM_CONF}" ]; then
   logok "Upstream config exists: ${UPSTREAM_CONF}"
 else
@@ -118,8 +134,8 @@ else
 fi
 echo ""
 
-# ── 3. Create Docker network ─────────────────────────────
-log "[3/6] Creating shared Docker network..."
+# ── 4. Create Docker network ─────────────────────────────
+log "[4/7] Creating shared Docker network..."
 if docker network inspect hola-net > /dev/null 2>&1; then
   logok "Network hola-net already exists."
 else
@@ -131,8 +147,8 @@ else
 fi
 echo ""
 
-# ── 4. Create deploy directories ─────────────────────────
-log "[4/6] Creating deploy directories..."
+# ── 5. Create deploy directories ─────────────────────────
+log "[5/7] Creating deploy directories..."
 mkdir -p "${DEPLOY_PATH}/scripts"
 mkdir -p "${DEPLOY_PATH}/backups"
 mkdir -p "${DEPLOY_PATH}/nginx"
@@ -141,8 +157,8 @@ mkdir -p "/etc/nginx/html"
 logok "Directories ready: scripts/, backups/, nginx/, /etc/nginx/html"
 echo ""
 
-# ── 5. Create initial state file ─────────────────────────
-log "[5/6] Creating deploy state file..."
+# ── 6. Create initial state file ─────────────────────────
+log "[6/7] Creating deploy state file..."
 if [ -f "${STATE_FILE}" ] && [ "${FORCE}" != "true" ]; then
   logw "State file already exists (use --force to overwrite):"
   python3 -c "import json; print('  ' + json.dumps(json.load(open('${STATE_FILE}')), indent=2).replace(chr(10), chr(10) + '  '))"
@@ -169,8 +185,8 @@ print('  ' + json.dumps(state, indent=2).replace(chr(10), chr(10) + '  '))
 fi
 echo ""
 
-# ── 6. Test Nginx config ─────────────────────────────────
-log "[6/6] Testing Nginx config..."
+# ── 7. Test Nginx config ─────────────────────────────────
+log "[7/7] Testing Nginx config..."
 if nginx -t 2>&1; then
   logok "Nginx config is valid."
 else
