@@ -18,7 +18,7 @@ import {
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 
 interface SecurityAlert {
   id: string;

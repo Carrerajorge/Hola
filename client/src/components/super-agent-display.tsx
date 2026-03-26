@@ -27,7 +27,7 @@ import {
   Presentation,
   Lightbulb,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -860,5 +860,4 @@ export const SuperAgentDisplay = memo(function SuperAgentDisplay({
 });
 
 export default SuperAgentDisplay;
-
 

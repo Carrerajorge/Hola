@@ -11,7 +11,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { ExternalLink, Loader2, ChevronLeft, AlertCircle, RefreshCw, XCircle, Clock, Ban, WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 import { apiFetch } from "@/lib/apiClient";
 
 export interface AppMetadata {

@@ -26,7 +26,7 @@ import {
   ChevronDown,
   ChevronUp
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from "@/lib/notify";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import { formatZonedDateTime, normalizeTimeZone } from "@/lib/platformDateTime";
 

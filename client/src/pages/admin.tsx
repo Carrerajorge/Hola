@@ -74,7 +74,7 @@ import { cn } from "@/lib/utils";
 import { apiFetch } from "@/lib/apiClient";
 import { formatZonedDateTime, normalizeTimeZone } from "@/lib/platformDateTime";
 import { format } from "date-fns";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import AnalyticsDashboard from "@/components/admin/AnalyticsDashboard";
 import AgenticEngineDashboard from "@/components/admin/AgenticEngineDashboard";

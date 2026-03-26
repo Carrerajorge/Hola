@@ -38,7 +38,7 @@ import {
   Settings2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 import type { UserSkill } from "@/hooks/use-user-skills";
 import { motion, AnimatePresence } from "framer-motion";
 

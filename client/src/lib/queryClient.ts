@@ -1,5 +1,5 @@
 import { QueryClient, QueryFunction, QueryCache, MutationCache } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 
 const AUTH_STORAGE_KEY = "siragpt_auth_user";
 
@@ -158,22 +158,31 @@ export async function apiRequest(
 }
 
 function getReadableErrorMessage(error: string): string {
+  const ERROR_TOAST_MESSAGES = {
+    offline: "Sin conexion a internet",
+    serverUnavailable: "Servidor no disponible",
+    requestTimedOut: "La solicitud tardo demasiado",
+    rateLimited: "Demasiadas solicitudes, espera un momento",
+    networkError: "Problema de red",
+    generic: "No se pudo completar",
+  } as const;
+
   if (error.includes('offline') || error.includes('Failed to fetch')) {
-    return 'No internet connection';
+    return ERROR_TOAST_MESSAGES.offline;
   }
   if (error.includes('500') || error.includes('502') || error.includes('503')) {
-    return 'Server temporarily unavailable';
+    return ERROR_TOAST_MESSAGES.serverUnavailable;
   }
   if (error.includes('408') || error.includes('timeout')) {
-    return 'Request timed out';
+    return ERROR_TOAST_MESSAGES.requestTimedOut;
   }
   if (error.includes('429')) {
-    return 'Too many requests, please wait';
+    return ERROR_TOAST_MESSAGES.rateLimited;
   }
   if (error.includes('Network') || error.includes('network')) {
-    return 'Network error occurred';
+    return ERROR_TOAST_MESSAGES.networkError;
   }
-  return 'Something went wrong';
+  return ERROR_TOAST_MESSAGES.generic;
 }
 
 const TOAST_COOLDOWN_MS = 30_000;
@@ -214,11 +223,11 @@ export function showErrorToast(
 
   // Use stable ids so Sonner replaces instead of stacking (especially important for 429 spam).
   const toastId = (() => {
-    if (toastMessage === "No internet connection") return OFFLINE_TOAST_ID;
-    if (toastMessage === "Too many requests, please wait") return "rate-limit";
-    if (toastMessage === "Server temporarily unavailable") return "server-unavailable";
-    if (toastMessage === "Request timed out") return "request-timeout";
-    if (toastMessage === "Network error occurred") return "network-error";
+    if (toastMessage === "Sin conexion a internet") return OFFLINE_TOAST_ID;
+    if (toastMessage === "Demasiadas solicitudes, espera un momento") return "rate-limit";
+    if (toastMessage === "Servidor no disponible") return "server-unavailable";
+    if (toastMessage === "La solicitud tardo demasiado") return "request-timeout";
+    if (toastMessage === "Problema de red") return "network-error";
     return "global-error";
   })();
 

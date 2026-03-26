@@ -4,6 +4,12 @@ import type {
   ToastActionElement,
   ToastProps,
 } from "@/components/ui/toast"
+import {
+  clearAllNotificationBursts,
+  clearNotificationBurstById,
+  formatRepeatedDescription,
+  registerNotificationBurst,
+} from "@/lib/notificationDeduper"
 
 const TOAST_LIMIT = 1
 const TOAST_REMOVE_DELAY = 1000000
@@ -13,14 +19,10 @@ type ToasterToast = ToastProps & {
   title?: React.ReactNode
   description?: React.ReactNode
   action?: ToastActionElement
+  repeatCount?: number
+  dedupeKey?: string
+  dedupeWindowMs?: number
 }
-
-const actionTypes = {
-  ADD_TOAST: "ADD_TOAST",
-  UPDATE_TOAST: "UPDATE_TOAST",
-  DISMISS_TOAST: "DISMISS_TOAST",
-  REMOVE_TOAST: "REMOVE_TOAST",
-} as const
 
 let count = 0
 
@@ -29,23 +31,21 @@ function genId() {
   return count.toString()
 }
 
-type ActionType = typeof actionTypes
-
 type Action =
   | {
-      type: ActionType["ADD_TOAST"]
+      type: "ADD_TOAST"
       toast: ToasterToast
     }
   | {
-      type: ActionType["UPDATE_TOAST"]
+      type: "UPDATE_TOAST"
       toast: Partial<ToasterToast>
     }
   | {
-      type: ActionType["DISMISS_TOAST"]
+      type: "DISMISS_TOAST"
       toastId?: ToasterToast["id"]
     }
   | {
-      type: ActionType["REMOVE_TOAST"]
+      type: "REMOVE_TOAST"
       toastId?: ToasterToast["id"]
     }
 
@@ -93,8 +93,10 @@ export const reducer = (state: State, action: Action): State => {
       // ! Side effects ! - This could be extracted into a dismissToast() action,
       // but I'll keep it here for simplicity
       if (toastId) {
+        clearNotificationBurstById(toastId)
         addToRemoveQueue(toastId)
       } else {
+        clearAllNotificationBursts()
         state.toasts.forEach((toast) => {
           addToRemoveQueue(toast.id)
         })
@@ -114,11 +116,13 @@ export const reducer = (state: State, action: Action): State => {
     }
     case "REMOVE_TOAST":
       if (action.toastId === undefined) {
+        clearAllNotificationBursts()
         return {
           ...state,
           toasts: [],
         }
       }
+      clearNotificationBurstById(action.toastId)
       return {
         ...state,
         toasts: state.toasts.filter((t) => t.id !== action.toastId),
@@ -139,8 +143,36 @@ function dispatch(action: Action) {
 
 type Toast = Omit<ToasterToast, "id">
 
-function toast({ ...props }: Toast) {
-  const id = genId()
+function toast({
+  dedupeKey,
+  dedupeWindowMs,
+  repeatCount: _repeatCount,
+  ...props
+}: Toast) {
+  const burst = registerNotificationBurst({
+    source: "radix",
+    tone: props.variant === "destructive" ? "destructive" : "default",
+    title: props.title,
+    description: props.description,
+    dedupeKey,
+    dedupeWindowMs,
+    createId: genId,
+  })
+
+  const id = burst.id
+  const description = formatRepeatedDescription(props.description, burst.count)
+  const nextToast: ToasterToast = {
+    ...props,
+    dedupeKey,
+    dedupeWindowMs,
+    description,
+    repeatCount: burst.count,
+    id,
+    open: true,
+    onOpenChange: (open) => {
+      if (!open) dismiss()
+    },
+  }
 
   const update = (props: ToasterToast) =>
     dispatch({
@@ -150,15 +182,8 @@ function toast({ ...props }: Toast) {
   const dismiss = () => dispatch({ type: "DISMISS_TOAST", toastId: id })
 
   dispatch({
-    type: "ADD_TOAST",
-    toast: {
-      ...props,
-      id,
-      open: true,
-      onOpenChange: (open) => {
-        if (!open) dismiss()
-      },
-    },
+    type: burst.isBurst ? "UPDATE_TOAST" : "ADD_TOAST",
+    toast: nextToast,
   })
 
   return {

@@ -29,7 +29,7 @@ import {
   Scissors,
   Clipboard,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from "@/lib/notify";
 import { colToName, makeRef } from '@/lib/spreadsheet-utils';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart as RechartsLineChart, Line, PieChart as RechartsPieChart, Pie, Cell } from 'recharts';
 import { VirtualizedExcel, GRID_CONFIG } from './virtualized-excel';

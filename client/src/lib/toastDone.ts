@@ -2,7 +2,7 @@
  * Pill-style "task done" toast with ding sound
  * Minimal, auto-dismissing notification for completed tasks
  */
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 import { playDing } from "./notification-sound";
 
 export function toastDone(msg = "Tarea completada"): void {

@@ -54,7 +54,7 @@ import {
   Sparkles
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 import { useUserSkills, UserSkill } from "@/hooks/use-user-skills";
 import { SkillBuilder } from "./skill-builder";
 

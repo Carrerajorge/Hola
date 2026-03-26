@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Menu, FileText, X, GripVertical } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 import { useStreamingStore, useProcessingChatIds, usePendingBadges } from "@/stores/streamingStore";
 
 const PANEL_SIZES_KEY = "workspace-panel-sizes";
