@@ -10,6 +10,40 @@ max_retries="${MAX_RETRIES:-6}"
 retry_sleep_seconds="${RETRY_SLEEP_SECONDS:-5}"
 fail_on_lookup_error="${FAIL_ON_LOOKUP_ERROR:-false}"
 
+resolve_latest_sha() {
+  local api_url="https://api.github.com/repos/${repo}/git/ref/heads/${target_branch}"
+  local response=""
+
+  if [ -n "${GH_TOKEN:-}" ]; then
+    response="$(curl -fsSL \
+      -H "Authorization: Bearer ${GH_TOKEN}" \
+      -H "Accept: application/vnd.github+json" \
+      "${api_url}" 2>/dev/null || true)"
+  else
+    response="$(curl -fsSL \
+      -H "Accept: application/vnd.github+json" \
+      "${api_url}" 2>/dev/null || true)"
+  fi
+
+  if [ -z "${response}" ]; then
+    return 0
+  fi
+
+  printf '%s' "${response}" | python3 -c '
+import json
+import sys
+
+try:
+    payload = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+
+sha = ((payload.get("object") or {}).get("sha") or "").strip()
+if sha:
+    print(sha)
+' 2>/dev/null || true
+}
+
 write_output() {
   local key="$1"
   local value="$2"
@@ -52,7 +86,7 @@ fi
 
 latest_sha=""
 for attempt in $(seq 1 "${max_retries}"); do
-  latest_sha="$(gh api "repos/${repo}/git/ref/heads/${target_branch}" --jq '.object.sha' 2>/dev/null || true)"
+  latest_sha="$(resolve_latest_sha)"
   if [ -n "${latest_sha}" ]; then
     break
   fi
