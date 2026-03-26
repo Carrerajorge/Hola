@@ -739,6 +739,7 @@ jobs:
             scripts/vps-bootstrap-bluegreen.sh \
             scripts/prod-rigorous-checks.sh \
             scripts/collect-prod-deploy-evidence.sh \
+            scripts/latest-main-guard.sh \
             scripts/verify-public-runtime-contract.mjs
           do
             fetch_asset "${asset}"
