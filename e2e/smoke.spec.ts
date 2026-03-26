@@ -29,6 +29,13 @@ function createRuntimeErrorTracker(page: Page, options?: { captureConsoleErrors?
   };
 }
 
+async function installAuthenticatedSession(page: Page) {
+  await page.addInitScript(() => {
+    localStorage.setItem('iliagpt_welcomed', 'true');
+    localStorage.removeItem('siragpt_force_signed_out');
+  });
+}
+
 async function installAuthenticatedShellMocks(page: Page) {
   let userSettings = {
     userId: TEST_USER_ID,
@@ -232,6 +239,133 @@ async function installSettingsMocks(page: Page) {
   await installAuthenticatedShellMocks(page);
 }
 
+async function installMemoryMocks(page: Page) {
+  await installAuthenticatedShellMocks(page);
+
+  const createMemory = (
+    id: string,
+    content: string,
+    type: 'fact' | 'preference' | 'instruction' | 'context' | 'persona' | 'emotional',
+    overrides?: Partial<{
+      source: string;
+      confidence: number;
+      accessCount: number;
+      createdAt: string;
+      lastAccessed: string;
+      tags: string[];
+    }>,
+  ) => ({
+    id,
+    content,
+    type,
+    metadata: {
+      source: overrides?.source ?? 'manual',
+      confidence: overrides?.confidence ?? 91,
+      accessCount: overrides?.accessCount ?? 3,
+      createdAt: overrides?.createdAt ?? '2026-03-24T15:00:00.000Z',
+      lastAccessed: overrides?.lastAccessed ?? '2026-03-25T11:00:00.000Z',
+      tags: overrides?.tags ?? ['smoke'],
+    },
+  });
+
+  let memories = [
+    createMemory('memory-1', 'Mi cumpleaños es el 15 de marzo', 'fact'),
+    createMemory('memory-2', 'Prefiero respuestas cortas y directas', 'preference', {
+      confidence: 88,
+      accessCount: 7,
+      source: 'conversation',
+    }),
+  ];
+
+  const buildStats = () => ({
+    totalMemories: memories.length,
+    byType: memories.reduce<Record<string, number>>((acc, memory) => {
+      acc[memory.type] = (acc[memory.type] ?? 0) + 1;
+      return acc;
+    }, {}),
+    avgConfidence:
+      memories.length === 0
+        ? 0
+        : Math.round(
+            memories.reduce((sum, memory) => sum + memory.metadata.confidence, 0) / memories.length,
+          ),
+    embeddingProvider: 'mock-embeddings',
+  });
+
+  await page.route('**/api/memory/semantic/recall?limit=100', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ memories }),
+    });
+  });
+
+  await page.route('**/api/memory/semantic/stats', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(buildStats()),
+    });
+  });
+
+  await page.route('**/api/memory/semantic/search', async (route) => {
+    const body = route.request().postDataJSON() as { query?: string };
+    const query = (body?.query ?? '').trim().toLowerCase();
+    const results = memories
+      .filter((memory) => memory.content.toLowerCase().includes(query))
+      .map((memory) => ({
+        chunk: memory,
+        similarity: memory.id === 'memory-1' ? 0.93 : 0.87,
+      }));
+
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ results }),
+    });
+  });
+
+  await page.route('**/api/memory/semantic/remember', async (route) => {
+    const body = route.request().postDataJSON() as { content?: string; type?: string };
+    const nextMemory = createMemory(
+      `memory-${memories.length + 1}`,
+      body.content ?? 'Nueva memoria',
+      (body.type as 'fact' | 'preference' | 'instruction' | 'context' | 'persona' | 'emotional') ??
+        'fact',
+      {
+        confidence: 95,
+        accessCount: 1,
+        createdAt: '2026-03-26T09:30:00.000Z',
+        lastAccessed: '2026-03-26T09:30:00.000Z',
+      },
+    );
+
+    memories = [nextMemory, ...memories];
+
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, memory: nextMemory }),
+    });
+  });
+
+  await page.route(/\/api\/memory\/semantic\/memory-[^/?]+$/, async (route) => {
+    if (route.request().method() !== 'DELETE') {
+      await route.continue();
+      return;
+    }
+
+    const memoryId = route.request().url().split('/').pop();
+    memories = memories.filter((memory) => memory.id !== memoryId);
+
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true }),
+    });
+  });
+}
+
 test('home loads without runtime errors', async ({ page }) => {
   const assertNoRuntimeErrors = createRuntimeErrorTracker(page);
 
@@ -255,10 +389,7 @@ test('login page loads without runtime errors', async ({ page }) => {
 test('privacy page loads as authenticated route without runtime errors', async ({ page }) => {
   const assertNoRuntimeErrors = createRuntimeErrorTracker(page, { captureConsoleErrors: true });
 
-  await page.addInitScript(() => {
-    localStorage.setItem('iliagpt_welcomed', 'true');
-    localStorage.removeItem('siragpt_force_signed_out');
-  });
+  await installAuthenticatedSession(page);
   await installPrivacyMocks(page);
 
   await page.goto('/privacy', { waitUntil: 'domcontentloaded' });
@@ -277,10 +408,7 @@ test('privacy page loads as authenticated route without runtime errors', async (
 test('settings page loads as authenticated route without runtime errors', async ({ page }) => {
   const assertNoRuntimeErrors = createRuntimeErrorTracker(page, { captureConsoleErrors: true });
 
-  await page.addInitScript(() => {
-    localStorage.setItem('iliagpt_welcomed', 'true');
-    localStorage.removeItem('siragpt_force_signed_out');
-  });
+  await installAuthenticatedSession(page);
   await installSettingsMocks(page);
 
   await page.goto('/settings', { waitUntil: 'domcontentloaded' });
@@ -297,6 +425,33 @@ test('settings page loads as authenticated route without runtime errors', async 
     'data-state',
     initialState === 'checked' ? 'unchecked' : 'checked',
   );
+
+  await page.waitForTimeout(700);
+  await assertNoRuntimeErrors();
+});
+
+test('memory page loads as authenticated route without runtime errors', async ({ page }) => {
+  const assertNoRuntimeErrors = createRuntimeErrorTracker(page, { captureConsoleErrors: true });
+
+  await installAuthenticatedSession(page);
+  await installMemoryMocks(page);
+
+  await page.goto('/memory', { waitUntil: 'domcontentloaded' });
+
+  await expect(page.getByTestId('memory-page-title')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Mi cumpleaños es el 15 de marzo')).toBeVisible({ timeout: 15_000 });
+
+  await page.getByTestId('memory-tab-search').click();
+  await page.getByTestId('memory-search-input').fill('cumpleaños');
+  await page.getByTestId('memory-search-input').press('Enter');
+  await expect(page.getByText(/93% similitud/i)).toBeVisible({ timeout: 15_000 });
+
+  await page.getByTestId('memory-tab-add').click();
+  await page.getByTestId('memory-add-textarea').fill('Siempre resume al final');
+  await page.getByTestId('button-save-memory').click();
+
+  await page.getByTestId('memory-tab-browse').click();
+  await expect(page.getByText('Siempre resume al final')).toBeVisible({ timeout: 15_000 });
 
   await page.waitForTimeout(700);
   await assertNoRuntimeErrors();

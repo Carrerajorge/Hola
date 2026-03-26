@@ -46,6 +46,7 @@
     "verify": "bash ./scripts/agent-verify.sh",
     "verify:sandbox": "AGENT_VERIFY_SKIP_TESTS=true bash ./scripts/agent-verify.sh",
     "test:smoke": "node scripts/with-env.cjs PLAYWRIGHT_BASE_URL=http://127.0.0.1:4173 PLAYWRIGHT_WEB_SERVER_COMMAND=\"npm run dev:client -- --host 127.0.0.1 --strictPort --port 4173\" PLAYWRIGHT_REUSE_EXISTING_SERVER=false -- npx playwright test e2e/smoke.spec.ts --reporter=list",
+    "test:smoke:build": "npm run build && node scripts/with-env.cjs PLAYWRIGHT_BASE_URL=http://127.0.0.1:4173 PLAYWRIGHT_WEB_SERVER_COMMAND=\"npx vite preview --host 127.0.0.1 --strictPort --port 4173\" PLAYWRIGHT_REUSE_EXISTING_SERVER=false PLAYWRIGHT_WEB_SERVER_TIMEOUT_MS=120000 -- npx playwright test e2e/smoke.spec.ts --reporter=list",
     "test:smoke:remote": "node scripts/with-env.cjs PLAYWRIGHT_SKIP_WEB_SERVER=true PLAYWRIGHT_REUSE_EXISTING_SERVER=false -- npx playwright test e2e/smoke.spec.ts --reporter=list",
     "test:e2e": "npx playwright test --reporter=html",
     "test:emaiti": "node scripts/run-emaiti-capabilities.cjs",

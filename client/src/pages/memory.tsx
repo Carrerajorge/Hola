@@ -214,7 +214,7 @@ export default function MemoryPage() {
                 <div>
                     <h1 className="text-3xl font-bold flex items-center gap-3">
                         <Brain className="h-8 w-8 text-primary" />
-                        Mis Memorias
+                        <span data-testid="memory-page-title">Mis Memorias</span>
                     </h1>
                     <p className="text-muted-foreground mt-1">
                         Gestiona lo que Ilia recuerda sobre ti
@@ -258,9 +258,9 @@ export default function MemoryPage() {
 
             <Tabs defaultValue="browse" className="space-y-6">
                 <TabsList>
-                    <TabsTrigger value="browse">Explorar</TabsTrigger>
-                    <TabsTrigger value="search">Buscar</TabsTrigger>
-                    <TabsTrigger value="add">Agregar</TabsTrigger>
+                    <TabsTrigger value="browse" data-testid="memory-tab-browse">Explorar</TabsTrigger>
+                    <TabsTrigger value="search" data-testid="memory-tab-search">Buscar</TabsTrigger>
+                    <TabsTrigger value="add" data-testid="memory-tab-add">Agregar</TabsTrigger>
                 </TabsList>
 
                 {/* Browse Tab */}
@@ -367,6 +367,7 @@ export default function MemoryPage() {
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                     onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                                    data-testid="memory-search-input"
                                 />
                                 <Button onClick={handleSearch} disabled={isSearching}>
                                     {isSearching ? (
@@ -447,10 +448,15 @@ export default function MemoryPage() {
                                     }
                                     value={newMemoryContent}
                                     onChange={(e) => setNewMemoryContent(e.target.value)}
+                                    data-testid="memory-add-textarea"
                                 />
                             </div>
 
-                            <Button onClick={handleAddMemory} disabled={!newMemoryContent.trim()}>
+                            <Button
+                                onClick={handleAddMemory}
+                                disabled={!newMemoryContent.trim()}
+                                data-testid="button-save-memory"
+                            >
                                 <Plus className="h-4 w-4 mr-2" />
                                 Guardar Memoria
                             </Button>
