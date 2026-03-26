@@ -81,7 +81,7 @@ function normalizeLoginHint(value: unknown): string | null {
 }
 
 // Store states temporarily (in production, use Redis)
-const stateStore = new Map<string, { createdAt: number; returnUrl: string }>();
+const stateStore = new Map<string, { createdAt: number; returnUrl: string; providerHint: string | null }>();
 
 // Cleanup old states every 5 minutes
 setInterval(() => {
@@ -108,7 +108,10 @@ router.get("/google", (req: Request, res: Response) => {
 
     const state = generateState();
     const returnUrl = (req.query.returnUrl as string) || "/";
-    stateStore.set(state, { createdAt: Date.now(), returnUrl });
+    // Capture provider_hint so we can auto-open the provider connection dialog
+    // after successful Google login (e.g. gemini, openai, apple, microsoft)
+    const providerHint = typeof req.query.provider_hint === "string" ? req.query.provider_hint.trim() : null;
+    stateStore.set(state, { createdAt: Date.now(), returnUrl, providerHint });
 
     // Use canonical redirect URI to match Google Cloud Console configuration
     const redirectUri = getCanonicalRedirectUri(req, "/api/auth/google/callback");
@@ -293,7 +296,15 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                 }
 
                 console.log("[Google Auth] Login successful for:", email);
-                res.redirect(stateData.returnUrl || "/?auth=success");
+                // If a provider_hint was passed (gemini, openai, etc.), redirect with
+                // auto_connect_provider so the client auto-opens the connection dialog
+                let redirectTarget = stateData.returnUrl || "/";
+                const separator = redirectTarget.includes("?") ? "&" : "?";
+                redirectTarget += `${separator}auth=success`;
+                if (stateData.providerHint) {
+                    redirectTarget += `&auto_connect_provider=${encodeURIComponent(stateData.providerHint)}`;
+                }
+                res.redirect(redirectTarget);
             });
         });
 

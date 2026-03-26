@@ -108,18 +108,19 @@ export default function Home() {
   }, [user, isLoading, isReady, setLocation]);
 
   // After OAuth login with provider_hint, auto-trigger the provider connection dialog.
-  // The server redirects to /?auth=success&provider=gemini (or openai) after Google OAuth.
+  // The server redirects to /?auth=success&auto_connect_provider=gemini (or openai) after Google OAuth.
   // We persist the hint in sessionStorage so it survives component re-mounts and lazy loading.
   useEffect(() => {
     if (!isReady || !user) return;
     const params = new URLSearchParams(window.location.search);
-    const providerFromUrl = params.get("provider");
+    const providerFromUrl = params.get("auto_connect_provider") || params.get("provider");
     if (providerFromUrl === "gemini" || providerFromUrl === "openai") {
       // Persist in sessionStorage so we don't lose it if the component remounts
       try {
         sessionStorage.setItem("iliagpt:pending-provider-connect", providerFromUrl);
       } catch {}
       // Clean up URL
+      params.delete("auto_connect_provider");
       params.delete("provider");
       params.delete("auth");
       const rest = params.toString();
