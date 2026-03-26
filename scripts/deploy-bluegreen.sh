@@ -494,18 +494,35 @@ pull_error_is_retryable() {
 pin_image_locally() {
   local image_ref="$1"
   local pin_name
-  local pin_id
+  local pin_name_base
+  local pin_id=""
+  local stale_pin_ids=""
+  local attempt
 
-  pin_name="iliagpt-deploy-pin-$(printf '%s' "${image_ref}" | sha256sum | awk '{print substr($1,1,12)}')"
+  pin_name_base="iliagpt-deploy-pin-$(printf '%s' "${image_ref}" | sha256sum | awk '{print substr($1,1,12)}')"
+  stale_pin_ids="$(docker ps -aq --filter "name=${pin_name_base}" 2>/dev/null || true)"
+  if [ -n "${stale_pin_ids}" ]; then
+    while IFS= read -r stale_pin_id; do
+      [ -n "${stale_pin_id}" ] || continue
+      docker rm -f "${stale_pin_id}" >/dev/null 2>&1 || true
+    done <<EOF
+${stale_pin_ids}
+EOF
+  fi
 
-  docker rm -f "${pin_name}" >/dev/null 2>&1 || true
-
-  pin_id="$(
-    docker create \
-      --label "iliagpt.deploy.preserve=true" \
-      --name "${pin_name}" \
-      "${image_ref}" >/dev/null && docker inspect -f '{{.Id}}' "${pin_name}"
-  )"
+  for attempt in 1 2 3; do
+    pin_name="${pin_name_base}-$$-${RANDOM}"
+    pin_id="$(
+      docker create \
+        --label "iliagpt.deploy.preserve=true" \
+        --name "${pin_name}" \
+        "${image_ref}" 2>/dev/null || true
+    )"
+    if [ -n "${pin_id}" ]; then
+      break
+    fi
+    sleep 1
+  done
 
   if [ -n "${pin_id}" ]; then
     IMAGE_PIN_IDS+=("${pin_id}")
@@ -961,6 +978,35 @@ else
   ACTIVE_SLOT="blue"
 fi
 
+case "${ACTIVE_SLOT}" in
+  blue|green) ;;
+  *)
+    logw "Deploy state reported invalid active slot '${ACTIVE_SLOT}'. Falling back to blue."
+    ACTIVE_SLOT="blue"
+    ACTIVE_IMAGE_TAG=""
+    ACTIVE_APP_VERSION=""
+    ;;
+esac
+
+OBSERVED_ACTIVE_PORT="$(
+  grep -oE 'server 127\\.0\\.0\\.1:[0-9]+' "${NGINX_CONF_DIR}/iliagpt-upstream.conf" 2>/dev/null |
+    sed -E 's/.*://' |
+    head -n 1 ||
+    true
+)"
+if [ "${OBSERVED_ACTIVE_PORT}" = "5000" ] || [ "${OBSERVED_ACTIVE_PORT}" = "5001" ]; then
+  OBSERVED_ACTIVE_SLOT="blue"
+  if [ "${OBSERVED_ACTIVE_PORT}" = "5001" ]; then
+    OBSERVED_ACTIVE_SLOT="green"
+  fi
+  if [ "${OBSERVED_ACTIVE_SLOT}" != "${ACTIVE_SLOT}" ]; then
+    logw "Deploy state says active slot is ${ACTIVE_SLOT}, but Nginx upstream currently points to ${OBSERVED_ACTIVE_SLOT} (${OBSERVED_ACTIVE_PORT}). Reconciling to observed active slot."
+    ACTIVE_SLOT="${OBSERVED_ACTIVE_SLOT}"
+    ACTIVE_IMAGE_TAG=""
+    ACTIVE_APP_VERSION=""
+  fi
+fi
+
 if [ "${ACTIVE_SLOT}" = "blue" ]; then
   NEW_SLOT="green"
   NEW_PORT="5001"
@@ -970,6 +1016,7 @@ else
   NEW_PORT="5000"
   OLD_PORT="5001"
 fi
+ACTIVE_PORT="${OLD_PORT}"
 
 log "Active slot:  ${ACTIVE_SLOT} (port ${OLD_PORT})"
 log "Deploying to: ${NEW_SLOT} (port ${NEW_PORT})"
@@ -1090,8 +1137,13 @@ find_redis_aof_manifest() {
 
 backup_redis_aof_files() {
   local repair_image="$1"
-  local manifest_path="$2"
+  local manifest_path="${2:-}"
   local backup_root="${DEPLOY_PATH}/backups/redis-aof"
+
+  if [ -z "${manifest_path}" ]; then
+    loge "Redis AOF manifest path is required for backup."
+    return 1
+  fi
 
   mkdir -p "${backup_root}"
 
@@ -1191,8 +1243,12 @@ list_slot_container_ids() {
 }
 
 list_slot_service_container_ids() {
-  local slot_name="$1"
-  local service_name="$2"
+  local slot_name="${1:-}"
+  local service_name="${2:-}"
+
+  if [ -z "${slot_name}" ] || [ -z "${service_name}" ]; then
+    return 0
+  fi
 
   {
     docker ps -aq --no-trunc --filter "label=com.docker.compose.project=hola-${slot_name}" --filter "label=com.docker.compose.service=${service_name}" 2>/dev/null || true
@@ -1372,8 +1428,12 @@ print_port_listener_diagnostics() {
 }
 
 known_manual_service_holds_port() {
-  local service_name="$1"
-  local target_port="$2"
+  local service_name="${1:-}"
+  local target_port="${2:-}"
+
+  if [ -z "${service_name}" ] || [ -z "${target_port}" ]; then
+    return 1
+  fi
 
   if ! command -v systemctl >/dev/null 2>&1 || ! command -v ss >/dev/null 2>&1; then
     return 1
@@ -1482,9 +1542,14 @@ legacy_upstream_referenced() {
 }
 
 ensure_legacy_upstream_file() {
-  local slot="$1"
-  local port="$2"
+  local slot="${1:-}"
+  local port="${2:-}"
   local legacy_file="${NGINX_CONF_DIR}/iliagpt-upstream-${slot}.conf"
+
+  if [ -z "${slot}" ] || [ -z "${port}" ]; then
+    logw "Skipping legacy upstream sync because slot/port metadata is incomplete."
+    return 1
+  fi
 
   if [ ! -L "${legacy_file}" ] && [ -f "${legacy_file}" ]; then
     return 0
@@ -1962,9 +2027,9 @@ else
 fi
 echo ""
 
-log "[13b/15] Verifying standby port ${ACTIVE_PORT} is free..."
-ensure_host_port_free_or_abort "${ACTIVE_PORT}"
-logok "Standby port ${ACTIVE_PORT} is free."
+log "[13b/15] Verifying retired port ${OLD_PORT} is free..."
+ensure_host_port_free_or_abort "${OLD_PORT}"
+logok "Retired port ${OLD_PORT} is free."
 echo ""
 
 # ── Step 13: Verify OCR + infrastructure health ──────────
