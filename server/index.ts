@@ -522,4 +522,11 @@ async function bootstrapOpenClawAsync(): Promise<void> {
       }
     });
   });
-})();
+})().catch((err) => {
+  console.error("[FATAL] Server startup failed with unhandled error:", err);
+  process.exit(1);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[FATAL] Unhandled promise rejection:", reason);
+});
