@@ -119,7 +119,7 @@ vi.mock("@/services/codexRuntime", () => ({
   spawnCodexSubagents: (...args: unknown[]) => spawnCodexSubagentsMock(...args),
 }));
 
-vi.mock("sonner", () => ({
+vi.mock("@/lib/notify", () => ({
   toast: {
     success: (...args: unknown[]) => toastSuccessMock(...args),
     error: (...args: unknown[]) => toastErrorMock(...args),
@@ -317,6 +317,30 @@ describe("CodexPage", () => {
               local_ops_filesystem_devops: 11,
               documents_and_library: 8,
             },
+          }),
+        };
+      }
+
+      if (url === "/api/openclaw/runtime/health") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            timestamp: "2026-03-26T11:00:00.000Z",
+            modules: {
+              skills: true,
+              tools: true,
+              gateway: true,
+            },
+          }),
+        };
+      }
+
+      if (url === "/api/openclaw/runtime/skills") {
+        return {
+          ok: true,
+          json: async () => ({
+            count: 48,
           }),
         };
       }

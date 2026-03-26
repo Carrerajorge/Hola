@@ -114,6 +114,11 @@ export function persistCodexWorkspaceDraft(
   return snapshot;
 }
 
+export function clearCodexWorkspaceDraft(): void {
+  if (!canUseStorage()) return;
+  window.localStorage.removeItem(CODEX_WORKSPACE_DRAFT_STORAGE_KEY);
+}
+
 export function loadCodexRunResume(): CodexRunResumeSnapshot | null {
   const payload = readJson(CODEX_RUN_RESUME_STORAGE_KEY);
   if (!payload || typeof payload !== "object") return null;
@@ -122,10 +127,9 @@ export function loadCodexRunResume(): CodexRunResumeSnapshot | null {
   const runId = normalizeOptionalId(record.runId);
   if (!runId) return null;
 
-  const updatedAt =
-    typeof record.updatedAt === "number" && Number.isFinite(record.updatedAt)
-      ? Math.round(record.updatedAt)
-      : Date.now();
+  const updatedAt = typeof record.updatedAt === "number" && Number.isFinite(record.updatedAt)
+    ? Math.round(record.updatedAt)
+    : Date.now();
 
   return {
     version: 1,
@@ -135,10 +139,9 @@ export function loadCodexRunResume(): CodexRunResumeSnapshot | null {
     status: typeof record.status === "string" && record.status.trim().length > 0 ? record.status.trim() : "running",
     summary: typeof record.summary === "string" ? record.summary : "",
     objective: typeof record.objective === "string" ? record.objective : "",
-    lastEventTitle:
-      typeof record.lastEventTitle === "string" && record.lastEventTitle.trim().length > 0
-        ? record.lastEventTitle.trim()
-        : null,
+    lastEventTitle: typeof record.lastEventTitle === "string" && record.lastEventTitle.trim().length > 0
+      ? record.lastEventTitle.trim()
+      : null,
     updatedAt,
   };
 }

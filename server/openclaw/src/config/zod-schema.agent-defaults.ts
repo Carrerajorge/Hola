@@ -1,4 +1,4 @@
-import { z } from "zod/v4";
+import { z } from "zod";
 import { isValidNonNegativeByteSizeString } from "./byte-size.js";
 import {
   HeartbeatSchema,

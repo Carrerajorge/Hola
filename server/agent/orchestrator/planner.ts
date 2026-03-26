@@ -107,9 +107,9 @@ ACADEMIC RESEARCH TOOLS:
 - "scopus_search" — Search Scopus (Elsevier) for scientific articles
     args: { query: "circular economy supply chain", maxResults?: 25, sortBy?: "relevance"|"date"|"citedby", yearFrom?: 2020, yearTo?: 2025 }
 - "academic_search" — Unified multi-source search (Scopus + OpenAlex + PubMed + SciELO + Redalyc + WoS + DuckDuckGo)
-    args: { query: "search terms", maxResults?: 50, maxPerSource?: 30, yearFrom?: 2020, yearTo?: 2025, sources?: ["scopus","openalex","pubmed","scielo","redalyc"], language?: "es", affilCountries?: ["Mexico","Spain","Colombia"] }
+    args: { query: "search terms", maxResults?: 500, maxPerSource?: 250, yearFrom?: 2020, yearTo?: 2025, sources?: ["scopus","openalex","pubmed","scielo","redalyc"], language?: "es", affilCountries?: ["Mexico","Spain","Colombia"] }
 - "academic_export" — Full academic pipeline: searches, deduplicates, generates Excel + Word with APA 7th citations
-    args: { prompt: "buscar 50 articulos de economia circular en latinoamerica del 2021 al 2025", excelPath?: "articles.xlsx", wordPath?: "citations.docx" }
+    args: { prompt: "buscar 500 articulos de economia circular en latinoamerica del 2021 al 2025", excelPath?: "articles.xlsx", wordPath?: "citations.docx" }
 - "format_citations" — Generate APA 7th edition citations from article data
     args: { articles?: [...] }  (or reads articles from dependency results)
 

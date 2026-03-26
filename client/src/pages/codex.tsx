@@ -35,9 +35,7 @@ import {
   Users2,
   type LucideIcon,
 } from "lucide-react";
-import { toast } from "sonner";
-
-import { DEFAULT_OPENCLAW_RELEASE_TAG } from "@shared/openclawRelease";
+import { toast } from "@/lib/notify";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -148,6 +146,20 @@ interface OpenClawCapabilityStats {
   gapsByCategory: Record<string, number>;
 }
 
+interface OpenClawRuntimeHealth {
+  ok: boolean;
+  timestamp: string;
+  modules: {
+    skills: boolean;
+    tools: boolean;
+    gateway: boolean;
+  };
+}
+
+interface OpenClawRuntimeSkillsSnapshot {
+  count: number;
+}
+
 type OpenClawControlUiAuthMode = "none" | "token" | "password" | "trusted-proxy";
 
 interface OpenClawControlUiMeta {
@@ -160,8 +172,9 @@ interface OpenClawControlUiMeta {
   reason?: string;
 }
 
-const OPENCLAW_RELEASE_TAG = DEFAULT_OPENCLAW_RELEASE_TAG;
+const OPENCLAW_RELEASE_TAG = "v2026.3.22";
 const OPENCLAW_RELEASE_REFRESH_MS = 15 * 60 * 1000;
+const OPENCLAW_RUNTIME_REFRESH_MS = 30 * 1000;
 const OPENCLAW_CONTROL_UI_SESSION_KEY = "main";
 const CODEX_PROFILE_SEQUENCE: readonly CodexExecutionProfile[] = CODEX_EXECUTION_PROFILE_OPTIONS.map((option) => option.value);
 
@@ -218,9 +231,9 @@ function formatResumeTimestamp(timestamp: number): string {
 }
 
 function formatFullDate(value?: string | null): string {
-  if (!value) return "Sin fecha disponible";
+  if (!value) return "Sin fecha remota";
   const timestamp = new Date(value).getTime();
-  if (!Number.isFinite(timestamp)) return "Sin fecha disponible";
+  if (!Number.isFinite(timestamp)) return "Sin fecha remota";
   return new Intl.DateTimeFormat("es-BO", {
     year: "numeric",
     month: "long",
@@ -397,10 +410,10 @@ function getOpenClawSyncTone(status: OpenClawReleaseSyncStatus): string {
 }
 
 function getOpenClawSyncLabel(status: OpenClawReleaseSyncStatus): string {
-  if (status === "synced") return "Integrado";
-  if (status === "update_available") return "Referencia embebida";
-  if (status === "tracking_requested") return "Referencia parcial";
-  return "Bundle local";
+  if (status === "synced") return "Sincronizado";
+  if (status === "update_available") return "Nueva release detectada";
+  if (status === "tracking_requested") return "Siguiendo release base";
+  return "Modo local";
 }
 
 async function fetchOpenClawReleaseSnapshot(signal?: AbortSignal): Promise<OpenClawReleaseSnapshot> {
@@ -414,20 +427,12 @@ async function fetchOpenClawReleaseSnapshot(signal?: AbortSignal): Promise<OpenC
 
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new Error(
-      typeof payload?.error === "string"
-        ? payload.error
-        : "No se pudieron cargar los metadatos nativos de OpenClaw.",
-    );
+    throw new Error(typeof payload?.error === "string" ? payload.error : "No se pudo sincronizar OpenClaw.");
   }
 
   const payload = await response.json();
   if (!payload?.success) {
-    throw new Error(
-      typeof payload?.error === "string"
-        ? payload.error
-        : "No se pudieron cargar los metadatos nativos de OpenClaw.",
-    );
+    throw new Error(typeof payload?.error === "string" ? payload.error : "No se pudo sincronizar OpenClaw.");
   }
 
   return payload as OpenClawReleaseSnapshot;
@@ -454,6 +459,38 @@ async function fetchOpenClawCapabilityStats(signal?: AbortSignal): Promise<OpenC
   return payload as OpenClawCapabilityStats;
 }
 
+async function fetchOpenClawRuntimeHealth(signal?: AbortSignal): Promise<OpenClawRuntimeHealth> {
+  const response = await apiFetch("/api/openclaw/runtime/health", {
+    method: "GET",
+    credentials: "include",
+    signal,
+    timeoutMs: 6_000,
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(typeof payload?.error === "string" ? payload.error : "No se pudo leer el estado runtime.");
+  }
+
+  return (await response.json()) as OpenClawRuntimeHealth;
+}
+
+async function fetchOpenClawRuntimeSkills(signal?: AbortSignal): Promise<OpenClawRuntimeSkillsSnapshot> {
+  const response = await apiFetch("/api/openclaw/runtime/skills", {
+    method: "GET",
+    credentials: "include",
+    signal,
+    timeoutMs: 6_000,
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(typeof payload?.error === "string" ? payload.error : "No se pudieron cargar las skills runtime.");
+  }
+
+  return (await response.json()) as OpenClawRuntimeSkillsSnapshot;
+}
+
 async function fetchOpenClawControlUiMeta(signal?: AbortSignal): Promise<OpenClawControlUiMeta> {
   const params = new URLSearchParams({ session: OPENCLAW_CONTROL_UI_SESSION_KEY });
   const response = await apiFetch(`/api/openclaw/control-ui/meta?${params.toString()}`, {
@@ -465,29 +502,18 @@ async function fetchOpenClawControlUiMeta(signal?: AbortSignal): Promise<OpenCla
 
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new Error(
-      typeof payload?.error === "string"
-        ? payload.error
-        : "No se pudo preparar el panel nativo de OpenClaw.",
-    );
+    throw new Error(typeof payload?.error === "string" ? payload.error : "No se pudo preparar el panel nativo de OpenClaw.");
   }
 
   const payload = await response.json();
   if (!payload?.success) {
-    throw new Error(
-      typeof payload?.error === "string"
-        ? payload.error
-        : "No se pudo preparar el panel nativo de OpenClaw.",
-    );
+    throw new Error(typeof payload?.error === "string" ? payload.error : "No se pudo preparar el panel nativo de OpenClaw.");
   }
 
   return payload as OpenClawControlUiMeta;
 }
 
-function buildOpenClawControlUiLaunchUrl(
-  launchUrl: string,
-  sessionKey = OPENCLAW_CONTROL_UI_SESSION_KEY,
-): string {
+function buildOpenClawControlUiLaunchUrl(launchUrl: string, sessionKey = OPENCLAW_CONTROL_UI_SESSION_KEY): string {
   const next = new URL(launchUrl, window.location.origin);
   next.searchParams.set("session", sessionKey);
   next.searchParams.set("refresh", String(Date.now()));
@@ -532,6 +558,12 @@ export default function CodexPage() {
   const [openClawStats, setOpenClawStats] = useState<OpenClawCapabilityStats | null>(null);
   const [isOpenClawLoading, setIsOpenClawLoading] = useState(true);
   const [openClawError, setOpenClawError] = useState<string | null>(null);
+  const [openClawRuntimeHealth, setOpenClawRuntimeHealth] = useState<OpenClawRuntimeHealth | null>(null);
+  const [openClawRuntimeSkills, setOpenClawRuntimeSkills] = useState<OpenClawRuntimeSkillsSnapshot | null>(null);
+  const [openClawRuntimeUpdatedAt, setOpenClawRuntimeUpdatedAt] = useState<string | null>(null);
+  const [isOpenClawRuntimeLoading, setIsOpenClawRuntimeLoading] = useState(true);
+  const [isOpenClawRuntimeReloading, setIsOpenClawRuntimeReloading] = useState(false);
+  const [openClawRuntimeError, setOpenClawRuntimeError] = useState<string | null>(null);
   const [openClawControlUiMeta, setOpenClawControlUiMeta] = useState<OpenClawControlUiMeta | null>(null);
   const [isOpenClawControlUiMetaLoading, setIsOpenClawControlUiMetaLoading] = useState(false);
   const [openClawControlUiMetaError, setOpenClawControlUiMetaError] = useState<string | null>(null);
@@ -649,7 +681,7 @@ export default function CodexPage() {
           nextErrors.push(
             releaseResult.reason instanceof Error
               ? releaseResult.reason.message
-              : "No se pudieron cargar los metadatos nativos de OpenClaw.",
+              : "No se pudo sincronizar OpenClaw.",
           );
         }
 
@@ -745,12 +777,64 @@ export default function CodexPage() {
     }
     setIsOpenClawControlUiFrameLoading(true);
     setOpenClawControlUiFrameSrc(
-      buildOpenClawControlUiLaunchUrl(
-        openClawControlUiMeta.launchUrl,
-        OPENCLAW_CONTROL_UI_SESSION_KEY,
-      ),
+      buildOpenClawControlUiLaunchUrl(openClawControlUiMeta.launchUrl, OPENCLAW_CONTROL_UI_SESSION_KEY),
     );
   }, [activeView, isAuthenticated, openClawControlUiFrameSrc, openClawControlUiMeta]);
+
+  useEffect(() => {
+    let isActive = true;
+    const abortController = new AbortController();
+
+    const loadRuntime = async (showLoading = true) => {
+      if (showLoading) setIsOpenClawRuntimeLoading(true);
+      try {
+        const [healthResult, skillsResult] = await Promise.allSettled([
+          fetchOpenClawRuntimeHealth(abortController.signal),
+          fetchOpenClawRuntimeSkills(abortController.signal),
+        ]);
+
+        if (!isActive) return;
+
+        const nextErrors: string[] = [];
+
+        if (healthResult.status === "fulfilled") {
+          setOpenClawRuntimeHealth(healthResult.value);
+        } else if (healthResult.reason?.name !== "AbortError") {
+          nextErrors.push(
+            healthResult.reason instanceof Error
+              ? healthResult.reason.message
+              : "No se pudo leer el estado runtime.",
+          );
+        }
+
+        if (skillsResult.status === "fulfilled") {
+          setOpenClawRuntimeSkills(skillsResult.value);
+        } else if (skillsResult.reason?.name !== "AbortError") {
+          nextErrors.push(
+            skillsResult.reason instanceof Error
+              ? skillsResult.reason.message
+              : "No se pudieron cargar las skills runtime.",
+          );
+        }
+
+        setOpenClawRuntimeError(nextErrors.length > 0 ? nextErrors[0] : null);
+        setOpenClawRuntimeUpdatedAt(new Date().toISOString());
+      } finally {
+        if (isActive) setIsOpenClawRuntimeLoading(false);
+      }
+    };
+
+    void loadRuntime(true);
+    const intervalId = window.setInterval(() => {
+      void loadRuntime(false);
+    }, OPENCLAW_RUNTIME_REFRESH_MS);
+
+    return () => {
+      isActive = false;
+      abortController.abort();
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   const groupedSessions = useMemo(() => {
     const groups = new Map<string, CodexSession[]>();
@@ -774,9 +858,11 @@ export default function CodexPage() {
   const releaseNotes = activeRelease?.notes || "";
   const releaseSyncStatus = openClawRelease?.sync.status || "offline";
   const releaseSyncLabel = getOpenClawSyncLabel(releaseSyncStatus);
-  const bundledReleaseLabel =
-    latestRelease?.tagName ||
-    (openClawRelease?.bundled.version ? `v${openClawRelease.bundled.version}` : null);
+  const runtimeModules = openClawRuntimeHealth?.modules;
+  const runtimeOk = openClawRuntimeHealth?.ok === true;
+  const runtimeStatusLabel = runtimeOk ? "Runtime activo" : "Runtime en revisión";
+  const runtimeStatusTone = runtimeOk ? "bg-[#e9f4ee] text-[var(--codex-accent-ink)]" : "bg-[#f7efe3] text-[#745b2d]";
+  const runtimeUpdatedLabel = openClawRuntimeUpdatedAt ? formatFullDate(openClawRuntimeUpdatedAt) : "Sin lectura";
   const topGapCategories = useMemo(
     () =>
       Object.entries(openClawStats?.gapsByCategory || {})
@@ -845,6 +931,20 @@ export default function CodexPage() {
     if (!resumeSnapshot) return "";
     return `${getCodexExecutionProfileOption(resumeSnapshot.executionProfile).runtimeLabel} · ${getRunResumeStatusLabel(resumeSnapshot.status)}`;
   }, [resumeSnapshot]);
+  const openClawControlUiAuthLabel = useMemo(() => {
+    switch (openClawControlUiMeta?.authMode) {
+      case "token":
+        return "Auth token compartido";
+      case "trusted-proxy":
+        return "Auth por proxy confiable";
+      case "none":
+        return "Sin auth remota";
+      case "password":
+        return "Auth manual por password";
+      default:
+        return "Auth nativa";
+    }
+  }, [openClawControlUiMeta?.authMode]);
 
   useEffect(() => {
     const snapshot = persistCodexWorkspaceDraft({
@@ -903,17 +1003,70 @@ export default function CodexPage() {
       setOpenClawStats(stats);
       setOpenClawError(null);
       toast.success("OpenClaw actualizado", {
-        description: "Recargué la metadata embebida y la cobertura local de OpenClaw.",
+        description: "Traje la release, la cobertura y verifiqué si hay cambios nuevos en GitHub.",
       });
     } catch (error) {
-      setOpenClawError(error instanceof Error ? error.message : "No se pudieron cargar los metadatos nativos de OpenClaw.");
-      toast.error("No se pudo actualizar la metadata nativa", {
-        description: error instanceof Error ? error.message : "Error inesperado al leer la release embebida.",
+      setOpenClawError(error instanceof Error ? error.message : "No se pudo sincronizar OpenClaw.");
+      toast.error("No se pudo sincronizar OpenClaw", {
+        description: error instanceof Error ? error.message : "Error inesperado al consultar la release.",
       });
     } finally {
       setIsOpenClawLoading(false);
     }
   }, []);
+
+  const refreshOpenClawRuntime = useCallback(async () => {
+    setIsOpenClawRuntimeLoading(true);
+    try {
+      const [health, skills] = await Promise.all([
+        fetchOpenClawRuntimeHealth(),
+        fetchOpenClawRuntimeSkills(),
+      ]);
+      setOpenClawRuntimeHealth(health);
+      setOpenClawRuntimeSkills(skills);
+      setOpenClawRuntimeUpdatedAt(new Date().toISOString());
+      setOpenClawRuntimeError(null);
+      toast.success("Estado runtime actualizado", {
+        description: "Sincronizamos salud, módulos y skills activas de OpenClaw.",
+      });
+    } catch (error) {
+      setOpenClawRuntimeError(error instanceof Error ? error.message : "No se pudo actualizar el estado runtime.");
+      toast.error("No se pudo actualizar el estado runtime", {
+        description: error instanceof Error ? error.message : "Error inesperado al consultar el runtime.",
+      });
+    } finally {
+      setIsOpenClawRuntimeLoading(false);
+    }
+  }, []);
+
+  const reloadOpenClawSkills = useCallback(async () => {
+    setIsOpenClawRuntimeReloading(true);
+    try {
+      const response = await apiFetch("/api/openclaw/runtime/skills/reload", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        timeoutMs: 12_000,
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(typeof payload?.error === "string" ? payload.error : "No se pudieron recargar las skills.");
+      }
+
+      await refreshOpenClawRuntime();
+      toast.success("Skills recargadas", {
+        description: "OpenClaw reinició el registro de skills y quedó listo.",
+      });
+    } catch (error) {
+      setOpenClawRuntimeError(error instanceof Error ? error.message : "No se pudieron recargar las skills.");
+      toast.error("No se pudieron recargar las skills", {
+        description: error instanceof Error ? error.message : "Error inesperado al recargar skills.",
+      });
+    } finally {
+      setIsOpenClawRuntimeReloading(false);
+    }
+  }, [refreshOpenClawRuntime]);
 
   const loadRepositoryBranches = useCallback(async (project: Project | null) => {
     if (!isAuthenticated) {
@@ -1171,10 +1324,7 @@ export default function CodexPage() {
     const meta = openClawControlUiMeta ?? (await refreshOpenClawControlUi());
     if (!meta?.available) {
       toast.error("No pude abrir el panel integrado", {
-        description:
-          meta?.reason ||
-          openClawControlUiMetaError ||
-          "El gateway todavía no expone un acceso embebible.",
+        description: meta?.reason || openClawControlUiMetaError || "El gateway todavía no expone un acceso embebible.",
       });
       return;
     }
@@ -1186,13 +1336,7 @@ export default function CodexPage() {
     toast.success("Panel OpenClaw reconectado", {
       description: "Renové el acceso nativo dentro del workspace seguro.",
     });
-  }, [
-    isAuthenticated,
-    login,
-    openClawControlUiMeta,
-    openClawControlUiMetaError,
-    refreshOpenClawControlUi,
-  ]);
+  }, [isAuthenticated, login, openClawControlUiMeta, openClawControlUiMetaError, refreshOpenClawControlUi]);
 
   const handleOpenClawControlUiNewTab = useCallback(async () => {
     if (!isAuthenticated) {
@@ -1207,8 +1351,7 @@ export default function CodexPage() {
 
     if (!targetUrl) {
       toast.error("No pude abrir OpenClaw", {
-        description:
-          openClawControlUiMetaError || "El panel nativo todavía no tiene una ruta lista.",
+        description: openClawControlUiMetaError || "El panel nativo todavía no tiene una ruta lista.",
       });
       return;
     }
@@ -1216,25 +1359,17 @@ export default function CodexPage() {
     const openedWindow = window.open(targetUrl, "_blank", "noopener,noreferrer");
     if (!openedWindow) {
       toast.error("El navegador bloqueó la pestaña", {
-        description:
-          "Permite ventanas emergentes para abrir OpenClaw en una pestaña segura.",
+        description: "Permite ventanas emergentes para abrir OpenClaw en una pestaña segura.",
       });
       return;
     }
 
     if (!meta?.available) {
       toast.error("Abrí la ruta manual de OpenClaw", {
-        description:
-          meta?.reason || "El acceso nativo aún no está disponible para este gateway.",
+        description: meta?.reason || "El acceso nativo aún no está disponible para este gateway.",
       });
     }
-  }, [
-    isAuthenticated,
-    login,
-    openClawControlUiMeta,
-    openClawControlUiMetaError,
-    refreshOpenClawControlUi,
-  ]);
+  }, [isAuthenticated, login, openClawControlUiMeta, openClawControlUiMetaError, refreshOpenClawControlUi]);
 
   const handleCommitShortcut = () => {
     if (draft.trim()) {
@@ -1507,16 +1642,11 @@ export default function CodexPage() {
               <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-5 px-4 py-6 md:px-6 lg:px-8">
                 {!isAuthenticated ? (
                   <section className="rounded-[32px] border border-[var(--codex-border)] bg-[rgba(255,255,255,0.9)] p-6 shadow-[var(--codex-shadow)]">
-                    <p className="text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">
-                      OpenClaw Native
-                    </p>
-                    <h2 className="mt-3 text-2xl font-semibold">
-                      Activa el panel operativo seguro
-                    </h2>
+                    <p className="text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">OpenClaw Native</p>
+                    <h2 className="mt-3 text-2xl font-semibold">Activa el panel operativo seguro</h2>
                     <p className="mt-3 max-w-3xl text-sm leading-7 text-[var(--codex-muted)]">
-                      Esta vista ahora prepara OpenClaw con acceso nativo y autenticado dentro
-                      de ILIAGPT. Inicia sesión para abrir el panel ya conectado, sin pegar
-                      tokens manualmente.
+                      Esta vista ahora prepara OpenClaw con acceso nativo y autenticado dentro de ILIAGPT.
+                      Inicia sesión para abrir el panel ya conectado, sin pegar tokens manualmente.
                     </p>
                     <Button
                       className="mt-5 rounded-full bg-[var(--codex-accent)] px-5 text-white hover:bg-[var(--codex-accent)]/90"
@@ -1537,24 +1667,24 @@ export default function CodexPage() {
                               Puente nativo OpenClaw
                             </span>
                             <span className="inline-flex items-center rounded-full border border-[var(--codex-border)] bg-white/80 px-3 py-1.5 text-xs text-[var(--codex-muted)]">
-                              {openClawControlUiMeta?.authMode || "token"}
+                              {openClawControlUiAuthLabel}
                             </span>
                             <span className="inline-flex items-center rounded-full border border-[var(--codex-border)] bg-white/80 px-3 py-1.5 text-xs text-[var(--codex-muted)]">
                               Embed same-origin
                             </span>
+                            {activeRelease?.tagName ? (
+                              <span className="inline-flex items-center rounded-full border border-[var(--codex-border)] bg-white/80 px-3 py-1.5 text-xs text-[var(--codex-muted)]">
+                                Release {activeRelease.tagName}
+                              </span>
+                            ) : null}
                           </div>
-                          <h2 className="mt-4 text-2xl font-semibold">
-                            OpenClaw embebido como parte real del workspace
-                          </h2>
+                          <h2 className="mt-4 text-2xl font-semibold">OpenClaw embebido como parte real del workspace</h2>
                           <p className="mt-3 max-w-3xl text-sm leading-7 text-[var(--codex-muted)]">
-                            La pestaña ya no depende de una conexión manual. Ahora resuelve si
-                            el gateway puede abrirse en modo nativo y lanza el panel con
-                            autenticación segura dentro de esta misma experiencia.
+                            La pestaña ya no depende de una conexión manual. Ahora resuelve si el gateway puede abrirse
+                            en modo nativo y lanza el panel con autenticación segura dentro de esta misma experiencia.
                           </p>
                           {openClawControlUiMetaError ? (
-                            <p className="mt-3 text-sm text-[#8a5f18]">
-                              {openClawControlUiMetaError}
-                            </p>
+                            <p className="mt-3 text-sm text-[#8a5f18]">{openClawControlUiMetaError}</p>
                           ) : null}
                         </div>
 
@@ -1589,12 +1719,7 @@ export default function CodexPage() {
                             disabled={isOpenClawControlUiMetaLoading}
                             onClick={() => void refreshOpenClawControlUi()}
                           >
-                            <RefreshCw
-                              className={cn(
-                                "mr-2 h-4 w-4",
-                                isOpenClawControlUiMetaLoading && "animate-spin",
-                              )}
-                            />
+                            <RefreshCw className={cn("mr-2 h-4 w-4", isOpenClawControlUiMetaLoading && "animate-spin")} />
                             Revisar acceso
                           </Button>
                         </div>
@@ -1605,18 +1730,13 @@ export default function CodexPage() {
                       <section className="flex min-h-[320px] items-center justify-center rounded-[32px] border border-[var(--codex-border)] bg-[rgba(255,255,255,0.86)] p-6 shadow-[var(--codex-shadow)]">
                         <div className="flex items-center gap-3 text-sm text-[var(--codex-muted)]">
                           <Loader2 className="h-5 w-5 animate-spin text-[var(--codex-accent)]" />
-                          Preparando acceso nativo y verificando cómo autenticar OpenClaw sin
-                          fricción.
+                          Preparando acceso nativo y verificando cómo autenticar OpenClaw sin fricción.
                         </div>
                       </section>
                     ) : openClawControlUiMeta && !openClawControlUiMeta.available ? (
                       <section className="rounded-[32px] border border-[var(--codex-border)] bg-[rgba(255,255,255,0.88)] p-6 shadow-[var(--codex-shadow)]">
-                        <p className="text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">
-                          Acceso parcial
-                        </p>
-                        <h3 className="mt-3 text-xl font-semibold">
-                          El gateway todavía no permite un embed automático completo
-                        </h3>
+                        <p className="text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">Acceso parcial</p>
+                        <h3 className="mt-3 text-xl font-semibold">El gateway todavía no permite un embed automático completo</h3>
                         <p className="mt-3 max-w-3xl text-sm leading-7 text-[var(--codex-muted)]">
                           {openClawControlUiMeta.reason ||
                             "OpenClaw necesita un ajuste adicional de autenticación antes de poder abrirse sin intervención manual."}
@@ -1645,17 +1765,14 @@ export default function CodexPage() {
                       <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[32px] border border-[var(--codex-border)] bg-[rgba(255,255,255,0.88)] shadow-[var(--codex-shadow)]">
                         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--codex-border)] px-5 py-4">
                           <div>
-                            <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">
-                              Embedded Control UI
-                            </p>
+                            <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Embedded Control UI</p>
                             <p className="mt-1 text-sm text-[var(--codex-muted)]">
-                              La sesión se abre en modo {OPENCLAW_CONTROL_UI_SESSION_KEY} y el
-                              token vive solo dentro del panel.
+                              La sesión se abre en modo {OPENCLAW_CONTROL_UI_SESSION_KEY} y el token vive solo dentro del panel.
                             </p>
                           </div>
                           <div className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/82 px-3 py-1.5 text-xs text-[var(--codex-muted)]">
-                            <Check className="h-3.5 w-3.5 text-[var(--codex-accent)]" />
-                            Launcher seguro activo
+                            {runtimeOk ? <Check className="h-3.5 w-3.5 text-[var(--codex-accent)]" /> : <Loader2 className="h-3.5 w-3.5" />}
+                            {runtimeStatusLabel}
                           </div>
                         </div>
 
@@ -1681,8 +1798,7 @@ export default function CodexPage() {
                             />
                           ) : (
                             <div className="flex h-full min-h-[420px] items-center justify-center px-6 text-center text-sm text-[var(--codex-muted)]">
-                              El panel aparecerá aquí apenas terminemos de resolver el acceso
-                              nativo del gateway.
+                              El panel aparecerá aquí apenas terminemos de resolver el acceso nativo del gateway.
                             </div>
                           )}
                         </div>
@@ -1771,17 +1887,15 @@ export default function CodexPage() {
                             </p>
                           </div>
                           <div className="rounded-2xl border border-[var(--codex-border)] bg-[#fbfaf6] px-4 py-4">
-                            <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Referencia local</p>
+                            <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Publicada</p>
                             <p className="mt-2 text-lg font-semibold">{formatFullDate(activeRelease?.publishedAt)}</p>
-                            <p className="mt-1 text-sm text-[var(--codex-muted)]">Metadata leída desde el OpenClaw embebido</p>
+                            <p className="mt-1 text-sm text-[var(--codex-muted)]">Release oficial consultada desde GitHub</p>
                           </div>
                           <div className="rounded-2xl border border-[var(--codex-border)] bg-[#fbfaf6] px-4 py-4">
-                            <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Build integrada</p>
-                            <p className="mt-2 text-lg font-semibold">{bundledReleaseLabel || "Sin bundle local"}</p>
+                            <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Última detectada</p>
+                            <p className="mt-2 text-lg font-semibold">{latestRelease?.tagName || "Sin señal remota"}</p>
                             <p className="mt-1 text-sm text-[var(--codex-muted)]">
-                              {bundledReleaseLabel === activeRelease?.tagName
-                                ? "La build activa ya expone esta misma versión."
-                                : "El bundle local quedó detectado para esta vista."}
+                              {latestRelease?.tagName === activeRelease?.tagName ? "Ya está alineada con esta vista." : "Hay cambios nuevos listos para reflejarse."}
                             </p>
                           </div>
                         </div>
@@ -1826,10 +1940,8 @@ export default function CodexPage() {
                               <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Notas importantes</p>
                               <div className="mt-4 space-y-3 text-sm leading-6 text-[var(--codex-muted)]">
                                 {(activeRelease?.importantNotes.length ? activeRelease.importantNotes : [
-                                  "La vista lee la release fijada desde el OpenClaw embebido en esta build.",
-                                  bundledReleaseLabel
-                                    ? `Bundle detectado: ${bundledReleaseLabel}.`
-                                    : "El bundle local se resuelve desde la instalación embebida de OpenClaw.",
+                                  "La web consulta la release fija y también revisa la última release disponible.",
+                                  "Si OpenClaw cambia en GitHub, esta vista puede mostrar el nuevo estado al refrescarse.",
                                 ]).map((note, index) => (
                                   <div key={`${note}-${index}`} className="rounded-2xl bg-[#f7f5ef] px-4 py-3 text-[var(--codex-ink)]">
                                     {note}
@@ -1843,15 +1955,15 @@ export default function CodexPage() {
 
                       <div className="space-y-4">
                         <section className="rounded-[32px] border border-[var(--codex-border)] bg-[var(--codex-panel-soft)] p-5 shadow-[var(--codex-shadow)]">
-                          <p className="text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">Referencia nativa</p>
+                          <p className="text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">Sincronización web</p>
                           <p className="mt-3 text-base leading-7 text-[var(--codex-ink)]">
                             {openClawRelease?.sync.summary ||
-                              "La vista usa metadata embebida para mostrar OpenClaw sin depender de consultas remotas."}
+                              "La vista queda preparada para revisar OpenClaw y detectar cambios remotos automáticamente."}
                           </p>
                           <div className="mt-4 space-y-3 text-sm text-[var(--codex-muted)]">
                             <p>Última revisión: {formatFullDate(openClawRelease?.syncedAt)}</p>
                             <p>Frecuencia automática: cada {openClawRelease?.sync.autoRefreshMinutes || 15} minutos.</p>
-                            <p>Bundle detectado: {bundledReleaseLabel || "Sin bundle local"}</p>
+                            <p>Reacciones en GitHub: {formatNumber(activeRelease?.reactionCount || 0)}</p>
                             <p>Cobertura verificada: {typeof openClawStats?.coveragePercent === "number" ? `${openClawStats.coveragePercent}%` : "Sin dato"}</p>
                           </div>
                           {openClawError ? (
@@ -1870,6 +1982,77 @@ export default function CodexPage() {
                                   </div>
                                 ))}
                               </div>
+                            </div>
+                          ) : null}
+                        </section>
+
+                        <section className="rounded-[32px] border border-[var(--codex-border)] bg-[var(--codex-panel-soft)] p-5 shadow-[var(--codex-shadow)]">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <p className="text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">Runtime local</p>
+                              <div className="mt-3 flex flex-wrap items-center gap-2">
+                                <span className={cn("inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm", runtimeStatusTone)}>
+                                  <Shield className="h-4 w-4" />
+                                  {runtimeStatusLabel}
+                                </span>
+                                <span className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/80 px-3 py-1.5 text-xs text-[var(--codex-muted)]">
+                                  Última lectura: {runtimeUpdatedLabel}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => void refreshOpenClawRuntime()}
+                                className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/82 px-4 py-2 text-sm transition-colors hover:bg-white"
+                              >
+                                {isOpenClawRuntimeLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                                Refrescar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void reloadOpenClawSkills()}
+                                disabled={isOpenClawRuntimeReloading}
+                                className={cn(
+                                  "inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/82 px-4 py-2 text-sm transition-colors hover:bg-white",
+                                  isOpenClawRuntimeReloading && "cursor-not-allowed opacity-60",
+                                )}
+                              >
+                                {isOpenClawRuntimeReloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <TimerReset className="h-4 w-4" />}
+                                Recargar skills
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                            <div className="rounded-2xl border border-[var(--codex-border)] bg-white/80 px-4 py-3">
+                              <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Módulos activos</p>
+                              <div className="mt-3 flex flex-wrap gap-2 text-sm">
+                                <span className={cn("rounded-full px-3 py-1", runtimeModules?.skills ? "bg-[#e9f4ee] text-[var(--codex-accent-ink)]" : "bg-[#f1ece3] text-[var(--codex-muted)]")}>
+                                  Skills {runtimeModules?.skills ? "on" : "off"}
+                                </span>
+                                <span className={cn("rounded-full px-3 py-1", runtimeModules?.tools ? "bg-[#e9f4ee] text-[var(--codex-accent-ink)]" : "bg-[#f1ece3] text-[var(--codex-muted)]")}>
+                                  Tools {runtimeModules?.tools ? "on" : "off"}
+                                </span>
+                                <span className={cn("rounded-full px-3 py-1", runtimeModules?.gateway ? "bg-[#e9f4ee] text-[var(--codex-accent-ink)]" : "bg-[#f1ece3] text-[var(--codex-muted)]")}>
+                                  Gateway {runtimeModules?.gateway ? "on" : "off"}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="rounded-2xl border border-[var(--codex-border)] bg-white/80 px-4 py-3">
+                              <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Skills cargadas</p>
+                              <p className="mt-2 text-lg font-semibold">
+                                {typeof openClawRuntimeSkills?.count === "number"
+                                  ? formatNumber(openClawRuntimeSkills.count)
+                                  : "Sin dato"}
+                              </p>
+                              <p className="mt-1 text-sm text-[var(--codex-muted)]">Registradas en el runtime activo</p>
+                            </div>
+                          </div>
+
+                          {openClawRuntimeError ? (
+                            <div className="mt-4 rounded-2xl border border-dashed border-[#d7c6a1] bg-[#f8f1de] px-4 py-3 text-sm text-[#745b2d]">
+                              {openClawRuntimeError}
                             </div>
                           ) : null}
                         </section>
@@ -2067,7 +2250,7 @@ export default function CodexPage() {
                       OpenClaw listo para mostrarse en tu plataforma
                     </h1>
                     <p className="mt-4 max-w-2xl text-lg leading-8 text-[var(--codex-muted)]">
-                      OpenClaw queda integrado dentro de un workspace dedicado para que el usuario vea la versión embebida, entienda sus cambios y use tu plataforma segura desde aquí.
+                      OpenClaw queda integrado dentro de un workspace dedicado para que el usuario vea la release oficial, entienda sus cambios y use tu plataforma segura desde aquí.
                     </p>
                     <div className="mt-8 grid w-full gap-3 text-left md:grid-cols-3">
                       <div className="rounded-2xl border border-[var(--codex-border)] bg-[#fbfaf6] px-4 py-4">
@@ -2081,9 +2264,9 @@ export default function CodexPage() {
                         <p className="mt-1 text-sm text-[var(--codex-muted)]">{openClawRelease?.sync.summary || "Esperando sincronización inicial."}</p>
                       </div>
                       <div className="rounded-2xl border border-[var(--codex-border)] bg-[#fbfaf6] px-4 py-4">
-                        <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Build integrada</p>
-                        <p className="mt-2 text-lg font-semibold">{bundledReleaseLabel || activeRelease?.tagName || OPENCLAW_RELEASE_TAG}</p>
-                        <p className="mt-1 text-sm text-[var(--codex-muted)]">Bundle local detectado en esta instalación</p>
+                        <p className="text-xs uppercase tracking-[0.18em] text-[var(--codex-muted)]">Publicada</p>
+                        <p className="mt-2 text-lg font-semibold">{formatFullDate(activeRelease?.publishedAt)}</p>
+                        <p className="mt-1 text-sm text-[var(--codex-muted)]">GitHub oficial de OpenClaw</p>
                       </div>
                     </div>
                     <div className="mt-3 grid w-full gap-3 text-left md:grid-cols-3">

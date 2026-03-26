@@ -17,12 +17,6 @@ IFS=$'\n\t'
 #    PREDEPLOY_ONLY       — set to "true" to boot the candidate slot,
 #                           verify health/canary checks, and tear it down
 #                           before swapping public traffic
-#    AUTO_REPAIR_DOCKER_BACKEND
-#                         — set to "true" to invoke
-#                           scripts/repair-docker-storage-backend.sh when the
-#                           host is still on the legacy containerd snapshotter
-#                           backend. This is disruptive and should only be used
-#                           during maintenance.
 # ═══════════════════════════════════════════════════════════
 
 readonly SCRIPT_VERSION="3.3.2"
@@ -33,7 +27,6 @@ readonly STATE_FILE="${DEPLOY_PATH}/deploy-state.json"
 readonly STATE_FILE_BAK="${DEPLOY_PATH}/deploy-state.json.bak"
 readonly LOCK_FILE="${DEPLOY_PATH}/.deploy.lock"
 readonly DEPLOY_LOG="${DEPLOY_PATH}/deploy.log"
-readonly DOCKER_BACKEND_REPAIR_SCRIPT="${DEPLOY_PATH}/scripts/repair-docker-storage-backend.sh"
 readonly INFRA_COMPOSE="${DEPLOY_PATH}/docker-compose.infra.yml"
 readonly SLOT_COMPOSE="${DEPLOY_PATH}/docker-compose.slot.yml"
 readonly NGINX_CONF_DIR="/etc/nginx/conf.d"
@@ -308,84 +301,6 @@ log()  { echo "[$(date '+%H:%M:%S')] $*"; }
 logok(){ echo "[$(date '+%H:%M:%S')]   ✓ $*"; }
 logw() { echo "[$(date '+%H:%M:%S')]   ⚠ $*"; }
 loge() { echo "[$(date '+%H:%M:%S')]   ✗ $*" >&2; }
-
-docker_driver_type() {
-  docker info --format '{{json .DriverStatus}}' 2>/dev/null | python3 -c '
-import json
-import sys
-
-raw = sys.stdin.read().strip()
-if not raw:
-    print("")
-    raise SystemExit(0)
-
-try:
-    status = json.loads(raw)
-except Exception:
-    print("")
-    raise SystemExit(0)
-
-value = ""
-for item in status or []:
-    if isinstance(item, list) and len(item) >= 2 and str(item[0]) == "driver-type":
-        value = str(item[1])
-        break
-print(value)
-'
-}
-
-docker_backend_summary() {
-  local driver driver_type
-  driver="$(docker info --format '{{.Driver}}' 2>/dev/null || echo "")"
-  driver_type="$(docker_driver_type)"
-  if [ -n "${driver_type}" ]; then
-    echo "driver=${driver:-unknown}, driver-type=${driver_type}"
-  else
-    echo "driver=${driver:-unknown}"
-  fi
-}
-
-docker_backend_is_supported() {
-  [ "$(docker info --format '{{.Driver}}' 2>/dev/null || echo "")" = "overlay2" ]
-}
-
-guard_supported_docker_backend() {
-  local summary
-
-  summary="$(docker_backend_summary)"
-  log "Docker backend: ${summary}"
-
-  if docker_backend_is_supported; then
-    logok "Docker backend supported for production deploys."
-    return 0
-  fi
-
-  if [ "${AUTO_REPAIR_DOCKER_BACKEND:-false}" = "true" ]; then
-    if [ ! -f "${DOCKER_BACKEND_REPAIR_SCRIPT}" ]; then
-      loge "AUTO_REPAIR_DOCKER_BACKEND=true but ${DOCKER_BACKEND_REPAIR_SCRIPT} is missing."
-      exit 1
-    fi
-
-    logw "AUTO_REPAIR_DOCKER_BACKEND enabled. Attempting disruptive Docker backend repair."
-    bash "${DOCKER_BACKEND_REPAIR_SCRIPT}" --force
-
-    summary="$(docker_backend_summary)"
-    log "Docker backend after repair: ${summary}"
-
-    if docker_backend_is_supported; then
-      logok "Docker backend repaired for deploy use."
-      return 0
-    fi
-
-    loge "Docker backend repair finished but the daemon is still unsupported."
-    exit 1
-  fi
-
-  loge "Unsupported Docker backend for blue-green deploys: ${summary}"
-  loge "This host must use overlay2 to avoid snapshotter-related pull and mount corruption."
-  loge "Repair with: cd ${DEPLOY_PATH} && bash scripts/repair-docker-storage-backend.sh --force"
-  exit 1
-}
 
 validate_image_inputs "${IMAGE_TAG}" "${APP_VERSION}" || exit 1
 
@@ -984,7 +899,6 @@ if ! docker info > /dev/null 2>&1; then
 fi
 logok "Docker daemon responsive"
 restart_docker_if_dead_metadata_ghosts_detected
-guard_supported_docker_backend
 
 # Verify Nginx is installed and running
 if ! command -v nginx > /dev/null 2>&1; then
@@ -1247,13 +1161,8 @@ find_redis_aof_manifest() {
 
 backup_redis_aof_files() {
   local repair_image="$1"
-  local manifest_path="${2:-}"
+  local manifest_path="$2"
   local backup_root="${DEPLOY_PATH}/backups/redis-aof"
-
-  if [ -z "${manifest_path}" ]; then
-    loge "Redis AOF manifest path is required for backup."
-    return 1
-  fi
 
   mkdir -p "${backup_root}"
 
@@ -1353,12 +1262,8 @@ list_slot_container_ids() {
 }
 
 list_slot_service_container_ids() {
-  local slot_name="${1:-}"
-  local service_name="${2:-}"
-
-  if [ -z "${slot_name}" ] || [ -z "${service_name}" ]; then
-    return 0
-  fi
+  local slot_name="$1"
+  local service_name="$2"
 
   {
     docker ps -aq --no-trunc --filter "label=com.docker.compose.project=hola-${slot_name}" --filter "label=com.docker.compose.service=${service_name}" 2>/dev/null || true
@@ -1538,12 +1443,8 @@ print_port_listener_diagnostics() {
 }
 
 known_manual_service_holds_port() {
-  local service_name="${1:-}"
-  local target_port="${2:-}"
-
-  if [ -z "${service_name}" ] || [ -z "${target_port}" ]; then
-    return 1
-  fi
+  local service_name="$1"
+  local target_port="$2"
 
   if ! command -v systemctl >/dev/null 2>&1 || ! command -v ss >/dev/null 2>&1; then
     return 1
@@ -1652,14 +1553,9 @@ legacy_upstream_referenced() {
 }
 
 ensure_legacy_upstream_file() {
-  local slot="${1:-}"
-  local port="${2:-}"
+  local slot="$1"
+  local port="$2"
   local legacy_file="${NGINX_CONF_DIR}/iliagpt-upstream-${slot}.conf"
-
-  if [ -z "${slot}" ] || [ -z "${port}" ]; then
-    logw "Skipping legacy upstream sync because slot/port metadata is incomplete."
-    return 1
-  fi
 
   if [ ! -L "${legacy_file}" ] && [ -f "${legacy_file}" ]; then
     return 0

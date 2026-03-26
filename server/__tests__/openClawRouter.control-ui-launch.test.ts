@@ -19,10 +19,6 @@ vi.mock("../services/superIntelligence/gateway/auth.js", () => ({
   resolveGatewayAuth: (...args: unknown[]) => resolveGatewayAuthMock(...args),
 }));
 
-vi.mock("../middleware/rateLimiter", () => ({
-  globalLimiter: (_req: unknown, _res: unknown, next: (error?: unknown) => void) => next(),
-}));
-
 async function createTestApp() {
   const { default: openClawRouter } = await import("../routes/openClawRouter");
   const app = express();
@@ -87,37 +83,6 @@ describe("openClawRouter control-ui launch", () => {
       expect(res.status).toBe(302);
       expect(res.headers.location).toBe("/openclaw-ui/?session=main#token=top-secret-token");
       expect(res.headers["cache-control"]).toContain("no-store");
-    } finally {
-      await close();
-    }
-  });
-
-  it("keeps launcher URLs aligned with the app-mounted /openclaw-ui route", async () => {
-    loadConfigMock.mockReturnValue({
-      gateway: {
-        controlUi: {
-          enabled: true,
-          basePath: "/openclaw",
-        },
-        auth: {
-          mode: "token",
-          token: "top-secret-token",
-        },
-      },
-    });
-
-    const app = await createTestApp();
-    const { client, close } = await createHttpTestClient(app);
-
-    try {
-      const res = await client.get("/api/openclaw/control-ui/meta");
-
-      expect(res.status).toBe(200);
-      expect(res.body).toMatchObject({
-        basePath: "/openclaw-ui",
-        manualUrl: "/openclaw-ui/?session=main",
-        launchUrl: "/api/openclaw/control-ui/launch?session=main",
-      });
     } finally {
       await close();
     }

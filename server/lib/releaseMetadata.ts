@@ -27,6 +27,7 @@ function getManifestCandidates(env: NodeJS.ProcessEnv): string[] {
     sanitizeReleaseValue(env.RELEASE_MANIFEST_PATH),
     path.resolve(process.cwd(), "dist", "release-manifest.json"),
     path.resolve(process.cwd(), "release-manifest.json"),
+    path.resolve(__dirname, "release-manifest.json"),
   ].filter((candidate): candidate is string => Boolean(candidate));
 
   return Array.from(new Set(candidates));
@@ -43,10 +44,7 @@ function readReleaseManifest(env: NodeJS.ProcessEnv): ReleaseManifest | null {
       const parsed = JSON.parse(raw) as Partial<ReleaseManifest>;
       cachedManifest = {
         app_version: sanitizeReleaseValue(parsed.app_version) ?? "unknown",
-        app_sha:
-          sanitizeReleaseValue(parsed.app_sha) ??
-          sanitizeReleaseValue(parsed.app_version) ??
-          "unknown",
+        app_sha: sanitizeReleaseValue(parsed.app_sha) ?? sanitizeReleaseValue(parsed.app_version) ?? "unknown",
         image_tag: sanitizeReleaseValue(parsed.image_tag),
         package_version: sanitizeReleaseValue(parsed.package_version) ?? "unknown",
         built_at: sanitizeReleaseValue(parsed.built_at),
@@ -77,9 +75,7 @@ function readPackageVersionFallback(): string | null {
   return cachedPackageVersion;
 }
 
-export function getReleaseMetadata(
-  env: NodeJS.ProcessEnv = process.env,
-): RuntimeReleaseMetadata {
+export function getReleaseMetadata(env: NodeJS.ProcessEnv = process.env): RuntimeReleaseMetadata {
   const manifest = readReleaseManifest(env);
   const appVersion =
     sanitizeReleaseValue(manifest?.app_version) ??

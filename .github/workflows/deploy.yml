@@ -181,11 +181,11 @@ jobs:
             nginx.conf \
             nginx/maintenance.html \
             scripts/deploy-bluegreen.sh \
+            scripts/repair-docker-storage-backend.sh \
             scripts/rollback-bluegreen.sh \
             scripts/health-dashboard.sh \
             scripts/vps-bootstrap-bluegreen.sh \
             scripts/prod-rigorous-checks.sh \
-            scripts/collect-prod-deploy-evidence.sh \
             scripts/latest-main-guard.sh \
             scripts/verify-public-runtime-contract.mjs
           do
@@ -421,7 +421,7 @@ jobs:
           set -euo pipefail
           sync_ok=false
           for attempt in 1 2 3; do
-            if scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12               docker-compose.infra.yml               docker-compose.slot.yml               nginx.conf               scripts/deploy-bluegreen.sh               scripts/rollback-bluegreen.sh               scripts/health-dashboard.sh               scripts/vps-bootstrap-bluegreen.sh               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/; then
+            if scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12               docker-compose.infra.yml               docker-compose.slot.yml               nginx.conf               scripts/deploy-bluegreen.sh               scripts/repair-docker-storage-backend.sh               scripts/rollback-bluegreen.sh               scripts/health-dashboard.sh               scripts/vps-bootstrap-bluegreen.sh               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/; then
               sync_ok=true
               break
             fi
@@ -432,7 +432,7 @@ jobs:
             echo "::warning::Failed to sync deploy scripts after 3 attempts; continuing with scripts already present on VPS"
           fi
 
-          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts ${{ env.DEPLOY_PATH }}/nginx &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts ${{ env.DEPLOY_PATH }}/nginx &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/repair-docker-storage-backend.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
 
           # Copy nginx static assets (maintenance page, custom error pages)
           scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }} \
@@ -526,6 +526,44 @@ jobs:
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
+          filter: blob:none
+          sparse-checkout: |
+            /.npmrc
+            /package.json
+            /package-lock.json
+            /playwright.config.ts
+            /e2e/
+            /scripts/ci-assert-required-paths.sh
+            /scripts/ci-retry.sh
+            /scripts/with-env.cjs
+          sparse-checkout-cone-mode: false
+
+      - name: Validate browser smoke checkout contents
+        run: |
+          bash ./scripts/ci-assert-required-paths.sh "browser smoke checkout" \
+            package.json \
+            package-lock.json \
+            playwright.config.ts \
+            e2e/smoke.spec.ts \
+            scripts/ci-assert-required-paths.sh \
+            scripts/ci-retry.sh \
+            scripts/with-env.cjs
+
+      - name: Summarize browser smoke checkout footprint
+        run: |
+          set -euo pipefail
+          FILE_COUNT="$(git ls-files | wc -l | tr -d ' ')"
+          CHECKOUT_SIZE="$(du -sh . | awk '{print $1}')"
+          echo "▸ Browser smoke checkout files: ${FILE_COUNT}"
+          echo "▸ Browser smoke checkout size:  ${CHECKOUT_SIZE}"
+          {
+            echo "## Browser Smoke Checkout Footprint"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|---|---|"
+            echo "| Files | \`${FILE_COUNT}\` |"
+            echo "| Size | \`${CHECKOUT_SIZE}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup Node for browser smoke
         uses: actions/setup-node@v4
@@ -552,10 +590,7 @@ jobs:
         continue-on-error: true
         env:
           PLAYWRIGHT_BASE_URL: https://iliagpt.com
-        run: |
-          set -euo pipefail
-          mkdir -p artifacts/prod-evidence
-          npm run test:smoke:remote 2>&1 | tee artifacts/prod-evidence/browser-smoke.log
+        run: npm run test:smoke:remote
 
       - name: Run production artifact-safety regressions
         id: artifact_safety
@@ -578,9 +613,7 @@ jobs:
           DEPLOY_STATE_PATH: /opt/hola/deploy-state.json
           NGINX_UPSTREAM_CONF: /etc/nginx/conf.d/iliagpt-upstream.conf
         run: |
-          set -euo pipefail
-          mkdir -p artifacts/prod-evidence
-          bash scripts/prod-rigorous-checks.sh 2>&1 | tee artifacts/prod-evidence/rigorous-checks.log
+          bash scripts/prod-rigorous-checks.sh
 
       - name: Roll back on post-deploy acceptance failure
         if: ${{ always() && steps.deploy_bluegreen.outcome == 'success' && (steps.verify_production.outcome == 'failure' || steps.browser_smoke.outcome == 'failure' || steps.artifact_safety.outcome == 'failure' || steps.prod_acceptance.outcome == 'failure') }}
@@ -595,35 +628,6 @@ jobs:
             -o TCPKeepAlive=yes \
             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }} \
             "cd ${{ env.DEPLOY_PATH }} && bash scripts/rollback-bluegreen.sh --force --stop-bad"
-
-      - name: Collect production evidence bundle
-        if: always()
-        continue-on-error: true
-        env:
-          PRODUCTION_BASE_URL: https://iliagpt.com
-          EVIDENCE_DIR: artifacts/prod-evidence
-          VPS_HOST: ${{ steps.target.outputs.host }}
-          VPS_PORT: ${{ steps.target.outputs.port }}
-          VPS_USER: ${{ env.VPS_USER }}
-          VPS_SSH_KEY: /home/runner/.ssh/deploy_key
-          EXPECTED_APP_VERSION: ${{ steps.tag.outputs.app_version }}
-          EXPECTED_APP_SHA: ${{ github.sha }}
-          DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
-          DEPLOY_STATE_PATH: /opt/hola/deploy-state.json
-          NGINX_UPSTREAM_CONF: /etc/nginx/conf.d/iliagpt-upstream.conf
-        run: |
-          set -euo pipefail
-          mkdir -p artifacts/prod-evidence
-          bash scripts/collect-prod-deploy-evidence.sh
-
-      - name: Upload production evidence bundle
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: production-evidence-manual-${{ github.run_id }}
-          path: artifacts/prod-evidence
-          if-no-files-found: warn
-          retention-days: 14
 
       - name: Enforce post-deploy acceptance
         if: ${{ always() && steps.deploy_bluegreen.outcome == 'success' }}
@@ -666,10 +670,6 @@ jobs:
           echo "| Image Tag | \`${{ steps.tag.outputs.image_tag }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
           echo "| URL | https://iliagpt.com |" >> $GITHUB_STEP_SUMMARY
-          if [ -f artifacts/prod-evidence/summary.md ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            cat artifacts/prod-evidence/summary.md >> $GITHUB_STEP_SUMMARY
-          fi
 
       - name: Cleanup SSH key
         if: always()
@@ -734,11 +734,11 @@ jobs:
             nginx.conf \
             nginx/maintenance.html \
             scripts/deploy-bluegreen.sh \
+            scripts/repair-docker-storage-backend.sh \
             scripts/rollback-bluegreen.sh \
             scripts/health-dashboard.sh \
             scripts/vps-bootstrap-bluegreen.sh \
             scripts/prod-rigorous-checks.sh \
-            scripts/collect-prod-deploy-evidence.sh \
             scripts/latest-main-guard.sh \
             scripts/verify-public-runtime-contract.mjs
           do
@@ -903,20 +903,8 @@ jobs:
             echo "Production is not yet on ${EXPECTED}; SSH deployment path required."
           fi
 
-      - name: Reconfirm deploy is still latest before remote cutover
-        id: latest_main_cutover
-        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CURRENT_SHA: ${{ github.sha }}
-          TARGET_BRANCH: main
-          FAIL_ON_LOOKUP_ERROR: "true"
-          GUARD_CONTEXT: deploy-auto-cutover
-        run: |
-          bash ./scripts/latest-main-guard.sh
-
       - name: Setup SSH key
-        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true'
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
@@ -933,7 +921,7 @@ jobs:
           } > ~/.ssh/config
           chmod 600 ~/.ssh/config
       - name: Resolve reachable deploy endpoint
-        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true'
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
         id: target
         run: |
           set -euo pipefail
@@ -973,7 +961,7 @@ jobs:
           exit 1
 
       - name: Validate resolved target inputs
-        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true'
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
         run: |
           set -euo pipefail
           RESOLVED_HOST="${{ steps.target.outputs.host }}"
@@ -1011,19 +999,19 @@ jobs:
           fi
 
       - name: Preflight target host
-        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true'
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
         run: |
           set -euo pipefail
           echo "▸ Deploy target: ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ steps.target.outputs.port }}"
           nc -vz -w 5 "${{ steps.target.outputs.host }}" "${{ steps.target.outputs.port }}" || echo "⚠️ TCP probe failed (continuing to SSH)"
 
       - name: Sync deploy scripts to VPS
-        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true'
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
         run: |
           set -euo pipefail
           sync_ok=false
           for attempt in 1 2 3; do
-            if scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12               docker-compose.infra.yml               docker-compose.slot.yml               nginx.conf               scripts/deploy-bluegreen.sh               scripts/rollback-bluegreen.sh               scripts/health-dashboard.sh               scripts/vps-bootstrap-bluegreen.sh               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/; then
+            if scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12               docker-compose.infra.yml               docker-compose.slot.yml               nginx.conf               scripts/deploy-bluegreen.sh               scripts/repair-docker-storage-backend.sh               scripts/rollback-bluegreen.sh               scripts/health-dashboard.sh               scripts/vps-bootstrap-bluegreen.sh               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/; then
               sync_ok=true
               break
             fi
@@ -1034,7 +1022,7 @@ jobs:
             echo "::warning::Failed to sync deploy scripts after 3 attempts; continuing with scripts already present on VPS"
           fi
 
-          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts ${{ env.DEPLOY_PATH }}/nginx &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts ${{ env.DEPLOY_PATH }}/nginx &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/repair-docker-storage-backend.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
 
           # Copy nginx static assets (maintenance page, custom error pages)
           scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }} \
@@ -1043,7 +1031,7 @@ jobs:
             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/nginx/ 2>/dev/null || true
 
       - name: Run predeploy startup gate
-        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true'
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
         run: |
           set -euo pipefail
           for attempt in 1 2; do
@@ -1059,7 +1047,7 @@ jobs:
 
       - name: Run blue-green deploy
         id: deploy_bluegreen
-        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true'
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
         run: |
           set -euo pipefail
           for attempt in 1 2; do
@@ -1075,7 +1063,7 @@ jobs:
 
       - name: Verify production
         id: verify_production
-        if: steps.latest_main.outputs.should_deploy == 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true'
+        if: steps.latest_main.outputs.should_deploy == 'true'
         run: |
           set -euo pipefail
           EXPECTED="${{ steps.tag.outputs.app_version }}"
@@ -1122,25 +1110,65 @@ jobs:
           fi
 
       - name: Checkout repository for browser smoke
-        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true'
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
+          filter: blob:none
+          sparse-checkout: |
+            /.npmrc
+            /package.json
+            /package-lock.json
+            /playwright.config.ts
+            /e2e/
+            /scripts/ci-assert-required-paths.sh
+            /scripts/ci-retry.sh
+            /scripts/with-env.cjs
+          sparse-checkout-cone-mode: false
+
+      - name: Validate browser smoke checkout contents
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
+        run: |
+          bash ./scripts/ci-assert-required-paths.sh "browser smoke checkout" \
+            package.json \
+            package-lock.json \
+            playwright.config.ts \
+            e2e/smoke.spec.ts \
+            scripts/ci-assert-required-paths.sh \
+            scripts/ci-retry.sh \
+            scripts/with-env.cjs
+
+      - name: Summarize browser smoke checkout footprint
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
+        run: |
+          set -euo pipefail
+          FILE_COUNT="$(git ls-files | wc -l | tr -d ' ')"
+          CHECKOUT_SIZE="$(du -sh . | awk '{print $1}')"
+          echo "▸ Browser smoke checkout files: ${FILE_COUNT}"
+          echo "▸ Browser smoke checkout size:  ${CHECKOUT_SIZE}"
+          {
+            echo "## Browser Smoke Checkout Footprint"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|---|---|"
+            echo "| Files | \`${FILE_COUNT}\` |"
+            echo "| Size | \`${CHECKOUT_SIZE}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup Node for browser smoke
-        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true'
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
 
       - name: Install browser smoke dependencies
-        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true'
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
         run: npm ci
 
       - name: Install Playwright Chromium
-        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true'
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
         run: |
           bash ./scripts/ci-retry.sh \
             --label "Playwright Chromium install" \
@@ -1153,25 +1181,22 @@ jobs:
 
       - name: Browser smoke against production
         id: browser_smoke
-        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true'
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
         continue-on-error: true
         env:
           PLAYWRIGHT_BASE_URL: https://iliagpt.com
-        run: |
-          set -euo pipefail
-          mkdir -p artifacts/prod-evidence
-          npm run test:smoke:remote 2>&1 | tee artifacts/prod-evidence/browser-smoke.log
+        run: npm run test:smoke:remote
 
       - name: Run production artifact-safety regressions
         id: artifact_safety
-        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true' && steps.browser_smoke.outcome == 'success'
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.browser_smoke.outcome == 'success'
         env:
           BASE_URL: https://iliagpt.com
         run: npm run test:prod:artifact-safety
 
       - name: Run rigorous production acceptance checks
         id: prod_acceptance
-        if: ${{ steps.latest_main.outputs.should_deploy == 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.browser_smoke.outcome == 'success' && steps.artifact_safety.outcome == 'success' }}
+        if: ${{ steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.browser_smoke.outcome == 'success' && steps.artifact_safety.outcome == 'success' }}
         env:
           VPS_HOST: ${{ steps.target.outputs.host }}
           VPS_PORT: ${{ steps.target.outputs.port }}
@@ -1183,12 +1208,10 @@ jobs:
           DEPLOY_STATE_PATH: /opt/hola/deploy-state.json
           NGINX_UPSTREAM_CONF: /etc/nginx/conf.d/iliagpt-upstream.conf
         run: |
-          set -euo pipefail
-          mkdir -p artifacts/prod-evidence
-          bash scripts/prod-rigorous-checks.sh 2>&1 | tee artifacts/prod-evidence/rigorous-checks.log
+          bash scripts/prod-rigorous-checks.sh
 
       - name: Roll back on post-deploy acceptance failure
-        if: ${{ always() && steps.latest_main.outputs.should_deploy == 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.deploy_bluegreen.outcome == 'success' && (steps.verify_production.outcome == 'failure' || steps.browser_smoke.outcome == 'failure' || steps.artifact_safety.outcome == 'failure' || steps.prod_acceptance.outcome == 'failure') }}
+        if: ${{ always() && steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.deploy_bluegreen.outcome == 'success' && (steps.verify_production.outcome == 'failure' || steps.browser_smoke.outcome == 'failure' || steps.artifact_safety.outcome == 'failure' || steps.prod_acceptance.outcome == 'failure') }}
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }} \
@@ -1201,37 +1224,8 @@ jobs:
             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }} \
             "cd ${{ env.DEPLOY_PATH }} && bash scripts/rollback-bluegreen.sh --force --stop-bad"
 
-      - name: Collect production evidence bundle
-        if: ${{ always() && steps.latest_main.outputs.should_deploy == 'true' }}
-        continue-on-error: true
-        env:
-          PRODUCTION_BASE_URL: https://iliagpt.com
-          EVIDENCE_DIR: artifacts/prod-evidence
-          VPS_HOST: ${{ steps.target.outputs.host }}
-          VPS_PORT: ${{ steps.target.outputs.port }}
-          VPS_USER: ${{ env.VPS_USER }}
-          VPS_SSH_KEY: /home/runner/.ssh/deploy_key
-          EXPECTED_APP_VERSION: ${{ steps.tag.outputs.app_version }}
-          EXPECTED_APP_SHA: ${{ github.sha }}
-          DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
-          DEPLOY_STATE_PATH: /opt/hola/deploy-state.json
-          NGINX_UPSTREAM_CONF: /etc/nginx/conf.d/iliagpt-upstream.conf
-        run: |
-          set -euo pipefail
-          mkdir -p artifacts/prod-evidence
-          bash scripts/collect-prod-deploy-evidence.sh
-
-      - name: Upload production evidence bundle
-        if: ${{ always() && steps.latest_main.outputs.should_deploy == 'true' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: production-evidence-auto-${{ github.run_id }}
-          path: artifacts/prod-evidence
-          if-no-files-found: warn
-          retention-days: 14
-
       - name: Enforce post-deploy acceptance
-        if: ${{ always() && steps.latest_main.outputs.should_deploy == 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.deploy_bluegreen.outcome == 'success' }}
+        if: ${{ always() && steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.deploy_bluegreen.outcome == 'success' }}
         run: |
           set -euo pipefail
           failed=0
@@ -1270,15 +1264,11 @@ jobs:
           echo "| Version | \`${{ steps.tag.outputs.app_version }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Image Tag | \`${{ steps.tag.outputs.image_tag }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Trigger | push(main) |" >> $GITHUB_STEP_SUMMARY
-          echo "| Latest Main SHA | \`${{ steps.latest_main_cutover.outputs.latest_sha || steps.latest_main.outputs.latest_sha || 'unknown' }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Superseded | \`${{ steps.latest_main.outputs.should_deploy != 'true' || steps.latest_main_cutover.outputs.should_deploy == 'false' }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Skip Reason | \`${{ steps.latest_main_cutover.outputs.skip_reason || steps.latest_main.outputs.skip_reason || 'n/a' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Latest Main SHA | \`${{ steps.latest_main.outputs.latest_sha || 'unknown' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Superseded | \`${{ steps.latest_main.outputs.should_deploy != 'true' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Skip Reason | \`${{ steps.latest_main.outputs.skip_reason || 'n/a' }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
           echo "| URL | https://iliagpt.com |" >> $GITHUB_STEP_SUMMARY
-          if [ -f artifacts/prod-evidence/summary.md ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            cat artifacts/prod-evidence/summary.md >> $GITHUB_STEP_SUMMARY
-          fi
 
       - name: Cleanup SSH key
         if: always()

@@ -1959,13 +1959,6 @@ export function ChatInterface({
     }
   }, [chatId]);
 
-  const validateStreamingChatId = useCallback(() => {
-    return (
-      streamingChatIdRef.current === null ||
-      streamingChatIdRef.current === chatId
-    );
-  }, [chatId]);
-
   // Auto-save document when component unmounts (chat switch, new chat, etc.)
   useEffect(() => {
     return () => {
@@ -2552,10 +2545,7 @@ export function ChatInterface({
       appendContent(conversationId, chunk, seq);
     },
     onStreamComplete: ({ conversationId, activeConversationId }) => {
-      const title =
-        streamChatTitleRef.current[conversationId] ||
-        chatTitle ||
-        "Conversación";
+      const title = streamChatTitleRef.current[conversationId] || chatTitle || "Conversación";
       completeRun(conversationId, activeConversationId, title);
       delete streamChatTitleRef.current[conversationId];
       if (streamingChatIdRef.current === conversationId) {
@@ -2563,10 +2553,7 @@ export function ChatInterface({
       }
     },
     onStreamError: ({ conversationId, activeConversationId, error }) => {
-      const title =
-        streamChatTitleRef.current[conversationId] ||
-        chatTitle ||
-        "Conversación";
+      const title = streamChatTitleRef.current[conversationId] || chatTitle || "Conversación";
       failRun(
         conversationId,
         error.message || "Stream error",

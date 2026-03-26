@@ -21,7 +21,7 @@ import {
   resolveHooksGmailModel,
   resolveThinkingDefault,
 } from "../../agents/model-selection.js";
-import { runEmbeddedPiAgent } from "../../agents/pi-embedded.js";
+import { runEmbeddedPiAgent } from "../../../../openclaw/src/agents/pi-embedded-runner/run.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { deriveSessionTotalTokens, hasNonzeroUsage } from "../../agents/usage.js";
 import { ensureAgentWorkspace } from "../../agents/workspace.js";
@@ -550,9 +550,9 @@ export async function runCronIsolatedAgentTurn(params: {
   const firstText = payloads[0]?.text ?? "";
   let summary = pickSummaryFromPayloads(payloads) ?? pickSummaryFromOutput(firstText);
   let outputText = pickLastNonEmptyTextFromPayloads(payloads);
-  let synthesizedText = outputText?.trim() || summary?.trim() || undefined;
+  const synthesizedText = outputText?.trim() || summary?.trim() || undefined;
   const deliveryPayload = pickLastDeliverablePayload(payloads);
-  let deliveryPayloads =
+  const deliveryPayloads =
     deliveryPayload !== undefined
       ? [deliveryPayload]
       : synthesizedText

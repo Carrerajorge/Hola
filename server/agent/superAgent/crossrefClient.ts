@@ -333,7 +333,7 @@ export async function searchCrossRef(
 ): Promise<AcademicCandidate[]> {
   const currentYear = new Date().getFullYear();
   const { yearStart = 2020, yearEnd = currentYear, maxResults = 100 } = options;
-  const clampedMax = Math.max(1, Math.min(100, maxResults));
+  const clampedMax = Math.max(1, Math.min(250, maxResults));
   const clampedYearStart = Math.max(1900, Math.min(currentYear + 1, yearStart));
   const clampedYearEnd = Math.max(clampedYearStart, Math.min(currentYear + 1, yearEnd));
 

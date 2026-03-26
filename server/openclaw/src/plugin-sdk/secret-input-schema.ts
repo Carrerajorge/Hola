@@ -1,4 +1,4 @@
-import { z } from "zod/v4";
+import { z } from "zod";
 import { ENV_SECRET_REF_ID_RE } from "../config/types.secrets.js";
 import {
   formatExecSecretRefIdValidationMessage,

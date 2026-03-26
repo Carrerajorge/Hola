@@ -1,6 +1,6 @@
 import path from "node:path";
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
-import { getActiveEmbeddedRunCount } from "../agents/pi-embedded-runner/runs.js";
+import { getActiveEmbeddedRunCount } from "../../../openclaw/src/agents/pi-embedded-runner/runs.js";
 import { registerSkillsChangeListener } from "../agents/skills/refresh.js";
 import { initSubagentRegistry } from "../agents/subagent-registry.js";
 import { getTotalPendingReplies } from "../auto-reply/reply/dispatcher-registry.js";
@@ -367,7 +367,7 @@ export async function startGatewayServer(
   const { wizardSessions, findRunningWizard, purgeWizardSession } = createWizardSessionTracker();
 
   const deps = createDefaultDeps();
-  let canvasHostServer: CanvasHostServer | null = null;
+  const canvasHostServer: CanvasHostServer | null = null;
   const gatewayTls = await loadGatewayTlsRuntime(cfgAtStart.gateway?.tls, log.child("tls"));
   if (cfgAtStart.gateway?.tls?.enabled && !gatewayTls.enabled) {
     throw new Error(gatewayTls.error ?? "gateway tls: failed to enable");

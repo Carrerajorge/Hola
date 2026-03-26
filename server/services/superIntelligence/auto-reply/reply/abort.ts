@@ -1,5 +1,5 @@
 import { resolveSessionAgentId } from "../../agents/agent-scope.js";
-import { abortEmbeddedPiRun } from "../../agents/pi-embedded.js";
+import { abortEmbeddedPiRun } from "../../../../openclaw/src/agents/pi-embedded-runner/runs.js";
 import {
   listSubagentRunsForRequester,
   markSubagentRunTerminated,

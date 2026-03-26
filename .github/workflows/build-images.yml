@@ -53,6 +53,63 @@ jobs:
         with:
           ref: ${{ inputs.sha }}
           fetch-depth: 1
+          filter: blob:none
+          sparse-checkout: |
+            /.dockerignore
+            /.npmrc
+            /Dockerfile
+            /components.json
+            /package.json
+            /package-lock.json
+            /postcss.config.js
+            /tsconfig.json
+            /tsconfig.base.json
+            /vite.config.ts
+            /vite-plugin-meta-images.ts
+            /client/
+            /migrations/
+            /ocr_service/
+            /packages/
+            /script/
+            /scripts/
+            /server/
+            /shared/
+          sparse-checkout-cone-mode: false
+
+      - name: Validate build checkout contents
+        run: |
+          bash ./scripts/ci-assert-required-paths.sh "build checkout" \
+            .dockerignore \
+            Dockerfile \
+            package.json \
+            package-lock.json \
+            postcss.config.js \
+            tsconfig.json \
+            tsconfig.base.json \
+            vite.config.ts \
+            vite-plugin-meta-images.ts \
+            scripts/sync-mathjax-assets.cjs \
+            client/public/sw-cleanup.js \
+            server/openclaw/package.json \
+            packages/flowise-components/package.json \
+            packages/flowise-server/package.json \
+            packages/flowise-server/src/Interface.ts
+
+      - name: Summarize build checkout footprint
+        run: |
+          set -euo pipefail
+          FILE_COUNT="$(git ls-files | wc -l | tr -d ' ')"
+          CHECKOUT_SIZE="$(du -sh . | awk '{print $1}')"
+          echo "▸ Sparse checkout files: ${FILE_COUNT}"
+          echo "▸ Sparse checkout size:  ${CHECKOUT_SIZE}"
+          {
+            echo "## Build Checkout Footprint"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|---|---|"
+            echo "| Files | \`${FILE_COUNT}\` |"
+            echo "| Size | \`${CHECKOUT_SIZE}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Compute image tag
         id: meta
@@ -106,32 +163,14 @@ jobs:
       - name: Pre-pull BuildKit image with retry
         if: steps.latest_main_guard.outputs.should_deploy == 'true'
         run: |
-          set -euo pipefail
-          attempts=5
-          delay=5
-          max_delay=45
-
-          for attempt in $(seq 1 "${attempts}"); do
-            echo "BuildKit image pull attempt ${attempt}/${attempts}"
-            if docker pull moby/buildkit:buildx-stable-1; then
-              echo "BuildKit image pull succeeded."
-              exit 0
-            fi
-
-            if [ "${attempt}" -eq "${attempts}" ]; then
-              echo "::error::Failed to pull moby/buildkit:buildx-stable-1 after ${attempts} attempts."
-              exit 1
-            fi
-
-            sleep_for="${delay}"
-            if [ "${sleep_for}" -gt "${max_delay}" ]; then
-              sleep_for="${max_delay}"
-            fi
-
-            echo "Retrying BuildKit pull in ${sleep_for}s..."
-            sleep "${sleep_for}"
-            delay=$(( delay * 2 ))
-          done
+          bash ./scripts/ci-retry.sh \
+            --label "BuildKit image pull" \
+            --attempts 5 \
+            --base-delay 5 \
+            --max-delay 45 \
+            --transient-only \
+            -- \
+            docker pull moby/buildkit:buildx-stable-1
 
       - name: Set up Docker Buildx
         if: steps.latest_main_guard.outputs.should_deploy == 'true'

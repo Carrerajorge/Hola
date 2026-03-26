@@ -339,15 +339,6 @@ export const NewsCards = memo(function NewsCards({ sources, maxDisplay = 8, onRe
   if (!sources || sources.length === 0) return null;
 
   const displaySources = sources.slice(0, maxDisplay);
-  
-  // Get unique sources for the badges
-  const uniqueSources = sources.reduce((acc, source) => {
-    const domain = source.domain?.replace(/^www\./, "") || "unknown";
-    if (!acc.find(s => s.domain?.replace(/^www\./, "") === domain)) {
-      acc.push(source);
-    }
-    return acc;
-  }, [] as WebSource[]);
 
   return (
     <>
@@ -403,53 +394,6 @@ export const NewsCards = memo(function NewsCards({ sources, maxDisplay = 8, onRe
               <ChevronRight className="w-5 h-5" />
             </button>
           )}
-        </div>
-
-        {/* News summary with direct links */}
-        <div className="mt-3 space-y-1.5">
-          {displaySources.map((source, idx) => {
-            const domain = source.domain?.replace(/^www\./, "") || "";
-            return (
-              <a
-                key={`summary-${idx}`}
-                href={source.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-start gap-2 px-2 py-1.5 rounded-md hover:bg-muted/60 transition-colors group text-left"
-              >
-                <img
-                  src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
-                  alt=""
-                  className="w-4 h-4 rounded-full mt-0.5 flex-shrink-0"
-                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1 min-w-0">
-                    <span className="text-xs font-medium text-foreground truncate group-hover:text-primary transition-colors min-w-0">
-                      {source.title || domain}
-                    </span>
-                    <a
-                      href={source.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex-shrink-0 text-sm leading-none hover:scale-110 transition-transform"
-                      title={source.url}
-                      onClick={(e) => e.stopPropagation()}
-                    >🔗</a>
-                  </div>
-                  {source.snippet && (
-                    <p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">
-                      {source.snippet}
-                    </p>
-                  )}
-                  <span className="text-[10px] text-muted-foreground/60">
-                    {domain}
-                    {source.date && ` · ${formatRelativeDate(source.date, { timeZone: platformTimeZone, dateFormat: platformDateFormat })}`}
-                  </span>
-                </div>
-              </a>
-            );
-          })}
         </div>
       </div>
 

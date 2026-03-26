@@ -1217,7 +1217,7 @@ export function SpreadsheetEditor({
     // Process multiple sheets
     setWorkbook(prev => {
       const newSheets: SheetData[] = prev.sheets.map(s => ({ ...s, data: { ...s.data, cells: { ...s.data.cells } } }));
-      let newWorkbook: WorkbookData = { ...prev, sheets: newSheets };
+      const newWorkbook: WorkbookData = { ...prev, sheets: newSheets };
       let lastSheetId = prev.activeSheetId;
 
       commands.forEach((cmd, idx) => {

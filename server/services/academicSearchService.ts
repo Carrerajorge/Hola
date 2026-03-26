@@ -5,6 +5,45 @@ import * as fs from "fs";
 import * as path from "path";
 import { v4 as uuidv4 } from "uuid";
 
+const DEFAULT_ACADEMIC_COUNT = 50;
+const MAX_ACADEMIC_COUNT = 500;
+
+function defaultAcademicYearRange(now: Date = new Date()): { yearStart: number; yearEnd: number } {
+    const currentYear = now.getFullYear();
+    return {
+        yearStart: currentYear - 3,
+        yearEnd: currentYear,
+    };
+}
+
+function normalizeAcademicQueryParams(input: {
+    englishKeywords?: string[];
+    spanishKeywords?: string[];
+    yearStart?: number;
+    yearEnd?: number;
+    count?: number;
+    region?: string;
+    outputFormats?: string[];
+}) {
+    const defaults = defaultAcademicYearRange();
+    const count = Math.max(1, Math.min(MAX_ACADEMIC_COUNT, Number(input.count) || DEFAULT_ACADEMIC_COUNT));
+    const yearStart = Number.isFinite(input.yearStart as number) ? Number(input.yearStart) : defaults.yearStart;
+    const yearEnd = Number.isFinite(input.yearEnd as number) ? Number(input.yearEnd) : defaults.yearEnd;
+    const normalizedEnglish = (input.englishKeywords || []).map((v) => String(v || "").trim()).filter(Boolean);
+    const normalizedSpanish = (input.spanishKeywords || []).map((v) => String(v || "").trim()).filter(Boolean);
+    const outputFormats = Array.from(new Set((input.outputFormats || ["word"]).map((v) => String(v || "").trim()).filter(Boolean)));
+
+    return {
+        englishKeywords: normalizedEnglish.length > 0 ? normalizedEnglish : ["academic research"],
+        spanishKeywords: normalizedSpanish.length > 0 ? normalizedSpanish : ["investigacion academica"],
+        yearStart: Math.min(yearStart, yearEnd),
+        yearEnd: Math.max(yearStart, yearEnd),
+        count,
+        region: input.region,
+        outputFormats: outputFormats.length > 0 ? outputFormats : ["word"],
+    };
+}
+
 /**
  * Service to orchestrate academic research requests using LLM for query optimization
  * and UnifiedArticleSearch for data retrieval.
@@ -68,7 +107,7 @@ export class AcademicSearchService {
         const affilCountries = regionToAffilCountries(queryParams.region);
 
         const searchResult = await unifiedArticleSearch.searchAllSources(searchQuery, {
-            maxResults: queryParams.count || 50,
+            maxResults: queryParams.count,
             startYear: queryParams.yearStart,
             endYear: queryParams.yearEnd,
             affilCountries,
@@ -141,9 +180,9 @@ export class AcademicSearchService {
           Return a JSON object with:
           - englishKeywords: Array of 3-5 specific academic keywords in English.
           - spanishKeywords: Array of 3-5 specific academic keywords in Spanish.
-          - yearStart: Number (optional).
-          - yearEnd: Number (optional).
-          - count: Number (desired number of articles, default 50, max 100).
+          - yearStart: Number (optional, default to the last 3 years if omitted).
+          - yearEnd: Number (optional, default to the current year if omitted).
+          - count: Number (desired number of articles, default 50, max 500).
           - region: String (e.g. "LatAm", "Spain", "World"). If user specifies "latinoamerica", "españa", etc.
           - outputFormats: Array of strings ["word", "excel", "txt"]. Default ["word"]. If user mentions "excel", "tabla", "hoja de cálculo", include "excel".
           
@@ -170,7 +209,7 @@ export class AcademicSearchService {
             });
 
             const text = response.content.replace(/```json/g, "").replace(/```/g, "").trim();
-            return JSON.parse(text);
+            return normalizeAcademicQueryParams(JSON.parse(text));
 
         } catch (error) {
             console.error("[AcademicSearch] LLM Optimization failed, using keyword extraction fallback", error);
@@ -183,21 +222,21 @@ export class AcademicSearchService {
                     ? extracted.allKeywords.slice(0, 5)
                     : [userQuery];
 
-                return {
+                return normalizeAcademicQueryParams({
                     englishKeywords,
                     spanishKeywords: [userQuery],
                     yearStart: extracted.yearRange?.start,
                     yearEnd: extracted.yearRange?.end,
-                    count: 50,
+                    count: DEFAULT_ACADEMIC_COUNT,
                     outputFormats: ["word"],
-                };
+                });
             } catch {
-                return {
+                return normalizeAcademicQueryParams({
                     englishKeywords: [userQuery],
                     spanishKeywords: [userQuery],
-                    count: 50,
+                    count: DEFAULT_ACADEMIC_COUNT,
                     outputFormats: ["word"]
-                };
+                });
             }
         }
     }

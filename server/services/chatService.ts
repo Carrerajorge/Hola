@@ -31,16 +31,17 @@ const AGENTIC_PIPELINE_ENABLED = process.env.AGENTIC_PIPELINE_ENABLED === 'true'
 
 // Cache Helpers utilizing Redis
 const CACHE_TTL_SEC = 5 * 60; // 5 minutes
+const SEARCH_CACHE_VERSION = "v2";
 
 async function getCachedSearch(query: string): Promise<any | null> {
   const normalizedQuery = query.toLowerCase().trim();
-  const cacheKey = `search:${normalizedQuery}`;
+  const cacheKey = `search:${SEARCH_CACHE_VERSION}:${normalizedQuery}`;
   return await getCacheService().get(cacheKey);
 }
 
 async function setCachedSearch(query: string, results: any): Promise<void> {
   const normalizedQuery = query.toLowerCase().trim();
-  const cacheKey = `search:${normalizedQuery}`;
+  const cacheKey = `search:${SEARCH_CACHE_VERSION}:${normalizedQuery}`;
   await getCacheService().set(cacheKey, results, CACHE_TTL_SEC);
 }
 

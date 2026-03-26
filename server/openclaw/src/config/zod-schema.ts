@@ -1,4 +1,4 @@
-import { z } from "zod/v4";
+import { z } from "zod";
 import { parseByteSize } from "../cli/parse-bytes.js";
 import { parseDurationMs } from "../cli/parse-duration.js";
 import { ToolsSchema } from "./zod-schema.agent-runtime.js";
@@ -431,6 +431,7 @@ export const OpenClawSchema = z
                 provider: z.string(),
                 mode: z.union([z.literal("api_key"), z.literal("oauth"), z.literal("token")]),
                 email: z.string().optional(),
+                displayName: z.string().optional(),
               })
               .strict(),
           )

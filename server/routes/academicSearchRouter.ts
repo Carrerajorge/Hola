@@ -27,7 +27,7 @@ export const academicSearchRouter = Router();
 // =============================================================================
 
 const MAX_QUERY_LENGTH = 500;
-const MAX_RESULTS_LIMIT = 100;
+const MAX_RESULTS_LIMIT = 500;
 const VALID_SOURCES = ["scopus", "pubmed", "scholar", "scielo", "semantic", "crossref", "duckduckgo", "wos"];
 
 /**
@@ -39,7 +39,7 @@ function validateQuery(raw: any): { valid: true; query: string } | { valid: fals
     return { valid: false, error: "query is required and must be a string" };
   }
 
-  let q = sanitizeSearchQuery(raw, MAX_QUERY_LENGTH);
+  const q = sanitizeSearchQuery(raw, MAX_QUERY_LENGTH);
 
   if (q.length === 0) {
     return { valid: false, error: "query cannot be empty" };
@@ -69,6 +69,14 @@ function validateYear(raw: any): number | undefined {
   if (isNaN(num)) return undefined;
   const currentYear = new Date().getFullYear();
   return Math.max(1900, Math.min(currentYear + 1, num));
+}
+
+function defaultRecentYearRange(): { yearFrom: number; yearTo: number } {
+  const currentYear = new Date().getFullYear();
+  return {
+    yearFrom: currentYear - 3,
+    yearTo: currentYear,
+  };
 }
 
 /**
@@ -107,8 +115,11 @@ academicSearchRouter.post("/search", async (req, res) => {
 
     const maxResults = validateMaxResults(req.body?.maxResults);
     const sources = validateSources(req.body?.sources);
-    const yearFrom = validateYear(req.body?.yearFrom);
-    const yearTo = validateYear(req.body?.yearTo);
+    const requestedYearFrom = validateYear(req.body?.yearFrom);
+    const requestedYearTo = validateYear(req.body?.yearTo);
+    const defaultYears = defaultRecentYearRange();
+    const yearFrom = requestedYearFrom ?? (requestedYearTo ? undefined : defaultYears.yearFrom);
+    const yearTo = requestedYearTo ?? (requestedYearFrom ? undefined : defaultYears.yearTo);
     const language = typeof req.body?.language === "string" ? req.body.language.substring(0, 10) : undefined;
 
     console.log(`[Academic] Unified search: "${queryResult.query}" | sources: ${sources?.join(",") || "all"}`);
@@ -121,7 +132,14 @@ academicSearchRouter.post("/search", async (req, res) => {
       language
     });
 
-    res.json(result);
+    res.json({
+      ...result,
+      appliedFilters: {
+        yearFrom,
+        yearTo,
+        defaultRecentWindowApplied: !requestedYearFrom && !requestedYearTo,
+      },
+    });
   } catch (error: any) {
     console.error("[Academic] Search error:", error);
     res.status(500).json({ error: error.message });
@@ -261,10 +279,18 @@ academicSearchRouter.get("/quick/:query", async (req, res) => {
     const queryResult = validateQuery(rawQuery);
     if (!queryResult.valid) return res.status(400).json({ error: queryResult.error });
     const maxResults = validateMaxResults(req.query.max);
+    const { yearFrom, yearTo } = defaultRecentYearRange();
 
-    const result = await searchAllSources(queryResult.query, { maxResults });
+    const result = await searchAllSources(queryResult.query, { maxResults, yearFrom, yearTo });
 
-    res.json(result);
+    res.json({
+      ...result,
+      appliedFilters: {
+        yearFrom,
+        yearTo,
+        defaultRecentWindowApplied: true,
+      },
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

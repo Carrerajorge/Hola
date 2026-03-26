@@ -683,7 +683,7 @@ export async function orchestrate(
   const maxRetries = opts.maxRetries ?? 2;
   const maxReplanAttempts = opts.maxReplanAttempts ?? 2;
   let replanCount = 0;
-  let selfExpandCount = 0;
+  const selfExpandCount = 0;
 
   const memory = createMemory(goal);
   logEvent(memory, "orchestration_start", goal);

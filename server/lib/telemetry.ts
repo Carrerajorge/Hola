@@ -1,6 +1,7 @@
 /** * OpenTelemetry Tracing Service * * Features: * - Automatic trace propagation * - Span creation for pipeline steps * - Export to Jaeger/Zipkin * - Custom attributes and events */
 
 import { Request, Response, NextFunction } from "express";
+import { getReleaseMetadata } from "./releaseMetadata";
 
 // OpenTelemetry configuration
 export interface TelemetryConfig {
@@ -15,7 +16,7 @@ export interface TelemetryConfig {
 
 const DEFAULT_CONFIG: TelemetryConfig = {
     serviceName: "iliagpt",
-    serviceVersion: process.env.APP_VERSION || "1.0.0",
+    serviceVersion: getReleaseMetadata().app_version,
     environment: process.env.NODE_ENV || "development",
     exporterType: "console",
     sampleRate: 0.1,
@@ -82,31 +83,35 @@ export async function initTelemetry(customConfig: Partial<TelemetryConfig> = {})
         let exporter: any;
 
         switch (config.exporterType) {
-            case "jaeger":
+            case "jaeger": {
                 const { JaegerExporter } = await import("@opentelemetry/exporter-jaeger");
                 exporter = new JaegerExporter({
                     endpoint: config.exporterEndpoint || "http://localhost:14268/api/traces",
                 });
                 break;
+            }
 
-            case "zipkin":
+            case "zipkin": {
                 const { ZipkinExporter } = await import("@opentelemetry/exporter-zipkin");
                 exporter = new ZipkinExporter({
                     url: config.exporterEndpoint || "http://localhost:9411/api/v2/spans",
                 });
                 break;
+            }
 
-            case "otlp":
+            case "otlp": {
                 const { OTLPTraceExporter } = await import("@opentelemetry/exporter-trace-otlp-http");
                 exporter = new OTLPTraceExporter({
                     url: config.exporterEndpoint || "http://localhost:4318/v1/traces",
                 });
                 break;
+            }
 
             case "console":
-            default:
+            default: {
                 const { ConsoleSpanExporter } = await import("@opentelemetry/sdk-trace-base");
                 exporter = new ConsoleSpanExporter();
+            }
         }
 
         const sdk = new NodeSDK({

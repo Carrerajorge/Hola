@@ -348,8 +348,7 @@ describe("useStreamChat conversation isolation", () => {
 
   it("continues finalizing a background stream after the chat view unmounts", async () => {
     const sentMessages: any[] = [];
-    const completedRuns: Array<{ conversationId: string; content: string }> =
-      [];
+    const completedRuns: Array<{ conversationId: string; content: string }> = [];
 
     vi.stubGlobal(
       "fetch",
@@ -374,9 +373,9 @@ describe("useStreamChat conversation isolation", () => {
               },
             },
           ],
-          15,
+          15
         );
-      }),
+      })
     );
 
     const { result, unmount } = renderHook(() => {

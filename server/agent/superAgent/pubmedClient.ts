@@ -80,7 +80,7 @@ export async function searchPubMed(
     } = {}
 ): Promise<PubMedSearchResult> {
     const { maxResults = 25, startYear, endYear } = options;
-    const clampedMax = Math.max(1, Math.min(100, maxResults));
+    const clampedMax = Math.max(1, Math.min(250, maxResults));
     const startTime = Date.now();
 
     // Sanitize query input

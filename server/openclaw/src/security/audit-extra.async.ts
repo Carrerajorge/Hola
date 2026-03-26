@@ -9,9 +9,9 @@ import { resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { resolveSandboxConfigForAgent } from "../agents/sandbox/config.js";
 import { SANDBOX_BROWSER_SECURITY_HASH_EPOCH } from "../agents/sandbox/constants.js";
 import { execDockerRaw, type ExecDockerRawResult } from "../agents/sandbox/docker.js";
-import { resolveSandboxToolPolicyForAgent } from "../agents/sandbox/tool-policy.js";
 import type { SandboxToolPolicy } from "../agents/sandbox/types.js";
 import { isToolAllowedByPolicies } from "../agents/tool-policy-match.js";
+import { resolveEffectiveSandboxToolPolicyForAgent } from "../agents/tool-policy-sandbox.js";
 import { resolveToolProfilePolicy } from "../agents/tool-policy.js";
 import { listAgentWorkspaceDirs } from "../agents/workspace-dirs.js";
 import { formatCliCommand } from "../cli/command-format.js";
@@ -151,7 +151,9 @@ function resolveToolPolicies(params: {
     pickSandboxToolPolicy(params.agentTools),
   ];
   if (params.sandboxMode === "all") {
-    policies.push(resolveSandboxToolPolicyForAgent(params.cfg, params.agentId ?? undefined));
+    policies.push(
+      resolveEffectiveSandboxToolPolicyForAgent(params.cfg, params.agentId ?? undefined),
+    );
   }
   return policies;
 }
@@ -741,7 +743,7 @@ export async function collectPluginsTrustFindings(params: {
         continue;
       }
       const installPath = record.installPath ?? path.join(params.stateDir, "extensions", pluginId);
-      // eslint-disable-next-line no-await-in-loop
+       
       const installedVersion = await readInstalledPackageVersion(installPath);
       if (!installedVersion || installedVersion === recordedVersion) {
         continue;
@@ -804,7 +806,7 @@ export async function collectPluginsTrustFindings(params: {
         continue;
       }
       const installPath = record.installPath ?? path.join(params.stateDir, "hooks", hookId);
-      // eslint-disable-next-line no-await-in-loop
+       
       const installedVersion = await readInstalledPackageVersion(installPath);
       if (!installedVersion || installedVersion === recordedVersion) {
         continue;
@@ -921,7 +923,7 @@ export async function collectIncludeFilePermFindings(params: {
   }
 
   for (const p of includePaths) {
-    // eslint-disable-next-line no-await-in-loop
+     
     const perms = await inspectPathPermissions(p, {
       env: params.env,
       platform: params.platform,
@@ -1036,7 +1038,7 @@ export async function collectStateDeepFilesystemFindings(params: {
   for (const agentId of ids) {
     const agentDir = path.join(params.stateDir, "agents", agentId, "agent");
     const authPath = path.join(agentDir, "auth-profiles.json");
-    // eslint-disable-next-line no-await-in-loop
+     
     const authPerms = await inspectPathPermissions(authPath, {
       env: params.env,
       platform: params.platform,
@@ -1075,7 +1077,7 @@ export async function collectStateDeepFilesystemFindings(params: {
     }
 
     const storePath = path.join(params.stateDir, "agents", agentId, "sessions", "sessions.json");
-    // eslint-disable-next-line no-await-in-loop
+     
     const storePerms = await inspectPathPermissions(storePath, {
       env: params.env,
       platform: params.platform,

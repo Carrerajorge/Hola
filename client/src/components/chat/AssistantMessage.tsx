@@ -285,10 +285,6 @@ export const AssistantMessage = memo(function AssistantMessage({
                 </div>
             )}
 
-            {message.webSources && message.webSources.length > 0 && !message.isThinking && (
-                <NewsCards sources={message.webSources} maxDisplay={5} />
-            )}
-
             {message.content && !message.isThinking && !message.agentRun && (
                 <>
                     {contentBlocks.map((block, blockIdx) =>
@@ -340,6 +336,10 @@ export const AssistantMessage = memo(function AssistantMessage({
                         </div>
                     )}
                 </>
+            )}
+
+            {message.webSources && message.webSources.length > 0 && !message.isThinking && (
+                <NewsCards sources={message.webSources} maxDisplay={5} />
             )}
 
             {message.documentAnalysis &&

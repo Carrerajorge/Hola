@@ -9,6 +9,7 @@
  */
 
 import { Request, Response, NextFunction } from "express";
+import { getReleaseMetadata } from "./releaseMetadata";
 
 // Sentry configuration
 export interface SentryConfig {
@@ -25,7 +26,7 @@ export interface SentryConfig {
 const DEFAULT_CONFIG: SentryConfig = {
     dsn: process.env.SENTRY_DSN || "",
     environment: process.env.NODE_ENV || "development",
-    release: process.env.APP_VERSION || "1.0.0",
+    release: getReleaseMetadata().app_version,
     sampleRate: 1.0,
     tracesSampleRate: 0.2,
     profilesSampleRate: 0.1,

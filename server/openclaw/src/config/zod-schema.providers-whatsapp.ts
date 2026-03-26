@@ -1,4 +1,4 @@
-import { z } from "zod/v4";
+import { z } from "zod";
 import { ToolPolicySchema } from "./zod-schema.agent-runtime.js";
 import {
   ChannelHealthMonitorSchema,

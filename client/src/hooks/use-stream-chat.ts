@@ -205,7 +205,6 @@ export function useStreamChat(deps: StreamChatDeps) {
     };
   }, []);
 
-
   const sessionsRef = useRef<Map<string, ConversationSession>>(new Map());
   const lastStartedConversationRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);

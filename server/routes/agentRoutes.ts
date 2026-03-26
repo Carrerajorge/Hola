@@ -1363,7 +1363,7 @@ export function createAgentModeRouter() {
       const plan = run.plan as AgentPlan;
       if (plan && plan.objective) {
         (async () => {
-          let currentStatus = "running";
+          const currentStatus = "running";
           try {
             const executionProfile = normalizeAgentExecutionProfile((run as any).executionProfile);
             const orchestrator = await agentManager.startRun(

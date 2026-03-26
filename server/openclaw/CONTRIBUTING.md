@@ -24,7 +24,7 @@ Welcome to the lobster tank! 🦞
   - GitHub: [@joshp123](https://github.com/joshp123) · X: [@jjpcodes](https://x.com/jjpcodes)
 
 - **Ayaan Zaidi** - Telegram subsystem, Android app
-  - GitHub: [@obviyus](https://github.com/obviyus) · X: [@0bviyus](https://x.com/0bviyus)
+  - GitHub: [@obviyus](https://github.com/obviyus) · X: [@obviyus](https://x.com/obviyus)
 
 - **Tyler Yust** - Agents/subagents, cron, BlueBubbles, macOS app
   - GitHub: [@tyler6204](https://github.com/tyler6204) · X: [@tyleryust](https://x.com/tyleryust)
@@ -58,6 +58,7 @@ Welcome to the lobster tank! 🦞
 
 - **Jonathan Taylor** - ACP subsystem, Gateway features/bugs, Gog/Mog/Sog CLI's, SEDMAT
   - GitHub [@visionik](https://github.com/visionik) · X: [@visionik](https://x.com/visionik)
+
 - **Josh Lehman** - Compaction, Tlon/Urbit subsystem
   - GitHub [@jalehman](https://github.com/jalehman) · X: [@jlehman\_](https://x.com/jlehman_)
 

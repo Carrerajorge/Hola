@@ -64,7 +64,7 @@ vi.mock("@/components/retrieval-vis", () => ({
 }));
 
 vi.mock("@/components/news-cards", () => ({
-  NewsCards: () => null,
+  NewsCards: () => <div data-testid="mock-news-cards">news cards</div>,
 }));
 
 vi.mock("@/components/code-execution-block", () => ({
@@ -146,6 +146,51 @@ describe("AssistantMessage", () => {
     expect(screen.getByTestId("mock-agent-run")).toBeInTheDocument();
     expect(screen.getByTestId("mock-action-toolbar")).toHaveTextContent(
       "Tema principal del documento.",
+    );
+  });
+
+  it("renders the response content before related news cards", () => {
+    render(
+      <AssistantMessage
+        message={makeMessage({
+          content: "Respuesta final",
+          webSources: [
+            {
+              url: "https://example.com/noticia",
+              title: "Noticia",
+              domain: "example.com",
+            },
+          ],
+        })}
+        msgIndex={1}
+        totalMessages={2}
+        variant="default"
+        copiedMessageId={null}
+        messageFeedback={{}}
+        speakingMessageId={null}
+        aiState="idle"
+        isRegenerating={false}
+        isGeneratingImage={false}
+        pendingGeneratedImage={null}
+        latestGeneratedImageRef={{ current: null }}
+        onCopyMessage={vi.fn()}
+        onFeedback={vi.fn()}
+        onRegenerate={vi.fn()}
+        onShare={vi.fn()}
+        onReadAloud={vi.fn()}
+        onOpenDocumentPreview={vi.fn()}
+        onOpenFileAttachmentPreview={vi.fn()}
+        onDownloadImage={vi.fn()}
+        onOpenLightbox={vi.fn()}
+      />,
+    );
+
+    const content = document.querySelector(".prose");
+    const newsCards = screen.getByTestId("mock-news-cards");
+
+    expect(content).not.toBeNull();
+    expect(content?.compareDocumentPosition(newsCards)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
     );
   });
 });

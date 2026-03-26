@@ -135,6 +135,116 @@ interface PageMetadata {
   publishedDate?: string;
 }
 
+const LAZY_IMAGE_ATTRIBUTES = [
+  "data-src",
+  "data-lazy-src",
+  "data-original",
+  "data-url",
+];
+
+const SRCSET_ATTRIBUTES = [
+  "data-srcset",
+  "data-lazy-srcset",
+  "srcset",
+];
+
+function resolveAbsoluteUrl(rawUrl: string | null | undefined, baseUrl: string): string | undefined {
+  if (!rawUrl) return undefined;
+  const trimmed = rawUrl.trim();
+  if (!trimmed || trimmed.startsWith("data:") || trimmed.startsWith("blob:")) {
+    return undefined;
+  }
+
+  try {
+    return trimmed.startsWith("http") ? trimmed : new URL(trimmed, baseUrl).href;
+  } catch {
+    return undefined;
+  }
+}
+
+function pickBestSrcsetUrl(srcset: string | null | undefined, baseUrl: string): string | undefined {
+  if (!srcset) return undefined;
+
+  const candidates = srcset
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [rawUrl, descriptor] = entry.split(/\s+/, 2);
+      const width = descriptor?.endsWith("w") ? Number.parseInt(descriptor, 10) : 0;
+      return {
+        url: resolveAbsoluteUrl(rawUrl, baseUrl),
+        width: Number.isFinite(width) ? width : 0,
+      };
+    })
+    .filter((candidate): candidate is { url: string; width: number } => Boolean(candidate.url))
+    .sort((a, b) => b.width - a.width);
+
+  return candidates[0]?.url;
+}
+
+function scoreImageCandidate(img: HTMLImageElement, url: string): number {
+  const width = Number.parseInt(img.getAttribute("width") || "0", 10) || 0;
+  const height = Number.parseInt(img.getAttribute("height") || "0", 10) || 0;
+  const alt = (img.getAttribute("alt") || "").toLowerCase();
+  const className = (img.getAttribute("class") || "").toLowerCase();
+  const lowerUrl = url.toLowerCase();
+
+  let score = 0;
+
+  if (width >= 300) score += 2;
+  if (height >= 180) score += 2;
+  if (width * height >= 60_000) score += 2;
+  if (alt.length >= 10) score += 1;
+
+  if (/(logo|icon|avatar|favicon|flag|sprite)/.test(className)) score -= 4;
+  if (/(logo|icon|avatar|favicon|flag|sprite|pdf\.gif|1x1|spacer)/.test(lowerUrl)) score -= 4;
+  if (width > 0 && width < 80) score -= 3;
+  if (height > 0 && height < 80) score -= 3;
+
+  return score;
+}
+
+function extractPreviewImageUrl(doc: Document, baseUrl: string): string | undefined {
+  const metadataCandidates = [
+    doc.querySelector('meta[property="og:image"]')?.getAttribute("content"),
+    doc.querySelector('meta[name="twitter:image"]')?.getAttribute("content"),
+    doc.querySelector('meta[itemprop="image"]')?.getAttribute("content"),
+    doc.querySelector('link[rel="image_src"]')?.getAttribute("href"),
+  ];
+
+  for (const candidate of metadataCandidates) {
+    const resolved = resolveAbsoluteUrl(candidate, baseUrl);
+    if (resolved) return resolved;
+  }
+
+  let bestImage: { url: string; score: number } | null = null;
+  for (const img of Array.from(doc.querySelectorAll("img")).slice(0, 24)) {
+    const directCandidate =
+      LAZY_IMAGE_ATTRIBUTES.map((attr) => img.getAttribute(attr)).find(Boolean) ||
+      pickBestSrcsetUrl(
+        SRCSET_ATTRIBUTES.map((attr) => img.getAttribute(attr)).find(Boolean),
+        baseUrl
+      ) ||
+      img.getAttribute("src");
+
+    const resolvedUrl = resolveAbsoluteUrl(directCandidate, baseUrl);
+    if (!resolvedUrl) continue;
+
+    const score = scoreImageCandidate(img, resolvedUrl);
+    if (!bestImage || score > bestImage.score) {
+      bestImage = { url: resolvedUrl, score };
+    }
+  }
+
+  return bestImage?.url;
+}
+
+export function extractPreviewImageUrlFromHtml(html: string, url: string): string | undefined {
+  const dom = new JSDOM(html, { url });
+  return extractPreviewImageUrl(dom.window.document, url);
+}
+
 // Export as fetchUrl for compatibility with agentExecutor
 export async function fetchUrl(url: string, options?: { extractText?: boolean; maxLength?: number }): Promise<PageMetadata | null> {
   return fetchPageContent(url);
@@ -161,15 +271,7 @@ export async function fetchPageContent(url: string): Promise<PageMetadata | null
     const dom = new JSDOM(html, { url });
     const doc = dom.window.document;
 
-    // Extract og:image, twitter:image, or first large image
-    let imageUrl: string | undefined;
-    const ogImage = doc.querySelector('meta[property="og:image"]')?.getAttribute("content");
-    const twitterImage = doc.querySelector('meta[name="twitter:image"]')?.getAttribute("content");
-    if (ogImage) {
-      imageUrl = ogImage.startsWith("http") ? ogImage : new URL(ogImage, url).href;
-    } else if (twitterImage) {
-      imageUrl = twitterImage.startsWith("http") ? twitterImage : new URL(twitterImage, url).href;
-    }
+    const imageUrl = extractPreviewImageUrl(doc, url);
 
     // Extract canonical URL and normalize to absolute
     const canonicalEl = doc.querySelector('link[rel="canonical"]');
@@ -241,15 +343,7 @@ export async function fetchPageMetadata(url: string): Promise<Omit<PageMetadata,
     const dom = new JSDOM(html, { url });
     const doc = dom.window.document;
 
-    // Extract og:image
-    let imageUrl: string | undefined;
-    const ogImage = doc.querySelector('meta[property="og:image"]')?.getAttribute("content");
-    const twitterImage = doc.querySelector('meta[name="twitter:image"]')?.getAttribute("content");
-    if (ogImage) {
-      imageUrl = ogImage.startsWith("http") ? ogImage : new URL(ogImage, url).href;
-    } else if (twitterImage) {
-      imageUrl = twitterImage.startsWith("http") ? twitterImage : new URL(twitterImage, url).href;
-    }
+    const imageUrl = extractPreviewImageUrl(doc, url);
 
     // Normalize canonical URL to absolute
     const rawCanonical = doc.querySelector('link[rel="canonical"]')?.getAttribute("href");
