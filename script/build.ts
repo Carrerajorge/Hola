@@ -143,25 +143,22 @@ async function buildServer(appVersion: string) {
       {
         name: "externalize-bare-imports",
         setup(build) {
-          // The @hola/openclaw package uses self-referential bare imports
-          // like "openclaw/plugin-sdk/...". Rewrite them to "@hola/openclaw/..."
-          // so esbuild can resolve and bundle them instead of externalizing.
-          build.onResolve({ filter: /^openclaw(\/|$)/ }, (args) => {
-            if (args.pluginData?.rewrittenFromOpenclaw) return;
-            const rewritten = args.path.replace(/^openclaw/, "@hola/openclaw");
-            return build.resolve(rewritten, {
-              kind: args.kind,
-              importer: args.importer,
-              resolveDir: args.resolveDir,
-              pluginData: { rewrittenFromOpenclaw: true },
-            });
-          });
-
           build.onResolve({ filter: /^[^./]|^\.[^./]|^\.\.[^/]/ }, (args) => {
             if (args.path.startsWith("@shared")) return;
             if (args.path.startsWith("@hola")) return;
-            // Don't externalize openclaw self-imports (handled above)
-            if (args.path === "openclaw" || args.path.startsWith("openclaw/")) return;
+            // The @hola/openclaw package uses self-referential bare imports
+            // like "openclaw/plugin-sdk/...". Rewrite to the scoped name and
+            // resolve via require.resolve so esbuild can bundle them.
+            if (args.path === "openclaw" || args.path.startsWith("openclaw/")) {
+              const scoped = args.path.replace(/^openclaw/, "@hola/openclaw");
+              try {
+                return { path: require.resolve(scoped, { paths: [args.resolveDir || process.cwd()] }) };
+              } catch {
+                // If dist files don't exist yet (local dev), mark as external.
+                // In Docker, pnpm build:docker creates them before npm run build.
+                return { path: args.path, external: true };
+              }
+            }
             return { path: args.path, external: true };
           });
         }
