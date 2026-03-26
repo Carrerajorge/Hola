@@ -30,7 +30,7 @@ services:
 
       PORT: "5000"
 
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-iliagpt}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-iliagpt}
 
       AGENT_WORKSPACE_ROOT: /app/sandbox_workspace
 
@@ -99,7 +99,7 @@ services:
 
       APP_VERSION: ${APP_VERSION:-dev}
 
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-iliagpt}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-iliagpt}
 
 
       OCR_SERVICE_URL: http://ocr:8000
@@ -142,7 +142,7 @@ services:
 
       APP_VERSION: ${APP_VERSION:-dev}
 
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-iliagpt}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-iliagpt}
 
     depends_on:
 
@@ -162,7 +162,7 @@ services:
 
     environment:
 
-      POSTGRES_USER: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
 
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
 

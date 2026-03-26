@@ -27,6 +27,7 @@ readonly STATE_FILE="${DEPLOY_PATH}/deploy-state.json"
 readonly STATE_FILE_BAK="${DEPLOY_PATH}/deploy-state.json.bak"
 readonly LOCK_FILE="${DEPLOY_PATH}/.deploy.lock"
 readonly DEPLOY_LOG="${DEPLOY_PATH}/deploy.log"
+readonly COMPOSE_ENV_FILE="${DEPLOY_PATH}/.env.production"
 readonly INFRA_COMPOSE="${DEPLOY_PATH}/docker-compose.infra.yml"
 readonly SLOT_COMPOSE="${DEPLOY_PATH}/docker-compose.slot.yml"
 readonly NGINX_CONF_DIR="/etc/nginx/conf.d"
@@ -114,6 +115,86 @@ load_env_value() {
   fi
 
   echo ""
+}
+
+parse_database_url_component() {
+  local database_url="$1"
+  local component="$2"
+
+  python3 - "$database_url" "$component" <<'PY'
+import sys
+from urllib.parse import urlparse, unquote
+
+database_url = sys.argv[1]
+component = sys.argv[2]
+
+if not database_url:
+    print("")
+    raise SystemExit(0)
+
+parsed = urlparse(database_url)
+
+if component == "username":
+    print(unquote(parsed.username or ""))
+elif component == "password":
+    print(unquote(parsed.password or ""))
+elif component == "database":
+    print(unquote((parsed.path or "").lstrip("/")))
+else:
+    print("")
+PY
+}
+
+urlencode_value() {
+  local raw_value="$1"
+
+  python3 - "$raw_value" <<'PY'
+import sys
+from urllib.parse import quote
+
+print(quote(sys.argv[1], safe=""))
+PY
+}
+
+validate_database_url() {
+  local database_url="$1"
+
+  python3 - "$database_url" <<'PY'
+import sys
+from urllib.parse import urlparse
+
+database_url = sys.argv[1].strip()
+if not database_url:
+    print("DATABASE_URL is empty", file=sys.stderr)
+    sys.exit(1)
+
+parsed = urlparse(database_url)
+if parsed.scheme not in {"postgres", "postgresql"}:
+    print("DATABASE_URL must use postgres:// or postgresql://", file=sys.stderr)
+    sys.exit(1)
+if not parsed.username:
+    print("DATABASE_URL is missing the database username", file=sys.stderr)
+    sys.exit(1)
+if parsed.password in (None, ""):
+    print("DATABASE_URL is missing the database password", file=sys.stderr)
+    sys.exit(1)
+if not parsed.hostname:
+    print("DATABASE_URL is missing the database host", file=sys.stderr)
+    sys.exit(1)
+if not parsed.path or parsed.path == "/":
+    print("DATABASE_URL is missing the database name", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    port = parsed.port
+except ValueError:
+    print("DATABASE_URL has an invalid port", file=sys.stderr)
+    sys.exit(1)
+
+if port is not None and not (1 <= port <= 65535):
+    print("DATABASE_URL port must be between 1 and 65535", file=sys.stderr)
+    sys.exit(1)
+PY
 }
 
 validate_image_inputs() {
@@ -920,7 +1001,7 @@ done
 logok "Compose files present"
 
 # Verify .env.production exists
-if [ ! -f .env.production ]; then
+if [ ! -f "${COMPOSE_ENV_FILE}" ]; then
   loge "Missing .env.production — required for deploy"
   exit 1
 fi
@@ -928,39 +1009,66 @@ logok ".env.production present"
 echo ""
 
 # ── Load secrets for compose variable expansion ────────────
-SANDBOX_RUNNER_TOKEN="$(load_env_value "SANDBOX_RUNNER_TOKEN" ".env.production" || true)"
+SANDBOX_RUNNER_TOKEN="$(load_env_value "SANDBOX_RUNNER_TOKEN" "${COMPOSE_ENV_FILE}" || true)"
 if ! SANDBOX_RUNNER_TOKEN="$(validate_secret "SANDBOX_RUNNER_TOKEN" "${SANDBOX_RUNNER_TOKEN}" 48)"; then
   exit 1
 fi
 export SANDBOX_RUNNER_TOKEN
 
-REDIS_PASSWORD="$(load_env_value "REDIS_PASSWORD" ".env.production" || true)"
+REDIS_PASSWORD="$(load_env_value "REDIS_PASSWORD" "${COMPOSE_ENV_FILE}" || true)"
 if ! REDIS_PASSWORD="$(validate_secret "REDIS_PASSWORD" "${REDIS_PASSWORD}" 20)"; then
   exit 1
 fi
 export REDIS_PASSWORD
 
-POSTGRES_USER="$(trim "$(load_env_value "POSTGRES_USER" ".env.production" || true)")"
+DATABASE_URL="$(trim "$(load_env_value "DATABASE_URL" "${COMPOSE_ENV_FILE}" || true)")"
+if [ -z "${DATABASE_URL}" ]; then
+  loge "DATABASE_URL is missing in .env.production"
+  exit 1
+fi
+if ! validate_database_url "${DATABASE_URL}"; then
+  loge "DATABASE_URL is invalid in .env.production"
+  exit 1
+fi
+export DATABASE_URL
+
+POSTGRES_USER="$(trim "$(load_env_value "POSTGRES_USER" "${COMPOSE_ENV_FILE}" || true)")"
+if [ -z "${POSTGRES_USER}" ]; then
+  POSTGRES_USER="$(trim "$(parse_database_url_component "${DATABASE_URL}" "username")")"
+fi
 POSTGRES_USER="${POSTGRES_USER:-postgres}"
 export POSTGRES_USER
 
-POSTGRES_PASSWORD="$(trim "$(load_env_value "POSTGRES_PASSWORD" ".env.production" || true)")"
+POSTGRES_PASSWORD="$(trim "$(load_env_value "POSTGRES_PASSWORD" "${COMPOSE_ENV_FILE}" || true)")"
 if [ -z "${POSTGRES_PASSWORD}" ]; then
-  loge "POSTGRES_PASSWORD is missing in .env.production"
+  POSTGRES_PASSWORD="$(trim "$(parse_database_url_component "${DATABASE_URL}" "password")")"
+fi
+if [ -z "${POSTGRES_PASSWORD}" ]; then
+  loge "POSTGRES_PASSWORD is missing and could not be derived from DATABASE_URL"
   exit 1
 fi
 export POSTGRES_PASSWORD
 
-POSTGRES_DB="$(trim "$(load_env_value "POSTGRES_DB" ".env.production" || true)")"
+POSTGRES_DB="$(trim "$(load_env_value "POSTGRES_DB" "${COMPOSE_ENV_FILE}" || true)")"
+if [ -z "${POSTGRES_DB}" ]; then
+  POSTGRES_DB="$(trim "$(parse_database_url_component "${DATABASE_URL}" "database")")"
+fi
 POSTGRES_DB="${POSTGRES_DB:-iliagpt}"
 export POSTGRES_DB
 
-POSTGRES_VOLUME_NAME="$(trim "$(load_env_value "POSTGRES_VOLUME_NAME" ".env.production" || true)")"
+POSTGRES_USER_URI="$(urlencode_value "${POSTGRES_USER}")"
+POSTGRES_PASSWORD_URI="$(urlencode_value "${POSTGRES_PASSWORD}")"
+POSTGRES_DB_URI="$(urlencode_value "${POSTGRES_DB}")"
+export POSTGRES_USER_URI
+export POSTGRES_PASSWORD_URI
+export POSTGRES_DB_URI
+
+POSTGRES_VOLUME_NAME="$(trim "$(load_env_value "POSTGRES_VOLUME_NAME" "${COMPOSE_ENV_FILE}" || true)")"
 if [ -n "${POSTGRES_VOLUME_NAME}" ]; then
   export POSTGRES_VOLUME_NAME
 fi
 
-DEPLOY_STATE_HMAC_KEY="$(load_env_value "DEPLOY_STATE_HMAC_KEY" ".env.production" || true)"
+DEPLOY_STATE_HMAC_KEY="$(load_env_value "DEPLOY_STATE_HMAC_KEY" "${COMPOSE_ENV_FILE}" || true)"
 if [ -n "${DEPLOY_STATE_HMAC_KEY}" ]; then
   if ! DEPLOY_STATE_HMAC_KEY="$(validate_secret "DEPLOY_STATE_HMAC_KEY" "${DEPLOY_STATE_HMAC_KEY}" 32)"; then
     exit 1
@@ -1060,7 +1168,7 @@ infra() {
   IMAGE_TAG="${IMAGE_TAG}" REDIS_PASSWORD="${REDIS_PASSWORD}" \
     POSTGRES_USER="${POSTGRES_USER}" POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
     POSTGRES_DB="${POSTGRES_DB}" POSTGRES_VOLUME_NAME="${POSTGRES_VOLUME_NAME:-}" \
-    docker compose -p hola-infra -f "${INFRA_COMPOSE}" "$@"
+    docker compose --env-file "${COMPOSE_ENV_FILE}" -p hola-infra -f "${INFRA_COMPOSE}" "$@"
 }
 
 ensure_infra_up() {
@@ -1099,10 +1207,10 @@ slot_compose() {
   SLOT="${slot_name}" HOST_PORT="${port}" \
     IMAGE_TAG="${image_tag}" APP_VERSION="${app_version}" \
     SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN}" \
-    REDIS_PASSWORD="${REDIS_PASSWORD}" \
+    REDIS_PASSWORD="${REDIS_PASSWORD}" DATABASE_URL="${DATABASE_URL}" \
     POSTGRES_USER="${POSTGRES_USER}" POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
     POSTGRES_DB="${POSTGRES_DB}" \
-    docker compose -p "hola-${slot_name}" -f "${SLOT_COMPOSE}" "$@"
+    docker compose --env-file "${COMPOSE_ENV_FILE}" -p "hola-${slot_name}" -f "${SLOT_COMPOSE}" "$@"
 }
 
 slot() {
@@ -1353,7 +1461,7 @@ run_sql_migrations() {
 
   local db_container="hola-postgres"
 
-  local db_name="iliagpt"
+  local db_name="${POSTGRES_DB:-iliagpt}"
 
   local migrations_dir="${DEPLOY_PATH}/migrations"
 
@@ -1630,7 +1738,7 @@ ensure_infra_up
 
 log "  Waiting for Postgres..."
 for i in $(seq 1 30); do
-  if docker exec hola-postgres pg_isready -U postgres > /dev/null 2>&1; then
+  if docker exec hola-postgres pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" > /dev/null 2>&1; then
     logok "Postgres ready."
     break
   fi
@@ -1686,8 +1794,8 @@ PG_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{en
 log "  Resolved hola-postgres IP: ${PG_IP}"
 
 if ! timeout "${MIGRATION_TIMEOUT}" docker run --rm --pull never --network hola-net \
-  --env-file .env.production \
-  -e DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${PG_IP}:5432/${POSTGRES_DB}" \
+  --env-file "${COMPOSE_ENV_FILE}" \
+  -e DATABASE_URL="postgresql://${POSTGRES_USER_URI}:${POSTGRES_PASSWORD_URI}@${PG_IP}:5432/${POSTGRES_DB_URI}" \
   -e NODE_ENV=production \
   --memory=512m --cpus=1 \
   "${LOCAL_APP_IMAGE_ID}" \
@@ -2064,7 +2172,7 @@ else
 fi
 
 # Postgres
-if docker exec hola-postgres pg_isready -U postgres > /dev/null 2>&1; then
+if docker exec hola-postgres pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" > /dev/null 2>&1; then
   logok "Postgres healthy."
 else
   logw "Postgres health check failed (non-fatal)."

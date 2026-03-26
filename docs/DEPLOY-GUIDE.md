@@ -63,6 +63,8 @@ cd /opt/hola
 docker compose -p iliagpt -f docker-compose.prod.yml restart app worker
 ```
 
+At minimum, production must also define `DATABASE_URL`, `REDIS_PASSWORD`, `POSTGRES_PASSWORD` (or a `DATABASE_URL` from which it can be derived), `SANDBOX_RUNNER_TOKEN`, and optionally `POSTGRES_USER` if your database user is not the default `postgres`.
+
 ### Observabilidad (Prometheus + InfluxDB)
 
 Enable with:
