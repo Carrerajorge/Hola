@@ -248,10 +248,17 @@ jobs:
           TAG="${{ steps.meta.outputs.tag }}"
           echo "▸ Verifying pushed images..."
           for img in app sandbox ocr; do
-            if docker manifest inspect "${{ env.IMAGE_BASE }}-${img}:${TAG}" > /dev/null 2>&1; then
-              echo "  ✓ ${{ env.IMAGE_BASE }}-${img}:${TAG}"
+            IMAGE_REF="${{ env.IMAGE_BASE }}-${img}:${TAG}"
+            if bash ./scripts/ci-retry.sh \
+              --label "GHCR manifest verify ${IMAGE_REF}" \
+              --attempts 6 \
+              --base-delay 5 \
+              --max-delay 30 \
+              -- \
+              docker manifest inspect "${IMAGE_REF}" > /dev/null 2>&1; then
+              echo "  ✓ ${IMAGE_REF}"
             else
-              echo "  ✗ ${{ env.IMAGE_BASE }}-${img}:${TAG} NOT FOUND"
+              echo "  ✗ ${IMAGE_REF} NOT FOUND"
               exit 1
             fi
           done
