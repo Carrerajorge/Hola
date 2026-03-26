@@ -183,7 +183,8 @@ jobs:
             scripts/rollback-bluegreen.sh \
             scripts/health-dashboard.sh \
             scripts/vps-bootstrap-bluegreen.sh \
-            scripts/prod-rigorous-checks.sh
+            scripts/prod-rigorous-checks.sh \
+            scripts/collect-prod-deploy-evidence.sh
           do
             fetch_asset "${asset}"
           done
@@ -540,7 +541,10 @@ jobs:
         continue-on-error: true
         env:
           PLAYWRIGHT_BASE_URL: https://iliagpt.com
-        run: npm run test:smoke:remote
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/prod-evidence
+          npm run test:smoke:remote 2>&1 | tee artifacts/prod-evidence/browser-smoke.log
 
       - name: Run rigorous production acceptance checks
         id: prod_acceptance
@@ -551,11 +555,14 @@ jobs:
           VPS_USER: ${{ env.VPS_USER }}
           VPS_SSH_KEY: /home/runner/.ssh/deploy_key
           EXPECTED_APP_VERSION: ${{ steps.tag.outputs.app_version }}
+          EXPECTED_APP_SHA: ${{ github.sha }}
           DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
           DEPLOY_STATE_PATH: /opt/hola/deploy-state.json
           NGINX_UPSTREAM_CONF: /etc/nginx/conf.d/iliagpt-upstream.conf
         run: |
-          bash scripts/prod-rigorous-checks.sh
+          set -euo pipefail
+          mkdir -p artifacts/prod-evidence
+          bash scripts/prod-rigorous-checks.sh 2>&1 | tee artifacts/prod-evidence/rigorous-checks.log
 
       - name: Roll back on post-deploy acceptance failure
         if: ${{ always() && steps.deploy_bluegreen.outcome == 'success' && (steps.verify_production.outcome == 'failure' || steps.browser_smoke.outcome == 'failure' || steps.prod_acceptance.outcome == 'failure') }}
@@ -570,6 +577,35 @@ jobs:
             -o TCPKeepAlive=yes \
             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }} \
             "cd ${{ env.DEPLOY_PATH }} && bash scripts/rollback-bluegreen.sh --force --stop-bad"
+
+      - name: Collect production evidence bundle
+        if: always()
+        continue-on-error: true
+        env:
+          PRODUCTION_BASE_URL: https://iliagpt.com
+          EVIDENCE_DIR: artifacts/prod-evidence
+          VPS_HOST: ${{ steps.target.outputs.host }}
+          VPS_PORT: ${{ steps.target.outputs.port }}
+          VPS_USER: ${{ env.VPS_USER }}
+          VPS_SSH_KEY: /home/runner/.ssh/deploy_key
+          EXPECTED_APP_VERSION: ${{ steps.tag.outputs.app_version }}
+          EXPECTED_APP_SHA: ${{ github.sha }}
+          DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
+          DEPLOY_STATE_PATH: /opt/hola/deploy-state.json
+          NGINX_UPSTREAM_CONF: /etc/nginx/conf.d/iliagpt-upstream.conf
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/prod-evidence
+          bash scripts/collect-prod-deploy-evidence.sh
+
+      - name: Upload production evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-evidence-manual-${{ github.run_id }}
+          path: artifacts/prod-evidence
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Enforce post-deploy acceptance
         if: ${{ always() && steps.deploy_bluegreen.outcome == 'success' }}
@@ -607,6 +643,10 @@ jobs:
           echo "| Image Tag | \`${{ steps.tag.outputs.image_tag }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
           echo "| URL | https://iliagpt.com |" >> $GITHUB_STEP_SUMMARY
+          if [ -f artifacts/prod-evidence/summary.md ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            cat artifacts/prod-evidence/summary.md >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Cleanup SSH key
         if: always()
@@ -674,7 +714,8 @@ jobs:
             scripts/rollback-bluegreen.sh \
             scripts/health-dashboard.sh \
             scripts/vps-bootstrap-bluegreen.sh \
-            scripts/prod-rigorous-checks.sh
+            scripts/prod-rigorous-checks.sh \
+            scripts/collect-prod-deploy-evidence.sh
           do
             fetch_asset "${asset}"
           done
@@ -1133,7 +1174,10 @@ jobs:
         continue-on-error: true
         env:
           PLAYWRIGHT_BASE_URL: https://iliagpt.com
-        run: npm run test:smoke:remote
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/prod-evidence
+          npm run test:smoke:remote 2>&1 | tee artifacts/prod-evidence/browser-smoke.log
 
       - name: Run rigorous production acceptance checks
         id: prod_acceptance
@@ -1144,11 +1188,14 @@ jobs:
           VPS_USER: ${{ env.VPS_USER }}
           VPS_SSH_KEY: /home/runner/.ssh/deploy_key
           EXPECTED_APP_VERSION: ${{ steps.tag.outputs.app_version }}
+          EXPECTED_APP_SHA: ${{ github.sha }}
           DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
           DEPLOY_STATE_PATH: /opt/hola/deploy-state.json
           NGINX_UPSTREAM_CONF: /etc/nginx/conf.d/iliagpt-upstream.conf
         run: |
-          bash scripts/prod-rigorous-checks.sh
+          set -euo pipefail
+          mkdir -p artifacts/prod-evidence
+          bash scripts/prod-rigorous-checks.sh 2>&1 | tee artifacts/prod-evidence/rigorous-checks.log
 
       - name: Roll back on post-deploy acceptance failure
         if: ${{ always() && steps.latest_main.outputs.should_deploy == 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.deploy_bluegreen.outcome == 'success' && (steps.verify_production.outcome == 'failure' || steps.browser_smoke.outcome == 'failure' || steps.prod_acceptance.outcome == 'failure') }}
@@ -1163,6 +1210,35 @@ jobs:
             -o TCPKeepAlive=yes \
             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }} \
             "cd ${{ env.DEPLOY_PATH }} && bash scripts/rollback-bluegreen.sh --force --stop-bad"
+
+      - name: Collect production evidence bundle
+        if: ${{ always() && steps.latest_main.outputs.should_deploy == 'true' }}
+        continue-on-error: true
+        env:
+          PRODUCTION_BASE_URL: https://iliagpt.com
+          EVIDENCE_DIR: artifacts/prod-evidence
+          VPS_HOST: ${{ steps.target.outputs.host }}
+          VPS_PORT: ${{ steps.target.outputs.port }}
+          VPS_USER: ${{ env.VPS_USER }}
+          VPS_SSH_KEY: /home/runner/.ssh/deploy_key
+          EXPECTED_APP_VERSION: ${{ steps.tag.outputs.app_version }}
+          EXPECTED_APP_SHA: ${{ github.sha }}
+          DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
+          DEPLOY_STATE_PATH: /opt/hola/deploy-state.json
+          NGINX_UPSTREAM_CONF: /etc/nginx/conf.d/iliagpt-upstream.conf
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/prod-evidence
+          bash scripts/collect-prod-deploy-evidence.sh
+
+      - name: Upload production evidence bundle
+        if: ${{ always() && steps.latest_main.outputs.should_deploy == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-evidence-auto-${{ github.run_id }}
+          path: artifacts/prod-evidence
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Enforce post-deploy acceptance
         if: ${{ always() && steps.latest_main.outputs.should_deploy == 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.deploy_bluegreen.outcome == 'success' }}
@@ -1204,6 +1280,10 @@ jobs:
           echo "| Skip Reason | \`${{ steps.latest_main_cutover.outputs.skip_reason || steps.latest_main.outputs.skip_reason || 'n/a' }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
           echo "| URL | https://iliagpt.com |" >> $GITHUB_STEP_SUMMARY
+          if [ -f artifacts/prod-evidence/summary.md ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            cat artifacts/prod-evidence/summary.md >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Cleanup SSH key
         if: always()
