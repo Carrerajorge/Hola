@@ -6,6 +6,7 @@ IMAGE_TAG="${IMAGE_TAG:?IMAGE_TAG is required}"
 APP_IMAGE="${APP_IMAGE:-ghcr.io/carrerajorge/iliagpt-app:${IMAGE_TAG}}"
 SANDBOX_IMAGE="${SANDBOX_IMAGE:-ghcr.io/carrerajorge/iliagpt-sandbox:${IMAGE_TAG}}"
 APP_VERSION="${APP_VERSION:-${IMAGE_TAG#sha-}}"
+APP_SHA="${APP_SHA:-${APP_VERSION}}"
 EXPECTED_OPENCLAW_VERSION="${EXPECTED_OPENCLAW_VERSION:-}"
 IMAGE_PULL_TIMEOUT_SECONDS="${IMAGE_PULL_TIMEOUT_SECONDS:-600}"
 MIGRATION_TIMEOUT_SECONDS="${MIGRATION_TIMEOUT_SECONDS:-300}"
@@ -172,7 +173,7 @@ write_env_file() {
 NODE_ENV=production
 PORT=5000
 APP_VERSION=${APP_VERSION}
-APP_SHA=${APP_VERSION}
+APP_SHA=${APP_SHA}
 BASE_URL=http://127.0.0.1:${HOST_PORT}
 ALLOWED_HOSTS=127.0.0.1,127.0.0.1:${HOST_PORT},localhost,localhost:${HOST_PORT}
 DATABASE_URL=postgres://postgres:postgres@${POSTGRES_CONTAINER}:5432/iliagpt
@@ -325,6 +326,10 @@ fi
 
 if ! printf '%s' "${HEALTH_JSON}" | grep -q "\"version\":\"${APP_VERSION}\""; then
   fail "/api/health version does not match expected app version ${APP_VERSION}."
+fi
+
+if ! printf '%s' "${HEALTH_JSON}" | grep -q "\"app_sha\":\"${APP_SHA}\""; then
+  fail "/api/health app_sha does not match expected app sha ${APP_SHA}."
 fi
 
 OPENCLAW_HEALTH_JSON="$(curl -fsS --max-time 5 "http://127.0.0.1:${HOST_PORT}/api/openclaw/runtime/health")"

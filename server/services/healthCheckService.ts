@@ -20,6 +20,7 @@ import { sql } from "drizzle-orm";
 import { redis } from "../lib/redis";
 import { env } from "../config/env";
 import { Logger } from "../lib/logger";
+import { getReleaseMetadata } from "../lib/releaseMetadata";
 import os from "os";
 import { getOpenAICompatibleBaseUrl, isCerebrasBaseUrl, usesCerebrasOpenAICompatibility } from "../lib/openaiCompatible";
 
@@ -138,10 +139,9 @@ function aggregateStatus(components: Record<string, ComponentHealth>): HealthSta
 
 // ─── Health Report Functions ──────────────────────────────────────────────────
 
-const APP_VERSION = process.env.npm_package_version || "unknown";
-
 /** Liveness check: rápido, solo DB + Redis */
 export async function livenessCheck(): Promise<HealthReport> {
+    const release = getReleaseMetadata();
     const [database, redisComponent, memory] = await Promise.all([
         checkDatabase(),
         checkRedis(),
@@ -152,7 +152,7 @@ export async function livenessCheck(): Promise<HealthReport> {
     return {
         status: aggregateStatus(components),
         timestamp: new Date().toISOString(),
-        version: APP_VERSION,
+        version: release.app_version,
         uptime: Math.round(process.uptime()),
         components,
     };
@@ -160,6 +160,7 @@ export async function livenessCheck(): Promise<HealthReport> {
 
 /** Readiness check: profundo, todos los componentes */
 export async function deepHealthCheck(): Promise<HealthReport> {
+    const release = getReleaseMetadata();
     const [database, redisComponent] = await Promise.all([
         checkDatabase(),
         checkRedis(),
@@ -177,7 +178,7 @@ export async function deepHealthCheck(): Promise<HealthReport> {
     return {
         status: aggregateStatus(components),
         timestamp: new Date().toISOString(),
-        version: APP_VERSION,
+        version: release.app_version,
         uptime: Math.round(process.uptime()),
         components,
     };

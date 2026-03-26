@@ -53,6 +53,7 @@ import {
   getHealthSummary as getPareHealthSummary,
 } from "./lib/pareHealthChecks";
 import { getMetricsSummary as getPareMetricsSummary } from "./lib/pareMetrics";
+import { getReleaseMetadata } from "./lib/releaseMetadata";
 import errorRouter from "./routes/errorRouter";
 import { createSpreadsheetRouter } from "./routes/spreadsheetRoutes";
 import { createChatRoutes } from "./routes/chatRoutes";
@@ -1073,16 +1074,17 @@ export async function registerRoutes(
   // Simple API health check (used by clients and local smoke checks)
   app.get("/api/health", (req, res) => {
     const mem = process.memoryUsage();
-    const appVersion =
-      process.env.APP_VERSION || process.env.npm_package_version || "unknown";
-    const packageVersion = process.env.npm_package_version || "unknown";
+    const release = getReleaseMetadata();
     res.json({
       status: "ok",
       timestamp: new Date().toISOString(),
-      version: appVersion,
-      app_version: appVersion,
-      package_version: packageVersion,
-      app_sha: process.env.APP_SHA || appVersion,
+      version: release.app_version,
+      app_version: release.app_version,
+      package_version: release.package_version,
+      app_sha: release.app_sha,
+      image_tag: release.image_tag,
+      built_at: release.built_at,
+      release_source: release.source,
       node: {
         version: process.version,
         platform: process.platform,

@@ -4,6 +4,8 @@
  * Uses dynamic import so that if any OTel package fails to load
  * (CJS/ESM interop, missing deps, etc.) the app still starts.
  */
+import { getReleaseMetadata } from "./lib/releaseMetadata";
+
 async function initOtel() {
   try {
     const { NodeSDK } = await import("@opentelemetry/sdk-node");
@@ -35,7 +37,7 @@ async function initOtel() {
 
     const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://otel-collector:4318";
     const serviceName = process.env.OTEL_SERVICE_NAME || "iliagpt-app";
-    const serviceVersion = process.env.APP_VERSION || "dev";
+    const serviceVersion = getReleaseMetadata().app_version;
     const environment = process.env.NODE_ENV || "development";
 
     const metricExporter = new OTLPMetricExporter({

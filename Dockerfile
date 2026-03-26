@@ -49,8 +49,15 @@ RUN set -eux; \
   npm cache clean --force
 # Build client and server assets
 ARG APP_VERSION=dev
+ARG APP_SHA=dev
+ARG IMAGE_TAG=dev
+ARG BUILD_TIMESTAMP=unknown
 ENV NODE_ENV=production
 ENV VITE_APP_VERSION=$APP_VERSION
+ENV APP_VERSION=$APP_VERSION
+ENV APP_SHA=$APP_SHA
+ENV IMAGE_TAG=$IMAGE_TAG
+ENV BUILD_TIMESTAMP=$BUILD_TIMESTAMP
 ENV NODE_OPTIONS="--max-old-space-size=8192"
 ENV CI=true
 RUN npm run build
@@ -68,7 +75,14 @@ WORKDIR /app
 # Bake APP_VERSION into the image so runtime can report the deployed commit SHA
 # even if docker-compose environment expansion is missing/misconfigured.
 ARG APP_VERSION=dev
+ARG APP_SHA=dev
+ARG IMAGE_TAG=dev
+ARG BUILD_TIMESTAMP=unknown
 ENV APP_VERSION=$APP_VERSION
+ENV APP_SHA=$APP_SHA
+ENV IMAGE_TAG=$IMAGE_TAG
+ENV BUILD_TIMESTAMP=$BUILD_TIMESTAMP
+ENV RELEASE_MANIFEST_PATH=/app/dist/release-manifest.json
 
 # docker CLI (runner executes docker-run jobs via /var/run/docker.sock)
 RUN apt-get update && apt-get install -y --no-install-recommends bash ca-certificates curl && apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
@@ -96,7 +110,14 @@ WORKDIR /app
 
 # Bake APP_VERSION into the image (source of truth for /api/health version).
 ARG APP_VERSION=dev
+ARG APP_SHA=dev
+ARG IMAGE_TAG=dev
+ARG BUILD_TIMESTAMP=unknown
 ENV APP_VERSION=$APP_VERSION
+ENV APP_SHA=$APP_SHA
+ENV IMAGE_TAG=$IMAGE_TAG
+ENV BUILD_TIMESTAMP=$BUILD_TIMESTAMP
+ENV RELEASE_MANIFEST_PATH=/app/dist/release-manifest.json
 
 # Create non-root user for security
 RUN groupadd --system --gid 1001 nodejs \

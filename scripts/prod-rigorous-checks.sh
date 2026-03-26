@@ -329,6 +329,16 @@ else
   check_contains "03" "$TMP_DIR/01.out" '"version":' "/api/health has version field"
 fi
 
+if [ -n "$EXPECTED_APP_SHA" ]; then
+  if grep -Fq "\"app_sha\":\"${EXPECTED_APP_SHA}\"" "$TMP_DIR/01.out"; then
+    pass "03b" "/api/health app_sha matches expected (${EXPECTED_APP_SHA})"
+  else
+    fail "03b" "/api/health app_sha did not match expected (${EXPECTED_APP_SHA})"
+  fi
+else
+  check_contains "03b" "$TMP_DIR/01.out" '"app_sha":' "/api/health has app_sha field"
+fi
+
 check_http_code "04" "${BASE_URL}/api/health/live" "200"
 check_contains "05" "$TMP_DIR/04.out" '"status":"ok"' "/api/health/live returns status ok"
 check_http_code "06" "${BASE_URL}/api/health/ready" "200"
