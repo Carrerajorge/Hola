@@ -40,7 +40,8 @@ import {
   CheckCircle2,
   XCircle,
   ExternalLink,
-  RefreshCw
+  RefreshCw,
+  Search,
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
@@ -119,6 +120,145 @@ const menuItems: { id: SettingsSection; label: string; icon: React.ReactNode }[]
   { id: "security", label: "Seguridad", icon: <Shield className="h-4 w-4" /> },
   { id: "account", label: "Cuenta", icon: <User className="h-4 w-4" /> },
 ];
+
+type SettingsSearchEntry = {
+  id: string;
+  section: SettingsSection;
+  title: string;
+  description: string;
+  keywords: string[];
+};
+
+const settingsSectionLabels = menuItems.reduce(
+  (acc, item) => {
+    acc[item.id] = item.label;
+    return acc;
+  },
+  {} as Record<SettingsSection, string>,
+);
+
+const settingsSearchEntries: SettingsSearchEntry[] = [
+  {
+    id: "general-theme",
+    section: "general",
+    title: "Tema y apariencia",
+    description: "Cambia tema, acento, fuente y densidad visual.",
+    keywords: ["modo oscuro", "claro", "apariencia", "color", "fuente", "densidad"],
+  },
+  {
+    id: "general-language",
+    section: "general",
+    title: "Idioma y región",
+    description: "Ajusta idioma, formato horario y preferencias regionales.",
+    keywords: ["idioma", "hora", "fecha", "zona horaria", "region", "lenguaje"],
+  },
+  {
+    id: "general-model",
+    section: "general",
+    title: "Modelo predeterminado",
+    description: "Define el modelo principal y opciones de streaming.",
+    keywords: ["modelo", "streaming", "respuesta", "default model"],
+  },
+  {
+    id: "notifications-delivery",
+    section: "notifications",
+    title: "Canales de notificación",
+    description: "Controla avisos en app, correo y escritorio.",
+    keywords: ["notificaciones", "correo", "desktop", "alertas", "resumen"],
+  },
+  {
+    id: "personalization-tone",
+    section: "personalization",
+    title: "Estilo y tono",
+    description: "Personaliza la forma en la que responde el asistente.",
+    keywords: ["tono", "instrucciones", "estilo", "respuesta", "personalidad"],
+  },
+  {
+    id: "personalization-voice",
+    section: "personalization",
+    title: "Voz y reproducción",
+    description: "Ajusta voz, idioma hablado y reproducción automática.",
+    keywords: ["voz", "audio", "reproduccion", "spoken language"],
+  },
+  {
+    id: "apps-github",
+    section: "apps",
+    title: "Integraciones como GitHub y Figma",
+    description: "Conecta proveedores y gestiona permisos por aplicación.",
+    keywords: ["github", "figma", "notion", "slack", "integraciones", "apps"],
+  },
+  {
+    id: "apps-policy",
+    section: "apps",
+    title: "Política de herramientas",
+    description: "Configura sandbox, confirmaciones y paralelismo de llamadas.",
+    keywords: ["sandbox", "herramientas", "tool calls", "parallel", "confirmacion"],
+  },
+  {
+    id: "schedules-overview",
+    section: "schedules",
+    title: "Programaciones activas",
+    description: "Consulta próximas ejecuciones, errores y accesos rápidos.",
+    keywords: ["schedule", "programacion", "resumen", "proxima ejecucion", "recordatorios"],
+  },
+  {
+    id: "schedules-create",
+    section: "schedules",
+    title: "Crear programación",
+    description: "Abre el gestor para crear o administrar automatizaciones.",
+    keywords: ["crear", "nueva programacion", "automatizacion", "calendar"],
+  },
+  {
+    id: "data-privacy",
+    section: "data",
+    title: "Privacidad y uso de datos",
+    description: "Decide si permites entrenamiento, historial y analítica.",
+    keywords: ["privacidad", "datos", "training", "analytics", "historial", "recordings"],
+  },
+  {
+    id: "data-exports",
+    section: "data",
+    title: "Exportar y revisar historial",
+    description: "Administra chats archivados, eliminados y enlaces compartidos.",
+    keywords: ["exportar", "archivados", "eliminados", "shared links", "historial"],
+  },
+  {
+    id: "security-2fa",
+    section: "security",
+    title: "Autenticación de dos factores",
+    description: "Configura 2FA, códigos y aprobaciones push.",
+    keywords: ["2fa", "mfa", "seguridad", "auth app", "push", "codigo"],
+  },
+  {
+    id: "security-devices",
+    section: "security",
+    title: "Dispositivos y sesiones",
+    description: "Revisa dispositivos de confianza y cierra sesiones activas.",
+    keywords: ["dispositivos", "sesiones", "logout all", "trusted devices"],
+  },
+  {
+    id: "account-profile",
+    section: "account",
+    title: "Perfil público y enlaces",
+    description: "Completa tu perfil con web, LinkedIn y GitHub.",
+    keywords: ["perfil", "github", "linkedin", "website", "builder", "cuenta"],
+  },
+  {
+    id: "account-email",
+    section: "account",
+    title: "Correo y comentarios",
+    description: "Controla si recibes comentarios por email y qué dirección usar.",
+    keywords: ["email", "correo", "comentarios", "notifications"],
+  },
+];
+
+function normalizeSearchText(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
 
 const voices = [
   { id: "cove", name: "Cove", description: "Voz cálida y amigable" },
@@ -2441,6 +2581,7 @@ function SecuritySection(props: {
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
+  const [settingsSearchQuery, setSettingsSearchQuery] = useState("");
   const [playingVoice, setPlayingVoice] = useState<string | null>(null);
   const [showLogoutAllConfirm, setShowLogoutAllConfirm] = useState(false);
   const [isLoggingOutAll, setIsLoggingOutAll] = useState(false);
@@ -2462,6 +2603,38 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const effectiveAppearance = themeManagedByPlatform
     ? (platformSettings.theme_mode === "light" ? "light" : "dark")
     : settings.appearance;
+  const normalizedSettingsSearchQuery = normalizeSearchText(settingsSearchQuery);
+  const settingsSearchResults = normalizedSettingsSearchQuery
+    ? settingsSearchEntries.filter((entry) => {
+        const haystack = [
+          entry.title,
+          entry.description,
+          settingsSectionLabels[entry.section],
+          ...entry.keywords,
+        ]
+          .map(normalizeSearchText)
+          .join(" ");
+
+        return haystack.includes(normalizedSettingsSearchQuery);
+      })
+    : [];
+  const settingsSearchCounts = settingsSearchResults.reduce(
+    (acc, entry) => {
+      acc[entry.section] = (acc[entry.section] || 0) + 1;
+      return acc;
+    },
+    {} as Partial<Record<SettingsSection, number>>,
+  );
+  const currentSectionSearchResults = settingsSearchResults.filter(
+    (entry) => entry.section === activeSection,
+  );
+
+  useEffect(() => {
+    if (!open) {
+      setSettingsSearchQuery("");
+      setActiveSection("general");
+    }
+  }, [open]);
 
   const handleLanguageChange = (value: string) => {
     if (value !== "auto") {
@@ -3474,6 +3647,42 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   <X className="h-4 w-4" />
                 </Button>
               </div>
+              <div className="mb-3 px-2">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={settingsSearchQuery}
+                    onChange={(event) => setSettingsSearchQuery(event.target.value)}
+                    placeholder="Buscar ajustes"
+                    className="h-9 bg-background pl-9 pr-9 text-sm"
+                    data-testid="input-settings-search"
+                  />
+                  {settingsSearchQuery ? (
+                    <button
+                      type="button"
+                      onClick={() => setSettingsSearchQuery("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      aria-label="Limpiar búsqueda"
+                      data-testid="button-clear-settings-search"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  ) : null}
+                </div>
+                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                  Busca "2FA", "GitHub", "privacidad" o "programaciones".
+                </p>
+                {normalizedSettingsSearchQuery ? (
+                  <p
+                    className="mt-2 text-[11px] font-medium text-foreground/80"
+                    data-testid="text-settings-search-count"
+                  >
+                    {settingsSearchResults.length > 0
+                      ? `${settingsSearchResults.length} resultado${settingsSearchResults.length === 1 ? "" : "s"}`
+                      : "Sin resultados"}
+                  </p>
+                ) : null}
+              </div>
               <nav className="space-y-1">
                 {menuItems.map((item) => (
                   <button
@@ -3483,18 +3692,102 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                       "w-full flex items-center gap-3 px-3 py-2 text-sm rounded-md transition-all duration-200",
                       activeSection === item.id
                         ? "bg-background font-medium border-l-3 border-l-primary shadow-sm"
-                        : "hover:bg-background/50 text-muted-foreground border-l-3 border-l-transparent"
+                        : "hover:bg-background/50 text-muted-foreground border-l-3 border-l-transparent",
+                      normalizedSettingsSearchQuery &&
+                        !settingsSearchCounts[item.id] &&
+                        "opacity-55"
                     )}
                     data-testid={`settings-menu-${item.id}`}
                   >
                     {item.icon}
-                    {item.label}
+                    <span className="min-w-0 flex-1 truncate text-left">{item.label}</span>
+                    {normalizedSettingsSearchQuery && settingsSearchCounts[item.id] ? (
+                      <span
+                        className="inline-flex min-w-5 items-center justify-center rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary"
+                        data-testid={`settings-menu-match-count-${item.id}`}
+                      >
+                        {settingsSearchCounts[item.id]}
+                      </span>
+                    ) : null}
                   </button>
                 ))}
               </nav>
             </div>
 
             <div className="flex-1 p-6 overflow-y-auto">
+              {normalizedSettingsSearchQuery ? (
+                <div
+                  className="mb-6 rounded-xl border bg-muted/30 p-4"
+                  data-testid="card-settings-search-results"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold">Resultados rápidos</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Encuentra un ajuste por palabra clave y salta a su sección.
+                      </p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setSettingsSearchQuery("")}
+                      data-testid="button-clear-settings-search-inline"
+                    >
+                      Limpiar
+                    </Button>
+                  </div>
+
+                  {settingsSearchResults.length > 0 ? (
+                    <div className="mt-4 space-y-2">
+                      {settingsSearchResults.slice(0, 8).map((entry) => (
+                        <button
+                          key={entry.id}
+                          type="button"
+                          onClick={() => setActiveSection(entry.section)}
+                          className={cn(
+                            "flex w-full items-start justify-between rounded-lg border bg-background px-3 py-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/5",
+                            activeSection === entry.section && "border-primary/50 bg-primary/5",
+                          )}
+                          data-testid={`settings-search-result-${entry.id}`}
+                        >
+                          <div>
+                            <p className="text-sm font-medium">{entry.title}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">{entry.description}</p>
+                            <p className="mt-2 text-[11px] font-medium uppercase tracking-wide text-primary/80">
+                              {settingsSectionLabels[entry.section]}
+                            </p>
+                          </div>
+                          <ChevronRight className="mt-0.5 h-4 w-4 text-muted-foreground" />
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div
+                      className="mt-4 rounded-lg border border-dashed bg-background/70 px-4 py-5 text-sm text-muted-foreground"
+                      data-testid="text-settings-search-empty"
+                    >
+                      No encontramos ajustes para "{settingsSearchQuery}". Prueba con términos como "privacidad",
+                      "idioma", "GitHub" o "2FA".
+                    </div>
+                  )}
+                </div>
+              ) : null}
+              {normalizedSettingsSearchQuery && currentSectionSearchResults.length > 0 ? (
+                <div
+                  className="mb-4 flex flex-wrap items-center gap-2"
+                  data-testid="settings-search-current-section-hits"
+                >
+                  <span className="text-xs font-medium text-muted-foreground">Coincidencias en esta sección:</span>
+                  {currentSectionSearchResults.map((entry) => (
+                    <span
+                      key={entry.id}
+                      className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary"
+                    >
+                      {entry.title}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               {renderSectionContent()}
             </div>
           </div>

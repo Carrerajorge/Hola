@@ -340,6 +340,33 @@ describe("SettingsDialog navigation", () => {
     expect(screen.getByTestId("badge-admin-managed-timezone")).toBeInTheDocument();
   });
 
+  it("searches settings and jumps to the matching section", async () => {
+    renderDialog();
+
+    const searchInput = await screen.findByTestId("input-settings-search");
+    fireEvent.change(searchInput, { target: { value: "2FA" } });
+
+    expect(screen.getByTestId("text-settings-search-count")).toHaveTextContent("1 resultado");
+    expect(screen.getByTestId("settings-menu-match-count-security")).toHaveTextContent("1");
+
+    fireEvent.click(screen.getByTestId("settings-search-result-security-2fa"));
+
+    expect(await screen.findByRole("heading", { name: "Seguridad" })).toBeInTheDocument();
+    expect(screen.getByTestId("settings-search-current-section-hits")).toHaveTextContent(
+      "Autenticación de dos factores",
+    );
+  });
+
+  it("shows an empty search state when no settings match", async () => {
+    renderDialog();
+
+    const searchInput = await screen.findByTestId("input-settings-search");
+    fireEvent.change(searchInput, { target: { value: "supercalifragilistico" } });
+
+    expect(screen.getByTestId("text-settings-search-count")).toHaveTextContent("Sin resultados");
+    expect(screen.getByTestId("text-settings-search-empty")).toBeInTheDocument();
+  });
+
   it("shows helpful empty states in account when links or email are missing", async () => {
     authState.user = {
       id: "user_1",
