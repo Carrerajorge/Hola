@@ -6,6 +6,7 @@ const runEmbeddedPiAgentMock = vi.fn();
 
 vi.mock("../lib/anonUserHelper", () => ({
   getOrCreateSecureUserId: () => "user_test",
+  isAuthenticated: () => true,
 }));
 
 vi.mock("../services/userScopedAgentDir.js", () => ({
@@ -14,6 +15,10 @@ vi.mock("../services/userScopedAgentDir.js", () => ({
 
 vi.mock("../services/superIntelligence/agents/pi-embedded.js", () => ({
   runEmbeddedPiAgent: (...args: unknown[]) => runEmbeddedPiAgentMock(...args),
+}));
+
+vi.mock("../middleware/rateLimiter", () => ({
+  globalLimiter: (_req: unknown, _res: unknown, next: (error?: unknown) => void) => next(),
 }));
 
 async function createTestApp() {
