@@ -134,4 +134,28 @@ describe("productionHandler", () => {
 
     expect(result).toBe(false);
   });
+
+  it("does not force production mode for transcription-style prompts", () => {
+    const result = isProductionIntent(
+      {
+        intent: "CREATE_PRESENTATION",
+        confidence: 0.9,
+      } as any,
+      "puedes transcribir",
+    );
+
+    expect(result).toBe(false);
+  });
+
+  it("keeps production mode for explicit presentation artifact requests", () => {
+    const result = isProductionIntent(
+      {
+        intent: "CREATE_PRESENTATION",
+        confidence: 0.9,
+      } as any,
+      "crea un powerpoint con el resumen ejecutivo",
+    );
+
+    expect(result).toBe(true);
+  });
 });

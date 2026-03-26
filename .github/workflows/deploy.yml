@@ -557,9 +557,16 @@ jobs:
           mkdir -p artifacts/prod-evidence
           npm run test:smoke:remote 2>&1 | tee artifacts/prod-evidence/browser-smoke.log
 
+      - name: Run production artifact-safety regressions
+        id: artifact_safety
+        if: ${{ steps.browser_smoke.outcome == 'success' }}
+        env:
+          BASE_URL: https://iliagpt.com
+        run: npm run test:prod:artifact-safety
+
       - name: Run rigorous production acceptance checks
         id: prod_acceptance
-        if: ${{ steps.browser_smoke.outcome == 'success' }}
+        if: ${{ steps.browser_smoke.outcome == 'success' && steps.artifact_safety.outcome == 'success' }}
         env:
           VPS_HOST: ${{ steps.target.outputs.host }}
           VPS_PORT: ${{ steps.target.outputs.port }}
@@ -576,7 +583,7 @@ jobs:
           bash scripts/prod-rigorous-checks.sh 2>&1 | tee artifacts/prod-evidence/rigorous-checks.log
 
       - name: Roll back on post-deploy acceptance failure
-        if: ${{ always() && steps.deploy_bluegreen.outcome == 'success' && (steps.verify_production.outcome == 'failure' || steps.browser_smoke.outcome == 'failure' || steps.prod_acceptance.outcome == 'failure') }}
+        if: ${{ always() && steps.deploy_bluegreen.outcome == 'success' && (steps.verify_production.outcome == 'failure' || steps.browser_smoke.outcome == 'failure' || steps.artifact_safety.outcome == 'failure' || steps.prod_acceptance.outcome == 'failure') }}
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }} \
@@ -631,6 +638,11 @@ jobs:
 
           if [ "${{ steps.browser_smoke.outcome }}" = "failure" ]; then
             echo "::error::Browser smoke detected runtime regressions in production."
+            failed=1
+          fi
+
+          if [ "${{ steps.artifact_safety.outcome }}" = "failure" ]; then
+            echo "::error::Artifact-safety regressions detected in production."
             failed=1
           fi
 
@@ -1149,9 +1161,16 @@ jobs:
           mkdir -p artifacts/prod-evidence
           npm run test:smoke:remote 2>&1 | tee artifacts/prod-evidence/browser-smoke.log
 
+      - name: Run production artifact-safety regressions
+        id: artifact_safety
+        if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true' && steps.browser_smoke.outcome == 'success'
+        env:
+          BASE_URL: https://iliagpt.com
+        run: npm run test:prod:artifact-safety
+
       - name: Run rigorous production acceptance checks
         id: prod_acceptance
-        if: ${{ steps.latest_main.outputs.should_deploy == 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.browser_smoke.outcome == 'success' }}
+        if: ${{ steps.latest_main.outputs.should_deploy == 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.browser_smoke.outcome == 'success' && steps.artifact_safety.outcome == 'success' }}
         env:
           VPS_HOST: ${{ steps.target.outputs.host }}
           VPS_PORT: ${{ steps.target.outputs.port }}
@@ -1168,7 +1187,7 @@ jobs:
           bash scripts/prod-rigorous-checks.sh 2>&1 | tee artifacts/prod-evidence/rigorous-checks.log
 
       - name: Roll back on post-deploy acceptance failure
-        if: ${{ always() && steps.latest_main.outputs.should_deploy == 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.deploy_bluegreen.outcome == 'success' && (steps.verify_production.outcome == 'failure' || steps.browser_smoke.outcome == 'failure' || steps.prod_acceptance.outcome == 'failure') }}
+        if: ${{ always() && steps.latest_main.outputs.should_deploy == 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.deploy_bluegreen.outcome == 'success' && (steps.verify_production.outcome == 'failure' || steps.browser_smoke.outcome == 'failure' || steps.artifact_safety.outcome == 'failure' || steps.prod_acceptance.outcome == 'failure') }}
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }} \
@@ -1223,6 +1242,11 @@ jobs:
 
           if [ "${{ steps.browser_smoke.outcome }}" = "failure" ]; then
             echo "::error::Browser smoke detected runtime regressions in production."
+            failed=1
+          fi
+
+          if [ "${{ steps.artifact_safety.outcome }}" = "failure" ]; then
+            echo "::error::Artifact-safety regressions detected in production."
             failed=1
           fi
 

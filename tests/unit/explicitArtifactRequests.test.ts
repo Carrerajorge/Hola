@@ -21,6 +21,8 @@ describe("explicitArtifactRequests", () => {
 describe("classifyOutputFormat — universal format gate", () => {
   describe("returns 'text' for content-only requests (no file format signal)", () => {
     const textCases = [
+      "puedes transcribir",
+      "transcribe este audio",
       "crea una carta de amor en 400 palabras",
       "escribe un ensayo sobre la libertad",
       "redacta un informe ejecutivo",
