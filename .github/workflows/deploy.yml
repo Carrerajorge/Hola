@@ -534,7 +534,15 @@ jobs:
         run: npm ci
 
       - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+        run: |
+          bash ./scripts/ci-retry.sh \
+            --label "Playwright Chromium install" \
+            --attempts 4 \
+            --base-delay 10 \
+            --max-delay 45 \
+            --transient-only \
+            -- \
+            npx playwright install --with-deps chromium
 
       - name: Browser smoke against production
         id: browser_smoke
@@ -1166,7 +1174,15 @@ jobs:
 
       - name: Install Playwright Chromium
         if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true' && steps.latest_main_cutover.outputs.should_deploy == 'true'
-        run: npx playwright install --with-deps chromium
+        run: |
+          bash ./scripts/ci-retry.sh \
+            --label "Playwright Chromium install" \
+            --attempts 4 \
+            --base-delay 10 \
+            --max-delay 45 \
+            --transient-only \
+            -- \
+            npx playwright install --with-deps chromium
 
       - name: Browser smoke against production
         id: browser_smoke
