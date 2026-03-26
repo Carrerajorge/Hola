@@ -104,14 +104,32 @@ jobs:
       - name: Pre-pull BuildKit image with retry
         if: steps.latest_main_guard.outputs.should_deploy == 'true'
         run: |
-          bash ./scripts/ci-retry.sh \
-            --label "BuildKit image pull" \
-            --attempts 5 \
-            --base-delay 5 \
-            --max-delay 45 \
-            --transient-only \
-            -- \
-            docker pull moby/buildkit:buildx-stable-1
+          set -euo pipefail
+          attempts=5
+          delay=5
+          max_delay=45
+
+          for attempt in $(seq 1 "${attempts}"); do
+            echo "BuildKit image pull attempt ${attempt}/${attempts}"
+            if docker pull moby/buildkit:buildx-stable-1; then
+              echo "BuildKit image pull succeeded."
+              exit 0
+            fi
+
+            if [ "${attempt}" -eq "${attempts}" ]; then
+              echo "::error::Failed to pull moby/buildkit:buildx-stable-1 after ${attempts} attempts."
+              exit 1
+            fi
+
+            sleep_for="${delay}"
+            if [ "${sleep_for}" -gt "${max_delay}" ]; then
+              sleep_for="${max_delay}"
+            fi
+
+            echo "Retrying BuildKit pull in ${sleep_for}s..."
+            sleep "${sleep_for}"
+            delay=$(( delay * 2 ))
+          done
 
       - name: Set up Docker Buildx
         if: steps.latest_main_guard.outputs.should_deploy == 'true'
