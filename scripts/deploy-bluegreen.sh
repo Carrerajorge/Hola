@@ -1247,8 +1247,13 @@ find_redis_aof_manifest() {
 
 backup_redis_aof_files() {
   local repair_image="$1"
-  local manifest_path="$2"
+  local manifest_path="${2:-}"
   local backup_root="${DEPLOY_PATH}/backups/redis-aof"
+
+  if [ -z "${manifest_path}" ]; then
+    loge "Redis AOF manifest path is required for backup."
+    return 1
+  fi
 
   mkdir -p "${backup_root}"
 
@@ -1348,8 +1353,12 @@ list_slot_container_ids() {
 }
 
 list_slot_service_container_ids() {
-  local slot_name="$1"
-  local service_name="$2"
+  local slot_name="${1:-}"
+  local service_name="${2:-}"
+
+  if [ -z "${slot_name}" ] || [ -z "${service_name}" ]; then
+    return 0
+  fi
 
   {
     docker ps -aq --no-trunc --filter "label=com.docker.compose.project=hola-${slot_name}" --filter "label=com.docker.compose.service=${service_name}" 2>/dev/null || true
@@ -1529,8 +1538,12 @@ print_port_listener_diagnostics() {
 }
 
 known_manual_service_holds_port() {
-  local service_name="$1"
-  local target_port="$2"
+  local service_name="${1:-}"
+  local target_port="${2:-}"
+
+  if [ -z "${service_name}" ] || [ -z "${target_port}" ]; then
+    return 1
+  fi
 
   if ! command -v systemctl >/dev/null 2>&1 || ! command -v ss >/dev/null 2>&1; then
     return 1
@@ -1639,9 +1652,14 @@ legacy_upstream_referenced() {
 }
 
 ensure_legacy_upstream_file() {
-  local slot="$1"
-  local port="$2"
+  local slot="${1:-}"
+  local port="${2:-}"
   local legacy_file="${NGINX_CONF_DIR}/iliagpt-upstream-${slot}.conf"
+
+  if [ -z "${slot}" ] || [ -z "${port}" ]; then
+    logw "Skipping legacy upstream sync because slot/port metadata is incomplete."
+    return 1
+  fi
 
   if [ ! -L "${legacy_file}" ] && [ -f "${legacy_file}" ]; then
     return 0
