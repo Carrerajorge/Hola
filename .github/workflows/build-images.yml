@@ -62,6 +62,8 @@ jobs:
           SHORT_SHA="${SHORT_SHA:0:8}"
           echo "tag=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "full_sha=${{ inputs.sha }}" >> "$GITHUB_OUTPUT"
+          echo "build_timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Evaluate latest-main build guard
         id: latest_main_guard
@@ -151,6 +153,9 @@ jobs:
             ${{ env.IMAGE_BASE }}-app:latest
           build-args: |
             APP_VERSION=${{ steps.meta.outputs.short_sha }}
+            APP_SHA=${{ steps.meta.outputs.full_sha }}
+            IMAGE_TAG=${{ steps.meta.outputs.tag }}
+            BUILD_TIMESTAMP=${{ steps.meta.outputs.build_timestamp }}
           cache-from: type=gha,scope=app
           cache-to: type=gha,mode=max,scope=app
           # Build provenance (SLSA) — creates attestation for supply chain security
@@ -173,6 +178,9 @@ jobs:
             ${{ env.IMAGE_BASE }}-sandbox:latest
           build-args: |
             APP_VERSION=${{ steps.meta.outputs.short_sha }}
+            APP_SHA=${{ steps.meta.outputs.full_sha }}
+            IMAGE_TAG=${{ steps.meta.outputs.tag }}
+            BUILD_TIMESTAMP=${{ steps.meta.outputs.build_timestamp }}
           cache-from: type=gha,scope=sandbox
           cache-to: type=gha,mode=max,scope=sandbox
           provenance: true
@@ -218,6 +226,7 @@ jobs:
         env:
           IMAGE_TAG: ${{ steps.meta.outputs.tag }}
           APP_VERSION: ${{ steps.meta.outputs.short_sha }}
+          APP_SHA: ${{ steps.meta.outputs.full_sha }}
           APP_IMAGE: ${{ env.IMAGE_BASE }}-app:${{ steps.meta.outputs.tag }}
         run: |
           bash ./scripts/ci-container-boot-smoke.sh

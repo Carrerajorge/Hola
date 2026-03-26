@@ -1,6 +1,7 @@
 import express, { type Express } from "express";
 import fs from "fs";
 import path from "path";
+import { getReleaseMetadata } from "./lib/releaseMetadata";
 
 const SW_CLEANUP_VERSION_PATTERN = /var APP_VERSION = '([^']*)';/;
 
@@ -27,8 +28,7 @@ export function serveStatic(app: Express) {
   // the correct deployed SHA via APP_VERSION.
   app.get("/sw-cleanup.js", (_req, res) => {
     const runtimeVersion =
-      sanitizeAppVersion(process.env.APP_VERSION) ??
-      sanitizeAppVersion(process.env.VITE_APP_VERSION) ??
+      sanitizeAppVersion(getReleaseMetadata().app_version) ??
       "dev";
 
     const distSwCleanupPath = path.join(distPath, "sw-cleanup.js");

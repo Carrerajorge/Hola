@@ -43,6 +43,29 @@ async function bumpBuiltSwCleanupVersion() {
   console.log(`[build] dist sw-cleanup APP_VERSION -> ${version}`);
 }
 
+async function writeReleaseManifest(appVersion: string) {
+  const packageJson = JSON.parse(await readFile("package.json", "utf-8")) as {
+    version?: string;
+  };
+  const manifest = {
+    app_version: appVersion,
+    app_sha: process.env.APP_SHA || appVersion,
+    image_tag: process.env.IMAGE_TAG || null,
+    package_version: packageJson.version || "unknown",
+    built_at: process.env.BUILD_TIMESTAMP || new Date().toISOString(),
+  };
+
+  await mkdir("dist", { recursive: true });
+  await writeFile(
+    "dist/release-manifest.json",
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    "utf-8",
+  );
+  console.log(
+    `[build] release manifest -> version=${manifest.app_version} sha=${manifest.app_sha} image=${manifest.image_tag ?? "n/a"}`,
+  );
+}
+
 async function buildEmbeddedOpenClawControlUi() {
   console.log("building embedded openclaw control ui...");
 
@@ -267,6 +290,7 @@ async function buildAll() {
       process.env.APP_VERSION ||
       `build-${Date.now()}`;
     await buildServer(appVersion);
+    await writeReleaseManifest(appVersion);
     return;
   }
 
@@ -289,6 +313,7 @@ async function buildAll() {
   const appVersion = process.env.VITE_APP_VERSION || process.env.APP_VERSION || `build-${Date.now()}`;
   await bumpBuiltSwCleanupVersion();
   await buildServerInFreshProcess(appVersion);
+  await writeReleaseManifest(appVersion);
 }
 
 
