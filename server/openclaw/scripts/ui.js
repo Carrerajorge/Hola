@@ -45,10 +45,36 @@ function which(cmd) {
   return null;
 }
 
+function readPreferredPnpmSpec() {
+  try {
+    const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
+    if (typeof packageJson.packageManager === "string" && packageJson.packageManager.startsWith("pnpm@")) {
+      return packageJson.packageManager;
+    }
+  } catch {
+    // ignore and fall back below
+  }
+  return "pnpm@latest";
+}
+
 function resolveRunner() {
   const pnpm = which("pnpm");
   if (pnpm) {
-    return { cmd: pnpm, kind: "pnpm" };
+    return { cmd: pnpm, kind: "pnpm", prefixArgs: [] };
+  }
+
+  const corepack = which("corepack");
+  if (corepack) {
+    return { cmd: corepack, kind: "corepack", prefixArgs: ["pnpm"] };
+  }
+
+  const npm = which("npm");
+  if (npm) {
+    return {
+      cmd: npm,
+      kind: "npm-exec-pnpm",
+      prefixArgs: ["exec", "--yes", readPreferredPnpmSpec(), "--"],
+    };
   }
   return null;
 }
@@ -89,18 +115,19 @@ function createSpawnOptions(cmd, args, envOverride) {
   };
 }
 
-function run(cmd, args) {
+function run(runner, args) {
+  const fullArgs = [...(runner.prefixArgs ?? []), ...args];
   let child;
   try {
-    child = spawn(cmd, args, createSpawnOptions(cmd, args));
+    child = spawn(runner.cmd, fullArgs, createSpawnOptions(runner.cmd, fullArgs));
   } catch (err) {
-    console.error(`Failed to launch ${cmd}:`, err);
+    console.error(`Failed to launch ${runner.cmd}:`, err);
     process.exit(1);
     return;
   }
 
   child.on("error", (err) => {
-    console.error(`Failed to launch ${cmd}:`, err);
+    console.error(`Failed to launch ${runner.cmd}:`, err);
     process.exit(1);
   });
   child.on("exit", (code) => {
@@ -110,12 +137,13 @@ function run(cmd, args) {
   });
 }
 
-function runSync(cmd, args, envOverride) {
+function runSync(runner, args, envOverride) {
+  const fullArgs = [...(runner.prefixArgs ?? []), ...args];
   let result;
   try {
-    result = spawnSync(cmd, args, createSpawnOptions(cmd, args, envOverride));
+    result = spawnSync(runner.cmd, fullArgs, createSpawnOptions(runner.cmd, fullArgs, envOverride));
   } catch (err) {
-    console.error(`Failed to launch ${cmd}:`, err);
+    console.error(`Failed to launch ${runner.cmd}:`, err);
     process.exit(1);
     return;
   }
@@ -168,7 +196,7 @@ export function main(argv = process.argv.slice(2)) {
 
   const runner = resolveRunner();
   if (!runner) {
-    process.stderr.write("Missing UI runner: install pnpm, then retry.\n");
+    process.stderr.write("Missing UI runner: install pnpm or ensure npm/corepack is available, then retry.\n");
     process.exit(1);
   }
 
@@ -179,18 +207,15 @@ export function main(argv = process.argv.slice(2)) {
   }
 
   if (action === "install") {
-    run(runner.cmd, ["install", ...rest]);
+    run(runner, ["install", ...rest]);
     return;
   }
 
   if (!depsInstalled(action === "test" ? "test" : "build")) {
-    const installEnv =
-      action === "build" ? { ...process.env, NODE_ENV: "production" } : process.env;
-    const installArgs = action === "build" ? ["install", "--prod"] : ["install"];
-    runSync(runner.cmd, installArgs, installEnv);
+    runSync(runner, ["install"], process.env);
   }
 
-  run(runner.cmd, ["run", script, ...rest]);
+  run(runner, ["run", script, ...rest]);
 }
 
 const isDirectExecution = (() => {

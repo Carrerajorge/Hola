@@ -827,7 +827,7 @@ export async function handleFeishuMessage(params: {
       }
 
       const rootMsg = await getRootMessageInfo();
-      const feishuThreadId = ctx.threadId ?? rootMsg?.threadId;
+      let feishuThreadId = ctx.threadId ?? rootMsg?.threadId;
       if (feishuThreadId) {
         log(`feishu[${account.accountId}]: resolved thread ID: ${feishuThreadId}`);
       }

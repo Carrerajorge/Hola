@@ -729,7 +729,7 @@ async function uploadFileBlock(
   const { children: inserted } = await insertBlocks(client, docToken, orderedBlocks, blockId);
 
   // Get the first inserted block - we'll delete it and create the file in its place
-   
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SDK return shape
   const placeholderBlock = inserted[0];
   if (!placeholderBlock?.block_id) {
     throw new Error("Failed to create placeholder block for file upload");
@@ -744,7 +744,7 @@ async function uploadFileBlock(
     throw new Error(childrenRes.msg);
   }
   const items = childrenRes.data?.items ?? [];
-   
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SDK block type
   const placeholderIdx = items.findIndex(
     (item: any) => item.block_id === placeholderBlock.block_id,
   );

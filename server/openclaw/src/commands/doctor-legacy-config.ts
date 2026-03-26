@@ -504,7 +504,7 @@ export function normalizeCompatibilityConfigValues(cfg: OpenClawConfig): {
     }
 
     let skillsChanged = false;
-    const skills = structuredClone(rawSkills);
+    let skills = structuredClone(rawSkills);
 
     if (Array.isArray(skills.allowBundled)) {
       const allowBundled = skills.allowBundled.filter(

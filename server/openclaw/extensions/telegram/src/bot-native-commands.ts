@@ -518,7 +518,7 @@ export const registerTelegramNativeCommands = ({
       isForum,
       messageThreadId: resolvedThreadId ?? messageThreadId,
     });
-    const { route, configuredBinding } = resolveTelegramConversationRoute({
+    let { route, configuredBinding } = resolveTelegramConversationRoute({
       cfg: runtimeCfg,
       accountId,
       chatId,

@@ -106,7 +106,7 @@ export async function runCli(argv: string[] = process.argv) {
     }
     return;
   }
-  const normalizedArgv = parsedProfile.argv;
+  let normalizedArgv = parsedProfile.argv;
 
   loadCliDotEnv({ quiet: true });
   normalizeEnv();

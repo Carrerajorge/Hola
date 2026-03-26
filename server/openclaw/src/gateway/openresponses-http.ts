@@ -495,7 +495,7 @@ export async function handleOpenResponsesHttpRequest(
 
   // Extract images + files from input (Phase 2)
   let images: ImageContent[] = [];
-  const fileContexts: string[] = [];
+  let fileContexts: string[] = [];
   let urlParts = 0;
   const markUrlPart = () => {
     urlParts += 1;

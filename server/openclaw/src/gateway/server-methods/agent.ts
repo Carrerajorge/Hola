@@ -578,7 +578,7 @@ export const agentHandlers: GatewayRequestHandlers = {
 
     let resolvedChannel = deliveryPlan.resolvedChannel;
     let deliveryTargetMode = deliveryPlan.deliveryTargetMode;
-    const resolvedAccountId = deliveryPlan.resolvedAccountId;
+    let resolvedAccountId = deliveryPlan.resolvedAccountId;
     let resolvedTo = deliveryPlan.resolvedTo;
     let effectivePlan = deliveryPlan;
 
