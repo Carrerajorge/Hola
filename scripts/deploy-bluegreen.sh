@@ -123,8 +123,15 @@ build_database_url() {
 
 write_database_url_override() {
   local output_file="$1"
-  python3 -c "import sys; path, dburl = sys.argv[1:]; esc = dburl.replace(\"'\", \"''\"); open(path, 'w', encoding='utf-8').write(\"services:\\n  app:\\n    environment:\\n      DATABASE_URL: '%s'\\n  worker:\\n    environment:\\n      DATABASE_URL: '%s'\\n\" % (esc, esc))" \
-    "${output_file}" "${DATABASE_URL}"
+  cat > "${output_file}" <<'EOF'
+services:
+  app:
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+  worker:
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+EOF
 }
 
 validate_image_inputs() {

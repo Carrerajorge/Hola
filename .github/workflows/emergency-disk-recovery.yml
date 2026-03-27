@@ -132,8 +132,14 @@ jobs:
           }
 
           write_database_url_override() {
-            python3 -c "import sys; path, dburl = sys.argv[1:]; esc = dburl.replace(\"'\", \"''\"); open(path, 'w', encoding='utf-8').write(\"services:\\n  app:\\n    environment:\\n      DATABASE_URL: '%s'\\n  worker:\\n    environment:\\n      DATABASE_URL: '%s'\\n\" % (esc, esc))" \
-              "$1" "${DATABASE_URL}"
+            printf '%s\n' \
+              'services:' \
+              '  app:' \
+              '    environment:' \
+              '      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}' \
+              '  worker:' \
+              '    environment:' \
+              '      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}' > "$1"
           }
 
           ensure_postgres_app_auth() {
