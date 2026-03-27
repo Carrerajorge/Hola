@@ -1398,11 +1398,79 @@ run_sql_migrations() {
 
 
   logok "SQL migrations applied."
-
 }
 
+ensure_postgres_app_auth() {
+  local db_container="hola-postgres"
+  local verify_user="${POSTGRES_USER:-postgres}"
+  local verify_password="${POSTGRES_PASSWORD:-}"
+  local verify_db="${POSTGRES_DB:-iliagpt}"
+  local i
 
+  if [ -z "${verify_password}" ]; then
+    loge "POSTGRES_PASSWORD is required to verify Postgres app credentials."
+    return 1
+  fi
 
+  log "  Verifying Postgres app credentials for role ${verify_user}..."
+  for i in $(seq 1 30); do
+    if docker exec "${db_container}" pg_isready -U postgres >/dev/null 2>&1; then
+      break
+    fi
+    if [ "${i}" -eq 30 ]; then
+      loge "Postgres admin socket not ready after 60s."
+      docker logs --tail=30 "${db_container}" 2>&1 || true
+      return 1
+    fi
+    sleep 2
+  done
+
+  if docker exec -e PGPASSWORD="${verify_password}" "${db_container}" \
+    psql -h 127.0.0.1 -U "${verify_user}" -d "${verify_db}" -tAc "SELECT 1" >/dev/null 2>&1; then
+    logok "Postgres app credentials verified."
+    return 0
+  fi
+
+  logw "Postgres app credentials rejected. Synchronizing role password from .env.production."
+  if ! docker exec -i "${db_container}" \
+    psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+      -v role_name="${verify_user}" \
+      -v role_password="${verify_password}" \
+      -v db_name="${verify_db}" >/dev/null <<'SQL'
+DO $do$
+DECLARE
+  target_role text := :'role_name';
+  target_password text := :'role_password';
+  target_db text := :'db_name';
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = target_role) THEN
+    EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', target_role, target_password);
+  ELSE
+    EXECUTE format('ALTER ROLE %I WITH LOGIN PASSWORD %L', target_role, target_password);
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = target_db) THEN
+    EXECUTE format('CREATE DATABASE %I OWNER %I', target_db, target_role);
+  END IF;
+
+  EXECUTE format('GRANT ALL PRIVILEGES ON DATABASE %I TO %I', target_db, target_role);
+END
+$do$;
+SQL
+  then
+    loge "Failed to synchronize Postgres app credentials."
+    return 1
+  fi
+
+  if docker exec -e PGPASSWORD="${verify_password}" "${db_container}" \
+    psql -h 127.0.0.1 -U "${verify_user}" -d "${verify_db}" -tAc "SELECT 1" >/dev/null 2>&1; then
+    logok "Postgres app credentials synchronized."
+    return 0
+  fi
+
+  loge "Postgres app credentials still failing after synchronization."
+  return 1
+}
 
 list_port_listeners() {
   local target_port="$1"
@@ -1643,6 +1711,10 @@ for i in $(seq 1 30); do
 done
 
 if ! ensure_redis_ready; then
+  exit 1
+fi
+
+if ! ensure_postgres_app_auth; then
   exit 1
 fi
 echo ""
