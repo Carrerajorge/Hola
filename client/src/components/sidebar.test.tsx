@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Sidebar } from "@/components/sidebar";
 import type { Chat } from "@/hooks/use-chats";
@@ -12,6 +12,8 @@ const {
   updateProjectMock,
   addChatToProjectMock,
   getProjectForChatMock,
+  toastSuccessMock,
+  toastErrorMock,
 } = vi.hoisted(() => ({
   logoutMock: vi.fn(),
   setLocationMock: vi.fn(),
@@ -21,6 +23,8 @@ const {
   updateProjectMock: vi.fn(),
   addChatToProjectMock: vi.fn(),
   getProjectForChatMock: vi.fn(),
+  toastSuccessMock: vi.fn(),
+  toastErrorMock: vi.fn(),
 }));
 
 vi.mock("wouter", () => ({
@@ -75,6 +79,13 @@ vi.mock("@/contexts/PlatformSettingsContext", () => ({
   }),
 }));
 
+vi.mock("@/lib/notify", () => ({
+  toast: {
+    success: (...args: unknown[]) => toastSuccessMock(...args),
+    error: (...args: unknown[]) => toastErrorMock(...args),
+  },
+}));
+
 vi.mock("@/stores/streamingStore", () => ({
   useProcessingChatIds: () => [],
   useChatStreamContent: () => "",
@@ -120,6 +131,21 @@ const chats: Chat[] = [
 
 describe("Sidebar primary action spacing", () => {
   it("keeps search flush with the rest of the primary navigation stack", () => {
+    createProjectMock.mockResolvedValue({
+      id: "project-sidebar",
+      name: "Desktop",
+      color: "#3b82f6",
+      backgroundImage: null,
+      systemPrompt: "",
+      repositoryPath: "/Users/luis/Desktop",
+      defaultCodeFolder: ".",
+      codingAgents: ["coder"],
+      files: [],
+      chatIds: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
     render(
       <Sidebar
         chats={chats}
@@ -139,5 +165,59 @@ describe("Sidebar primary action spacing", () => {
     expect(navigationGroup).toHaveClass("flex", "flex-col", "gap-0.5");
     expect(screen.getByTestId("button-library").parentElement).toBe(navigationGroup);
     expect(screen.getByTestId("button-gpts").parentElement).toBe(navigationGroup);
+    expect(screen.getByText("Hilos")).toBeInTheDocument();
+    expect(screen.getByTestId("button-thread-controls")).toBeInTheDocument();
+    expect(screen.getByTestId("button-new-folder")).toBeInTheDocument();
+  });
+
+  it("creates and selects a local project from Nueva Carpeta", async () => {
+    const onSelectProject = vi.fn();
+    Object.defineProperty(window, "electronAPI", {
+      value: {
+        pickWorkspaceFolder: vi.fn().mockResolvedValue("/Users/luis/Desktop/WorkspaceLocal"),
+      },
+      configurable: true,
+    });
+
+    createProjectMock.mockResolvedValue({
+      id: "project-local",
+      name: "WorkspaceLocal",
+      color: "#3b82f6",
+      backgroundImage: null,
+      systemPrompt: "",
+      repositoryPath: "/Users/luis/Desktop/WorkspaceLocal",
+      defaultCodeFolder: ".",
+      codingAgents: ["coder"],
+      files: [],
+      chatIds: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    render(
+      <Sidebar
+        chats={chats}
+        activeChatId={null}
+        onSelectChat={vi.fn()}
+        onSelectProject={onSelectProject}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("button-new-folder"));
+
+    await waitFor(() => {
+      expect(createProjectMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "WorkspaceLocal",
+          repositoryPath: "/Users/luis/Desktop/WorkspaceLocal",
+          defaultCodeFolder: ".",
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(onSelectProject).toHaveBeenCalledWith("project-local");
+      expect(toastSuccessMock).toHaveBeenCalled();
+    });
   });
 });
