@@ -196,7 +196,8 @@ jobs:
             IMAGE_TAG=${{ steps.meta.outputs.tag }}
             BUILD_TIMESTAMP=${{ steps.meta.outputs.build_timestamp }}
           cache-from: type=gha,scope=app
-          cache-to: type=gha,mode=max,scope=app
+          # Keep cache export best-effort so GHA cache flakiness does not cancel production image publication.
+          cache-to: type=gha,mode=min,scope=app,ignore-error=true
           # Build provenance (SLSA) — creates attestation for supply chain security
           provenance: true
           # SBOM generation currently pulls docker/buildkit-syft-scanner from Docker Hub,
@@ -221,7 +222,7 @@ jobs:
             IMAGE_TAG=${{ steps.meta.outputs.tag }}
             BUILD_TIMESTAMP=${{ steps.meta.outputs.build_timestamp }}
           cache-from: type=gha,scope=sandbox
-          cache-to: type=gha,mode=max,scope=sandbox
+          cache-to: type=gha,mode=min,scope=sandbox,ignore-error=true
           provenance: true
           sbom: false
 
@@ -237,7 +238,7 @@ jobs:
             ${{ env.IMAGE_BASE }}-ocr:${{ steps.meta.outputs.tag }}
             ${{ env.IMAGE_BASE }}-ocr:latest
           cache-from: type=gha,scope=ocr
-          cache-to: type=gha,mode=max,scope=ocr
+          cache-to: type=gha,mode=min,scope=ocr,ignore-error=true
           provenance: true
           sbom: false
 
