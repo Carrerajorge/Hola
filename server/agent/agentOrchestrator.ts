@@ -2730,8 +2730,49 @@ export class AgentManager {
     return orchestrator;
   }
 
-  async executeRun(runId: string, chatId?: string, userId?: string | null, message?: string, attachments?: any[]): Promise<void> {
-    const orchestrator = this.activeRuns.get(runId);
+  async executeRun(
+    runId: string,
+    chatId?: string,
+    userId?: string | null,
+    message?: string,
+    attachments?: any[],
+    executionProfile: AgentExecutionProfile = DEFAULT_AGENT_EXECUTION_PROFILE,
+    userPlan: "free" | "pro" | "admin" = "free",
+    modelId?: string,
+  ): Promise<void> {
+    let orchestrator = this.activeRuns.get(runId);
+
+    if (!orchestrator) {
+      orchestrator = await this.ensureHydrated(runId, false);
+    }
+
+    if (!orchestrator && chatId && message) {
+      const persistedRun = await db.select()
+        .from(agentModeRuns)
+        .where(eq(agentModeRuns.id, runId))
+        .limit(1)
+        .then((rows) => rows[0]);
+
+      const persistedStatus = persistedRun
+        ? normalizePersistedRunStatus(persistedRun.status)
+        : "queued";
+      const persistedExecutionProfile = persistedRun?.executionProfile
+        ? normalizeAgentExecutionProfile(persistedRun.executionProfile)
+        : executionProfile;
+
+      orchestrator = await this.createRun(
+        runId,
+        chatId,
+        userId || "anonymous",
+        message,
+        attachments,
+        userPlan,
+        modelId,
+        persistedExecutionProfile,
+        persistedStatus,
+      );
+    }
+
     if (!orchestrator) {
       throw new Error(`AgentOrchestrator not found for run ${runId}`);
     }

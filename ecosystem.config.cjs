@@ -21,6 +21,9 @@ module.exports = {
                 PORT: process.env.PORT || 5000,
                 DATABASE_URL: process.env.DATABASE_URL,
                 SESSION_SECRET: process.env.SESSION_SECRET,
+                REDIS_URL: process.env.REDIS_URL,
+                REDIS_PASSWORD: process.env.REDIS_PASSWORD,
+                ENABLE_AGENT_BACKGROUND_QUEUE: process.env.ENABLE_AGENT_BACKGROUND_QUEUE || 'true',
             },
 
             error_file: '/var/www/michat/logs/pm2-error.log',
@@ -41,6 +44,9 @@ module.exports = {
             env_production: {
                 NODE_ENV: 'production',
                 DATABASE_URL: process.env.DATABASE_URL,
+                REDIS_URL: process.env.REDIS_URL,
+                REDIS_PASSWORD: process.env.REDIS_PASSWORD,
+                ENABLE_AGENT_BACKGROUND_QUEUE: process.env.ENABLE_AGENT_BACKGROUND_QUEUE || 'true',
             },
 
             error_file: '/var/www/michat/logs/worker-error.log',

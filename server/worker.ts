@@ -11,10 +11,29 @@ import { Job } from "bullmq";
 import { syncStripePaidInvoicesToPayments } from "./services/stripePaymentsSyncService";
 import type { ChannelIngestJob } from "./channels/types";
 import { processChannelIngestJob } from "./channels/channelIngestService";
+import { isAgentBackgroundQueueEnabled } from "./agent/executionRuntimeMode";
+import { createAgentExecutionWorker } from "./agent/queue/agentQueue";
 
 const WORKER_CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || "5");
 
 Logger.info(`Starting Worker Process (Concurrency: ${WORKER_CONCURRENCY})...`);
+
+createAgentExecutionWorker();
+
+if (isAgentBackgroundQueueEnabled()) {
+    setImmediate(() => {
+        import("./agent/agentOrchestrator")
+            .then(({ agentManager }) => agentManager.recoverPersistedRuns())
+            .then((summary) => {
+                Logger.info(
+                    `[AgentRecovery][worker] scanned=${summary.scanned} recovered=${summary.recovered} resumed=${summary.resumed} skipped=${summary.skipped} failed=${summary.failed}`,
+                );
+            })
+            .catch((error) => {
+                Logger.error("[AgentRecovery][worker] Failed to recover persisted runs", error);
+            });
+    });
+}
 
 // ==========================================
 // 1. Upload Queue Worker

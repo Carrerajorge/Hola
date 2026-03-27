@@ -79,7 +79,8 @@ nano .env.production
 - `JWT_REFRESH_SECRET`: mínimo 32 caracteres.
 - `SESSION_SECRET`: mínimo 32 caracteres.
 - Al menos una clave LLM: `XAI_API_KEY`, `GOOGLE_API_KEY`, `ANTHROPIC_API_KEY` u `OPENAI_API_KEY`.
-- `REDIS_URL`: opcional (o usa el servicio dockerizado).
+- `REDIS_URL`: requerido si quieres ejecución durable de tareas largas por cola.
+- `ENABLE_AGENT_BACKGROUND_QUEUE=true`: recomendado en producción para que los runs largos se ejecuten en el worker.
 
 Para generar secretos seguros:
 
@@ -100,6 +101,7 @@ El script agrega `SESSION_SECRET`, `JWT_ACCESS_SECRET` y `JWT_REFRESH_SECRET` si
 ## Paso 4: Levantar los Servicios
 
 Utiliza `docker-compose.prod.yml` para construir y levantar la aplicación.
+En producción deben quedar activos tanto `app` como `worker`; la app encola los runs y el worker los ejecuta y recupera tras reinicios.
 
 ```bash
 # Construir y levantar en segundo plano
@@ -110,6 +112,7 @@ docker compose -f docker-compose.prod.yml up --build -d
 
 - **Ver logs**: `docker compose -f docker-compose.prod.yml logs -f`
 - **Reiniciar solo la app**: `docker compose -f docker-compose.prod.yml restart app`
+- **Reiniciar el worker**: `docker compose -f docker-compose.prod.yml restart worker`
 - **Parar todo**: `docker compose -f docker-compose.prod.yml down`
 
 ### Solución a fallos de `npm ci`

@@ -31,6 +31,8 @@ services:
       PORT: "5000"
 
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-iliagpt}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
+      ENABLE_AGENT_BACKGROUND_QUEUE: "true"
 
       AGENT_WORKSPACE_ROOT: /app/sandbox_workspace
 
@@ -100,6 +102,8 @@ services:
       APP_VERSION: ${APP_VERSION:-dev}
 
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-iliagpt}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
+      ENABLE_AGENT_BACKGROUND_QUEUE: "true"
 
 
       OCR_SERVICE_URL: http://ocr:8000

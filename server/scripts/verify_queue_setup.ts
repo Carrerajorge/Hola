@@ -1,9 +1,11 @@
 import "../config/load-env"; // Load environment variables
-import { agentQueue, agentWorker } from "../agent/queue/agentQueue";
+import { agentQueue, createAgentExecutionWorker } from "../agent/queue/agentQueue";
 import { agentManager } from "../agent/agentOrchestrator";
 
 async function verifyQueue() {
     console.log("Starting Queue Verification...");
+
+    const agentWorker = createAgentExecutionWorker();
 
     if (!agentQueue) {
         throw new Error("agentQueue is null - Redis not configured?");

@@ -10,9 +10,8 @@ import { Router, Request, Response, NextFunction } from "express"; import { Auth
 } from "../agent/contracts"; import { validateOrThrow, ValidationError } from "../agent/validation"; import { checkIdempotency } from
   "../agent/idempotency"; import { updateRunWithLock } from "../agent/dbTransactions"; import { toolRegistry, TOOL_CATEGORIES } from "../agent/registry/toolRegistry"; import { ToolArtifact } from
   "../agent/toolRegistry"; import { agentRegistry } from "../agent/registry/agentRegistry"; import {
-  DEFAULT_AGENT_EXECUTION_PROFILE,
   normalizeAgentExecutionProfile
-} from "@shared/agentExecutionProfile"; import { getAgentExecutionProfileConfig } from "../agent/executionProfiles";
+} from "@shared/agentExecutionProfile"; import { getAgentExecutionProfileConfig } from "../agent/executionProfiles"; import { agentQueue } from "../agent/queue/agentQueue"; import { isAgentBackgroundQueueEnabled } from "../agent/executionRuntimeMode"; import { selectAgentExecutionProfile } from "../agent/executionProfileSelector";
 
 
 
@@ -471,8 +470,19 @@ export function createAgentModeRouter() {
       const user = (req as AuthenticatedRequest).user;
       const userId = user?.claims?.sub || user?.id;
       const userPlan = ((user as any)?.plan === "pro" || (user as any)?.plan === "admin") ? (user as any).plan : "free" as "free" | "pro" | "admin";
-      const normalizedExecutionProfile = normalizeAgentExecutionProfile(executionProfile);
+      const selectedExecutionProfile = selectAgentExecutionProfile({
+        requestedProfile: executionProfile,
+        message,
+        hasAttachments: Array.isArray(attachments) && attachments.length > 0,
+      });
+      const normalizedExecutionProfile = normalizeAgentExecutionProfile(selectedExecutionProfile.profile);
       const executionProfileConfig = getAgentExecutionProfileConfig(normalizedExecutionProfile);
+
+      if (selectedExecutionProfile.source === "auto") {
+        console.log(
+          `[AgentRoutes] Auto-selected execution profile ${normalizedExecutionProfile} for run request on chat ${chatId}: ${selectedExecutionProfile.reason || "complex task detected"}`,
+        );
+      }
 
       if (idempotencyKey) {
         const idempotencyResult = await checkIdempotency(idempotencyKey, chatId);
@@ -507,7 +517,7 @@ export function createAgentModeRouter() {
         idempotencyKey: idempotencyKey || null,
       }).returning();
 
-      (async () => {
+      const launchInProcess = () => (async () => {
         let currentStatus = "queued";
         try {
           const lockResult = await updateRunWithLock(runId, "queued", {
@@ -542,6 +552,28 @@ export function createAgentModeRouter() {
           });
         }
       })();
+
+      if (isAgentBackgroundQueueEnabled() && agentQueue) {
+        try {
+          await agentQueue.add("agent-execution", {
+            runId,
+            chatId,
+            userId: userId || null,
+            message,
+            attachments,
+            executionProfile: normalizedExecutionProfile,
+            userPlan,
+            modelId: model,
+          }, {
+            jobId: runId,
+          });
+        } catch (queueError: any) {
+          console.warn(`[AgentRoutes] Agent queue unavailable for run ${runId}, falling back to embedded execution: ${queueError?.message || queueError}`);
+          launchInProcess();
+        }
+      } else {
+        launchInProcess();
+      }
 
       const createResponse = {
         id: newRun.id,
