@@ -993,7 +993,11 @@ export class ProductionWorkflowRunner extends EventEmitter {
         const specificImageBase64 = validInput.specificImageBase64 || null;
         const specificImageId = validInput.specificImageId || null;
 
-        const intent = classifyImageIntent(prompt, !!lastImageBase64);
+        const intent = classifyImageIntent(
+          prompt,
+          !!lastImageBase64,
+          !!specificImageBase64
+        );
         console.log(`[WorkflowRunner] image_generate: Mode=${intent.mode}, prompt="${prompt.slice(0, 50)}..."`);
 
         try {

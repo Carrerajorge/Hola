@@ -126,6 +126,35 @@ export interface ImageEditResult extends ImageGenerationResult {
   parentId?: string;
 }
 
+export type ImageIntentMode = "generate" | "edit_last" | "edit_specific";
+
+export interface ClassifiedImageIntent {
+  mode: ImageIntentMode;
+  reason: "specific_image_context" | "last_image_context" | "new_generation";
+}
+
+const IMAGE_EDIT_HINT_PATTERNS = [
+  /\b(edita|editar|edit|modifica|modify|ajusta|adjust|retoca|retouch|cambia|change|transforma|transform)\b/i,
+  /\b(hazla|hazlo|mejorala|mejórala|improve|improve it|remove background|quita el fondo|ponle|agrega|añade)\b/i,
+];
+
+export function classifyImageIntent(
+  prompt: string,
+  hasLastImage: boolean,
+  hasSpecificImage: boolean = false,
+): ClassifiedImageIntent {
+  if (hasSpecificImage) {
+    return { mode: "edit_specific", reason: "specific_image_context" };
+  }
+
+  const wantsEdit = IMAGE_EDIT_HINT_PATTERNS.some((pattern) => pattern.test(prompt));
+  if (hasLastImage && wantsEdit) {
+    return { mode: "edit_last", reason: "last_image_context" };
+  }
+
+  return { mode: "generate", reason: "new_generation" };
+}
+
 export async function editImage(
   baseImageBase64: string,
   editPrompt: string,
