@@ -8092,25 +8092,6 @@ export function ChatInterface({
         (f: any) => f?.status === "error",
       );
 
-      // Reset UI state immediately — save files for restoration on error
-      let savedMainFiles = [...uploadedFilesRef.current];
-      setInput("");
-      if (chatId) clearDraft(chatId);
-      // If uploads are still in flight, don't clear the composer file list yet or we lose upload progress updates.
-      // We'll clear once uploads settle (after optimistic message is already on screen).
-      if (!hadPendingUploadsAtSubmit) {
-        // Clear all files from composer immediately after send to avoid stuck attachments.
-        setUploadedFiles([]);
-        if (failedUploadsAtSubmit.length > 0) {
-          toast({
-            title: "Archivo no adjuntado",
-            description: `${failedUploadsAtSubmit.length} archivo(s) fallaron al subir y no se incluyeron en el mensaje.`,
-            variant: "destructive",
-            duration: 4500,
-          });
-        }
-      }
-
       // Construct the minimal optimistic user message first so the UI updates
       // before we do any heavier attachment/integrity work.
       const userMsg: Message = {
