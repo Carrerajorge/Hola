@@ -1,21 +1,16 @@
-import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   Brain,
-  CheckCircle2,
   Clock,
   Code,
   FileText,
   Image,
-  Infinity,
   Loader2,
   MessageSquare,
-  Shield,
   Sparkles,
   Star,
   Target,
-  Users,
   Video,
   Zap,
 } from "lucide-react";
@@ -92,61 +87,6 @@ const PERSONAL_PLANS: PlanCard[] = [
     ],
     footerNote: "Se aplican límites",
   },
-  {
-    name: "Pro",
-    price: 200,
-    description: "Maximiza tu productividad",
-    buttonText: "Obtener Pro",
-    buttonVariant: "outline",
-    features: [
-      { icon: Star, text: "Domina tareas y temas avanzados" },
-      { icon: Infinity, text: "Trabaja en proyectos grandes con mensajes ilimitados" },
-      { icon: Image, text: "Crea imágenes de alta calidad a cualquier escala" },
-      { icon: Brain, text: "Mantén todo el contexto con la memoria máxima" },
-      { icon: Zap, text: "Ejecuta investigaciones y planifica tareas con agentes" },
-      { icon: Target, text: "Adapta tus proyectos y automatiza flujos de trabajo" },
-      { icon: Video, text: "Supera tus límites con la creación de videos en Sora" },
-      { icon: Code, text: "Implementa código más rápido con OpenClaw" },
-      { icon: Star, text: "Obtén acceso anticipado a características experimentales" },
-    ],
-    footerNote: "Ilimitado, sujeto a medidas de protección contra abusos. Obtener más información",
-  },
-];
-
-const EMPRESA_PLANS: PlanCard[] = [
-  {
-    name: "Gratis",
-    price: 0,
-    description: "Mira lo que la IA puede hacer",
-    buttonText: "Empezar",
-    buttonVariant: "outline",
-    features: [
-      { icon: Sparkles, text: "Obtén explicaciones sencillas" },
-      { icon: MessageSquare, text: "Mantén chats breves para preguntas frecuentes" },
-      { icon: Image, text: "Prueba la generación de imágenes" },
-      { icon: Brain, text: "Guardar memoria y contexto limitados" },
-    ],
-  },
-  {
-    name: "Business",
-    price: 25,
-    badge: "RECOMENDADO",
-    description: "Mejora la productividad con la IA para equipos",
-    buttonText: "Obtener Business",
-    buttonVariant: "default",
-    highlight: true,
-    features: [
-      { icon: CheckCircle2, text: "Realiza un análisis profesional" },
-      { icon: Infinity, text: "Obtén mensajes ilimitados con GPT-5" },
-      { icon: Image, text: "Produce imágenes, videos, presentaciones y más" },
-      { icon: Shield, text: "Protege tu espacio con SSO, MFA y más" },
-      { icon: Shield, text: "Protege la privacidad; los datos nunca se usan para fines de entrenamiento" },
-      { icon: Users, text: "Comparte proyectos y GPT personalizados" },
-      { icon: FileText, text: "Se integra con SharePoint y otras herramientas" },
-      { icon: Target, text: "Simplifica la facturación y administración de usuarios" },
-      { icon: MessageSquare, text: "Captura notas de reuniones con transcripción" },
-    ],
-  },
 ];
 
 function PlanBadge({
@@ -177,7 +117,7 @@ function PlanBadge({
 }
 
 export function PricingPlansSection(props: {
-  /** If true, shows tab switcher (Personal/Empresa). Defaults true. */
+  /** Deprecated. The catalog now exposes only personal plans. */
   showTabs?: boolean;
   /** Called when user clicks a plan CTA. */
   onSelectPlan: (planName: string, tab: PlanTab) => void;
@@ -185,67 +125,26 @@ export function PricingPlansSection(props: {
   currentPlanName?: string;
   /** External loading state by plan name (lowercase). */
   loadingPlanName?: string | null;
-  /** Override initial tab */
+  /** Deprecated. Personal plans are always shown. */
   defaultTab?: PlanTab;
 }) {
   const {
-    showTabs = true,
     onSelectPlan,
     currentPlanName,
     loadingPlanName = null,
-    defaultTab = "personal",
   } = props;
 
-  const [activeTab, setActiveTab] = useState<PlanTab>(defaultTab);
-
-  const plans = useMemo(() => {
-    return activeTab === "personal" ? PERSONAL_PLANS : EMPRESA_PLANS;
-  }, [activeTab]);
+  const plans = PERSONAL_PLANS;
 
   const normalizedCurrent = (currentPlanName || "").toLowerCase();
 
   return (
     <div>
-      {showTabs && (
-        <div className="flex justify-center mt-4">
-          <div className="inline-flex items-center rounded-full border border-border bg-muted/60 p-1">
-            <button
-              className={cn(
-                "px-4 py-1.5 text-sm font-medium rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-                activeTab === "personal"
-                  ? "bg-background shadow-sm text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-              onClick={() => setActiveTab("personal")}
-              data-testid="tab-personal"
-              type="button"
-              aria-pressed={activeTab === "personal"}
-            >
-              Personal
-            </button>
-            <button
-              className={cn(
-                "px-4 py-1.5 text-sm font-medium rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-                activeTab === "empresa"
-                  ? "bg-background shadow-sm text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-              onClick={() => setActiveTab("empresa")}
-              data-testid="tab-empresa"
-              type="button"
-              aria-pressed={activeTab === "empresa"}
-            >
-              Empresa
-            </button>
-          </div>
-        </div>
-      )}
-
       <div className="p-6">
         <div
           className={cn(
             "grid gap-5",
-            activeTab === "personal" ? "grid-cols-1 md:grid-cols-2 lg:grid-cols-4" : "grid-cols-1 md:grid-cols-2",
+            "grid-cols-1 md:grid-cols-2 lg:grid-cols-3",
           )}
         >
           {plans.map((plan) => {
@@ -255,7 +154,7 @@ export function PricingPlansSection(props: {
 
             return (
               <div
-                key={`${activeTab}:${plan.name}`}
+                key={plan.name}
                 className={cn(
                   "rounded-2xl border border-border p-6 flex flex-col bg-card text-card-foreground shadow-sm transition-shadow hover:shadow-md",
                   plan.highlight &&
@@ -298,7 +197,7 @@ export function PricingPlansSection(props: {
                     plan.highlight && plan.buttonVariant === "default" && "shadow-sm",
                   )}
                   disabled={isCurrent || isLoading}
-                  onClick={() => !isCurrent && onSelectPlan(plan.name, activeTab)}
+                  onClick={() => !isCurrent && onSelectPlan(plan.name, "personal")}
                   data-testid={`button-${plan.name.toLowerCase()}`}
                 >
                   {isLoading ? (

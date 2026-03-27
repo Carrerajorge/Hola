@@ -42,22 +42,14 @@ export const STRIPE_PLANS = {
   go: {
     name: 'Go',
     price: 5,
-    priceId: process.env.STRIPE_PRICE_GO || '', // Will be created in Stripe
+    priceId: process.env.STRIPE_PRICE_GO || '',
+    productId: process.env.STRIPE_PRODUCT_GO || 'prod_UCZVvFMHeIWdLC',
   },
   plus: {
     name: 'Plus',
     price: 10,
     priceId: process.env.STRIPE_PRICE_PLUS || '',
-  },
-  pro: {
-    name: 'Pro',
-    price: 200,
-    priceId: process.env.STRIPE_PRICE_PRO || '',
-  },
-  business: {
-    name: 'Business',
-    price: 25,
-    priceId: process.env.STRIPE_PRICE_BUSINESS || '',
+    productId: process.env.STRIPE_PRODUCT_PLUS || 'prod_UCZWW8ZDfZzUWk',
   },
 };
 

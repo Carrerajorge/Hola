@@ -4,7 +4,7 @@ import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/compone
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { X, Sparkles, MessageSquare, Image, Brain, Clock, Target, Zap, Users, Shield, FileText, Video, Code, Star, Infinity, CheckCircle2, Loader2 } from "lucide-react";
+import { X, Sparkles, MessageSquare, Image, Brain, Clock, Target, Zap, FileText, Video, Code, Star, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 
@@ -13,18 +13,32 @@ interface UpgradePlanDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-type PlanTab = "personal" | "empresa";
+type UpgradePlanFeature = {
+  icon: React.ComponentType<{ className?: string }>;
+  text: string;
+};
+
+type UpgradePlan = {
+  badge?: string;
+  buttonColor?: string;
+  buttonText: string;
+  buttonVariant: React.ComponentProps<typeof Button>["variant"];
+  description: string;
+  features: UpgradePlanFeature[];
+  footerNote?: string;
+  highlight?: boolean;
+  isCurrentPlan?: boolean;
+  name: string;
+  price: number;
+};
 
 // Plan to price ID mapping (will be fetched from backend)
 const PLAN_PRICE_IDS: Record<string, string> = {
   go: "price_go_monthly",
-  plus: "price_plus_monthly", 
-  pro: "price_pro_monthly",
-  business: "price_business_monthly",
+  plus: "price_plus_monthly",
 };
 
 export function UpgradePlanDialog({ open, onOpenChange }: UpgradePlanDialogProps) {
-  const [activeTab, setActiveTab] = useState<PlanTab>("personal");
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
   const { toast } = useToast();
 
@@ -114,7 +128,7 @@ export function UpgradePlanDialog({ open, onOpenChange }: UpgradePlanDialogProps
     }
   };
 
-  const personalPlans = [
+  const personalPlans: UpgradePlan[] = [
     {
       name: "Gratis",
       price: 0,
@@ -166,65 +180,8 @@ export function UpgradePlanDialog({ open, onOpenChange }: UpgradePlanDialogProps
       ],
       footerNote: "Se aplican límites"
     },
-    {
-      name: "Pro",
-      price: 200,
-      description: "Maximiza tu productividad",
-      buttonText: "Obtener Pro",
-      buttonVariant: "default" as const,
-      features: [
-        { icon: Star, text: "Domina tareas y temas avanzados" },
-        { icon: Infinity, text: "Trabaja en proyectos grandes con mensajes ilimitados" },
-        { icon: Image, text: "Crea imágenes de alta calidad a cualquier escala" },
-        { icon: Brain, text: "Mantén todo el contexto con la memoria máxima" },
-        { icon: Zap, text: "Ejecuta investigaciones y planifica tareas con agentes" },
-        { icon: Target, text: "Adapta tus proyectos y automatiza flujos de trabajo" },
-        { icon: Video, text: "Supera tus límites con la creación de videos en Sora" },
-        { icon: Code, text: "Implementa código más rápido con OpenClaw" },
-        { icon: Star, text: "Obtén acceso anticipado a características experimentales" },
-      ],
-      footerNote: "Ilimitado, sujeto a medidas de protección contra abusos. Obtener más información"
-    },
   ];
-
-  const empresaPlans = [
-    {
-      name: "Gratis",
-      price: 0,
-      description: "Mira lo que la IA puede hacer",
-      buttonText: "Tu plan actual",
-      buttonVariant: "outline" as const,
-      isCurrentPlan: true,
-      features: [
-        { icon: Sparkles, text: "Obtén explicaciones sencillas" },
-        { icon: MessageSquare, text: "Mantén chats breves para preguntas frecuentes" },
-        { icon: Image, text: "Prueba la generación de imágenes" },
-        { icon: Brain, text: "Guardar memoria y contexto limitados" },
-      ]
-    },
-    {
-      name: "Business",
-      price: 25,
-      badge: "RECOMENDADO",
-      description: "Mejora la productividad con la IA para equipos",
-      buttonText: "Obtener Business",
-      buttonVariant: "default" as const,
-      highlight: true,
-      features: [
-        { icon: CheckCircle2, text: "Realiza un análisis profesional" },
-        { icon: Infinity, text: "Obtén mensajes ilimitados con GPT-5" },
-        { icon: Image, text: "Produce imágenes, videos, presentaciones y más" },
-        { icon: Shield, text: "Protege tu espacio con SSO, MFA y más" },
-        { icon: Shield, text: "Protege la privacidad; los datos nunca se usan para fines de entrenamiento" },
-        { icon: Users, text: "Comparte proyectos y GPT personalizados" },
-        { icon: FileText, text: "Se integra con SharePoint y otras herramientas" },
-        { icon: Target, text: "Simplifica la facturación y administración de usuarios" },
-        { icon: MessageSquare, text: "Captura notas de reuniones con transcripción" },
-      ]
-    },
-  ];
-
-  const plans = activeTab === "personal" ? personalPlans : empresaPlans;
+  const plans = personalPlans;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -248,37 +205,10 @@ export function UpgradePlanDialog({ open, onOpenChange }: UpgradePlanDialogProps
             </Button>
           </div>
           
-          <div className="flex justify-center mt-4">
-            <div className="inline-flex bg-muted rounded-full p-1">
-              <button
-                className={cn(
-                  "px-4 py-1.5 text-sm font-medium rounded-full transition-colors",
-                  activeTab === "personal" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
-                )}
-                onClick={() => setActiveTab("personal")}
-                data-testid="tab-personal"
-              >
-                Personal
-              </button>
-              <button
-                className={cn(
-                  "px-4 py-1.5 text-sm font-medium rounded-full transition-colors",
-                  activeTab === "empresa" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
-                )}
-                onClick={() => setActiveTab("empresa")}
-                data-testid="tab-empresa"
-              >
-                Empresa
-              </button>
-            </div>
-          </div>
         </div>
 
         <div className="p-6">
-          <div className={cn(
-            "grid gap-4",
-            activeTab === "personal" ? "grid-cols-1 md:grid-cols-2 lg:grid-cols-4" : "grid-cols-1 md:grid-cols-2"
-          )}>
+          <div className={cn("grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3")}>
             {plans.map((plan) => (
               <div
                 key={plan.name}
@@ -313,7 +243,7 @@ export function UpgradePlanDialog({ open, onOpenChange }: UpgradePlanDialogProps
                   variant={plan.buttonVariant}
                   className={cn(
                     "w-full mb-6",
-                    (plan as any).buttonColor ? (plan as any).buttonColor : plan.highlight && "bg-primary hover:bg-primary/90"
+                    plan.buttonColor ? plan.buttonColor : plan.highlight && "bg-primary hover:bg-primary/90"
                   )}
                   disabled={plan.isCurrentPlan || loadingPlan === plan.name.toLowerCase()}
                   onClick={() => !plan.isCurrentPlan && handleSubscribe(plan.name)}
@@ -338,20 +268,20 @@ export function UpgradePlanDialog({ open, onOpenChange }: UpgradePlanDialogProps
                   ))}
                 </div>
 
-                {(plan as any).footerNote && (
+                {plan.footerNote && (
                   <p className="text-xs text-muted-foreground mt-4 pt-4 border-t">
-                    {((plan as any).footerNote as string).includes("Obtener más información") ? (
+                    {plan.footerNote.includes("Obtener más información") ? (
                       <>
-                        {((plan as any).footerNote as string).replace("Obtener más información", "")}
+                        {plan.footerNote.replace("Obtener más información", "")}
                         <button className="underline hover:text-foreground">Obtener más información</button>
                       </>
-                    ) : ((plan as any).footerNote as string).includes("Se aplican límites") ? (
+                    ) : plan.footerNote.includes("Se aplican límites") ? (
                       <>
-                        {((plan as any).footerNote as string).replace("Se aplican límites", "")}
+                        {plan.footerNote.replace("Se aplican límites", "")}
                         <button className="underline hover:text-foreground">Se aplican límites</button>
                       </>
                     ) : (
-                      (plan as any).footerNote
+                      plan.footerNote
                     )}
                   </p>
                 )}

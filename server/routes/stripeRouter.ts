@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type Stripe from "stripe";
 import { getUncachableStripeClient, getStripePublishableKey } from "../stripeClient";
 import { db } from "../db";
 import { apiLogs, billingCreditGrants, invoices, payments, users } from "@shared/schema";
@@ -9,16 +10,19 @@ import { sendEmail } from "../services/genericEmailService";
 import { requireAdmin } from "./admin/utils";
 import { auditLog, AuditActions } from "../services/auditLogger";
 import { isSystemAdminRole, isWorkspaceAdminRole, normalizeRoleKey, resolveRolePermissionsForOrg } from "../services/workspaceRoleService";
-
-const PLAN_PRICE_MAPPING: Record<string, { name: string; amount: number; interval?: string }> = {
-  price_go_monthly: { name: "Go", amount: 500, interval: "month" },
-  price_plus_monthly: { name: "Plus", amount: 1000, interval: "month" },
-  price_pro_monthly: { name: "Pro", amount: 20000, interval: "month" },
-  price_business_monthly: { name: "Business", amount: 2500, interval: "month" },
-};
+import {
+  ACTIVE_SUBSCRIPTION_PLANS,
+  ACTIVE_SUBSCRIPTION_PLAN_KEYS,
+  getConfiguredProductId,
+  getPlanKeyFromAlias,
+  getPlanKeyFromAmount,
+  getPlanKeyFromProductId,
+} from "../lib/stripeActivePlans";
 
 /** Valid subscription amounts (cents) — reject anything not on this list */
-const VALID_PLAN_AMOUNTS = new Set([500, 1000, 2500, 20000]);
+const VALID_PLAN_AMOUNTS = new Set(
+  ACTIVE_SUBSCRIPTION_PLAN_KEYS.map((planKey) => ACTIVE_SUBSCRIPTION_PLANS[planKey].amount),
+);
 
 /** Webhook event idempotency cache — prevents replayed events (TTL: 24h) */
 const processedWebhookEvents = new Map<string, number>();
@@ -38,6 +42,175 @@ const billingContactIpCooldown = new Map<string, number>();
 
 // Credits: 1 USD => 100,000 credits (tokens). $5 minimum top-up.
 const CREDITS_PER_USD = 100_000;
+
+type ResolvedCheckoutPrice = {
+  amount: number;
+  planKey: keyof typeof ACTIVE_SUBSCRIPTION_PLANS;
+  priceId: string;
+  productId: string;
+};
+
+type DbStripePriceRow = {
+  price_id: string | null;
+  product_id: string | null;
+  unit_amount: number | null;
+};
+
+function extractStripeProductId(product: Stripe.Price["product"]): string | null {
+  if (typeof product === "string") return product;
+  if (product && typeof product === "object" && "id" in product && typeof product.id === "string") {
+    return product.id;
+  }
+  return null;
+}
+
+function toResolvedCheckoutPrice(price: Stripe.Price): ResolvedCheckoutPrice | null {
+  if (!price.active) return null;
+  if (price.recurring?.interval !== "month") return null;
+
+  const amount = typeof price.unit_amount === "number" ? price.unit_amount : null;
+  if (amount === null || !VALID_PLAN_AMOUNTS.has(amount)) return null;
+
+  const productId = extractStripeProductId(price.product);
+  const planKeyFromProduct = getPlanKeyFromProductId(productId);
+  const planKeyFromAmount = getPlanKeyFromAmount(amount);
+
+  if (!productId || !planKeyFromProduct || !planKeyFromAmount || planKeyFromProduct !== planKeyFromAmount) {
+    return null;
+  }
+
+  return {
+    amount,
+    planKey: planKeyFromProduct,
+    priceId: price.id,
+    productId,
+  };
+}
+
+function toResolvedCheckoutPriceFromDbRow(row?: DbStripePriceRow | null): ResolvedCheckoutPrice | null {
+  if (!row?.price_id || !row.product_id || typeof row.unit_amount !== "number") {
+    return null;
+  }
+
+  if (!VALID_PLAN_AMOUNTS.has(row.unit_amount)) {
+    return null;
+  }
+
+  const planKeyFromProduct = getPlanKeyFromProductId(row.product_id);
+  const planKeyFromAmount = getPlanKeyFromAmount(row.unit_amount);
+
+  if (!planKeyFromProduct || !planKeyFromAmount || planKeyFromProduct !== planKeyFromAmount) {
+    return null;
+  }
+
+  return {
+    amount: row.unit_amount,
+    planKey: planKeyFromProduct,
+    priceId: row.price_id,
+    productId: row.product_id,
+  };
+}
+
+async function findDbCheckoutPrice(rawIdentifier: string): Promise<ResolvedCheckoutPrice | null> {
+  if (rawIdentifier.startsWith("price_")) {
+    const result = await db.execute(sql`
+      SELECT pr.id as price_id, p.id as product_id, pr.unit_amount
+      FROM stripe.prices pr
+      INNER JOIN stripe.products p ON p.id = pr.product
+      WHERE pr.id = ${rawIdentifier}
+        AND pr.active = true
+        AND p.active = true
+      LIMIT 1
+    `);
+
+    return toResolvedCheckoutPriceFromDbRow((result.rows as DbStripePriceRow[])[0]);
+  }
+
+  const aliasPlanKey = getPlanKeyFromAlias(rawIdentifier);
+  const productId = aliasPlanKey ? getConfiguredProductId(aliasPlanKey) : rawIdentifier.startsWith("prod_") ? rawIdentifier : null;
+  if (!productId) return null;
+
+  const productPlanKey = getPlanKeyFromProductId(productId);
+  const expectedAmount = aliasPlanKey
+    ? ACTIVE_SUBSCRIPTION_PLANS[aliasPlanKey].amount
+    : productPlanKey
+      ? ACTIVE_SUBSCRIPTION_PLANS[productPlanKey].amount
+      : null;
+
+  if (expectedAmount === null) return null;
+
+  const result = await db.execute(sql`
+    SELECT pr.id as price_id, p.id as product_id, pr.unit_amount
+    FROM stripe.prices pr
+    INNER JOIN stripe.products p ON p.id = pr.product
+    WHERE p.id = ${productId}
+      AND p.active = true
+      AND pr.active = true
+      AND pr.unit_amount = ${expectedAmount}
+    LIMIT 1
+  `);
+
+  return toResolvedCheckoutPriceFromDbRow((result.rows as DbStripePriceRow[])[0]);
+}
+
+async function findActiveMonthlyPriceForPlan(
+  stripe: Stripe,
+  planKey: keyof typeof ACTIVE_SUBSCRIPTION_PLANS,
+): Promise<Stripe.Price | null> {
+  const productId = getConfiguredProductId(planKey);
+  const expectedAmount = ACTIVE_SUBSCRIPTION_PLANS[planKey].amount;
+
+  const prices = await withRetry(
+    () => stripe.prices.list({ active: true, limit: 100, product: productId, expand: ["data.product"] }),
+    { maxAttempts: 3, initialDelayMs: 1000 },
+  );
+
+  return (
+    prices.data.find((price) => {
+      const resolved = toResolvedCheckoutPrice(price);
+      return resolved?.planKey === planKey && resolved.amount === expectedAmount;
+    }) || null
+  );
+}
+
+async function resolveAllowedCheckoutPrice(
+  stripe: Stripe,
+  rawIdentifier: string,
+): Promise<ResolvedCheckoutPrice | null> {
+  const normalized = rawIdentifier.trim();
+  if (!normalized) return null;
+
+  try {
+    const dbResolved = await findDbCheckoutPrice(normalized);
+    if (dbResolved) return dbResolved;
+  } catch {
+    // Fall through to direct Stripe API lookup if the billing mirror is unavailable.
+  }
+
+  if (normalized.startsWith("price_")) {
+    const price = await withRetry(
+      () => stripe.prices.retrieve(normalized, { expand: ["product"] }),
+      { maxAttempts: 3, initialDelayMs: 1000 },
+    );
+    return toResolvedCheckoutPrice(price);
+  }
+
+  const aliasPlanKey = getPlanKeyFromAlias(normalized);
+  if (aliasPlanKey) {
+    const price = await findActiveMonthlyPriceForPlan(stripe, aliasPlanKey);
+    return price ? toResolvedCheckoutPrice(price) : null;
+  }
+
+  if (normalized.startsWith("prod_")) {
+    const planKey = getPlanKeyFromProductId(normalized);
+    if (!planKey) return null;
+
+    const price = await findActiveMonthlyPriceForPlan(stripe, planKey);
+    return price ? toResolvedCheckoutPrice(price) : null;
+  }
+
+  return null;
+}
 
 function requireStripeProductSeedingEnabled(_req: any, res: any, next: any) {
   const flag = String(process.env.ALLOW_STRIPE_PRODUCT_SEEDING || "").trim().toLowerCase();
@@ -190,96 +363,49 @@ export function createStripeRouter() {
   router.get("/api/stripe/price-ids", async (req, res) => {
     try {
       const priceMapping: Record<string, string> = {};
+      const productMapping: Record<string, string> = {};
+      let stripe: Stripe | null = null;
 
-      try {
-        const result = await db.execute(sql`
-          SELECT 
-            p.name as product_name,
-            pr.id as price_id,
-            pr.unit_amount
-          FROM stripe.products p
-          LEFT JOIN stripe.prices pr ON pr.product = p.id AND pr.active = true
-          WHERE p.active = true
-          ORDER BY pr.unit_amount ASC
-        `);
+      for (const planKey of ACTIVE_SUBSCRIPTION_PLAN_KEYS) {
+        const plan = ACTIVE_SUBSCRIPTION_PLANS[planKey];
+        const productId = getConfiguredProductId(planKey);
+        productMapping[plan.alias] = productId;
 
-        for (const row of result.rows as any[]) {
-          const productName = (row.product_name || "").toLowerCase();
-          const amount = row.unit_amount;
-
-          if (productName.includes("go") || amount === 500) {
-            priceMapping.price_go_monthly = row.price_id;
-          } else if (productName.includes("plus") || amount === 1000) {
-            priceMapping.price_plus_monthly = row.price_id;
-          } else if (productName.includes("pro") || amount === 2000) {
-            priceMapping.price_pro_yearly = row.price_id;
-          }
-        }
-      } catch (dbError) {
-        console.log("DB lookup failed, trying Stripe API directly");
-      }
-
-      if (Object.keys(priceMapping).length === 0) {
         try {
-          const stripe = await getUncachableStripeClient();
-          // Add retry logic for Stripe API calls
-          const prices = await withRetry(
-            () => stripe.prices.list({ active: true, limit: 100, expand: ["data.product"] }),
-            { maxAttempts: 3, initialDelayMs: 1000 }
+          const result = await db.execute(
+            sql`
+              SELECT pr.id as price_id
+              FROM stripe.products p
+              INNER JOIN stripe.prices pr ON pr.product = p.id
+              WHERE p.id = ${productId}
+                AND p.active = true
+                AND pr.active = true
+                AND pr.unit_amount = ${plan.amount}
+              LIMIT 1
+            `,
           );
 
-          // Prefer mapping by product name to avoid picking legacy prices
-          for (const price of prices.data) {
-            const amount = price.unit_amount;
-            const interval = price.recurring?.interval;
-            const productName =
-              typeof price.product === "object" && price.product && "name" in price.product
-                ? String((price.product as any).name || "").toLowerCase()
-                : "";
-
-            if (interval !== "month") continue;
-
-            if (productName.includes("iliagpt business") || productName === "business") {
-              if (amount === 2500) priceMapping.price_business_monthly = price.id;
-              continue;
-            }
-
-            if (productName.includes("iliagpt pro") || productName === "pro") {
-              if (amount === 20000) priceMapping.price_pro_monthly = price.id;
-              continue;
-            }
-
-            if (productName.includes("iliagpt plus") || productName === "plus") {
-              if (amount === 1000) priceMapping.price_plus_monthly = price.id;
-              continue;
-            }
-
-            if (productName.includes("iliagpt go") || productName === "go") {
-              if (amount === 500) priceMapping.price_go_monthly = price.id;
-              continue;
-            }
+          const priceId = typeof result.rows[0]?.price_id === "string" ? result.rows[0].price_id : null;
+          if (priceId) {
+            priceMapping[plan.alias] = priceId;
+            continue;
           }
+        } catch {
+          console.log(`[Stripe] DB lookup failed for ${planKey}, trying Stripe API directly`);
+        }
 
-          // Fallback by amount if still missing
-          for (const price of prices.data) {
-            if (typeof price.product === "object") {
-              // already handled above
-            }
-            const amount = price.unit_amount;
-            const interval = price.recurring?.interval;
-            if (interval !== "month") continue;
-
-            if (!priceMapping.price_go_monthly && amount === 500) priceMapping.price_go_monthly = price.id;
-            if (!priceMapping.price_plus_monthly && amount === 1000) priceMapping.price_plus_monthly = price.id;
-            if (!priceMapping.price_pro_monthly && amount === 20000) priceMapping.price_pro_monthly = price.id;
-            if (!priceMapping.price_business_monthly && amount === 2500) priceMapping.price_business_monthly = price.id;
+        try {
+          stripe ??= await getUncachableStripeClient();
+          const price = await findActiveMonthlyPriceForPlan(stripe, planKey);
+          if (price?.id) {
+            priceMapping[plan.alias] = price.id;
           }
         } catch (stripeError: any) {
-          console.error("Stripe API lookup failed:", stripeError.message);
+          console.error(`[Stripe] Price lookup failed for ${planKey}:`, stripeError.message);
         }
       }
 
-      res.json({ priceMapping });
+      res.json({ priceMapping, productMapping });
     } catch (error: any) {
       console.error("Error fetching price IDs:", error);
       res.json({ priceMapping: {} });
@@ -305,12 +431,7 @@ export function createStripeRouter() {
       if (!parsedCheckout.success) {
         return res.status(400).json({ error: "Invalid request body" });
       }
-      const { priceId, utmSource, utmMedium, utmCampaign, referrer } = parsedCheckout.data;
-
-      // Validate priceId format (must look like a Stripe price ID)
-      if (!priceId.startsWith("price_")) {
-        return res.status(400).json({ error: "Invalid priceId format" });
-      }
+      const { priceId: requestedPriceId, utmSource, utmMedium, utmCampaign, referrer } = parsedCheckout.data;
 
       const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
       if (!dbUser) {
@@ -320,6 +441,13 @@ export function createStripeRouter() {
       }
 
       const stripe = await getUncachableStripeClient();
+      const resolvedCheckoutPrice = await resolveAllowedCheckoutPrice(stripe, requestedPriceId);
+
+      if (!resolvedCheckoutPrice) {
+        return res.status(400).json({
+          error: "Solo están habilitados los planes Go ($5) y Plus ($10).",
+        });
+      }
 
       let customerId = dbUser.stripeCustomerId;
       if (!customerId) {
@@ -382,12 +510,14 @@ export function createStripeRouter() {
         () => stripe.checkout.sessions.create({
           customer: customerId,
           payment_method_types: ['card'],
-          line_items: [{ price: priceId, quantity: 1 }],
+          line_items: [{ price: resolvedCheckoutPrice.priceId, quantity: 1 }],
           mode: 'subscription',
           success_url: successUrl,
           cancel_url: cancelUrl,
           metadata: { 
             userId,
+            plan: resolvedCheckoutPrice.planKey,
+            stripeProductId: resolvedCheckoutPrice.productId,
             ipAddress: ipAddress.substring(0, 50),
             device: deviceType,
             browser: browser,
@@ -399,6 +529,8 @@ export function createStripeRouter() {
           subscription_data: {
             metadata: {
               userId,
+              plan: resolvedCheckoutPrice.planKey,
+              stripeProductId: resolvedCheckoutPrice.productId,
               ipAddress: ipAddress.substring(0, 50),
               device: deviceType,
               browser: browser,
@@ -440,20 +572,6 @@ export function createStripeRouter() {
           priceAmount: 1000, // $10
           interval: "month" as const,
           metadata: { plan: "plus" }
-        },
-        {
-          name: "IliaGPT Pro",
-          description: "Maximiza tu productividad - Mensajes ilimitados",
-          priceAmount: 20000, // $200
-          interval: "month" as const,
-          metadata: { plan: "pro" }
-        },
-        {
-          name: "IliaGPT Business",
-          description: "Mejora la productividad con IA para equipos",
-          priceAmount: 2500, // $25
-          interval: "month" as const,
-          metadata: { plan: "business" }
         }
       ];
 
@@ -563,7 +681,6 @@ export function createStripeRouter() {
               // Handle subscription created with notifications (pass event.id for idempotency)
               await subscriptionService.handleSubscriptionCreated(subscription, event.id);
               
-              const priceId = subscription.items.data[0].price.id;
               const amount = subscription.items.data[0].price.unit_amount || 0;
               
               // Determine plan from amount

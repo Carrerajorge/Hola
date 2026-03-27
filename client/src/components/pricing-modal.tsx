@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Check, Zap, Rocket, Star, Crown, Clock } from "lucide-react";
+import { Check, Zap, Rocket, Star, Clock } from "lucide-react";
 import { apiFetch } from "@/lib/apiClient";
 
 interface QuotaInfo {
@@ -100,28 +100,6 @@ const plans: PlanInfo[] = [
       { text: "Organiza proyectos y GPT personalizados", included: true },
       { text: "Produce y comparte videos en Sora", included: true },
       { text: "Escribe código y crea aplicaciones con OpenClaw", included: true },
-    ],
-  },
-  {
-    id: "pro",
-    name: "Pro",
-    price: "$20",
-    priceId: "price_pro_yearly",
-    description: "Maximiza tu productividad",
-    icon: <Crown className="h-6 w-6" />,
-    gradient: "from-amber-500 to-orange-600",
-    buttonText: "Obtener Pro",
-    features: [
-      { text: "Mensajes ilimitados", included: true },
-      { text: "Domina tareas y temas avanzados", included: true },
-      { text: "Trabaja en proyectos grandes con mensajes ilimitados", included: true },
-      { text: "Crea imágenes de alta calidad a cualquier escala", included: true },
-      { text: "Mantén todo el contexto con la memoria máxima", included: true },
-      { text: "Ejecuta investigaciones y planifica tareas con agentes", included: true },
-      { text: "Adapta tus proyectos y automatiza flujos de trabajo", included: true },
-      { text: "Supera tus límites con la creación de videos en Sora", included: true },
-      { text: "Implementa código más rápido con OpenClaw", included: true },
-      { text: "Obtén acceso anticipado a características experimentales", included: true },
     ],
   },
 ];
@@ -270,7 +248,7 @@ export function PricingModal({ open, onClose, quota }: PricingModalProps) {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {plans.map((plan) => {
             const isCurrentPlan = currentPlanId === plan.id;
             const isLoading = loadingPlan === plan.id;
@@ -307,7 +285,7 @@ export function PricingModal({ open, onClose, quota }: PricingModalProps) {
                     </span>
                     {plan.price !== "$0" && (
                       <span className="text-gray-500 dark:text-gray-400">
-                        {plan.id === "pro" ? "/año" : "/mes"}
+                        /mes
                       </span>
                     )}
                   </div>
