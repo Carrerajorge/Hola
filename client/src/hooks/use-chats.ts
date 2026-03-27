@@ -103,7 +103,7 @@ export interface Message {
   isThinking?: boolean;
   steps?: { title: string; status: "pending" | "loading" | "complete" }[];
   attachments?: { type: "word" | "excel" | "ppt" | "image" | "pdf" | "text" | "code" | "archive" | "document" | "unknown"; name: string; mimeType?: string; imageUrl?: string; storagePath?: string; fileId?: string; documentType?: "word" | "excel" | "ppt" | "pdf"; content?: string; title?: string; savedAt?: string; spreadsheetData?: { uploadId: string; sheets: Array<{ name: string; rowCount: number; columnCount: number }>; previewData?: { headers: string[]; data: any[][] }; analysisId?: string; sessionId?: string } }[];
-  sources?: { fileName: string; content: string }[];
+  sources?: { fileName: string; content: string; citation?: string }[];
   figmaDiagram?: FigmaDiagram;
   generatedImage?: string;
   googleFormPreview?: GoogleFormPreview;
@@ -351,8 +351,9 @@ function normalizeSources(raw: unknown): Message["sources"] | undefined {
       if (!isPlainObject(source)) return null;
       const fileName = stringifyUnknown(source.fileName || source.name).trim();
       const content = typeof source.content === "string" ? source.content : stringifyUnknown(source.content);
+      const citation = stringifyUnknown(source.citation).trim() || undefined;
       if (!fileName) return null;
-      return { fileName, content };
+      return { fileName, content, citation };
     })
     .filter((source): source is NonNullable<Message["sources"]>[number] => source !== null);
   return normalized.length > 0 ? normalized : undefined;
@@ -606,7 +607,7 @@ function normalizeMessage(raw: unknown, options: {
     isThinking: source.isThinking === true,
     steps: normalizeMessageSteps(source.steps ?? metadata?.steps),
     attachments: normalizeAttachmentList(options.attachments ?? source.attachments),
-    sources: normalizeSources(source.sources),
+    sources: normalizeSources(source.sources ?? metadata?.sources),
     figmaDiagram: isPlainObject(source.figmaDiagram) ? source.figmaDiagram as FigmaDiagram : undefined,
     generatedImage: typeof source.generatedImage === "string" ? source.generatedImage : undefined,
     googleFormPreview: normalizeGoogleFormPreview(source.googleFormPreview),
