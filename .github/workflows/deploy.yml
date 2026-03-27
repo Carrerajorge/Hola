@@ -536,6 +536,8 @@ jobs:
             /scripts/clean-playwright-artifacts.cjs
             /scripts/ci-assert-required-paths.sh
             /scripts/ci-retry.sh
+            /scripts/prod-artifact-safety-regression.ts
+            /scripts/prod-rigorous-checks.sh
             /scripts/sync-mathjax-assets.cjs
             /scripts/with-env.cjs
           sparse-checkout-cone-mode: false
@@ -550,6 +552,8 @@ jobs:
             scripts/clean-playwright-artifacts.cjs \
             scripts/ci-assert-required-paths.sh \
             scripts/ci-retry.sh \
+            scripts/prod-artifact-safety-regression.ts \
+            scripts/prod-rigorous-checks.sh \
             scripts/sync-mathjax-assets.cjs \
             scripts/with-env.cjs
 
@@ -1129,6 +1133,8 @@ jobs:
             /scripts/clean-playwright-artifacts.cjs
             /scripts/ci-assert-required-paths.sh
             /scripts/ci-retry.sh
+            /scripts/prod-artifact-safety-regression.ts
+            /scripts/prod-rigorous-checks.sh
             /scripts/sync-mathjax-assets.cjs
             /scripts/with-env.cjs
           sparse-checkout-cone-mode: false
@@ -1144,6 +1150,8 @@ jobs:
             scripts/clean-playwright-artifacts.cjs \
             scripts/ci-assert-required-paths.sh \
             scripts/ci-retry.sh \
+            scripts/prod-artifact-safety-regression.ts \
+            scripts/prod-rigorous-checks.sh \
             scripts/sync-mathjax-assets.cjs \
             scripts/with-env.cjs
 
