@@ -1,11 +1,20 @@
 import { EventEmitter } from "events";
+import * as fs from "fs";
+import * as path from "path";
 import { nanoid } from "nanoid";
-import { defaultToolRegistry, ToolRegistry } from "../agent/sandbox/tools";
+import {
+  createDefaultToolRegistry,
+  defaultToolRegistry,
+  ToolRegistry,
+} from "../agent/sandbox/tools";
+import { CommandExecutor } from "../agent/sandbox/commandExecutor";
+import { FileManager } from "../agent/sandbox/fileManager";
 import type { ToolResult as SandboxToolResult } from "../agent/sandbox/agentTypes";
 import {
   DEFAULT_AGENT_EXECUTION_PROFILE,
   type AgentExecutionProfile,
 } from "@shared/agentExecutionProfile";
+import type { OpenClawWorkspaceContext } from "@shared/openclawWorkspaceContext";
 import { getAgentExecutionProfileConfig } from "../agent/executionProfiles";
 
 export interface AgentState {
@@ -36,6 +45,8 @@ export interface AgentRunnerConfig {
   stepTimeoutMs: number;
   enableLogging: boolean;
   maxConsecutiveFailures: number;
+  workspaceContext?: OpenClawWorkspaceContext;
+  toolRegistry?: ToolRegistry;
 }
 
 export interface ToolResult {
@@ -101,6 +112,33 @@ const DEFAULT_CONFIG: AgentRunnerConfig = {
   maxConsecutiveFailures: 2,
 };
 
+function resolveWorkspaceDirectories(workspaceContext: OpenClawWorkspaceContext): {
+  repositoryRoot: string;
+  workspaceDir: string;
+} | null {
+  const repositoryRoot = path.resolve(workspaceContext.repositoryPath);
+  if (!fs.existsSync(repositoryRoot) || !fs.statSync(repositoryRoot).isDirectory()) {
+    return null;
+  }
+
+  const selectedFolder =
+    workspaceContext.selectedFolder && workspaceContext.selectedFolder !== "."
+      ? workspaceContext.selectedFolder
+      : "";
+  const requestedWorkspaceDir = path.resolve(repositoryRoot, selectedFolder || ".");
+  const withinRepository =
+    requestedWorkspaceDir === repositoryRoot ||
+    requestedWorkspaceDir.startsWith(`${repositoryRoot}${path.sep}`);
+  const workspaceDir =
+    withinRepository &&
+    fs.existsSync(requestedWorkspaceDir) &&
+    fs.statSync(requestedWorkspaceDir).isDirectory()
+      ? requestedWorkspaceDir
+      : repositoryRoot;
+
+  return { repositoryRoot, workspaceDir };
+}
+
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: NodeJS.Timeout | null = null;
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -123,6 +161,8 @@ export class AgentRunner extends EventEmitter {
   private startTime: number = 0;
   private consecutiveFailures: number = 0;
   private lastFailedTool: string = "";
+  private readonly toolRegistry: ToolRegistry;
+  private readonly workspaceContext?: OpenClawWorkspaceContext;
 
   constructor(config: Partial<AgentRunnerConfig> = {}) {
     super();
@@ -137,12 +177,67 @@ export class AgentRunner extends EventEmitter {
       maxConsecutiveFailures: profileConfig.subagent.maxConsecutiveFailures,
       ...config,
     };
+    this.workspaceContext = this.config.workspaceContext;
+    this.toolRegistry = this.createToolRegistry();
     this.logStructured("debug", "initialized", {
       executionProfile: this.config.executionProfile,
       maxSteps: this.config.maxSteps,
       stepTimeoutMs: this.config.stepTimeoutMs,
       maxConsecutiveFailures: this.config.maxConsecutiveFailures,
+      repositoryPath: this.workspaceContext?.repositoryPath,
+      selectedFolder: this.workspaceContext?.selectedFolder,
+      branch: this.workspaceContext?.branch,
+      toolRegistrySize: this.toolRegistry.size,
     });
+  }
+
+  private createToolRegistry(): ToolRegistry {
+    if (this.config.toolRegistry) {
+      return this.config.toolRegistry;
+    }
+
+    if (!this.workspaceContext?.repositoryPath) {
+      return defaultToolRegistry;
+    }
+
+    const directories = resolveWorkspaceDirectories(this.workspaceContext);
+    if (!directories) {
+      this.logStructured("warn", "workspace_context_invalid", {
+        repositoryPath: this.workspaceContext.repositoryPath,
+        selectedFolder: this.workspaceContext.selectedFolder,
+      });
+      return defaultToolRegistry;
+    }
+
+    const executor = new CommandExecutor({
+      workingDirectory: directories.workspaceDir,
+      environment: {
+        OPENCLAW_REPOSITORY_PATH: directories.repositoryRoot,
+        OPENCLAW_WORKSPACE_DIR: directories.workspaceDir,
+        OPENCLAW_SELECTED_FOLDER: this.workspaceContext.selectedFolder,
+        ...(this.workspaceContext.branch
+          ? { OPENCLAW_BRANCH: this.workspaceContext.branch }
+          : {}),
+      },
+    });
+    const fileManager = new FileManager(directories.workspaceDir);
+    return createDefaultToolRegistry(executor, fileManager);
+  }
+
+  private buildWorkspacePromptSection(): string {
+    if (!this.workspaceContext?.repositoryPath) return "";
+
+    const lines = [
+      "Contexto de workspace activo:",
+      `- Repositorio: ${this.workspaceContext.repositoryPath}`,
+      `- Carpeta objetivo: ${this.workspaceContext.selectedFolder || "."}`,
+      `- Rama: ${this.workspaceContext.branch || "desconocida"}`,
+      `- Perfiles: ${(this.workspaceContext.codingAgents || ["coder"]).join(", ")}`,
+      `- Runtime: ${this.workspaceContext.runtimeTarget || "Local"}`,
+      `- Acceso: ${this.workspaceContext.executionAccess || "Full access"}`,
+      "Regla operativa: los comandos shell arrancan en la carpeta objetivo del workspace.",
+    ];
+    return lines.join("\n");
   }
 
   async run(objective: string, planHint: string[] = []): Promise<{ success: boolean; result: any; state: AgentState; run_id: string }> {
@@ -375,8 +470,9 @@ export class AgentRunner extends EventEmitter {
         : "";
 
       // Get all available tools from the registry
-      const availableTools = defaultToolRegistry.listToolsWithInfo();
+      const availableTools = this.toolRegistry.listToolsWithInfo();
       const toolsDescription = availableTools.map(t => `- ${t.name}: ${t.description}`).join("\n");
+      const workspacePrompt = this.buildWorkspacePromptSection();
 
       const prompt = `Eres un agente autónomo ejecutando una tarea.
 
@@ -384,6 +480,7 @@ Objetivo: ${context.objective}
 Plan: ${context.plan.join(" → ")}
 Paso actual: ${context.currentStep + 1}/${this.config.maxSteps}
 
+${workspacePrompt ? `${workspacePrompt}\n` : ""}
 ${contextSummary}
 
 Acciones recientes (últimas 3): ${JSON.stringify(context.previousActions)}
@@ -579,7 +676,7 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
     }
 
     // Check if tool exists in sandbox registry
-    if (defaultToolRegistry.has(actualToolName)) {
+    if (this.toolRegistry.has(actualToolName)) {
       this.logStructured("info", "sandbox_tool_executing", { run_id: this.runId, tool: actualToolName, originalTool: toolName });
 
       try {
@@ -607,7 +704,7 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
           adaptedInput = { operation: "list", path: input.path || input.directory || "." };
         }
 
-        const result: SandboxToolResult = await defaultToolRegistry.execute(actualToolName, adaptedInput);
+        const result: SandboxToolResult = await this.toolRegistry.execute(actualToolName, adaptedInput);
 
         return {
           success: result.success,
@@ -632,7 +729,10 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
         return this.toolExtractText(input.content || input.html || input.markdown);
 
       default:
-        return { success: false, error: `Unknown tool: ${toolName}. Available tools: ${defaultToolRegistry.listTools().join(", ")}` };
+        return {
+          success: false,
+          error: `Unknown tool: ${toolName}. Available tools: ${this.toolRegistry.listTools().join(", ")}`,
+        };
     }
   }
 

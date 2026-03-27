@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import { createHttpTestClient } from "../../tests/helpers/httpTestClient";
+import { openclawSessionContextService } from "../openclaw/sessionContextService";
 
 const runtimeRuns: any[] = [];
 
@@ -138,10 +139,14 @@ vi.mock("../openclaw/agents/subagentService", () => ({
         objective: params.objective,
         planHint: params.planHint || [],
         parentRunId: params.parentRunId,
+        workspaceContext: params.workspaceContext,
         executionProfile: params.executionProfile || "standard",
         status: "queued",
         createdAt: Date.now(),
       };
+      if (params.workspaceContext) {
+        openclawSessionContextService.remember(run.id, params.workspaceContext);
+      }
       runtimeRuns.push(run);
       return run;
     }),
@@ -173,6 +178,7 @@ async function createTestApp() {
 describe("openclawRuntimeRouter smoke flow", () => {
   beforeEach(() => {
     runtimeRuns.length = 0;
+    openclawSessionContextService.clear();
     vi.clearAllMocks();
   });
 
@@ -215,6 +221,44 @@ describe("openclawRuntimeRouter smoke flow", () => {
       expect(Array.isArray(flowRes.body.delegatedRuns)).toBe(true);
       expect(flowRes.body.delegatedRuns.length).toBeGreaterThanOrEqual(1);
       expect(flowRes.body.combined.summary.completed).toBe(2);
+    } finally {
+      await close();
+    }
+  });
+
+  it("inherits workspace context from the parent run session", async () => {
+    const app = await createTestApp();
+    const { client, close } = await createHttpTestClient(app);
+
+    try {
+      const workspaceContext = {
+        projectId: "project_hola",
+        projectName: "Hola",
+        repositoryPath: "/tmp/hola-repo",
+        selectedFolder: "packages/app",
+        codingAgents: ["coder", "reviewer"],
+        runtimeTarget: "Local",
+        executionAccess: "Full access",
+        branch: "main",
+      };
+
+      const sessionRes = await client
+        .post("/api/openclaw/runtime/session-context/run_parent_1")
+        .send({ workspaceContext });
+      expect(sessionRes.status).toBe(201);
+      expect(sessionRes.body.workspaceContext.repositoryPath).toBe(
+        workspaceContext.repositoryPath,
+      );
+
+      const spawnRes = await client.post("/api/openclaw/runtime/subagents").send({
+        objective: "Analiza el repo y prepara cambios",
+        parentRunId: "run_parent_1",
+      });
+      expect(spawnRes.status).toBe(202);
+      expect(spawnRes.body.workspaceContext).toMatchObject(workspaceContext);
+      expect(
+        openclawSessionContextService.resolveWorkspaceContext(spawnRes.body.id),
+      ).toMatchObject(workspaceContext);
     } finally {
       await close();
     }

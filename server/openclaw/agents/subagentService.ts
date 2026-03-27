@@ -4,7 +4,9 @@ import {
   DEFAULT_AGENT_EXECUTION_PROFILE,
   type AgentExecutionProfile,
 } from "@shared/agentExecutionProfile";
+import type { OpenClawWorkspaceContext } from "@shared/openclawWorkspaceContext";
 import { resolveAgentExecutionProfileFromHints } from "../../agent/executionProfiles";
+import { openclawSessionContextService } from "../sessionContextService";
 
 export type SubagentRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
@@ -25,6 +27,7 @@ export interface SubagentRunRecord {
   objective: string;
   planHint: string[];
   parentRunId?: string;
+  workspaceContext?: OpenClawWorkspaceContext;
   executionProfile: AgentExecutionProfile;
   status: SubagentRunStatus;
   createdAt: number;
@@ -40,6 +43,7 @@ type SpawnSubagentParams = {
   planHint?: string[];
   parentRunId?: string;
   executionProfile?: AgentExecutionProfile;
+  workspaceContext?: OpenClawWorkspaceContext;
 };
 
 type ListRunsParams = {
@@ -84,12 +88,16 @@ class OpenClawSubagentService extends EventEmitter {
       objective: params.objective,
       planHint: params.planHint || [],
       parentRunId: params.parentRunId,
+      workspaceContext: params.workspaceContext,
       executionProfile,
       status: "queued",
       createdAt: Date.now(),
     };
 
     this.runs.set(runId, run);
+    if (params.workspaceContext) {
+      openclawSessionContextService.remember(runId, params.workspaceContext);
+    }
     this.trimRetention();
     this.emitStatusChange(run);
     void this.execute(runId);
@@ -139,7 +147,14 @@ class OpenClawSubagentService extends EventEmitter {
 
     try {
       const { AgentRunner } = await import("../../services/agentRunner");
-      const activeRunner = new AgentRunner({ executionProfile: run.executionProfile });
+      const workspaceContext =
+        openclawSessionContextService.resolveWorkspaceContext(run.id) ||
+        run.workspaceContext ||
+        openclawSessionContextService.resolveWorkspaceContext(run.parentRunId);
+      const activeRunner = new AgentRunner({
+        executionProfile: run.executionProfile,
+        workspaceContext,
+      });
       runner = activeRunner;
       this.runners.set(runId, activeRunner);
       run.status = "running";

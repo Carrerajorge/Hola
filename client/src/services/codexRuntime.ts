@@ -1,5 +1,9 @@
 import { apiRequest } from "@/lib/queryClient";
 import type { Project } from "@/hooks/use-projects";
+import {
+  type OpenClawWorkspaceContext,
+  normalizeOpenClawWorkspaceContext,
+} from "@shared/openclawWorkspaceContext";
 
 export type CodexExecutionProfile = "standard" | "marathon_12h" | "marathon_24h";
 export type CodexAgentRole = "coder" | "reviewer" | "improver";
@@ -59,6 +63,7 @@ export interface CodexSubagentRun {
   objective: string;
   planHint: string[];
   parentRunId?: string;
+  workspaceContext?: OpenClawWorkspaceContext;
   status: CodexSubagentStatus;
   createdAt: number;
   startedAt?: number;
@@ -123,6 +128,39 @@ function buildWorkspaceSummary(project?: Project | null, branchName?: string | n
   ];
 
   return lines.filter(Boolean).join("\n");
+}
+
+function buildOpenClawWorkspaceContext(
+  project?: Project | null,
+  branchName?: string | null,
+): OpenClawWorkspaceContext | undefined {
+  if (!project?.repositoryPath) return undefined;
+
+  return normalizeOpenClawWorkspaceContext({
+    projectId: project.id,
+    projectName: project.name,
+    repositoryPath: project.repositoryPath,
+    selectedFolder: project.defaultCodeFolder || ".",
+    codingAgents: project.codingAgents || ["coder"],
+    runtimeTarget: "Local",
+    executionAccess: "Full access",
+    branch: branchName || undefined,
+  });
+}
+
+async function registerOpenClawSessionContext(
+  runId: string,
+  workspaceContext?: OpenClawWorkspaceContext,
+): Promise<void> {
+  if (!workspaceContext) return;
+
+  try {
+    await apiRequest("POST", `/api/openclaw/runtime/session-context/${encodeURIComponent(runId)}`, {
+      workspaceContext,
+    });
+  } catch (error) {
+    console.warn("[codexRuntime] Failed to register OpenClaw session context", error);
+  }
 }
 
 export function buildCodexPrompt(params: {
@@ -225,6 +263,7 @@ export async function createCodexRun(params: CreateCodexRunParams): Promise<{
 
   const executionProfile = resolveExecutionProfile(params.executionProfile, params.marathonMode);
   const chatId = params.chatId?.trim() ? params.chatId.trim() : await createChatForCodex(trimmedMessage);
+  const workspaceContext = buildOpenClawWorkspaceContext(params.project, params.branchName);
   const prompt = buildCodexPrompt({
     message: trimmedMessage,
     project: params.project,
@@ -238,9 +277,12 @@ export async function createCodexRun(params: CreateCodexRunParams): Promise<{
     executionProfile,
   });
   const payload = await response.json();
+  const runId = String(payload.id);
+
+  await registerOpenClawSessionContext(runId, workspaceContext);
 
   return {
-    runId: String(payload.id),
+    runId,
     chatId,
     prompt,
   };
@@ -251,6 +293,7 @@ export async function spawnCodexSubagents(params: SpawnCodexSubagentsParams): Pr
   if (roles.length === 0) return [];
 
   const executionProfile = resolveExecutionProfile(params.executionProfile, params.marathonMode);
+  const workspaceContext = buildOpenClawWorkspaceContext(params.project, params.branchName);
   const responses = await Promise.all(
     roles.map(async (role) => {
       const response = await apiRequest("POST", "/api/openclaw/runtime/subagents", {
@@ -269,6 +312,7 @@ export async function spawnCodexSubagents(params: SpawnCodexSubagentsParams): Pr
         ],
         parentRunId: params.runId,
         executionProfile,
+        workspaceContext,
       });
 
       return response.json() as Promise<CodexSubagentRun>;

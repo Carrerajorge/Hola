@@ -5,6 +5,8 @@ import { getOpenClawConfig } from "../openclaw/config";
 import { skillRegistry } from "../openclaw/skills/skillRegistry";
 import { initSkills } from "../openclaw/skills/skillLoader";
 import { AgentExecutionProfileSchema } from "@shared/agentExecutionProfile";
+import { normalizeOpenClawWorkspaceContext } from "@shared/openclawWorkspaceContext";
+import { openclawSessionContextService } from "../openclaw/sessionContextService";
 
 const objectiveSchema = z.object({
   objective: z.string().trim().min(1, "objective is required"),
@@ -32,11 +34,13 @@ const spawnSubagentSchema = z.object({
   planHint: z.array(z.string().trim().min(1)).optional(),
   parentRunId: z.string().trim().optional(),
   executionProfile: AgentExecutionProfileSchema.optional(),
+  workspaceContext: z.unknown().optional(),
 });
 
 const orchestratorFlowSchema = objectiveSchema.extend({
   spawnSubagents: z.boolean().optional().default(true),
   maxSubagents: z.coerce.number().int().min(1).max(10).optional().default(3),
+  workspaceContext: z.unknown().optional(),
 });
 
 function normalizeComplexity(objective: string, complexity?: number): number {
@@ -114,6 +118,31 @@ async function getOrchestrationEngine(): Promise<OrchestrationEngine> {
 
 export function createOpenClawRuntimeRouter(): Router {
   const router = Router();
+
+  router.post("/session-context/:runId", (req, res) => {
+    try {
+      const rawWorkspaceContext =
+        req.body && typeof req.body === "object" && "workspaceContext" in req.body
+          ? (req.body as Record<string, unknown>).workspaceContext
+          : req.body;
+      const workspaceContext = normalizeOpenClawWorkspaceContext(rawWorkspaceContext);
+      if (!workspaceContext) {
+        return res.status(400).json({ error: "Invalid workspace context" });
+      }
+
+      const record = openclawSessionContextService.remember(
+        req.params.runId,
+        workspaceContext,
+      );
+      return res.status(201).json({
+        runId: record.runId,
+        workspaceContext: record.workspaceContext,
+        updatedAt: record.updatedAt,
+      });
+    } catch (error) {
+      return respondError(res, error);
+    }
+  });
 
   router.get("/health", (_req, res) => {
     return res.json({
@@ -258,6 +287,7 @@ export function createOpenClawRuntimeRouter(): Router {
       const orchestrationEngine = await getOrchestrationEngine();
       const openclawSubagentService = await getSubagentService();
       const parsed = orchestratorFlowSchema.parse(req.body || {});
+      const workspaceContext = normalizeOpenClawWorkspaceContext(parsed.workspaceContext);
       const complexity = normalizeComplexity(parsed.objective, parsed.complexity);
       const subtasks = await orchestrationEngine.decomposeTask(parsed.objective, complexity);
       const plan = orchestrationEngine.buildExecutionPlan(subtasks);
@@ -268,6 +298,7 @@ export function createOpenClawRuntimeRouter(): Router {
               requesterUserId: userId,
               objective: subtask.description,
               planHint: subtask.toolId ? [`use:${subtask.toolId}`] : [],
+              workspaceContext,
             }),
           )
         : [];
@@ -299,12 +330,16 @@ export function createOpenClawRuntimeRouter(): Router {
     try {
       const openclawSubagentService = await getSubagentService();
       const parsed = spawnSubagentSchema.parse(req.body || {});
+      const workspaceContext =
+        normalizeOpenClawWorkspaceContext(parsed.workspaceContext) ||
+        openclawSessionContextService.resolveWorkspaceContext(parsed.parentRunId);
       const run = openclawSubagentService.spawn({
         requesterUserId: userId,
         objective: parsed.objective,
         planHint: parsed.planHint || [],
         parentRunId: parsed.parentRunId,
         executionProfile: parsed.executionProfile,
+        workspaceContext,
       });
       return res.status(202).json(run);
     } catch (error) {

@@ -197,21 +197,25 @@ export class SecurityGuard {
 
   validatePath(filePath: string): PathSecurityResult {
     try {
+      const sandboxRoot = fs.existsSync(this.sandboxRoot)
+        ? fs.realpathSync(this.sandboxRoot)
+        : this.sandboxRoot;
       let resolvedPath: string;
       if (path.isAbsolute(filePath)) {
         resolvedPath = path.resolve(filePath);
       } else {
-        resolvedPath = path.resolve(this.sandboxRoot, filePath);
+        resolvedPath = path.resolve(sandboxRoot, filePath);
       }
 
       // Resolve symlinks to prevent sandbox escape via symbolic links
       try {
-        const realSandboxRoot = fs.realpathSync(this.sandboxRoot);
         if (fs.existsSync(resolvedPath)) {
           resolvedPath = fs.realpathSync(resolvedPath);
         }
         // Re-check containment after symlink resolution
-        const isWithinAfterResolve = resolvedPath.startsWith(realSandboxRoot + "/") || resolvedPath === realSandboxRoot;
+        const isWithinAfterResolve =
+          resolvedPath.startsWith(sandboxRoot + "/") ||
+          resolvedPath === sandboxRoot;
         if (!isWithinAfterResolve) {
           return {
             path: filePath,
@@ -228,7 +232,7 @@ export class SecurityGuard {
       for (const protected_ of SecurityGuard.PROTECTED_DIRECTORIES) {
         if (
           resolvedPath === protected_ ||
-          (resolvedPath.startsWith(protected_ + "/") && !resolvedPath.startsWith(this.sandboxRoot))
+          (resolvedPath.startsWith(protected_ + "/") && !resolvedPath.startsWith(sandboxRoot))
         ) {
           return {
             path: filePath,
@@ -240,7 +244,9 @@ export class SecurityGuard {
         }
       }
 
-      const isWithinSandbox = resolvedPath.startsWith(this.sandboxRoot);
+      const isWithinSandbox =
+        resolvedPath === sandboxRoot ||
+        resolvedPath.startsWith(sandboxRoot + "/");
 
       return {
         path: filePath,
