@@ -250,12 +250,7 @@ import {
   DEFAULT_UI_GPT_CAPABILITIES,
   normalizeUiGptCapabilities,
 } from "@/lib/gptCapabilities";
-import { UniversalExecutionConsole } from "./universal-execution-console";
-import {
-  ExecutionStreamClient,
-  FlatRunState,
-} from "@/lib/executionStreamClient";
-import { LiveExecutionConsole } from "./live-execution-console";
+import { LegacyMissionControlConsole } from "@/components/agent/LegacyMissionControlConsole";
 import { PricingModal } from "./pricing-modal";
 
 import { SyncStatusIndicator } from "./sync-status-indicator";
@@ -1450,7 +1445,7 @@ export function ChatInterface({
   const setActiveRunId = setActiveRunIdProp || setActiveRunIdLocal;
 
   // uiPhase: single source of truth for UI state during Super Agent runs
-  // 'idle' = normal state, 'thinking' = spinner (max 2s), 'console' = LiveExecutionConsole, 'done' = completed
+  // 'idle' = normal state, 'thinking' = spinner (max 2s), 'console' = Mission Control, 'done' = completed
   const [uiPhaseLocal, setUiPhaseLocal] = useState<
     "idle" | "thinking" | "console" | "done"
   >("idle");
@@ -1459,42 +1454,6 @@ export function ChatInterface({
 
   const uiPhaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Execution stream client for UniversalExecutionConsole - DISABLED
-  // This was causing re-renders that interfered with LiveExecutionConsole in MessageList.
-  // LiveExecutionConsole has its own RunStreamClient that handles streaming correctly.
-  const [executionClient, setExecutionClient] =
-    useState<ExecutionStreamClient | null>(null);
-  const [executionRunState, setExecutionRunState] =
-    useState<FlatRunState | null>(null);
-
-  // DISABLED: ExecutionStreamClient was connecting to /stream endpoint and causing re-renders
-  // that unmounted/remounted the LiveExecutionConsole in a loop.
-  // The LiveExecutionConsole in MessageList now handles all SSE streaming via RunStreamClient.
-  // useEffect(() => {
-  //   if (uiPhase === 'console' && activeRunId) {
-  //     const client = new ExecutionStreamClient(activeRunId);
-  //     const unsubscribe = client.subscribe((state) => {
-  //       setExecutionRunState(state);
-  //       if (state.status === 'completed') {
-  //         setUiPhase('done');
-  //       }
-  //     });
-  //     client.connect();
-  //     setExecutionClient(client);
-  //     return () => {
-  //       unsubscribe();
-  //       client.destroy();
-  //       setExecutionClient(null);
-  //       setExecutionRunState(null);
-  //     };
-  //   } else {
-  //     if (executionClient) {
-  //       executionClient.destroy();
-  //       setExecutionClient(null);
-  //       setExecutionRunState(null);
-  //     }
-  //   }
-  // }, [uiPhase, activeRunId]);
 
   // Optimistic messages - shown immediately before they appear in props
   const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
@@ -10156,20 +10115,10 @@ IMPORTANTE:
                           </div>
                         )}
 
-                      {/* Execution Console - Show UniversalExecutionConsole when state is available, fallback to LiveExecutionConsole */}
+                      {/* Mission Control for Super Agent runs */}
                       {uiPhase === "console" && activeRunId && (
                         <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
-                          {executionRunState ? (
-                            <UniversalExecutionConsole
-                              runState={executionRunState as any}
-                              className="mb-4"
-                            />
-                          ) : (
-                            <LiveExecutionConsole
-                              runId={activeRunId}
-                              forceShow={true}
-                            />
-                          )}
+                          <LegacyMissionControlConsole runId={activeRunId} />
                         </div>
                       )}
 

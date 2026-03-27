@@ -45,6 +45,7 @@ import { PromptDialog } from "@/components/ui/prompt-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { MissionControlPanel } from "@/components/agent/MissionControlPanel";
 import { useAuth } from "@/hooks/use-auth";
 import { useChats, type Chat, type Message } from "@/hooks/use-chats";
 import { useProjects, type Project } from "@/hooks/use-projects";
@@ -886,6 +887,16 @@ export default function CodexPage() {
 
   const composerTarget = selectedSession ? `/chat/${selectedSession.id}` : "/";
   const launchRunId = selectedSession ? getLatestRunId(selectedSession.chat) : null;
+  const missionControlRunId = useMemo(() => {
+    if (selectedSession) {
+      const latestRun = getLatestRunId(selectedSession.chat);
+      if (latestRun) return latestRun;
+      if (resumeSnapshot?.chatId === selectedSession.id) {
+        return resumeSnapshot.runId;
+      }
+    }
+    return null;
+  }, [resumeSnapshot, selectedSession]);
 
   const transcriptMessages = useMemo(
     () =>
@@ -2095,6 +2106,13 @@ export default function CodexPage() {
                         </section>
                       </div>
                     </section>
+
+                    {missionControlRunId ? (
+                      <MissionControlPanel
+                        runId={missionControlRunId}
+                        openHref={`/runs/${missionControlRunId}/progress`}
+                      />
+                    ) : null}
 
                     {releaseNotes ? (
                       <section className="overflow-hidden rounded-[34px] border border-[var(--codex-border)] bg-[var(--codex-panel)] shadow-[var(--codex-shadow)]">
