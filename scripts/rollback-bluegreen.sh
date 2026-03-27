@@ -132,6 +132,11 @@ load_env_value() {
   echo ""
 }
 
+build_database_url() {
+  python3 -c "import sys, urllib.parse; user, password, host, port, dbname = sys.argv[1:]; print(f\"postgresql://{urllib.parse.quote(user, safe='')}:{urllib.parse.quote(password, safe='')}@{host}:{port}/{urllib.parse.quote(dbname, safe='')}\")" \
+    "$1" "$2" "$3" "$4" "$5"
+}
+
 validate_state_file_schema() {
   local file="$1"
   python3 - "$file" "${STATE_FILE_MAX_BYTES}" <<'PY'
@@ -322,6 +327,27 @@ if ! REDIS_PASSWORD="$(validate_secret "REDIS_PASSWORD" "${REDIS_PASSWORD}" 20)"
   exit 1
 fi
 export REDIS_PASSWORD
+
+POSTGRES_USER="$(trim "$(load_env_value "POSTGRES_USER" ".env.production" || true)")"
+if [ -z "${POSTGRES_USER}" ]; then
+  POSTGRES_USER="postgres"
+fi
+export POSTGRES_USER
+
+POSTGRES_PASSWORD="$(trim "$(load_env_value "POSTGRES_PASSWORD" ".env.production" || true)")"
+if ! POSTGRES_PASSWORD="$(validate_secret "POSTGRES_PASSWORD" "${POSTGRES_PASSWORD}" 20)"; then
+  exit 1
+fi
+export POSTGRES_PASSWORD
+
+POSTGRES_DB="$(trim "$(load_env_value "POSTGRES_DB" ".env.production" || true)")"
+if [ -z "${POSTGRES_DB}" ]; then
+  POSTGRES_DB="iliagpt"
+fi
+export POSTGRES_DB
+
+DATABASE_URL="$(build_database_url "${POSTGRES_USER}" "${POSTGRES_PASSWORD}" "hola-postgres" "5432" "${POSTGRES_DB}")"
+export DATABASE_URL
 
 DEPLOY_STATE_HMAC_KEY="$(load_env_value "DEPLOY_STATE_HMAC_KEY" ".env.production" || true)"
 if [ -n "${DEPLOY_STATE_HMAC_KEY}" ]; then

@@ -29,6 +29,11 @@ services:
       SHELL_COMMAND_RUNNER_URL: http://hola-${SLOT:-blue}-sandbox:8080
       SHELL_COMMAND_RUNNER_TOKEN: ${SANDBOX_RUNNER_TOKEN}
       OCR_SERVICE_URL: http://hola-ocr:8000
+      ENABLE_OPENCLAW_GATEWAY: "true"
+      ENABLE_OPENCLAW_TOOLS: "true"
+      ENABLE_OPENCLAW_PLUGINS: "true"
+      ENABLE_OPENCLAW_SKILLS: "true"
+      ENABLE_OPENCLAW_STREAMING: "true"
       # Cap Node heap so it GC-s before Docker OOM-kills the container
       NODE_OPTIONS: "--max-old-space-size=1536"
     ports:
@@ -99,6 +104,11 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@hola-postgres:5432/${POSTGRES_DB:-iliagpt}
       REDIS_URL: redis://:${REDIS_PASSWORD:-redis_secure_password_change_me}@hola-redis:6379
       OCR_SERVICE_URL: http://hola-ocr:8000
+      ENABLE_OPENCLAW_GATEWAY: "true"
+      ENABLE_OPENCLAW_TOOLS: "true"
+      ENABLE_OPENCLAW_PLUGINS: "true"
+      ENABLE_OPENCLAW_SKILLS: "true"
+      ENABLE_OPENCLAW_STREAMING: "true"
     volumes:
       - uploads_data:/app/uploads
       - generated_artifacts:/app/generated_artifacts

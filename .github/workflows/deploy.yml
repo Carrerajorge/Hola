@@ -533,6 +533,7 @@ jobs:
             /package-lock.json
             /playwright.config.ts
             /e2e/
+            /scripts/clean-playwright-artifacts.cjs
             /scripts/ci-assert-required-paths.sh
             /scripts/ci-retry.sh
             /scripts/sync-mathjax-assets.cjs
@@ -546,6 +547,7 @@ jobs:
             package-lock.json \
             playwright.config.ts \
             e2e/smoke.spec.ts \
+            scripts/clean-playwright-artifacts.cjs \
             scripts/ci-assert-required-paths.sh \
             scripts/ci-retry.sh \
             scripts/sync-mathjax-assets.cjs \
@@ -1124,6 +1126,7 @@ jobs:
             /package-lock.json
             /playwright.config.ts
             /e2e/
+            /scripts/clean-playwright-artifacts.cjs
             /scripts/ci-assert-required-paths.sh
             /scripts/ci-retry.sh
             /scripts/sync-mathjax-assets.cjs
@@ -1138,6 +1141,7 @@ jobs:
             package-lock.json \
             playwright.config.ts \
             e2e/smoke.spec.ts \
+            scripts/clean-playwright-artifacts.cjs \
             scripts/ci-assert-required-paths.sh \
             scripts/ci-retry.sh \
             scripts/sync-mathjax-assets.cjs \
