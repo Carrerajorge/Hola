@@ -273,9 +273,27 @@ class AuthStorage implements IAuthStorage {
       }
 
       console.warn(
-        `[AuthStorage] Retrying user insert without legacy-missing columns: ${error?.message || error}`,
+        `[AuthStorage] Retrying user insert with legacy-compatible column set: ${error?.message || error}`,
       );
-      await db.insert(users).values(baseValues);
+      await db.execute(sql`
+        INSERT INTO users (
+          id,
+          email,
+          first_name,
+          last_name,
+          profile_image_url,
+          created_at,
+          updated_at
+        ) VALUES (
+          ${normalizedUser.id},
+          ${normalizedUser.email},
+          ${normalizedUser.firstName},
+          ${normalizedUser.lastName},
+          ${normalizedUser.profileImageUrl},
+          ${now},
+          ${now}
+        )
+      `);
     }
 
     return this.refreshUserOrThrow(normalizedUser.id, "insertNewUser");

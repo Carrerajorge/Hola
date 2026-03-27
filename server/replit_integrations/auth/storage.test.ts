@@ -163,12 +163,13 @@ describe("authStorage schema drift resilience", () => {
     });
   });
 
-  it("retries user creation without org_id and email_canonical when production schema is behind", async () => {
+  it("retries user creation with a legacy-compatible insert when production schema is behind", async () => {
     executeMock
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockRejectedValueOnce({ code: "42703", message: 'column "email_canonical" does not exist' })
       .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({})
       .mockResolvedValueOnce({
         rows: [
           {
@@ -180,8 +181,7 @@ describe("authStorage schema drift resilience", () => {
       });
 
     userInsertValuesMock
-      .mockRejectedValueOnce({ code: "42703", message: 'column "org_id" does not exist' })
-      .mockResolvedValueOnce(undefined);
+      .mockRejectedValueOnce({ code: "42703", message: 'column "org_id" does not exist' });
 
     const authStorage = await loadAuthStorage();
     const user = await authStorage.upsertUser({
@@ -195,7 +195,7 @@ describe("authStorage schema drift resilience", () => {
     });
 
     expect(user.id).toBe("google_456");
-    expect(userInsertValuesMock).toHaveBeenCalledTimes(2);
+    expect(userInsertValuesMock).toHaveBeenCalledTimes(1);
 
     expect(userInsertValuesMock.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
@@ -205,14 +205,10 @@ describe("authStorage schema drift resilience", () => {
       }),
     );
 
-    expect(userInsertValuesMock.mock.calls[1]?.[0]).toEqual(
-      expect.objectContaining({
-        id: "google_456",
-        email: "new@example.com",
-      }),
-    );
-    expect(userInsertValuesMock.mock.calls[1]?.[0]).not.toHaveProperty("orgId");
-    expect(userInsertValuesMock.mock.calls[1]?.[0]).not.toHaveProperty("emailCanonical");
+    expect(queryText(4).toLowerCase()).toContain("insert into users");
+    expect(queryText(4)).not.toContain("org_id");
+    expect(queryText(4)).not.toContain("email_canonical");
+    expect(queryText(4)).not.toContain("network_access_enabled");
 
     expect(publishMock).toHaveBeenCalledWith("USER_REGISTERED", "google_456", {
       email: "new@example.com",
