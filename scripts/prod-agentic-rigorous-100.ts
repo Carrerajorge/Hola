@@ -27,13 +27,27 @@ const BASE_URL = (process.env.BASE_URL || "https://iliagpt.com").replace(/\/+$/,
 const MIN_CHECKS = Number(process.env.MIN_CHECKS || "100");
 const WORKFLOW_POLL_TIMEOUT_MS = Number(process.env.WORKFLOW_POLL_TIMEOUT_MS || "45000");
 const WORKFLOW_POLL_INTERVAL_MS = Number(process.env.WORKFLOW_POLL_INTERVAL_MS || "1000");
+const MIN_REQUEST_GAP_MS = Number(process.env.MIN_REQUEST_GAP_MS || "400");
+const REQUEST_RETRY_ATTEMPTS = Number(process.env.REQUEST_RETRY_ATTEMPTS || "5");
+const REQUEST_RETRY_DELAY_MS = Number(process.env.REQUEST_RETRY_DELAY_MS || "1500");
 
 const cookieJar = new Map<string, string>();
 const checks: CheckResult[] = [];
 let checkCounter = 0;
+let lastRequestStartedAtMs = 0;
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function throttleRequests(): Promise<void> {
+  const now = Date.now();
+  const elapsed = now - lastRequestStartedAtMs;
+  const delayMs = MIN_REQUEST_GAP_MS - elapsed;
+  if (delayMs > 0) {
+    await sleep(delayMs);
+  }
+  lastRequestStartedAtMs = Date.now();
 }
 
 function addCheck(name: string, ok: boolean, detail: string): void {
@@ -78,42 +92,64 @@ async function request(
   }
 ): Promise<HttpResponse> {
   const method = options?.method || "GET";
-  const headers: Record<string, string> = { ...(options?.headers || {}) };
+  for (let attempt = 1; attempt <= REQUEST_RETRY_ATTEMPTS; attempt += 1) {
+    const headers: Record<string, string> = { ...(options?.headers || {}) };
 
-  if (cookieJar.size > 0) {
-    headers.Cookie = cookieHeader();
-  }
-
-  let body: string | undefined;
-  if (options?.jsonBody !== undefined) {
-    body = JSON.stringify(options.jsonBody);
-    if (!Object.keys(headers).some(k => k.toLowerCase() === "content-type")) {
-      headers["Content-Type"] = "application/json";
+    if (cookieJar.size > 0) {
+      headers.Cookie = cookieHeader();
     }
-  }
 
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method,
-    headers,
-    body,
-    redirect: "manual",
-  });
+    let body: string | undefined;
+    if (options?.jsonBody !== undefined) {
+      body = JSON.stringify(options.jsonBody);
+      if (!Object.keys(headers).some(k => k.toLowerCase() === "content-type")) {
+        headers["Content-Type"] = "application/json";
+      }
+    }
 
-  updateCookiesFromHeaders(res.headers);
+    await throttleRequests();
 
-  const text = await res.text();
-  let json: JsonRecord | null = null;
-  try {
-    json = text ? JSON.parse(text) : null;
-  } catch {
-    json = null;
+    const res = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers,
+      body,
+      redirect: "manual",
+    });
+
+    updateCookiesFromHeaders(res.headers);
+
+    const text = await res.text();
+    let json: JsonRecord | null = null;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {
+      json = null;
+    }
+
+    if (res.status !== 429 || attempt === REQUEST_RETRY_ATTEMPTS) {
+      return {
+        status: res.status,
+        text,
+        json,
+        headers: res.headers,
+      };
+    }
+
+    const retryAfterHeader = Number(res.headers.get("retry-after") || "0");
+    const retryDelayMs = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
+      ? retryAfterHeader * 1000
+      : REQUEST_RETRY_DELAY_MS * attempt;
+    console.warn(
+      `Rate limited on ${method} ${path}; retrying in ${retryDelayMs}ms (attempt ${attempt}/${REQUEST_RETRY_ATTEMPTS})`
+    );
+    await sleep(retryDelayMs);
   }
 
   return {
-    status: res.status,
-    text,
-    json,
-    headers: res.headers,
+    status: 429,
+    text: "",
+    json: null,
+    headers: new Headers(),
   };
 }
 

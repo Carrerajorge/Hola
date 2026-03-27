@@ -32,12 +32,14 @@ interface WorkflowExpectation {
 const BASE_URL = (process.env.BASE_URL || "https://iliagpt.com").replace(/\/+$/, "");
 const WORKFLOW_POLL_TIMEOUT_MS = Number(process.env.WORKFLOW_POLL_TIMEOUT_MS || "90000");
 const WORKFLOW_POLL_INTERVAL_MS = Number(process.env.WORKFLOW_POLL_INTERVAL_MS || "1000");
+const MIN_REQUEST_GAP_MS = Number(process.env.MIN_REQUEST_GAP_MS || "400");
 const REQUEST_RETRY_ATTEMPTS = Number(process.env.REQUEST_RETRY_ATTEMPTS || "5");
 const REQUEST_RETRY_DELAY_MS = Number(process.env.REQUEST_RETRY_DELAY_MS || "1500");
 
 const cookieJar = new Map<string, string>();
 const checks: CheckResult[] = [];
 let checkCounter = 0;
+let lastRequestStartedAtMs = 0;
 
 const intentCases: IntentExpectation[] = [
   { query: "puedes transcribir", expectedIntent: "generic", expectedGeneration: false },
@@ -103,21 +105,29 @@ async function request(
   },
 ): Promise<HttpResponse> {
   const method = options?.method || "GET";
-  const headers: Record<string, string> = { ...(options?.headers || {}) };
-
-  if (cookieJar.size > 0) {
-    headers.Cookie = cookieHeader();
-  }
-
-  let body: string | undefined;
-  if (options?.jsonBody !== undefined) {
-    body = JSON.stringify(options.jsonBody);
-    if (!Object.keys(headers).some((key) => key.toLowerCase() === "content-type")) {
-      headers["Content-Type"] = "application/json";
-    }
-  }
-
   for (let attempt = 1; attempt <= REQUEST_RETRY_ATTEMPTS; attempt += 1) {
+    const headers: Record<string, string> = { ...(options?.headers || {}) };
+
+    if (cookieJar.size > 0) {
+      headers.Cookie = cookieHeader();
+    }
+
+    let body: string | undefined;
+    if (options?.jsonBody !== undefined) {
+      body = JSON.stringify(options.jsonBody);
+      if (!Object.keys(headers).some((key) => key.toLowerCase() === "content-type")) {
+        headers["Content-Type"] = "application/json";
+      }
+    }
+
+    const now = Date.now();
+    const elapsed = now - lastRequestStartedAtMs;
+    const delayMs = MIN_REQUEST_GAP_MS - elapsed;
+    if (delayMs > 0) {
+      await sleep(delayMs);
+    }
+    lastRequestStartedAtMs = Date.now();
+
     const res = await fetch(`${BASE_URL}${path}`, {
       method,
       headers,
