@@ -829,6 +829,20 @@ release_lock() {
   rm -f "${LOCK_FILE}"
 }
 
+write_upstream_config() {
+  local target_file="$1"
+  local target_port="$2"
+
+  cat > "${target_file}" <<EOF
+upstream iliagpt {
+    server 127.0.0.1:${target_port};
+    keepalive 32;
+    keepalive_timeout 60s;
+    keepalive_requests 1000;
+}
+EOF
+}
+
 # ── Signal trap: clean up on unexpected exit ───────────────
 NEW_SLOT_STARTED=false
 NGINX_SWAPPED=false
@@ -853,7 +867,7 @@ cleanup_on_failure() {
   # If we swapped Nginx but something failed after, revert to old port
   if [ "${NGINX_SWAPPED}" = "true" ] && [ -n "${ACTIVE_PORT:-}" ]; then
     log "  Reverting Nginx upstream to port ${ACTIVE_PORT}..."
-    printf 'upstream iliagpt {\n    server 127.0.0.1:%s;\n    keepalive 32;\n    keepalive_timeout 60s;\n    keepalive_requests 1000;\n}\n' "${ACTIVE_PORT}" > "${NGINX_CONF_DIR}/iliagpt-upstream.conf" 2>/dev/null || true
+    write_upstream_config "${NGINX_CONF_DIR}/iliagpt-upstream.conf" "${ACTIVE_PORT}" 2>/dev/null || true
     nginx -s reload 2>/dev/null || true
   fi
 
@@ -1690,7 +1704,7 @@ ensure_legacy_upstream_file() {
   # Replace dangling symlink or missing file only when Nginx actually references it.
   if legacy_upstream_referenced "${slot}"; then
     rm -f "${legacy_file}" 2>/dev/null || true
-    printf 'upstream iliagpt {\n    server 127.0.0.1:%s;\n    keepalive 32;\n    keepalive_timeout 60s;\n    keepalive_requests 1000;\n}\n' "${port}" > "${legacy_file}"
+    write_upstream_config "${legacy_file}" "${port}"
     logw "Ensured legacy upstream file exists: ${legacy_file} (port ${port})"
   fi
 }
@@ -2091,7 +2105,7 @@ fi
 log "  Previous upstream port: $(echo "${PREV_UPSTREAM}" | grep -oP 'server 127\.0\.0\.1:\K[0-9]+' 2>/dev/null || echo 'none')"
 
 # Write new upstream pointing to the new slot
-printf 'upstream iliagpt {\n    server 127.0.0.1:%s;\n    keepalive 32;\n    keepalive_timeout 60s;\n    keepalive_requests 1000;\n}\n' "${NEW_PORT}" > "${UPSTREAM_CONF}"
+write_upstream_config "${UPSTREAM_CONF}" "${NEW_PORT}"
 logok "Upstream written: port ${NEW_PORT}"
 
 log "  Testing Nginx config..."
@@ -2100,7 +2114,7 @@ if ! nginx -t 2>&1; then
   if [ -n "${PREV_UPSTREAM}" ]; then
     echo "${PREV_UPSTREAM}" > "${UPSTREAM_CONF}"
   else
-    printf 'upstream iliagpt {\n    server 127.0.0.1:%s;\n    keepalive 32;\n    keepalive_timeout 60s;\n    keepalive_requests 1000;\n}\n' "${ACTIVE_PORT}" > "${UPSTREAM_CONF}"
+    write_upstream_config "${UPSTREAM_CONF}" "${ACTIVE_PORT}"
   fi
   slot "${NEW_SLOT}" down --remove-orphans || true
   NEW_SLOT_STARTED=false
@@ -2143,7 +2157,7 @@ done
 
 if [ "${NGINX_OK}" != "true" ]; then
   loge "Public Nginx routing verification failed. Reverting upstream..."
-  printf 'upstream iliagpt {\n    server 127.0.0.1:%s;\n    keepalive 32;\n    keepalive_timeout 60s;\n    keepalive_requests 1000;\n}\n' "${ACTIVE_PORT}" > "${NGINX_CONF_DIR}/iliagpt-upstream.conf"
+  write_upstream_config "${NGINX_CONF_DIR}/iliagpt-upstream.conf" "${ACTIVE_PORT}"
   nginx -s reload
   NGINX_SWAPPED=false
   slot "${NEW_SLOT}" down --remove-orphans || true
