@@ -1,11 +1,17 @@
 import { EventEmitter } from "events";
+import fs from "fs";
+import path from "path";
 import { nanoid } from "nanoid";
-import { defaultToolRegistry, ToolRegistry } from "../agent/sandbox/tools";
+import { defaultToolRegistry, createDefaultToolRegistry, ToolRegistry } from "../agent/sandbox/tools";
 import type { ToolResult as SandboxToolResult } from "../agent/sandbox/agentTypes";
+import { CommandExecutor } from "../agent/sandbox/commandExecutor";
+import { FileManager } from "../agent/sandbox/fileManager";
+import { SecurityGuard } from "../agent/sandbox/securityGuard";
 import {
   DEFAULT_AGENT_EXECUTION_PROFILE,
   type AgentExecutionProfile,
 } from "@shared/agentExecutionProfile";
+import type { WorkspaceContext } from "@shared/workspaceContext";
 import { getAgentExecutionProfileConfig } from "../agent/executionProfiles";
 
 export interface AgentState {
@@ -15,6 +21,7 @@ export interface AgentState {
   observations: string[];
   toolsUsed: string[];
   currentStep: number;
+  workspaceContext?: WorkspaceContext;
   status: "idle" | "running" | "completed" | "failed" | "cancelled";
 }
 
@@ -36,6 +43,8 @@ export interface AgentRunnerConfig {
   stepTimeoutMs: number;
   enableLogging: boolean;
   maxConsecutiveFailures: number;
+  workspaceContext?: WorkspaceContext;
+  toolRegistry?: ToolRegistry;
 }
 
 export interface ToolResult {
@@ -115,6 +124,38 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
   }
 }
 
+function isPathWithinRoot(root: string, candidate: string): boolean {
+  const relativePath = path.relative(root, candidate);
+  return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+}
+
+function resolveWorkspaceDir(workspaceContext?: WorkspaceContext): string | null {
+  const repositoryPath = workspaceContext?.repositoryPath?.trim();
+  if (!repositoryPath) {
+    return null;
+  }
+
+  const repositoryRoot = path.resolve(repositoryPath);
+  const selectedFolder = workspaceContext?.selectedFolder?.trim();
+  if (!selectedFolder) {
+    return repositoryRoot;
+  }
+
+  const candidate = path.isAbsolute(selectedFolder)
+    ? path.resolve(selectedFolder)
+    : path.resolve(repositoryRoot, selectedFolder);
+
+  return isPathWithinRoot(repositoryRoot, candidate) ? candidate : repositoryRoot;
+}
+
+function createWorkspaceToolRegistry(workspaceDir: string): ToolRegistry {
+  const normalizedWorkspaceDir = fs.existsSync(workspaceDir) ? fs.realpathSync(workspaceDir) : workspaceDir;
+  const securityGuard = new SecurityGuard(normalizedWorkspaceDir);
+  const commandExecutor = new CommandExecutor({ workingDirectory: normalizedWorkspaceDir }, securityGuard);
+  const fileManager = new FileManager(normalizedWorkspaceDir, securityGuard);
+  return createDefaultToolRegistry(commandExecutor, fileManager);
+}
+
 export class AgentRunner extends EventEmitter {
   private config: AgentRunnerConfig;
   private state: AgentState | null = null;
@@ -123,11 +164,14 @@ export class AgentRunner extends EventEmitter {
   private startTime: number = 0;
   private consecutiveFailures: number = 0;
   private lastFailedTool: string = "";
+  private readonly toolRegistry: ToolRegistry;
+  private readonly workspaceDir: string | null;
 
   constructor(config: Partial<AgentRunnerConfig> = {}) {
     super();
     const executionProfile = config.executionProfile || DEFAULT_CONFIG.executionProfile;
     const profileConfig = getAgentExecutionProfileConfig(executionProfile);
+    const workspaceDir = resolveWorkspaceDir(config.workspaceContext);
 
     this.config = {
       ...DEFAULT_CONFIG,
@@ -137,11 +181,15 @@ export class AgentRunner extends EventEmitter {
       maxConsecutiveFailures: profileConfig.subagent.maxConsecutiveFailures,
       ...config,
     };
+    this.workspaceDir = workspaceDir;
+    this.toolRegistry = config.toolRegistry || (workspaceDir ? createWorkspaceToolRegistry(workspaceDir) : defaultToolRegistry);
     this.logStructured("debug", "initialized", {
       executionProfile: this.config.executionProfile,
       maxSteps: this.config.maxSteps,
       stepTimeoutMs: this.config.stepTimeoutMs,
       maxConsecutiveFailures: this.config.maxConsecutiveFailures,
+      workspaceDir: this.workspaceDir,
+      workspaceBranch: this.config.workspaceContext?.branch,
     });
   }
 
@@ -159,10 +207,17 @@ export class AgentRunner extends EventEmitter {
       observations: [],
       toolsUsed: [],
       currentStep: 0,
+      workspaceContext: this.config.workspaceContext,
       status: "running",
     };
 
-    this.logStructured("info", "run_started", { run_id: this.runId, objective: objective.slice(0, 200), plan: this.state.plan });
+    this.logStructured("info", "run_started", {
+      run_id: this.runId,
+      objective: objective.slice(0, 200),
+      plan: this.state.plan,
+      workspaceDir: this.workspaceDir,
+      workspaceBranch: this.config.workspaceContext?.branch,
+    });
     this.emit("started", { run_id: this.runId, objective, plan: this.state.plan });
 
     try {
@@ -360,6 +415,7 @@ export class AgentRunner extends EventEmitter {
         objective: this.state!.objective,
         plan: this.state!.plan,
         currentStep: this.state!.currentStep,
+        workspaceContext: this.state!.workspaceContext,
         previousActions: this.state!.history.slice(-3).map(h => ({
           tool: h.tool,
           success: h.success,
@@ -375,14 +431,25 @@ export class AgentRunner extends EventEmitter {
         : "";
 
       // Get all available tools from the registry
-      const availableTools = defaultToolRegistry.listToolsWithInfo();
+      const availableTools = this.toolRegistry.listToolsWithInfo();
       const toolsDescription = availableTools.map(t => `- ${t.name}: ${t.description}`).join("\n");
+      const workspaceContextSummary = context.workspaceContext
+        ? [
+            `Repositorio: ${context.workspaceContext.repositoryPath}`,
+            context.workspaceContext.selectedFolder ? `Carpeta activa: ${context.workspaceContext.selectedFolder}` : null,
+            context.workspaceContext.branch ? `Rama: ${context.workspaceContext.branch}` : null,
+          ]
+            .filter(Boolean)
+            .join("\n")
+        : "";
 
       const prompt = `Eres un agente autónomo ejecutando una tarea.
 
 Objetivo: ${context.objective}
 Plan: ${context.plan.join(" → ")}
 Paso actual: ${context.currentStep + 1}/${this.config.maxSteps}
+
+${workspaceContextSummary ? `Workspace estructurado:\n${workspaceContextSummary}\n` : ""}
 
 ${contextSummary}
 
@@ -579,7 +646,7 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
     }
 
     // Check if tool exists in sandbox registry
-    if (defaultToolRegistry.has(actualToolName)) {
+    if (this.toolRegistry.has(actualToolName)) {
       this.logStructured("info", "sandbox_tool_executing", { run_id: this.runId, tool: actualToolName, originalTool: toolName });
 
       try {
@@ -607,7 +674,15 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
           adaptedInput = { operation: "list", path: input.path || input.directory || "." };
         }
 
-        const result: SandboxToolResult = await defaultToolRegistry.execute(actualToolName, adaptedInput);
+        if (this.workspaceDir && (actualToolName === "shell" || actualToolName === "python")) {
+          adaptedInput = {
+            ...adaptedInput,
+            workingDir: adaptedInput.workingDir || adaptedInput.working_dir || adaptedInput.cwd || this.workspaceDir,
+            cwd: adaptedInput.cwd || adaptedInput.workingDir || adaptedInput.working_dir || this.workspaceDir,
+          };
+        }
+
+        const result: SandboxToolResult = await this.toolRegistry.execute(actualToolName, adaptedInput);
 
         return {
           success: result.success,
@@ -632,7 +707,7 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
         return this.toolExtractText(input.content || input.html || input.markdown);
 
       default:
-        return { success: false, error: `Unknown tool: ${toolName}. Available tools: ${defaultToolRegistry.listTools().join(", ")}` };
+        return { success: false, error: `Unknown tool: ${toolName}. Available tools: ${this.toolRegistry.listTools().join(", ")}` };
     }
   }
 

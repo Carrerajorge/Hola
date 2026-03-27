@@ -3,6 +3,19 @@ import express from "express";
 import { createHttpTestClient } from "../../tests/helpers/httpTestClient";
 
 const runtimeRuns: any[] = [];
+const runtimeSkills: any[] = [];
+const defaultRuntimeSkill = {
+  id: "coding-agent",
+  name: "Coding Agent",
+  description: "Code skill",
+  tools: ["openclaw_exec"],
+  source: "builtin",
+};
+const initSkillsMock = vi.fn(async () => {
+  if (runtimeSkills.length === 0) {
+    runtimeSkills.push({ ...defaultRuntimeSkill });
+  }
+});
 
 const orchestrationEngineMock = {
   decomposeTask: vi.fn(async (objective: string) => [
@@ -76,28 +89,17 @@ vi.mock("../services/orchestrationEngine", () => ({
 
 vi.mock("../openclaw/skills/skillRegistry", () => ({
   skillRegistry: {
-    list: vi.fn(() => [
-      {
-        id: "coding-agent",
-        name: "Coding Agent",
-        description: "Code skill",
-        tools: ["openclaw_exec"],
-        source: "builtin",
-      },
-    ]),
+    list: vi.fn(() => runtimeSkills),
     resolve: vi.fn((skillIds?: string[]) => ({
-      skills: [
-        {
-          id: skillIds?.[0] || "coding-agent",
-          name: "Coding Agent",
-          description: "Code skill",
-          tools: ["openclaw_exec"],
-          source: "builtin",
-        },
-      ],
+      skills: runtimeSkills.filter((skill) =>
+        !skillIds || skillIds.length === 0 ? true : skillIds.includes(skill.id),
+      ),
       prompt: "## Skill: Coding Agent\nUse tools.",
       tools: ["openclaw_exec"],
     })),
+    clear: vi.fn(() => {
+      runtimeSkills.length = 0;
+    }),
   },
 }));
 
@@ -126,7 +128,7 @@ vi.mock("../openclaw/config", () => ({
 }));
 
 vi.mock("../openclaw/skills/skillLoader", () => ({
-  initSkills: vi.fn(async () => {}),
+  initSkills: initSkillsMock,
 }));
 
 vi.mock("../openclaw/agents/subagentService", () => ({
@@ -139,6 +141,7 @@ vi.mock("../openclaw/agents/subagentService", () => ({
         planHint: params.planHint || [],
         parentRunId: params.parentRunId,
         executionProfile: params.executionProfile || "standard",
+        workspaceContext: params.workspaceContext,
         status: "queued",
         createdAt: Date.now(),
       };
@@ -173,7 +176,32 @@ async function createTestApp() {
 describe("openclawRuntimeRouter smoke flow", () => {
   beforeEach(() => {
     runtimeRuns.length = 0;
+    runtimeSkills.length = 0;
+    runtimeSkills.push({ ...defaultRuntimeSkill });
     vi.clearAllMocks();
+  });
+
+  it("lazy-loads runtime skills and reports effective health", async () => {
+    runtimeSkills.length = 0;
+
+    const app = await createTestApp();
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const healthRes = await client.get("/api/openclaw/runtime/health");
+      expect(healthRes.status).toBe(200);
+      expect(healthRes.body.modules.skills).toBe(true);
+      expect(healthRes.body.modules.tools).toBe(false);
+      expect(healthRes.body.details.skillsConfigured).toBe(true);
+      expect(healthRes.body.details.skillsLoaded).toBe(1);
+      expect(initSkillsMock).toHaveBeenCalledTimes(1);
+
+      const skillsRes = await client.get("/api/openclaw/runtime/skills");
+      expect(skillsRes.status).toBe(200);
+      expect(skillsRes.body.count).toBe(1);
+      expect(skillsRes.body.skills[0]?.id).toBe("coding-agent");
+    } finally {
+      await close();
+    }
   });
 
   it("executes objective -> plan -> subagents -> consolidated response", async () => {
@@ -215,6 +243,39 @@ describe("openclawRuntimeRouter smoke flow", () => {
       expect(Array.isArray(flowRes.body.delegatedRuns)).toBe(true);
       expect(flowRes.body.delegatedRuns.length).toBeGreaterThanOrEqual(1);
       expect(flowRes.body.combined.summary.completed).toBe(2);
+    } finally {
+      await close();
+    }
+  });
+
+  it("persists structured workspace context when spawning subagents", async () => {
+    const app = await createTestApp();
+    const { client, close } = await createHttpTestClient(app);
+
+    try {
+      const workspaceContext = {
+        projectId: "project-1",
+        projectName: "Hola",
+        repositoryPath: "/tmp/repos/hola",
+        selectedFolder: "server/openclaw",
+        branch: "codex/openclaw-native-review-20260327",
+        runtimeTarget: "openclaw_native",
+        executionAccess: "workspace",
+      };
+
+      const spawnRes = await client.post("/api/openclaw/runtime/subagents").send({
+        objective: "Revisa el módulo de runtime",
+        executionProfile: "standard",
+        workspaceContext,
+      });
+
+      expect(spawnRes.status).toBe(202);
+      expect(spawnRes.body.workspaceContext).toEqual(workspaceContext);
+      expect(runtimeRuns[0]?.workspaceContext).toEqual(workspaceContext);
+
+      const listRes = await client.get("/api/openclaw/runtime/subagents");
+      expect(listRes.status).toBe(200);
+      expect(listRes.body.runs[0]?.workspaceContext).toEqual(workspaceContext);
     } finally {
       await close();
     }

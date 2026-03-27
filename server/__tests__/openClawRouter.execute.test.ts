@@ -73,6 +73,31 @@ describe("openClawRouter native execute", () => {
     }
   }, 30_000);
 
+  it("prefers repository workspace context for native embedded runs", async () => {
+    const app = await createTestApp();
+    const { client, close } = await createHttpTestClient(app);
+
+    try {
+      const res = await client.post("/api/openclaw/execute").send({
+        prompt: "Revisa el módulo actual",
+        context: {
+          project: {
+            repositoryPath: "/tmp/repos/hola",
+            selectedFolder: "server/openclaw",
+          },
+        },
+      });
+
+      expect(res.status).toBe(200);
+      expect(runEmbeddedPiAgentMock).toHaveBeenCalledTimes(1);
+      expect(runEmbeddedPiAgentMock.mock.calls[0][0]).toMatchObject({
+        workspaceDir: "/tmp/repos/hola/server/openclaw",
+      });
+    } finally {
+      await close();
+    }
+  }, 30_000);
+
   it("returns 400 for invalid execute payloads", async () => {
     const app = await createTestApp();
     const { client, close } = await createHttpTestClient(app);

@@ -1,5 +1,6 @@
 import { apiRequest } from "@/lib/queryClient";
 import type { Project } from "@/hooks/use-projects";
+import type { WorkspaceContext } from "@shared/workspaceContext";
 
 export type CodexExecutionProfile = "standard" | "marathon_12h" | "marathon_24h";
 export type CodexAgentRole = "coder" | "reviewer" | "improver";
@@ -59,6 +60,8 @@ export interface CodexSubagentRun {
   objective: string;
   planHint: string[];
   parentRunId?: string;
+  executionProfile?: CodexExecutionProfile;
+  workspaceContext?: WorkspaceContext;
   status: CodexSubagentStatus;
   createdAt: number;
   startedAt?: number;
@@ -123,6 +126,26 @@ function buildWorkspaceSummary(project?: Project | null, branchName?: string | n
   ];
 
   return lines.filter(Boolean).join("\n");
+}
+
+function buildWorkspaceContext(project?: Project | null, branchName?: string | null): WorkspaceContext | undefined {
+  const repositoryPath = project?.repositoryPath?.trim();
+  if (!repositoryPath) {
+    return undefined;
+  }
+
+  const selectedFolder = project?.defaultCodeFolder?.trim();
+
+  return {
+    projectId: project?.id,
+    projectName: project?.name,
+    repositoryPath,
+    selectedFolder: selectedFolder && selectedFolder !== "." ? selectedFolder : undefined,
+    codingAgents: project?.codingAgents?.length ? project.codingAgents : undefined,
+    runtimeTarget: "openclaw_native",
+    executionAccess: "workspace",
+    branch: branchName?.trim() || undefined,
+  };
 }
 
 export function buildCodexPrompt(params: {
@@ -251,6 +274,7 @@ export async function spawnCodexSubagents(params: SpawnCodexSubagentsParams): Pr
   if (roles.length === 0) return [];
 
   const executionProfile = resolveExecutionProfile(params.executionProfile, params.marathonMode);
+  const workspaceContext = buildWorkspaceContext(params.project, params.branchName);
   const responses = await Promise.all(
     roles.map(async (role) => {
       const response = await apiRequest("POST", "/api/openclaw/runtime/subagents", {
@@ -269,6 +293,7 @@ export async function spawnCodexSubagents(params: SpawnCodexSubagentsParams): Pr
         ],
         parentRunId: params.runId,
         executionProfile,
+        workspaceContext,
       });
 
       return response.json() as Promise<CodexSubagentRun>;
