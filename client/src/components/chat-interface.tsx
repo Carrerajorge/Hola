@@ -5,7 +5,6 @@ import React, {
   useCallback,
   useMemo,
 } from "react";
-import { flushSync } from "react-dom";
 import { SkeletonChatMessages } from "@/components/skeletons";
 import { useDraft } from "@/hooks/use-draft";
 import { useStreamingTransition } from "@/hooks/use-streaming-transition";
@@ -740,6 +739,8 @@ export function ChatInterface({
   const [repoFolders, setRepoFolders] = useState<string[]>([]);
   const [repoBranches, setRepoBranches] = useState<string[]>(["main"]);
   const [activeRepoBranch, setActiveRepoBranch] = useState("main");
+  const [branchStatusLabel, setBranchStatusLabel] = useState("Sin cambios pendientes");
+  const [isBranchActionLoading, setIsBranchActionLoading] = useState(false);
   const [selectedRepoFolder, setSelectedRepoFolder] = useState<string>(".");
   const [selectedCodingAgents, setSelectedCodingAgents] = useState<
     CodingAgentProfile[]
@@ -778,6 +779,7 @@ export function ChatInterface({
         setRepoFolders([]);
         setRepoBranches(["main"]);
         setActiveRepoBranch("main");
+        setBranchStatusLabel("Sin repo git");
         return;
       }
 
@@ -839,9 +841,16 @@ export function ChatInterface({
             if (normalizedBranches.includes(prev)) return prev;
             return normalizedBranches[0] || "main";
           });
+          setBranchStatusLabel(
+            typeof branchesData?.summary?.label === "string" &&
+              branchesData.summary.label.trim().length > 0
+              ? branchesData.summary.label.trim()
+              : "Sin cambios pendientes",
+          );
         } else {
           setRepoBranches(["main"]);
           setActiveRepoBranch("main");
+          setBranchStatusLabel("Sin repo git");
         }
       } catch (error: any) {
         console.warn(
@@ -851,6 +860,7 @@ export function ChatInterface({
         setRepoFolders([]);
         setRepoBranches(["main"]);
         setActiveRepoBranch("main");
+        setBranchStatusLabel("Sin repo git");
       }
     },
     [],
@@ -861,6 +871,7 @@ export function ChatInterface({
       setRepoFolders([]);
       setRepoBranches(["main"]);
       setActiveRepoBranch("main");
+      setBranchStatusLabel("Sin repo git");
       setSelectedRepoFolder(".");
       setSelectedCodingAgents(["coder"]);
       return;
@@ -987,6 +998,134 @@ export function ChatInterface({
       });
     },
     [selectedProject?.id, updateProject],
+  );
+
+  const handleSelectRepoBranch = useCallback(
+    async (branch: string) => {
+      const rootPath = selectedProject?.repositoryPath?.trim();
+      const nextBranch = String(branch || "").trim();
+
+      if (!rootPath || !nextBranch || nextBranch === activeRepoBranch) {
+        return;
+      }
+
+      setIsBranchActionLoading(true);
+      try {
+        const response = await apiFetch("/api/local/repo/branches/switch", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...getAnonUserIdHeader(),
+          },
+          credentials: "include",
+          body: JSON.stringify({ rootPath, branch: nextBranch }),
+        });
+
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error || "No se pudo cambiar de rama.");
+        }
+
+        const nextBranches = Array.isArray(payload?.branches)
+          ? payload.branches.filter(
+              (item: unknown): item is string =>
+                typeof item === "string" && item.trim().length > 0,
+            )
+          : [nextBranch];
+
+        setRepoBranches(nextBranches.length > 0 ? nextBranches : [nextBranch]);
+        setActiveRepoBranch(
+          typeof payload?.current === "string" && payload.current.trim().length > 0
+            ? payload.current.trim()
+            : nextBranch,
+        );
+        setBranchStatusLabel(
+          typeof payload?.summary?.label === "string" && payload.summary.label.trim().length > 0
+            ? payload.summary.label.trim()
+            : "Sin cambios pendientes",
+        );
+        toast({
+          title: "Rama activa actualizada",
+          description: `Ahora estás trabajando en ${nextBranch}.`,
+          duration: 2200,
+        });
+      } catch (error: any) {
+        toast({
+          title: "No se pudo cambiar de rama",
+          description: error?.message || "Error desconocido",
+          variant: "destructive",
+        });
+      } finally {
+        setIsBranchActionLoading(false);
+      }
+    },
+    [activeRepoBranch, selectedProject?.repositoryPath, toast],
+  );
+
+  const handleCreateRepoBranch = useCallback(
+    async (branch: string) => {
+      const rootPath = selectedProject?.repositoryPath?.trim();
+      const nextBranch = String(branch || "").trim();
+
+      if (!rootPath || !nextBranch) {
+        return;
+      }
+
+      setIsBranchActionLoading(true);
+      try {
+        const response = await apiFetch("/api/local/repo/branches/create", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...getAnonUserIdHeader(),
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            rootPath,
+            branch: nextBranch,
+            checkout: true,
+          }),
+        });
+
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error || "No se pudo crear la rama.");
+        }
+
+        const nextBranches = Array.isArray(payload?.branches)
+          ? payload.branches.filter(
+              (item: unknown): item is string =>
+                typeof item === "string" && item.trim().length > 0,
+            )
+          : [nextBranch];
+
+        setRepoBranches(nextBranches.length > 0 ? nextBranches : [nextBranch]);
+        setActiveRepoBranch(
+          typeof payload?.current === "string" && payload.current.trim().length > 0
+            ? payload.current.trim()
+            : nextBranch,
+        );
+        setBranchStatusLabel(
+          typeof payload?.summary?.label === "string" && payload.summary.label.trim().length > 0
+            ? payload.summary.label.trim()
+            : "Sin cambios pendientes",
+        );
+        toast({
+          title: "Rama creada",
+          description: `${nextBranch} quedó lista y activa.`,
+          duration: 2200,
+        });
+      } catch (error: any) {
+        toast({
+          title: "No se pudo crear la rama",
+          description: error?.message || "Error desconocido",
+          variant: "destructive",
+        });
+      } finally {
+        setIsBranchActionLoading(false);
+      }
+    },
+    [selectedProject?.repositoryPath, toast],
   );
 
   const workspaceContext = useMemo<WorkspaceContextPayload | undefined>(() => {
@@ -1550,6 +1689,7 @@ export function ChatInterface({
   //   }
   // }, [uiPhase, activeRunId]);
 
+
   // Optimistic messages - shown immediately before they appear in props
   const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
 
@@ -2064,6 +2204,7 @@ export function ChatInterface({
     | null
   >(null);
   const speechRecognitionRef = useRef<any>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [userHasScrolledUp, setUserHasScrolledUp] = useState(false);
@@ -2074,19 +2215,17 @@ export function ChatInterface({
     (force = false, instant = false) => {
       if (userHasScrolledUp && !force) return;
 
-      const scroller = messagesContainerRef.current;
-      if (!scroller) return;
-
       if (instant) {
-        scroller.scrollTo({
-          top: scroller.scrollHeight,
+        // Instant scroll — no animation delay (used when user sends a message)
+        messagesEndRef.current?.scrollIntoView({
           behavior: "auto",
+          block: "end",
         });
       } else {
         requestAnimationFrame(() => {
-          scroller.scrollTo({
-            top: scroller.scrollHeight,
+          messagesEndRef.current?.scrollIntoView({
             behavior: "smooth",
+            block: "end",
           });
         });
       }
@@ -2094,13 +2233,31 @@ export function ChatInterface({
     [userHasScrolledUp],
   );
 
-  const handleAtBottomChange = useCallback((atBottom: boolean) => {
-    setShowScrollButton(!atBottom);
-    setUserHasScrolledUp(!atBottom);
+  const isNearBottom = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return true;
+    const threshold = 150;
+    return (
+      container.scrollHeight - container.scrollTop - container.clientHeight <
+      threshold
+    );
   }, []);
 
-  const handleMessagesScrollerRef = useCallback((element: HTMLElement | null) => {
-    messagesContainerRef.current = element;
+  const handleScroll = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = container;
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+
+    const nearBottom = distanceFromBottom < 150;
+    setShowScrollButton(!nearBottom);
+
+    if (distanceFromBottom > 200) {
+      setUserHasScrolledUp(true);
+    } else if (distanceFromBottom < 50) {
+      setUserHasScrolledUp(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -7935,6 +8092,25 @@ export function ChatInterface({
         (f: any) => f?.status === "error",
       );
 
+      // Reset UI state immediately — save files for restoration on error
+      let savedMainFiles = [...uploadedFilesRef.current];
+      setInput("");
+      if (chatId) clearDraft(chatId);
+      // If uploads are still in flight, don't clear the composer file list yet or we lose upload progress updates.
+      // We'll clear once uploads settle (after optimistic message is already on screen).
+      if (!hadPendingUploadsAtSubmit) {
+        // Clear all files from composer immediately after send to avoid stuck attachments.
+        setUploadedFiles([]);
+        if (failedUploadsAtSubmit.length > 0) {
+          toast({
+            title: "Archivo no adjuntado",
+            description: `${failedUploadsAtSubmit.length} archivo(s) fallaron al subir y no se incluyeron en el mensaje.`,
+            variant: "destructive",
+            duration: 4500,
+          });
+        }
+      }
+
       // Construct the minimal optimistic user message first so the UI updates
       // before we do any heavier attachment/integrity work.
       const userMsg: Message = {
@@ -9898,8 +10074,6 @@ IMPORTANTE:
   };
 
   const hasMessages = displayMessages.length > 0;
-  const shouldShowConversationSkeleton =
-    isConversationStateLoading && !hasMessages;
 
   return (
     <>
@@ -9999,7 +10173,7 @@ IMPORTANTE:
                 )}
 
                 {/* Messages Area - Compact for document mode */}
-                {shouldShowConversationSkeleton ? (
+                {isConversationStateLoading ? (
                   <div
                     className={cn(
                       "flex-1 overflow-y-auto space-y-3 overscroll-contain pb-[var(--composer-height,120px)]",
@@ -10012,7 +10186,7 @@ IMPORTANTE:
                   hasMessages && (
                     <div
                       className={cn(
-                        "flex-1 min-h-0 overflow-hidden space-y-3 overscroll-contain pb-[var(--composer-height,120px)]",
+                        "flex-1 overflow-y-auto space-y-3 overscroll-contain pb-[var(--composer-height,120px)]",
                         activeDocEditor
                           ? "p-3"
                           : "p-4 sm:p-6 md:p-10 space-y-6",
@@ -10070,8 +10244,6 @@ IMPORTANTE:
                         onRunComplete={handleRunComplete}
                         uiPhase={uiPhase}
                         aiProcessSteps={aiProcessSteps}
-                        onAtBottomChange={handleAtBottomChange}
-                        onScrollerRef={handleMessagesScrollerRef}
                       />
 
                       {/* Agent Observer - Show when agent is running */}
@@ -10350,7 +10522,10 @@ IMPORTANTE:
                   onExecutionAccessChange={setExecutionAccess}
                   activeBranch={activeRepoBranch}
                   branchOptions={repoBranches}
-                  onSelectBranch={setActiveRepoBranch}
+                  onSelectBranch={handleSelectRepoBranch}
+                  onCreateBranch={handleCreateRepoBranch}
+                  isBranchBusy={isBranchActionLoading}
+                  branchStatusLabel={branchStatusLabel}
                   repositoryPath={selectedProject?.repositoryPath || null}
                   repoFolders={repoFolders}
                   selectedRepoFolder={selectedRepoFolder}
@@ -10473,14 +10648,18 @@ IMPORTANTE:
         ) : (
           <div className="flex-1 flex flex-col min-w-0 min-h-0 h-full overflow-hidden">
             {/* Content Area - conditional based on whether we have messages */}
-            {shouldShowConversationSkeleton ? (
+            {isConversationStateLoading ? (
               <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6">
                 <SkeletonChatMessages count={3} />
               </div>
             ) : hasMessages ? (
               <>
                 {/* Scrollable messages container */}
-                <div className="flex-1 min-h-0 overflow-hidden p-4 sm:p-6 md:p-10 space-y-6">
+                <div
+                  ref={messagesContainerRef}
+                  onScroll={handleScroll}
+                  className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6"
+                >
                   <ChatMessageList
                     messages={displayMessages}
                     activeSendTransition={activeSendTransition}
@@ -10536,9 +10715,8 @@ IMPORTANTE:
                     }}
                     uiPhase={uiPhase}
                     aiProcessSteps={aiProcessSteps}
-                    onAtBottomChange={handleAtBottomChange}
-                    onScrollerRef={handleMessagesScrollerRef}
                   />
+                  <div ref={messagesEndRef} />
                 </div>
 
                 {/* Scroll to bottom button */}
@@ -10776,7 +10954,10 @@ IMPORTANTE:
               onExecutionAccessChange={setExecutionAccess}
               activeBranch={activeRepoBranch}
               branchOptions={repoBranches}
-              onSelectBranch={setActiveRepoBranch}
+              onSelectBranch={handleSelectRepoBranch}
+              onCreateBranch={handleCreateRepoBranch}
+              isBranchBusy={isBranchActionLoading}
+              branchStatusLabel={branchStatusLabel}
               repositoryPath={selectedProject?.repositoryPath || null}
               repoFolders={repoFolders}
               selectedRepoFolder={selectedRepoFolder}

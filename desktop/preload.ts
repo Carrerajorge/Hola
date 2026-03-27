@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Requerir información cruda del OS
     getSystemVolume: () => ipcRenderer.invoke('system:getVolume'),
 
+    pickWorkspaceFolder: () => ipcRenderer.invoke("workspace:pick-folder"),
+
     // Toggle Ignore Mouse Events (Para la transparencia overlay)
     setIgnoreMouseEvents: (ignore: boolean) => ipcRenderer.send('window:setIgnoreMouseEvents', ignore)
 });

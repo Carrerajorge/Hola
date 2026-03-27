@@ -1,5 +1,5 @@
 
-import { useState, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { usePinnedGpts } from "@/hooks/use-pinned-gpts";
@@ -28,6 +28,7 @@ import {
   FolderPlus,
   Folder,
   FolderOpen,
+  SlidersHorizontal,
   Pin,
   Download,
   MoveRight,
@@ -53,6 +54,7 @@ import { useWhatsAppWebStatus } from "@/hooks/use-whatsapp-web";
 import { Folder as FolderType } from "@/hooks/use-chat-folders";
 import { diffZonedDays, formatZonedDate, getZonedDateParts, normalizeTimeZone } from "@/lib/platformDateTime";
 import { DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuPortal } from "@/components/ui/dropdown-menu";
+import { toast } from "@/lib/notify";
 
 const PremiumIcons = {
   Library: ({ className }: { className?: string }) => (
@@ -307,6 +309,72 @@ export function Sidebar({
 
   // Projects hook for project folder management
   const { projects, createProject, deleteProject, updateProject, addChatToProject, getProjectForChat } = useProjects();
+
+  const quickProjectColors = ["#3b82f6", "#22c55e", "#a855f7", "#f97316", "#ef4444", "#14b8a6"];
+
+  const inferProjectNameFromPath = useCallback((folderPath: string) => {
+    const normalized = String(folderPath || "").replace(/[\\/]+$/, "");
+    const parts = normalized.split(/[\\/]/).filter(Boolean);
+    return parts[parts.length - 1] || "Proyecto local";
+  }, []);
+
+  const pickLocalFolderPath = useCallback(async (): Promise<string | null> => {
+    if (typeof window !== "undefined" && window.electronAPI?.pickWorkspaceFolder) {
+      return window.electronAPI.pickWorkspaceFolder();
+    }
+
+    if (typeof window !== "undefined" && typeof window.prompt === "function") {
+      const manualPath = window.prompt("Pega la ruta absoluta de la carpeta local que quieres abrir");
+      return manualPath?.trim() ? manualPath.trim() : null;
+    }
+
+    return null;
+  }, []);
+
+  const handleQuickOpenProjectFolder = useCallback(async () => {
+    try {
+      const folderPath = await pickLocalFolderPath();
+      if (!folderPath) {
+        return;
+      }
+
+      const normalizedPath = folderPath.replace(/[\\/]+$/, "");
+      const existingProject = projects.find(
+        (project) => project.repositoryPath?.replace(/[\\/]+$/, "") === normalizedPath,
+      );
+
+      if (existingProject) {
+        onSelectProject?.(existingProject.id);
+        setExpandedFolders((prev) => new Set(prev).add(existingProject.id));
+        toast.success("Carpeta local lista", {
+          description: `${existingProject.name} quedó seleccionada para empezar a trabajar.`,
+        });
+        return;
+      }
+
+      const createdProject = await createProject({
+        name: inferProjectNameFromPath(normalizedPath),
+        color: quickProjectColors[projects.length % quickProjectColors.length] || quickProjectColors[0],
+        backgroundImage: null,
+        systemPrompt:
+          "Workspace local listo para editar código, crear ramas, worktrees y ejecutar cambios sobre esta carpeta.",
+        repositoryPath: normalizedPath,
+        defaultCodeFolder: ".",
+        codingAgents: ["coder"],
+        files: [],
+      });
+
+      onSelectProject?.(createdProject.id);
+      setExpandedFolders((prev) => new Set(prev).add(createdProject.id));
+      toast.success("Carpeta local conectada", {
+        description: `${createdProject.name} quedó lista para editar código desde el chat.`,
+      });
+    } catch (error) {
+      toast.error("No se pudo abrir la carpeta local", {
+        description: error instanceof Error ? error.message : "Error inesperado al abrir la carpeta.",
+      });
+    }
+  }, [createProject, inferProjectNameFromPath, onSelectProject, pickLocalFolderPath, projects]);
 
   const toggleFolder = (folderId: string) => {
     setExpandedFolders(prev => {
@@ -738,11 +806,40 @@ export function Sidebar({
       <ScrollArea className="flex-1 px-2 liquid-scroll [&_[data-radix-scroll-area-viewport]]:scrollbar-thin [&_[data-radix-scroll-area-viewport]]:scrollbar-thumb-muted-foreground/30 [&_[data-radix-scroll-area-viewport]]:scrollbar-track-transparent hover:[&_[data-radix-scroll-area-viewport]]:scrollbar-thumb-muted-foreground/50">
         <div className="flex flex-col gap-1.5 pb-2">
 
-          {folders.length > 0 && (
+          <div className="flex items-center justify-between px-2 py-1">
+            <h2 className="text-[15px] font-medium tracking-[-0.02em] text-foreground/80">
+              Hilos
+            </h2>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 rounded-[10px] text-muted-foreground hover:text-foreground"
+                onClick={() => setIsCreatingFolder((prev) => !prev)}
+                data-testid="button-thread-controls"
+                aria-label="Crear carpeta de chats"
+                title="Nueva carpeta de chats"
+              >
+                <SlidersHorizontal className="h-[15px] w-[15px]" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 rounded-[10px] text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  void handleQuickOpenProjectFolder();
+                }}
+                data-testid="button-new-folder"
+                aria-label="Abrir carpeta local"
+                title="Abrir carpeta local"
+              >
+                <FolderPlus className="h-[15px] w-[15px]" />
+              </Button>
+            </div>
+          </div>
+
+          {(folders.length > 0 || isCreatingFolder) && (
             <div className="flex flex-col gap-0.5">
-              <div className="px-2 py-0.5">
-                <h3 className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/80">Carpetas</h3>
-              </div>
               {folders.map((folder) => {
                 const folderChats = chats.filter(chat => folder.chatIds.includes(chat.id));
                 const isExpanded = expandedFolders.has(folder.id);
@@ -814,50 +911,27 @@ export function Sidebar({
                     <X className="h-3 w-3 text-red-500" />
                   </Button>
                 </div>
-              ) : (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="min-h-8 w-full justify-start gap-1.5 rounded-[10px] px-2 py-1 text-[12px] text-muted-foreground hover:text-foreground"
-                  onClick={() => setIsCreateProjectOpen(true)}
-                  data-testid="button-new-folder"
-                >
-                  <FolderPlus className="h-[13px] w-[13px]" />
-                  Nueva Carpeta
-                </Button>
-              )}
+              ) : null}
             </div>
           )}
 
-          {folders.length === 0 && (
-            <div className="px-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="min-h-8 w-full justify-start gap-1.5 rounded-[10px] px-2 py-1 text-[12px] text-muted-foreground hover:text-foreground"
-                onClick={() => setIsCreateProjectOpen(true)}
-                data-testid="button-new-folder"
-              >
-                <FolderPlus className="h-[13px] w-[13px]" />
-                Nueva Carpeta
-              </Button>
-
-              {/* Projects List */}
-              {projects.length > 0 && (
-                <div className="mt-1 flex flex-col gap-0.5">
-                  {projects.map((project) => {
-                    const projectChats = chats.filter(chat => project.chatIds.includes(chat.id));
-                    const isExpanded = expandedFolders.has(project.id);
-                  return (
-                      <Collapsible key={project.id} open={isExpanded} onOpenChange={() => toggleFolder(project.id)}>
-                        <div className="group flex min-h-[32px] items-center gap-1 rounded-[10px] px-1.5 py-1 transition-all duration-300 hover:bg-black/5 dark:hover:bg-white/10 liquid-button">
-                          <CollapsibleTrigger asChild>
-                            <button
-                              aria-label="Expand project"
-                              className="rounded p-0.5 hover:bg-muted cursor-pointer shrink-0">
-                              <ChevronRight className={cn("h-[13px] w-[13px] text-muted-foreground transition-transform", isExpanded && "rotate-90")} />
-                            </button>
-                          </CollapsibleTrigger>
+          <div className="px-2">
+            {/* Projects List */}
+            {projects.length > 0 && (
+              <div className="mt-1 flex flex-col gap-0.5">
+                {projects.map((project) => {
+                  const projectChats = chats.filter(chat => project.chatIds.includes(chat.id));
+                  const isExpanded = expandedFolders.has(project.id);
+                return (
+                    <Collapsible key={project.id} open={isExpanded} onOpenChange={() => toggleFolder(project.id)}>
+                      <div className="group flex min-h-[32px] items-center gap-1 rounded-[10px] px-1.5 py-1 transition-all duration-300 hover:bg-black/5 dark:hover:bg-white/10 liquid-button">
+                        <CollapsibleTrigger asChild>
+                          <button
+                            aria-label="Expand project"
+                            className="rounded p-0.5 hover:bg-muted cursor-pointer shrink-0">
+                            <ChevronRight className={cn("h-[13px] w-[13px] text-muted-foreground transition-transform", isExpanded && "rotate-90")} />
+                          </button>
+                        </CollapsibleTrigger>
 
                           {/* Three dots menu - ON THE LEFT */}
                           <DropdownMenu>
@@ -997,7 +1071,6 @@ export function Sidebar({
                 </div>
               )}
             </div>
-          )}
 
           {/* Pinned Chats Section */}
           {pinnedChats.length > 0 && (

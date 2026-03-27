@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Plus,
@@ -21,6 +21,8 @@ import {
   ShieldAlert,
   GitBranch,
   Folder,
+  Check,
+  FolderOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -154,6 +156,9 @@ export interface ComposerProps {
   activeBranch?: string;
   branchOptions?: string[];
   onSelectBranch?: (branch: string) => void;
+  onCreateBranch?: (branch: string) => void | Promise<void>;
+  isBranchBusy?: boolean;
+  branchStatusLabel?: string;
   repositoryPath?: string | null;
   repoFolders?: string[];
   selectedRepoFolder?: string;
@@ -246,6 +251,9 @@ export function Composer({
   activeBranch: activeBranchProp,
   branchOptions: branchOptionsProp,
   onSelectBranch,
+  onCreateBranch,
+  isBranchBusy = false,
+  branchStatusLabel = "Sin cambios pendientes",
   repositoryPath,
   repoFolders = [],
   selectedRepoFolder = ".",
@@ -272,6 +280,10 @@ export function Composer({
   const [runtimeTargetState, setRuntimeTargetState] = useState("Local");
   const [executionAccessState, setExecutionAccessState] = useState("Full access");
   const [activeBranchState, setActiveBranchState] = useState("main");
+  const [runtimePopoverOpen, setRuntimePopoverOpen] = useState(false);
+  const [accessPopoverOpen, setAccessPopoverOpen] = useState(false);
+  const [branchPopoverOpen, setBranchPopoverOpen] = useState(false);
+  const [branchQuery, setBranchQuery] = useState("");
   const runtimeTarget = runtimeTargetProp ?? runtimeTargetState;
   const executionAccess = executionAccessProp ?? executionAccessState;
   const activeBranch = activeBranchProp ?? activeBranchState;
@@ -796,219 +808,378 @@ export function Composer({
     </Popover>
   );
 
-  const runtimeTargetOptions = ["Local", "Workspace", "Remote"];
-  const executionAccessOptions = ["Full access", "Workspace write", "Read only"];
   const branchOptions = (branchOptionsProp && branchOptionsProp.length > 0)
     ? branchOptionsProp
     : ["main", "develop", "feature/codex"];
+  const repositoryLabel = useMemo(() => {
+    const source = String(repositoryPath || "").trim();
+    if (!source) return "Proyecto local";
+    const parts = source.split(/[\\/]/).filter(Boolean);
+    return parts[parts.length - 1] || "Proyecto local";
+  }, [repositoryPath]);
+  const runtimeTargetOptions = [
+    {
+      value: "Local",
+      label: "Proyecto local",
+      description: repositoryPath ? repositoryLabel : "Trabaja sobre una carpeta conectada",
+      icon: Laptop,
+    },
+    {
+      value: "Nuevo worktree",
+      label: "Nuevo worktree",
+      description: "Aísla cambios largos en otro checkout Git",
+      icon: FolderOpen,
+    },
+    {
+      value: "Nube",
+      label: "Nube",
+      description: "Reserva la tarea para ejecución remota",
+      icon: Globe,
+    },
+  ] as const;
+  const executionAccessOptions = [
+    {
+      value: "Full access",
+      label: "Full access",
+      description: "Editar, crear ramas y mover archivos sin fricción",
+    },
+    {
+      value: "Workspace write",
+      label: "Workspace write",
+      description: "Escritura solo dentro del workspace conectado",
+    },
+    {
+      value: "Read only",
+      label: "Read only",
+      description: "Inspección y propuestas de cambio",
+    },
+  ] as const;
+  const filteredBranches = branchOptions.filter((branch) =>
+    branch.toLowerCase().includes(branchQuery.trim().toLowerCase()),
+  );
+
+  const handleCreateBranchRequest = useCallback(async () => {
+    const branchName = window.prompt("Nombre de la nueva rama");
+    const normalizedBranch = branchName?.trim();
+    if (!normalizedBranch) return;
+
+    if (onCreateBranch) {
+      await onCreateBranch(normalizedBranch);
+    } else if (onSelectBranch) {
+      onSelectBranch(normalizedBranch);
+    } else {
+      setActiveBranchState(normalizedBranch);
+    }
+
+    setBranchQuery("");
+    setBranchPopoverOpen(false);
+  }, [onCreateBranch, onSelectBranch]);
 
   const renderProgrammingModeBar = () => {
     if (isDocumentMode) return null;
 
     return (
-      <div className="mx-auto mt-0.5 flex w-full max-w-3xl items-center justify-between gap-2 px-1 text-[10px] text-zinc-500">
-        <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto">
-          <Popover>
+      <div className="mx-auto mt-1 flex w-full max-w-3xl items-center justify-between gap-2 px-1 text-[11px] text-zinc-500">
+        <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
+          <Popover open={runtimePopoverOpen} onOpenChange={setRuntimePopoverOpen}>
             <PopoverTrigger asChild>
               <button
                 type="button"
-                className="inline-flex h-5 items-center gap-1 rounded-md px-1.5 text-[10px] text-zinc-500 transition-colors hover:bg-zinc-100/60 dark:text-zinc-400 dark:hover:bg-zinc-800/40"
+                className="inline-flex h-8 items-center gap-1.5 rounded-full border border-black/5 bg-white/80 px-3 text-[12px] font-medium text-zinc-600 shadow-sm transition-colors hover:bg-white dark:border-white/10 dark:bg-zinc-900/50 dark:text-zinc-300"
                 data-testid="programming-runtime-selector"
               >
-                <Laptop className="h-3 w-3" />
+                <Laptop className="h-3.5 w-3.5" />
                 <span className="whitespace-nowrap">{runtimeTarget}</span>
                 <ChevronDown className="h-3 w-3 opacity-70" />
               </button>
             </PopoverTrigger>
-            <PopoverContent align="start" className="w-44 p-1">
-              <div className="grid gap-0.5">
-                {runtimeTargetOptions.map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    className={cn(
-                      "w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800",
-                      runtimeTarget === option && "bg-zinc-100 dark:bg-zinc-800"
-                    )}
-                    onClick={() => {
-                      if (onRuntimeTargetChange) onRuntimeTargetChange(option);
-                      else setRuntimeTargetState(option);
-                    }}
-                  >
-                    {option}
-                  </button>
-                ))}
+            <PopoverContent
+              align="start"
+              className="w-[21rem] rounded-[26px] border-zinc-900/80 bg-[rgba(28,28,30,0.96)] p-2 text-zinc-50 shadow-[0_30px_80px_-30px_rgba(0,0,0,0.55)] backdrop-blur-2xl"
+            >
+              <div className="px-3 pb-2 pt-1 text-[11px] uppercase tracking-[0.18em] text-zinc-400">
+                Continuar en
               </div>
-            </PopoverContent>
-          </Popover>
-
-          <Popover>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                className="inline-flex h-5 items-center gap-1 rounded-md px-1.5 text-[10px] text-zinc-500 transition-colors hover:bg-zinc-100/60 dark:text-zinc-400 dark:hover:bg-zinc-800/40"
-                data-testid="programming-access-selector"
-              >
-                <ShieldAlert className="h-3 w-3" />
-                <span className="whitespace-nowrap">{executionAccess}</span>
-                <ChevronDown className="h-3 w-3 opacity-70" />
-              </button>
-            </PopoverTrigger>
-            <PopoverContent align="start" className="w-52 p-1">
-              <div className="grid gap-0.5">
-                {executionAccessOptions.map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    className={cn(
-                      "w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800",
-                      executionAccess === option && "bg-zinc-100 dark:bg-zinc-800"
-                    )}
-                    onClick={() => {
-                      if (onExecutionAccessChange) onExecutionAccessChange(option);
-                      else setExecutionAccessState(option);
-                    }}
-                  >
-                    {option}
-                  </button>
-                ))}
+              <div className="grid gap-1">
+                {runtimeTargetOptions.map((option) => {
+                  const Icon = option.icon;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={cn(
+                        "flex w-full items-center justify-between gap-3 rounded-[18px] px-3 py-3 text-left transition-colors hover:bg-white/8",
+                        runtimeTarget === option.value && "bg-white/10",
+                      )}
+                      onClick={() => {
+                        if (onRuntimeTargetChange) onRuntimeTargetChange(option.value);
+                        else setRuntimeTargetState(option.value);
+                        setRuntimePopoverOpen(false);
+                      }}
+                    >
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10">
+                          <Icon className="h-4 w-4" />
+                        </span>
+                        <div className="min-w-0">
+                          <div className="truncate text-[15px] font-medium text-zinc-50">{option.label}</div>
+                          <div className="truncate text-[12px] text-zinc-400">{option.description}</div>
+                        </div>
+                      </div>
+                      {runtimeTarget === option.value ? <Check className="h-4 w-4 shrink-0 text-zinc-50" /> : null}
+                    </button>
+                  );
+                })}
               </div>
-            </PopoverContent>
-          </Popover>
 
-          {repositoryPath && (
-            <>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <button
-                    type="button"
-                    className="inline-flex h-5 items-center gap-1 rounded-md px-1.5 text-[10px] text-zinc-500 transition-colors hover:bg-zinc-100/60 dark:text-zinc-400 dark:hover:bg-zinc-800/40"
-                    data-testid="programming-folder-selector"
-                    title={repositoryPath}
-                  >
-                    <Folder className="h-3 w-3" />
-                    <span className="max-w-[120px] truncate whitespace-nowrap">
-                      {selectedRepoFolder && selectedRepoFolder !== "." ? selectedRepoFolder : "/"}
-                    </span>
-                    <ChevronDown className="h-3 w-3 opacity-70" />
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent align="start" className="w-64 p-1">
-                  <div className="max-h-56 space-y-0.5 overflow-y-auto">
+              {repositoryPath ? (
+                <>
+                  <div className="mx-2 my-2 h-px bg-white/10" />
+                  <div className="px-3 pb-2 pt-1 text-[11px] uppercase tracking-[0.18em] text-zinc-400">
+                    Carpeta activa
+                  </div>
+                  <div className="max-h-48 space-y-1 overflow-y-auto px-1">
                     <button
                       type="button"
                       className={cn(
-                        "w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800",
-                        selectedRepoFolder === "." && "bg-zinc-100 dark:bg-zinc-800"
+                        "flex w-full items-center justify-between gap-3 rounded-[16px] px-3 py-2.5 text-left transition-colors hover:bg-white/8",
+                        selectedRepoFolder === "." && "bg-white/10",
                       )}
-                      onClick={() => onSelectRepoFolder?.(".")}
+                      onClick={() => {
+                        onSelectRepoFolder?.(".");
+                        setRuntimePopoverOpen(false);
+                      }}
                     >
-                      / (repo root)
+                      <div className="flex items-center gap-3">
+                        <Folder className="h-4 w-4 text-zinc-400" />
+                        <div>
+                          <div className="text-sm font-medium text-zinc-50">/{repositoryLabel}</div>
+                          <div className="text-[12px] text-zinc-400">Raíz del repositorio</div>
+                        </div>
+                      </div>
+                      {selectedRepoFolder === "." ? <Check className="h-4 w-4 shrink-0" /> : null}
                     </button>
+
                     {repoFolders.map((folderPath) => (
                       <button
                         key={folderPath}
                         type="button"
                         className={cn(
-                          "w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800",
-                          selectedRepoFolder === folderPath && "bg-zinc-100 dark:bg-zinc-800"
+                          "flex w-full items-center justify-between gap-3 rounded-[16px] px-3 py-2.5 text-left transition-colors hover:bg-white/8",
+                          selectedRepoFolder === folderPath && "bg-white/10",
                         )}
-                        onClick={() => onSelectRepoFolder?.(folderPath)}
-                      >
-                        {folderPath}
-                      </button>
-                    ))}
-                    <div className="mt-1 border-t border-border pt-1">
-                      <button
-                        type="button"
-                        className="w-full rounded-md px-2 py-1.5 text-left text-sm text-blue-600 transition-colors hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/30"
                         onClick={() => {
-                          const folderName = window.prompt("Nombre de la nueva carpeta");
-                          if (!folderName?.trim()) return;
-                          void onCreateRepoFolder?.(folderName.trim());
+                          onSelectRepoFolder?.(folderPath);
+                          setRuntimePopoverOpen(false);
                         }}
                       >
-                        + Nueva carpeta
+                        <div className="flex items-center gap-3">
+                          <Folder className="h-4 w-4 text-zinc-400" />
+                          <span className="truncate text-sm text-zinc-50">{folderPath}</span>
+                        </div>
+                        {selectedRepoFolder === folderPath ? <Check className="h-4 w-4 shrink-0" /> : null}
                       </button>
-                    </div>
+                    ))}
                   </div>
-                </PopoverContent>
-              </Popover>
-
-              <Popover>
-                <PopoverTrigger asChild>
+                  <div className="mx-2 my-2 h-px bg-white/10" />
                   <button
                     type="button"
-                    className="inline-flex h-5 items-center gap-1 rounded-md px-1.5 text-[10px] text-zinc-500 transition-colors hover:bg-zinc-100/60 dark:text-zinc-400 dark:hover:bg-zinc-800/40"
-                    data-testid="programming-agents-selector"
+                    className="flex w-full items-center gap-3 rounded-[16px] px-3 py-3 text-left text-sm text-zinc-50 transition-colors hover:bg-white/8"
+                    onClick={() => {
+                      const folderName = window.prompt("Nombre de la nueva carpeta");
+                      if (!folderName?.trim()) return;
+                      void onCreateRepoFolder?.(folderName.trim());
+                    }}
                   >
-                    <Bot className="h-3 w-3" />
-                    <span className="whitespace-nowrap">
-                      {selectedCodingAgents.length > 1
-                        ? `${selectedCodingAgents.length} agents`
-                        : (selectedCodingAgents[0] || "agents")}
-                    </span>
-                    <ChevronDown className="h-3 w-3 opacity-70" />
+                    <FolderOpen className="h-4 w-4 text-zinc-400" />
+                    + Nueva carpeta
                   </button>
-                </PopoverTrigger>
-                <PopoverContent align="start" className="w-52 p-1">
-                  <div className="grid gap-0.5">
-                    {(["coder", "reviewer", "improver"] as const).map((agent) => {
-                      const enabled = selectedCodingAgents.includes(agent);
-                      return (
-                        <button
-                          key={agent}
-                          type="button"
-                          className={cn(
-                            "w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800",
-                            enabled && "bg-zinc-100 dark:bg-zinc-800"
-                          )}
-                          onClick={() => onToggleCodingAgent?.(agent)}
-                        >
-                          {enabled ? "✓ " : ""}{agent}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </PopoverContent>
-              </Popover>
-            </>
-          )}
+                </>
+              ) : null}
+            </PopoverContent>
+          </Popover>
+
+          <Popover open={accessPopoverOpen} onOpenChange={setAccessPopoverOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="inline-flex h-8 items-center gap-1.5 rounded-full border border-black/5 bg-white/80 px-3 text-[12px] font-medium text-zinc-600 shadow-sm transition-colors hover:bg-white dark:border-white/10 dark:bg-zinc-900/50 dark:text-zinc-300"
+                data-testid="programming-access-selector"
+              >
+                <ShieldAlert
+                  className={cn(
+                    "h-3.5 w-3.5",
+                    executionAccess === "Full access" ? "text-[#f28c28]" : "text-zinc-500 dark:text-zinc-400",
+                  )}
+                />
+                <span
+                  className={cn(
+                    "whitespace-nowrap",
+                    executionAccess === "Full access" && "text-[#f28c28]",
+                  )}
+                >
+                  {executionAccess}
+                </span>
+                <ChevronDown className="h-3 w-3 opacity-70" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="start"
+              className="w-[20rem] rounded-[26px] border-zinc-900/80 bg-[rgba(28,28,30,0.96)] p-2 text-zinc-50 shadow-[0_30px_80px_-30px_rgba(0,0,0,0.55)] backdrop-blur-2xl"
+            >
+              <div className="px-3 pb-2 pt-1 text-[11px] uppercase tracking-[0.18em] text-zinc-400">
+                Nivel de acceso
+              </div>
+              <div className="grid gap-1">
+                {executionAccessOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={cn(
+                      "flex w-full items-center justify-between gap-3 rounded-[18px] px-3 py-3 text-left transition-colors hover:bg-white/8",
+                      executionAccess === option.value && "bg-white/10",
+                    )}
+                    onClick={() => {
+                      if (onExecutionAccessChange) onExecutionAccessChange(option.value);
+                      else setExecutionAccessState(option.value);
+                      setAccessPopoverOpen(false);
+                    }}
+                  >
+                    <div>
+                      <div className="text-[15px] font-medium text-zinc-50">{option.label}</div>
+                      <div className="text-[12px] text-zinc-400">{option.description}</div>
+                    </div>
+                    {executionAccess === option.value ? <Check className="h-4 w-4 shrink-0 text-zinc-50" /> : null}
+                  </button>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
 
-        <Popover>
-          <PopoverTrigger asChild>
-            <button
-              type="button"
-              className="inline-flex h-5 shrink-0 items-center gap-1 rounded-md px-1.5 text-[10px] text-zinc-500 transition-colors hover:bg-zinc-100/60 dark:text-zinc-400 dark:hover:bg-zinc-800/40"
-              data-testid="programming-branch-selector"
-            >
-              <GitBranch className="h-3 w-3" />
-              <span className="max-w-[100px] truncate">{activeBranch}</span>
-              <ChevronDown className="h-3 w-3 opacity-70" />
-            </button>
-          </PopoverTrigger>
-          <PopoverContent align="end" className="w-48 p-1">
-            <div className="grid gap-0.5">
-              {branchOptions.map((option) => (
+        <div className="flex shrink-0 items-center gap-1">
+          {repositoryPath ? (
+            <Popover>
+              <PopoverTrigger asChild>
                 <button
-                  key={option}
                   type="button"
-                  className={cn(
-                    "w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800",
-                    activeBranch === option && "bg-zinc-100 dark:bg-zinc-800"
-                  )}
-                  onClick={() => {
-                    if (onSelectBranch) onSelectBranch(option);
-                    else setActiveBranchState(option);
-                  }}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-full border border-black/5 bg-white/80 px-3 text-[12px] font-medium text-zinc-600 shadow-sm transition-colors hover:bg-white dark:border-white/10 dark:bg-zinc-900/50 dark:text-zinc-300"
+                  data-testid="programming-agents-selector"
                 >
-                  {option}
+                  <Bot className="h-3.5 w-3.5" />
+                  <span className="whitespace-nowrap">
+                    {selectedCodingAgents.length > 1
+                      ? `${selectedCodingAgents.length} agents`
+                      : (selectedCodingAgents[0] || "agents")}
+                  </span>
+                  <ChevronDown className="h-3 w-3 opacity-70" />
                 </button>
-              ))}
-            </div>
-          </PopoverContent>
-        </Popover>
+              </PopoverTrigger>
+              <PopoverContent
+                align="end"
+                className="w-52 rounded-[22px] border-zinc-900/80 bg-[rgba(28,28,30,0.96)] p-2 text-zinc-50 shadow-[0_30px_80px_-30px_rgba(0,0,0,0.55)] backdrop-blur-2xl"
+              >
+                <div className="grid gap-1">
+                  {(["coder", "reviewer", "improver"] as const).map((agent) => {
+                    const enabled = selectedCodingAgents.includes(agent);
+                    return (
+                      <button
+                        key={agent}
+                        type="button"
+                        className={cn(
+                          "w-full rounded-[14px] px-3 py-2.5 text-left text-sm transition-colors hover:bg-white/8",
+                          enabled && "bg-white/10",
+                        )}
+                        onClick={() => onToggleCodingAgent?.(agent)}
+                      >
+                        {enabled ? "✓ " : ""}{agent}
+                      </button>
+                    );
+                  })}
+                </div>
+              </PopoverContent>
+            </Popover>
+          ) : null}
+
+          <Popover
+            open={branchPopoverOpen}
+            onOpenChange={(open) => {
+              setBranchPopoverOpen(open);
+              if (!open) setBranchQuery("");
+            }}
+          >
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                disabled={!repositoryPath || isBranchBusy}
+                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-black/5 bg-white/80 px-3 text-[12px] font-medium text-zinc-600 shadow-sm transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-zinc-900/50 dark:text-zinc-300"
+                data-testid="programming-branch-selector"
+              >
+                <GitBranch className="h-3.5 w-3.5" />
+                <span className="max-w-[140px] truncate">{activeBranch}</span>
+                <ChevronDown className="h-3 w-3 opacity-70" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="end"
+              className="w-[22rem] rounded-[26px] border-zinc-900/80 bg-[rgba(28,28,30,0.96)] p-0 text-zinc-50 shadow-[0_30px_80px_-30px_rgba(0,0,0,0.55)] backdrop-blur-2xl"
+            >
+              <div className="border-b border-white/10 p-3">
+                <div className="flex items-center gap-3 rounded-full border border-white/10 bg-white/5 px-3 py-2">
+                  <Search className="h-4 w-4 text-zinc-400" />
+                  <input
+                    value={branchQuery}
+                    onChange={(event) => setBranchQuery(event.target.value)}
+                    placeholder="Buscar ramas"
+                    className="h-auto w-full border-0 bg-transparent p-0 text-sm text-zinc-50 outline-none placeholder:text-zinc-500"
+                  />
+                </div>
+              </div>
+              <div className="px-5 pt-4 text-[11px] uppercase tracking-[0.18em] text-zinc-400">
+                Ramas
+              </div>
+              <div className="max-h-[22rem] space-y-1 overflow-y-auto px-3 py-3">
+                {filteredBranches.length > 0 ? filteredBranches.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={cn(
+                      "flex w-full items-start justify-between gap-3 rounded-[18px] px-3 py-3 text-left transition-colors hover:bg-white/8",
+                      activeBranch === option && "bg-white/10",
+                    )}
+                    onClick={() => {
+                      if (onSelectBranch) onSelectBranch(option);
+                      else setActiveBranchState(option);
+                      setBranchPopoverOpen(false);
+                    }}
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-[15px] font-medium text-zinc-50">{option}</div>
+                      <div className="mt-1 text-[12px] text-zinc-400">
+                        {activeBranch === option ? branchStatusLabel : "Cambiar a esta rama"}
+                      </div>
+                    </div>
+                    {activeBranch === option ? <Check className="mt-0.5 h-4 w-4 shrink-0 text-zinc-50" /> : null}
+                  </button>
+                )) : (
+                  <div className="px-3 py-6 text-sm text-zinc-400">
+                    No encontré ramas que coincidan con “{branchQuery}”.
+                  </div>
+                )}
+              </div>
+              <div className="border-t border-white/10 p-3">
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-3 rounded-[18px] px-3 py-3 text-left text-sm text-zinc-50 transition-colors hover:bg-white/8"
+                  onClick={() => void handleCreateBranchRequest()}
+                >
+                  <GitBranch className="h-4 w-4 text-zinc-400" />
+                  Crear y cambiar a una rama nueva...
+                </button>
+              </div>
+            </PopoverContent>
+          </Popover>
+        </div>
       </div>
     );
   };

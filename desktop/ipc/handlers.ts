@@ -1,12 +1,27 @@
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain, BrowserWindow, dialog } from 'electron';
 
 export function registerIpcHandlers(overlayWindow: BrowserWindow | null) {
-    if (!overlayWindow) return;
-
     ipcMain.handle('system:getVolume', async () => {
         // En Fase 4 hicimos Node Fetch, aquí se usaría un daemon bridge o similar
         // Para este HUD, servirá de ping test
         return 100;
+    });
+
+    ipcMain.handle("workspace:pick-folder", async () => {
+        const focusedWindow =
+            BrowserWindow.getFocusedWindow() || overlayWindow || BrowserWindow.getAllWindows()[0] || null;
+
+        const result = await dialog.showOpenDialog(focusedWindow ?? undefined, {
+            title: "Abrir carpeta de trabajo local",
+            buttonLabel: "Abrir",
+            properties: ["openDirectory", "createDirectory", "promptToCreate"],
+        });
+
+        if (result.canceled || result.filePaths.length === 0) {
+            return null;
+        }
+
+        return result.filePaths[0] || null;
     });
 
     ipcMain.on('set-ignore-mouse-events', (event, ignore: boolean) => {
