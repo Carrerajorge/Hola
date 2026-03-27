@@ -1,283 +1,99 @@
 /**
  * ILIAGPT Service Worker
  *
- * Features:
- * - Offline caching of static assets
- * - Network-first strategy for API calls
- * - Background sync for pending requests
- * - Push notification support
+ * Keep the runtime worker push-only. Navigation/document caching caused stale
+ * JSON error responses to get pinned as the app shell for some users.
  */
 
 /// <reference lib="webworker" />
 
 declare const self: ServiceWorkerGlobalScope;
 
-const CACHE_NAME = "iliagpt-cache-v1";
-const STATIC_CACHE = "iliagpt-static-v1";
-const API_CACHE = "iliagpt-api-v1";
-
-// Assets to cache immediately
-const PRECACHE_ASSETS = [
-    "/",
-    "/index.html",
-    "/offline.html",
-    "/manifest.json",
-    "/icons/icon-192x192.png",
-    "/icons/icon-512x512.png",
+const LEGACY_CACHE_PREFIXES = [
+  "iliagpt-",
+  "precache-",
 ];
 
-// Offline fallback page
-const OFFLINE_PAGE = "/offline.html";
+function isLegacyCacheName(name: string): boolean {
+  return LEGACY_CACHE_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
 
-// API routes to cache with network-first strategy
-const CACHEABLE_API_ROUTES = [
-    "/api/health",
-    "/api/models",
-];
-
-// Install event - precache static assets
 self.addEventListener("install", (event) => {
-    console.log("[ServiceWorker] Installing...");
-
-    event.waitUntil(
-        caches.open(STATIC_CACHE)
-            .then((cache) => {
-                console.log("[ServiceWorker] Precaching static assets");
-                return cache.addAll(PRECACHE_ASSETS);
-            })
-            .then(() => {
-                console.log("[ServiceWorker] Install complete");
-                return self.skipWaiting();
-            })
-            .catch((error) => {
-                console.error("[ServiceWorker] Precache failed:", error);
-            })
-    );
+  event.waitUntil(self.skipWaiting());
 });
 
-// Activate event - clean old caches
 self.addEventListener("activate", (event) => {
-    console.log("[ServiceWorker] Activating...");
-
-    event.waitUntil(
-        caches.keys()
-            .then((cacheNames) => {
-                return Promise.all(
-                    cacheNames
-                        .filter((name) =>
-                            name !== CACHE_NAME &&
-                            name !== STATIC_CACHE &&
-                            name !== API_CACHE
-                        )
-                        .map((name) => {
-                            console.log("[ServiceWorker] Deleting old cache:", name);
-                            return caches.delete(name);
-                        })
-                );
-            })
-            .then(() => {
-                console.log("[ServiceWorker] Activate complete");
-                return self.clients.claim();
-            })
+  event.waitUntil((async () => {
+    const cacheNames = await caches.keys();
+    await Promise.all(
+      cacheNames
+        .filter((name) => isLegacyCacheName(name))
+        .map((name) => caches.delete(name)),
     );
+    await self.clients.claim();
+  })());
 });
 
-// Fetch event - serve from cache or network
-self.addEventListener("fetch", (event) => {
-    const { request } = event;
-    const url = new URL(request.url);
-
-    // Skip non-GET requests
-    if (request.method !== "GET") return;
-
-    // Skip WebSocket and SSE connections
-    if (url.pathname.includes("/stream") || url.pathname.includes("/ws")) return;
-
-    // API requests - network first, cache fallback
-    if (url.pathname.startsWith("/api/")) {
-        if (CACHEABLE_API_ROUTES.some((route) => url.pathname.startsWith(route))) {
-            event.respondWith(networkFirstStrategy(request, API_CACHE));
-        }
-        return;
-    }
-
-    // Static assets - cache first
-    if (
-        url.pathname.match(/\.(js|css|png|jpg|jpeg|gif|svg|woff2?|ttf|eot)$/) ||
-        url.pathname === "/" ||
-        url.pathname.endsWith(".html")
-    ) {
-        event.respondWith(cacheFirstStrategy(request, STATIC_CACHE));
-        return;
-    }
-
-    // Default - network only
-    event.respondWith(fetch(request));
-});
-
-// Cache-first strategy
-async function cacheFirstStrategy(request: Request, cacheName: string): Promise<Response> {
-    const cache = await caches.open(cacheName);
-    const cached = await cache.match(request);
-
-    if (cached) {
-        // Return cached, but update in background
-        fetchAndCache(request, cacheName);
-        return cached;
-    }
-
-    return fetchAndCache(request, cacheName);
-}
-
-// Network-first strategy
-async function networkFirstStrategy(request: Request, cacheName: string): Promise<Response> {
-    const cache = await caches.open(cacheName);
-
-    try {
-        const response = await fetch(request);
-
-        if (response.ok) {
-            cache.put(request, response.clone());
-        }
-
-        return response;
-    } catch (error) {
-        const cached = await cache.match(request);
-
-        if (cached) {
-            return cached;
-        }
-
-        // Return offline fallback for HTML requests
-        if (request.headers.get("Accept")?.includes("text/html")) {
-            const offlinePage = await caches.match(OFFLINE_PAGE);
-            if (offlinePage) {
-                return offlinePage;
-            }
-            // Fallback to inline HTML if offline page not cached
-            return new Response(
-                `<!DOCTYPE html>
-        <html lang="es">
-          <head><meta charset="UTF-8"><title>Sin conexión</title></head>
-          <body style="font-family:system-ui;text-align:center;padding:2rem;">
-            <h1>Sin conexión</h1>
-            <p>No hay conexión a internet. Intenta de nuevo más tarde.</p>
-            <button onclick="location.reload()">Reintentar</button>
-          </body>
-        </html>`,
-                {
-                    headers: { "Content-Type": "text/html" },
-                    status: 503,
-                }
-            );
-        }
-
-        throw error;
-    }
-}
-
-// Fetch and cache helper
-async function fetchAndCache(request: Request, cacheName: string): Promise<Response> {
-    const cache = await caches.open(cacheName);
-
-    try {
-        const response = await fetch(request);
-
-        if (response.ok) {
-            cache.put(request, response.clone());
-        }
-
-        return response;
-    } catch (error) {
-        // Try to return from cache on network error
-        const cached = await cache.match(request);
-        if (cached) return cached;
-        throw error;
-    }
-}
-
-// Push notification handler
-self.addEventListener("push", (event) => {
-    if (!event.data) return;
-
-    const data = event.data.json();
-
-    const options: NotificationOptions = {
-        body: data.body || "New notification",
-        icon: "/icons/icon-192x192.png",
-        badge: "/icons/badge-72x72.png",
-        vibrate: [100, 50, 100],
-        data: {
-            url: data.url || "/",
-        },
-        actions: [
-            {
-                action: "open",
-                title: "Open",
-            },
-            {
-                action: "dismiss",
-                title: "Dismiss",
-            },
-        ],
-    };
-
-    event.waitUntil(
-        self.registration.showNotification(data.title || "ILIAGPT", options)
-    );
-});
-
-// Notification click handler
-self.addEventListener("notificationclick", (event) => {
-    event.notification.close();
-
-    if (event.action === "dismiss") return;
-
-    const url = event.notification.data?.url || "/";
-
-    event.waitUntil(
-        self.clients.matchAll({ type: "window", includeUncontrolled: true })
-            .then((clients) => {
-                // Focus existing window if available
-                for (const client of clients) {
-                    if (client.url === url && "focus" in client) {
-                        return client.focus();
-                    }
-                }
-
-                // Open new window
-                return self.clients.openWindow(url);
-            })
-    );
-});
-
-// Background sync for failed requests
-self.addEventListener("sync", (event) => {
-    if (event.tag === "sync-messages") {
-        event.waitUntil(syncPendingMessages());
-    }
-});
-
-// Sync pending messages (placeholder)
-async function syncPendingMessages(): Promise<void> {
-    console.log("[ServiceWorker] Syncing pending messages...");
-    // Implementation would retrieve pending messages from IndexedDB
-    // and retry sending them
-}
-
-// Message handler for client communication
 self.addEventListener("message", (event) => {
-    if (event.data?.type === "SKIP_WAITING") {
-        self.skipWaiting();
-    }
-
-    if (event.data?.type === "CLEAR_CACHE") {
-        event.waitUntil(
-            caches.keys().then((names) =>
-                Promise.all(names.map((name) => caches.delete(name)))
-            )
-        );
-    }
+  if ((event.data as { type?: string } | undefined)?.type === "SKIP_WAITING") {
+    void self.skipWaiting();
+  }
 });
 
-export { };
+self.addEventListener("push", (event) => {
+  let data: Record<string, unknown> = {};
+  try {
+    data = event.data ? (event.data.json() as Record<string, unknown>) : {};
+  } catch {
+    data = {};
+  }
+
+  const title = String(data.title || "ILIAGPT");
+  const options: NotificationOptions = {
+    body: String(data.body || ""),
+    icon: String(data.icon || "/pwa-192x192.png"),
+    badge: String(data.badge || "/pwa-192x192.png"),
+    data: (data.data as Record<string, unknown> | undefined) || {},
+    actions: Array.isArray(data.actions) ? (data.actions as NotificationAction[]) : [],
+    requireInteraction: Boolean(data.requireInteraction),
+    silent: Boolean(data.silent),
+    vibrate: Array.isArray(data.vibrate) ? (data.vibrate as number[]) : undefined,
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+
+  const data = (event.notification.data || {}) as {
+    url?: string;
+    actionUrls?: Record<string, string>;
+  };
+
+  let urlToOpen = data.url || "/";
+  if (event.action && data.actionUrls?.[event.action]) {
+    urlToOpen = data.actionUrls[event.action];
+  }
+
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url === urlToOpen && "focus" in client) {
+          return client.focus();
+        }
+      }
+      return self.clients.openWindow(urlToOpen);
+    }),
+  );
+});
+
+self.addEventListener("sync", (event) => {
+  if (event.tag === "send-message") {
+    event.waitUntil(sendPendingMessages());
+  }
+});
+
+async function sendPendingMessages(): Promise<void> {
+  console.log("[SW] Syncing pending messages...");
+}

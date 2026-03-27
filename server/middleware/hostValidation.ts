@@ -25,6 +25,10 @@ const logger = createLogger("host-validation");
 
 const isProduction = process.env.NODE_ENV === "production";
 
+function shouldAddWwwAlias(hostname: string): boolean {
+  return hostname.includes(".") && hostname !== "localhost" && !hostname.startsWith("www.");
+}
+
 // Build allowlist from environment
 function buildAllowedHosts(): Set<string> {
   const hosts = new Set<string>();
@@ -53,6 +57,14 @@ function buildAllowedHosts(): Set<string> {
     }
   }
 
+  const canonicalDomain = String(process.env.CANONICAL_DOMAIN || "").trim().toLowerCase();
+  if (canonicalDomain) {
+    hosts.add(canonicalDomain);
+    if (shouldAddWwwAlias(canonicalDomain)) {
+      hosts.add(`www.${canonicalDomain}`);
+    }
+  }
+
   // Parse APP_URL for the primary domain
   const appUrl = process.env.APP_URL || process.env.REPL_SLUG;
   if (appUrl) {
@@ -60,6 +72,9 @@ function buildAllowedHosts(): Set<string> {
       const url = new URL(appUrl.startsWith("http") ? appUrl : `https://${appUrl}`);
       hosts.add(url.host.toLowerCase());
       hosts.add(url.hostname.toLowerCase());
+      if (shouldAddWwwAlias(url.hostname.toLowerCase())) {
+        hosts.add(`www.${url.hostname.toLowerCase()}`);
+      }
     } catch {
       // Invalid URL, skip
     }

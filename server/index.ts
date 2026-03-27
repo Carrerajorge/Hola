@@ -88,15 +88,16 @@ declare module "http" {
   }
 }
 
-// DNS rebinding protection — must be very early, before any routing
-app.use(hostValidation());
-
 // Request logger middleware with correlation context - must go first
 app.use(correlationIdMiddleware);
 app.use(requestLoggerMiddleware);
 
-// Canonical URL redirect (www -> non-www) - must be before CORS and sessions
+// Canonical URL redirect (www -> non-www) must run before host validation so the
+// sanctioned alias can reach the 301 instead of being rejected as an unknown host.
 app.use(canonicalUrlMiddleware);
+
+// DNS rebinding protection — must be very early, before any routing
+app.use(hostValidation());
 
 // Compression middleware - skip SSE streams (text/event-stream) to prevent buffering.
 // compression() buffers output to build compression blocks, which breaks real-time SSE.

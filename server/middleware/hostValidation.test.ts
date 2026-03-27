@@ -49,6 +49,7 @@ describe("hostValidation", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("ALLOWED_HOSTS", "myapp.example.com");
     vi.stubEnv("APP_URL", "");
+    vi.stubEnv("CANONICAL_DOMAIN", "");
   });
 
   it("allows requests with host in ALLOWED_HOSTS", async () => {
@@ -64,6 +65,32 @@ describe("hostValidation", () => {
     const next = vi.fn();
     middleware(req as Request, res as Response, next as NextFunction);
     expect(next).toHaveBeenCalled();
+  });
+
+  it("allows the www alias for the canonical domain so it can be redirected", async () => {
+    vi.stubEnv("ALLOWED_HOSTS", "");
+    vi.stubEnv("APP_URL", "");
+    vi.stubEnv("CANONICAL_DOMAIN", "iliagpt.com");
+    vi.resetModules();
+    vi.doMock("../lib/structuredLogger", () => ({
+      createLogger: () => ({
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+      }),
+    }));
+
+    const freshMod = await import("../middleware/hostValidation");
+    const middleware = freshMod.hostValidation();
+    const req = mockReq("www.iliagpt.com", "/");
+    const res = mockRes();
+    const next = vi.fn();
+
+    middleware(req as Request, res as Response, next as NextFunction);
+
+    expect(next).toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalledWith(421);
   });
 
   it("rejects unknown host with 421 status", () => {

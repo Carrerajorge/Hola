@@ -5,6 +5,7 @@
   // Keep the key consistent with client/src/main.tsx so both mechanisms agree.
   var VERSION_KEY = 'iliagpt_app_version';
   var RELOAD_GUARD_KEY = 'iliagpt_sw_cleanup_reload';
+  var LEGACY_CACHE_PREFIXES = ['iliagpt-', 'precache-'];
   var stored = localStorage.getItem(VERSION_KEY);
   var reloadGuardVersion = null;
   var hadPreviousVersion = typeof stored === 'string' && stored.length > 0;
@@ -40,6 +41,36 @@
     window.location.reload();
   }
 
+  function isLegacyCacheName(name) {
+    for (var i = 0; i < LEGACY_CACHE_PREFIXES.length; i += 1) {
+      if (name.indexOf(LEGACY_CACHE_PREFIXES[i]) === 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function deleteLegacyCaches() {
+    if (!('caches' in window)) {
+      return Promise.resolve(0);
+    }
+
+    return caches.keys().then(function(names) {
+      var legacyNames = names.filter(isLegacyCacheName);
+      return Promise.all(
+        legacyNames.map(function(name) {
+          console.log('[IliaGPT Cleanup] Deleted legacy cache:', name);
+          return caches.delete(name);
+        })
+      ).then(function() {
+        return legacyNames.length;
+      });
+    }).catch(function(error) {
+      console.warn('[IliaGPT Cleanup] Failed to delete legacy caches:', error);
+      return 0;
+    });
+  }
+
   if (stored !== APP_VERSION) {
     console.log('[IliaGPT Cleanup] Version changed: ' + stored + ' -> ' + APP_VERSION);
     localStorage.setItem(VERSION_KEY, APP_VERSION);
@@ -62,20 +93,11 @@
       );
     }
 
-    // Clear all caches
-    if ('caches' in window) {
-      cleanupTasks.push(
-        caches.keys().then(function(names) {
-          cacheCount = names.length;
-          for (var j = 0; j < names.length; j++) {
-            caches.delete(names[j]);
-            console.log('[IliaGPT Cleanup] Deleted cache:', names[j]);
-          }
-        }).catch(function(error) {
-          console.warn('[IliaGPT Cleanup] Failed to inspect caches:', error);
-        })
-      );
-    }
+    cleanupTasks.push(
+      deleteLegacyCaches().then(function(count) {
+        cacheCount = count;
+      })
+    );
 
     Promise.all(cleanupTasks).catch(function() {
       // Individual cleanup tasks already log their own failures.
@@ -83,6 +105,7 @@
       reloadAfterCleanup(registrationCount, cacheCount);
     });
   } else {
+    void deleteLegacyCaches();
     try {
       sessionStorage.removeItem(RELOAD_GUARD_KEY);
     } catch (error) {
