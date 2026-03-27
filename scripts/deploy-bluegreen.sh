@@ -43,6 +43,9 @@ readonly MIN_PULL_HEADROOM_MB=12288
 readonly PREFERRED_PULL_HEADROOM_MB=16384
 readonly MIN_DISK_INODES_K=100
 readonly STATE_FILE_MAX_BYTES=65536
+readonly DEPLOY_LOCK_STALE_AFTER_SECONDS="${DEPLOY_LOCK_STALE_AFTER_SECONDS:-900}"
+readonly DEPLOY_LOCK_WAIT_TIMEOUT_SECONDS="${DEPLOY_LOCK_WAIT_TIMEOUT_SECONDS:-1200}"
+readonly DEPLOY_LOCK_POLL_SECONDS="${DEPLOY_LOCK_POLL_SECONDS:-15}"
 
 # ── Validate inputs ────────────────────────────────────────
 IMAGE_TAG="${IMAGE_TAG:?IMAGE_TAG is required (e.g. sha-abc12345)}"
@@ -783,27 +786,72 @@ validate_image_digests() {
 }
 
 # ── Deploy lock (prevent concurrent deploys) ───────────────
+lock_pid_matches_deploy() {
+  local pid="$1"
+  local cmdline=""
+
+  if [ -z "${pid}" ] || ! [[ "${pid}" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+
+  if ! kill -0 "${pid}" 2>/dev/null; then
+    return 1
+  fi
+
+  if [ -r "/proc/${pid}/cmdline" ]; then
+    cmdline="$(tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null || true)"
+    if [ -n "${cmdline}" ] && ! printf '%s' "${cmdline}" | grep -Eq 'deploy-bluegreen\.sh|rollback-bluegreen\.sh'; then
+      return 1
+    fi
+  fi
+
+  return 0
+}
+
 acquire_lock() {
-  if [ -f "${LOCK_FILE}" ]; then
-    local lock_pid lock_age now age_sec
+  local wait_started_at now wait_elapsed lock_pid lock_age age_sec
+
+  wait_started_at="$(date +%s)"
+
+  while [ -f "${LOCK_FILE}" ]; do
     lock_pid="$(cat "${LOCK_FILE}" 2>/dev/null || echo "")"
     lock_age="$(stat -c %Y "${LOCK_FILE}" 2>/dev/null || stat -f %m "${LOCK_FILE}" 2>/dev/null || echo "0")"
     now="$(date +%s)"
     age_sec=$(( now - lock_age ))
-    if [ "${age_sec}" -gt 900 ]; then
+    wait_elapsed=$(( now - wait_started_at ))
+
+    if [ "${age_sec}" -gt "${DEPLOY_LOCK_STALE_AFTER_SECONDS}" ]; then
+      if lock_pid_matches_deploy "${lock_pid}"; then
+        if [ "${wait_elapsed}" -lt "${DEPLOY_LOCK_WAIT_TIMEOUT_SECONDS}" ]; then
+          logw "Deploy lock is ${age_sec}s old but PID ${lock_pid} still looks active. Waiting ${DEPLOY_LOCK_POLL_SECONDS}s for it to clear..."
+          sleep "${DEPLOY_LOCK_POLL_SECONDS}"
+          continue
+        fi
+
+        loge "Deploy lock remained active (PID ${lock_pid}, ${age_sec}s old) after waiting ${wait_elapsed}s. Aborting."
+        exit 1
+      fi
+
       logw "Stale lock found (${age_sec}s old, PID ${lock_pid}). Removing."
       rm -f "${LOCK_FILE}"
-    else
-      # Check if the PID is still alive
-      if [ -n "${lock_pid}" ] && kill -0 "${lock_pid}" 2>/dev/null; then
-        loge "Another deploy is running (PID ${lock_pid}, ${age_sec}s ago). Aborting."
-        exit 1
-      else
-        logw "Lock found but PID ${lock_pid} is dead (${age_sec}s ago). Stealing lock."
-        rm -f "${LOCK_FILE}"
-      fi
+      continue
     fi
-  fi
+
+    if lock_pid_matches_deploy "${lock_pid}"; then
+      if [ "${wait_elapsed}" -lt "${DEPLOY_LOCK_WAIT_TIMEOUT_SECONDS}" ]; then
+        logw "Another deploy is running (PID ${lock_pid}, ${age_sec}s ago). Waiting ${DEPLOY_LOCK_POLL_SECONDS}s for the lock to clear..."
+        sleep "${DEPLOY_LOCK_POLL_SECONDS}"
+        continue
+      fi
+
+      loge "Another deploy is still running (PID ${lock_pid}, ${age_sec}s ago) after waiting ${wait_elapsed}s. Aborting."
+      exit 1
+    fi
+
+    logw "Lock found but PID ${lock_pid} is dead or unrelated (${age_sec}s ago). Stealing lock."
+    rm -f "${LOCK_FILE}"
+  done
+
   echo "$$" > "${LOCK_FILE}"
 }
 
