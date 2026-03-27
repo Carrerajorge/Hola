@@ -40,6 +40,8 @@ const createdArtifacts = new Set<string>();
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.resetModules();
+  vi.doUnmock("../../server/services/imageGeneration");
   for (const artifactPath of createdArtifacts) {
     try {
       if (fs.existsSync(artifactPath)) {
@@ -99,6 +101,45 @@ describe("ProductionWorkflowRunner", () => {
     expect(result.artifacts).toHaveLength(1);
     expect(artifact?.mimeType).toBe("image/png");
     expect(data.model).toBe("fallback-local-png");
+    expect(artifact).toBeDefined();
+    createdArtifacts.add(artifact!.path);
+  });
+
+  it("returns a PNG fallback when image generation throws during execution", async () => {
+    vi.doMock("../../server/services/imageGeneration", () => ({
+      generateImage: vi.fn(async () => {
+        throw new Error("forced image failure");
+      }),
+      editImage: vi.fn(async () => {
+        throw new Error("forced image failure");
+      }),
+      classifyImageIntent: vi.fn(() => ({ mode: "generate", reason: "new_generation" })),
+    }));
+
+    const { ProductionWorkflowRunner: MockedRunner } = await import("../../server/agent/registry/productionWorkflowRunner");
+    const runner = new MockedRunner({ watchdogTimeoutMs: 1000, stepTimeoutMs: 10 });
+    const fakeCircuitBreaker = {
+      canExecute: vi.fn(() => true),
+      recordSuccess: vi.fn(),
+      recordFailure: vi.fn(),
+    };
+
+    vi.spyOn(runner as any, "getCircuitBreaker").mockReturnValue(fakeCircuitBreaker);
+
+    const result = await (runner as any).executeToolReal(
+      "image_generate",
+      { prompt: "gato futurista" },
+      createRun()
+    );
+    const artifact = result.artifacts?.[0];
+    const data = result.data as { model: string; warning: string; parentId?: string | null };
+
+    expect(result.success).toBe(true);
+    expect(result.artifacts).toHaveLength(1);
+    expect(artifact?.mimeType).toBe("image/png");
+    expect(data.model).toBe("fallback-local-png");
+    expect(data.warning).toContain("forced image failure");
+    expect(data.parentId ?? null).toBeNull();
     expect(artifact).toBeDefined();
     createdArtifacts.add(artifact!.path);
   });

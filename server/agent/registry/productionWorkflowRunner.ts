@@ -1000,9 +1000,9 @@ export class ProductionWorkflowRunner extends EventEmitter {
         );
         console.log(`[WorkflowRunner] image_generate: Mode=${intent.mode}, prompt="${prompt.slice(0, 50)}..."`);
 
+        let parentId: string | null = null;
         try {
           let result;
-          let parentId: string | null = null;
 
           if (intent.mode === 'edit_last' && lastImageBase64) {
             console.log(`[WorkflowRunner] image_generate: Editing last image (id: ${lastImageId})`);
