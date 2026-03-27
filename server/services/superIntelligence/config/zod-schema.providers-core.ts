@@ -201,9 +201,11 @@ export const TelegramAccountSchema = TelegramAccountSchemaBase.superRefine((valu
   validateTelegramCustomCommands(value, ctx);
 });
 
-export const TelegramConfigSchema = TelegramAccountSchemaBase.extend({
+const TelegramConfigSchemaBase = TelegramAccountSchemaBase.extend({
   accounts: z.record(z.string(), TelegramAccountSchema.optional()).optional(),
-}).superRefine((value, ctx) => {
+});
+
+export const TelegramConfigSchema = TelegramConfigSchemaBase.superRefine((value, ctx) => {
   normalizeTelegramStreamingConfig(value);
   requireOpenAllowFrom({
     policy: value.dmPolicy,
@@ -486,9 +488,11 @@ function refineDiscordAccountSchema(
 
 export const DiscordAccountSchema = DiscordAccountSchemaBase.superRefine(refineDiscordAccountSchema);
 
-export const DiscordConfigSchema = DiscordAccountSchemaBase.extend({
+const DiscordConfigSchemaBase = DiscordAccountSchemaBase.extend({
   accounts: z.record(z.string(), DiscordAccountSchema.optional()).optional(),
-}).superRefine((value, ctx) => {
+});
+
+export const DiscordConfigSchema = DiscordConfigSchemaBase.superRefine((value, ctx) => {
   refineDiscordAccountSchema(value, ctx);
 });
 
@@ -700,13 +704,15 @@ function refineSlackAccountSchema(
 
 export const SlackAccountSchema = SlackAccountSchemaBase.superRefine(refineSlackAccountSchema);
 
-export const SlackConfigSchema = SlackAccountSchemaBase.extend({
+const SlackConfigSchemaBase = SlackAccountSchemaBase.extend({
   mode: z.enum(["socket", "http"]).optional().default("socket"),
   signingSecret: z.string().optional().register(sensitive),
   webhookPath: z.string().optional().default("/slack/events"),
   groupPolicy: GroupPolicySchema.optional().default("allowlist"),
   accounts: z.record(z.string(), SlackAccountSchema.optional()).optional(),
-}).superRefine((value, ctx) => {
+});
+
+export const SlackConfigSchema = SlackConfigSchemaBase.superRefine((value, ctx) => {
   refineSlackAccountSchema(value, ctx);
   const baseMode = value.mode ?? "socket";
   if (baseMode === "http" && !value.signingSecret) {
@@ -797,9 +803,11 @@ export const SignalAccountSchema = SignalAccountSchemaBase.superRefine((value, c
   });
 });
 
-export const SignalConfigSchema = SignalAccountSchemaBase.extend({
+const SignalConfigSchemaBase = SignalAccountSchemaBase.extend({
   accounts: z.record(z.string(), SignalAccountSchema.optional()).optional(),
-}).superRefine((value, ctx) => {
+});
+
+export const SignalConfigSchema = SignalConfigSchemaBase.superRefine((value, ctx) => {
   requireOpenAllowFrom({
     policy: value.dmPolicy,
     allowFrom: value.allowFrom,
@@ -892,9 +900,11 @@ export const IrcAccountSchema = IrcAccountSchemaBase.superRefine((value, ctx) =>
   refineIrcAllowFromAndNickserv(value, ctx);
 });
 
-export const IrcConfigSchema = IrcAccountSchemaBase.extend({
+const IrcConfigSchemaBase = IrcAccountSchemaBase.extend({
   accounts: z.record(z.string(), IrcAccountSchema.optional()).optional(),
-}).superRefine((value, ctx) => {
+});
+
+export const IrcConfigSchema = IrcConfigSchemaBase.superRefine((value, ctx) => {
   refineIrcAllowFromAndNickserv(value, ctx);
 });
 
@@ -962,9 +972,11 @@ export const IMessageAccountSchema = IMessageAccountSchemaBase.superRefine((valu
   });
 });
 
-export const IMessageConfigSchema = IMessageAccountSchemaBase.extend({
+const IMessageConfigSchemaBase = IMessageAccountSchemaBase.extend({
   accounts: z.record(z.string(), IMessageAccountSchema.optional()).optional(),
-}).superRefine((value, ctx) => {
+});
+
+export const IMessageConfigSchema = IMessageConfigSchemaBase.superRefine((value, ctx) => {
   requireOpenAllowFrom({
     policy: value.dmPolicy,
     allowFrom: value.allowFrom,
@@ -1042,10 +1054,12 @@ export const BlueBubblesAccountSchema = BlueBubblesAccountSchemaBase.superRefine
   });
 });
 
-export const BlueBubblesConfigSchema = BlueBubblesAccountSchemaBase.extend({
+const BlueBubblesConfigSchemaBase = BlueBubblesAccountSchemaBase.extend({
   accounts: z.record(z.string(), BlueBubblesAccountSchema.optional()).optional(),
   actions: BlueBubblesActionSchema,
-}).superRefine((value, ctx) => {
+});
+
+export const BlueBubblesConfigSchema = BlueBubblesConfigSchemaBase.superRefine((value, ctx) => {
   requireOpenAllowFrom({
     policy: value.dmPolicy,
     allowFrom: value.allowFrom,
