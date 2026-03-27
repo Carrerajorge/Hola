@@ -535,6 +535,7 @@ jobs:
             /e2e/
             /scripts/ci-assert-required-paths.sh
             /scripts/ci-retry.sh
+            /scripts/sync-mathjax-assets.cjs
             /scripts/with-env.cjs
           sparse-checkout-cone-mode: false
 
@@ -547,6 +548,7 @@ jobs:
             e2e/smoke.spec.ts \
             scripts/ci-assert-required-paths.sh \
             scripts/ci-retry.sh \
+            scripts/sync-mathjax-assets.cjs \
             scripts/with-env.cjs
 
       - name: Summarize browser smoke checkout footprint
@@ -1124,6 +1126,7 @@ jobs:
             /e2e/
             /scripts/ci-assert-required-paths.sh
             /scripts/ci-retry.sh
+            /scripts/sync-mathjax-assets.cjs
             /scripts/with-env.cjs
           sparse-checkout-cone-mode: false
 
@@ -1137,6 +1140,7 @@ jobs:
             e2e/smoke.spec.ts \
             scripts/ci-assert-required-paths.sh \
             scripts/ci-retry.sh \
+            scripts/sync-mathjax-assets.cjs \
             scripts/with-env.cjs
 
       - name: Summarize browser smoke checkout footprint
