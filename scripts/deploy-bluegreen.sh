@@ -1430,6 +1430,13 @@ ensure_postgres_app_auth() {
   local verify_user="${POSTGRES_USER:-postgres}"
   local verify_password="${POSTGRES_PASSWORD:-}"
   local verify_db="${POSTGRES_DB:-iliagpt}"
+  local role_literal
+  local password_literal
+  local db_literal
+  local role_ident
+  local db_ident
+  local role_exists
+  local db_exists
   local i
 
   if [ -z "${verify_password}" ]; then
@@ -1459,32 +1466,38 @@ ensure_postgres_app_auth() {
   fi
 
   logw "Postgres app credentials rejected. Synchronizing role password from .env.production."
-  if ! docker exec -i "${db_container}" \
-    psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
-      -v role_name="${verify_user}" \
-      -v role_password="${verify_password}" \
-      -v db_name="${verify_db}" >/dev/null <<'SQL'
-DO $do$
-DECLARE
-  target_role text := :'role_name';
-  target_password text := :'role_password';
-  target_db text := :'db_name';
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = target_role) THEN
-    EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', target_role, target_password);
-  ELSE
-    EXECUTE format('ALTER ROLE %I WITH LOGIN PASSWORD %L', target_role, target_password);
-  END IF;
+  role_literal="'$(printf '%s' "${verify_user}" | sed "s/'/''/g")'"
+  password_literal="'$(printf '%s' "${verify_password}" | sed "s/'/''/g")'"
+  db_literal="'$(printf '%s' "${verify_db}" | sed "s/'/''/g")'"
+  role_ident="\"$(printf '%s' "${verify_user}" | sed 's/\"/\"\"/g')\""
+  db_ident="\"$(printf '%s' "${verify_db}" | sed 's/\"/\"\"/g')\""
 
-  IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = target_db) THEN
-    EXECUTE format('CREATE DATABASE %I OWNER %I', target_db, target_role);
-  END IF;
+  role_exists="$(docker exec -i "${db_container}" psql -U postgres -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname = ${role_literal} LIMIT 1" | tr -d '[:space:]' || true)"
+  if [ "${role_exists}" = "1" ]; then
+    if ! docker exec -i "${db_container}" psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+      -c "ALTER ROLE ${role_ident} WITH LOGIN PASSWORD ${password_literal}" >/dev/null; then
+      loge "Failed to update Postgres role ${verify_user}."
+      return 1
+    fi
+  else
+    if ! docker exec -i "${db_container}" psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+      -c "CREATE ROLE ${role_ident} LOGIN PASSWORD ${password_literal}" >/dev/null; then
+      loge "Failed to create Postgres role ${verify_user}."
+      return 1
+    fi
+  fi
 
-  EXECUTE format('GRANT ALL PRIVILEGES ON DATABASE %I TO %I', target_db, target_role);
-END
-$do$;
-SQL
-  then
+  db_exists="$(docker exec -i "${db_container}" psql -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = ${db_literal} LIMIT 1" | tr -d '[:space:]' || true)"
+  if [ "${db_exists}" != "1" ]; then
+    if ! docker exec -i "${db_container}" psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+      -c "CREATE DATABASE ${db_ident} OWNER ${role_ident}" >/dev/null; then
+      loge "Failed to create Postgres database ${verify_db}."
+      return 1
+    fi
+  fi
+
+  if ! docker exec -i "${db_container}" psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+    -c "GRANT ALL PRIVILEGES ON DATABASE ${db_ident} TO ${role_ident}" >/dev/null; then
     loge "Failed to synchronize Postgres app credentials."
     return 1
   fi
