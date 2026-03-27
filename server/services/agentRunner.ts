@@ -11,8 +11,13 @@ import {
   DEFAULT_AGENT_EXECUTION_PROFILE,
   type AgentExecutionProfile,
 } from "@shared/agentExecutionProfile";
-import type { WorkspaceContext } from "@shared/workspaceContext";
+import type {
+  OpenClawPreferredCommand,
+  OpenClawRepositorySnapshot,
+} from "@shared/openclawRepositorySnapshot";
+import type { OpenClawWorkspaceContext } from "@shared/openclawWorkspaceContext";
 import { getAgentExecutionProfileConfig } from "../agent/executionProfiles";
+import { repositorySnapshotService } from "../openclaw/repositorySnapshotService";
 
 export interface AgentState {
   objective: string;
@@ -21,7 +26,7 @@ export interface AgentState {
   observations: string[];
   toolsUsed: string[];
   currentStep: number;
-  workspaceContext?: WorkspaceContext;
+  workspaceContext?: OpenClawWorkspaceContext;
   status: "idle" | "running" | "completed" | "failed" | "cancelled";
 }
 
@@ -43,7 +48,8 @@ export interface AgentRunnerConfig {
   stepTimeoutMs: number;
   enableLogging: boolean;
   maxConsecutiveFailures: number;
-  workspaceContext?: WorkspaceContext;
+  workspaceContext?: OpenClawWorkspaceContext;
+  repositorySnapshot?: OpenClawRepositorySnapshot;
   toolRegistry?: ToolRegistry;
 }
 
@@ -124,36 +130,62 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
   }
 }
 
-function isPathWithinRoot(root: string, candidate: string): boolean {
-  const relativePath = path.relative(root, candidate);
-  return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
-}
-
-function resolveWorkspaceDir(workspaceContext?: WorkspaceContext): string | null {
-  const repositoryPath = workspaceContext?.repositoryPath?.trim();
-  if (!repositoryPath) {
+function resolveWorkspaceDirectories(workspaceContext: OpenClawWorkspaceContext): {
+  repositoryRoot: string;
+  workspaceDir: string;
+} | null {
+  const repositoryRoot = path.resolve(workspaceContext.repositoryPath);
+  if (!fs.existsSync(repositoryRoot) || !fs.statSync(repositoryRoot).isDirectory()) {
     return null;
   }
 
-  const repositoryRoot = path.resolve(repositoryPath);
-  const selectedFolder = workspaceContext?.selectedFolder?.trim();
-  if (!selectedFolder) {
-    return repositoryRoot;
-  }
+  const selectedFolder =
+    workspaceContext.selectedFolder && workspaceContext.selectedFolder !== "."
+      ? workspaceContext.selectedFolder
+      : "";
+  const requestedWorkspaceDir = path.resolve(repositoryRoot, selectedFolder || ".");
+  const withinRepository =
+    requestedWorkspaceDir === repositoryRoot ||
+    requestedWorkspaceDir.startsWith(`${repositoryRoot}${path.sep}`);
+  const workspaceDir =
+    withinRepository &&
+    fs.existsSync(requestedWorkspaceDir) &&
+    fs.statSync(requestedWorkspaceDir).isDirectory()
+      ? requestedWorkspaceDir
+      : repositoryRoot;
 
-  const candidate = path.isAbsolute(selectedFolder)
-    ? path.resolve(selectedFolder)
-    : path.resolve(repositoryRoot, selectedFolder);
-
-  return isPathWithinRoot(repositoryRoot, candidate) ? candidate : repositoryRoot;
+  return { repositoryRoot, workspaceDir };
 }
 
-function createWorkspaceToolRegistry(workspaceDir: string): ToolRegistry {
-  const normalizedWorkspaceDir = fs.existsSync(workspaceDir) ? fs.realpathSync(workspaceDir) : workspaceDir;
+function createWorkspaceToolRegistry(
+  workspaceContext: OpenClawWorkspaceContext,
+): { toolRegistry: ToolRegistry; workspaceDir: string | null } {
+  const directories = resolveWorkspaceDirectories(workspaceContext);
+  if (!directories) {
+    return { toolRegistry: defaultToolRegistry, workspaceDir: null };
+  }
+
+  const normalizedWorkspaceDir = fs.existsSync(directories.workspaceDir)
+    ? fs.realpathSync(directories.workspaceDir)
+    : directories.workspaceDir;
   const securityGuard = new SecurityGuard(normalizedWorkspaceDir);
-  const commandExecutor = new CommandExecutor({ workingDirectory: normalizedWorkspaceDir }, securityGuard);
+  const commandExecutor = new CommandExecutor(
+    {
+      workingDirectory: normalizedWorkspaceDir,
+      environment: {
+        OPENCLAW_REPOSITORY_PATH: directories.repositoryRoot,
+        OPENCLAW_WORKSPACE_DIR: normalizedWorkspaceDir,
+        OPENCLAW_SELECTED_FOLDER: workspaceContext.selectedFolder,
+        ...(workspaceContext.branch ? { OPENCLAW_BRANCH: workspaceContext.branch } : {}),
+      },
+    },
+    securityGuard,
+  );
   const fileManager = new FileManager(normalizedWorkspaceDir, securityGuard);
-  return createDefaultToolRegistry(commandExecutor, fileManager);
+  return {
+    toolRegistry: createDefaultToolRegistry(commandExecutor, fileManager),
+    workspaceDir: normalizedWorkspaceDir,
+  };
 }
 
 export class AgentRunner extends EventEmitter {
@@ -165,13 +197,14 @@ export class AgentRunner extends EventEmitter {
   private consecutiveFailures: number = 0;
   private lastFailedTool: string = "";
   private readonly toolRegistry: ToolRegistry;
+  private readonly workspaceContext?: OpenClawWorkspaceContext;
+  private readonly repositorySnapshot?: OpenClawRepositorySnapshot;
   private readonly workspaceDir: string | null;
 
   constructor(config: Partial<AgentRunnerConfig> = {}) {
     super();
     const executionProfile = config.executionProfile || DEFAULT_CONFIG.executionProfile;
     const profileConfig = getAgentExecutionProfileConfig(executionProfile);
-    const workspaceDir = resolveWorkspaceDir(config.workspaceContext);
 
     this.config = {
       ...DEFAULT_CONFIG,
@@ -181,16 +214,104 @@ export class AgentRunner extends EventEmitter {
       maxConsecutiveFailures: profileConfig.subagent.maxConsecutiveFailures,
       ...config,
     };
-    this.workspaceDir = workspaceDir;
-    this.toolRegistry = config.toolRegistry || (workspaceDir ? createWorkspaceToolRegistry(workspaceDir) : defaultToolRegistry);
+    this.workspaceContext = this.config.workspaceContext;
+    this.repositorySnapshot =
+      this.config.repositorySnapshot ||
+      (this.workspaceContext
+        ? repositorySnapshotService.capture(this.workspaceContext)
+        : undefined);
+
+    const scopedRegistry =
+      !config.toolRegistry && this.workspaceContext
+        ? createWorkspaceToolRegistry(this.workspaceContext)
+        : null;
+
+    this.workspaceDir = scopedRegistry?.workspaceDir || null;
+    this.toolRegistry =
+      config.toolRegistry || scopedRegistry?.toolRegistry || defaultToolRegistry;
     this.logStructured("debug", "initialized", {
       executionProfile: this.config.executionProfile,
       maxSteps: this.config.maxSteps,
       stepTimeoutMs: this.config.stepTimeoutMs,
       maxConsecutiveFailures: this.config.maxConsecutiveFailures,
       workspaceDir: this.workspaceDir,
-      workspaceBranch: this.config.workspaceContext?.branch,
+      workspaceBranch: this.workspaceContext?.branch,
+      repositoryPath: this.workspaceContext?.repositoryPath,
+      selectedFolder: this.workspaceContext?.selectedFolder,
+      repoStyle: this.repositorySnapshot?.repoStyle,
+      packageManager: this.repositorySnapshot?.packageManager,
+      headSha: this.repositorySnapshot?.headSha,
+      toolRegistrySize: this.toolRegistry.size,
     });
+  }
+
+  private buildWorkspacePromptSection(): string {
+    if (!this.workspaceContext?.repositoryPath) return "";
+
+    const lines = [
+      "Contexto de workspace activo:",
+      `- Repositorio: ${this.workspaceContext.repositoryPath}`,
+      `- Carpeta objetivo: ${this.workspaceContext.selectedFolder || "."}`,
+      `- Rama: ${this.workspaceContext.branch || "desconocida"}`,
+      `- Perfiles: ${(this.workspaceContext.codingAgents || ["coder"]).join(", ")}`,
+      `- Runtime: ${this.workspaceContext.runtimeTarget || "Local"}`,
+      `- Acceso: ${this.workspaceContext.executionAccess || "Full access"}`,
+      "Regla operativa: los comandos shell arrancan en la carpeta objetivo del workspace.",
+    ];
+    return lines.join("\n");
+  }
+
+  private buildRepositorySnapshotPromptSection(): string {
+    if (!this.repositorySnapshot) return "";
+
+    const preferredCommands = (
+      Object.entries(this.repositorySnapshot.preferredCommands || {}) as Array<
+        [string, OpenClawPreferredCommand | undefined]
+      >
+    )
+      .map(([kind, command]) => {
+        if (!command) return null;
+        const commandLine =
+          command.workingDirectory && command.workingDirectory !== "."
+            ? `(cd ${command.workingDirectory} && ${command.command})`
+            : command.command;
+        return `- ${kind}: ${commandLine}`;
+      })
+      .filter((value): value is string => Boolean(value));
+
+    return [
+      "Repository intelligence snapshot:",
+      `- Estilo de repo: ${this.repositorySnapshot.repoStyle}`,
+      `- Package manager: ${this.repositorySnapshot.packageManager}`,
+      this.repositorySnapshot.selectedRoot
+        ? `- Root preferido: ${this.repositorySnapshot.selectedRoot}`
+        : null,
+      this.repositorySnapshot.stacks.length > 0
+        ? `- Stacks detectados: ${this.repositorySnapshot.stacks.join(", ")}`
+        : null,
+      preferredCommands.length > 0
+        ? `- Comandos preferidos:\n${preferredCommands.join("\n")}`
+        : null,
+      this.repositorySnapshot.deployWorkflows.length > 0
+        ? `- Deploy/CI relevante: ${this.repositorySnapshot.deployWorkflows
+            .slice(0, 4)
+            .join(", ")}`
+        : this.repositorySnapshot.ciWorkflows.length > 0
+          ? `- CI relevante: ${this.repositorySnapshot.ciWorkflows
+              .slice(0, 4)
+              .join(", ")}`
+          : null,
+      this.repositorySnapshot.sensitivePaths.length > 0
+        ? `- Rutas sensibles: ${this.repositorySnapshot.sensitivePaths
+            .slice(0, 6)
+            .join(", ")}`
+        : null,
+      this.repositorySnapshot.openClawSignals.length > 0
+        ? `- Señales OpenClaw: ${this.repositorySnapshot.openClawSignals.join(", ")}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
 
   async run(objective: string, planHint: string[] = []): Promise<{ success: boolean; result: any; state: AgentState; run_id: string }> {
@@ -433,15 +554,8 @@ export class AgentRunner extends EventEmitter {
       // Get all available tools from the registry
       const availableTools = this.toolRegistry.listToolsWithInfo();
       const toolsDescription = availableTools.map(t => `- ${t.name}: ${t.description}`).join("\n");
-      const workspaceContextSummary = context.workspaceContext
-        ? [
-            `Repositorio: ${context.workspaceContext.repositoryPath}`,
-            context.workspaceContext.selectedFolder ? `Carpeta activa: ${context.workspaceContext.selectedFolder}` : null,
-            context.workspaceContext.branch ? `Rama: ${context.workspaceContext.branch}` : null,
-          ]
-            .filter(Boolean)
-            .join("\n")
-        : "";
+      const workspacePrompt = this.buildWorkspacePromptSection();
+      const repositorySnapshotPrompt = this.buildRepositorySnapshotPromptSection();
 
       const prompt = `Eres un agente autónomo ejecutando una tarea.
 
@@ -449,8 +563,8 @@ Objetivo: ${context.objective}
 Plan: ${context.plan.join(" → ")}
 Paso actual: ${context.currentStep + 1}/${this.config.maxSteps}
 
-${workspaceContextSummary ? `Workspace estructurado:\n${workspaceContextSummary}\n` : ""}
-
+${workspacePrompt ? `${workspacePrompt}\n` : ""}
+${repositorySnapshotPrompt ? `${repositorySnapshotPrompt}\n` : ""}
 ${contextSummary}
 
 Acciones recientes (últimas 3): ${JSON.stringify(context.previousActions)}

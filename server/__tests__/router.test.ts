@@ -275,7 +275,7 @@ describe("AgentRunner - Guardrails", () => {
         },
       });
 
-      expect(agent["workspaceDir"]).toBe(selectedFolder);
+      expect(agent["workspaceDir"]).toBe(realSelectedFolder);
 
       const listResult = await agent["toolRegistry"].execute("file", { operation: "list", path: "." });
       expect(listResult.success).toBe(true);

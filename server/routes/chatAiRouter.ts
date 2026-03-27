@@ -108,6 +108,10 @@ import type { z } from "zod";
 import { getUserId } from "../types/express";
 import { semanticMemoryStore } from "../memory/SemanticMemoryStore";
 import { type SkillScope } from "@shared/schema/skillPlatform";
+import {
+  type OpenClawWorkspaceContext,
+  normalizeOpenClawWorkspaceContext,
+} from "@shared/openclawWorkspaceContext";
 import { handleEmailChatRequest } from "../services/gmailChatIntegration";
 import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { ensureUserRowExists } from "../lib/ensureUserRowExists";
@@ -131,18 +135,7 @@ import type {
 } from "../agent/terminalController";
 
 type AttachmentSpec = z.infer<typeof AttachmentSpecSchema>;
-type CodingAgentProfile = "coder" | "reviewer" | "improver";
-
-interface WorkspaceContextInput {
-  projectId?: string;
-  projectName?: string;
-  repositoryPath: string;
-  selectedFolder: string;
-  codingAgents: CodingAgentProfile[];
-  runtimeTarget: string;
-  executionAccess: string;
-  branch?: string;
-}
+type WorkspaceContextInput = OpenClawWorkspaceContext;
 
 import { v4 as uuidv4 } from "uuid";
 import type { Response } from "express";
@@ -671,57 +664,7 @@ function looksLikeDesktopFolderIntent(input: string): boolean {
 function normalizeWorkspaceContext(
   input: unknown,
 ): WorkspaceContextInput | undefined {
-  if (!input || typeof input !== "object") return undefined;
-  const source = input as Record<string, unknown>;
-
-  const repositoryPath =
-    typeof source.repositoryPath === "string"
-      ? source.repositoryPath.trim()
-      : "";
-  if (!repositoryPath) return undefined;
-
-  const rawFolder =
-    typeof source.selectedFolder === "string"
-      ? source.selectedFolder.trim()
-      : ".";
-  let selectedFolder = rawFolder || ".";
-  selectedFolder = selectedFolder.replace(/\\/g, "/").replace(/^\.\/+/, "");
-  if (!selectedFolder || selectedFolder === ".") selectedFolder = ".";
-  if (selectedFolder.startsWith("/") || selectedFolder.includes(".."))
-    selectedFolder = ".";
-
-  const codingAgents = Array.isArray(source.codingAgents)
-    ? source.codingAgents.filter(
-        (value): value is CodingAgentProfile =>
-          value === "coder" || value === "reviewer" || value === "improver",
-      )
-    : [];
-
-  const runtimeTarget =
-    typeof source.runtimeTarget === "string" && source.runtimeTarget.trim()
-      ? source.runtimeTarget.trim()
-      : "Local";
-  const executionAccess =
-    typeof source.executionAccess === "string" && source.executionAccess.trim()
-      ? source.executionAccess.trim()
-      : "Full access";
-  const branch =
-    typeof source.branch === "string" && source.branch.trim()
-      ? source.branch.trim()
-      : undefined;
-
-  return {
-    projectId:
-      typeof source.projectId === "string" ? source.projectId : undefined,
-    projectName:
-      typeof source.projectName === "string" ? source.projectName : undefined,
-    repositoryPath,
-    selectedFolder,
-    codingAgents: codingAgents.length > 0 ? codingAgents : ["coder"],
-    runtimeTarget,
-    executionAccess,
-    branch,
-  };
+  return normalizeOpenClawWorkspaceContext(input);
 }
 
 // ── Natural language intent extractors for all local control commands ──
