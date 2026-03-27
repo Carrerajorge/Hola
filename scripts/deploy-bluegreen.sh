@@ -116,6 +116,17 @@ load_env_value() {
   echo ""
 }
 
+build_database_url() {
+  python3 -c "import sys, urllib.parse; user, password, host, port, dbname = sys.argv[1:]; print(f\"postgresql://{urllib.parse.quote(user, safe='')}:{urllib.parse.quote(password, safe='')}@{host}:{port}/{urllib.parse.quote(dbname, safe='')}\")" \
+    "$1" "$2" "$3" "$4" "$5"
+}
+
+write_database_url_override() {
+  local output_file="$1"
+  python3 -c "import sys; path, dburl = sys.argv[1:]; esc = dburl.replace(\"'\", \"''\"); open(path, 'w', encoding='utf-8').write(\"services:\\n  app:\\n    environment:\\n      DATABASE_URL: '%s'\\n  worker:\\n    environment:\\n      DATABASE_URL: '%s'\\n\" % (esc, esc))" \
+    "${output_file}" "${DATABASE_URL}"
+}
+
 validate_image_inputs() {
   local tag="$1"
   local version="$2"
@@ -955,6 +966,16 @@ POSTGRES_DB="$(trim "$(load_env_value "POSTGRES_DB" ".env.production" || true)")
 POSTGRES_DB="${POSTGRES_DB:-iliagpt}"
 export POSTGRES_DB
 
+DATABASE_URL="$(trim "$(load_env_value "DATABASE_URL" ".env.production" || true)")"
+if [ -z "${DATABASE_URL}" ]; then
+  DATABASE_URL="$(build_database_url "${POSTGRES_USER}" "${POSTGRES_PASSWORD}" "hola-postgres" "5432" "${POSTGRES_DB}")"
+  logw "DATABASE_URL missing in .env.production; generated URL from POSTGRES_* values."
+fi
+export DATABASE_URL
+
+DATABASE_URL_OVERRIDE_COMPOSE="${DEPLOY_PATH}/docker-compose.db-url.override.yml"
+write_database_url_override "${DATABASE_URL_OVERRIDE_COMPOSE}"
+
 POSTGRES_VOLUME_NAME="$(trim "$(load_env_value "POSTGRES_VOLUME_NAME" ".env.production" || true)")"
 if [ -n "${POSTGRES_VOLUME_NAME}" ]; then
   export POSTGRES_VOLUME_NAME
@@ -1100,9 +1121,10 @@ slot_compose() {
     IMAGE_TAG="${image_tag}" APP_VERSION="${app_version}" \
     SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN}" \
     REDIS_PASSWORD="${REDIS_PASSWORD}" \
+    DATABASE_URL="${DATABASE_URL}" \
     POSTGRES_USER="${POSTGRES_USER}" POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
     POSTGRES_DB="${POSTGRES_DB}" \
-    docker compose -p "hola-${slot_name}" -f "${SLOT_COMPOSE}" "$@"
+    docker compose -p "hola-${slot_name}" -f "${SLOT_COMPOSE}" -f "${DATABASE_URL_OVERRIDE_COMPOSE}" "$@"
 }
 
 slot() {
@@ -1759,7 +1781,7 @@ log "  Resolved hola-postgres IP: ${PG_IP}"
 
 if ! timeout "${MIGRATION_TIMEOUT}" docker run --rm --pull never --network hola-net \
   --env-file .env.production \
-  -e DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${PG_IP}:5432/${POSTGRES_DB}" \
+  -e DATABASE_URL="$(build_database_url "${POSTGRES_USER}" "${POSTGRES_PASSWORD}" "${PG_IP}" "5432" "${POSTGRES_DB}")" \
   -e NODE_ENV=production \
   --memory=512m --cpus=1 \
   "${LOCAL_APP_IMAGE_ID}" \

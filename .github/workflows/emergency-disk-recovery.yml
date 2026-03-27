@@ -126,6 +126,16 @@ jobs:
             echo "$line"
           }
 
+          build_database_url() {
+            python3 -c "import sys, urllib.parse; user, password, host, port, dbname = sys.argv[1:]; print(f\"postgresql://{urllib.parse.quote(user, safe='')}:{urllib.parse.quote(password, safe='')}@{host}:{port}/{urllib.parse.quote(dbname, safe='')}\")" \
+              "$1" "$2" "$3" "$4" "$5"
+          }
+
+          write_database_url_override() {
+            python3 -c "import sys; path, dburl = sys.argv[1:]; esc = dburl.replace(\"'\", \"''\"); open(path, 'w', encoding='utf-8').write(\"services:\\n  app:\\n    environment:\\n      DATABASE_URL: '%s'\\n  worker:\\n    environment:\\n      DATABASE_URL: '%s'\\n\" % (esc, esc))" \
+              "$1" "${DATABASE_URL}"
+          }
+
           ensure_postgres_app_auth() {
             local db_container="hola-postgres"
             local verify_user="${POSTGRES_USER:-postgres}"
@@ -220,8 +230,16 @@ jobs:
           POSTGRES_USER="$(extract_env_value .env.production POSTGRES_USER || true)"
           POSTGRES_PASSWORD="$(extract_env_value .env.production POSTGRES_PASSWORD || true)"
           POSTGRES_DB="$(extract_env_value .env.production POSTGRES_DB || true)"
+          DATABASE_URL="$(extract_env_value .env.production DATABASE_URL || true)"
           POSTGRES_USER="${POSTGRES_USER:-postgres}"
           POSTGRES_DB="${POSTGRES_DB:-iliagpt}"
+          if [ -z "${DATABASE_URL}" ]; then
+            DATABASE_URL="$(build_database_url "${POSTGRES_USER}" "${POSTGRES_PASSWORD}" "hola-postgres" "5432" "${POSTGRES_DB}")"
+            echo "DATABASE_URL missing in .env.production; generated URL from POSTGRES_* values."
+          fi
+          DB_OVERRIDE="$(mktemp /tmp/hola-db-override.XXXXXX.yml)"
+          trap 'rm -f "${DB_OVERRIDE}"' EXIT
+          write_database_url_override "${DB_OVERRIDE}"
           ensure_postgres_app_auth
           timeout 30 docker rm -f \
             "hola-${ACTIVE_SLOT}-app" \
@@ -234,10 +252,11 @@ jobs:
           APP_VERSION="${APP_VERSION}" \
           SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN}" \
           REDIS_PASSWORD="${REDIS_PASSWORD}" \
+          DATABASE_URL="${DATABASE_URL}" \
           POSTGRES_USER="${POSTGRES_USER}" \
           POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
           POSTGRES_DB="${POSTGRES_DB}" \
-            timeout 180 docker compose -p "hola-${ACTIVE_SLOT}" -f "${SLOT_COMPOSE}" up -d --force-recreate app worker sandbox-runner
+            timeout 180 docker compose -p "hola-${ACTIVE_SLOT}" -f "${SLOT_COMPOSE}" -f "${DB_OVERRIDE}" up -d --force-recreate app worker sandbox-runner
 
           echo "=== waiting for local readiness ==="
           for i in $(seq 1 36); do
