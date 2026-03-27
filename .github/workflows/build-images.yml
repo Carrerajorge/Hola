@@ -161,24 +161,39 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Pre-pull BuildKit image with retry
+      - name: Resolve BuildKit driver image
         if: steps.latest_main_guard.outputs.should_deploy == 'true'
+        id: buildkit_image
         run: |
-          bash ./scripts/ci-retry.sh \
+          set -euo pipefail
+
+          if bash ./scripts/ci-retry.sh \
             --label "BuildKit image pull" \
             --attempts 5 \
             --base-delay 5 \
             --max-delay 45 \
             --transient-only \
             -- \
-            docker pull "${BUILDKIT_IMAGE}"
+            docker pull "${BUILDKIT_IMAGE}"; then
+            echo "driver_image=${BUILDKIT_IMAGE}" >> "$GITHUB_OUTPUT"
+            echo "driver_source=mirror" >> "$GITHUB_OUTPUT"
+            echo "Using prefetched BuildKit driver image: ${BUILDKIT_IMAGE}"
+          else
+            echo "::warning::BuildKit mirror ${BUILDKIT_IMAGE} stayed unavailable after retries. Falling back to docker/setup-buildx-action default image."
+            echo "driver_image=" >> "$GITHUB_OUTPUT"
+            echo "driver_source=default" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Set up Docker Buildx
-        if: steps.latest_main_guard.outputs.should_deploy == 'true'
+      - name: Set up Docker Buildx (prefetched mirror)
+        if: steps.latest_main_guard.outputs.should_deploy == 'true' && steps.buildkit_image.outputs.driver_image != ''
         uses: docker/setup-buildx-action@v3
         with:
           driver-opts: |
-            image=${{ env.BUILDKIT_IMAGE }}
+            image=${{ steps.buildkit_image.outputs.driver_image }}
+
+      - name: Set up Docker Buildx (default image fallback)
+        if: steps.latest_main_guard.outputs.should_deploy == 'true' && steps.buildkit_image.outputs.driver_image == ''
+        uses: docker/setup-buildx-action@v3
 
       - name: Build & push app image (runner stage)
         id: build_app

@@ -88,7 +88,7 @@ is_transient_failure() {
   local log_file="$1"
 
   grep -Eiq \
-    'auth\.docker\.io|registry-1\.docker\.io|context deadline exceeded|Client\.Timeout exceeded|TLS handshake timeout|tls handshake timeout|connection reset by peer|temporary failure|i/o timeout|unexpected EOF|500 Internal Server Error|502 Bad Gateway|503 Service Unavailable|504 Gateway Timeout|network is unreachable|no route to host|timed out while awaiting headers|resource temporarily unavailable' \
+    'auth\.docker\.io|registry-1\.docker\.io|context deadline exceeded|Client\.Timeout exceeded|TLS handshake timeout|tls handshake timeout|connection reset by peer|temporary failure|i/o timeout|unexpected EOF|500 Internal Server Error|502 Bad Gateway|503 Service Unavailable|504 Gateway Timeout|429 Too Many Requests|too many requests|toomanyrequests|rate exceeded|network is unreachable|no route to host|timed out while awaiting headers|resource temporarily unavailable' \
     "${log_file}"
 }
 
