@@ -1088,7 +1088,7 @@ infra() {
 }
 
 ensure_infra_up() {
-  local infra_output conflict_name
+  local infra_output conflict_name conflict_container_id removal_target
 
   if infra_output="$(infra up -d --remove-orphans 2>&1)"; then
     printf '%s\n' "${infra_output}"
@@ -1101,10 +1101,26 @@ ensure_infra_up() {
       sed -n 's/.*The container name \"\/\([^\"]*\)\" is already in use.*/\1/p' |
       head -n 1
   )"
+  conflict_container_id="$(
+    printf '%s\n' "${infra_output}" |
+      sed -n 's/.*already in use by container \"\([^\"]*\)\".*/\1/p' |
+      head -n 1
+  )"
 
-  if [ -n "${conflict_name}" ]; then
-    logw "Removing conflicting container ${conflict_name} and retrying infra startup."
-    docker rm -f "${conflict_name}" >/dev/null 2>&1 || true
+  if [ -n "${conflict_name}" ] || [ -n "${conflict_container_id}" ]; then
+    if [ -n "${conflict_name}" ] && [ -n "${conflict_container_id}" ]; then
+      logw "Removing conflicting container ${conflict_name} (id ${conflict_container_id}) and retrying infra startup."
+    elif [ -n "${conflict_name}" ]; then
+      logw "Removing conflicting container ${conflict_name} and retrying infra startup."
+    else
+      logw "Removing conflicting container id ${conflict_container_id} and retrying infra startup."
+    fi
+
+    for removal_target in "${conflict_name}" "${conflict_container_id}"; do
+      [ -n "${removal_target}" ] || continue
+      docker rm -f "${removal_target}" >/dev/null 2>&1 || true
+    done
+
     infra up -d --remove-orphans
     return $?
   fi
