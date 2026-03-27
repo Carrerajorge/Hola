@@ -42,6 +42,10 @@ import {
   type SimpleAttachment as BatchAttachment,
 } from "../services/documentBatchProcessor";
 import {
+  buildRelevantConversationDocumentContextResult,
+  buildRelevantDocumentContextResult,
+} from "../services/documentRagContext";
+import {
   pareRequestContract,
   pareRateLimiter,
   pareQuotaGuard,
@@ -332,6 +336,100 @@ function buildPersistentConversationDocumentContext(
   }
 
   return parts.join("\n");
+}
+
+const DEFAULT_ATTACHMENT_RAG_OPTIONS = {
+  maxChunks: 8,
+  maxChars: 14_000,
+  perDocumentLimit: 3,
+  minScore: 0.16,
+};
+
+const FULL_COVERAGE_ATTACHMENT_RAG_OPTIONS = {
+  maxChunks: 16,
+  maxChars: 24_000,
+  perDocumentLimit: 6,
+  minScore: 0.08,
+  candidateMultiplier: 12,
+};
+
+function getAttachmentRagOptions(requiresFullCoverage: boolean) {
+  return requiresFullCoverage
+    ? FULL_COVERAGE_ATTACHMENT_RAG_OPTIONS
+    : DEFAULT_ATTACHMENT_RAG_OPTIONS;
+}
+
+function getPersistentConversationDocumentRagOptions(hasAttachments: boolean) {
+  return hasAttachments
+    ? {
+        maxChunks: 4,
+        maxChars: 8_000,
+        perDocumentLimit: 2,
+        minScore: 0.12,
+      }
+    : {
+        maxChunks: 6,
+        maxChars: 12_000,
+        perDocumentLimit: 2,
+        minScore: 0.12,
+      };
+}
+
+function extractPersistedAttachmentText(
+  attachment: {
+    name?: string | null;
+    content?: string | null;
+  },
+  batchResult: BatchProcessingResult | null,
+): string | null {
+  const inlineContent =
+    typeof attachment.content === "string" && attachment.content.trim().length > 0
+      ? attachment.content
+      : null;
+
+  if (!batchResult || !attachment.name) return inlineContent;
+
+  const fileChunks = batchResult.chunks.filter(
+    (chunk) =>
+      chunk.filename === attachment.name &&
+      typeof chunk.content === "string" &&
+      chunk.content.trim().length > 0,
+  );
+
+  if (fileChunks.length === 0) return inlineContent;
+
+  return fileChunks.map((chunk) => chunk.content.trim()).join("\n\n");
+}
+
+function mergeDocumentSources(
+  current: Array<{ fileName: string; content: string; citation?: string }>,
+  incoming: Array<{ fileName: string; content: string; citation?: string }>,
+): Array<{ fileName: string; content: string; citation?: string }> {
+  const merged = [...current];
+  const seen = new Set(
+    current.map(
+      (source) => `${source.fileName}::${source.citation || ""}::${source.content}`,
+    ),
+  );
+
+  for (const source of incoming) {
+    const key = `${source.fileName}::${source.citation || ""}::${source.content}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(source);
+  }
+
+  return merged.slice(0, 8);
+}
+
+function rankedChunksToDocumentSources(
+  chunks: Array<{ filename: string; content: string; citation: string }>,
+): Array<{ fileName: string; content: string; citation?: string }> {
+  return chunks.slice(0, 8).map((chunk) => ({
+    fileName: chunk.filename,
+    content: chunk.content.trim().slice(0, 320),
+    citation: chunk.citation,
+  }));
 }
 
 function buildFallbackGptSessionContract(
@@ -7012,7 +7110,21 @@ export function createChatAiRouter(
       // The /api/chat/analyze endpoint remains available for dedicated document analysis.
 
       let attachmentContext = "";
+      let attachmentSources: Array<{
+        fileName: string;
+        content: string;
+        citation?: string;
+      }> = [];
+      let documentRetrievalSteps: Array<{
+        id: string;
+        label: string;
+        status: "pending" | "active" | "complete" | "error";
+        detail?: string;
+      }> = [];
       const hasAttachments = normalizedChatAttachments.length > 0;
+      const latestChatUserMessage = String(
+        messages[messages.length - 1]?.content || "",
+      ).trim();
 
       if (hasAttachments) {
         console.log(
@@ -7041,11 +7153,41 @@ export function createChatAiRouter(
             .filter((e) => e.extracted !== null)
             .map((e) => e.extracted!);
           if (successfulExtractions.length > 0) {
-            attachmentContext = formatAttachmentsAsContext(
-              successfulExtractions,
+            const ragAttachmentResult = latestChatUserMessage
+              ? await buildRelevantConversationDocumentContextResult(
+                  latestChatUserMessage,
+                  successfulExtractions.map((content) => ({
+                    fileName: content.fileName,
+                    extractedText: content.content,
+                    mimeType: content.mimeType,
+                  })),
+                  getAttachmentRagOptions(false),
+                )
+              : { context: "", chunks: [] };
+            const ragAttachmentContext = ragAttachmentResult.context;
+            attachmentSources = mergeDocumentSources(
+              attachmentSources,
+              rankedChunksToDocumentSources(ragAttachmentResult.chunks),
             );
+            if (ragAttachmentResult.chunks.length > 0) {
+              const documentCount = new Set(
+                ragAttachmentResult.chunks.map((chunk) => chunk.filename),
+              ).size;
+              documentRetrievalSteps = [
+                ...documentRetrievalSteps,
+                {
+                  id: "document_rag_attachments",
+                  label: "RAG documental",
+                  status: "complete",
+                  detail: `${ragAttachmentResult.chunks.length} fragmentos relevantes de ${documentCount} documento(s) adjuntos`,
+                },
+              ];
+            }
+            attachmentContext =
+              ragAttachmentContext ||
+              formatAttachmentsAsContext(successfulExtractions);
             console.log(
-              `[Chat API] Extracted content from ${successfulExtractions.length} attachment(s), context length: ${attachmentContext.length}`,
+              `[Chat API] Extracted content from ${successfulExtractions.length} attachment(s), context length: ${attachmentContext.length}, strategy=${ragAttachmentContext ? "query_rag" : "full_context_fallback"}`,
             );
           }
 
@@ -7184,12 +7326,54 @@ export function createChatAiRouter(
       const responseWithMetadata = gptSessionContract
         ? {
             ...response,
+            sources: mergeDocumentSources(
+              attachmentSources,
+              (response.sources as Array<{
+                fileName: string;
+                content: string;
+                citation?: string;
+              }>) || [],
+            ),
+            retrievalSteps:
+              documentRetrievalSteps.length > 0
+                ? [
+                    ...documentRetrievalSteps,
+                    ...(((response as any).retrievalSteps as Array<{
+                      id: string;
+                      label: string;
+                      status: "pending" | "active" | "complete" | "error";
+                      detail?: string;
+                    }>) || []),
+                  ]
+                : (response as any).retrievalSteps,
             gpt_id: gptSessionContract.gptId,
             config_version: gptSessionContract.configVersion,
             tool_permissions: gptSessionContract.toolPermissions,
             session_id: serverSessionId || gptSessionContract.sessionId,
           }
-        : response;
+        : {
+            ...response,
+            sources: mergeDocumentSources(
+              attachmentSources,
+              (response.sources as Array<{
+                fileName: string;
+                content: string;
+                citation?: string;
+              }>) || [],
+            ),
+            retrievalSteps:
+              documentRetrievalSteps.length > 0
+                ? [
+                    ...documentRetrievalSteps,
+                    ...(((response as any).retrievalSteps as Array<{
+                      id: string;
+                      label: string;
+                      status: "pending" | "active" | "complete" | "error";
+                      detail?: string;
+                    }>) || []),
+                  ]
+                : (response as any).retrievalSteps,
+          };
 
       res.json(responseWithMetadata);
     } catch (error: any) {
@@ -9642,6 +9826,17 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         // Process attachments using DocumentBatchProcessor for atomic batch handling
         let attachmentContext = "";
         let persistentConversationDocumentContext = "";
+        let documentSources: Array<{
+          fileName: string;
+          content: string;
+          citation?: string;
+        }> = [];
+        const documentRetrievalSteps: Array<{
+          id: string;
+          label: string;
+          status: "pending" | "active" | "complete" | "error";
+          detail?: string;
+        }> = [];
         let batchResult: BatchProcessingResult | null = null;
         const hasAttachments = resolvedAttachments.length > 0;
         const attachmentsCount = hasAttachments
@@ -9652,6 +9847,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         const userMessage = messages[messages.length - 1]?.content || "";
         const requiresFullCoverage =
           /\b(todos|all|completo|complete|cada|every)\b/i.test(userMessage);
+        const retrievalQuery = String(userMessageText || userMessage || "").trim();
 
         if (hasAttachments) {
           console.log(
@@ -9745,12 +9941,54 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
                 return res.end();
               }
 
-              // Use unified context from batch processor
-              if (batchResult.unifiedContext) {
-                attachmentContext = batchResult.unifiedContext;
-                console.log(
-                  `[Stream] Unified context from ${batchResult.processedFiles} files, length: ${attachmentContext.length} chars`,
-                );
+              const fallbackAttachmentContext = batchResult.unifiedContext || "";
+              if (batchResult.chunks.length > 0 || fallbackAttachmentContext) {
+                try {
+                  const ragAttachmentResult = retrievalQuery
+                    ? await buildRelevantDocumentContextResult(
+                        retrievalQuery,
+                        batchResult.chunks.map((chunk) => ({
+                          docId: chunk.docId,
+                          filename: chunk.filename,
+                          content: chunk.content,
+                          location: chunk.location,
+                        })),
+                        getAttachmentRagOptions(requiresFullCoverage),
+                      )
+                    : { context: "", chunks: [] };
+                  const ragAttachmentContext = ragAttachmentResult.context;
+                  documentSources = mergeDocumentSources(
+                    documentSources,
+                    rankedChunksToDocumentSources(ragAttachmentResult.chunks),
+                  );
+                  if (ragAttachmentResult.chunks.length > 0) {
+                    const documentCount = new Set(
+                      ragAttachmentResult.chunks.map((chunk) => chunk.filename),
+                    ).size;
+                    documentRetrievalSteps.push({
+                      id: "document_rag_attachments",
+                      label: "RAG documental",
+                      status: "complete",
+                      detail: `${ragAttachmentResult.chunks.length} fragmentos relevantes de ${documentCount} documento(s) adjuntos`,
+                    });
+                  }
+                  attachmentContext =
+                    ragAttachmentContext || fallbackAttachmentContext;
+                  console.log("[Stream] Attachment RAG context ready", {
+                    strategy: ragAttachmentContext
+                      ? "query_rag"
+                      : "unified_context_fallback",
+                    files: batchResult.processedFiles,
+                    chunks: batchResult.chunks.length,
+                    contextChars: attachmentContext.length,
+                  });
+                } catch (ragContextError) {
+                  attachmentContext = fallbackAttachmentContext;
+                  console.warn(
+                    "[Stream] Failed to build attachment RAG context, using unified fallback:",
+                    ragContextError,
+                  );
+                }
               }
             }
           } catch (batchError: any) {
@@ -9776,11 +10014,35 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           streamConversationId ||
           ""
         ).trim();
-        if (!hasAttachments && persistentDocumentChatId) {
+        if (persistentDocumentChatId) {
           try {
             const conversationDocs =
               await storage.getConversationDocuments(persistentDocumentChatId);
+            const ragPersistentResult = retrievalQuery
+              ? await buildRelevantConversationDocumentContextResult(
+                  retrievalQuery,
+                  conversationDocs,
+                  getPersistentConversationDocumentRagOptions(hasAttachments),
+                )
+              : { context: "", chunks: [] };
+            const ragPersistentContext = ragPersistentResult.context;
+            documentSources = mergeDocumentSources(
+              documentSources,
+              rankedChunksToDocumentSources(ragPersistentResult.chunks),
+            );
+            if (ragPersistentResult.chunks.length > 0) {
+              const documentCount = new Set(
+                ragPersistentResult.chunks.map((chunk) => chunk.filename),
+              ).size;
+              documentRetrievalSteps.push({
+                id: "document_rag_conversation",
+                label: "Memoria documental",
+                status: "complete",
+                detail: `${ragPersistentResult.chunks.length} fragmentos relevantes de ${documentCount} documento(s) previos del hilo`,
+              });
+            }
             persistentConversationDocumentContext =
+              ragPersistentContext ||
               buildPersistentConversationDocumentContext(conversationDocs);
 
             if (persistentConversationDocumentContext) {
@@ -9788,6 +10050,9 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
                 chatId: persistentDocumentChatId,
                 documents: conversationDocs.length,
                 contextChars: persistentConversationDocumentContext.length,
+                strategy: ragPersistentContext
+                  ? "query_rag"
+                  : "legacy_context_fallback",
               });
             }
           } catch (persistentDocError) {
@@ -10065,12 +10330,17 @@ ${batchResult.stats.map((s) => `- ${s.filename}: ${s.status === "success" ? `${s
 FORMATO DE CITAS REQUERIDO:
 ${citationFormats}
 
-CONTENIDO DE LOS DOCUMENTOS:
+FRAGMENTOS RELEVANTES DE LOS DOCUMENTOS:
 ${attachmentContext}`;
         }
 
-        if (!hasAttachments && persistentConversationDocumentContext) {
+        if (persistentConversationDocumentContext) {
           systemContent += `\n\nDOCUMENTOS PREVIOS DE ESTA CONVERSACION:\n${persistentConversationDocumentContext}`;
+        }
+
+        if (attachmentContext || persistentConversationDocumentContext) {
+          systemContent +=
+            "\n\nREGLA DOCUMENTAL:\nCuando cites informacion documental, usa la referencia [doc:...] exacta del bloque recuperado siempre que este disponible.";
         }
 
         // Apply user personalization (style, custom instructions, profile) and semantic memory.
@@ -10378,24 +10648,10 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
                 for (const att of resolvedAttachments) {
                   try {
                     // Determine extracted text: use batch result if available, else attachment content
-                    let extractedText = att.content || null;
-                    if (batchResult && batchResult.stats) {
-                      const fileStat = batchResult.stats.find(
-                        (s: any) =>
-                          s.filename === att.name && s.status === "success",
-                      );
-                      if (fileStat) {
-                        // Find the matching chunk from batch result for this file's content
-                        const fileChunks = batchResult.chunks.filter(
-                          (c: any) => c.source === att.name,
-                        );
-                        if (fileChunks.length > 0) {
-                          extractedText = fileChunks
-                            .map((c: any) => c.content)
-                            .join("\n");
-                        }
-                      }
-                    }
+                    const extractedText = extractPersistedAttachmentText(
+                      att,
+                      batchResult,
+                    );
 
                     await storage.createConversationDocument({
                       chatId: effectiveChatIdForPersistence,
@@ -10457,22 +10713,10 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
         ) {
           for (const att of resolvedAttachments) {
             try {
-              let extractedText = att.content || null;
-              if (batchResult && batchResult.stats) {
-                const fileStat = batchResult.stats.find(
-                  (s: any) => s.filename === att.name && s.status === "success",
-                );
-                if (fileStat) {
-                  const fileChunks = batchResult.chunks.filter(
-                    (c: any) => c.source === att.name,
-                  );
-                  if (fileChunks.length > 0) {
-                    extractedText = fileChunks
-                      .map((c: any) => c.content)
-                      .join("\n");
-                  }
-                }
-              }
+              const extractedText = extractPersistedAttachmentText(
+                att,
+                batchResult,
+              );
               await storage.createConversationDocument({
                 chatId: effectiveChatIdForPersistence,
                 messageId: claimedRun.userMessageId || null,
@@ -10908,6 +11152,12 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
                 intent: unifiedContext?.requestSpec.intent,
                 latencyLane: resolvedLane,
                 responseHealth,
+                sources:
+                  documentSources.length > 0 ? documentSources : undefined,
+                retrievalSteps:
+                  documentRetrievalSteps.length > 0
+                    ? documentRetrievalSteps
+                    : undefined,
                 webSources:
                   detectedWebSources.length > 0
                     ? detectedWebSources
@@ -10977,7 +11227,10 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
             const metadata: Record<string, any> = {};
             if (detectedWebSources.length > 0)
               metadata.webSources = detectedWebSources;
+            if (documentSources.length > 0) metadata.sources = documentSources;
             if (cotSteps.length > 0) metadata.steps = cotSteps;
+            if (documentRetrievalSteps.length > 0)
+              metadata.retrievalSteps = documentRetrievalSteps;
             if (responseHealth) metadata.responseHealth = responseHealth;
 
             const finalMetadata =
@@ -11063,6 +11316,12 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
               assistantMessageId,
               latencyLane: resolvedLane,
               responseHealth,
+              sources:
+                documentSources.length > 0 ? documentSources : undefined,
+              retrievalSteps:
+                documentRetrievalSteps.length > 0
+                  ? documentRetrievalSteps
+                  : undefined,
               webSources:
                 detectedWebSources.length > 0 ? detectedWebSources : undefined,
               traceId: requestId,

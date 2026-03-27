@@ -9805,6 +9805,7 @@ IMPORTANTE:
 
               const fullContent = data.content;
               const responseSources = data.sources || [];
+              const responseRetrievalSteps = data.retrievalSteps;
               const figmaDiagram = data.figmaDiagram as
                 | FigmaDiagram
                 | undefined;
@@ -9843,6 +9844,11 @@ IMPORTANTE:
                       requestId: generateRequestId(),
                       userMessageId: userMsgId,
                       figmaDiagram,
+                      sources:
+                        responseSources.length > 0
+                          ? responseSources
+                          : undefined,
+                      retrievalSteps: responseRetrievalSteps,
                       webSources: responseWebSources,
                       confidence: uncertainty.confidence,
                       uncertaintyReason: uncertainty.reason,
@@ -10004,6 +10010,7 @@ IMPORTANTE:
                         responseSources.length > 0
                           ? responseSources
                           : undefined,
+                      retrievalSteps: responseRetrievalSteps,
                       artifact: responseArtifact,
                       webSources: responseWebSources,
                       confidence: uncertainty.confidence,

@@ -176,6 +176,7 @@ export const AssistantMessage = memo(function AssistantMessage({
     const responseHealthReason = responseHealth?.reason?.trim() || "";
     const responseHealthDetail = responseHealth?.detail?.trim() || "";
     const responseHealthProvider = responseHealth?.provider?.replace(/[-_]/g, " ").trim() || "";
+    const documentSources = message.sources || [];
     const shouldShowResponseHealthCard = Boolean(
         responseHealth && responseHealth.state !== "complete"
     );
@@ -478,6 +479,42 @@ export const AssistantMessage = memo(function AssistantMessage({
 
             {message.webSources && message.webSources.length > 0 && !message.isThinking && (
                 <NewsCards sources={message.webSources} maxDisplay={5} />
+            )}
+
+            {documentSources.length > 0 && !message.isThinking && (
+                <div className="mt-4 rounded-2xl border border-border/60 bg-muted/20 p-3">
+                    <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                        <FileText className="h-3.5 w-3.5" />
+                        <span>Citas Documentales</span>
+                        <span className="rounded-full bg-background px-2 py-0.5 text-[10px] font-medium text-foreground">
+                            {documentSources.length}
+                        </span>
+                    </div>
+                    <div className="space-y-2">
+                        {documentSources.map((source, index) => (
+                            <div
+                                key={`${message.id}-doc-source-${source.fileName}-${source.citation || index}`}
+                                className="rounded-xl border border-border/50 bg-background/80 px-3 py-2"
+                            >
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-sm font-medium text-foreground">
+                                        {source.fileName}
+                                    </span>
+                                    {source.citation && (
+                                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+                                            {source.citation}
+                                        </span>
+                                    )}
+                                </div>
+                                {source.content && (
+                                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                                        {source.content}
+                                    </p>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </div>
             )}
 
             {message.documentAnalysis &&

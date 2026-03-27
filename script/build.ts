@@ -68,13 +68,18 @@ async function writeReleaseManifest(appVersion: string) {
 
 async function buildEmbeddedOpenClawControlUi() {
   console.log("building embedded openclaw control ui...");
+  // pnpm refuses to recreate node_modules in non-interactive builds unless CI is explicit.
+  const embeddedUiBuildEnv = {
+    ...process.env,
+    CI: process.env.CI || "true",
+  };
 
   // Ensure UI dependencies are installed before building (CI may not have them)
   await new Promise<void>((resolve, reject) => {
     const install = spawn(process.execPath, ["scripts/ui.js", "install"], {
       cwd: "server/openclaw",
       stdio: "inherit",
-      env: process.env,
+      env: embeddedUiBuildEnv,
     });
     install.on("error", reject);
     install.on("exit", (code) => {
@@ -87,7 +92,7 @@ async function buildEmbeddedOpenClawControlUi() {
     const child = spawn(process.execPath, ["scripts/ui.js", "build"], {
       cwd: "server/openclaw",
       stdio: "inherit",
-      env: process.env,
+      env: embeddedUiBuildEnv,
     });
 
     child.on("error", reject);

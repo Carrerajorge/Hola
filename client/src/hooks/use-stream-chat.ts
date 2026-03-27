@@ -201,6 +201,33 @@ function withResponseHealth(
   };
 }
 
+function withStreamPayload(message: Message, payload?: Record<string, any>): Message {
+  if (!payload) return message;
+
+  const nextMessage: Message = { ...message };
+
+  if (Array.isArray(payload.sources) && nextMessage.sources === undefined) {
+    nextMessage.sources = payload.sources;
+  }
+
+  if (
+    Array.isArray(payload.retrievalSteps) &&
+    nextMessage.retrievalSteps === undefined
+  ) {
+    nextMessage.retrievalSteps = payload.retrievalSteps;
+  }
+
+  if (Array.isArray(payload.webSources) && nextMessage.webSources === undefined) {
+    nextMessage.webSources = payload.webSources;
+  }
+
+  if (payload.artifact !== undefined && nextMessage.artifact === undefined) {
+    nextMessage.artifact = payload.artifact;
+  }
+
+  return nextMessage;
+}
+
 type StreamErrorWithResponseHealth = Error & {
   responseHealth?: unknown;
 };
@@ -1007,15 +1034,20 @@ export function useStreamChat(deps: StreamChatDeps) {
                   throw new Error("No se recibio contenido util del servidor.");
                 }
                 const msg = withResponseHealth(
-                  buildFinalMessage?.(fullContent, finalEventData, messageId) ?? {
-                    id: messageId,
-                    role: "assistant" as const,
-                    content: fullContent,
-                    timestamp: new Date(),
-                    requestId: finalEventData.requestId || streamRequestId,
-                    artifact: finalEventData.artifact,
-                    webSources: finalEventData.webSources,
-                  },
+                  withStreamPayload(
+                    buildFinalMessage?.(fullContent, finalEventData, messageId) ?? {
+                      id: messageId,
+                      role: "assistant" as const,
+                      content: fullContent,
+                      timestamp: new Date(),
+                      requestId: finalEventData.requestId || streamRequestId,
+                      artifact: finalEventData.artifact,
+                      webSources: finalEventData.webSources,
+                      sources: finalEventData.sources,
+                      retrievalSteps: finalEventData.retrievalSteps,
+                    },
+                    finalEventData,
+                  ),
                   normalizeResponseHealth(finalEventData.responseHealth),
                 );
 
@@ -1046,13 +1078,20 @@ export function useStreamChat(deps: StreamChatDeps) {
             clearTokenTimeouts();
             flushNow(conversationId);
             const msg = withResponseHealth(
-              buildFinalMessage?.(fullContent, lastEventData, messageId) ?? {
-                id: messageId,
-                role: "assistant" as const,
-                content: fullContent,
-                timestamp: new Date(),
-                requestId: streamRequestId,
-              },
+              withStreamPayload(
+                buildFinalMessage?.(fullContent, lastEventData, messageId) ?? {
+                  id: messageId,
+                  role: "assistant" as const,
+                  content: fullContent,
+                  timestamp: new Date(),
+                  requestId: streamRequestId,
+                  sources: lastEventData?.sources,
+                  retrievalSteps: lastEventData?.retrievalSteps,
+                  webSources: lastEventData?.webSources,
+                  artifact: lastEventData?.artifact,
+                },
+                lastEventData,
+              ),
               normalizeResponseHealth(lastEventData?.responseHealth),
             );
 
