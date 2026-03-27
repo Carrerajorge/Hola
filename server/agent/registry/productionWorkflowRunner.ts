@@ -215,7 +215,27 @@ const TOOL_CIRCUIT_BREAKER_CONFIG: Partial<CircuitBreakerConfig> = {
   halfOpenMaxCalls: 2,
 };
 
+const DEFAULT_WATCHDOG_TIMEOUT_MS = 90000;
 const STEP_TIMEOUT_MS = 30000;
+const TOOL_STEP_TIMEOUT_MS: Record<string, number> = {
+  image_generate: 45000,
+  slides_create: 75000,
+  docx_generate: 45000,
+  xlsx_create: 45000,
+  pdf_generate: 45000,
+};
+const TOOL_OUTPUT_MIME_TYPES: Partial<Record<string, string>> = Object.fromEntries(
+  Object.entries(INTENT_TO_TOOL)
+    .filter(([, toolName]) => toolName !== "text_generate")
+    .map(([intent, toolName]) => [toolName, INTENT_MIME_TYPES[intent as GenerationIntent]])
+);
+const CIRCUIT_BREAKER_ENABLED_TOOLS = new Set([
+  "image_generate",
+  "web_search",
+  "data_analyze",
+  "browse_url",
+  "text_generate",
+]);
 
 export interface WorkflowMetrics {
   totalRuns: number;
@@ -282,7 +302,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
   private activeRuns: Map<string, ProductionRun> = new Map();
   private runEvents: Map<string, RunEvent[]> = new Map();
   private watchdogTimers: Map<string, NodeJS.Timeout> = new Map();
-  private watchdogTimeoutMs: number = 30000;
+  private watchdogTimeoutMs: number = DEFAULT_WATCHDOG_TIMEOUT_MS;
   private stepTimeoutMs: number = STEP_TIMEOUT_MS;
   private toolCircuitBreakers: Map<string, CircuitBreaker> = new Map();
   private metrics: WorkflowMetrics = {
@@ -302,7 +322,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
 
   constructor(config?: { watchdogTimeoutMs?: number; stepTimeoutMs?: number }) {
     super();
-    this.watchdogTimeoutMs = config?.watchdogTimeoutMs || 30000;
+    this.watchdogTimeoutMs = config?.watchdogTimeoutMs || DEFAULT_WATCHDOG_TIMEOUT_MS;
     this.stepTimeoutMs = config?.stepTimeoutMs || STEP_TIMEOUT_MS;
     ensureArtifactsDir();
     this.initializeCircuitBreakers();
@@ -326,6 +346,27 @@ export class ProductionWorkflowRunner extends EventEmitter {
       this.toolCircuitBreakers.set(toolName, cb);
     }
     return this.toolCircuitBreakers.get(toolName)!;
+  }
+
+  private getStepTimeoutMs(toolName: string): number {
+    return TOOL_STEP_TIMEOUT_MS[toolName] || this.stepTimeoutMs;
+  }
+
+  private getExpectedArtifactMimeType(run: ProductionRun): string | null {
+    return run.plan.expectedArtifactType || TOOL_OUTPUT_MIME_TYPES[INTENT_TO_TOOL[run.intent]] || null;
+  }
+
+  private getCompatibleAlternativeTools(run: ProductionRun, alternatives: string[]): string[] {
+    if (!run.plan.requiresArtifact) {
+      return alternatives;
+    }
+
+    const expectedMimeType = this.getExpectedArtifactMimeType(run);
+    if (!expectedMimeType) {
+      return alternatives;
+    }
+
+    return alternatives.filter((toolName) => TOOL_OUTPUT_MIME_TYPES[toolName] === expectedMimeType);
   }
 
   getMetrics(): WorkflowMetrics {
@@ -531,10 +572,19 @@ export class ProductionWorkflowRunner extends EventEmitter {
         }
       }
 
-      if (run.status === "running" && run.plan.requiresArtifact && run.artifacts.length === 0) {
-        run.status = "failed";
-        run.errorType = "EXECUTION_ERROR";
-        run.error = `Required artifact (${run.plan.expectedArtifactType || "unknown"}) was not generated`;
+      if (run.status === "running" && run.plan.requiresArtifact) {
+        const expectedArtifactType = this.getExpectedArtifactMimeType(run) || "unknown";
+        const matchingArtifacts = run.artifacts.filter(
+          (artifact) => artifact.mimeType === expectedArtifactType
+        );
+
+        if (matchingArtifacts.length === 0) {
+          run.status = "failed";
+          run.errorType = "EXECUTION_ERROR";
+          run.error = `Required artifact (${expectedArtifactType}) was not generated`;
+        } else {
+          run.artifacts = matchingArtifacts;
+        }
       }
 
       if (run.status === "running") {
@@ -707,6 +757,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
       replanEvents: [...previousReplanEvents],
       status: "running",
     };
+    const stepTimeoutMs = this.getStepTimeoutMs(step.toolName);
 
     try {
       this.emitEvent(run.runId, "tool_called", {
@@ -718,7 +769,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
 
       const { result, timedOut, error } = await this.executeStepWithTimeout(
         () => this.executeToolReal(step.toolName, step.input, run),
-        this.stepTimeoutMs
+        stepTimeoutMs
       );
 
       if (timedOut) {
@@ -797,9 +848,10 @@ export class ProductionWorkflowRunner extends EventEmitter {
     input: unknown,
     run: ProductionRun
   ): Promise<{ success: boolean; data: unknown; error?: string; artifacts?: ArtifactInfo[] }> {
-    const circuitBreaker = this.getCircuitBreaker(toolName);
+    const shouldUseCircuitBreaker = CIRCUIT_BREAKER_ENABLED_TOOLS.has(toolName);
+    const circuitBreaker = shouldUseCircuitBreaker ? this.getCircuitBreaker(toolName) : null;
 
-    if (!circuitBreaker.canExecute()) {
+    if (circuitBreaker && !circuitBreaker.canExecute()) {
       this.metrics.circuitBreakerTrips++;
       this.metrics.lastUpdated = new Date().toISOString();
 
@@ -819,6 +871,10 @@ export class ProductionWorkflowRunner extends EventEmitter {
     try {
       const result = await this.executeToolInternal(toolName, input, run);
 
+      if (!circuitBreaker) {
+        return result;
+      }
+
       if (result.success) {
         circuitBreaker.recordSuccess();
       } else {
@@ -827,7 +883,9 @@ export class ProductionWorkflowRunner extends EventEmitter {
 
       return result;
     } catch (error: any) {
-      circuitBreaker.recordFailure();
+      if (circuitBreaker) {
+        circuitBreaker.recordFailure();
+      }
       return {
         success: false,
         data: null,
@@ -841,7 +899,41 @@ export class ProductionWorkflowRunner extends EventEmitter {
     input: unknown,
     run: ProductionRun
   ): { success: boolean; data: unknown; error?: string; artifacts?: ArtifactInfo[] } | null {
+    const timestamp = Date.now();
+    const safeTitle = (run.query.slice(0, 30) || "output").replace(/[^a-zA-Z0-9]/g, "_");
     const fallbacks: Record<string, () => { success: boolean; data: unknown; error?: string; artifacts?: ArtifactInfo[] }> = {
+      "image_generate": () => {
+        const filePath = path.join(ARTIFACTS_DIR, `image_cb_fallback_${safeTitle}_${timestamp}.png`);
+        const placeholder = this.createRealPNG(1024, 1024);
+        fs.writeFileSync(filePath, placeholder);
+        const stats = fs.statSync(filePath);
+        const artifactId = crypto.randomUUID();
+
+        const artifact: ArtifactInfo = {
+          artifactId,
+          type: "image",
+          mimeType: "image/png",
+          path: filePath,
+          sizeBytes: stats.size,
+          createdAt: new Date().toISOString(),
+          previewUrl: `/api/artifacts/${path.basename(filePath)}/preview`,
+        };
+
+        return {
+          success: true,
+          data: {
+            imageGenerated: true,
+            filePath,
+            prompt: (input as Record<string, any>)?.prompt || run.query,
+            model: "fallback-local-png",
+            mode: "generate",
+            imageId: artifactId,
+            warning: "Image generator circuit breaker open; using local placeholder image.",
+            imageBase64: placeholder.toString("base64"),
+          },
+          artifacts: [artifact],
+        };
+      },
       "web_search": () => ({
         success: false,
         data: {
@@ -1467,7 +1559,7 @@ IMG: [descripción breve de imagen relevante]
     // Wait for all images (with timeout)
     await Promise.race([
       Promise.allSettled(imagePromises),
-      new Promise(resolve => setTimeout(resolve, 30000)) // 30s timeout
+      new Promise(resolve => setTimeout(resolve, 12000)) // Decorative images should not block PPTX artifact generation
     ]);
 
     console.log(`[PPTX] Generated ${slideImages.size} AI images for presentation`);
@@ -1757,8 +1849,8 @@ IMG: [descripción breve de imagen relevante]
 
   private attemptReplan(run: ProductionRun, failedStep: PlanStep): boolean {
     const alternativeTools: Record<string, string[]> = {
-      "image_generate": ["text_generate", "pdf_generate"],
-      "slides_create": ["docx_generate", "pdf_generate", "text_generate"],
+      "image_generate": ["image_generate"],
+      "slides_create": ["slides_create"],
       "docx_generate": ["pdf_generate", "text_generate"],
       "xlsx_create": ["data_analyze", "text_generate"],
       "pdf_generate": ["docx_generate", "text_generate"],
@@ -1768,7 +1860,10 @@ IMG: [descripción breve de imagen relevante]
     };
 
     const maxReplans = 3;
-    const alternatives = alternativeTools[failedStep.toolName];
+    const alternatives = this.getCompatibleAlternativeTools(
+      run,
+      alternativeTools[failedStep.toolName] || []
+    );
 
     if (!alternatives || alternatives.length === 0 || run.replansCount >= maxReplans) {
       return false;
@@ -1904,7 +1999,7 @@ IMG: [descripción breve de imagen relevante]
     return true;
   }
 
-  async waitForCompletion(runId: string, timeoutMs: number = 35000): Promise<ProductionRun> {
+  async waitForCompletion(runId: string, timeoutMs: number = this.watchdogTimeoutMs + 5000): Promise<ProductionRun> {
     return new Promise((resolve, reject) => {
       let timeoutHandle: NodeJS.Timeout | null = null;
       let resolved = false;
@@ -2030,4 +2125,6 @@ Descargar: ${downloadUrl}`;
   }
 }
 
-export const productionWorkflowRunner = new ProductionWorkflowRunner({ watchdogTimeoutMs: 30000 });
+export const productionWorkflowRunner = new ProductionWorkflowRunner({
+  watchdogTimeoutMs: DEFAULT_WATCHDOG_TIMEOUT_MS,
+});
