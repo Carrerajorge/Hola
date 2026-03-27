@@ -474,7 +474,7 @@ const DiscordVoiceSchema = z
   .strict()
   .optional();
 
-export const DiscordAccountSchema = z
+const DiscordAccountSchemaBase = z
   .object({
     name: z.string().optional(),
     capabilities: z.array(z.string()).optional(),
@@ -621,63 +621,71 @@ export const DiscordAccountSchema = z
       .strict()
       .optional(),
   })
-  .strict()
-  .superRefine((value, ctx) => {
-    normalizeDiscordStreamingConfig(value);
+  .strict();
 
-    const activityText = typeof value.activity === "string" ? value.activity.trim() : "";
-    const hasActivity = Boolean(activityText);
-    const hasActivityType = value.activityType !== undefined;
-    const activityUrl = typeof value.activityUrl === "string" ? value.activityUrl.trim() : "";
-    const hasActivityUrl = Boolean(activityUrl);
+function refineDiscordAccountSchema(
+  value: z.infer<typeof DiscordAccountSchemaBase>,
+  ctx: z.RefinementCtx,
+) {
+  normalizeDiscordStreamingConfig(value);
 
-    if ((hasActivityType || hasActivityUrl) && !hasActivity) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "channels.discord.activity is required when activityType or activityUrl is set",
-        path: ["activity"],
-      });
-    }
+  const activityText = typeof value.activity === "string" ? value.activity.trim() : "";
+  const hasActivity = Boolean(activityText);
+  const hasActivityType = value.activityType !== undefined;
+  const activityUrl = typeof value.activityUrl === "string" ? value.activityUrl.trim() : "";
+  const hasActivityUrl = Boolean(activityUrl);
 
-    if (value.activityType === 1 && !hasActivityUrl) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "channels.discord.activityUrl is required when activityType is 1 (Streaming)",
-        path: ["activityUrl"],
-      });
-    }
+  if ((hasActivityType || hasActivityUrl) && !hasActivity) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "channels.discord.activity is required when activityType or activityUrl is set",
+      path: ["activity"],
+    });
+  }
 
-    if (hasActivityUrl && value.activityType !== 1) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "channels.discord.activityType must be 1 (Streaming) when activityUrl is set",
-        path: ["activityType"],
-      });
-    }
+  if (value.activityType === 1 && !hasActivityUrl) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "channels.discord.activityUrl is required when activityType is 1 (Streaming)",
+      path: ["activityUrl"],
+    });
+  }
 
-    const autoPresenceInterval = value.autoPresence?.intervalMs;
-    const autoPresenceMinUpdate = value.autoPresence?.minUpdateIntervalMs;
-    if (
-      typeof autoPresenceInterval === "number" &&
-      typeof autoPresenceMinUpdate === "number" &&
-      autoPresenceMinUpdate > autoPresenceInterval
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message:
-          "channels.discord.autoPresence.minUpdateIntervalMs must be less than or equal to channels.discord.autoPresence.intervalMs",
-        path: ["autoPresence", "minUpdateIntervalMs"],
-      });
-    }
+  if (hasActivityUrl && value.activityType !== 1) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "channels.discord.activityType must be 1 (Streaming) when activityUrl is set",
+      path: ["activityType"],
+    });
+  }
 
-    // DM allowlist validation is enforced at DiscordConfigSchema so account entries
-    // can inherit top-level allowFrom via runtime shallow merge.
-  });
+  const autoPresenceInterval = value.autoPresence?.intervalMs;
+  const autoPresenceMinUpdate = value.autoPresence?.minUpdateIntervalMs;
+  if (
+    typeof autoPresenceInterval === "number" &&
+    typeof autoPresenceMinUpdate === "number" &&
+    autoPresenceMinUpdate > autoPresenceInterval
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        "channels.discord.autoPresence.minUpdateIntervalMs must be less than or equal to channels.discord.autoPresence.intervalMs",
+      path: ["autoPresence", "minUpdateIntervalMs"],
+    });
+  }
 
-export const DiscordConfigSchema = DiscordAccountSchema.extend({
+  // DM allowlist validation is enforced at DiscordConfigSchema so account entries
+  // can inherit top-level allowFrom via runtime shallow merge.
+}
+
+export const DiscordAccountSchema = DiscordAccountSchemaBase.superRefine(refineDiscordAccountSchema);
+
+export const DiscordConfigSchema = DiscordAccountSchemaBase.extend({
   accounts: z.record(z.string(), DiscordAccountSchema.optional()).optional(),
   defaultAccount: z.string().optional(),
 }).superRefine((value, ctx) => {
+  refineDiscordAccountSchema(value, ctx);
+
   const dmPolicy = value.dmPolicy ?? value.dm?.policy ?? "pairing";
   const allowFrom = value.allowFrom ?? value.dm?.allowFrom;
   const allowFromPath =
@@ -859,7 +867,7 @@ const SlackReplyToModeByChatTypeSchema = z
   })
   .strict();
 
-export const SlackAccountSchema = z
+const SlackAccountSchemaBase = z
   .object({
     name: z.string().optional(),
     mode: z.enum(["socket", "http"]).optional(),
@@ -929,15 +937,18 @@ export const SlackAccountSchema = z
     ackReaction: z.string().optional(),
     typingReaction: z.string().optional(),
   })
-  .strict()
-  .superRefine((value) => {
-    normalizeSlackStreamingConfig(value);
+  .strict();
 
-    // DM allowlist validation is enforced at SlackConfigSchema so account entries
-    // can inherit top-level allowFrom via runtime shallow merge.
-  });
+function refineSlackAccountSchema(value: z.infer<typeof SlackAccountSchemaBase>) {
+  normalizeSlackStreamingConfig(value);
 
-export const SlackConfigSchema = SlackAccountSchema.safeExtend({
+  // DM allowlist validation is enforced at SlackConfigSchema so account entries
+  // can inherit top-level allowFrom via runtime shallow merge.
+}
+
+export const SlackAccountSchema = SlackAccountSchemaBase.superRefine(refineSlackAccountSchema);
+
+export const SlackConfigSchema = SlackAccountSchemaBase.extend({
   mode: z.enum(["socket", "http"]).optional().default("socket"),
   signingSecret: SecretInputSchema.optional().register(sensitive),
   webhookPath: z.string().optional().default("/slack/events"),
@@ -945,6 +956,8 @@ export const SlackConfigSchema = SlackAccountSchema.safeExtend({
   accounts: z.record(z.string(), SlackAccountSchema.optional()).optional(),
   defaultAccount: z.string().optional(),
 }).superRefine((value, ctx) => {
+  refineSlackAccountSchema(value);
+
   const dmPolicy = value.dmPolicy ?? value.dm?.policy ?? "pairing";
   const allowFrom = value.allowFrom ?? value.dm?.allowFrom;
   const allowFromPath =
