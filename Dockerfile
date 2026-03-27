@@ -1,9 +1,13 @@
 # ILIAGPT Dockerfile - Optimized for lower disk usage in GitHub/VPS builds Multi-stage build for production
 
+# Use Docker Official Images via Amazon ECR Public to reduce Docker Hub
+# throttling/auth failures in CI.
+ARG NODE_BASE_IMAGE=public.ecr.aws/docker/library/node:22-slim
+
 # ============================================
 # Stage 1: Build (dependencies + compile)
 # ============================================
-FROM node:22-slim AS builder
+FROM ${NODE_BASE_IMAGE} AS builder
 WORKDIR /app
 
 # Build-time tooling for native modules
@@ -94,21 +98,11 @@ RUN node -e "console.log(require.resolve('ajv/package.json'))"
 RUN node -e "console.log(require.resolve('ajv/package.json'))"
 # ============================================
 # Stage 2: Sandbox Runner
+# Reuse the already-built builder stage so this target does not need a second
+# Node base-image resolution during CI.
 # ============================================
-FROM node:22-slim AS sandbox-runner
+FROM builder AS sandbox-runner
 WORKDIR /app
-
-# Bake APP_VERSION into the image so runtime can report the deployed commit SHA
-# even if docker-compose environment expansion is missing/misconfigured.
-ARG APP_VERSION=dev
-ARG APP_SHA=dev
-ARG IMAGE_TAG=dev
-ARG BUILD_TIMESTAMP=unknown
-ENV APP_VERSION=$APP_VERSION
-ENV APP_SHA=$APP_SHA
-ENV IMAGE_TAG=$IMAGE_TAG
-ENV BUILD_TIMESTAMP=$BUILD_TIMESTAMP
-ENV RELEASE_MANIFEST_PATH=/app/dist/release-manifest.json
 
 # docker CLI (runner executes docker-run jobs via /var/run/docker.sock)
 RUN apt-get update && apt-get install -y --no-install-recommends bash ca-certificates curl && apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
@@ -117,12 +111,8 @@ RUN curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${
 
 ENV NODE_ENV=production
 ENV SANDBOX_RUNNER_PORT=8080
-
-# Runtime deps + built artifacts
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/server/openclaw ./server/openclaw
+ENV RELEASE_MANIFEST_PATH=/app/dist/release-manifest.json
+ENV CI=
 
 EXPOSE 8080
 
@@ -131,7 +121,7 @@ CMD ["node", "dist/sandbox-runner.cjs"]
 # ============================================
 # Stage 3: Production Runner
 # ============================================
-FROM node:22-slim AS runner
+FROM ${NODE_BASE_IMAGE} AS runner
 WORKDIR /app
 
 # Bake APP_VERSION into the image (source of truth for /api/health version).
