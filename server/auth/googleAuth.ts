@@ -81,7 +81,7 @@ function normalizeLoginHint(value: unknown): string | null {
 }
 
 // Store states temporarily (in production, use Redis)
-const stateStore = new Map<string, { createdAt: number; returnUrl: string }>();
+const stateStore = new Map<string, { createdAt: number; returnUrl: string; providerHint?: string }>();
 
 // Cleanup old states every 5 minutes
 setInterval(() => {
@@ -108,7 +108,8 @@ router.get("/google", (req: Request, res: Response) => {
 
     const state = generateState();
     const returnUrl = (req.query.returnUrl as string) || "/";
-    stateStore.set(state, { createdAt: Date.now(), returnUrl });
+    const providerHint = typeof req.query.provider_hint === "string" ? req.query.provider_hint.trim() : undefined;
+    stateStore.set(state, { createdAt: Date.now(), returnUrl, providerHint });
 
     // Use canonical redirect URI to match Google Cloud Console configuration
     const redirectUri = getCanonicalRedirectUri(req, "/api/auth/google/callback");
@@ -293,7 +294,17 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                 }
 
                 console.log("[Google Auth] Login successful for:", email);
-                res.redirect(stateData.returnUrl || "/?auth=success");
+                // If a provider_hint was set during login, redirect to a post-login
+                // page that automatically triggers the corresponding OAuth flow.
+                // The home page listens for ?provider=gemini|openai to auto-open
+                // the provider connection dialog (see home.tsx useEffect).
+                if (stateData.providerHint === "gemini") {
+                    res.redirect("/?auth=success&provider=gemini");
+                } else if (stateData.providerHint === "openai") {
+                    res.redirect("/?auth=success&provider=openai");
+                } else {
+                    res.redirect(stateData.returnUrl || "/?auth=success");
+                }
             });
         });
 
