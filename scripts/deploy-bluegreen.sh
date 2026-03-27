@@ -1450,8 +1450,10 @@ ensure_postgres_app_auth() {
     sleep 2
   done
 
-  if docker exec -e PGPASSWORD="${verify_password}" "${db_container}" \
-    psql -h 127.0.0.1 -U "${verify_user}" -d "${verify_db}" -tAc "SELECT 1" >/dev/null 2>&1; then
+  if timeout 20 docker run --rm --pull never --network hola-net \
+    -e PGPASSWORD="${verify_password}" \
+    pgvector/pgvector:pg15 \
+    psql -h hola-postgres -U "${verify_user}" -d "${verify_db}" -tAc "SELECT 1" >/dev/null 2>&1; then
     logok "Postgres app credentials verified."
     return 0
   fi
@@ -1487,8 +1489,10 @@ SQL
     return 1
   fi
 
-  if docker exec -e PGPASSWORD="${verify_password}" "${db_container}" \
-    psql -h 127.0.0.1 -U "${verify_user}" -d "${verify_db}" -tAc "SELECT 1" >/dev/null 2>&1; then
+  if timeout 20 docker run --rm --pull never --network hola-net \
+    -e PGPASSWORD="${verify_password}" \
+    pgvector/pgvector:pg15 \
+    psql -h hola-postgres -U "${verify_user}" -d "${verify_db}" -tAc "SELECT 1" >/dev/null 2>&1; then
     logok "Postgres app credentials synchronized."
     return 0
   fi
