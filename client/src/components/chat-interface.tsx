@@ -5,6 +5,7 @@ import React, {
   useCallback,
   useMemo,
 } from "react";
+import { flushSync } from "react-dom";
 import { SkeletonChatMessages } from "@/components/skeletons";
 import { useDraft } from "@/hooks/use-draft";
 import { useStreamingTransition } from "@/hooks/use-streaming-transition";
@@ -2010,7 +2011,6 @@ export function ChatInterface({
     | null
   >(null);
   const speechRecognitionRef = useRef<any>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [userHasScrolledUp, setUserHasScrolledUp] = useState(false);
@@ -2021,17 +2021,19 @@ export function ChatInterface({
     (force = false, instant = false) => {
       if (userHasScrolledUp && !force) return;
 
+      const scroller = messagesContainerRef.current;
+      if (!scroller) return;
+
       if (instant) {
-        // Instant scroll — no animation delay (used when user sends a message)
-        messagesEndRef.current?.scrollIntoView({
+        scroller.scrollTo({
+          top: scroller.scrollHeight,
           behavior: "auto",
-          block: "end",
         });
       } else {
         requestAnimationFrame(() => {
-          messagesEndRef.current?.scrollIntoView({
+          scroller.scrollTo({
+            top: scroller.scrollHeight,
             behavior: "smooth",
-            block: "end",
           });
         });
       }
@@ -2039,31 +2041,13 @@ export function ChatInterface({
     [userHasScrolledUp],
   );
 
-  const isNearBottom = useCallback(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return true;
-    const threshold = 150;
-    return (
-      container.scrollHeight - container.scrollTop - container.clientHeight <
-      threshold
-    );
+  const handleAtBottomChange = useCallback((atBottom: boolean) => {
+    setShowScrollButton(!atBottom);
+    setUserHasScrolledUp(!atBottom);
   }, []);
 
-  const handleScroll = useCallback(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
-
-    const { scrollTop, scrollHeight, clientHeight } = container;
-    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-
-    const nearBottom = distanceFromBottom < 150;
-    setShowScrollButton(!nearBottom);
-
-    if (distanceFromBottom > 200) {
-      setUserHasScrolledUp(true);
-    } else if (distanceFromBottom < 50) {
-      setUserHasScrolledUp(false);
-    }
+  const handleMessagesScrollerRef = useCallback((element: HTMLElement | null) => {
+    messagesContainerRef.current = element;
   }, []);
 
   useEffect(() => {
@@ -7896,25 +7880,6 @@ export function ChatInterface({
         (f: any) => f?.status === "error",
       );
 
-      // Reset UI state immediately — save files for restoration on error
-      let savedMainFiles = [...uploadedFilesRef.current];
-      setInput("");
-      if (chatId) clearDraft(chatId);
-      // If uploads are still in flight, don't clear the composer file list yet or we lose upload progress updates.
-      // We'll clear once uploads settle (after optimistic message is already on screen).
-      if (!hadPendingUploadsAtSubmit) {
-        // Clear all files from composer immediately after send to avoid stuck attachments.
-        setUploadedFiles([]);
-        if (failedUploadsAtSubmit.length > 0) {
-          toast({
-            title: "Archivo no adjuntado",
-            description: `${failedUploadsAtSubmit.length} archivo(s) fallaron al subir y no se incluyeron en el mensaje.`,
-            variant: "destructive",
-            duration: 4500,
-          });
-        }
-      }
-
       // Construct the minimal optimistic user message first so the UI updates
       // before we do any heavier attachment/integrity work.
       const userMsg: Message = {
@@ -7930,12 +7895,36 @@ export function ChatInterface({
         deliveryError: undefined,
       } as any;
 
-      // Apply Optimistic Update IMMEDIATELY
+      // Reset UI and commit the optimistic bubble in the same synchronous
+      // render pass so the send interaction feels native.
+      let savedMainFiles = [...uploadedFilesRef.current];
+      if (chatId) clearDraft(chatId);
+      const shouldClearComposerFilesImmediately = !hadPendingUploadsAtSubmit;
+      const commitOptimisticUi = () => {
+        setContextNotice(null);
+        setInput("");
+        if (shouldClearComposerFilesImmediately) {
+          setUploadedFiles([]);
+        }
+        setOptimisticMessages((prev: Message[]) => [...prev, userMsg]);
+      };
+
       const optimisticStart =
         import.meta.env.DEV && typeof performance !== "undefined"
           ? performance.now()
           : null;
-      setOptimisticMessages((prev: Message[]) => [...prev, userMsg]);
+      flushSync(commitOptimisticUi);
+      if (
+        shouldClearComposerFilesImmediately &&
+        failedUploadsAtSubmit.length > 0
+      ) {
+        toast({
+          title: "Archivo no adjuntado",
+          description: `${failedUploadsAtSubmit.length} archivo(s) fallaron al subir y no se incluyeron en el mensaje.`,
+          variant: "destructive",
+          duration: 4500,
+        });
+      }
       if (optimisticStart !== null) {
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
@@ -9842,6 +9831,8 @@ IMPORTANTE:
   };
 
   const hasMessages = displayMessages.length > 0;
+  const shouldShowConversationSkeleton =
+    isConversationStateLoading && !hasMessages;
 
   return (
     <>
@@ -9940,7 +9931,7 @@ IMPORTANTE:
                 )}
 
                 {/* Messages Area - Compact for document mode */}
-                {isConversationStateLoading ? (
+                {shouldShowConversationSkeleton ? (
                   <div
                     className={cn(
                       "flex-1 overflow-y-auto space-y-3 overscroll-contain pb-[var(--composer-height,120px)]",
@@ -9953,7 +9944,7 @@ IMPORTANTE:
                   hasMessages && (
                     <div
                       className={cn(
-                        "flex-1 overflow-y-auto space-y-3 overscroll-contain pb-[var(--composer-height,120px)]",
+                        "flex-1 min-h-0 overflow-hidden space-y-3 overscroll-contain pb-[var(--composer-height,120px)]",
                         activeDocEditor
                           ? "p-3"
                           : "p-4 sm:p-6 md:p-10 space-y-6",
@@ -10010,6 +10001,8 @@ IMPORTANTE:
                         onRunComplete={handleRunComplete}
                         uiPhase={uiPhase}
                         aiProcessSteps={aiProcessSteps}
+                        onAtBottomChange={handleAtBottomChange}
+                        onScrollerRef={handleMessagesScrollerRef}
                       />
 
                       {/* Agent Observer - Show when agent is running */}
@@ -10410,18 +10403,14 @@ IMPORTANTE:
         ) : (
           <div className="flex-1 flex flex-col min-w-0 min-h-0 h-full overflow-hidden">
             {/* Content Area - conditional based on whether we have messages */}
-            {isConversationStateLoading ? (
+            {shouldShowConversationSkeleton ? (
               <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6">
                 <SkeletonChatMessages count={3} />
               </div>
             ) : hasMessages ? (
               <>
                 {/* Scrollable messages container */}
-                <div
-                  ref={messagesContainerRef}
-                  onScroll={handleScroll}
-                  className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6"
-                >
+                <div className="flex-1 min-h-0 overflow-hidden p-4 sm:p-6 md:p-10 space-y-6">
                   <ChatMessageList
                     messages={displayMessages}
                     onUserRetrySend={handleUserRetrySend}
@@ -10476,8 +10465,9 @@ IMPORTANTE:
                     }}
                     uiPhase={uiPhase}
                     aiProcessSteps={aiProcessSteps}
+                    onAtBottomChange={handleAtBottomChange}
+                    onScrollerRef={handleMessagesScrollerRef}
                   />
-                  <div ref={messagesEndRef} />
                 </div>
 
                 {/* Scroll to bottom button */}

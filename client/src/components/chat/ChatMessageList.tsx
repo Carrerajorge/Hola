@@ -1,5 +1,5 @@
 
-import React, { useRef, useMemo, useEffect, useCallback } from "react";
+import React, { useRef, useMemo, useEffect, useLayoutEffect, useCallback } from "react";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import { motion, AnimatePresence } from "framer-motion";
 import { Message } from "@/hooks/use-chats";
@@ -85,6 +85,8 @@ export interface ChatMessageListProps {
     onUserRetrySend?: (message: Message) => void;
     onToolConfirm?: (messageId: string, toolName: string, stepIndex: number) => void;
     onToolDeny?: (messageId: string, toolName: string, stepIndex: number) => void;
+    onAtBottomChange?: (atBottom: boolean) => void;
+    onScrollerRef?: (element: HTMLElement | null) => void;
 }
 
 export function ChatMessageList({
@@ -132,9 +134,11 @@ export function ChatMessageList({
     streamingMsgId,
     onUserRetrySend,
     onToolConfirm,
-    onToolDeny
+    onToolDeny,
+    onAtBottomChange,
+    onScrollerRef
 }: ChatMessageListProps) {
-    const virtuosoRef = useRef<VirtuosoHandle>(null);
+    const virtuosoRef = useRef<VirtuosoHandle | null>(null);
 
     // Effective streaming message ID: use pre-generated ID if available (for zero-flicker),
     // otherwise fall back to the fixed "__streaming__" constant.
@@ -246,6 +250,29 @@ export function ChatMessageList({
         }
         return visibleMessages;
     }, [visibleMessages, streamingContent, variant, effectiveStreamingId]);
+
+    const prevMergedCountRef = useRef(mergedMessages.length);
+    useLayoutEffect(() => {
+        const previousCount = prevMergedCountRef.current;
+        prevMergedCountRef.current = mergedMessages.length;
+
+        if (mergedMessages.length <= previousCount) return;
+
+        const lastMessage = mergedMessages[mergedMessages.length - 1];
+        if (!lastMessage || lastMessage.role !== "user") return;
+
+        virtuosoRef.current?.scrollToIndex({
+            index: "LAST",
+            align: "end",
+            behavior: "auto",
+        });
+
+        if (typeof requestAnimationFrame === "function") {
+            requestAnimationFrame(() => {
+                virtuosoRef.current?.autoscrollToBottom();
+            });
+        }
+    }, [mergedMessages]);
 
     // Virtuoso occasionally misses the structural insert of synthetic agent
     // messages during live runs. Remount only when agent bubbles appear/disappear.
@@ -415,7 +442,13 @@ export function ChatMessageList({
                 computeItemKey={computeItemKey}
                 components={{ Footer: ListFooter }}
                 initialTopMostItemIndex={mergedMessages.length - 1}
-                followOutput="auto"
+                defaultItemHeight={88}
+                atBottomThreshold={64}
+                atBottomStateChange={onAtBottomChange}
+                scrollerRef={(ref) => {
+                    onScrollerRef?.(ref instanceof HTMLElement ? ref : null);
+                }}
+                followOutput={(isAtBottom) => (isAtBottom ? "auto" : false)}
                 alignToBottom
                 className="h-full w-full scrollbar-thin scrollbar-thumb-muted-foreground/20 hover:scrollbar-thumb-muted-foreground/40"
                 itemContent={renderItem}
