@@ -189,7 +189,7 @@ jobs:
              cd ${{ env.DEPLOY_PATH }} && \
              IMAGE_TAG='${{ needs.build_images.outputs.image_tag }}' \
              APP_VERSION='${{ needs.validate.outputs.short_sha }}' \
-             bash scripts/deploy-bluegreen.sh"
+             bash -s" < scripts/deploy-bluegreen.sh
 
       - name: Verify production
         run: |
