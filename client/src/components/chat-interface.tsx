@@ -223,6 +223,7 @@ import {
   FileCategory,
 } from "@/lib/fileTypeTheme";
 import {
+  filterImportableUrls,
   dataImageUrlToFile,
   extractBareUrlsFromText,
   extractFilesFromDataTransfer,
@@ -5740,7 +5741,9 @@ export function ChatInterface({
       return;
     }
 
-    // Smart paste: if the clipboard content is one or more bare URLs, import them as attachments.
+    // Smart paste: only auto-import bare URLs when they look like direct files.
+    // Regular web page links should remain as text so prompts like "resume este link"
+    // paste naturally into the composer.
     const uriList = clipboard.getData("text/uri-list");
     const html = clipboard.getData("text/html");
     const text = clipboard.getData("text/plain");
@@ -5775,9 +5778,10 @@ export function ChatInterface({
     const urlsFromBareText = extractBareUrlsFromText(text);
 
     const urls = uniq([...urlsFromUriList, ...urlsFromBareText]);
-    if (urls.length > 0) {
+    const importableUrls = filterImportableUrls(urls);
+    if (urls.length > 0 && importableUrls.length === urls.length) {
       e.preventDefault();
-      importUrlsForUpload(urls);
+      importUrlsForUpload(importableUrls);
       return;
     }
 

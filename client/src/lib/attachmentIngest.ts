@@ -90,6 +90,23 @@ export function extractBareUrlsFromText(text: string): string[] {
   return uniq(urls);
 }
 
+export function filterImportableUrls(urls: string[]): string[] {
+  return uniq(
+    urls
+      .map((url) => normalizeHttpUrl(url))
+      .filter((url): url is string => !!url)
+      .filter((url) => {
+        if (!looksLikeDirectFileUrl(url)) return false;
+        try {
+          const pathname = new URL(url).pathname || "";
+          return !/\.html?$/i.test(pathname);
+        } catch {
+          return false;
+        }
+      }),
+  );
+}
+
 export function extractImageUrlsFromHtml(html: string): string[] {
   if (!html) return [];
   try {
