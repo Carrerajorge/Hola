@@ -145,19 +145,20 @@ async function buildServer(appVersion: string) {
         setup(build) {
           build.onResolve({ filter: /^[^./]|^\.[^./]|^\.\.[^/]/ }, (args) => {
             if (args.path.startsWith("@shared")) return;
-            if (args.path.startsWith("@hola")) return;
-            // The @hola/openclaw package uses self-referential bare imports
-            // like "openclaw/plugin-sdk/...". Rewrite to the scoped name and
-            // resolve via require.resolve so esbuild can bundle them.
+            // Keep embedded OpenClaw on its own dependency/runtime boundary.
+            // Bundling @hola/openclaw into the app server pulls OpenClaw's Zod 4-era
+            // config/runtime code into Hola's root Zod 3 bundle, which causes
+            // startup crashes like:
+            //   - z.registry is not a function
+            //   - superRefine(...).strict is not a function
+            // By externalizing both scoped and self-referential OpenClaw imports,
+            // Node resolves them from server/openclaw at runtime using that package's
+            // own dependency tree instead of merging runtimes in esbuild output.
+            if (args.path === "@hola/openclaw" || args.path.startsWith("@hola/openclaw/")) {
+              return { path: args.path, external: true };
+            }
             if (args.path === "openclaw" || args.path.startsWith("openclaw/")) {
-              const scoped = args.path.replace(/^openclaw/, "@hola/openclaw");
-              try {
-                return { path: require.resolve(scoped, { paths: [args.resolveDir || process.cwd()] }) };
-              } catch {
-                // If dist files don't exist yet (local dev), mark as external.
-                // In Docker, pnpm build:docker creates them before npm run build.
-                return { path: args.path, external: true };
-              }
+              return { path: args.path, external: true };
             }
             return { path: args.path, external: true };
           });
