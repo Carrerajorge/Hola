@@ -1130,6 +1130,46 @@ class LLMGateway {
     throw new Error("Max retries exceeded");
   }
 
+  private async recoverEmptyStreamResponse(
+    provider: LLMProvider,
+    messages: ChatCompletionMessageParam[],
+    options: LLMRequestOptions,
+    requestId: string,
+  ): Promise<LLMResponse | null> {
+    const recoveryTimeoutMs = Math.min(
+      options.timeout ?? DEFAULT_TIMEOUT_MS,
+      DEFAULT_TIMEOUT_MS,
+    );
+
+    try {
+      const recovered = await this.executeOnProviderNoBreaker(
+        provider,
+        messages,
+        {
+          ...options,
+          requestId,
+          timeout: recoveryTimeoutMs,
+        },
+        Date.now(),
+      );
+
+      if (!recovered.content?.trim()) {
+        return null;
+      }
+
+      this.metrics.streamRecoveries++;
+      console.warn(
+        `[LLMGateway] ${requestId} recovered empty ${provider} stream via non-stream completion`,
+      );
+      return recovered;
+    } catch (error: any) {
+      console.warn(
+        `[LLMGateway] ${requestId} non-stream recovery after empty ${provider} stream failed: ${error?.message || error}`,
+      );
+      return null;
+    }
+  }
+
   private getOpenAICompatibleClient(provider: "xai" | "openrouter" | "openai" | "deepseek"): OpenAI {
     if (provider === "xai") {
       if (!this.xaiClient) {
@@ -1718,6 +1758,54 @@ class LLMGateway {
           // budget is too low or the response is otherwise suppressed). Treat that as a failure so
           // fallback providers can attempt recovery.
           if (chunk.done && accumulatedContent.trim().length === 0) {
+            const recovered = await this.recoverEmptyStreamResponse(
+              provider,
+              truncatedMessages,
+              options,
+              requestId,
+            );
+
+            if (recovered?.content?.trim()) {
+              accumulatedContent = recovered.content;
+
+              const recoveredChunk: StreamChunk = {
+                content: recovered.content,
+                sequenceId: sequenceId++,
+                done: false,
+                requestId,
+                provider,
+                checkpoint: {
+                  requestId,
+                  sequenceId,
+                  accumulatedContent,
+                  timestamp: Date.now(),
+                },
+              };
+
+              yield recoveredChunk;
+
+              const recoveredDoneChunk: StreamChunk = {
+                content: "",
+                sequenceId: sequenceId++,
+                done: true,
+                requestId,
+                provider,
+                checkpoint: {
+                  requestId,
+                  sequenceId,
+                  accumulatedContent,
+                  timestamp: Date.now(),
+                },
+              };
+
+              yield recoveredDoneChunk;
+
+              this.streamCheckpoints.delete(requestId);
+              clearRuntimeProviderSuppression(provider);
+              getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG).recordSuccess();
+              return;
+            }
+
             throw new Error(`Empty streamed response from provider ${provider}`);
           }
 

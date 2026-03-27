@@ -11166,6 +11166,15 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
         }
       } catch (error: any) {
         console.error(`[SSE] Stream error ${requestId}:`, error);
+        const rawErrorMessage =
+          typeof error?.message === "string" && error.message.trim()
+            ? error.message.trim()
+            : "Stream error";
+        const userFacingErrorMessage = /Empty streamed response from provider/i.test(
+          rawErrorMessage,
+        )
+          ? "El modelo no devolvio texto util en este intento. Reintenta y, si vuelve a ocurrir, cambia de modelo."
+          : rawErrorMessage;
 
         // Mark run as failed if we claimed one
         if (claimedRun) {
@@ -11173,7 +11182,7 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
             await storage.updateChatRunStatus(
               claimedRun.id,
               "failed",
-              error.message,
+              userFacingErrorMessage,
             );
             runFinalized = true;
           } catch (updateError) {
@@ -11185,7 +11194,7 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
         const errorTimings = reportTimings("error");
         if (!isConnectionClosed) {
           writeSse(res, "error", {
-            error: error.message,
+            error: userFacingErrorMessage,
             requestId,
             runId: errorRunId,
             traceId: requestId,
@@ -11209,7 +11218,13 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
           }
 
           emitTraceEvent(errorRunId, "error", {
-            error: { message: error.message, code: error.code || "UNKNOWN" },
+            error: {
+              message: userFacingErrorMessage,
+              code: error.code || "UNKNOWN",
+              ...(rawErrorMessage !== userFacingErrorMessage
+                ? { rawMessage: rawErrorMessage }
+                : {}),
+            },
           }).catch(() => {});
         }
       } finally {
