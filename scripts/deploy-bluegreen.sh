@@ -1763,7 +1763,8 @@ echo ""
 
 # ── Step 3: Verify current slot is actually serving (pre-deploy sanity) ──
 log "[3/14] Pre-deploy sanity: checking current ${ACTIVE_SLOT} slot..."
-CURRENT_HEALTHY="$(curl -sf -o /dev/null -w '%{http_code}' "http://127.0.0.1:${OLD_PORT}/api/health/ready" 2>/dev/null || echo "000")"
+CURRENT_HEALTHY="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${OLD_PORT}/api/health/ready" 2>/dev/null || true)"
+CURRENT_HEALTHY="${CURRENT_HEALTHY:-000}"
 if [ "${CURRENT_HEALTHY}" = "200" ]; then
   logok "Current ${ACTIVE_SLOT} slot is healthy on port ${OLD_PORT}."
 else
@@ -1830,7 +1831,8 @@ echo ""
 log "[7/15] Waiting for ${NEW_SLOT} slot health check (max $(( HEALTHCHECK_RETRIES * HEALTHCHECK_INTERVAL ))s)..."
 HEALTHY=false
 for i in $(seq 1 ${HEALTHCHECK_RETRIES}); do
-  HTTP_CODE="$(curl -sf -o /dev/null -w '%{http_code}' "http://127.0.0.1:${NEW_PORT}/api/health/ready" 2>/dev/null || echo "000")"
+  HTTP_CODE="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${NEW_PORT}/api/health/ready" 2>/dev/null || true)"
+  HTTP_CODE="${HTTP_CODE:-000}"
   if [ "${HTTP_CODE}" = "200" ]; then
     logok "${NEW_SLOT} slot is healthy! ($(elapsed))"
     HEALTHY=true
@@ -1920,7 +1922,8 @@ if [ "${SKIP_CANARY:-false}" != "true" ]; then
 
   CANARY_OK=true
   for endpoint in "${CANARY_ENDPOINTS[@]}"; do
-    CANARY_CODE="$(curl -sf -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1:${NEW_PORT}${endpoint}" 2>/dev/null || echo "000")"
+    CANARY_CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1:${NEW_PORT}${endpoint}" 2>/dev/null || true)"
+    CANARY_CODE="${CANARY_CODE:-000}"
     if [ "${CANARY_CODE}" = "200" ]; then
       logok "${endpoint} → HTTP ${CANARY_CODE}"
     else
@@ -2106,8 +2109,10 @@ PUBLIC_ROOT_URL="${PUBLIC_ROOT_URL:-${PUBLIC_BASE_URL}/}"
 log "[12/15] Verifying public traffic flows through Nginx (${PUBLIC_BASE_URL})..."
 NGINX_OK=false
 for i in $(seq 1 15); do
-  READY_CODE="$(curl -sf -o /dev/null -w '%{http_code}' --max-time 10 "${PUBLIC_READY_URL}" 2>/dev/null || echo "000")"
-  ROOT_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "${PUBLIC_ROOT_URL}" 2>/dev/null || echo "000")"
+  READY_CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "${PUBLIC_READY_URL}" 2>/dev/null || true)"
+  READY_CODE="${READY_CODE:-000}"
+  ROOT_CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "${PUBLIC_ROOT_URL}" 2>/dev/null || true)"
+  ROOT_CODE="${ROOT_CODE:-000}"
   if [ "${READY_CODE}" = "200" ] && [ "${ROOT_CODE}" -lt 500 ]; then
     logok "Public Nginx routing confirmed (${PUBLIC_READY_URL} → ${READY_CODE}, root → ${ROOT_CODE})."
     NGINX_OK=true
