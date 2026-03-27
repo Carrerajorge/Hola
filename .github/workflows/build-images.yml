@@ -163,6 +163,7 @@ jobs:
 
       - name: Pre-pull BuildKit image with retry
         if: steps.latest_main_guard.outputs.should_deploy == 'true'
+        continue-on-error: true
         run: |
           bash ./scripts/ci-retry.sh \
             --label "BuildKit image pull" \
