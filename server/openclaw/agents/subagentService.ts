@@ -4,6 +4,7 @@ import {
   DEFAULT_AGENT_EXECUTION_PROFILE,
   type AgentExecutionProfile,
 } from "@shared/agentExecutionProfile";
+import type { WorkspaceContext } from "@shared/workspaceContext";
 import { resolveAgentExecutionProfileFromHints } from "../../agent/executionProfiles";
 
 export type SubagentRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -26,6 +27,7 @@ export interface SubagentRunRecord {
   planHint: string[];
   parentRunId?: string;
   executionProfile: AgentExecutionProfile;
+  workspaceContext?: WorkspaceContext;
   status: SubagentRunStatus;
   createdAt: number;
   startedAt?: number;
@@ -40,6 +42,7 @@ type SpawnSubagentParams = {
   planHint?: string[];
   parentRunId?: string;
   executionProfile?: AgentExecutionProfile;
+  workspaceContext?: WorkspaceContext;
 };
 
 type ListRunsParams = {
@@ -85,6 +88,7 @@ class OpenClawSubagentService extends EventEmitter {
       planHint: params.planHint || [],
       parentRunId: params.parentRunId,
       executionProfile,
+      workspaceContext: params.workspaceContext,
       status: "queued",
       createdAt: Date.now(),
     };
@@ -139,7 +143,10 @@ class OpenClawSubagentService extends EventEmitter {
 
     try {
       const { AgentRunner } = await import("../../services/agentRunner");
-      const activeRunner = new AgentRunner({ executionProfile: run.executionProfile });
+      const activeRunner = new AgentRunner({
+        executionProfile: run.executionProfile,
+        workspaceContext: run.workspaceContext,
+      });
       runner = activeRunner;
       this.runners.set(runId, activeRunner);
       run.status = "running";

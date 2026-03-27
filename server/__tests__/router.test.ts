@@ -1,3 +1,6 @@
+import fs from "fs/promises";
+import os from "os";
+import path from "path";
 import { describe, it, expect, beforeAll, vi, beforeEach, afterEach } from "vitest";
 import { Router, decideRoute, checkDynamicEscalation } from "../services/router";
 
@@ -251,6 +254,39 @@ describe("AgentRunner - Guardrails", () => {
     const agent = new AgentRunner({ maxConsecutiveFailures: 3 });
     
     expect(agent["config"].maxConsecutiveFailures).toBe(3);
+  });
+
+  it("should scope sandbox tools to the configured workspace context", async () => {
+    const { AgentRunner } = await import("../services/agentRunner");
+    const repositoryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agent-runner-workspace-"));
+    const selectedFolder = path.join(repositoryRoot, "server", "openclaw");
+
+    try {
+      await fs.mkdir(selectedFolder, { recursive: true });
+      await fs.writeFile(path.join(selectedFolder, "README.md"), "# workspace context\n", "utf-8");
+      const realSelectedFolder = await fs.realpath(selectedFolder);
+
+      const agent = new AgentRunner({
+        enableLogging: false,
+        workspaceContext: {
+          repositoryPath: repositoryRoot,
+          selectedFolder: "server/openclaw",
+          branch: "main",
+        },
+      });
+
+      expect(agent["workspaceDir"]).toBe(selectedFolder);
+
+      const listResult = await agent["toolRegistry"].execute("file", { operation: "list", path: "." });
+      expect(listResult.success).toBe(true);
+      expect(listResult.data.items.map((item: { name: string }) => item.name)).toContain("README.md");
+
+      const shellResult = await agent["toolRegistry"].execute("shell", { command: "pwd" });
+      expect(shellResult.success).toBe(true);
+      expect(String(shellResult.data.stdout).trim()).toBe(realSelectedFolder);
+    } finally {
+      await fs.rm(repositoryRoot, { recursive: true, force: true });
+    }
   });
 });
 

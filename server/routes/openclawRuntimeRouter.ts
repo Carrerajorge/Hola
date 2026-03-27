@@ -5,6 +5,7 @@ import { getOpenClawConfig } from "../openclaw/config";
 import { skillRegistry } from "../openclaw/skills/skillRegistry";
 import { initSkills } from "../openclaw/skills/skillLoader";
 import { AgentExecutionProfileSchema } from "@shared/agentExecutionProfile";
+import { WorkspaceContextSchema } from "@shared/workspaceContext";
 
 const objectiveSchema = z.object({
   objective: z.string().trim().min(1, "objective is required"),
@@ -32,11 +33,13 @@ const spawnSubagentSchema = z.object({
   planHint: z.array(z.string().trim().min(1)).optional(),
   parentRunId: z.string().trim().optional(),
   executionProfile: AgentExecutionProfileSchema.optional(),
+  workspaceContext: WorkspaceContextSchema.optional(),
 });
 
 const orchestratorFlowSchema = objectiveSchema.extend({
   spawnSubagents: z.boolean().optional().default(true),
   maxSubagents: z.coerce.number().int().min(1).max(10).optional().default(3),
+  workspaceContext: WorkspaceContextSchema.optional(),
 });
 
 function normalizeComplexity(objective: string, complexity?: number): number {
@@ -86,6 +89,7 @@ type OrchestrationEngine = typeof import("../services/orchestrationEngine").orch
 let ragServicePromise: Promise<RAGServiceInstance> | null = null;
 let subagentServicePromise: Promise<OpenClawSubagentService> | null = null;
 let orchestrationEnginePromise: Promise<OrchestrationEngine> | null = null;
+let runtimeSkillsInitPromise: Promise<number> | null = null;
 
 async function getRagService(): Promise<RAGServiceInstance> {
   if (!ragServicePromise) {
@@ -112,22 +116,71 @@ async function getOrchestrationEngine(): Promise<OrchestrationEngine> {
   return orchestrationEnginePromise;
 }
 
+async function ensureRuntimeSkillsLoaded(forceReload = false): Promise<number> {
+  const config = getOpenClawConfig();
+  if (!config.skills.enabled) {
+    skillRegistry.clear();
+    return 0;
+  }
+
+  if (!forceReload && skillRegistry.list().length > 0) {
+    return skillRegistry.list().length;
+  }
+
+  if (!runtimeSkillsInitPromise) {
+    runtimeSkillsInitPromise = initSkills(config)
+      .then(() => skillRegistry.list().length)
+      .finally(() => {
+        runtimeSkillsInitPromise = null;
+      });
+  }
+
+  return await runtimeSkillsInitPromise;
+}
+
 export function createOpenClawRuntimeRouter(): Router {
   const router = Router();
 
-  router.get("/health", (_req, res) => {
+  router.get("/health", async (_req, res) => {
+    const config = getOpenClawConfig();
+    let skillsLoaded = skillRegistry.list().length;
+
+    if (config.skills.enabled && skillsLoaded === 0) {
+      try {
+        skillsLoaded = await ensureRuntimeSkillsLoaded();
+      } catch {
+        skillsLoaded = skillRegistry.list().length;
+      }
+    }
+
     return res.json({
       ok: true,
       timestamp: new Date().toISOString(),
       modules: {
-        skills: process.env.ENABLE_OPENCLAW_SKILLS === "true",
-        tools: process.env.ENABLE_OPENCLAW_TOOLS === "true",
-        gateway: process.env.ENABLE_OPENCLAW_GATEWAY === "true",
+        skills: config.skills.enabled && skillsLoaded > 0,
+        tools: config.tools.enabled,
+        gateway: config.gateway.enabled,
+      },
+      details: {
+        skillsConfigured: config.skills.enabled,
+        skillsLoaded,
+        skillsDirectory: config.skills.directory,
+        toolsConfigured: config.tools.enabled,
+        gatewayConfigured: config.gateway.enabled,
+        gatewayPath: config.gateway.path,
       },
     });
   });
 
-  router.get("/skills", (_req, res) => {
+  router.get("/skills", async (_req, res) => {
+    try {
+      await ensureRuntimeSkillsLoaded();
+    } catch (error: any) {
+      return res.status(500).json({
+        error: error?.message || "Failed to load skills",
+      });
+    }
+
     const skills = skillRegistry.list().map((skill) => ({
       id: skill.id,
       name: skill.name,
@@ -145,11 +198,10 @@ export function createOpenClawRuntimeRouter(): Router {
 
   router.post("/skills/reload", async (_req, res) => {
     try {
-      const config = getOpenClawConfig();
-      await initSkills(config);
+      const count = await ensureRuntimeSkillsLoaded(true);
       return res.json({
         reloaded: true,
-        count: skillRegistry.list().length,
+        count,
       });
     } catch (error: any) {
       return res.status(500).json({
@@ -158,9 +210,10 @@ export function createOpenClawRuntimeRouter(): Router {
     }
   });
 
-  router.post("/skills/resolve", (req, res) => {
+  router.post("/skills/resolve", async (req, res) => {
     try {
       const parsed = skillsResolveSchema.parse(req.body || {});
+      await ensureRuntimeSkillsLoaded();
       const resolved = skillRegistry.resolve(parsed.skillIds);
       return res.json({
         prompt: resolved.prompt,
@@ -268,6 +321,7 @@ export function createOpenClawRuntimeRouter(): Router {
               requesterUserId: userId,
               objective: subtask.description,
               planHint: subtask.toolId ? [`use:${subtask.toolId}`] : [],
+              workspaceContext: parsed.workspaceContext,
             }),
           )
         : [];
@@ -305,6 +359,7 @@ export function createOpenClawRuntimeRouter(): Router {
         planHint: parsed.planHint || [],
         parentRunId: parsed.parentRunId,
         executionProfile: parsed.executionProfile,
+        workspaceContext: parsed.workspaceContext,
       });
       return res.status(202).json(run);
     } catch (error) {
