@@ -973,11 +973,7 @@ POSTGRES_DB="$(trim "$(load_env_value "POSTGRES_DB" ".env.production" || true)")
 POSTGRES_DB="${POSTGRES_DB:-iliagpt}"
 export POSTGRES_DB
 
-DATABASE_URL="$(trim "$(load_env_value "DATABASE_URL" ".env.production" || true)")"
-if [ -z "${DATABASE_URL}" ]; then
-  DATABASE_URL="$(build_database_url "${POSTGRES_USER}" "${POSTGRES_PASSWORD}" "hola-postgres" "5432" "${POSTGRES_DB}")"
-  logw "DATABASE_URL missing in .env.production; generated URL from POSTGRES_* values."
-fi
+DATABASE_URL="$(build_database_url "${POSTGRES_USER}" "${POSTGRES_PASSWORD}" "hola-postgres" "5432" "${POSTGRES_DB}")"
 export DATABASE_URL
 
 DATABASE_URL_OVERRIDE_COMPOSE="${DEPLOY_PATH}/docker-compose.db-url.override.yml"

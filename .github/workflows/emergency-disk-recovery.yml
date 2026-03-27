@@ -236,13 +236,9 @@ jobs:
           POSTGRES_USER="$(extract_env_value .env.production POSTGRES_USER || true)"
           POSTGRES_PASSWORD="$(extract_env_value .env.production POSTGRES_PASSWORD || true)"
           POSTGRES_DB="$(extract_env_value .env.production POSTGRES_DB || true)"
-          DATABASE_URL="$(extract_env_value .env.production DATABASE_URL || true)"
           POSTGRES_USER="${POSTGRES_USER:-postgres}"
           POSTGRES_DB="${POSTGRES_DB:-iliagpt}"
-          if [ -z "${DATABASE_URL}" ]; then
-            DATABASE_URL="$(build_database_url "${POSTGRES_USER}" "${POSTGRES_PASSWORD}" "hola-postgres" "5432" "${POSTGRES_DB}")"
-            echo "DATABASE_URL missing in .env.production; generated URL from POSTGRES_* values."
-          fi
+          DATABASE_URL="$(build_database_url "${POSTGRES_USER}" "${POSTGRES_PASSWORD}" "hola-postgres" "5432" "${POSTGRES_DB}")"
           DB_OVERRIDE="$(mktemp /tmp/hola-db-override.XXXXXX.yml)"
           trap 'rm -f "${DB_OVERRIDE}"' EXIT
           write_database_url_override "${DB_OVERRIDE}"
