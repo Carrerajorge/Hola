@@ -128,8 +128,8 @@ export const TelegramDirectSchema = z
 
 const TelegramCustomCommandSchema = z
   .object({
-    command: z.string().overwrite(normalizeTelegramCommandName),
-    description: z.string().overwrite(normalizeTelegramCommandDescription),
+    command: z.string().transform(normalizeTelegramCommandName),
+    description: z.string().transform(normalizeTelegramCommandDescription),
   })
   .strict();
 
