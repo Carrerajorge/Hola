@@ -99,6 +99,48 @@ describe("llmGateway stream empty-response recovery", () => {
     );
   });
 
+  it("suppresses placeholder-only chunks before recovering the stream", async () => {
+    const streamSpy = vi
+      .spyOn(llmGateway as any, "streamOpenAICompatible")
+      .mockImplementation(async function* () {
+        yield { content: "...", done: false };
+        yield { content: "", done: true };
+      });
+    const executeSpy = vi
+      .spyOn(llmGateway as any, "executeOnProviderNoBreaker")
+      .mockResolvedValue({
+        content: "Respuesta recuperada.",
+        requestId: "req_stream_placeholder",
+        latencyMs: 11,
+        model: "openrouter/moonshotai/kimi-k2.5",
+        provider: "openrouter",
+      });
+
+    const chunks = await collectStream(baseMessages, {
+      requestId: "req_stream_placeholder",
+      provider: "openrouter",
+      model: "openrouter/moonshotai/kimi-k2.5",
+    });
+
+    expect(streamSpy).toHaveBeenCalledTimes(1);
+    expect(executeSpy).toHaveBeenCalledTimes(1);
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0]).toMatchObject({
+      content: "Respuesta recuperada.",
+      done: false,
+      requestId: "req_stream_placeholder",
+      provider: "openrouter",
+      sequenceId: 0,
+    });
+    expect(chunks[1]).toMatchObject({
+      content: "",
+      done: true,
+      requestId: "req_stream_placeholder",
+      provider: "openrouter",
+      sequenceId: 1,
+    });
+  });
+
   it("preserves the original empty-stream failure when same-provider recovery is also empty", async () => {
     vi.spyOn(llmGateway as any, "streamOpenAICompatible").mockImplementation(
       async function* () {

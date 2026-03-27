@@ -3,17 +3,22 @@ import React, { memo, useState, useMemo } from "react";
 import {
     CheckCircle2,
     Loader2,
+    AlertCircle,
+    ChevronDown,
+    ChevronUp,
     FileText,
     FileSpreadsheet,
     FileIcon,
     Maximize2,
     ZoomIn,
     Download,
-    Eye
+    Eye,
+    RotateCcw
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
+import { normalizeResponseHealth } from "@shared/responseHealth";
 import {
     Message,
     storeGeneratedImage,
@@ -122,9 +127,14 @@ export const AssistantMessage = memo(function AssistantMessage({
     onToolDeny
 }: AssistantMessageProps) {
     const [sourcesPanelOpen, setSourcesPanelOpen] = useState(false);
+    const [showResponseHealthDetail, setShowResponseHealthDetail] = useState(false);
     const superAgentState = useSuperAgentRun(message.id);
     const { settings: platformSettings } = usePlatformSettings();
     const { settings } = useSettingsContext();
+    const responseHealth = useMemo(
+        () => normalizeResponseHealth(message.metadata?.responseHealth),
+        [message.metadata?.responseHealth]
+    );
 
     const parsedContent = useMemo(() => {
         if (!message.content || message.isThinking) {
@@ -163,7 +173,68 @@ export const AssistantMessage = memo(function AssistantMessage({
         return result;
     }, [message.id, message.generatedImage, pendingGeneratedImage, latestGeneratedImageRef]);
 
+    const responseHealthReason = responseHealth?.reason?.trim() || "";
+    const responseHealthDetail = responseHealth?.detail?.trim() || "";
+    const responseHealthProvider = responseHealth?.provider?.replace(/[-_]/g, " ").trim() || "";
+    const shouldShowResponseHealthCard = Boolean(
+        responseHealth && responseHealth.state !== "complete"
+    );
+    const shouldHidePrimaryContent = Boolean(
+        responseHealth?.state === "failed" &&
+        message.content?.trim()
+    );
+    const canShowResponseHealthDetail = Boolean(
+        responseHealthDetail && responseHealthDetail !== responseHealthReason
+    );
+
+    const responseHealthUi = useMemo(() => {
+        if (!responseHealth || responseHealth.state === "complete") return null;
+
+        if (responseHealth.state === "recovered") {
+            return {
+                title: "Recuperada automaticamente",
+                description:
+                    responseHealthReason ||
+                    "Se corrigio automaticamente una salida vacia o degradada.",
+                containerClass:
+                    "border-emerald-200/80 bg-emerald-50/80 text-emerald-950 dark:border-emerald-900/70 dark:bg-emerald-950/30 dark:text-emerald-100",
+                iconWrapClass:
+                    "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-200",
+                icon: CheckCircle2,
+            };
+        }
+
+        if (responseHealth.state === "partial") {
+            return {
+                title: "Respuesta parcial",
+                description:
+                    responseHealthReason ||
+                    "La respuesta se guardo antes de que el stream se interrumpiera.",
+                containerClass:
+                    "border-amber-200/80 bg-amber-50/80 text-amber-950 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-100",
+                iconWrapClass:
+                    "bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200",
+                icon: AlertCircle,
+            };
+        }
+
+        return {
+            title: "No se pudo completar",
+            description:
+                responseHealthReason || "No hubo una salida valida para mostrar.",
+            containerClass:
+                "border-slate-200/90 bg-slate-50/90 text-slate-950 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100",
+            iconWrapClass:
+                "bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200",
+            icon: AlertCircle,
+        };
+    }, [responseHealth, responseHealthReason]);
+
     const actionContent = useMemo(() => {
+        if (responseHealth?.state === "failed" && shouldHidePrimaryContent) {
+            return "";
+        }
+
         const directContent =
             typeof message.content === "string" ? message.content.trim() : "";
         if (directContent.length > 0) {
@@ -175,7 +246,7 @@ export const AssistantMessage = memo(function AssistantMessage({
                 ? message.agentRun.summary.trim()
                 : "";
         return agentSummary;
-    }, [message.content, message.agentRun?.summary]);
+    }, [message.content, message.agentRun?.summary, responseHealth?.state, shouldHidePrimaryContent]);
 
     if (variant === "compact") {
         return (
@@ -285,7 +356,74 @@ export const AssistantMessage = memo(function AssistantMessage({
                 </div>
             )}
 
-            {message.content && !message.isThinking && !message.agentRun && (
+            {shouldShowResponseHealthCard && responseHealthUi && (
+                <div className={cn("mb-3 rounded-2xl border px-4 py-3 shadow-sm", responseHealthUi.containerClass)}>
+                    <div className="flex items-start gap-3">
+                        <div className={cn("mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full", responseHealthUi.iconWrapClass)}>
+                            <responseHealthUi.icon className="h-4 w-4" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm font-medium leading-none">
+                                    {responseHealthUi.title}
+                                </p>
+                                {responseHealthProvider && (
+                                    <span className="text-[10px] uppercase tracking-[0.16em] text-current/60">
+                                        {responseHealthProvider}
+                                    </span>
+                                )}
+                            </div>
+                            <p className="mt-1 text-sm text-current/80">
+                                {responseHealthUi.description}
+                            </p>
+
+                            {showResponseHealthDetail && canShowResponseHealthDetail && (
+                                <div className="mt-3 rounded-xl border border-black/5 bg-white/50 px-3 py-2 text-xs text-current/75 dark:border-white/10 dark:bg-black/10">
+                                    {responseHealthDetail}
+                                </div>
+                            )}
+
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                                {responseHealth?.retryable && (
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-8 rounded-full px-3 text-xs"
+                                        onClick={() => onRegenerate(msgIndex)}
+                                    >
+                                        <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                                        Reintentar
+                                    </Button>
+                                )}
+
+                                {canShowResponseHealthDetail && (
+                                    <button
+                                        type="button"
+                                        className="inline-flex items-center gap-1 text-xs font-medium text-current/70 transition-colors hover:text-current"
+                                        onClick={() => setShowResponseHealthDetail((value) => !value)}
+                                    >
+                                        {showResponseHealthDetail ? "Ocultar detalle" : "Ver detalle"}
+                                        {showResponseHealthDetail ? (
+                                            <ChevronUp className="h-3.5 w-3.5" />
+                                        ) : (
+                                            <ChevronDown className="h-3.5 w-3.5" />
+                                        )}
+                                    </button>
+                                )}
+
+                                {responseHealth?.state === "failed" && (
+                                    <span className="text-xs text-current/60">
+                                        Si vuelve a ocurrir, prueba otro modelo.
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {message.content && !message.isThinking && !message.agentRun && !shouldHidePrimaryContent && (
                 <>
                     {contentBlocks.map((block, blockIdx) =>
                         block.type === "python" ? (
@@ -595,6 +733,9 @@ export const AssistantMessage = memo(function AssistantMessage({
         prevProps.message.id === nextProps.message.id &&
         prevProps.message.content === nextProps.message.content &&
         prevProps.message.isThinking === nextProps.message.isThinking &&
+        prevProps.message.metadata?.verified === nextProps.message.metadata?.verified &&
+        prevProps.message.metadata?.verificationAttempts === nextProps.message.metadata?.verificationAttempts &&
+        JSON.stringify(prevProps.message.metadata?.responseHealth) === JSON.stringify(nextProps.message.metadata?.responseHealth) &&
         areAgentRunsEqual(prevProps.message.agentRun, nextProps.message.agentRun) &&
         prevProps.message.webSources === nextProps.message.webSources &&
         prevProps.msgIndex === nextProps.msgIndex &&

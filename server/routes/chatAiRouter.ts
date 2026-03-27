@@ -103,6 +103,7 @@ import {
   getDeliverables,
 } from "../services/productionHandler";
 import { classifyOutputFormat } from "@shared/explicitArtifactRequests";
+import type { ResponseHealthMetadata } from "@shared/responseHealth";
 import type { z } from "zod";
 import { getUserId } from "../types/express";
 import { semanticMemoryStore } from "../memory/SemanticMemoryStore";
@@ -10927,6 +10928,8 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
           const onClose = () => writer.destroy();
           req.once("close", onClose);
 
+          let responseHealth: ResponseHealthMetadata | undefined;
+
           for await (const chunk of streamGenerator) {
             if (isConnectionClosed) break;
 
@@ -10935,6 +10938,9 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
             }
             fullContent += chunk.content;
             lastAckSequence = Math.max(lastAckSequence, chunk.sequenceId);
+            if (chunk.responseHealth) {
+              responseHealth = chunk.responseHealth;
+            }
 
             // Update run's lastSeq for deduplication on reconnect
             if (claimedRun && chunk.sequenceId > (claimedRun.lastSeq || 0)) {
@@ -10958,6 +10964,7 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
                 runId: effectiveRunId,
                 intent: unifiedContext?.requestSpec.intent,
                 latencyLane: resolvedLane,
+                responseHealth,
                 webSources:
                   detectedWebSources.length > 0
                     ? detectedWebSources
@@ -11028,6 +11035,7 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
             if (detectedWebSources.length > 0)
               metadata.webSources = detectedWebSources;
             if (cotSteps.length > 0) metadata.steps = cotSteps;
+            if (responseHealth) metadata.responseHealth = responseHealth;
 
             const finalMetadata =
               Object.keys(metadata).length > 0 ? metadata : undefined;
@@ -11111,6 +11119,7 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
               runId: effectiveRunId,
               assistantMessageId,
               latencyLane: resolvedLane,
+              responseHealth,
               webSources:
                 detectedWebSources.length > 0 ? detectedWebSources : undefined,
               traceId: requestId,
@@ -11125,6 +11134,7 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
             assistantMessageId,
             latencyMode,
             latencyLane: resolvedLane,
+            responseHealth,
             totalSequences: finalSequenceCount,
             contentLength: fullContent.length,
             intent: unifiedContext?.requestSpec.intent,
@@ -11175,6 +11185,15 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
         )
           ? "El modelo no devolvio texto util en este intento. Reintenta y, si vuelve a ocurrir, cambia de modelo."
           : rawErrorMessage;
+        const responseHealth: ResponseHealthMetadata = {
+          state: "failed",
+          retryable:
+            !/not configured|authentication failure|No LLM providers configured/i.test(
+              rawErrorMessage,
+            ),
+          reason: "No se pudo completar esta respuesta.",
+          detail: userFacingErrorMessage,
+        };
 
         // Mark run as failed if we claimed one
         if (claimedRun) {
@@ -11195,6 +11214,7 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
         if (!isConnectionClosed) {
           writeSse(res, "error", {
             error: userFacingErrorMessage,
+            responseHealth,
             requestId,
             runId: errorRunId,
             traceId: requestId,
@@ -11214,6 +11234,7 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
               timings: errorTimings,
               timestamp: Date.now(),
               error: true,
+              responseHealth,
             });
           }
 

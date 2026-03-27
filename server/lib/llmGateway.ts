@@ -15,6 +15,8 @@ import { recordQualityMetric, getQualityStats, type QualityMetric, type QualityS
 import { recordConnectorUsage } from "./connectorMetrics";
 import { storage } from "../storage";
 import { redis } from "./redis";
+import { hasMeaningfulAssistantContent } from "@shared/assistantContent";
+import type { ResponseHealthMetadata } from "@shared/responseHealth";
 import type { InsertApiLog } from "@shared/schema";
 
 import { getCircuitBreaker, CircuitBreakerOpenError, CircuitState } from "./circuitBreaker";
@@ -94,6 +96,7 @@ interface StreamChunk {
   requestId: string;
   provider?: LLMProvider;
   checkpoint?: StreamCheckpoint;
+  responseHealth?: ResponseHealthMetadata;
 }
 
 interface StreamCheckpoint {
@@ -1153,7 +1156,7 @@ class LLMGateway {
         Date.now(),
       );
 
-      if (!recovered.content?.trim()) {
+      if (!hasMeaningfulAssistantContent(recovered.content)) {
         return null;
       }
 
@@ -1752,12 +1755,21 @@ class LLMGateway {
             : this.streamOpenAICompatible(provider, truncatedMessages, options, requestId);
 
         for await (const chunk of this.withIdleTimeout(stream, STREAM_IDLE_TIMEOUT_MS, requestId)) {
+          const hadMeaningfulContent = hasMeaningfulAssistantContent(accumulatedContent);
           accumulatedContent += chunk.content;
+          const hasMeaningfulContent = hasMeaningfulAssistantContent(accumulatedContent);
+
+          // Some providers emit placeholder tokens such as "..." before the real
+          // answer. Suppress those until the stream contains substantive text so
+          // the client never renders a ghost response.
+          if (!chunk.done && !hadMeaningfulContent && !hasMeaningfulContent) {
+            continue;
+          }
 
           // Some providers can return a "done" marker without any visible text (e.g. if the output
           // budget is too low or the response is otherwise suppressed). Treat that as a failure so
           // fallback providers can attempt recovery.
-          if (chunk.done && accumulatedContent.trim().length === 0) {
+          if (chunk.done && !hasMeaningfulContent) {
             const recovered = await this.recoverEmptyStreamResponse(
               provider,
               truncatedMessages,
@@ -1765,7 +1777,7 @@ class LLMGateway {
               requestId,
             );
 
-            if (recovered?.content?.trim()) {
+            if (recovered && hasMeaningfulAssistantContent(recovered.content)) {
               accumulatedContent = recovered.content;
 
               const recoveredChunk: StreamChunk = {
@@ -1774,6 +1786,12 @@ class LLMGateway {
                 done: false,
                 requestId,
                 provider,
+                responseHealth: {
+                  state: "recovered",
+                  retryable: false,
+                  reason: "La respuesta fue recuperada automaticamente tras un stream vacio.",
+                  provider,
+                },
                 checkpoint: {
                   requestId,
                   sequenceId,

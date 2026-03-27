@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Message } from "@/hooks/use-chats";
@@ -192,5 +192,56 @@ describe("AssistantMessage", () => {
     expect(content?.compareDocumentPosition(newsCards)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
+  });
+
+  it("renders a failed response health card without duplicating the fallback body", () => {
+    render(
+      <AssistantMessage
+        message={makeMessage({
+          content: "No se pudo completar esta respuesta.",
+          metadata: {
+            responseHealth: {
+              state: "failed",
+              retryable: true,
+              reason: "No se pudo completar esta respuesta.",
+              detail: "Gateway timeout",
+              provider: "openai",
+            },
+          },
+        })}
+        msgIndex={1}
+        totalMessages={2}
+        variant="default"
+        copiedMessageId={null}
+        messageFeedback={{}}
+        speakingMessageId={null}
+        aiState="idle"
+        isRegenerating={false}
+        isGeneratingImage={false}
+        pendingGeneratedImage={null}
+        latestGeneratedImageRef={{ current: null }}
+        onCopyMessage={vi.fn()}
+        onFeedback={vi.fn()}
+        onRegenerate={vi.fn()}
+        onShare={vi.fn()}
+        onReadAloud={vi.fn()}
+        onOpenDocumentPreview={vi.fn()}
+        onOpenFileAttachmentPreview={vi.fn()}
+        onDownloadImage={vi.fn()}
+        onOpenLightbox={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("No se pudo completar")).toBeInTheDocument();
+    expect(
+      screen.getAllByText("No se pudo completar esta respuesta."),
+    ).toHaveLength(1);
+    expect(
+      screen.getByRole("button", { name: /Reintentar/i }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Ver detalle/i }));
+
+    expect(screen.getByText("Gateway timeout")).toBeInTheDocument();
   });
 });

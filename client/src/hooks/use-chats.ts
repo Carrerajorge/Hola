@@ -4,6 +4,7 @@ import { apiFetch, getAnonUserIdHeader } from "@/lib/apiClient";
 import { trackWorkspaceEvent } from "@/lib/analytics";
 import { shouldBootstrapWorkspaceSurface } from "@/lib/auth-flow";
 import { useAuth } from "@/hooks/use-auth";
+import type { ResponseHealthMetadata } from "@shared/responseHealth";
 
 import { type AgentRunStatus } from "@/stores/agent-store";
 
@@ -51,7 +52,7 @@ export interface WebSource {
     name: string;
     domain: string;
   };
-  metadata?: Record<string, any>;
+  metadata?: Record<string, any> & { responseHealth?: ResponseHealthMetadata };
 }
 
 export interface AgentRunData {
@@ -118,7 +119,7 @@ export interface Message {
   ui_components?: string[]; // Components to render: 'executive_summary', 'suggested_questions', 'insights_panel'
   confidence?: 'high' | 'medium' | 'low';
   uncertaintyReason?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, any> & { responseHealth?: ResponseHealthMetadata };
   retrievalSteps?: { id: string; label: string; status: "pending" | "active" | "complete" | "error"; detail?: string }[];
 }
 

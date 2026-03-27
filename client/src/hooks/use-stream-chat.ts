@@ -12,6 +12,11 @@ import { useCallback, useRef, useEffect } from "react";
 import { getAnonUserIdHeader } from "@/lib/apiClient";
 import type { Message } from "@/hooks/use-chats";
 import { type AIState, type AiProcessStep } from "@/components/chat-interface/types";
+import { hasMeaningfulAssistantContent } from "@shared/assistantContent";
+import {
+  normalizeResponseHealth,
+  type ResponseHealthMetadata,
+} from "@shared/responseHealth";
 
 export interface StreamChatDeps {
   setOptimisticMessages: React.Dispatch<React.SetStateAction<Message[]>>;
@@ -171,6 +176,44 @@ function normalizeConversationId(options: StreamOptions): string | null {
   if (fromBodyChatId) return fromBodyChatId;
 
   return null;
+}
+
+function hasArtifactPayload(value: unknown): boolean {
+  return Boolean(value && typeof value === "object" && "artifact" in value && (value as { artifact?: unknown }).artifact);
+}
+
+function hasUsableStreamOutcome(content: string, lastEventData?: unknown): boolean {
+  return hasMeaningfulAssistantContent(content) || hasArtifactPayload(lastEventData);
+}
+
+function withResponseHealth(
+  message: Message,
+  responseHealth?: ResponseHealthMetadata,
+): Message {
+  if (!responseHealth) return message;
+
+  return {
+    ...message,
+    metadata: {
+      ...(message.metadata || {}),
+      responseHealth,
+    },
+  };
+}
+
+type StreamErrorWithResponseHealth = Error & {
+  responseHealth?: unknown;
+};
+
+function attachResponseHealth(
+  error: Error,
+  responseHealth?: unknown,
+): StreamErrorWithResponseHealth {
+  const enriched = error as StreamErrorWithResponseHealth;
+  if (responseHealth !== undefined) {
+    enriched.responseHealth = responseHealth;
+  }
+  return enriched;
 }
 
 export function useStreamChat(deps: StreamChatDeps) {
@@ -525,6 +568,82 @@ export function useStreamChat(deps: StreamChatDeps) {
       let lastResponse: Response | undefined;
       let lastContent = "";
 
+      const resolveErrorResponseHealth = (
+        error: StreamErrorWithResponseHealth,
+        content: string,
+        fallbackRetryable: boolean,
+      ): ResponseHealthMetadata => {
+        const eventResponseHealth = normalizeResponseHealth(error.responseHealth);
+
+        if (hasMeaningfulAssistantContent(content)) {
+          if (eventResponseHealth?.state === "partial") {
+            return {
+              ...eventResponseHealth,
+              retryable: eventResponseHealth.retryable ?? fallbackRetryable,
+              detail: eventResponseHealth.detail || error.message || undefined,
+            };
+          }
+
+          return {
+            state: "partial",
+            retryable: eventResponseHealth?.retryable ?? fallbackRetryable,
+            reason:
+              "Se recupero una respuesta parcial antes de que el stream terminara correctamente.",
+            detail: eventResponseHealth?.detail || error.message || undefined,
+            provider: eventResponseHealth?.provider,
+          };
+        }
+
+        return (
+          eventResponseHealth || {
+            state: "failed",
+            retryable: fallbackRetryable,
+            reason: "No se pudo completar esta respuesta.",
+            detail:
+              error.message || "Error de conexión. Por favor, intenta de nuevo.",
+          }
+        );
+      };
+
+      const buildStreamErrorMessage = (
+        error: StreamErrorWithResponseHealth,
+        content: string,
+        requestId: string,
+        fallbackRetryable: boolean,
+      ) => {
+        const responseHealth = resolveErrorResponseHealth(
+          error,
+          content,
+          fallbackRetryable,
+        );
+        const baseMessage = buildErrorMessage?.(error, messageId) ?? {
+          id: messageId,
+          role: "assistant" as const,
+          content:
+            error.message || "Error de conexión. Por favor, intenta de nuevo.",
+          timestamp: new Date(),
+          requestId,
+        };
+
+        const resolvedContent =
+          responseHealth.state === "partial"
+            ? content
+            : hasMeaningfulAssistantContent(baseMessage.content)
+              ? baseMessage.content
+              : responseHealth.reason ||
+                baseMessage.content ||
+                "No se pudo completar esta respuesta.";
+
+        return withResponseHealth(
+          {
+            ...baseMessage,
+            requestId: baseMessage.requestId || requestId,
+            content: resolvedContent,
+          },
+          responseHealth,
+        );
+      };
+
       for (let attempt = 0; attempt <= normalizedMaxRetries; attempt++) {
         const streamRequestId = buildAttemptRequestId(attempt);
         const controller = new AbortController();
@@ -831,7 +950,9 @@ export function useStreamChat(deps: StreamChatDeps) {
                     seq: chunkSeq,
                   });
                   if (isConversationActive(conversationId)) {
-                    session.pendingContent = fullContent;
+                    session.pendingContent = hasMeaningfulAssistantContent(fullContent)
+                      ? fullContent
+                      : "";
                     scheduleFlush(conversationId);
                   }
                 }
@@ -882,15 +1003,21 @@ export function useStreamChat(deps: StreamChatDeps) {
                 flushNow(conversationId);
 
                 const finalEventData = { ...(lastEventData || {}), ...(data || {}) };
-                const msg = buildFinalMessage?.(fullContent, finalEventData, messageId) ?? {
-                  id: messageId,
-                  role: "assistant" as const,
-                  content: fullContent,
-                  timestamp: new Date(),
-                  requestId: finalEventData.requestId || streamRequestId,
-                  artifact: finalEventData.artifact,
-                  webSources: finalEventData.webSources,
-                };
+                if (!hasUsableStreamOutcome(fullContent, finalEventData)) {
+                  throw new Error("No se recibio contenido util del servidor.");
+                }
+                const msg = withResponseHealth(
+                  buildFinalMessage?.(fullContent, finalEventData, messageId) ?? {
+                    id: messageId,
+                    role: "assistant" as const,
+                    content: fullContent,
+                    timestamp: new Date(),
+                    requestId: finalEventData.requestId || streamRequestId,
+                    artifact: finalEventData.artifact,
+                    webSources: finalEventData.webSources,
+                  },
+                  normalizeResponseHealth(finalEventData.responseHealth),
+                );
 
                 finalize(msg, conversationId, "done");
                 const { activeConversationId, onStreamComplete } = getStreamCallbacks();
@@ -907,21 +1034,27 @@ export function useStreamChat(deps: StreamChatDeps) {
 
               if (currentEventType === "error" || currentEventType === "production_error") {
                 const errorMsg = data.message || data.error || "Stream error";
-                throw new Error(errorMsg);
+                throw attachResponseHealth(
+                  new Error(errorMsg),
+                  data.responseHealth,
+                );
               }
             }
           }
 
-          if (!session.finalizing && fullContent) {
+          if (!session.finalizing && hasUsableStreamOutcome(fullContent, lastEventData)) {
             clearTokenTimeouts();
             flushNow(conversationId);
-            const msg = buildFinalMessage?.(fullContent, lastEventData, messageId) ?? {
-              id: messageId,
-              role: "assistant" as const,
-              content: fullContent,
-              timestamp: new Date(),
-              requestId: streamRequestId,
-            };
+            const msg = withResponseHealth(
+              buildFinalMessage?.(fullContent, lastEventData, messageId) ?? {
+                id: messageId,
+                role: "assistant" as const,
+                content: fullContent,
+                timestamp: new Date(),
+                requestId: streamRequestId,
+              },
+              normalizeResponseHealth(lastEventData?.responseHealth),
+            );
 
             finalize(msg, conversationId, "done");
             const { activeConversationId, onStreamComplete } = getStreamCallbacks();
@@ -938,7 +1071,7 @@ export function useStreamChat(deps: StreamChatDeps) {
 
           if (!session.finalizing) {
             clearTokenTimeouts();
-            throw new Error("No se recibió respuesta del servidor.");
+            throw new Error("No se recibio contenido util del servidor.");
           }
 
           return { ok: true, content: fullContent, response };
@@ -970,7 +1103,7 @@ export function useStreamChat(deps: StreamChatDeps) {
                 ? `No se recibió ningún evento del servidor en ${firstTokenTimeoutMs}ms.`
                 : timeoutCause === "done"
                   ? `La respuesta demoró demasiado (>${doneTimeoutMs}ms).`
-                  : `Stream timeout after ${timeoutMs}ms.`;
+                  : `La respuesta excedio el tiempo limite general (${timeoutMs}ms).`;
 
             const abortError = new Error(abortMessage);
             lastError = abortError;
@@ -982,13 +1115,27 @@ export function useStreamChat(deps: StreamChatDeps) {
               continue;
             }
 
-            const timeoutErrorMsg = buildErrorMessage?.(abortError, messageId) ?? {
-              id: messageId,
-              role: "assistant" as const,
-              content: abortMessage,
-              timestamp: new Date(),
-              requestId: streamRequestId,
-            };
+            const timeoutResponseHealth: ResponseHealthMetadata =
+              hasMeaningfulAssistantContent(fullContent)
+                ? {
+                    state: "partial",
+                    retryable: true,
+                    reason: "Se recupero una respuesta parcial antes del timeout.",
+                    detail: abortMessage,
+                  }
+                : {
+                    state: "failed",
+                    retryable: true,
+                    reason: "La respuesta excedio el tiempo limite.",
+                    detail: abortMessage,
+                  };
+
+            const timeoutErrorMsg = buildStreamErrorMessage(
+              attachResponseHealth(abortError, timeoutResponseHealth),
+              fullContent,
+              streamRequestId,
+              true,
+            );
             finalize(timeoutErrorMsg, conversationId, "error");
             const { activeConversationId, onStreamError } = getStreamCallbacks();
             onStreamError?.({
@@ -1004,7 +1151,9 @@ export function useStreamChat(deps: StreamChatDeps) {
             return { ok: false, content: fullContent, response, error: abortError };
           }
 
-          const normalizedError = err instanceof Error ? err : new Error(String(err));
+          const normalizedError = (
+            err instanceof Error ? err : new Error(String(err))
+          ) as StreamErrorWithResponseHealth;
           console.error("[useStreamChat] Stream error:", normalizedError);
 
           const retryable = shouldRetry(normalizedError, response, timeoutCause);
@@ -1017,13 +1166,12 @@ export function useStreamChat(deps: StreamChatDeps) {
             continue;
           }
 
-          const errorMsg = buildErrorMessage?.(normalizedError, messageId) ?? {
-            id: messageId,
-            role: "assistant" as const,
-            content: normalizedError?.message || "Error de conexión. Por favor, intenta de nuevo.",
-            timestamp: new Date(),
-            requestId: streamRequestId,
-          };
+          const errorMsg = buildStreamErrorMessage(
+            normalizedError,
+            fullContent,
+            streamRequestId,
+            retryable,
+          );
 
           if (!session.finalizing) {
             finalize(errorMsg, conversationId, "error");
@@ -1073,13 +1221,13 @@ export function useStreamChat(deps: StreamChatDeps) {
       }
 
       if (lastError) {
-        const errorMsg = buildErrorMessage?.(lastError, messageId) ?? {
-          id: messageId,
-          role: "assistant" as const,
-          content: lastError.message || "Error de conexión. Por favor, intenta de nuevo.",
-          timestamp: new Date(),
-          requestId: baseRequestId,
-        };
+        const retryable = shouldRetry(lastError, lastResponse, null);
+        const errorMsg = buildStreamErrorMessage(
+          lastError as StreamErrorWithResponseHealth,
+          lastContent,
+          baseRequestId,
+          retryable,
+        );
         finalize(errorMsg, conversationId, "error");
         const { activeConversationId, onStreamError } = getStreamCallbacks();
         onStreamError?.({

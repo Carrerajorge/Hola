@@ -261,6 +261,174 @@ describe("useStreamChat conversation isolation", () => {
     expect(streamingSnapshots.some((v) => v.includes("LONG_RUNNING_TOKEN"))).toBe(false);
   });
 
+  it("does not render or finalize placeholder-only output as a valid reply", async () => {
+    const activeConversation = { current: "chat_placeholder" };
+    const sentMessages: any[] = [];
+    const streamingSnapshots: string[] = [];
+    let streamResult: any;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const payload = JSON.parse(String(init?.body || "{}"));
+
+        return makeSseResponse([
+          {
+            event: "chunk",
+            data: {
+              conversationId: payload.conversationId,
+              requestId: payload.requestId,
+              content: "...",
+            },
+          },
+          {
+            event: "done",
+            data: {
+              conversationId: payload.conversationId,
+              requestId: payload.requestId,
+            },
+          },
+        ]);
+      })
+    );
+
+    const { result } = renderHook(() => {
+      const [optimisticMessages, setOptimisticMessages] = useState<any[]>([]);
+      const [streamingContent, setStreamingContentRaw] = useState("");
+      const [aiState, setAiState] = useState<any>("idle");
+      const [steps, setAiProcessSteps] = useState<any[]>([]);
+      const streamingContentRef = useRef("");
+
+      const setStreamingContent = (content: string) => {
+        streamingSnapshots.push(content);
+        setStreamingContentRaw(content);
+      };
+
+      const hook = useStreamChat({
+        setOptimisticMessages,
+        onSendMessage: async (message) => {
+          sentMessages.push(message);
+          return undefined;
+        },
+        setStreamingContent,
+        streamingContentRef,
+        setAiState,
+        setAiProcessSteps,
+        getActiveConversationId: () => activeConversation.current,
+      });
+
+      return { hook, optimisticMessages, streamingContent, aiState, steps };
+    });
+
+    await act(async () => {
+      streamResult = await result.current.hook.stream("/api/chat/stream", {
+        conversationId: "chat_placeholder",
+        chatId: "chat_placeholder",
+        body: {
+          messages: [{ role: "user", content: "hola" }],
+          conversationId: "chat_placeholder",
+          requestId: "req_placeholder",
+        },
+        buildFinalMessage: (fullContent, data, messageId) => ({
+          id: messageId || `assistant-${Date.now()}`,
+          role: "assistant",
+          content: fullContent || "No se recibio respuesta del servidor.",
+          timestamp: new Date(),
+          requestId: data?.requestId || "req_placeholder_final",
+        }),
+      });
+    });
+
+    expect(streamResult.ok).toBe(false);
+    expect(streamingSnapshots.some((value) => value.includes("..."))).toBe(false);
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0]?.content).toContain("No se recibio contenido util del servidor.");
+  });
+
+  it("preserves partial content and marks the message as partial when the stream fails mid-response", async () => {
+    const activeConversation = { current: "chat_partial" };
+    const sentMessages: any[] = [];
+    let streamResult: any;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const payload = JSON.parse(String(init?.body || "{}"));
+
+        return makeSseResponse([
+          {
+            event: "chunk",
+            data: {
+              conversationId: payload.conversationId,
+              requestId: payload.requestId,
+              content: "Respuesta parcial util",
+            },
+          },
+          {
+            event: "error",
+            data: {
+              conversationId: payload.conversationId,
+              requestId: payload.requestId,
+              message: "Provider stream aborted",
+              responseHealth: {
+                state: "failed",
+                retryable: true,
+                reason: "No se pudo completar esta respuesta.",
+                detail: "Provider stream aborted",
+                provider: "openai",
+              },
+            },
+          },
+        ]);
+      })
+    );
+
+    const { result } = renderHook(() => {
+      const [optimisticMessages, setOptimisticMessages] = useState<any[]>([]);
+      const [streamingContent, setStreamingContent] = useState("");
+      const [aiState, setAiState] = useState<any>("idle");
+      const [steps, setAiProcessSteps] = useState<any[]>([]);
+      const streamingContentRef = useRef("");
+
+      const hook = useStreamChat({
+        setOptimisticMessages,
+        onSendMessage: async (message) => {
+          sentMessages.push(message);
+          return undefined;
+        },
+        setStreamingContent,
+        streamingContentRef,
+        setAiState,
+        setAiProcessSteps,
+        getActiveConversationId: () => activeConversation.current,
+      });
+
+      return { hook, optimisticMessages, streamingContent, aiState, steps };
+    });
+
+    await act(async () => {
+      streamResult = await result.current.hook.stream("/api/chat/stream", {
+        conversationId: "chat_partial",
+        chatId: "chat_partial",
+        body: {
+          messages: [{ role: "user", content: "hola" }],
+          conversationId: "chat_partial",
+          requestId: "req_partial",
+        },
+      });
+    });
+
+    expect(streamResult.ok).toBe(false);
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0]?.content).toBe("Respuesta parcial util");
+    expect(sentMessages[0]?.metadata?.responseHealth).toMatchObject({
+      state: "partial",
+      retryable: true,
+      detail: "Provider stream aborted",
+      provider: "openai",
+    });
+  });
+
   it("recovers to idle if stale busy state is set after stream completion", async () => {
     vi.useFakeTimers();
 
