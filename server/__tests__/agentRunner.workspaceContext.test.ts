@@ -13,6 +13,43 @@ function createWorkspaceRepo(): { repositoryRoot: string; workspaceDir: string }
 
   const workspaceDir = path.join(repositoryRoot, "packages", "app");
   fs.mkdirSync(workspaceDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(repositoryRoot, "package.json"),
+    JSON.stringify(
+      {
+        name: "snapshot-root",
+        scripts: {
+          test: "vitest run",
+        },
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  );
+  fs.writeFileSync(
+    path.join(workspaceDir, "package.json"),
+    JSON.stringify(
+      {
+        name: "workspace-app",
+        scripts: {
+          dev: "vite dev",
+          build: "vite build",
+          test: "vitest run",
+        },
+        dependencies: {
+          vite: "^7.0.0",
+        },
+        devDependencies: {
+          vitest: "^4.0.0",
+          typescript: "^5.0.0",
+        },
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  );
   fs.writeFileSync(path.join(workspaceDir, "index.ts"), "export const ok = true;\n", "utf-8");
 
   return { repositoryRoot, workspaceDir };
@@ -44,6 +81,11 @@ describe("AgentRunner workspace context", () => {
 
     const registry = (runner as any).toolRegistry as ToolRegistry;
     expect(registry).not.toBe(defaultToolRegistry);
+    expect((runner as any).repositorySnapshot).toMatchObject({
+      selectedRoot: "packages/app",
+      packageManager: "unknown",
+      stacks: expect.arrayContaining(["TypeScript", "Vite", "Vitest"]),
+    });
 
     const shellResult = await registry.execute("shell", { command: "pwd" });
     expect(shellResult.success).toBe(true);

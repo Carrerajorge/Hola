@@ -1,8 +1,11 @@
 import type { OpenClawWorkspaceContext } from "@shared/openclawWorkspaceContext";
+import type { OpenClawRepositorySnapshot } from "@shared/openclawRepositorySnapshot";
+import { repositorySnapshotService } from "./repositorySnapshotService";
 
 export interface OpenClawSessionContextRecord {
   runId: string;
   workspaceContext: OpenClawWorkspaceContext;
+  repositorySnapshot: OpenClawRepositorySnapshot;
   createdAt: number;
   updatedAt: number;
 }
@@ -18,9 +21,19 @@ class OpenClawSessionContextService {
   ): OpenClawSessionContextRecord {
     const now = Date.now();
     const existing = this.records.get(runId);
+    const shouldRefreshSnapshot =
+      !existing ||
+      existing.workspaceContext.repositoryPath !== workspaceContext.repositoryPath ||
+      existing.workspaceContext.selectedFolder !== workspaceContext.selectedFolder ||
+      existing.workspaceContext.branch !== workspaceContext.branch;
+    const repositorySnapshot =
+      shouldRefreshSnapshot
+        ? repositorySnapshotService.capture(workspaceContext)
+        : existing.repositorySnapshot;
     const record: OpenClawSessionContextRecord = {
       runId,
       workspaceContext,
+      repositorySnapshot,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
     };
@@ -36,6 +49,12 @@ class OpenClawSessionContextService {
 
   resolveWorkspaceContext(runId?: string): OpenClawWorkspaceContext | undefined {
     return this.get(runId)?.workspaceContext;
+  }
+
+  resolveRepositorySnapshot(
+    runId?: string,
+  ): OpenClawRepositorySnapshot | undefined {
+    return this.get(runId)?.repositorySnapshot;
   }
 
   clear(): void {

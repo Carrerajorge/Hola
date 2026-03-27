@@ -137,6 +137,7 @@ export function createOpenClawRuntimeRouter(): Router {
       return res.status(201).json({
         runId: record.runId,
         workspaceContext: record.workspaceContext,
+        repositorySnapshot: record.repositorySnapshot,
         updatedAt: record.updatedAt,
       });
     } catch (error) {

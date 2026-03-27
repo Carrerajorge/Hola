@@ -4,6 +4,7 @@ import {
   DEFAULT_AGENT_EXECUTION_PROFILE,
   type AgentExecutionProfile,
 } from "@shared/agentExecutionProfile";
+import type { OpenClawRepositorySnapshot } from "@shared/openclawRepositorySnapshot";
 import type { OpenClawWorkspaceContext } from "@shared/openclawWorkspaceContext";
 import { resolveAgentExecutionProfileFromHints } from "../../agent/executionProfiles";
 import { openclawSessionContextService } from "../sessionContextService";
@@ -28,6 +29,7 @@ export interface SubagentRunRecord {
   planHint: string[];
   parentRunId?: string;
   workspaceContext?: OpenClawWorkspaceContext;
+  repositorySnapshot?: OpenClawRepositorySnapshot;
   executionProfile: AgentExecutionProfile;
   status: SubagentRunStatus;
   createdAt: number;
@@ -89,15 +91,18 @@ class OpenClawSubagentService extends EventEmitter {
       planHint: params.planHint || [],
       parentRunId: params.parentRunId,
       workspaceContext: params.workspaceContext,
+      repositorySnapshot: params.workspaceContext
+        ? openclawSessionContextService.remember(runId, params.workspaceContext)
+            .repositorySnapshot
+        : openclawSessionContextService.resolveRepositorySnapshot(
+            params.parentRunId,
+          ),
       executionProfile,
       status: "queued",
       createdAt: Date.now(),
     };
 
     this.runs.set(runId, run);
-    if (params.workspaceContext) {
-      openclawSessionContextService.remember(runId, params.workspaceContext);
-    }
     this.trimRetention();
     this.emitStatusChange(run);
     void this.execute(runId);
@@ -151,9 +156,14 @@ class OpenClawSubagentService extends EventEmitter {
         openclawSessionContextService.resolveWorkspaceContext(run.id) ||
         run.workspaceContext ||
         openclawSessionContextService.resolveWorkspaceContext(run.parentRunId);
+      const repositorySnapshot =
+        openclawSessionContextService.resolveRepositorySnapshot(run.id) ||
+        run.repositorySnapshot ||
+        openclawSessionContextService.resolveRepositorySnapshot(run.parentRunId);
       const activeRunner = new AgentRunner({
         executionProfile: run.executionProfile,
         workspaceContext,
+        repositorySnapshot,
       });
       runner = activeRunner;
       this.runners.set(runId, activeRunner);

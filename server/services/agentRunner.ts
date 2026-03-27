@@ -14,8 +14,13 @@ import {
   DEFAULT_AGENT_EXECUTION_PROFILE,
   type AgentExecutionProfile,
 } from "@shared/agentExecutionProfile";
+import type {
+  OpenClawPreferredCommand,
+  OpenClawRepositorySnapshot,
+} from "@shared/openclawRepositorySnapshot";
 import type { OpenClawWorkspaceContext } from "@shared/openclawWorkspaceContext";
 import { getAgentExecutionProfileConfig } from "../agent/executionProfiles";
+import { repositorySnapshotService } from "../openclaw/repositorySnapshotService";
 
 export interface AgentState {
   objective: string;
@@ -46,6 +51,7 @@ export interface AgentRunnerConfig {
   enableLogging: boolean;
   maxConsecutiveFailures: number;
   workspaceContext?: OpenClawWorkspaceContext;
+  repositorySnapshot?: OpenClawRepositorySnapshot;
   toolRegistry?: ToolRegistry;
 }
 
@@ -163,6 +169,7 @@ export class AgentRunner extends EventEmitter {
   private lastFailedTool: string = "";
   private readonly toolRegistry: ToolRegistry;
   private readonly workspaceContext?: OpenClawWorkspaceContext;
+  private readonly repositorySnapshot?: OpenClawRepositorySnapshot;
 
   constructor(config: Partial<AgentRunnerConfig> = {}) {
     super();
@@ -178,6 +185,11 @@ export class AgentRunner extends EventEmitter {
       ...config,
     };
     this.workspaceContext = this.config.workspaceContext;
+    this.repositorySnapshot =
+      this.config.repositorySnapshot ||
+      (this.workspaceContext
+        ? repositorySnapshotService.capture(this.workspaceContext)
+        : undefined);
     this.toolRegistry = this.createToolRegistry();
     this.logStructured("debug", "initialized", {
       executionProfile: this.config.executionProfile,
@@ -187,6 +199,9 @@ export class AgentRunner extends EventEmitter {
       repositoryPath: this.workspaceContext?.repositoryPath,
       selectedFolder: this.workspaceContext?.selectedFolder,
       branch: this.workspaceContext?.branch,
+      repoStyle: this.repositorySnapshot?.repoStyle,
+      packageManager: this.repositorySnapshot?.packageManager,
+      headSha: this.repositorySnapshot?.headSha,
       toolRegistrySize: this.toolRegistry.size,
     });
   }
@@ -238,6 +253,61 @@ export class AgentRunner extends EventEmitter {
       "Regla operativa: los comandos shell arrancan en la carpeta objetivo del workspace.",
     ];
     return lines.join("\n");
+  }
+
+  private buildRepositorySnapshotPromptSection(): string {
+    if (!this.repositorySnapshot) return "";
+
+    const preferredCommands = (
+      Object.entries(this.repositorySnapshot.preferredCommands || {}) as Array<
+        [string, OpenClawPreferredCommand | undefined]
+      >
+    )
+      .map(([kind, command]) => {
+        if (!command) return null;
+        const commandLine =
+          command.workingDirectory && command.workingDirectory !== "."
+            ? `(cd ${command.workingDirectory} && ${command.command})`
+            : command.command;
+        return `- ${kind}: ${commandLine}`;
+      })
+      .filter((value): value is string => Boolean(value));
+
+    const lines = [
+      "Repository intelligence snapshot:",
+      `- Estilo de repo: ${this.repositorySnapshot.repoStyle}`,
+      `- Package manager: ${this.repositorySnapshot.packageManager}`,
+      this.repositorySnapshot.selectedRoot
+        ? `- Root preferido: ${this.repositorySnapshot.selectedRoot}`
+        : null,
+      this.repositorySnapshot.stacks.length > 0
+        ? `- Stacks detectados: ${this.repositorySnapshot.stacks.join(", ")}`
+        : null,
+      preferredCommands.length > 0
+        ? `- Comandos preferidos:\n${preferredCommands.join("\n")}`
+        : null,
+      this.repositorySnapshot.deployWorkflows.length > 0
+        ? `- Deploy/CI relevante: ${this.repositorySnapshot.deployWorkflows
+            .slice(0, 4)
+            .join(", ")}`
+        : this.repositorySnapshot.ciWorkflows.length > 0
+          ? `- CI relevante: ${this.repositorySnapshot.ciWorkflows
+              .slice(0, 4)
+              .join(", ")}`
+          : null,
+      this.repositorySnapshot.sensitivePaths.length > 0
+        ? `- Rutas sensibles: ${this.repositorySnapshot.sensitivePaths
+            .slice(0, 6)
+            .join(", ")}`
+        : null,
+      this.repositorySnapshot.openClawSignals.length > 0
+        ? `- Señales OpenClaw: ${this.repositorySnapshot.openClawSignals.join(
+            ", ",
+          )}`
+        : null,
+    ];
+
+    return lines.filter(Boolean).join("\n");
   }
 
   async run(objective: string, planHint: string[] = []): Promise<{ success: boolean; result: any; state: AgentState; run_id: string }> {
@@ -473,6 +543,7 @@ export class AgentRunner extends EventEmitter {
       const availableTools = this.toolRegistry.listToolsWithInfo();
       const toolsDescription = availableTools.map(t => `- ${t.name}: ${t.description}`).join("\n");
       const workspacePrompt = this.buildWorkspacePromptSection();
+      const repositorySnapshotPrompt = this.buildRepositorySnapshotPromptSection();
 
       const prompt = `Eres un agente autónomo ejecutando una tarea.
 
@@ -481,6 +552,7 @@ Plan: ${context.plan.join(" → ")}
 Paso actual: ${context.currentStep + 1}/${this.config.maxSteps}
 
 ${workspacePrompt ? `${workspacePrompt}\n` : ""}
+${repositorySnapshotPrompt ? `${repositorySnapshotPrompt}\n` : ""}
 ${contextSummary}
 
 Acciones recientes (últimas 3): ${JSON.stringify(context.previousActions)}

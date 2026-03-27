@@ -1,9 +1,81 @@
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import { createHttpTestClient } from "../../tests/helpers/httpTestClient";
 import { openclawSessionContextService } from "../openclaw/sessionContextService";
+import { repositorySnapshotService } from "../openclaw/repositorySnapshotService";
 
 const runtimeRuns: any[] = [];
+const tempDirectories: string[] = [];
+
+function createSnapshotRepo(): string {
+  const repositoryRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), "openclaw-runtime-router-"),
+  );
+  tempDirectories.push(repositoryRoot);
+
+  fs.mkdirSync(path.join(repositoryRoot, ".github", "workflows"), {
+    recursive: true,
+  });
+  fs.mkdirSync(path.join(repositoryRoot, "apps", "web"), { recursive: true });
+  fs.mkdirSync(path.join(repositoryRoot, "server", "openclaw"), {
+    recursive: true,
+  });
+
+  fs.writeFileSync(
+    path.join(repositoryRoot, "package.json"),
+    JSON.stringify(
+      {
+        name: "hola-root",
+        workspaces: ["apps/*"],
+        scripts: {
+          dev: "turbo dev",
+          build: "turbo build",
+          test: "vitest run",
+        },
+        dependencies: {
+          react: "^19.0.0",
+          openclaw: "workspace:*",
+        },
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  );
+  fs.writeFileSync(path.join(repositoryRoot, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n", "utf-8");
+  fs.writeFileSync(path.join(repositoryRoot, "turbo.json"), "{ \"pipeline\": {} }\n", "utf-8");
+  fs.writeFileSync(path.join(repositoryRoot, ".env.production"), "TOKEN=secret\n", "utf-8");
+  fs.writeFileSync(
+    path.join(repositoryRoot, ".github", "workflows", "deploy-production.yml"),
+    "name: Deploy Production\n",
+    "utf-8",
+  );
+  fs.writeFileSync(
+    path.join(repositoryRoot, "apps", "web", "package.json"),
+    JSON.stringify(
+      {
+        name: "web",
+        scripts: {
+          dev: "next dev",
+          build: "next build",
+          test: "vitest run",
+        },
+        dependencies: {
+          next: "^15.0.0",
+          react: "^19.0.0",
+        },
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  );
+
+  return repositoryRoot;
+}
 
 const orchestrationEngineMock = {
   decomposeTask: vi.fn(async (objective: string) => [
@@ -179,6 +251,13 @@ describe("openclawRuntimeRouter smoke flow", () => {
   beforeEach(() => {
     runtimeRuns.length = 0;
     openclawSessionContextService.clear();
+    repositorySnapshotService.clear();
+    while (tempDirectories.length > 0) {
+      const directory = tempDirectories.pop();
+      if (directory) {
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    }
     vi.clearAllMocks();
   });
 
@@ -231,11 +310,12 @@ describe("openclawRuntimeRouter smoke flow", () => {
     const { client, close } = await createHttpTestClient(app);
 
     try {
+      const repositoryRoot = createSnapshotRepo();
       const workspaceContext = {
         projectId: "project_hola",
         projectName: "Hola",
-        repositoryPath: "/tmp/hola-repo",
-        selectedFolder: "packages/app",
+        repositoryPath: repositoryRoot,
+        selectedFolder: "apps/web",
         codingAgents: ["coder", "reviewer"],
         runtimeTarget: "Local",
         executionAccess: "Full access",
@@ -249,6 +329,15 @@ describe("openclawRuntimeRouter smoke flow", () => {
       expect(sessionRes.body.workspaceContext.repositoryPath).toBe(
         workspaceContext.repositoryPath,
       );
+      expect(sessionRes.body.repositorySnapshot.packageManager).toBe("pnpm");
+      expect(sessionRes.body.repositorySnapshot.repoStyle).toBe("monorepo");
+      expect(sessionRes.body.repositorySnapshot.selectedRoot).toBe("apps/web");
+      expect(sessionRes.body.repositorySnapshot.stacks).toEqual(
+        expect.arrayContaining(["Next.js", "React", "Turbo"]),
+      );
+      expect(sessionRes.body.repositorySnapshot.deployWorkflows).toContain(
+        ".github/workflows/deploy-production.yml",
+      );
 
       const spawnRes = await client.post("/api/openclaw/runtime/subagents").send({
         objective: "Analiza el repo y prepara cambios",
@@ -259,6 +348,12 @@ describe("openclawRuntimeRouter smoke flow", () => {
       expect(
         openclawSessionContextService.resolveWorkspaceContext(spawnRes.body.id),
       ).toMatchObject(workspaceContext);
+      expect(
+        openclawSessionContextService.resolveRepositorySnapshot(spawnRes.body.id),
+      ).toMatchObject({
+        packageManager: "pnpm",
+        selectedRoot: "apps/web",
+      });
     } finally {
       await close();
     }
