@@ -1,9 +1,13 @@
 # ILIAGPT Dockerfile - Optimized for lower disk usage in GitHub/VPS builds Multi-stage build for production
 
+# Use Docker Official Images via Amazon ECR Public to reduce Docker Hub
+# throttling/auth failures in CI.
+ARG NODE_BASE_IMAGE=public.ecr.aws/docker/library/node:22-slim
+
 # ============================================
 # Stage 1: Build (dependencies + compile)
 # ============================================
-FROM node:22-slim AS builder
+FROM ${NODE_BASE_IMAGE} AS builder
 WORKDIR /app
 
 # Build-time tooling for native modules
@@ -95,7 +99,7 @@ RUN node -e "console.log(require.resolve('ajv/package.json'))"
 # ============================================
 # Stage 2: Sandbox Runner
 # Reuse the already-built builder stage so this target does not need a second
-# Docker Hub base-image resolution during CI, which was tripping rate limits.
+# Node base-image resolution during CI.
 # ============================================
 FROM builder AS sandbox-runner
 WORKDIR /app
@@ -117,7 +121,7 @@ CMD ["node", "dist/sandbox-runner.cjs"]
 # ============================================
 # Stage 3: Production Runner
 # ============================================
-FROM node:22-slim AS runner
+FROM ${NODE_BASE_IMAGE} AS runner
 WORKDIR /app
 
 # Bake APP_VERSION into the image (source of truth for /api/health version).
