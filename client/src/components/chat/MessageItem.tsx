@@ -11,6 +11,7 @@ import { areAgentRunsEqual } from "./agentRunCompare";
 
 export interface MessageItemProps {
     message: Message;
+    sendTransitionLayoutId?: string;
     msgIndex: number;
     totalMessages: number;
     variant: "compact" | "default";
@@ -57,6 +58,7 @@ export interface MessageItemProps {
 
 export const MessageItem = memo(function MessageItem({
     message,
+    sendTransitionLayoutId,
     msgIndex,
     totalMessages,
     variant,
@@ -122,6 +124,7 @@ export const MessageItem = memo(function MessageItem({
                 {message.role === "user" ? (
                     <UserMessage
                         message={message}
+                        sendTransitionLayoutId={sendTransitionLayoutId}
                         variant={variant}
                         isEditing={editingMessageId === message.id}
                         editContent={editContent}
@@ -188,6 +191,7 @@ export const MessageItem = memo(function MessageItem({
     return (
         prevProps.message.id === nextProps.message.id &&
         prevProps.message.clientTempId === nextProps.message.clientTempId &&
+        prevProps.sendTransitionLayoutId === nextProps.sendTransitionLayoutId &&
         prevProps.message.content === nextProps.message.content &&
         prevProps.message.role === nextProps.message.role &&
         prevProps.message.deliveryStatus === nextProps.message.deliveryStatus &&

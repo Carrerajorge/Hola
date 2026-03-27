@@ -6,11 +6,13 @@ import {
     Pencil,
     Copy,
     CheckCircle2,
-    Loader2
+    Loader2,
+    CheckCheck,
+    AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import { Message } from "@/hooks/use-chats";
@@ -18,6 +20,7 @@ import { AttachmentList, formatMessageTime, DocumentBlock } from "./MessageParts
 
 export interface UserMessageProps {
     message: Message;
+    sendTransitionLayoutId?: string;
     variant: "compact" | "default";
     isEditing: boolean;
     editContent: string;
@@ -35,6 +38,7 @@ export interface UserMessageProps {
 
 export const UserMessage = memo(function UserMessage({
     message,
+    sendTransitionLayoutId,
     variant,
     isEditing,
     editContent,
@@ -50,6 +54,7 @@ export const UserMessage = memo(function UserMessage({
     documentAnalysisStatus
 }: UserMessageProps) {
     const { settings: platformSettings } = usePlatformSettings();
+    const isSending = message.deliveryStatus === "sending";
     const hasDocumentAttachments = !!message.attachments?.some((att) => {
         const attachmentType = (att.type || "").toLowerCase();
         const attachmentMime = (att.mimeType || "").toLowerCase();
@@ -76,12 +81,18 @@ export const UserMessage = memo(function UserMessage({
                     <DocumentAnalysisInlineStatus text={documentAnalysisStatus.text} />
                 )}
                 {message.content && (
-                    <div className="bg-primary/10 text-primary-foreground px-3 py-2 rounded-lg max-w-full text-sm">
+                    <motion.div
+                        layout={sendTransitionLayoutId ? "position" : false}
+                        layoutId={sendTransitionLayoutId}
+                        transition={SEND_TRANSITION_SPRING}
+                        className="bg-primary/10 text-primary-foreground px-3 py-2 rounded-lg max-w-full text-sm"
+                        style={{ transformOrigin: "right bottom" }}
+                    >
                         <span className="text-muted-foreground mr-1 font-medium">
                             Instrucción:
                         </span>
                         <span className="text-foreground">{message.content}</span>
-                    </div>
+                    </motion.div>
                 )}
             </div>
         );
@@ -130,9 +141,19 @@ export const UserMessage = memo(function UserMessage({
                         <DocumentAnalysisInlineStatus text={documentAnalysisStatus.text} />
                     )}
                     {message.content && (
-                        <div className="liquid-message-user px-4 py-2.5 text-sm break-words leading-relaxed">
+                        <motion.div
+                            layout={sendTransitionLayoutId ? "position" : false}
+                            layoutId={sendTransitionLayoutId}
+                            transition={SEND_TRANSITION_SPRING}
+                            className={cn(
+                                "liquid-message-user px-4 py-2.5 text-sm break-words leading-relaxed transition-[box-shadow,border-color,transform,opacity] duration-200",
+                                isSending &&
+                                    "ring-1 ring-primary/10 shadow-[0_12px_30px_-22px_rgba(59,130,246,0.55)]",
+                            )}
+                            style={{ transformOrigin: "right bottom" }}
+                        >
                             {message.content}
-                        </div>
+                        </motion.div>
                     )}
                     <div className="flex items-center justify-end gap-1.5 mt-2">
                         {message.timestamp && (
@@ -140,29 +161,9 @@ export const UserMessage = memo(function UserMessage({
                                 {formatMessageTime(message.timestamp, platformSettings.timezone_default)}
                             </span>
                         )}
-                        {message.deliveryStatus === "sending" && (
-                            <span className="text-[10px] text-muted-foreground/70">
-                                Enviando...
-                            </span>
-                        )}
-                        {message.deliveryStatus === "sent" && (
-                            <span className="text-[10px] text-muted-foreground/60">
-                                Enviado
-                            </span>
-                        )}
-                        {message.deliveryStatus === "delivered" && (
-                            <span className="text-[10px] text-muted-foreground/60">
-                                Entregado
-                            </span>
-                        )}
+                        <DeliveryStatusBadge status={message.deliveryStatus} />
                         {message.deliveryStatus === "error" && (
                             <div className="flex items-center gap-2">
-                                <span
-                                    className="text-[10px] text-destructive"
-                                    title={message.deliveryError || undefined}
-                                >
-                                    Error
-                                </span>
                                 {onRetrySend && (
                                     <Button
                                         variant="ghost"
@@ -212,6 +213,7 @@ export const UserMessage = memo(function UserMessage({
     return (
         prevProps.message.id === nextProps.message.id &&
         prevProps.message.clientTempId === nextProps.message.clientTempId &&
+        prevProps.sendTransitionLayoutId === nextProps.sendTransitionLayoutId &&
         prevProps.message.content === nextProps.message.content &&
         prevProps.message.deliveryStatus === nextProps.message.deliveryStatus &&
         prevProps.message.deliveryError === nextProps.message.deliveryError &&
@@ -222,6 +224,91 @@ export const UserMessage = memo(function UserMessage({
         prevProps.message.attachments === nextProps.message.attachments &&
         prevProps.documentAnalysisStatus?.state === nextProps.documentAnalysisStatus?.state &&
         prevProps.documentAnalysisStatus?.text === nextProps.documentAnalysisStatus?.text
+    );
+});
+
+const SEND_TRANSITION_SPRING = {
+    type: "spring" as const,
+    stiffness: 460,
+    damping: 36,
+    mass: 0.82,
+};
+
+const DELIVERY_STATUS_BADGE_CLASSNAME =
+    "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium shadow-sm backdrop-blur-sm";
+
+const DeliveryStatusBadge = memo(function DeliveryStatusBadge({
+    status,
+}: {
+    status: Message["deliveryStatus"];
+}) {
+    if (!status) return null;
+
+    if (status === "error") {
+        return (
+            <AnimatePresence mode="popLayout" initial={false}>
+                <motion.span
+                    key="error"
+                    initial={{ opacity: 0, y: 3, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -3, scale: 0.98 }}
+                    transition={{ duration: 0.16, ease: "easeOut" }}
+                    className={cn(
+                        DELIVERY_STATUS_BADGE_CLASSNAME,
+                        "border-destructive/20 bg-destructive/5 text-destructive",
+                    )}
+                    aria-live="polite"
+                >
+                    <AlertCircle className="h-3 w-3" />
+                    <span>Error</span>
+                </motion.span>
+            </AnimatePresence>
+        );
+    }
+
+    const badgeContent =
+        status === "sending"
+            ? {
+                  key: "sending",
+                  className: "border-primary/15 bg-primary/5 text-primary/80",
+                  label: "Enviando",
+                  icon: (
+                      <motion.span
+                          className="h-1.5 w-1.5 rounded-full bg-primary"
+                          animate={{ scale: [1, 1.25, 1], opacity: [0.55, 1, 0.55] }}
+                          transition={{ duration: 1.15, ease: "easeInOut", repeat: Infinity }}
+                      />
+                  ),
+              }
+            : status === "delivered"
+              ? {
+                    key: "delivered",
+                    className: "border-emerald-500/20 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300",
+                    label: "Entregado",
+                    icon: <CheckCheck className="h-3 w-3" />,
+                }
+              : {
+                    key: "sent",
+                    className: "border-zinc-200/70 bg-white/70 text-muted-foreground dark:border-zinc-700/70 dark:bg-zinc-900/50",
+                    label: "Enviado",
+                    icon: <CheckCircle2 className="h-3 w-3" />,
+                };
+
+    return (
+        <AnimatePresence mode="popLayout" initial={false}>
+            <motion.span
+                key={badgeContent.key}
+                initial={{ opacity: 0, y: 3, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -3, scale: 0.98 }}
+                transition={{ duration: 0.16, ease: "easeOut" }}
+                className={cn(DELIVERY_STATUS_BADGE_CLASSNAME, badgeContent.className)}
+                aria-live="polite"
+            >
+                {badgeContent.icon}
+                <span>{badgeContent.label}</span>
+            </motion.span>
+        </AnimatePresence>
     );
 });
 

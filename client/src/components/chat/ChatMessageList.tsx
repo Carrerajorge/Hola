@@ -87,6 +87,7 @@ export interface ChatMessageListProps {
     onToolDeny?: (messageId: string, toolName: string, stepIndex: number) => void;
     onAtBottomChange?: (atBottom: boolean) => void;
     onScrollerRef?: (element: HTMLElement | null) => void;
+    activeSendTransition?: { messageId: string; layoutId: string } | null;
 }
 
 export function ChatMessageList({
@@ -136,7 +137,8 @@ export function ChatMessageList({
     onToolConfirm,
     onToolDeny,
     onAtBottomChange,
-    onScrollerRef
+    onScrollerRef,
+    activeSendTransition
 }: ChatMessageListProps) {
     const virtuosoRef = useRef<VirtuosoHandle | null>(null);
 
@@ -378,6 +380,12 @@ export function ChatMessageList({
             <div className="pb-4 px-2">
                 <MessageItem
                     message={msg}
+                    sendTransitionLayoutId={
+                        msg.role === "user" &&
+                        activeSendTransition?.messageId === (msg.clientTempId || msg.id)
+                            ? activeSendTransition.layoutId
+                            : undefined
+                    }
                     msgIndex={index}
                     totalMessages={mergedMessages.length}
                     variant={variant}
@@ -430,7 +438,8 @@ export function ChatMessageList({
         minimizedDocument, onRestoreDocument, setEditContent,
         onAgentCancel, onAgentRetry, onAgentArtifactPreview,
         onSuperAgentCancel, onSuperAgentRetry, onQuestionClick,
-        effectiveStreamingId, streamingContent, onUserRetrySend
+        effectiveStreamingId, streamingContent, onUserRetrySend,
+        activeSendTransition
     ]);
 
     return (

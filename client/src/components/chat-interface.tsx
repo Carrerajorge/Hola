@@ -105,7 +105,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import { Upload, Search, Image, Video, Bot, Plug } from "lucide-react";
-import { motion } from "framer-motion";
+import { LayoutGroup, motion } from "framer-motion";
 
 import { ActiveGpt } from "@/types/chat";
 import {
@@ -279,6 +279,15 @@ import {
   extractTextFromChildren,
   isNumericValue,
 } from "./chat-interface/utils";
+
+type ActiveSendTransition = {
+  messageId: string;
+  layoutId: string;
+};
+
+function createSendTransitionLayoutId(): string {
+  return `composer-send-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 function AvatarWithFallback({
   src,
@@ -1100,6 +1109,12 @@ export function ChatInterface({
     [chatId, saveDraftDebounced, currentTextRef],
   );
   const [streamingContent, setStreamingContent] = useState("");
+  const [composerSendLayoutId, setComposerSendLayoutId] = useState(() =>
+    createSendTransitionLayoutId(),
+  );
+  const [activeSendTransition, setActiveSendTransition] =
+    useState<ActiveSendTransition | null>(null);
+  const activeSendTransitionTimeoutRef = useRef<number | null>(null);
   const [contextNotice, setContextNotice] = useState<{
     type: string;
     originalTokens: number;
@@ -1260,6 +1275,44 @@ export function ChatInterface({
   const canvasEnabledForActiveContext = activeGpt
     ? gptCapabilityFlags.canvas
     : settings.canvas;
+
+  const clearActiveSendTransition = useCallback(() => {
+    if (activeSendTransitionTimeoutRef.current !== null) {
+      window.clearTimeout(activeSendTransitionTimeoutRef.current);
+      activeSendTransitionTimeoutRef.current = null;
+    }
+    setActiveSendTransition(null);
+  }, []);
+
+  const scheduleActiveSendTransitionClear = useCallback((messageId: string) => {
+    if (typeof window === "undefined") {
+      setActiveSendTransition(null);
+      return;
+    }
+
+    if (activeSendTransitionTimeoutRef.current !== null) {
+      window.clearTimeout(activeSendTransitionTimeoutRef.current);
+    }
+
+    activeSendTransitionTimeoutRef.current = window.setTimeout(() => {
+      setActiveSendTransition((current) =>
+        current?.messageId === messageId ? null : current,
+      );
+      activeSendTransitionTimeoutRef.current = null;
+    }, 260);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (activeSendTransitionTimeoutRef.current !== null) {
+        window.clearTimeout(activeSendTransitionTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    clearActiveSendTransition();
+  }, [chatId, clearActiveSendTransition]);
 
   // Keep UI state consistent with Settings toggles (disable features when turned off).
   useEffect(() => {
@@ -7871,6 +7924,8 @@ export function ChatInterface({
       setContextNotice(null); // Clear any previous truncation notice
       let currentUploadedFiles = [...uploadedFilesRef.current];
       const userMsgId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      const sendTransitionLayoutId =
+        userInput.trim().length > 0 ? composerSendLayoutId : null;
       const hasUnsettledUploadsAtSubmit = currentUploadedFiles.some(
         (f: UploadedFile) => isFileUploadBlockingSend(f),
       );
@@ -7902,6 +7957,13 @@ export function ChatInterface({
       const shouldClearComposerFilesImmediately = !hadPendingUploadsAtSubmit;
       const commitOptimisticUi = () => {
         setContextNotice(null);
+        if (sendTransitionLayoutId) {
+          setActiveSendTransition({
+            messageId: userMsgId,
+            layoutId: sendTransitionLayoutId,
+          });
+          setComposerSendLayoutId(createSendTransitionLayoutId());
+        }
         setInput("");
         if (shouldClearComposerFilesImmediately) {
           setUploadedFiles([]);
@@ -7934,6 +7996,11 @@ export function ChatInterface({
             );
           });
         });
+      }
+      if (sendTransitionLayoutId) {
+        scheduleActiveSendTransitionClear(userMsgId);
+      } else {
+        clearActiveSendTransition();
       }
 
       // Yield one frame so the optimistic bubble paints before the heavier
@@ -9836,7 +9903,8 @@ IMPORTANTE:
 
   return (
     <>
-      <div className="flex h-full flex-col bg-transparent relative">
+      <LayoutGroup id={`chat-send-transition-${chatId ?? "draft"}`}>
+        <div className="flex h-full flex-col bg-transparent relative">
         {/* Header */}
         <ChatHeader
           chatId={chatId || null}
@@ -9952,6 +10020,7 @@ IMPORTANTE:
                     >
                       <ChatMessageList
                         messages={displayMessages}
+                        activeSendTransition={activeSendTransition}
                         onUserRetrySend={handleUserRetrySend}
                         variant={activeDocEditor ? "compact" : "default"}
                         editingMessageId={editingMessageId}
@@ -10219,6 +10288,7 @@ IMPORTANTE:
 
                 <Composer
                   input={input}
+                  sendTransitionLayoutId={composerSendLayoutId}
                   setInput={setInput}
                   textareaRef={textareaRef}
                   composerRef={composerRef}
@@ -10413,6 +10483,7 @@ IMPORTANTE:
                 <div className="flex-1 min-h-0 overflow-hidden p-4 sm:p-6 md:p-10 space-y-6">
                   <ChatMessageList
                     messages={displayMessages}
+                    activeSendTransition={activeSendTransition}
                     onUserRetrySend={handleUserRetrySend}
                     variant="default"
                     editingMessageId={editingMessageId}
@@ -10639,6 +10710,7 @@ IMPORTANTE:
             </div>
             <Composer
               input={input}
+              sendTransitionLayoutId={composerSendLayoutId}
               setInput={setInput}
               textareaRef={textareaRef}
               composerRef={composerRef}
@@ -11160,7 +11232,8 @@ IMPORTANTE:
         />
 
         {/* Agent Panel removed - progress is shown inline in chat messages */}
-      </div>
+        </div>
+      </LayoutGroup>
     </>
   );
 }
