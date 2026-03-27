@@ -10,7 +10,7 @@ import * as React from "react";
  * If we want tooltips back, replace this with a non-Radix implementation or a fixed Radix version.
  */
 
-type WrapperProps = { children: React.ReactNode };
+type WrapperProps = { children: React.ReactNode; delayDuration?: number; [key: string]: unknown };
 
 export function TooltipProvider({ children }: WrapperProps) {
   return <>{children}</>;
@@ -24,9 +24,9 @@ export function TooltipTrigger({ children }: WrapperProps & { asChild?: boolean 
   return <>{children}</>;
 }
 
-export const TooltipContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  function TooltipContent(_props, _ref) {
-    return null;
-  }
-);
-
+export const TooltipContent = React.forwardRef<
+  HTMLDivElement,
+  React.HTMLAttributes<HTMLDivElement> & { side?: string; sideOffset?: number; [key: string]: unknown }
+>(function TooltipContent(_props, _ref) {
+  return null;
+});

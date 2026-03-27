@@ -5,7 +5,7 @@ import {
     CheckCircle2,
     XCircle,
     ChevronDown,
-    ChevronUpload,
+    ChevronUp,
     ShieldAlert,
     Play,
     TerminalSquare,
