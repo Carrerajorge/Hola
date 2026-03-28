@@ -18,6 +18,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
+import { autosizeTextarea } from "@/lib/textareaAutosize";
 
 interface MinimalComposerProps {
   value: string;
@@ -63,12 +64,7 @@ export const MinimalComposer = memo(function MinimalComposer({
   }, [value, isLoading, disabled, onSubmit]);
 
   const adjustHeight = useCallback(() => {
-    const textarea = textareaRef.current;
-    if (textarea) {
-      textarea.style.height = "auto";
-      const newHeight = Math.min(textarea.scrollHeight, 200);
-      textarea.style.height = `${newHeight}px`;
-    }
+    autosizeTextarea(textareaRef.current, 200);
   }, []);
 
   useEffect(() => {

@@ -5670,17 +5670,6 @@ export function ChatInterface({
     return !hasStableFileId && !hasStoragePath;
   };
 
-  const adjustTextareaHeight = () => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
-    }
-  };
-
-  useEffect(() => {
-    adjustTextareaHeight();
-  }, [input]);
-
   const handleSubmit = async () => {
     // ── Mutex guard: prevent re-entrant calls ──────────────────────────
     // React re-renders (from chatId prop change after new-chat creation)
