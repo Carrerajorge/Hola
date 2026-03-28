@@ -2691,6 +2691,11 @@ export function ChatInterface({
   
 
   useEffect(() => {
+    // Failsafe: Siempre limpiar un posible SubmitLock colgado cuando montamos interfaz nueva
+    clearSubmitLock();
+  }, []);
+
+  useEffect(() => {
     if (newChatResetNonce === undefined) return;
     if (newChatResetNonce === lastNewChatResetNonceRef.current) return;
     lastNewChatResetNonceRef.current = newChatResetNonce;
@@ -5916,17 +5921,11 @@ export function ChatInterface({
 
   const handleSubmit = async () => {
     // ── Mutex guard: prevent re-entrant calls ──────────────────────────
-    // React re-renders (from chatId prop change after new-chat creation)
-    // can cause handleSubmit to be called again before the first async
-    // invocation completes. This ref-based lock prevents that entirely.
     if (isSubmitLocked()) {
-      console.log(
-        "[handleSubmit] Blocked: already submitting (sessionStorage lock active)",
-      );
+      console.log("[handleSubmit] Blocked: already submitting (sessionStorage lock active)");
       return;
     }
     // Prevent double-submit while THIS chat has a request in flight.
-    // If a DIFFERENT chat is busy (aiStateChatId !== chatId), allow submission.
     const thisChatBusy =
       aiState !== "idle" && (!aiStateChatId || aiStateChatId === chatId);
     if (thisChatBusy) {
@@ -5936,10 +5935,15 @@ export function ChatInterface({
         "for chatId",
         aiStateChatId,
       );
+      toast({
+         title: "Espera un momento",
+         description: "Aún estamos procesando tu solicitud anterior.",
+         variant: "default",
+         duration: 3000,
+      });
       return;
     }
     setSubmitLock();
-    isSubmittingRef.current = true;
     try {
       const submitConversationId = chatId || latestChatIdRef.current;
       // When sending the very first message, the parent may create a pending chatId asynchronously.
