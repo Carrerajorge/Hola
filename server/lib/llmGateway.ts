@@ -1824,6 +1824,10 @@ class LLMGateway {
               return;
             }
 
+            const isLastProvider = providers.indexOf(provider) === providers.length - 1;
+            if (isLastProvider) {
+              throw new Error("El proveedor no devolvió contenido útil. Reintenta o cambia de modelo.");
+            }
             throw new Error(`Empty streamed response from provider ${provider}`);
           }
 

@@ -11067,6 +11067,7 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
             provider: effectiveProvider,
             disableImageGeneration: hasAttachments,
             maxTokens: laneMaxTokens,
+            enableFallback: true,
           };
 
           const streamGenerator = isGoogleGeminiCliProvider(effectiveProvider)
