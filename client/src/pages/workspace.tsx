@@ -146,8 +146,8 @@ function WorkspaceContent() {
   const aiState: WorkspaceAiState = activeConversationState?.aiState || "idle";
   const aiProcessSteps: WorkspaceAiStep[] = activeConversationState?.aiProcessSteps || [];
 
-  const setAiState = useCallback((nextState: WorkspaceAiState | ((prev: WorkspaceAiState) => WorkspaceAiState)) => {
-    const targetConversationId = activeConversationId || pendingChatIdRef.current || newChatStableKey;
+  const setAiState = useCallback((nextState: WorkspaceAiState | ((prev: WorkspaceAiState) => WorkspaceAiState), conversationId?: string | null) => {
+    const targetConversationId = conversationId || activeConversationId || pendingChatIdRef.current || newChatStableKey;
     if (!targetConversationId) return;
     setConversationUiStateMap((prev) => {
       const current = prev[targetConversationId] || createWorkspaceConversationUiState();
@@ -165,8 +165,8 @@ function WorkspaceContent() {
     });
   }, [activeConversationId, newChatStableKey]);
 
-  const setAiProcessSteps = useCallback((nextSteps: WorkspaceAiStep[] | ((prev: WorkspaceAiStep[]) => WorkspaceAiStep[])) => {
-    const targetConversationId = activeConversationId || pendingChatIdRef.current || newChatStableKey;
+  const setAiProcessSteps = useCallback((nextSteps: WorkspaceAiStep[] | ((prev: WorkspaceAiStep[]) => WorkspaceAiStep[]), conversationId?: string | null) => {
+    const targetConversationId = conversationId || activeConversationId || pendingChatIdRef.current || newChatStableKey;
     if (!targetConversationId) return;
     setConversationUiStateMap((prev) => {
       const current = prev[targetConversationId] || createWorkspaceConversationUiState();
