@@ -47,50 +47,12 @@ export function UpgradePlanDialog({ open, onOpenChange }: UpgradePlanDialogProps
     setLoadingPlan(planKey);
     
     try {
-      // First, get the actual price IDs from the backend
-      const priceResponse = await apiFetch("/api/stripe/price-ids");
-      const priceData = await priceResponse.json();
-      
       const priceIdKey = PLAN_PRICE_IDS[planKey];
-      const priceId = priceData.priceMapping?.[priceIdKey];
-      
-      if (!priceId) {
-        // If no price found, try to create products first
+      if (!priceIdKey) {
         toast({
-          title: "Configurando pagos...",
-          description: "Preparando el sistema de pagos, intenta de nuevo en unos segundos.",
-        });
-        
-        // Trigger product creation (admin-only, opt-in on server)
-        const seedRes = await apiFetch("/api/stripe/create-products", { method: "POST" });
-        const seedData = await seedRes.json().catch(() => null);
-        if (!seedRes.ok) {
-          if (seedRes.status === 404) {
-            toast({
-              title: "Inicialización deshabilitada",
-              description:
-                "El servidor tiene deshabilitada la inicialización de productos. Habilita ALLOW_STRIPE_PRODUCT_SEEDING=true para usar esta función.",
-              variant: "destructive",
-            });
-          } else if (seedRes.status === 403) {
-            toast({
-              title: "Acceso restringido",
-              description: "Solo administradores pueden inicializar productos de Stripe.",
-              variant: "destructive",
-            });
-          } else {
-            toast({
-              title: "Error",
-              description: seedData?.error || "No se pudo inicializar productos de Stripe.",
-              variant: "destructive",
-            });
-          }
-          return;
-        }
-
-        toast({
-          title: "Productos listos",
-          description: "Stripe fue inicializado. Intenta suscribirte de nuevo.",
+          title: "Plan no disponible",
+          description: "Ese plan no está habilitado en este momento.",
+          variant: "destructive",
         });
         return;
       }
@@ -99,7 +61,7 @@ export function UpgradePlanDialog({ open, onOpenChange }: UpgradePlanDialogProps
       const checkoutResponse = await apiFetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ priceId }),
+        body: JSON.stringify({ priceId: priceIdKey }),
       });
       
       const checkoutData = await checkoutResponse.json();
