@@ -1233,7 +1233,15 @@ export default function CodexPage() {
   );
 
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.nativeEvent.isComposing) return;
+
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      event.preventDefault();
+      void handleLaunch();
+      return;
+    }
+
+    if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       void handleLaunch();
     }

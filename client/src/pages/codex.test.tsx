@@ -536,6 +536,51 @@ describe("CodexPage", () => {
     });
   });
 
+  it("launches the run when pressing Enter in the Codex composer", async () => {
+    render(<CodexPage />);
+
+    const composer = screen.getByRole("textbox");
+
+    fireEvent.change(composer, {
+      target: { value: "Lanza este run con Enter." },
+    });
+
+    fireEvent.keyDown(composer, {
+      key: "Enter",
+      code: "Enter",
+      charCode: 13,
+    });
+
+    await waitFor(() => {
+      expect(createCodexRunMock).toHaveBeenCalledWith({
+        chatId: null,
+        message: "Lanza este run con Enter.",
+        project: expect.objectContaining({ id: "project-1", name: "Document hotfix" }),
+        executionProfile: "standard",
+        branchName: "main",
+      });
+    });
+  });
+
+  it("keeps Shift+Enter for multiline input without launching", () => {
+    render(<CodexPage />);
+
+    const composer = screen.getByRole("textbox");
+
+    fireEvent.change(composer, {
+      target: { value: "Primera linea" },
+    });
+
+    fireEvent.keyDown(composer, {
+      key: "Enter",
+      code: "Enter",
+      charCode: 13,
+      shiftKey: true,
+    });
+
+    expect(createCodexRunMock).not.toHaveBeenCalled();
+  });
+
   it("cycles the execution profile up to 24h and launches with that profile", async () => {
     render(<CodexPage />);
 
