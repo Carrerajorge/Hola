@@ -41,7 +41,9 @@ jobs:
   build:
     name: Build & Push
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # App build + sandbox build + boot smoke are exceeding 30 minutes on GH-hosted runners.
+    # Keep this above the observed worst-case so the final smoke gate can finish.
+    timeout-minutes: 45
     outputs:
       image_tag: ${{ steps.meta.outputs.tag }}
       app_digest: ${{ steps.build_app.outputs.digest }}
