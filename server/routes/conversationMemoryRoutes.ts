@@ -8,6 +8,10 @@ import { KeywordExtractor } from "../lib/keywordExtractor";
 import { AutoSummarizer, SummaryResult } from "../lib/autoSummarizer";
 import { IntentRouter, DetectedIntent, IntentType } from "../lib/intentRouter";
 import { RAGRetriever } from "../lib/ragRetriever";
+import {
+  isOptionalConversationStatePersistenceError,
+  summarizePersistenceCompatibilityError,
+} from "../lib/persistenceCompatibility";
 
 const router = Router();
 
@@ -73,6 +77,13 @@ router.get("/chats/:chatId/state", async (req: Request, res: Response, next: Nex
 
     res.json(state);
   } catch (error: any) {
+    if (isOptionalConversationStatePersistenceError(error)) {
+      console.warn(
+        "[ConversationMemoryRoutes] State store unavailable on GET state; returning null:",
+        summarizePersistenceCompatibilityError(error),
+      );
+      return res.json(null);
+    }
     console.error("[ConversationMemoryRoutes] GET state error:", error.message);
     next(error);
   }
@@ -86,6 +97,13 @@ router.post("/chats/:chatId/state", async (req: Request, res: Response, next: Ne
     const state = await conversationStateService.getOrCreateState(chatId, userId);
     res.status(201).json(state);
   } catch (error: any) {
+    if (isOptionalConversationStatePersistenceError(error)) {
+      console.warn(
+        "[ConversationMemoryRoutes] State store unavailable on POST state; returning null:",
+        summarizePersistenceCompatibilityError(error),
+      );
+      return res.json(null);
+    }
     console.error("[ConversationMemoryRoutes] POST state error:", error.message);
     next(error);
   }
@@ -105,6 +123,13 @@ router.post("/chats/:chatId/state/messages", async (req: Request, res: Response,
 
     res.status(201).json(state);
   } catch (error: any) {
+    if (isOptionalConversationStatePersistenceError(error)) {
+      console.warn(
+        "[ConversationMemoryRoutes] State store unavailable on POST message; skipping:",
+        summarizePersistenceCompatibilityError(error),
+      );
+      return res.status(202).json(null);
+    }
     console.error("[ConversationMemoryRoutes] POST message error:", error.message);
     next(error);
   }
@@ -133,6 +158,13 @@ router.post("/chats/:chatId/state/artifacts", async (req: Request, res: Response
 
     res.status(201).json(state);
   } catch (error: any) {
+    if (isOptionalConversationStatePersistenceError(error)) {
+      console.warn(
+        "[ConversationMemoryRoutes] State store unavailable on POST artifact; skipping:",
+        summarizePersistenceCompatibilityError(error),
+      );
+      return res.status(202).json(null);
+    }
     console.error("[ConversationMemoryRoutes] POST artifact error:", error.message);
     next(error);
   }
@@ -152,6 +184,13 @@ router.post("/chats/:chatId/state/images", async (req: Request, res: Response, n
 
     res.status(201).json(state);
   } catch (error: any) {
+    if (isOptionalConversationStatePersistenceError(error)) {
+      console.warn(
+        "[ConversationMemoryRoutes] State store unavailable on POST image; skipping:",
+        summarizePersistenceCompatibilityError(error),
+      );
+      return res.status(202).json(null);
+    }
     console.error("[ConversationMemoryRoutes] POST image error:", error.message);
     next(error);
   }
@@ -169,6 +208,13 @@ router.patch("/chats/:chatId/state/context", async (req: Request, res: Response,
     const state = await conversationStateService.updateContext(chatId, validation.data);
     res.json(state);
   } catch (error: any) {
+    if (isOptionalConversationStatePersistenceError(error)) {
+      console.warn(
+        "[ConversationMemoryRoutes] State store unavailable on PATCH context; skipping:",
+        summarizePersistenceCompatibilityError(error),
+      );
+      return res.status(202).json(null);
+    }
     console.error("[ConversationMemoryRoutes] PATCH context error:", error.message);
     next(error);
   }
@@ -231,6 +277,13 @@ router.get("/chats/:chatId/state/latest-image", async (req: Request, res: Respon
 
     res.json(image);
   } catch (error: any) {
+    if (isOptionalConversationStatePersistenceError(error)) {
+      console.warn(
+        "[ConversationMemoryRoutes] State store unavailable on GET latest-image; returning not found:",
+        summarizePersistenceCompatibilityError(error),
+      );
+      return res.status(404).json({ error: "No images found" });
+    }
     console.error("[ConversationMemoryRoutes] GET latest-image error:", error.message);
     next(error);
   }
@@ -253,6 +306,13 @@ router.delete("/chats/:chatId/state", async (req: Request, res: Response, next: 
     await conversationStateService.deleteState(chatId);
     res.status(204).send();
   } catch (error: any) {
+    if (isOptionalConversationStatePersistenceError(error)) {
+      console.warn(
+        "[ConversationMemoryRoutes] State store unavailable on DELETE state; skipping:",
+        summarizePersistenceCompatibilityError(error),
+      );
+      return res.status(204).send();
+    }
     console.error("[ConversationMemoryRoutes] DELETE state error:", error.message);
     next(error);
   }

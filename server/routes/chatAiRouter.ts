@@ -120,6 +120,10 @@ import { handleEmailChatRequest } from "../services/gmailChatIntegration";
 import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { ensureUserRowExists } from "../lib/ensureUserRowExists";
 import {
+  isOptionalChatRunPersistenceError,
+  summarizePersistenceCompatibilityError,
+} from "../lib/persistenceCompatibility";
+import {
   buildSkillSystemPromptSection,
   drizzleSkillStore,
   resolveSkillContextFromRequest,
@@ -8253,201 +8257,212 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         // (before SSE headers are sent).
         if (chatId && !claimedRun && (runId || clientRequestId)) {
           const claimStageStart = performance.now();
-
-          let existingRun = runId
-            ? await storage.getChatRun(runId)
-            : await storage.getChatRunByClientRequestId(
-                chatId,
-                clientRequestId!,
-              );
-
-          // If caller did not provide runId but did provide clientRequestId,
-          // create a lightweight run here so streaming can start.
-          if (
-            !existingRun &&
-            !runId &&
-            clientRequestId &&
-            latestUserTextForRun
-          ) {
-            const runPrepStart = performance.now();
-            try {
-              // 1) Prefer linking the run to an already-persisted user message
-              // when /chats/:id/messages used skipRun mode.
-              const runMessageIdStart = performance.now();
-              const runMessageId = userRequestId
-                ? await storage.findMessageByRequestId(userRequestId)
-                : null;
-              recordStage("user_message_lookup_ms", runMessageIdStart);
-              if (runMessageId && runMessageId.chatId === chatId) {
-                const createRunStart = performance.now();
-                const createdRun = await storage.createChatRun({
+          try {
+            let existingRun = runId
+              ? await storage.getChatRun(runId)
+              : await storage.getChatRunByClientRequestId(
                   chatId,
-                  clientRequestId,
-                  userMessageId: runMessageId.id,
-                  status: "pending",
-                });
-                existingRun = createdRun;
-                recordStage("run_from_existing_message_ms", createRunStart);
-              }
+                  clientRequestId!,
+                );
 
-              // 2) Fallback: create user message + run atomically (legacy first-write path).
-              if (!existingRun && latestUserTextForRun) {
-                // If stream starts before /api/chats finishes, make sure the chat row exists
-                // so createUserMessageAndRun won't fail with FK violations.
-                const existingChat = await storage.getChat(chatId);
-                if (!existingChat) {
-                  try {
-                    await storage.createChat({
-                      id: chatId,
-                      title: "New Chat",
-                      userId: effectiveUserId || undefined,
-                      gptId: effectiveGptId || undefined,
-                    });
-                  } catch (chatCreateError: any) {
-                    if (chatCreateError?.code !== "23505") {
-                      throw chatCreateError;
-                    }
-                  }
+            // If caller did not provide runId but did provide clientRequestId,
+            // create a lightweight run here so streaming can start.
+            if (
+              !existingRun &&
+              !runId &&
+              clientRequestId &&
+              latestUserTextForRun
+            ) {
+              const runPrepStart = performance.now();
+              try {
+                // 1) Prefer linking the run to an already-persisted user message
+                // when /chats/:id/messages used skipRun mode.
+                const runMessageIdStart = performance.now();
+                const runMessageId = userRequestId
+                  ? await storage.findMessageByRequestId(userRequestId)
+                  : null;
+                recordStage("user_message_lookup_ms", runMessageIdStart);
+                if (runMessageId && runMessageId.chatId === chatId) {
+                  const createRunStart = performance.now();
+                  const createdRun = await storage.createChatRun({
+                    chatId,
+                    clientRequestId,
+                    userMessageId: runMessageId.id,
+                    status: "pending",
+                  });
+                  existingRun = createdRun;
+                  recordStage("run_from_existing_message_ms", createRunStart);
                 }
 
-                const createdRunStart = performance.now();
-                const created = await storage.createUserMessageAndRun(
-                  chatId,
-                  {
+                // 2) Fallback: create user message + run atomically (legacy first-write path).
+                if (!existingRun && latestUserTextForRun) {
+                  // If stream starts before /api/chats finishes, make sure the chat row exists
+                  // so createUserMessageAndRun won't fail with FK violations.
+                  const existingChat = await storage.getChat(chatId);
+                  if (!existingChat) {
+                    try {
+                      await storage.createChat({
+                        id: chatId,
+                        title: "New Chat",
+                        userId: effectiveUserId || undefined,
+                        gptId: effectiveGptId || undefined,
+                      });
+                    } catch (chatCreateError: any) {
+                      if (chatCreateError?.code !== "23505") {
+                        throw chatCreateError;
+                      }
+                    }
+                  }
+
+                  const createdRunStart = performance.now();
+                  const created = await storage.createUserMessageAndRun(
                     chatId,
-                    role: "user",
-                    content: latestUserTextForRun,
-                    status: "done",
-                    requestId: userRequestId || `${requestId}:user`,
-                    userMessageId: null,
-                    attachments: sanitizedRunAttachments,
-                  } as any,
+                    {
+                      chatId,
+                      role: "user",
+                      content: latestUserTextForRun,
+                      status: "done",
+                      requestId: userRequestId || `${requestId}:user`,
+                      userMessageId: null,
+                      attachments: sanitizedRunAttachments,
+                    } as any,
+                    clientRequestId,
+                  );
+                  existingRun = created.run;
+                  recordStage("create_message_run_ms", createdRunStart);
+                }
+                recordStage("run_prep_ms", runPrepStart);
+              } catch (createRunError: any) {
+                // Unique violation means another concurrent request created it first.
+                if (createRunError?.code !== "23505") {
+                  throw createRunError;
+                }
+                existingRun = await storage.getChatRunByClientRequestId(
+                  chatId,
                   clientRequestId,
                 );
-                existingRun = created.run;
-                recordStage("create_message_run_ms", createdRunStart);
+                recordStage("run_prep_ms", runPrepStart);
               }
-              recordStage("run_prep_ms", runPrepStart);
-            } catch (createRunError: any) {
-              // Unique violation means another concurrent request created it first.
-              if (createRunError?.code !== "23505") {
-                throw createRunError;
-              }
-              existingRun = await storage.getChatRunByClientRequestId(
-                chatId,
-                clientRequestId,
-              );
-              recordStage("run_prep_ms", runPrepStart);
             }
-          }
 
-          if (!existingRun) {
-            recordStage("run_claim_ms", claimStageStart);
-            if (runId) {
-              return res.status(404).json({
-                error: "Run not found",
-                traceId: requestId,
-                timings: reportTimings("run_not_found"),
-              });
-            }
-            // No run found for clientRequestId yet: continue in legacy mode
-            // (best-effort), /chat/stream will still function.
-          } else {
-            if (existingRun.status === "processing") {
-              const STALE_RUN_THRESHOLD_MS = 5 * 60 * 1000;
-              const runStartedAt = existingRun.startedAt
-                ? new Date(existingRun.startedAt).getTime()
-                : 0;
-              const runAge = Date.now() - runStartedAt;
-
-              // Allow run replacement in two cases:
-              // 1. queueMode "replace" (default) — client explicitly wants to supersede
-              // 2. Stale run (processing > 5 min) — abandoned connection safety net
-              if (queueMode === "replace" || runAge > STALE_RUN_THRESHOLD_MS) {
-                const reason =
-                  runAge > STALE_RUN_THRESHOLD_MS
-                    ? "stale_run_recovered"
-                    : "run_replaced";
-                console.log(
-                  `[Run] Resetting run ${existingRun.id} to pending (${reason}, age=${Math.round(runAge / 1000)}s)`,
-                );
-                await storage.updateChatRunStatus(
-                  existingRun.id,
-                  "pending",
-                  reason,
-                );
-                existingRun = { ...existingRun, status: "pending" };
-                // Fall through to claim the reset run below
-              } else {
-                recordStage("run_claim_ms", claimStageStart);
-                console.log(
-                  `[Run] Run ${existingRun.id} is already being processed (${Math.round(runAge / 1000)}s), returning status`,
-                );
-                return res.json({
-                  status: "already_processing",
-                  run: existingRun,
-                  traceId: requestId,
-                  timings: reportTimings("already_processing"),
-                });
-              }
-            }
-            if (existingRun.status === "done") {
+            if (!existingRun) {
               recordStage("run_claim_ms", claimStageStart);
-              console.log(`[Run] Run ${existingRun.id} already completed`);
-              return res.json({
-                status: "already_done",
-                run: existingRun,
-                traceId: requestId,
-                timings: reportTimings("already_done"),
-              });
-            }
-            if (existingRun.status === "failed") {
-              console.log(
-                `[Run] Run ${existingRun.id} previously failed — resetting to pending for retry`,
-              );
-              await storage.updateChatRunStatus(existingRun.id, "pending");
-              existingRun = { ...existingRun, status: "pending" };
-            }
-
-            const claimKey = existingRun.clientRequestId || clientRequestId;
-            claimedRun = await storage.claimPendingRun(
-              chatId,
-              claimKey || undefined,
-            );
-            recordStage("run_claim_ms", claimStageStart);
-            if (!claimedRun) {
-              const refreshedRun = runId
-                ? await storage.getChatRun(runId)
-                : claimKey
-                  ? await storage.getChatRunByClientRequestId(chatId, claimKey)
-                  : null;
-              if (refreshedRun?.status === "processing") {
-                return res.json({
-                  status: "already_processing",
-                  run: refreshedRun,
+              if (runId) {
+                return res.status(404).json({
+                  error: "Run not found",
                   traceId: requestId,
-                  timings: reportTimings("already_processing"),
+                  timings: reportTimings("run_not_found"),
                 });
               }
-              if (refreshedRun?.status === "done") {
+              // No run found for clientRequestId yet: continue in legacy mode
+              // (best-effort), /chat/stream will still function.
+            } else {
+              if (existingRun.status === "processing") {
+                const STALE_RUN_THRESHOLD_MS = 5 * 60 * 1000;
+                const runStartedAt = existingRun.startedAt
+                  ? new Date(existingRun.startedAt).getTime()
+                  : 0;
+                const runAge = Date.now() - runStartedAt;
+
+                // Allow run replacement in two cases:
+                // 1. queueMode "replace" (default) — client explicitly wants to supersede
+                // 2. Stale run (processing > 5 min) — abandoned connection safety net
+                if (queueMode === "replace" || runAge > STALE_RUN_THRESHOLD_MS) {
+                  const reason =
+                    runAge > STALE_RUN_THRESHOLD_MS
+                      ? "stale_run_recovered"
+                      : "run_replaced";
+                  console.log(
+                    `[Run] Resetting run ${existingRun.id} to pending (${reason}, age=${Math.round(runAge / 1000)}s)`,
+                  );
+                  await storage.updateChatRunStatus(
+                    existingRun.id,
+                    "pending",
+                    reason,
+                  );
+                  existingRun = { ...existingRun, status: "pending" };
+                  // Fall through to claim the reset run below
+                } else {
+                  recordStage("run_claim_ms", claimStageStart);
+                  console.log(
+                    `[Run] Run ${existingRun.id} is already being processed (${Math.round(runAge / 1000)}s), returning status`,
+                  );
+                  return res.json({
+                    status: "already_processing",
+                    run: existingRun,
+                    traceId: requestId,
+                    timings: reportTimings("already_processing"),
+                  });
+                }
+              }
+              if (existingRun.status === "done") {
+                recordStage("run_claim_ms", claimStageStart);
+                console.log(`[Run] Run ${existingRun.id} already completed`);
                 return res.json({
                   status: "already_done",
-                  run: refreshedRun,
+                  run: existingRun,
                   traceId: requestId,
                   timings: reportTimings("already_done"),
                 });
               }
-              console.log(
-                `[Run] Failed to claim run ${existingRun.id} - may have been claimed by another request`,
+              if (existingRun.status === "failed") {
+                console.log(
+                  `[Run] Run ${existingRun.id} previously failed — resetting to pending for retry`,
+                );
+                await storage.updateChatRunStatus(existingRun.id, "pending");
+                existingRun = { ...existingRun, status: "pending" };
+              }
+
+              const claimKey = existingRun.clientRequestId || clientRequestId;
+              claimedRun = await storage.claimPendingRun(
+                chatId,
+                claimKey || undefined,
               );
-              return res.json({
-                status: "claim_failed",
-                message: "Run already claimed or not pending",
-                traceId: requestId,
-                timings: reportTimings("claim_failed"),
-              });
+              recordStage("run_claim_ms", claimStageStart);
+              if (!claimedRun) {
+                const refreshedRun = runId
+                  ? await storage.getChatRun(runId)
+                  : claimKey
+                    ? await storage.getChatRunByClientRequestId(chatId, claimKey)
+                    : null;
+                if (refreshedRun?.status === "processing") {
+                  return res.json({
+                    status: "already_processing",
+                    run: refreshedRun,
+                    traceId: requestId,
+                    timings: reportTimings("already_processing"),
+                  });
+                }
+                if (refreshedRun?.status === "done") {
+                  return res.json({
+                    status: "already_done",
+                    run: refreshedRun,
+                    traceId: requestId,
+                    timings: reportTimings("already_done"),
+                  });
+                }
+                console.log(
+                  `[Run] Failed to claim run ${existingRun.id} - may have been claimed by another request`,
+                );
+                return res.json({
+                  status: "claim_failed",
+                  message: "Run already claimed or not pending",
+                  traceId: requestId,
+                  timings: reportTimings("claim_failed"),
+                });
+              }
+              console.log(`[Run] Successfully claimed run ${claimedRun.id}`);
             }
-            console.log(`[Run] Successfully claimed run ${claimedRun.id}`);
+          } catch (runPersistenceError: any) {
+            if (!isOptionalChatRunPersistenceError(runPersistenceError)) {
+              throw runPersistenceError;
+            }
+
+            console.warn(
+              "[Run] chat_runs persistence unavailable; continuing in legacy stream mode:",
+              summarizePersistenceCompatibilityError(runPersistenceError),
+            );
+            claimedRun = null;
           }
         }
 
@@ -9534,65 +9549,79 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
         // If runId provided, claim the pending run (idempotent processing)
         if (runId && chatId && !claimedRun) {
-          const existingRun = await storage.getChatRun(runId);
-          if (!existingRun) {
-            return res.status(404).json({ error: "Run not found" });
-          }
+          try {
+            const existingRun = await storage.getChatRun(runId);
+            if (!existingRun) {
+              return res.status(404).json({ error: "Run not found" });
+            }
 
-          // If run is already processing or done, don't re-process
-          if (existingRun.status === "processing") {
-            const runStartedAt = existingRun.startedAt
-              ? new Date(existingRun.startedAt).getTime()
-              : 0;
-            const runAge = Date.now() - runStartedAt;
-            if (queueMode === "replace" || runAge > 5 * 60 * 1000) {
-              const reason =
-                runAge > 5 * 60 * 1000 ? "stale_run_recovered" : "run_replaced";
+            // If run is already processing or done, don't re-process
+            if (existingRun.status === "processing") {
+              const runStartedAt = existingRun.startedAt
+                ? new Date(existingRun.startedAt).getTime()
+                : 0;
+              const runAge = Date.now() - runStartedAt;
+              if (queueMode === "replace" || runAge > 5 * 60 * 1000) {
+                const reason =
+                  runAge > 5 * 60 * 1000
+                    ? "stale_run_recovered"
+                    : "run_replaced";
+                console.log(
+                  `[Run] Resetting run ${runId} to pending (${reason}, age=${Math.round(runAge / 1000)}s)`,
+                );
+                await storage.updateChatRunStatus(
+                  existingRun.id,
+                  "pending",
+                  reason,
+                );
+                // Fall through to claim below
+              } else {
+                console.log(
+                  `[Run] Run ${runId} is already being processed, returning status`,
+                );
+                return res.json({
+                  status: "already_processing",
+                  run: existingRun,
+                });
+              }
+            }
+            if (existingRun.status === "done") {
+              console.log(`[Run] Run ${runId} already completed`);
+              return res.json({ status: "already_done", run: existingRun });
+            }
+            if (existingRun.status === "failed") {
               console.log(
-                `[Run] Resetting run ${runId} to pending (${reason}, age=${Math.round(runAge / 1000)}s)`,
+                `[Run] Run ${runId} previously failed — resetting to pending for retry`,
               );
-              await storage.updateChatRunStatus(
-                existingRun.id,
-                "pending",
-                reason,
-              );
-              // Fall through to claim below
-            } else {
+              await storage.updateChatRunStatus(existingRun.id, "pending");
+            }
+
+            // Atomically claim the pending run using clientRequestId for specificity
+            claimedRun = await storage.claimPendingRun(
+              chatId,
+              existingRun.clientRequestId,
+            );
+            if (!claimedRun || claimedRun.id !== runId) {
               console.log(
-                `[Run] Run ${runId} is already being processed, returning status`,
+                `[Run] Failed to claim run ${runId} - may have been claimed by another request`,
               );
               return res.json({
-                status: "already_processing",
-                run: existingRun,
+                status: "claim_failed",
+                message: "Run already claimed or not pending",
               });
             }
-          }
-          if (existingRun.status === "done") {
-            console.log(`[Run] Run ${runId} already completed`);
-            return res.json({ status: "already_done", run: existingRun });
-          }
-          if (existingRun.status === "failed") {
-            console.log(
-              `[Run] Run ${runId} previously failed — resetting to pending for retry`,
-            );
-            await storage.updateChatRunStatus(existingRun.id, "pending");
-          }
+            console.log(`[Run] Successfully claimed run ${runId}`);
+          } catch (runPersistenceError: any) {
+            if (!isOptionalChatRunPersistenceError(runPersistenceError)) {
+              throw runPersistenceError;
+            }
 
-          // Atomically claim the pending run using clientRequestId for specificity
-          claimedRun = await storage.claimPendingRun(
-            chatId,
-            existingRun.clientRequestId,
-          );
-          if (!claimedRun || claimedRun.id !== runId) {
-            console.log(
-              `[Run] Failed to claim run ${runId} - may have been claimed by another request`,
+            console.warn(
+              "[Run] chat_runs persistence unavailable during runId claim; continuing without idempotent run tracking:",
+              summarizePersistenceCompatibilityError(runPersistenceError),
             );
-            return res.json({
-              status: "claim_failed",
-              message: "Run already claimed or not pending",
-            });
+            claimedRun = null;
           }
-          console.log(`[Run] Successfully claimed run ${runId}`);
         }
 
         // SSE headers were already set early (before search). This block only

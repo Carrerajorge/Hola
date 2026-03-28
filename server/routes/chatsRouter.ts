@@ -6,6 +6,10 @@ import { sendShareNotificationEmail } from "../services/emailService";
 import { getSecureUserId, getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { sanitizeMessageContent } from "../lib/markdownSanitizer";
 import { isTitlePlaceholder } from "../lib/chatTitleGenerator";
+import {
+  isOptionalChatRunPersistenceError,
+  summarizePersistenceCompatibilityError,
+} from "../lib/persistenceCompatibility";
 
 // Higher body limit middleware for message creation endpoints.
 // The global limit is 1MB, but messages with attachment metadata can be larger.
@@ -862,84 +866,95 @@ export function createChatsRouter() {
 
       // Run-based idempotency for user messages when enabled.
       if (shouldCreateRun) {
-        // Check if a run with this clientRequestId already exists
-        const tRunLookup = performance.now();
-        const existingRun = await storage.getChatRunByClientRequestId(req.params.id, clientRequestId);
-        addTiming("run_lookup", tRunLookup);
-        if (existingRun) {
-          console.log(`[Dedup] Run with clientRequestId ${clientRequestId} already exists, returning existing`);
-          // Fetch the user message that was created with this run
-          const tMsgLookup = performance.now();
-          const existingMessage = await storage.getChatMessage(req.params.id, existingRun.userMessageId);
-          addTiming("msg_lookup", tMsgLookup);
-          if (!existingMessage) {
-            console.warn(`[Dedup] Missing userMessageId ${existingRun.userMessageId} for existing run ${existingRun.id}`);
-          }
-          setServerTiming();
-          return res.json({
-            message: existingMessage,
-            run: existingRun,
-            deduplicated: true
-          });
-        }
-
-        // Create user message and run atomically
-        const tCreate = performance.now();
-        const { message, run } = await storage.createUserMessageAndRun(
-          req.params.id,
-          {
-            chatId: req.params.id,
-            role: 'user',
-            content: safeContent,
-            status: 'done',
-            requestId: requestId || null,
-            userMessageId: null,
-            attachments: sanitizedAttachments,
-            sources: sources || null,
-            figmaDiagram: figmaDiagram || null,
-            googleFormPreview: googleFormPreview || null,
-            gmailPreview: gmailPreview || null,
-            generatedImage: generatedImage || null
-          },
-          clientRequestId
-        );
-        addTiming("create_message_run", tCreate);
-
-        // Persist conversationDocuments for each attachment so files survive reload.
-        // Best-effort & non-blocking — runs in parallel without delaying the response.
-        if (sanitizedAttachments && sanitizedAttachments.length > 0) {
-          Promise.allSettled(
-            sanitizedAttachments.map((att: any) =>
-              storage.createConversationDocument({
-                chatId: req.params.id,
-                messageId: message.id,
-                fileName: att.name || 'document',
-                storagePath: att.storagePath || null,
-                mimeType: att.mimeType || att.type || 'application/octet-stream',
-                fileSize: att.size || null,
-                extractedText: null, // Text extraction happens in the streaming endpoint
-                metadata: { fileId: att.fileId || att.id },
-              })
-            )
-          ).then(results => {
-            const failures = results.filter(r => r.status === 'rejected');
-            if (failures.length > 0) {
-              console.warn(`[Messages] ${failures.length} conversationDocument(s) failed to persist`);
+        try {
+          // Check if a run with this clientRequestId already exists
+          const tRunLookup = performance.now();
+          const existingRun = await storage.getChatRunByClientRequestId(req.params.id, clientRequestId);
+          addTiming("run_lookup", tRunLookup);
+          if (existingRun) {
+            console.log(`[Dedup] Run with clientRequestId ${clientRequestId} already exists, returning existing`);
+            // Fetch the user message that was created with this run
+            const tMsgLookup = performance.now();
+            const existingMessage = await storage.getChatMessage(req.params.id, existingRun.userMessageId);
+            addTiming("msg_lookup", tMsgLookup);
+            if (!existingMessage) {
+              console.warn(`[Dedup] Missing userMessageId ${existingRun.userMessageId} for existing run ${existingRun.id}`);
             }
-          });
-        }
+            setServerTiming();
+            return res.json({
+              message: existingMessage,
+              run: existingRun,
+              deduplicated: true
+            });
+          }
 
-        // Set a quick placeholder title from the user's message.
-        // The AI-generated title will replace this during streaming via chatTitleGenerator.
-        if (isTitlePlaceholder(chat.title)) {
-          const newTitle = sanitizedContent.slice(0, 50) + (sanitizedContent.length > 50 ? "..." : "");
-          void storage.updateChat(req.params.id, { title: newTitle }).catch((err) => {
-            console.warn("[Chats] Failed to update placeholder title:", err);
-          });
-        }
+          // Create user message and run atomically
+          const tCreate = performance.now();
+          const { message, run } = await storage.createUserMessageAndRun(
+            req.params.id,
+            {
+              chatId: req.params.id,
+              role: 'user',
+              content: safeContent,
+              status: 'done',
+              requestId: requestId || null,
+              userMessageId: null,
+              attachments: sanitizedAttachments,
+              sources: sources || null,
+              figmaDiagram: figmaDiagram || null,
+              googleFormPreview: googleFormPreview || null,
+              gmailPreview: gmailPreview || null,
+              generatedImage: generatedImage || null
+            },
+            clientRequestId
+          );
+          addTiming("create_message_run", tCreate);
 
-        setServerTiming();
-        return res.json({ message, run, deduplicated: false });
+          // Persist conversationDocuments for each attachment so files survive reload.
+          // Best-effort & non-blocking — runs in parallel without delaying the response.
+          if (sanitizedAttachments && sanitizedAttachments.length > 0) {
+            Promise.allSettled(
+              sanitizedAttachments.map((att: any) =>
+                storage.createConversationDocument({
+                  chatId: req.params.id,
+                  messageId: message.id,
+                  fileName: att.name || 'document',
+                  storagePath: att.storagePath || null,
+                  mimeType: att.mimeType || att.type || 'application/octet-stream',
+                  fileSize: att.size || null,
+                  extractedText: null, // Text extraction happens in the streaming endpoint
+                  metadata: { fileId: att.fileId || att.id },
+                })
+              )
+            ).then(results => {
+              const failures = results.filter(r => r.status === 'rejected');
+              if (failures.length > 0) {
+                console.warn(`[Messages] ${failures.length} conversationDocument(s) failed to persist`);
+              }
+            });
+          }
+
+          // Set a quick placeholder title from the user's message.
+          // The AI-generated title will replace this during streaming via chatTitleGenerator.
+          if (isTitlePlaceholder(chat.title)) {
+            const newTitle = sanitizedContent.slice(0, 50) + (sanitizedContent.length > 50 ? "..." : "");
+            void storage.updateChat(req.params.id, { title: newTitle }).catch((err) => {
+              console.warn("[Chats] Failed to update placeholder title:", err);
+            });
+          }
+
+          setServerTiming();
+          return res.json({ message, run, deduplicated: false });
+        } catch (runPersistenceError: any) {
+          if (!isOptionalChatRunPersistenceError(runPersistenceError)) {
+            throw runPersistenceError;
+          }
+
+          console.warn(
+            "[Chats] chat_runs persistence unavailable; falling back to legacy message save:",
+            summarizePersistenceCompatibilityError(runPersistenceError),
+          );
+        }
       }
 
       // Legacy flow for assistant messages or messages without clientRequestId
