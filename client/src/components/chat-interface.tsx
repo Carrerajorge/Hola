@@ -597,7 +597,12 @@ function isSubmitLocked(): boolean {
   try {
     const ts = sessionStorage.getItem("__sira_submit_lock");
     if (!ts) return false;
-    return Date.now() - Number(ts) < 10_000;
+    const ageMs = Date.now() - Number(ts);
+    if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs >= 2_500) {
+      sessionStorage.removeItem("__sira_submit_lock");
+      return false;
+    }
+    return true;
   } catch {
     // sessionStorage may be unavailable (privacy mode / quota / blocked)
     return false;
