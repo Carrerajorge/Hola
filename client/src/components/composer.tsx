@@ -306,9 +306,6 @@ export function Composer({
     source.mention.toLowerCase().includes(mentionSearch.toLowerCase())
   );
 
-  const showSendTransitionSource =
-    !!sendTransitionLayoutId && input.trim().length > 0;
-
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
     setInput(value);
@@ -1490,14 +1487,6 @@ export function Composer({
 
         <div className="flex flex-col relative">
           <div className="px-3 py-1">
-            {showSendTransitionSource && (
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-x-3 top-1 z-0 whitespace-pre-wrap break-words rounded-[22px] px-0 py-0 text-[15px] leading-6 text-transparent [color:transparent] [overflow-wrap:anywhere] opacity-0"
-              >
-                {input}
-              </div>
-            )}
             <Textarea
               ref={textareaRef}
               value={input}
