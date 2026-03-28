@@ -37,7 +37,6 @@ readonly HEALTHCHECK_INTERVAL=3
 readonly DRAIN_WAIT=8
 readonly STOP_TIMEOUT=15
 readonly MIGRATION_TIMEOUT=120
-readonly PULL_TIMEOUT=300
 readonly MIN_DISK_MB=1024
 readonly MIN_PULL_HEADROOM_MB=12288
 readonly PREFERRED_PULL_HEADROOM_MB=16384
@@ -715,7 +714,10 @@ pull_image_with_retry() {
 
   for attempt in 1 2 3; do
     output_file="$(mktemp)"
-    if timeout "${PULL_TIMEOUT}" docker pull "${image_ref}" 2>&1 | tee "${output_file}"; then
+    # The enclosing GitHub job already has a hard timeout. Avoid adding a shorter
+    # shell-level timeout here because large GHCR pulls on the VPS can be
+    # terminated mid-stream even though the registry transfer is still making progress.
+    if docker pull "${image_ref}" 2>&1 | tee "${output_file}"; then
       rm -f "${output_file}"
       return 0
     fi
@@ -1710,7 +1712,7 @@ ensure_legacy_upstream_file() {
 }
 
 # ── Step 1: Pull images from GHCR (with timeout + digest verification) ──
-log "[1/14] Pulling images from GHCR (timeout: ${PULL_TIMEOUT}s)..."
+log "[1/14] Pulling images from GHCR..."
 
 # Reclaim space from the inactive slot before pulling new images. This frees
 # old slot containers so image prune can actually drop their unreferenced layers.
