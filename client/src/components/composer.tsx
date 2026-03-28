@@ -1,5 +1,4 @@
 import React, { useCallback, useLayoutEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
 import {
   Plus,
   Upload,
@@ -167,15 +166,7 @@ export interface ComposerProps {
   onCreateRepoFolder?: (folderName: string) => void | Promise<void>;
   selectedCodingAgents?: Array<"coder" | "reviewer" | "improver">;
   onToggleCodingAgent?: (agent: "coder" | "reviewer" | "improver") => void;
-  sendTransitionLayoutId?: string | null;
 }
-
-const SEND_TRANSITION_SPRING = {
-  type: "spring" as const,
-  stiffness: 460,
-  damping: 36,
-  mass: 0.82,
-};
 
 function formatFileSize(bytes: number): string {
   if (bytes === 0) return "0 B";
@@ -262,7 +253,6 @@ export function Composer({
   onCreateRepoFolder,
   selectedCodingAgents = ["coder"],
   onToggleCodingAgent,
-  sendTransitionLayoutId,
 }: ComposerProps) {
   const COMPOSER_MAX_TEXTAREA_HEIGHT = 180;
   const isDocumentMode = variant === "document";
@@ -1329,9 +1319,6 @@ export function Composer({
     isDraggingOver && cn("border-[#bdbdbd]/85 bg-white/80 ring-2 dark:bg-white/5", SILVER_RING_SOFT)
   );
 
-  const showSendTransitionSource =
-    !!sendTransitionLayoutId && input.trim().length > 0;
-
   useLayoutEffect(() => {
     autosizeTextarea(textareaRef.current, COMPOSER_MAX_TEXTAREA_HEIGHT);
   }, [input, textareaRef]);
@@ -1498,16 +1485,6 @@ export function Composer({
 
         <div className="flex flex-col relative">
           <div className="px-3 py-1">
-            {showSendTransitionSource && (
-              <motion.div
-                aria-hidden="true"
-                layoutId={sendTransitionLayoutId ?? undefined}
-                transition={SEND_TRANSITION_SPRING}
-                className="pointer-events-none absolute inset-x-3 top-1 z-0 whitespace-pre-wrap break-words rounded-[22px] px-0 py-0 text-[15px] leading-6 text-transparent [color:transparent] [overflow-wrap:anywhere] opacity-0"
-              >
-                {input}
-              </motion.div>
-            )}
             <Textarea
               ref={textareaRef}
               value={input}
@@ -1520,16 +1497,34 @@ export function Composer({
               }
               onFocus={onTextareaFocus}
               onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+                const mentionMenuActive =
+                  showMentionPopover && filteredSources.length > 0;
+                const hasTextareaContent =
+                  e.currentTarget.value.trim().length > 0 || hasAttachableFiles;
+                const isComposing = e.nativeEvent.isComposing;
+
                 handleMentionKeyDown(e);
-                if (showMentionPopover) return;
+                if (mentionMenuActive) return;
                 handleHistoryNavigation(e);
                 const filesStillLoading = isFilesLoading;
-                if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !filesStillLoading && hasContent) {
+                if (
+                  !isComposing &&
+                  (e.metaKey || e.ctrlKey) &&
+                  e.key === "Enter" &&
+                  !filesStillLoading &&
+                  hasTextareaContent
+                ) {
                   e.preventDefault();
                   handleSubmitWithHistory();
                   return;
                 }
-                if (e.key === "Enter" && !e.shiftKey && !filesStillLoading && hasContent) {
+                if (
+                  !isComposing &&
+                  e.key === "Enter" &&
+                  !e.shiftKey &&
+                  !filesStillLoading &&
+                  hasTextareaContent
+                ) {
                   e.preventDefault();
                   handleSubmitWithHistory();
                 }
