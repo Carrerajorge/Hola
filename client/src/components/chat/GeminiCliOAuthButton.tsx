@@ -28,6 +28,10 @@ import { normalizeAppBuildVersion } from "@/lib/chunk-recovery";
 
 type GeminiCliOAuthButtonProps = {
   onConnected?: (modelId: string) => void | Promise<void>;
+  /** When true, auto-accept risk and start the OAuth flow immediately on open */
+  autoStart?: boolean;
+  /** Pre-fill the email hint for the Google OAuth flow */
+  initialEmail?: string;
   renderTrigger?: (state: {
     isBusy: boolean;
     isConnected: boolean;
@@ -364,6 +368,8 @@ function resolveFlowForCallbackInput(params: {
 
 export function GeminiCliOAuthButton({
   onConnected,
+  autoStart = false,
+  initialEmail,
   renderTrigger,
 }: GeminiCliOAuthButtonProps) {
   const { toast } = useToast();
@@ -377,7 +383,8 @@ export function GeminiCliOAuthButton({
     null,
   );
   const [callbackUrl, setCallbackUrl] = React.useState("");
-  const [preferredEmail, setPreferredEmail] = React.useState("");
+  const [preferredEmail, setPreferredEmail] = React.useState(initialEmail || "");
+  const autoStartTriggeredRef = React.useRef(false);
   const popupRef = React.useRef<Window | null>(null);
   const lastAutoCompletedCallbackRef = React.useRef<string | null>(null);
   const lastBridgePayloadSignatureRef = React.useRef<string | null>(null);
@@ -1041,6 +1048,29 @@ export function GeminiCliOAuthButton({
     }, 800);
     return () => clearInterval(interval);
   }, [flowId, completeMutation.isPending, handleBridgePayload]);
+
+  // Auto-start: when triggered from login flow, auto-accept risk and start immediately
+  React.useEffect(() => {
+    if (
+      !autoStart ||
+      autoStartTriggeredRef.current ||
+      !open ||
+      isStatusLoading ||
+      status?.connected ||
+      flowId ||
+      startMutation.isPending ||
+      completeMutation.isPending
+    ) {
+      return;
+    }
+    autoStartTriggeredRef.current = true;
+    setAcceptedRisk(true);
+    // Small delay to let the dialog render before starting
+    const timer = window.setTimeout(() => {
+      startMutation.mutate();
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [autoStart, open, isStatusLoading, status?.connected, flowId, startMutation, completeMutation.isPending]);
 
   const isBusy = startMutation.isPending || completeMutation.isPending;
   const isConnected = Boolean(status?.connected);

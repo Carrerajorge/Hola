@@ -139,7 +139,7 @@ export default function Home() {
       const maxAttempts = 5;
       const dispatch = () => {
         attempts++;
-        window.dispatchEvent(new CustomEvent("auto-connect-provider", { detail: { provider: pendingProvider } }));
+        window.dispatchEvent(new CustomEvent("auto-connect-provider", { detail: { provider: pendingProvider, email: user?.claims?.email } }));
         if (attempts >= maxAttempts) {
           // Give up and clean sessionStorage
           try { sessionStorage.removeItem("iliagpt:pending-provider-connect"); } catch {}

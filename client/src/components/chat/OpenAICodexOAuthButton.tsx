@@ -17,6 +17,8 @@ import { ChatGptLogoIcon } from "./OAuthProviderLogos";
 
 type OpenAICodexOAuthButtonProps = {
   onConnected?: (modelId: string) => void | Promise<void>;
+  /** When true, auto-start the OAuth flow immediately on open */
+  autoStart?: boolean;
   renderTrigger?: (state: {
     isBusy: boolean;
     isConnected: boolean;
@@ -67,6 +69,7 @@ function isOpenAIAuthorizationUrl(input: string): boolean {
 
 export function OpenAICodexOAuthButton({
   onConnected,
+  autoStart = false,
   renderTrigger,
 }: OpenAICodexOAuthButtonProps) {
   const { toast } = useToast();
@@ -82,6 +85,7 @@ export function OpenAICodexOAuthButton({
   const [manualInput, setManualInput] = React.useState("");
   const [showManualFallback, setShowManualFallback] = React.useState(false);
   const popupRef = React.useRef<Window | null>(null);
+  const autoStartTriggeredRef = React.useRef(false);
   const lastHandledFlowStateRef = React.useRef<"completed" | "failed" | null>(
     null,
   );
@@ -226,6 +230,27 @@ export function OpenAICodexOAuthButton({
     },
     [completeMutation, startMutation],
   );
+
+  // Auto-start: when triggered from login flow, start immediately
+  React.useEffect(() => {
+    if (
+      !autoStart ||
+      autoStartTriggeredRef.current ||
+      !open ||
+      isStatusLoading ||
+      status?.connected ||
+      flowId ||
+      startMutation.isPending ||
+      completeMutation.isPending
+    ) {
+      return;
+    }
+    autoStartTriggeredRef.current = true;
+    const timer = window.setTimeout(() => {
+      startMutation.mutate();
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [autoStart, open, isStatusLoading, status?.connected, flowId, startMutation, completeMutation.isPending]);
 
   React.useEffect(() => {
     if (!flowQuery.data) {

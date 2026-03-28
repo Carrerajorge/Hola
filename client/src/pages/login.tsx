@@ -556,11 +556,11 @@ export default function LoginPage() {
                 {isSocialProviderLoading("gemini") ? "Conectando..." : "Continuar con Gemini"}
               </Button>
 
-              {/* Apple - uses Google OAuth */}
+              {/* Apple - uses Google OAuth (Apple accounts can sign in via Google) */}
               <Button
                 variant="outline"
                 className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-3"
-                onClick={() => handleGoogleLogin("apple")}
+                onClick={() => handleGoogleLogin("google")}
                 disabled={isAnySocialProviderLoading}
                 data-testid="button-login-apple"
               >
@@ -572,11 +572,16 @@ export default function LoginPage() {
                 {isSocialProviderLoading("apple") ? "Conectando..." : "Continuar con Apple"}
               </Button>
 
-              {/* Microsoft - uses Google OAuth */}
+              {/* Microsoft - uses its own OAuth flow */}
               <Button
                 variant="outline"
                 className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-3"
-                onClick={() => handleGoogleLogin("microsoft")}
+                onClick={() => {
+                  clearForcedSignedOutFlag();
+                  setActiveSocialProvider("microsoft");
+                  setError("");
+                  window.location.assign("/api/auth/microsoft");
+                }}
                 disabled={isAnySocialProviderLoading}
                 data-testid="button-login-microsoft"
               >

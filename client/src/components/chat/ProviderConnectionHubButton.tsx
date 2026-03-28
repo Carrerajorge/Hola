@@ -173,6 +173,8 @@ export function ProviderConnectionHubButton({
   // Refs to auto-open specific provider dialogs after OAuth login redirect
   const geminiOpenDialogRef = React.useRef<(() => void) | null>(null);
   const openaiOpenDialogRef = React.useRef<(() => void) | null>(null);
+  // Track which provider should auto-start OAuth immediately (from login redirect)
+  const [autoStartProvider, setAutoStartProvider] = React.useState<string | null>(null);
 
   // Listen for auto-connect-provider events dispatched after OAuth login
   React.useEffect(() => {
@@ -185,6 +187,8 @@ export function ProviderConnectionHubButton({
       if (provider === "openai" && !openaiOpenDialogRef.current) return;
       // Clear the pending hint from sessionStorage since we're handling it
       try { sessionStorage.removeItem("iliagpt:pending-provider-connect"); } catch {}
+      // Mark which provider should auto-start
+      setAutoStartProvider(detail.provider);
       // Open the hub dialog first
       setOpen(true);
       // Then auto-open the specific provider dialog after a small delay
@@ -310,6 +314,7 @@ export function ProviderConnectionHubButton({
             <div className="grid gap-3 md:grid-cols-3">
               <OpenAICodexOAuthButton
                 onConnected={handleConnected}
+                autoStart={autoStartProvider === "openai"}
                 renderTrigger={({ isBusy, isConnected, openDialog }) => {
                   openaiOpenDialogRef.current = openDialog;
                   return (
@@ -331,6 +336,7 @@ export function ProviderConnectionHubButton({
 
               <GeminiCliOAuthButton
                 onConnected={handleConnected}
+                autoStart={autoStartProvider === "gemini"}
                 renderTrigger={({ isBusy, isConnected, openDialog }) => {
                   geminiOpenDialogRef.current = openDialog;
                   return (
