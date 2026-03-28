@@ -2688,7 +2688,7 @@ export function ChatInterface({
   const handleStopChatRef = useRef<(() => void) | null>(null);
   // Mutex: see isSubmitLocked() above (sessionStorage, survives all remount/reload types).
   const isSubmittingRef = useRef(false);
-  isSubmittingRef.current = isSubmitLocked();
+  
 
   useEffect(() => {
     if (newChatResetNonce === undefined) return;
