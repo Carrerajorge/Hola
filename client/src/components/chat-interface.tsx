@@ -5957,8 +5957,8 @@ export function ChatInterface({
       });
       return;
     }
-    setSubmitLock();
     try {
+      setSubmitLock();
       const submitConversationId = chatId || latestChatIdRef.current;
       // When sending the very first message, the parent may create a pending chatId asynchronously.
       // We may need to wait briefly for `chatId` (and `latestChatIdRef`) to update before starting SSE.

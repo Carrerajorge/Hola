@@ -1,4 +1,4 @@
-import React, { useCallback, useLayoutEffect, useMemo, useState, type FormEvent } from "react";
+import React, { useCallback, useLayoutEffect, useMemo, useState } from "react";
 import {
   Plus,
   Upload,
@@ -326,9 +326,7 @@ export function Composer({
     }
   };
 
-  const handleSubmitWithHistory = useCallback((event?: FormEvent<HTMLFormElement>) => {
-    event?.preventDefault();
-
+  const handleSubmitWithHistory = useCallback(() => {
     if (isFilesLoading) return;
     if (!hasContent) return;
 
@@ -1467,7 +1465,7 @@ export function Composer({
         aria-label="Subir archivos"
       />
 
-      <form className={inputContainerClass} onSubmit={handleSubmitWithHistory}>
+      <div className={inputContainerClass}>
         {renderAttachmentPreview()}
 
         {isDocumentMode && selectedDocText && handleDocTextDeselect && (
@@ -1703,7 +1701,7 @@ export function Composer({
           </div>
         )}
 
-      </form>
+      </div>
 
       {renderProgrammingModeBar()}
 

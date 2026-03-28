@@ -239,7 +239,7 @@ export function RecordingPanel({
             <Button
               onClick={onSubmit}
               disabled={!canSendNow}
-              type="submit"
+              type="button"
               size="icon"
               className={cn(
                 "h-9 w-9 sm:h-8 sm:w-8 shrink-0",
