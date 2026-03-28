@@ -64,6 +64,61 @@ function extractStripeProductId(product: Stripe.Price["product"]): string | null
   return null;
 }
 
+function extractStripeProductName(product: Stripe.Price["product"]): string {
+  if (product && typeof product === "object" && "name" in product && typeof product.name === "string") {
+    return product.name;
+  }
+  return "";
+}
+
+function extractStripeProductMetadata(product: Stripe.Price["product"]): Record<string, string> {
+  if (product && typeof product === "object" && "metadata" in product && product.metadata) {
+    return product.metadata as Record<string, string>;
+  }
+  return {};
+}
+
+function normalizeStripePlanText(value: string | null | undefined): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function inferPlanKeyFromSignals(input: {
+  amount?: number | null;
+  metadataPlan?: string | null;
+  planName?: string | null;
+  priceLookupKey?: string | null;
+  productId?: string | null;
+}): keyof typeof ACTIVE_SUBSCRIPTION_PLANS | null {
+  const byAmount = getPlanKeyFromAmount(input.amount);
+  if (!byAmount) return null;
+
+  const byProductId = getPlanKeyFromProductId(input.productId);
+  if (byProductId && byProductId === byAmount) {
+    return byProductId;
+  }
+
+  const candidates = [
+    normalizeStripePlanText(input.metadataPlan),
+    normalizeStripePlanText(input.planName),
+    normalizeStripePlanText(input.priceLookupKey),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    for (const planKey of ACTIVE_SUBSCRIPTION_PLAN_KEYS) {
+      const normalizedKey = normalizeStripePlanText(planKey);
+      const normalizedName = normalizeStripePlanText(ACTIVE_SUBSCRIPTION_PLANS[planKey].name);
+      if ((candidate === normalizedKey || candidate.includes(normalizedKey) || candidate.includes(normalizedName)) && planKey === byAmount) {
+        return planKey;
+      }
+    }
+  }
+
+  return null;
+}
+
 function toResolvedCheckoutPrice(price: Stripe.Price): ResolvedCheckoutPrice | null {
   if (!price.active) return null;
   if (price.recurring?.interval !== "month") return null;
@@ -72,16 +127,22 @@ function toResolvedCheckoutPrice(price: Stripe.Price): ResolvedCheckoutPrice | n
   if (amount === null || !VALID_PLAN_AMOUNTS.has(amount)) return null;
 
   const productId = extractStripeProductId(price.product);
-  const planKeyFromProduct = getPlanKeyFromProductId(productId);
-  const planKeyFromAmount = getPlanKeyFromAmount(amount);
+  const productMetadata = extractStripeProductMetadata(price.product);
+  const inferredPlanKey = inferPlanKeyFromSignals({
+    amount,
+    metadataPlan: productMetadata.plan || price.metadata?.plan || null,
+    planName: extractStripeProductName(price.product),
+    priceLookupKey: price.lookup_key || null,
+    productId,
+  });
 
-  if (!productId || !planKeyFromProduct || !planKeyFromAmount || planKeyFromProduct !== planKeyFromAmount) {
+  if (!productId || !inferredPlanKey) {
     return null;
   }
 
   return {
     amount,
-    planKey: planKeyFromProduct,
+    planKey: inferredPlanKey,
     priceId: price.id,
     productId,
   };
@@ -96,19 +157,49 @@ function toResolvedCheckoutPriceFromDbRow(row?: DbStripePriceRow | null): Resolv
     return null;
   }
 
-  const planKeyFromProduct = getPlanKeyFromProductId(row.product_id);
-  const planKeyFromAmount = getPlanKeyFromAmount(row.unit_amount);
+  const inferredPlanKey = inferPlanKeyFromSignals({
+    amount: row.unit_amount,
+    productId: row.product_id,
+  });
 
-  if (!planKeyFromProduct || !planKeyFromAmount || planKeyFromProduct !== planKeyFromAmount) {
+  if (!inferredPlanKey) {
     return null;
   }
 
   return {
     amount: row.unit_amount,
-    planKey: planKeyFromProduct,
+    planKey: inferredPlanKey,
     priceId: row.price_id,
     productId: row.product_id,
   };
+}
+
+async function listActiveStripePrices(
+  stripe: Stripe,
+  productId?: string,
+): Promise<Stripe.Price[]> {
+  const collected: Stripe.Price[] = [];
+  let startingAfter: string | undefined;
+
+  for (let page = 0; page < 5; page += 1) {
+    const response = await withRetry(
+      () =>
+        stripe.prices.list({
+          active: true,
+          limit: 100,
+          ...(productId ? { product: productId } : {}),
+          ...(startingAfter ? { starting_after: startingAfter } : {}),
+          expand: ["data.product"],
+        }),
+      { maxAttempts: 3, initialDelayMs: 1000 },
+    );
+
+    collected.push(...response.data);
+    if (!response.has_more || response.data.length === 0) break;
+    startingAfter = response.data[response.data.length - 1]?.id;
+  }
+
+  return collected;
 }
 
 async function findDbCheckoutPrice(rawIdentifier: string): Promise<ResolvedCheckoutPrice | null> {
@@ -159,14 +250,23 @@ async function findActiveMonthlyPriceForPlan(
 ): Promise<Stripe.Price | null> {
   const productId = getConfiguredProductId(planKey);
   const expectedAmount = ACTIVE_SUBSCRIPTION_PLANS[planKey].amount;
+  const matchesPlan = (price: Stripe.Price) => {
+    const resolved = toResolvedCheckoutPrice(price);
+    return resolved?.planKey === planKey && resolved.amount === expectedAmount;
+  };
 
-  const prices = await withRetry(
-    () => stripe.prices.list({ active: true, limit: 100, product: productId, expand: ["data.product"] }),
-    { maxAttempts: 3, initialDelayMs: 1000 },
-  );
+  try {
+    const productScopedPrices = await listActiveStripePrices(stripe, productId);
+    const scopedMatch = productScopedPrices.find(matchesPlan);
+    if (scopedMatch) {
+      return scopedMatch;
+    }
+  } catch (error: any) {
+    console.warn(`[Stripe] Product-scoped lookup failed for ${planKey}: ${error?.message || error}`);
+  }
 
   return (
-    prices.data.find((price) => {
+    (await listActiveStripePrices(stripe)).find((price) => {
       const resolved = toResolvedCheckoutPrice(price);
       return resolved?.planKey === planKey && resolved.amount === expectedAmount;
     }) || null
