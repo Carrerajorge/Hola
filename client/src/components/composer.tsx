@@ -166,6 +166,7 @@ export interface ComposerProps {
   onCreateRepoFolder?: (folderName: string) => void | Promise<void>;
   selectedCodingAgents?: Array<"coder" | "reviewer" | "improver">;
   onToggleCodingAgent?: (agent: "coder" | "reviewer" | "improver") => void;
+  sendTransitionLayoutId?: string | null;
 }
 
 function formatFileSize(bytes: number): string {
@@ -253,6 +254,7 @@ export function Composer({
   onCreateRepoFolder,
   selectedCodingAgents = ["coder"],
   onToggleCodingAgent,
+  sendTransitionLayoutId,
 }: ComposerProps) {
   const COMPOSER_MAX_TEXTAREA_HEIGHT = 180;
   const isDocumentMode = variant === "document";
@@ -303,6 +305,9 @@ export function Composer({
     source.name.toLowerCase().includes(mentionSearch.toLowerCase()) ||
     source.mention.toLowerCase().includes(mentionSearch.toLowerCase())
   );
+
+  const showSendTransitionSource =
+    !!sendTransitionLayoutId && input.trim().length > 0;
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
@@ -1485,6 +1490,14 @@ export function Composer({
 
         <div className="flex flex-col relative">
           <div className="px-3 py-1">
+            {showSendTransitionSource && (
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-3 top-1 z-0 whitespace-pre-wrap break-words rounded-[22px] px-0 py-0 text-[15px] leading-6 text-transparent [color:transparent] [overflow-wrap:anywhere] opacity-0"
+              >
+                {input}
+              </div>
+            )}
             <Textarea
               ref={textareaRef}
               value={input}
