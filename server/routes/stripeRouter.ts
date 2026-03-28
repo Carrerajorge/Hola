@@ -58,6 +58,8 @@ type DbStripePriceRow = {
   unit_amount: number | null;
 };
 
+type BillingUserRecord = Pick<typeof users.$inferSelect, "id" | "email" | "stripeCustomerId">;
+
 function extractStripeProductId(product: Stripe.Price["product"]): string | null {
   if (typeof product === "string") return product;
   if (product && typeof product === "object" && "id" in product && typeof product.id === "string") {
@@ -262,6 +264,62 @@ function toResolvedCheckoutPriceFromDbRow(row?: DbStripePriceRow | null): Resolv
     priceId: row.price_id,
     productId: row.product_id,
   };
+}
+
+function isMissingStripeCustomerError(error: any): boolean {
+  if (!error) return false;
+
+  if (String(error?.code || "").trim().toLowerCase() === "resource_missing") {
+    const param = String(error?.param || "").trim().toLowerCase();
+    if (!param || param === "customer") {
+      return true;
+    }
+  }
+
+  const message = String(error?.message || "").toLowerCase();
+  return message.includes("no such customer");
+}
+
+async function ensureStripeCustomerId(
+  stripe: Stripe,
+  dbUser: BillingUserRecord,
+): Promise<string> {
+  const existingCustomerId = String(dbUser.stripeCustomerId || "").trim();
+  if (existingCustomerId) {
+    try {
+      const existingCustomer = await withRetry(
+        () => stripe.customers.retrieve(existingCustomerId),
+        { maxAttempts: 3, initialDelayMs: 1000 },
+      );
+
+      if (!("deleted" in existingCustomer) || existingCustomer.deleted !== true) {
+        return existingCustomerId;
+      }
+
+      console.warn(`[Stripe] Customer ${existingCustomerId} for user ${dbUser.id} is deleted; recreating`);
+    } catch (error: any) {
+      if (!isMissingStripeCustomerError(error)) {
+        throw error;
+      }
+
+      console.warn(`[Stripe] Customer ${existingCustomerId} missing for user ${dbUser.id}; recreating`);
+    }
+  }
+
+  const customer = await withRetry(
+    () =>
+      stripe.customers.create({
+        email: dbUser.email || undefined,
+        metadata: { userId: dbUser.id },
+      }),
+    { maxAttempts: 3, initialDelayMs: 1000 },
+  );
+
+  await db.update(users)
+    .set({ stripeCustomerId: customer.id })
+    .where(eq(users.id, dbUser.id));
+
+  return customer.id;
 }
 
 async function listActiveStripePrices(
@@ -717,22 +775,7 @@ export function createStripeRouter() {
         });
       }
 
-      let customerId = dbUser.stripeCustomerId;
-      if (!customerId) {
-        // Add retry logic for customer creation
-        const customer = await withRetry(
-          () => stripe.customers.create({
-            email: dbUser.email || undefined,
-            metadata: { userId }
-          }),
-          { maxAttempts: 3, initialDelayMs: 1000 }
-        );
-        customerId = customer.id;
-
-        await db.update(users)
-          .set({ stripeCustomerId: customerId })
-          .where(eq(users.id, userId));
-      }
+      const customerId = await ensureStripeCustomerId(stripe, dbUser);
 
       const domain = process.env.REPLIT_DOMAINS?.split(',')[0] || 'localhost:5000';
       const protocol = domain.includes('localhost') ? 'http' : 'https';
@@ -1470,20 +1513,7 @@ export function createStripeRouter() {
 
       const stripe = await getUncachableStripeClient();
 
-      let customerId = dbUser.stripeCustomerId;
-      if (!customerId) {
-        const customer = await withRetry(
-          () =>
-            stripe.customers.create({
-              email: dbUser.email || undefined,
-              metadata: { userId },
-            }),
-          { maxAttempts: 3, initialDelayMs: 1000 }
-        );
-        customerId = customer.id;
-
-        await db.update(users).set({ stripeCustomerId: customerId }).where(eq(users.id, userId));
-      }
+      const customerId = await ensureStripeCustomerId(stripe, dbUser);
 
       const domain = process.env.REPLIT_DOMAINS?.split(",")[0] || "localhost:5000";
       const protocol = domain.includes("localhost") ? "http" : "https";
