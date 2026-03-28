@@ -16,10 +16,13 @@ import {
   CheckCircle2,
   ChevronDown,
   Clock3,
+  Cloud,
   Code2,
   Command,
   FolderOpen,
+  FolderPlus,
   GitBranch,
+  Laptop,
   Layers3,
   Loader2,
   LogIn,
@@ -30,8 +33,12 @@ import {
   Send,
   Settings2,
   Shield,
+  ShieldCheck,
+  ShieldAlert,
+  SlidersHorizontal,
   Sparkles,
   TimerReset,
+  TreePine,
   Users2,
   type LucideIcon,
 } from "lucide-react";
@@ -68,6 +75,20 @@ import {
 
 type SessionStatus = "ready" | "running" | "waiting";
 type ActivityTone = "accent" | "success" | "neutral";
+type ExecutionMode = "local" | "worktree" | "cloud";
+type PermissionMode = "default" | "guardian" | "full_access";
+
+const EXECUTION_MODE_OPTIONS: readonly { value: ExecutionMode; label: string; description: string; icon: LucideIcon }[] = [
+  { value: "local", label: "Proyecto local", description: "Trabaja directamente sobre el checkout activo de tu máquina.", icon: Laptop },
+  { value: "worktree", label: "Nuevo worktree", description: "Crea un checkout aislado del repositorio para cambios seguros.", icon: TreePine },
+  { value: "cloud", label: "Nube", description: "Ejecuta en un entorno remoto configurado previamente.", icon: Cloud },
+] as const;
+
+const PERMISSION_MODE_OPTIONS: readonly { value: PermissionMode; label: string; description: string; icon: LucideIcon }[] = [
+  { value: "default", label: "Permisos predeterminados", description: "Sandbox y aprobaciones restrictivos. Recomendado para empezar.", icon: Shield },
+  { value: "guardian", label: "Guardian approvals", description: "El agente trabaja con autonomía, pero pide permiso para acciones sensibles.", icon: ShieldCheck },
+  { value: "full_access", label: "Acceso completo", description: "Sin restricciones de directorio ni sandbox. Solo para entornos confiables.", icon: ShieldAlert },
+] as const;
 
 interface CodexSession {
   id: string;
@@ -547,6 +568,12 @@ export default function CodexPage() {
   );
   const [maxSubagents, setMaxSubagents] = useState(initialWorkspaceSnapshot?.maxSubagents ?? 3);
   const [isLaunching, setIsLaunching] = useState(false);
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>("local");
+  const [isExecutionModeOpen, setIsExecutionModeOpen] = useState(false);
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>("full_access");
+  const [isPermissionModeOpen, setIsPermissionModeOpen] = useState(false);
+  const [threadFilter, setThreadFilter] = useState<"all" | "running" | "ready" | "waiting">("all");
+  const [isThreadFilterOpen, setIsThreadFilterOpen] = useState(false);
   const [repoBranches, setRepoBranches] = useState<string[]>(["main"]);
   const [activeRepoBranch, setActiveRepoBranch] = useState(initialWorkspaceSnapshot?.activeRepoBranch ?? "main");
   const [branchSummary, setBranchSummary] = useState<BranchSummary | null>(null);
@@ -902,9 +929,27 @@ export default function CodexPage() {
   }, [selectedProject]);
 
   const branchButtonLabel = activeRepoBranch || selectedSession?.branchLabel || "main";
+  const executionModeOption = EXECUTION_MODE_OPTIONS.find((o) => o.value === executionMode) || EXECUTION_MODE_OPTIONS[0];
+  const permissionModeOption = PERMISSION_MODE_OPTIONS.find((o) => o.value === permissionMode) || PERMISSION_MODE_OPTIONS[2];
+
+  const filteredSessions = useMemo(() => {
+    if (threadFilter === "all") return sessions;
+    return sessions.filter((s) => s.status === threadFilter);
+  }, [sessions, threadFilter]);
+
+  const filteredGroupedSessions = useMemo(() => {
+    const groups = new Map<string, CodexSession[]>();
+    for (const session of filteredSessions) {
+      const label = formatSectionLabel(session.chat.timestamp);
+      const existing = groups.get(label) ?? [];
+      existing.push(session);
+      groups.set(label, existing);
+    }
+    return Array.from(groups.entries()).map(([label, items]) => ({ label, items }));
+  }, [filteredSessions]);
   const runtimeStatusItems = useMemo(
     () => [
-      isAuthenticated ? "Local · Full access" : "Preview · Acceso limitado",
+      isAuthenticated ? `${executionModeOption.label} · ${permissionModeOption.label}` : "Preview · Acceso limitado",
       selectedProject?.repositoryPath ? `Git · ${branchButtonLabel}` : "Sin repo git",
       executionProfile === "marathon_24h"
         ? "24h · checkpoints + handoff"
@@ -912,7 +957,7 @@ export default function CodexPage() {
           ? "12h · checkpoints por bloque"
           : "Estándar · entrega puntual",
     ],
-    [branchButtonLabel, executionProfile, isAuthenticated, selectedProject?.repositoryPath],
+    [branchButtonLabel, executionModeOption.label, executionProfile, isAuthenticated, permissionModeOption.label, selectedProject?.repositoryPath],
   );
   const executionProfileHint = useMemo(() => {
     if (executionProfile === "marathon_24h") {
@@ -1415,7 +1460,64 @@ export default function CodexPage() {
             </Button>
           </div>
 
-          <div className="mt-7 space-y-1.5">
+          {/* Execution mode selector */}
+          <div className="mt-6">
+            <Popover open={isExecutionModeOpen} onOpenChange={setIsExecutionModeOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-2 rounded-2xl border border-[var(--codex-border)] bg-white/80 px-4 py-3 text-left transition-colors hover:bg-white"
+                >
+                  <div className="flex items-center gap-3">
+                    <executionModeOption.icon className="h-4 w-4 text-[var(--codex-accent)]" />
+                    <span className="text-sm font-medium">{executionModeOption.label}</span>
+                  </div>
+                  <ChevronDown className="h-4 w-4 text-[var(--codex-muted)]" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" side="bottom" className="w-[280px] overflow-hidden rounded-[24px] p-0">
+                <div className="px-4 pt-4 pb-2 text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">Modo de ejecución</div>
+                <div className="space-y-1 px-2 pb-2">
+                  {EXECUTION_MODE_OPTIONS.map((option) => {
+                    const Icon = option.icon;
+                    const isActive = executionMode === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => {
+                          setExecutionMode(option.value);
+                          setIsExecutionModeOpen(false);
+                        }}
+                        className={cn(
+                          "flex w-full items-start gap-3 rounded-[18px] px-3 py-3 text-left transition-colors hover:bg-[#f7f5ef]",
+                          isActive && "bg-[#f7f5ef]",
+                        )}
+                      >
+                        <Icon className="mt-0.5 h-4 w-4 shrink-0 text-[var(--codex-muted)]" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium">{option.label}</p>
+                          <p className="mt-1 text-xs leading-5 text-[var(--codex-muted)]">{option.description}</p>
+                        </div>
+                        {isActive ? <Check className="mt-0.5 h-4 w-4 shrink-0 text-[var(--codex-accent)]" /> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+                <Separator className="bg-[var(--codex-border)]" />
+                <button
+                  type="button"
+                  onClick={() => setIsExecutionModeOpen(false)}
+                  className="flex w-full items-center gap-3 px-5 py-3 text-left text-sm text-[var(--codex-muted)] transition-colors hover:bg-[#f7f5ef]"
+                >
+                  Límites de uso restantes
+                  <ArrowUpRight className="ml-auto h-3.5 w-3.5" />
+                </button>
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          <div className="mt-5 space-y-1.5">
             {primaryNav.map((item, index) => {
               const Icon = item.icon;
               const isActive = index === 0;
@@ -1445,8 +1547,61 @@ export default function CodexPage() {
           </div>
 
           <div className="mt-7 flex items-center justify-between px-2">
-            <p className="text-xs uppercase tracking-[0.22em] text-[var(--codex-muted)]">Hilos</p>
-            <span className="text-xs text-[var(--codex-muted)]">{sessions.length}</span>
+            <div className="flex items-center gap-2">
+              <p className="text-xs uppercase tracking-[0.22em] text-[var(--codex-muted)]">Hilos</p>
+              <span className="text-xs text-[var(--codex-muted)]">{filteredSessions.length}</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <Popover open={isThreadFilterOpen} onOpenChange={setIsThreadFilterOpen}>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className={cn(
+                      "flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/75",
+                      threadFilter !== "all" && "bg-[var(--codex-accent-soft)] text-[var(--codex-accent-ink)]",
+                    )}
+                    aria-label="Filtrar hilos"
+                  >
+                    <SlidersHorizontal className="h-3.5 w-3.5" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="end" side="bottom" className="w-[200px] overflow-hidden rounded-[20px] p-2">
+                  {(["all", "running", "ready", "waiting"] as const).map((filter) => {
+                    const filterLabels: Record<typeof filter, string> = {
+                      all: "Todos los hilos",
+                      running: "En ejecución",
+                      ready: "Listos",
+                      waiting: "En espera",
+                    };
+                    return (
+                      <button
+                        key={filter}
+                        type="button"
+                        onClick={() => {
+                          setThreadFilter(filter);
+                          setIsThreadFilterOpen(false);
+                        }}
+                        className={cn(
+                          "flex w-full items-center justify-between rounded-[14px] px-3 py-2 text-sm transition-colors hover:bg-[#f7f5ef]",
+                          threadFilter === filter && "bg-[#f7f5ef] font-medium",
+                        )}
+                      >
+                        {filterLabels[filter]}
+                        {threadFilter === filter ? <Check className="h-3.5 w-3.5 text-[var(--codex-accent)]" /> : null}
+                      </button>
+                    );
+                  })}
+                </PopoverContent>
+              </Popover>
+              <button
+                type="button"
+                onClick={() => setLocation("/")}
+                className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/75"
+                aria-label="Agregar proyecto"
+              >
+                <FolderPlus className="h-3.5 w-3.5 text-[var(--codex-muted)]" />
+              </button>
+            </div>
           </div>
 
           <ScrollArea className="mt-4 flex-1 pr-1">
@@ -1463,8 +1618,8 @@ export default function CodexPage() {
                 </div>
               </div>
 
-              {groupedSessions.length > 0 ? (
-                groupedSessions.map((group) => (
+              {filteredGroupedSessions.length > 0 ? (
+                filteredGroupedSessions.map((group) => (
                   <div key={group.label} className="space-y-2">
                     <p className="px-2 text-xs font-medium text-[var(--codex-muted)]">{group.label}</p>
                     {group.items.map((session) => (
@@ -1554,48 +1709,180 @@ export default function CodexPage() {
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
-                <Button variant="ghost" size="icon" className="rounded-full border border-[var(--codex-border)] bg-white/82">
-                  <Settings2 className="h-4 w-4" />
-                </Button>
-                <button
-                  type="button"
-                  onClick={() => setMultiAgentEnabled((current) => !current)}
-                  disabled={!isAuthenticated}
-                  className={cn(
-                    "inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm transition-colors",
-                    multiAgentEnabled
-                      ? "border-[var(--codex-accent)] bg-[var(--codex-accent-soft)] text-[var(--codex-accent-ink)]"
-                      : "border-[var(--codex-border)] bg-white/82 text-[var(--codex-muted)]",
-                    !isAuthenticated && "cursor-not-allowed opacity-60",
-                  )}
-                >
-                  <Users2 className="h-4 w-4" />
-                  {multiAgentEnabled ? `Multi-agent x${maxSubagents}` : "Single-agent"}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleWorktreeShortcut}
-                  disabled={!isAuthenticated}
-                  className={cn(
-                    "inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/82 px-4 py-2 text-sm",
-                    !isAuthenticated && "cursor-not-allowed opacity-60",
-                  )}
-                >
-                  <FolderOpen className="h-4 w-4" />
-                  Mover al worktree
-                </button>
-                <button
-                  type="button"
-                  onClick={handleCommitShortcut}
-                  disabled={!isAuthenticated}
-                  className={cn(
-                    "inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/82 px-4 py-2 text-sm",
-                    !isAuthenticated && "cursor-not-allowed opacity-60",
-                  )}
-                >
-                  <CheckCircle2 className="h-4 w-4" />
-                  Confirmar
-                </button>
+                {/* Execution mode selector (top bar mirror) */}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/82 px-4 py-2 text-sm transition-colors hover:bg-white"
+                    >
+                      <executionModeOption.icon className="h-4 w-4 text-[var(--codex-accent)]" />
+                      {executionModeOption.label}
+                      <ChevronDown className="h-3.5 w-3.5 text-[var(--codex-muted)]" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" side="bottom" className="w-[280px] overflow-hidden rounded-[24px] p-0">
+                    <div className="px-4 pt-4 pb-2 text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">Modo de ejecución</div>
+                    <div className="space-y-1 px-2 pb-3">
+                      {EXECUTION_MODE_OPTIONS.map((option) => {
+                        const Icon = option.icon;
+                        const isActive = executionMode === option.value;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => setExecutionMode(option.value)}
+                            className={cn(
+                              "flex w-full items-start gap-3 rounded-[18px] px-3 py-3 text-left transition-colors hover:bg-[#f7f5ef]",
+                              isActive && "bg-[#f7f5ef]",
+                            )}
+                          >
+                            <Icon className="mt-0.5 h-4 w-4 shrink-0 text-[var(--codex-muted)]" />
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium">{option.label}</p>
+                              <p className="mt-1 text-xs leading-5 text-[var(--codex-muted)]">{option.description}</p>
+                            </div>
+                            {isActive ? <Check className="mt-0.5 h-4 w-4 shrink-0 text-[var(--codex-accent)]" /> : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+
+                {/* Permissions / autonomy selector */}
+                <Popover open={isPermissionModeOpen} onOpenChange={setIsPermissionModeOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className={cn(
+                        "inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm transition-colors hover:bg-white",
+                        permissionMode === "full_access"
+                          ? "border-[var(--codex-accent)] bg-[var(--codex-accent-soft)] text-[var(--codex-accent-ink)]"
+                          : "border-[var(--codex-border)] bg-white/82 text-[var(--codex-ink)]",
+                      )}
+                    >
+                      <permissionModeOption.icon className="h-4 w-4" />
+                      {permissionModeOption.label}
+                      <ChevronDown className="h-3.5 w-3.5 text-[var(--codex-muted)]" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" side="bottom" className="w-[300px] overflow-hidden rounded-[24px] p-0">
+                    <div className="px-4 pt-4 pb-2 text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">Perfil de permisos</div>
+                    <div className="space-y-1 px-2 pb-3">
+                      {PERMISSION_MODE_OPTIONS.map((option) => {
+                        const Icon = option.icon;
+                        const isActive = permissionMode === option.value;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => {
+                              setPermissionMode(option.value);
+                              setIsPermissionModeOpen(false);
+                            }}
+                            className={cn(
+                              "flex w-full items-start gap-3 rounded-[18px] px-3 py-3 text-left transition-colors hover:bg-[#f7f5ef]",
+                              isActive && "bg-[#f7f5ef]",
+                            )}
+                          >
+                            <Icon className="mt-0.5 h-4 w-4 shrink-0 text-[var(--codex-muted)]" />
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium">{option.label}</p>
+                              <p className="mt-1 text-xs leading-5 text-[var(--codex-muted)]">{option.description}</p>
+                            </div>
+                            {isActive ? <Check className="mt-0.5 h-4 w-4 shrink-0 text-[var(--codex-accent)]" /> : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+
+                {/* Git branch selector (top bar) */}
+                <Popover open={isBranchMenuOpen} onOpenChange={setIsBranchMenuOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      disabled={!isAuthenticated}
+                      className={cn(
+                        "inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/82 px-4 py-2 text-sm transition-colors hover:bg-white",
+                        !isAuthenticated && "cursor-not-allowed opacity-60",
+                      )}
+                      data-testid="codex-branch-trigger-header"
+                    >
+                      <GitBranch className="h-4 w-4 text-[var(--codex-muted)]" />
+                      <span className="max-w-[140px] truncate">{branchButtonLabel}</span>
+                      <ChevronDown className="h-3.5 w-3.5 text-[var(--codex-muted)]" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" side="bottom" className="w-[23rem] overflow-hidden rounded-[30px] p-0">
+                    <div className="border-b border-[var(--codex-border)] p-4">
+                      <div className="flex items-center gap-3 rounded-2xl border border-[var(--codex-border)] bg-[#fbfaf6] px-3 py-2">
+                        <Search className="h-4 w-4 text-[var(--codex-muted)]" />
+                        <Input
+                          value={branchQuery}
+                          onChange={(event) => setBranchQuery(event.target.value)}
+                          placeholder="Buscar ramas"
+                          className="h-auto border-0 bg-transparent px-0 py-0 text-sm shadow-none focus-visible:ring-0"
+                        />
+                      </div>
+                    </div>
+                    <div className="px-5 pt-4 text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">Ramas</div>
+                    <ScrollArea className="max-h-[22rem] px-2 pb-3 pt-2">
+                      <div className="space-y-1 px-2">
+                        {filteredBranches.length > 0 ? (
+                          filteredBranches.map((branch) => {
+                            const isActive = branch === activeRepoBranch;
+                            return (
+                              <button
+                                key={branch}
+                                type="button"
+                                onClick={() => void handleSelectBranch(branch)}
+                                disabled={isBranchActionLoading}
+                                className={cn(
+                                  "flex w-full items-start justify-between gap-3 rounded-[22px] px-4 py-3 text-left transition-colors hover:bg-[#f7f5ef]",
+                                  isActive && "bg-[#f7f5ef]",
+                                  isBranchActionLoading && "cursor-wait opacity-70",
+                                )}
+                              >
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-3">
+                                    <GitBranch className="mt-0.5 h-4 w-4 shrink-0 text-[var(--codex-muted)]" />
+                                    <p className="truncate text-base font-medium">{branch}</p>
+                                  </div>
+                                  <p className="mt-2 pl-7 text-sm leading-6 text-[var(--codex-muted)]">
+                                    {isActive ? branchSummary?.label || "Sin cambios pendientes" : "Cambiar a esta rama"}
+                                  </p>
+                                </div>
+                                {isActive ? <Check className="mt-1 h-5 w-5 shrink-0 text-[var(--codex-accent)]" /> : null}
+                              </button>
+                            );
+                          })
+                        ) : (
+                          <div className="px-4 py-8 text-sm text-[var(--codex-muted)]">
+                            No encontré ramas que coincidan con "{branchQuery}".
+                          </div>
+                        )}
+                      </div>
+                    </ScrollArea>
+                    <div className="border-t border-[var(--codex-border)] p-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsBranchMenuOpen(false);
+                          setIsCreateBranchDialogOpen(true);
+                        }}
+                        className="flex w-full items-center gap-3 rounded-[22px] px-4 py-3 text-left text-base transition-colors hover:bg-[#f7f5ef]"
+                      >
+                        <Plus className="h-5 w-5 text-[var(--codex-ink)]" />
+                        Crear y cambiar a una rama nueva...
+                      </button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+
+                {/* Diff stats & quick actions */}
                 <div className="inline-flex items-center gap-3 rounded-full border border-[var(--codex-border)] bg-white/82 px-4 py-2 text-sm tabular-nums">
                   <span className="text-[var(--codex-accent)]">+{formatNumber(branchSummary?.insertions || 0)}</span>
                   <span className="text-[#b64034]">-{formatNumber(branchSummary?.deletions || 0)}</span>
@@ -2503,86 +2790,10 @@ export default function CodexPage() {
                   </span>
                 </div>
 
-                <Popover open={isBranchMenuOpen} onOpenChange={setIsBranchMenuOpen}>
-                  <PopoverTrigger asChild>
-                    <button
-                      type="button"
-                      disabled={!isAuthenticated}
-                      className="inline-flex items-center gap-2 rounded-full border border-[var(--codex-border)] bg-white/88 px-4 py-2 text-sm text-[var(--codex-ink)] shadow-sm transition-colors hover:bg-white"
-                      data-testid="codex-branch-trigger"
-                    >
-                      <GitBranch className="h-4 w-4 text-[var(--codex-muted)]" />
-                      <span>{branchButtonLabel}</span>
-                      <ChevronDown className="h-4 w-4 text-[var(--codex-muted)]" />
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent align="end" side="top" className="w-[23rem] overflow-hidden rounded-[30px] p-0">
-                    <div className="border-b border-[var(--codex-border)] p-4">
-                      <div className="flex items-center gap-3 rounded-2xl border border-[var(--codex-border)] bg-[#fbfaf6] px-3 py-2">
-                        <Search className="h-4 w-4 text-[var(--codex-muted)]" />
-                        <Input
-                          value={branchQuery}
-                          onChange={(event) => setBranchQuery(event.target.value)}
-                          placeholder="Buscar ramas"
-                          className="h-auto border-0 bg-transparent px-0 py-0 text-sm shadow-none focus-visible:ring-0"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="px-5 pt-4 text-xs uppercase tracking-[0.2em] text-[var(--codex-muted)]">Ramas</div>
-                    <ScrollArea className="max-h-[22rem] px-2 pb-3 pt-2">
-                      <div className="space-y-1 px-2">
-                        {filteredBranches.length > 0 ? (
-                          filteredBranches.map((branch) => {
-                            const isActive = branch === activeRepoBranch;
-                            return (
-                              <button
-                                key={branch}
-                                type="button"
-                                onClick={() => void handleSelectBranch(branch)}
-                                disabled={isBranchActionLoading}
-                                className={cn(
-                                  "flex w-full items-start justify-between gap-3 rounded-[22px] px-4 py-3 text-left transition-colors hover:bg-[#f7f5ef]",
-                                  isActive && "bg-[#f7f5ef]",
-                                  isBranchActionLoading && "cursor-wait opacity-70",
-                                )}
-                              >
-                                <div className="min-w-0">
-                                  <div className="flex items-center gap-3">
-                                    <GitBranch className="mt-0.5 h-4 w-4 shrink-0 text-[var(--codex-muted)]" />
-                                    <p className="truncate text-base font-medium">{branch}</p>
-                                  </div>
-                                  <p className="mt-2 pl-7 text-sm leading-6 text-[var(--codex-muted)]">
-                                    {isActive ? branchSummary?.label || "Sin cambios pendientes" : "Cambiar a esta rama"}
-                                  </p>
-                                </div>
-                                {isActive ? <Check className="mt-1 h-5 w-5 shrink-0 text-[var(--codex-accent)]" /> : null}
-                              </button>
-                            );
-                          })
-                        ) : (
-                          <div className="px-4 py-8 text-sm text-[var(--codex-muted)]">
-                            No encontré ramas que coincidan con “{branchQuery}”.
-                          </div>
-                        )}
-                      </div>
-                    </ScrollArea>
-
-                    <div className="border-t border-[var(--codex-border)] p-3">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsBranchMenuOpen(false);
-                          setIsCreateBranchDialogOpen(true);
-                        }}
-                        className="flex w-full items-center gap-3 rounded-[22px] px-4 py-3 text-left text-base transition-colors hover:bg-[#f7f5ef]"
-                      >
-                        <Plus className="h-5 w-5 text-[var(--codex-ink)]" />
-                        Crear y cambiar a una rama nueva...
-                      </button>
-                    </div>
-                  </PopoverContent>
-                </Popover>
+                <span className=”inline-flex items-center gap-2 text-xs text-[var(--codex-muted)]”>
+                  <GitBranch className=”h-3.5 w-3.5” />
+                  {branchButtonLabel}
+                </span>
               </div>
             </div>
           </div>
