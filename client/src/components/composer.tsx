@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useLayoutEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Plus,
@@ -49,6 +49,7 @@ import { useCommandHistory } from "@/hooks/use-command-history";
 import { VirtualComputer } from "@/components/virtual-computer";
 import { getFileTheme } from "@/lib/fileTypeTheme";
 import { useSettingsContext } from "@/contexts/SettingsContext";
+import { autosizeTextarea } from "@/lib/textareaAutosize";
 import "@/components/ui/glass-effects.css";
 import { type AIState, isAiBusyState } from "@/components/chat-interface/types";
 
@@ -263,6 +264,7 @@ export function Composer({
   onToggleCodingAgent,
   sendTransitionLayoutId,
 }: ComposerProps) {
+  const COMPOSER_MAX_TEXTAREA_HEIGHT = 180;
   const isDocumentMode = variant === "document";
   const hasAttachableFiles = uploadedFiles.some((file) => file.status !== "error");
   const hasContent = input.trim().length > 0 || hasAttachableFiles;
@@ -316,6 +318,7 @@ export function Composer({
     const value = e.target.value;
     setInput(value);
     resetNavigation();
+    autosizeTextarea(e.currentTarget, COMPOSER_MAX_TEXTAREA_HEIGHT);
 
     const cursorPos = e.target.selectionStart || 0;
     const textBeforeCursor = value.slice(0, cursorPos);
@@ -1329,6 +1332,10 @@ export function Composer({
   const showSendTransitionSource =
     !!sendTransitionLayoutId && input.trim().length > 0;
 
+  useLayoutEffect(() => {
+    autosizeTextarea(textareaRef.current, COMPOSER_MAX_TEXTAREA_HEIGHT);
+  }, [input, textareaRef]);
+
   return (
     <div
       ref={composerRef}
@@ -1505,6 +1512,12 @@ export function Composer({
               ref={textareaRef}
               value={input}
               onChange={handleInputChange}
+              onInput={(event) =>
+                autosizeTextarea(
+                  event.currentTarget,
+                  COMPOSER_MAX_TEXTAREA_HEIGHT,
+                )
+              }
               onFocus={onTextareaFocus}
               onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
                 handleMentionKeyDown(e);
@@ -1523,9 +1536,10 @@ export function Composer({
               }}
               onPaste={handlePaste}
               placeholder={placeholder}
+              wrap="soft"
               aria-label="Message input"
               aria-describedby="composer-hint"
-              className="min-h-[22px] max-h-[180px] w-full resize-none border-0 bg-transparent p-0 shadow-none outline-none focus-visible:!outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[15px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400/70 dark:placeholder:text-zinc-500/60 leading-[1.4] overflow-y-auto scrollbar-none"
+              className="min-h-[24px] max-h-[180px] w-full resize-none border-0 bg-transparent p-0 shadow-none outline-none focus-visible:!outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[15px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400/70 dark:placeholder:text-zinc-500/60 leading-6 overflow-y-auto scrollbar-none [overflow-wrap:anywhere]"
               rows={1}
             />
           </div>
