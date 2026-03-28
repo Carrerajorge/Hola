@@ -13,9 +13,11 @@ import { isSystemAdminRole, isWorkspaceAdminRole, normalizeRoleKey, resolveRoleP
 import {
   ACTIVE_SUBSCRIPTION_PLANS,
   ACTIVE_SUBSCRIPTION_PLAN_KEYS,
+  getConfiguredPriceId,
   getConfiguredProductId,
   getPlanKeyFromAlias,
   getPlanKeyFromAmount,
+  getPlanKeyFromConfiguredPriceId,
   getPlanKeyFromProductId,
 } from "../lib/stripeActivePlans";
 
@@ -215,6 +217,27 @@ function toResolvedCheckoutPrice(
   };
 }
 
+function toResolvedCheckoutPriceForKnownPlan(
+  price: Stripe.Price,
+  planKey: keyof typeof ACTIVE_SUBSCRIPTION_PLANS,
+): ResolvedCheckoutPrice | null {
+  if (!isAllowedMonthlyPrice(price, ACTIVE_SUBSCRIPTION_PLANS[planKey].amount)) {
+    return null;
+  }
+
+  const productId = extractStripeProductId(price.product);
+  if (!productId) {
+    return null;
+  }
+
+  return {
+    amount: price.unit_amount,
+    planKey,
+    priceId: price.id,
+    productId,
+  };
+}
+
 function toResolvedCheckoutPriceFromDbRow(row?: DbStripePriceRow | null): ResolvedCheckoutPrice | null {
   if (!row?.price_id || !row.product_id || typeof row.unit_amount !== "number") {
     return null;
@@ -387,6 +410,14 @@ async function findActiveMonthlyPriceById(
     () => stripe.prices.retrieve(priceId, { expand: ["product"] }),
     { maxAttempts: 3, initialDelayMs: 1000 },
   );
+
+  const configuredPlanKey = getPlanKeyFromConfiguredPriceId(priceId);
+  if (configuredPlanKey) {
+    const configuredResolved = toResolvedCheckoutPriceForKnownPlan(price, configuredPlanKey);
+    if (configuredResolved) {
+      return configuredResolved;
+    }
+  }
 
   const allActivePrices = await listActiveStripePrices(stripe);
   const directResolved = toResolvedCheckoutPrice(price, { siblingPrices: allActivePrices });
@@ -592,13 +623,18 @@ export function createStripeRouter() {
       let stripe: Stripe | null = null;
 
       for (const planKey of ACTIVE_SUBSCRIPTION_PLAN_KEYS) {
-        const plan = ACTIVE_SUBSCRIPTION_PLANS[planKey];
-        const productId = getConfiguredProductId(planKey);
-        productMapping[plan.alias] = productId;
+      const plan = ACTIVE_SUBSCRIPTION_PLANS[planKey];
+      const productId = getConfiguredProductId(planKey);
+      productMapping[plan.alias] = productId;
+      const configuredPriceId = getConfiguredPriceId(planKey);
 
-        try {
-          const result = await db.execute(
-            sql`
+      if (configuredPriceId) {
+        priceMapping[plan.alias] = configuredPriceId;
+      }
+
+      try {
+        const result = await db.execute(
+          sql`
               SELECT pr.id as price_id
               FROM stripe.products p
               INNER JOIN stripe.prices pr ON pr.product = p.id
@@ -621,9 +657,16 @@ export function createStripeRouter() {
 
         try {
           stripe ??= await getUncachableStripeClient();
-          const price = await findActiveMonthlyPriceForPlan(stripe, planKey);
-          if (price?.id) {
-            priceMapping[plan.alias] = price.id;
+          const resolvedPrice = await findActiveMonthlyPriceForPlan(stripe, planKey);
+          if (resolvedPrice?.priceId) {
+            priceMapping[plan.alias] = resolvedPrice.priceId;
+            productMapping[plan.alias] = resolvedPrice.productId;
+          } else if (configuredPriceId) {
+            const configuredResolved = await findActiveMonthlyPriceById(stripe, configuredPriceId);
+            if (configuredResolved?.priceId) {
+              priceMapping[plan.alias] = configuredResolved.priceId;
+              productMapping[plan.alias] = configuredResolved.productId;
+            }
           }
         } catch (stripeError: any) {
           console.error(`[Stripe] Price lookup failed for ${planKey}:`, stripeError.message);
@@ -906,6 +949,7 @@ export function createStripeRouter() {
               // Handle subscription created with notifications (pass event.id for idempotency)
               await subscriptionService.handleSubscriptionCreated(subscription, event.id);
               
+              const priceId = subscription.items.data[0].price.id;
               const amount = subscription.items.data[0].price.unit_amount || 0;
               
               // Determine plan from amount
