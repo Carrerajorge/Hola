@@ -85,6 +85,31 @@ function normalizeStripePlanText(value: string | null | undefined): string {
     .trim();
 }
 
+function isAllowedMonthlyPrice(price: Stripe.Price, expectedAmount?: number): boolean {
+  if (!price.active) return false;
+  if (price.recurring?.interval !== "month") return false;
+
+  const amount = typeof price.unit_amount === "number" ? price.unit_amount : null;
+  if (amount === null || !VALID_PLAN_AMOUNTS.has(amount)) return false;
+  if (typeof expectedAmount === "number" && amount !== expectedAmount) return false;
+
+  return true;
+}
+
+function getPlanLookupKeyCandidates(
+  planKey: keyof typeof ACTIVE_SUBSCRIPTION_PLANS,
+): string[] {
+  const alias = ACTIVE_SUBSCRIPTION_PLANS[planKey].alias;
+  return Array.from(
+    new Set([
+      alias,
+      planKey,
+      `${planKey}_monthly`,
+      `${planKey}-monthly`,
+    ].filter(Boolean)),
+  );
+}
+
 function inferPlanKeyFromSignals(input: {
   amount?: number | null;
   metadataPlan?: string | null;
@@ -119,22 +144,64 @@ function inferPlanKeyFromSignals(input: {
   return null;
 }
 
-function toResolvedCheckoutPrice(price: Stripe.Price): ResolvedCheckoutPrice | null {
-  if (!price.active) return null;
-  if (price.recurring?.interval !== "month") return null;
+function inferPlanKeyFromPrice(
+  price: Stripe.Price,
+  options?: {
+    knownPlanKey?: keyof typeof ACTIVE_SUBSCRIPTION_PLANS;
+    siblingPrices?: Stripe.Price[];
+  },
+): keyof typeof ACTIVE_SUBSCRIPTION_PLANS | null {
+  if (!isAllowedMonthlyPrice(price)) return null;
 
-  const amount = typeof price.unit_amount === "number" ? price.unit_amount : null;
-  if (amount === null || !VALID_PLAN_AMOUNTS.has(amount)) return null;
-
+  const amount = price.unit_amount;
   const productId = extractStripeProductId(price.product);
   const productMetadata = extractStripeProductMetadata(price.product);
-  const inferredPlanKey = inferPlanKeyFromSignals({
+  const strictPlanKey = inferPlanKeyFromSignals({
     amount,
     metadataPlan: productMetadata.plan || price.metadata?.plan || null,
     planName: extractStripeProductName(price.product),
     priceLookupKey: price.lookup_key || null,
     productId,
   });
+
+  if (strictPlanKey) {
+    return strictPlanKey;
+  }
+
+  const amountPlanKey = getPlanKeyFromAmount(amount);
+  if (!amountPlanKey) {
+    return null;
+  }
+
+  const sameAmountCandidates = (options?.siblingPrices || []).filter((candidate) =>
+    isAllowedMonthlyPrice(candidate, amount),
+  );
+  const isUniqueAllowedAmountCandidate =
+    sameAmountCandidates.length === 1 && sameAmountCandidates[0]?.id === price.id;
+
+  if (options?.knownPlanKey && options.knownPlanKey === amountPlanKey && isUniqueAllowedAmountCandidate) {
+    return options.knownPlanKey;
+  }
+
+  if (isUniqueAllowedAmountCandidate) {
+    return amountPlanKey;
+  }
+
+  return null;
+}
+
+function toResolvedCheckoutPrice(
+  price: Stripe.Price,
+  options?: {
+    knownPlanKey?: keyof typeof ACTIVE_SUBSCRIPTION_PLANS;
+    siblingPrices?: Stripe.Price[];
+  },
+): ResolvedCheckoutPrice | null {
+  if (!isAllowedMonthlyPrice(price)) return null;
+
+  const amount = price.unit_amount;
+  const productId = extractStripeProductId(price.product);
+  const inferredPlanKey = inferPlanKeyFromPrice(price, options);
 
   if (!productId || !inferredPlanKey) {
     return null;
@@ -202,6 +269,26 @@ async function listActiveStripePrices(
   return collected;
 }
 
+async function listStripePricesByLookupKeys(
+  stripe: Stripe,
+  lookupKeys: string[],
+): Promise<Stripe.Price[]> {
+  if (lookupKeys.length === 0) return [];
+
+  const response = await withRetry(
+    () =>
+      stripe.prices.list({
+        active: true,
+        limit: 100,
+        lookup_keys: lookupKeys,
+        expand: ["data.product"],
+      }),
+    { maxAttempts: 3, initialDelayMs: 1000 },
+  );
+
+  return response.data;
+}
+
 async function findDbCheckoutPrice(rawIdentifier: string): Promise<ResolvedCheckoutPrice | null> {
   if (rawIdentifier.startsWith("price_")) {
     const result = await db.execute(sql`
@@ -247,17 +334,36 @@ async function findDbCheckoutPrice(rawIdentifier: string): Promise<ResolvedCheck
 async function findActiveMonthlyPriceForPlan(
   stripe: Stripe,
   planKey: keyof typeof ACTIVE_SUBSCRIPTION_PLANS,
-): Promise<Stripe.Price | null> {
-  const productId = getConfiguredProductId(planKey);
+): Promise<ResolvedCheckoutPrice | null> {
   const expectedAmount = ACTIVE_SUBSCRIPTION_PLANS[planKey].amount;
-  const matchesPlan = (price: Stripe.Price) => {
-    const resolved = toResolvedCheckoutPrice(price);
-    return resolved?.planKey === planKey && resolved.amount === expectedAmount;
+  const resolveForPlan = (price: Stripe.Price, siblingPrices: Stripe.Price[]) => {
+    const resolved = toResolvedCheckoutPrice(price, { knownPlanKey: planKey, siblingPrices });
+    return resolved?.planKey === planKey && resolved.amount === expectedAmount ? resolved : null;
   };
 
   try {
+    const lookupKeyPrices = await listStripePricesByLookupKeys(
+      stripe,
+      getPlanLookupKeyCandidates(planKey),
+    );
+    const lookupMatch =
+      lookupKeyPrices
+        .map((price) => resolveForPlan(price, lookupKeyPrices))
+        .find(Boolean) || null;
+    if (lookupMatch) {
+      return lookupMatch;
+    }
+  } catch (error: any) {
+    console.warn(`[Stripe] Lookup-key lookup failed for ${planKey}: ${error?.message || error}`);
+  }
+
+  const productId = getConfiguredProductId(planKey);
+  try {
     const productScopedPrices = await listActiveStripePrices(stripe, productId);
-    const scopedMatch = productScopedPrices.find(matchesPlan);
+    const scopedMatch =
+      productScopedPrices
+        .map((price) => resolveForPlan(price, productScopedPrices))
+        .find(Boolean) || null;
     if (scopedMatch) {
       return scopedMatch;
     }
@@ -265,12 +371,37 @@ async function findActiveMonthlyPriceForPlan(
     console.warn(`[Stripe] Product-scoped lookup failed for ${planKey}: ${error?.message || error}`);
   }
 
+  const allActivePrices = await listActiveStripePrices(stripe);
   return (
-    (await listActiveStripePrices(stripe)).find((price) => {
-      const resolved = toResolvedCheckoutPrice(price);
-      return resolved?.planKey === planKey && resolved.amount === expectedAmount;
-    }) || null
+    allActivePrices
+      .map((price) => resolveForPlan(price, allActivePrices))
+      .find(Boolean) || null
   );
+}
+
+async function findActiveMonthlyPriceById(
+  stripe: Stripe,
+  priceId: string,
+): Promise<ResolvedCheckoutPrice | null> {
+  const price = await withRetry(
+    () => stripe.prices.retrieve(priceId, { expand: ["product"] }),
+    { maxAttempts: 3, initialDelayMs: 1000 },
+  );
+
+  const allActivePrices = await listActiveStripePrices(stripe);
+  const directResolved = toResolvedCheckoutPrice(price, { siblingPrices: allActivePrices });
+  if (directResolved) {
+    return directResolved;
+  }
+
+  for (const planKey of ACTIVE_SUBSCRIPTION_PLAN_KEYS) {
+    const resolved = await findActiveMonthlyPriceForPlan(stripe, planKey);
+    if (resolved?.priceId === priceId) {
+      return resolved;
+    }
+  }
+
+  return null;
 }
 
 async function resolveAllowedCheckoutPrice(
@@ -288,25 +419,19 @@ async function resolveAllowedCheckoutPrice(
   }
 
   if (normalized.startsWith("price_")) {
-    const price = await withRetry(
-      () => stripe.prices.retrieve(normalized, { expand: ["product"] }),
-      { maxAttempts: 3, initialDelayMs: 1000 },
-    );
-    return toResolvedCheckoutPrice(price);
+    return findActiveMonthlyPriceById(stripe, normalized);
   }
 
   const aliasPlanKey = getPlanKeyFromAlias(normalized);
   if (aliasPlanKey) {
-    const price = await findActiveMonthlyPriceForPlan(stripe, aliasPlanKey);
-    return price ? toResolvedCheckoutPrice(price) : null;
+    return findActiveMonthlyPriceForPlan(stripe, aliasPlanKey);
   }
 
   if (normalized.startsWith("prod_")) {
     const planKey = getPlanKeyFromProductId(normalized);
     if (!planKey) return null;
 
-    const price = await findActiveMonthlyPriceForPlan(stripe, planKey);
-    return price ? toResolvedCheckoutPrice(price) : null;
+    return findActiveMonthlyPriceForPlan(stripe, planKey);
   }
 
   return null;
