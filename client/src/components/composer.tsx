@@ -1,4 +1,4 @@
-import React, { useCallback, useLayoutEffect, useMemo, useState } from "react";
+import React, { useCallback, useLayoutEffect, useMemo, useState, type FormEvent } from "react";
 import {
   Plus,
   Upload,
@@ -326,12 +326,17 @@ export function Composer({
     }
   };
 
-  const handleSubmitWithHistory = () => {
+  const handleSubmitWithHistory = useCallback((event?: FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
+
+    if (isFilesLoading) return;
+    if (!hasContent) return;
+
     if (input.trim()) {
       addToHistory(input.trim());
     }
     handleSubmit();
-  };
+  }, [addToHistory, handleSubmit, hasContent, input, isFilesLoading]);
 
   const handleHistoryNavigation = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const textarea = e.currentTarget;
@@ -1462,7 +1467,7 @@ export function Composer({
         aria-label="Subir archivos"
       />
 
-      <div className={inputContainerClass}>
+      <form className={inputContainerClass} onSubmit={handleSubmitWithHistory}>
         {renderAttachmentPreview()}
 
         {isDocumentMode && selectedDocText && handleDocTextDeselect && (
@@ -1655,7 +1660,7 @@ export function Composer({
                 onToggleRecording={toggleVoiceRecording}
                 onOpenVoiceChat={() => setIsVoiceChatOpen(true)}
                 onStopChat={handleStopChat}
-                onSubmit={handleSubmit}
+                onSubmit={() => handleSubmitWithHistory()}
                 aiState={aiState}
                 hasContent={hasContent}
                 isAgentRunning={isAgentRunning}
@@ -1698,7 +1703,7 @@ export function Composer({
           </div>
         )}
 
-      </div>
+      </form>
 
       {renderProgrammingModeBar()}
 

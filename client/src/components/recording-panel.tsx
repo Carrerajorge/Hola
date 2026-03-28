@@ -62,6 +62,9 @@ export function RecordingPanel({
   const { settings } = useSettingsContext();
   const voiceEnabled = !!settings.voiceMode;
 
+  // Keep send controls disabled while files are still uploading/processing.
+  const canSendNow = canSend && !_isFilesLoading;
+
   // Show stop button if either AI is processing OR agent is running
   const showStopButton = isAiBusyState(aiState) || isAgentRunning;
 
@@ -163,7 +166,7 @@ export function RecordingPanel({
             <Button
               size="icon"
               onClick={onSend}
-              disabled={!canSend}
+              disabled={!canSendNow}
               className={cn(
                 "h-9 w-9 sm:h-8 sm:w-8",
                 SILVER_ICON_BUTTON_BASE,
@@ -205,7 +208,52 @@ export function RecordingPanel({
         </Tooltip>
       )}
 
-      {showStopButton ? (
+      {hasContent ? (
+        <div className="flex gap-1.5 items-center">
+          {showStopButton && (
+            <Button
+              onClick={handleStop}
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "h-9 w-9 sm:h-8 sm:w-8 shrink-0",
+                SILVER_ICON_BUTTON_BASE,
+                "border-red-300/60 hover:border-red-400 dark:border-red-300/30 dark:hover:border-red-300/50",
+                "bg-white/35 hover:bg-red-50 dark:bg-white/5 dark:hover:bg-red-950/30",
+                "text-red-600 hover:text-red-700 dark:text-red-300 dark:hover:text-red-200"
+              )}
+              aria-label={isAgentRunning ? "Stop agent" : "Stop AI response"}
+              data-testid="button-stop-chat"
+            >
+              <Square className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          )}
+
+          <motion.div
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.8, opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            key="send-button"
+          >
+            <Button
+              onClick={onSubmit}
+              disabled={!canSendNow}
+              type="submit"
+              size="icon"
+              className={cn(
+                "h-9 w-9 sm:h-8 sm:w-8 shrink-0",
+                SILVER_ICON_BUTTON_BASE,
+                SILVER_ICON_BUTTON_TONE
+              )}
+              aria-label="Send message (Cmd+Enter)"
+              data-testid="button-send-message"
+            >
+              <ArrowUp className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </motion.div>
+        </div>
+      ) : showStopButton ? (
         <Button
           onClick={handleStop}
           variant="ghost"
@@ -222,28 +270,6 @@ export function RecordingPanel({
         >
           <Square className="h-4 w-4" aria-hidden="true" />
         </Button>
-      ) : hasContent ? (
-        <motion.div
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.8, opacity: 0 }}
-          transition={{ duration: 0.2, ease: "easeOut" }}
-          key="send-button"
-        >
-          <Button
-            onClick={onSubmit}
-            size="icon"
-            className={cn(
-              "h-9 w-9 sm:h-8 sm:w-8",
-              SILVER_ICON_BUTTON_BASE,
-              SILVER_ICON_BUTTON_TONE
-            )}
-            aria-label="Send message (Cmd+Enter)"
-            data-testid="button-send-message"
-          >
-            <ArrowUp className="h-4 w-4" aria-hidden="true" />
-          </Button>
-        </motion.div>
       ) : (
         voiceEnabled ? (
           <div className="flex items-center gap-1">

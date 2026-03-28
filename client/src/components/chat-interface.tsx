@@ -5925,6 +5925,20 @@ export function ChatInterface({
       console.log("[handleSubmit] Blocked: already submitting (sessionStorage lock active)");
       return;
     }
+    const currentFilesAtSubmit = [...uploadedFilesRef.current];
+    const blockingFilesBeforeSubmit = currentFilesAtSubmit.filter(
+      isFileUploadBlockingSend,
+    );
+    if (blockingFilesBeforeSubmit.length > 0) {
+      toast({
+        title: "Subida en progreso",
+        description:
+          "Espera un momento a que termine la carga del archivo para enviarlo.",
+        duration: 3000,
+      });
+      return;
+    }
+
     // Prevent double-submit while THIS chat has a request in flight.
     const thisChatBusy =
       aiState !== "idle" && (!aiStateChatId || aiStateChatId === chatId);
