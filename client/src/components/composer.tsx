@@ -1503,7 +1503,7 @@ export function Composer({
                 aria-hidden="true"
                 layoutId={sendTransitionLayoutId ?? undefined}
                 transition={SEND_TRANSITION_SPRING}
-                className="pointer-events-none absolute inset-x-3 top-1 z-0 whitespace-pre-wrap break-words rounded-[22px] px-0 py-0 text-[15px] leading-[1.4] opacity-0"
+                className="pointer-events-none absolute inset-x-3 top-1 z-0 whitespace-pre-wrap break-words rounded-[22px] px-0 py-0 text-[15px] leading-6 text-transparent [color:transparent] [overflow-wrap:anywhere] opacity-0"
               >
                 {input}
               </motion.div>
