@@ -1,4 +1,0 @@
-server/services/knowledgeBase.ts(5,92): error TS2307: Cannot find module '@shared/schema' or its corresponding type declarations.
-server/services/knowledgeBase.ts(6,93): error TS2307: Cannot find module '@shared/schema/knowledge' or its corresponding type declarations.
-server/services/knowledgeBase.ts(186,29): error TS2802: Type 'Set<string>' can only be iterated through when using the '--downlevelIteration' flag or with a '--target' of 'es2015' or higher.
-shared/schema/gpt.ts(277,5): error TS2353: Object literal may only specify known properties, and 'gptId' does not exist in type 'Mask<"name" | "description" | "parameters" | "isActive" | "authType" | "endpoint" | "authConfig" | "rateLimit" | "actionType" | "httpMethod" | "headers" | "bodyTemplate" | "responseMapping" | ... 6 more ... | "timeout">'.

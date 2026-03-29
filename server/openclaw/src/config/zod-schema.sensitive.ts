@@ -32,4 +32,4 @@ function createSensitiveRegistry(): ZodRegistryLike {
 // Zod v3. This compatibility shim preserves the tiny subset we need:
 //   - schema.register(sensitive) -> sensitive.add(schema)
 //   - sensitive.has(schema)
-export const sensitive = createSensitiveRegistry();
+export const sensitive: any = createSensitiveRegistry();

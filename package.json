@@ -103,7 +103,6 @@
     "@mariozechner/pi-ai": "0.58.0",
     "@mariozechner/pi-coding-agent": "0.58.0",
     "@mariozechner/pi-tui": "0.58.0",
-    "openclaw": "file:./server/openclaw",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@monaco-editor/react": "^4.7.0",
     "@mozilla/readability": "^0.6.0",
@@ -287,6 +286,7 @@
     "node-pty": "^1.1.0",
     "officeparser": "^5.2.2",
     "openai": "^6.18.0",
+    "openclaw": "file:./server/openclaw",
     "openid-client": "^6.8.2",
     "opossum": "^9.0.0",
     "osc-progress": "^0.3.0",
@@ -400,6 +400,7 @@
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.1.4",
     "autoprefixer": "^10.4.24",
+    "concurrently": "^9.2.1",
     "drizzle-kit": "^0.31.9",
     "electron": "^40.6.0",
     "electron-builder": "^26.8.1",
@@ -417,7 +418,7 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.36.0",
-    "vite": "^7.1.9",
+    "vite": "^7.3.1",
     "wait-on": "^9.0.4"
   },
   "optionalDependencies": {

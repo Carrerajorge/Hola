@@ -1,4 +1,0 @@
-
-> iliagpt@2.1.0 dev
-> node scripts/with-env.cjs NODE_ENV=development PORT=5001 -- node --import tsx server/index.ts
-

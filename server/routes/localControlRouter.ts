@@ -293,6 +293,22 @@ router.post("/local/create-folder", async (req, res) => {
   }
 });
 
+
+router.get("/local/pick-folder", async (req, res) => {
+  try {
+    const { exec } = await import("child_process");
+    exec('osascript -e \'choose folder with prompt "Selecciona una carpeta para modificar su código"\' -e \'POSIX path of result\'', (error, stdout) => {
+      if (error) {
+        return res.status(500).json({ success: false, error: "Carpeta no seleccionada o cancelado" });
+      }
+      const path = stdout.trim();
+      return res.json({ success: true, path });
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: "Error al abrir seleccionador de carpetas" });
+  }
+});
+
 router.get("/local/repo/folders", async (req, res) => {
   try {
     const rootPath = await resolveRepositoryRoot(String(req.query.rootPath || ""));

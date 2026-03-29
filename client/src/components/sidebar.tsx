@@ -319,8 +319,18 @@ export function Sidebar({
   }, []);
 
   const pickLocalFolderPath = useCallback(async (): Promise<string | null> => {
-    if (typeof window !== "undefined" && window.electronAPI?.pickWorkspaceFolder) {
-      return window.electronAPI.pickWorkspaceFolder();
+    if (typeof window !== "undefined" && (window as any).electronAPI?.pickWorkspaceFolder) {
+      return (window as any).electronAPI.pickWorkspaceFolder();
+    }
+
+    try {
+      const res = await fetch("/api/local/pick-folder");
+      const data = await res.json();
+      if (data.success && data.path) {
+        return data.path;
+      }
+    } catch (e) {
+      console.error("Local pick folder failed", e);
     }
 
     if (typeof window !== "undefined" && typeof window.prompt === "function") {
