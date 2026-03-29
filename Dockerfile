@@ -20,7 +20,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY package.json package-lock.json ./
 # Ensure mathjax sync script exists before npm ci postinstall hook
 COPY scripts/sync-mathjax-assets.cjs scripts/sync-mathjax-assets.cjs
-# Install dependencies first (without postinstall scripts) to cache layer
+# Copy all source files BEFORE npm install so file: dependencies (like @hola/openclaw) resolve
+COPY . .
 RUN set -eux; \
   retry_npm() { \
   attempt=1; \
