@@ -17,6 +17,8 @@ import { ChatGptLogoIcon } from "./OAuthProviderLogos";
 
 type OpenAICodexOAuthButtonProps = {
   onConnected?: (modelId: string) => void | Promise<void>;
+  /** When true, auto-start the OAuth flow immediately on dialog open. */
+  autoStart?: boolean;
   renderTrigger?: (state: {
     isBusy: boolean;
     isConnected: boolean;
@@ -67,6 +69,7 @@ function isOpenAIAuthorizationUrl(input: string): boolean {
 
 export function OpenAICodexOAuthButton({
   onConnected,
+  autoStart = false,
   renderTrigger,
 }: OpenAICodexOAuthButtonProps) {
   const { toast } = useToast();
@@ -226,6 +229,17 @@ export function OpenAICodexOAuthButton({
     },
     [completeMutation, startMutation],
   );
+
+  // Auto-start: when opened via auto-connect (e.g. after login with provider_hint=openai),
+  // immediately start the OAuth flow for a seamless experience.
+  const autoStartTriggeredRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!open || !autoStart || autoStartTriggeredRef.current) return;
+    if (flowId || startMutation.isPending || completeMutation.isPending) return;
+    if (status?.connected) return;
+    autoStartTriggeredRef.current = true;
+    startMutation.mutate();
+  }, [open, autoStart, flowId, startMutation, completeMutation.isPending, status?.connected]);
 
   React.useEffect(() => {
     if (!flowQuery.data) {

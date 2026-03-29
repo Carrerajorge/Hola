@@ -28,6 +28,8 @@ import { normalizeAppBuildVersion } from "@/lib/chunk-recovery";
 
 type GeminiCliOAuthButtonProps = {
   onConnected?: (modelId: string) => void | Promise<void>;
+  /** When true, auto-accept the risk warning and start the OAuth flow immediately on dialog open. */
+  autoStart?: boolean;
   renderTrigger?: (state: {
     isBusy: boolean;
     isConnected: boolean;
@@ -364,6 +366,7 @@ function resolveFlowForCallbackInput(params: {
 
 export function GeminiCliOAuthButton({
   onConnected,
+  autoStart = false,
   renderTrigger,
 }: GeminiCliOAuthButtonProps) {
   const { toast } = useToast();
@@ -718,6 +721,30 @@ export function GeminiCliOAuthButton({
     },
     [completeMutation, startMutation],
   );
+
+  // Auto-start: when the dialog opens via auto-connect (e.g. after login with provider_hint=gemini),
+  // skip the risk warning and immediately start the OAuth flow for a seamless experience.
+  const autoStartTriggeredRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!open || !autoStart || autoStartTriggeredRef.current) return;
+    if (flowId || startMutation.isPending || completeMutation.isPending) return;
+    if (status?.connected) return;
+    // Check for a stored flow first
+    const storedFlow = readStoredFlowDraft();
+    if (storedFlow) {
+      setFlowId(storedFlow.flowId);
+      setAuthUrl(storedFlow.authUrl);
+      setRedirectUri(storedFlow.redirectUri);
+      setFlowProof(storedFlow.flowProof);
+      setCallbackUrl(storedFlow.callbackUrl);
+      autoStartTriggeredRef.current = true;
+      return;
+    }
+    // Auto-accept risk and start the flow
+    setAcceptedRisk(true);
+    autoStartTriggeredRef.current = true;
+    startMutation.mutate();
+  }, [open, autoStart, flowId, startMutation, completeMutation.isPending, status?.connected]);
 
   React.useEffect(() => {
     if (

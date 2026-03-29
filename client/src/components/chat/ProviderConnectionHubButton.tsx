@@ -170,6 +170,9 @@ export function ProviderConnectionHubButton({
   const [anthropicKeyOpen, setAnthropicKeyOpen] = React.useState(false);
   const [anthropicKey, setAnthropicKey] = React.useState("");
 
+  // Track which provider should auto-start its OAuth flow (set by auto-connect event)
+  const [autoStartProvider, setAutoStartProvider] = React.useState<string | null>(null);
+
   // Refs to auto-open specific provider dialogs after OAuth login redirect
   const geminiOpenDialogRef = React.useRef<(() => void) | null>(null);
   const openaiOpenDialogRef = React.useRef<(() => void) | null>(null);
@@ -179,6 +182,8 @@ export function ProviderConnectionHubButton({
     const handler = (event: Event) => {
       const detail = (event as CustomEvent).detail;
       if (!detail?.provider) return;
+      // Mark which provider should auto-start
+      setAutoStartProvider(detail.provider);
       // Open the hub dialog first
       setOpen(true);
       // Then auto-open the specific provider dialog after a small delay
@@ -229,6 +234,7 @@ export function ProviderConnectionHubButton({
   const handleConnected = React.useCallback(
     async (modelId: string) => {
       setOpen(false);
+      setAutoStartProvider(null);
       await refetchStatus();
       queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
       await Promise.resolve(onConnected?.(modelId));
@@ -304,6 +310,7 @@ export function ProviderConnectionHubButton({
             <div className="grid gap-3 md:grid-cols-3">
               <OpenAICodexOAuthButton
                 onConnected={handleConnected}
+                autoStart={autoStartProvider === "openai"}
                 renderTrigger={({ isBusy, isConnected, openDialog }) => {
                   openaiOpenDialogRef.current = openDialog;
                   return (
@@ -325,6 +332,7 @@ export function ProviderConnectionHubButton({
 
               <GeminiCliOAuthButton
                 onConnected={handleConnected}
+                autoStart={autoStartProvider === "gemini"}
                 renderTrigger={({ isBusy, isConnected, openDialog }) => {
                   geminiOpenDialogRef.current = openDialog;
                   return (
