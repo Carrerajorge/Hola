@@ -68,6 +68,12 @@
     "src/plugin-sdk/secret-input-schema.ts",
     "src/plugin-sdk/secret-input.ts",
     "src/terminal/theme.ts",
+    "src/auto-reply/reply/export-html/vendor/highlight.min.js",
+    "src/auto-reply/reply/export-html/vendor/marked.min.js",
+    "ui/src/ui/__screenshots__/config-form.browser.test.ts/config-form-renderer-flags-unsupported-unions-1.png",
+    "ui/src/ui/__screenshots__/config-form.browser.test.ts/config-form-renderer-renders-inputs-and-patches-values-1.png",
+    "ui/src/ui/__screenshots__/config-form.browser.test.ts/config-form-renderer-renders-union-literals-as-select-options-1.png",
+    "ui/src/ui/__screenshots__/navigation.browser.test.ts/control-UI-routing-auto-scrolls-chat-history-to-the-latest-message-1.png",
     "tsconfig.json",
     "vitest.config.ts"
   ]
