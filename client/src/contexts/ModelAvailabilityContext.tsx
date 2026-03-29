@@ -35,7 +35,7 @@ const PREFERRED_PROVIDER_ORDER = Object.freeze([
   "google",
   "gemini",
 ]);
-const DEFAULT_VISIBLE_MODEL_LIMIT = 3;
+const DEFAULT_VISIBLE_MODEL_LIMIT = 10;
 const LEGACY_MODEL_ID_ALIASES = Object.freeze({
   "grok-4-1-fast-non-reasoning": ["grok-4.1-fast", "grok-code-fast-1"],
   "grok-4-1-fast-reasoning": ["grok-4.1-fast-reasoning"],
@@ -71,7 +71,7 @@ export function pickPreferredEnabledModel(
     const normalized = unquoted.toLowerCase();
     const candidates = [
       unquoted,
-      ...(LEGACY_MODEL_ID_ALIASES[normalized] ?? []),
+      ...(LEGACY_MODEL_ID_ALIASES[normalized as keyof typeof LEGACY_MODEL_ID_ALIASES] ?? []),
     ];
 
     return Array.from(new Set(candidates));
@@ -208,7 +208,7 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
   const [selectedModelId, setSelectedModelIdState] = useState<string | null>(null);
   const { settings, updateSetting } = useSettingsContext();
   const { settings: platformSettings } = usePlatformSettings();
-  const shouldLoadModels = shouldBootstrapWorkspaceSurface(location, isAuthenticated);
+  const shouldLoadModels = true; // Always load models for chat interface
 
   const { data: modelsData, isLoading: isQueryLoading, refetch } = useQuery<{ models: AvailableModel[] }>({
     queryKey: ["/api/models/available"],

@@ -34,7 +34,10 @@ import {
   MoveRight,
   Brain,
   MessageCircle,
+  Sun,
+  Moon,
 } from "lucide-react";
+import { useTheme } from "next-themes";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { cn } from "@/lib/utils";
 import { isAdminUser } from "@/lib/admin";
@@ -277,6 +280,7 @@ export function Sidebar({
   onSelectProject
 }: SidebarProps) {
   const [, setLocation] = useLocation();
+  const { theme, setTheme } = useTheme();
   const { user, logout } = useAuth();
   const isAdmin = isAdminUser(user as any);
   const { settings: platformSettings } = usePlatformSettings();
@@ -744,6 +748,9 @@ export function Sidebar({
         </button>
 
         <div className={primaryActionStackClass}>
+          <div className="px-2 pt-2 pb-0.5 mt-1">
+            <h3 className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/70">Herramientas</h3>
+          </div>
           <Button
             variant="ghost"
             className={cn(minimalSectionButtonClass, "group")}
@@ -1152,6 +1159,10 @@ export function Sidebar({
             </div>
           )}
 
+          {groupOrder.length > 0 && <div className="px-2 pt-3 pb-0.5 mt-2 border-t border-white/10 dark:border-white/5">
+            <h3 className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/70">Hilos</h3>
+          </div>}
+          
           {groupOrder.map((group) => {
             const groupChats = groupedChats[group];
             if (!groupChats || groupChats.length === 0) return null;
@@ -1216,15 +1227,15 @@ export function Sidebar({
         )
       }
 
-      <div className="mt-auto border-t border-white/35 p-1.5 dark:border-white/10">
-        <div className="flex w-full items-center gap-1 rounded-[14px] border border-white/35 bg-white/60 p-1 shadow-sm backdrop-blur-xl dark:border-white/8 dark:bg-white/5">
+      <div className="mt-auto border-t border-white/35 p-3 dark:border-white/10">
+        <div className="flex w-full items-center gap-1 rounded-[14px] border border-white/40 bg-white/80 p-1.5 shadow-sm backdrop-blur-xl transition-all duration-300 hover:shadow-md hover:border-primary/20 hover:bg-white/95 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10">
           <Popover open={isUserMenuOpen} onOpenChange={setIsUserMenuOpen}>
             <PopoverTrigger asChild>
-              <button className="flex min-h-[34px] flex-1 cursor-pointer items-center gap-1.5 rounded-[10px] border border-transparent px-1.5 py-1 hover:border-white/20 hover:bg-white/60 shadow-sm transition-all duration-300 dark:hover:border-white/10 dark:hover:bg-white/10 backdrop-blur-md liquid-button" data-testid="button-user-menu">
+              <button className="flex min-h-[40px] flex-1 cursor-pointer items-center gap-2 rounded-[10px] border border-transparent px-2 py-1 transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-primary/20 liquid-button" data-testid="button-user-menu">
                 <div className="relative">
 
-              <Avatar className="h-6 w-6 border border-black/5 bg-white/90 shadow-inner dark:border-white/10 dark:bg-white/[0.08]">
-		<AvatarFallback className="bg-transparent text-[14px] text-muted-foreground">
+              <Avatar className="h-7 w-7 border border-black/5 bg-white/90 shadow-inner dark:border-white/10 dark:bg-white/[0.08]">
+		<AvatarFallback className="bg-transparent text-[14px] text-muted-foreground font-semibold">
 		{isAdmin
 		? "A"
 		: (
@@ -1240,7 +1251,7 @@ export function Sidebar({
 		<span className="absolute bottom-0 right-0 block h-1.5 w-1.5 rounded-full bg-green-500 ring-2 ring-[#eef3f4] dark:ring-[#111315]" title="En línea" />
 		</div>
 		<div className="flex flex-1 flex-col overflow-hidden text-left">
-		<span className="truncate text-[12px] font-semibold tracking-[-0.02em] leading-tight">
+		<span className="truncate text-[13px] font-semibold tracking-[-0.02em] leading-tight">
 		{isAdmin
 		? "Admin"
 		: (
@@ -1252,7 +1263,7 @@ export function Sidebar({
 		)}
 		</span>
 
-		<span className="truncate text-[8px] uppercase tracking-[0.16em] text-muted-foreground/75">
+		<span className="truncate text-[9px] font-medium uppercase tracking-[0.16em] text-muted-foreground/80">
 		{(() => {
 		// Avoid hardcoding plan by email. Use server-provided plan when available.
 		const plan = ((user as any)?.plan || "free").toString().toLowerCase();
@@ -1262,6 +1273,15 @@ export function Sidebar({
 		</div>
 		</button>
 		</PopoverTrigger>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 rounded-full ml-auto mr-1 flex-shrink-0 text-muted-foreground hover:bg-black/5 dark:hover:bg-white/10"
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            title="Cambiar tema"
+          >
+            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </Button>
    
             <PopoverContent className="w-auto min-w-56 p-2 bg-white/80 dark:bg-black/80 backdrop-blur-xl border border-white/20 dark:border-white/10 shadow-lg" align="start" side="top">
               <div className="flex flex-col">

@@ -253,6 +253,7 @@ import {
 } from "./middleware/csrf";
 import { finopsRouter } from "./routes/finopsRouter";
 import { resolveEmbeddedOpenClawControlUiRootSync } from "./services/openClawEmbeddedAssets";
+import { createHardwareTelemetryRouter } from "./routes/hardwareTelemetryRouter";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -989,6 +990,7 @@ export async function registerRoutes(
   // Telemetry Dashboard
   const { createTelemetryRouter } = await import("./telemetry/telemetryRouter");
   app.use("/api/telemetry", createTelemetryRouter());
+  app.use("/api/hardware-telemetry", createHardwareTelemetryRouter());
 
   const { createPublicReleasesRouter } =
     await import("./routes/releasesRouter");

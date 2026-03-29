@@ -156,13 +156,14 @@ export function ChatHeader({
 
     return (
         <>
-        <header className="sticky top-0 z-20 flex items-center justify-between px-3 md:px-4 py-2 border-b border-border/50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 h-14">
-            <div className="flex items-center gap-2">
+        <header className="sticky top-0 z-20 flex items-center justify-between px-3 md:px-4 py-2 border-b border-border/50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 h-14 relative">
+            {/* Left Hand Actions & Model Selector */}
+            <div className="flex flex-1 items-center gap-2 min-w-0">
                 {!isSidebarOpen && (
                     <TooltipProvider>
                         <Tooltip>
                             <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" onClick={onToggleSidebar} className="-ml-2 h-9 w-9">
+                                <Button variant="ghost" size="icon" onClick={onToggleSidebar} className="-ml-2 shrink-0 h-9 w-9">
                                     <PanelLeftOpen className="h-5 w-5 text-muted-foreground" />
                                 </Button>
                             </TooltipTrigger>
@@ -173,38 +174,41 @@ export function ChatHeader({
                     </TooltipProvider>
                 )}
 
-                {/* STRICT Separation: Custom GPT Actions vs Standard Model Selector */}
-                {isCustomGpt ? (
-                    <GptActionMenu
-                        activeGpt={activeGpt}
-                        modelsByProvider={modelsByProvider}
-                        selectedModelId={selectedModelId}
-                        setSelectedModelId={setSelectedModelId}
-                        onModelChange={handleModelChange}
-                        modelChangeDisabled={isChatProcessing}
-                        onNewChat={onNewChat}
-                        onAboutGpt={onAboutGpt}
-                        onEditGpt={onEditGpt}
-                        onHideGptFromSidebar={onHideGptFromSidebar}
-                        onPinGptToSidebar={onPinGptToSidebar}
-                        isGptPinned={isGptPinned}
-                    />
-                ) : (
-                    <StandardModelSelector
-                        availableModels={availableModels}
-                        selectedModelId={selectedModelId}
-                        setSelectedModelId={setSelectedModelId}
-                        onModelChange={handleModelChange}
-                        modelChangeDisabled={isChatProcessing}
-                        modelsByProvider={modelsByProvider}
-                        refetchModels={refetch}
-                        showOAuthProviderButtons
-                        activeGptName={activeGpt?.name === 'ILIAGPT' ? undefined : activeGpt?.name}
-                    />
-                )}
+                <div className="pointer-events-auto flex items-center min-w-0">
+                    {/* STRICT Separation: Custom GPT Actions vs Standard Model Selector */}
+                    {isCustomGpt ? (
+                        <GptActionMenu
+                            activeGpt={activeGpt}
+                            modelsByProvider={modelsByProvider}
+                            selectedModelId={selectedModelId}
+                            setSelectedModelId={setSelectedModelId}
+                            onModelChange={handleModelChange}
+                            modelChangeDisabled={isChatProcessing}
+                            onNewChat={onNewChat}
+                            onAboutGpt={onAboutGpt}
+                            onEditGpt={onEditGpt}
+                            onHideGptFromSidebar={onHideGptFromSidebar}
+                            onPinGptToSidebar={onPinGptToSidebar}
+                            isGptPinned={isGptPinned}
+                        />
+                    ) : (
+                        <StandardModelSelector
+                            availableModels={availableModels}
+                            selectedModelId={selectedModelId}
+                            setSelectedModelId={setSelectedModelId}
+                            onModelChange={handleModelChange}
+                            modelChangeDisabled={isChatProcessing}
+                            modelsByProvider={modelsByProvider}
+                            refetchModels={refetch}
+                            showOAuthProviderButtons
+                            activeGptName={activeGpt?.name === 'ILIAGPT' ? undefined : activeGpt?.name}
+                        />
+                    )}
+                </div>
             </div>
 
-            <div className="flex items-center gap-0.5 sm:gap-1">
+            {/* Right Hand Actions */}
+            <div className="flex flex-1 items-center justify-end gap-0.5 sm:gap-1 min-w-0">
                 {/* Pricing CTA - show for unpaid users, hide for paid/admin */}
                 {shouldShowUpgradeCTA(userPlanInfo) && (
                     <Button

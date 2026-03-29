@@ -107,9 +107,9 @@ export function PromptSuggestions({
                     key={index}
                     onClick={() => onSelect(suggestion.action)}
                     className={cn(
-                        "group flex items-center gap-3 px-4 py-2.5 rounded-full",
+                        "group flex items-center gap-3 px-4 py-2.5 rounded-full border border-black/5 dark:border-white/5",
                         "text-[13px] font-medium transition-all duration-300",
-                        "bg-black/[0.03] dark:bg-white/[0.03] hover:bg-black/[0.08] dark:hover:bg-white/[0.08]",
+                        "bg-black/[0.03] dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/10 hover:shadow-sm hover:border-primary/20 dark:hover:border-primary/30",
                         "text-foreground/70 hover:text-foreground",
                         "active:scale-95"
                     )}

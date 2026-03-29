@@ -1319,7 +1319,7 @@ export function Composer({
         "hover:border-[#A5A0FF]/50",
         "rounded-[28px] p-2",
         "shadow-xl shadow-[#A5A0FF]/10",
-        "focus-within:ring-4 focus-within:ring-[#A5A0FF]/20 focus-within:border-[#A5A0FF]/70"
+        "focus-within:ring-2 focus-within:ring-primary/40 focus-within:border-primary transition-all duration-300"
       ),
     // Keep these highlights in document mode too
     selectedDocText && "border-primary/20",
@@ -1660,7 +1660,6 @@ export function Composer({
                 onToggleRecording={toggleVoiceRecording}
                 onOpenVoiceChat={() => setIsVoiceChatOpen(true)}
                 onStopChat={handleStopChat}
-                onSubmit={() => handleSubmitWithHistory()}
                 aiState={aiState}
                 hasContent={hasContent}
                 isAgentRunning={isAgentRunning}
@@ -1707,7 +1706,7 @@ export function Composer({
 
       {renderProgrammingModeBar()}
 
-      <div id="composer-hint" className="-mb-0.5 mt-0 text-center text-[9px] text-zinc-400/45 dark:text-zinc-600/55 font-normal tracking-wide leading-none select-none">
+      <div id="composer-hint" className="mb-0.5 mt-0 text-center text-[10px] text-zinc-400/60 dark:text-zinc-500/60 font-medium tracking-wide leading-none select-none">
         <span className="sr-only">Press Enter to send, Shift+Enter for new line, or Cmd+Enter to send quickly. </span>
         ILIAGPT puede cometer errores. Verifica la información importante.
       </div>

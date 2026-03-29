@@ -5,6 +5,7 @@ import React, {
   useCallback,
   useMemo,
 } from "react";
+import { flushSync } from "react-dom";
 import { SkeletonChatMessages } from "@/components/skeletons";
 import { useDraft } from "@/hooks/use-draft";
 import { useStreamingTransition } from "@/hooks/use-streaming-transition";
@@ -5706,6 +5707,20 @@ export function ChatInterface({
     const items = clipboard?.items;
     if (!clipboard) return;
 
+    // Detect if the content comes from Microsoft Office (Excel/Word).
+    // MS Office copies multiple formats (text/plain, text/html, and an image/png rendering).
+    // We want to skip the image upload and allow the browser's native text paste to occur.
+    const html = clipboard.getData("text/html") || "";
+    const isOfficeData = html.includes("urn:schemas-microsoft-com:office");
+    
+    if (isOfficeData && clipboard.types.includes("text/plain")) {
+      const textContent = clipboard.getData("text/plain").trim();
+      if (textContent.length > 0) {
+        // Exit early to prevent file extraction. The text area will handle pasting the string.
+        return;
+      }
+    }
+
     const filesToUpload: File[] = [];
 
     const itemsArray = items ? (Array.from(items) as any[]) : [];
@@ -5755,7 +5770,7 @@ export function ChatInterface({
     // Regular web page links should remain as text so prompts like "resume este link"
     // paste naturally into the composer.
     const uriList = clipboard.getData("text/uri-list");
-    const html = clipboard.getData("text/html");
+    // `html` was already declared above to check for MS Office data
     const text = clipboard.getData("text/plain");
 
     // Support pasting base64-encoded images (data URLs).
@@ -10799,8 +10814,11 @@ IMPORTANTE:
                         </div>
                       ) : (
                         <div className="relative group p-1 flex items-center justify-center">
-                          <div className="absolute -inset-3 bg-gradient-to-r from-blue-500/30 via-purple-500/30 to-pink-500/30 rounded-full blur-xl opacity-0 group-hover:opacity-100 transition duration-700"></div>
-                          <IliaGPTLogo size={88} className="drop-shadow-xl" />
+                          <div className="absolute -inset-3 bg-gradient-to-r from-blue-500/15 via-purple-500/15 to-pink-500/15 rounded-full blur-[20px] animate-pulse"></div>
+                          <div className="absolute -inset-4 bg-gradient-to-r from-blue-500/30 via-purple-500/30 to-pink-500/30 rounded-full blur-[25px] opacity-0 group-hover:opacity-100 transition duration-700"></div>
+                          <div className="relative z-10 animate-in fade-in zoom-in duration-700 delay-150 transform transition-transform hover:scale-105">
+                             <IliaGPTLogo size={88} className="drop-shadow-2xl opacity-90 text-foreground" />
+                          </div>
                         </div>
                       )}
                     </motion.div>

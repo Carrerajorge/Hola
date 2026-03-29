@@ -25,7 +25,6 @@ interface RecordingPanelProps {
   onOpenVoiceChat: () => void;
   onOpenLivekitRoom?: () => void;
   onStopChat: () => void;
-  onSubmit: () => void;
   aiState: AIState;
   hasContent: boolean;
   isAgentRunning?: boolean;
@@ -52,7 +51,6 @@ export function RecordingPanel({
   onOpenVoiceChat,
   onOpenLivekitRoom,
   onStopChat,
-  onSubmit,
   aiState,
   hasContent,
   isAgentRunning,
@@ -237,14 +235,14 @@ export function RecordingPanel({
             key="send-button"
           >
             <Button
-              onClick={onSubmit}
               disabled={!canSendNow}
               type="submit"
               size="icon"
               className={cn(
-                "h-9 w-9 sm:h-8 sm:w-8 shrink-0",
-                SILVER_ICON_BUTTON_BASE,
-                SILVER_ICON_BUTTON_TONE
+                "h-9 w-9 sm:h-8 sm:w-8 shrink-0 rounded-xl transition-all duration-200",
+                canSendNow
+                  ? "bg-primary text-primary-foreground hover:bg-primary/90 shadow-md scale-105"
+                  : "bg-muted text-muted-foreground cursor-not-allowed"
               )}
               aria-label="Send message (Cmd+Enter)"
               data-testid="button-send-message"
