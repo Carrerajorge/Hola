@@ -2,6 +2,8 @@
 .DS_Store?
 node_modules/
 /dist/
+server/openclaw/dist/
+server/openclaw/pnpm-lock.yaml
 server/public
 vite.config.ts.*
 *.tar.gz
