@@ -8,8 +8,12 @@
  */
 
 import React, { Component, ErrorInfo, ReactNode } from 'react';
-import { AlertTriangle, RefreshCw, Home } from 'lucide-react';
+import { AlertTriangle, RefreshCw, Home, Bug } from 'lucide-react';
+import { Button } from "@/components/ui/button";
 import { normalizeAppBuildVersion, recoverFromChunkError } from '@/lib/chunk-recovery';
+import { useErrorStore } from "@/stores/errorStore";
+import { classifyError, getUserErrorMessage } from "@/lib/errors";
+import type { AppError } from "@/lib/errors";
 
 const APP_VERSION = normalizeAppBuildVersion(import.meta.env.VITE_APP_VERSION);
 
@@ -50,6 +54,13 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         if (import.meta.env.DEV) {
             console.error('[ErrorBoundary] Caught error:', error, errorInfo);
         }
+
+        // Add to error store with taxonomy
+        const { addError } = useErrorStore.getState();
+        const appError = addError(error, {
+            component: this.props.level,
+            metadata: { componentStack: errorInfo.componentStack },
+        });
 
         // Call custom error handler
         this.props.onError?.(error, errorInfo);
@@ -249,4 +260,69 @@ export function ThreeJSErrorBoundary({ children }: { children: ReactNode }) {
             {children}
         </ErrorBoundary>
     );
+}
+
+// ============================================================================
+// Async Error Handling
+// ============================================================================
+
+/**
+ * Hook for handling async errors consistently
+ */
+export function useAsyncError() {
+    return {
+        handleAsync: async <T,>(
+            promise: Promise<T>,
+            context?: { component?: string; action?: string }
+        ): Promise<T | null> => {
+            try {
+                return await promise;
+            } catch (error) {
+                const { addError } = useErrorStore.getState();
+                addError(error, context);
+                return null;
+            }
+        },
+
+        handleAsyncWithToast: async <T,>(
+            promise: Promise<T>,
+            context?: { component?: string; action?: string }
+        ): Promise<T | null> => {
+            const { addError } = useErrorStore.getState();
+            
+            try {
+                return await promise;
+            } catch (error) {
+                const appError = addError(error, context);
+                
+                // Show toast with user-friendly message
+                if (typeof window !== 'undefined') {
+                    const event = new CustomEvent('show-error-toast', {
+                        detail: { message: getUserErrorMessage(appError) }
+                    });
+                    window.dispatchEvent(event);
+                }
+                
+                return null;
+            }
+        }
+    };
+}
+
+/**
+ * Wrap a function to catch and handle errors consistently
+ */
+export function withErrorHandling<T extends (...args: any[]) => Promise<any>>(
+    fn: T,
+    context?: { component?: string; action?: string }
+): (...args: Parameters<T>) => Promise<ReturnType<T> | null> {
+    return async (...args: Parameters<T>): Promise<ReturnType<T> | null> => {
+        try {
+            return await fn(...args);
+        } catch (error) {
+            const { addError } = useErrorStore.getState();
+            addError(error, context);
+            return null;
+        }
+    };
 }
