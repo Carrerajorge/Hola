@@ -298,3 +298,137 @@ export default {
   validateLength,
   getPasswordStrength,
 };
+
+// ============================================================================
+// Chat & Message Validation (Added)
+// ============================================================================
+
+export const MAX_MESSAGE_LENGTH = 32000;
+export const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+export const ALLOWED_FILE_TYPES = [
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+];
+
+export function validateMessage(content: string): ValidationResult {
+  if (!content || typeof content !== 'string') {
+    return { isValid: false, error: 'El mensaje no puede estar vacío' };
+  }
+
+  const trimmed = content.trim();
+
+  if (trimmed.length === 0) {
+    return { isValid: false, error: 'El mensaje no puede estar vacío' };
+  }
+
+  if (trimmed.length > MAX_MESSAGE_LENGTH) {
+    return { isValid: false, error: `El mensaje no puede exceder ${MAX_MESSAGE_LENGTH} caracteres` };
+  }
+
+  return { isValid: true };
+}
+
+export function validateFile(file: File): ValidationResult {
+  if (!file) {
+    return { isValid: false, error: 'No se seleccionó ningún archivo' };
+  }
+
+  if (file.size > MAX_FILE_SIZE) {
+    return { isValid: false, error: `El archivo excede el tamaño máximo de 100MB` };
+  }
+
+  if (!ALLOWED_FILE_TYPES.includes(file.type)) {
+    return { isValid: false, error: `Tipo de archivo no permitido` };
+  }
+
+  return { isValid: true };
+}
+
+// ============================================================================
+// Security & Sanitization
+// ============================================================================
+
+export function sanitizeInput(input: string): string {
+  return input
+    .trim()
+    .replace(/[<>]/g, "")
+    .replace(/javascript:/gi, "")
+    .replace(/on\w+=/gi, "");
+}
+
+export const dangerousPatterns = [
+  /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
+  /javascript:/gi,
+  /on\w+\s*=/gi,
+  /eval\s*\(/gi,
+];
+
+export function containsDangerousContent(input: string): boolean {
+  return dangerousPatterns.some((pattern) => pattern.test(input));
+}
+
+export function validateSafeContent(input: string): ValidationResult {
+  if (containsDangerousContent(input)) {
+    return { isValid: false, error: "El contenido contiene patrones no permitidos" };
+  }
+  return { isValid: true };
+}
+
+// ============================================================================
+// Rate Limiting
+// ============================================================================
+
+interface RateLimitEntry {
+  count: number;
+  resetTime: number;
+}
+
+const rateLimits = new Map<string, RateLimitEntry>();
+
+export function checkRateLimit(
+  key: string,
+  maxRequests: number = 10,
+  windowMs: number = 60000
+): { allowed: boolean; remaining: number; resetTime: number } {
+  const now = Date.now();
+  const entry = rateLimits.get(key);
+  
+  if (!entry || now > entry.resetTime) {
+    rateLimits.set(key, {
+      count: 1,
+      resetTime: now + windowMs,
+    });
+    return {
+      allowed: true,
+      remaining: maxRequests - 1,
+      resetTime: now + windowMs,
+    };
+  }
+  
+  if (entry.count >= maxRequests) {
+    return {
+      allowed: false,
+      remaining: 0,
+      resetTime: entry.resetTime,
+    };
+  }
+  
+  entry.count++;
+  return {
+    allowed: true,
+    remaining: maxRequests - entry.count,
+    resetTime: entry.resetTime,
+  };
+}
