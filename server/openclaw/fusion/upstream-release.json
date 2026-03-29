@@ -1,6 +1,6 @@
 {
   "tag": "v2026.3.28",
-  "commit": "4d9a54cc616bd044752d0bdd719a683cd0a22f18",
+  "commit": "f9b1079283a8ee25a7cee77c8f8225d5c813bc30",
   "packageVersion": "2026.3.28",
   "criticalPrefixes": [
     "agents/",
@@ -15,6 +15,9 @@
   ],
   "allowedDriftPaths": [
     "agents/subagentService.ts",
+    "skills/skillLoader.ts",
+    "skills/skillRegistry.ts",
+    "skills/clawiSkillAdapter.ts",
     "extensions/google-gemini-cli-auth/README.md",
     "extensions/google-gemini-cli-auth/index.ts",
     "extensions/google-gemini-cli-auth/oauth.test.ts",
