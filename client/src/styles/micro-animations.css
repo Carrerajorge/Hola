@@ -365,6 +365,16 @@
   transform: scale(0.95);
 }
 
+/* Icon Spin on Hover */
+.icon-spin-hover {
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transform: rotate(0deg);
+}
+
+.group:hover .icon-spin-hover {
+  transform: rotate(360deg);
+}
+
 /* Text Reveal Animation */
 .text-reveal {
   background: linear-gradient(90deg, hsl(var(--foreground)) 50%, transparent 50%);
