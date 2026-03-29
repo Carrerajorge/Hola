@@ -1,4 +1,0 @@
-server/agent/__tests__/memory.test.ts
-server/agent/capabilities/tests/e2e_capabilities.test.ts
-tests/unit/agent-confirmation-flow.test.ts
-tests/unit/agent-trace-events.test.ts

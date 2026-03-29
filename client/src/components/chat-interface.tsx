@@ -228,6 +228,7 @@ import {
   dataImageUrlToFile,
   extractBareUrlsFromText,
   extractFilesFromDataTransfer,
+  getPreferredClipboardContent,
   extractImageUrlsFromHtml,
   extractLinkUrlsFromHtml,
   extractUrlsFromUriList,
@@ -4133,6 +4134,33 @@ export function ChatInterface({
     [handleOpenFileAttachmentPreview, isTemporaryUploadId],
   );
 
+  const wordPreviewTriggeredRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const wordFiles = uploadedFiles.filter((file) => {
+      const isWord =
+        file.name.toLowerCase().endsWith(".docx") ||
+        file.name.toLowerCase().endsWith(".doc") ||
+        (file.type && file.type.includes("word")) ||
+        (file.mimeType && file.mimeType.includes("word"));
+      const isReady = file.status === "ready";
+      const hasContent = typeof file.content === "string" && file.content.trim().length > 0;
+      const notYetTriggered = !wordPreviewTriggeredRef.current.has(file.id);
+      
+      if (isWord && isReady) {
+        console.log("[WordPreview] File:", file.name, "hasContent:", hasContent, "contentLength:", file.content?.length || 0);
+      }
+      
+      return isWord && isReady && hasContent && notYetTriggered;
+    });
+
+    if (wordFiles.length > 0) {
+      const firstWordFile = wordFiles[0];
+      wordPreviewTriggeredRef.current.add(firstWordFile.id);
+      handlePreviewUploadedFile(firstWordFile);
+    }
+  }, [uploadedFiles, handlePreviewUploadedFile]);
+
   const handleCopyAttachmentContent = async () => {
     if (previewFileAttachment?.content) {
       await navigator.clipboard.writeText(previewFileAttachment.content);
@@ -4735,7 +4763,9 @@ export function ChatInterface({
                       ...f,
                       id: fileId,
                       status: "ready",
-                      content: contentData.content,
+                      content: contentData.content && contentData.content.trim() 
+                        ? contentData.content 
+                        : f.content,
                     }
                   : f,
               ),
@@ -4822,6 +4852,23 @@ export function ChatInterface({
   const MAX_FILE_SIZE_MB = 500;
   const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
   const MAX_IMAGE_PREVIEW_BYTES = 15 * 1024 * 1024;
+
+  async function extractTextFromBinary(buffer: ArrayBuffer): Promise<string> {
+    const decoder = new TextDecoder("utf-8", { fatal: false });
+    const text = decoder.decode(buffer);
+    
+    const cleanText = text
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "")
+      .replace(/[^\x20-\x7E\n\r\táéíóúüñÁÉÍÓÚÜÑ¿¡]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (cleanText.length < 50) {
+      throw new Error("Could not extract meaningful text from .doc file");
+    }
+
+    return cleanText;
+  }
 
   const processFilesForUpload = async (files: File[]) => {
     const normalizedFiles = files.map(normalizeFileForUpload);
@@ -4913,7 +4960,11 @@ export function ChatInterface({
         }
       }
 
-      if (file.size <= 5 * 1024 * 1024) {
+      const isWordFile = file.name.match(/\.(docx|doc)$/i);
+      const wordSizeLimit = 15 * 1024 * 1024;
+      const maxSizeForContent = isWordFile ? wordSizeLimit : 5 * 1024 * 1024;
+
+      if (file.size <= maxSizeForContent) {
         const isTextFile =
           file.type.startsWith("text/") ||
           ["application/json", "application/javascript"].includes(file.type) ||
@@ -4929,14 +4980,22 @@ export function ChatInterface({
           } catch (e) {
             console.warn("Failed to read text locally", e);
           }
-        } else if (file.name.match(/\.(docx)$/i)) {
+        } else if (isWordFile) {
           try {
             const buffer = await file.arrayBuffer();
-            const mammoth = await import("mammoth");
-            const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
-            content = result.value;
+            
+            if (file.name.toLowerCase().endsWith(".doc") && !file.name.toLowerCase().endsWith(".docx")) {
+              const text = await extractTextFromBinary(buffer);
+              content = text;
+              console.log("[WordPreview] Extracted .doc content length:", content?.length || 0);
+            } else {
+              const mammoth = await import("mammoth");
+              const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
+              content = result.value;
+              console.log("[WordPreview] Extracted .docx content length:", content?.length || 0);
+            }
           } catch (e) {
-            console.warn("Failed to read docx locally", e);
+            console.warn("Failed to read word locally", e);
           }
         } else if (isExcel) {
           try {
@@ -5300,7 +5359,9 @@ export function ChatInterface({
                       ...f,
                       id: fileId,
                       status: "ready",
-                      content: contentData.content,
+                      content: contentData.content && contentData.content.trim() 
+                        ? contentData.content 
+                        : f.content,
                     }
                   : f,
               ),
@@ -5511,7 +5572,9 @@ export function ChatInterface({
                                 ...f,
                                 id: fileId,
                                 status: "ready",
-                                content: contentData.content,
+                                content: contentData.content && contentData.content.trim() 
+                                  ? contentData.content 
+                                  : f.content,
                               }
                             : f,
                         ),
@@ -5704,8 +5767,12 @@ export function ChatInterface({
 
   const handlePaste = async (e: React.ClipboardEvent) => {
     const clipboard = e.clipboardData;
-    const items = clipboard?.items;
     if (!clipboard) return;
+
+    const preferredContent = getPreferredClipboardContent(clipboard);
+    if (preferredContent?.kind === "text") {
+      return;
+    }
 
     // Detect if the content comes from Microsoft Office (Excel/Word).
     // MS Office copies multiple formats (text/plain, text/html, and an image/png rendering).
@@ -5721,44 +5788,7 @@ export function ChatInterface({
       }
     }
 
-    const filesToUpload: File[] = [];
-
-    const itemsArray = items ? (Array.from(items) as any[]) : [];
-    for (const item of itemsArray) {
-      if (item.kind !== "file") continue;
-      const file = item.getAsFile?.();
-      if (!file) continue;
-
-      const originalName = (file.name || "").trim();
-      const declaredType = (file.type || item.type || "").trim();
-
-      const isGenericImageName =
-        !originalName ||
-        originalName === "image.png" ||
-        originalName === "image.jpg";
-      const subtype = declaredType.includes("/")
-        ? declaredType.split("/")[1]
-        : "";
-      const cleanedSubtype = subtype.split("+")[0].split(".")[0];
-      const safeExt = declaredType.startsWith("image/")
-        ? cleanedSubtype || "png"
-        : "bin";
-      const fileName = isGenericImageName
-        ? `pasted-${Date.now()}.${safeExt}`
-        : originalName;
-
-      const normalized = normalizeFileForUpload(
-        new File([file], fileName, { type: declaredType || file.type }),
-      );
-      filesToUpload.push(normalized);
-    }
-
-    // Some browsers expose pasted files via clipboardData.files instead of items.
-    if (clipboard.files && clipboard.files.length > 0) {
-      for (const f of Array.from(clipboard.files)) {
-        filesToUpload.push(normalizeFileForUpload(f));
-      }
-    }
+    const filesToUpload = preferredContent?.kind === "file" ? preferredContent.files : [];
 
     if (filesToUpload.length > 0) {
       e.preventDefault();

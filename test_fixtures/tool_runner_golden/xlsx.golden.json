@@ -1,5 +1,0 @@
-{
-  "documentType": "xlsx",
-  "requiredTools": ["theme-apply", "xlsxgen", "mso-validate", "render-preview"],
-  "requiredValidationChecks": ["relationships", "schema", "images"]
-}

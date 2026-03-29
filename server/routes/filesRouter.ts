@@ -2400,6 +2400,67 @@ export function createFilesRouter() {
     }
   });
 
+  router.post("/api/convert/doc", async (req, res) => {
+    try {
+      const busboy = await import("busboy");
+      const bb = busboy.default({
+        headers: req.headers,
+        limits: { fileSize: 15 * 1024 * 1024 },
+      });
+
+      let fileBuffer: Buffer | null = null;
+      let fileName = "document.doc";
+
+      bb.on("file", (fieldname, file, info) => {
+        const { filename } = info;
+        fileName = filename || "document.doc";
+        const chunks: Buffer[] = [];
+        file.on("data", (chunk) => chunks.push(chunk));
+        file.on("end", () => {
+          fileBuffer = Buffer.concat(chunks);
+        });
+      });
+
+      bb.on("finish", async () => {
+        if (!fileBuffer) {
+          return res.status(400).json({ error: "No file provided" });
+        }
+
+        try {
+          const text = fileBuffer.toString("utf-8")
+            .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "")
+            .replace(/[^\x20-\x7E\n\r\táéíóúüñÁÉÍÓÚÜÑ¿¡]/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+
+          const html = text.split("\n").map(line => 
+            line.trim() ? `<p>${line}</p>` : ""
+          ).join("\n");
+
+          res.json({
+            text,
+            html,
+            content: text,
+            htmlContent: html,
+          });
+        } catch (convertError) {
+          console.error("Error converting .doc file:", convertError);
+          res.status(500).json({ error: "Failed to convert .doc file" });
+        }
+      });
+
+      bb.on("error", (err) => {
+        console.error("Busboy error:", err);
+        res.status(400).json({ error: "Failed to parse upload" });
+      });
+
+      req.pipe(bb);
+    } catch (error) {
+      console.error("Error in /api/convert/doc:", error);
+      res.status(500).json({ error: "Failed to process file" });
+    }
+  });
+
   router.get("/objects/:objectPath(*)", async (req, res) => {
     try {
       // LOCAL FALLBACK: In development, /api/objects/upload can return storage paths like

@@ -1,5 +1,0 @@
-#!/usr/bin/expect -f
-spawn ssh-add /Users/ale/.ssh/id_ed25519
-expect "Enter passphrase"
-send "Sora2022.\r"
-expect eof

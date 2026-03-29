@@ -172,6 +172,120 @@ export function dataImageUrlToFile(dataUrl: string, fileName: string): File | nu
   }
 }
 
+export function htmlContainsTabularContent(html: string): boolean {
+  if (!html) return false;
+  try {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    return Boolean(doc.querySelector("table,thead,tbody,tfoot,tr,td,th"));
+  } catch {
+    return false;
+  }
+}
+
+export function htmlToPlainText(html: string): string {
+  if (!html) return "";
+  try {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    return (doc.body?.textContent || "").replace(/\u00a0/g, " ");
+  } catch {
+    return "";
+  }
+}
+
+type ClipboardLikeItem = {
+  kind?: string;
+  type?: string;
+  getAsFile?: () => File | null;
+};
+
+type ClipboardLikeData = {
+  getData: (type: string) => string;
+  types?: readonly string[];
+  items?: ArrayLike<ClipboardLikeItem> | null;
+  files?: ArrayLike<File> | null;
+};
+
+export type PreferredClipboardContent =
+  | { kind: "text"; text: string; html?: string }
+  | { kind: "file"; files: File[] };
+
+function normalizePastedFile(file: File, fallbackType?: string): File {
+  const originalName = (file.name || "").trim();
+  const declaredType = (file.type || fallbackType || "").trim();
+
+  const isGenericImageName =
+    !originalName ||
+    originalName === "image.png" ||
+    originalName === "image.jpg";
+  const subtype = declaredType.includes("/") ? declaredType.split("/")[1] : "";
+  const cleanedSubtype = subtype.split("+")[0].split(".")[0];
+  const safeExt = declaredType.startsWith("image/") ? cleanedSubtype || "png" : "bin";
+  const fileName = isGenericImageName ? `pasted-${Date.now()}.${safeExt}` : originalName;
+
+  return normalizeFileForUpload(
+    new File([file], fileName, { type: declaredType || file.type }),
+  );
+}
+
+function extractClipboardFiles(clipboard: ClipboardLikeData): File[] {
+  const files: File[] = [];
+  const itemsArray = clipboard.items ? Array.from(clipboard.items) : [];
+
+  for (const item of itemsArray) {
+    if (item.kind !== "file") continue;
+    const file = item.getAsFile?.();
+    if (!file) continue;
+    files.push(normalizePastedFile(file, item.type));
+  }
+
+  if (clipboard.files && clipboard.files.length > 0) {
+    for (const file of Array.from(clipboard.files)) {
+      files.push(normalizeFileForUpload(file));
+    }
+  }
+
+  return files;
+}
+
+export function getPreferredClipboardContent(
+  clipboard: ClipboardLikeData | null | undefined,
+): PreferredClipboardContent | null {
+  if (!clipboard) return null;
+
+  const text = clipboard.getData("text/plain") || "";
+  const html = clipboard.getData("text/html") || "";
+  const trimmedText = text.trim();
+  const trimmedHtml = html.trim();
+  const files = extractClipboardFiles(clipboard);
+
+  const hasText = trimmedText.length > 0;
+  const hasHtml = trimmedHtml.length > 0;
+  const officeHtml = hasHtml && trimmedHtml.includes("urn:schemas-microsoft-com:office");
+  const hasTableHtml = hasHtml && htmlContainsTabularContent(trimmedHtml);
+  const htmlPlainText = hasHtml ? htmlToPlainText(trimmedHtml).trim() : "";
+  const htmlMeaningfullyMatchesText =
+    hasText &&
+    htmlPlainText.length > 0 &&
+    htmlPlainText.replace(/\s+/g, " ") === trimmedText.replace(/\s+/g, " ");
+
+  if (hasText) {
+    if (hasTableHtml || officeHtml || htmlMeaningfullyMatchesText) {
+      return { kind: "text", text, html: trimmedHtml || undefined };
+    }
+    return { kind: "text", text };
+  }
+
+  if (hasTableHtml) {
+    return { kind: "text", text: htmlPlainText || text, html: trimmedHtml };
+  }
+
+  if (files.length > 0) {
+    return { kind: "file", files };
+  }
+
+  return null;
+}
+
 export function inferMimeTypeFromFilename(filename: string): string | null {
   const name = (filename || "").toLowerCase();
   const idx = name.lastIndexOf(".");

@@ -1,1 +1,0 @@
-import{j as t}from"./vendor-ui-DrOz7FpX.js";const r="/assets/sira-logo-BGTda-6H.png";function i({size:o=32,className:s=""}){return t.jsx("img",{src:r,alt:"IliaGPT Logo",width:o,height:o,className:`${s} dark:invert dark:brightness-100`,style:{objectFit:"contain",borderRadius:"6px"}})}export{i as I};

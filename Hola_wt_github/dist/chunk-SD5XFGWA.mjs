@@ -1,7 +1,0 @@
-import { createRequire } from 'module';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
-const require = createRequire(import.meta.url);
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-import d from"pino";import{AsyncLocalStorage as c}from"async_hooks";var i=new c;function s(){return i.getStore()}function f(r,t){return i.run(r,t)}var u=["password","token","secret","key","authorization","cookie","stripe","access_token","refresh_token"],g=!0,x=d({level:process.env.LOG_LEVEL||(g?"info":"debug"),redact:{paths:u.flatMap(r=>[r,`*.${r}`,`*.*.${r}`]),remove:!0},transport:g?void 0:{target:"pino-pretty",options:{colorize:!0,ignore:"pid,hostname",translateTime:"HH:MM:ss"}},base:{env:"production"}}),o=class r{constructor(t,e={}){this.logger=t,this.staticContext=e}getMergedContext(t){let e=s();return{...this.staticContext,...t,...e}}debug(t,e){this.logger.debug(this.getMergedContext(e),t)}info(t,e){this.logger.info(this.getMergedContext(e),t)}warn(t,e){this.logger.warn(this.getMergedContext(e),t)}error(t,e){this.logger.error(this.getMergedContext(e),t)}child(t){return new r(this.logger.child(t),{...this.staticContext,...t})}};function p(r){let t=r?{component:r}:{};return new o(x,t)}var n=p();var a=class{static info(t,e){n.info(t,e)}static warn(t,e){n.warn(t,e)}static error(t,e){e instanceof Error?n.error(t,{error:e.message,stack:e.stack,...e}):n.error(t,{error:e})}static security(t,e){n.warn(t,{...e,category:"security"})}static debug(t,e){n.debug(t,e)}};export{f as a,p as b,n as c,a as d};
