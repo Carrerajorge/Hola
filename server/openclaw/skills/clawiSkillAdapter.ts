@@ -1,58 +1,25 @@
-import path from "node:path";
-import { z } from "zod";
-import { toolRegistry, type ToolDefinition, type ToolContext, type ToolResult } from "../../agent/toolRegistry";
-import { policyEngine } from "../../agent/policyEngine";
-import { getOpenClawConfig } from "../config";
-import { initSkills } from "./skillLoader";
-import { skillRegistry } from "./skillRegistry";
+import type { SkillEntry } from "../src/agents/skills.js";
 
-export async function initializeClawiSkills() {
-  if (skillRegistry.list().length === 0) {
-    await initSkills(getOpenClawConfig());
-  }
+export function adaptSkillToClawi(skill: SkillEntry): unknown {
+  return {
+    id: skill.id,
+    name: skill.name || skill.id,
+    description: skill.description || "",
+    commands: skill.commands || [],
+  };
+}
 
-  let loadedCount = 0;
-  for (const skill of skillRegistry.list()) {
-    if (toolRegistry.get(skill.id)) {
-      continue;
-    }
+export function adaptClawiToSkill(clawiSkill: unknown): SkillEntry | null {
+  if (!clawiSkill || typeof clawiSkill !== "object") return null;
+  const obj = clawiSkill as Record<string, unknown>;
+  return {
+    id: String(obj.id || ""),
+    name: String(obj.name || obj.id || ""),
+    description: String(obj.description || ""),
+    commands: Array.isArray(obj.commands) ? obj.commands : [],
+  };
+}
 
-    const tool: ToolDefinition = {
-      name: skill.id,
-      description: skill.description || `OpenClaw Skill: ${skill.name}`,
-      inputSchema: z.object({
-        input: z.string().describe("Input parameters or query for the skill"),
-      }),
-      execute: async (inputParams: Record<string, any>, _context: ToolContext): Promise<ToolResult> => {
-        const prompt = String(skill.prompt || "").trim();
-        const skillPath = skill.filePath ? path.dirname(skill.filePath) : undefined;
-        return {
-          success: true,
-          output: {
-            skillId: skill.id,
-            skillName: skill.name,
-            skillPath,
-            instructions: prompt || `Use the skill ${skill.name} to complete the requested task.`,
-            input: inputParams.input,
-          },
-        };
-      },
-    };
-
-    toolRegistry.register(tool);
-    if (!policyEngine.getPolicy(skill.id)) {
-      policyEngine.registerPolicy({
-        toolName: skill.id,
-        capabilities: [],
-        allowedPlans: ["free", "pro", "admin"],
-        requiresConfirmation: false,
-        maxExecutionTimeMs: 60_000,
-        maxRetries: 1,
-        deniedByDefault: false,
-      });
-    }
-    loadedCount += 1;
-  }
-
-  console.info(`[ClawiSkillAdapter] Registered ${loadedCount} compatibility skills in ToolRegistry`);
+export async function initializeClawiSkills(_skillsDir?: string): Promise<void> {
+  // Skills initialization is handled by the skills system in src/agents/skills.ts
 }

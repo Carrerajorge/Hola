@@ -128,8 +128,8 @@ export const TelegramDirectSchema = z
 
 const TelegramCustomCommandSchema = z
   .object({
-    command: z.string().transform(normalizeTelegramCommandName),
-    description: z.string().transform(normalizeTelegramCommandDescription),
+    command: z.string().overwrite(normalizeTelegramCommandName),
+    description: z.string().overwrite(normalizeTelegramCommandDescription),
   })
   .strict();
 
@@ -474,7 +474,7 @@ const DiscordVoiceSchema = z
   .strict()
   .optional();
 
-const DiscordAccountSchemaBase = z
+export const DiscordAccountSchema = z
   .object({
     name: z.string().optional(),
     capabilities: z.array(z.string()).optional(),
@@ -621,9 +621,7 @@ const DiscordAccountSchemaBase = z
       .strict()
       .optional(),
   })
-  .strict();
-
-export const DiscordAccountSchema = DiscordAccountSchemaBase
+  .strict()
   .superRefine((value, ctx) => {
     normalizeDiscordStreamingConfig(value);
 
@@ -676,7 +674,7 @@ export const DiscordAccountSchema = DiscordAccountSchemaBase
     // can inherit top-level allowFrom via runtime shallow merge.
   });
 
-export const DiscordConfigSchema = DiscordAccountSchemaBase.extend({
+export const DiscordConfigSchema = DiscordAccountSchema.extend({
   accounts: z.record(z.string(), DiscordAccountSchema.optional()).optional(),
   defaultAccount: z.string().optional(),
 }).superRefine((value, ctx) => {
@@ -861,7 +859,7 @@ const SlackReplyToModeByChatTypeSchema = z
   })
   .strict();
 
-const SlackAccountSchemaBase = z
+export const SlackAccountSchema = z
   .object({
     name: z.string().optional(),
     mode: z.enum(["socket", "http"]).optional(),
@@ -931,9 +929,7 @@ const SlackAccountSchemaBase = z
     ackReaction: z.string().optional(),
     typingReaction: z.string().optional(),
   })
-  .strict();
-
-export const SlackAccountSchema = SlackAccountSchemaBase
+  .strict()
   .superRefine((value) => {
     normalizeSlackStreamingConfig(value);
 
@@ -941,7 +937,7 @@ export const SlackAccountSchema = SlackAccountSchemaBase
     // can inherit top-level allowFrom via runtime shallow merge.
   });
 
-export const SlackConfigSchema = SlackAccountSchemaBase.extend({
+export const SlackConfigSchema = SlackAccountSchema.safeExtend({
   mode: z.enum(["socket", "http"]).optional().default("socket"),
   signingSecret: SecretInputSchema.optional().register(sensitive),
   webhookPath: z.string().optional().default("/slack/events"),
@@ -1413,6 +1409,7 @@ export const BlueBubblesAccountSchemaBase = z
     mediaMaxMb: z.number().int().positive().optional(),
     mediaLocalRoots: z.array(z.string()).optional(),
     sendReadReceipts: z.boolean().optional(),
+    allowPrivateNetwork: z.boolean().optional(),
     blockStreaming: z.boolean().optional(),
     blockStreamingCoalesce: BlockStreamingCoalesceSchema.optional(),
     groups: z.record(z.string(), BlueBubblesGroupConfigSchema.optional()).optional(),
@@ -1520,6 +1517,7 @@ export const MSTeamsConfigSchema = z
     groupPolicy: GroupPolicySchema.optional().default("allowlist"),
     textChunkLimit: z.number().int().positive().optional(),
     chunkMode: z.enum(["length", "newline"]).optional(),
+    blockStreaming: z.boolean().optional(),
     blockStreamingCoalesce: BlockStreamingCoalesceSchema.optional(),
     mediaAllowHosts: z.array(z.string()).optional(),
     mediaAuthAllowHosts: z.array(z.string()).optional(),
@@ -1536,6 +1534,12 @@ export const MSTeamsConfigSchema = z
     heartbeat: ChannelHeartbeatVisibilitySchema,
     healthMonitor: ChannelHealthMonitorSchema,
     responsePrefix: z.string().optional(),
+    welcomeCard: z.boolean().optional(),
+    promptStarters: z.array(z.string()).optional(),
+    groupWelcomeCard: z.boolean().optional(),
+    feedbackEnabled: z.boolean().optional(),
+    feedbackReflection: z.boolean().optional(),
+    feedbackReflectionCooldownMs: z.number().int().min(0).optional(),
   })
   .strict()
   .superRefine((value, ctx) => {

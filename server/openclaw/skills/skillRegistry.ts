@@ -1,73 +1,21 @@
-export type Skill = {
-  id: string;
-  name: string;
-  description?: string;
-  prompt?: string;
-  tools?: string[];
-  source?: string;
-  filePath?: string;
-  updatedAt?: string;
-};
+import type { SkillEntry } from "../src/agents/skills.js";
 
-export class SkillRegistry {
-  private skills = new Map<string, Skill>();
+const _skillRegistry = new Map<string, SkillEntry>();
 
-  register(skill: Skill): void {
-    this.skills.set(skill.id, skill);
-  }
+export const skillRegistry = _skillRegistry;
 
-  registerMany(skills: Skill[]): void {
-    for (const skill of skills) {
-      this.register(skill);
-    }
-  }
-
-  get(id: string): Skill | undefined {
-    return this.skills.get(id);
-  }
-
-  list(): Skill[] {
-    return Array.from(this.skills.values());
-  }
-
-  getPromptForSkills(skillIds: string[]): string {
-    const prompts: string[] = [];
-    for (const id of skillIds) {
-      const skill = this.skills.get(id);
-      if (skill?.prompt) {
-        prompts.push(`## Skill: ${skill.name}\n${skill.prompt}`);
-      }
-    }
-    return prompts.join("\n\n");
-  }
-
-  getToolsForSkills(skillIds: string[]): string[] {
-    const tools = new Set<string>();
-    for (const id of skillIds) {
-      const skill = this.skills.get(id);
-      for (const tool of skill?.tools || []) {
-        tools.add(tool);
-      }
-    }
-    return Array.from(tools);
-  }
-
-  clear(): void {
-    this.skills.clear();
-  }
-
-  resolve(skillIds?: string[]): { skills: Skill[]; prompt: string; tools: string[] } {
-    const selected =
-      skillIds && skillIds.length > 0
-        ? skillIds.map((id) => this.skills.get(id)).filter(Boolean) as Skill[]
-        : this.list();
-
-    return {
-      skills: selected,
-      prompt: this.getPromptForSkills(selected.map((skill) => skill.id)),
-      tools: this.getToolsForSkills(selected.map((skill) => skill.id)),
-    };
-  }
+export function registerSkill(skillId: string, entry: SkillEntry): void {
+  _skillRegistry.set(skillId, entry);
 }
 
-export const skillRegistry = new SkillRegistry();
+export function getSkill(skillId: string): SkillEntry | undefined {
+  return _skillRegistry.get(skillId);
+}
+
+export function getAllSkills(): Map<string, SkillEntry> {
+  return _skillRegistry;
+}
+
+export function clearSkills(): void {
+  _skillRegistry.clear();
+}

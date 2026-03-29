@@ -20,6 +20,8 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+      - name: Install pnpm
+        run: npm install -g pnpm
       - name: Verify embedded OpenClaw release sync
         run: npm run verify:openclaw-upstream
       - name: Install dependencies
@@ -68,6 +70,8 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+      - name: Install pnpm
+        run: npm install -g pnpm
       - name: Install dependencies
         run: npm install
       - name: Install Playwright Chromium
