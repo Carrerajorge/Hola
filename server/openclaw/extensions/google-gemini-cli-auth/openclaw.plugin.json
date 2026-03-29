@@ -1,9 +1,8 @@
 {
   "id": "google-gemini-cli-auth",
-  "providers": ["google-gemini-cli"],
-  "configSchema": {
-    "type": "object",
-    "additionalProperties": false,
-    "properties": {}
-  }
+  "name": "Google Gemini CLI Auth",
+  "version": "1.0.0",
+  "description": "OAuth authentication for Google Gemini CLI",
+  "providerIds": ["google-gemini-cli"],
+  "channelIds": []
 }
