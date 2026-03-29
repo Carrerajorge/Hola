@@ -34,6 +34,7 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
                 size="icon" 
                 className="h-10 w-10 rounded-2xl border border-white/40 bg-white/70 shadow-sm transition-colors hover:bg-white dark:border-white/8 dark:bg-white/6 dark:hover:bg-white/10"
                 onClick={onExpand}
+                title="Expandir sidebar"
               >
                 <IliaGPTLogo size={24} />
               </Button>
@@ -53,6 +54,7 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
                 className="h-10 w-10 rounded-2xl border border-white/40 bg-white/70 shadow-sm transition-colors hover:bg-white dark:border-white/8 dark:bg-white/6 dark:hover:bg-white/10"
                 onClick={onNewChat}
                 data-testid="mini-button-new-chat"
+                title="Nuevo chat"
               >
                 <SquarePen className="h-4 w-4 text-foreground" />
               </Button>
@@ -69,6 +71,7 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
                 size="icon" 
                 className="h-10 w-10 rounded-2xl border border-white/40 bg-white/70 shadow-sm transition-colors hover:bg-white dark:border-white/8 dark:bg-white/6 dark:hover:bg-white/10"
                 data-testid="mini-button-search"
+                title="Buscar chats"
               >
                 <Search className="h-4 w-4 text-foreground" />
               </Button>
@@ -85,6 +88,7 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
                 size="icon" 
                 className="h-10 w-10 rounded-2xl border border-white/40 bg-white/70 shadow-sm transition-colors hover:bg-white dark:border-white/8 dark:bg-white/6 dark:hover:bg-white/10"
                 data-testid="mini-button-library"
+                title="Biblioteca de medios"
               >
                 <Library className="h-4 w-4 text-foreground" />
               </Button>
@@ -101,6 +105,7 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
                 size="icon" 
                 className="h-10 w-10 rounded-2xl border border-white/40 bg-white/70 shadow-sm transition-colors hover:bg-white dark:border-white/8 dark:bg-white/6 dark:hover:bg-white/10"
                 data-testid="mini-button-gpts"
+                title="GPTs personalizados"
               >
                 <Bot className="h-4 w-4 text-foreground" />
               </Button>
@@ -120,6 +125,7 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
                 size="icon" 
                 className="h-10 w-10 rounded-2xl border border-white/40 bg-white/70 shadow-sm transition-colors hover:bg-white dark:border-white/8 dark:bg-white/6 dark:hover:bg-white/10"
                 data-testid="mini-button-user"
+                title={`Cuenta: ${displayName}`}
               >
                 <Avatar className="h-7 w-7">
                   <AvatarFallback className="bg-muted text-muted-foreground text-xs">{avatarInitial}</AvatarFallback>

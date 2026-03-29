@@ -720,7 +720,7 @@ export function Sidebar({
             </div>
           </div>
         </div>
-        <Button variant="ghost" size="icon" className="h-6 w-6 rounded-md hover:bg-black/[0.04] dark:hover:bg-white/[0.06]" onClick={onToggle}>
+        <Button variant="ghost" size="icon" className="h-6 w-6 rounded-md hover:bg-black/[0.04] dark:hover:bg-white/[0.06]" onClick={onToggle} title="Colapsar sidebar">
           <svg className="h-3.5 w-3.5 text-muted-foreground" viewBox="0 0 24 24" fill="none">
             <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" strokeWidth="1.5" />
             <line x1="9" y1="3" x2="9" y2="21" stroke="currentColor" strokeWidth="1.5" />
@@ -737,6 +737,7 @@ export function Sidebar({
           onClick={() => setIsSearchModalOpen(true)}
           className={compactSearchButtonClass}
           data-testid="button-search-chats"
+          title="Buscar chats... (⌘K)"
         >
           <div className="flex items-center gap-1.5">
             <Search className="h-[14px] w-[14px] text-muted-foreground/70" />
@@ -756,6 +757,7 @@ export function Sidebar({
             className={cn(minimalSectionButtonClass, "group")}
             onClick={onOpenLibrary}
             data-testid="button-library"
+            title="Biblioteca - Gestiona tus archivos y medios"
           >
             <div className={minimalIconChipClass}>
               <PremiumIcons.Library className="h-[13px] w-[13px]" />
@@ -767,6 +769,7 @@ export function Sidebar({
             className={cn(minimalSectionButtonClass, "group")}
             onClick={onOpenGpts}
             data-testid="button-gpts"
+            title="GPTs - Explora y crea asistentes personalizados"
           >
             <div className={minimalIconChipClass}>
               <PremiumIcons.Gpt className="h-[13px] w-[13px]" />
@@ -778,6 +781,7 @@ export function Sidebar({
             className={cn(minimalSectionButtonClass, "group")}
             onClick={onOpenSkills}
             data-testid="button-skills"
+            title="Skills - Habilidades y automatizaciones del asistente"
           >
             <div className={cn(minimalIconChipClass, "shrink-0")}>
               <PremiumIcons.Skills className="h-[13px] w-[13px]" />
@@ -789,6 +793,7 @@ export function Sidebar({
             className={cn(minimalSectionButtonClass, "group")}
             onClick={onOpenApps}
             data-testid="button-apps"
+            title="Aplicaciones - Conecta con apps externas como Gmail, Drive"
           >
             <div className={minimalIconChipClass}>
               <PremiumIcons.Apps className="h-[13px] w-[13px]" />
@@ -800,6 +805,7 @@ export function Sidebar({
             className={cn(minimalSectionButtonClass, "group")}
             onClick={onOpenWhatsAppConnect}
             data-testid="button-whatsapp-connect"
+            title="AppsWebChat - Conecta WhatsApp y otros canales de chat"
           >
             <div className={minimalIconChipClass}>
               <PremiumIcons.ChatQr className="h-[13px] w-[13px]" />
