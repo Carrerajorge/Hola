@@ -115,7 +115,7 @@ export function PromptSuggestions({
                     )}
                 >
                     <span className={cn(
-                        "transition-colors duration-300 text-muted-foreground",
+                        "icon-spin-hover transition-colors duration-300 text-muted-foreground inline-flex",
                         suggestion.category === "analyze" && "group-hover:text-blue-500 dark:group-hover:text-blue-400",
                         suggestion.category === "create" && "group-hover:text-green-500 dark:group-hover:text-green-400",
                         suggestion.category === "search" && "group-hover:text-purple-500 dark:group-hover:text-purple-400",

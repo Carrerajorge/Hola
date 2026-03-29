@@ -1,9 +1,0 @@
-services:
-  testapp:
-    build:
-      context: .
-      args:
-        APP_VERSION: sha-1234
-    environment:
-      TARGET_VERSION: ${TARGET_VERSION:-dev}
-    command: ["node", "-e", "console.log('ENV=', process.env.APP_VERSION, process.env.TARGET_VERSION)"]
