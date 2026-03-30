@@ -20,6 +20,10 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
       - name: Verify embedded OpenClaw release sync
         run: npm run verify:openclaw-upstream
       - name: Install dependencies
@@ -51,6 +55,10 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
       - name: Verify embedded OpenClaw release sync
         run: npm run verify:openclaw-upstream
       - name: Install dependencies
@@ -68,6 +76,10 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
       - name: Install dependencies
         run: npm install
       - name: Install Playwright Chromium

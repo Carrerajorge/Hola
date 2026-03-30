@@ -243,6 +243,7 @@
     "express": "^4.21.2",
     "express-rate-limit": "^8.3.1",
     "express-session": "^1.18.2",
+    "fake-indexeddb": "^6.2.5",
     "file-saver": "^2.0.5",
     "file-type": "^21.3.3",
     "form-data": "^4.0.5",
