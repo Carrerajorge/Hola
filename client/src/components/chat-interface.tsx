@@ -8227,7 +8227,6 @@ export function ChatInterface({
         attachments = updatedFiles
           .filter((f: any) => f.status === "ready" || f.status === "processing")
           .map(mapFileToAttachment);
-          }));
 
         const nextAttachments =
           attachments.length > 0 ? attachments : undefined;
