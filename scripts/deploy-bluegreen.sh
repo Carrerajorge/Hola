@@ -21,6 +21,8 @@ EXPECTED_APP_DIGEST="${EXPECTED_APP_DIGEST:-}"
 EXPECTED_SANDBOX_DIGEST="${EXPECTED_SANDBOX_DIGEST:-}"
 EXPECTED_OCR_DIGEST="${EXPECTED_OCR_DIGEST:-}"
 PREDEPLOY_ONLY="${PREDEPLOY_ONLY:-}"
+KEEP_PREVIOUS_SLOT="${KEEP_PREVIOUS_SLOT:-true}"
+NGINX_UPSTREAM_CONF="${NGINX_UPSTREAM_CONF:-/etc/nginx/conf.d/iliagpt-upstream.conf}"
 
 log() {
     echo -e "${BLUE}[$(date '+%Y-%m-%d %H:%M:%S')]${NC} $1"
@@ -36,6 +38,68 @@ success() {
 
 warn() {
     echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+apply_nginx_site_config() {
+    local source_conf="${DEPLOY_PATH}/nginx.conf"
+    local source_maintenance="${DEPLOY_PATH}/nginx/maintenance.html"
+    local installed="false"
+
+    if [ ! -f "${source_conf}" ]; then
+        warn "nginx.conf not found at ${source_conf}; keeping existing site config"
+        return 0
+    fi
+
+    for target in \
+        /etc/nginx/sites-enabled/iliagpt.conf \
+        /etc/nginx/sites-enabled/iliagpt \
+        /etc/nginx/sites-available/iliagpt \
+        /etc/nginx/conf.d/iliagpt.conf; do
+        if [ -e "${target}" ] || [ -L "${target}" ]; then
+            cp "${source_conf}" "${target}"
+            installed="true"
+        fi
+    done
+
+    if [ "${installed}" != "true" ]; then
+        mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
+        cp "${source_conf}" /etc/nginx/sites-available/iliagpt
+        ln -sf /etc/nginx/sites-available/iliagpt /etc/nginx/sites-enabled/iliagpt
+    fi
+
+    if [ -f "${source_maintenance}" ]; then
+        mkdir -p /etc/nginx/html
+        cp "${source_maintenance}" /etc/nginx/html/maintenance.html
+    fi
+}
+
+reload_nginx() {
+    local nginx_container=""
+
+    for candidate in hola-nginx hola-infra-nginx-1; do
+        if docker ps --format '{{.Names}}' | grep -qx "${candidate}"; then
+            nginx_container="${candidate}"
+            break
+        fi
+    done
+
+    if [ -n "${nginx_container}" ]; then
+        docker exec "${nginx_container}" nginx -t
+        docker exec "${nginx_container}" nginx -s reload
+        return 0
+    fi
+
+    if ! command -v nginx >/dev/null 2>&1; then
+        error "nginx binary not found and no nginx container is running"
+        return 1
+    fi
+
+    nginx -t
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl reload nginx || nginx -s reload
+    else
+        nginx -s reload
+    fi
 }
 
 # Extract env value from file
@@ -70,6 +134,7 @@ main() {
     log "Deploy path: ${DEPLOY_PATH}"
     
     cd "${DEPLOY_PATH}"
+    apply_nginx_site_config
     
     # Read current state
     STATE_FILE="${DEPLOY_PATH}/deploy-state.json"
@@ -161,18 +226,33 @@ main() {
     
     # Switch nginx to new slot
     log "Switching traffic to ${INACTIVE_SLOT}..."
-    NGINX_CONF="/etc/nginx/conf.d/iliagpt-upstream.conf"
+    BACKUP_UPSTREAM="$(mktemp)"
+    if [ -f "${NGINX_UPSTREAM_CONF}" ]; then
+        cp "${NGINX_UPSTREAM_CONF}" "${BACKUP_UPSTREAM}"
+    else
+        : > "${BACKUP_UPSTREAM}"
+    fi
     
     # Update upstream to point to new slot
-    cat > "${NGINX_CONF}" << EOF
+    cat > "${NGINX_UPSTREAM_CONF}" << EOF
 upstream iliagpt_backend {
     server 127.0.0.1:${INACTIVE_PORT};
     keepalive 32;
 }
 EOF
     
-    # Reload nginx
-    docker exec hola-nginx nginx -s reload || nginx -s reload || true
+    if ! reload_nginx; then
+        warn "Failed to reload nginx after switching to ${INACTIVE_SLOT}; restoring previous upstream config"
+        if [ -s "${BACKUP_UPSTREAM}" ]; then
+            cp "${BACKUP_UPSTREAM}" "${NGINX_UPSTREAM_CONF}"
+        else
+            rm -f "${NGINX_UPSTREAM_CONF}"
+        fi
+        reload_nginx || true
+        rm -f "${BACKUP_UPSTREAM}"
+        exit 1
+    fi
+    rm -f "${BACKUP_UPSTREAM}"
     
     # Update state file
     python3 -c "
@@ -188,10 +268,13 @@ with open('${STATE_FILE}', 'w') as f:
     json.dump(state, f, indent=2)
 "
     
-    # Stop old containers
-    log "Stopping old ${ACTIVE_SLOT} containers..."
-    sleep 5
-    docker rm -f "hola-${ACTIVE_SLOT}-app" "hola-${ACTIVE_SLOT}-worker" "hola-${ACTIVE_SLOT}-sandbox" 2>/dev/null || true
+    if [ "${KEEP_PREVIOUS_SLOT}" = "true" ]; then
+        log "Keeping previous ${ACTIVE_SLOT} slot running until post-deploy acceptance passes"
+    else
+        log "Stopping old ${ACTIVE_SLOT} containers..."
+        sleep 5
+        docker rm -f "hola-${ACTIVE_SLOT}-app" "hola-${ACTIVE_SLOT}-worker" "hola-${ACTIVE_SLOT}-sandbox" 2>/dev/null || true
+    fi
     
     success "Blue-green deployment completed successfully!"
     log "New active slot: ${INACTIVE_SLOT}"
