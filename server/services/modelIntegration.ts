@@ -21,10 +21,10 @@ import { isRuntimeProviderSuppressed } from "../lib/runtimeProviderHealth";
 export type ChatRuntimeProvider = "xai" | "gemini" | "openai" | "anthropic" | "deepseek" | "openrouter";
 
 export const DEFAULT_END_USER_MODEL_PROVIDER = "openrouter" as const;
-export const DEFAULT_END_USER_MODEL_ID = "openai/gpt-4o-mini" as const;
-export const DEFAULT_END_USER_MODEL_NAME = "GPT-4o Mini" as const;
+export const DEFAULT_END_USER_MODEL_ID = "moonshotai/kimi-k2.5" as const;
+export const DEFAULT_END_USER_MODEL_NAME = "Kimi K2.5" as const;
 export const DEFAULT_END_USER_MODEL_CONTEXT_WINDOW = 128000 as const;
-export const OPENROUTER_ALLOWED_MODEL_IDS = Object.freeze(["openai/gpt-4o-mini", "moonshotai/kimi-k2.5"] as const);
+export const OPENROUTER_ALLOWED_MODEL_IDS = Object.freeze(["moonshotai/kimi-k2.5", "openai/gpt-4o-mini"] as const);
 
 const ALL_RUNTIME_PROVIDERS: readonly ChatRuntimeProvider[] = Object.freeze([
   "xai", "gemini", "openai", "anthropic", "deepseek", "openrouter",
