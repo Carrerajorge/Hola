@@ -104,6 +104,24 @@ load_database_url_from_pm2() {
   return 1
 }
 
+resolve_pm2_app_name() {
+  if ! command -v pm2 >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if pm2 describe iliagpt-host >/dev/null 2>&1; then
+    echo "iliagpt-host"
+    return 0
+  fi
+
+  if pm2 describe michat >/dev/null 2>&1; then
+    echo "michat"
+    return 0
+  fi
+
+  return 1
+}
+
 ensure_database_url() {
   if [ -n "${DATABASE_URL:-}" ]; then
     return 0
@@ -130,6 +148,11 @@ ensure_database_url() {
 
 run_db_push() {
   if ! ensure_database_url; then
+    if resolve_pm2_app_name >/dev/null 2>&1; then
+      echo "⚠️ DATABASE_URL unavailable in deploy shell; skipping db:push and preserving existing PM2 runtime environment."
+      return 0
+    fi
+
     echo "❌ DATABASE_URL not set. Add DATABASE_URL to environment or .env.production/.env before deploy." >&2
     return 1
   fi
@@ -139,14 +162,20 @@ run_db_push() {
 
 restart_app() {
   if command -v pm2 >/dev/null 2>&1; then
-    if pm2 describe iliagpt-host >/dev/null 2>&1; then
-      pm2 restart iliagpt-host --update-env
+    local app_name=""
+    if app_name="$(resolve_pm2_app_name)"; then
+      if ensure_database_url; then
+        pm2 restart "${app_name}" --update-env
+      else
+        echo "⚠️ DATABASE_URL unavailable in deploy shell; restarting ${app_name} without --update-env to preserve current PM2 environment."
+        pm2 restart "${app_name}"
+      fi
       return 0
     fi
 
-    if pm2 describe michat >/dev/null 2>&1; then
-      pm2 restart michat --update-env
-      return 0
+    if ! ensure_database_url; then
+      echo "❌ DATABASE_URL not set and no existing PM2 app found to reuse runtime environment." >&2
+      return 1
     fi
 
     pm2 start npm --name iliagpt-host -- start
