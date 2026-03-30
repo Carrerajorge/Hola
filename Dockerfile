@@ -94,6 +94,13 @@ RUN npm run build
 
 # Convert to production-only deps for runtime images
 RUN npm prune --legacy-peer-deps --omit=dev
+RUN set -eux; \
+  if [ -d server/openclaw/dist/extensions ]; then \
+    find server/openclaw/dist/extensions -mindepth 2 -maxdepth 2 -type d -name node_modules | while read -r deps_dir; do \
+      echo "Merging staged bundled plugin runtime deps from ${deps_dir}"; \
+      cp -a "${deps_dir}/." /app/node_modules/; \
+    done; \
+  fi
 RUN node -e "console.log(require.resolve('ajv/package.json'))"
 RUN node -e "console.log(require.resolve('ajv/package.json'))"
 # ============================================
