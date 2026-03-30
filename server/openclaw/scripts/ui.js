@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -44,36 +45,10 @@ function which(cmd) {
   return null;
 }
 
-function readPreferredPnpmSpec() {
-  try {
-    const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
-    if (typeof packageJson.packageManager === "string" && packageJson.packageManager.startsWith("pnpm@")) {
-      return packageJson.packageManager;
-    }
-  } catch {
-    // ignore and fall back below
-  }
-  return "pnpm@latest";
-}
-
 function resolveRunner() {
   const pnpm = which("pnpm");
   if (pnpm) {
-    return { cmd: pnpm, kind: "pnpm", prefixArgs: [] };
-  }
-
-  const corepack = which("corepack");
-  if (corepack) {
-    return { cmd: corepack, kind: "corepack", prefixArgs: ["pnpm"] };
-  }
-
-  const npm = which("npm");
-  if (npm) {
-    return {
-      cmd: npm,
-      kind: "npm-exec-pnpm",
-      prefixArgs: ["exec", "--yes", readPreferredPnpmSpec(), "--"],
-    };
+    return { cmd: pnpm, kind: "pnpm" };
   }
   return null;
 }
@@ -114,19 +89,18 @@ function createSpawnOptions(cmd, args, envOverride) {
   };
 }
 
-function run(runner, args) {
-  const fullArgs = [...(runner.prefixArgs ?? []), ...args];
+function run(cmd, args) {
   let child;
   try {
-    child = spawn(runner.cmd, fullArgs, createSpawnOptions(runner.cmd, fullArgs));
+    child = spawn(cmd, args, createSpawnOptions(cmd, args));
   } catch (err) {
-    console.error(`Failed to launch ${runner.cmd}:`, err);
+    console.error(`Failed to launch ${cmd}:`, err);
     process.exit(1);
     return;
   }
 
   child.on("error", (err) => {
-    console.error(`Failed to launch ${runner.cmd}:`, err);
+    console.error(`Failed to launch ${cmd}:`, err);
     process.exit(1);
   });
   child.on("exit", (code) => {
@@ -136,13 +110,12 @@ function run(runner, args) {
   });
 }
 
-function runSync(runner, args, envOverride) {
-  const fullArgs = [...(runner.prefixArgs ?? []), ...args];
+function runSync(cmd, args, envOverride) {
   let result;
   try {
-    result = spawnSync(runner.cmd, fullArgs, createSpawnOptions(runner.cmd, fullArgs, envOverride));
+    result = spawnSync(cmd, args, createSpawnOptions(cmd, args, envOverride));
   } catch (err) {
-    console.error(`Failed to launch ${runner.cmd}:`, err);
+    console.error(`Failed to launch ${cmd}:`, err);
     process.exit(1);
     return;
   }
@@ -154,25 +127,17 @@ function runSync(runner, args, envOverride) {
   }
 }
 
-export function hasLocalPackage(packageName, baseDir = uiDir) {
-  const segments = packageName.split("/");
-  const packageDir = path.join(baseDir, "node_modules", ...segments);
-  return fs.existsSync(path.join(packageDir, "package.json")) || fs.existsSync(packageDir);
-}
-
-function requiredUiPackages(_kind, baseDir = uiDir) {
-  const packageJson = JSON.parse(fs.readFileSync(path.join(baseDir, "package.json"), "utf8"));
-  return [
-    ...new Set([
-      ...Object.keys(packageJson.dependencies ?? {}),
-      ...Object.keys(packageJson.devDependencies ?? {}),
-    ]),
-  ];
-}
-
-export function depsInstalled(kind, baseDir = uiDir, requiredPackages = requiredUiPackages(kind, baseDir)) {
+function depsInstalled(kind) {
   try {
-    return requiredPackages.every((packageName) => hasLocalPackage(packageName, baseDir));
+    const require = createRequire(path.join(uiDir, "package.json"));
+    require.resolve("vite");
+    require.resolve("dompurify");
+    if (kind === "test") {
+      require.resolve("vitest");
+      require.resolve("@vitest/browser-playwright");
+      require.resolve("playwright");
+    }
+    return true;
   } catch {
     return false;
   }
@@ -203,7 +168,7 @@ export function main(argv = process.argv.slice(2)) {
 
   const runner = resolveRunner();
   if (!runner) {
-    process.stderr.write("Missing UI runner: install pnpm or ensure npm/corepack is available, then retry.\n");
+    process.stderr.write("Missing UI runner: install pnpm, then retry.\n");
     process.exit(1);
   }
 
@@ -214,15 +179,18 @@ export function main(argv = process.argv.slice(2)) {
   }
 
   if (action === "install") {
-    run(runner, ["install", ...rest]);
+    run(runner.cmd, ["install", ...rest]);
     return;
   }
 
   if (!depsInstalled(action === "test" ? "test" : "build")) {
-    runSync(runner, ["install"], process.env);
+    const installEnv =
+      action === "build" ? { ...process.env, NODE_ENV: "production" } : process.env;
+    const installArgs = action === "build" ? ["install", "--prod"] : ["install"];
+    runSync(runner.cmd, installArgs, installEnv);
   }
 
-  run(runner, ["run", script, ...rest]);
+  run(runner.cmd, ["run", script, ...rest]);
 }
 
 const isDirectExecution = (() => {

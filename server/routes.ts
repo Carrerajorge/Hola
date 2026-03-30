@@ -254,6 +254,7 @@ import {
 import { finopsRouter } from "./routes/finopsRouter";
 import { resolveEmbeddedOpenClawControlUiRootSync } from "./services/openClawEmbeddedAssets";
 import { createHardwareTelemetryRouter } from "./routes/hardwareTelemetryRouter";
+import { messageLifecycleRouter } from "./routes/messageLifecycleRouter";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -1002,6 +1003,7 @@ export async function registerRoutes(
   app.use(createCodeRouter());
   app.use(createUserRouter());
   app.use("/api", createChatAiRouter(broadcastAgentUpdate));
+  app.use("/api/message", messageLifecycleRouter);
   app.use("/api/apps", createAppsIntegrationRouter());
 
   // Integration Kernel OAuth routes (generic connector flow).

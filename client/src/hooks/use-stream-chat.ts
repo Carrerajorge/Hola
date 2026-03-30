@@ -133,7 +133,7 @@ const DEFAULT_DONE_TIMEOUT_MS = 45_000;
 // Covers the window after firstTokenTimeout is cleared (by a non-content event like
 // "thinking") but before doneTimeout is armed (which requires a content chunk).
 const DEFAULT_CONTENT_TOKEN_TIMEOUT_MS = 60_000;
-const DEFAULT_IDLE_RECOVERY_MS = 1_500;
+const DEFAULT_IDLE_RECOVERY_MS = 5_000;
 const DEFAULT_MAX_RETRIES = 1;
 const DEFAULT_RETRY_BACKOFF_MS = 800;
 const DEFAULT_RETRY_JITTER_MS = 250;
