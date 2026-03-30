@@ -121,7 +121,7 @@ jobs:
 
           rollback_if_needed() {
             echo "Deploy failed, trying rollback to previous SHA: $PREV_SHA"
-            git checkout "$PREV_SHA"
+            git -c core.hooksPath=/dev/null checkout "$PREV_SHA"
             ./deploy_direct.sh || true
           }
 
@@ -147,7 +147,7 @@ jobs:
           ensure_repo
           PREV_SHA="$(git rev-parse HEAD)"
           sync_with_retry
-          git checkout -f -B "$BRANCH" "refs/remotes/origin/${BRANCH}"
+          git -c core.hooksPath=/dev/null checkout -f -B "$BRANCH" "refs/remotes/origin/${BRANCH}"
 
           export LOCAL_DEPLOY=1
           export VPS_DIR="$TARGET_DIR"
