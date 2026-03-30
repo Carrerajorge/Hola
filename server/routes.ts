@@ -748,10 +748,16 @@ export async function registerRoutes(
           typeof googleUser.name === "string" && googleUser.name.trim()
             ? googleUser.name.trim()
             : [firstName, lastName].filter(Boolean).join(" ") || null;
+            
+        // Make the username highly likely to be unique to prevent unique constraint DB errors in production
+        const baseUsername = email.split("@")[0].replace(/[^a-zA-Z0-9]/g, "");
+        const uniqueSuffix = randomBytes(2).toString("hex");
+        
         const userData = {
           id: `google_${googleUserId}`,
+          providerSubject: googleUserId,
           email,
-          username: email.split("@")[0],
+          username: `${baseUsername}${uniqueSuffix}`,
           fullName,
           firstName,
           lastName,
@@ -777,6 +783,7 @@ export async function registerRoutes(
         }
 
         const baseSessionUser = buildSessionUserFromDbUser(resolvedUser) as any;
+        const expiresInNum = typeof tokens.expires_in === "number" ? tokens.expires_in : parseInt(String(tokens.expires_in) || "3600", 10);
         const sessionUser = {
           ...baseSessionUser,
           claims: {
@@ -788,7 +795,7 @@ export async function registerRoutes(
           },
           access_token: tokens.access_token,
           refresh_token: tokens.refresh_token,
-          expires_at: Math.floor(Date.now() / 1000) + (tokens.expires_in || 3600),
+          expires_at: Math.floor(Date.now() / 1000) + expiresInNum,
         };
 
         const userId = String(sessionUser?.claims?.sub || resolvedUser.id || "");
@@ -878,12 +885,14 @@ export async function registerRoutes(
           res.redirect(redirectTarget);
         });
       } catch (err: any) {
-        const failure = resolveGoogleOAuthFailure(err);
         console.error("[Auth] Google callback failed", {
-          error: failure.error,
-          message: failure.message,
+          errorObject: err,
+          message: err?.message,
+          stack: err?.stack,
           sessionId: req.sessionID || null,
         });
+        
+        const failure = resolveGoogleOAuthFailure(err);
         const query = failure.message
           ? `?error=${encodeURIComponent(failure.error)}&message=${encodeURIComponent(failure.message)}`
           : `?error=${encodeURIComponent(failure.error)}`;

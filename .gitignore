@@ -1,6 +1,9 @@
 .DS_Store
 .DS_Store?
-node_modules/
+node_modules
+
+# Ignore temp openclaw
+openclaw_v2026_tmp//
 /dist/
 server/openclaw/dist/
 server/openclaw/pnpm-lock.yaml
@@ -84,7 +87,10 @@ attached_assets/
 sandbox_workspace/.state/
 
 # Ignore extra artifact noise
-artifacts/node_modules_backup/
+artifacts/node_modules
+
+# Ignore temp openclaw
+openclaw_v2026_tmp/_backup/
 artifacts/Test_*.txt
 artifacts/*.log
 artifacts/*.tmp
@@ -128,6 +134,18 @@ audit.json
 monitoring/alertmanager/secrets/
 *.log
 node_modules
+
+# Ignore temp openclaw
+openclaw_v2026_tmp/
 node_modules
+
+# Ignore temp openclaw
+openclaw_v2026_tmp/
 node_modules
+
+# Ignore temp openclaw
+openclaw_v2026_tmp/
 node_modules
+
+# Ignore temp openclaw
+openclaw_v2026_tmp/
