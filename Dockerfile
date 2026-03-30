@@ -97,8 +97,24 @@ RUN npm prune --legacy-peer-deps --omit=dev
 RUN set -eux; \
   if [ -d server/openclaw/dist/extensions ]; then \
     find server/openclaw/dist/extensions -mindepth 2 -maxdepth 2 -type d -name node_modules | while read -r deps_dir; do \
-      echo "Merging staged bundled plugin runtime deps from ${deps_dir}"; \
-      cp -a "${deps_dir}/." /app/node_modules/; \
+      echo "Linking missing staged bundled plugin runtime deps from ${deps_dir}"; \
+      find "${deps_dir}" -mindepth 1 -maxdepth 1 | while read -r entry; do \
+        name="$(basename "${entry}")"; \
+        if [ "${name#@}" != "${name}" ]; then \
+          mkdir -p "/app/node_modules/${name}"; \
+          find "${entry}" -mindepth 1 -maxdepth 1 | while read -r scoped_pkg; do \
+            target="/app/node_modules/${name}/$(basename "${scoped_pkg}")"; \
+            if [ ! -e "${target}" ]; then \
+              cp -a "${scoped_pkg}" "${target}"; \
+            fi; \
+          done; \
+        else \
+          target="/app/node_modules/${name}"; \
+          if [ ! -e "${target}" ]; then \
+            cp -a "${entry}" "${target}"; \
+          fi; \
+        fi; \
+      done; \
     done; \
   fi
 RUN node -e "console.log(require.resolve('ajv/package.json'))"
