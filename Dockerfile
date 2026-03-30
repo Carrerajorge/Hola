@@ -11,9 +11,9 @@ ARG NODE_BASE_IMAGE=public.ecr.aws/docker/library/node:22-slim
 FROM ${NODE_BASE_IMAGE} AS builder
 WORKDIR /app
 
-# Build-time tooling for native modules
+# Build-time tooling for native modules and git dependencies (OpenClaw has git deps)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-  python3 make g++ \
+  python3 make g++ git \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
