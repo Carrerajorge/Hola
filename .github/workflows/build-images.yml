@@ -1,0 +1,311 @@
+name: Build & Push Docker Images
+
+on:
+  workflow_call:
+    inputs:
+      sha:
+        required: true
+        type: string
+      enforce_latest_main:
+        required: false
+        type: boolean
+        default: false
+      latest_main_branch:
+        required: false
+        type: string
+        default: main
+    outputs:
+      image_tag:
+        description: "The image tag that was pushed"
+        value: ${{ jobs.build.outputs.image_tag }}
+      app_digest:
+        description: "App image digest"
+        value: ${{ jobs.build.outputs.app_digest }}
+      sandbox_digest:
+        description: "Sandbox image digest"
+        value: ${{ jobs.build.outputs.sandbox_digest }}
+      ocr_digest:
+        description: "OCR image digest"
+        value: ${{ jobs.build.outputs.ocr_digest }}
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BASE: ghcr.io/carrerajorge/iliagpt
+  BUILDKIT_IMAGE: public.ecr.aws/vend/moby/buildkit:buildx-stable-1
+
+jobs:
+  build:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    # App build + sandbox build + boot smoke are exceeding 30 minutes on GH-hosted runners.
+    # Keep this above the observed worst-case so the final smoke gate can finish.
+    timeout-minutes: 45
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+      app_digest: ${{ steps.build_app.outputs.digest }}
+      sandbox_digest: ${{ steps.build_sandbox.outputs.digest }}
+      ocr_digest: ${{ steps.build_ocr.outputs.digest }}
+
+    steps:
+      - name: Check out source at requested SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+          fetch-depth: 1
+          filter: blob:none
+          sparse-checkout: |
+            /.dockerignore
+            /.npmrc
+            /Dockerfile
+            /components.json
+            /package.json
+            /package-lock.json
+            /postcss.config.js
+            /tsconfig.json
+            /tsconfig.base.json
+            /vite.config.ts
+            /vite-plugin-meta-images.ts
+            /client/
+            /migrations/
+            /ocr_service/
+            /packages/
+            /script/
+            /scripts/
+            /server/
+            /shared/
+          sparse-checkout-cone-mode: false
+
+      - name: Validate build checkout contents
+        run: |
+          bash ./scripts/ci-assert-required-paths.sh "build checkout" \
+            .dockerignore \
+            Dockerfile \
+            package.json \
+            package-lock.json \
+            postcss.config.js \
+            tsconfig.json \
+            tsconfig.base.json \
+            vite.config.ts \
+            vite-plugin-meta-images.ts \
+            scripts/sync-mathjax-assets.cjs \
+            client/public/sw-cleanup.js \
+            server/openclaw/package.json \
+            packages/flowise-components/package.json \
+            packages/flowise-server/package.json \
+            packages/flowise-server/src/Interface.ts
+
+      - name: Summarize build checkout footprint
+        run: |
+          set -euo pipefail
+          FILE_COUNT="$(git ls-files | wc -l | tr -d ' ')"
+          CHECKOUT_SIZE="$(du -sh . | awk '{print $1}')"
+          echo "▸ Sparse checkout files: ${FILE_COUNT}"
+          echo "▸ Sparse checkout size:  ${CHECKOUT_SIZE}"
+          {
+            echo "## Build Checkout Footprint"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|---|---|"
+            echo "| Files | \`${FILE_COUNT}\` |"
+            echo "| Size | \`${CHECKOUT_SIZE}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Compute image tag
+        id: meta
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${{ inputs.sha }}"
+          SHORT_SHA="${SHORT_SHA:0:8}"
+          echo "tag=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "full_sha=${{ inputs.sha }}" >> "$GITHUB_OUTPUT"
+          echo "build_timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Evaluate latest-main build guard
+        id: latest_main_guard
+        env:
+          ENFORCE_LATEST_MAIN: ${{ inputs.enforce_latest_main }}
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_SHA: ${{ inputs.sha }}
+          TARGET_BRANCH: ${{ inputs.latest_main_branch }}
+          FAIL_ON_LOOKUP_ERROR: "false"
+          GUARD_CONTEXT: build-images
+        run: |
+          set -euo pipefail
+          if [ "${ENFORCE_LATEST_MAIN}" != "true" ]; then
+            {
+              echo "is_latest=true"
+              echo "should_deploy=true"
+              echo "latest_sha="
+              echo "skip_reason="
+            } >> "$GITHUB_OUTPUT"
+            echo "Latest-main build guard disabled for this workflow call."
+            exit 0
+          fi
+
+          bash ./scripts/latest-main-guard.sh
+
+      - name: Set up Swap Space
+        if: steps.latest_main_guard.outputs.should_deploy == 'true'
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 10
+
+      - name: Log in to GHCR
+        if: steps.latest_main_guard.outputs.should_deploy == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve BuildKit driver image
+        if: steps.latest_main_guard.outputs.should_deploy == 'true'
+        id: buildkit_image
+        run: |
+          set -euo pipefail
+
+          if bash ./scripts/ci-retry.sh \
+            --label "BuildKit image pull" \
+            --attempts 5 \
+            --base-delay 5 \
+            --max-delay 45 \
+            --transient-only \
+            -- \
+            docker pull "${BUILDKIT_IMAGE}"; then
+            echo "driver_image=${BUILDKIT_IMAGE}" >> "$GITHUB_OUTPUT"
+            echo "driver_source=mirror" >> "$GITHUB_OUTPUT"
+            echo "Using prefetched BuildKit driver image: ${BUILDKIT_IMAGE}"
+          else
+            echo "::warning::BuildKit mirror ${BUILDKIT_IMAGE} stayed unavailable after retries. Falling back to docker/setup-buildx-action default image."
+            echo "driver_image=" >> "$GITHUB_OUTPUT"
+            echo "driver_source=default" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx (prefetched mirror)
+        if: steps.latest_main_guard.outputs.should_deploy == 'true' && steps.buildkit_image.outputs.driver_image != ''
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=${{ steps.buildkit_image.outputs.driver_image }}
+
+      - name: Set up Docker Buildx (default image fallback)
+        if: steps.latest_main_guard.outputs.should_deploy == 'true' && steps.buildkit_image.outputs.driver_image == ''
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push app image (runner stage)
+        id: build_app
+        if: steps.latest_main_guard.outputs.should_deploy == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runner
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}-app:${{ steps.meta.outputs.tag }}
+            ${{ env.IMAGE_BASE }}-app:latest
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.short_sha }}
+            APP_SHA=${{ steps.meta.outputs.full_sha }}
+            IMAGE_TAG=${{ steps.meta.outputs.tag }}
+            BUILD_TIMESTAMP=${{ steps.meta.outputs.build_timestamp }}
+          cache-from: type=gha,scope=app
+          # Large layer exports can overrun the default 5m cache timeout and mark the
+          # build step as cancelled even after the image itself was pushed successfully.
+          cache-to: type=gha,mode=min,scope=app,ignore-error=true,timeout=15m
+          # Build provenance (SLSA) — creates attestation for supply chain security
+          provenance: true
+          # SBOM generation currently pulls docker/buildkit-syft-scanner from Docker Hub,
+          # and transient Docker Hub OAuth 500s were making production builds red.
+          # Keep provenance enabled and disable SBOM until the external registry path is stable.
+          sbom: false
+
+      - name: Build & push sandbox-runner image
+        id: build_sandbox
+        if: steps.latest_main_guard.outputs.should_deploy == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: sandbox-runner
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}-sandbox:${{ steps.meta.outputs.tag }}
+            ${{ env.IMAGE_BASE }}-sandbox:latest
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.short_sha }}
+            APP_SHA=${{ steps.meta.outputs.full_sha }}
+            IMAGE_TAG=${{ steps.meta.outputs.tag }}
+            BUILD_TIMESTAMP=${{ steps.meta.outputs.build_timestamp }}
+          cache-from: type=gha,scope=sandbox
+          cache-to: type=gha,mode=min,scope=sandbox,ignore-error=true,timeout=15m
+          provenance: true
+          sbom: false
+
+      - name: Build & push OCR image
+        id: build_ocr
+        if: steps.latest_main_guard.outputs.should_deploy == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ocr_service/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}-ocr:${{ steps.meta.outputs.tag }}
+            ${{ env.IMAGE_BASE }}-ocr:latest
+          cache-from: type=gha,scope=ocr
+          cache-to: type=gha,mode=min,scope=ocr,ignore-error=true,timeout=15m
+          provenance: true
+          sbom: false
+
+      - name: Verify images exist in GHCR
+        if: steps.latest_main_guard.outputs.should_deploy == 'true'
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.meta.outputs.tag }}"
+          echo "▸ Verifying pushed images..."
+          for img in app sandbox ocr; do
+            IMAGE_REF="${{ env.IMAGE_BASE }}-${img}:${TAG}"
+            if bash ./scripts/ci-retry.sh \
+              --label "GHCR manifest verify ${IMAGE_REF}" \
+              --attempts 6 \
+              --base-delay 5 \
+              --max-delay 30 \
+              -- \
+              docker manifest inspect "${IMAGE_REF}" > /dev/null 2>&1; then
+              echo "  ✓ ${IMAGE_REF}"
+            else
+              echo "  ✗ ${IMAGE_REF} NOT FOUND"
+              exit 1
+            fi
+          done
+          echo ""
+          echo "▸ App image digest: ${{ steps.build_app.outputs.digest }}"
+          echo "▸ Sandbox digest:   ${{ steps.build_sandbox.outputs.digest }}"
+          echo "▸ OCR digest:       ${{ steps.build_ocr.outputs.digest }}"
+
+      - name: Smoke-test production app image boot
+        if: steps.latest_main_guard.outputs.should_deploy == 'true'
+        env:
+          IMAGE_TAG: ${{ steps.meta.outputs.tag }}
+          APP_VERSION: ${{ steps.meta.outputs.short_sha }}
+          APP_SHA: ${{ steps.meta.outputs.full_sha }}
+          APP_IMAGE: ${{ env.IMAGE_BASE }}-app:${{ steps.meta.outputs.tag }}
+        run: |
+          bash ./scripts/ci-container-boot-smoke.sh
+
+      - name: Generate build summary
+        if: always()
+        run: |
+          echo "## Docker Build Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | Tag | Digest |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| app | \`${{ steps.meta.outputs.tag }}\` | \`${{ steps.build_app.outputs.digest || 'N/A' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| sandbox | \`${{ steps.meta.outputs.tag }}\` | \`${{ steps.build_sandbox.outputs.digest || 'N/A' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| ocr | \`${{ steps.meta.outputs.tag }}\` | \`${{ steps.build_ocr.outputs.digest || 'N/A' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| latest-main guard | \`${{ inputs.enforce_latest_main && 'enabled' || 'disabled' }}\` | \`${{ steps.latest_main_guard.outputs.should_deploy || 'n/a' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| latest main sha | \`${{ steps.latest_main_guard.outputs.latest_sha || 'n/a' }}\` | \`${{ steps.latest_main_guard.outputs.skip_reason || 'n/a' }}\` |" >> $GITHUB_STEP_SUMMARY

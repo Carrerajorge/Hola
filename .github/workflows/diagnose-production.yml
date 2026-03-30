@@ -1,0 +1,144 @@
+name: Diagnose Production (VPS)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
+  VPS_USER: ${{ secrets.VPS_USER || 'root' }}
+  VPS_PORT: ${{ secrets.VPS_PORT || '8022' }}
+  DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/hola' }}
+
+jobs:
+  diagnose:
+    name: Collect VPS diagnostics
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: production
+      url: https://iliagpt.com
+
+    steps:
+      - name: Setup SSH key
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          {
+            echo "Host *"
+            echo "  StrictHostKeyChecking accept-new"
+            echo "  PubkeyAcceptedKeyTypes +ssh-rsa"
+            echo "  HostKeyAlgorithms +ssh-rsa"
+          } > ~/.ssh/config
+          chmod 600 ~/.ssh/config
+
+      - name: Resolve reachable deploy endpoint
+        id: target
+        run: |
+          set -euo pipefail
+          DEFAULT_HOST="69.62.98.126"
+          HOSTS=()
+          if [ -n "${{ secrets.VPS_HOST }}" ]; then HOSTS+=("${{ secrets.VPS_HOST }}"); fi
+          HOSTS+=("${VPS_HOST}" "${DEFAULT_HOST}")
+          PORTS=("${VPS_PORT}" "8022" "22" "2222")
+
+          mapfile -t uniq_hosts < <(printf "%s\n" "${HOSTS[@]}" | awk 'NF' | awk '!seen[$0]++')
+          mapfile -t uniq_ports < <(printf "%s\n" "${PORTS[@]}" | awk 'NF' | awk '!seen[$0]++')
+
+          for host in "${uniq_hosts[@]}"; do
+            for port in "${uniq_ports[@]}"; do
+              echo "Trying ${VPS_USER}@${host}:${port}..."
+              ssh-keyscan -p "$port" -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
+              ssh_probe_opts=(
+                -i ~/.ssh/deploy_key
+                -p "$port"
+                -o StrictHostKeyChecking=accept-new
+                -o BatchMode=yes
+                -o ConnectTimeout=8
+                -o PubkeyAcceptedAlgorithms=+ssh-rsa
+                -o HostKeyAlgorithms=+ssh-rsa
+              )
+              if ssh "${ssh_probe_opts[@]}" -4 "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1 || \
+                 ssh "${ssh_probe_opts[@]}" "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1; then
+                echo "host=${host}" >> "$GITHUB_OUTPUT"
+                echo "port=${port}" >> "$GITHUB_OUTPUT"
+                echo "✓ Selected endpoint ${host}:${port}"
+                exit 0
+              fi
+            done
+          done
+
+          echo "::error::No reachable VPS endpoint found (hosts: ${uniq_hosts[*]} | ports: ${uniq_ports[*]})"
+          exit 1
+
+      - name: Collect diagnostics
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }} \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
+            -o PubkeyAcceptedAlgorithms=+ssh-rsa \
+            -o HostKeyAlgorithms=+ssh-rsa \
+            ${{ env.VPS_USER }}@${{ steps.target.outputs.host }} \
+            "DEPLOY_PATH='${{ env.DEPLOY_PATH }}' bash -s" <<'ENDSSH'
+          set -euo pipefail
+
+          DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
+
+          echo "=== host ==="
+          hostname
+          date -Is
+
+          echo "=== deploy state ==="
+          cat "${DEPLOY_PATH}/deploy-state.json" 2>/dev/null || echo "deploy-state.json missing"
+
+          echo "=== nginx upstream ==="
+          cat /etc/nginx/conf.d/iliagpt-upstream.conf 2>/dev/null || echo "upstream conf missing"
+
+          echo "=== deploy lock ==="
+          if [ -f "${DEPLOY_PATH}/.deploy.lock" ]; then
+            ls -l "${DEPLOY_PATH}/.deploy.lock"
+            cat "${DEPLOY_PATH}/.deploy.lock" 2>/dev/null || true
+          else
+            echo "no deploy lock"
+          fi
+
+          echo "=== container status ==="
+          docker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' | grep -E 'hola-|iliagpt|NAMES' || true
+
+          echo "=== local health checks ==="
+          for port in 5000 5001; do
+            echo "--- port ${port} /api/health ---"
+            timeout 10 curl -sS -i "http://127.0.0.1:${port}/api/health" || true
+            echo
+            echo "--- port ${port} /api/health/ready ---"
+            timeout 10 curl -sS -i "http://127.0.0.1:${port}/api/health/ready" || true
+            echo
+          done
+
+          echo "=== app inspect ==="
+          for name in hola-blue-app hola-green-app; do
+            echo "--- ${name} inspect ---"
+            docker inspect --format '{{.Name}} status={{.State.Status}} exit={{.State.ExitCode}} started={{.State.StartedAt}} finished={{.State.FinishedAt}} oom={{.State.OOMKilled}} error={{.State.Error}}' "${name}" 2>/dev/null || echo "${name} missing"
+          done
+
+          echo "=== blue app logs ==="
+          docker logs --tail=200 hola-blue-app 2>&1 || true
+
+          echo "=== green app logs ==="
+          docker logs --tail=200 hola-green-app 2>&1 || true
+
+          echo "=== worker logs ==="
+          docker logs --tail=120 hola-blue-worker 2>&1 || true
+          docker logs --tail=120 hola-green-worker 2>&1 || true
+          ENDSSH
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key ~/.ssh/config

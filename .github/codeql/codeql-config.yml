@@ -1,0 +1,38 @@
+name: codeql-config
+
+paths:
+  - client/src
+  - server/agent
+  - server/lib
+  - server/routes
+  - server/integrations
+  - server/middleware
+  - server/auth
+  - server/utils
+  - server/core
+  - server/repositories
+  - server/config
+  - server/types
+  - shared
+
+paths-ignore:
+  - node_modules
+  - dist
+  - "**/node_modules/**"
+  - "**/dist/**"
+  - artifacts
+  - docs
+  - ocr_service
+  - fastapi_sse
+  - python_agent_tools
+  - migrations
+  - client/public/**
+  - server/openclaw/**
+  - server/local-runner/**
+  - server/services/superIntelligence/**
+  - server/services/**/docs/**
+  - server/services/**/test/**
+  - server/services/**/test-helpers/**
+  - server/services/**/__tests__/**
+  - "**/*.min.js"
+  - "**/*.snap"
