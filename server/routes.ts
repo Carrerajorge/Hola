@@ -513,6 +513,15 @@ export async function registerRoutes(
     returnUrl: string;
   }>();
   const googleOAuthStateTtlMs = 10 * 60 * 1000;
+  type GoogleOAuthStateRecord = {
+    createdAt: number;
+    providerHint?: string;
+    returnUrl: string;
+  };
+  type GoogleOAuthSession = {
+    googleOAuthStates?: Record<string, GoogleOAuthStateRecord>;
+    save?: (callback: (err?: unknown) => void) => void;
+  };
 
   const cleanupGoogleOAuthStateStore = () => {
     const now = Date.now();
@@ -524,6 +533,62 @@ export async function registerRoutes(
   };
 
   setInterval(cleanupGoogleOAuthStateStore, 5 * 60 * 1000).unref?.();
+
+  const cleanupGoogleOAuthSessionStates = (session?: GoogleOAuthSession | null) => {
+    const states = session?.googleOAuthStates;
+    if (!states) {
+      return;
+    }
+
+    const now = Date.now();
+    for (const [state, data] of Object.entries(states)) {
+      if (!data || now - data.createdAt > googleOAuthStateTtlMs) {
+        delete states[state];
+      }
+    }
+
+    if (Object.keys(states).length === 0) {
+      delete session.googleOAuthStates;
+    }
+  };
+
+  const storeGoogleOAuthState = (
+    session: GoogleOAuthSession | null | undefined,
+    state: string,
+    stateData: GoogleOAuthStateRecord,
+  ) => {
+    googleOAuthStateStore.set(state, stateData);
+    if (!session) {
+      return;
+    }
+
+    cleanupGoogleOAuthSessionStates(session);
+    session.googleOAuthStates = {
+      ...(session.googleOAuthStates || {}),
+      [state]: stateData,
+    };
+  };
+
+  const consumeGoogleOAuthState = (
+    session: GoogleOAuthSession | null | undefined,
+    state: string,
+  ): GoogleOAuthStateRecord | undefined => {
+    cleanupGoogleOAuthStateStore();
+    cleanupGoogleOAuthSessionStates(session);
+
+    const sessionState = session?.googleOAuthStates?.[state];
+    if (session?.googleOAuthStates) {
+      delete session.googleOAuthStates[state];
+      if (Object.keys(session.googleOAuthStates).length === 0) {
+        delete session.googleOAuthStates;
+      }
+    }
+
+    const memoryState = googleOAuthStateStore.get(state);
+    googleOAuthStateStore.delete(state);
+
+    return sessionState || memoryState;
+  };
 
   const normalizeGoogleOAuthFailureMessage = (value: unknown): string | undefined => {
     const raw =
@@ -593,14 +658,17 @@ export async function registerRoutes(
       ? req.query.provider_hint.trim().toLowerCase()
       : "";
     const returnUrl = normalizeGoogleReturnUrl(req.query.returnUrl);
+    const session = req.session as GoogleOAuthSession | undefined;
     cleanupGoogleOAuthStateStore();
+    cleanupGoogleOAuthSessionStates(session);
 
     const state = randomBytes(24).toString("hex");
-    googleOAuthStateStore.set(state, {
+    const stateData = {
       createdAt: Date.now(),
       providerHint: providerHint || undefined,
       returnUrl,
-    });
+    };
+    storeGoogleOAuthState(session, state, stateData);
 
     const params = new URLSearchParams({
       client_id: env.GOOGLE_CLIENT_ID,
@@ -615,7 +683,20 @@ export async function registerRoutes(
       params.set("login_hint", loginHint);
     }
 
-    return res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
+    const redirectToGoogle = () =>
+      res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
+
+    if (session?.save) {
+      return session.save((error) => {
+        if (error) {
+          console.error("[Auth] Failed to persist Google OAuth state in session:", error);
+          return res.redirect("/login?error=session_save_error");
+        }
+        return redirectToGoogle();
+      });
+    }
+
+    return redirectToGoogle();
   });
 
   app.get("/api/auth/google/status", (_req, res) => {
@@ -664,9 +745,8 @@ export async function registerRoutes(
         return res.redirect("/login?error=google_invalid_response");
       }
 
-      cleanupGoogleOAuthStateStore();
-      const stateData = googleOAuthStateStore.get(state);
-      googleOAuthStateStore.delete(state);
+      const session = req.session as GoogleOAuthSession | undefined;
+      const stateData = consumeGoogleOAuthState(session, state);
       if (!stateData) {
         return res.redirect("/login?error=google_invalid_state");
       }
