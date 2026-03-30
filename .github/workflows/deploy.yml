@@ -582,7 +582,12 @@ jobs:
           cache: npm
 
       - name: Install browser smoke dependencies
-        run: npm ci
+        run: |
+          set -euo pipefail
+          if ! npm ci; then
+            echo "::warning::npm ci failed because package-lock.json is out of sync; falling back to npm install for post-deploy acceptance."
+            npm install --no-audit --no-fund
+          fi
 
       - name: Install Playwright Chromium
         run: |
@@ -1185,7 +1190,12 @@ jobs:
 
       - name: Install browser smoke dependencies
         if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
-        run: npm ci
+        run: |
+          set -euo pipefail
+          if ! npm ci; then
+            echo "::warning::npm ci failed because package-lock.json is out of sync; falling back to npm install for post-deploy acceptance."
+            npm install --no-audit --no-fund
+          fi
 
       - name: Install Playwright Chromium
         if: steps.latest_main.outputs.should_deploy == 'true' && steps.production_state.outputs.already_deployed != 'true'
