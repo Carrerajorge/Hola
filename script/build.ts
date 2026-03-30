@@ -2,10 +2,21 @@ import { build as esbuild, BuildResult } from "esbuild";
 import { build as viteBuild } from "vite";
 import { copyFile, mkdir, rm, readFile, writeFile } from "fs/promises";
 import { spawn } from "child_process";
+import path from "path";
+import { createRequire } from "module";
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times.
 const allowlist: string[] = [];
 const buildPhase = process.env.ILIAGPT_BUILD_PHASE ?? "all";
+const require = createRequire(import.meta.url);
+const openClawRoot = path.resolve("server/openclaw");
+const openClawRootWithSep = `${openClawRoot}${path.sep}`;
+
+function isOpenClawSourceImporter(importer: string | undefined) {
+  if (!importer) return false;
+  const normalized = path.resolve(importer);
+  return normalized === openClawRoot || normalized.startsWith(openClawRootWithSep);
+}
 
 async function bumpBuiltSwCleanupVersion() {
   // Ensure the built SW cleanup script changes on each production build.
@@ -153,6 +164,18 @@ async function buildServer(appVersion: string) {
         setup(build) {
           build.onResolve({ filter: /^[^./]|^\.[^./]|^\.\.[^/]/ }, (args) => {
             if (args.path.startsWith("@shared")) return;
+            // The host app still imports some embedded OpenClaw source files
+            // directly. Those modules expect OpenClaw's local Zod 4 runtime,
+            // while Hola's root dependency tree still pins Zod 3. If we leave
+            // "zod" as a bare external here, Node resolves it from /app/node_modules
+            // at runtime and startup crashes with "z.registry is not a function".
+            // Resolve OpenClaw-source imports of zod against server/openclaw so
+            // esbuild can bundle the correct runtime into those chunks.
+            if (args.path === "zod" && isOpenClawSourceImporter(args.importer)) {
+              return {
+                path: require.resolve("zod", { paths: [openClawRoot] }),
+              };
+            }
             // Keep embedded OpenClaw on its own dependency/runtime boundary.
             // Bundling @hola/openclaw into the app server pulls OpenClaw's Zod 4-era
             // config/runtime code into Hola's root Zod 3 bundle, which causes
