@@ -239,7 +239,7 @@ export function RecordingPanel({
               type="submit"
               size="icon"
               className={cn(
-                "h-9 w-9 sm:h-8 sm:w-8 shrink-0 rounded-xl transition-all duration-200",
+                "h-9 w-9 sm:h-8 sm:w-8 shrink-0 rounded-xl transition-all duration-200 liquid-button",
                 canSendNow
                   ? "bg-primary text-primary-foreground hover:bg-primary/90 shadow-md scale-105"
                   : "bg-muted text-muted-foreground cursor-not-allowed"
