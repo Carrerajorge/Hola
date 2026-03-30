@@ -229,7 +229,7 @@
     "discord-api-types": "^0.38.42",
     "dockerode": "^4.0.9",
     "docx": "^9.5.3",
-    "dompurify": "^3.3.1",
+    "dompurify": "^3.3.2",
     "dotenv": "^17.2.4",
     "drizzle-orm": "^0.45.1",
     "drizzle-zod": "^0.8.3",
