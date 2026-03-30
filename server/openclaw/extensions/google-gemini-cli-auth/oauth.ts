@@ -5,7 +5,7 @@ import { delimiter, dirname, join } from "node:path";
 import {
   fetchWithSsrFGuard,
   isWSL2Sync,
-} from "../../../../external/openclaw/src/plugin-sdk/google-gemini-cli-auth.ts";
+} from "../../src/plugin-sdk/google-gemini-cli-auth.ts";
 
 const CLIENT_ID_KEYS = [
   "OPENCLAW_GEMINI_OAUTH_CLIENT_ID",
