@@ -783,6 +783,8 @@ export interface SendMessageAck {
   deduplicated?: boolean;
   /** Resolved real chat ID (may differ from pending ID used locally). */
   chatId?: string;
+  /** Present if the server or network rejected the message, despite optimistic enqueueing. */
+  error?: string;
 }
 
 /**
@@ -2343,7 +2345,7 @@ export function useChats() {
       if (retryable && normalizedMessage.role === "user") {
         enqueueFailedMessageForRecovery(resolvedChatId, normalizedMessage);
       }
-      return { chatId: resolvedChatId };
+      return { chatId: resolvedChatId, error: errText || `HTTP ${res.status}` };
     } catch (error) {
       console.error("Error saving message to server:", error);
 
@@ -2364,7 +2366,7 @@ export function useChats() {
         enqueueFailedMessageForRecovery(resolvedChatId, normalizedMessage);
       }
 
-      return { chatId: resolvedChatId };
+      return { chatId: resolvedChatId, error: error instanceof Error ? error.message : String(error) };
     }
   }, []);
 
