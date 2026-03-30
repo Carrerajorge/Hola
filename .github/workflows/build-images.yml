@@ -188,14 +188,14 @@ jobs:
 
       - name: Set up Docker Buildx (prefetched mirror)
         if: steps.latest_main_guard.outputs.should_deploy == 'true' && steps.buildkit_image.outputs.driver_image != ''
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
         with:
           driver-opts: |
             image=${{ steps.buildkit_image.outputs.driver_image }}
 
       - name: Set up Docker Buildx (default image fallback)
         if: steps.latest_main_guard.outputs.should_deploy == 'true' && steps.buildkit_image.outputs.driver_image == ''
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build & push app image (runner stage)
         id: build_app
