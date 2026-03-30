@@ -102,6 +102,27 @@ reload_nginx() {
     fi
 }
 
+free_slot_port() {
+    local port="$1"
+    local containers=()
+    local listeners=""
+
+    mapfile -t containers < <(docker ps --filter "publish=${port}" --format '{{.Names}}')
+    if [ "${#containers[@]}" -gt 0 ]; then
+        warn "Port ${port} is occupied by Docker containers: ${containers[*]}. Removing them before deploy."
+        docker rm -f "${containers[@]}" >/dev/null 2>&1 || true
+    fi
+
+    if command -v ss >/dev/null 2>&1; then
+        listeners="$(ss -ltnp "( sport = :${port} )" 2>/dev/null | tail -n +2 || true)"
+        if [ -n "${listeners}" ]; then
+            error "Port ${port} is still occupied after Docker cleanup:"
+            printf '%s\n' "${listeners}" >&2
+            return 1
+        fi
+    fi
+}
+
 # Extract env value from file
 extract_env_value() {
     local file="$1"
@@ -177,6 +198,7 @@ main() {
     # Stop any existing containers in the inactive slot
     log "Stopping existing ${INACTIVE_SLOT} containers..."
     docker rm -f "hola-${INACTIVE_SLOT}-app" "hola-${INACTIVE_SLOT}-worker" "hola-${INACTIVE_SLOT}-sandbox" 2>/dev/null || true
+    free_slot_port "${INACTIVE_PORT}"
     
     # Run migrations on the new image
     log "Running migrations..."
