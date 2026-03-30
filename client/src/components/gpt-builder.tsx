@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogContent, FullScreenDialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -525,7 +525,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-screen h-screen max-w-none rounded-none p-0 gap-0 overflow-hidden" data-testid="gpt-builder-dialog">
+      <FullScreenDialogContent className="overflow-hidden" data-testid="gpt-builder-dialog">
         <DialogTitle className="sr-only">Configurar GPT</DialogTitle>
         <DialogDescription className="sr-only">Constructor de GPT personalizado</DialogDescription>
         <div className="flex flex-col h-full bg-background">
@@ -1354,7 +1354,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
             </DialogContent>
           </Dialog>
         )}
-      </DialogContent>
+      </FullScreenDialogContent>
     </Dialog >
   );
 }

@@ -644,3 +644,108 @@ export function useChatStreamContent(chatId: string | null | undefined): string 
     return state.runs.get(chatId)?.content || '';
   });
 }
+
+// ============================================================================
+// PERFORMANCE METRICS
+// ============================================================================
+
+export interface StreamPerformanceMetrics {
+  startTime: number;
+  firstTokenTime: number | null;
+  endTime: number | null;
+  tokenCount: number;
+  charCount: number;
+  duration: number;
+  tokensPerSecond: number;
+  timeToFirstToken: number;
+}
+
+const performanceMetrics = new Map<string, StreamPerformanceMetrics>();
+
+export function recordStreamStart(chatId: string): void {
+  performanceMetrics.set(chatId, {
+    startTime: performance.now(),
+    firstTokenTime: null,
+    endTime: null,
+    tokenCount: 0,
+    charCount: 0,
+    duration: 0,
+    tokensPerSecond: 0,
+    timeToFirstToken: 0,
+  });
+}
+
+export function recordStreamToken(chatId: string, tokenLength: number): void {
+  const metrics = performanceMetrics.get(chatId);
+  if (!metrics) return;
+
+  const now = performance.now();
+  if (metrics.firstTokenTime === null) {
+    metrics.firstTokenTime = now;
+    metrics.timeToFirstToken = now - metrics.startTime;
+  }
+
+  metrics.tokenCount++;
+  metrics.charCount += tokenLength;
+}
+
+export function recordStreamEnd(chatId: string): StreamPerformanceMetrics | null {
+  const metrics = performanceMetrics.get(chatId);
+  if (!metrics) return null;
+
+  const endTime = performance.now();
+  const duration = (endTime - metrics.startTime) / 1000;
+
+  metrics.endTime = endTime;
+  metrics.duration = duration;
+  metrics.tokensPerSecond = duration > 0 ? metrics.tokenCount / duration : 0;
+
+  // Log metrics
+  console.info(`[Stream Performance] Chat ${chatId}:`, {
+    duration: `${duration.toFixed(2)}s`,
+    tokens: metrics.tokenCount,
+    tokensPerSecond: metrics.tokensPerSecond.toFixed(2),
+    timeToFirstToken: `${metrics.timeToFirstToken.toFixed(2)}ms`,
+    chars: metrics.charCount,
+  });
+
+  return { ...metrics };
+}
+
+export function getStreamMetrics(chatId: string): StreamPerformanceMetrics | null {
+  const metrics = performanceMetrics.get(chatId);
+  return metrics ? { ...metrics } : null;
+}
+
+export function clearStreamMetrics(chatId: string): void {
+  performanceMetrics.delete(chatId);
+}
+
+// ============================================================================
+// OPTIMIZED SELECTORS (to prevent unnecessary re-renders)
+// ============================================================================
+
+// Selector for just the streaming status (prevents re-renders on content changes)
+export function useChatIsStreaming(chatId: string | null | undefined): boolean {
+  return useStreamingStore((state) => {
+    if (!chatId) return false;
+    const run = state.runs.get(chatId);
+    return run?.status === 'streaming' || run?.status === 'started';
+  });
+}
+
+// Selector for stream status only
+export function useChatStreamStatus(chatId: string | null | undefined): StreamingStatus | null {
+  return useStreamingStore((state) => {
+    if (!chatId) return null;
+    return state.runs.get(chatId)?.status || null;
+  });
+}
+
+// Selector for stream start time
+export function useChatStreamStartTime(chatId: string | null | undefined): number | null {
+  return useStreamingStore((state) => {
+    if (!chatId) return null;
+    return state.runs.get(chatId)?.startedAt || null;
+  });
+}
