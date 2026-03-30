@@ -79,7 +79,7 @@ run_db_push() {
     return 1
   fi
 
-  npm run db:push
+  npm run db:push -- --force
 }
 
 restart_app() {
@@ -108,7 +108,7 @@ sync_to_vps() {
 }
 
 run_remote_cmd() {
-  ssh ${SSH_OPTS} "${VPS_USER}@${VPS_HOST}" "bash -lc 'cd ${VPS_DIR} && ensure_pnpm() { if command -v pnpm >/dev/null 2>&1; then return 0; fi; if command -v corepack >/dev/null 2>&1; then corepack enable >/dev/null 2>&1 || true; corepack prepare pnpm@10 --activate >/dev/null 2>&1 || true; fi; if command -v pnpm >/dev/null 2>&1; then return 0; fi; npm install -g pnpm@10 >/dev/null 2>&1; export PATH=\"\$(npm config get prefix)/bin:\${PATH}\"; hash -r; command -v pnpm >/dev/null 2>&1; } && ensure_pnpm && npm install --no-package-lock --no-audit --no-fund && (cd server/openclaw && npm install --no-package-lock --no-audit --no-fund) && npm run build && ( source .env.production 2>/dev/null || true; source .env 2>/dev/null || true; if [ -z \"\${DATABASE_URL:-}\" ]; then echo \"DATABASE_URL not set. Add DATABASE_URL to environment or .env.production/.env before deploy.\" >&2; exit 1; fi; npm run db:push; ) && if pm2 describe iliagpt-host >/dev/null 2>&1; then pm2 restart iliagpt-host --update-env; elif pm2 describe michat >/dev/null 2>&1; then pm2 restart michat --update-env; else pm2 start npm --name iliagpt-host -- start; fi'"
+  ssh ${SSH_OPTS} "${VPS_USER}@${VPS_HOST}" "bash -lc 'cd ${VPS_DIR} && ensure_pnpm() { if command -v pnpm >/dev/null 2>&1; then return 0; fi; if command -v corepack >/dev/null 2>&1; then corepack enable >/dev/null 2>&1 || true; corepack prepare pnpm@10 --activate >/dev/null 2>&1 || true; fi; if command -v pnpm >/dev/null 2>&1; then return 0; fi; npm install -g pnpm@10 >/dev/null 2>&1; export PATH=\"\$(npm config get prefix)/bin:\${PATH}\"; hash -r; command -v pnpm >/dev/null 2>&1; } && ensure_pnpm && npm install --no-package-lock --no-audit --no-fund && (cd server/openclaw && npm install --no-package-lock --no-audit --no-fund) && npm run build && ( source .env.production 2>/dev/null || true; source .env 2>/dev/null || true; if [ -z \"\${DATABASE_URL:-}\" ]; then echo \"DATABASE_URL not set. Add DATABASE_URL to environment or .env.production/.env before deploy.\" >&2; exit 1; fi; npm run db:push -- --force; ) && if pm2 describe iliagpt-host >/dev/null 2>&1; then pm2 restart iliagpt-host --update-env; elif pm2 describe michat >/dev/null 2>&1; then pm2 restart michat --update-env; else pm2 start npm --name iliagpt-host -- start; fi'"
 }
 
 deploy_on_target() {
