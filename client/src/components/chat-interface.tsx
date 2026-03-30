@@ -8477,15 +8477,31 @@ export function ChatInterface({
         await applyPromptIntegrity();
         void onSendMessage(userMsg)
           .then((ack) => {
+            if (!ack && (!chatId || chatId.startsWith("pending-"))) {
+               throw new Error("No se pudo crear la sesión");
+            }
             sendMessageAck = ack;
             markMessageDeliverySent(userMsgId);
             return ack;
           })
           .catch((err) => {
             console.warn(
-              "[handleSubmit] Failed to persist user message (will still attempt streaming):",
+              "[handleSubmit] Failed to persist user message:",
               err,
             );
+            setInput(userInput);
+            setUploadedFiles(savedMainFiles);
+            setOptimisticMessages((prev: Message[]) => prev.filter(m => m.id !== userMsgId));
+            toast({
+              title: "Error de conexión",
+              description: "No pudimos enviar tu mensaje. El texto ha sido restaurado.",
+              variant: "destructive",
+            });
+            setAiStateForChat("idle", submitConversationId);
+            setAiProcessStepsForChat([], submitConversationId);
+            if (abortControllerRef.current) {
+                abortControllerRef.current.abort();
+            }
             return undefined;
           });
 

@@ -672,30 +672,31 @@ export default function Home() {
     setIsNewChatMode(false);
     const provisionalChatId = resolveRealChatId(pendingId);
 
-    // Return the provisional real chatId immediately so the first stream can
-    // start without waiting for the message-save round-trip.
-    void addMessage(pendingId, messageWithGptContext)
-      .then((result) => {
-        const realId =
-          result?.run?.chatId ||
-          (result ? resolveRealChatId(pendingId) : provisionalChatId);
-        if (realId && !realId.startsWith("pending-")) {
-          moveConversationUiState(pendingId, realId);
-          // addMessage already renames the chat entry and updates activeChatId,
-          // but call setActiveChatId again as a safety net.
-          setActiveChatId(realId);
-          // Keep the ref pointing to the real ID so that stale closures in
-          // useStreamChat.finalize → handleSendMessage can still find the correct
-          // chat via pendingChatIdRef.current (refs are read by reference, not
-          // captured by value like state).
-          pendingChatIdRef.current = realId;
-          // Silently update the URL bar without triggering wouter's router.
-          window.history.replaceState(null, "", `/chat/${realId}`);
-        }
-      })
-      .catch((error) => {
-        console.error("[home] Failed to persist first message for new chat:", error);
-      });
+    try {
+      const result = await addMessage(pendingId, messageWithGptContext);
+      if (!result) {
+         throw new Error("No response from server");
+      }
+      if (result.error) {
+         throw new Error(result.error);
+      }
+      
+      const realId = result?.run?.chatId || resolveRealChatId(pendingId);
+      if (realId && !realId.startsWith("pending-")) {
+        moveConversationUiState(pendingId, realId);
+        setActiveChatId(realId);
+        pendingChatIdRef.current = realId;
+        window.history.replaceState(null, "", `/chat/${realId}`);
+      }
+    } catch (error) {
+      console.error("[home] Failed to persist first message for new chat:", error);
+      // Revert the UI state
+      setChats(prev => prev.filter(c => c.id !== pendingId));
+      setIsNewChatMode(true);
+      setActiveChatId(null);
+      pendingChatIdRef.current = null;
+      throw error; // Let ChatInterface handle the error to restore composer text
+    }
 
     return { chatId: provisionalChatId };
   }, [activeGptId, addMessage, createChat, ensureConversationUiState, moveConversationUiState, newChatStableKey, setActiveChatId]);
