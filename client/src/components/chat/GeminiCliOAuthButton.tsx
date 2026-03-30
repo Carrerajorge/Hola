@@ -28,9 +28,9 @@ import { normalizeAppBuildVersion } from "@/lib/chunk-recovery";
 
 type GeminiCliOAuthButtonProps = {
   onConnected?: (modelId: string) => void | Promise<void>;
-  /** When true, auto-accept risk and start the OAuth flow immediately on open */
+  /** When true, auto-accept the risk warning and start the OAuth flow immediately on dialog open. */
   autoStart?: boolean;
-  /** Pre-fill the email hint for the Google OAuth flow */
+  /** Pre-fill the email field (e.g. from the logged-in user) so Google auto-selects the right account. */
   initialEmail?: string;
   renderTrigger?: (state: {
     isBusy: boolean;
@@ -369,7 +369,7 @@ function resolveFlowForCallbackInput(params: {
 export function GeminiCliOAuthButton({
   onConnected,
   autoStart = false,
-  initialEmail,
+  initialEmail = "",
   renderTrigger,
 }: GeminiCliOAuthButtonProps) {
   const { toast } = useToast();
@@ -383,8 +383,13 @@ export function GeminiCliOAuthButton({
     null,
   );
   const [callbackUrl, setCallbackUrl] = React.useState("");
-  const [preferredEmail, setPreferredEmail] = React.useState(initialEmail || "");
-  const autoStartTriggeredRef = React.useRef(false);
+  const [preferredEmail, setPreferredEmail] = React.useState(initialEmail);
+  // Sync initialEmail prop changes (e.g. user logs in after mount)
+  React.useEffect(() => {
+    if (initialEmail && !preferredEmail) {
+      setPreferredEmail(initialEmail);
+    }
+  }, [initialEmail]); // eslint-disable-line react-hooks/exhaustive-deps
   const popupRef = React.useRef<Window | null>(null);
   const lastAutoCompletedCallbackRef = React.useRef<string | null>(null);
   const lastBridgePayloadSignatureRef = React.useRef<string | null>(null);

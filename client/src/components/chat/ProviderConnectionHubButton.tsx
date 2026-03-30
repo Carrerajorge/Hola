@@ -27,6 +27,7 @@ import {
   useProviderDisconnect,
 } from "@/hooks/use-provider-oauth";
 import { useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/use-auth";
 
 type ProviderConnectionHubButtonProps = {
   availableModels: AvailableModel[];
@@ -166,44 +167,60 @@ export function ProviderConnectionHubButton({
 }: ProviderConnectionHubButtonProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const userEmail = user?.email || "";
   const [open, setOpen] = React.useState(false);
   const [anthropicKeyOpen, setAnthropicKeyOpen] = React.useState(false);
   const [anthropicKey, setAnthropicKey] = React.useState("");
 
+  // Track which provider should auto-start its OAuth flow (set by auto-connect event)
+  const [autoStartProvider, setAutoStartProvider] = React.useState<string | null>(null);
+
   // Refs to auto-open specific provider dialogs after OAuth login redirect
   const geminiOpenDialogRef = React.useRef<(() => void) | null>(null);
   const openaiOpenDialogRef = React.useRef<(() => void) | null>(null);
-  // Track which provider should auto-start OAuth immediately (from login redirect)
-  const [autoStartProvider, setAutoStartProvider] = React.useState<string | null>(null);
+
+  // Trigger auto-connect for a specific provider: opens the hub dialog and
+  // then the specific provider sub-dialog with autoStart enabled.
+  const triggerAutoConnect = React.useCallback((provider: string) => {
+    setAutoStartProvider(provider);
+    setOpen(true);
+    const timer = window.setTimeout(() => {
+      if (provider === "gemini" && geminiOpenDialogRef.current) {
+        geminiOpenDialogRef.current();
+      } else if (provider === "openai" && openaiOpenDialogRef.current) {
+        openaiOpenDialogRef.current();
+      }
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   // Listen for auto-connect-provider events dispatched after OAuth login
   React.useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent).detail;
       if (!detail?.provider) return;
-      const provider = detail.provider;
-      // Only act if the relevant dialog ref is ready
-      if (provider === "gemini" && !geminiOpenDialogRef.current) return;
-      if (provider === "openai" && !openaiOpenDialogRef.current) return;
       // Clear the pending hint from sessionStorage since we're handling it
       try { sessionStorage.removeItem("iliagpt:pending-provider-connect"); } catch {}
-      // Mark which provider should auto-start
-      setAutoStartProvider(detail.provider);
-      // Open the hub dialog first
-      setOpen(true);
-      // Then auto-open the specific provider dialog after a small delay
-      const timer = window.setTimeout(() => {
-        if (provider === "gemini" && geminiOpenDialogRef.current) {
-          geminiOpenDialogRef.current();
-        } else if (provider === "openai" && openaiOpenDialogRef.current) {
-          openaiOpenDialogRef.current();
-        }
-      }, 400);
-      return () => window.clearTimeout(timer);
+      triggerAutoConnect(detail.provider);
     };
     window.addEventListener("auto-connect-provider", handler);
     return () => window.removeEventListener("auto-connect-provider", handler);
-  }, []);
+  }, [triggerAutoConnect]);
+
+  // On mount, check sessionStorage for a pending auto-connect provider
+  // (set by home.tsx before this component may have mounted — race-condition fix).
+  React.useEffect(() => {
+    try {
+      const pending = window.sessionStorage.getItem("iliagpt:auto-connect-provider");
+      if (pending === "gemini" || pending === "openai") {
+        window.sessionStorage.removeItem("iliagpt:auto-connect-provider");
+        // Small delay so refs are populated by the first render
+        const timer = window.setTimeout(() => triggerAutoConnect(pending), 300);
+        return () => window.clearTimeout(timer);
+      }
+    } catch { /* ignore */ }
+  }, [triggerAutoConnect]);
 
   const { data: providerStatus, refetch: refetchStatus } = useAllProvidersStatus();
   const anthropicKeyMutation = useAnthropicKeySubmit();
@@ -337,6 +354,7 @@ export function ProviderConnectionHubButton({
               <GeminiCliOAuthButton
                 onConnected={handleConnected}
                 autoStart={autoStartProvider === "gemini"}
+                initialEmail={userEmail}
                 renderTrigger={({ isBusy, isConnected, openDialog }) => {
                   geminiOpenDialogRef.current = openDialog;
                   return (

@@ -108,8 +108,9 @@ export default function Home() {
   }, [user, isLoading, isReady, setLocation]);
 
   // After OAuth login with provider_hint, auto-trigger the provider connection dialog.
-  // The server redirects to /?auth=success&auto_connect_provider=gemini (or openai) after Google OAuth.
-  // We persist the hint in sessionStorage so it survives component re-mounts and lazy loading.
+  // The server redirects to /?auth=success&provider=gemini (or openai) after Google OAuth.
+  // Uses sessionStorage so the signal survives even if ProviderConnectionHubButton
+  // mounts later than the event dispatch (race-condition fix).
   useEffect(() => {
     if (!isReady || !user) return;
     const params = new URLSearchParams(window.location.search);
@@ -125,32 +126,16 @@ export default function Home() {
       params.delete("auth");
       const rest = params.toString();
       window.history.replaceState({}, "", rest ? `${window.location.pathname}?${rest}` : window.location.pathname);
-    }
-
-    // Check for pending provider connect (from URL or previous sessionStorage)
-    let pendingProvider: string | null = null;
-    try {
-      pendingProvider = sessionStorage.getItem("iliagpt:pending-provider-connect");
-    } catch {}
-
-    if (pendingProvider === "gemini" || pendingProvider === "openai") {
-      // Dispatch event with retry logic - components may not be mounted yet
-      let attempts = 0;
-      const maxAttempts = 5;
-      const dispatch = () => {
-        attempts++;
-        window.dispatchEvent(new CustomEvent("auto-connect-provider", { detail: { provider: pendingProvider, email: user?.claims?.email } }));
-        if (attempts >= maxAttempts) {
-          // Give up and clean sessionStorage
-          try { sessionStorage.removeItem("iliagpt:pending-provider-connect"); } catch {}
-        }
-      };
-      // Stagger dispatches: 600ms, 1500ms, 3000ms, 5000ms, 8000ms
-      const delays = [600, 1500, 3000, 5000, 8000];
-      const timers = delays.slice(0, maxAttempts).map((delay, i) =>
-        window.setTimeout(dispatch, delay),
-      );
-      return () => timers.forEach((t) => window.clearTimeout(t));
+      // Persist to sessionStorage so ProviderConnectionHubButton can pick it up
+      // even if it mounts after this effect runs.
+      try {
+        window.sessionStorage.setItem("iliagpt:auto-connect-provider", providerFromUrl);
+      } catch { /* ignore quota/privacy errors */ }
+      // Also dispatch event for components that are already mounted
+      const timer = window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("auto-connect-provider", { detail: { provider: providerFromUrl } }));
+      }, 600);
+      return () => window.clearTimeout(timer);
     }
   }, [isReady, user]);
 

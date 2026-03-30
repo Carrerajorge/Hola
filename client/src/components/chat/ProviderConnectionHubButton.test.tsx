@@ -11,6 +11,14 @@ vi.mock("@/hooks/use-toast", () => ({
   }),
 }));
 
+vi.mock("@/hooks/use-auth", () => ({
+  useAuth: () => ({
+    user: { email: "test@gmail.com" },
+    isReady: true,
+    isLoading: false,
+  }),
+}));
+
 vi.mock("@/hooks/use-provider-oauth", () => ({
   useAllProvidersStatus: () => ({
     data: {
