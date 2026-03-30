@@ -13,7 +13,7 @@ WORKDIR /app
 
 # Build-time tooling for native modules and git dependencies (OpenClaw has git deps)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-  python3 make g++ git \
+  python3 make g++ git ca-certificates \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
