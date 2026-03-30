@@ -1,7 +1,7 @@
 {
-  "tag": "v2026.3.24",
-  "commit": "cff6dc94e30794a269eb7805b6e636c3634a088c",
-  "packageVersion": "2026.3.24",
+  "tag": "v2026.3.28",
+  "commit": "4d9a54cc616bd044752d0bdd719a683cd0a22f18",
+  "packageVersion": "2026.3.28",
   "criticalPrefixes": [
     "agents/",
     "extensions/",
