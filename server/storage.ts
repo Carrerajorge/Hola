@@ -967,7 +967,12 @@ export class MemStorage implements IStorage {
   }
 
   async createChatMessage(message: InsertChatMessage): Promise<ChatMessage> {
-    const [result] = await db.insert(chatMessages).values(message).returning();
+    const normalizedMessage = {
+      ...message,
+      attachments: message.attachments && (Array.isArray(message.attachments) && message.attachments.length > 0) ? message.attachments : null,
+      userMessageId: message.userMessageId || null,
+    };
+    const [result] = await db.insert(chatMessages).values(normalizedMessage).returning();
     queueMicrotask(() => {
       db.update(chats)
         .set({ updatedAt: new Date() })
@@ -1295,6 +1300,8 @@ export class MemStorage implements IStorage {
       ...message,
       id: messageId,
       runId,
+      attachments: message.attachments && (Array.isArray(message.attachments) && message.attachments.length > 0) ? message.attachments : null,
+      userMessageId: message.userMessageId || null,
     };
 
     try {

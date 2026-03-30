@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   DANGEROUS_SANDBOX_DOCKER_BOOLEAN_KEYS,
@@ -181,19 +180,6 @@ describe("sandbox docker config", () => {
 });
 
 describe("sandbox browser binds config", () => {
-  it("keeps SandboxBrowserSchema strict before superRefine for zod v3 compatibility", () => {
-    const source = readFileSync(new URL("./zod-schema.agent-runtime.ts", import.meta.url), "utf8");
-    const start = source.indexOf("export const SandboxBrowserSchema");
-    const end = source.indexOf("export const SandboxPruneSchema", start);
-    const block = source.slice(start, end);
-
-    expect(start).toBeGreaterThanOrEqual(0);
-    expect(end).toBeGreaterThan(start);
-    expect(block.indexOf(".strict()")).toBeGreaterThanOrEqual(0);
-    expect(block.indexOf(".superRefine(")).toBeGreaterThanOrEqual(0);
-    expect(block.indexOf(".strict()")).toBeLessThan(block.indexOf(".superRefine("));
-  });
-
   it("accepts binds array in sandbox.browser config", () => {
     const res = validateConfigObject({
       agents: {

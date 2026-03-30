@@ -219,17 +219,21 @@ export const AssistantMessage = memo(function AssistantMessage({
             };
         }
 
+        const rawContentError = shouldHidePrimaryContent && message.content && message.content.length < 250
+            ? message.content.trim()
+            : null;
+
         return {
             title: "No se pudo completar",
             description:
-                responseHealthReason || "No hubo una salida valida para mostrar.",
+                rawContentError || responseHealthReason || "No hubo una salida valida para mostrar.",
             containerClass:
                 "border-slate-200/90 bg-slate-50/90 text-slate-950 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100",
             iconWrapClass:
                 "bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200",
             icon: AlertCircle,
         };
-    }, [responseHealth, responseHealthReason]);
+    }, [responseHealth, responseHealthReason, shouldHidePrimaryContent, message.content]);
 
     const actionContent = useMemo(() => {
         if (responseHealth?.state === "failed" && shouldHidePrimaryContent) {
