@@ -1,4 +1,5 @@
 # ILIAGPT Dockerfile - Optimized for lower disk usage in GitHub/VPS builds Multi-stage build for production
+# Cache bust: 2026-03-29-v2
 
 # Use Docker Official Images via Amazon ECR Public to reduce Docker Hub
 # throttling/auth failures in CI.
@@ -20,6 +21,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY package.json package-lock.json ./
 # Ensure mathjax sync script exists before npm ci postinstall hook
 COPY scripts/sync-mathjax-assets.cjs scripts/sync-mathjax-assets.cjs
+# Ensure openclaw package.json is available for corepack
+COPY server/openclaw/package.json ./server/openclaw/package.json
 # Copy all source files BEFORE npm install so file: dependencies (like @hola/openclaw) resolve
 COPY . .
 RUN set -eux; \
