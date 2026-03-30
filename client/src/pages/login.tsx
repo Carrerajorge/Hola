@@ -41,8 +41,16 @@ const OAUTH_ERROR_MESSAGES: Record<string, string> = {
   invalid_token: "Enlace mágico inválido o expirado.",
   magic_link_expired: "El enlace mágico ha expirado. Solicita uno nuevo.",
   session_error: "Error al crear la sesión. Por favor intenta de nuevo.",
+  session_save_error: "No se pudo guardar la sesión. Por favor intenta de nuevo.",
   verification_failed: "Error al verificar el enlace. Por favor intenta de nuevo.",
   google_failed: "Error al iniciar sesión con Google. Por favor intenta de nuevo.",
+  google_auth_failed: "Google rechazó la autenticación. Verifica la cuenta elegida e intenta de nuevo.",
+  google_invalid_response: "Google devolvió una respuesta inválida. Intenta de nuevo.",
+  google_invalid_state: "La sesión de autenticación de Google expiró. Intenta de nuevo.",
+  google_not_configured: "El inicio de sesión con Google no está configurado en este entorno.",
+  google_token_failed: "No se pudo completar el intercambio de token con Google. Intenta de nuevo.",
+  google_userinfo_failed: "No se pudo recuperar tu perfil desde Google. Intenta de nuevo.",
+  google_error: "Ocurrió un error inesperado durante el inicio de sesión con Google.",
   microsoft_failed: "Error al iniciar sesión con Microsoft. Por favor intenta de nuevo.",
   auth0_failed: "Error al iniciar sesión con Auth0. Por favor intenta de nuevo.",
   replit_disabled: "El inicio de sesión con Replit fue desactivado. Usa Google, teléfono o correo.",
@@ -93,13 +101,16 @@ export default function LoginPage() {
       setEmail(prefilledEmail);
     }
     const errorCode = params.get("error");
+    const providerMessage = (params.get("message") || "").trim();
     if (errorCode && OAUTH_ERROR_MESSAGES[errorCode]) {
-      setError(OAUTH_ERROR_MESSAGES[errorCode]);
+      const baseMessage = OAUTH_ERROR_MESSAGES[errorCode];
+      setError(providerMessage ? `${baseMessage} ${providerMessage}` : baseMessage);
     }
 
-    if (prefilledEmail || errorCode) {
+    if (prefilledEmail || errorCode || providerMessage) {
       params.delete("email");
       params.delete("error");
+      params.delete("message");
       const rest = params.toString();
       const nextUrl = rest ? `${window.location.pathname}?${rest}` : window.location.pathname;
       window.history.replaceState({}, "", nextUrl);

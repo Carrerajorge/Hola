@@ -55,6 +55,17 @@ describe("LoginPage", () => {
     apiFetchMock.mockReset();
     setLocationMock.mockReset();
     locationAssignMock.mockReset();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: {
+        ...originalLocation,
+        assign: locationAssignMock,
+        href: "http://localhost/login",
+        origin: "http://localhost",
+        pathname: "/login",
+        search: "",
+      },
+    });
     apiFetchMock.mockResolvedValue(
       new Response(JSON.stringify({ active: false }), {
         status: 200,
@@ -96,5 +107,31 @@ describe("LoginPage", () => {
     expect(openAiButton).toHaveTextContent("Conectando...");
     expect(googleButton).toHaveTextContent("Continuar con Google");
     expect(geminiButton).toHaveTextContent("Continuar con Gemini");
+  });
+
+  it("renders specific Google OAuth errors from the callback query params", async () => {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: {
+        ...originalLocation,
+        assign: locationAssignMock,
+        href: "http://localhost/login?error=google_not_configured&message=redirect_uri_mismatch",
+        origin: "http://localhost",
+        pathname: "/login",
+        search: "?error=google_not_configured&message=redirect_uri_mismatch",
+      },
+    });
+
+    render(<LoginPage />);
+
+    await waitFor(() => {
+      expect(apiFetchMock).toHaveBeenCalledWith("/api/auth/mfa/status");
+    });
+
+    expect(
+      screen.getByText(
+        "El inicio de sesión con Google no está configurado en este entorno. redirect_uri_mismatch"
+      )
+    ).toBeVisible();
   });
 });

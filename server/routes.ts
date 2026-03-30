@@ -463,6 +463,11 @@ export async function registerRoutes(
   app: Express,
 ): Promise<Server> {
   // Session + Passport are initialized in server/index.ts (before csrf/rateLimiter).
+  const googleCanonicalDomain = process.env.CANONICAL_DOMAIN || "iliagpt.com";
+  const googleCallbackURL =
+    env.NODE_ENV === "production"
+      ? `https://${googleCanonicalDomain}/api/auth/google/callback`
+      : `${env.BASE_URL}/api/auth/google/callback`;
 
   const normalizeGoogleLoginHint = (value: unknown): string | undefined => {
     if (typeof value !== "string") {
@@ -483,6 +488,54 @@ export async function registerRoutes(
     }
 
     return normalized;
+  };
+
+  const normalizeGoogleOAuthFailureMessage = (value: unknown): string | undefined => {
+    const raw =
+      typeof value === "string"
+        ? value
+        : value instanceof Error
+          ? value.message
+          : value == null
+            ? ""
+            : String(value);
+
+    const normalized = raw.replace(/\s+/g, " ").trim();
+    if (!normalized) {
+      return undefined;
+    }
+
+    return normalized.slice(0, 180);
+  };
+
+  const resolveGoogleOAuthFailure = (err: unknown, info?: unknown) => {
+    const message =
+      normalizeGoogleOAuthFailureMessage(
+        info && typeof info === "object" && "message" in (info as Record<string, unknown>)
+          ? (info as Record<string, unknown>).message
+          : undefined,
+      ) ??
+      normalizeGoogleOAuthFailureMessage(err) ??
+      normalizeGoogleOAuthFailureMessage(info);
+
+    const lower = (message || "").toLowerCase();
+
+    if (lower.includes("state") || lower.includes("csrf")) {
+      return { error: "google_invalid_state", message };
+    }
+    if (lower.includes("token") || lower.includes("authorization code")) {
+      return { error: "google_token_failed", message };
+    }
+    if (
+      lower.includes("access_denied") ||
+      lower.includes("oauth") ||
+      lower.includes("consent") ||
+      lower.includes("cancel")
+    ) {
+      return { error: "google_auth_failed", message };
+    }
+
+    return { error: "google_failed", message };
   };
 
   // Passport Auth Routes
@@ -510,12 +563,54 @@ export async function registerRoutes(
       (req as any).session.providerHint = providerHint;
     }
 
-    passport.authenticate("google", {
-      scope: ["openid", "email", "profile"],
-      accessType: "offline",
-      prompt: "select_account consent",
-      ...(loginHint ? { loginHint } : {}),
-    })(req, res, next);
+    const session = (req as any).session as any | undefined;
+    if (session) {
+      session.googleOAuthStartedAt = Date.now();
+      session.googleOAuthProvider = providerHint || "google";
+      session.googleOAuthLoginHint = loginHint || null;
+    }
+
+    const startGoogleOAuth = () =>
+      passport.authenticate("google", {
+        scope: ["openid", "email", "profile"],
+        accessType: "offline",
+        prompt: "select_account consent",
+        ...(loginHint ? { loginHint } : {}),
+      })(req, res, next);
+
+    if (session?.save) {
+      return session.save((saveErr: any) => {
+        if (saveErr) {
+          console.error("[Auth] Failed to persist session before Google OAuth:", saveErr);
+          return res.redirect("/login?error=session_error");
+        }
+        return startGoogleOAuth();
+      });
+    }
+
+    return startGoogleOAuth();
+  });
+
+  app.get("/api/auth/google/status", (_req, res) => {
+    res.json({
+      configured: Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
+      nodeEnv: env.NODE_ENV,
+      callbackURL: googleCallbackURL,
+      canonicalDomain: googleCanonicalDomain,
+    });
+  });
+
+  app.get("/api/auth/google/debug", (req, res) => {
+    const session = (req as any).session as any | undefined;
+    res.json({
+      configured: Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
+      nodeEnv: env.NODE_ENV,
+      callbackURL: googleCallbackURL,
+      canonicalDomain: googleCanonicalDomain,
+      sessionId: req.sessionID || null,
+      hasProviderHint: Boolean(session?.providerHint),
+      hasGoogleOAuthStartedAt: Boolean(session?.googleOAuthStartedAt),
+    });
   });
 
   if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
@@ -527,10 +622,20 @@ export async function registerRoutes(
       passport.authenticate(
         "google",
         { failureRedirect: "/login?error=google_failed" },
-        (err: any, user: any) => {
+        (err: any, user: any, info: any) => {
           (async () => {
             if (err || !user) {
-              return res.redirect("/login?error=google_failed");
+              const failure = resolveGoogleOAuthFailure(err, info);
+              console.error("[Auth] Google callback failed", {
+                error: failure.error,
+                message: failure.message,
+                sessionId: req.sessionID || null,
+                hasSession: Boolean((req as any).session),
+              });
+              const query = failure.message
+                ? `?error=${encodeURIComponent(failure.error)}&message=${encodeURIComponent(failure.message)}`
+                : `?error=${encodeURIComponent(failure.error)}`;
+              return res.redirect(`/login${query}`);
             }
 
             const userId = user?.claims?.sub || user?.id;
