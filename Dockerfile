@@ -69,7 +69,7 @@ RUN set -eux; \
   done; \
   }; \
   corepack prepare "$(node -p "require('./server/openclaw/package.json').packageManager")" --activate; \
-  retry_pnpm pnpm --dir server/openclaw install --frozen-lockfile; \
+  retry_pnpm pnpm --dir server/openclaw install; \
   pnpm --dir server/openclaw canvas:a2ui:bundle || \
   (echo "A2UI bundle: creating stub (non-fatal)" && \
   mkdir -p server/openclaw/src/canvas-host/a2ui && \
