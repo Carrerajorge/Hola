@@ -72,6 +72,9 @@ async function buildEmbeddedOpenClawControlUi() {
   const embeddedUiBuildEnv = {
     ...process.env,
     CI: process.env.CI || "true",
+    // Allow VPS deploys to refresh the vendored OpenClaw workspace even when the
+    // embedded lockfile/config drifted from the host checkout.
+    npm_config_frozen_lockfile: process.env.npm_config_frozen_lockfile || "false",
   };
 
   // Ensure UI dependencies are installed before building (CI may not have them)
