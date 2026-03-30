@@ -1,0 +1,337 @@
+name: Emergency Disk Recovery & Restart
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "RECOVER" to confirm'
+        required: true
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
+  VPS_USER: ${{ secrets.VPS_USER || 'root' }}
+  VPS_PORT: ${{ secrets.VPS_PORT || '8022' }}
+  DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/hola' }}
+
+jobs:
+  recover:
+    name: Free disk and recover active slot
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: https://iliagpt.com
+
+    steps:
+      - name: Validate confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "RECOVER" ]; then
+            echo "::error::Confirmation required. Type RECOVER to proceed."
+            exit 1
+          fi
+
+      - name: Setup SSH key
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          {
+            echo "Host *"
+            echo "  StrictHostKeyChecking accept-new"
+            echo "  PubkeyAcceptedKeyTypes +ssh-rsa"
+            echo "  HostKeyAlgorithms +ssh-rsa"
+          } > ~/.ssh/config
+          chmod 600 ~/.ssh/config
+
+      - name: Resolve reachable deploy endpoint
+        id: target
+        run: |
+          set -euo pipefail
+          DEFAULT_HOST="69.62.98.126"
+          HOSTS=()
+          if [ -n "${{ secrets.VPS_HOST }}" ]; then HOSTS+=("${{ secrets.VPS_HOST }}"); fi
+          HOSTS+=("${VPS_HOST}" "${DEFAULT_HOST}")
+          PORTS=("${VPS_PORT}" "8022" "22" "2222")
+
+          mapfile -t uniq_hosts < <(printf "%s\n" "${HOSTS[@]}" | awk 'NF' | awk '!seen[$0]++')
+          mapfile -t uniq_ports < <(printf "%s\n" "${PORTS[@]}" | awk 'NF' | awk '!seen[$0]++')
+
+          for host in "${uniq_hosts[@]}"; do
+            for port in "${uniq_ports[@]}"; do
+              echo "Trying ${VPS_USER}@${host}:${port}..."
+              ssh-keyscan -p "$port" -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
+              ssh_probe_opts=(
+                -i ~/.ssh/deploy_key
+                -p "$port"
+                -o StrictHostKeyChecking=accept-new
+                -o BatchMode=yes
+                -o ConnectTimeout=8
+                -o PubkeyAcceptedAlgorithms=+ssh-rsa
+                -o HostKeyAlgorithms=+ssh-rsa
+              )
+              if ssh "${ssh_probe_opts[@]}" -4 "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1 || \
+                 ssh "${ssh_probe_opts[@]}" "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1; then
+                echo "host=${host}" >> "$GITHUB_OUTPUT"
+                echo "port=${port}" >> "$GITHUB_OUTPUT"
+                echo "✓ Selected endpoint ${host}:${port}"
+                exit 0
+              fi
+            done
+          done
+
+          echo "::error::No reachable VPS endpoint found (hosts: ${uniq_hosts[*]} | ports: ${uniq_ports[*]})"
+          exit 1
+
+      - name: Free disk and recover services
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }} \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
+            -o PubkeyAcceptedAlgorithms=+ssh-rsa \
+            -o HostKeyAlgorithms=+ssh-rsa \
+            ${{ env.VPS_USER }}@${{ steps.target.outputs.host }} \
+            "DEPLOY_PATH='${{ env.DEPLOY_PATH }}' GHCR_USERNAME='${{ github.actor }}' GHCR_TOKEN='${{ github.token }}' bash -s" <<'ENDSSH'
+          set -euo pipefail
+
+          DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
+          STATE_FILE="${DEPLOY_PATH}/deploy-state.json"
+          SLOT_COMPOSE="${DEPLOY_PATH}/docker-compose.slot.yml"
+          GHCR_USERNAME="${GHCR_USERNAME:-}"
+          GHCR_TOKEN="${GHCR_TOKEN:-}"
+
+          extract_env_value() {
+            local file="$1"
+            local key="$2"
+            local line
+            line="$(grep -m1 -E "^${key}=" "$file" 2>/dev/null || true)"
+            if [ -z "$line" ]; then
+              return 1
+            fi
+            line="${line#*=}"
+            line="${line%$'\r'}"
+            line="${line%\"}"
+            line="${line#\"}"
+            line="${line%\'}"
+            line="${line#\'}"
+            echo "$line"
+          }
+
+          build_database_url() {
+            python3 -c "import sys, urllib.parse; user, password, host, port, dbname = sys.argv[1:]; print(f\"postgresql://{urllib.parse.quote(user, safe='')}:{urllib.parse.quote(password, safe='')}@{host}:{port}/{urllib.parse.quote(dbname, safe='')}\")" \
+              "$1" "$2" "$3" "$4" "$5"
+          }
+
+          write_database_url_override() {
+            printf '%s\n' \
+              'services:' \
+              '  app:' \
+              '    environment:' \
+              '      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}' \
+              '  worker:' \
+              '    environment:' \
+              '      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}' > "$1"
+          }
+
+          ensure_postgres_app_auth() {
+            local db_container="hola-postgres"
+            local verify_user="${POSTGRES_USER:-postgres}"
+            local verify_password="${POSTGRES_PASSWORD:-}"
+            local verify_db="${POSTGRES_DB:-iliagpt}"
+            local role_literal
+            local password_literal
+            local db_literal
+            local role_ident
+            local db_ident
+            local role_exists
+            local db_exists
+            local i
+
+            if [ -z "${verify_password}" ]; then
+              echo "ERROR: POSTGRES_PASSWORD is missing in .env.production"
+              return 1
+            fi
+
+            echo "Verifying Postgres app credentials for role ${verify_user}..."
+            for i in $(seq 1 30); do
+              if docker exec "${db_container}" pg_isready -U postgres >/dev/null 2>&1; then
+                break
+              fi
+              if [ "${i}" -eq 30 ]; then
+                echo "ERROR: Postgres admin socket not ready after 60s"
+                docker logs --tail=30 "${db_container}" 2>&1 || true
+                return 1
+              fi
+              sleep 2
+            done
+
+            if timeout 20 docker run --rm --pull never --network hola-net \
+              -e PGPASSWORD="${verify_password}" \
+              pgvector/pgvector:pg15 \
+              psql -h hola-postgres -U "${verify_user}" -d "${verify_db}" -tAc "SELECT 1" >/dev/null 2>&1; then
+              echo "Postgres app credentials verified."
+              return 0
+            fi
+
+            echo "Postgres app credentials rejected. Synchronizing role password from .env.production..."
+            role_literal="'$(printf '%s' "${verify_user}" | sed "s/'/''/g")'"
+            password_literal="'$(printf '%s' "${verify_password}" | sed "s/'/''/g")'"
+            db_literal="'$(printf '%s' "${verify_db}" | sed "s/'/''/g")'"
+            role_ident="\"$(printf '%s' "${verify_user}" | sed 's/\"/\"\"/g')\""
+            db_ident="\"$(printf '%s' "${verify_db}" | sed 's/\"/\"\"/g')\""
+
+            role_exists="$(docker exec -i "${db_container}" psql -U postgres -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname = ${role_literal} LIMIT 1" | tr -d '[:space:]' || true)"
+            if [ "${role_exists}" = "1" ]; then
+              if ! docker exec -i "${db_container}" psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+                -c "ALTER ROLE ${role_ident} WITH LOGIN PASSWORD ${password_literal}" >/dev/null; then
+                echo "ERROR: Failed to update Postgres role ${verify_user}"
+                return 1
+              fi
+            else
+              if ! docker exec -i "${db_container}" psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+                -c "CREATE ROLE ${role_ident} LOGIN PASSWORD ${password_literal}" >/dev/null; then
+                echo "ERROR: Failed to create Postgres role ${verify_user}"
+                return 1
+              fi
+            fi
+
+            db_exists="$(docker exec -i "${db_container}" psql -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = ${db_literal} LIMIT 1" | tr -d '[:space:]' || true)"
+            if [ "${db_exists}" != "1" ]; then
+              if ! docker exec -i "${db_container}" psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+                -c "CREATE DATABASE ${db_ident} OWNER ${role_ident}" >/dev/null; then
+                echo "ERROR: Failed to create Postgres database ${verify_db}"
+                return 1
+              fi
+            fi
+
+            if ! docker exec -i "${db_container}" psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+              -c "GRANT ALL PRIVILEGES ON DATABASE ${db_ident} TO ${role_ident}" >/dev/null; then
+              echo "ERROR: Failed to synchronize Postgres app credentials"
+              return 1
+            fi
+
+            if timeout 20 docker run --rm --pull never --network hola-net \
+              -e PGPASSWORD="${verify_password}" \
+              pgvector/pgvector:pg15 \
+              psql -h hola-postgres -U "${verify_user}" -d "${verify_db}" -tAc "SELECT 1" >/dev/null 2>&1; then
+              echo "Postgres app credentials synchronized."
+              return 0
+            fi
+
+            echo "ERROR: Postgres app credentials still failing after synchronization"
+            return 1
+          }
+
+          if [ ! -f "${STATE_FILE}" ]; then
+            echo "ERROR: state file not found"
+            exit 1
+          fi
+
+          ACTIVE_SLOT="$(python3 -c "import json; d=json.load(open('${STATE_FILE}')); print(d['active_slot'])")"
+          ACTIVE_PORT="$(python3 -c "import json; d=json.load(open('${STATE_FILE}')); print(d['active_port'])")"
+          IMAGE_TAG="$(python3 -c "import json; d=json.load(open('${STATE_FILE}')); print(d.get('image_tag','latest'))")"
+          APP_VERSION="$(python3 -c "import json; d=json.load(open('${STATE_FILE}')); print(d.get('app_version',''))")"
+
+          echo "=== before cleanup ==="
+          df -h "${DEPLOY_PATH}" || true
+          docker system df || true
+
+          echo "=== freeing disk ==="
+          docker container prune -f || true
+          docker image prune -af || true
+          docker builder prune -af || true
+          find /var/lib/docker/containers -type f -name '*-json.log' -exec truncate -s 0 {} + 2>/dev/null || true
+          journalctl --vacuum-size=200M || true
+          apt-get clean || true
+          rm -rf /tmp/* /var/tmp/* 2>/dev/null || true
+
+          echo "=== after cleanup ==="
+          df -h "${DEPLOY_PATH}" || true
+          docker system df || true
+
+          echo "=== restarting stateful services ==="
+          docker restart hola-redis || true
+          docker restart hola-postgres || true
+
+          echo "=== recreating active slot ${ACTIVE_SLOT} ==="
+          cd "${DEPLOY_PATH}"
+          if [ -n "${GHCR_TOKEN}" ] && [ -n "${GHCR_USERNAME}" ]; then
+            echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin >/dev/null
+          fi
+          SANDBOX_RUNNER_TOKEN="$(extract_env_value .env.production SANDBOX_RUNNER_TOKEN || true)"
+          REDIS_PASSWORD="$(extract_env_value .env.production REDIS_PASSWORD || true)"
+          POSTGRES_USER="$(extract_env_value .env.production POSTGRES_USER || true)"
+          POSTGRES_PASSWORD="$(extract_env_value .env.production POSTGRES_PASSWORD || true)"
+          POSTGRES_DB="$(extract_env_value .env.production POSTGRES_DB || true)"
+          POSTGRES_USER="${POSTGRES_USER:-postgres}"
+          POSTGRES_DB="${POSTGRES_DB:-iliagpt}"
+          DATABASE_URL="$(build_database_url "${POSTGRES_USER}" "${POSTGRES_PASSWORD}" "hola-postgres" "5432" "${POSTGRES_DB}")"
+          DB_OVERRIDE="$(mktemp /tmp/hola-db-override.XXXXXX.yml)"
+          trap 'rm -f "${DB_OVERRIDE}"' EXIT
+          write_database_url_override "${DB_OVERRIDE}"
+          ensure_postgres_app_auth
+          timeout 30 docker rm -f \
+            "hola-${ACTIVE_SLOT}-app" \
+            "hola-${ACTIVE_SLOT}-worker" \
+            "hola-${ACTIVE_SLOT}-sandbox" >/dev/null 2>&1 || true
+
+          SLOT="${ACTIVE_SLOT}" \
+          HOST_PORT="${ACTIVE_PORT}" \
+          IMAGE_TAG="${IMAGE_TAG}" \
+          APP_VERSION="${APP_VERSION}" \
+          SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN}" \
+          REDIS_PASSWORD="${REDIS_PASSWORD}" \
+          DATABASE_URL="${DATABASE_URL}" \
+          POSTGRES_USER="${POSTGRES_USER}" \
+          POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
+          POSTGRES_DB="${POSTGRES_DB}" \
+            timeout 180 docker compose -p "hola-${ACTIVE_SLOT}" -f "${SLOT_COMPOSE}" -f "${DB_OVERRIDE}" up -d --force-recreate app worker sandbox-runner
+
+          echo "=== waiting for local readiness ==="
+          for i in $(seq 1 36); do
+            HTTP_CODE="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${ACTIVE_PORT}/api/health/ready" 2>/dev/null || true)"
+            HTTP_CODE="${HTTP_CODE:-000}"
+            if [ "${HTTP_CODE}" = "200" ]; then
+              echo "Local readiness OK on attempt ${i}"
+              break
+            fi
+            echo "Attempt ${i}/36 local readiness HTTP ${HTTP_CODE}"
+            sleep 5
+          done
+
+          echo "=== final status ==="
+          df -h "${DEPLOY_PATH}" || true
+          docker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' | grep -E 'hola-|iliagpt|NAMES' || true
+          curl -sS -i "http://127.0.0.1:${ACTIVE_PORT}/api/health" || true
+          curl -sS -i "http://127.0.0.1:${ACTIVE_PORT}/api/health/ready" || true
+          ENDSSH
+
+      - name: Check production health
+        run: |
+          sleep 5
+          for i in $(seq 1 12); do
+            HTTP_CODE="$(curl -sS -o /dev/null -w '%{http_code}' https://iliagpt.com/api/health 2>/dev/null || true)"
+            HTTP_CODE="${HTTP_CODE:-000}"
+            if [ "${HTTP_CODE}" = "200" ]; then
+              echo "✓ Production is healthy (attempt ${i}, HTTP ${HTTP_CODE})"
+              exit 0
+            fi
+            echo "Attempt ${i}/12 production health HTTP ${HTTP_CODE}"
+            sleep 5
+          done
+
+          echo "✗ Production health check did not recover within 60s"
+          exit 1
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key ~/.ssh/config
