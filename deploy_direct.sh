@@ -53,6 +53,57 @@ load_env_file() {
   return 1
 }
 
+load_database_url_from_pm2() {
+  if ! command -v pm2 >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
+    return 1
+  fi
+
+  local value=""
+  value="$(
+    pm2 jlist 2>/dev/null | node -e '
+      let input = "";
+      process.stdin.on("data", (chunk) => (input += chunk));
+      process.stdin.on("end", () => {
+        try {
+          const apps = JSON.parse(input);
+          const preferredNames = ["iliagpt-host", "michat"];
+          const readDbUrl = (app) =>
+            app?.pm2_env?.env?.DATABASE_URL ||
+            app?.pm2_env?.DATABASE_URL ||
+            app?.env?.DATABASE_URL ||
+            "";
+
+          for (const name of preferredNames) {
+            const app = apps.find((entry) => entry?.name === name);
+            const url = readDbUrl(app);
+            if (url) {
+              process.stdout.write(url);
+              return;
+            }
+          }
+
+          for (const app of apps) {
+            const url = readDbUrl(app);
+            if (url) {
+              process.stdout.write(url);
+              return;
+            }
+          }
+        } catch {
+          process.exit(0);
+        }
+      });
+    '
+  )"
+
+  if [ -n "${value}" ]; then
+    export DATABASE_URL="${value}"
+    return 0
+  fi
+
+  return 1
+}
+
 ensure_database_url() {
   if [ -n "${DATABASE_URL:-}" ]; then
     return 0
@@ -68,6 +119,10 @@ ensure_database_url() {
     if [ -n "${DATABASE_URL:-}" ]; then
       return 0
     fi
+  fi
+
+  if load_database_url_from_pm2; then
+    return 0
   fi
 
   return 1
