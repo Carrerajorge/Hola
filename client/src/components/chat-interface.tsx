@@ -151,7 +151,7 @@ import { CodeExecutionBlock } from "@/components/code-execution-block";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { ShareChatDialog, ShareIcon } from "@/components/share-chat-dialog";
 import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
-import { computePromptIntegrity } from "@/lib/promptIntegrity";
+import { computePromptIntegrity, type PromptIntegrityMeta } from "@/lib/promptIntegrity";
 import { getEffectivePlan, isPaidPlan } from "@/lib/planUtils";
 import { DocumentGeneratorDialog } from "@/components/document-generator-dialog";
 import { GoogleFormsDialog } from "@/components/google-forms-dialog";
@@ -1699,6 +1699,18 @@ export function ChatInterface({
 
   // Optimistic messages - shown immediately before they appear in props
   const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
+
+  // Pre-compute prompt integrity while user types (reduces send latency)
+  const precomputedIntegrityRef = useRef<Promise<PromptIntegrityMeta> | null>(null);
+  const precomputedIntegrityInputRef = useRef<string>("");
+  
+  useEffect(() => {
+    const inputToHash = input || autoPromptForFiles;
+    if (inputToHash && inputToHash !== precomputedIntegrityInputRef.current) {
+      precomputedIntegrityInputRef.current = inputToHash;
+      precomputedIntegrityRef.current = computePromptIntegrity(inputToHash);
+    }
+  }, [input, autoPromptForFiles]);
 
   // Clean up optimistic messages once they appear in props.messages
   useEffect(() => {
@@ -5935,44 +5947,82 @@ export function ChatInterface({
   };
 
   const handleSubmit = async () => {
-    // ── Mutex guard: prevent re-entrant calls ──────────────────────────
-    if (isSubmitLocked()) {
-      console.log("[handleSubmit] Blocked: already submitting (sessionStorage lock active)");
-      return;
-    }
+    // ── Fast validation: check busy state and blocking files first ──────────────────────────
     const currentFilesAtSubmit = [...uploadedFilesRef.current];
-    const blockingFilesBeforeSubmit = currentFilesAtSubmit.filter(
-      isFileUploadBlockingSend,
-    );
-    if (blockingFilesBeforeSubmit.length > 0) {
+    const blockingFiles = currentFilesAtSubmit.filter(isFileUploadBlockingSend);
+    
+    if (blockingFiles.length > 0) {
       toast({
         title: "Subida en progreso",
-        description:
-          "Espera un momento a que termine la carga del archivo para enviarlo.",
+        description: "Espera un momento a que termine la carga del archivo para enviarlo.",
         duration: 3000,
       });
       return;
     }
 
-    // Prevent double-submit while THIS chat has a request in flight.
-    const thisChatBusy =
-      aiState !== "idle" && (!aiStateChatId || aiStateChatId === chatId);
-    if (thisChatBusy) {
-      console.log(
-        "[handleSubmit] Blocked: aiState is",
-        aiState,
-        "for chatId",
-        aiStateChatId,
-      );
+    // Simplified busy check - use aiState directly instead of sessionStorage mutex
+    if (aiState !== "idle" && (!aiStateChatId || aiStateChatId === chatId)) {
       toast({
-         title: "Espera un momento",
-         description: "Aún estamos procesando tu solicitud anterior.",
-         variant: "default",
-         duration: 3000,
+        title: "Espera un momento",
+        description: "Aún estamos procesando tu solicitud anterior.",
+        duration: 3000,
       });
       return;
     }
-    setSubmitLock();
+
+    // ── 1. OPTIMISTIC UI: IMMEDIATE UPDATE (0ms LATENCY) ──────────────────────────
+    const userInput = input || autoPromptForFiles;
+    const userMsgId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const userRequestId = generateRequestId(); // Single ID generation
+    
+    // Capture file state before clearing (for error recovery)
+    const currentUploadedFiles = [...uploadedFilesRef.current];
+    const savedMainFiles = [...currentUploadedFiles]; // Keep for error recovery
+    const hadPendingUploadsAtSubmit = pendingUploadsRef.current.size > 0 ||
+      currentUploadedFiles.some((f: UploadedFile) => isFileUploadBlockingSend(f));
+    const failedUploadsAtSubmit = currentUploadedFiles.filter((f: any) => f?.status === "error");
+    const shouldClearComposerFilesImmediately = !hadPendingUploadsAtSubmit;
+    
+    // Create minimal optimistic message immediately
+    const optimisticUserMsg: Message = {
+      id: userMsgId,
+      clientTempId: userMsgId,
+      role: "user",
+      content: userInput,
+      timestamp: new Date(),
+      requestId: userRequestId,
+      clientRequestId: userRequestId,
+      status: "pending",
+      deliveryStatus: "sending",
+      deliveryError: undefined,
+    } as any;
+
+    // Clear input and show message in ONE synchronous render pass
+    // Note: clearDraft is async and non-blocking, so we call it after flushSync
+    flushSync(() => {
+      setContextNotice(null);
+      setInput("");
+      if (shouldClearComposerFilesImmediately) {
+        setUploadedFiles([]);
+      }
+      setOptimisticMessages((prev: Message[]) => [...prev, optimisticUserMsg]);
+    });
+
+    // Clear draft asynchronously (non-blocking)
+    if (chatId) void clearDraft(chatId);
+
+    // Show toast for failed uploads (non-blocking)
+    if (shouldClearComposerFilesImmediately && failedUploadsAtSubmit.length > 0) {
+      toast({
+        title: "Archivo no adjuntado",
+        description: `${failedUploadsAtSubmit.length} archivo(s) fallaron al subir y no se incluyeron en el mensaje.`,
+        variant: "destructive",
+        duration: 4500,
+      });
+    }
+
+    // Mark as busy
+    setAiStateForChat("thinking", chatId || latestChatIdRef.current);
     try {
       const submitConversationId = chatId || latestChatIdRef.current;
       // When sending the very first message, the parent may create a pending chatId asynchronously.
@@ -5994,9 +6044,8 @@ export function ChatInterface({
       const ENABLE_EMERGENCY_BYPASS = false;
 
       // If input is present and starts with "!", do direct API call (dev only).
-      if (ENABLE_EMERGENCY_BYPASS && input.trim().startsWith("!")) {
-        const cleanInput = input.trim().substring(1);
-        setInput("");
+      if (ENABLE_EMERGENCY_BYPASS && userInput.trim().startsWith("!")) {
+        const cleanInput = userInput.trim().substring(1);
 
         const effectiveChatIdForStream =
           chatId && !chatId.startsWith("pending-")
@@ -6047,7 +6096,7 @@ export function ChatInterface({
       }
 
       // MOCK CITATION TRIGGER FOR VERIFICATION
-      if (input.trim() === "/test-citation") {
+      if (userInput.trim() === "/test-citation") {
         const mockMsg: Message = {
           id: `mock-${Date.now()}`,
           role: "assistant",
@@ -6069,19 +6118,18 @@ export function ChatInterface({
           ],
         };
         onSendMessage(mockMsg);
-        setInput("");
         return;
       }
 
       if (import.meta.env.DEV) {
         chatLogger.debug("handleSubmit called", {
-          inputLength: input.length,
+          inputLength: userInput.length,
           selectedTool,
         });
       }
 
       // Allow submit if: there's input text, OR there are sendable files, OR there's selected doc text with instruction
-      const hasInput = input.trim().length > 0;
+      const hasInput = userInput.trim().length > 0;
       const filesAtSubmit = [...uploadedFilesRef.current];
       const failedFilesAtSubmit = filesAtSubmit.filter(
         (f: UploadedFile) => f?.status === "error",
@@ -6093,7 +6141,7 @@ export function ChatInterface({
         isFileUploadBlockingSend,
       );
       const hasFiles = attachableFilesAtSubmit.length > 0;
-      const hasSelectionWithInstruction = selectedDocText && input.trim();
+      const hasSelectionWithInstruction = selectedDocText && userInput.trim();
 
       if (import.meta.env.DEV) {
         chatLogger.debug("handleSubmit content check", {
@@ -6133,7 +6181,7 @@ export function ChatInterface({
       // Deterministic local shortcut (no LLM/stream): create Desktop folder immediately.
       // Uses keyword detection + name extraction to handle ANY word order in Spanish/English.
       if (hasInput && !hasFiles) {
-        const userText = input.trim();
+        const userText = userInput.trim();
 
         // Step 1: Detect intent — does the user want to create a folder on the desktop?
         const hasCreateVerb =
@@ -6364,7 +6412,7 @@ export function ChatInterface({
       // Intercepts /local <cmd> prefixed commands AND natural language commands
       // (rm, read, shell, sysinfo, write, ls, cp, etc.) BEFORE the LLM stream.
       if (hasInput && !hasFiles) {
-        const userText2 = input.trim();
+        const userText2 = userInput.trim();
         let isLocalExecIntent = false;
         console.log(
           "[LocalControl] Checking general interception for:",
@@ -7095,9 +7143,8 @@ export function ChatInterface({
       }
 
       // If there's selected text from document, rewrite it
-      if (selectedDocText && applyRewriteRef.current && input.trim()) {
-        const rewritePrompt = input.trim();
-        setInput("");
+      if (selectedDocText && applyRewriteRef.current && userInput.trim()) {
+        const rewritePrompt = userInput.trim();
         if (chatId) {
           clearDraft(chatId);
         }
@@ -8104,139 +8151,42 @@ export function ChatInterface({
         return;
       }
 
-      // -------------------------------------------------------------------------
-      // 1. OPTIMISTIC UI: IMMEDIATE UPDATE (0ms LATENCY)
-      // -------------------------------------------------------------------------
-      // Capture state immediately — use auto-generated prompt if user sent only files
-      const userInput = input || autoPromptForFiles;
-      setContextNotice(null); // Clear any previous truncation notice
-      let currentUploadedFiles = [...uploadedFilesRef.current];
-      const userMsgId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-      const sendTransitionLayoutId =
-        userInput.trim().length > 0 ? composerSendLayoutId : null;
-      const hasUnsettledUploadsAtSubmit = currentUploadedFiles.some(
-        (f: UploadedFile) => isFileUploadBlockingSend(f),
-      );
-      const hadPendingUploadsAtSubmit =
-        pendingUploadsRef.current.size > 0 || hasUnsettledUploadsAtSubmit;
-      const failedUploadsAtSubmit = currentUploadedFiles.filter(
-        (f: any) => f?.status === "error",
-      );
-
-      // Construct the minimal optimistic user message first so the UI updates
-      // before we do any heavier attachment/integrity work.
-      const userMsg: Message = {
-        id: userMsgId,
-        clientTempId: userMsgId,
-        role: "user",
-        content: userInput,
-        timestamp: new Date(),
-        requestId: generateRequestId(),
-        clientRequestId: generateClientRequestId(),
-        status: "pending",
-        deliveryStatus: "sending",
-        deliveryError: undefined,
-      } as any;
-
-      // Reset UI and commit the optimistic bubble in the same synchronous
-      // render pass so the send interaction feels native.
-      let savedMainFiles = [...uploadedFilesRef.current];
-      if (chatId) clearDraft(chatId);
-      const shouldClearComposerFilesImmediately = !hadPendingUploadsAtSubmit;
-      const commitOptimisticUi = () => {
-        setContextNotice(null);
-        if (sendTransitionLayoutId) {
-          setActiveSendTransition({
-            messageId: userMsgId,
-            layoutId: sendTransitionLayoutId,
-          });
-          setComposerSendLayoutId(createSendTransitionLayoutId());
+      // Helper function to map file to attachment (optimized - single pass)
+      const mapFileToAttachment = (f: any): Attachment => {
+        const isImage = f.type.startsWith("image/");
+        let documentType: "word" | "excel" | "ppt" | "pdf" | undefined;
+        
+        if (!isImage) {
+          const lowerName = f.name.toLowerCase();
+          if (f.type.includes("pdf") || lowerName.endsWith(".pdf")) {
+            documentType = "pdf";
+          } else if (f.type.includes("sheet") || f.type.includes("excel") || f.type.includes("csv") || /\.(xlsx|xls|csv)$/i.test(f.name)) {
+            documentType = "excel";
+          } else if (f.type.includes("presentation") || f.type.includes("powerpoint") || /\.(pptx|ppt)$/i.test(f.name)) {
+            documentType = "ppt";
+          } else {
+            documentType = "word";
+          }
         }
-        setInput("");
-        if (shouldClearComposerFilesImmediately) {
-          setUploadedFiles([]);
-        }
-        setOptimisticMessages((prev: Message[]) => [...prev, userMsg]);
-      };
-
-      const optimisticStart =
-        import.meta.env.DEV && typeof performance !== "undefined"
-          ? performance.now()
-          : null;
-      flushSync(commitOptimisticUi);
-      if (
-        shouldClearComposerFilesImmediately &&
-        failedUploadsAtSubmit.length > 0
-      ) {
-        toast({
-          title: "Archivo no adjuntado",
-          description: `${failedUploadsAtSubmit.length} archivo(s) fallaron al subir y no se incluyeron en el mensaje.`,
-          variant: "destructive",
-          duration: 4500,
-        });
-      }
-      if (optimisticStart !== null) {
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            console.debug(
-              "[Perf] optimistic_render_ms",
-              Math.max(0, performance.now() - optimisticStart).toFixed(1),
-            );
-          });
-        });
-      }
-      if (sendTransitionLayoutId) {
-        scheduleActiveSendTransitionClear(userMsgId);
-      } else {
-        clearActiveSendTransition();
-      }
-
-      // Yield one frame so the optimistic bubble paints before the heavier
-      // classification / network work continues. This removes the visible
-      // "send lag" on slower production devices.
-      await new Promise<void>((resolve) => {
-        if (typeof requestAnimationFrame === "function") {
-          requestAnimationFrame(() => resolve());
-          return;
-        }
-        setTimeout(resolve, 0);
-      });
-
-      // Finish enriching the optimistic message after the first paint.
-      let attachments = currentUploadedFiles
-        .filter((f: any) => f?.status !== "error")
-        .map((f: any) => ({
-          type: (f.type.startsWith("image/") ? "image" : "document") as
-            | "image"
-            | "document",
+        
+        return {
+          type: isImage ? "image" : "document",
           name: f.name,
-          documentType: (() => {
-            if (f.type.startsWith("image/")) return undefined;
-            if (f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf"))
-              return "pdf";
-            if (
-              f.type.includes("sheet") ||
-              f.type.includes("excel") ||
-              f.type.includes("csv") ||
-              f.name.match(/\.(xlsx|xls|csv)$/i)
-            )
-              return "excel";
-            if (
-              f.type.includes("presentation") ||
-              f.type.includes("powerpoint") ||
-              f.name.match(/\.(pptx|ppt)$/i)
-            )
-              return "ppt";
-            return "word";
-          })() as "word" | "excel" | "ppt" | "pdf",
+          documentType,
           mimeType: f.type,
           imageUrl: f.dataUrl,
           storagePath: f.storagePath,
           fileId: f.id,
           spreadsheetData: f.spreadsheetData,
-        }));
+        };
+      };
+
+      // Process attachments immediately (no await frame needed - already painted in flushSync)
+      let attachments = currentUploadedFiles
+        .filter((f: any) => f?.status !== "error")
+        .map(mapFileToAttachment);
       if (attachments.length > 0) {
-        userMsg.attachments = attachments;
+        optimisticUserMsg.attachments = attachments;
         setOptimisticMessages((prev: Message[]) =>
           prev.map((m: Message) =>
             m.id === userMsgId ? { ...m, attachments } : m,
@@ -8244,78 +8194,44 @@ export function ChatInterface({
         );
       }
 
-      const promptIntegrityPromise = computePromptIntegrity(userInput);
+      // Start prompt integrity computation (use pre-computed if available)
+      const promptIntegrityPromise = precomputedIntegrityRef.current && 
+        precomputedIntegrityInputRef.current === userInput
+          ? precomputedIntegrityRef.current 
+          : computePromptIntegrity(userInput);
 
       // Set initial AI state
-      setAiStateForChat("thinking", submitConversationId);
       streamingContentRef.current = "";
       setStreamingContent("");
 
-      // Track document attachments for analysis (declared here to avoid TDZ with later reassignment)
+      // Track document attachments for analysis
       let hasDocumentAttachments = false;
       let documentAttachmentsForAnalysis: any[] = [];
       let promptIntegrityApplied = false;
 
       const applyPromptIntegrity = async () => {
-        if (promptIntegrityApplied) {
-          return;
-        }
+        if (promptIntegrityApplied) return;
         promptIntegrityApplied = true;
         const promptIntegrity = await promptIntegrityPromise;
-        userMsg.clientPromptLen = promptIntegrity.clientPromptLen;
-        userMsg.clientPromptHash = promptIntegrity.clientPromptHash;
-        userMsg.promptMessageId = promptIntegrity.messageId;
+        optimisticUserMsg.clientPromptLen = promptIntegrity.clientPromptLen;
+        optimisticUserMsg.clientPromptHash = promptIntegrity.clientPromptHash;
+        optimisticUserMsg.promptMessageId = promptIntegrity.messageId;
       };
 
-      // If there are pending uploads, wait for them before kicking off any backend work.
-      // The user message is already visible (optimistic), so this doesn't block perceived responsiveness.
+      // Parallel: wait for pending uploads while prompt integrity computes in background
       if (hadPendingUploadsAtSubmit) {
         await waitForPendingUploads();
 
-        currentUploadedFiles = [...uploadedFilesRef.current];
-        savedMainFiles = [...currentUploadedFiles]; // updated reference for error recovery
-        const failedAfterWait = currentUploadedFiles.filter(
-          (f: any) => f?.status === "error",
-        );
-        attachments = currentUploadedFiles
+        const updatedFiles = [...uploadedFilesRef.current];
+        const failedAfterWait = updatedFiles.filter((f: any) => f?.status === "error");
+        attachments = updatedFiles
           .filter((f: any) => f.status === "ready" || f.status === "processing")
-          .map((f: any) => ({
-            type: (f.type.startsWith("image/") ? "image" : "document") as
-              | "image"
-              | "document",
-            name: f.name,
-            documentType: (() => {
-              if (f.type.startsWith("image/")) return undefined;
-              if (
-                f.type.includes("pdf") ||
-                f.name.toLowerCase().endsWith(".pdf")
-              )
-                return "pdf";
-              if (
-                f.type.includes("sheet") ||
-                f.type.includes("excel") ||
-                f.type.includes("csv") ||
-                f.name.match(/\.(xlsx|xls|csv)$/i)
-              )
-                return "excel";
-              if (
-                f.type.includes("presentation") ||
-                f.type.includes("powerpoint") ||
-                f.name.match(/\.(pptx|ppt)$/i)
-              )
-                return "ppt";
-              return "word";
-            })() as "word" | "excel" | "ppt" | "pdf",
-            mimeType: f.type,
-            imageUrl: f.dataUrl,
-            storagePath: f.storagePath,
-            fileId: f.id,
-            spreadsheetData: f.spreadsheetData,
+          .map(mapFileToAttachment);
           }));
 
         const nextAttachments =
           attachments.length > 0 ? attachments : undefined;
-        userMsg.attachments = nextAttachments;
+        optimisticUserMsg.attachments = nextAttachments;
         setOptimisticMessages((prev: Message[]) =>
           prev.map((m: Message) =>
             m.id === userMsgId ? { ...m, attachments: nextAttachments } : m,
@@ -8342,10 +8258,6 @@ export function ChatInterface({
           isDocumentFile(a.mimeType || a.type, a.name, a.type),
         );
       } else {
-        // If there were no pending uploads at submit, files are already cleared from the UI.
-        // Update savedMainFiles to empty so if standard chat streaming
-        // fails later, we don't accidentally restore files.
-        savedMainFiles = [];
         hasDocumentAttachments = attachments.some((a: any) =>
           isDocumentFile(a.mimeType || a.type, a.name, a.type),
         );
@@ -8357,7 +8269,7 @@ export function ChatInterface({
       const hasAttachedFiles = attachments.length > 0;
       if (hasDocumentAttachments && documentAttachmentsForAnalysis.length > 0) {
         await applyPromptIntegrity();
-        const documentSendAck = await onSendMessage(userMsg).catch((err) => {
+        const documentSendAck = await onSendMessage(optimisticUserMsg).catch((err) => {
           console.warn(
             "[handleSubmit] Failed to persist document user message before analysis:",
             err,
@@ -9299,7 +9211,7 @@ IMPORTANTE:
                   chatId: effectiveStreamChatId,
                   runId: streamRunContext.runId,
                   clientRequestId: streamRunContext.clientRequestId,
-                  userRequestId: userMsg.requestId,
+                  userRequestId: optimisticUserMsg.requestId,
                   attachments:
                     streamAttachments.length > 0
                       ? streamAttachments
@@ -9314,9 +9226,9 @@ IMPORTANTE:
                   latencyMode,
                   ...gptSessionPayload,
                   // Prompt integrity metadata for server-side verification
-                  clientPromptLen: (userMsg as any).clientPromptLen,
-                  clientPromptHash: (userMsg as any).clientPromptHash,
-                  promptMessageId: (userMsg as any).promptMessageId,
+                  clientPromptLen: (optimisticUserMsg as any).clientPromptLen,
+                  clientPromptHash: (optimisticUserMsg as any).clientPromptHash,
+                  promptMessageId: (optimisticUserMsg as any).promptMessageId,
                 }),
                 onAiStateChange: (nextState) => setAiStateForStream(nextState),
                 onEvent: (eventType, data) => {
@@ -10086,8 +9998,7 @@ IMPORTANTE:
         abortControllerRef.current = null;
       }
     } finally {
-      // Always release the submit lock so the user can send again.
-      clearSubmitLock();
+      // Always reset the submitting flag so the user can send again.
       isSubmittingRef.current = false;
     }
   };

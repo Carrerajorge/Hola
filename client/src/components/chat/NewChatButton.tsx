@@ -87,5 +87,5 @@ export function NewChatButton({
 }
 
 export function NewChatFab({ onNewChat }: { onNewChat?: () => void }) {
-  return <NewChatButton onNewChat={onNewChat} variant="fab" showTooltip={false} />;
+  return null;
 }
