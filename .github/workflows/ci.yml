@@ -23,7 +23,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10.32.1
       - name: Verify embedded OpenClaw release sync
         run: npm run verify:openclaw-upstream
       - name: Install dependencies
@@ -58,7 +58,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10.32.1
       - name: Verify embedded OpenClaw release sync
         run: npm run verify:openclaw-upstream
       - name: Install dependencies
@@ -79,7 +79,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10.32.1
       - name: Install dependencies
         run: npm install
       - name: Install Playwright Chromium

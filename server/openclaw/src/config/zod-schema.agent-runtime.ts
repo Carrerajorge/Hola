@@ -221,6 +221,7 @@ export const SandboxBrowserSchema = z
     autoStartTimeoutMs: z.number().int().positive().optional(),
     binds: z.array(z.string()).optional(),
   })
+  .strict()
   .superRefine((data, ctx) => {
     if (data.network?.trim().toLowerCase() === "host") {
       ctx.addIssue({
@@ -231,7 +232,6 @@ export const SandboxBrowserSchema = z
       });
     }
   })
-  .strict()
   .optional();
 
 export const SandboxPruneSchema = z
