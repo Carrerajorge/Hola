@@ -12,6 +12,7 @@ import { createClient } from "redis";
 import { promises as fs } from "fs";
 import { conversationMemoryManager } from "../services/conversationMemory";
 import { buildOpenClaw1000CapabilityProfile } from "../services/openClaw1000CapabilityProfiler";
+import { SandboxTeamOrchestrator } from "../agent/advancedOrchestrator/sandboxTeamOrchestrator";
 
 const router = Router();
 
@@ -1027,6 +1028,45 @@ router.get("/super/health", async (req: Request, res: Response) => {
       replay: redisOk,
     },
   });
+});
+
+router.post("/super/sandbox-team", async (req: Request, res: Response) => {
+  try {
+    const { prompt } = req.body;
+    const runId = `sandbox_run_${randomUUID()}`;
+    const orchestrator = new SandboxTeamOrchestrator(runId, { maxParallel: 2, timeoutMs: 15000 });
+    
+    // Create a mock TaskPlan for demonstration purposes based on the prompt
+    const plan = {
+      id: "plan-1",
+      goal: prompt || "Demo Task",
+      status: "pending" as const,
+      subtasks: [
+        { id: "task-1", title: "Web Research", agentType: "researcher" as const, instruction: "Search info", dependencies: [], status: "pending" as const },
+        { id: "task-2", title: "Code execution", agentType: "coder" as const, instruction: "Write script", dependencies: ["task-1"], status: "pending" as const }
+      ],
+      progress: 0
+    };
+
+    const context = {
+      userId: "system",
+      chatId: "demo",
+      runId,
+      sharedMemory: {
+        get: () => undefined,
+        set: () => {},
+        getAll: () => ({ initialPrompt: prompt }),
+        clear: () => {}
+      }
+    };
+
+    const result = await orchestrator.execute(plan, context);
+    
+    res.json({ success: true, orchestration_result: result });
+
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 export default router;
