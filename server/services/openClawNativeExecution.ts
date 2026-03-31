@@ -147,12 +147,13 @@ export async function executeOpenClawNativePrompt(
   const sessionFile = path.join(sessionRoot, `${chatSeed}.jsonl`);
   const workspaceDir = process.env.OPENCLAW_WORKSPACE_ROOT?.trim()
     ? path.resolve(process.env.OPENCLAW_WORKSPACE_ROOT)
-    : process.cwd();
+    : path.join(os.tmpdir(), "iliagpt-openclaw-workspaces", userSeed);
   const agentDir =
     resolveUserScopedAgentDir(params.userId) || path.join(sessionRoot, "agent");
 
   await fs.mkdir(sessionRoot, { recursive: true });
   await fs.mkdir(agentDir, { recursive: true });
+  await fs.mkdir(workspaceDir, { recursive: true });
 
   const runEmbeddedPiAgent = await loadEmbeddedPiAgentRunner();
   const result = await runEmbeddedPiAgent({

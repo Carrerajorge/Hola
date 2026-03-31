@@ -35,8 +35,8 @@ export const tokenLedgerUsage = pgTable("token_ledger_usage", {
     requestId: text("request_id").notNull(), // Corelated with x-correlation-id Pino log
     sessionId: text("session_id"),
 
-    userId: uuid("user_id").references(() => users.id),
-    workspaceId: uuid("workspace_id").references(() => workspaces.id),
+    userId: text("user_id").references(() => users.id),
+    workspaceId: text("workspace_id").references(() => workspaces.id),
 
     modelId: uuid("model_id").references(() => pricingCatalog.id),
     modelName: text("model_name").notNull(), // Snapshot of the model string used

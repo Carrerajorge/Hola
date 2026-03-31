@@ -1704,6 +1704,10 @@ export function ChatInterface({
   const precomputedIntegrityRef = useRef<Promise<PromptIntegrityMeta> | null>(null);
   const precomputedIntegrityInputRef = useRef<string>("");
   
+  // autoPromptForFiles is computed inside handleSubmit; default to empty so the
+  // pre-computed integrity effect can reference it safely on initial render.
+  const autoPromptForFiles = "";
+  
   useEffect(() => {
     const inputToHash = input || autoPromptForFiles;
     if (inputToHash && inputToHash !== precomputedIntegrityInputRef.current) {
