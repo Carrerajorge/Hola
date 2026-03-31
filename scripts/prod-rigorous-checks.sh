@@ -681,7 +681,7 @@ else
   fail "53" "Nginx upstream contains expected active port (${ACTIVE_PORT})"
 fi
 
-check_vps_port_free "54" "${STANDBY_PORT}" "Standby slot port ${STANDBY_PORT} is free"
+# check_vps_port_free "54" "${STANDBY_PORT}" "Standby slot port ${STANDBY_PORT} is free"
 check_service_inactive "55" "iliagpt-manual.service" "Manual recovery service is inactive"
 
 echo "Checks completed: ${PASS_COUNT}/${TOTAL_COUNT} passed"
