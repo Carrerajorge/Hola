@@ -119,12 +119,17 @@ export default function Home() {
       params.delete("auth");
       const rest = params.toString();
       window.history.replaceState({}, "", rest ? `${window.location.pathname}?${rest}` : window.location.pathname);
-      // Dispatch event so provider dialogs can auto-open
-      // Small delay to let components mount first
-      const timer = window.setTimeout(() => {
-        window.dispatchEvent(new CustomEvent("auto-connect-provider", { detail: { provider } }));
-      }, 600);
-      return () => window.clearTimeout(timer);
+      // Dispatch event so provider dialogs can auto-open.
+      // Retry with increasing delay to handle cases where components
+      // are still mounting (lazy-loaded chat interface).
+      const delays = [800, 1600, 3000];
+      const timers: number[] = [];
+      for (const delay of delays) {
+        timers.push(window.setTimeout(() => {
+          window.dispatchEvent(new CustomEvent("auto-connect-provider", { detail: { provider } }));
+        }, delay));
+      }
+      return () => timers.forEach((t) => window.clearTimeout(t));
     }
   }, [isReady, user]);
 

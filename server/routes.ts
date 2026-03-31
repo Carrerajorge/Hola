@@ -163,6 +163,9 @@ import {
   handleGoogleGeminiCliOAuthCallback,
   renderGeminiCliOAuthBridge,
 } from "./auth/googleGeminiCliBridge";
+import { oauthStates } from "../shared/schema/auth";
+import { eq, lt } from "drizzle-orm";
+import { db } from "./db";
 import { getLogs, getLogStats, type LogFilters } from "./lib/structuredLogger";
 import { getActiveRequests, getRequestStats } from "./lib/requestTracer";
 import {
@@ -532,7 +535,11 @@ export async function registerRoutes(
     }
   };
 
-  setInterval(cleanupGoogleOAuthStateStore, 5 * 60 * 1000).unref?.();
+  setInterval(() => {
+    cleanupGoogleOAuthStateStore();
+    // Clean up expired DB states
+    db.delete(oauthStates).where(lt(oauthStates.expiresAt, new Date())).catch(() => {});
+  }, 5 * 60 * 1000).unref?.();
 
   const cleanupGoogleOAuthSessionStates = (session?: GoogleOAuthSession | null) => {
     const states = session?.googleOAuthStates;
@@ -558,6 +565,25 @@ export async function registerRoutes(
     stateData: GoogleOAuthStateRecord,
   ) => {
     googleOAuthStateStore.set(state, stateData);
+
+    // Persist to database for production reliability across blue-green deploys
+    db.insert(oauthStates).values({
+      state,
+      returnUrl: stateData.returnUrl || "/",
+      provider: "google",
+      providerHint: stateData.providerHint || null,
+      expiresAt: new Date(stateData.createdAt + googleOAuthStateTtlMs),
+    }).onConflictDoUpdate({
+      target: oauthStates.state,
+      set: {
+        returnUrl: stateData.returnUrl || "/",
+        providerHint: stateData.providerHint || null,
+        expiresAt: new Date(stateData.createdAt + googleOAuthStateTtlMs),
+      },
+    }).catch((err: unknown) => {
+      console.warn("[Auth] Failed to persist OAuth state to DB:", err);
+    });
+
     if (!session) {
       return;
     }
@@ -569,10 +595,10 @@ export async function registerRoutes(
     };
   };
 
-  const consumeGoogleOAuthState = (
+  const consumeGoogleOAuthState = async (
     session: GoogleOAuthSession | null | undefined,
     state: string,
-  ): GoogleOAuthStateRecord | undefined => {
+  ): Promise<GoogleOAuthStateRecord | undefined> => {
     cleanupGoogleOAuthStateStore();
     cleanupGoogleOAuthSessionStates(session);
 
@@ -587,7 +613,31 @@ export async function registerRoutes(
     const memoryState = googleOAuthStateStore.get(state);
     googleOAuthStateStore.delete(state);
 
-    return sessionState || memoryState;
+    if (sessionState || memoryState) {
+      // Clean up DB state in background
+      db.delete(oauthStates).where(eq(oauthStates.state, state)).catch(() => {});
+      return sessionState || memoryState;
+    }
+
+    // Fallback: check database (handles blue-green deploys where memory was lost)
+    try {
+      const [dbState] = await db.select().from(oauthStates)
+        .where(eq(oauthStates.state, state))
+        .limit(1);
+      if (dbState && dbState.expiresAt > new Date()) {
+        // Clean up consumed state
+        db.delete(oauthStates).where(eq(oauthStates.state, state)).catch(() => {});
+        return {
+          createdAt: dbState.createdAt.getTime(),
+          returnUrl: dbState.returnUrl,
+          providerHint: dbState.providerHint || undefined,
+        };
+      }
+    } catch (dbError) {
+      console.warn("[Auth] Failed to read OAuth state from DB:", dbError);
+    }
+
+    return undefined;
   };
 
   const normalizeGoogleOAuthFailureMessage = (value: unknown): string | undefined => {
@@ -746,7 +796,7 @@ export async function registerRoutes(
       }
 
       const session = req.session as GoogleOAuthSession | undefined;
-      const stateData = consumeGoogleOAuthState(session, state);
+      const stateData = await consumeGoogleOAuthState(session, state);
       if (!stateData) {
         return res.redirect("/login?error=google_invalid_state");
       }

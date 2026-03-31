@@ -44,6 +44,7 @@ export const oauthStates = pgTable("oauth_states", {
     state: varchar("state", { length: 255 }).primaryKey(),
     returnUrl: text("return_url").notNull().default("/"),
     provider: varchar("provider", { length: 50 }).notNull().default("google"),
+    providerHint: varchar("provider_hint", { length: 50 }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     expiresAt: timestamp("expires_at").notNull(),
 }, (table: any) => [

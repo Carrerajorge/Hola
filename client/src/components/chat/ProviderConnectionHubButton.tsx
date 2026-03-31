@@ -177,11 +177,16 @@ export function ProviderConnectionHubButton({
   const geminiOpenDialogRef = React.useRef<(() => void) | null>(null);
   const openaiOpenDialogRef = React.useRef<(() => void) | null>(null);
 
-  // Listen for auto-connect-provider events dispatched after OAuth login
+  // Listen for auto-connect-provider events dispatched after OAuth login.
+  // Events may fire multiple times (retry logic in home page) so we track
+  // whether we already handled the auto-connect to avoid duplicate dialogs.
+  const autoConnectHandledRef = React.useRef(false);
   React.useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent).detail;
       if (!detail?.provider) return;
+      if (autoConnectHandledRef.current) return;
+      autoConnectHandledRef.current = true;
       // Mark which provider should auto-start
       setAutoStartProvider(detail.provider);
       // Open the hub dialog first

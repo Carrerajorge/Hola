@@ -304,18 +304,13 @@ export default function LoginPage() {
     clearForcedSignedOutFlag();
     setActiveSocialProvider(provider);
     setError("");
-    // Build OAuth URL with optional login_hint for Gmail auto-redirect
     const params = new URLSearchParams();
+    // Use explicit login_hint if provided
     if (loginHint) {
       params.set("login_hint", loginHint);
     }
     // If user entered an email, use it as login_hint for Google to pre-select account
     if (!loginHint && email && email.includes("@")) {
-      params.set("login_hint", email);
-    }
-    // For Gemini and OpenAI providers, always hint towards Gmail domain
-    // so Google pre-selects the user's Gmail account automatically
-    if ((provider === "gemini" || provider === "openai") && !params.has("login_hint") && email && email.endsWith("@gmail.com")) {
       params.set("login_hint", email);
     }
     // Pass provider_hint so the server can redirect to the right flow after Google OAuth
