@@ -155,37 +155,69 @@ export async function executeOpenClawNativePrompt(
   await fs.mkdir(agentDir, { recursive: true });
   await fs.mkdir(workspaceDir, { recursive: true });
 
-  const runEmbeddedPiAgent = await loadEmbeddedPiAgentRunner();
-  const result = await runEmbeddedPiAgent({
-    sessionId,
-    sessionKey,
-    sessionFile,
-    workspaceDir,
-    agentDir,
-    prompt: buildNativePrompt(prompt, params.context),
-    provider: params.provider?.trim() || undefined,
-    model: params.model?.trim() || undefined,
-    timeoutMs: clampTimeout(params.timeoutMs),
-    runId: `openclaw-native-${chatSeed}-${runSeed}`.slice(0, 180),
-    disableTools: params.enableTools === true ? false : true,
-    messageChannel: "api",
-    messageProvider: "iliagpt-openclaw-native",
-  });
+  const loggerCtx = { userId: userSeed, chatId: chatSeed, runId };
+  console.log(JSON.stringify({
+    level: "info", timestamp: new Date().toISOString(), event: "openclaw.native.start",
+    message: "Initiating native agent execution", ...loggerCtx,
+    workspaceDir, agentDir, toolsEnabled: params.enableTools
+  }));
 
-  const response = collectText(result);
-
-  return {
-    engine: "OpenClaw native embedded runtime",
-    sessionId,
-    sessionKey,
-    workspaceDir,
-    response:
-      response ||
-      result.meta?.error?.message ||
-      "El runtime nativo completo la solicitud sin salida textual.",
-    payloads: result.payloads || [],
-    mediaUrls: collectMediaUrls(result),
-    meta: result.meta,
-    nativeToolsEnabled: params.enableTools === true,
+  const abortController = new AbortController();
+  const cleanupHandler = async () => {
+    console.log(JSON.stringify({ level: "warn", timestamp: new Date().toISOString(), event: "openclaw.native.abort", message: "Graceful shutdown requested, aborting agent run", runId }));
+    abortController.abort();
   };
+  
+  // Register globally for SIGTERM
+  import("../lib/gracefulShutdown.js").then(({ registerCleanup }) => registerCleanup(cleanupHandler)).catch(() => {});
+
+  try {
+    const runEmbeddedPiAgent = await loadEmbeddedPiAgentRunner();
+    const result = await runEmbeddedPiAgent({
+      sessionId,
+      sessionKey,
+      sessionFile,
+      workspaceDir,
+      agentDir,
+      prompt: buildNativePrompt(prompt, params.context),
+      provider: params.provider?.trim() || undefined,
+      model: params.model?.trim() || undefined,
+      timeoutMs: clampTimeout(params.timeoutMs),
+      runId,
+      disableTools: params.enableTools === true ? false : true,
+      messageChannel: "api",
+      messageProvider: "iliagpt-openclaw-native",
+    });
+
+    const response = collectText(result);
+    
+    console.log(JSON.stringify({
+      level: result.meta?.error ? "error" : "info", timestamp: new Date().toISOString(), event: "openclaw.native.complete",
+      message: result.meta?.error ? "Agent execution finished with error" : "Agent execution succeeded",
+      ...loggerCtx, durationMs: result.meta?.durationMs,
+      error: result.meta?.error?.message,
+    }));
+
+    return {
+      engine: "OpenClaw native embedded runtime",
+      sessionId,
+      sessionKey,
+      workspaceDir,
+      response:
+        response ||
+        result.meta?.error?.message ||
+        "El runtime nativo completo la solicitud sin salida textual.",
+      payloads: result.payloads || [],
+      mediaUrls: collectMediaUrls(result),
+      meta: result.meta,
+      nativeToolsEnabled: params.enableTools === true,
+    };
+  } catch (err: any) {
+    if (abortController.signal.aborted) {
+      console.log(JSON.stringify({ level: "warn", timestamp: new Date().toISOString(), event: "openclaw.native.terminated", message: "Agent forcefully halted during graceful shutdown", ...loggerCtx }));
+      throw new Error("Agent execution interrupted by server shutdown (Graceful Exit)");
+    }
+    console.log(JSON.stringify({ level: "error", timestamp: new Date().toISOString(), event: "openclaw.native.crash", message: "Catastrophic crash inside agent wrapper", error: err.message, ...loggerCtx }));
+    throw err;
+  }
 }

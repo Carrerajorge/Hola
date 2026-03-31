@@ -471,10 +471,16 @@ async function bootstrapOpenClawAsync(): Promise<void> {
     // Schedule Daily Cleanup (24h)
     setInterval(() => {
       runCleanup().catch(err => log(`[Cleanup Error] ${err.message}`));
+      import("./services/workspaceGC")
+        .then(({ runWorkspaceGarbageCollector }) => runWorkspaceGarbageCollector())
+        .catch(err => log(`[WorkspaceGC Error] ${err.message}`));
     }, 24 * 60 * 60 * 1000);
     // Run once on startup after delay
     setTimeout(() => {
       runCleanup().catch(err => log(`[Cleanup Error] ${err.message}`));
+      import("./services/workspaceGC")
+        .then(({ runWorkspaceGarbageCollector }) => runWorkspaceGarbageCollector())
+        .catch(err => log(`[WorkspaceGC Error] ${err.message}`));
     }, 60 * 1000);
 
     const tracingStatus = getTracingMetrics();

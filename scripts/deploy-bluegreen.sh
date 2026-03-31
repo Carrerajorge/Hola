@@ -200,6 +200,21 @@ main() {
     docker rm -f "hola-${INACTIVE_SLOT}-app" "hola-${INACTIVE_SLOT}-worker" "hola-${INACTIVE_SLOT}-sandbox" 2>/dev/null || true
     free_slot_port "${INACTIVE_PORT}"
     
+    # Create database backup before migrating
+    log "Creating pre-migration database backup..."
+    BACKUP_DIR="${DEPLOY_PATH}/backups"
+    mkdir -p "${BACKUP_DIR}"
+    BACKUP_FILE="${BACKUP_DIR}/db_backup_${APP_VERSION}_$(date +%Y%m%d_%H%M%S).sql.gz"
+    # We use gzip to save space
+    if docker exec hola-postgres pg_dump -U "${POSTGRES_USER}" "${POSTGRES_DB}" | gzip > "${BACKUP_FILE}"; then
+        log "Database backup saved to ${BACKUP_FILE}"
+        # Keep only the latest 5 backups
+        ls -t "${BACKUP_DIR}"/db_backup_*.sql.gz 2>/dev/null | tail -n +6 | xargs -I {} rm -f {} || true
+    else
+        warn "Failed to create database backup. Proceeding anyway..."
+        rm -f "${BACKUP_FILE}"
+    fi
+
     # Run migrations on the new image
     log "Running migrations..."
     docker run --rm \
