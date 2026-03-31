@@ -189,6 +189,12 @@ main() {
     POSTGRES_DB="${POSTGRES_DB:-iliagpt}"
     DATABASE_URL="$(build_database_url "${POSTGRES_USER}" "${POSTGRES_PASSWORD}" "hola-postgres" "5432" "${POSTGRES_DB}")"
     
+    # Clean up old docker artifacts to prevent disk exhaustion
+    log "Cleaning up old docker containers and images..."
+    docker container prune -f || true
+    docker image prune -af || true
+    docker builder prune -af || true
+    
     # Pull new images
     log "Pulling images..."
     docker pull "${REGISTRY}/iliagpt-app:${IMAGE_TAG}"
