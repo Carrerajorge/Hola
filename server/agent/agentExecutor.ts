@@ -1661,7 +1661,23 @@ ${fsEvidence.evidence}`,
 
       // If OpenClaw aborted natively due to timeout or other error
       if (response.meta.stopReason === "error" || response.meta.aborted) {
-        console.warn(`[AgentExecutor] OpenClaw run finished with error/abort.`);
+        console.warn(`[AgentExecutor] OpenClaw run finished with error/abort. Initiating Critique & Re-Execute loop.`);
+        conversationHistory.push({
+          role: "assistant",
+          content: textContent || "[Ejecución abortada]"
+        });
+        conversationHistory.push({
+          role: "user",
+          content: `CRITICAL SYSTEM ALERT: Your previous execution was aborted or encountered a fatal error. 
+Please perform Self-Reflection:
+1. Analyze what went wrong and why the tool/action failed or timed out.
+2. Adapt your plan to use alternative tools or different arguments.
+3. Re-execute the next steps to complete the objective.
+Do not repeat the exact same failing action.`
+        });
+        textContent = "";
+        fullResponse = "";
+        continue;
       }
 
       // Debug: log what the LLM returned

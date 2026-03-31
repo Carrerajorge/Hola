@@ -416,7 +416,7 @@ export function useChatActions({
     if (!controller) return;
 
     try {
-      const response = await fetch("/api/chat/ai", {
+      const response = await fetch("/api/chat/stream", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

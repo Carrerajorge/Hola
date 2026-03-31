@@ -1,5 +1,9 @@
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export interface ReleaseManifest {
   app_version: string;
@@ -27,7 +31,7 @@ function getManifestCandidates(env: NodeJS.ProcessEnv): string[] {
     sanitizeReleaseValue(env.RELEASE_MANIFEST_PATH),
     path.resolve(process.cwd(), "dist", "release-manifest.json"),
     path.resolve(process.cwd(), "release-manifest.json"),
-    path.resolve(__dirname, "release-manifest.json"),
+    path.resolve(import.meta.dirname, "release-manifest.json"),
   ].filter((candidate): candidate is string => Boolean(candidate));
 
   return Array.from(new Set(candidates));
