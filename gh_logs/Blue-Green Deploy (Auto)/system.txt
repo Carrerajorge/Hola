@@ -1,0 +1,4 @@
+2026-03-31T04:17:33.0810000Z Evaluating deploy_auto.if
+2026-03-31T04:17:33.0810000Z Evaluating: (always() && (github.event_name == 'push') && (github.ref == 'refs/heads/main') && (needs.build_images.result == 'success'))
+2026-03-31T04:17:33.0810000Z Expanded: (true && ('push' == 'push') && ('refs/heads/main' == 'refs/heads/main') && ('failure' == 'success'))
+2026-03-31T04:17:33.0810000Z Result: false

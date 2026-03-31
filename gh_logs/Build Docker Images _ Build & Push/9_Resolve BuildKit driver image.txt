@@ -1,0 +1,59 @@
+﻿2026-03-31T04:14:33.5396179Z ##[group]Run set -euo pipefail
+2026-03-31T04:14:33.5396696Z [36;1mset -euo pipefail[0m
+2026-03-31T04:14:33.5397088Z [36;1m[0m
+2026-03-31T04:14:33.5397419Z [36;1mif bash ./scripts/ci-retry.sh \[0m
+2026-03-31T04:14:33.5397911Z [36;1m  --label "BuildKit image pull" \[0m
+2026-03-31T04:14:33.5398352Z [36;1m  --attempts 5 \[0m
+2026-03-31T04:14:33.5398732Z [36;1m  --base-delay 5 \[0m
+2026-03-31T04:14:33.5399376Z [36;1m  --max-delay 45 \[0m
+2026-03-31T04:14:33.5399774Z [36;1m  --transient-only \[0m
+2026-03-31T04:14:33.5400210Z [36;1m  -- \[0m
+2026-03-31T04:14:33.5400579Z [36;1m  docker pull "${BUILDKIT_IMAGE}"; then[0m
+2026-03-31T04:14:33.5401192Z [36;1m  echo "driver_image=${BUILDKIT_IMAGE}" >> "$GITHUB_OUTPUT"[0m
+2026-03-31T04:14:33.5402098Z [36;1m  echo "driver_source=mirror" >> "$GITHUB_OUTPUT"[0m
+2026-03-31T04:14:33.5402797Z [36;1m  echo "Using prefetched BuildKit driver image: ${BUILDKIT_IMAGE}"[0m
+2026-03-31T04:14:33.5403418Z [36;1melse[0m
+2026-03-31T04:14:33.5404368Z [36;1m  echo "::warning::BuildKit mirror ${BUILDKIT_IMAGE} stayed unavailable after retries. Falling back to docker/setup-buildx-action default image."[0m
+2026-03-31T04:14:33.5405563Z [36;1m  echo "driver_image=" >> "$GITHUB_OUTPUT"[0m
+2026-03-31T04:14:33.5406213Z [36;1m  echo "driver_source=default" >> "$GITHUB_OUTPUT"[0m
+2026-03-31T04:14:33.5406727Z [36;1mfi[0m
+2026-03-31T04:14:33.5447719Z shell: /usr/bin/bash -e {0}
+2026-03-31T04:14:33.5448111Z env:
+2026-03-31T04:14:33.5448392Z   REGISTRY: ghcr.io
+2026-03-31T04:14:33.5448808Z   IMAGE_BASE: ghcr.io/carrerajorge/iliagpt
+2026-03-31T04:14:33.5449729Z   BUILDKIT_IMAGE: public.ecr.aws/vend/moby/buildkit:buildx-stable-1
+2026-03-31T04:14:33.5450339Z ##[endgroup]
+2026-03-31T04:14:33.5556547Z [ci-retry] BuildKit image pull: attempt 1/5
+2026-03-31T04:14:33.8533211Z buildx-stable-1: Pulling from vend/moby/buildkit
+2026-03-31T04:14:33.9603654Z 589002ba0eae: Already exists
+2026-03-31T04:14:33.9644566Z eb1b8fad2e85: Pulling fs layer
+2026-03-31T04:14:33.9645725Z a74773768b3e: Pulling fs layer
+2026-03-31T04:14:33.9647028Z 2c38347bf17e: Pulling fs layer
+2026-03-31T04:14:33.9647781Z 46189c002678: Pulling fs layer
+2026-03-31T04:14:33.9653170Z 4b0c4bc598e0: Pulling fs layer
+2026-03-31T04:14:33.9655357Z e0d296f8c42a: Pulling fs layer
+2026-03-31T04:14:33.9655754Z 46189c002678: Waiting
+2026-03-31T04:14:33.9665751Z 4b0c4bc598e0: Waiting
+2026-03-31T04:14:33.9666745Z e0d296f8c42a: Waiting
+2026-03-31T04:14:34.0566683Z a74773768b3e: Verifying Checksum
+2026-03-31T04:14:34.0568670Z a74773768b3e: Download complete
+2026-03-31T04:14:34.0596669Z 2c38347bf17e: Verifying Checksum
+2026-03-31T04:14:34.0597019Z 2c38347bf17e: Download complete
+2026-03-31T04:14:34.1460475Z 4b0c4bc598e0: Download complete
+2026-03-31T04:14:34.1577376Z eb1b8fad2e85: Verifying Checksum
+2026-03-31T04:14:34.1578222Z eb1b8fad2e85: Download complete
+2026-03-31T04:14:34.2263508Z e0d296f8c42a: Verifying Checksum
+2026-03-31T04:14:34.2265447Z e0d296f8c42a: Download complete
+2026-03-31T04:14:34.5090603Z 46189c002678: Verifying Checksum
+2026-03-31T04:14:34.5091160Z 46189c002678: Download complete
+2026-03-31T04:14:35.2853075Z eb1b8fad2e85: Pull complete
+2026-03-31T04:14:35.2946895Z a74773768b3e: Pull complete
+2026-03-31T04:14:35.3058583Z 2c38347bf17e: Pull complete
+2026-03-31T04:14:36.3419003Z 46189c002678: Pull complete
+2026-03-31T04:14:36.3849961Z 4b0c4bc598e0: Pull complete
+2026-03-31T04:14:36.3966555Z e0d296f8c42a: Pull complete
+2026-03-31T04:14:36.4004217Z Digest: sha256:a82d1ab899cda51aade6fe818d71e4b58c4079e047a0cf29dbb93b2b0465ea69
+2026-03-31T04:14:36.4018697Z Status: Downloaded newer image for public.ecr.aws/vend/moby/buildkit:buildx-stable-1
+2026-03-31T04:14:36.4025828Z public.ecr.aws/vend/moby/buildkit:buildx-stable-1
+2026-03-31T04:14:36.4040352Z [ci-retry] BuildKit image pull: success on attempt 1/5
+2026-03-31T04:14:36.4055515Z Using prefetched BuildKit driver image: public.ecr.aws/vend/moby/buildkit:buildx-stable-1

@@ -1,0 +1,4 @@
+2026-03-31T04:14:13.7900000Z Evaluating ci.if
+2026-03-31T04:14:13.7900000Z Evaluating: (success() && (((github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main'))))
+2026-03-31T04:14:13.7900000Z Expanded: (true && (('push' == 'workflow_dispatch') && (github.ref == 'refs/heads/main')))
+2026-03-31T04:14:13.7900000Z Result: false

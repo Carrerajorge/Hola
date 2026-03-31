@@ -1,0 +1,221 @@
+﻿2026-03-31T04:14:18.9202369Z ##[group]Run actions/checkout@v4
+2026-03-31T04:14:18.9203599Z with:
+2026-03-31T04:14:18.9204340Z   ref: d944c46e5bd85145816060a46d6595de00a9e606
+2026-03-31T04:14:18.9205318Z   fetch-depth: 1
+2026-03-31T04:14:18.9206003Z   filter: blob:none
+2026-03-31T04:14:18.9209672Z   sparse-checkout: /.dockerignore
+/.npmrc
+/Dockerfile
+/components.json
+/package.json
+/package-lock.json
+/postcss.config.js
+/tsconfig.json
+/tsconfig.base.json
+/vite.config.ts
+/vite-plugin-meta-images.ts
+/client/
+/migrations/
+/ocr_service/
+/packages/
+/script/
+/scripts/
+/server/
+/shared/
+
+2026-03-31T04:14:18.9213424Z   sparse-checkout-cone-mode: false
+2026-03-31T04:14:18.9214331Z   repository: Carrerajorge/Hola
+2026-03-31T04:14:18.9215413Z   token: ***
+2026-03-31T04:14:18.9216081Z   ssh-strict: true
+2026-03-31T04:14:18.9216770Z   ssh-user: git
+2026-03-31T04:14:18.9217466Z   persist-credentials: true
+2026-03-31T04:14:18.9218250Z   clean: true
+2026-03-31T04:14:18.9218907Z   fetch-tags: false
+2026-03-31T04:14:18.9219750Z   show-progress: true
+2026-03-31T04:14:18.9220513Z   lfs: false
+2026-03-31T04:14:18.9221159Z   submodules: false
+2026-03-31T04:14:18.9221875Z   set-safe-directory: true
+2026-03-31T04:14:18.9222938Z env:
+2026-03-31T04:14:18.9223568Z   REGISTRY: ghcr.io
+2026-03-31T04:14:18.9224592Z   IMAGE_BASE: ghcr.io/carrerajorge/iliagpt
+2026-03-31T04:14:18.9225823Z   BUILDKIT_IMAGE: public.ecr.aws/vend/moby/buildkit:buildx-stable-1
+2026-03-31T04:14:18.9226993Z ##[endgroup]
+2026-03-31T04:14:19.0388639Z Syncing repository: Carrerajorge/Hola
+2026-03-31T04:14:19.0391462Z ##[group]Getting Git version info
+2026-03-31T04:14:19.0392588Z Working directory is '/home/runner/work/Hola/Hola'
+2026-03-31T04:14:19.0394167Z [command]/usr/bin/git version
+2026-03-31T04:14:19.0402394Z git version 2.53.0
+2026-03-31T04:14:19.0432794Z ##[endgroup]
+2026-03-31T04:14:19.0448390Z Temporarily overriding HOME='/home/runner/work/_temp/af694607-05a1-4cab-96c9-b8b38eaa3dcf' before making global git config changes
+2026-03-31T04:14:19.0454475Z Adding repository directory to the temporary git global config as a safe directory
+2026-03-31T04:14:19.0466677Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Hola/Hola
+2026-03-31T04:14:19.0504314Z Deleting the contents of '/home/runner/work/Hola/Hola'
+2026-03-31T04:14:19.0507533Z ##[group]Initializing the repository
+2026-03-31T04:14:19.0513022Z [command]/usr/bin/git init /home/runner/work/Hola/Hola
+2026-03-31T04:14:19.0604993Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-03-31T04:14:19.0620595Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-03-31T04:14:19.0623542Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-03-31T04:14:19.0625867Z hint: call:
+2026-03-31T04:14:19.0626950Z hint:
+2026-03-31T04:14:19.0628263Z hint: 	git config --global init.defaultBranch <name>
+2026-03-31T04:14:19.0630309Z hint:
+2026-03-31T04:14:19.0632301Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-03-31T04:14:19.0635002Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-03-31T04:14:19.0637201Z hint:
+2026-03-31T04:14:19.0638285Z hint: 	git branch -m <name>
+2026-03-31T04:14:19.0640016Z hint:
+2026-03-31T04:14:19.0641879Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-03-31T04:14:19.0644796Z Initialized empty Git repository in /home/runner/work/Hola/Hola/.git/
+2026-03-31T04:14:19.0649645Z [command]/usr/bin/git remote add origin https://github.com/Carrerajorge/Hola
+2026-03-31T04:14:19.0670261Z ##[endgroup]
+2026-03-31T04:14:19.0671544Z ##[group]Disabling automatic garbage collection
+2026-03-31T04:14:19.0675990Z [command]/usr/bin/git config --local gc.auto 0
+2026-03-31T04:14:19.0715350Z ##[endgroup]
+2026-03-31T04:14:19.0717824Z ##[group]Setting up auth
+2026-03-31T04:14:19.0723580Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-03-31T04:14:19.0763054Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-03-31T04:14:19.1105997Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-03-31T04:14:19.1139866Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-03-31T04:14:19.1367298Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-03-31T04:14:19.1406283Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-03-31T04:14:19.1661467Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-03-31T04:14:19.1703813Z ##[endgroup]
+2026-03-31T04:14:19.1705053Z ##[group]Fetching the repository
+2026-03-31T04:14:19.1718151Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --filter=blob:none --depth=1 origin d944c46e5bd85145816060a46d6595de00a9e606
+2026-03-31T04:14:19.5487559Z From https://github.com/Carrerajorge/Hola
+2026-03-31T04:14:19.5491072Z  * branch            d944c46e5bd85145816060a46d6595de00a9e606 -> FETCH_HEAD
+2026-03-31T04:14:19.5515172Z ##[endgroup]
+2026-03-31T04:14:19.5516880Z ##[group]Determining the checkout info
+2026-03-31T04:14:19.5518324Z ##[endgroup]
+2026-03-31T04:14:19.5519799Z ##[group]Setting up sparse checkout
+2026-03-31T04:14:19.5521948Z [command]/usr/bin/git config core.sparseCheckout true
+2026-03-31T04:14:19.5552318Z [command]/usr/bin/git rev-parse --git-path info/sparse-checkout
+2026-03-31T04:14:19.5570987Z .git/info/sparse-checkout
+2026-03-31T04:14:19.5580289Z ##[endgroup]
+2026-03-31T04:14:19.5582301Z ##[group]Checking out the ref
+2026-03-31T04:14:19.5586614Z [command]/usr/bin/git checkout --progress --force d944c46e5bd85145816060a46d6595de00a9e606
+2026-03-31T04:14:31.1497951Z Updating files:   0% (1/18965)
+2026-03-31T04:14:31.1645068Z Updating files:   1% (190/18965)
+2026-03-31T04:14:31.1765237Z Updating files:   2% (380/18965)
+2026-03-31T04:14:31.1865513Z Updating files:   3% (569/18965)
+2026-03-31T04:14:31.2017463Z Updating files:   4% (759/18965)
+2026-03-31T04:14:31.2038357Z Updating files:   4% (899/18965)
+2026-03-31T04:14:31.2165060Z Updating files:   5% (949/18965)
+2026-03-31T04:14:31.2307915Z Updating files:   6% (1138/18965)
+2026-03-31T04:14:31.2442634Z Updating files:   7% (1328/18965)
+2026-03-31T04:14:31.2584905Z Updating files:   8% (1518/18965)
+2026-03-31T04:14:31.2751128Z Updating files:   9% (1707/18965)
+2026-03-31T04:14:31.2821413Z Updating files:  10% (1897/18965)
+2026-03-31T04:14:31.2953756Z Updating files:  11% (2087/18965)
+2026-03-31T04:14:31.4287763Z Updating files:  12% (2276/18965)
+2026-03-31T04:14:31.4424919Z Updating files:  13% (2466/18965)
+2026-03-31T04:14:31.4614624Z Updating files:  14% (2656/18965)
+2026-03-31T04:14:31.4861623Z Updating files:  15% (2845/18965)
+2026-03-31T04:14:31.4959607Z Updating files:  16% (3035/18965)
+2026-03-31T04:14:31.5086795Z Updating files:  17% (3225/18965)
+2026-03-31T04:14:31.5207751Z Updating files:  18% (3414/18965)
+2026-03-31T04:14:31.5407685Z Updating files:  19% (3604/18965)
+2026-03-31T04:14:31.5574475Z Updating files:  20% (3793/18965)
+2026-03-31T04:14:31.5843723Z Updating files:  21% (3983/18965)
+2026-03-31T04:14:31.5983292Z Updating files:  22% (4173/18965)
+2026-03-31T04:14:31.6079390Z Updating files:  23% (4362/18965)
+2026-03-31T04:14:31.6456382Z Updating files:  24% (4552/18965)
+2026-03-31T04:14:31.6695873Z Updating files:  25% (4742/18965)
+2026-03-31T04:14:31.6824749Z Updating files:  26% (4931/18965)
+2026-03-31T04:14:31.6947184Z Updating files:  27% (5121/18965)
+2026-03-31T04:14:31.7059563Z Updating files:  28% (5311/18965)
+2026-03-31T04:14:31.7159122Z Updating files:  29% (5500/18965)
+2026-03-31T04:14:31.7513797Z Updating files:  30% (5690/18965)
+2026-03-31T04:14:31.7627038Z Updating files:  31% (5880/18965)
+2026-03-31T04:14:31.7734978Z Updating files:  32% (6069/18965)
+2026-03-31T04:14:31.7825340Z Updating files:  33% (6259/18965)
+2026-03-31T04:14:31.7920863Z Updating files:  34% (6449/18965)
+2026-03-31T04:14:31.8027799Z Updating files:  35% (6638/18965)
+2026-03-31T04:14:31.8130386Z Updating files:  36% (6828/18965)
+2026-03-31T04:14:31.8233758Z Updating files:  37% (7018/18965)
+2026-03-31T04:14:31.8342383Z Updating files:  38% (7207/18965)
+2026-03-31T04:14:31.8432323Z Updating files:  39% (7397/18965)
+2026-03-31T04:14:31.8534731Z Updating files:  40% (7586/18965)
+2026-03-31T04:14:31.8657185Z Updating files:  41% (7776/18965)
+2026-03-31T04:14:31.8750867Z Updating files:  42% (7966/18965)
+2026-03-31T04:14:31.8841399Z Updating files:  43% (8155/18965)
+2026-03-31T04:14:31.8947610Z Updating files:  44% (8345/18965)
+2026-03-31T04:14:31.9054911Z Updating files:  45% (8535/18965)
+2026-03-31T04:14:31.9179859Z Updating files:  46% (8724/18965)
+2026-03-31T04:14:31.9289946Z Updating files:  47% (8914/18965)
+2026-03-31T04:14:31.9425946Z Updating files:  48% (9104/18965)
+2026-03-31T04:14:31.9541014Z Updating files:  49% (9293/18965)
+2026-03-31T04:14:31.9650043Z Updating files:  50% (9483/18965)
+2026-03-31T04:14:31.9764841Z Updating files:  51% (9673/18965)
+2026-03-31T04:14:31.9885938Z Updating files:  52% (9862/18965)
+2026-03-31T04:14:32.0001474Z Updating files:  53% (10052/18965)
+2026-03-31T04:14:32.0103860Z Updating files:  54% (10242/18965)
+2026-03-31T04:14:32.0205039Z Updating files:  55% (10431/18965)
+2026-03-31T04:14:32.0307771Z Updating files:  56% (10621/18965)
+2026-03-31T04:14:32.0416696Z Updating files:  57% (10811/18965)
+2026-03-31T04:14:32.0529051Z Updating files:  58% (11000/18965)
+2026-03-31T04:14:32.0643871Z Updating files:  59% (11190/18965)
+2026-03-31T04:14:32.0771975Z Updating files:  60% (11379/18965)
+2026-03-31T04:14:32.0879522Z Updating files:  61% (11569/18965)
+2026-03-31T04:14:32.0990511Z Updating files:  62% (11759/18965)
+2026-03-31T04:14:32.1116511Z Updating files:  63% (11948/18965)
+2026-03-31T04:14:32.1227515Z Updating files:  64% (12138/18965)
+2026-03-31T04:14:32.1335432Z Updating files:  65% (12328/18965)
+2026-03-31T04:14:32.1440575Z Updating files:  66% (12517/18965)
+2026-03-31T04:14:32.1547242Z Updating files:  67% (12707/18965)
+2026-03-31T04:14:32.1641307Z Updating files:  68% (12897/18965)
+2026-03-31T04:14:32.1729284Z Updating files:  69% (13086/18965)
+2026-03-31T04:14:32.1842060Z Updating files:  70% (13276/18965)
+2026-03-31T04:14:32.1947022Z Updating files:  71% (13466/18965)
+2026-03-31T04:14:32.1966265Z Updating files:  72% (13655/18965)
+2026-03-31T04:14:32.2047285Z Updating files:  72% (13683/18965)
+2026-03-31T04:14:32.2138070Z Updating files:  73% (13845/18965)
+2026-03-31T04:14:32.2244832Z Updating files:  74% (14035/18965)
+2026-03-31T04:14:32.2358088Z Updating files:  75% (14224/18965)
+2026-03-31T04:14:32.2519724Z Updating files:  76% (14414/18965)
+2026-03-31T04:14:32.2681000Z Updating files:  77% (14604/18965)
+2026-03-31T04:14:32.2819403Z Updating files:  78% (14793/18965)
+2026-03-31T04:14:32.2924968Z Updating files:  79% (14983/18965)
+2026-03-31T04:14:32.3035465Z Updating files:  80% (15172/18965)
+2026-03-31T04:14:32.3146375Z Updating files:  81% (15362/18965)
+2026-03-31T04:14:32.3264227Z Updating files:  82% (15552/18965)
+2026-03-31T04:14:32.3384665Z Updating files:  83% (15741/18965)
+2026-03-31T04:14:32.3481544Z Updating files:  84% (15931/18965)
+2026-03-31T04:14:32.3579631Z Updating files:  85% (16121/18965)
+2026-03-31T04:14:32.3681453Z Updating files:  86% (16310/18965)
+2026-03-31T04:14:32.3789734Z Updating files:  87% (16500/18965)
+2026-03-31T04:14:32.3904538Z Updating files:  88% (16690/18965)
+2026-03-31T04:14:32.4011857Z Updating files:  89% (16879/18965)
+2026-03-31T04:14:32.4123712Z Updating files:  90% (17069/18965)
+2026-03-31T04:14:32.4238954Z Updating files:  91% (17259/18965)
+2026-03-31T04:14:32.4344552Z Updating files:  92% (17448/18965)
+2026-03-31T04:14:32.4453476Z Updating files:  93% (17638/18965)
+2026-03-31T04:14:32.4549657Z Updating files:  94% (17828/18965)
+2026-03-31T04:14:32.4666444Z Updating files:  95% (18017/18965)
+2026-03-31T04:14:32.4766878Z Updating files:  96% (18207/18965)
+2026-03-31T04:14:32.4871834Z Updating files:  97% (18397/18965)
+2026-03-31T04:14:32.4972988Z Updating files:  98% (18586/18965)
+2026-03-31T04:14:32.5104926Z Updating files:  99% (18776/18965)
+2026-03-31T04:14:32.5105713Z Updating files: 100% (18965/18965)
+2026-03-31T04:14:32.5106069Z Updating files: 100% (18965/18965), done.
+2026-03-31T04:14:32.6001135Z Note: switching to 'd944c46e5bd85145816060a46d6595de00a9e606'.
+2026-03-31T04:14:32.6001552Z 
+2026-03-31T04:14:32.6001828Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-03-31T04:14:32.6002468Z changes and commit them, and you can discard any commits you make in this
+2026-03-31T04:14:32.6003104Z state without impacting any branches by switching back to a branch.
+2026-03-31T04:14:32.6003472Z 
+2026-03-31T04:14:32.6003713Z If you want to create a new branch to retain commits you create, you may
+2026-03-31T04:14:32.6004326Z do so (now or later) by using -c with the switch command. Example:
+2026-03-31T04:14:32.6004668Z 
+2026-03-31T04:14:32.6004801Z   git switch -c <new-branch-name>
+2026-03-31T04:14:32.6005023Z 
+2026-03-31T04:14:32.6005433Z Or undo this operation with:
+2026-03-31T04:14:32.6005596Z 
+2026-03-31T04:14:32.6005684Z   git switch -
+2026-03-31T04:14:32.6005803Z 
+2026-03-31T04:14:32.6006025Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-03-31T04:14:32.6006358Z 
+2026-03-31T04:14:32.6006570Z HEAD is now at d944c46e feat(openclaw): native integration and user sandboxing
+2026-03-31T04:14:32.6056239Z ##[endgroup]
+2026-03-31T04:14:32.6094577Z [command]/usr/bin/git log -1 --format=%H
+2026-03-31T04:14:32.6117016Z d944c46e5bd85145816060a46d6595de00a9e606

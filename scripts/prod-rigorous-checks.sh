@@ -371,7 +371,7 @@ load_state_from_vps() {
   if [ "$slot" != "blue" ] && [ "$slot" != "green" ]; then
     return 1
   fi
-  if [ "$port" != "5000" ] && [ "$port" != "5001" ]; then
+  if [ "$port" != "3000" ] && [ "$port" != "3001" ]; then
     return 1
   fi
   if [ -n "$version" ] && ! echo "$version" | grep -Eq '^[0-9a-f]{8}$'; then
@@ -393,16 +393,16 @@ load_active_slot_fallback() {
   local nginx_port=""
   nginx_port="$(run_ssh "grep -Eo 'server[[:space:]]+127\\.0\\.0\\.1:[0-9]+' '${NGINX_UPSTREAM_CONF}' 2>/dev/null | awk -F: '{print \$NF}' | awk 'NF {print; exit}' || true")"
 
-  if [ "$nginx_port" = "5000" ] || [ "$nginx_port" = "5001" ]; then
+  if [ "$nginx_port" = "3000" ] || [ "$nginx_port" = "3001" ]; then
     ACTIVE_PORT="$nginx_port"
-    ACTIVE_SLOT="$( [ "$ACTIVE_PORT" = "5000" ] && echo blue || echo green )"
+    ACTIVE_SLOT="$( [ "$ACTIVE_PORT" = "3000" ] && echo blue || echo green )"
     STATE_SOURCE="nginx-upstream"
     return 0
   fi
 
   for candidate_slot in blue green; do
     local candidate_port
-    candidate_port="$( [ "$candidate_slot" = "blue" ] && echo 5000 || echo 5001 )"
+    candidate_port="$( [ "$candidate_slot" = "blue" ] && echo 3000 || echo 3001 )"
     local status
     status="$(run_ssh "docker inspect --format '{{.State.Status}}' hola-${candidate_slot}-app 2>/dev/null || true")"
     if [ "$status" = "running" ]; then
@@ -414,7 +414,7 @@ load_active_slot_fallback() {
   done
 
   ACTIVE_SLOT="blue"
-  ACTIVE_PORT="5000"
+  ACTIVE_PORT="3000"
   STATE_SOURCE="hardcoded-fallback"
 }
 
@@ -476,7 +476,7 @@ check_psql_query() {
 }
 
 determine_active_slot
-STANDBY_PORT="$( [ "$ACTIVE_PORT" = "5000" ] && echo 5001 || echo 5000 )"
+STANDBY_PORT="$( [ "$ACTIVE_PORT" = "3000" ] && echo 3001 || echo 3000 )"
 
 APP_CONTAINER="hola-${ACTIVE_SLOT}-app"
 WORKER_CONTAINER="hola-${ACTIVE_SLOT}-worker"

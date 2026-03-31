@@ -1,0 +1,4 @@
+2026-03-31T04:14:13.7900000Z Evaluating ci_gate.if
+2026-03-31T04:14:13.7900000Z Evaluating: (success() && (false))
+2026-03-31T04:14:13.7900000Z Expanded: (true && false)
+2026-03-31T04:14:13.7900000Z Result: false

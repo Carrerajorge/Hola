@@ -1,0 +1,13 @@
+﻿2026-03-31T04:14:33.0555830Z ##[group]Run docker/login-action@v3
+2026-03-31T04:14:33.0556111Z with:
+2026-03-31T04:14:33.0556282Z   registry: ghcr.io
+2026-03-31T04:14:33.0556483Z   username: Carrerajorge
+2026-03-31T04:14:33.0556889Z   password: ***
+2026-03-31T04:14:33.0557082Z   logout: true
+2026-03-31T04:14:33.0557253Z env:
+2026-03-31T04:14:33.0557418Z   REGISTRY: ghcr.io
+2026-03-31T04:14:33.0557626Z   IMAGE_BASE: ghcr.io/carrerajorge/iliagpt
+2026-03-31T04:14:33.0557998Z   BUILDKIT_IMAGE: public.ecr.aws/vend/moby/buildkit:buildx-stable-1
+2026-03-31T04:14:33.0558335Z ##[endgroup]
+2026-03-31T04:14:33.3558346Z Logging into ghcr.io...
+2026-03-31T04:14:33.5249546Z Login Succeeded!
