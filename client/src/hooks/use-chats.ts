@@ -1963,9 +1963,13 @@ export function useChats() {
           const data = await res.json();
           const serverTitle = data.chat?.title || data.title;
           if (serverTitle) {
-            setChats(prev => prev.map(c =>
-              c.id === chatId ? { ...c, title: serverTitle } : c
-            ));
+            setChats(prev => prev.map(c => {
+              const returnedChatId = res.headers.get("x-chat-id") || res.headers.get("X-Chat-Id");
+              if (returnedChatId && returnedChatId !== chatId && chatId.startsWith("pending-")) {
+                return c.id === chatId ? { ...c, id: returnedChatId, title: serverTitle } : c;
+              }
+              return c.id === chatId ? { ...c, title: serverTitle } : c;
+            }));
           }
         } catch (err) {
           console.warn("[TitleRefresh] Failed to fetch updated title:", err);
@@ -2019,9 +2023,9 @@ export function useChats() {
     return { pendingId, stableKey };
   }, []);
 
-  const addMessage = useCallback(async (chatId: string, message: Message): Promise<SendMessageAck | undefined> => {
-    const safeChatId = sanitizeChatId(chatId);
-    let resolvedChatId = pendingToRealIdMap.get(safeChatId) || safeChatId;
+  const addMessage = useCallback(async (targetChatId: string, message: Message): Promise<SendMessageAck | undefined> => {
+    const safeChatId = sanitizeChatId(targetChatId);
+    let currentTargetChatId = pendingToRealIdMap.get(safeChatId) || safeChatId;
     const isPending = safeChatId.startsWith(PENDING_CHAT_PREFIX);
     const sanitizedInput = sanitizeSendMessage(message);
     const safeRequestId = sanitizeRequestId(sanitizedInput.requestId);
@@ -2045,7 +2049,7 @@ export function useChats() {
 
     const setDeliveryPatch = (patch: Partial<Message>) => {
       setChats(prev => prev.map(chat => {
-        if (chat.id !== resolvedChatId && chat.id !== safeChatId) return chat;
+        if (chat.id !== currentTargetChatId && chat.id !== safeChatId) return chat;
         return {
           ...chat,
           messages: chat.messages.map(m => {
@@ -2063,7 +2067,7 @@ export function useChats() {
 
     const reconcileMessageId = (serverId: string) => {
       setChats(prev => prev.map(chat => {
-        if (chat.id !== resolvedChatId && chat.id !== safeChatId) return chat;
+        if (chat.id !== currentTargetChatId && chat.id !== safeChatId) return chat;
 
         let changed = false;
         let updated = chat.messages.map(m => {
@@ -2116,18 +2120,18 @@ export function useChats() {
     // Idempotency guard: claim the requestId for this send attempt.
     if (safeRequestId && !markRequestProcessing(safeRequestId)) {
       console.log(`[Dedup] Skipping already processed/processing requestId: ${safeRequestId}`);
-      const existingRun = getActiveRun(resolvedChatId);
+      const existingRun = getActiveRun(currentTargetChatId);
       if (existingRun) {
-        return { run: existingRun, deduplicated: true, chatId: resolvedChatId };
+        return { run: existingRun, deduplicated: true, chatId: currentTargetChatId };
       }
-      return { chatId: resolvedChatId };
+      return { chatId: currentTargetChatId };
     }
 
     const title = normalizedMessage.role === "user" && normalizedMessage.content
       ? normalizedMessage.content.slice(0, 50) + (normalizedMessage.content.length > 50 ? "..." : "")
       : "Nuevo Chat";
 
-    if (isPending && resolvedChatId.startsWith(PENDING_CHAT_PREFIX)) {
+    if (isPending && currentTargetChatId.startsWith(PENDING_CHAT_PREFIX)) {
       const fallbackChatId = generateStableServerChatId();
       pendingToRealIdMap.set(safeChatId, fallbackChatId);
       setChats(prev => prev.map(chat =>
@@ -2136,9 +2140,9 @@ export function useChats() {
       if (activeChatId === safeChatId) {
         setActiveChatId(fallbackChatId);
       }
-      resolvedChatId = fallbackChatId;
-    } else if (isPending && resolvedChatId !== safeChatId) {
-      // The pending chat already has a real resolvedChatId (from createChat's
+      currentTargetChatId = fallbackChatId;
+    } else if (isPending && currentTargetChatId !== safeChatId) {
+      // The pending chat already has a real currentTargetChatId (from createChat's
       // provisionalRealId), but the chat entry in state still has the pending
       // id. Rename it now so that:
       //   1. Server sync (mergeServerChatsWithLocal) won't create a duplicate
@@ -2146,20 +2150,20 @@ export function useChats() {
       //   3. setActiveChatId(realId) from handleSendNewChatMessage will match
       setChats(prev => {
         // Only rename if the real ID doesn't already exist (avoid duplication)
-        const realAlreadyExists = prev.some(c => c.id === resolvedChatId);
+        const realAlreadyExists = prev.some(c => c.id === currentTargetChatId);
         if (realAlreadyExists) return prev;
         return prev.map(chat =>
-          chat.id === safeChatId ? { ...chat, id: resolvedChatId } : chat
+          chat.id === safeChatId ? { ...chat, id: currentTargetChatId } : chat
         );
       });
       if (activeChatId === safeChatId) {
-        setActiveChatId(resolvedChatId);
+        setActiveChatId(currentTargetChatId);
       }
     }
 
     // Insert into local state (optimistic) if not present.
     setChats(prev => {
-      const chatExists = prev.some(chat => chat.id === safeChatId || chat.id === resolvedChatId);
+      const chatExists = prev.some(chat => chat.id === safeChatId || chat.id === currentTargetChatId);
 
       if (!chatExists && isPending) {
         return [...prev, {
@@ -2173,7 +2177,7 @@ export function useChats() {
       }
 
       return prev.map(chat => {
-        const matchId = chat.id === safeChatId || chat.id === resolvedChatId;
+        const matchId = chat.id === safeChatId || chat.id === currentTargetChatId;
         if (!matchId) return chat;
         const currentChatGptId = typeof chat.gptId === "string" && chat.gptId.trim().length > 0
           ? chat.gptId.trim()
@@ -2239,7 +2243,7 @@ export function useChats() {
       const t0 = typeof performance !== "undefined" ? performance.now() : Date.now();
 
       const res = await withRetry(async () => {
-        const response = await fetchWithTimeout(`/api/chats/${resolvedChatId}/messages`, {
+        const response = await fetchWithTimeout(`/api/chats/${currentTargetChatId}/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
           credentials: "include",
@@ -2281,7 +2285,7 @@ export function useChats() {
         const serverTiming = res.headers.get("server-timing");
         const traceId = res.headers.get("x-trace-id");
         console.debug("[Perf] send_message", {
-          chatId: resolvedChatId,
+          chatId: currentTargetChatId,
           tempId,
           role: normalizedMessage.role,
           totalMs: Number(totalMs.toFixed(1)),
@@ -2290,9 +2294,18 @@ export function useChats() {
         });
       }
 
+      const returnedChatId = res.headers.get("x-chat-id") || res.headers.get("X-Chat-Id");
+      if (returnedChatId && returnedChatId !== currentTargetChatId && targetChatId.startsWith("pending-")) {
+        const oldId = currentTargetChatId;
+        currentTargetChatId = returnedChatId;
+        setChats(prev => prev.map(c => 
+          c.id === oldId ? { ...c, id: returnedChatId } : c
+        ));
+      }
+
       if (res.ok) {
         const data = await res.json();
-        trackChatMessageSent(resolvedChatId, normalizedMessage, data?.deduplicated);
+        trackChatMessageSent(currentTargetChatId, normalizedMessage, data?.deduplicated);
 
         const serverMessage = data?.message ?? data;
         if (serverMessage?.id && typeof serverMessage.id === "string") {
@@ -2309,19 +2322,19 @@ export function useChats() {
         if (data.run) {
           const run: ChatRun = {
             id: data.run.id,
-            chatId: resolvedChatId,
+            chatId: currentTargetChatId,
             clientRequestId: data.run.clientRequestId,
             userMessageId: data.run.userMessageId,
             status: data.run.status,
             assistantMessageId: data.run.assistantMessageId,
             lastSeq: data.run.lastSeq,
           };
-          setActiveRun(resolvedChatId, run);
-          console.log(`[Run] ${data.deduplicated ? "Resumed" : "Created"} run ${run.id} for chat ${resolvedChatId}`);
-          return { run, deduplicated: !!data.deduplicated, chatId: resolvedChatId };
+          setActiveRun(currentTargetChatId, run);
+          console.log(`[Run] ${data.deduplicated ? "Resumed" : "Created"} run ${run.id} for chat ${currentTargetChatId}`);
+          return { run, deduplicated: !!data.deduplicated, chatId: currentTargetChatId };
         }
 
-        return { chatId: resolvedChatId };
+        return { chatId: currentTargetChatId };
       }
 
       const errText = await res.text().catch(() => "");
@@ -2343,9 +2356,9 @@ export function useChats() {
         res.status === 429 ||
         res.status === 401;
       if (retryable && normalizedMessage.role === "user") {
-        enqueueFailedMessageForRecovery(resolvedChatId, normalizedMessage);
+        enqueueFailedMessageForRecovery(currentTargetChatId, normalizedMessage);
       }
-      return { chatId: resolvedChatId, error: errText || `HTTP ${res.status}` };
+      return { chatId: currentTargetChatId, error: errText || `HTTP ${res.status}` };
     } catch (error) {
       console.error("Error saving message to server:", error);
 
