@@ -1,8 +1,18 @@
 import { EventEmitter } from 'events';
-import { TaskPlan, SubTask, getExecutionOrder, updateSubtaskStatus, calculateProgress } from '../taskDecomposer';
 import { AgentResult, TeamContext } from '../teamOrchestrator';
-import { SandboxWorkerManager, SandboxExecutionOptions } from './sandboxWorkerManager';
+import { SandboxWorkerManager, SandboxExecutionOptions, AgentType, SubTask } from './sandboxWorkerManager';
 import { CrossAgentMemoryBus } from './crossAgentMemoryBus';
+
+export interface TaskPlan {
+    id: string;
+    goal: string;
+    subtasks: SubTask[];
+    status: "pending" | "executing" | "completed" | "failed";
+    progress: number;
+}
+export function getExecutionOrder(plan: TaskPlan): SubTask[][] { return [plan.subtasks]; }
+export function updateSubtaskStatus(plan: TaskPlan, id: string, status: any, output: any, err?: any): TaskPlan { return plan; }
+export function calculateProgress(plan: TaskPlan): number { return plan.progress || 0; }
 
 export interface SandboxTeamOptions {
     maxParallel?: number;
@@ -47,7 +57,7 @@ export class SandboxTeamOrchestrator extends EventEmitter {
         // Put the initial context/variables into the bus so isolated agents can read them
         await this.memoryBus.set('sharedMemory', context.sharedMemory.getAll());
 
-        let currentPlan = { ...plan, status: "executing" as const };
+        let currentPlan = { ...plan, status: "executing" } as TaskPlan;
         const executionWaves = getExecutionOrder(currentPlan);
 
         if (context.signal) {

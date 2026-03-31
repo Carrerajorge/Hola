@@ -1,8 +1,17 @@
 import { Worker } from 'worker_threads';
 import * as path from 'path';
-import { AgentType, SubTask } from '../taskDecomposer';
 import { AgentResult } from '../teamOrchestrator';
 import { sandboxService } from '../sandbox/sandboxService';
+
+export type AgentType = "researcher" | "coder" | "data_analyst" | "reviewer" | string;
+export interface SubTask {
+    id: string;
+    agentType: AgentType;
+    title: string;
+    instruction: string;
+    dependencies: string[];
+    status: "pending" | "running" | "completed" | "failed";
+}
 
 export interface SandboxExecutionOptions {
     runId: string;
@@ -136,7 +145,7 @@ export class SandboxWorkerManager {
             let stdoutOutput = result.stdout;
             // Best effort to parse JSON output from sandbox stdout
             try {
-                const match = result.stdout.match(/({.*})/ms);
+                const match = result.stdout.match(/({[\s\S]*})/m);
                 if (match) {
                     const parsed = JSON.parse(match[1]);
                     return {
@@ -150,7 +159,7 @@ export class SandboxWorkerManager {
             return {
                 taskId: task.id,
                 agentType: task.agentType,
-                success: result.exitCode === 0,
+                success: result.returnCode === 0,
                 output: result.stdout || result.stderr || "No output",
                 durationMs: Date.now() - startTime
             };
