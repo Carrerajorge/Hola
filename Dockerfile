@@ -169,6 +169,12 @@ COPY --chown=iliagpt:nodejs --from=builder /app/client/public ./client/public
 COPY --chown=iliagpt:nodejs --from=builder /app/package.json ./package.json
 COPY --chown=iliagpt:nodejs --from=builder /app/server/openclaw ./server/openclaw
 
+# Align @mariozechner/pi-coding-agent with openclaw's version (0.64.0) so that
+# ESM imports from bundled openclaw source code resolve the correct version.
+# The root node_modules may ship an older release that lacks newer exports.
+RUN rm -rf node_modules/@mariozechner/pi-coding-agent \
+  && ln -s /app/server/openclaw/node_modules/@mariozechner/pi-coding-agent node_modules/@mariozechner/pi-coding-agent
+
 # Download Playwright's bundled Chromium browser binary.
 # System deps are installed above via apt-get; here we only fetch the browser.
 ENV PLAYWRIGHT_BROWSERS_PATH=/app/.playwright-browsers
