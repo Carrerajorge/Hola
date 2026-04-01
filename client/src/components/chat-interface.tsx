@@ -1822,6 +1822,20 @@ export function ChatInterface({
     // Override with prop messages (they are the source of truth once available)
     messages.forEach((m: any) => msgMap.set(messageKey(m), m));
 
+    // DEBUG: trace duplicate assistant messages
+    if (import.meta.env.DEV) {
+      const assistantEntries = Array.from(msgMap.values()).filter((m: any) => m.role === "assistant");
+      if (assistantEntries.length > 1) {
+        console.warn("[displayMessages] Multiple assistant messages detected:", assistantEntries.map((m: any) => ({
+          id: m.id,
+          clientTempId: m.clientTempId,
+          key: messageKey(m),
+          content: (m.content || "").slice(0, 50),
+          source: optimisticMessages.includes(m) ? "optimistic" : "prop",
+        })));
+      }
+    }
+
     const buildAgentRunPayload = (runState: any) => ({
       runId: runState.runId,
       status: runState.status,
@@ -1856,6 +1870,34 @@ export function ChatInterface({
 
           // Agent runs are keyed by the originating user message. Render them as
           // a synthetic assistant bubble so progress is visible in the transcript.
+          // BUT: skip the synthetic if a real assistant message already exists
+          // for this user message (from finalize/streaming), to avoid duplication.
+          const hasRealAssistantReply = Array.from(msgMap.values()).some(
+            (m: any) => m.role === "assistant" && m.userMessageId === messageId
+          );
+          if (import.meta.env.DEV) {
+            const allAssistant = Array.from(msgMap.values()).filter((m: any) => m.role === "assistant");
+            console.log("[displayMessages] Agent run check for userMsgId:", messageId, {
+              hasRealAssistantReply,
+              assistantMessages: allAssistant.map((m: any) => ({
+                id: m.id,
+                clientTempId: m.clientTempId,
+                userMessageId: m.userMessageId,
+                content: (m.content || "").slice(0, 30),
+              })),
+            });
+          }
+          if (hasRealAssistantReply) {
+            // Enrich the existing real assistant reply with agentRun data
+            for (const [key, m] of msgMap.entries()) {
+              if ((m as any).role === "assistant" && (m as any).userMessageId === messageId) {
+                msgMap.set(key, { ...m, agentRun: buildAgentRunPayload(runState) });
+                break;
+              }
+            }
+            return;
+          }
+
           const syntheticAgentMessageKey = `agent-run:${messageId}`;
           const existingSyntheticMessage = msgMap.get(syntheticAgentMessageKey);
           const syntheticTimestamp =
@@ -1877,6 +1919,19 @@ export function ChatInterface({
             agentRun: buildAgentRunPayload(runState),
           });
         } else {
+          // Same guard: skip synthetic if a real assistant reply already exists
+          const hasRealReply = Array.from(msgMap.values()).some(
+            (m: any) => m.role === "assistant" && m.userMessageId === messageId
+          );
+          if (hasRealReply) {
+            for (const [key, m] of msgMap.entries()) {
+              if ((m as any).role === "assistant" && (m as any).userMessageId === messageId) {
+                msgMap.set(key, { ...m, agentRun: buildAgentRunPayload(runState) });
+                break;
+              }
+            }
+            return;
+          }
           const syntheticAgentMessageKey = `agent-run:${messageId}`;
           msgMap.set(syntheticAgentMessageKey, {
             id: messageId,
@@ -8156,6 +8211,10 @@ export function ChatInterface({
       }
 
       // Helper function to map file to attachment (optimized - single pass)
+      // Alias optimisticUserMsg as userMsg for the regular flow below.
+      // The generation/agent/local-control branches each define their own
+      // `const userMsg` locally; this one covers the remaining regular path.
+      const userMsg = optimisticUserMsg;
       const mapFileToAttachment = (f: any): Attachment => {
         const isImage = f.type.startsWith("image/");
         let documentType: "word" | "excel" | "ppt" | "pdf" | undefined;

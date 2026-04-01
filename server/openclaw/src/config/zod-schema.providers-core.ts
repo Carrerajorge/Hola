@@ -128,8 +128,8 @@ export const TelegramDirectSchema = z
 
 const TelegramCustomCommandSchema = z
   .object({
-    command: z.string().transform(normalizeTelegramCommandName),
-    description: z.string().transform(normalizeTelegramCommandDescription),
+    command: z.string().overwrite(normalizeTelegramCommandName),
+    description: z.string().overwrite(normalizeTelegramCommandDescription),
   })
   .strict();
 
@@ -474,7 +474,7 @@ const DiscordVoiceSchema = z
   .strict()
   .optional();
 
-const DiscordAccountSchemaBase = z
+export const DiscordAccountSchema = z
   .object({
     name: z.string().optional(),
     capabilities: z.array(z.string()).optional(),
@@ -621,9 +621,8 @@ const DiscordAccountSchemaBase = z
       .strict()
       .optional(),
   })
-  .strict();
-
-export const DiscordAccountSchema = DiscordAccountSchemaBase.superRefine((value, ctx) => {
+  .strict()
+  .superRefine((value, ctx) => {
     normalizeDiscordStreamingConfig(value);
 
     const activityText = typeof value.activity === "string" ? value.activity.trim() : "";
@@ -671,11 +670,11 @@ export const DiscordAccountSchema = DiscordAccountSchemaBase.superRefine((value,
       });
     }
 
-  // DM allowlist validation is enforced at DiscordConfigSchema so account entries
-  // can inherit top-level allowFrom via runtime shallow merge.
-});
+    // DM allowlist validation is enforced at DiscordConfigSchema so account entries
+    // can inherit top-level allowFrom via runtime shallow merge.
+  });
 
-export const DiscordConfigSchema = DiscordAccountSchemaBase.extend({
+export const DiscordConfigSchema = DiscordAccountSchema.extend({
   accounts: z.record(z.string(), DiscordAccountSchema.optional()).optional(),
   defaultAccount: z.string().optional(),
 }).superRefine((value, ctx) => {
@@ -860,13 +859,23 @@ const SlackReplyToModeByChatTypeSchema = z
   })
   .strict();
 
-const SlackAccountSchemaBase = z
+export const SlackAccountSchema = z
   .object({
     name: z.string().optional(),
     mode: z.enum(["socket", "http"]).optional(),
     signingSecret: SecretInputSchema.optional().register(sensitive),
     webhookPath: z.string().optional(),
     capabilities: SlackCapabilitiesSchema.optional(),
+    execApprovals: z
+      .object({
+        enabled: z.boolean().optional(),
+        approvers: z.array(z.union([z.string(), z.number()])).optional(),
+        agentFilter: z.array(z.string()).optional(),
+        sessionFilter: z.array(z.string()).optional(),
+        target: z.enum(["dm", "channel", "both"]).optional(),
+      })
+      .strict()
+      .optional(),
     markdown: MarkdownConfigSchema,
     enabled: z.boolean().optional(),
     commands: ProviderCommandsSchema,
@@ -930,16 +939,15 @@ const SlackAccountSchemaBase = z
     ackReaction: z.string().optional(),
     typingReaction: z.string().optional(),
   })
-  .strict();
-
-export const SlackAccountSchema = SlackAccountSchemaBase.superRefine((value) => {
+  .strict()
+  .superRefine((value) => {
     normalizeSlackStreamingConfig(value);
 
-  // DM allowlist validation is enforced at SlackConfigSchema so account entries
-  // can inherit top-level allowFrom via runtime shallow merge.
-});
+    // DM allowlist validation is enforced at SlackConfigSchema so account entries
+    // can inherit top-level allowFrom via runtime shallow merge.
+  });
 
-export const SlackConfigSchema = SlackAccountSchemaBase.extend({
+export const SlackConfigSchema = SlackAccountSchema.safeExtend({
   mode: z.enum(["socket", "http"]).optional().default("socket"),
   signingSecret: SecretInputSchema.optional().register(sensitive),
   webhookPath: z.string().optional().default("/slack/events"),

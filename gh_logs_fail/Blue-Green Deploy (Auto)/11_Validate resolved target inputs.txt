@@ -1,0 +1,43 @@
+﻿2026-03-31T15:14:32.1842681Z ##[group]Run set -euo pipefail
+2026-03-31T15:14:32.1843031Z [36;1mset -euo pipefail[0m
+2026-03-31T15:14:32.1843327Z [36;1mRESOLVED_HOST="***"[0m
+2026-03-31T15:14:32.1843631Z [36;1mRESOLVED_PORT="***"[0m
+2026-03-31T15:14:32.1843891Z [36;1mRESOLVED_USER="***"[0m
+2026-03-31T15:14:32.1844150Z [36;1mRESOLVED_PATH="***"[0m
+2026-03-31T15:14:32.1844384Z [36;1m[0m
+2026-03-31T15:14:32.1844832Z [36;1mif [ -z "${RESOLVED_HOST}" ] || [ -z "${RESOLVED_PORT}" ] || [ -z "${RESOLVED_USER}" ] || [ -z "${RESOLVED_PATH}" ]; then[0m
+2026-03-31T15:14:32.1845399Z [36;1m  echo "::error::Resolved deploy target is incomplete."[0m
+2026-03-31T15:14:32.1845733Z [36;1m  exit 1[0m
+2026-03-31T15:14:32.1845933Z [36;1mfi[0m
+2026-03-31T15:14:32.1846238Z [36;1mif ! printf '%s' "${RESOLVED_HOST}" | grep -Eq '^[A-Za-z0-9.-]+$'; then[0m
+2026-03-31T15:14:32.1846737Z [36;1m  echo "::error::Resolved host has invalid characters: ${RESOLVED_HOST}"[0m
+2026-03-31T15:14:32.1847115Z [36;1m  exit 1[0m
+2026-03-31T15:14:32.1847311Z [36;1mfi[0m
+2026-03-31T15:14:32.1847644Z [36;1mif ! printf '%s' "${RESOLVED_PORT}" | grep -Eq '^[0-9]{1,5}$'; then[0m
+2026-03-31T15:14:32.1848081Z [36;1m  echo "::error::Resolved port is invalid: ${RESOLVED_PORT}"[0m
+2026-03-31T15:14:32.1848416Z [36;1m  exit 1[0m
+2026-03-31T15:14:32.1848609Z [36;1mfi[0m
+2026-03-31T15:14:32.1848901Z [36;1mif [ "${RESOLVED_PORT}" -lt 1 ] || [ "${RESOLVED_PORT}" -gt 65535 ]; then[0m
+2026-03-31T15:14:32.1849541Z [36;1m  echo "::error::Resolved port out of range: ${RESOLVED_PORT}"[0m
+2026-03-31T15:14:32.1849879Z [36;1m  exit 1[0m
+2026-03-31T15:14:32.1850070Z [36;1mfi[0m
+2026-03-31T15:14:32.1850412Z [36;1mif ! printf '%s' "${RESOLVED_USER}" | grep -Eq '^[A-Za-z_][A-Za-z0-9_-]{0,31}$'; then[0m
+2026-03-31T15:14:32.1850921Z [36;1m  echo "::error::Resolved user is invalid: ${RESOLVED_USER}"[0m
+2026-03-31T15:14:32.1851645Z [36;1m  exit 1[0m
+2026-03-31T15:14:32.1851850Z [36;1mfi[0m
+2026-03-31T15:14:32.1852157Z [36;1mif ! printf '%s' "${RESOLVED_PATH}" | grep -Eq '^/[A-Za-z0-9._/-]+$'; then[0m
+2026-03-31T15:14:32.1852645Z [36;1m  echo "::error::Resolved deploy path is invalid: ${RESOLVED_PATH}"[0m
+2026-03-31T15:14:32.1853016Z [36;1m  exit 1[0m
+2026-03-31T15:14:32.1853209Z [36;1mfi[0m
+2026-03-31T15:14:32.1853484Z [36;1mif printf '%s' "${RESOLVED_PATH}" | grep -Eq '(^|/)\.\.(/|$)'; then[0m
+2026-03-31T15:14:32.1854011Z [36;1m  echo "::error::Resolved deploy path contains path traversal segments: ${RESOLVED_PATH}"[0m
+2026-03-31T15:14:32.1854467Z [36;1m  exit 1[0m
+2026-03-31T15:14:32.1854664Z [36;1mfi[0m
+2026-03-31T15:14:32.1879939Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:14:32.1880197Z env:
+2026-03-31T15:14:32.1880421Z   VPS_HOST: ***
+2026-03-31T15:14:32.1880645Z   VPS_USER: ***
+2026-03-31T15:14:32.1880849Z   VPS_PORT: ***
+2026-03-31T15:14:32.1881265Z   DEPLOY_PATH: ***
+2026-03-31T15:14:32.1881519Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:14:32.1881782Z ##[endgroup]

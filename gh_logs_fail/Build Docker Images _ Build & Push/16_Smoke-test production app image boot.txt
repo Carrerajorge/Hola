@@ -1,0 +1,292 @@
+﻿2026-03-31T15:08:02.2282574Z ##[group]Run bash ./scripts/ci-container-boot-smoke.sh
+2026-03-31T15:08:02.2282980Z [36;1mbash ./scripts/ci-container-boot-smoke.sh[0m
+2026-03-31T15:08:02.2309830Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:08:02.2310064Z env:
+2026-03-31T15:08:02.2310219Z   REGISTRY: ghcr.io
+2026-03-31T15:08:02.2310445Z   IMAGE_BASE: ghcr.io/carrerajorge/iliagpt
+2026-03-31T15:08:02.2310817Z   BUILDKIT_IMAGE: public.ecr.aws/vend/moby/buildkit:buildx-stable-1
+2026-03-31T15:08:02.2311485Z   IMAGE_TAG: sha-1abdd4cf
+2026-03-31T15:08:02.2311697Z   APP_VERSION: 1abdd4cf
+2026-03-31T15:08:02.2311923Z   APP_SHA: 1abdd4cffdb111bee62917e8426b960fd02066e2
+2026-03-31T15:08:02.2312263Z   APP_IMAGE: ghcr.io/carrerajorge/iliagpt-app:sha-1abdd4cf
+2026-03-31T15:08:02.2312558Z ##[endgroup]
+2026-03-31T15:08:02.3747580Z [ci-container-smoke] Creating isolated Docker network hola-smoke-23803683206-1-14853...
+2026-03-31T15:08:02.4344631Z [ci-container-smoke] Pulling image pgvector/pgvector:pg15 (attempt 1/3)...
+2026-03-31T15:08:03.1200553Z pg15: Pulling from pgvector/pgvector
+2026-03-31T15:08:03.3290922Z 84a2afebaf4d: Pulling fs layer
+2026-03-31T15:08:03.3291610Z 07bb39b1907a: Pulling fs layer
+2026-03-31T15:08:03.3291982Z 8e27e7e6783b: Pulling fs layer
+2026-03-31T15:08:03.3292332Z 0314308764f1: Pulling fs layer
+2026-03-31T15:08:03.3292676Z 52999bde1c9e: Pulling fs layer
+2026-03-31T15:08:03.3293043Z 26bfd31c30a9: Pulling fs layer
+2026-03-31T15:08:03.3293891Z 3b713549c1ee: Pulling fs layer
+2026-03-31T15:08:03.3294298Z c357ed282036: Pulling fs layer
+2026-03-31T15:08:03.3294998Z 0447dbffefb7: Pulling fs layer
+2026-03-31T15:08:03.3295407Z d7dec530a99f: Pulling fs layer
+2026-03-31T15:08:03.3295787Z 50c10bfa04d0: Pulling fs layer
+2026-03-31T15:08:03.3296359Z d8c929822e1e: Pulling fs layer
+2026-03-31T15:08:03.3296763Z d9fb78b2d496: Pulling fs layer
+2026-03-31T15:08:03.3297125Z 6a4804775285: Pulling fs layer
+2026-03-31T15:08:03.3297494Z 24edba3d5dd2: Pulling fs layer
+2026-03-31T15:08:03.3297853Z 2b3a397cb08c: Pulling fs layer
+2026-03-31T15:08:03.3298232Z 0447dbffefb7: Waiting
+2026-03-31T15:08:03.3298607Z d7dec530a99f: Waiting
+2026-03-31T15:08:03.3298924Z 50c10bfa04d0: Waiting
+2026-03-31T15:08:03.3299219Z d8c929822e1e: Waiting
+2026-03-31T15:08:03.3299519Z d9fb78b2d496: Waiting
+2026-03-31T15:08:03.3299819Z 6a4804775285: Waiting
+2026-03-31T15:08:03.3300119Z 24edba3d5dd2: Waiting
+2026-03-31T15:08:03.3300434Z 2b3a397cb08c: Waiting
+2026-03-31T15:08:03.3300749Z 52999bde1c9e: Waiting
+2026-03-31T15:08:03.3301062Z 26bfd31c30a9: Waiting
+2026-03-31T15:08:03.3301363Z 3b713549c1ee: Waiting
+2026-03-31T15:08:03.3301676Z c357ed282036: Waiting
+2026-03-31T15:08:03.3301975Z 0314308764f1: Waiting
+2026-03-31T15:08:03.5886671Z 07bb39b1907a: Verifying Checksum
+2026-03-31T15:08:03.5887239Z 07bb39b1907a: Download complete
+2026-03-31T15:08:03.7442399Z 8e27e7e6783b: Verifying Checksum
+2026-03-31T15:08:03.7444173Z 8e27e7e6783b: Download complete
+2026-03-31T15:08:03.8839166Z 84a2afebaf4d: Verifying Checksum
+2026-03-31T15:08:03.8845965Z 84a2afebaf4d: Download complete
+2026-03-31T15:08:03.9596578Z 0314308764f1: Verifying Checksum
+2026-03-31T15:08:03.9597989Z 0314308764f1: Download complete
+2026-03-31T15:08:04.1975794Z 52999bde1c9e: Download complete
+2026-03-31T15:08:04.2320663Z 3b713549c1ee: Verifying Checksum
+2026-03-31T15:08:04.2321270Z 3b713549c1ee: Download complete
+2026-03-31T15:08:04.2617532Z 26bfd31c30a9: Download complete
+2026-03-31T15:08:04.4447370Z c357ed282036: Verifying Checksum
+2026-03-31T15:08:04.4451952Z c357ed282036: Download complete
+2026-03-31T15:08:04.5209269Z d7dec530a99f: Verifying Checksum
+2026-03-31T15:08:04.5209607Z d7dec530a99f: Download complete
+2026-03-31T15:08:04.7072162Z 50c10bfa04d0: Verifying Checksum
+2026-03-31T15:08:04.7072698Z 50c10bfa04d0: Download complete
+2026-03-31T15:08:04.7518468Z d8c929822e1e: Verifying Checksum
+2026-03-31T15:08:04.7520271Z d8c929822e1e: Download complete
+2026-03-31T15:08:04.9644061Z d9fb78b2d496: Verifying Checksum
+2026-03-31T15:08:04.9645962Z d9fb78b2d496: Download complete
+2026-03-31T15:08:05.0069505Z 6a4804775285: Verifying Checksum
+2026-03-31T15:08:05.0072544Z 6a4804775285: Download complete
+2026-03-31T15:08:05.0878195Z 84a2afebaf4d: Pull complete
+2026-03-31T15:08:05.2230716Z 0447dbffefb7: Verifying Checksum
+2026-03-31T15:08:05.2231184Z 0447dbffefb7: Download complete
+2026-03-31T15:08:05.2526968Z 24edba3d5dd2: Verifying Checksum
+2026-03-31T15:08:05.2527515Z 24edba3d5dd2: Download complete
+2026-03-31T15:08:05.3238176Z 07bb39b1907a: Pull complete
+2026-03-31T15:08:05.3495088Z 2b3a397cb08c: Verifying Checksum
+2026-03-31T15:08:05.3495566Z 2b3a397cb08c: Download complete
+2026-03-31T15:08:05.4555299Z 8e27e7e6783b: Pull complete
+2026-03-31T15:08:05.4898451Z 0314308764f1: Pull complete
+2026-03-31T15:08:05.7756683Z 52999bde1c9e: Pull complete
+2026-03-31T15:08:05.8476431Z 26bfd31c30a9: Pull complete
+2026-03-31T15:08:05.8545035Z 3b713549c1ee: Pull complete
+2026-03-31T15:08:05.8629291Z c357ed282036: Pull complete
+2026-03-31T15:08:08.6790029Z 0447dbffefb7: Pull complete
+2026-03-31T15:08:08.6936990Z d7dec530a99f: Pull complete
+2026-03-31T15:08:08.7276513Z 50c10bfa04d0: Pull complete
+2026-03-31T15:08:08.7369333Z d8c929822e1e: Pull complete
+2026-03-31T15:08:08.7455326Z d9fb78b2d496: Pull complete
+2026-03-31T15:08:08.7533140Z 6a4804775285: Pull complete
+2026-03-31T15:08:08.8028949Z 24edba3d5dd2: Pull complete
+2026-03-31T15:08:08.8700033Z 2b3a397cb08c: Pull complete
+2026-03-31T15:08:08.8733106Z Digest: sha256:7f5681e45237acdf546cf7cdc0dfc0ed7752ede857fda6e54f6ea21b936f8742
+2026-03-31T15:08:08.8742289Z Status: Downloaded newer image for pgvector/pgvector:pg15
+2026-03-31T15:08:08.8749742Z docker.io/pgvector/pgvector:pg15
+2026-03-31T15:08:08.8890154Z [ci-container-smoke] Pulling image redis:alpine (attempt 1/3)...
+2026-03-31T15:08:09.5612879Z alpine: Pulling from library/redis
+2026-03-31T15:08:09.7682283Z 589002ba0eae: Already exists
+2026-03-31T15:08:09.7694373Z cd9ebb746e5b: Pulling fs layer
+2026-03-31T15:08:09.7694846Z d3f91c0b9ad5: Pulling fs layer
+2026-03-31T15:08:09.7698162Z cb2f87994157: Pulling fs layer
+2026-03-31T15:08:09.7698525Z d67eeb8f9f36: Pulling fs layer
+2026-03-31T15:08:09.7698910Z 4f4fb700ef54: Pulling fs layer
+2026-03-31T15:08:09.7699127Z 826f751c7f6d: Pulling fs layer
+2026-03-31T15:08:09.7699449Z d67eeb8f9f36: Waiting
+2026-03-31T15:08:09.7699639Z 4f4fb700ef54: Waiting
+2026-03-31T15:08:09.7699871Z 826f751c7f6d: Waiting
+2026-03-31T15:08:10.0172140Z cd9ebb746e5b: Verifying Checksum
+2026-03-31T15:08:10.0172996Z cd9ebb746e5b: Download complete
+2026-03-31T15:08:10.0315904Z cd9ebb746e5b: Pull complete
+2026-03-31T15:08:10.0485205Z d3f91c0b9ad5: Verifying Checksum
+2026-03-31T15:08:10.1954066Z d3f91c0b9ad5: Pull complete
+2026-03-31T15:08:10.2670527Z d67eeb8f9f36: Verifying Checksum
+2026-03-31T15:08:10.2671154Z d67eeb8f9f36: Download complete
+2026-03-31T15:08:10.2804445Z 4f4fb700ef54: Verifying Checksum
+2026-03-31T15:08:10.2804908Z 4f4fb700ef54: Download complete
+2026-03-31T15:08:10.3810037Z cb2f87994157: Verifying Checksum
+2026-03-31T15:08:10.3810541Z cb2f87994157: Download complete
+2026-03-31T15:08:10.5209171Z 826f751c7f6d: Verifying Checksum
+2026-03-31T15:08:10.5211236Z 826f751c7f6d: Download complete
+2026-03-31T15:08:10.8199233Z cb2f87994157: Pull complete
+2026-03-31T15:08:10.8295235Z d67eeb8f9f36: Pull complete
+2026-03-31T15:08:10.8357637Z 4f4fb700ef54: Pull complete
+2026-03-31T15:08:10.8477051Z 826f751c7f6d: Pull complete
+2026-03-31T15:08:10.8510918Z Digest: sha256:81b6f81d6a6c5b9019231a2e8eb10085e3a139a34f833dcc965a8a959b040b72
+2026-03-31T15:08:10.8520182Z Status: Downloaded newer image for redis:alpine
+2026-03-31T15:08:10.8526869Z docker.io/library/redis:alpine
+2026-03-31T15:08:10.8658961Z [ci-container-smoke] Pulling image ghcr.io/carrerajorge/iliagpt-app:sha-1abdd4cf (attempt 1/3)...
+2026-03-31T15:08:11.8501187Z sha-1abdd4cf: Pulling from carrerajorge/iliagpt-app
+2026-03-31T15:08:12.0702404Z 6db0909c4473: Pulling fs layer
+2026-03-31T15:08:12.0703106Z 7723618b139f: Pulling fs layer
+2026-03-31T15:08:12.0703493Z eb2c6bc01a10: Pulling fs layer
+2026-03-31T15:08:12.0704052Z 93f73fef6895: Pulling fs layer
+2026-03-31T15:08:12.0705318Z 71ff01535b69: Pulling fs layer
+2026-03-31T15:08:12.0706059Z a5ecc29837c2: Pulling fs layer
+2026-03-31T15:08:12.0707512Z 5a8bcd61b768: Pulling fs layer
+2026-03-31T15:08:12.0707952Z 34ff1226a825: Pulling fs layer
+2026-03-31T15:08:12.0708190Z c482eb557ee9: Pulling fs layer
+2026-03-31T15:08:12.0708418Z 3ce0a73d5d4a: Pulling fs layer
+2026-03-31T15:08:12.0708634Z be561248ca9a: Pulling fs layer
+2026-03-31T15:08:12.0708946Z f491395d99d1: Pulling fs layer
+2026-03-31T15:08:12.0709304Z e1d3487db0db: Pulling fs layer
+2026-03-31T15:08:12.0709527Z 59466fc61f94: Pulling fs layer
+2026-03-31T15:08:12.0709730Z 44942549a2d8: Pulling fs layer
+2026-03-31T15:08:12.0709942Z d22fb0309e2d: Pulling fs layer
+2026-03-31T15:08:12.0710156Z 93f73fef6895: Waiting
+2026-03-31T15:08:12.0710493Z 71ff01535b69: Waiting
+2026-03-31T15:08:12.0710672Z a5ecc29837c2: Waiting
+2026-03-31T15:08:12.0710964Z 5a8bcd61b768: Waiting
+2026-03-31T15:08:12.0711137Z 34ff1226a825: Waiting
+2026-03-31T15:08:12.0711299Z c482eb557ee9: Waiting
+2026-03-31T15:08:12.0711588Z 3ce0a73d5d4a: Waiting
+2026-03-31T15:08:12.0712527Z be561248ca9a: Waiting
+2026-03-31T15:08:12.0712803Z f491395d99d1: Waiting
+2026-03-31T15:08:12.0712982Z e1d3487db0db: Waiting
+2026-03-31T15:08:12.0713254Z 59466fc61f94: Waiting
+2026-03-31T15:08:12.0713662Z 44942549a2d8: Waiting
+2026-03-31T15:08:12.0713838Z d22fb0309e2d: Waiting
+2026-03-31T15:08:12.3234051Z 7723618b139f: Verifying Checksum
+2026-03-31T15:08:12.3234749Z 7723618b139f: Download complete
+2026-03-31T15:08:12.6157602Z 6db0909c4473: Verifying Checksum
+2026-03-31T15:08:12.6159665Z 6db0909c4473: Download complete
+2026-03-31T15:08:12.7908016Z eb2c6bc01a10: Verifying Checksum
+2026-03-31T15:08:12.7908527Z eb2c6bc01a10: Download complete
+2026-03-31T15:08:12.9684584Z 93f73fef6895: Verifying Checksum
+2026-03-31T15:08:12.9685171Z 93f73fef6895: Download complete
+2026-03-31T15:08:13.0814616Z a5ecc29837c2: Verifying Checksum
+2026-03-31T15:08:13.0819589Z a5ecc29837c2: Download complete
+2026-03-31T15:08:13.2695367Z 5a8bcd61b768: Verifying Checksum
+2026-03-31T15:08:13.2695931Z 5a8bcd61b768: Download complete
+2026-03-31T15:08:13.2823745Z 71ff01535b69: Verifying Checksum
+2026-03-31T15:08:13.2824439Z 71ff01535b69: Download complete
+2026-03-31T15:08:13.8173085Z 6db0909c4473: Pull complete
+2026-03-31T15:08:13.9588812Z 3ce0a73d5d4a: Verifying Checksum
+2026-03-31T15:08:13.9589324Z 3ce0a73d5d4a: Download complete
+2026-03-31T15:08:14.1258467Z 7723618b139f: Pull complete
+2026-03-31T15:08:14.2761301Z be561248ca9a: Verifying Checksum
+2026-03-31T15:08:14.2761788Z be561248ca9a: Download complete
+2026-03-31T15:08:14.8558237Z f491395d99d1: Verifying Checksum
+2026-03-31T15:08:14.8558793Z f491395d99d1: Download complete
+2026-03-31T15:08:15.1531394Z e1d3487db0db: Verifying Checksum
+2026-03-31T15:08:15.1532170Z e1d3487db0db: Download complete
+2026-03-31T15:08:16.1639729Z 34ff1226a825: Verifying Checksum
+2026-03-31T15:08:16.1640416Z 34ff1226a825: Download complete
+2026-03-31T15:08:16.9361168Z 59466fc61f94: Verifying Checksum
+2026-03-31T15:08:16.9366734Z 59466fc61f94: Download complete
+2026-03-31T15:08:17.0708323Z eb2c6bc01a10: Pull complete
+2026-03-31T15:08:17.2704835Z d22fb0309e2d: Download complete
+2026-03-31T15:08:17.4159609Z 93f73fef6895: Pull complete
+2026-03-31T15:08:17.5712034Z 71ff01535b69: Pull complete
+2026-03-31T15:08:17.6650609Z a5ecc29837c2: Pull complete
+2026-03-31T15:08:17.7148465Z 5a8bcd61b768: Pull complete
+2026-03-31T15:08:18.8398148Z 44942549a2d8: Verifying Checksum
+2026-03-31T15:08:18.8400518Z 44942549a2d8: Download complete
+2026-03-31T15:08:19.4034570Z c482eb557ee9: Verifying Checksum
+2026-03-31T15:08:19.4035012Z c482eb557ee9: Download complete
+2026-03-31T15:08:34.7167094Z 34ff1226a825: Pull complete
+2026-03-31T15:09:29.4669442Z c482eb557ee9: Pull complete
+2026-03-31T15:09:30.0188894Z 3ce0a73d5d4a: Pull complete
+2026-03-31T15:09:30.0470033Z be561248ca9a: Pull complete
+2026-03-31T15:09:30.1944099Z f491395d99d1: Pull complete
+2026-03-31T15:09:30.2019456Z e1d3487db0db: Pull complete
+2026-03-31T15:09:42.5225369Z 59466fc61f94: Pull complete
+2026-03-31T15:09:46.8734660Z 44942549a2d8: Pull complete
+2026-03-31T15:09:46.8833768Z d22fb0309e2d: Pull complete
+2026-03-31T15:09:46.8870837Z Digest: sha256:ad1575ff2efb3dbe0b7c55ab60c2f7daa386fe89ccf6bfe525b1c3850b45a2db
+2026-03-31T15:09:46.8880900Z Status: Downloaded newer image for ghcr.io/carrerajorge/iliagpt-app:sha-1abdd4cf
+2026-03-31T15:09:46.8889045Z ghcr.io/carrerajorge/iliagpt-app:sha-1abdd4cf
+2026-03-31T15:09:46.9029787Z [ci-container-smoke] Pulling image ghcr.io/carrerajorge/iliagpt-sandbox:sha-1abdd4cf (attempt 1/3)...
+2026-03-31T15:09:47.8866985Z sha-1abdd4cf: Pulling from carrerajorge/iliagpt-sandbox
+2026-03-31T15:09:48.0891954Z 6db0909c4473: Already exists
+2026-03-31T15:09:48.0903919Z 7723618b139f: Already exists
+2026-03-31T15:09:48.0914553Z eb2c6bc01a10: Already exists
+2026-03-31T15:09:48.0925424Z 93f73fef6895: Already exists
+2026-03-31T15:09:48.0936179Z 71ff01535b69: Already exists
+2026-03-31T15:09:48.0946284Z a5ecc29837c2: Already exists
+2026-03-31T15:09:48.0957772Z f6e4043e8642: Pulling fs layer
+2026-03-31T15:09:48.0958226Z 55401ae2d368: Pulling fs layer
+2026-03-31T15:09:48.0959408Z 67e60235ef3b: Pulling fs layer
+2026-03-31T15:09:48.0959786Z 11a3ed72736e: Pulling fs layer
+2026-03-31T15:09:48.0960216Z e861f627de6e: Pulling fs layer
+2026-03-31T15:09:48.0960582Z 9143849752da: Pulling fs layer
+2026-03-31T15:09:48.0960932Z 528d49b52bd9: Pulling fs layer
+2026-03-31T15:09:48.0961290Z 149c4e96ce4f: Pulling fs layer
+2026-03-31T15:09:48.0961664Z 60a428ee8e3d: Pulling fs layer
+2026-03-31T15:09:48.0962021Z 4f4fb700ef54: Pulling fs layer
+2026-03-31T15:09:48.0962373Z f4353113c232: Pulling fs layer
+2026-03-31T15:09:48.0962716Z 5758c172c780: Pulling fs layer
+2026-03-31T15:09:48.0963078Z 149c4e96ce4f: Waiting
+2026-03-31T15:09:48.0963546Z f4353113c232: Waiting
+2026-03-31T15:09:48.0963839Z 5758c172c780: Waiting
+2026-03-31T15:09:48.0964153Z 60a428ee8e3d: Waiting
+2026-03-31T15:09:48.0964457Z 4f4fb700ef54: Waiting
+2026-03-31T15:09:48.0964751Z 11a3ed72736e: Waiting
+2026-03-31T15:09:48.0965037Z e861f627de6e: Waiting
+2026-03-31T15:09:48.0965336Z 9143849752da: Waiting
+2026-03-31T15:09:48.0965544Z 528d49b52bd9: Waiting
+2026-03-31T15:09:48.4771858Z 67e60235ef3b: Verifying Checksum
+2026-03-31T15:09:48.4772390Z 67e60235ef3b: Download complete
+2026-03-31T15:09:48.5495945Z 55401ae2d368: Verifying Checksum
+2026-03-31T15:09:48.5497031Z 55401ae2d368: Download complete
+2026-03-31T15:09:48.8075382Z 11a3ed72736e: Verifying Checksum
+2026-03-31T15:09:48.8076088Z 11a3ed72736e: Download complete
+2026-03-31T15:09:50.0036983Z f6e4043e8642: Verifying Checksum
+2026-03-31T15:09:50.0040869Z f6e4043e8642: Download complete
+2026-03-31T15:09:50.0775261Z e861f627de6e: Download complete
+2026-03-31T15:09:57.6828794Z 9143849752da: Verifying Checksum
+2026-03-31T15:09:57.6831416Z 9143849752da: Download complete
+2026-03-31T15:09:57.7326943Z 528d49b52bd9: Verifying Checksum
+2026-03-31T15:09:57.7331313Z 528d49b52bd9: Download complete
+2026-03-31T15:09:58.2078990Z 4f4fb700ef54: Verifying Checksum
+2026-03-31T15:09:58.2081183Z 4f4fb700ef54: Download complete
+2026-03-31T15:09:58.7981281Z f4353113c232: Verifying Checksum
+2026-03-31T15:09:58.7987199Z f4353113c232: Download complete
+2026-03-31T15:09:59.4277227Z 60a428ee8e3d: Verifying Checksum
+2026-03-31T15:09:59.4277587Z 60a428ee8e3d: Download complete
+2026-03-31T15:10:00.0709495Z f6e4043e8642: Pull complete
+2026-03-31T15:10:00.1474801Z 5758c172c780: Verifying Checksum
+2026-03-31T15:10:00.1475184Z 5758c172c780: Download complete
+2026-03-31T15:10:01.0700040Z 55401ae2d368: Pull complete
+2026-03-31T15:10:01.1627183Z 67e60235ef3b: Pull complete
+2026-03-31T15:10:01.2269647Z 11a3ed72736e: Pull complete
+2026-03-31T15:10:04.5928870Z 149c4e96ce4f: Verifying Checksum
+2026-03-31T15:10:04.5929309Z 149c4e96ce4f: Download complete
+2026-03-31T15:10:08.4763905Z e861f627de6e: Pull complete
+2026-03-31T15:11:13.4135132Z 9143849752da: Pull complete
+2026-03-31T15:12:00.4219100Z 528d49b52bd9: Pull complete
+2026-03-31T15:12:21.9210092Z 149c4e96ce4f: Pull complete
+2026-03-31T15:12:30.3719919Z 60a428ee8e3d: Pull complete
+2026-03-31T15:12:30.3811860Z 4f4fb700ef54: Pull complete
+2026-03-31T15:12:30.4291238Z f4353113c232: Pull complete
+2026-03-31T15:12:31.6644853Z 5758c172c780: Pull complete
+2026-03-31T15:12:31.6690790Z Digest: sha256:acef0462a63bc3e9b037250ab84c2a7156e8cfc16565cfd3d74925d7f3480a7d
+2026-03-31T15:12:31.6700640Z Status: Downloaded newer image for ghcr.io/carrerajorge/iliagpt-sandbox:sha-1abdd4cf
+2026-03-31T15:12:31.6715242Z ghcr.io/carrerajorge/iliagpt-sandbox:sha-1abdd4cf
+2026-03-31T15:12:31.6737787Z [ci-container-smoke] Starting ephemeral Postgres for production boot smoke...
+2026-03-31T15:12:31.8263053Z [ci-container-smoke] Starting ephemeral Redis for production boot smoke...
+2026-03-31T15:12:38.0909525Z [ci-container-smoke] hola-smoke-postgres-23803683206-1-14853 is healthy.
+2026-03-31T15:12:38.1174458Z [ci-container-smoke] hola-smoke-redis-23803683206-1-14853 is healthy.
+2026-03-31T15:12:38.1188906Z [ci-container-smoke] Running production migrations inside the built image...
+2026-03-31T15:12:39.9960359Z [ci-container-smoke] Booting the sandbox runner image on host port 60825 (attempt 1/3)...
+2026-03-31T15:12:42.1936441Z [ci-container-smoke] http://127.0.0.1:60825/health returned HTTP 200.
+2026-03-31T15:12:42.1952686Z [ci-container-smoke] Booting the production app image on host port 38027 (attempt 1/3)...
+2026-03-31T15:12:42.3518612Z [ci-container-smoke] Booting the production worker image...
+2026-03-31T15:12:56.7337392Z [ci-container-smoke] http://127.0.0.1:38027/api/health/ready returned HTTP 200.
+2026-03-31T15:13:06.7487898Z [ci-container-smoke] Worker container is running.
+2026-03-31T15:13:06.7594994Z [ci-container-smoke] Health payload: {"status":"ok","timestamp":"2026-03-31T15:13:06.757Z","version":"1abdd4cf","app_version":"1abdd4cf","package_version":"2.1.0","app_sha":"1abdd4cffdb111bee62917e8426b960fd02066e2","image_tag":"sha-1abdd4cf","built_at":"2026-03-31T14:49:59Z","release_source":"manifest","node":{"version":"v22.22.2","platform":"linux","arch":"x64"},"memory":{"rss":888324096,"heapUsed":673553576,"heapTotal":718778368},"uptime":24.404769379,"rateLimiter":{"initialized":true,"backend":"redis"}}
+2026-03-31T15:13:06.8183231Z [ci-container-smoke] OpenClaw runtime health payload: {"ok":true,"timestamp":"2026-03-31T15:13:06.812Z","modules":{"skills":true,"tools":true,"gateway":true},"details":{"skillsConfigured":true,"skillsLoaded":103,"skillsDirectory":"/app/server/openclaw/skills","toolsConfigured":true,"gatewayConfigured":true,"gatewayPath":"/api/openclaw/runtime"}}
+2026-03-31T15:13:07.0561106Z [ci-container-smoke] [ci-container-smoke] Contrato publico de runtime verificado.
+2026-03-31T15:13:07.0561670Z - default_model: moonshotai/kimi-k2.5
+2026-03-31T15:13:07.0562045Z - public_model: openrouter/moonshotai/kimi-k2.5
+2026-03-31T15:13:07.0948131Z [ci-container-smoke] OpenClaw runtime reported 103 skills.
+2026-03-31T15:13:07.1932587Z [ci-container-smoke] Embedded OpenClaw version verified: 2026.3.28
+2026-03-31T15:13:07.1934537Z [ci-container-smoke] Runtime readiness gate passed for ghcr.io/carrerajorge/iliagpt-app:sha-1abdd4cf.

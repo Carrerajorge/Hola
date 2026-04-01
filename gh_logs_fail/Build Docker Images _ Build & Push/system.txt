@@ -1,0 +1,15 @@
+2026-03-31T14:49:34.5480000Z Evaluating build_images.if
+2026-03-31T14:49:34.5480000Z Evaluating: (success() && (((github.event_name == 'push') || (((github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main'))))))
+2026-03-31T14:49:34.5480000Z Expanded: (true && (('push' == 'push') || ((github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main'))))
+2026-03-31T14:49:34.5480000Z Result: true
+2026-03-31T14:49:34.5480000Z Evaluating build_images.build.if
+2026-03-31T14:49:34.5480000Z Evaluating: success()
+2026-03-31T14:49:34.5480000Z Result: true
+2026-03-31T14:49:34.5920000Z Requested labels: ubuntu-latest
+2026-03-31T14:49:34.5920000Z Job defined at: Carrerajorge/Hola/.github/workflows/build-images.yml@refs/heads/main
+2026-03-31T14:49:34.5920000Z Reusable workflow chain:
+2026-03-31T14:49:34.5920000Z Carrerajorge/Hola/.github/workflows/deploy.yml@refs/heads/main (1abdd4cffdb111bee62917e8426b960fd02066e2)
+2026-03-31T14:49:34.5920000Z -> Carrerajorge/Hola/.github/workflows/build-images.yml@refs/heads/main (1abdd4cffdb111bee62917e8426b960fd02066e2)
+2026-03-31T14:49:34.5920000Z Waiting for a runner to pick up this job...
+2026-03-31T14:49:35.1010000Z Job is waiting for a hosted runner to come online.
+2026-03-31T14:49:35.0990000Z Job is about to start running on the hosted runner: GitHub Actions 1000020395

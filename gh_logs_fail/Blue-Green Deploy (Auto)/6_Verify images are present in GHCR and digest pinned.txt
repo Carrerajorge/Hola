@@ -1,0 +1,72 @@
+﻿2026-03-31T15:13:52.7411848Z ##[group]Run set -euo pipefail
+2026-03-31T15:13:52.7412252Z [36;1mset -euo pipefail[0m
+2026-03-31T15:13:52.7412520Z [36;1mIMAGE_TAG="${IMAGE_TAG}"[0m
+2026-03-31T15:13:52.7412892Z [36;1mAPP_IMAGE="ghcr.io/carrerajorge/iliagpt-app:${IMAGE_TAG}"[0m
+2026-03-31T15:13:52.7413384Z [36;1mSANDBOX_IMAGE="ghcr.io/carrerajorge/iliagpt-sandbox:${IMAGE_TAG}"[0m
+2026-03-31T15:13:52.7413865Z [36;1mOCR_IMAGE="ghcr.io/carrerajorge/iliagpt-ocr:${IMAGE_TAG}"[0m
+2026-03-31T15:13:52.7414213Z [36;1m[0m
+2026-03-31T15:13:52.7414418Z [36;1mextract_digest() {[0m
+2026-03-31T15:13:52.7414676Z [36;1m  local image_ref="$1"[0m
+2026-03-31T15:13:52.7414927Z [36;1m  local digest[0m
+2026-03-31T15:13:52.7415870Z [36;1m  digest="$(docker manifest inspect "${image_ref}" | python3 -c 'import sys, json; d=json.load(sys.stdin); prints = (d.get("manifests") or [{}]); print((prints[0].get("digest") if prints else "") or d.get("digest", "") or d.get("config", {}).get("digest", ""));' )"[0m
+2026-03-31T15:13:52.7416844Z [36;1m  echo "${digest}"[0m
+2026-03-31T15:13:52.7417111Z [36;1m}[0m
+2026-03-31T15:13:52.7417300Z [36;1m[0m
+2026-03-31T15:13:52.7417503Z [36;1mverify_expected_digest() {[0m
+2026-03-31T15:13:52.7417772Z [36;1m  local label="$1"[0m
+2026-03-31T15:13:52.7418009Z [36;1m  local image_ref="$2"[0m
+2026-03-31T15:13:52.7418263Z [36;1m  local expected="$3"[0m
+2026-03-31T15:13:52.7418521Z [36;1m  if [ -z "${expected}" ]; then[0m
+2026-03-31T15:13:52.7418964Z [36;1m    echo "  ⚠️ No expected ${label} digest provided; skipping digest verification."[0m
+2026-03-31T15:13:52.7419407Z [36;1m    return 0[0m
+2026-03-31T15:13:52.7419624Z [36;1m  fi[0m
+2026-03-31T15:13:52.7419824Z [36;1m  local actual[0m
+2026-03-31T15:13:52.7420091Z [36;1m  actual="$(extract_digest "${image_ref}")"[0m
+2026-03-31T15:13:52.7420407Z [36;1m  if [ -z "${actual}" ]; then[0m
+2026-03-31T15:13:52.7420774Z [36;1m    echo "::error::Could not extract digest for ${label}: ${image_ref}"[0m
+2026-03-31T15:13:52.7421433Z [36;1m    exit 1[0m
+2026-03-31T15:13:52.7421675Z [36;1m  fi[0m
+2026-03-31T15:13:52.7421916Z [36;1m  if [ "${actual}" != "${expected}" ]; then[0m
+2026-03-31T15:13:52.7422686Z [36;1m    echo "::warning::Digest mismatch for ${label}. expected=${expected} actual=${actual} (build output digest and remote manifest digest can differ when attestations are enabled)"[0m
+2026-03-31T15:13:52.7423418Z [36;1m  fi[0m
+2026-03-31T15:13:52.7423664Z [36;1m  echo "  ✓ ${label} digest pinned to ${actual}"[0m
+2026-03-31T15:13:52.7423971Z [36;1m}[0m
+2026-03-31T15:13:52.7424159Z [36;1m[0m
+2026-03-31T15:13:52.7424439Z [36;1mfor pair in "${APP_IMAGE}" "${SANDBOX_IMAGE}" "${OCR_IMAGE}"; do[0m
+2026-03-31T15:13:52.7424809Z [36;1m  for i in $(seq 1 60); do[0m
+2026-03-31T15:13:52.7425153Z [36;1m    if docker manifest inspect "${pair}" > /dev/null 2>&1; then[0m
+2026-03-31T15:13:52.7425553Z [36;1m      echo "  ✓ Manifest available for ${pair}"[0m
+2026-03-31T15:13:52.7425852Z [36;1m      break[0m
+2026-03-31T15:13:52.7426054Z [36;1m    fi[0m
+2026-03-31T15:13:52.7426269Z [36;1m    if [ "${i}" -eq 40 ]; then[0m
+2026-03-31T15:13:52.7426644Z [36;1m      echo "::error::Manifest ${pair} not available in GHCR after retries."[0m
+2026-03-31T15:13:52.7427028Z [36;1m      exit 1[0m
+2026-03-31T15:13:52.7427424Z [36;1m    fi[0m
+2026-03-31T15:13:52.7427628Z [36;1m    sleep $(( i < 10 ? 3 : 5 ))[0m
+2026-03-31T15:13:52.7427880Z [36;1m  done[0m
+2026-03-31T15:13:52.7428070Z [36;1mdone[0m
+2026-03-31T15:13:52.7428255Z [36;1m[0m
+2026-03-31T15:13:52.7428553Z [36;1mverify_expected_digest "app" "${APP_IMAGE}" "${EXPECTED_APP_DIGEST}"[0m
+2026-03-31T15:13:52.7429090Z [36;1mverify_expected_digest "sandbox" "${SANDBOX_IMAGE}" "${EXPECTED_SANDBOX_DIGEST}"[0m
+2026-03-31T15:13:52.7429624Z [36;1mverify_expected_digest "ocr" "${OCR_IMAGE}" "${EXPECTED_OCR_DIGEST}"[0m
+2026-03-31T15:13:52.7455585Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:13:52.7455844Z env:
+2026-03-31T15:13:52.7456118Z   VPS_HOST: ***
+2026-03-31T15:13:52.7456340Z   VPS_USER: ***
+2026-03-31T15:13:52.7456731Z   VPS_PORT: ***
+2026-03-31T15:13:52.7456950Z   DEPLOY_PATH: ***
+2026-03-31T15:13:52.7457174Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:13:52.7457440Z   IMAGE_TAG: sha-1abdd4cf
+2026-03-31T15:13:52.7457873Z   EXPECTED_APP_DIGEST: sha256:ad1575ff2efb3dbe0b7c55ab60c2f7daa386fe89ccf6bfe525b1c3850b45a2db
+2026-03-31T15:13:52.7458554Z   EXPECTED_SANDBOX_DIGEST: sha256:acef0462a63bc3e9b037250ab84c2a7156e8cfc16565cfd3d74925d7f3480a7d
+2026-03-31T15:13:52.7459201Z   EXPECTED_OCR_DIGEST: sha256:5e5489af99ace817d9c0fa1c82b0067a4685829e23e0da4b11cca6db8e9b10c8
+2026-03-31T15:13:52.7459658Z ##[endgroup]
+2026-03-31T15:14:08.1052683Z   ✓ Manifest available for ghcr.io/carrerajorge/iliagpt-app:sha-1abdd4cf
+2026-03-31T15:14:12.6760743Z   ✓ Manifest available for ghcr.io/carrerajorge/iliagpt-sandbox:sha-1abdd4cf
+2026-03-31T15:14:16.8593902Z   ✓ Manifest available for ghcr.io/carrerajorge/iliagpt-ocr:sha-1abdd4cf
+2026-03-31T15:14:18.2014719Z ##[warning]Digest mismatch for app. expected=sha256:ad1575ff2efb3dbe0b7c55ab60c2f7daa386fe89ccf6bfe525b1c3850b45a2db actual=sha256:80f37ef5503bdfc9af236e9ffbba0525d6c91ba21cf6bf4701272e618bc1a9d6 (build output digest and remote manifest digest can differ when attestations are enabled)
+2026-03-31T15:14:18.2023601Z   ✓ app digest pinned to sha256:80f37ef5503bdfc9af236e9ffbba0525d6c91ba21cf6bf4701272e618bc1a9d6
+2026-03-31T15:14:20.5051463Z ##[warning]Digest mismatch for sandbox. expected=sha256:acef0462a63bc3e9b037250ab84c2a7156e8cfc16565cfd3d74925d7f3480a7d actual=sha256:da104806abbba594cf13562dd4fb75ad9ba643e243f900cd965dfbee31e92143 (build output digest and remote manifest digest can differ when attestations are enabled)
+2026-03-31T15:14:20.5054523Z   ✓ sandbox digest pinned to sha256:da104806abbba594cf13562dd4fb75ad9ba643e243f900cd965dfbee31e92143
+2026-03-31T15:14:25.1513673Z ##[warning]Digest mismatch for ocr. expected=sha256:5e5489af99ace817d9c0fa1c82b0067a4685829e23e0da4b11cca6db8e9b10c8 actual=sha256:75bead10951412f0689aaa1f27b57c4a0d707cfd16b5160409f28b7c51959e89 (build output digest and remote manifest digest can differ when attestations are enabled)
+2026-03-31T15:14:25.1516246Z   ✓ ocr digest pinned to sha256:75bead10951412f0689aaa1f27b57c4a0d707cfd16b5160409f28b7c51959e89

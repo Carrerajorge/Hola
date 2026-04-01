@@ -1,0 +1,34 @@
+﻿2026-03-31T15:13:49.7873450Z Current runner version: '2.333.0'
+2026-03-31T15:13:49.7907739Z ##[group]Runner Image Provisioner
+2026-03-31T15:13:49.7909106Z Hosted Compute Agent
+2026-03-31T15:13:49.7910118Z Version: 20260213.493
+2026-03-31T15:13:49.7911523Z Commit: 5c115507f6dd24b8de37d8bbe0bb4509d0cc0fa3
+2026-03-31T15:13:49.7912764Z Build Date: 2026-02-13T00:28:41Z
+2026-03-31T15:13:49.7913924Z Worker ID: {1cebd427-d8e7-4ca9-82ef-ab4253a80638}
+2026-03-31T15:13:49.7915218Z Azure Region: eastus2
+2026-03-31T15:13:49.7916184Z ##[endgroup]
+2026-03-31T15:13:49.7918545Z ##[group]Operating System
+2026-03-31T15:13:49.7919701Z Ubuntu
+2026-03-31T15:13:49.7920625Z 24.04.4
+2026-03-31T15:13:49.7921868Z LTS
+2026-03-31T15:13:49.7922726Z ##[endgroup]
+2026-03-31T15:13:49.7923740Z ##[group]Runner Image
+2026-03-31T15:13:49.7924783Z Image: ubuntu-24.04
+2026-03-31T15:13:49.7925665Z Version: 20260323.65.1
+2026-03-31T15:13:49.7927488Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260323.65/images/ubuntu/Ubuntu2404-Readme.md
+2026-03-31T15:13:49.7930661Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260323.65
+2026-03-31T15:13:49.7932739Z ##[endgroup]
+2026-03-31T15:13:49.7935124Z ##[group]GITHUB_TOKEN Permissions
+2026-03-31T15:13:49.7937982Z Actions: read
+2026-03-31T15:13:49.7939052Z Contents: read
+2026-03-31T15:13:49.7940058Z Metadata: read
+2026-03-31T15:13:49.7941334Z Packages: write
+2026-03-31T15:13:49.7942397Z SecurityEvents: write
+2026-03-31T15:13:49.7943324Z ##[endgroup]
+2026-03-31T15:13:49.7946806Z Secret source: Actions
+2026-03-31T15:13:49.7948705Z Prepare workflow directory
+2026-03-31T15:13:49.8698075Z Prepare all required actions
+2026-03-31T15:13:49.8753127Z Getting action download info
+2026-03-31T15:13:50.2404681Z Download action repository 'actions/checkout@v4' (SHA:34e114876b0b11c390a56381ad16ebd13914f8d5)
+2026-03-31T15:13:50.4067698Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+2026-03-31T15:13:50.5890483Z Complete job name: Blue-Green Deploy (Auto)

@@ -1,0 +1,41 @@
+﻿2026-03-31T14:49:38.4317030Z Current runner version: '2.333.0'
+2026-03-31T14:49:38.4340763Z ##[group]Runner Image Provisioner
+2026-03-31T14:49:38.4341546Z Hosted Compute Agent
+2026-03-31T14:49:38.4342109Z Version: 20260213.493
+2026-03-31T14:49:38.4342756Z Commit: 5c115507f6dd24b8de37d8bbe0bb4509d0cc0fa3
+2026-03-31T14:49:38.4343729Z Build Date: 2026-02-13T00:28:41Z
+2026-03-31T14:49:38.4344370Z Worker ID: {d1653d45-8cac-4350-8dd5-a23f844758bb}
+2026-03-31T14:49:38.4345105Z Azure Region: westcentralus
+2026-03-31T14:49:38.4345659Z ##[endgroup]
+2026-03-31T14:49:38.4347055Z ##[group]Operating System
+2026-03-31T14:49:38.4347734Z Ubuntu
+2026-03-31T14:49:38.4348222Z 24.04.4
+2026-03-31T14:49:38.4348676Z LTS
+2026-03-31T14:49:38.4349073Z ##[endgroup]
+2026-03-31T14:49:38.4349629Z ##[group]Runner Image
+2026-03-31T14:49:38.4350128Z Image: ubuntu-24.04
+2026-03-31T14:49:38.4350623Z Version: 20260323.65.1
+2026-03-31T14:49:38.4351675Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260323.65/images/ubuntu/Ubuntu2404-Readme.md
+2026-03-31T14:49:38.4353543Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260323.65
+2026-03-31T14:49:38.4354444Z ##[endgroup]
+2026-03-31T14:49:38.4355530Z ##[group]GITHUB_TOKEN Permissions
+2026-03-31T14:49:38.4357409Z Contents: read
+2026-03-31T14:49:38.4358025Z Metadata: read
+2026-03-31T14:49:38.4358531Z Packages: write
+2026-03-31T14:49:38.4359116Z ##[endgroup]
+2026-03-31T14:49:38.4361001Z Secret source: Actions
+2026-03-31T14:49:38.4361707Z Prepare workflow directory
+2026-03-31T14:49:38.4809156Z Prepare all required actions
+2026-03-31T14:49:38.4846765Z Getting action download info
+2026-03-31T14:49:39.1095196Z Download action repository 'actions/checkout@v4' (SHA:34e114876b0b11c390a56381ad16ebd13914f8d5)
+2026-03-31T14:49:40.3692450Z Download action repository 'pierotofy/set-swap-space@master' (SHA:fc79b3f67fa8a838184ce84a674ca12238d2c761)
+2026-03-31T14:49:40.8054751Z Download action repository 'docker/login-action@v3' (SHA:c94ce9fb468520275223c153574b00df6fe4bcc9)
+2026-03-31T14:49:41.7831888Z Download action repository 'docker/setup-buildx-action@v3' (SHA:8d2750c68a42422c14e847fe6c8ac0403b4cbd6f)
+2026-03-31T14:49:42.8485372Z Download action repository 'docker/build-push-action@v6' (SHA:10e90e3645eae34f1e60eeb005ba3a3d33f178e8)
+2026-03-31T14:49:44.0428014Z Uses: Carrerajorge/Hola/.github/workflows/build-images.yml@refs/heads/main (1abdd4cffdb111bee62917e8426b960fd02066e2)
+2026-03-31T14:49:44.0432383Z ##[group] Inputs
+2026-03-31T14:49:44.0432850Z   sha: 1abdd4cffdb111bee62917e8426b960fd02066e2
+2026-03-31T14:49:44.0434045Z   enforce_latest_main: true
+2026-03-31T14:49:44.0434491Z   latest_main_branch: main
+2026-03-31T14:49:44.0434810Z ##[endgroup]
+2026-03-31T14:49:44.0435147Z Complete job name: Build Docker Images / Build & Push

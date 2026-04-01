@@ -1,0 +1,46 @@
+﻿2026-03-31T15:14:27.2690093Z ##[group]Run set -euo pipefail
+2026-03-31T15:14:27.2690440Z [36;1mset -euo pipefail[0m
+2026-03-31T15:14:27.2690749Z [36;1mDEFAULT_HOST="***"[0m
+2026-03-31T15:14:27.2690995Z [36;1mHOSTS=()[0m
+2026-03-31T15:14:27.2691629Z [36;1mif [ -n "***" ]; then HOSTS+=("***"); fi[0m
+2026-03-31T15:14:27.2691983Z [36;1mHOSTS+=("${VPS_HOST}" "${DEFAULT_HOST}")[0m
+2026-03-31T15:14:27.2692332Z [36;1mPORTS=("${VPS_PORT}" "80***" "***" "***")[0m
+2026-03-31T15:14:27.2692633Z [36;1m[0m
+2026-03-31T15:14:27.2693174Z [36;1mmapfile -t uniq_hosts < <(printf "%s\n" "${HOSTS[@]}" | awk 'NF' | awk '!seen[$0]++')[0m
+2026-03-31T15:14:27.2693733Z [36;1mmapfile -t uniq_ports < <(printf "%s\n" "${PORTS[@]}" | awk 'NF' | awk '!seen[$0]++')[0m
+2026-03-31T15:14:27.2694130Z [36;1m[0m
+2026-03-31T15:14:27.2694337Z [36;1mfor host in "${uniq_hosts[@]}"; do[0m
+2026-03-31T15:14:27.2694639Z [36;1m  for port in "${uniq_ports[@]}"; do[0m
+2026-03-31T15:14:27.2694964Z [36;1m    echo "Trying ${VPS_USER}@${host}:${port}..."[0m
+2026-03-31T15:14:27.2695432Z [36;1m    ssh-keyscan -p "$port" -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true[0m
+2026-03-31T15:14:27.2695830Z [36;1m    ssh_probe_opts=([0m
+2026-03-31T15:14:27.2696083Z [36;1m      -i ~/.ssh/deploy_key[0m
+2026-03-31T15:14:27.2696339Z [36;1m      -p "$port"[0m
+2026-03-31T15:14:27.2696611Z [36;1m      -o StrictHostKeyChecking=accept-new[0m
+2026-03-31T15:14:27.2696921Z [36;1m      -o BatchMode=yes[0m
+2026-03-31T15:14:27.2697175Z [36;1m      -o ConnectTimeout=8[0m
+2026-03-31T15:14:27.2697476Z [36;1m      -o PubkeyAcceptedAlgorithms=+ssh-rsa[0m
+2026-03-31T15:14:27.2697798Z [36;1m      -o HostKeyAlgorithms=+ssh-rsa[0m
+2026-03-31T15:14:27.2698068Z [36;1m    )[0m
+2026-03-31T15:14:27.2698400Z [36;1m    if ssh "${ssh_probe_opts[@]}" -4 "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1 || \[0m
+2026-03-31T15:14:27.2698928Z [36;1m       ssh "${ssh_probe_opts[@]}" "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1; then[0m
+2026-03-31T15:14:27.2699355Z [36;1m      echo "host=${host}" >> "$GITHUB_OUTPUT"[0m
+2026-03-31T15:14:27.2699680Z [36;1m      echo "port=${port}" >> "$GITHUB_OUTPUT"[0m
+2026-03-31T15:14:27.2700018Z [36;1m      echo "✓ Selected endpoint ${host}:${port}"[0m
+2026-03-31T15:14:27.2700322Z [36;1m      exit 0[0m
+2026-03-31T15:14:27.2700541Z [36;1m    fi[0m
+2026-03-31T15:14:27.2700732Z [36;1m  done[0m
+2026-03-31T15:14:27.2700921Z [36;1mdone[0m
+2026-03-31T15:14:27.2701375Z [36;1m[0m
+2026-03-31T15:14:27.2701792Z [36;1mecho "::error::No reachable VPS endpoint found (hosts: ${uniq_hosts[*]} | ports: ${uniq_ports[*]})"[0m
+2026-03-31T15:14:27.2702275Z [36;1mexit 1[0m
+2026-03-31T15:14:27.2727409Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:14:27.2727663Z env:
+2026-03-31T15:14:27.2727891Z   VPS_HOST: ***
+2026-03-31T15:14:27.2728141Z   VPS_USER: ***
+2026-03-31T15:14:27.2728358Z   VPS_PORT: ***
+2026-03-31T15:14:27.2728581Z   DEPLOY_PATH: ***
+2026-03-31T15:14:27.2728817Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:14:27.2729068Z ##[endgroup]
+2026-03-31T15:14:27.2827256Z Trying ***@***:***...
+2026-03-31T15:14:32.1809738Z ✓ Selected endpoint ***:***

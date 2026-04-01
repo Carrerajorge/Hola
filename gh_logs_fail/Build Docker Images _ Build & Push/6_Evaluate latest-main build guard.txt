@@ -1,0 +1,27 @@
+﻿2026-03-31T14:49:59.9628101Z ##[group]Run set -euo pipefail
+2026-03-31T14:49:59.9628407Z [36;1mset -euo pipefail[0m
+2026-03-31T14:49:59.9628673Z [36;1mif [ "${ENFORCE_LATEST_MAIN}" != "true" ]; then[0m
+2026-03-31T14:49:59.9628949Z [36;1m  {[0m
+2026-03-31T14:49:59.9629137Z [36;1m    echo "is_latest=true"[0m
+2026-03-31T14:49:59.9629392Z [36;1m    echo "should_deploy=true"[0m
+2026-03-31T14:49:59.9629634Z [36;1m    echo "latest_sha="[0m
+2026-03-31T14:49:59.9629852Z [36;1m    echo "skip_reason="[0m
+2026-03-31T14:49:59.9630075Z [36;1m  } >> "$GITHUB_OUTPUT"[0m
+2026-03-31T14:49:59.9630387Z [36;1m  echo "Latest-main build guard disabled for this workflow call."[0m
+2026-03-31T14:49:59.9630732Z [36;1m  exit 0[0m
+2026-03-31T14:49:59.9630896Z [36;1mfi[0m
+2026-03-31T14:49:59.9631055Z [36;1m[0m
+2026-03-31T14:49:59.9631255Z [36;1mbash ./scripts/latest-main-guard.sh[0m
+2026-03-31T14:49:59.9654728Z shell: /usr/bin/bash -e {0}
+2026-03-31T14:49:59.9654971Z env:
+2026-03-31T14:49:59.9655131Z   REGISTRY: ghcr.io
+2026-03-31T14:49:59.9655384Z   IMAGE_BASE: ghcr.io/carrerajorge/iliagpt
+2026-03-31T14:49:59.9655745Z   BUILDKIT_IMAGE: public.ecr.aws/vend/moby/buildkit:buildx-stable-1
+2026-03-31T14:49:59.9656088Z   ENFORCE_LATEST_MAIN: true
+2026-03-31T14:49:59.9656490Z   GH_TOKEN: ***
+2026-03-31T14:49:59.9656733Z   CURRENT_SHA: 1abdd4cffdb111bee62917e8426b960fd02066e2
+2026-03-31T14:49:59.9657020Z   TARGET_BRANCH: main
+2026-03-31T14:49:59.9657219Z   FAIL_ON_LOOKUP_ERROR: false
+2026-03-31T14:49:59.9657432Z   GUARD_CONTEXT: build-images
+2026-03-31T14:49:59.9657642Z ##[endgroup]
+2026-03-31T14:50:00.2692760Z [build-images] 1abdd4cf is still the tip of main.

@@ -1,0 +1,41 @@
+﻿2026-03-31T15:13:50.6597788Z ##[group]Run set -euo pipefail
+2026-03-31T15:13:50.6598547Z [36;1mset -euo pipefail[0m
+2026-03-31T15:13:50.6599065Z [36;1mfetch_asset() {[0m
+2026-03-31T15:13:50.6599571Z [36;1m  local asset_path="$1"[0m
+2026-03-31T15:13:50.6600152Z [36;1m  mkdir -p "$(dirname "${asset_path}")"[0m
+2026-03-31T15:13:50.6600760Z [36;1m  curl -fsSL \[0m
+2026-03-31T15:13:50.6601694Z [36;1m    -H "Authorization: ***" \[0m
+2026-03-31T15:13:50.6602344Z [36;1m    -H "Accept: application/vnd.github.raw" \[0m
+2026-03-31T15:13:50.6603225Z [36;1m    "https://api.github.com/repos/${REPO}/contents/${asset_path}?ref=${REF}" \[0m
+2026-03-31T15:13:50.6604030Z [36;1m    -o "${asset_path}"[0m
+2026-03-31T15:13:50.6604538Z [36;1m}[0m
+2026-03-31T15:13:50.6604929Z [36;1m[0m
+2026-03-31T15:13:50.6605353Z [36;1mfor asset in \[0m
+2026-03-31T15:13:50.6605862Z [36;1m  docker-compose.infra.yml \[0m
+2026-03-31T15:13:50.6606438Z [36;1m  docker-compose.slot.yml \[0m
+2026-03-31T15:13:50.6607005Z [36;1m  nginx.conf \[0m
+2026-03-31T15:13:50.6607539Z [36;1m  nginx/maintenance.html \[0m
+2026-03-31T15:13:50.6608098Z [36;1m  scripts/deploy-bluegreen.sh \[0m
+2026-03-31T15:13:50.6608768Z [36;1m  scripts/repair-docker-storage-backend.sh \[0m
+2026-03-31T15:13:50.6609438Z [36;1m  scripts/rollback-bluegreen.sh \[0m
+2026-03-31T15:13:50.6610038Z [36;1m  scripts/health-dashboard.sh \[0m
+2026-03-31T15:13:50.6610649Z [36;1m  scripts/vps-bootstrap-bluegreen.sh \[0m
+2026-03-31T15:13:50.6611513Z [36;1m  scripts/prod-rigorous-checks.sh \[0m
+2026-03-31T15:13:50.6612155Z [36;1m  scripts/latest-main-guard.sh \[0m
+2026-03-31T15:13:50.6612850Z [36;1m  scripts/verify-public-runtime-contract.mjs[0m
+2026-03-31T15:13:50.6613470Z [36;1mdo[0m
+2026-03-31T15:13:50.6613913Z [36;1m  fetch_asset "${asset}"[0m
+2026-03-31T15:13:50.6614435Z [36;1mdone[0m
+2026-03-31T15:13:50.6614856Z [36;1m[0m
+2026-03-31T15:13:50.6615270Z [36;1mchmod +x scripts/*.sh[0m
+2026-03-31T15:13:50.6645591Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:13:50.6646719Z env:
+2026-03-31T15:13:50.6647352Z   VPS_HOST: ***
+2026-03-31T15:13:50.6647821Z   VPS_USER: ***
+2026-03-31T15:13:50.6648286Z   VPS_PORT: ***
+2026-03-31T15:13:50.6648755Z   DEPLOY_PATH: ***
+2026-03-31T15:13:50.6649215Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:13:50.6649893Z   GH_TOKEN: ***
+2026-03-31T15:13:50.6650342Z   REPO: Carrerajorge/Hola
+2026-03-31T15:13:50.6650876Z   REF: 1abdd4cffdb111bee62917e8426b960fd02066e2
+2026-03-31T15:13:50.6651748Z ##[endgroup]

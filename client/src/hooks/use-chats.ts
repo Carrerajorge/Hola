@@ -2376,10 +2376,10 @@ export function useChats() {
 
       // Queue failed message save for later recovery.
       if (normalizedMessage.role === "user") {
-        enqueueFailedMessageForRecovery(resolvedChatId, normalizedMessage);
+        enqueueFailedMessageForRecovery(currentTargetChatId, normalizedMessage);
       }
 
-      return { chatId: resolvedChatId, error: error instanceof Error ? error.message : String(error) };
+      return { chatId: currentTargetChatId, error: error instanceof Error ? error.message : String(error) };
     }
   }, []);
 

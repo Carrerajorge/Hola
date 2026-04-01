@@ -1,0 +1,17 @@
+﻿2026-03-31T15:14:25.1560476Z ##[group]Run set -euo pipefail
+2026-03-31T15:14:25.1560840Z [36;1mset -euo pipefail[0m
+2026-03-31T15:14:25.1561964Z [36;1mfailures=$(gh run list --repo Carrerajorge/Hola --workflow "Deploy to Production (Blue-Green)" --branch main --limit 8 --json conclusion --jq '[.[] | select(.conclusion=="failure")] | length')[0m
+2026-03-31T15:14:25.1562817Z [36;1mecho "Recent deploy failures: ${failures}"[0m
+2026-03-31T15:14:25.1563144Z [36;1mif [ "${failures}" -ge 5 ]; then[0m
+2026-03-31T15:14:25.1563613Z [36;1m  echo "::warning::Circuit breaker: ${failures}/8 recent deploys failed. Proceeding anyway."[0m
+2026-03-31T15:14:25.1564067Z [36;1mfi[0m
+2026-03-31T15:14:25.1589594Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:14:25.1589852Z env:
+2026-03-31T15:14:25.1590096Z   VPS_HOST: ***
+2026-03-31T15:14:25.1590371Z   VPS_USER: ***
+2026-03-31T15:14:25.1590578Z   VPS_PORT: ***
+2026-03-31T15:14:25.1590793Z   DEPLOY_PATH: ***
+2026-03-31T15:14:25.1591014Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:14:25.1591677Z   GH_TOKEN: ***
+2026-03-31T15:14:25.1592117Z ##[endgroup]
+2026-03-31T15:14:25.9426923Z Recent deploy failures: 3

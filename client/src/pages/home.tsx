@@ -696,7 +696,7 @@ export default function Home() {
     } catch (error) {
       console.error("[home] Failed to persist first message for new chat:", error);
       // Revert the UI state
-      setChats(prev => prev.filter(c => c.id !== pendingId));
+      void deleteChat(pendingId).catch(() => {}); // Best-effort cleanup of the failed pending chat
       setIsNewChatMode(true);
       setActiveChatId(null);
       pendingChatIdRef.current = null;

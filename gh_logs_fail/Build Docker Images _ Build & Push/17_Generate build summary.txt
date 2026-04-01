@@ -1,0 +1,16 @@
+﻿2026-03-31T15:13:07.6435450Z ##[group]Run echo "## Docker Build Results" >> $GITHUB_STEP_SUMMARY
+2026-03-31T15:13:07.6435961Z [36;1mecho "## Docker Build Results" >> $GITHUB_STEP_SUMMARY[0m
+2026-03-31T15:13:07.6436295Z [36;1mecho "" >> $GITHUB_STEP_SUMMARY[0m
+2026-03-31T15:13:07.6436603Z [36;1mecho "| Image | Tag | Digest |" >> $GITHUB_STEP_SUMMARY[0m
+2026-03-31T15:13:07.6436965Z [36;1mecho "|-------|-----|--------|" >> $GITHUB_STEP_SUMMARY[0m
+2026-03-31T15:13:07.6437787Z [36;1mecho "| app | \`sha-1abdd4cf\` | \`sha256:ad1575ff2efb3dbe0b7c55ab60c2f7daa386fe89ccf6bfe525b1c3850b45a2db\` |" >> $GITHUB_STEP_SUMMARY[0m
+2026-03-31T15:13:07.6438754Z [36;1mecho "| sandbox | \`sha-1abdd4cf\` | \`sha256:acef0462a63bc3e9b037250ab84c2a7156e8cfc16565cfd3d74925d7f3480a7d\` |" >> $GITHUB_STEP_SUMMARY[0m
+2026-03-31T15:13:07.6439675Z [36;1mecho "| ocr | \`sha-1abdd4cf\` | \`sha256:5e5489af99ace817d9c0fa1c82b0067a4685829e23e0da4b11cca6db8e9b10c8\` |" >> $GITHUB_STEP_SUMMARY[0m
+2026-03-31T15:13:07.6440386Z [36;1mecho "| latest-main guard | \`enabled\` | \`true\` |" >> $GITHUB_STEP_SUMMARY[0m
+2026-03-31T15:13:07.6441028Z [36;1mecho "| latest main sha | \`1abdd4cffdb111bee62917e8426b960fd02066e2\` | \`n/a\` |" >> $GITHUB_STEP_SUMMARY[0m
+2026-03-31T15:13:07.6470344Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:13:07.6470577Z env:
+2026-03-31T15:13:07.6470736Z   REGISTRY: ghcr.io
+2026-03-31T15:13:07.6470959Z   IMAGE_BASE: ghcr.io/carrerajorge/iliagpt
+2026-03-31T15:13:07.6471324Z   BUILDKIT_IMAGE: public.ecr.aws/vend/moby/buildkit:buildx-stable-1
+2026-03-31T15:13:07.6471668Z ##[endgroup]

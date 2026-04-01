@@ -1,0 +1,14 @@
+﻿2026-03-31T14:49:59.9498739Z ##[group]Run set -euo pipefail
+2026-03-31T14:49:59.9499058Z [36;1mset -euo pipefail[0m
+2026-03-31T14:49:59.9499357Z [36;1mSHORT_SHA="1abdd4cffdb111bee62917e8426b960fd02066e2"[0m
+2026-03-31T14:49:59.9499675Z [36;1mSHORT_SHA="${SHORT_SHA:0:8}"[0m
+2026-03-31T14:49:59.9499976Z [36;1mecho "tag=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"[0m
+2026-03-31T14:49:59.9500338Z [36;1mecho "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"[0m
+2026-03-31T14:49:59.9500766Z [36;1mecho "full_sha=1abdd4cffdb111bee62917e8426b960fd02066e2" >> "$GITHUB_OUTPUT"[0m
+2026-03-31T14:49:59.9501291Z [36;1mecho "build_timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"[0m
+2026-03-31T14:49:59.9527196Z shell: /usr/bin/bash -e {0}
+2026-03-31T14:49:59.9527427Z env:
+2026-03-31T14:49:59.9527592Z   REGISTRY: ghcr.io
+2026-03-31T14:49:59.9527809Z   IMAGE_BASE: ghcr.io/carrerajorge/iliagpt
+2026-03-31T14:49:59.9528173Z   BUILDKIT_IMAGE: public.ecr.aws/vend/moby/buildkit:buildx-stable-1
+2026-03-31T14:49:59.9528500Z ##[endgroup]

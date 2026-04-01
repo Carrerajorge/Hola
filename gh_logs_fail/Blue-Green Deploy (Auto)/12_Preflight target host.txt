@@ -1,0 +1,14 @@
+﻿2026-03-31T15:14:32.2027799Z ##[group]Run set -euo pipefail
+2026-03-31T15:14:32.2028116Z [36;1mset -euo pipefail[0m
+2026-03-31T15:14:32.2028481Z [36;1mecho "▸ Deploy target: ***@***:***"[0m
+2026-03-31T15:14:32.2028920Z [36;1mnc -vz -w 5 "***" "***" || echo "⚠️ TCP probe failed (continuing to SSH)"[0m
+2026-03-31T15:14:32.2052405Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:14:32.2052666Z env:
+2026-03-31T15:14:32.2052885Z   VPS_HOST: ***
+2026-03-31T15:14:32.2053123Z   VPS_USER: ***
+2026-03-31T15:14:32.2053338Z   VPS_PORT: ***
+2026-03-31T15:14:32.2053547Z   DEPLOY_PATH: ***
+2026-03-31T15:14:32.2053771Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:14:32.2054032Z ##[endgroup]
+2026-03-31T15:14:32.2096295Z ▸ Deploy target: ***@***:***
+2026-03-31T15:14:32.3303325Z Connection to *** *** port [tcp/ssh] succeeded!

@@ -15,7 +15,7 @@ vi.mock(
   async () => await import("../../test-utils/model-fallback.mock.js"),
 );
 
-vi.mock("../../agents/pi-embedded.js", () => ({
+vi.mock("../../../../openclaw/src/agents/pi-embedded-runner/run.js", () => ({
   runEmbeddedPiAgent: (params: unknown) => runEmbeddedPiAgentMock(params),
 }));
 

@@ -477,6 +477,15 @@ export function useStreamChat(deps: StreamChatDeps) {
       flushNow(targetConversationId);
 
       setOptimisticMessages((prev) => [...prev, message]);
+      if (import.meta.env.DEV) {
+        console.log("[useStreamChat finalize]", {
+          msgId: message.id,
+          role: message.role,
+          content: (message.content || "").slice(0, 80),
+          userMessageId: (message as any).userMessageId,
+          convId: targetConversationId,
+        });
+      }
       onSendMessage(message).catch((err) => {
         console.error("[useStreamChat] onSendMessage failed:", err);
       });

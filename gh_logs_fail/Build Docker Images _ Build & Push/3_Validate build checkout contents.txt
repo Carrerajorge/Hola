@@ -1,0 +1,40 @@
+﻿2026-03-31T14:49:59.8178035Z ##[group]Run bash ./scripts/ci-assert-required-paths.sh "build checkout" \
+2026-03-31T14:49:59.8178615Z [36;1mbash ./scripts/ci-assert-required-paths.sh "build checkout" \[0m
+2026-03-31T14:49:59.8178987Z [36;1m  .dockerignore \[0m
+2026-03-31T14:49:59.8179198Z [36;1m  Dockerfile \[0m
+2026-03-31T14:49:59.8179402Z [36;1m  package.json \[0m
+2026-03-31T14:49:59.8179619Z [36;1m  package-lock.json \[0m
+2026-03-31T14:49:59.8179845Z [36;1m  postcss.config.js \[0m
+2026-03-31T14:49:59.8180081Z [36;1m  tsconfig.json \[0m
+2026-03-31T14:49:59.8180286Z [36;1m  tsconfig.base.json \[0m
+2026-03-31T14:49:59.8180507Z [36;1m  vite.config.ts \[0m
+2026-03-31T14:49:59.8180734Z [36;1m  vite-plugin-meta-images.ts \[0m
+2026-03-31T14:49:59.8181023Z [36;1m  scripts/sync-mathjax-assets.cjs \[0m
+2026-03-31T14:49:59.8181287Z [36;1m  client/public/sw-cleanup.js \[0m
+2026-03-31T14:49:59.8181552Z [36;1m  server/openclaw/package.json \[0m
+2026-03-31T14:49:59.8181869Z [36;1m  packages/flowise-components/package.json \[0m
+2026-03-31T14:49:59.8182217Z [36;1m  packages/flowise-server/package.json \[0m
+2026-03-31T14:49:59.8182529Z [36;1m  packages/flowise-server/src/Interface.ts[0m
+2026-03-31T14:49:59.8211416Z shell: /usr/bin/bash -e {0}
+2026-03-31T14:49:59.8211660Z env:
+2026-03-31T14:49:59.8211823Z   REGISTRY: ghcr.io
+2026-03-31T14:49:59.8212042Z   IMAGE_BASE: ghcr.io/carrerajorge/iliagpt
+2026-03-31T14:49:59.8212398Z   BUILDKIT_IMAGE: public.ecr.aws/vend/moby/buildkit:buildx-stable-1
+2026-03-31T14:49:59.8212738Z ##[endgroup]
+2026-03-31T14:49:59.8289135Z [ci-checkout] Verifying build checkout required paths...
+2026-03-31T14:49:59.8289714Z [ci-checkout] OK .dockerignore
+2026-03-31T14:49:59.8290073Z [ci-checkout] OK Dockerfile
+2026-03-31T14:49:59.8290472Z [ci-checkout] OK package.json
+2026-03-31T14:49:59.8290932Z [ci-checkout] OK package-lock.json
+2026-03-31T14:49:59.8291413Z [ci-checkout] OK postcss.config.js
+2026-03-31T14:49:59.8291846Z [ci-checkout] OK tsconfig.json
+2026-03-31T14:49:59.8292222Z [ci-checkout] OK tsconfig.base.json
+2026-03-31T14:49:59.8292495Z [ci-checkout] OK vite.config.ts
+2026-03-31T14:49:59.8292754Z [ci-checkout] OK vite-plugin-meta-images.ts
+2026-03-31T14:49:59.8293077Z [ci-checkout] OK scripts/sync-mathjax-assets.cjs
+2026-03-31T14:49:59.8293530Z [ci-checkout] OK client/public/sw-cleanup.js
+2026-03-31T14:49:59.8293823Z [ci-checkout] OK server/openclaw/package.json
+2026-03-31T14:49:59.8294213Z [ci-checkout] OK packages/flowise-components/package.json
+2026-03-31T14:49:59.8294906Z [ci-checkout] OK packages/flowise-server/package.json
+2026-03-31T14:49:59.8295522Z [ci-checkout] OK packages/flowise-server/src/Interface.ts
+2026-03-31T14:49:59.8296070Z [ci-checkout] build checkout is complete.

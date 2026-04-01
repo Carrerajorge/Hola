@@ -19,6 +19,7 @@ vi.mock("../../pairing/pairing-store.js", () => ({
 
 vi.mock("../../web/accounts.js", () => ({
   resolveWhatsAppAccount: vi.fn(() => ({ allowFrom: [] })),
+  hasAnyWhatsAppAuth: vi.fn(() => false),
 }));
 
 import { loadSessionStore } from "../../config/sessions.js";

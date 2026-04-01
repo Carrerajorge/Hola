@@ -1,0 +1,4 @@
+2026-03-31T15:13:44.9380000Z Evaluating deploy_manual.if
+2026-03-31T15:13:44.9380000Z Evaluating: (always() && (github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main') && (needs.ci.result == 'success') && (needs.build_images.result == 'success'))
+2026-03-31T15:13:44.9380000Z Expanded: (true && ('push' == 'workflow_dispatch') && (github.ref == 'refs/heads/main') && (needs.ci.result == 'success') && (needs.build_images.result == 'success'))
+2026-03-31T15:13:44.9380000Z Result: false

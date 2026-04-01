@@ -1,0 +1,20 @@
+﻿2026-03-31T15:13:07.6604514Z Post job cleanup.
+2026-03-31T15:13:07.9125019Z ##[group]Generating build summary
+2026-03-31T15:13:07.9130704Z exporting build record to /home/runner/work/_temp/docker-actions-toolkit-3XW796/export
+2026-03-31T15:13:08.1176387Z [command]/usr/bin/docker buildx history export --builder builder-3b54da24-9ceb-4f0c-9e94-80968b581b5a --output /home/runner/work/_temp/docker-actions-toolkit-3XW796/export/Carrerajorge~Hola~AMV8RM.dockerbuild amv8rmx06e7volagulvoo9566 --finalize
+2026-03-31T15:13:08.3415099Z Build record written to /home/runner/work/_temp/docker-actions-toolkit-3XW796/export/Carrerajorge~Hola~AMV8RM.dockerbuild (38.64 KB)
+2026-03-31T15:13:08.3452643Z Uploading Carrerajorge~Hola~AMV8RM.dockerbuild to blob storage
+2026-03-31T15:13:08.5796172Z Beginning upload of artifact content to blob storage
+2026-03-31T15:13:08.5898136Z Uploaded bytes 39568
+2026-03-31T15:13:08.8698860Z Finished uploading artifact content to blob storage!
+2026-03-31T15:13:08.8705546Z SHA256 hash of uploaded artifact is 0863cbb5da6f4ee671417f13a2ae03ab4ceff271352d822ba7ad89eebace2379
+2026-03-31T15:13:08.8707080Z Finalizing artifact upload
+2026-03-31T15:13:09.2087562Z Artifact successfully finalized (6202358902)
+2026-03-31T15:13:09.2088744Z Artifact download URL: https://github.com/Carrerajorge/Hola/actions/runs/23803683206/artifacts/6202358902
+2026-03-31T15:13:09.2115020Z Writing summary
+2026-03-31T15:13:09.2128609Z ##[endgroup]
+2026-03-31T15:13:09.2129479Z ##[group]Removing temp folder /home/runner/work/_temp/docker-actions-toolkit-hYGhSZ
+2026-03-31T15:13:09.2139197Z ##[endgroup]
+2026-03-31T15:13:09.2139782Z ##[group]Post cache
+2026-03-31T15:13:09.2141104Z State not set
+2026-03-31T15:13:09.2141873Z ##[endgroup]

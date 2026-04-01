@@ -1,0 +1,145 @@
+﻿2026-03-31T15:14:43.5475308Z ##[group]Run set -euo pipefail
+2026-03-31T15:14:43.5475873Z [36;1mset -euo pipefail[0m
+2026-03-31T15:14:43.5476311Z [36;1mfor attempt in 1 2; do[0m
+2026-03-31T15:14:43.5482702Z [36;1m  if ssh -i ~/.ssh/deploy_key -p ***               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ConnectionAttempts=3               -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes               ***@***               "echo '***' | docker login ghcr.io -u Carrerajorge --password-stdin 2>/dev/null &&                cd *** &&                PREDEPLOY_ONLY='true'                IMAGE_TAG='sha-1abdd4cf'                APP_VERSION='1abdd4cf'                BUILD_IMAGE_TAG='sha-1abdd4cf'                EXPECTED_APP_DIGEST='sha256:ad1575ff2efb3dbe0b7c55ab60c2f7daa386fe89ccf6bfe525b1c3850b45a2db'                EXPECTED_SANDBOX_DIGEST='sha256:acef0462a63bc3e9b037250ab84c2a7156e8cfc16565cfd3d74925d7f3480a7d'                EXPECTED_OCR_DIGEST='sha256:5e5489af99ace817d9c0fa1c82b0067a4685829e23e0da4b11cca6db8e9b10c8'                bash -s" < scripts/deploy-bluegreen.sh; then[0m
+2026-03-31T15:14:43.5487067Z [36;1m    break[0m
+2026-03-31T15:14:43.5487317Z [36;1m  fi[0m
+2026-03-31T15:14:43.5487553Z [36;1m  if [ "$attempt" -eq 2 ]; then[0m
+2026-03-31T15:14:43.5487928Z [36;1m    echo "Predeploy startup gate failed after retry" >&2[0m
+2026-03-31T15:14:43.5488298Z [36;1m    exit 1[0m
+2026-03-31T15:14:43.5488512Z [36;1m  fi[0m
+2026-03-31T15:14:43.5488703Z [36;1m  sleep 10[0m
+2026-03-31T15:14:43.5488909Z [36;1mdone[0m
+2026-03-31T15:14:43.5514601Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:14:43.5514872Z env:
+2026-03-31T15:14:43.5515095Z   VPS_HOST: ***
+2026-03-31T15:14:43.5515313Z   VPS_USER: ***
+2026-03-31T15:14:43.5515523Z   VPS_PORT: ***
+2026-03-31T15:14:43.5515741Z   DEPLOY_PATH: ***
+2026-03-31T15:14:43.5515971Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:14:43.5516228Z ##[endgroup]
+2026-03-31T15:14:46.6989841Z Login Succeeded
+2026-03-31T15:14:46.7201729Z [0;34m[2026-03-31 15:14:46][0m Starting blue-green deployment...
+2026-03-31T15:14:46.7233928Z [0;34m[2026-03-31 15:14:46][0m Image: ghcr.io/carrerajorge/iliagpt-app:sha-1abdd4cf
+2026-03-31T15:14:46.7274170Z [0;34m[2026-03-31 15:14:46][0m App version: 1abdd4cf
+2026-03-31T15:14:46.7274836Z [0;34m[2026-03-31 15:14:46][0m Deploy path: ***
+2026-03-31T15:14:46.8303069Z [0;34m[2026-03-31 15:14:46][0m Active slot: blue (port 3000)
+2026-03-31T15:14:46.8337473Z [0;34m[2026-03-31 15:14:46][0m Target slot: green (port 3001)
+2026-03-31T15:14:46.9195580Z [0;34m[2026-03-31 15:14:46][0m Pulling images...
+2026-03-31T15:14:47.8476862Z sha-1abdd4cf: Pulling from carrerajorge/iliagpt-app
+2026-03-31T15:14:48.0818514Z 6db0909c4473: Already exists
+2026-03-31T15:14:48.0942500Z 7723618b139f: Already exists
+2026-03-31T15:14:48.1029679Z eb2c6bc01a10: Already exists
+2026-03-31T15:14:48.1117195Z 93f73fef6895: Already exists
+2026-03-31T15:14:48.1217475Z 71ff01535b69: Already exists
+2026-03-31T15:14:48.1287322Z a5ecc29837c2: Already exists
+2026-03-31T15:14:48.1338071Z 5a8bcd61b768: Pulling fs layer
+2026-03-31T15:14:48.1348978Z 34ff1***6a825: Pulling fs layer
+2026-03-31T15:14:48.1349388Z 34ff1***6a825: Waiting
+2026-03-31T15:14:48.1354022Z c482eb557ee9: Pulling fs layer
+2026-03-31T15:14:48.1354472Z c482eb557ee9: Waiting
+2026-03-31T15:14:48.1354764Z 3ce0a73d5d4a: Pulling fs layer
+2026-03-31T15:14:48.1355083Z be561248ca9a: Pulling fs layer
+2026-03-31T15:14:48.1355393Z f491395d99d1: Pulling fs layer
+2026-03-31T15:14:48.1355700Z e1d3487db0db: Pulling fs layer
+2026-03-31T15:14:48.1356001Z 59466fc61f94: Pulling fs layer
+2026-03-31T15:14:48.1356293Z 44942549a2d8: Pulling fs layer
+2026-03-31T15:14:48.1356578Z 3ce0a73d5d4a: Waiting
+2026-03-31T15:14:48.1356840Z be561248ca9a: Waiting
+2026-03-31T15:14:48.1357132Z d***fb0309e2d: Pulling fs layer
+2026-03-31T15:14:48.1357458Z f491395d99d1: Waiting
+2026-03-31T15:14:48.1357722Z e1d3487db0db: Waiting
+2026-03-31T15:14:48.1357971Z 59466fc61f94: Waiting
+2026-03-31T15:14:48.1358231Z d***fb0309e2d: Waiting
+2026-03-31T15:14:48.1358487Z 44942549a2d8: Waiting
+2026-03-31T15:14:48.4512332Z 5a8bcd61b768: Verifying Checksum
+2026-03-31T15:14:48.4513178Z 5a8bcd61b768: Download complete
+2026-03-31T15:14:48.5102367Z 5a8bcd61b768: Pull complete
+2026-03-31T15:15:02.0544739Z 34ff1***6a825: Verifying Checksum
+2026-03-31T15:15:02.0545392Z 34ff1***6a825: Download complete
+2026-03-31T15:15:13.1301470Z c482eb557ee9: Verifying Checksum
+2026-03-31T15:15:13.1302045Z c482eb557ee9: Download complete
+2026-03-31T15:15:15.7725106Z 3ce0a73d5d4a: Verifying Checksum
+2026-03-31T15:15:15.7725764Z 3ce0a73d5d4a: Download complete
+2026-03-31T15:15:16.1462436Z be561248ca9a: Verifying Checksum
+2026-03-31T15:15:16.1462949Z be561248ca9a: Download complete
+2026-03-31T15:15:18.9623183Z f491395d99d1: Download complete
+2026-03-31T15:15:19.4756491Z e1d3487db0db: Verifying Checksum
+2026-03-31T15:15:19.4760004Z e1d3487db0db: Download complete
+2026-03-31T15:15:33.9695730Z 59466fc61f94: Verifying Checksum
+2026-03-31T15:15:33.9707332Z 59466fc61f94: Download complete
+2026-03-31T15:15:44.7815516Z 44942549a2d8: Verifying Checksum
+2026-03-31T15:15:44.7815980Z 44942549a2d8: Download complete
+2026-03-31T15:15:45.1105179Z d***fb0309e2d: Verifying Checksum
+2026-03-31T15:15:45.1105660Z d***fb0309e2d: Download complete
+2026-03-31T15:16:09.5155073Z 34ff1***6a825: Pull complete
+2026-03-31T15:18:28.7846744Z c482eb557ee9: Pull complete
+2026-03-31T15:18:29.6054656Z 3ce0a73d5d4a: Pull complete
+2026-03-31T15:18:29.6497121Z be561248ca9a: Pull complete
+2026-03-31T15:18:29.8905317Z f491395d99d1: Pull complete
+2026-03-31T15:18:29.9204738Z e1d3487db0db: Pull complete
+2026-03-31T15:18:55.6823569Z failed to register layer: write /app/server/openclaw/src/plugins/bundled-dir.test.ts: no space left on device
+2026-03-31T15:19:08.1949455Z Login Succeeded
+2026-03-31T15:19:08.2249677Z [0;34m[2026-03-31 15:19:08][0m Starting blue-green deployment...
+2026-03-31T15:19:08.2274323Z [0;34m[2026-03-31 15:19:08][0m Image: ghcr.io/carrerajorge/iliagpt-app:sha-1abdd4cf
+2026-03-31T15:19:08.2294996Z [0;34m[2026-03-31 15:19:08][0m App version: 1abdd4cf
+2026-03-31T15:19:08.2322212Z [0;34m[2026-03-31 15:19:08][0m Deploy path: ***
+2026-03-31T15:19:08.3252419Z [0;34m[2026-03-31 15:19:08][0m Active slot: blue (port 3000)
+2026-03-31T15:19:08.3272533Z [0;34m[2026-03-31 15:19:08][0m Target slot: green (port 3001)
+2026-03-31T15:19:08.3958528Z [0;34m[2026-03-31 15:19:08][0m Pulling images...
+2026-03-31T15:19:09.5695105Z sha-1abdd4cf: Pulling from carrerajorge/iliagpt-app
+2026-03-31T15:19:09.8329869Z 6db0909c4473: Already exists
+2026-03-31T15:19:09.8342982Z 7723618b139f: Already exists
+2026-03-31T15:19:09.8397271Z eb2c6bc01a10: Already exists
+2026-03-31T15:19:09.8449223Z 93f73fef6895: Already exists
+2026-03-31T15:19:09.8463486Z 71ff01535b69: Already exists
+2026-03-31T15:19:09.8495256Z a5ecc29837c2: Already exists
+2026-03-31T15:19:09.8521959Z 5a8bcd61b768: Pulling fs layer
+2026-03-31T15:19:09.8522653Z 34ff1***6a825: Pulling fs layer
+2026-03-31T15:19:09.8522992Z c482eb557ee9: Pulling fs layer
+2026-03-31T15:19:09.8523303Z 3ce0a73d5d4a: Pulling fs layer
+2026-03-31T15:19:09.8523627Z be561248ca9a: Pulling fs layer
+2026-03-31T15:19:09.8523986Z f491395d99d1: Pulling fs layer
+2026-03-31T15:19:09.8524513Z e1d3487db0db: Pulling fs layer
+2026-03-31T15:19:09.8525026Z 59466fc61f94: Pulling fs layer
+2026-03-31T15:19:09.8525554Z 44942549a2d8: Pulling fs layer
+2026-03-31T15:19:09.8526108Z d***fb0309e2d: Pulling fs layer
+2026-03-31T15:19:09.8526623Z 34ff1***6a825: Waiting
+2026-03-31T15:19:09.8527055Z c482eb557ee9: Waiting
+2026-03-31T15:19:09.8527484Z 3ce0a73d5d4a: Waiting
+2026-03-31T15:19:09.8527901Z be561248ca9a: Waiting
+2026-03-31T15:19:09.8528308Z f491395d99d1: Waiting
+2026-03-31T15:19:09.8528715Z e1d3487db0db: Waiting
+2026-03-31T15:19:09.8529123Z 59466fc61f94: Waiting
+2026-03-31T15:19:09.8529524Z 44942549a2d8: Waiting
+2026-03-31T15:19:09.8529950Z d***fb0309e2d: Waiting
+2026-03-31T15:19:10.2452721Z 5a8bcd61b768: Verifying Checksum
+2026-03-31T15:19:10.2453394Z 5a8bcd61b768: Download complete
+2026-03-31T15:19:10.2938187Z 5a8bcd61b768: Pull complete
+2026-03-31T15:19:20.2489706Z 34ff1***6a825: Verifying Checksum
+2026-03-31T15:19:20.2498143Z 34ff1***6a825: Download complete
+2026-03-31T15:19:24.4156970Z c482eb557ee9: Verifying Checksum
+2026-03-31T15:19:24.4157565Z c482eb557ee9: Download complete
+2026-03-31T15:19:26.2102589Z 3ce0a73d5d4a: Verifying Checksum
+2026-03-31T15:19:26.2103047Z 3ce0a73d5d4a: Download complete
+2026-03-31T15:19:26.3892388Z be561248ca9a: Verifying Checksum
+2026-03-31T15:19:26.3892867Z be561248ca9a: Download complete
+2026-03-31T15:19:27.1189345Z f491395d99d1: Download complete
+2026-03-31T15:19:27.3039367Z e1d3487db0db: Verifying Checksum
+2026-03-31T15:19:27.3040058Z e1d3487db0db: Download complete
+2026-03-31T15:19:32.9840730Z 59466fc61f94: Verifying Checksum
+2026-03-31T15:19:32.9841524Z 59466fc61f94: Download complete
+2026-03-31T15:19:44.0722831Z 44942549a2d8: Verifying Checksum
+2026-03-31T15:19:44.0723370Z 44942549a2d8: Download complete
+2026-03-31T15:19:45.5315843Z d***fb0309e2d: Verifying Checksum
+2026-03-31T15:19:45.5316320Z d***fb0309e2d: Download complete
+2026-03-31T15:19:47.6557750Z 34ff1***6a825: Pull complete
+2026-03-31T15:21:20.4606619Z c482eb557ee9: Pull complete
+2026-03-31T15:21:21.2467261Z 3ce0a73d5d4a: Pull complete
+2026-03-31T15:21:21.2865644Z be561248ca9a: Pull complete
+2026-03-31T15:21:21.5161976Z f491395d99d1: Pull complete
+2026-03-31T15:21:21.5449169Z e1d3487db0db: Pull complete
+2026-03-31T15:21:45.5384583Z 59466fc61f94: Pull complete
+2026-03-31T15:21:52.3467528Z failed to register layer: write /app/.playwright-browsers/chromium-1208/chrome-linux64/chrome: no space left on device
+2026-03-31T15:21:52.3498118Z Predeploy startup gate failed after retry
+2026-03-31T15:21:52.3506836Z ##[error]Process completed with exit code 1.

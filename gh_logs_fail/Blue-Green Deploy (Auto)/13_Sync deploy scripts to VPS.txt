@@ -1,0 +1,30 @@
+﻿2026-03-31T15:14:32.3340001Z ##[group]Run set -euo pipefail
+2026-03-31T15:14:32.3340353Z [36;1mset -euo pipefail[0m
+2026-03-31T15:14:32.3340598Z [36;1msync_ok=false[0m
+2026-03-31T15:14:32.3340832Z [36;1mfor attempt in 1 2 3; do[0m
+2026-03-31T15:14:32.3342822Z [36;1m  if scp -i ~/.ssh/deploy_key -P ***               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12               docker-compose.infra.yml               docker-compose.slot.yml               nginx.conf               scripts/deploy-bluegreen.sh               scripts/repair-docker-storage-backend.sh               scripts/rollback-bluegreen.sh               scripts/health-dashboard.sh               scripts/vps-bootstrap-bluegreen.sh               ***@***:***/; then[0m
+2026-03-31T15:14:32.3344456Z [36;1m    sync_ok=true[0m
+2026-03-31T15:14:32.3344690Z [36;1m    break[0m
+2026-03-31T15:14:32.3344901Z [36;1m  fi[0m
+2026-03-31T15:14:32.3345099Z [36;1m  sleep 3[0m
+2026-03-31T15:14:32.3345303Z [36;1mdone[0m
+2026-03-31T15:14:32.3345485Z [36;1m[0m
+2026-03-31T15:14:32.3345729Z [36;1mif [ "${sync_ok}" != "true" ]; then[0m
+2026-03-31T15:14:32.3346273Z [36;1m  echo "::warning::Failed to sync deploy scripts after 3 attempts; continuing with scripts already present on VPS"[0m
+2026-03-31T15:14:32.3346795Z [36;1mfi[0m
+2026-03-31T15:14:32.3346980Z [36;1m[0m
+2026-03-31T15:14:32.3349272Z [36;1mssh -i ~/.ssh/deploy_key -p ***             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ***@***             "mkdir -p ***/scripts ***/nginx &&              cp ***/deploy-bluegreen.sh ***/scripts/ 2>/dev/null || true &&              cp ***/repair-docker-storage-backend.sh ***/scripts/ 2>/dev/null || true &&              cp ***/rollback-bluegreen.sh ***/scripts/ 2>/dev/null || true &&              cp ***/health-dashboard.sh ***/scripts/ 2>/dev/null || true &&              cp ***/vps-bootstrap-bluegreen.sh ***/scripts/ 2>/dev/null || true &&              chmod +x ***/scripts/*.sh ***/deploy-bluegreen.sh 2>/dev/null || true"[0m
+2026-03-31T15:14:32.3351709Z [36;1m[0m
+2026-03-31T15:14:32.3352034Z [36;1m# Copy nginx static assets (maintenance page, custom error pages)[0m
+2026-03-31T15:14:32.3352458Z [36;1mscp -i ~/.ssh/deploy_key -P *** \[0m
+2026-03-31T15:14:32.3352846Z [36;1m  -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12 \[0m
+2026-03-31T15:14:32.3353225Z [36;1m  nginx/maintenance.html \[0m
+2026-03-31T15:14:32.3353581Z [36;1m  ***@***:***/nginx/ 2>/dev/null || true[0m
+2026-03-31T15:14:32.3378695Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:14:32.3378951Z env:
+2026-03-31T15:14:32.3379171Z   VPS_HOST: ***
+2026-03-31T15:14:32.3379391Z   VPS_USER: ***
+2026-03-31T15:14:32.3379608Z   VPS_PORT: ***
+2026-03-31T15:14:32.3379818Z   DEPLOY_PATH: ***
+2026-03-31T15:14:32.3380037Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:14:32.3380290Z ##[endgroup]

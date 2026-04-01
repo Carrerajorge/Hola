@@ -1,0 +1,22 @@
+﻿2026-03-31T14:49:59.8324981Z ##[group]Run set -euo pipefail
+2026-03-31T14:49:59.8325282Z [36;1mset -euo pipefail[0m
+2026-03-31T14:49:59.8325552Z [36;1mFILE_COUNT="$(git ls-files | wc -l | tr -d ' ')"[0m
+2026-03-31T14:49:59.8325904Z [36;1mCHECKOUT_SIZE="$(du -sh . | awk '{print $1}')"[0m
+2026-03-31T14:49:59.8326234Z [36;1mecho "▸ Sparse checkout files: ${FILE_COUNT}"[0m
+2026-03-31T14:49:59.8326576Z [36;1mecho "▸ Sparse checkout size:  ${CHECKOUT_SIZE}"[0m
+2026-03-31T14:49:59.8326859Z [36;1m{[0m
+2026-03-31T14:49:59.8327060Z [36;1m  echo "## Build Checkout Footprint"[0m
+2026-03-31T14:49:59.8327316Z [36;1m  echo ""[0m
+2026-03-31T14:49:59.8327501Z [36;1m  echo "| Metric | Value |"[0m
+2026-03-31T14:49:59.8327735Z [36;1m  echo "|---|---|"[0m
+2026-03-31T14:49:59.8328190Z [36;1m  echo "| Files | \`${FILE_COUNT}\` |"[0m
+2026-03-31T14:49:59.8328496Z [36;1m  echo "| Size | \`${CHECKOUT_SIZE}\` |"[0m
+2026-03-31T14:49:59.8328764Z [36;1m} >> "$GITHUB_STEP_SUMMARY"[0m
+2026-03-31T14:49:59.8352224Z shell: /usr/bin/bash -e {0}
+2026-03-31T14:49:59.8352490Z env:
+2026-03-31T14:49:59.8352657Z   REGISTRY: ghcr.io
+2026-03-31T14:49:59.8352867Z   IMAGE_BASE: ghcr.io/carrerajorge/iliagpt
+2026-03-31T14:49:59.8353229Z   BUILDKIT_IMAGE: public.ecr.aws/vend/moby/buildkit:buildx-stable-1
+2026-03-31T14:49:59.8353878Z ##[endgroup]
+2026-03-31T14:49:59.9437092Z ▸ Sparse checkout files: 87630
+2026-03-31T14:49:59.9437687Z ▸ Sparse checkout size:  360M

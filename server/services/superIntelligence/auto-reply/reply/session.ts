@@ -140,6 +140,15 @@ function forkSessionFromParent(params: {
       const sessionFile = manager.createBranchedSession(leafId) ?? manager.getSessionFile();
       const sessionId = manager.getSessionId();
       if (sessionFile && sessionId) {
+        if (!fs.existsSync(sessionFile)) {
+          const header = manager.getHeader();
+          if (header) {
+            const content =
+              [header, ...manager.getEntries()].map((e) => JSON.stringify(e)).join("\n") + "\n";
+            fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
+            fs.writeFileSync(sessionFile, content, "utf-8");
+          }
+        }
         return { sessionId, sessionFile };
       }
     }
@@ -155,9 +164,11 @@ function forkSessionFromParent(params: {
       cwd: manager.getCwd(),
       parentSession: parentSessionFile,
     };
+    fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
     fs.writeFileSync(sessionFile, `${JSON.stringify(header)}\n`, "utf-8");
     return { sessionId, sessionFile };
-  } catch {
+  } catch (err: unknown) {
+    log.error(`forkSessionFromParent failed`, Number.isFinite((err as any)?.code) ? err : { err });
     return null;
   }
 }

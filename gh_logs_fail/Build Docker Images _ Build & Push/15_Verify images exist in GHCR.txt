@@ -1,0 +1,37 @@
+﻿2026-03-31T15:07:40.6344015Z ##[group]Run set -euo pipefail
+2026-03-31T15:07:40.6344360Z [36;1mset -euo pipefail[0m
+2026-03-31T15:07:40.6344594Z [36;1mTAG="sha-1abdd4cf"[0m
+2026-03-31T15:07:40.6344848Z [36;1mecho "▸ Verifying pushed images..."[0m
+2026-03-31T15:07:40.6345143Z [36;1mfor img in app sandbox ocr; do[0m
+2026-03-31T15:07:40.6345468Z [36;1m  IMAGE_REF="ghcr.io/carrerajorge/iliagpt-${img}:${TAG}"[0m
+2026-03-31T15:07:40.6345801Z [36;1m  if bash ./scripts/ci-retry.sh \[0m
+2026-03-31T15:07:40.6346101Z [36;1m    --label "GHCR manifest verify ${IMAGE_REF}" \[0m
+2026-03-31T15:07:40.6346383Z [36;1m    --attempts 6 \[0m
+2026-03-31T15:07:40.6346587Z [36;1m    --base-delay 5 \[0m
+2026-03-31T15:07:40.6346796Z [36;1m    --max-delay 30 \[0m
+2026-03-31T15:07:40.6346986Z [36;1m    -- \[0m
+2026-03-31T15:07:40.6347250Z [36;1m    docker manifest inspect "${IMAGE_REF}" > /dev/null 2>&1; then[0m
+2026-03-31T15:07:40.6347595Z [36;1m    echo "  ✓ ${IMAGE_REF}"[0m
+2026-03-31T15:07:40.6347822Z [36;1m  else[0m
+2026-03-31T15:07:40.6348053Z [36;1m    echo "  ✗ ${IMAGE_REF} NOT FOUND"[0m
+2026-03-31T15:07:40.6348301Z [36;1m    exit 1[0m
+2026-03-31T15:07:40.6348470Z [36;1m  fi[0m
+2026-03-31T15:07:40.6348633Z [36;1mdone[0m
+2026-03-31T15:07:40.6348788Z [36;1mecho ""[0m
+2026-03-31T15:07:40.6349208Z [36;1mecho "▸ App image digest: sha256:ad1575ff2efb3dbe0b7c55ab60c2f7daa386fe89ccf6bfe525b1c3850b45a2db"[0m
+2026-03-31T15:07:40.6349910Z [36;1mecho "▸ Sandbox digest:   sha256:acef0462a63bc3e9b037250ab84c2a7156e8cfc16565cfd3d74925d7f3480a7d"[0m
+2026-03-31T15:07:40.6350555Z [36;1mecho "▸ OCR digest:       sha256:5e5489af99ace817d9c0fa1c82b0067a4685829e23e0da4b11cca6db8e9b10c8"[0m
+2026-03-31T15:07:40.6395768Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:07:40.6396009Z env:
+2026-03-31T15:07:40.6396164Z   REGISTRY: ghcr.io
+2026-03-31T15:07:40.6396384Z   IMAGE_BASE: ghcr.io/carrerajorge/iliagpt
+2026-03-31T15:07:40.6396745Z   BUILDKIT_IMAGE: public.ecr.aws/vend/moby/buildkit:buildx-stable-1
+2026-03-31T15:07:40.6397077Z ##[endgroup]
+2026-03-31T15:07:40.6445083Z ▸ Verifying pushed images...
+2026-03-31T15:07:50.6959529Z   ✓ ghcr.io/carrerajorge/iliagpt-app:sha-1abdd4cf
+2026-03-31T15:07:56.3680734Z   ✓ ghcr.io/carrerajorge/iliagpt-sandbox:sha-1abdd4cf
+2026-03-31T15:08:02.2252084Z   ✓ ghcr.io/carrerajorge/iliagpt-ocr:sha-1abdd4cf
+2026-03-31T15:08:02.2252548Z 
+2026-03-31T15:08:02.2253184Z ▸ App image digest: sha256:ad1575ff2efb3dbe0b7c55ab60c2f7daa386fe89ccf6bfe525b1c3850b45a2db
+2026-03-31T15:08:02.2254767Z ▸ Sandbox digest:   sha256:acef0462a63bc3e9b037250ab84c2a7156e8cfc16565cfd3d74925d7f3480a7d
+2026-03-31T15:08:02.2256654Z ▸ OCR digest:       sha256:5e5489af99ace817d9c0fa1c82b0067a4685829e23e0da4b11cca6db8e9b10c8

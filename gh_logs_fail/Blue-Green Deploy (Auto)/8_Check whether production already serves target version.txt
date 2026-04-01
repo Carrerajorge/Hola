@@ -1,0 +1,26 @@
+﻿2026-03-31T15:14:25.9460373Z ##[group]Run set -euo pipefail
+2026-03-31T15:14:25.9460733Z [36;1mset -euo pipefail[0m
+2026-03-31T15:14:25.9461627Z [36;1mHEALTH_JSON="$(curl -sf --max-time 10 https://iliagpt.com/api/health 2>/dev/null || echo "{}")"[0m
+2026-03-31T15:14:25.9462448Z [36;1mREADY_CODE="$(curl -sf -o /dev/null -w '%{http_code}' --max-time 10 https://iliagpt.com/api/health/ready 2>/dev/null || echo "000")"[0m
+2026-03-31T15:14:25.9463210Z [36;1mROOT_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 https://iliagpt.com/ || echo "000")"[0m
+2026-03-31T15:14:25.9463689Z [36;1m[0m
+2026-03-31T15:14:25.9463983Z [36;1mif echo "${HEALTH_JSON}" | grep -q "\"version\":\"${EXPECTED}\"" && \[0m
+2026-03-31T15:14:25.9464384Z [36;1m   [ "${READY_CODE}" = "200" ] && \[0m
+2026-03-31T15:14:25.9464674Z [36;1m   [ "${ROOT_CODE}" -lt 500 ]; then[0m
+2026-03-31T15:14:25.9465000Z [36;1m  echo "already_deployed=true" >> "$GITHUB_OUTPUT"[0m
+2026-03-31T15:14:25.9465527Z [36;1m  echo "✓ Production already serves ${EXPECTED}; skipping SSH deployment path."[0m
+2026-03-31T15:14:25.9466009Z [36;1m  echo "  ${HEALTH_JSON}"[0m
+2026-03-31T15:14:25.9466261Z [36;1melse[0m
+2026-03-31T15:14:25.9466520Z [36;1m  echo "already_deployed=false" >> "$GITHUB_OUTPUT"[0m
+2026-03-31T15:14:25.9466990Z [36;1m  echo "Production is not yet on ${EXPECTED}; SSH deployment path required."[0m
+2026-03-31T15:14:25.9467385Z [36;1mfi[0m
+2026-03-31T15:14:25.9493424Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:14:25.9493688Z env:
+2026-03-31T15:14:25.9493959Z   VPS_HOST: ***
+2026-03-31T15:14:25.9494179Z   VPS_USER: ***
+2026-03-31T15:14:25.9494383Z   VPS_PORT: ***
+2026-03-31T15:14:25.9494612Z   DEPLOY_PATH: ***
+2026-03-31T15:14:25.9494835Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:14:25.9495092Z   EXPECTED: 1abdd4cf
+2026-03-31T15:14:25.9495309Z ##[endgroup]
+2026-03-31T15:14:27.2070633Z Production is not yet on 1abdd4cf; SSH deployment path required.

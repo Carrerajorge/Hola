@@ -1,0 +1,15 @@
+﻿2026-03-31T15:21:52.3822636Z ##[group]Run echo "::error::Blue-green auto-deployment FAILED. Old slot should still be serving."
+2026-03-31T15:21:52.3823324Z [36;1mecho "::error::Blue-green auto-deployment FAILED. Old slot should still be serving."[0m
+2026-03-31T15:21:52.3823990Z [36;1mecho "::error::Check state: ssh -p *** ***@*** 'cat ***/deploy-state.json'"[0m
+2026-03-31T15:21:52.3824666Z [36;1mecho "::error::Rollback: ssh -p *** ***@*** 'cd *** && bash scripts/rollback-bluegreen.sh --force'"[0m
+2026-03-31T15:21:52.3847769Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:21:52.3848022Z env:
+2026-03-31T15:21:52.3848236Z   VPS_HOST: ***
+2026-03-31T15:21:52.3848450Z   VPS_USER: ***
+2026-03-31T15:21:52.3848659Z   VPS_PORT: ***
+2026-03-31T15:21:52.3848873Z   DEPLOY_PATH: ***
+2026-03-31T15:21:52.3849099Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:21:52.3849357Z ##[endgroup]
+2026-03-31T15:21:52.3891638Z ##[error]Blue-green auto-deployment FAILED. Old slot should still be serving.
+2026-03-31T15:21:52.3893919Z ##[error]Check state: ssh -p *** ***@*** 'cat ***/deploy-state.json'
+2026-03-31T15:21:52.3895432Z ##[error]Rollback: ssh -p *** ***@*** 'cd *** && bash scripts/rollback-bluegreen.sh --force'

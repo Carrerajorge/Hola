@@ -1,0 +1,613 @@
+﻿2026-03-31T15:13:49.7874467Z Current runner version: '2.333.0'
+2026-03-31T15:13:49.7907768Z ##[group]Runner Image Provisioner
+2026-03-31T15:13:49.7909123Z Hosted Compute Agent
+2026-03-31T15:13:49.7910134Z Version: 20260213.493
+2026-03-31T15:13:49.7911542Z Commit: 5c115507f6dd24b8de37d8bbe0bb4509d0cc0fa3
+2026-03-31T15:13:49.7912782Z Build Date: 2026-02-13T00:28:41Z
+2026-03-31T15:13:49.7913941Z Worker ID: {1cebd427-d8e7-4ca9-82ef-ab4253a80638}
+2026-03-31T15:13:49.7915237Z Azure Region: eastus2
+2026-03-31T15:13:49.7916191Z ##[endgroup]
+2026-03-31T15:13:49.7918568Z ##[group]Operating System
+2026-03-31T15:13:49.7919720Z Ubuntu
+2026-03-31T15:13:49.7920645Z 24.04.4
+2026-03-31T15:13:49.7921888Z LTS
+2026-03-31T15:13:49.7922738Z ##[endgroup]
+2026-03-31T15:13:49.7923757Z ##[group]Runner Image
+2026-03-31T15:13:49.7924801Z Image: ubuntu-24.04
+2026-03-31T15:13:49.7925677Z Version: 20260323.65.1
+2026-03-31T15:13:49.7927837Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260323.65/images/ubuntu/Ubuntu2404-Readme.md
+2026-03-31T15:13:49.7930687Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260323.65
+2026-03-31T15:13:49.7932764Z ##[endgroup]
+2026-03-31T15:13:49.7935146Z ##[group]GITHUB_TOKEN Permissions
+2026-03-31T15:13:49.7938005Z Actions: read
+2026-03-31T15:13:49.7939068Z Contents: read
+2026-03-31T15:13:49.7940075Z Metadata: read
+2026-03-31T15:13:49.7941354Z Packages: write
+2026-03-31T15:13:49.7942409Z SecurityEvents: write
+2026-03-31T15:13:49.7943333Z ##[endgroup]
+2026-03-31T15:13:49.7946832Z Secret source: Actions
+2026-03-31T15:13:49.7948728Z Prepare workflow directory
+2026-03-31T15:13:49.8698113Z Prepare all required actions
+2026-03-31T15:13:49.8753160Z Getting action download info
+2026-03-31T15:13:50.2404725Z Download action repository 'actions/checkout@v4' (SHA:34e114876b0b11c390a56381ad16ebd13914f8d5)
+2026-03-31T15:13:50.4067731Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+2026-03-31T15:13:50.5890537Z Complete job name: Blue-Green Deploy (Auto)
+2026-03-31T15:13:50.6597819Z ##[group]Run set -euo pipefail
+2026-03-31T15:13:50.6598552Z [36;1mset -euo pipefail[0m
+2026-03-31T15:13:50.6599069Z [36;1mfetch_asset() {[0m
+2026-03-31T15:13:50.6599574Z [36;1m  local asset_path="$1"[0m
+2026-03-31T15:13:50.6600156Z [36;1m  mkdir -p "$(dirname "${asset_path}")"[0m
+2026-03-31T15:13:50.6600763Z [36;1m  curl -fsSL \[0m
+2026-03-31T15:13:50.6601703Z [36;1m    -H "Authorization: ***" \[0m
+2026-03-31T15:13:50.6602349Z [36;1m    -H "Accept: application/vnd.github.raw" \[0m
+2026-03-31T15:13:50.6603229Z [36;1m    "https://api.github.com/repos/${REPO}/contents/${asset_path}?ref=${REF}" \[0m
+2026-03-31T15:13:50.6604034Z [36;1m    -o "${asset_path}"[0m
+2026-03-31T15:13:50.6604541Z [36;1m}[0m
+2026-03-31T15:13:50.6604938Z [36;1m[0m
+2026-03-31T15:13:50.6605363Z [36;1mfor asset in \[0m
+2026-03-31T15:13:50.6605866Z [36;1m  docker-compose.infra.yml \[0m
+2026-03-31T15:13:50.6606441Z [36;1m  docker-compose.slot.yml \[0m
+2026-03-31T15:13:50.6607052Z [36;1m  nginx.conf \[0m
+2026-03-31T15:13:50.6607543Z [36;1m  nginx/maintenance.html \[0m
+2026-03-31T15:13:50.6608107Z [36;1m  scripts/deploy-bluegreen.sh \[0m
+2026-03-31T15:13:50.6608772Z [36;1m  scripts/repair-docker-storage-backend.sh \[0m
+2026-03-31T15:13:50.6609441Z [36;1m  scripts/rollback-bluegreen.sh \[0m
+2026-03-31T15:13:50.6610041Z [36;1m  scripts/health-dashboard.sh \[0m
+2026-03-31T15:13:50.6610653Z [36;1m  scripts/vps-bootstrap-bluegreen.sh \[0m
+2026-03-31T15:13:50.6611519Z [36;1m  scripts/prod-rigorous-checks.sh \[0m
+2026-03-31T15:13:50.6612158Z [36;1m  scripts/latest-main-guard.sh \[0m
+2026-03-31T15:13:50.6612853Z [36;1m  scripts/verify-public-runtime-contract.mjs[0m
+2026-03-31T15:13:50.6613473Z [36;1mdo[0m
+2026-03-31T15:13:50.6613917Z [36;1m  fetch_asset "${asset}"[0m
+2026-03-31T15:13:50.6614438Z [36;1mdone[0m
+2026-03-31T15:13:50.6614859Z [36;1m[0m
+2026-03-31T15:13:50.6615273Z [36;1mchmod +x scripts/*.sh[0m
+2026-03-31T15:13:50.6645613Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:13:50.6646746Z env:
+2026-03-31T15:13:50.6647359Z   VPS_HOST: ***
+2026-03-31T15:13:50.6647825Z   VPS_USER: ***
+2026-03-31T15:13:50.6648289Z   VPS_PORT: ***
+2026-03-31T15:13:50.6648759Z   DEPLOY_PATH: ***
+2026-03-31T15:13:50.6649218Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:13:50.6649897Z   GH_TOKEN: ***
+2026-03-31T15:13:50.6650345Z   REPO: Carrerajorge/Hola
+2026-03-31T15:13:50.6650880Z   REF: 1abdd4cffdb111bee62917e8426b960fd02066e2
+2026-03-31T15:13:50.6651755Z ##[endgroup]
+2026-03-31T15:13:52.4466236Z ##[group]Run set -euo pipefail
+2026-03-31T15:13:52.4466665Z [36;1mset -euo pipefail[0m
+2026-03-31T15:13:52.4467016Z [36;1mif [ -z "${VPS_SSH_KEY_B64}" ]; then[0m
+2026-03-31T15:13:52.4467482Z [36;1m  echo "::error::VPS_SSH_KEY_B64 secret is required for deployment."[0m
+2026-03-31T15:13:52.4467923Z [36;1m  exit 1[0m
+2026-03-31T15:13:52.4468181Z [36;1mfi[0m
+2026-03-31T15:13:52.4468521Z [36;1mif ! printf '%s' "${VPS_PORT}" | grep -Eq '^[0-9]{1,5}$'; then[0m
+2026-03-31T15:13:52.4469009Z [36;1m  echo "::error::VPS_PORT is invalid: ${VPS_PORT}"[0m
+2026-03-31T15:13:52.4469379Z [36;1m  exit 1[0m
+2026-03-31T15:13:52.4469636Z [36;1mfi[0m
+2026-03-31T15:13:52.4469961Z [36;1mif [ "${VPS_PORT}" -lt 1 ] || [ "${VPS_PORT}" -gt 65535 ]; then[0m
+2026-03-31T15:13:52.4470421Z [36;1m  echo "::error::VPS_PORT out of range: ${VPS_PORT}"[0m
+2026-03-31T15:13:52.4470802Z [36;1m  exit 1[0m
+2026-03-31T15:13:52.4471228Z [36;1mfi[0m
+2026-03-31T15:13:52.4471602Z [36;1mVPS_HOST="${VPS_HOST:-${VPS_DEFAULT_HOST}}"[0m
+2026-03-31T15:13:52.4472027Z [36;1mif [ -z "${VPS_HOST}" ]; then[0m
+2026-03-31T15:13:52.4472392Z [36;1m  echo "::error::VPS_HOST is required."[0m
+2026-03-31T15:13:52.4472742Z [36;1m  exit 1[0m
+2026-03-31T15:13:52.4472996Z [36;1mfi[0m
+2026-03-31T15:13:52.4473340Z [36;1mif ! printf '%s' "${VPS_HOST}" | grep -Eq '^[A-Za-z0-9._-]+$'; then[0m
+2026-03-31T15:13:52.4473863Z [36;1m  echo "::error::VPS_HOST contains invalid characters: ${VPS_HOST}"[0m
+2026-03-31T15:13:52.4474280Z [36;1m  exit 1[0m
+2026-03-31T15:13:52.4474541Z [36;1mfi[0m
+2026-03-31T15:13:52.4474810Z [36;1mif [ -z "${VPS_USER}" ]; then[0m
+2026-03-31T15:13:52.4475164Z [36;1m  echo "::error::VPS_USER is required."[0m
+2026-03-31T15:13:52.4475507Z [36;1m  exit 1[0m
+2026-03-31T15:13:52.4475761Z [36;1mfi[0m
+2026-03-31T15:13:52.4476024Z [36;1mif [ -z "${DEPLOY_PATH}" ]; then[0m
+2026-03-31T15:13:52.4476394Z [36;1m  echo "::error::DEPLOY_PATH is required."[0m
+2026-03-31T15:13:52.4476789Z [36;1m  exit 1[0m
+2026-03-31T15:13:52.4477066Z [36;1mfi[0m
+2026-03-31T15:13:52.4505256Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:13:52.4505579Z env:
+2026-03-31T15:13:52.4505911Z   VPS_HOST: ***
+2026-03-31T15:13:52.4506195Z   VPS_USER: ***
+2026-03-31T15:13:52.4506463Z   VPS_PORT: ***
+2026-03-31T15:13:52.4506773Z   DEPLOY_PATH: ***
+2026-03-31T15:13:52.4507056Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:13:52.4691609Z   VPS_SSH_KEY_B64: ***
+2026-03-31T15:13:52.4691956Z   VPS_DEFAULT_HOST: ***
+2026-03-31T15:13:52.4692241Z ##[endgroup]
+2026-03-31T15:13:52.4891476Z ##[group]Run set -euo pipefail
+2026-03-31T15:13:52.4891964Z [36;1mset -euo pipefail[0m
+2026-03-31T15:13:52.4892385Z [36;1mSHORT_SHA="1abdd4cffdb111bee62917e8426b960fd02066e2"[0m
+2026-03-31T15:13:52.4892812Z [36;1mSHORT_SHA="${SHORT_SHA:0:8}"[0m
+2026-03-31T15:13:52.4893230Z [36;1mecho "image_tag=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"[0m
+2026-03-31T15:13:52.4893718Z [36;1mecho "app_version=${SHORT_SHA}" >> "$GITHUB_OUTPUT"[0m
+2026-03-31T15:13:52.4922454Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:13:52.4922777Z env:
+2026-03-31T15:13:52.4923130Z   VPS_HOST: ***
+2026-03-31T15:13:52.4923416Z   VPS_USER: ***
+2026-03-31T15:13:52.4923689Z   VPS_PORT: ***
+2026-03-31T15:13:52.4924004Z   DEPLOY_PATH: ***
+2026-03-31T15:13:52.4924299Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:13:52.4924623Z ##[endgroup]
+2026-03-31T15:13:52.5028461Z ##[group]Run bash ./scripts/latest-main-guard.sh
+2026-03-31T15:13:52.5028959Z [36;1mbash ./scripts/latest-main-guard.sh[0m
+2026-03-31T15:13:52.5056639Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:13:52.5056965Z env:
+2026-03-31T15:13:52.5057307Z   VPS_HOST: ***
+2026-03-31T15:13:52.5057596Z   VPS_USER: ***
+2026-03-31T15:13:52.5057869Z   VPS_PORT: ***
+2026-03-31T15:13:52.5058163Z   DEPLOY_PATH: ***
+2026-03-31T15:13:52.5058448Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:13:52.5059047Z   GH_TOKEN: ***
+2026-03-31T15:13:52.5059461Z   CURRENT_SHA: 1abdd4cffdb111bee62917e8426b960fd02066e2
+2026-03-31T15:13:52.5059880Z   TARGET_BRANCH: main
+2026-03-31T15:13:52.5060178Z   FAIL_ON_LOOKUP_ERROR: true
+2026-03-31T15:13:52.5060492Z   GUARD_CONTEXT: deploy-auto
+2026-03-31T15:13:52.5060791Z ##[endgroup]
+2026-03-31T15:13:52.7367061Z [deploy-auto] 1abdd4cf is still the tip of main.
+2026-03-31T15:13:52.7411860Z ##[group]Run set -euo pipefail
+2026-03-31T15:13:52.7412255Z [36;1mset -euo pipefail[0m
+2026-03-31T15:13:52.7412523Z [36;1mIMAGE_TAG="${IMAGE_TAG}"[0m
+2026-03-31T15:13:52.7412895Z [36;1mAPP_IMAGE="ghcr.io/carrerajorge/iliagpt-app:${IMAGE_TAG}"[0m
+2026-03-31T15:13:52.7413387Z [36;1mSANDBOX_IMAGE="ghcr.io/carrerajorge/iliagpt-sandbox:${IMAGE_TAG}"[0m
+2026-03-31T15:13:52.7413868Z [36;1mOCR_IMAGE="ghcr.io/carrerajorge/iliagpt-ocr:${IMAGE_TAG}"[0m
+2026-03-31T15:13:52.7414216Z [36;1m[0m
+2026-03-31T15:13:52.7414421Z [36;1mextract_digest() {[0m
+2026-03-31T15:13:52.7414678Z [36;1m  local image_ref="$1"[0m
+2026-03-31T15:13:52.7414929Z [36;1m  local digest[0m
+2026-03-31T15:13:52.7415873Z [36;1m  digest="$(docker manifest inspect "${image_ref}" | python3 -c 'import sys, json; d=json.load(sys.stdin); prints = (d.get("manifests") or [{}]); print((prints[0].get("digest") if prints else "") or d.get("digest", "") or d.get("config", {}).get("digest", ""));' )"[0m
+2026-03-31T15:13:52.7416888Z [36;1m  echo "${digest}"[0m
+2026-03-31T15:13:52.7417114Z [36;1m}[0m
+2026-03-31T15:13:52.7417302Z [36;1m[0m
+2026-03-31T15:13:52.7417505Z [36;1mverify_expected_digest() {[0m
+2026-03-31T15:13:52.7417775Z [36;1m  local label="$1"[0m
+2026-03-31T15:13:52.7418011Z [36;1m  local image_ref="$2"[0m
+2026-03-31T15:13:52.7418265Z [36;1m  local expected="$3"[0m
+2026-03-31T15:13:52.7418524Z [36;1m  if [ -z "${expected}" ]; then[0m
+2026-03-31T15:13:52.7418968Z [36;1m    echo "  ⚠️ No expected ${label} digest provided; skipping digest verification."[0m
+2026-03-31T15:13:52.7419410Z [36;1m    return 0[0m
+2026-03-31T15:13:52.7419626Z [36;1m  fi[0m
+2026-03-31T15:13:52.7419827Z [36;1m  local actual[0m
+2026-03-31T15:13:52.7420094Z [36;1m  actual="$(extract_digest "${image_ref}")"[0m
+2026-03-31T15:13:52.7420409Z [36;1m  if [ -z "${actual}" ]; then[0m
+2026-03-31T15:13:52.7420777Z [36;1m    echo "::error::Could not extract digest for ${label}: ${image_ref}"[0m
+2026-03-31T15:13:52.7421446Z [36;1m    exit 1[0m
+2026-03-31T15:13:52.7421677Z [36;1m  fi[0m
+2026-03-31T15:13:52.7421918Z [36;1m  if [ "${actual}" != "${expected}" ]; then[0m
+2026-03-31T15:13:52.7422696Z [36;1m    echo "::warning::Digest mismatch for ${label}. expected=${expected} actual=${actual} (build output digest and remote manifest digest can differ when attestations are enabled)"[0m
+2026-03-31T15:13:52.7423420Z [36;1m  fi[0m
+2026-03-31T15:13:52.7423667Z [36;1m  echo "  ✓ ${label} digest pinned to ${actual}"[0m
+2026-03-31T15:13:52.7423973Z [36;1m}[0m
+2026-03-31T15:13:52.7424161Z [36;1m[0m
+2026-03-31T15:13:52.7424442Z [36;1mfor pair in "${APP_IMAGE}" "${SANDBOX_IMAGE}" "${OCR_IMAGE}"; do[0m
+2026-03-31T15:13:52.7424811Z [36;1m  for i in $(seq 1 60); do[0m
+2026-03-31T15:13:52.7425155Z [36;1m    if docker manifest inspect "${pair}" > /dev/null 2>&1; then[0m
+2026-03-31T15:13:52.7425556Z [36;1m      echo "  ✓ Manifest available for ${pair}"[0m
+2026-03-31T15:13:52.7425854Z [36;1m      break[0m
+2026-03-31T15:13:52.7426062Z [36;1m    fi[0m
+2026-03-31T15:13:52.7426271Z [36;1m    if [ "${i}" -eq 40 ]; then[0m
+2026-03-31T15:13:52.7426647Z [36;1m      echo "::error::Manifest ${pair} not available in GHCR after retries."[0m
+2026-03-31T15:13:52.7427030Z [36;1m      exit 1[0m
+2026-03-31T15:13:52.7427426Z [36;1m    fi[0m
+2026-03-31T15:13:52.7427631Z [36;1m    sleep $(( i < 10 ? 3 : 5 ))[0m
+2026-03-31T15:13:52.7427882Z [36;1m  done[0m
+2026-03-31T15:13:52.7428072Z [36;1mdone[0m
+2026-03-31T15:13:52.7428257Z [36;1m[0m
+2026-03-31T15:13:52.7428555Z [36;1mverify_expected_digest "app" "${APP_IMAGE}" "${EXPECTED_APP_DIGEST}"[0m
+2026-03-31T15:13:52.7429092Z [36;1mverify_expected_digest "sandbox" "${SANDBOX_IMAGE}" "${EXPECTED_SANDBOX_DIGEST}"[0m
+2026-03-31T15:13:52.7429626Z [36;1mverify_expected_digest "ocr" "${OCR_IMAGE}" "${EXPECTED_OCR_DIGEST}"[0m
+2026-03-31T15:13:52.7455590Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:13:52.7455846Z env:
+2026-03-31T15:13:52.7456121Z   VPS_HOST: ***
+2026-03-31T15:13:52.7456520Z   VPS_USER: ***
+2026-03-31T15:13:52.7456733Z   VPS_PORT: ***
+2026-03-31T15:13:52.7456953Z   DEPLOY_PATH: ***
+2026-03-31T15:13:52.7457177Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:13:52.7457442Z   IMAGE_TAG: sha-1abdd4cf
+2026-03-31T15:13:52.7457876Z   EXPECTED_APP_DIGEST: sha256:ad1575ff2efb3dbe0b7c55ab60c2f7daa386fe89ccf6bfe525b1c3850b45a2db
+2026-03-31T15:13:52.7458556Z   EXPECTED_SANDBOX_DIGEST: sha256:acef0462a63bc3e9b037250ab84c2a7156e8cfc16565cfd3d74925d7f3480a7d
+2026-03-31T15:13:52.7459204Z   EXPECTED_OCR_DIGEST: sha256:5e5489af99ace817d9c0fa1c82b0067a4685829e23e0da4b11cca6db8e9b10c8
+2026-03-31T15:13:52.7459660Z ##[endgroup]
+2026-03-31T15:14:08.1052735Z   ✓ Manifest available for ghcr.io/carrerajorge/iliagpt-app:sha-1abdd4cf
+2026-03-31T15:14:12.6760790Z   ✓ Manifest available for ghcr.io/carrerajorge/iliagpt-sandbox:sha-1abdd4cf
+2026-03-31T15:14:16.8593958Z   ✓ Manifest available for ghcr.io/carrerajorge/iliagpt-ocr:sha-1abdd4cf
+2026-03-31T15:14:18.2014789Z ##[warning]Digest mismatch for app. expected=sha256:ad1575ff2efb3dbe0b7c55ab60c2f7daa386fe89ccf6bfe525b1c3850b45a2db actual=sha256:80f37ef5503bdfc9af236e9ffbba0525d6c91ba21cf6bf4701272e618bc1a9d6 (build output digest and remote manifest digest can differ when attestations are enabled)
+2026-03-31T15:14:18.2023640Z   ✓ app digest pinned to sha256:80f37ef5503bdfc9af236e9ffbba0525d6c91ba21cf6bf4701272e618bc1a9d6
+2026-03-31T15:14:20.5051502Z ##[warning]Digest mismatch for sandbox. expected=sha256:acef0462a63bc3e9b037250ab84c2a7156e8cfc16565cfd3d74925d7f3480a7d actual=sha256:da104806abbba594cf13562dd4fb75ad9ba643e243f900cd965dfbee31e92143 (build output digest and remote manifest digest can differ when attestations are enabled)
+2026-03-31T15:14:20.5054529Z   ✓ sandbox digest pinned to sha256:da104806abbba594cf13562dd4fb75ad9ba643e243f900cd965dfbee31e92143
+2026-03-31T15:14:25.1513742Z ##[warning]Digest mismatch for ocr. expected=sha256:5e5489af99ace817d9c0fa1c82b0067a4685829e23e0da4b11cca6db8e9b10c8 actual=sha256:75bead10951412f0689aaa1f27b57c4a0d707cfd16b5160409f28b7c51959e89 (build output digest and remote manifest digest can differ when attestations are enabled)
+2026-03-31T15:14:25.1516251Z   ✓ ocr digest pinned to sha256:75bead10951412f0689aaa1f27b57c4a0d707cfd16b5160409f28b7c51959e89
+2026-03-31T15:14:25.1560485Z ##[group]Run set -euo pipefail
+2026-03-31T15:14:25.1560844Z [36;1mset -euo pipefail[0m
+2026-03-31T15:14:25.1561971Z [36;1mfailures=$(gh run list --repo Carrerajorge/Hola --workflow "Deploy to Production (Blue-Green)" --branch main --limit 8 --json conclusion --jq '[.[] | select(.conclusion=="failure")] | length')[0m
+2026-03-31T15:14:25.1562820Z [36;1mecho "Recent deploy failures: ${failures}"[0m
+2026-03-31T15:14:25.1563146Z [36;1mif [ "${failures}" -ge 5 ]; then[0m
+2026-03-31T15:14:25.1563616Z [36;1m  echo "::warning::Circuit breaker: ${failures}/8 recent deploys failed. Proceeding anyway."[0m
+2026-03-31T15:14:25.1564069Z [36;1mfi[0m
+2026-03-31T15:14:25.1589599Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:14:25.1589855Z env:
+2026-03-31T15:14:25.1590099Z   VPS_HOST: ***
+2026-03-31T15:14:25.1590374Z   VPS_USER: ***
+2026-03-31T15:14:25.1590580Z   VPS_PORT: ***
+2026-03-31T15:14:25.1590796Z   DEPLOY_PATH: ***
+2026-03-31T15:14:25.1591017Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:14:25.1591712Z   GH_TOKEN: ***
+2026-03-31T15:14:25.1592120Z ##[endgroup]
+2026-03-31T15:14:25.9427002Z Recent deploy failures: 3
+2026-03-31T15:14:25.9460383Z ##[group]Run set -euo pipefail
+2026-03-31T15:14:25.9460737Z [36;1mset -euo pipefail[0m
+2026-03-31T15:14:25.9461633Z [36;1mHEALTH_JSON="$(curl -sf --max-time 10 https://iliagpt.com/api/health 2>/dev/null || echo "{}")"[0m
+2026-03-31T15:14:25.9462451Z [36;1mREADY_CODE="$(curl -sf -o /dev/null -w '%{http_code}' --max-time 10 https://iliagpt.com/api/health/ready 2>/dev/null || echo "000")"[0m
+2026-03-31T15:14:25.9463213Z [36;1mROOT_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 https://iliagpt.com/ || echo "000")"[0m
+2026-03-31T15:14:25.9463692Z [36;1m[0m
+2026-03-31T15:14:25.9463986Z [36;1mif echo "${HEALTH_JSON}" | grep -q "\"version\":\"${EXPECTED}\"" && \[0m
+2026-03-31T15:14:25.9464387Z [36;1m   [ "${READY_CODE}" = "200" ] && \[0m
+2026-03-31T15:14:25.9464677Z [36;1m   [ "${ROOT_CODE}" -lt 500 ]; then[0m
+2026-03-31T15:14:25.9465002Z [36;1m  echo "already_deployed=true" >> "$GITHUB_OUTPUT"[0m
+2026-03-31T15:14:25.9465564Z [36;1m  echo "✓ Production already serves ${EXPECTED}; skipping SSH deployment path."[0m
+2026-03-31T15:14:25.9466012Z [36;1m  echo "  ${HEALTH_JSON}"[0m
+2026-03-31T15:14:25.9466264Z [36;1melse[0m
+2026-03-31T15:14:25.9466522Z [36;1m  echo "already_deployed=false" >> "$GITHUB_OUTPUT"[0m
+2026-03-31T15:14:25.9466993Z [36;1m  echo "Production is not yet on ${EXPECTED}; SSH deployment path required."[0m
+2026-03-31T15:14:25.9467388Z [36;1mfi[0m
+2026-03-31T15:14:25.9493432Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:14:25.9493691Z env:
+2026-03-31T15:14:25.9493962Z   VPS_HOST: ***
+2026-03-31T15:14:25.9494181Z   VPS_USER: ***
+2026-03-31T15:14:25.9494385Z   VPS_PORT: ***
+2026-03-31T15:14:25.9494614Z   DEPLOY_PATH: ***
+2026-03-31T15:14:25.9494837Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:14:25.9495094Z   EXPECTED: 1abdd4cf
+2026-03-31T15:14:25.9495311Z ##[endgroup]
+2026-03-31T15:14:27.2070663Z Production is not yet on 1abdd4cf; SSH deployment path required.
+2026-03-31T15:14:27.2108139Z ##[group]Run set -euo pipefail
+2026-03-31T15:14:27.2108513Z [36;1mset -euo pipefail[0m
+2026-03-31T15:14:27.2108770Z [36;1mmkdir -p ~/.ssh[0m
+2026-03-31T15:14:27.2294710Z [36;1mprintf '%s' "***" | base64 -d > ~/.ssh/deploy_key[0m
+2026-03-31T15:14:27.2295147Z [36;1mchmod 600 ~/.ssh/deploy_key[0m
+2026-03-31T15:14:27.2295421Z [36;1mwc -c ~/.ssh/deploy_key[0m
+2026-03-31T15:14:27.2295684Z [36;1mhead -n 1 ~/.ssh/deploy_key[0m
+2026-03-31T15:14:27.2296007Z [36;1mssh-keygen -y -f ~/.ssh/deploy_key >/dev/null[0m
+2026-03-31T15:14:27.2296324Z [36;1m{[0m
+2026-03-31T15:14:27.2296527Z [36;1m  echo "Host *"[0m
+2026-03-31T15:14:27.2296822Z [36;1m  echo "  StrictHostKeyChecking accept-new"[0m
+2026-03-31T15:14:27.2297173Z [36;1m  echo "  PubkeyAcceptedKeyTypes +ssh-rsa"[0m
+2026-03-31T15:14:27.2297508Z [36;1m  echo "  HostKeyAlgorithms +ssh-rsa"[0m
+2026-03-31T15:14:27.2297801Z [36;1m} > ~/.ssh/config[0m
+2026-03-31T15:14:27.2298039Z [36;1mchmod 600 ~/.ssh/config[0m
+2026-03-31T15:14:27.2324529Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:14:27.2324795Z env:
+2026-03-31T15:14:27.2325099Z   VPS_HOST: ***
+2026-03-31T15:14:27.2325320Z   VPS_USER: ***
+2026-03-31T15:14:27.2325524Z   VPS_PORT: ***
+2026-03-31T15:14:27.2325739Z   DEPLOY_PATH: ***
+2026-03-31T15:14:27.2325956Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:14:27.2326221Z ##[endgroup]
+2026-03-31T15:14:27.2570539Z 3401 /home/runner/.ssh/deploy_key
+2026-03-31T15:14:27.2580522Z -----BEGIN OPENSSH PRIVATE KEY-----
+2026-03-31T15:14:27.2690103Z ##[group]Run set -euo pipefail
+2026-03-31T15:14:27.2690443Z [36;1mset -euo pipefail[0m
+2026-03-31T15:14:27.2690752Z [36;1mDEFAULT_HOST="***"[0m
+2026-03-31T15:14:27.2690998Z [36;1mHOSTS=()[0m
+2026-03-31T15:14:27.2691633Z [36;1mif [ -n "***" ]; then HOSTS+=("***"); fi[0m
+2026-03-31T15:14:27.2691986Z [36;1mHOSTS+=("${VPS_HOST}" "${DEFAULT_HOST}")[0m
+2026-03-31T15:14:27.2692335Z [36;1mPORTS=("${VPS_PORT}" "80***" "***" "***")[0m
+2026-03-31T15:14:27.2692635Z [36;1m[0m
+2026-03-31T15:14:27.2693177Z [36;1mmapfile -t uniq_hosts < <(printf "%s\n" "${HOSTS[@]}" | awk 'NF' | awk '!seen[$0]++')[0m
+2026-03-31T15:14:27.2693736Z [36;1mmapfile -t uniq_ports < <(printf "%s\n" "${PORTS[@]}" | awk 'NF' | awk '!seen[$0]++')[0m
+2026-03-31T15:14:27.2694132Z [36;1m[0m
+2026-03-31T15:14:27.2694340Z [36;1mfor host in "${uniq_hosts[@]}"; do[0m
+2026-03-31T15:14:27.2694641Z [36;1m  for port in "${uniq_ports[@]}"; do[0m
+2026-03-31T15:14:27.2695000Z [36;1m    echo "Trying ${VPS_USER}@${host}:${port}..."[0m
+2026-03-31T15:14:27.2695435Z [36;1m    ssh-keyscan -p "$port" -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true[0m
+2026-03-31T15:14:27.2695833Z [36;1m    ssh_probe_opts=([0m
+2026-03-31T15:14:27.2696085Z [36;1m      -i ~/.ssh/deploy_key[0m
+2026-03-31T15:14:27.2696341Z [36;1m      -p "$port"[0m
+2026-03-31T15:14:27.2696614Z [36;1m      -o StrictHostKeyChecking=accept-new[0m
+2026-03-31T15:14:27.2696923Z [36;1m      -o BatchMode=yes[0m
+2026-03-31T15:14:27.2697177Z [36;1m      -o ConnectTimeout=8[0m
+2026-03-31T15:14:27.2697478Z [36;1m      -o PubkeyAcceptedAlgorithms=+ssh-rsa[0m
+2026-03-31T15:14:27.2697800Z [36;1m      -o HostKeyAlgorithms=+ssh-rsa[0m
+2026-03-31T15:14:27.2698070Z [36;1m    )[0m
+2026-03-31T15:14:27.2698403Z [36;1m    if ssh "${ssh_probe_opts[@]}" -4 "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1 || \[0m
+2026-03-31T15:14:27.2698930Z [36;1m       ssh "${ssh_probe_opts[@]}" "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1; then[0m
+2026-03-31T15:14:27.2699362Z [36;1m      echo "host=${host}" >> "$GITHUB_OUTPUT"[0m
+2026-03-31T15:14:27.2699687Z [36;1m      echo "port=${port}" >> "$GITHUB_OUTPUT"[0m
+2026-03-31T15:14:27.2700021Z [36;1m      echo "✓ Selected endpoint ${host}:${port}"[0m
+2026-03-31T15:14:27.2700325Z [36;1m      exit 0[0m
+2026-03-31T15:14:27.2700543Z [36;1m    fi[0m
+2026-03-31T15:14:27.2700734Z [36;1m  done[0m
+2026-03-31T15:14:27.2700923Z [36;1mdone[0m
+2026-03-31T15:14:27.2701379Z [36;1m[0m
+2026-03-31T15:14:27.2701795Z [36;1mecho "::error::No reachable VPS endpoint found (hosts: ${uniq_hosts[*]} | ports: ${uniq_ports[*]})"[0m
+2026-03-31T15:14:27.2702278Z [36;1mexit 1[0m
+2026-03-31T15:14:27.2727416Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:14:27.2727666Z env:
+2026-03-31T15:14:27.2727894Z   VPS_HOST: ***
+2026-03-31T15:14:27.2728143Z   VPS_USER: ***
+2026-03-31T15:14:27.2728360Z   VPS_PORT: ***
+2026-03-31T15:14:27.2728584Z   DEPLOY_PATH: ***
+2026-03-31T15:14:27.2728819Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:14:27.2729081Z ##[endgroup]
+2026-03-31T15:14:27.2827272Z Trying ***@***:***...
+2026-03-31T15:14:32.1809771Z ✓ Selected endpoint ***:***
+2026-03-31T15:14:32.1842689Z ##[group]Run set -euo pipefail
+2026-03-31T15:14:32.1843033Z [36;1mset -euo pipefail[0m
+2026-03-31T15:14:32.1843330Z [36;1mRESOLVED_HOST="***"[0m
+2026-03-31T15:14:32.1843633Z [36;1mRESOLVED_PORT="***"[0m
+2026-03-31T15:14:32.1843893Z [36;1mRESOLVED_USER="***"[0m
+2026-03-31T15:14:32.1844152Z [36;1mRESOLVED_PATH="***"[0m
+2026-03-31T15:14:32.1844387Z [36;1m[0m
+2026-03-31T15:14:32.1844836Z [36;1mif [ -z "${RESOLVED_HOST}" ] || [ -z "${RESOLVED_PORT}" ] || [ -z "${RESOLVED_USER}" ] || [ -z "${RESOLVED_PATH}" ]; then[0m
+2026-03-31T15:14:32.1845402Z [36;1m  echo "::error::Resolved deploy target is incomplete."[0m
+2026-03-31T15:14:32.1845735Z [36;1m  exit 1[0m
+2026-03-31T15:14:32.1845935Z [36;1mfi[0m
+2026-03-31T15:14:32.1846241Z [36;1mif ! printf '%s' "${RESOLVED_HOST}" | grep -Eq '^[A-Za-z0-9.-]+$'; then[0m
+2026-03-31T15:14:32.1846744Z [36;1m  echo "::error::Resolved host has invalid characters: ${RESOLVED_HOST}"[0m
+2026-03-31T15:14:32.1847117Z [36;1m  exit 1[0m
+2026-03-31T15:14:32.1847358Z [36;1mfi[0m
+2026-03-31T15:14:32.1847646Z [36;1mif ! printf '%s' "${RESOLVED_PORT}" | grep -Eq '^[0-9]{1,5}$'; then[0m
+2026-03-31T15:14:32.1848083Z [36;1m  echo "::error::Resolved port is invalid: ${RESOLVED_PORT}"[0m
+2026-03-31T15:14:32.1848418Z [36;1m  exit 1[0m
+2026-03-31T15:14:32.1848611Z [36;1mfi[0m
+2026-03-31T15:14:32.1848904Z [36;1mif [ "${RESOLVED_PORT}" -lt 1 ] || [ "${RESOLVED_PORT}" -gt 65535 ]; then[0m
+2026-03-31T15:14:32.1849544Z [36;1m  echo "::error::Resolved port out of range: ${RESOLVED_PORT}"[0m
+2026-03-31T15:14:32.1849881Z [36;1m  exit 1[0m
+2026-03-31T15:14:32.1850072Z [36;1mfi[0m
+2026-03-31T15:14:32.1850415Z [36;1mif ! printf '%s' "${RESOLVED_USER}" | grep -Eq '^[A-Za-z_][A-Za-z0-9_-]{0,31}$'; then[0m
+2026-03-31T15:14:32.1850923Z [36;1m  echo "::error::Resolved user is invalid: ${RESOLVED_USER}"[0m
+2026-03-31T15:14:32.1851650Z [36;1m  exit 1[0m
+2026-03-31T15:14:32.1851858Z [36;1mfi[0m
+2026-03-31T15:14:32.1852166Z [36;1mif ! printf '%s' "${RESOLVED_PATH}" | grep -Eq '^/[A-Za-z0-9._/-]+$'; then[0m
+2026-03-31T15:14:32.1852647Z [36;1m  echo "::error::Resolved deploy path is invalid: ${RESOLVED_PATH}"[0m
+2026-03-31T15:14:32.1853018Z [36;1m  exit 1[0m
+2026-03-31T15:14:32.1853211Z [36;1mfi[0m
+2026-03-31T15:14:32.1853486Z [36;1mif printf '%s' "${RESOLVED_PATH}" | grep -Eq '(^|/)\.\.(/|$)'; then[0m
+2026-03-31T15:14:32.1854014Z [36;1m  echo "::error::Resolved deploy path contains path traversal segments: ${RESOLVED_PATH}"[0m
+2026-03-31T15:14:32.1854470Z [36;1m  exit 1[0m
+2026-03-31T15:14:32.1854666Z [36;1mfi[0m
+2026-03-31T15:14:32.1879945Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:14:32.1880200Z env:
+2026-03-31T15:14:32.1880423Z   VPS_HOST: ***
+2026-03-31T15:14:32.1880648Z   VPS_USER: ***
+2026-03-31T15:14:32.1880851Z   VPS_PORT: ***
+2026-03-31T15:14:32.1881271Z   DEPLOY_PATH: ***
+2026-03-31T15:14:32.1881522Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:14:32.1881784Z ##[endgroup]
+2026-03-31T15:14:32.2027808Z ##[group]Run set -euo pipefail
+2026-03-31T15:14:32.2028119Z [36;1mset -euo pipefail[0m
+2026-03-31T15:14:32.2028484Z [36;1mecho "▸ Deploy target: ***@***:***"[0m
+2026-03-31T15:14:32.2028924Z [36;1mnc -vz -w 5 "***" "***" || echo "⚠️ TCP probe failed (continuing to SSH)"[0m
+2026-03-31T15:14:32.2052411Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:14:32.2052669Z env:
+2026-03-31T15:14:32.2052887Z   VPS_HOST: ***
+2026-03-31T15:14:32.2053126Z   VPS_USER: ***
+2026-03-31T15:14:32.2053340Z   VPS_PORT: ***
+2026-03-31T15:14:32.2053549Z   DEPLOY_PATH: ***
+2026-03-31T15:14:32.2053774Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:14:32.2054035Z ##[endgroup]
+2026-03-31T15:14:32.2096306Z ▸ Deploy target: ***@***:***
+2026-03-31T15:14:32.3303350Z Connection to *** *** port [tcp/ssh] succeeded!
+2026-03-31T15:14:32.3340011Z ##[group]Run set -euo pipefail
+2026-03-31T15:14:32.3340356Z [36;1mset -euo pipefail[0m
+2026-03-31T15:14:32.3340600Z [36;1msync_ok=false[0m
+2026-03-31T15:14:32.3340835Z [36;1mfor attempt in 1 2 3; do[0m
+2026-03-31T15:14:32.3342828Z [36;1m  if scp -i ~/.ssh/deploy_key -P ***               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12               docker-compose.infra.yml               docker-compose.slot.yml               nginx.conf               scripts/deploy-bluegreen.sh               scripts/repair-docker-storage-backend.sh               scripts/rollback-bluegreen.sh               scripts/health-dashboard.sh               scripts/vps-bootstrap-bluegreen.sh               ***@***:***/; then[0m
+2026-03-31T15:14:32.3344459Z [36;1m    sync_ok=true[0m
+2026-03-31T15:14:32.3344692Z [36;1m    break[0m
+2026-03-31T15:14:32.3344904Z [36;1m  fi[0m
+2026-03-31T15:14:32.3345101Z [36;1m  sleep 3[0m
+2026-03-31T15:14:32.3345305Z [36;1mdone[0m
+2026-03-31T15:14:32.3345522Z [36;1m[0m
+2026-03-31T15:14:32.3345732Z [36;1mif [ "${sync_ok}" != "true" ]; then[0m
+2026-03-31T15:14:32.3346276Z [36;1m  echo "::warning::Failed to sync deploy scripts after 3 attempts; continuing with scripts already present on VPS"[0m
+2026-03-31T15:14:32.3346798Z [36;1mfi[0m
+2026-03-31T15:14:32.3346982Z [36;1m[0m
+2026-03-31T15:14:32.3349286Z [36;1mssh -i ~/.ssh/deploy_key -p ***             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ***@***             "mkdir -p ***/scripts ***/nginx &&              cp ***/deploy-bluegreen.sh ***/scripts/ 2>/dev/null || true &&              cp ***/repair-docker-storage-backend.sh ***/scripts/ 2>/dev/null || true &&              cp ***/rollback-bluegreen.sh ***/scripts/ 2>/dev/null || true &&              cp ***/health-dashboard.sh ***/scripts/ 2>/dev/null || true &&              cp ***/vps-bootstrap-bluegreen.sh ***/scripts/ 2>/dev/null || true &&              chmod +x ***/scripts/*.sh ***/deploy-bluegreen.sh 2>/dev/null || true"[0m
+2026-03-31T15:14:32.3351715Z [36;1m[0m
+2026-03-31T15:14:32.3352037Z [36;1m# Copy nginx static assets (maintenance page, custom error pages)[0m
+2026-03-31T15:14:32.3352461Z [36;1mscp -i ~/.ssh/deploy_key -P *** \[0m
+2026-03-31T15:14:32.3352848Z [36;1m  -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12 \[0m
+2026-03-31T15:14:32.3353233Z [36;1m  nginx/maintenance.html \[0m
+2026-03-31T15:14:32.3353583Z [36;1m  ***@***:***/nginx/ 2>/dev/null || true[0m
+2026-03-31T15:14:32.3378700Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:14:32.3378954Z env:
+2026-03-31T15:14:32.3379173Z   VPS_HOST: ***
+2026-03-31T15:14:32.3379394Z   VPS_USER: ***
+2026-03-31T15:14:32.3379610Z   VPS_PORT: ***
+2026-03-31T15:14:32.3379820Z   DEPLOY_PATH: ***
+2026-03-31T15:14:32.3380040Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:14:32.3380292Z ##[endgroup]
+2026-03-31T15:14:43.5475325Z ##[group]Run set -euo pipefail
+2026-03-31T15:14:43.5475879Z [36;1mset -euo pipefail[0m
+2026-03-31T15:14:43.5476316Z [36;1mfor attempt in 1 2; do[0m
+2026-03-31T15:14:43.5482757Z [36;1m  if ssh -i ~/.ssh/deploy_key -p ***               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ConnectionAttempts=3               -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes               ***@***               "echo '***' | docker login ghcr.io -u Carrerajorge --password-stdin 2>/dev/null &&                cd *** &&                PREDEPLOY_ONLY='true'                IMAGE_TAG='sha-1abdd4cf'                APP_VERSION='1abdd4cf'                BUILD_IMAGE_TAG='sha-1abdd4cf'                EXPECTED_APP_DIGEST='sha256:ad1575ff2efb3dbe0b7c55ab60c2f7daa386fe89ccf6bfe525b1c3850b45a2db'                EXPECTED_SANDBOX_DIGEST='sha256:acef0462a63bc3e9b037250ab84c2a7156e8cfc16565cfd3d74925d7f3480a7d'                EXPECTED_OCR_DIGEST='sha256:5e5489af99ace817d9c0fa1c82b0067a4685829e23e0da4b11cca6db8e9b10c8'                bash -s" < scripts/deploy-bluegreen.sh; then[0m
+2026-03-31T15:14:43.5487078Z [36;1m    break[0m
+2026-03-31T15:14:43.5487319Z [36;1m  fi[0m
+2026-03-31T15:14:43.5487556Z [36;1m  if [ "$attempt" -eq 2 ]; then[0m
+2026-03-31T15:14:43.5487931Z [36;1m    echo "Predeploy startup gate failed after retry" >&2[0m
+2026-03-31T15:14:43.5488301Z [36;1m    exit 1[0m
+2026-03-31T15:14:43.5488514Z [36;1m  fi[0m
+2026-03-31T15:14:43.5488705Z [36;1m  sleep 10[0m
+2026-03-31T15:14:43.5488911Z [36;1mdone[0m
+2026-03-31T15:14:43.5514607Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:14:43.5514874Z env:
+2026-03-31T15:14:43.5515097Z   VPS_HOST: ***
+2026-03-31T15:14:43.5515321Z   VPS_USER: ***
+2026-03-31T15:14:43.5515525Z   VPS_PORT: ***
+2026-03-31T15:14:43.5515743Z   DEPLOY_PATH: ***
+2026-03-31T15:14:43.5515974Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:14:43.5516230Z ##[endgroup]
+2026-03-31T15:14:46.6989886Z Login Succeeded
+2026-03-31T15:14:46.7201794Z [0;34m[2026-03-31 15:14:46][0m Starting blue-green deployment...
+2026-03-31T15:14:46.7233948Z [0;34m[2026-03-31 15:14:46][0m Image: ghcr.io/carrerajorge/iliagpt-app:sha-1abdd4cf
+2026-03-31T15:14:46.7274190Z [0;34m[2026-03-31 15:14:46][0m App version: 1abdd4cf
+2026-03-31T15:14:46.7274840Z [0;34m[2026-03-31 15:14:46][0m Deploy path: ***
+2026-03-31T15:14:46.8303118Z [0;34m[2026-03-31 15:14:46][0m Active slot: blue (port 3000)
+2026-03-31T15:14:46.8337495Z [0;34m[2026-03-31 15:14:46][0m Target slot: green (port 3001)
+2026-03-31T15:14:46.9195624Z [0;34m[2026-03-31 15:14:46][0m Pulling images...
+2026-03-31T15:14:47.8476912Z sha-1abdd4cf: Pulling from carrerajorge/iliagpt-app
+2026-03-31T15:14:48.0818567Z 6db0909c4473: Already exists
+2026-03-31T15:14:48.0942523Z 7723618b139f: Already exists
+2026-03-31T15:14:48.1029699Z eb2c6bc01a10: Already exists
+2026-03-31T15:14:48.1117213Z 93f73fef6895: Already exists
+2026-03-31T15:14:48.1217499Z 71ff01535b69: Already exists
+2026-03-31T15:14:48.1287375Z a5ecc29837c2: Already exists
+2026-03-31T15:14:48.1338086Z 5a8bcd61b768: Pulling fs layer
+2026-03-31T15:14:48.1348995Z 34ff1***6a825: Pulling fs layer
+2026-03-31T15:14:48.1349390Z 34ff1***6a825: Waiting
+2026-03-31T15:14:48.1354033Z c482eb557ee9: Pulling fs layer
+2026-03-31T15:14:48.1354474Z c482eb557ee9: Waiting
+2026-03-31T15:14:48.1354766Z 3ce0a73d5d4a: Pulling fs layer
+2026-03-31T15:14:48.1355085Z be561248ca9a: Pulling fs layer
+2026-03-31T15:14:48.1355395Z f491395d99d1: Pulling fs layer
+2026-03-31T15:14:48.1355702Z e1d3487db0db: Pulling fs layer
+2026-03-31T15:14:48.1356003Z 59466fc61f94: Pulling fs layer
+2026-03-31T15:14:48.1356296Z 44942549a2d8: Pulling fs layer
+2026-03-31T15:14:48.1356581Z 3ce0a73d5d4a: Waiting
+2026-03-31T15:14:48.1356842Z be561248ca9a: Waiting
+2026-03-31T15:14:48.1357135Z d***fb0309e2d: Pulling fs layer
+2026-03-31T15:14:48.1357461Z f491395d99d1: Waiting
+2026-03-31T15:14:48.1357724Z e1d3487db0db: Waiting
+2026-03-31T15:14:48.1357974Z 59466fc61f94: Waiting
+2026-03-31T15:14:48.1358234Z d***fb0309e2d: Waiting
+2026-03-31T15:14:48.1358921Z 44942549a2d8: Waiting
+2026-03-31T15:14:48.4512385Z 5a8bcd61b768: Verifying Checksum
+2026-03-31T15:14:48.4513185Z 5a8bcd61b768: Download complete
+2026-03-31T15:14:48.5102417Z 5a8bcd61b768: Pull complete
+2026-03-31T15:15:02.0544784Z 34ff1***6a825: Verifying Checksum
+2026-03-31T15:15:02.0545399Z 34ff1***6a825: Download complete
+2026-03-31T15:15:13.1301522Z c482eb557ee9: Verifying Checksum
+2026-03-31T15:15:13.1302049Z c482eb557ee9: Download complete
+2026-03-31T15:15:15.7725155Z 3ce0a73d5d4a: Verifying Checksum
+2026-03-31T15:15:15.7725769Z 3ce0a73d5d4a: Download complete
+2026-03-31T15:15:16.1462477Z be561248ca9a: Verifying Checksum
+2026-03-31T15:15:16.1462954Z be561248ca9a: Download complete
+2026-03-31T15:15:18.9623222Z f491395d99d1: Download complete
+2026-03-31T15:15:19.4756529Z e1d3487db0db: Verifying Checksum
+2026-03-31T15:15:19.4760018Z e1d3487db0db: Download complete
+2026-03-31T15:15:33.9695771Z 59466fc61f94: Verifying Checksum
+2026-03-31T15:15:33.9707366Z 59466fc61f94: Download complete
+2026-03-31T15:15:44.7815559Z 44942549a2d8: Verifying Checksum
+2026-03-31T15:15:44.7815984Z 44942549a2d8: Download complete
+2026-03-31T15:15:45.1105215Z d***fb0309e2d: Verifying Checksum
+2026-03-31T15:15:45.1105663Z d***fb0309e2d: Download complete
+2026-03-31T15:16:09.5155117Z 34ff1***6a825: Pull complete
+2026-03-31T15:18:28.7846787Z c482eb557ee9: Pull complete
+2026-03-31T15:18:29.6054694Z 3ce0a73d5d4a: Pull complete
+2026-03-31T15:18:29.6497165Z be561248ca9a: Pull complete
+2026-03-31T15:18:29.8905366Z f491395d99d1: Pull complete
+2026-03-31T15:18:29.9204787Z e1d3487db0db: Pull complete
+2026-03-31T15:18:55.6823611Z failed to register layer: write /app/server/openclaw/src/plugins/bundled-dir.test.ts: no space left on device
+2026-03-31T15:19:08.1949501Z Login Succeeded
+2026-03-31T15:19:08.2249717Z [0;34m[2026-03-31 15:19:08][0m Starting blue-green deployment...
+2026-03-31T15:19:08.2274345Z [0;34m[2026-03-31 15:19:08][0m Image: ghcr.io/carrerajorge/iliagpt-app:sha-1abdd4cf
+2026-03-31T15:19:08.2295030Z [0;34m[2026-03-31 15:19:08][0m App version: 1abdd4cf
+2026-03-31T15:19:08.2322223Z [0;34m[2026-03-31 15:19:08][0m Deploy path: ***
+2026-03-31T15:19:08.3252457Z [0;34m[2026-03-31 15:19:08][0m Active slot: blue (port 3000)
+2026-03-31T15:19:08.3272549Z [0;34m[2026-03-31 15:19:08][0m Target slot: green (port 3001)
+2026-03-31T15:19:08.3958570Z [0;34m[2026-03-31 15:19:08][0m Pulling images...
+2026-03-31T15:19:09.5695151Z sha-1abdd4cf: Pulling from carrerajorge/iliagpt-app
+2026-03-31T15:19:09.8329912Z 6db0909c4473: Already exists
+2026-03-31T15:19:09.8342996Z 7723618b139f: Already exists
+2026-03-31T15:19:09.8397296Z eb2c6bc01a10: Already exists
+2026-03-31T15:19:09.8449241Z 93f73fef6895: Already exists
+2026-03-31T15:19:09.8463497Z 71ff01535b69: Already exists
+2026-03-31T15:19:09.8495266Z a5ecc29837c2: Already exists
+2026-03-31T15:19:09.8521979Z 5a8bcd61b768: Pulling fs layer
+2026-03-31T15:19:09.8522661Z 34ff1***6a825: Pulling fs layer
+2026-03-31T15:19:09.8522995Z c482eb557ee9: Pulling fs layer
+2026-03-31T15:19:09.8523326Z 3ce0a73d5d4a: Pulling fs layer
+2026-03-31T15:19:09.8523630Z be561248ca9a: Pulling fs layer
+2026-03-31T15:19:09.8523989Z f491395d99d1: Pulling fs layer
+2026-03-31T15:19:09.8524520Z e1d3487db0db: Pulling fs layer
+2026-03-31T15:19:09.8525032Z 59466fc61f94: Pulling fs layer
+2026-03-31T15:19:09.8525560Z 44942549a2d8: Pulling fs layer
+2026-03-31T15:19:09.8526113Z d***fb0309e2d: Pulling fs layer
+2026-03-31T15:19:09.8526628Z 34ff1***6a825: Waiting
+2026-03-31T15:19:09.8527059Z c482eb557ee9: Waiting
+2026-03-31T15:19:09.8527488Z 3ce0a73d5d4a: Waiting
+2026-03-31T15:19:09.8527905Z be561248ca9a: Waiting
+2026-03-31T15:19:09.8528312Z f491395d99d1: Waiting
+2026-03-31T15:19:09.8528719Z e1d3487db0db: Waiting
+2026-03-31T15:19:09.8529127Z 59466fc61f94: Waiting
+2026-03-31T15:19:09.8529527Z 44942549a2d8: Waiting
+2026-03-31T15:19:09.8529953Z d***fb0309e2d: Waiting
+2026-03-31T15:19:10.2452767Z 5a8bcd61b768: Verifying Checksum
+2026-03-31T15:19:10.2453400Z 5a8bcd61b768: Download complete
+2026-03-31T15:19:10.2938682Z 5a8bcd61b768: Pull complete
+2026-03-31T15:19:20.2489744Z 34ff1***6a825: Verifying Checksum
+2026-03-31T15:19:20.2498159Z 34ff1***6a825: Download complete
+2026-03-31T15:19:24.4157016Z c482eb557ee9: Verifying Checksum
+2026-03-31T15:19:24.4157569Z c482eb557ee9: Download complete
+2026-03-31T15:19:26.2102627Z 3ce0a73d5d4a: Verifying Checksum
+2026-03-31T15:19:26.2103051Z 3ce0a73d5d4a: Download complete
+2026-03-31T15:19:26.3892433Z be561248ca9a: Verifying Checksum
+2026-03-31T15:19:26.3892872Z be561248ca9a: Download complete
+2026-03-31T15:19:27.1189384Z f491395d99d1: Download complete
+2026-03-31T15:19:27.3039416Z e1d3487db0db: Verifying Checksum
+2026-03-31T15:19:27.3040065Z e1d3487db0db: Download complete
+2026-03-31T15:19:32.9840769Z 59466fc61f94: Verifying Checksum
+2026-03-31T15:19:32.9841531Z 59466fc61f94: Download complete
+2026-03-31T15:19:44.0722878Z 44942549a2d8: Verifying Checksum
+2026-03-31T15:19:44.0723375Z 44942549a2d8: Download complete
+2026-03-31T15:19:45.5315885Z d***fb0309e2d: Verifying Checksum
+2026-03-31T15:19:45.5316351Z d***fb0309e2d: Download complete
+2026-03-31T15:19:47.6557791Z 34ff1***6a825: Pull complete
+2026-03-31T15:21:20.4606657Z c482eb557ee9: Pull complete
+2026-03-31T15:21:21.2467302Z 3ce0a73d5d4a: Pull complete
+2026-03-31T15:21:21.2865689Z be561248ca9a: Pull complete
+2026-03-31T15:21:21.5162015Z f491395d99d1: Pull complete
+2026-03-31T15:21:21.5449208Z e1d3487db0db: Pull complete
+2026-03-31T15:21:45.5384623Z 59466fc61f94: Pull complete
+2026-03-31T15:21:52.3467570Z failed to register layer: write /app/.playwright-browsers/chromium-1208/chrome-linux64/chrome: no space left on device
+2026-03-31T15:21:52.3498142Z Predeploy startup gate failed after retry
+2026-03-31T15:21:52.3506846Z ##[error]Process completed with exit code 1.
+2026-03-31T15:21:52.3608001Z ##[group]Run echo "## Auto Deploy Results" >> $GITHUB_STEP_SUMMARY
+2026-03-31T15:21:52.3608512Z [36;1mecho "## Auto Deploy Results" >> $GITHUB_STEP_SUMMARY[0m
+2026-03-31T15:21:52.3608880Z [36;1mecho "" >> $GITHUB_STEP_SUMMARY[0m
+2026-03-31T15:21:52.3609204Z [36;1mecho "| Field | Value |" >> $GITHUB_STEP_SUMMARY[0m
+2026-03-31T15:21:52.3609567Z [36;1mecho "|-------|-------|" >> $GITHUB_STEP_SUMMARY[0m
+2026-03-31T15:21:52.3609941Z [36;1mecho "| Version | \`1abdd4cf\` |" >> $GITHUB_STEP_SUMMARY[0m
+2026-03-31T15:21:52.3610359Z [36;1mecho "| Image Tag | \`sha-1abdd4cf\` |" >> $GITHUB_STEP_SUMMARY[0m
+2026-03-31T15:21:52.3610778Z [36;1mecho "| Trigger | push(main) |" >> $GITHUB_STEP_SUMMARY[0m
+2026-03-31T15:21:52.3611597Z [36;1mecho "| Latest Main SHA | \`1abdd4cffdb111bee62917e8426b960fd02066e2\` |" >> $GITHUB_STEP_SUMMARY[0m
+2026-03-31T15:21:52.3612148Z [36;1mecho "| Superseded | \`false\` |" >> $GITHUB_STEP_SUMMARY[0m
+2026-03-31T15:21:52.3612576Z [36;1mecho "| Skip Reason | \`n/a\` |" >> $GITHUB_STEP_SUMMARY[0m
+2026-03-31T15:21:52.3612965Z [36;1mecho "| Status | failure |" >> $GITHUB_STEP_SUMMARY[0m
+2026-03-31T15:21:52.3613570Z [36;1mecho "| URL | https://iliagpt.com |" >> $GITHUB_STEP_SUMMARY[0m
+2026-03-31T15:21:52.3638914Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:21:52.3639164Z env:
+2026-03-31T15:21:52.3639384Z   VPS_HOST: ***
+2026-03-31T15:21:52.3639599Z   VPS_USER: ***
+2026-03-31T15:21:52.3639800Z   VPS_PORT: ***
+2026-03-31T15:21:52.3640016Z   DEPLOY_PATH: ***
+2026-03-31T15:21:52.3640234Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:21:52.3640489Z ##[endgroup]
+2026-03-31T15:21:52.3719027Z ##[group]Run rm -f ~/.ssh/deploy_key
+2026-03-31T15:21:52.3719345Z [36;1mrm -f ~/.ssh/deploy_key[0m
+2026-03-31T15:21:52.3742435Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:21:52.3742687Z env:
+2026-03-31T15:21:52.3742907Z   VPS_HOST: ***
+2026-03-31T15:21:52.3743115Z   VPS_USER: ***
+2026-03-31T15:21:52.3743321Z   VPS_PORT: ***
+2026-03-31T15:21:52.3743549Z   DEPLOY_PATH: ***
+2026-03-31T15:21:52.3743773Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:21:52.3744029Z ##[endgroup]
+2026-03-31T15:21:52.3822646Z ##[group]Run echo "::error::Blue-green auto-deployment FAILED. Old slot should still be serving."
+2026-03-31T15:21:52.3823327Z [36;1mecho "::error::Blue-green auto-deployment FAILED. Old slot should still be serving."[0m
+2026-03-31T15:21:52.3823993Z [36;1mecho "::error::Check state: ssh -p *** ***@*** 'cat ***/deploy-state.json'"[0m
+2026-03-31T15:21:52.3824669Z [36;1mecho "::error::Rollback: ssh -p *** ***@*** 'cd *** && bash scripts/rollback-bluegreen.sh --force'"[0m
+2026-03-31T15:21:52.3847774Z shell: /usr/bin/bash -e {0}
+2026-03-31T15:21:52.3848025Z env:
+2026-03-31T15:21:52.3848239Z   VPS_HOST: ***
+2026-03-31T15:21:52.3848452Z   VPS_USER: ***
+2026-03-31T15:21:52.3848661Z   VPS_PORT: ***
+2026-03-31T15:21:52.3848875Z   DEPLOY_PATH: ***
+2026-03-31T15:21:52.3849107Z   REGISTRY: ghcr.io/carrerajorge
+2026-03-31T15:21:52.3849359Z ##[endgroup]
+2026-03-31T15:21:52.3891652Z ##[error]Blue-green auto-deployment FAILED. Old slot should still be serving.
+2026-03-31T15:21:52.3893954Z ##[error]Check state: ssh -p *** ***@*** 'cat ***/deploy-state.json'
+2026-03-31T15:21:52.3895435Z ##[error]Rollback: ssh -p *** ***@*** 'cd *** && bash scripts/rollback-bluegreen.sh --force'
+2026-03-31T15:21:52.3950806Z Evaluate and set environment url
+2026-03-31T15:21:52.3953479Z Evaluated environment url: https://iliagpt.com
+2026-03-31T15:21:52.3954314Z Cleaning up orphan processes

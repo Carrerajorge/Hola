@@ -1,0 +1,527 @@
+﻿2026-03-31T15:07:31.1073976Z ##[group]Run docker/build-push-action@v6
+2026-03-31T15:07:31.1074342Z with:
+2026-03-31T15:07:31.1074600Z   context: .
+2026-03-31T15:07:31.1074860Z   file: ocr_service/Dockerfile
+2026-03-31T15:07:31.1075158Z   push: true
+2026-03-31T15:07:31.1075602Z   tags: ghcr.io/carrerajorge/iliagpt-ocr:sha-1abdd4cf
+ghcr.io/carrerajorge/iliagpt-ocr:latest
+
+2026-03-31T15:07:31.1076127Z   cache-from: type=gha,scope=ocr
+2026-03-31T15:07:31.1076530Z   cache-to: type=gha,mode=min,scope=ocr,ignore-error=true,timeout=15m
+2026-03-31T15:07:31.1076945Z   provenance: true
+2026-03-31T15:07:31.1077222Z   sbom: false
+2026-03-31T15:07:31.1077515Z   load: false
+2026-03-31T15:07:31.1077764Z   no-cache: false
+2026-03-31T15:07:31.1078020Z   pull: false
+2026-03-31T15:07:31.1078400Z   github-token: ***
+2026-03-31T15:07:31.1078672Z env:
+2026-03-31T15:07:31.1078913Z   REGISTRY: ghcr.io
+2026-03-31T15:07:31.1079194Z   IMAGE_BASE: ghcr.io/carrerajorge/iliagpt
+2026-03-31T15:07:31.1079616Z   BUILDKIT_IMAGE: public.ecr.aws/vend/moby/buildkit:buildx-stable-1
+2026-03-31T15:07:31.1080057Z ##[endgroup]
+2026-03-31T15:07:31.3448325Z ##[group]GitHub Actions runtime token ACs
+2026-03-31T15:07:31.3459282Z refs/heads/main: read/write
+2026-03-31T15:07:31.3460299Z ##[endgroup]
+2026-03-31T15:07:31.3460980Z ##[group]Docker info
+2026-03-31T15:07:31.3529924Z [command]/usr/bin/docker version
+2026-03-31T15:07:31.3712252Z Client: Docker Engine - Community
+2026-03-31T15:07:31.3725578Z  Version:           28.0.4
+2026-03-31T15:07:31.3754117Z  API version:       1.48
+2026-03-31T15:07:31.3754535Z  Go version:        go1.23.7
+2026-03-31T15:07:31.3754938Z  Git commit:        b8034c0
+2026-03-31T15:07:31.3755354Z  Built:             Tue Mar 25 15:07:16 2025
+2026-03-31T15:07:31.3755799Z  OS/Arch:           linux/amd64
+2026-03-31T15:07:31.3756163Z  Context:           default
+2026-03-31T15:07:31.3756401Z 
+2026-03-31T15:07:31.3756550Z Server: Docker Engine - Community
+2026-03-31T15:07:31.3756916Z  Engine:
+2026-03-31T15:07:31.3757187Z   Version:          28.0.4
+2026-03-31T15:07:31.3757592Z   API version:      1.48 (minimum version 1.24)
+2026-03-31T15:07:31.3757967Z   Go version:       go1.23.7
+2026-03-31T15:07:31.3758503Z   Git commit:       6430e49
+2026-03-31T15:07:31.3758723Z   Built:            Tue Mar 25 15:07:16 2025
+2026-03-31T15:07:31.3758970Z   OS/Arch:          linux/amd64
+2026-03-31T15:07:31.3759180Z   Experimental:     false
+2026-03-31T15:07:31.3759381Z  containerd:
+2026-03-31T15:07:31.3759539Z   Version:          v2.2.2
+2026-03-31T15:07:31.3759812Z   GitCommit:        301b2dac98f15c27117da5c8af12118a041a31d9
+2026-03-31T15:07:31.3760095Z  runc:
+2026-03-31T15:07:31.3760263Z   Version:          1.3.4
+2026-03-31T15:07:31.3760462Z   GitCommit:        v1.3.4-0-gd6d73eb8
+2026-03-31T15:07:31.3760689Z  docker-init:
+2026-03-31T15:07:31.3760856Z   Version:          0.19.0
+2026-03-31T15:07:31.3761042Z   GitCommit:        de40ad0
+2026-03-31T15:07:31.3768904Z [command]/usr/bin/docker info
+2026-03-31T15:07:31.4238924Z Client: Docker Engine - Community
+2026-03-31T15:07:31.4239448Z  Version:    28.0.4
+2026-03-31T15:07:31.4239777Z  Context:    default
+2026-03-31T15:07:31.4240100Z  Debug Mode: false
+2026-03-31T15:07:31.4240387Z  Plugins:
+2026-03-31T15:07:31.4240685Z   buildx: Docker Buildx (Docker Inc.)
+2026-03-31T15:07:31.4241082Z     Version:  v0.32.1
+2026-03-31T15:07:31.4241500Z     Path:     /usr/libexec/docker/cli-plugins/docker-buildx
+2026-03-31T15:07:31.4242030Z   compose: Docker Compose (Docker Inc.)
+2026-03-31T15:07:31.4242434Z     Version:  v2.38.2
+2026-03-31T15:07:31.4242834Z     Path:     /usr/libexec/docker/cli-plugins/docker-compose
+2026-03-31T15:07:31.4243228Z 
+2026-03-31T15:07:31.4243796Z Server:
+2026-03-31T15:07:31.4244074Z  Containers: 1
+2026-03-31T15:07:31.4244353Z   Running: 1
+2026-03-31T15:07:31.4244611Z   Paused: 0
+2026-03-31T15:07:31.4244848Z   Stopped: 0
+2026-03-31T15:07:31.4245096Z  Images: 7
+2026-03-31T15:07:31.4245340Z  Server Version: 28.0.4
+2026-03-31T15:07:31.4245657Z  Storage Driver: overlay2
+2026-03-31T15:07:31.4245975Z   Backing Filesystem: extfs
+2026-03-31T15:07:31.4246719Z   Supports d_type: true
+2026-03-31T15:07:31.4247046Z   Using metacopy: false
+2026-03-31T15:07:31.4247382Z   Native Overlay Diff: false
+2026-03-31T15:07:31.4247715Z   userxattr: false
+2026-03-31T15:07:31.4248012Z  Logging Driver: json-file
+2026-03-31T15:07:31.4248332Z  Cgroup Driver: systemd
+2026-03-31T15:07:31.4248621Z  Cgroup Version: 2
+2026-03-31T15:07:31.4248894Z  Plugins:
+2026-03-31T15:07:31.4249152Z   Volume: local
+2026-03-31T15:07:31.4249501Z   Network: bridge host ipvlan macvlan null overlay
+2026-03-31T15:07:31.4250184Z   Log: awslogs fluentd gcplogs gelf journald json-file local splunk syslog
+2026-03-31T15:07:31.4250805Z  Swarm: inactive
+2026-03-31T15:07:31.4251136Z  Runtimes: io.containerd.runc.v2 runc
+2026-03-31T15:07:31.4251557Z  Default Runtime: runc
+2026-03-31T15:07:31.4251886Z  Init Binary: docker-init
+2026-03-31T15:07:31.4252362Z  containerd version: 301b2dac98f15c27117da5c8af12118a041a31d9
+2026-03-31T15:07:31.4252912Z  runc version: v1.3.4-0-gd6d73eb8
+2026-03-31T15:07:31.4253290Z  init version: de40ad0
+2026-03-31T15:07:31.4253822Z  Security Options:
+2026-03-31T15:07:31.4254125Z   apparmor
+2026-03-31T15:07:31.4254398Z   seccomp
+2026-03-31T15:07:31.4254556Z    Profile: builtin
+2026-03-31T15:07:31.4254740Z   cgroupns
+2026-03-31T15:07:31.4254907Z  Kernel Version: 6.17.0-1008-azure
+2026-03-31T15:07:31.4255150Z  Operating System: Ubuntu 24.04.4 LTS
+2026-03-31T15:07:31.4255375Z  OSType: linux
+2026-03-31T15:07:31.4255557Z  Architecture: x86_64
+2026-03-31T15:07:31.4255737Z  CPUs: 4
+2026-03-31T15:07:31.4255888Z  Total Memory: 15.61GiB
+2026-03-31T15:07:31.4256075Z  Name: runnervmrg6be
+2026-03-31T15:07:31.4256269Z  ID: 26c853c4-ebf5-403c-a446-44e39e017c08
+2026-03-31T15:07:31.4256519Z  Docker Root Dir: /var/lib/docker
+2026-03-31T15:07:31.4256725Z  Debug Mode: false
+2026-03-31T15:07:31.4256902Z  Username: githubactions
+2026-03-31T15:07:31.4257096Z  Experimental: false
+2026-03-31T15:07:31.4257285Z  Insecure Registries:
+2026-03-31T15:07:31.4257502Z   ::1/128
+2026-03-31T15:07:31.4257647Z   127.0.0.0/8
+2026-03-31T15:07:31.4257816Z  Live Restore Enabled: false
+2026-03-31T15:07:31.4258054Z 
+2026-03-31T15:07:31.4258833Z ##[endgroup]
+2026-03-31T15:07:31.4259321Z ##[group]Proxy configuration
+2026-03-31T15:07:31.4262401Z No proxy configuration found
+2026-03-31T15:07:31.4262973Z ##[endgroup]
+2026-03-31T15:07:31.4892900Z ##[group]Buildx version
+2026-03-31T15:07:31.4918218Z [command]/usr/bin/docker buildx version
+2026-03-31T15:07:31.5477432Z github.com/docker/buildx v0.32.1 d3bfb3f4e48a67dda56e957a6636f4fab6c5fcb2
+2026-03-31T15:07:31.5517214Z ##[endgroup]
+2026-03-31T15:07:31.5517578Z ##[group]Builder info
+2026-03-31T15:07:31.6572449Z {
+2026-03-31T15:07:31.6572779Z   "nodes": [
+2026-03-31T15:07:31.6573057Z     {
+2026-03-31T15:07:31.6573653Z       "name": "builder-3b54da24-9ceb-4f0c-9e94-80968b581b5a0",
+2026-03-31T15:07:31.6574248Z       "endpoint": "unix:///var/run/docker.sock",
+2026-03-31T15:07:31.6574706Z       "driver-opts": [
+2026-03-31T15:07:31.6575171Z         "image=public.ecr.aws/vend/moby/buildkit:buildx-stable-1"
+2026-03-31T15:07:31.6575700Z       ],
+2026-03-31T15:07:31.6575921Z       "status": "running",
+2026-03-31T15:07:31.6576453Z       "buildkitd-flags": "--allow-insecure-entitlement security.insecure --allow-insecure-entitlement network.host",
+2026-03-31T15:07:31.6576997Z       "buildkit": "v0.28.1",
+2026-03-31T15:07:31.6577300Z       "platforms": "linux/amd64,linux/amd64/v2,linux/amd64/v3,linux/386",
+2026-03-31T15:07:31.6577632Z       "features": {
+2026-03-31T15:07:31.6577910Z         "Automatically load images to the Docker Engine image store": true,
+2026-03-31T15:07:31.6578252Z         "Cache export": true,
+2026-03-31T15:07:31.6578464Z         "Direct push": true,
+2026-03-31T15:07:31.6578669Z         "Docker exporter": true,
+2026-03-31T15:07:31.6578906Z         "Multi-platform build": true,
+2026-03-31T15:07:31.6579135Z         "OCI exporter": true
+2026-03-31T15:07:31.6579326Z       },
+2026-03-31T15:07:31.6579472Z       "labels": {
+2026-03-31T15:07:31.6579710Z         "org.mobyproject.buildkit.worker.executor": "oci",
+2026-03-31T15:07:31.6580320Z         "org.mobyproject.buildkit.worker.hostname": "2b1fc998ab65",
+2026-03-31T15:07:31.6580703Z         "org.mobyproject.buildkit.worker.network": "host",
+2026-03-31T15:07:31.6581090Z         "org.mobyproject.buildkit.worker.oci.process-mode": "sandbox",
+2026-03-31T15:07:31.6581509Z         "org.mobyproject.buildkit.worker.selinux.enabled": "false",
+2026-03-31T15:07:31.6581914Z         "org.mobyproject.buildkit.worker.snapshotter": "overlayfs"
+2026-03-31T15:07:31.6582214Z       },
+2026-03-31T15:07:31.6582363Z       "gcPolicy": [
+2026-03-31T15:07:31.6582522Z         {
+2026-03-31T15:07:31.6582672Z           "all": false,
+2026-03-31T15:07:31.6582848Z           "filter": [
+2026-03-31T15:07:31.6583041Z             "type==source.local",
+2026-03-31T15:07:31.6583260Z             "type==exec.cachemount",
+2026-03-31T15:07:31.6584151Z             "type==source.git.checkout"
+2026-03-31T15:07:31.6584386Z           ],
+2026-03-31T15:07:31.6584552Z           "keepDuration": "48h0m0s",
+2026-03-31T15:07:31.6584794Z           "maxUsedSpace": "488.3MiB"
+2026-03-31T15:07:31.6585000Z         },
+2026-03-31T15:07:31.6585145Z         {
+2026-03-31T15:07:31.6585287Z           "all": false,
+2026-03-31T15:07:31.6585482Z           "keepDuration": "1440h0m0s",
+2026-03-31T15:07:31.6585713Z           "reservedSpace": "9.313GiB",
+2026-03-31T15:07:31.6585954Z           "maxUsedSpace": "93.13GiB",
+2026-03-31T15:07:31.6586177Z           "minFreeSpace": "27.01GiB"
+2026-03-31T15:07:31.6586377Z         },
+2026-03-31T15:07:31.6586520Z         {
+2026-03-31T15:07:31.6586659Z           "all": false,
+2026-03-31T15:07:31.6586844Z           "reservedSpace": "9.313GiB",
+2026-03-31T15:07:31.6587061Z           "maxUsedSpace": "93.13GiB",
+2026-03-31T15:07:31.6587278Z           "minFreeSpace": "27.01GiB"
+2026-03-31T15:07:31.6587473Z         },
+2026-03-31T15:07:31.6587613Z         {
+2026-03-31T15:07:31.6587755Z           "all": true,
+2026-03-31T15:07:31.6587941Z           "reservedSpace": "9.313GiB",
+2026-03-31T15:07:31.6588165Z           "maxUsedSpace": "93.13GiB",
+2026-03-31T15:07:31.6588383Z           "minFreeSpace": "27.01GiB"
+2026-03-31T15:07:31.6588745Z         }
+2026-03-31T15:07:31.6588881Z       ]
+2026-03-31T15:07:31.6589023Z     }
+2026-03-31T15:07:31.6589154Z   ],
+2026-03-31T15:07:31.6589363Z   "name": "builder-3b54da24-9ceb-4f0c-9e94-80968b581b5a",
+2026-03-31T15:07:31.6589660Z   "driver": "docker-container",
+2026-03-31T15:07:31.6589891Z   "lastActivity": "2026-03-31T14:59:34.000Z"
+2026-03-31T15:07:31.6590120Z }
+2026-03-31T15:07:31.6590488Z ##[endgroup]
+2026-03-31T15:07:31.7433690Z [command]/usr/bin/docker buildx build --cache-from type=gha,scope=ocr --cache-to type=gha,mode=min,scope=ocr,ignore-error=true,timeout=15m --file ocr_service/Dockerfile --iidfile /home/runner/work/_temp/docker-actions-toolkit-hYGhSZ/build-iidfile-5e5eed1a31.txt --attest type=provenance,builder-id=https://github.com/Carrerajorge/Hola/actions/runs/23803683206/attempts/1 --attest type=sbom,disabled=true --tag ghcr.io/carrerajorge/iliagpt-ocr:sha-1abdd4cf --tag ghcr.io/carrerajorge/iliagpt-ocr:latest --metadata-file /home/runner/work/_temp/docker-actions-toolkit-hYGhSZ/build-metadata-167b9d80df.json --push .
+2026-03-31T15:07:32.1004188Z #0 building with "builder-3b54da24-9ceb-4f0c-9e94-80968b581b5a" instance using docker-container driver
+2026-03-31T15:07:32.1005028Z 
+2026-03-31T15:07:32.1005262Z #1 [internal] load build definition from Dockerfile
+2026-03-31T15:07:32.1005805Z #1 transferring dockerfile: 965B done
+2026-03-31T15:07:32.1006240Z #1 DONE 0.0s
+2026-03-31T15:07:32.1006417Z 
+2026-03-31T15:07:32.1006711Z #2 [internal] load metadata for docker.io/library/python:3.11-slim
+2026-03-31T15:07:32.2579544Z #2 ...
+2026-03-31T15:07:32.2579790Z 
+2026-03-31T15:07:32.2580054Z #3 [auth] library/python:pull token for registry-1.docker.io
+2026-03-31T15:07:32.2580552Z #3 DONE 0.0s
+2026-03-31T15:07:32.4082634Z 
+2026-03-31T15:07:32.4083080Z #2 [internal] load metadata for docker.io/library/python:3.11-slim
+2026-03-31T15:07:32.7775269Z #2 DONE 0.8s
+2026-03-31T15:07:32.9402134Z 
+2026-03-31T15:07:32.9402628Z #4 [internal] load .dockerignore
+2026-03-31T15:07:32.9403159Z #4 transferring context: 1.22kB done
+2026-03-31T15:07:32.9403757Z #4 DONE 0.0s
+2026-03-31T15:07:32.9403935Z 
+2026-03-31T15:07:32.9404070Z #5 [internal] load build context
+2026-03-31T15:07:32.9404464Z #5 DONE 0.0s
+2026-03-31T15:07:32.9404623Z 
+2026-03-31T15:07:32.9405001Z #6 [1/6] FROM docker.io/library/python:3.11-slim@sha256:9358444059ed78e2975ada2c189f1c1a3144a5dab6f35bff8c981afb38946634
+2026-03-31T15:07:32.9405854Z #6 resolve docker.io/library/python:3.11-slim@sha256:9358444059ed78e2975ada2c189f1c1a3144a5dab6f35bff8c981afb38946634 done
+2026-03-31T15:07:32.9406398Z #6 DONE 0.0s
+2026-03-31T15:07:32.9406504Z 
+2026-03-31T15:07:32.9406646Z #7 importing cache manifest from gha:17622534897527719762
+2026-03-31T15:07:33.0410653Z #7 DONE 0.3s
+2026-03-31T15:07:33.1962092Z 
+2026-03-31T15:07:33.1962592Z #5 [internal] load build context
+2026-03-31T15:07:33.5599033Z #5 transferring context: 2.33kB 0.5s done
+2026-03-31T15:07:33.7143705Z #5 DONE 0.5s
+2026-03-31T15:07:33.7144453Z 
+2026-03-31T15:07:33.7145102Z #8 [4/6] COPY ocr_service/pyproject.toml ocr_service/README.md ocr_service/run_api.py ./
+2026-03-31T15:07:33.7145657Z #8 CACHED
+2026-03-31T15:07:33.7145868Z 
+2026-03-31T15:07:33.7145994Z #9 [5/6] COPY ocr_service/src ./src
+2026-03-31T15:07:33.7146222Z #9 CACHED
+2026-03-31T15:07:33.7146320Z 
+2026-03-31T15:07:33.7147443Z #10 [2/6] RUN apt-get update && apt-get install -y --no-install-recommends       tesseract-ocr       tesseract-ocr-eng       tesseract-ocr-spa       curl       fonts-dejavu-core       libgomp1       libgl1       libglib2.0-0     && apt-get clean     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+2026-03-31T15:07:33.7148472Z #10 CACHED
+2026-03-31T15:07:33.7148564Z 
+2026-03-31T15:07:33.7148643Z #11 [3/6] WORKDIR /app/ocr_service
+2026-03-31T15:07:33.7148856Z #11 CACHED
+2026-03-31T15:07:33.7148939Z 
+2026-03-31T15:07:33.7149154Z #12 [6/6] RUN python -m pip install --upgrade pip &&     pip install -e ".[paddle]"
+2026-03-31T15:07:33.7519585Z #12 CACHED
+2026-03-31T15:07:33.9308529Z 
+2026-03-31T15:07:33.9309527Z #13 exporting to image
+2026-03-31T15:07:33.9309969Z #13 exporting layers done
+2026-03-31T15:07:33.9310816Z #13 exporting manifest sha256:75bead10951412f0689aaa1f27b57c4a0d707cfd16b5160409f28b7c51959e89 done
+2026-03-31T15:07:33.9312072Z #13 exporting config sha256:32afc9daf45a39952d790e03f640a18522731eee095226109158cb9e31165c2a done
+2026-03-31T15:07:33.9313669Z #13 exporting attestation manifest sha256:b12a8fb4ea2379f3f3b2cd65696733433cfb4128ccd4c8f63d254ee3c328e8ae done
+2026-03-31T15:07:33.9315131Z #13 exporting manifest list sha256:5e5489af99ace817d9c0fa1c82b0067a4685829e23e0da4b11cca6db8e9b10c8 done
+2026-03-31T15:07:33.9316055Z #13 DONE 0.0s
+2026-03-31T15:07:33.9316282Z 
+2026-03-31T15:07:33.9316448Z #14 exporting to GitHub Actions Cache
+2026-03-31T15:07:33.9316964Z #14 preparing build cache for export done
+2026-03-31T15:07:33.9317466Z #14 sending cache export
+2026-03-31T15:07:34.0869850Z #14 ...
+2026-03-31T15:07:34.0870250Z 
+2026-03-31T15:07:34.0870653Z #15 [auth] carrerajorge/iliagpt-ocr:pull,push token for ghcr.io
+2026-03-31T15:07:34.0871112Z #15 DONE 0.0s
+2026-03-31T15:07:34.2363572Z 
+2026-03-31T15:07:34.2363799Z #14 exporting to GitHub Actions Cache
+2026-03-31T15:07:35.0711690Z #14 sending cache export 1.3s done
+2026-03-31T15:07:35.0712041Z #14 DONE 1.3s
+2026-03-31T15:07:40.6006878Z 
+2026-03-31T15:07:40.6009070Z #16 resolving provenance for metadata file
+2026-03-31T15:07:40.6062087Z #16 DONE 0.0s
+2026-03-31T15:07:40.6151544Z ##[group]ImageID
+2026-03-31T15:07:40.6152141Z sha256:5e5489af99ace817d9c0fa1c82b0067a4685829e23e0da4b11cca6db8e9b10c8
+2026-03-31T15:07:40.6153116Z ##[endgroup]
+2026-03-31T15:07:40.6154005Z ##[group]Digest
+2026-03-31T15:07:40.6164526Z sha256:5e5489af99ace817d9c0fa1c82b0067a4685829e23e0da4b11cca6db8e9b10c8
+2026-03-31T15:07:40.6165406Z ##[endgroup]
+2026-03-31T15:07:40.6165950Z ##[group]Metadata
+2026-03-31T15:07:40.6166259Z {
+2026-03-31T15:07:40.6166554Z   "buildx.build.provenance": {
+2026-03-31T15:07:40.6167319Z     "builder": {
+2026-03-31T15:07:40.6167903Z       "id": "https://github.com/Carrerajorge/Hola/actions/runs/23803683206/attempts/1"
+2026-03-31T15:07:40.6168601Z     },
+2026-03-31T15:07:40.6168998Z     "buildType": "https://mobyproject.org/buildkit@v1",
+2026-03-31T15:07:40.6169473Z     "materials": [
+2026-03-31T15:07:40.6169737Z       {
+2026-03-31T15:07:40.6170086Z         "uri": "pkg:docker/python@3.11-slim?platform=linux%2Famd64",
+2026-03-31T15:07:40.6170568Z         "digest": {
+2026-03-31T15:07:40.6171037Z           "sha256": "9358444059ed78e2975ada2c189f1c1a3144a5dab6f35bff8c981afb38946634"
+2026-03-31T15:07:40.6171611Z         }
+2026-03-31T15:07:40.6171895Z       }
+2026-03-31T15:07:40.6172135Z     ],
+2026-03-31T15:07:40.6172425Z     "invocation": {
+2026-03-31T15:07:40.6172715Z       "configSource": {
+2026-03-31T15:07:40.6173022Z         "entryPoint": "Dockerfile"
+2026-03-31T15:07:40.6173675Z       },
+2026-03-31T15:07:40.6173929Z       "parameters": {
+2026-03-31T15:07:40.6174307Z         "frontend": "dockerfile.v0",
+2026-03-31T15:07:40.6174642Z         "locals": [
+2026-03-31T15:07:40.6174896Z           {
+2026-03-31T15:07:40.6175131Z             "name": "context"
+2026-03-31T15:07:40.6175432Z           },
+2026-03-31T15:07:40.6175656Z           {
+2026-03-31T15:07:40.6175893Z             "name": "dockerfile"
+2026-03-31T15:07:40.6176198Z           }
+2026-03-31T15:07:40.6176413Z         ]
+2026-03-31T15:07:40.6176629Z       },
+2026-03-31T15:07:40.6176851Z       "environment": {
+2026-03-31T15:07:40.6177149Z         "github_actor": "Carrerajorge",
+2026-03-31T15:07:40.6177512Z         "github_actor_id": "145494147",
+2026-03-31T15:07:40.6177867Z         "github_event_name": "push",
+2026-03-31T15:07:40.6178216Z         "github_event_payload": {
+2026-03-31T15:07:40.6178631Z           "after": "1abdd4cffdb111bee62917e8426b960fd02066e2",
+2026-03-31T15:07:40.6179060Z           "base_ref": null,
+2026-03-31T15:07:40.6179440Z           "before": "d67fe4fc13014ff39093895cabf46512a8f7638d",
+2026-03-31T15:07:40.6179870Z           "commits": [
+2026-03-31T15:07:40.6180206Z             {
+2026-03-31T15:07:40.6180684Z               "author": {
+2026-03-31T15:07:40.6181035Z                 "email": "carrerajorge@example.com",
+2026-03-31T15:07:40.6181467Z                 "name": "Jorge Carrera"
+2026-03-31T15:07:40.6181804Z               },
+2026-03-31T15:07:40.6182057Z               "committer": {
+2026-03-31T15:07:40.6182429Z                 "email": "carrerajorge@example.com",
+2026-03-31T15:07:40.6182864Z                 "name": "Jorge Carrera"
+2026-03-31T15:07:40.6183210Z               },
+2026-03-31T15:07:40.6183698Z               "distinct": true,
+2026-03-31T15:07:40.6184082Z               "id": "1abdd4cffdb111bee62917e8426b960fd02066e2",
+2026-03-31T15:07:40.6184867Z               "message": "feat(agent): implement gc, structured logging, graceful shutdown, and db backups",
+2026-03-31T15:07:40.6185653Z               "timestamp": "2026-03-31T11:49:28-03:00",
+2026-03-31T15:07:40.6186181Z               "tree_id": "af89a8f5e5498d794df2435d4ea80eb3b64f0d80",
+2026-03-31T15:07:40.6186983Z               "url": "https://github.com/Carrerajorge/Hola/commit/1abdd4cffdb111bee62917e8426b960fd02066e2"
+2026-03-31T15:07:40.6187676Z             }
+2026-03-31T15:07:40.6187901Z           ],
+2026-03-31T15:07:40.6188414Z           "compare": "https://github.com/Carrerajorge/Hola/compare/d67fe4fc1301...1abdd4cffdb1",
+2026-03-31T15:07:40.6189061Z           "created": false,
+2026-03-31T15:07:40.6189389Z           "deleted": false,
+2026-03-31T15:07:40.6189720Z           "forced": false,
+2026-03-31T15:07:40.6190047Z           "head_commit": {
+2026-03-31T15:07:40.6190366Z             "author": {
+2026-03-31T15:07:40.6190720Z               "email": "carrerajorge@example.com",
+2026-03-31T15:07:40.6191168Z               "name": "Jorge Carrera"
+2026-03-31T15:07:40.6191505Z             },
+2026-03-31T15:07:40.6191763Z             "committer": {
+2026-03-31T15:07:40.6192149Z               "email": "carrerajorge@example.com",
+2026-03-31T15:07:40.6192764Z               "name": "Jorge Carrera"
+2026-03-31T15:07:40.6193103Z             },
+2026-03-31T15:07:40.6193538Z             "distinct": true,
+2026-03-31T15:07:40.6193926Z             "id": "1abdd4cffdb111bee62917e8426b960fd02066e2",
+2026-03-31T15:07:40.6194768Z             "message": "feat(agent): implement gc, structured logging, graceful shutdown, and db backups",
+2026-03-31T15:07:40.6195590Z             "timestamp": "2026-03-31T11:49:28-03:00",
+2026-03-31T15:07:40.6196179Z             "tree_id": "af89a8f5e5498d794df2435d4ea80eb3b64f0d80",
+2026-03-31T15:07:40.6197060Z             "url": "https://github.com/Carrerajorge/Hola/commit/1abdd4cffdb111bee62917e8426b960fd02066e2"
+2026-03-31T15:07:40.6197826Z           },
+2026-03-31T15:07:40.6198104Z           "pusher": {
+2026-03-31T15:07:40.6198568Z             "email": "145494147+Carrerajorge@users.noreply.github.com",
+2026-03-31T15:07:40.6199115Z             "name": "Carrerajorge"
+2026-03-31T15:07:40.6199479Z           },
+2026-03-31T15:07:40.6199743Z           "ref": "refs/heads/main",
+2026-03-31T15:07:40.6200142Z           "repository": {
+2026-03-31T15:07:40.6200490Z             "allow_forking": true,
+2026-03-31T15:07:40.6201157Z             "archive_url": "https://api.github.com/repos/Carrerajorge/Hola/{archive_format}{/ref}",
+2026-03-31T15:07:40.6201901Z             "archived": false,
+2026-03-31T15:07:40.6202525Z             "assignees_url": "https://api.github.com/repos/Carrerajorge/Hola/assignees{/user}",
+2026-03-31T15:07:40.6203674Z             "blobs_url": "https://api.github.com/repos/Carrerajorge/Hola/git/blobs{/sha}",
+2026-03-31T15:07:40.6204607Z             "branches_url": "https://api.github.com/repos/Carrerajorge/Hola/branches{/branch}",
+2026-03-31T15:07:40.6205428Z             "clone_url": "https://github.com/Carrerajorge/Hola.git",
+2026-03-31T15:07:40.6206350Z             "collaborators_url": "https://api.github.com/repos/Carrerajorge/Hola/collaborators{/collaborator}",
+2026-03-31T15:07:40.6207414Z             "comments_url": "https://api.github.com/repos/Carrerajorge/Hola/comments{/number}",
+2026-03-31T15:07:40.6208358Z             "commits_url": "https://api.github.com/repos/Carrerajorge/Hola/commits{/sha}",
+2026-03-31T15:07:40.6209519Z             "compare_url": "https://api.github.com/repos/Carrerajorge/Hola/compare/{base}...{head}",
+2026-03-31T15:07:40.6210513Z             "contents_url": "https://api.github.com/repos/Carrerajorge/Hola/contents/{+path}",
+2026-03-31T15:07:40.6211468Z             "contributors_url": "https://api.github.com/repos/Carrerajorge/Hola/contributors",
+2026-03-31T15:07:40.6212189Z             "created_at": 1695147884,
+2026-03-31T15:07:40.6212570Z             "default_branch": "main",
+2026-03-31T15:07:40.6213237Z             "deployments_url": "https://api.github.com/repos/Carrerajorge/Hola/deployments",
+2026-03-31T15:07:40.6214125Z             "description": null,
+2026-03-31T15:07:40.6214513Z             "disabled": false,
+2026-03-31T15:07:40.6215090Z             "downloads_url": "https://api.github.com/repos/Carrerajorge/Hola/downloads",
+2026-03-31T15:07:40.6215954Z             "events_url": "https://api.github.com/repos/Carrerajorge/Hola/events",
+2026-03-31T15:07:40.6216571Z             "fork": false,
+2026-03-31T15:07:40.6216905Z             "forks": 0,
+2026-03-31T15:07:40.6217197Z             "forks_count": 0,
+2026-03-31T15:07:40.6217751Z             "forks_url": "https://api.github.com/repos/Carrerajorge/Hola/forks",
+2026-03-31T15:07:40.6218367Z             "full_name": "Carrerajorge/Hola",
+2026-03-31T15:07:40.6219062Z             "git_commits_url": "https://api.github.com/repos/Carrerajorge/Hola/git/commits{/sha}",
+2026-03-31T15:07:40.6220008Z             "git_refs_url": "https://api.github.com/repos/Carrerajorge/Hola/git/refs{/sha}",
+2026-03-31T15:07:40.6220912Z             "git_tags_url": "https://api.github.com/repos/Carrerajorge/Hola/git/tags{/sha}",
+2026-03-31T15:07:40.6221685Z             "git_url": "git://github.com/Carrerajorge/Hola.git",
+2026-03-31T15:07:40.6222209Z             "has_discussions": false,
+2026-03-31T15:07:40.6222857Z             "has_downloads": true,
+2026-03-31T15:07:40.6223259Z             "has_issues": true,
+2026-03-31T15:07:40.6223866Z             "has_pages": false,
+2026-03-31T15:07:40.6224214Z             "has_projects": true,
+2026-03-31T15:07:40.6224681Z             "has_pull_requests": true,
+2026-03-31T15:07:40.6225058Z             "has_wiki": false,
+2026-03-31T15:07:40.6225425Z             "homepage": null,
+2026-03-31T15:07:40.6225955Z             "hooks_url": "https://api.github.com/repos/Carrerajorge/Hola/hooks",
+2026-03-31T15:07:40.6226567Z             "html_url": "https://github.com/Carrerajorge/Hola",
+2026-03-31T15:07:40.6227044Z             "id": 693797763,
+2026-03-31T15:07:40.6227378Z             "is_template": false,
+2026-03-31T15:07:40.6228086Z             "issue_comment_url": "https://api.github.com/repos/Carrerajorge/Hola/issues/comments{/number}",
+2026-03-31T15:07:40.6229065Z             "issue_events_url": "https://api.github.com/repos/Carrerajorge/Hola/issues/events{/number}",
+2026-03-31T15:07:40.6230227Z             "issues_url": "https://api.github.com/repos/Carrerajorge/Hola/issues{/number}",
+2026-03-31T15:07:40.6231556Z             "keys_url": "https://api.github.com/repos/Carrerajorge/Hola/keys{/key_id}",
+2026-03-31T15:07:40.6232549Z             "labels_url": "https://api.github.com/repos/Carrerajorge/Hola/labels{/name}",
+2026-03-31T15:07:40.6233597Z             "language": "TypeScript",
+2026-03-31T15:07:40.6234309Z             "languages_url": "https://api.github.com/repos/Carrerajorge/Hola/languages",
+2026-03-31T15:07:40.6235055Z             "license": {
+2026-03-31T15:07:40.6235383Z               "key": "mit",
+2026-03-31T15:07:40.6235736Z               "name": "MIT License",
+2026-03-31T15:07:40.6236178Z               "node_id": "MDc6TGljZW5zZTEz",
+2026-03-31T15:07:40.6236627Z               "spdx_id": "MIT",
+2026-03-31T15:07:40.6237095Z               "url": "https://api.github.com/licenses/mit"
+2026-03-31T15:07:40.6237589Z             },
+2026-03-31T15:07:40.6237923Z             "master_branch": "main",
+2026-03-31T15:07:40.6238532Z             "merges_url": "https://api.github.com/repos/Carrerajorge/Hola/merges",
+2026-03-31T15:07:40.6240205Z             "milestones_url": "https://api.github.com/repos/Carrerajorge/Hola/milestones{/number}",
+2026-03-31T15:07:40.6241105Z             "mirror_url": null,
+2026-03-31T15:07:40.6241548Z             "name": "Hola",
+2026-03-31T15:07:40.6241945Z             "node_id": "R_kgDOKVqDgw",
+2026-03-31T15:07:40.6242885Z             "notifications_url": "https://api.github.com/repos/Carrerajorge/Hola/notifications{?since,all,participating}",
+2026-03-31T15:07:40.6244081Z             "open_issues": 58,
+2026-03-31T15:07:40.6244459Z             "open_issues_count": 58,
+2026-03-31T15:07:40.6244881Z             "owner": {
+2026-03-31T15:07:40.6245428Z               "avatar_url": "https://avatars.githubusercontent.com/u/145494147?v=4",
+2026-03-31T15:07:40.6246270Z               "email": "145494147+Carrerajorge@users.noreply.github.com",
+2026-03-31T15:07:40.6247075Z               "events_url": "https://api.github.com/users/Carrerajorge/events{/privacy}",
+2026-03-31T15:07:40.6247996Z               "followers_url": "https://api.github.com/users/Carrerajorge/followers",
+2026-03-31T15:07:40.6249199Z               "following_url": "https://api.github.com/users/Carrerajorge/following{/other_user}",
+2026-03-31T15:07:40.6250471Z               "gists_url": "https://api.github.com/users/Carrerajorge/gists{/gist_id}",
+2026-03-31T15:07:40.6251355Z               "gravatar_id": "",
+2026-03-31T15:07:40.6252002Z               "html_url": "https://github.com/Carrerajorge",
+2026-03-31T15:07:40.6252667Z               "id": 145494147,
+2026-03-31T15:07:40.6253170Z               "login": "Carrerajorge",
+2026-03-31T15:07:40.6253905Z               "name": "Carrerajorge",
+2026-03-31T15:07:40.6254384Z               "node_id": "U_kgDOCKwQgw",
+2026-03-31T15:07:40.6255022Z               "organizations_url": "https://api.github.com/users/Carrerajorge/orgs",
+2026-03-31T15:07:40.6255940Z               "received_events_url": "https://api.github.com/users/Carrerajorge/received_events",
+2026-03-31T15:07:40.6257068Z               "repos_url": "https://api.github.com/users/Carrerajorge/repos",
+2026-03-31T15:07:40.6257492Z               "site_admin": false,
+2026-03-31T15:07:40.6257877Z               "starred_url": "https://api.github.com/users/Carrerajorge/starred{/owner}{/repo}",
+2026-03-31T15:07:40.6258864Z               "subscriptions_url": "https://api.github.com/users/Carrerajorge/subscriptions",
+2026-03-31T15:07:40.6259523Z               "type": "User",
+2026-03-31T15:07:40.6259938Z               "url": "https://api.github.com/users/Carrerajorge",
+2026-03-31T15:07:40.6260408Z               "user_view_type": "public"
+2026-03-31T15:07:40.6260758Z             },
+2026-03-31T15:07:40.6261038Z             "private": false,
+2026-03-31T15:07:40.6261387Z             "pull_request_creation_policy": "all",
+2026-03-31T15:07:40.6262020Z             "pulls_url": "https://api.github.com/repos/Carrerajorge/Hola/pulls{/number}",
+2026-03-31T15:07:40.6262638Z             "pushed_at": 1774968570,
+2026-03-31T15:07:40.6263199Z             "releases_url": "https://api.github.com/repos/Carrerajorge/Hola/releases{/id}",
+2026-03-31T15:07:40.6264068Z             "size": 1983918,
+2026-03-31T15:07:40.6264463Z             "ssh_url": "git@github.com:Carrerajorge/Hola.git",
+2026-03-31T15:07:40.6264907Z             "stargazers": 1,
+2026-03-31T15:07:40.6265218Z             "stargazers_count": 1,
+2026-03-31T15:07:40.6265773Z             "stargazers_url": "https://api.github.com/repos/Carrerajorge/Hola/stargazers",
+2026-03-31T15:07:40.6266607Z             "statuses_url": "https://api.github.com/repos/Carrerajorge/Hola/statuses/{sha}",
+2026-03-31T15:07:40.6267584Z             "subscribers_url": "https://api.github.com/repos/Carrerajorge/Hola/subscribers",
+2026-03-31T15:07:40.6268272Z             "subscription_url": "https://api.github.com/repos/Carrerajorge/Hola/subscription",
+2026-03-31T15:07:40.6268715Z             "svn_url": "https://github.com/Carrerajorge/Hola",
+2026-03-31T15:07:40.6269093Z             "tags_url": "https://api.github.com/repos/Carrerajorge/Hola/tags",
+2026-03-31T15:07:40.6269716Z             "teams_url": "https://api.github.com/repos/Carrerajorge/Hola/teams",
+2026-03-31T15:07:40.6270059Z             "topics": [],
+2026-03-31T15:07:40.6270377Z             "trees_url": "https://api.github.com/repos/Carrerajorge/Hola/git/trees{/sha}",
+2026-03-31T15:07:40.6270765Z             "updated_at": "2026-03-31T13:50:08Z",
+2026-03-31T15:07:40.6271073Z             "url": "https://api.github.com/repos/Carrerajorge/Hola",
+2026-03-31T15:07:40.6271381Z             "visibility": "public",
+2026-03-31T15:07:40.6271599Z             "watchers": 1,
+2026-03-31T15:07:40.6271792Z             "watchers_count": 1,
+2026-03-31T15:07:40.6272021Z             "web_commit_signoff_required": false
+2026-03-31T15:07:40.6272249Z           },
+2026-03-31T15:07:40.6272405Z           "sender": {
+2026-03-31T15:07:40.6272695Z             "avatar_url": "https://avatars.githubusercontent.com/u/145494147?v=4",
+2026-03-31T15:07:40.6273176Z             "events_url": "https://api.github.com/users/Carrerajorge/events{/privacy}",
+2026-03-31T15:07:40.6273977Z             "followers_url": "https://api.github.com/users/Carrerajorge/followers",
+2026-03-31T15:07:40.6274486Z             "following_url": "https://api.github.com/users/Carrerajorge/following{/other_user}",
+2026-03-31T15:07:40.6274986Z             "gists_url": "https://api.github.com/users/Carrerajorge/gists{/gist_id}",
+2026-03-31T15:07:40.6275336Z             "gravatar_id": "",
+2026-03-31T15:07:40.6275582Z             "html_url": "https://github.com/Carrerajorge",
+2026-03-31T15:07:40.6275847Z             "id": 145494147,
+2026-03-31T15:07:40.6276048Z             "login": "Carrerajorge",
+2026-03-31T15:07:40.6276269Z             "node_id": "U_kgDOCKwQgw",
+2026-03-31T15:07:40.6276605Z             "organizations_url": "https://api.github.com/users/Carrerajorge/orgs",
+2026-03-31T15:07:40.6277099Z             "received_events_url": "https://api.github.com/users/Carrerajorge/received_events",
+2026-03-31T15:07:40.6277708Z             "repos_url": "https://api.github.com/users/Carrerajorge/repos",
+2026-03-31T15:07:40.6278030Z             "site_admin": false,
+2026-03-31T15:07:40.6278373Z             "starred_url": "https://api.github.com/users/Carrerajorge/starred{/owner}{/repo}",
+2026-03-31T15:07:40.6278890Z             "subscriptions_url": "https://api.github.com/users/Carrerajorge/subscriptions",
+2026-03-31T15:07:40.6279263Z             "type": "User",
+2026-03-31T15:07:40.6279512Z             "url": "https://api.github.com/users/Carrerajorge",
+2026-03-31T15:07:40.6279845Z             "user_view_type": "public"
+2026-03-31T15:07:40.6280055Z           }
+2026-03-31T15:07:40.6280205Z         },
+2026-03-31T15:07:40.6280355Z         "github_job": "build",
+2026-03-31T15:07:40.6280565Z         "github_ref": "refs/heads/main",
+2026-03-31T15:07:40.6280794Z         "github_ref_name": "main",
+2026-03-31T15:07:40.6281014Z         "github_ref_protected": "false",
+2026-03-31T15:07:40.6281245Z         "github_ref_type": "branch",
+2026-03-31T15:07:40.6281499Z         "github_repository": "Carrerajorge/Hola",
+2026-03-31T15:07:40.6281764Z         "github_repository_id": "693797763",
+2026-03-31T15:07:40.6282020Z         "github_repository_owner": "Carrerajorge",
+2026-03-31T15:07:40.6282294Z         "github_repository_owner_id": "145494147",
+2026-03-31T15:07:40.6282538Z         "github_run_attempt": "1",
+2026-03-31T15:07:40.6282758Z         "github_run_id": "23803683206",
+2026-03-31T15:07:40.6282980Z         "github_run_number": "1318",
+2026-03-31T15:07:40.6283199Z         "github_runner_arch": "X64",
+2026-03-31T15:07:40.6283775Z         "github_runner_environment": "github-hosted",
+2026-03-31T15:07:40.6284097Z         "github_runner_image_os": "ubuntu24",
+2026-03-31T15:07:40.6284370Z         "github_runner_image_version": "20260323.65.1",
+2026-03-31T15:07:40.6284664Z         "github_runner_name": "GitHub Actions 1000020395",
+2026-03-31T15:07:40.6284934Z         "github_runner_os": "Linux",
+2026-03-31T15:07:40.6285265Z         "github_runner_tracking_id": "github_32746ee9-0d60-427f-b33c-f4317ae4daac",
+2026-03-31T15:07:40.6285784Z         "github_server_url": "https://github.com",
+2026-03-31T15:07:40.6286511Z         "github_triggering_actor": "Carrerajorge",
+2026-03-31T15:07:40.6287102Z         "github_workflow": "Deploy to Production (Blue-Green)",
+2026-03-31T15:07:40.6287905Z         "github_workflow_ref": "Carrerajorge/Hola/.github/workflows/deploy.yml@refs/heads/main",
+2026-03-31T15:07:40.6288422Z         "github_workflow_sha": "1abdd4cffdb111bee62917e8426b960fd02066e2",
+2026-03-31T15:07:40.6288763Z         "platform": "linux/amd64"
+2026-03-31T15:07:40.6288972Z       }
+2026-03-31T15:07:40.6289121Z     }
+2026-03-31T15:07:40.6289255Z   },
+2026-03-31T15:07:40.6289784Z   "buildx.build.ref": "builder-3b54da24-9ceb-4f0c-9e94-80968b581b5a/builder-3b54da24-9ceb-4f0c-9e94-80968b581b5a0/amv8rmx06e7volagulvoo9566",
+2026-03-31T15:07:40.6290402Z   "containerimage.descriptor": {
+2026-03-31T15:07:40.6290705Z     "mediaType": "application/vnd.oci.image.index.v1+json",
+2026-03-31T15:07:40.6291160Z     "digest": "sha256:5e5489af99ace817d9c0fa1c82b0067a4685829e23e0da4b11cca6db8e9b10c8",
+2026-03-31T15:07:40.6291563Z     "size": 856
+2026-03-31T15:07:40.6291725Z   },
+2026-03-31T15:07:40.6292077Z   "containerimage.digest": "sha256:5e5489af99ace817d9c0fa1c82b0067a4685829e23e0da4b11cca6db8e9b10c8",
+2026-03-31T15:07:40.6292737Z   "image.name": "ghcr.io/carrerajorge/iliagpt-ocr:sha-1abdd4cf,ghcr.io/carrerajorge/iliagpt-ocr:latest"
+2026-03-31T15:07:40.6293188Z }
+2026-03-31T15:07:40.6293868Z ##[endgroup]
+2026-03-31T15:07:40.6294339Z ##[group]Reference
+2026-03-31T15:07:40.6295112Z builder-3b54da24-9ceb-4f0c-9e94-80968b581b5a/builder-3b54da24-9ceb-4f0c-9e94-80968b581b5a0/amv8rmx06e7volagulvoo9566
+2026-03-31T15:07:40.6296177Z ##[endgroup]
+2026-03-31T15:07:40.6296506Z ##[group]Check build summary support
+2026-03-31T15:07:40.6296866Z Build summary supported!
+2026-03-31T15:07:40.6297170Z ##[endgroup]

@@ -831,6 +831,11 @@ describe("initSessionState reset triggers in Slack channels", () => {
     });
     const cfg = {
       session: { store: storePath, idleMinutes: 999 },
+      messages: {
+        groupChat: {
+          mentionPatterns: ["<@[A-Z0-9]+>"],
+        },
+      },
     } as OpenClawConfig;
 
     const result = await initSessionState({

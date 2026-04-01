@@ -5,6 +5,17 @@
 
 import '@testing-library/jest-dom';
 import { vi, beforeAll, afterEach, afterAll } from 'vitest';
+import * as React from 'react';
+
+// Polyfill React.act for React 19 compatibility with @testing-library/react < 16.2
+const ReactWithAct = React as typeof React & { act?: any };
+if (typeof ReactWithAct.act === 'undefined') {
+  ReactWithAct.act = React.act;
+}
+// Handle ES6 default export edge cases for CommonJS legacy test utils
+if (typeof (globalThis as any).IS_REACT_ACT_ENVIRONMENT === 'undefined') {
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+}
 
 // Mock window.matchMedia
 beforeAll(() => {
