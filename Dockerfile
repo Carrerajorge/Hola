@@ -169,11 +169,18 @@ COPY --chown=iliagpt:nodejs --from=builder /app/client/public ./client/public
 COPY --chown=iliagpt:nodejs --from=builder /app/package.json ./package.json
 COPY --chown=iliagpt:nodejs --from=builder /app/server/openclaw ./server/openclaw
 
-# Align @mariozechner/pi-coding-agent with openclaw's version (0.64.0) so that
-# ESM imports from bundled openclaw source code resolve the correct version.
-# The root node_modules may ship an older release that lacks newer exports.
+# Bridge openclaw's dependency tree into the root resolution scope.
+# The esbuild bundle externalizes bare imports, but some openclaw source files
+# are pulled in via relative imports. Their transitive deps (pi-coding-agent,
+# zod v4) must be resolvable from /app/node_modules at runtime.
+# Strategy: symlink openclaw's ENTIRE scoped package directories so that
+# openclaw's version wins for shared packages. The Zod 4 symlink is required
+# because openclaw's config schema uses z.registry() (a Zod 4 API).
+# Root code that uses Zod 3 APIs (which are a subset of Zod 4) continues to work.
 RUN rm -rf node_modules/@mariozechner/pi-coding-agent \
-  && ln -s /app/server/openclaw/node_modules/@mariozechner/pi-coding-agent node_modules/@mariozechner/pi-coding-agent
+  && ln -s /app/server/openclaw/node_modules/@mariozechner/pi-coding-agent node_modules/@mariozechner/pi-coding-agent \
+  && rm -rf node_modules/zod \
+  && ln -s /app/server/openclaw/node_modules/zod node_modules/zod
 
 # Download Playwright's bundled Chromium browser binary.
 # System deps are installed above via apt-get; here we only fetch the browser.
