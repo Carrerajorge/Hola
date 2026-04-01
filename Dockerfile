@@ -182,16 +182,17 @@ RUN rm -rf node_modules/@mariozechner/pi-coding-agent \
   && rm -rf node_modules/zod \
   && ln -s /app/server/openclaw/node_modules/zod node_modules/zod
 
-# Expose openclaw's bundled plugin extensions at the root level.
-# esbuild bundles some openclaw source files (via relative imports) into
-# /app/dist/ chunks.  At runtime these chunks call resolveLoaderPackageRoot()
-# which walks up from /app/dist/ to /app/ (nearest package.json), then looks
-# for extensions/ there.  Without this the scanner finds nothing and throws
-# "Missing bundled chat channel metadata".
-# We also place a copy at dist/extensions/ because the bundled code sets
-# RUNNING_FROM_BUILT_ARTIFACT=true (path includes /dist/) and prefers
-# that location.
-RUN cp -a /app/server/openclaw/extensions /app/extensions \
+# Expose openclaw's bundled plugin extensions so the metadata scanner finds them.
+#
+# When openclaw's chat-meta code runs from esbuild's bundled chunk at
+# /app/dist/chunk-*.mjs, the fallback root resolves via:
+#   new URL("../..", import.meta.url) → file:/// → "/"
+# The scanner then looks for /dist/extensions/, /dist-runtime/extensions/,
+# and /extensions/.  Place copies at all three potential locations so the
+# scanner succeeds regardless of which check matches first.
+RUN cp -a /app/server/openclaw/extensions /extensions \
+  && cp -a /app/server/openclaw/extensions /dist/extensions 2>/dev/null; \
+  cp -a /app/server/openclaw/extensions /app/extensions \
   && cp -a /app/server/openclaw/extensions /app/dist/extensions
 
 # Download Playwright's bundled Chromium browser binary.
