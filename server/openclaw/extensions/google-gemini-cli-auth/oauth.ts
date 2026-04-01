@@ -292,6 +292,7 @@ function buildAuthUrl(options: {
   loginHint?: string;
 }): string {
   const { clientId } = resolveOAuthClientConfig();
+  const loginHint = options.loginHint?.trim();
   const params = new URLSearchParams({
     client_id: clientId,
     response_type: "code",
@@ -301,9 +302,10 @@ function buildAuthUrl(options: {
     code_challenge_method: "S256",
     state: options.state,
     access_type: "offline",
-    prompt: "select_account consent",
+    // When a login_hint is provided the user already chose an account during
+    // ILIAGPT login — skip the Google account picker and only request consent.
+    prompt: loginHint ? "consent" : "select_account consent",
   });
-  const loginHint = options.loginHint?.trim();
   if (loginHint) {
     params.set("login_hint", loginHint);
   }
@@ -549,7 +551,10 @@ async function exchangeCodeForTokens(
   };
 
   if (!data.refresh_token) {
-    throw new Error("No refresh token received. Please try again.");
+    throw new Error(
+      "Google no devolvio un refresh token. Esto ocurre cuando la cuenta ya tenia acceso concedido. " +
+      "Ve a https://myaccount.google.com/permissions, revoca el acceso de ILIAGPT y reintenta.",
+    );
   }
 
   const email = await getUserEmail(data.access_token);

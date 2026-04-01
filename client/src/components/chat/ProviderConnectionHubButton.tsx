@@ -177,6 +177,9 @@ export function ProviderConnectionHubButton({
   const geminiOpenDialogRef = React.useRef<(() => void) | null>(null);
   const openaiOpenDialogRef = React.useRef<(() => void) | null>(null);
 
+  // Track the email from the login redirect so we can pass it as loginHint to the provider OAuth.
+  const [autoConnectEmail, setAutoConnectEmail] = React.useState<string | null>(null);
+
   // Listen for auto-connect-provider events dispatched after OAuth login.
   // Events may fire multiple times (retry logic in home page) so we track
   // whether we already handled the auto-connect to avoid duplicate dialogs.
@@ -189,6 +192,8 @@ export function ProviderConnectionHubButton({
       autoConnectHandledRef.current = true;
       // Mark which provider should auto-start
       setAutoStartProvider(detail.provider);
+      // Capture email from the login redirect
+      if (detail.email) setAutoConnectEmail(detail.email);
       // Open the hub dialog first
       setOpen(true);
       // Then auto-open the specific provider dialog after a small delay
@@ -316,6 +321,7 @@ export function ProviderConnectionHubButton({
               <OpenAICodexOAuthButton
                 onConnected={handleConnected}
                 autoStart={autoStartProvider === "openai"}
+                initialEmail={autoConnectEmail || undefined}
                 renderTrigger={({ isBusy, isConnected, openDialog }) => {
                   openaiOpenDialogRef.current = openDialog;
                   return (
@@ -338,6 +344,7 @@ export function ProviderConnectionHubButton({
               <GeminiCliOAuthButton
                 onConnected={handleConnected}
                 autoStart={autoStartProvider === "gemini"}
+                initialEmail={autoConnectEmail || undefined}
                 renderTrigger={({ isBusy, isConnected, openDialog }) => {
                   geminiOpenDialogRef.current = openDialog;
                   return (

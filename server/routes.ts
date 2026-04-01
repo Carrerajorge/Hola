@@ -989,9 +989,11 @@ export async function registerRoutes(
 
           let redirectTarget = stateData.returnUrl || "/?auth=success";
           if (stateData.providerHint === "gemini") {
-            redirectTarget = "/?auth=success&provider=gemini";
+            const emailParam = email ? `&email=${encodeURIComponent(email)}` : "";
+            redirectTarget = `/?auth=success&provider=gemini${emailParam}`;
           } else if (stateData.providerHint === "openai") {
-            redirectTarget = "/?auth=success&provider=openai";
+            const emailParam = email ? `&email=${encodeURIComponent(email)}` : "";
+            redirectTarget = `/?auth=success&provider=openai${emailParam}`;
           }
 
           if (session?.save) {

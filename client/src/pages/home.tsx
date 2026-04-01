@@ -114,9 +114,12 @@ export default function Home() {
     const params = new URLSearchParams(window.location.search);
     const provider = params.get("provider");
     if (provider === "gemini" || provider === "openai") {
+      // Capture the email before cleaning URL params
+      const loginEmail = params.get("email") || "";
       // Clean up URL first
       params.delete("provider");
       params.delete("auth");
+      params.delete("email");
       const rest = params.toString();
       window.history.replaceState({}, "", rest ? `${window.location.pathname}?${rest}` : window.location.pathname);
       // Dispatch event so provider dialogs can auto-open.
@@ -126,7 +129,7 @@ export default function Home() {
       const timers: number[] = [];
       for (const delay of delays) {
         timers.push(window.setTimeout(() => {
-          window.dispatchEvent(new CustomEvent("auto-connect-provider", { detail: { provider } }));
+          window.dispatchEvent(new CustomEvent("auto-connect-provider", { detail: { provider, email: loginEmail } }));
         }, delay));
       }
       return () => timers.forEach((t) => window.clearTimeout(t));

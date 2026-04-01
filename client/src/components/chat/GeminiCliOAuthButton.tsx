@@ -30,6 +30,8 @@ type GeminiCliOAuthButtonProps = {
   onConnected?: (modelId: string) => void | Promise<void>;
   /** When true, auto-accept the risk warning and start the OAuth flow immediately on dialog open. */
   autoStart?: boolean;
+  /** Pre-fill the email field from the login flow so Google skips the account picker. */
+  initialEmail?: string;
   renderTrigger?: (state: {
     isBusy: boolean;
     isConnected: boolean;
@@ -367,6 +369,7 @@ function resolveFlowForCallbackInput(params: {
 export function GeminiCliOAuthButton({
   onConnected,
   autoStart = false,
+  initialEmail,
   renderTrigger,
 }: GeminiCliOAuthButtonProps) {
   const { toast } = useToast();
@@ -380,7 +383,7 @@ export function GeminiCliOAuthButton({
     null,
   );
   const [callbackUrl, setCallbackUrl] = React.useState("");
-  const [preferredEmail, setPreferredEmail] = React.useState("");
+  const [preferredEmail, setPreferredEmail] = React.useState(initialEmail || "");
   const popupRef = React.useRef<Window | null>(null);
   const lastAutoCompletedCallbackRef = React.useRef<string | null>(null);
   const lastBridgePayloadSignatureRef = React.useRef<string | null>(null);
@@ -447,10 +450,13 @@ export function GeminiCliOAuthButton({
       );
       popupRef.current = popup;
       if (!popup) {
+        // Popup was blocked — copy URL to clipboard and show guidance
+        void navigator.clipboard.writeText(payload.authUrl).catch(() => {});
         toast({
-          title: "Ventana bloqueada",
+          title: "Ventana bloqueada por el navegador",
           description:
-            "Abre manualmente la URL del flujo o habilita popups para continuar.",
+            "La URL fue copiada al portapapeles. Abrela en una nueva pestaña o habilita popups para este sitio.",
+          duration: 8000,
         });
         return;
       }
@@ -724,7 +730,12 @@ export function GeminiCliOAuthButton({
 
   // Auto-start: when the dialog opens via auto-connect (e.g. after login with provider_hint=gemini),
   // skip the risk warning and immediately start the OAuth flow for a seamless experience.
+  // Retries up to 3 times with increasing delay to handle cases where the session
+  // isn't fully established yet after the initial Google OAuth login redirect.
   const autoStartTriggeredRef = React.useRef(false);
+  const autoStartRetryCountRef = React.useRef(0);
+  const AUTO_START_MAX_RETRIES = 3;
+  const AUTO_START_RETRY_DELAYS = [500, 1500, 3000];
   React.useEffect(() => {
     if (!open || !autoStart || autoStartTriggeredRef.current) return;
     if (flowId || startMutation.isPending || completeMutation.isPending) return;
@@ -745,6 +756,23 @@ export function GeminiCliOAuthButton({
     autoStartTriggeredRef.current = true;
     startMutation.mutate();
   }, [open, autoStart, flowId, startMutation, completeMutation.isPending, status?.connected]);
+
+  // Retry auto-start if the mutation failed with a 401 (session not ready yet)
+  React.useEffect(() => {
+    if (!autoStart || !autoStartTriggeredRef.current) return;
+    if (!startMutation.isError) return;
+    const errorMsg = startMutation.error?.message || "";
+    const isAuthError = errorMsg.includes("401") || errorMsg.toLowerCase().includes("unauthorized") || errorMsg.toLowerCase().includes("authentication");
+    if (!isAuthError) return;
+    if (autoStartRetryCountRef.current >= AUTO_START_MAX_RETRIES) return;
+    const delay = AUTO_START_RETRY_DELAYS[autoStartRetryCountRef.current] || 3000;
+    autoStartRetryCountRef.current += 1;
+    const timer = window.setTimeout(() => {
+      autoStartTriggeredRef.current = false;
+      startMutation.reset();
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [autoStart, startMutation.isError, startMutation.error, startMutation]);
 
   React.useEffect(() => {
     if (
