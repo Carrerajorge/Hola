@@ -320,7 +320,11 @@ export default function LoginPage() {
     setIsGeminiLoading(true);
     setError("");
     try {
-      const res = await apiFetch("/api/gemini-cli-oauth/initiate", { method: "POST" });
+      const res = await apiFetch("/api/gemini-cli-oauth/initiate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ loginFlow: true }),
+      });
       if (!res.ok) {
         const data = await res.json().catch(() => ({} as any));
         throw new Error((data as any)?.error || "No se pudo iniciar Gemini OAuth");
@@ -336,7 +340,9 @@ export default function LoginPage() {
   const handleOpenAILogin = () => {
     setIsOpenAILoading(true);
     setError("");
-    // OpenAI uses Google OAuth under the hood — redirect to Google with select_account
+    // OpenAI login uses Google OAuth — redirect with provider_hint so the server
+    // knows to track this as an OpenAI-branded login. Google account picker is
+    // forced via prompt=consent+select_account on the server side.
     window.location.href = "/api/auth/google?provider_hint=openai";
   };
 

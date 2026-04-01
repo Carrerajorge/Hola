@@ -1,25 +1,33 @@
 /**
  * Gemini CLI OAuth Router
  *
- * Provides a web-based OAuth flow for Google Gemini CLI authentication.
+ * Provides a web-based OAuth flow for Google Gemini / Antigravity authentication.
  * Uses PKCE (Proof Key for Code Exchange) for secure authorization.
+ *
+ * This router serves dual purposes:
+ * 1. Login: Users can authenticate via their Google account (Gemini-branded flow)
+ * 2. Token storage: The resulting tokens are stored per-session for Gemini API calls
  *
  * WARNING: This is an unofficial OAuth flow using Gemini CLI credentials.
  * Review Google's Terms of Service and account-risk warnings before use.
  */
 import { Router, Request, Response } from "express";
 import crypto from "crypto";
+import { authStorage } from "../replit_integrations/auth/storage";
+import { tokenManager } from "../lib/auth/tokenManager";
+import { Logger } from "../lib/logger";
 
 const router = Router();
 
 // OAuth Configuration
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
-const USERINFO_URL = "https://www.googleapis.com/oauth2/v1/userinfo?alt=json";
+const USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo";
 const SCOPES = [
   "https://www.googleapis.com/auth/cloud-platform",
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/userinfo.profile",
+  "openid",
 ];
 
 // In-memory store for OAuth state (production should use Redis)
@@ -31,6 +39,7 @@ const oauthStateStore = new Map<
     createdAt: number;
     clientId: string;
     clientSecret?: string;
+    isLoginFlow: boolean;
   }
 >();
 
@@ -93,7 +102,9 @@ router.get("/status", (req: Request, res: Response) => {
 
 /**
  * POST /api/gemini-cli-oauth/initiate
- * Starts the Gemini CLI OAuth flow, returns the authorization URL
+ * Starts the Gemini CLI OAuth flow, returns the authorization URL.
+ * When called from the login page, sets isLoginFlow=true so the callback
+ * will create a proper user session.
  */
 router.post("/initiate", (req: Request, res: Response) => {
   const clientId =
@@ -113,12 +124,17 @@ router.post("/initiate", (req: Request, res: Response) => {
   const { verifier, challenge } = generatePkce();
   const redirectUri = getCanonicalRedirectUri(req);
 
+  // Determine if this is a login flow (user not yet authenticated)
+  const isAuthenticated = !!(req as any).user || !!(req as any).session?.passport?.user;
+  const isLoginFlow = req.body?.loginFlow === true || !isAuthenticated;
+
   oauthStateStore.set(state, {
     verifier,
     challenge,
     createdAt: Date.now(),
     clientId,
     clientSecret,
+    isLoginFlow,
   });
 
   const params = new URLSearchParams({
@@ -130,39 +146,43 @@ router.post("/initiate", (req: Request, res: Response) => {
     code_challenge_method: "S256",
     state,
     access_type: "offline",
-    prompt: "consent",
+    prompt: "consent select_account",
   });
 
   const authUrl = `${AUTH_URL}?${params.toString()}`;
 
-  console.log("[Gemini CLI OAuth] Initiated OAuth flow, redirect_uri:", redirectUri);
+  Logger.info("[Gemini OAuth] Initiated OAuth flow", {
+    redirectUri,
+    isLoginFlow,
+  });
 
   res.json({ authUrl, state });
 });
 
 /**
  * GET /api/gemini-cli-oauth/callback
- * Handles the OAuth callback from Google
+ * Handles the OAuth callback from Google.
+ * If the flow was initiated as a login, creates a proper user session.
  */
 router.get("/callback", async (req: Request, res: Response) => {
   const { code, state, error, error_description } = req.query;
 
   if (error) {
-    console.error("[Gemini CLI OAuth] OAuth error:", error, error_description);
+    Logger.error("[Gemini OAuth] OAuth error", { error, error_description });
     return res.redirect(
-      `/?gemini_oauth_error=${encodeURIComponent(String(error_description || error))}`
+      `/login?error=${encodeURIComponent(String(error_description || "gemini_failed"))}`
     );
   }
 
   if (!code || !state) {
-    console.error("[Gemini CLI OAuth] Missing code or state");
-    return res.redirect("/?gemini_oauth_error=missing_parameters");
+    Logger.error("[Gemini OAuth] Missing code or state");
+    return res.redirect("/login?error=gemini_failed");
   }
 
   const stateData = oauthStateStore.get(state as string);
   if (!stateData) {
-    console.error("[Gemini CLI OAuth] Invalid or expired state");
-    return res.redirect("/?gemini_oauth_error=invalid_state");
+    Logger.error("[Gemini OAuth] Invalid or expired state");
+    return res.redirect("/login?error=gemini_failed");
   }
   oauthStateStore.delete(state as string);
 
@@ -192,52 +212,171 @@ router.get("/callback", async (req: Request, res: Response) => {
 
     if (!tokenResponse.ok) {
       const errorText = await tokenResponse.text();
-      console.error("[Gemini CLI OAuth] Token exchange failed:", errorText);
-      return res.redirect("/?gemini_oauth_error=token_exchange_failed");
+      Logger.error("[Gemini OAuth] Token exchange failed", { errorText });
+      return res.redirect("/login?error=gemini_failed");
     }
 
     const tokens = (await tokenResponse.json()) as {
       access_token: string;
       refresh_token?: string;
       expires_in: number;
+      id_token?: string;
     };
 
-    if (!tokens.refresh_token) {
-      console.error("[Gemini CLI OAuth] No refresh token received");
-      return res.redirect("/?gemini_oauth_error=no_refresh_token");
-    }
-
-    // Get user info
+    // Get user info from Google
     let email: string | undefined;
+    let fullName: string | undefined;
+    let profilePicture: string | undefined;
+    let googleId: string | undefined;
+
     try {
       const userResponse = await fetch(USERINFO_URL, {
         headers: { Authorization: `Bearer ${tokens.access_token}` },
       });
       if (userResponse.ok) {
-        const userData = (await userResponse.json()) as { email?: string };
+        const userData = (await userResponse.json()) as {
+          id?: string;
+          email?: string;
+          name?: string;
+          given_name?: string;
+          family_name?: string;
+          picture?: string;
+          verified_email?: boolean;
+        };
         email = userData.email;
+        fullName = userData.name;
+        profilePicture = userData.picture;
+        googleId = userData.id;
       }
     } catch (e) {
-      console.warn("[Gemini CLI OAuth] Failed to get user email:", e);
+      Logger.warn("[Gemini OAuth] Failed to get user info", { error: e });
     }
 
-    // Store tokens
+    if (!email) {
+      Logger.error("[Gemini OAuth] No email received from Google");
+      return res.redirect("/login?error=gemini_failed");
+    }
+
+    // Store tokens in memory for Gemini API access
     const sessionId = req.sessionID || "anonymous";
     const expiresAt = Date.now() + tokens.expires_in * 1000 - 5 * 60 * 1000;
 
     geminiOAuthTokenStore.set(sessionId, {
       accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
+      refreshToken: tokens.refresh_token || "",
       expiresAt,
       email,
     });
 
-    console.log("[Gemini CLI OAuth] Successfully authenticated:", email || "unknown");
+    // --- LOGIN FLOW: Create a proper user session ---
+    if (stateData.isLoginFlow) {
+      try {
+        // Upsert user in the database (same pattern as Google Passport strategy)
+        const userId = googleId ? `gemini_${googleId}` : `gemini_${email.replace(/[^a-zA-Z0-9]/g, "_")}`;
 
+        // Check if user already exists by email (may have signed in via Google before)
+        let user = await authStorage.getUserByEmail(email);
+        const userData = {
+          id: user?.id || userId,
+          email,
+          username: email.split("@")[0],
+          fullName: fullName || email.split("@")[0],
+          profileImageUrl: profilePicture,
+          authProvider: "gemini",
+          emailVerified: "true",
+        };
+
+        user = await authStorage.upsertUser(userData);
+
+        // Persist tokens for this user (best-effort).
+        // Use "google" provider since Gemini OAuth goes through Google's endpoints.
+        try {
+          await tokenManager.saveTokens(user.id, "google", {
+            access_token: tokens.access_token,
+            refresh_token: tokens.refresh_token || "",
+            expiry_date: Date.now() + tokens.expires_in * 1000,
+            scope: SCOPES.join(" "),
+          });
+        } catch (tokenError) {
+          Logger.warn("[Gemini OAuth] Token persistence failed", {
+            userId: user.id,
+            error: (tokenError as any)?.message || tokenError,
+          });
+        }
+
+        // Create audit log for new registration
+        try {
+          const { storage } = await import("../storage");
+          await storage.createAuditLog({
+            action: "user_login",
+            resource: "users",
+            resourceId: user.id,
+            details: {
+              email,
+              provider: "gemini",
+              fullName,
+              timestamp: new Date().toISOString(),
+            },
+          });
+        } catch (auditError) {
+          Logger.warn("[Gemini OAuth] Audit log failed", { error: auditError });
+        }
+
+        // Establish session via Passport's logIn
+        const hydratedUser = {
+          ...user,
+          claims: {
+            sub: user.id,
+            email: user.email,
+            name: user.fullName || user.username,
+            picture: user.profileImageUrl,
+          },
+        };
+
+        return (req as any).logIn(hydratedUser, (loginErr: any) => {
+          if (loginErr) {
+            Logger.error("[Gemini OAuth] Session login error", { error: loginErr });
+            return res.redirect("/login?error=gemini_failed");
+          }
+
+          // Persist userId explicitly for robust auth across deployments
+          const session = (req as any).session as any | undefined;
+          if (session) {
+            session.authUserId = String(user!.id);
+            session.passport = session.passport || {};
+            if (typeof session.passport.user !== "string") {
+              session.passport.user = String(user!.id);
+            }
+          }
+
+          const sess = (req as any).session;
+          if (sess?.save) {
+            sess.save((saveErr: any) => {
+              if (saveErr) {
+                Logger.error("[Gemini OAuth] Session save error", { error: saveErr });
+                return res.redirect("/login?error=session_error");
+              }
+              Logger.info("[Gemini OAuth] Login successful", { email, userId: user!.id });
+              res.redirect("/?auth=success&provider=gemini");
+            });
+            return;
+          }
+
+          Logger.info("[Gemini OAuth] Login successful (no session save)", { email });
+          res.redirect("/?auth=success&provider=gemini");
+        });
+      } catch (loginError: any) {
+        Logger.error("[Gemini OAuth] Login flow error", { error: loginError?.message || loginError });
+        return res.redirect("/login?error=gemini_failed");
+      }
+    }
+
+    // --- Non-login flow: just store tokens and redirect back ---
+    Logger.info("[Gemini OAuth] Token-only auth successful", { email });
     return res.redirect(`/?gemini_oauth_success=true&gemini_email=${encodeURIComponent(email || "")}`);
   } catch (err: any) {
-    console.error("[Gemini CLI OAuth] Callback error:", err);
-    return res.redirect("/?gemini_oauth_error=callback_failed");
+    Logger.error("[Gemini OAuth] Callback error", { error: err?.message || err });
+    return res.redirect("/login?error=gemini_failed");
   }
 });
 
@@ -282,7 +421,7 @@ router.post("/refresh", async (req: Request, res: Response) => {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("[Gemini CLI OAuth] Token refresh failed:", errorText);
+      Logger.error("[Gemini OAuth] Token refresh failed", { errorText });
       geminiOAuthTokenStore.delete(sessionId);
       return res.status(401).json({ error: "Token refresh failed. Please re-authenticate." });
     }
@@ -302,7 +441,7 @@ router.post("/refresh", async (req: Request, res: Response) => {
       email: tokenData.email,
     });
   } catch (err: any) {
-    console.error("[Gemini CLI OAuth] Refresh error:", err);
+    Logger.error("[Gemini OAuth] Refresh error", { error: err?.message || err });
     res.status(500).json({ error: "Token refresh failed" });
   }
 });
@@ -314,7 +453,7 @@ router.post("/refresh", async (req: Request, res: Response) => {
 router.post("/disconnect", (req: Request, res: Response) => {
   const sessionId = req.sessionID || "anonymous";
   geminiOAuthTokenStore.delete(sessionId);
-  console.log("[Gemini CLI OAuth] Disconnected session:", sessionId);
+  Logger.info("[Gemini OAuth] Disconnected session", { sessionId });
   res.json({ success: true });
 });
 

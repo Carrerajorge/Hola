@@ -253,12 +253,18 @@ export async function registerRoutes(
               }
             }
 
+	            // Determine provider hint (e.g. "openai") stored during initiation
+	            const providerHint = (req as any).session?.providerHint || "";
+	            const successRedirect = providerHint
+	              ? `/?auth=success&provider=${encodeURIComponent(providerHint)}`
+	              : "/?auth=success";
+
 	            return (req as any).logIn(user, (loginErr: any) => {
 	              if (loginErr) {
 	                console.error("[Auth] Google login error:", loginErr);
-	                return res.redirect("/login?error=login_failed");
+	                return res.redirect(`/login?error=${providerHint ? providerHint + "_failed" : "login_failed"}`);
 	              }
-	
+
 	              // Persist userId explicitly for robust auth across deployments.
 	              // Keep Passport's `session.passport.user` as a string id to ensure deserializeUser works.
 	              const session = (req as any).session as any | undefined;
@@ -268,8 +274,10 @@ export async function registerRoutes(
 	                if (typeof session.passport.user !== "string") {
 	                  session.passport.user = String(userId);
 	                }
+	                // Clean up providerHint after use
+	                delete session.providerHint;
 	              }
-	
+
 	              const sess = (req as any).session;
 	              if (sess?.save) {
 	                sess.save((saveErr: any) => {
@@ -277,12 +285,12 @@ export async function registerRoutes(
 	                    console.error("[Auth] Google session save error:", saveErr);
 	                    return res.redirect("/login?error=session_error");
 	                  }
-	                  res.redirect("/?auth=success");
+	                  res.redirect(successRedirect);
 	                });
 	                return;
 	              }
 
-              res.redirect("/?auth=success");
+              res.redirect(successRedirect);
             });
           })().catch(next);
         })(req, res, next);
