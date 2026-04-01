@@ -298,11 +298,12 @@ function resolveScopes(): string[] {
   if (envScopes) {
     return envScopes.split(/\s+/);
   }
-  // Use cloud-platform scopes by default for full Gemini CLI compatibility.
-  // If the Google Cloud Console consent screen is not configured for cloud-platform,
-  // set GEMINI_CLI_OAUTH_SCOPES to use generative-language instead.
-  const useFallback = process.env.GEMINI_CLI_OAUTH_FALLBACK_SCOPES === "1";
-  return useFallback ? SCOPES_FALLBACK : SCOPES;
+  // Default to generative-language (fallback) scopes because cloud-platform is a
+  // restricted Google scope that requires explicit consent-screen approval. Most
+  // deployments won't have that approval, so the safer default is the fallback.
+  // Set GEMINI_CLI_OAUTH_FALLBACK_SCOPES=0 to force cloud-platform scopes.
+  const forceCloudPlatform = process.env.GEMINI_CLI_OAUTH_FALLBACK_SCOPES === "0";
+  return forceCloudPlatform ? SCOPES : SCOPES_FALLBACK;
 }
 
 function buildAuthUrl(options: {
@@ -588,7 +589,7 @@ async function exchangeCodeForTokens(
 
   const email = await getUserEmail(data.access_token);
   let projectId: string;
-  const usingFallbackScopes = process.env.GEMINI_CLI_OAUTH_FALLBACK_SCOPES === "1";
+  const usingFallbackScopes = process.env.GEMINI_CLI_OAUTH_FALLBACK_SCOPES !== "0";
   if (usingFallbackScopes) {
     // With generative-language scope (fallback), Code Assist endpoints require
     // cloud-platform and will always fail. Skip discovery entirely.
