@@ -2,12 +2,11 @@ import XLSXChart from 'xlsx-chart';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const _etlDir = path.dirname(fileURLToPath(import.meta.url));
 
 const xlsxChart = new XLSXChart();
 
-const templatePath = path.join(__dirname, 'templates', 'etl_template_chart.xlsx');
+const templatePath = path.join(_etlDir, 'templates', 'etl_template_chart.xlsx');
 
 // Create a simple template with a bar chart
 const opts = {
