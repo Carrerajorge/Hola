@@ -19,6 +19,8 @@ type OpenAICodexOAuthButtonProps = {
   onConnected?: (modelId: string) => void | Promise<void>;
   /** When true, auto-start the OAuth flow immediately on dialog open. */
   autoStart?: boolean;
+  /** Pre-fill email hint from the login flow (reserved for future use). */
+  initialEmail?: string;
   renderTrigger?: (state: {
     isBusy: boolean;
     isConnected: boolean;
@@ -70,6 +72,7 @@ function isOpenAIAuthorizationUrl(input: string): boolean {
 export function OpenAICodexOAuthButton({
   onConnected,
   autoStart = false,
+  initialEmail: _initialEmail,
   renderTrigger,
 }: OpenAICodexOAuthButtonProps) {
   const { toast } = useToast();
