@@ -139,7 +139,7 @@ export async function executeOpenClawNativePrompt(
 
   const userSeed = sanitizeSegment(params.userId, "anon");
   const chatSeed = sanitizeSegment(params.chatId, randomUUID().slice(0, 8));
-  const runSeed = randomUUID().slice(0, 8);
+  const runId = randomUUID().slice(0, 8);
 
   const sessionId = `iliagpt-native-${userSeed}-${chatSeed}`.slice(0, 180);
   const sessionKey = `iliagpt:native:${userSeed}:${chatSeed}`.slice(0, 180);

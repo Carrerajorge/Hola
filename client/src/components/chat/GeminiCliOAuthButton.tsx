@@ -757,13 +757,12 @@ export function GeminiCliOAuthButton({
     startMutation.mutate();
   }, [open, autoStart, flowId, startMutation, completeMutation.isPending, status?.connected]);
 
-  // Retry auto-start if the mutation failed with a 401 (session not ready yet)
+  // Retry auto-start if the mutation failed (session not ready, server error, etc.)
+  // After Google OAuth login redirect the session may need a moment to settle,
+  // so we retry on any server error — not just 401.
   React.useEffect(() => {
     if (!autoStart || !autoStartTriggeredRef.current) return;
     if (!startMutation.isError) return;
-    const errorMsg = startMutation.error?.message || "";
-    const isAuthError = errorMsg.includes("401") || errorMsg.toLowerCase().includes("unauthorized") || errorMsg.toLowerCase().includes("authentication");
-    if (!isAuthError) return;
     if (autoStartRetryCountRef.current >= AUTO_START_MAX_RETRIES) return;
     const delay = AUTO_START_RETRY_DELAYS[autoStartRetryCountRef.current] || 3000;
     autoStartRetryCountRef.current += 1;

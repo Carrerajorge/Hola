@@ -235,7 +235,12 @@ export function OpenAICodexOAuthButton({
 
   // Auto-start: when opened via auto-connect (e.g. after login with provider_hint=openai),
   // immediately start the OAuth flow for a seamless experience.
+  // Retries up to 3 times with increasing delay to handle cases where the session
+  // isn't fully established yet after the initial Google OAuth login redirect.
   const autoStartTriggeredRef = React.useRef(false);
+  const autoStartRetryCountRef = React.useRef(0);
+  const AUTO_START_MAX_RETRIES = 3;
+  const AUTO_START_RETRY_DELAYS = [500, 1500, 3000];
   React.useEffect(() => {
     if (!open || !autoStart || autoStartTriggeredRef.current) return;
     if (flowId || startMutation.isPending || completeMutation.isPending) return;
@@ -243,6 +248,20 @@ export function OpenAICodexOAuthButton({
     autoStartTriggeredRef.current = true;
     startMutation.mutate();
   }, [open, autoStart, flowId, startMutation, completeMutation.isPending, status?.connected]);
+
+  // Retry auto-start if the mutation failed (session not ready, server error, etc.)
+  React.useEffect(() => {
+    if (!autoStart || !autoStartTriggeredRef.current) return;
+    if (!startMutation.isError) return;
+    if (autoStartRetryCountRef.current >= AUTO_START_MAX_RETRIES) return;
+    const delay = AUTO_START_RETRY_DELAYS[autoStartRetryCountRef.current] || 3000;
+    autoStartRetryCountRef.current += 1;
+    const timer = window.setTimeout(() => {
+      autoStartTriggeredRef.current = false;
+      startMutation.reset();
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [autoStart, startMutation.isError, startMutation.error, startMutation]);
 
   React.useEffect(() => {
     if (!flowQuery.data) {
