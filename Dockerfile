@@ -182,6 +182,14 @@ RUN rm -rf node_modules/@mariozechner/pi-coding-agent \
   && rm -rf node_modules/zod \
   && ln -s /app/server/openclaw/node_modules/zod node_modules/zod
 
+# Expose openclaw's bundled plugin extensions at the root level.
+# esbuild bundles some openclaw source files (via relative imports) into
+# /app/dist/ chunks.  At runtime these chunks call resolveLoaderPackageRoot()
+# which walks up from /app/dist/ to /app/ (nearest package.json), then looks
+# for extensions/ there.  Without this symlink it finds nothing and throws
+# "Missing bundled chat channel metadata".
+RUN ln -s /app/server/openclaw/extensions /app/extensions
+
 # Download Playwright's bundled Chromium browser binary.
 # System deps are installed above via apt-get; here we only fetch the browser.
 ENV PLAYWRIGHT_BROWSERS_PATH=/app/.playwright-browsers
