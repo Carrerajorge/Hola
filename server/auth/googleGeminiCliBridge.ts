@@ -309,14 +309,18 @@ export async function handleGoogleGeminiCliOAuthCallback(
     });
     return true;
   } catch (error) {
-    console.error("[Google Auth] Gemini CLI callback completion failed:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error("[Google Auth] Gemini CLI callback completion failed:", {
+      flowId: geminiFlowId,
+      userId: flow.userId,
+      redirectUri: flow.redirectUri,
+      error: errorMessage,
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     renderGeminiCliOAuthBridge(res, {
       flowId: geminiFlowId,
       error: "gemini_cli_complete_failed",
-      errorDescription:
-        error instanceof Error
-          ? error.message
-          : "No se pudo completar Gemini CLI OAuth.",
+      errorDescription: errorMessage || "No se pudo completar Gemini CLI OAuth.",
       callbackUrl,
     });
     return true;

@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator } from "@/components/ui/input-otp";
-import { X, Apple, Phone, Loader2, Mail, Sparkles, ArrowLeft, CheckCircle2, XCircle, AlertCircle, ShieldCheck, ChevronDown } from "lucide-react";
+import { X, Phone, Loader2, Mail, Sparkles, ArrowLeft, CheckCircle2, XCircle, AlertCircle, ShieldCheck, ChevronDown } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import { apiFetch } from "@/lib/apiClient";
@@ -41,22 +41,17 @@ const OAUTH_ERROR_MESSAGES: Record<string, string> = {
   invalid_token: "Enlace mágico inválido o expirado.",
   magic_link_expired: "El enlace mágico ha expirado. Solicita uno nuevo.",
   session_error: "Error al crear la sesión. Por favor intenta de nuevo.",
-  session_save_error: "No se pudo guardar la sesión. Por favor intenta de nuevo.",
   verification_failed: "Error al verificar el enlace. Por favor intenta de nuevo.",
   google_failed: "Error al iniciar sesión con Google. Por favor intenta de nuevo.",
-  google_auth_failed: "Google rechazó la autenticación. Verifica la cuenta elegida e intenta de nuevo.",
-  google_invalid_response: "Google devolvió una respuesta inválida. Intenta de nuevo.",
-  google_invalid_state: "La sesión de autenticación de Google expiró. Intenta de nuevo.",
-  google_not_configured: "El inicio de sesión con Google no está configurado en este entorno.",
-  google_token_failed: "No se pudo completar el intercambio de token con Google. Intenta de nuevo.",
-  google_userinfo_failed: "No se pudo recuperar tu perfil desde Google. Intenta de nuevo.",
-  google_error: "Ocurrió un error inesperado durante el inicio de sesión con Google.",
+  google_state_failed: "La sesión de Google expiró o se perdió durante el regreso. Intenta de nuevo.",
+  google_profile_failed: "Google no devolvió un correo válido para iniciar sesión.",
+  google_token_failed: "Google no permitió completar el acceso. Intenta de nuevo.",
   microsoft_failed: "Error al iniciar sesión con Microsoft. Por favor intenta de nuevo.",
   auth0_failed: "Error al iniciar sesión con Auth0. Por favor intenta de nuevo.",
   replit_disabled: "El inicio de sesión con Replit fue desactivado. Usa Google, teléfono o correo.",
 };
 
-type SocialProvider = "google" | "openai" | "gemini" | "apple" | "microsoft";
+type SocialProvider = "google" | "gemini" | "openai";
 
 export default function LoginPage() {
   const [, setLocation] = useLocation();
@@ -101,16 +96,13 @@ export default function LoginPage() {
       setEmail(prefilledEmail);
     }
     const errorCode = params.get("error");
-    const providerMessage = (params.get("message") || "").trim();
     if (errorCode && OAUTH_ERROR_MESSAGES[errorCode]) {
-      const baseMessage = OAUTH_ERROR_MESSAGES[errorCode];
-      setError(providerMessage ? `${baseMessage} ${providerMessage}` : baseMessage);
+      setError(OAUTH_ERROR_MESSAGES[errorCode]);
     }
 
-    if (prefilledEmail || errorCode || providerMessage) {
+    if (prefilledEmail || errorCode) {
       params.delete("email");
       params.delete("error");
-      params.delete("message");
       const rest = params.toString();
       const nextUrl = rest ? `${window.location.pathname}?${rest}` : window.location.pathname;
       window.history.replaceState({}, "", nextUrl);
@@ -304,13 +296,18 @@ export default function LoginPage() {
     clearForcedSignedOutFlag();
     setActiveSocialProvider(provider);
     setError("");
+    // Build OAuth URL with optional login_hint for Gmail auto-redirect
     const params = new URLSearchParams();
-    // Use explicit login_hint if provided
     if (loginHint) {
       params.set("login_hint", loginHint);
     }
     // If user entered an email, use it as login_hint for Google to pre-select account
     if (!loginHint && email && email.includes("@")) {
+      params.set("login_hint", email);
+    }
+    // For Gemini and OpenAI providers, always hint towards Gmail domain
+    // so Google pre-selects the user's Gmail account automatically
+    if ((provider === "gemini" || provider === "openai") && !params.has("login_hint") && email && email.endsWith("@gmail.com")) {
       params.set("login_hint", email);
     }
     // Pass provider_hint so the server can redirect to the right flow after Google OAuth
@@ -519,25 +516,7 @@ export default function LoginPage() {
                 {isSocialProviderLoading("google") ? "Conectando..." : "Continuar con Google"}
               </Button>
 
-              {/* ChatGPT / OpenAI - uses Google OAuth with OpenAI branding */}
-              <Button
-                variant="outline"
-                className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-2"
-                onClick={() => handleGoogleLogin("openai")}
-                disabled={isAnySocialProviderLoading}
-                data-testid="button-login-openai"
-              >
-                {isSocialProviderLoading("openai") ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <svg className="h-6 w-6" viewBox="0 0 24 24" aria-hidden="true">
-                    <path fill="currentColor" d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z" />
-                  </svg>
-                )}
-                {isSocialProviderLoading("openai") ? "Conectando..." : "Continuar con OpenAI"}
-              </Button>
-
-              {/* Gemini / Google AI - uses Google OAuth with Gemini branding */}
+              {/* Google Gemini Login */}
               <Button
                 variant="outline"
                 className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-2"
@@ -546,57 +525,38 @@ export default function LoginPage() {
                 data-testid="button-login-gemini"
               >
                 {isSocialProviderLoading("gemini") ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
+                  <Loader2 className="h-6 w-6 animate-spin" />
                 ) : (
                   <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M12 0C12 6.627 17.373 12 24 12C17.373 12 12 17.373 12 24C12 17.373 6.627 12 0 12C6.627 12 12 6.627 12 0Z" fill="url(#gemini-login-gradient)" />
                     <defs>
-                      <linearGradient id="gemini-login-gradient" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
-                        <stop stopColor="#4285F4" />
-                        <stop offset="0.5" stopColor="#9B72CB" />
-                        <stop offset="1" stopColor="#D96570" />
+                      <linearGradient id="gemini-login-grad" x1="4" y1="3" x2="20" y2="21" gradientUnits="userSpaceOnUse">
+                        <stop stopColor="#1A73E8" />
+                        <stop offset="0.45" stopColor="#8E6CF8" />
+                        <stop offset="1" stopColor="#34A853" />
                       </linearGradient>
                     </defs>
+                    <path fill="url(#gemini-login-grad)" d="M12 2.5c.46 3.63 1.24 5.96 2.42 7.08 1.11 1.05 3.45 1.84 7.08 2.42-3.63.58-5.97 1.37-7.08 2.42-1.18 1.12-1.96 3.45-2.42 7.08-.46-3.63-1.24-5.96-2.42-7.08-1.11-1.05-3.45-1.84-7.08-2.42 3.63-.58 5.97-1.37 7.08-2.42C10.76 8.46 11.54 6.13 12 2.5Z" />
                   </svg>
                 )}
                 {isSocialProviderLoading("gemini") ? "Conectando..." : "Continuar con Gemini"}
               </Button>
 
-              {/* Apple - uses Google OAuth */}
+              {/* OpenAI / ChatGPT Login */}
               <Button
                 variant="outline"
-                className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-3"
-                onClick={() => handleGoogleLogin("apple")}
+                className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-2"
+                onClick={() => handleGoogleLogin("openai")}
                 disabled={isAnySocialProviderLoading}
-                data-testid="button-login-apple"
+                data-testid="button-login-openai"
               >
-                {isSocialProviderLoading("apple") ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
+                {isSocialProviderLoading("openai") ? (
+                  <Loader2 className="h-6 w-6 animate-spin" />
                 ) : (
-                  <Apple className="h-5 w-5" />
-                )}
-                {isSocialProviderLoading("apple") ? "Conectando..." : "Continuar con Apple"}
-              </Button>
-
-              {/* Microsoft - uses Google OAuth */}
-              <Button
-                variant="outline"
-                className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-3"
-                onClick={() => handleGoogleLogin("microsoft")}
-                disabled={isAnySocialProviderLoading}
-                data-testid="button-login-microsoft"
-              >
-                {isSocialProviderLoading("microsoft") ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <svg className="h-5 w-5" viewBox="0 0 23 23" aria-hidden="true">
-                    <path fill="#f35325" d="M1 1h10v10H1z" />
-                    <path fill="#81bc06" d="M12 1h10v10H12z" />
-                    <path fill="#05a6f0" d="M1 12h10v10H1z" />
-                    <path fill="#ffba08" d="M12 12h10v10H12z" />
+                  <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M22.28 9.37a5.99 5.99 0 0 0-.52-4.93 6.07 6.07 0 0 0-6.55-2.91A5.99 5.99 0 0 0 10.69.18a6.07 6.07 0 0 0-5.8 4.21 5.99 5.99 0 0 0-4.01 2.9 6.07 6.07 0 0 0 .74 7.12 5.99 5.99 0 0 0 .52 4.93 6.07 6.07 0 0 0 6.55 2.91 5.99 5.99 0 0 0 4.52 1.35 6.07 6.07 0 0 0 5.8-4.21 5.99 5.99 0 0 0 4.01-2.9 6.07 6.07 0 0 0-.74-7.12Z" fill="currentColor" opacity="0.85"/>
                   </svg>
                 )}
-                {isSocialProviderLoading("microsoft") ? "Conectando..." : "Continuar con Microsoft"}
+                {isSocialProviderLoading("openai") ? "Conectando..." : "Continuar con ChatGPT"}
               </Button>
 
               {/* Phone Authentication */}

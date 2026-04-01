@@ -17,6 +17,7 @@ import { globalAuditMiddleware } from "./middleware/audit";
 import { pptExportRouter } from "./routes/pptExport";
 import swaggerUi from "swagger-ui-express";
 import { passport } from "./lib/auth/passport";
+import { isGoogleOAuthStateFailureMessage } from "./lib/auth/googleOAuthStateStore";
 import { swaggerSpec } from "./lib/swagger";
 import { createChatsRouter } from "./routes/chatsRouter";
 import { createFilesRouter } from "./routes/filesRouter";
@@ -163,9 +164,6 @@ import {
   handleGoogleGeminiCliOAuthCallback,
   renderGeminiCliOAuthBridge,
 } from "./auth/googleGeminiCliBridge";
-import { oauthStates } from "../shared/schema/auth";
-import { eq, lt } from "drizzle-orm";
-import { db } from "./db";
 import { getLogs, getLogStats, type LogFilters } from "./lib/structuredLogger";
 import { getActiveRequests, getRequestStats } from "./lib/requestTracer";
 import {
@@ -235,7 +233,6 @@ import {
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { randomBytes } from "crypto";
 
 import { createRunRouter } from "./routes/runRouter";
 import { createBrowserControlRouter } from "./routes/browserControlRouter";
@@ -257,11 +254,6 @@ import {
 } from "./middleware/csrf";
 import { finopsRouter } from "./routes/finopsRouter";
 import { resolveEmbeddedOpenClawControlUiRootSync } from "./services/openClawEmbeddedAssets";
-import { createHardwareTelemetryRouter } from "./routes/hardwareTelemetryRouter";
-import { messageLifecycleRouter } from "./routes/messageLifecycleRouter";
-import { authStorage } from "./replit_integrations/auth/storage";
-import { buildSessionUserFromDbUser } from "./lib/sessionUser";
-import { tokenManager } from "./lib/auth/tokenManager";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -470,11 +462,6 @@ export async function registerRoutes(
   app: Express,
 ): Promise<Server> {
   // Session + Passport are initialized in server/index.ts (before csrf/rateLimiter).
-  const googleCanonicalDomain = process.env.CANONICAL_DOMAIN || "iliagpt.com";
-  const googleCallbackURL =
-    env.NODE_ENV === "production"
-      ? `https://${googleCanonicalDomain}/api/auth/google/callback`
-      : `${env.BASE_URL}/api/auth/google/callback`;
 
   const normalizeGoogleLoginHint = (value: unknown): string | undefined => {
     if (typeof value !== "string") {
@@ -497,195 +484,24 @@ export async function registerRoutes(
     return normalized;
   };
 
-  const normalizeGoogleReturnUrl = (value: unknown): string => {
-    if (typeof value !== "string") {
-      return "/?auth=success";
+  const resolveGoogleAuthFailureCode = (err: unknown, info: unknown): string => {
+    const message = String(
+      (typeof info === "object" && info !== null && "message" in info
+        ? (info as { message?: unknown }).message
+        : "") ||
+      (err instanceof Error ? err.message : err || ""),
+    ).trim();
+
+    if (isGoogleOAuthStateFailureMessage(message)) {
+      return "google_state_failed";
     }
-
-    const normalized = value.trim();
-    if (!normalized || !normalized.startsWith("/") || normalized.startsWith("//")) {
-      return "/?auth=success";
+    if (message.toLowerCase().includes("access token")) {
+      return "google_token_failed";
     }
-
-    return normalized;
-  };
-
-  const googleOAuthStateStore = new Map<string, {
-    createdAt: number;
-    providerHint?: string;
-    returnUrl: string;
-  }>();
-  const googleOAuthStateTtlMs = 10 * 60 * 1000;
-  type GoogleOAuthStateRecord = {
-    createdAt: number;
-    providerHint?: string;
-    returnUrl: string;
-  };
-  type GoogleOAuthSession = {
-    googleOAuthStates?: Record<string, GoogleOAuthStateRecord>;
-    save?: (callback: (err?: unknown) => void) => void;
-  };
-
-  const cleanupGoogleOAuthStateStore = () => {
-    const now = Date.now();
-    for (const [state, data] of googleOAuthStateStore.entries()) {
-      if (now - data.createdAt > googleOAuthStateTtlMs) {
-        googleOAuthStateStore.delete(state);
-      }
+    if (message.toLowerCase().includes("no email")) {
+      return "google_profile_failed";
     }
-  };
-
-  setInterval(() => {
-    cleanupGoogleOAuthStateStore();
-    // Clean up expired DB states
-    db.delete(oauthStates).where(lt(oauthStates.expiresAt, new Date())).catch(() => {});
-  }, 5 * 60 * 1000).unref?.();
-
-  const cleanupGoogleOAuthSessionStates = (session?: GoogleOAuthSession | null) => {
-    const states = session?.googleOAuthStates;
-    if (!states) {
-      return;
-    }
-
-    const now = Date.now();
-    for (const [state, data] of Object.entries(states)) {
-      if (!data || now - data.createdAt > googleOAuthStateTtlMs) {
-        delete states[state];
-      }
-    }
-
-    if (Object.keys(states).length === 0) {
-      delete session.googleOAuthStates;
-    }
-  };
-
-  const storeGoogleOAuthState = (
-    session: GoogleOAuthSession | null | undefined,
-    state: string,
-    stateData: GoogleOAuthStateRecord,
-  ) => {
-    googleOAuthStateStore.set(state, stateData);
-
-    // Persist to database for production reliability across blue-green deploys
-    db.insert(oauthStates).values({
-      state,
-      returnUrl: stateData.returnUrl || "/",
-      provider: "google",
-      providerHint: stateData.providerHint || null,
-      expiresAt: new Date(stateData.createdAt + googleOAuthStateTtlMs),
-    }).onConflictDoUpdate({
-      target: oauthStates.state,
-      set: {
-        returnUrl: stateData.returnUrl || "/",
-        providerHint: stateData.providerHint || null,
-        expiresAt: new Date(stateData.createdAt + googleOAuthStateTtlMs),
-      },
-    }).catch((err: unknown) => {
-      console.warn("[Auth] Failed to persist OAuth state to DB:", err);
-    });
-
-    if (!session) {
-      return;
-    }
-
-    cleanupGoogleOAuthSessionStates(session);
-    session.googleOAuthStates = {
-      ...(session.googleOAuthStates || {}),
-      [state]: stateData,
-    };
-  };
-
-  const consumeGoogleOAuthState = async (
-    session: GoogleOAuthSession | null | undefined,
-    state: string,
-  ): Promise<GoogleOAuthStateRecord | undefined> => {
-    cleanupGoogleOAuthStateStore();
-    cleanupGoogleOAuthSessionStates(session);
-
-    const sessionState = session?.googleOAuthStates?.[state];
-    if (session?.googleOAuthStates) {
-      delete session.googleOAuthStates[state];
-      if (Object.keys(session.googleOAuthStates).length === 0) {
-        delete session.googleOAuthStates;
-      }
-    }
-
-    const memoryState = googleOAuthStateStore.get(state);
-    googleOAuthStateStore.delete(state);
-
-    if (sessionState || memoryState) {
-      // Clean up DB state in background
-      db.delete(oauthStates).where(eq(oauthStates.state, state)).catch(() => {});
-      return sessionState || memoryState;
-    }
-
-    // Fallback: check database (handles blue-green deploys where memory was lost)
-    try {
-      const [dbState] = await db.select().from(oauthStates)
-        .where(eq(oauthStates.state, state))
-        .limit(1);
-      if (dbState && dbState.expiresAt > new Date()) {
-        // Clean up consumed state
-        db.delete(oauthStates).where(eq(oauthStates.state, state)).catch(() => {});
-        return {
-          createdAt: dbState.createdAt.getTime(),
-          returnUrl: dbState.returnUrl,
-          providerHint: dbState.providerHint || undefined,
-        };
-      }
-    } catch (dbError) {
-      console.warn("[Auth] Failed to read OAuth state from DB:", dbError);
-    }
-
-    return undefined;
-  };
-
-  const normalizeGoogleOAuthFailureMessage = (value: unknown): string | undefined => {
-    const raw =
-      typeof value === "string"
-        ? value
-        : value instanceof Error
-          ? value.message
-          : value == null
-            ? ""
-            : String(value);
-
-    const normalized = raw.replace(/\s+/g, " ").trim();
-    if (!normalized) {
-      return undefined;
-    }
-
-    return normalized.slice(0, 180);
-  };
-
-  const resolveGoogleOAuthFailure = (err: unknown, info?: unknown) => {
-    const message =
-      normalizeGoogleOAuthFailureMessage(
-        info && typeof info === "object" && "message" in (info as Record<string, unknown>)
-          ? (info as Record<string, unknown>).message
-          : undefined,
-      ) ??
-      normalizeGoogleOAuthFailureMessage(err) ??
-      normalizeGoogleOAuthFailureMessage(info);
-
-    const lower = (message || "").toLowerCase();
-
-    if (lower.includes("state") || lower.includes("csrf")) {
-      return { error: "google_invalid_state", message };
-    }
-    if (lower.includes("token") || lower.includes("authorization code")) {
-      return { error: "google_token_failed", message };
-    }
-    if (
-      lower.includes("access_denied") ||
-      lower.includes("oauth") ||
-      lower.includes("consent") ||
-      lower.includes("cancel")
-    ) {
-      return { error: "google_auth_failed", message };
-    }
-
-    return { error: "google_failed", message };
+    return "google_failed";
   };
 
   // Passport Auth Routes
@@ -704,69 +520,30 @@ export async function registerRoutes(
       normalizeGoogleLoginHint(req.query.loginHint) ??
       normalizeGoogleLoginHint(req.query.login_hint);
 
+    // Preserve provider_hint (gemini, openai, etc.) in session so we can act
+    // on it after the OAuth callback completes (e.g. auto-initiate Gemini CLI).
     const providerHint = typeof req.query.provider_hint === "string"
       ? req.query.provider_hint.trim().toLowerCase()
       : "";
-    const returnUrl = normalizeGoogleReturnUrl(req.query.returnUrl);
-    const session = req.session as GoogleOAuthSession | undefined;
-    cleanupGoogleOAuthStateStore();
-    cleanupGoogleOAuthSessionStates(session);
-
-    const state = randomBytes(24).toString("hex");
-    const stateData = {
-      createdAt: Date.now(),
-      providerHint: providerHint || undefined,
-      returnUrl,
-    };
-    storeGoogleOAuthState(session, state, stateData);
-
-    const params = new URLSearchParams({
-      client_id: env.GOOGLE_CLIENT_ID,
-      response_type: "code",
-      redirect_uri: googleCallbackURL,
-      scope: "openid email profile",
-      state,
-      access_type: "offline",
-      prompt: loginHint ? "consent" : "select_account consent",
-    });
-    if (loginHint) {
-      params.set("login_hint", loginHint);
+    if (providerHint && (req as any).session) {
+      (req as any).session.providerHint = providerHint;
     }
 
-    const redirectToGoogle = () =>
-      res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
+    // Dynamic callbackURL ensures redirect URI matches the actual request host,
+    // preventing redirect_uri_mismatch when PORT differs between dev scripts and .env.
+    const canonicalDomain = process.env.CANONICAL_DOMAIN || "iliagpt.com";
+    const callbackURL =
+      env.NODE_ENV === "production"
+        ? `https://${canonicalDomain}/api/auth/google/callback`
+        : `${req.protocol}://${req.get("host")}/api/auth/google/callback`;
 
-    if (session?.save) {
-      return session.save((error) => {
-        if (error) {
-          console.error("[Auth] Failed to persist Google OAuth state in session:", error);
-          return res.redirect("/login?error=session_save_error");
-        }
-        return redirectToGoogle();
-      });
-    }
-
-    return redirectToGoogle();
-  });
-
-  app.get("/api/auth/google/status", (_req, res) => {
-    res.json({
-      configured: Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
-      nodeEnv: env.NODE_ENV,
-      callbackURL: googleCallbackURL,
-      canonicalDomain: googleCanonicalDomain,
-    });
-  });
-
-  app.get("/api/auth/google/debug", (req, res) => {
-    res.json({
-      configured: Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
-      nodeEnv: env.NODE_ENV,
-      callbackURL: googleCallbackURL,
-      canonicalDomain: googleCanonicalDomain,
-      sessionId: req.sessionID || null,
-      pendingOAuthStates: googleOAuthStateStore.size,
-    });
+    passport.authenticate("google", {
+      scope: ["openid", "email", "profile"],
+      accessType: "offline",
+      prompt: "select_account consent",
+      callbackURL,
+      ...(loginHint ? { loginHint } : {}),
+    })(req, res, next);
   });
 
   if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
@@ -775,252 +552,110 @@ export async function registerRoutes(
         return;
       }
 
-      const googleError =
-        typeof req.query.error === "string" ? req.query.error.trim() : "";
-      const googleErrorDescription =
-        typeof req.query.error_description === "string"
-          ? req.query.error_description.trim()
-          : "";
-      if (googleError) {
-        const message = normalizeGoogleOAuthFailureMessage(googleErrorDescription);
-        const query = message
-          ? `?error=google_auth_failed&message=${encodeURIComponent(message)}`
-          : "?error=google_auth_failed";
-        return res.redirect(`/login${query}`);
-      }
+      const canonicalDomainCb = process.env.CANONICAL_DOMAIN || "iliagpt.com";
+      const callbackURLCb =
+        env.NODE_ENV === "production"
+          ? `https://${canonicalDomainCb}/api/auth/google/callback`
+          : `${req.protocol}://${req.get("host")}/api/auth/google/callback`;
 
-      const code = typeof req.query.code === "string" ? req.query.code.trim() : "";
-      const state = typeof req.query.state === "string" ? req.query.state.trim() : "";
-      if (!code || !state) {
-        return res.redirect("/login?error=google_invalid_response");
-      }
-
-      const session = req.session as GoogleOAuthSession | undefined;
-      const stateData = await consumeGoogleOAuthState(session, state);
-      if (!stateData) {
-        return res.redirect("/login?error=google_invalid_state");
-      }
-
-      try {
-        const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-          },
-          body: new URLSearchParams({
-            client_id: env.GOOGLE_CLIENT_ID,
-            client_secret: env.GOOGLE_CLIENT_SECRET,
-            code,
-            redirect_uri: googleCallbackURL,
-            grant_type: "authorization_code",
-          }),
-        });
-
-        if (!tokenResponse.ok) {
-          const tokenErrorText = await tokenResponse.text().catch(() => "");
-          const failure = resolveGoogleOAuthFailure(
-            new Error(tokenErrorText || "Google token exchange failed"),
-          );
-          const query = failure.message
-            ? `?error=${encodeURIComponent(failure.error)}&message=${encodeURIComponent(failure.message)}`
-            : `?error=${encodeURIComponent(failure.error)}`;
-          return res.redirect(`/login${query}`);
-        }
-
-        const tokens = await tokenResponse.json() as {
-          access_token?: string;
-          refresh_token?: string;
-          expires_in?: number;
-        };
-        if (!tokens.access_token) {
-          return res.redirect("/login?error=google_token_failed");
-        }
-
-        const userResponse = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
-          headers: {
-            Authorization: `Bearer ${tokens.access_token}`,
-          },
-        });
-        if (!userResponse.ok) {
-          const userInfoErrorText = await userResponse.text().catch(() => "");
-          const message = normalizeGoogleOAuthFailureMessage(userInfoErrorText);
-          const query = message
-            ? `?error=google_userinfo_failed&message=${encodeURIComponent(message)}`
-            : "?error=google_userinfo_failed";
-          return res.redirect(`/login${query}`);
-        }
-
-        const googleUser = await userResponse.json() as Record<string, unknown>;
-        const email =
-          typeof googleUser.email === "string" ? googleUser.email.trim().toLowerCase() : "";
-        if (!email) {
-          return res.redirect("/login?error=google_invalid_response");
-        }
-
-        let resolvedUser = await authStorage.getUserByEmail(email);
-        const googleUserId =
-          typeof googleUser.id === "string" && googleUser.id.trim()
-            ? googleUser.id.trim()
-            : email;
-        const firstName =
-          typeof googleUser.given_name === "string"
-            ? googleUser.given_name
-            : typeof googleUser.name === "string"
-              ? googleUser.name.split(" ")[0] || ""
-              : "";
-        const lastName =
-          typeof googleUser.family_name === "string"
-            ? googleUser.family_name
-            : typeof googleUser.name === "string"
-              ? googleUser.name.split(" ").slice(1).join(" ")
-              : "";
-        const fullName =
-          typeof googleUser.name === "string" && googleUser.name.trim()
-            ? googleUser.name.trim()
-            : [firstName, lastName].filter(Boolean).join(" ") || null;
-        const userData = {
-          id: `google_${googleUserId}`,
-          email,
-          username: email.split("@")[0],
-          fullName,
-          firstName,
-          lastName,
-          profileImageUrl:
-            typeof googleUser.picture === "string" ? googleUser.picture : null,
-          authProvider: "google",
-          emailVerified:
-            googleUser.verified_email === true ? "true" : "false",
-        };
-        resolvedUser = resolvedUser
-          ? await authStorage.upsertUser({ ...userData, id: resolvedUser.id })
-          : await authStorage.upsertUser(userData);
-
-        try {
-          await tokenManager.saveTokens(resolvedUser.id, "google", {
-            access_token: tokens.access_token,
-            refresh_token: tokens.refresh_token,
-            expiry_date: Date.now() + ((tokens.expires_in || 3600) * 1000),
-            scope: "openid email profile",
-          });
-        } catch (tokenError) {
-          console.warn("[Auth] Google token persistence failed:", tokenError);
-        }
-
-        const baseSessionUser = buildSessionUserFromDbUser(resolvedUser) as any;
-        const sessionUser = {
-          ...baseSessionUser,
-          claims: {
-            ...baseSessionUser.claims,
-            email,
-            name: fullName,
-            picture:
-              typeof googleUser.picture === "string" ? googleUser.picture : undefined,
-          },
-          access_token: tokens.access_token,
-          refresh_token: tokens.refresh_token,
-          expires_at: Math.floor(Date.now() / 1000) + (tokens.expires_in || 3600),
-        };
-
-        const userId = String(sessionUser?.claims?.sub || resolvedUser.id || "");
-        if (!userId) {
-          return res.redirect("/login?error=login_failed");
-        }
-
-        const mfa = await computeMfaForUser({
-          userId,
-          excludeSid: req.sessionID || null,
-        });
-        if (mfa.requiresMfa) {
-          try {
-            await startMfaLoginChallenge({
-              req,
-              userId,
-              email,
-              totpEnabled: mfa.totpEnabled,
-              pushTargets: mfa.pushTargets,
-              ttlMs: 5 * 60 * 1000,
-              sessionUser,
-            });
-            return res.redirect("/login?mfa=1");
-          } catch (e: any) {
-            console.warn(
-              "[Auth] Google callback MFA failed:",
-              e?.message || e,
-            );
-            return res.redirect("/login?error=login_failed");
-          }
-        }
-
-        return (req as any).logIn(sessionUser, async (loginErr: any) => {
-          if (loginErr) {
-            console.error("[Auth] Google login error:", loginErr);
-            return res.redirect("/login?error=login_failed");
-          }
-
-          try {
-            await authStorage.updateUserLogin(resolvedUser.id, {
-              ipAddress: req.ip || req.socket.remoteAddress || null,
-              userAgent: req.headers["user-agent"] || null,
-            });
-
-            await storage.createAuditLog({
-              userId: resolvedUser.id,
-              action: "user_login",
-              resource: "auth",
-              details: {
-                email,
-                provider: "google_oauth",
-              },
-              ipAddress: req.ip || req.socket.remoteAddress || null,
-              userAgent: req.headers["user-agent"] || null,
-            });
-          } catch (auditError) {
-            console.warn("[Auth] Google audit update failed:", auditError);
-          }
-
-          const session = (req as any).session as any | undefined;
-          if (session) {
-            session.authUserId = String(userId);
-            session.passport = session.passport || {};
-            if (typeof session.passport.user !== "string") {
-              session.passport.user = String(userId);
-            }
-          }
-
-          let redirectTarget = stateData.returnUrl || "/?auth=success";
-          if (stateData.providerHint === "gemini") {
-            const emailParam = email ? `&email=${encodeURIComponent(email)}` : "";
-            redirectTarget = `/?auth=success&provider=gemini${emailParam}`;
-          } else if (stateData.providerHint === "openai") {
-            const emailParam = email ? `&email=${encodeURIComponent(email)}` : "";
-            redirectTarget = `/?auth=success&provider=openai${emailParam}`;
-          }
-
-          if (session?.save) {
-            session.save((saveErr: any) => {
-              if (saveErr) {
-                console.error("[Auth] Google session save error:", saveErr);
-                return res.redirect("/login?error=session_error");
+      passport.authenticate(
+        "google",
+        { failureRedirect: "/login?error=google_failed", callbackURL: callbackURLCb },
+        (err: any, user: any, info: any) => {
+          (async () => {
+            if (err || !user) {
+              const failureCode = resolveGoogleAuthFailureCode(err, info);
+              if (err || info) {
+                console.warn("[Auth] Google callback failed:", {
+                  failureCode,
+                  error: err instanceof Error ? err.message : err || null,
+                  info,
+                });
               }
+              return res.redirect(`/login?error=${failureCode}`);
+            }
+
+            const userId = user?.claims?.sub || user?.id;
+            const email = user?.claims?.email || user?.email || null;
+            if (!userId) {
+              return res.redirect("/login?error=login_failed");
+            }
+
+            const mfa = await computeMfaForUser({
+              userId,
+              excludeSid: req.sessionID || null,
+            });
+            if (mfa.requiresMfa) {
+              try {
+                await startMfaLoginChallenge({
+                  req,
+                  userId,
+                  email,
+                  totpEnabled: mfa.totpEnabled,
+                  pushTargets: mfa.pushTargets,
+                  ttlMs: 5 * 60 * 1000,
+                  sessionUser: user,
+                });
+                return res.redirect("/login?mfa=1");
+              } catch (e: any) {
+                console.warn(
+                  "[Auth] Google callback MFA failed:",
+                  e?.message || e,
+                );
+                return res.redirect("/login?error=login_failed");
+              }
+            }
+
+            return (req as any).logIn(user, (loginErr: any) => {
+              if (loginErr) {
+                console.error("[Auth] Google login error:", loginErr);
+                return res.redirect("/login?error=login_failed");
+              }
+
+              // Persist userId explicitly for robust auth across deployments.
+              // Keep Passport's `session.passport.user` as a string id to ensure deserializeUser works.
+              const session = (req as any).session as any | undefined;
+              if (session) {
+                session.authUserId = String(userId);
+                session.passport = session.passport || {};
+                if (typeof session.passport.user !== "string") {
+                  session.passport.user = String(userId);
+                }
+              }
+
+              // Determine redirect based on provider_hint saved before OAuth.
+              const sess = (req as any).session;
+              const providerHint = sess?.providerHint || "";
+              // Clear after use so it doesn't persist across sessions.
+              if (sess) {
+                delete sess.providerHint;
+              }
+
+              // Build redirect URL: if the user came from a specific provider button,
+              // include it so the client can auto-trigger the relevant connection flow.
+              let redirectTarget = "/?auth=success";
+              if (providerHint === "gemini") {
+                redirectTarget = "/?auth=success&provider=gemini";
+              } else if (providerHint === "openai") {
+                redirectTarget = "/?auth=success&provider=openai";
+              }
+
+              if (sess?.save) {
+                sess.save((saveErr: any) => {
+                  if (saveErr) {
+                    console.error("[Auth] Google session save error:", saveErr);
+                    return res.redirect("/login?error=session_error");
+                  }
+                  res.redirect(redirectTarget);
+                });
+                return;
+              }
+
               res.redirect(redirectTarget);
             });
-            return;
-          }
-
-          res.redirect(redirectTarget);
-        });
-      } catch (err: any) {
-        const failure = resolveGoogleOAuthFailure(err);
-        console.error("[Auth] Google callback failed", {
-          error: failure.error,
-          message: failure.message,
-          sessionId: req.sessionID || null,
-        });
-        const query = failure.message
-          ? `?error=${encodeURIComponent(failure.error)}&message=${encodeURIComponent(failure.message)}`
-          : `?error=${encodeURIComponent(failure.error)}`;
-        return res.redirect(`/login${query}`);
-      }
+          })().catch(next);
+        },
+      )(req, res, next);
     });
   } else {
     // Return a helpful error when Google auth is not configured
@@ -1398,7 +1033,6 @@ export async function registerRoutes(
   // Telemetry Dashboard
   const { createTelemetryRouter } = await import("./telemetry/telemetryRouter");
   app.use("/api/telemetry", createTelemetryRouter());
-  app.use("/api/hardware-telemetry", createHardwareTelemetryRouter());
 
   const { createPublicReleasesRouter } =
     await import("./routes/releasesRouter");
@@ -1410,7 +1044,6 @@ export async function registerRoutes(
   app.use(createCodeRouter());
   app.use(createUserRouter());
   app.use("/api", createChatAiRouter(broadcastAgentUpdate));
-  app.use("/api/message", messageLifecycleRouter);
   app.use("/api/apps", createAppsIntegrationRouter());
 
   // Integration Kernel OAuth routes (generic connector flow).

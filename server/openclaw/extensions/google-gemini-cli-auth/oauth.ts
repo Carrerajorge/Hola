@@ -2,10 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { createServer } from "node:http";
 import { delimiter, dirname, join } from "node:path";
-import {
-  fetchWithSsrFGuard,
-  isWSL2Sync,
-} from "../../src/plugin-sdk/google-gemini-cli-auth.ts";
+import { fetchWithSsrFGuard, isWSL2Sync } from "../../src/plugin-sdk/google-gemini-cli-auth.js";
 
 const CLIENT_ID_KEYS = [
   "OPENCLAW_GEMINI_OAUTH_CLIENT_ID",
@@ -30,8 +27,18 @@ const LOAD_CODE_ASSIST_ENDPOINTS = [
   CODE_ASSIST_ENDPOINT_AUTOPUSH,
 ];
 const DEFAULT_FETCH_TIMEOUT_MS = 10_000;
+// cloud-platform is required for Code Assist / Gemini CLI project discovery.
+// If the OAuth consent screen doesn't have it approved, Google will reject the
+// authorization request entirely. We keep it as the primary scope set but also
+// provide a fallback scope set without cloud-platform for graceful degradation.
 const SCOPES = [
   "https://www.googleapis.com/auth/cloud-platform",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/userinfo.profile",
+];
+
+const SCOPES_FALLBACK = [
+  "https://www.googleapis.com/auth/generative-language",
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/userinfo.profile",
 ];
@@ -285,6 +292,19 @@ async function fetchWithTimeout(
   }
 }
 
+function resolveScopes(): string[] {
+  // Allow operator override via env var (space-separated list)
+  const envScopes = process.env.GEMINI_CLI_OAUTH_SCOPES?.trim();
+  if (envScopes) {
+    return envScopes.split(/\s+/);
+  }
+  // Use cloud-platform scopes by default for full Gemini CLI compatibility.
+  // If the Google Cloud Console consent screen is not configured for cloud-platform,
+  // set GEMINI_CLI_OAUTH_SCOPES to use generative-language instead.
+  const useFallback = process.env.GEMINI_CLI_OAUTH_FALLBACK_SCOPES === "1";
+  return useFallback ? SCOPES_FALLBACK : SCOPES;
+}
+
 function buildAuthUrl(options: {
   challenge: string;
   redirectUri: string;
@@ -292,20 +312,20 @@ function buildAuthUrl(options: {
   loginHint?: string;
 }): string {
   const { clientId } = resolveOAuthClientConfig();
-  const loginHint = options.loginHint?.trim();
+  const scopes = resolveScopes();
   const params = new URLSearchParams({
     client_id: clientId,
     response_type: "code",
     redirect_uri: options.redirectUri,
-    scope: SCOPES.join(" "),
+    scope: scopes.join(" "),
     code_challenge: options.challenge,
     code_challenge_method: "S256",
     state: options.state,
     access_type: "offline",
-    // When a login_hint is provided the user already chose an account during
-    // ILIAGPT login — skip the Google account picker and only request consent.
-    prompt: loginHint ? "consent" : "select_account consent",
+    prompt: "select_account consent",
+    include_granted_scopes: "true",
   });
+  const loginHint = options.loginHint?.trim();
   if (loginHint) {
     params.set("login_hint", loginHint);
   }
@@ -541,7 +561,18 @@ async function exchangeCodeForTokens(
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Token exchange failed: ${errorText}`);
+    let detail = errorText;
+    try {
+      const errorJson = JSON.parse(errorText);
+      detail = errorJson.error_description || errorJson.error || errorText;
+    } catch {}
+    console.error("[GeminiCliOAuth] Token exchange failed:", {
+      status: response.status,
+      clientId: clientId.slice(0, 12) + "...",
+      redirectUri,
+      detail,
+    });
+    throw new Error(`Token exchange failed (${response.status}): ${detail}`);
   }
 
   const data = (await response.json()) as {
@@ -551,28 +582,36 @@ async function exchangeCodeForTokens(
   };
 
   if (!data.refresh_token) {
-    throw new Error(
-      "Google no devolvio un refresh token. Esto ocurre cuando la cuenta ya tenia acceso concedido. " +
-      "Ve a https://myaccount.google.com/permissions, revoca el acceso de ILIAGPT y reintenta.",
-    );
+    console.warn("[GeminiCliOAuth] No refresh_token in response. User may need to revoke and re-authorize. access_type=offline should be set.");
+    throw new Error("No refresh token received. Revoke ILIAGPT access in your Google Account settings and try again.");
   }
 
   const email = await getUserEmail(data.access_token);
   let projectId: string;
-  try {
-    projectId = await discoverProject(data.access_token);
-  } catch (projectError) {
-    // Project discovery is best-effort: free-tier users and accounts without
-    // a Cloud project can still use Gemini CLI with a fallback project ID.
-    // Logging the error for diagnostics while letting the OAuth flow succeed.
-    console.warn(
-      "[GeminiCliOAuth] discoverProject failed, using fallback:",
-      projectError instanceof Error ? projectError.message : projectError,
-    );
+  const usingFallbackScopes = process.env.GEMINI_CLI_OAUTH_FALLBACK_SCOPES === "1";
+  if (usingFallbackScopes) {
+    // With generative-language scope (fallback), Code Assist endpoints require
+    // cloud-platform and will always fail. Skip discovery entirely.
     projectId =
       process.env.GOOGLE_CLOUD_PROJECT ||
       process.env.GOOGLE_CLOUD_PROJECT_ID ||
       "gemini-cli-free-tier";
+    console.info("[GeminiCliOAuth] Using fallback scopes, skipping project discovery. projectId:", projectId);
+  } else {
+    try {
+      projectId = await discoverProject(data.access_token);
+    } catch (projectError) {
+      // Project discovery is best-effort: free-tier users and accounts without
+      // a Cloud project can still use Gemini CLI with a fallback project ID.
+      console.warn(
+        "[GeminiCliOAuth] discoverProject failed, using fallback:",
+        projectError instanceof Error ? projectError.message : projectError,
+      );
+      projectId =
+        process.env.GOOGLE_CLOUD_PROJECT ||
+        process.env.GOOGLE_CLOUD_PROJECT_ID ||
+        "gemini-cli-free-tier";
+    }
   }
   const expiresAt = Date.now() + data.expires_in * 1000 - 5 * 60 * 1000;
 
