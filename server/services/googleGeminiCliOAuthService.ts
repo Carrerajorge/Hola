@@ -103,25 +103,40 @@ async function persistGeminiCliOAuthCredentials(
     );
   }
 
-  upsertAuthProfile({
-    profileId,
-    agentDir,
-    credential: {
-      type: "oauth",
-      provider: PROVIDER_ID,
-      access: credentials.access,
-      refresh: credentials.refresh,
-      expires: credentials.expires,
-      projectId: credentials.projectId,
-      ...(credentials.email ? { email: credentials.email } : {}),
-    },
-  });
+  try {
+    upsertAuthProfile({
+      profileId,
+      agentDir,
+      credential: {
+        type: "oauth",
+        provider: PROVIDER_ID,
+        access: credentials.access,
+        refresh: credentials.refresh,
+        expires: credentials.expires,
+        projectId: credentials.projectId,
+        ...(credentials.email ? { email: credentials.email } : {}),
+      },
+    });
+  } catch (profileError) {
+    console.error(
+      "[GeminiCliOAuth] upsertAuthProfile failed:",
+      profileError instanceof Error ? profileError.message : profileError,
+    );
+    throw new Error("No se pudo guardar el perfil OAuth. Revisa permisos del directorio del servidor.");
+  }
 
-  await setAuthProfileOrder({
-    agentDir,
-    provider: PROVIDER_ID,
-    order: [profileId],
-  });
+  try {
+    await setAuthProfileOrder({
+      agentDir,
+      provider: PROVIDER_ID,
+      order: [profileId],
+    });
+  } catch (orderError) {
+    console.warn(
+      "[GeminiCliOAuth] setAuthProfileOrder failed (non-critical):",
+      orderError instanceof Error ? orderError.message : orderError,
+    );
+  }
 
   // Post-credential hooks: models JSON and Pi auth JSON are best-effort.
   // The credential is already persisted; these enhance the developer experience

@@ -113,7 +113,7 @@ export default function Home() {
     if (!isReady || !user) return;
     const params = new URLSearchParams(window.location.search);
     const provider = params.get("provider");
-    if (provider === "gemini" || provider === "openai") {
+    if (provider === "gemini" || provider === "openai" || provider === "antigravity") {
       // Capture the email before cleaning URL params
       const loginEmail = params.get("email") || "";
       // Clean up URL first

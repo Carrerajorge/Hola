@@ -51,7 +51,7 @@ const OAUTH_ERROR_MESSAGES: Record<string, string> = {
   replit_disabled: "El inicio de sesión con Replit fue desactivado. Usa Google, teléfono o correo.",
 };
 
-type SocialProvider = "google" | "gemini" | "openai";
+type SocialProvider = "google" | "gemini" | "openai" | "antigravity";
 
 export default function LoginPage() {
   const [, setLocation] = useLocation();
@@ -305,13 +305,18 @@ export default function LoginPage() {
     if (!loginHint && email && email.includes("@")) {
       params.set("login_hint", email);
     }
-    // For Gemini and OpenAI providers, always hint towards Gmail domain
-    // so Google pre-selects the user's Gmail account automatically
-    if ((provider === "gemini" || provider === "openai") && !params.has("login_hint") && email && email.endsWith("@gmail.com")) {
-      params.set("login_hint", email);
+    // For Gemini, OpenAI, and Antigravity providers, always hint towards Gmail
+    // so Google pre-selects the user's Gmail account automatically.
+    // If the user has typed an email ending in @gmail.com, use it directly.
+    // Otherwise, for these providers, still pass the email if available to help Google
+    // suggest the right account.
+    if ((provider === "gemini" || provider === "openai" || provider === "antigravity") && !params.has("login_hint")) {
+      if (email && email.includes("@")) {
+        params.set("login_hint", email);
+      }
     }
     // Pass provider_hint so the server can redirect to the right flow after Google OAuth
-    // This enables auto-triggering Gemini CLI or OpenAI Codex OAuth after login
+    // This enables auto-triggering Gemini CLI, OpenAI Codex, or Antigravity OAuth after login
     if (provider !== "google") {
       params.set("provider_hint", provider);
     }
@@ -557,6 +562,26 @@ export default function LoginPage() {
                   </svg>
                 )}
                 {isSocialProviderLoading("openai") ? "Conectando..." : "Continuar con ChatGPT"}
+              </Button>
+
+              {/* Google Antigravity Login */}
+              <Button
+                variant="outline"
+                className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-2"
+                onClick={() => handleGoogleLogin("antigravity")}
+                disabled={isAnySocialProviderLoading}
+                data-testid="button-login-antigravity"
+              >
+                {isSocialProviderLoading("antigravity") ? (
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                ) : (
+                  <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5" opacity="0.3" />
+                    <circle cx="12" cy="12" r="6" stroke="currentColor" strokeWidth="1.5" opacity="0.5" />
+                    <circle cx="12" cy="12" r="2.5" fill="currentColor" opacity="0.85" />
+                  </svg>
+                )}
+                {isSocialProviderLoading("antigravity") ? "Conectando..." : "Continuar con Antigravity"}
               </Button>
 
               {/* Phone Authentication */}

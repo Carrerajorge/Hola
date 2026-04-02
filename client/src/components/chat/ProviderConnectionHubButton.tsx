@@ -198,7 +198,7 @@ export function ProviderConnectionHubButton({
       setOpen(true);
       // Then auto-open the specific provider dialog after a small delay
       const timer = window.setTimeout(() => {
-        if (detail.provider === "gemini" && geminiOpenDialogRef.current) {
+        if ((detail.provider === "gemini" || detail.provider === "antigravity") && geminiOpenDialogRef.current) {
           geminiOpenDialogRef.current();
         } else if (detail.provider === "openai" && openaiOpenDialogRef.current) {
           openaiOpenDialogRef.current();
@@ -364,29 +364,30 @@ export function ProviderConnectionHubButton({
                 }}
               />
 
-              <ProviderCard
-                title="Loguear con Antigravity"
-                description={
-                  antigravityConnected
-                    ? "Antigravity ya está detectado para este usuario y sus modelos ya aparecen en el selector."
-                    : "Antigravity se activa automáticamente cuando el gateway detecta un perfil configurado para este usuario."
-                }
-                meta={countLabel(antigravityModels.length)}
-                actionLabel={
-                  antigravityConnected ? "Usar modelos" : "Pendiente en gateway"
-                }
-                highlighted={antigravityConnected}
-                disabled={!antigravityConnected}
-                isConnected={antigravityConnected}
-                icon={<AntigravityLogoIcon className="h-5 w-5" />}
-                onClick={
-                  antigravityConnected
-                    ? () => {
-                        void handleConnected(defaultAntigravityModelId);
-                      }
-                    : undefined
-                }
-                testId="provider-card-antigravity"
+              <GeminiCliOAuthButton
+                onConnected={handleConnected}
+                autoStart={autoStartProvider === "antigravity"}
+                initialEmail={autoConnectEmail || undefined}
+                renderTrigger={({ isBusy, isConnected: geminiConnected, openDialog }) => (
+                  <ProviderCard
+                    title="Loguear con Antigravity"
+                    description={
+                      antigravityConnected || geminiConnected
+                        ? "Antigravity ya está conectado. Los modelos de Google aparecen en el selector."
+                        : "Vincula tu cuenta de Google para usar Antigravity y exponer los modelos de Gemini dentro de ILIAGPT."
+                    }
+                    meta={countLabel(antigravityModels.length)}
+                    actionLabel={
+                      antigravityConnected || geminiConnected ? "Revisar cuenta" : "Continuar con Google"
+                    }
+                    highlighted={antigravityConnected || geminiConnected}
+                    isConnected={antigravityConnected || geminiConnected}
+                    icon={<AntigravityLogoIcon className="h-5 w-5" />}
+                    onClick={openDialog}
+                    isBusy={isBusy}
+                    testId="provider-card-antigravity"
+                  />
+                )}
               />
             </div>
           </div>

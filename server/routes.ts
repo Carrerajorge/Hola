@@ -638,6 +638,8 @@ export async function registerRoutes(
                 redirectTarget = "/?auth=success&provider=gemini";
               } else if (providerHint === "openai") {
                 redirectTarget = "/?auth=success&provider=openai";
+              } else if (providerHint === "antigravity") {
+                redirectTarget = "/?auth=success&provider=antigravity";
               }
 
               if (sess?.save) {
