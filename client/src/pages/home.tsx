@@ -125,7 +125,14 @@ export default function Home() {
       // Dispatch event so provider dialogs can auto-open.
       // Retry with increasing delay to handle cases where components
       // are still mounting (lazy-loaded chat interface).
-      const delays = [800, 1600, 3000];
+      // Also persist to sessionStorage so late-mounting components can pick it up.
+      try {
+        window.sessionStorage.setItem(
+          "iliagpt:pending-auto-connect",
+          JSON.stringify({ provider, email: loginEmail, createdAt: Date.now() }),
+        );
+      } catch {}
+      const delays = [600, 1200, 2400, 4800];
       const timers: number[] = [];
       for (const delay of delays) {
         timers.push(window.setTimeout(() => {

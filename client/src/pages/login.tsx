@@ -558,7 +558,7 @@ export default function LoginPage() {
                   <Loader2 className="h-6 w-6 animate-spin" />
                 ) : (
                   <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M22.28 9.37a5.99 5.99 0 0 0-.52-4.93 6.07 6.07 0 0 0-6.55-2.91A5.99 5.99 0 0 0 10.69.18a6.07 6.07 0 0 0-5.8 4.21 5.99 5.99 0 0 0-4.01 2.9 6.07 6.07 0 0 0 .74 7.12 5.99 5.99 0 0 0 .52 4.93 6.07 6.07 0 0 0 6.55 2.91 5.99 5.99 0 0 0 4.52 1.35 6.07 6.07 0 0 0 5.8-4.21 5.99 5.99 0 0 0 4.01-2.9 6.07 6.07 0 0 0-.74-7.12Z" fill="currentColor" opacity="0.85"/>
+                    <path d="M22.28 9.37a5.99 5.99 0 0 0-.52-4.93 6.07 6.07 0 0 0-6.55-2.91A5.99 5.99 0 0 0 10.69.18a6.07 6.07 0 0 0-5.8 4.21 5.99 5.99 0 0 0-4.01 2.9 6.07 6.07 0 0 0 .74 7.12 5.99 5.99 0 0 0 .52 4.93 6.07 6.07 0 0 0 6.55 2.91 5.99 5.99 0 0 0 4.52 1.35 6.07 6.07 0 0 0 5.8-4.21 5.99 5.99 0 0 0 4.01-2.9 6.07 6.07 0 0 0-.74-7.12Z" fill="#10a37f" opacity="0.9"/>
                   </svg>
                 )}
                 {isSocialProviderLoading("openai") ? "Conectando..." : "Continuar con ChatGPT"}
@@ -576,9 +576,10 @@ export default function LoginPage() {
                   <Loader2 className="h-6 w-6 animate-spin" />
                 ) : (
                   <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5" opacity="0.3" />
-                    <circle cx="12" cy="12" r="6" stroke="currentColor" strokeWidth="1.5" opacity="0.5" />
-                    <circle cx="12" cy="12" r="2.5" fill="currentColor" opacity="0.85" />
+                    <path d="M12 3.25c-4.83 0-8.75 3.92-8.75 8.75S7.17 20.75 12 20.75c2.85 0 5.38-1.37 6.98-3.48" stroke="#4285F4" strokeWidth="1.8" strokeLinecap="round" />
+                    <path d="M14.25 7.25c3.04 0 5.5 2.46 5.5 5.5 0 1.96-1.02 3.67-2.56 4.65" stroke="#34A853" strokeWidth="1.8" strokeLinecap="round" opacity="0.8" />
+                    <circle cx="12" cy="12" r="2.4" fill="#EA4335" opacity="0.92" />
+                    <path d="M16.8 6.2l.95 2.05 2.05.95-2.05.95-.95 2.05-.95-2.05-2.05-.95 2.05-.95.95-2.05Z" fill="#FBBC05" />
                   </svg>
                 )}
                 {isSocialProviderLoading("antigravity") ? "Conectando..." : "Continuar con Antigravity"}

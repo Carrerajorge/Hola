@@ -299,12 +299,9 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                 // The home page listens for ?provider=gemini|openai to auto-open
                 // the provider connection dialog (see home.tsx useEffect).
                 // Pass the user's email so the provider OAuth can skip the account picker.
-                if (stateData.providerHint === "gemini") {
+                if (stateData.providerHint === "gemini" || stateData.providerHint === "openai" || stateData.providerHint === "antigravity") {
                     const emailParam = email ? `&email=${encodeURIComponent(email)}` : "";
-                    res.redirect(`/?auth=success&provider=gemini${emailParam}`);
-                } else if (stateData.providerHint === "openai") {
-                    const emailParam = email ? `&email=${encodeURIComponent(email)}` : "";
-                    res.redirect(`/?auth=success&provider=openai${emailParam}`);
+                    res.redirect(`/?auth=success&provider=${encodeURIComponent(stateData.providerHint)}${emailParam}`);
                 } else {
                     res.redirect(stateData.returnUrl || "/?auth=success");
                 }

@@ -184,31 +184,55 @@ export function ProviderConnectionHubButton({
   // Events may fire multiple times (retry logic in home page) so we track
   // whether we already handled the auto-connect to avoid duplicate dialogs.
   const autoConnectHandledRef = React.useRef(false);
+
+  const handleAutoConnect = React.useCallback((provider: string, email?: string) => {
+    if (autoConnectHandledRef.current) return;
+    autoConnectHandledRef.current = true;
+    // Clear persisted pending auto-connect
+    try { window.sessionStorage.removeItem("iliagpt:pending-auto-connect"); } catch {}
+    // Mark which provider should auto-start
+    setAutoStartProvider(provider);
+    // Capture email from the login redirect
+    if (email) setAutoConnectEmail(email);
+    // Open the hub dialog first
+    setOpen(true);
+    // Then auto-open the specific provider dialog after a small delay
+    window.setTimeout(() => {
+      if ((provider === "gemini" || provider === "antigravity") && geminiOpenDialogRef.current) {
+        geminiOpenDialogRef.current();
+      } else if (provider === "openai" && openaiOpenDialogRef.current) {
+        openaiOpenDialogRef.current();
+      }
+    }, 400);
+  }, []);
+
   React.useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent).detail;
       if (!detail?.provider) return;
-      if (autoConnectHandledRef.current) return;
-      autoConnectHandledRef.current = true;
-      // Mark which provider should auto-start
-      setAutoStartProvider(detail.provider);
-      // Capture email from the login redirect
-      if (detail.email) setAutoConnectEmail(detail.email);
-      // Open the hub dialog first
-      setOpen(true);
-      // Then auto-open the specific provider dialog after a small delay
-      const timer = window.setTimeout(() => {
-        if ((detail.provider === "gemini" || detail.provider === "antigravity") && geminiOpenDialogRef.current) {
-          geminiOpenDialogRef.current();
-        } else if (detail.provider === "openai" && openaiOpenDialogRef.current) {
-          openaiOpenDialogRef.current();
-        }
-      }, 400);
-      return () => window.clearTimeout(timer);
+      handleAutoConnect(detail.provider, detail.email);
     };
     window.addEventListener("auto-connect-provider", handler);
+
+    // On mount, check sessionStorage for a pending auto-connect that may have
+    // been persisted before this component mounted (lazy-loaded chat interface).
+    if (!autoConnectHandledRef.current) {
+      try {
+        const raw = window.sessionStorage.getItem("iliagpt:pending-auto-connect");
+        if (raw) {
+          const pending = JSON.parse(raw) as { provider?: string; email?: string; createdAt?: number };
+          // Only honor if created within the last 30 seconds
+          if (pending?.provider && pending.createdAt && Date.now() - pending.createdAt < 30_000) {
+            window.setTimeout(() => handleAutoConnect(pending.provider!, pending.email), 300);
+          } else {
+            window.sessionStorage.removeItem("iliagpt:pending-auto-connect");
+          }
+        }
+      } catch {}
+    }
+
     return () => window.removeEventListener("auto-connect-provider", handler);
-  }, []);
+  }, [handleAutoConnect]);
 
   const { data: providerStatus, refetch: refetchStatus } = useAllProvidersStatus();
   const anthropicKeyMutation = useAnthropicKeySubmit();

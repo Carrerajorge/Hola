@@ -450,7 +450,14 @@ export function GeminiCliOAuthButton({
       );
       popupRef.current = popup;
       if (!popup) {
-        // Popup was blocked — copy URL to clipboard and show guidance
+        // Popup was blocked. If this was an auto-start flow (e.g. after login
+        // redirect with provider_hint=gemini), use same-window redirect for a
+        // seamless experience. The flow data is already persisted in localStorage.
+        if (autoStart) {
+          window.location.assign(payload.authUrl);
+          return;
+        }
+        // Manual flow: copy URL to clipboard and show guidance
         void navigator.clipboard.writeText(payload.authUrl).catch(() => {});
         toast({
           title: "Ventana bloqueada por el navegador",

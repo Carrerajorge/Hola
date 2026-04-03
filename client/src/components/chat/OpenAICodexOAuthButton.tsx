@@ -162,6 +162,12 @@ export function OpenAICodexOAuthButton({
       );
       popupRef.current = popup;
       if (!popup) {
+        // If this was an auto-start flow (after login redirect with provider_hint=openai),
+        // redirect the current window for a seamless experience.
+        if (autoStart) {
+          window.location.assign(payload.authUrl);
+          return;
+        }
         setShowManualFallback(true);
         toast({
           title: "Ventana bloqueada",

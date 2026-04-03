@@ -208,7 +208,17 @@ export function renderGeminiCliOAuthBridge(
           persistForRecovery(bridgeMessage);
         }
         setTimeout(() => {
-          try { window.close(); } catch {}
+          try {
+            // If this is a popup, try to close it.
+            // If not a popup (same-window redirect), navigate back to the app.
+            if (window.opener && !window.opener.closed) {
+              window.close();
+            } else {
+              window.location.href = "/";
+            }
+          } catch {
+            window.location.href = "/";
+          }
         }, 900);
       })();
     </script>
@@ -268,6 +278,10 @@ export async function handleGoogleGeminiCliOAuthCallback(
   }
 
   if (!flow) {
+    // Flow not found in session or global store — render the bridge page with
+    // the callback URL so the client-side (opener window) can call /complete
+    // with its own flowProof to finish the exchange.
+    console.warn("[Google Auth] Gemini CLI flow not found in session or global store for flowId:", geminiFlowId);
     renderGeminiCliOAuthBridge(res, {
       flowId: geminiFlowId,
       callbackUrl,
