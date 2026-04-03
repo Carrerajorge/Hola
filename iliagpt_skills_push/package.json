@@ -144,7 +144,7 @@
     "d3": "^7.9.0",
     "date-fns": "^3.6.0",
     "docx": "^9.5.1",
-    "dompurify": "^3.3.1",
+    "dompurify": "^3.3.2",
     "dotenv": "^17.2.3",
     "drizzle-orm": "^0.39.3",
     "drizzle-zod": "^0.7.0",
