@@ -410,7 +410,7 @@
     "autoprefixer": "^10.4.24",
     "concurrently": "^9.2.1",
     "drizzle-kit": "^0.31.9",
-    "electron": "^40.6.0",
+    "electron": "^40.8.5",
     "electron-builder": "^26.8.1",
     "esbuild": "^0.25.0",
     "eslint": "^9.39.0",
