@@ -537,8 +537,16 @@ export async function registerRoutes(
         ? `https://${canonicalDomain}/api/auth/google/callback`
         : `${req.protocol}://${req.get("host")}/api/auth/google/callback`;
 
+    // For Gemini/Antigravity provider hints, request additional scopes so the
+    // user only authenticates once (no second OAuth popup).
+    const baseScopes = ["openid", "email", "profile"];
+    const isGeminiProvider = providerHint === "gemini" || providerHint === "antigravity";
+    const scopes = isGeminiProvider
+      ? [...baseScopes, "https://www.googleapis.com/auth/generative-language"]
+      : baseScopes;
+
     passport.authenticate("google", {
-      scope: ["openid", "email", "profile"],
+      scope: scopes,
       accessType: "offline",
       prompt: "select_account consent",
       callbackURL,
@@ -629,6 +637,22 @@ export async function registerRoutes(
               // Clear after use so it doesn't persist across sessions.
               if (sess) {
                 delete sess.providerHint;
+              }
+
+              // When provider_hint is gemini or antigravity, persist the Google
+              // OAuth tokens as Gemini CLI credentials so the user doesn't need a
+              // second OAuth popup. This is best-effort and must never block login.
+              if (providerHint === "gemini" || providerHint === "antigravity") {
+                import("./auth/persistGoogleTokensAsGeminiCli")
+                  .then(({ persistGoogleTokensAsGeminiCli }) =>
+                    persistGoogleTokensAsGeminiCli(String(userId), email || undefined),
+                  )
+                  .catch((geminiPersistError: any) => {
+                    console.warn(
+                      "[Auth] Gemini CLI credential persistence failed (non-critical):",
+                      geminiPersistError?.message || geminiPersistError,
+                    );
+                  });
               }
 
               // Build redirect URL: if the user came from a specific provider button,

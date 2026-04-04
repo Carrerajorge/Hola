@@ -3,35 +3,16 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator } from "@/components/ui/input-otp";
-import { X, Apple, Phone, Loader2, Mail, Sparkles, ArrowLeft, CheckCircle2, XCircle, AlertCircle, ShieldCheck, ChevronDown } from "lucide-react";
+import { X, Phone, Loader2, Mail, Sparkles, ArrowLeft, CheckCircle2, XCircle, AlertCircle, ShieldCheck, ChevronDown } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import { apiFetch } from "@/lib/apiClient";
-
-/* ── SVG Logo Components ── */
-const GeminiLogo = ({ className }: { className?: string }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-    <path d="M12 2C12 2 14.5 7.5 17 10C19.5 12.5 22 12 22 12C22 12 19.5 11.5 17 14C14.5 16.5 12 22 12 22C12 22 9.5 16.5 7 14C4.5 11.5 2 12 2 12C2 12 4.5 12.5 7 10C9.5 7.5 12 2 12 2Z" fill="url(#gemini-gradient)" />
-    <defs>
-      <linearGradient id="gemini-gradient" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
-        <stop stopColor="#4285F4" />
-        <stop offset="0.5" stopColor="#9B72CB" />
-        <stop offset="1" stopColor="#D96570" />
-      </linearGradient>
-    </defs>
-  </svg>
-);
-
-const OpenAILogo = ({ className }: { className?: string }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-    <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364l2.0201-1.1638a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.4114-.6813zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0974-2.3616l2.603-1.5018 2.6032 1.5018v3.0036l-2.6032 1.5018-2.603-1.5018z" />
-  </svg>
-);
+import { clearForcedSignedOutFlag } from "@/lib/auth-flow";
 
 const COUNTRY_CODES = [
   { code: "+1", country: "US", flag: "\u{1F1FA}\u{1F1F8}", name: "Estados Unidos" },
-  { code: "+52", country: "MX", flag: "\u{1F1F2}\u{1F1FD}", name: "M\u00e9xico" },
-  { code: "+51", country: "PE", flag: "\u{1F1F5}\u{1F1EA}", name: "Per\u00fa" },
+  { code: "+52", country: "MX", flag: "\u{1F1F2}\u{1F1FD}", name: "México" },
+  { code: "+51", country: "PE", flag: "\u{1F1F5}\u{1F1EA}", name: "Perú" },
   { code: "+54", country: "AR", flag: "\u{1F1E6}\u{1F1F7}", name: "Argentina" },
   { code: "+55", country: "BR", flag: "\u{1F1E7}\u{1F1F7}", name: "Brasil" },
   { code: "+56", country: "CL", flag: "\u{1F1E8}\u{1F1F1}", name: "Chile" },
@@ -42,32 +23,41 @@ const COUNTRY_CODES = [
   { code: "+595", country: "PY", flag: "\u{1F1F5}\u{1F1FE}", name: "Paraguay" },
   { code: "+598", country: "UY", flag: "\u{1F1FA}\u{1F1FE}", name: "Uruguay" },
   { code: "+506", country: "CR", flag: "\u{1F1E8}\u{1F1F7}", name: "Costa Rica" },
-  { code: "+507", country: "PA", flag: "\u{1F1F5}\u{1F1E6}", name: "Panam\u00e1" },
-  { code: "+34", country: "ES", flag: "\u{1F1EA}\u{1F1F8}", name: "Espa\u00f1a" },
+  { code: "+507", country: "PA", flag: "\u{1F1F5}\u{1F1E6}", name: "Panamá" },
+  { code: "+34", country: "ES", flag: "\u{1F1EA}\u{1F1F8}", name: "España" },
   { code: "+44", country: "GB", flag: "\u{1F1EC}\u{1F1E7}", name: "Reino Unido" },
   { code: "+49", country: "DE", flag: "\u{1F1E9}\u{1F1EA}", name: "Alemania" },
   { code: "+33", country: "FR", flag: "\u{1F1EB}\u{1F1F7}", name: "Francia" },
   { code: "+39", country: "IT", flag: "\u{1F1EE}\u{1F1F9}", name: "Italia" },
-  { code: "+81", country: "JP", flag: "\u{1F1EF}\u{1F1F5}", name: "Jap\u00f3n" },
+  { code: "+81", country: "JP", flag: "\u{1F1EF}\u{1F1F5}", name: "Japón" },
   { code: "+86", country: "CN", flag: "\u{1F1E8}\u{1F1F3}", name: "China" },
   { code: "+91", country: "IN", flag: "\u{1F1EE}\u{1F1F3}", name: "India" },
 ];
 
 const OAUTH_ERROR_MESSAGES: Record<string, string> = {
-  auth_failed: "Error de autenticaci\u00f3n con Google. Por favor intenta de nuevo.",
-  no_user: "No se pudo obtener la informaci\u00f3n del usuario. Por favor intenta de nuevo.",
-  login_failed: "Error al iniciar sesi\u00f3n. Por favor intenta de nuevo.",
-  invalid_token: "Enlace m\u00e1gico inv\u00e1lido o expirado.",
-  magic_link_expired: "El enlace m\u00e1gico ha expirado. Solicita uno nuevo.",
-  session_error: "Error al crear la sesi\u00f3n. Por favor intenta de nuevo.",
+  auth_failed: "Error de autenticación con Google. Por favor intenta de nuevo.",
+  no_user: "No se pudo obtener la información del usuario. Por favor intenta de nuevo.",
+  login_failed: "Error al iniciar sesión. Por favor intenta de nuevo.",
+  invalid_token: "Enlace mágico inválido o expirado.",
+  magic_link_expired: "El enlace mágico ha expirado. Solicita uno nuevo.",
+  session_error: "Error al crear la sesión. Por favor intenta de nuevo.",
   verification_failed: "Error al verificar el enlace. Por favor intenta de nuevo.",
-  google_failed: "Error al iniciar sesi\u00f3n con Google. Por favor intenta de nuevo.",
-  microsoft_failed: "Error al iniciar sesi\u00f3n con Microsoft. Por favor intenta de nuevo.",
-  auth0_failed: "Error al iniciar sesi\u00f3n con Auth0. Por favor intenta de nuevo.",
-  replit_disabled: "El inicio de sesi\u00f3n con Replit fue desactivado. Usa Google, tel\u00e9fono o correo.",
-  gemini_failed: "Error al iniciar sesi\u00f3n con Gemini. Por favor intenta de nuevo.",
-  openai_failed: "Error al iniciar sesi\u00f3n con OpenAI. Por favor intenta de nuevo.",
+  google_failed: "Error al iniciar sesión con Google. Por favor intenta de nuevo.",
+  google_state_failed: "La sesión de Google expiró o se perdió durante el regreso. Intenta de nuevo.",
+  google_profile_failed: "Google no devolvió un correo válido para iniciar sesión.",
+  google_token_failed: "Google no permitió completar el acceso. Intenta de nuevo.",
+  microsoft_failed: "Error al iniciar sesión con Microsoft. Por favor intenta de nuevo.",
+  auth0_failed: "Error al iniciar sesión con Auth0. Por favor intenta de nuevo.",
+  replit_disabled: "El inicio de sesión con Replit fue desactivado. Usa Google, teléfono o correo.",
+  gemini_failed: "Error al iniciar sesión con Gemini. Por favor intenta de nuevo.",
+  openai_failed: "Error al iniciar sesión con OpenAI/ChatGPT. Por favor intenta de nuevo.",
+  antigravity_failed: "Error al iniciar sesión con Antigravity. Por favor intenta de nuevo.",
+  gemini_cli_complete_failed: "No se pudo completar la vinculación con Gemini CLI. Intenta de nuevo.",
+  gemini_cli_missing_code: "Google no devolvió el código de autorización para Gemini. Intenta de nuevo.",
+  gemini_cli_invalid_state: "La sesión de Gemini OAuth expiró. Por favor intenta de nuevo.",
 };
+
+type SocialProvider = "google" | "gemini" | "openai" | "antigravity";
 
 export default function LoginPage() {
   const [, setLocation] = useLocation();
@@ -78,9 +68,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
-  const [isGeminiLoading, setIsGeminiLoading] = useState(false);
-  const [isOpenAILoading, setIsOpenAILoading] = useState(false);
+  const [activeSocialProvider, setActiveSocialProvider] = useState<SocialProvider | null>(null);
 
   const [isMagicLinkLoading, setIsMagicLinkLoading] = useState(false);
   const [magicLinkSent, setMagicLinkSent] = useState(false);
@@ -161,7 +149,6 @@ export default function LoginPage() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -181,9 +168,9 @@ export default function LoginPage() {
 
         if (!data.active) {
           if (status === "denied") {
-            setError("Solicitud rechazada. Intenta iniciar sesi\u00f3n de nuevo.");
+            setError("Solicitud rechazada. Intenta iniciar sesión de nuevo.");
           } else if (status === "expired") {
-            setError("La solicitud expir\u00f3. Intenta iniciar sesi\u00f3n de nuevo.");
+            setError("La solicitud expiró. Intenta iniciar sesión de nuevo.");
           }
           if (intervalId) window.clearInterval(intervalId);
           intervalId = null;
@@ -204,7 +191,7 @@ export default function LoginPage() {
               window.location.href = "/";
               return;
             }
-            setError((verifyData as any)?.message || "No se pudo completar el inicio de sesi\u00f3n.");
+            setError((verifyData as any)?.message || "No se pudo completar el inicio de sesión.");
           } finally {
             setIsMfaVerifying(false);
           }
@@ -264,9 +251,9 @@ export default function LoginPage() {
         window.location.href = "/";
         return;
       }
-      setError((data as any)?.message || "No se pudo verificar el c\u00f3digo.");
+      setError((data as any)?.message || "No se pudo verificar el código.");
     } catch {
-      setError("Error al verificar el c\u00f3digo.");
+      setError("Error al verificar el código.");
     } finally {
       setIsMfaVerifying(false);
     }
@@ -274,6 +261,7 @@ export default function LoginPage() {
 
   const handleContinue = async () => {
     if (email && password) {
+      clearForcedSignedOutFlag();
       setIsLoading(true);
       setError("");
       try {
@@ -299,56 +287,52 @@ export default function LoginPage() {
           return;
         }
 
-        setError((data as any)?.message || "Credenciales inv\u00e1lidas");
+        setError((data as any)?.message || "Credenciales inválidas");
       } catch (err) {
-        setError("Error al iniciar sesi\u00f3n");
+        setError("Error al iniciar sesión");
       } finally {
         setIsLoading(false);
       }
     } else if (email && !password) {
-      setError("Por favor ingresa tu contrase\u00f1a");
+      setError("Por favor ingresa tu contraseña");
     }
   };
 
-  const handleGoogleLogin = () => {
-    setIsGoogleLoading(true);
+  const handleGoogleLogin = (provider: SocialProvider = "google", loginHint?: string) => {
+    clearForcedSignedOutFlag();
+    setActiveSocialProvider(provider);
     setError("");
-    window.location.href = "/api/auth/google";
-  };
-
-  const handleGeminiLogin = async () => {
-    setIsGeminiLoading(true);
-    setError("");
-    try {
-      const res = await apiFetch("/api/gemini-cli-oauth/initiate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ loginFlow: true }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({} as any));
-        throw new Error((data as any)?.error || "No se pudo iniciar Gemini OAuth");
+    // Build OAuth URL with optional login_hint for Gmail auto-redirect
+    const params = new URLSearchParams();
+    if (loginHint) {
+      params.set("login_hint", loginHint);
+    }
+    // If user entered an email, use it as login_hint for Google to pre-select account
+    if (!loginHint && email && email.includes("@")) {
+      params.set("login_hint", email);
+    }
+    // For Gemini, OpenAI, and Antigravity providers, always hint towards Gmail
+    // so Google pre-selects the user's Gmail account automatically.
+    // If the user has typed an email ending in @gmail.com, use it directly.
+    // Otherwise, for these providers, still pass the email if available to help Google
+    // suggest the right account.
+    if ((provider === "gemini" || provider === "openai" || provider === "antigravity") && !params.has("login_hint")) {
+      if (email && email.includes("@")) {
+        params.set("login_hint", email);
       }
-      const { authUrl } = await res.json();
-      window.location.href = authUrl;
-    } catch (err: any) {
-      setError(err.message || "Error al iniciar Gemini OAuth");
-      setIsGeminiLoading(false);
     }
-  };
-
-  const handleOpenAILogin = () => {
-    setIsOpenAILoading(true);
-    setError("");
-    // OpenAI login uses Google OAuth — redirect with provider_hint so the server
-    // knows to track this as an OpenAI-branded login. Google account picker is
-    // forced via prompt=consent+select_account on the server side.
-    window.location.href = "/api/auth/google?provider_hint=openai";
+    // Pass provider_hint so the server can redirect to the right flow after Google OAuth
+    // This enables auto-triggering Gemini CLI, OpenAI Codex, or Antigravity OAuth after login
+    if (provider !== "google") {
+      params.set("provider_hint", provider);
+    }
+    const query = params.toString();
+    window.location.assign(`/api/auth/google${query ? `?${query}` : ""}`);
   };
 
   const handleMagicLink = async () => {
     if (!email) {
-      setError("Ingresa tu correo electr\u00f3nico para recibir el enlace m\u00e1gico");
+      setError("Ingresa tu correo electrónico para recibir el enlace mágico");
       return;
     }
 
@@ -372,10 +356,10 @@ export default function LoginPage() {
           setMagicLinkUrl(data.magicLinkUrl);
         }
       } else {
-        setError(data.message || "Error al enviar el enlace m\u00e1gico");
+        setError(data.message || "Error al enviar el enlace mágico");
       }
     } catch (err) {
-      setError("Error al enviar el enlace m\u00e1gico");
+      setError("Error al enviar el enlace mágico");
     } finally {
       setIsMagicLinkLoading(false);
     }
@@ -384,7 +368,7 @@ export default function LoginPage() {
   // Phone authentication handlers
   const handleSendOtp = async () => {
     if (!phoneNumber) {
-      setError("Ingresa tu n\u00famero de tel\u00e9fono");
+      setError("Ingresa tu número de teléfono");
       return;
     }
 
@@ -409,10 +393,10 @@ export default function LoginPage() {
           setDevCode(data.devCode);
         }
       } else {
-        setError(data.message || "Error al enviar el c\u00f3digo");
+        setError(data.message || "Error al enviar el código");
       }
     } catch (err) {
-      setError("Error al enviar el c\u00f3digo");
+      setError("Error al enviar el código");
     } finally {
       setIsPhoneLoading(false);
     }
@@ -420,10 +404,11 @@ export default function LoginPage() {
 
   const handleVerifyOtp = async () => {
     if (!otpCode) {
-      setError("Ingresa el c\u00f3digo de verificaci\u00f3n");
+      setError("Ingresa el código de verificación");
       return;
     }
 
+    clearForcedSignedOutFlag();
     setIsPhoneLoading(true);
     setError("");
 
@@ -454,9 +439,9 @@ export default function LoginPage() {
         return;
       }
 
-      setError((data as any)?.message || "C\u00f3digo incorrecto");
+      setError((data as any)?.message || "Código incorrecto");
     } catch (err) {
-      setError("Error al verificar el c\u00f3digo");
+      setError("Error al verificar el código");
     } finally {
       setIsPhoneLoading(false);
     }
@@ -477,30 +462,9 @@ export default function LoginPage() {
     setSuccessMessage("");
   };
 
-  const ComingSoonButton = ({ icon: Icon, label }: { icon: any; label: string }) => (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <div className="relative fade-in-up fade-in-up-delay-3">
-            <Button
-              variant="outline"
-              className="w-full h-12 justify-start gap-3 rounded-xl text-base font-normal bg-muted/30 border-border text-muted-foreground cursor-not-allowed"
-              disabled
-            >
-              <Icon className="h-5 w-5 text-muted-foreground" />
-              <span className="text-muted-foreground">{label}</span>
-              <span className="ml-auto text-xs bg-background text-muted-foreground border border-border px-2 py-0.5 rounded-full font-medium">
-                Pr\u00f3ximamente
-              </span>
-            </Button>
-          </div>
-        </TooltipTrigger>
-        <TooltipContent>
-          <p>Esta opci\u00f3n estar\u00e1 disponible pronto</p>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
+  const isSocialProviderLoading = (provider: SocialProvider) => activeSocialProvider === provider;
+  const isAnySocialProviderLoading = activeSocialProvider !== null;
+
 
   return (
     <div className="min-h-screen paper-grid flex items-center justify-center p-4">
@@ -524,7 +488,7 @@ export default function LoginPage() {
               </span>
             </h1>
             <p className="text-muted-foreground">
-              Obt\u00e9n respuestas m\u00e1s inteligentes, carga archivos e im\u00e1genes, y m\u00e1s.
+              Obtén respuestas más inteligentes, carga archivos e imágenes, y más.
             </p>
           </div>
 
@@ -534,11 +498,11 @@ export default function LoginPage() {
               <Button
                 variant="outline"
                 className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-1"
-                onClick={handleGoogleLogin}
-                disabled={isGoogleLoading}
+                onClick={() => handleGoogleLogin("google")}
+                disabled={isAnySocialProviderLoading}
                 data-testid="button-login-google"
               >
-                {isGoogleLoading ? (
+                {isSocialProviderLoading("google") ? (
                   <Loader2 className="h-6 w-6 animate-spin" />
                 ) : (
                   <svg className="h-6 w-6" viewBox="0 0 24 24" aria-hidden="true">
@@ -560,72 +524,72 @@ export default function LoginPage() {
                     />
                   </svg>
                 )}
-                {isGoogleLoading ? "Conectando..." : "Continuar con Google"}
+                {isSocialProviderLoading("google") ? "Conectando..." : "Continuar con Google"}
               </Button>
 
-              {/* Gemini - Google AI */}
+              {/* Google Gemini Login */}
               <Button
                 variant="outline"
                 className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-2"
-                onClick={handleGeminiLogin}
-                disabled={isGeminiLoading}
+                onClick={() => handleGoogleLogin("gemini")}
+                disabled={isAnySocialProviderLoading}
                 data-testid="button-login-gemini"
               >
-                {isGeminiLoading ? (
+                {isSocialProviderLoading("gemini") ? (
                   <Loader2 className="h-6 w-6 animate-spin" />
                 ) : (
-                  <GeminiLogo className="h-6 w-6" />
+                  <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <defs>
+                      <linearGradient id="gemini-login-grad" x1="4" y1="3" x2="20" y2="21" gradientUnits="userSpaceOnUse">
+                        <stop stopColor="#1A73E8" />
+                        <stop offset="0.45" stopColor="#8E6CF8" />
+                        <stop offset="1" stopColor="#34A853" />
+                      </linearGradient>
+                    </defs>
+                    <path fill="url(#gemini-login-grad)" d="M12 2.5c.46 3.63 1.24 5.96 2.42 7.08 1.11 1.05 3.45 1.84 7.08 2.42-3.63.58-5.97 1.37-7.08 2.42-1.18 1.12-1.96 3.45-2.42 7.08-.46-3.63-1.24-5.96-2.42-7.08-1.11-1.05-3.45-1.84-7.08-2.42 3.63-.58 5.97-1.37 7.08-2.42C10.76 8.46 11.54 6.13 12 2.5Z" />
+                  </svg>
                 )}
-                {isGeminiLoading ? "Conectando..." : "Continuar con Gemini"}
+                {isSocialProviderLoading("gemini") ? "Conectando..." : "Continuar con Gemini"}
               </Button>
 
-              {/* OpenAI - via Google OAuth */}
+              {/* OpenAI / ChatGPT Login */}
               <Button
                 variant="outline"
                 className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-2"
-                onClick={handleOpenAILogin}
-                disabled={isOpenAILoading}
+                onClick={() => handleGoogleLogin("openai")}
+                disabled={isAnySocialProviderLoading}
                 data-testid="button-login-openai"
               >
-                {isOpenAILoading ? (
+                {isSocialProviderLoading("openai") ? (
                   <Loader2 className="h-6 w-6 animate-spin" />
                 ) : (
-                  <OpenAILogo className="h-6 w-6" />
+                  <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M22.28 9.37a5.99 5.99 0 0 0-.52-4.93 6.07 6.07 0 0 0-6.55-2.91A5.99 5.99 0 0 0 10.69.18a6.07 6.07 0 0 0-5.8 4.21 5.99 5.99 0 0 0-4.01 2.9 6.07 6.07 0 0 0 .74 7.12 5.99 5.99 0 0 0 .52 4.93 6.07 6.07 0 0 0 6.55 2.91 5.99 5.99 0 0 0 4.52 1.35 6.07 6.07 0 0 0 5.8-4.21 5.99 5.99 0 0 0 4.01-2.9 6.07 6.07 0 0 0-.74-7.12Z" fill="#10a37f" opacity="0.9"/>
+                  </svg>
                 )}
-                {isOpenAILoading ? "Conectando..." : "Continuar con OpenAI"}
+                {isSocialProviderLoading("openai") ? "Conectando..." : "Continuar con ChatGPT"}
               </Button>
 
-              {/* Coming Soon Options */}
-              <ComingSoonButton icon={Apple} label="Continuar con Apple" />
-
-              {/* Microsoft - Coming Soon */}
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <div className="relative fade-in-up fade-in-up-delay-3">
-                      <Button
-                        variant="outline"
-                        className="w-full h-12 justify-start gap-3 rounded-xl text-base font-normal bg-muted/30 border-border text-muted-foreground cursor-not-allowed"
-                        disabled
-                      >
-                        <svg className="h-5 w-5" viewBox="0 0 23 23" aria-hidden="true">
-                          <path fill="#f35325" d="M1 1h10v10H1z" />
-                          <path fill="#81bc06" d="M12 1h10v10H12z" />
-                          <path fill="#05a6f0" d="M1 12h10v10H1z" />
-                          <path fill="#ffba08" d="M12 12h10v10H12z" />
-                        </svg>
-                        <span className="text-muted-foreground">Continuar con Microsoft</span>
-                        <span className="ml-auto text-xs bg-background text-muted-foreground border border-border px-2 py-0.5 rounded-full font-medium">
-                          Pr\u00f3ximamente
-                        </span>
-                      </Button>
-                    </div>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Esta opci\u00f3n estar\u00e1 disponible pronto</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              {/* Google Antigravity Login */}
+              <Button
+                variant="outline"
+                className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-2"
+                onClick={() => handleGoogleLogin("antigravity")}
+                disabled={isAnySocialProviderLoading}
+                data-testid="button-login-antigravity"
+              >
+                {isSocialProviderLoading("antigravity") ? (
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                ) : (
+                  <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M12 3.25c-4.83 0-8.75 3.92-8.75 8.75S7.17 20.75 12 20.75c2.85 0 5.38-1.37 6.98-3.48" stroke="#4285F4" strokeWidth="1.8" strokeLinecap="round" />
+                    <path d="M14.25 7.25c3.04 0 5.5 2.46 5.5 5.5 0 1.96-1.02 3.67-2.56 4.65" stroke="#34A853" strokeWidth="1.8" strokeLinecap="round" opacity="0.8" />
+                    <circle cx="12" cy="12" r="2.4" fill="#EA4335" opacity="0.92" />
+                    <path d="M16.8 6.2l.95 2.05 2.05.95-2.05.95-.95 2.05-.95-2.05-2.05-.95 2.05-.95.95-2.05Z" fill="#FBBC05" />
+                  </svg>
+                )}
+                {isSocialProviderLoading("antigravity") ? "Conectando..." : "Continuar con Antigravity"}
+              </Button>
 
               {/* Phone Authentication */}
               <Button
@@ -635,7 +599,7 @@ export default function LoginPage() {
                 data-testid="button-login-phone"
               >
                 <Phone className="h-5 w-5" />
-                Continuar con el tel\u00e9fono
+                Continuar con el teléfono
               </Button>
             </div>
           )}
@@ -653,7 +617,7 @@ export default function LoginPage() {
               <div className="space-y-4 fade-in-up">
                 <div className="bg-muted/30 border border-border rounded-xl p-4 text-center">
                   <Sparkles className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-                  <h3 className="font-semibold text-foreground mb-1">Enlace m\u00e1gico enviado</h3>
+                  <h3 className="font-semibold text-foreground mb-1">Enlace mágico enviado</h3>
                   <p className="text-sm text-muted-foreground">{successMessage}</p>
                 </div>
 
@@ -661,7 +625,7 @@ export default function LoginPage() {
                 {magicLinkUrl && (
                   <div className="bg-muted/20 border border-border rounded-xl p-4">
                     <p className="text-xs text-muted-foreground mb-2 font-semibold">
-                      Modo desarrollo: click para iniciar sesi\u00f3n
+                      Modo desarrollo: click para iniciar sesión
                     </p>
                     <a href={magicLinkUrl} className="text-sm text-foreground underline break-all">
                       {magicLinkUrl}
@@ -695,11 +659,11 @@ export default function LoginPage() {
 
                 <div className="bg-muted/30 border border-border rounded-xl p-4 text-center">
                   <ShieldCheck className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-                  <h3 className="font-semibold text-foreground mb-1">Verificaci\u00f3n de seguridad</h3>
+                  <h3 className="font-semibold text-foreground mb-1">Verificación de seguridad</h3>
                   <p className="text-sm text-muted-foreground">
                     {mfaMethods?.push
-                      ? "Aprueba el inicio de sesi\u00f3n en tu dispositivo de confianza o ingresa tu c\u00f3digo 2FA."
-                      : "Ingresa tu c\u00f3digo 2FA para continuar."}
+                      ? "Aprueba el inicio de sesión en tu dispositivo de confianza o ingresa tu código 2FA."
+                      : "Ingresa tu código 2FA para continuar."}
                   </p>
                 </div>
 
@@ -725,7 +689,7 @@ export default function LoginPage() {
                               : "Pendiente"}
                       </p>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Revisa la notificaci\u00f3n push en tu dispositivo de confianza.
+                        Revisa la notificación push en tu dispositivo de confianza.
                       </p>
                       {mfaApprovalId ? (
                         <p className="text-[11px] text-muted-foreground mt-2 break-all">
@@ -743,7 +707,7 @@ export default function LoginPage() {
                   <div className="space-y-3">
                     <Input
                       type="text"
-                      placeholder="C\u00f3digo 2FA"
+                      placeholder="Código 2FA"
                       value={mfaCode}
                       onChange={(e) => setMfaCode(e.target.value)}
                       className="h-12 text-base rounded-xl bg-background border-input text-foreground placeholder:text-muted-foreground"
@@ -771,10 +735,16 @@ export default function LoginPage() {
                 )}
               </div>
             ) : (
-              <div className="space-y-4 fade-in-up fade-in-up-delay-4">
+              <form
+                className="space-y-4 fade-in-up fade-in-up-delay-4"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void handleContinue();
+                }}
+              >
                 <Input
                   type="email"
-                  placeholder="Direcci\u00f3n de correo electr\u00f3nico"
+                  placeholder="Dirección de correo electrónico"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="h-12 text-base rounded-xl bg-background border-input text-foreground placeholder:text-muted-foreground"
@@ -782,12 +752,11 @@ export default function LoginPage() {
                 />
                 <Input
                   type="password"
-                  placeholder="Contrase\u00f1a"
+                  placeholder="Contraseña"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="h-12 text-base rounded-xl bg-background border-input text-foreground placeholder:text-muted-foreground"
                   data-testid="input-login-password"
-                  onKeyDown={(e) => e.key === "Enter" && handleContinue()}
                 />
                 {error && (
                   <p
@@ -799,8 +768,8 @@ export default function LoginPage() {
                 )}
                 <div className="flex gap-2">
                   <Button
+                    type="submit"
                     className="flex-1 h-12 text-base bg-primary hover:bg-primary/90 border border-border text-primary-foreground font-semibold transition-colors rounded-xl"
-                    onClick={handleContinue}
                     disabled={isLoading}
                     data-testid="button-login-continue"
                   >
@@ -824,12 +793,12 @@ export default function LoginPage() {
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent>
-                        <p>Iniciar sesi\u00f3n con enlace m\u00e1gico (sin contrase\u00f1a)</p>
+                        <p>Iniciar sesión con enlace mágico (sin contraseña)</p>
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                 </div>
-              </div>
+              </form>
             ))}
 
           {/* ─── Phone Authentication View ─── */}
@@ -859,11 +828,11 @@ export default function LoginPage() {
                         ? "bg-primary/20 text-primary"
                         : "bg-primary text-primary-foreground"
                     }`}>1</div>
-                    <h3 className="text-sm font-semibold text-foreground">Tu n\u00famero</h3>
+                    <h3 className="text-sm font-semibold text-foreground">Tu número</h3>
                   </div>
 
                   <p className="text-xs text-muted-foreground mb-3">
-                    Selecciona tu pa\u00eds e ingresa tu n\u00famero sin el c\u00f3digo de \u00e1rea.
+                    Selecciona tu país e ingresa tu número sin el código de área.
                   </p>
 
                   {/* Country selector */}
@@ -927,7 +896,7 @@ export default function LoginPage() {
                       disabled={isPhoneLoading || !phoneNumber.replace(/\D/g, "")}
                       data-testid="button-send-otp"
                     >
-                      {isPhoneLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Enviar c\u00f3digo"}
+                      {isPhoneLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Enviar código"}
                     </Button>
                   )}
 
@@ -942,7 +911,7 @@ export default function LoginPage() {
                         setError("");
                       }}
                     >
-                      Cambiar n\u00famero
+                      Cambiar número
                     </button>
                   )}
                 </div>
@@ -959,13 +928,13 @@ export default function LoginPage() {
                         ? "bg-primary text-primary-foreground"
                         : "bg-muted text-muted-foreground"
                     }`}>2</div>
-                    <h3 className="text-sm font-semibold text-foreground">C\u00f3digo de verificaci\u00f3n</h3>
+                    <h3 className="text-sm font-semibold text-foreground">Código de verificación</h3>
                   </div>
 
                   <p className="text-xs text-muted-foreground mb-3">
                     {otpSent
                       ? `Enviado a ${selectedCountry.code} ${phoneNumber}`
-                      : "Ingresa el c\u00f3digo de 6 d\u00edgitos que recibir\u00e1s."}
+                      : "Ingresa el código de 6 dígitos que recibirás."}
                   </p>
 
                   {devCode && otpSent && (
@@ -1018,7 +987,7 @@ export default function LoginPage() {
                         handleSendOtp();
                       }}
                     >
-                      Reenviar c\u00f3digo
+                      Reenviar código
                     </button>
                   )}
                 </div>
@@ -1042,13 +1011,13 @@ export default function LoginPage() {
           {!showPhoneAuth && (
             allowRegistration ? (
               <p className="text-center text-sm text-zinc-500 mt-6 fade-in-up fade-in-up-delay-5">
-                \u00bfNo tienes una cuenta?{" "}
+                ¿No tienes una cuenta?{" "}
                 <button
                   onClick={() => setLocation("/signup")}
                   className="text-foreground font-semibold hover:underline transition-colors"
                   data-testid="link-goto-signup"
                 >
-                  Suscr\u00edbete gratis
+                  Suscríbete gratis
                 </button>
               </p>
             ) : (

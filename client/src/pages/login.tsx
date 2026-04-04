@@ -49,6 +49,12 @@ const OAUTH_ERROR_MESSAGES: Record<string, string> = {
   microsoft_failed: "Error al iniciar sesión con Microsoft. Por favor intenta de nuevo.",
   auth0_failed: "Error al iniciar sesión con Auth0. Por favor intenta de nuevo.",
   replit_disabled: "El inicio de sesión con Replit fue desactivado. Usa Google, teléfono o correo.",
+  gemini_failed: "Error al iniciar sesión con Gemini. Por favor intenta de nuevo.",
+  openai_failed: "Error al iniciar sesión con OpenAI/ChatGPT. Por favor intenta de nuevo.",
+  antigravity_failed: "Error al iniciar sesión con Antigravity. Por favor intenta de nuevo.",
+  gemini_cli_complete_failed: "No se pudo completar la vinculación con Gemini CLI. Intenta de nuevo.",
+  gemini_cli_missing_code: "Google no devolvió el código de autorización para Gemini. Intenta de nuevo.",
+  gemini_cli_invalid_state: "La sesión de Gemini OAuth expiró. Por favor intenta de nuevo.",
 };
 
 type SocialProvider = "google" | "gemini" | "openai" | "antigravity";
