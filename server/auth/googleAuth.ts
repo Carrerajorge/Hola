@@ -2,12 +2,14 @@
  * Google OAuth Authentication
  * Implements OAuth 2.0 for Google account login
  */
+import { randomBytes } from "node:crypto";
 import { Router, Request, Response } from "express";
 import { authStorage } from "../replit_integrations/auth/storage";
 import { storage } from "../storage";
 import { env } from "../config/env";
 import { handleGoogleGeminiCliOAuthCallback } from "./googleGeminiCliBridge";
 import { buildSessionUserFromDbUser } from "../lib/sessionUser";
+import { persistGoogleTokensAsGeminiCli } from "./persistGoogleTokensAsGeminiCli";
 
 const router = Router();
 
@@ -54,9 +56,7 @@ export const isGoogleConfigured = (): boolean => {
 
 // Helper to generate random state for CSRF protection
 const generateState = (): string => {
-    const array = new Uint8Array(32);
-    crypto.getRandomValues(array);
-    return Array.from(array, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return randomBytes(32).toString("hex");
 };
 
 function normalizeLoginHint(value: unknown): string | null {
@@ -122,17 +122,25 @@ router.get("/google", (req: Request, res: Response) => {
         normalizeLoginHint(req.query.loginHint) ??
         normalizeLoginHint(req.query.login_hint);
 
+    // When provider_hint is gemini or antigravity, request Gemini-specific scopes
+    // so the user only needs ONE OAuth login (no second popup).
+    const isGeminiHint = providerHint === "gemini" || providerHint === "antigravity";
+    const scopes = isGeminiHint
+        ? "openid email profile https://www.googleapis.com/auth/generative-language https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
+        : "openid email profile";
+
     const params = new URLSearchParams({
         client_id: config.clientId,
         response_type: "code",
         redirect_uri: redirectUri,
-        scope: "openid email profile",
+        scope: scopes,
         state,
         access_type: "offline",
         // When a login_hint is provided the user already chose an account in the
         // ILIAGPT UI, so skip the Google account-picker and only ask for consent
         // if Google requires it (first-time authorization).
-        prompt: loginHint ? "consent" : "select_account consent",
+        // For Gemini/Antigravity, always force consent to ensure expanded scopes are granted.
+        prompt: isGeminiHint ? "select_account consent" : (loginHint ? "consent" : "select_account consent"),
     });
     if (loginHint) {
         params.set("login_hint", loginHint);
@@ -287,13 +295,33 @@ router.get("/google/callback", async (req: Request, res: Response) => {
             }
 
             // Force session save before redirect (critical for OAuth flow)
-            req.session.save((saveErr: any) => {
+            req.session.save(async (saveErr: any) => {
                 if (saveErr) {
                     console.error("[Google Auth] Session save failed:", saveErr);
                     return res.redirect("/login?error=session_save_error");
                 }
 
                 console.log("[Google Auth] Login successful for:", email);
+
+                // If provider_hint is gemini or antigravity, persist Google tokens
+                // as Gemini CLI credentials in a single step (no second OAuth popup needed).
+                if (stateData.providerHint === "gemini" || stateData.providerHint === "antigravity") {
+                    try {
+                        await persistGoogleTokensAsGeminiCli(
+                            resolvedUser.id,
+                            email,
+                            {
+                                access_token: tokens.access_token,
+                                refresh_token: tokens.refresh_token,
+                                expires_at: Math.floor(Date.now() / 1000) + (tokens.expires_in || 3600),
+                            },
+                        );
+                        console.log("[Google Auth] Gemini CLI credentials persisted for:", email);
+                    } catch (geminiError: any) {
+                        console.warn("[Google Auth] Gemini credential persistence failed (non-blocking):", geminiError?.message || geminiError);
+                    }
+                }
+
                 // If a provider_hint was set during login, redirect to a post-login
                 // page that automatically triggers the corresponding OAuth flow.
                 // The home page listens for ?provider=gemini|openai to auto-open

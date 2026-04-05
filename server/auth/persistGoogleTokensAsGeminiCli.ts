@@ -11,8 +11,13 @@ import { resolveUserScopedAgentDir } from "../services/userScopedAgentDir";
 export async function persistGoogleTokensAsGeminiCli(
   userId: string,
   email?: string,
+  directTokens?: {
+    access_token: string;
+    refresh_token?: string;
+    expires_at?: number;
+  },
 ): Promise<void> {
-  // Retrieve the Google tokens that Passport just saved
+  // Use direct tokens if provided (from OAuth callback), otherwise retrieve from token manager
   let tokens: {
     access_token?: string;
     refresh_token?: string;
@@ -20,10 +25,20 @@ export async function persistGoogleTokensAsGeminiCli(
     scope?: string;
   } | null = null;
 
-  try {
-    tokens = await tokenManager.getTokens(userId, "google");
-  } catch {
-    // Token retrieval might fail if encryption key isn't set
+  if (directTokens) {
+    tokens = {
+      access_token: directTokens.access_token,
+      refresh_token: directTokens.refresh_token,
+      expiry_date: directTokens.expires_at
+        ? directTokens.expires_at * 1000
+        : Date.now() + 3600 * 1000,
+    };
+  } else {
+    try {
+      tokens = await tokenManager.getTokens(userId, "google");
+    } catch {
+      // Token retrieval might fail if encryption key isn't set
+    }
   }
 
   if (!tokens?.access_token) {
