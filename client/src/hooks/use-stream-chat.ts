@@ -134,9 +134,10 @@ const DEFAULT_DONE_TIMEOUT_MS = 45_000;
 // "thinking") but before doneTimeout is armed (which requires a content chunk).
 const DEFAULT_CONTENT_TOKEN_TIMEOUT_MS = 60_000;
 const DEFAULT_IDLE_RECOVERY_MS = 5_000;
-const DEFAULT_MAX_RETRIES = 1;
-const DEFAULT_RETRY_BACKOFF_MS = 800;
-const DEFAULT_RETRY_JITTER_MS = 250;
+const DEFAULT_MAX_RETRIES = 3;
+const DEFAULT_RETRY_BACKOFF_MS = 1_000;
+const DEFAULT_RETRY_JITTER_MS = 500;
+const MAX_RETRY_BACKOFF_MS = 30_000;
 
 const isBusyAiState = (state: AIState): boolean =>
   state === "sending" ||
@@ -458,11 +459,25 @@ export function useStreamChat(deps: StreamChatDeps) {
         }, DEFAULT_IDLE_RECOVERY_MS);
       };
 
+      const persistMessageWithRetry = async (msg: Message, maxAttempts = 3) => {
+        for (let i = 0; i < maxAttempts; i++) {
+          try {
+            await onSendMessage(msg);
+            return;
+          } catch (err) {
+            console.error(`[useStreamChat] onSendMessage failed (attempt ${i + 1}/${maxAttempts}):`, err);
+            if (i < maxAttempts - 1) {
+              await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, i)));
+            } else {
+              console.error("[useStreamChat] Message persistence failed after all retries. Message may be lost:", msg.id);
+            }
+          }
+        }
+      };
+
       if (!targetConversationId) {
         setOptimisticMessages((prev) => [...prev, message]);
-        onSendMessage(message).catch((err) => {
-          console.error("[useStreamChat] onSendMessage failed:", err);
-        });
+        persistMessageWithRetry(message);
         streamingContentRef.current = "";
         setStreamingContent("");
         applyFinalState(finalState, targetConversationId);
@@ -486,9 +501,7 @@ export function useStreamChat(deps: StreamChatDeps) {
           convId: targetConversationId,
         });
       }
-      onSendMessage(message).catch((err) => {
-        console.error("[useStreamChat] onSendMessage failed:", err);
-      });
+      persistMessageWithRetry(message);
 
       session.fullContent = "";
       session.pendingContent = null;
@@ -580,24 +593,58 @@ export function useStreamChat(deps: StreamChatDeps) {
 
       const computeBackoff = (attemptIndex: number) => {
         const base = retryBackoffMs * Math.pow(2, attemptIndex);
-        const jitter = retryJitterMs ? Math.floor(Math.random() * retryJitterMs) : 0;
-        return Math.max(0, base + jitter);
+        const jitter = retryJitterMs ? Math.floor(Math.random() * retryJitterMs * 2) - retryJitterMs : 0;
+        return Math.min(Math.max(0, base + jitter), MAX_RETRY_BACKOFF_MS);
+      };
+
+      const classifyError = (
+        error: any,
+        response?: Response,
+        timeoutCause?: "overall" | "first-token" | "done" | null
+      ): { category: "timeout" | "rate_limit" | "server_error" | "network" | "auth" | "validation" | "unknown"; retryable: boolean } => {
+        if (timeoutCause) return { category: "timeout", retryable: true };
+        const status = (error as any)?.status ?? response?.status;
+        if (typeof status === "number") {
+          if (status === 429) return { category: "rate_limit", retryable: true };
+          if (status === 401 || status === 403) return { category: "auth", retryable: false };
+          if (status === 400 || status === 422) return { category: "validation", retryable: false };
+          if (status >= 500 || status === 408 || status === 504) return { category: "server_error", retryable: true };
+          return { category: "unknown", retryable: false };
+        }
+        const msg = String(error?.message || "").toLowerCase();
+        if (msg.includes("failed to fetch") || msg.includes("network") || msg.includes("load failed")) return { category: "network", retryable: true };
+        if (msg.includes("timeout")) return { category: "timeout", retryable: true };
+        return { category: "unknown", retryable: false };
       };
 
       const shouldRetry = (
         error: any,
         response?: Response,
         timeoutCause?: "overall" | "first-token" | "done" | null
-      ) => {
-        if (timeoutCause) return true;
-        const status = (error as any)?.status ?? response?.status;
-        if (typeof status === "number") {
-          if (status >= 500 || status === 429 || status === 408 || status === 504) return true;
-          return false;
+      ) => classifyError(error, response, timeoutCause).retryable;
+
+      const getUserFriendlyErrorMessage = (
+        error: any,
+        response?: Response,
+        timeoutCause?: "overall" | "first-token" | "done" | null
+      ): string => {
+        const { category } = classifyError(error, response, timeoutCause);
+        switch (category) {
+          case "timeout":
+            return "La respuesta tardó demasiado. Reintentando automáticamente...";
+          case "rate_limit":
+            return "Demasiadas solicitudes. Esperando un momento antes de reintentar...";
+          case "server_error":
+            return "Error del servidor. Reintentando...";
+          case "network":
+            return "Error de conexión. Verifica tu internet e intenta de nuevo.";
+          case "auth":
+            return "Sesión expirada. Por favor, inicia sesión nuevamente.";
+          case "validation":
+            return "Error en la solicitud. Por favor, intenta reformular tu mensaje.";
+          default:
+            return "Ocurrió un error inesperado. Por favor, intenta de nuevo.";
         }
-        const msg = String(error?.message || "").toLowerCase();
-        if (msg.includes("failed to fetch") || msg.includes("network") || msg.includes("timeout")) return true;
-        return false;
       };
 
       let lastError: Error | undefined;
@@ -624,7 +671,7 @@ export function useStreamChat(deps: StreamChatDeps) {
             state: "partial",
             retryable: eventResponseHealth?.retryable ?? fallbackRetryable,
             reason:
-              "Se recupero una respuesta parcial antes de que el stream terminara correctamente.",
+              "Se recuperó una respuesta parcial. La conexión se interrumpió antes de completar.",
             detail: eventResponseHealth?.detail || error.message || undefined,
             provider: eventResponseHealth?.provider,
           };
@@ -636,7 +683,7 @@ export function useStreamChat(deps: StreamChatDeps) {
             retryable: fallbackRetryable,
             reason: "No se pudo completar esta respuesta.",
             detail:
-              error.message || "Error de conexión. Por favor, intenta de nuevo.",
+              error.message || getUserFriendlyErrorMessage(error),
           }
         );
       };
@@ -656,7 +703,7 @@ export function useStreamChat(deps: StreamChatDeps) {
           id: messageId,
           role: "assistant" as const,
           content:
-            error.message || "Error de conexión. Por favor, intenta de nuevo.",
+            error.message || getUserFriendlyErrorMessage(error),
           timestamp: new Date(),
           requestId,
         };
@@ -1040,7 +1087,7 @@ export function useStreamChat(deps: StreamChatDeps) {
 
                 const finalEventData = { ...(lastEventData || {}), ...(data || {}) };
                 if (!hasUsableStreamOutcome(fullContent, finalEventData)) {
-                  throw new Error("No se recibio contenido util del servidor.");
+                  throw new Error("No se recibió contenido del servidor. Intenta enviar tu mensaje de nuevo.");
                 }
                 const msg = withResponseHealth(
                   withStreamPayload(
@@ -1119,7 +1166,7 @@ export function useStreamChat(deps: StreamChatDeps) {
 
           if (!session.finalizing) {
             clearTokenTimeouts();
-            throw new Error("No se recibio contenido util del servidor.");
+            throw new Error("No se recibió contenido del servidor. Intenta enviar tu mensaje de nuevo.");
           }
 
           return { ok: true, content: fullContent, response };
@@ -1148,10 +1195,10 @@ export function useStreamChat(deps: StreamChatDeps) {
 
             const abortMessage =
               timeoutCause === "first-token"
-                ? `No se recibió ningún evento del servidor en ${firstTokenTimeoutMs}ms.`
+                ? `El servidor no respondió a tiempo (${Math.round(firstTokenTimeoutMs / 1000)}s). Reintentando...`
                 : timeoutCause === "done"
-                  ? `La respuesta demoró demasiado (>${doneTimeoutMs}ms).`
-                  : `La respuesta excedio el tiempo limite general (${timeoutMs}ms).`;
+                  ? `La respuesta se interrumpió por inactividad (>${Math.round(doneTimeoutMs / 1000)}s sin nuevos datos).`
+                  : `La respuesta excedió el tiempo límite (${Math.round(timeoutMs / 1000)}s).`;
 
             const abortError = new Error(abortMessage);
             lastError = abortError;
@@ -1168,13 +1215,13 @@ export function useStreamChat(deps: StreamChatDeps) {
                 ? {
                     state: "partial",
                     retryable: true,
-                    reason: "Se recupero una respuesta parcial antes del timeout.",
+                    reason: "Se recuperó una respuesta parcial antes del timeout.",
                     detail: abortMessage,
                   }
                 : {
                     state: "failed",
                     retryable: true,
-                    reason: "La respuesta excedio el tiempo limite.",
+                    reason: "La respuesta excedió el tiempo límite.",
                     detail: abortMessage,
                   };
 

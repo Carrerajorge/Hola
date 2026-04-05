@@ -497,47 +497,90 @@ export function getEnforcedModel(contract: GptSessionContract, requestedModel?: 
   return contract.enforcedModelId || contract.modelFallbacks[0] || DEFAULT_MODEL;
 }
 
+// Token budget constants for system prompt sections
+const MAX_KNOWLEDGE_CONTEXT_CHARS = 8_000; // ~2000 tokens
+const MAX_SYSTEM_PROMPT_CHARS = 6_000; // ~1500 tokens
+
+function truncateWithEllipsis(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return text.slice(0, maxChars - 3) + "...";
+}
+
+const CAPABILITY_DESCRIPTIONS: Record<string, { label: string; instruction: string }> = {
+  webBrowsing: {
+    label: "web browsing and search",
+    instruction: "You can search the web and browse URLs to find current information.",
+  },
+  codeInterpreter: {
+    label: "code interpretation and execution",
+    instruction: "You can write and execute code to solve problems, analyze data, and create visualizations.",
+  },
+  imageGeneration: {
+    label: "image generation",
+    instruction: "You can generate images based on text descriptions.",
+  },
+  fileUpload: {
+    label: "file upload handling",
+    instruction: "You can process and analyze uploaded files including documents, images, and data files.",
+  },
+  dataAnalysis: {
+    label: "data analysis",
+    instruction: "You can perform statistical analysis, create charts, and derive insights from datasets.",
+  },
+  canvas: {
+    label: "interactive canvas",
+    instruction: "You can create and edit interactive visual content collaboratively.",
+  },
+  wordCreation: {
+    label: "word document creation",
+    instruction: "You can create formatted Word documents (.docx).",
+  },
+  excelCreation: {
+    label: "excel spreadsheet creation",
+    instruction: "You can create Excel spreadsheets (.xlsx) with formulas and formatting.",
+  },
+  pptCreation: {
+    label: "powerpoint presentation creation",
+    instruction: "You can create PowerPoint presentations (.pptx) with slides and layouts.",
+  },
+};
+
 export function buildSystemPromptWithContext(contract: GptSessionContract): string {
   const parts: string[] = [];
 
-  parts.push(contract.systemPrompt);
+  // Base system prompt with budget enforcement
+  const basePrompt = truncateWithEllipsis(contract.systemPrompt, MAX_SYSTEM_PROMPT_CHARS);
+  parts.push(basePrompt);
 
+  // Build capability section with actionable descriptions
   const enabledCapabilities: string[] = [];
-  if (contract.capabilities.webBrowsing) {
-    enabledCapabilities.push("web browsing and search");
-  }
-  if (contract.capabilities.codeInterpreter) {
-    enabledCapabilities.push("code interpretation and execution");
-  }
-  if (contract.capabilities.imageGeneration) {
-    enabledCapabilities.push("image generation");
-  }
-  if (contract.capabilities.fileUpload) {
-    enabledCapabilities.push("file upload handling");
-  }
-  if (contract.capabilities.dataAnalysis) {
-    enabledCapabilities.push("data analysis");
-  }
-  if (contract.capabilities.canvas) {
-    enabledCapabilities.push("interactive canvas");
-  }
-  if (contract.capabilities.wordCreation) {
-    enabledCapabilities.push("word document creation");
-  }
-  if (contract.capabilities.excelCreation) {
-    enabledCapabilities.push("excel spreadsheet creation");
-  }
-  if (contract.capabilities.pptCreation) {
-    enabledCapabilities.push("powerpoint presentation creation");
+  const capabilityInstructions: string[] = [];
+  for (const [key, desc] of Object.entries(CAPABILITY_DESCRIPTIONS)) {
+    if ((contract.capabilities as Record<string, boolean>)[key]) {
+      enabledCapabilities.push(desc.label);
+      capabilityInstructions.push(`- ${desc.label}: ${desc.instruction}`);
+    }
   }
 
   if (enabledCapabilities.length > 0) {
-    parts.push(`\n\n[Enabled Capabilities: ${enabledCapabilities.join(", ")}]`);
+    parts.push(`\n\n[Enabled Capabilities]\n${capabilityInstructions.join("\n")}`);
   }
 
+  // Knowledge context with token budget enforcement
   if (contract.knowledgeContext) {
-    parts.push(`\n\n[Knowledge Base]\n${contract.knowledgeContext}`);
+    const truncatedKnowledge = truncateWithEllipsis(
+      contract.knowledgeContext,
+      MAX_KNOWLEDGE_CONTEXT_CHARS,
+    );
+    parts.push(`\n\n[Knowledge Base]\nUse the following reference material to inform your responses when relevant:\n${truncatedKnowledge}`);
   }
+
+  // Response quality guidelines
+  parts.push(`\n\n[Response Guidelines]
+- Respond in the same language the user writes in.
+- Be concise but thorough. Prefer structured responses (lists, headers) for complex topics.
+- If you're unsure about something, say so rather than guessing.
+- When using capabilities, explain what you're doing briefly before showing results.`);
 
   return parts.join("");
 }

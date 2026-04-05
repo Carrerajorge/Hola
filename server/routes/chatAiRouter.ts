@@ -7731,6 +7731,13 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           code,
           error: message,
           timeout: true,
+          retryable: true,
+          timestamp: Date.now(),
+        });
+        // Send done event after timeout error so client can finalize
+        writeSse(res, "done", {
+          error: true,
+          code,
           timestamp: Date.now(),
         });
         if (!(res as any).writableEnded) {
@@ -11412,17 +11419,41 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
           typeof error?.message === "string" && error.message.trim()
             ? error.message.trim()
             : "Stream error";
-        const userFacingErrorMessage = /Empty streamed response from provider/i.test(
-          rawErrorMessage,
-        )
-          ? "El modelo no devolvio texto util en este intento. Reintenta y, si vuelve a ocurrir, cambia de modelo."
-          : rawErrorMessage;
+
+        // Classify error for structured error codes
+        const classifyServerError = (err: any, rawMsg: string): { code: string; retryable: boolean; userMessage: string } => {
+          if (/Empty streamed response from provider/i.test(rawMsg)) {
+            return { code: "empty_response", retryable: true, userMessage: "El modelo no devolvió texto útil. Reintenta o cambia de modelo." };
+          }
+          if (/not configured|No LLM providers configured/i.test(rawMsg)) {
+            return { code: "provider_not_configured", retryable: false, userMessage: "No hay proveedores de IA configurados. Contacta al administrador." };
+          }
+          if (/authentication failure|unauthorized|api.?key/i.test(rawMsg)) {
+            return { code: "auth_error", retryable: false, userMessage: "Error de autenticación con el proveedor de IA. Verifica la configuración." };
+          }
+          if (/rate.?limit|too many requests|429/i.test(rawMsg)) {
+            return { code: "rate_limit", retryable: true, userMessage: "Demasiadas solicitudes. Espera un momento e intenta de nuevo." };
+          }
+          if (/timeout|timed?.?out|ETIMEDOUT|ESOCKETTIMEDOUT/i.test(rawMsg)) {
+            return { code: "timeout", retryable: true, userMessage: "El servidor tardó demasiado en responder. Intenta de nuevo." };
+          }
+          if (/ECONNREFUSED|ENOTFOUND|network|fetch failed/i.test(rawMsg)) {
+            return { code: "network_error", retryable: true, userMessage: "Error de conexión con el servicio. Intenta de nuevo." };
+          }
+          if (/context.?length|token.?limit|too.?long/i.test(rawMsg)) {
+            return { code: "context_too_long", retryable: false, userMessage: "El mensaje es demasiado largo. Intenta acortarlo o inicia una nueva conversación." };
+          }
+          if (err?.status === 503 || /unavailable|overloaded/i.test(rawMsg)) {
+            return { code: "service_unavailable", retryable: true, userMessage: "El servicio está temporalmente no disponible. Intenta en unos momentos." };
+          }
+          return { code: "server_error", retryable: true, userMessage: rawMsg };
+        };
+
+        const errorClassification = classifyServerError(error, rawErrorMessage);
+        const userFacingErrorMessage = errorClassification.userMessage;
         const responseHealth: ResponseHealthMetadata = {
           state: "failed",
-          retryable:
-            !/not configured|authentication failure|No LLM providers configured/i.test(
-              rawErrorMessage,
-            ),
+          retryable: errorClassification.retryable,
           reason: "No se pudo completar esta respuesta.",
           detail: userFacingErrorMessage,
         };
@@ -11445,7 +11476,9 @@ INSTRUCCION: cuando la tarea implique programar o editar archivos, opera directa
         const errorTimings = reportTimings("error");
         if (!isConnectionClosed) {
           writeSse(res, "error", {
+            code: errorClassification.code,
             error: userFacingErrorMessage,
+            retryable: errorClassification.retryable,
             responseHealth,
             requestId,
             runId: errorRunId,
