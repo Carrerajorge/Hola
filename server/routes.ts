@@ -657,13 +657,17 @@ export async function registerRoutes(
 
               // Build redirect URL: if the user came from a specific provider button,
               // include it so the client can auto-trigger the relevant connection flow.
+              // Pass the user's email so the secondary provider OAuth can skip the
+              // account picker (login_hint) for a seamless single-click experience.
+              const userEmail = user?.claims?.email || user?.email || "";
+              const emailParam = userEmail ? `&email=${encodeURIComponent(userEmail)}` : "";
               let redirectTarget = "/?auth=success";
               if (providerHint === "gemini") {
-                redirectTarget = "/?auth=success&provider=gemini";
+                redirectTarget = `/?auth=success&provider=gemini${emailParam}`;
               } else if (providerHint === "openai") {
-                redirectTarget = "/?auth=success&provider=openai";
+                redirectTarget = `/?auth=success&provider=openai${emailParam}`;
               } else if (providerHint === "antigravity") {
-                redirectTarget = "/?auth=success&provider=antigravity";
+                redirectTarget = `/?auth=success&provider=antigravity${emailParam}`;
               }
 
               if (sess?.save) {
