@@ -153,6 +153,41 @@ async function persistGeminiCliOAuthCredentials(
   }
 }
 
+/**
+ * Persists Google OAuth tokens as Gemini CLI credentials directly.
+ * Called from the Google OAuth callback when provider_hint is gemini/antigravity,
+ * allowing single-step login + Gemini CLI credential persistence.
+ */
+export async function persistGeminiCliCredentialsFromGoogleTokens(
+  userId: string,
+  email?: string,
+  tokens?: {
+    access_token: string;
+    refresh_token?: string;
+    expires_at?: number;
+  },
+): Promise<void> {
+  if (!tokens?.access_token) {
+    console.warn("[GeminiCliOAuth] No tokens to persist for user:", userId);
+    return;
+  }
+
+  const credentials: GeminiCliOAuthCredentials = {
+    access: tokens.access_token,
+    refresh: tokens.refresh_token || "",
+    expires: tokens.expires_at
+      ? tokens.expires_at * 1000
+      : Date.now() + 3600 * 1000,
+    projectId:
+      process.env.GOOGLE_CLOUD_PROJECT ||
+      process.env.GOOGLE_CLOUD_PROJECT_ID ||
+      "gemini-cli-free-tier",
+    email: email?.trim().toLowerCase(),
+  };
+
+  await persistGeminiCliOAuthCredentials(credentials, userId);
+}
+
 export function beginGoogleGeminiCliOAuthFlow(params?: {
   redirectUri?: string;
   state?: string;

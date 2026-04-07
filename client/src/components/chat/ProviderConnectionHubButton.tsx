@@ -221,8 +221,8 @@ export function ProviderConnectionHubButton({
         const raw = window.sessionStorage.getItem("iliagpt:pending-auto-connect");
         if (raw) {
           const pending = JSON.parse(raw) as { provider?: string; email?: string; createdAt?: number };
-          // Only honor if created within the last 30 seconds
-          if (pending?.provider && pending.createdAt && Date.now() - pending.createdAt < 30_000) {
+          // Only honor if created within the last 60 seconds (extended for slow networks)
+          if (pending?.provider && pending.createdAt && Date.now() - pending.createdAt < 60_000) {
             window.setTimeout(() => handleAutoConnect(pending.provider!, pending.email), 300);
           } else {
             window.sessionStorage.removeItem("iliagpt:pending-auto-connect");

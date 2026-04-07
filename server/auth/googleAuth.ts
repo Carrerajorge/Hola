@@ -136,9 +136,6 @@ router.get("/google", (req: Request, res: Response) => {
         scope: scopes,
         state,
         access_type: "offline",
-        // When a login_hint is provided the user already chose an account in the
-        // ILIAGPT UI, so skip the Google account-picker and only ask for consent
-        // if Google requires it (first-time authorization).
         // For Gemini/Antigravity, always force consent to ensure expanded scopes are granted.
         prompt: isGeminiHint ? "select_account consent" : (loginHint ? "consent" : "select_account consent"),
     });
@@ -303,11 +300,27 @@ router.get("/google/callback", async (req: Request, res: Response) => {
 
                 console.log("[Google Auth] Login successful for:", email);
 
+                // Persist Google tokens to the token manager for later retrieval
+                // (e.g., by Gemini CLI credential persistence or token refresh jobs).
+                try {
+                    const { tokenManager } = await import("../lib/auth/tokenManager.js");
+                    await tokenManager.saveTokens(resolvedUser.id, "google", {
+                        access_token: tokens.access_token,
+                        refresh_token: tokens.refresh_token,
+                        expiry_date: Math.floor(Date.now()) + (tokens.expires_in || 3600) * 1000,
+                        scope: tokens.scope || "",
+                    });
+                } catch (tokenSaveError: any) {
+                    // Non-blocking: TOKEN_ENCRYPTION_KEY may not be set in all environments
+                    console.warn("[Google Auth] Token persistence to DB failed (non-blocking):", tokenSaveError?.message || tokenSaveError);
+                }
+
                 // If provider_hint is gemini or antigravity, persist Google tokens
                 // as Gemini CLI credentials in a single step (no second OAuth popup needed).
                 if (stateData.providerHint === "gemini" || stateData.providerHint === "antigravity") {
                     try {
-                        await persistGoogleTokensAsGeminiCli(
+                        const { persistGeminiCliCredentialsFromGoogleTokens } = await import("../services/googleGeminiCliOAuthService.js");
+                        await persistGeminiCliCredentialsFromGoogleTokens(
                             resolvedUser.id,
                             email,
                             {
@@ -324,7 +337,7 @@ router.get("/google/callback", async (req: Request, res: Response) => {
 
                 // If a provider_hint was set during login, redirect to a post-login
                 // page that automatically triggers the corresponding OAuth flow.
-                // The home page listens for ?provider=gemini|openai to auto-open
+                // The home page listens for ?provider=gemini|openai|antigravity to auto-open
                 // the provider connection dialog (see home.tsx useEffect).
                 // Pass the user's email so the provider OAuth can skip the account picker.
                 if (stateData.providerHint === "gemini" || stateData.providerHint === "openai" || stateData.providerHint === "antigravity") {

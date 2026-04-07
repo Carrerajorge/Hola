@@ -132,7 +132,8 @@ export default function Home() {
           JSON.stringify({ provider, email: loginEmail, createdAt: Date.now() }),
         );
       } catch {}
-      const delays = [600, 1200, 2400, 4800];
+      // Extended to 6 attempts with longer tail to cover slow networks.
+      const delays = [300, 800, 1500, 3000, 5000, 8000];
       const timers: number[] = [];
       for (const delay of delays) {
         timers.push(window.setTimeout(() => {

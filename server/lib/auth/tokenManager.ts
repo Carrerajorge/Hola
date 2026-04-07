@@ -85,6 +85,42 @@ export class TokenManager {
     }
 
     /**
+     * Get full token record (access_token, refresh_token, expiry_date) for a user+provider.
+     * Returns null if no tokens are stored.
+     */
+    async getTokens(userId: string, provider: TokenProvider): Promise<{
+        access_token: string;
+        refresh_token?: string;
+        expiry_date?: number;
+        scope?: string;
+    } | null> {
+        try {
+            const [record] = await db
+                .select()
+                .from(authTokens)
+                .where(and(eq(authTokens.userId, userId), eq(authTokens.provider, provider)));
+
+            if (!record) return null;
+
+            const accessToken = this.decrypt(record.accessToken);
+            if (!accessToken) return null;
+
+            const refreshToken = record.refreshToken ? this.decrypt(record.refreshToken) : undefined;
+            const expiresAt = record.expiresAt ? Number(record.expiresAt) : undefined;
+
+            return {
+                access_token: accessToken,
+                refresh_token: refreshToken || undefined,
+                expiry_date: expiresAt,
+                scope: record.scope || undefined,
+            };
+        } catch (error) {
+            Logger.error(`[TokenMgr] Failed to get tokens: ${error}`);
+            return null;
+        }
+    }
+
+    /**
      * Get valid access token (auto-refresh if needed)
      */
     async getAccessToken(userId: string, provider: TokenProvider): Promise<string | null> {
