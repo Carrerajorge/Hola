@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { resolveStateDir } from "./superIntelligence/config/paths.js";
 
@@ -27,10 +28,20 @@ export function resolveUserScopedAgentDir(
     .slice(0, 16);
   const safeUserSegment = normalizeUserSegment(normalizedUserId);
 
-  return path.join(
+  const agentDir = path.join(
     resolveStateDir(),
     "iliagpt-users",
     `${safeUserSegment}-${hash}`,
     "agent",
   );
+
+  // Ensure the directory exists so auth-profiles and other state files
+  // can be written without ENOENT errors during credential persistence.
+  try {
+    mkdirSync(agentDir, { recursive: true });
+  } catch {
+    // Best-effort: if we can't create the dir, the caller will handle the error.
+  }
+
+  return agentDir;
 }

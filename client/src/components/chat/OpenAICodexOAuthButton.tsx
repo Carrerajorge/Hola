@@ -250,10 +250,27 @@ export function OpenAICodexOAuthButton({
   React.useEffect(() => {
     if (!open || !autoStart || autoStartTriggeredRef.current) return;
     if (flowId || startMutation.isPending || completeMutation.isPending) return;
-    if (status?.connected) return;
+    // Wait for status to finish loading before deciding to start a new flow
+    if (isStatusLoading) return;
+    if (status?.connected) {
+      // Already connected — close dialog and notify parent
+      autoStartTriggeredRef.current = true;
+      void (async () => {
+        await queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+        await Promise.resolve(onConnected?.(status.defaultModelId || "gpt-5.3-codex"));
+        toast({
+          title: "ChatGPT ya conectado",
+          description: status.accountId
+            ? `Cuenta ${status.accountId} lista para usar OpenClaw.`
+            : "Tu cuenta de ChatGPT ya puede usar OpenClaw.",
+        });
+        resetLocalState(false);
+      })();
+      return;
+    }
     autoStartTriggeredRef.current = true;
     startMutation.mutate();
-  }, [open, autoStart, flowId, startMutation, completeMutation.isPending, status?.connected]);
+  }, [open, autoStart, flowId, startMutation, completeMutation.isPending, status?.connected, isStatusLoading, status, queryClient, onConnected, toast, resetLocalState]);
 
   // Retry auto-start if the mutation failed (session not ready, server error, etc.)
   React.useEffect(() => {

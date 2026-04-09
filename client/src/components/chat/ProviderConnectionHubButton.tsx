@@ -190,6 +190,13 @@ export function ProviderConnectionHubButton({
     autoConnectHandledRef.current = true;
     // Clear persisted pending auto-connect
     try { window.sessionStorage.removeItem("iliagpt:pending-auto-connect"); } catch {}
+    // Force refetch provider status — the Google OAuth callback (with provider_hint)
+    // may have already persisted Gemini/OpenAI credentials server-side. If the status
+    // cache still shows "not connected", the child dialog would start a redundant
+    // second OAuth popup. Invalidating now ensures the child sees fresh status.
+    void queryClient.invalidateQueries({ queryKey: ["/api/oauth/google/gemini-cli/status"] });
+    void queryClient.invalidateQueries({ queryKey: ["/api/oauth/openai/codex/status"] });
+    void queryClient.invalidateQueries({ queryKey: ["/api/oauth/providers/status"] });
     // Mark which provider should auto-start
     setAutoStartProvider(provider);
     // Capture email from the login redirect
@@ -204,7 +211,7 @@ export function ProviderConnectionHubButton({
         openaiOpenDialogRef.current();
       }
     }, 400);
-  }, []);
+  }, [queryClient]);
 
   React.useEffect(() => {
     const handler = (event: Event) => {

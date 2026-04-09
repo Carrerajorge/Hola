@@ -737,6 +737,9 @@ export function GeminiCliOAuthButton({
 
   // Auto-start: when the dialog opens via auto-connect (e.g. after login with provider_hint=gemini),
   // skip the risk warning and immediately start the OAuth flow for a seamless experience.
+  // IMPORTANT: When coming from provider_hint=gemini login, the server already persisted
+  // Gemini CLI credentials during the Google OAuth callback. We must wait for the status
+  // query to finish and check if already connected before starting a redundant second flow.
   // Retries up to 3 times with increasing delay to handle cases where the session
   // isn't fully established yet after the initial Google OAuth login redirect.
   const autoStartTriggeredRef = React.useRef(false);
@@ -746,7 +749,27 @@ export function GeminiCliOAuthButton({
   React.useEffect(() => {
     if (!open || !autoStart || autoStartTriggeredRef.current) return;
     if (flowId || startMutation.isPending || completeMutation.isPending) return;
-    if (status?.connected) return;
+    // Wait for status query to finish loading before deciding to start a new flow.
+    // The provider_hint=gemini login already persists credentials server-side,
+    // so we need to confirm whether that succeeded before opening a second popup.
+    if (isStatusLoading) return;
+    if (status?.connected) {
+      // Already connected (credentials were persisted during Google OAuth login).
+      // Close the dialog and notify the parent.
+      autoStartTriggeredRef.current = true;
+      void (async () => {
+        await queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+        await Promise.resolve(onConnected?.(status.defaultModelId || "gemini-3.1-pro-preview"));
+        toast({
+          title: "Gemini CLI ya vinculado",
+          description: status.email
+            ? `La cuenta ${status.email} ya puede usar Gemini 3.1 Pro desde ILIAGPT.`
+            : "Gemini 3.1 Pro ya puede usarse desde ILIAGPT.",
+        });
+        setOpen(false);
+      })();
+      return;
+    }
     // Check for a stored flow first
     const storedFlow = readStoredFlowDraft();
     if (storedFlow) {
@@ -762,7 +785,7 @@ export function GeminiCliOAuthButton({
     setAcceptedRisk(true);
     autoStartTriggeredRef.current = true;
     startMutation.mutate();
-  }, [open, autoStart, flowId, startMutation, completeMutation.isPending, status?.connected]);
+  }, [open, autoStart, flowId, startMutation, completeMutation.isPending, status?.connected, isStatusLoading, status, queryClient, onConnected, toast]);
 
   // Retry auto-start if the mutation failed (session not ready, server error, etc.)
   // After Google OAuth login redirect the session may need a moment to settle,
