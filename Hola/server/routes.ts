@@ -582,6 +582,8 @@ export async function registerRoutes(
   app.use("/api/integrations/google/gmail", createGmailRouter());
   const { createWhatsAppWebRouter } = await import('./routes/whatsappWebRouter');
   app.use('/api/integrations/whatsapp/web', createWhatsAppWebRouter());
+  const { createMessagingGatewayRouter } = await import('./routes/messagingGatewayRouter');
+  app.use('/api/messaging-gateway', createMessagingGatewayRouter());
   app.use("/api/oauth/google/gmail", gmailOAuthRouter);
   app.use("/api/oauth/google/calendar", calendarOAuthRouter);
   app.use("/api/oauth/microsoft", outlookOAuthRouter);

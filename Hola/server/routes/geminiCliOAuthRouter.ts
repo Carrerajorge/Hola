@@ -40,6 +40,8 @@ const oauthStateStore = new Map<
     clientId: string;
     clientSecret?: string;
     isLoginFlow: boolean;
+    provider: string; // "gemini" | "antigravity"
+    loginHint?: string;
   }
 >();
 
@@ -127,6 +129,8 @@ router.post("/initiate", (req: Request, res: Response) => {
   // Determine if this is a login flow (user not yet authenticated)
   const isAuthenticated = !!(req as any).user || !!(req as any).session?.passport?.user;
   const isLoginFlow = req.body?.loginFlow === true || !isAuthenticated;
+  const provider = req.body?.provider || "gemini";
+  const loginHint = req.body?.loginHint;
 
   oauthStateStore.set(state, {
     verifier,
@@ -135,6 +139,8 @@ router.post("/initiate", (req: Request, res: Response) => {
     clientId,
     clientSecret,
     isLoginFlow,
+    provider,
+    loginHint,
   });
 
   const params = new URLSearchParams({
@@ -148,6 +154,11 @@ router.post("/initiate", (req: Request, res: Response) => {
     access_type: "offline",
     prompt: "consent select_account",
   });
+
+  // Pre-select the user's Google account if login_hint is provided
+  if (loginHint) {
+    params.set("login_hint", loginHint);
+  }
 
   const authUrl = `${AUTH_URL}?${params.toString()}`;
 
@@ -169,8 +180,10 @@ router.get("/callback", async (req: Request, res: Response) => {
 
   if (error) {
     Logger.error("[Gemini OAuth] OAuth error", { error, error_description });
+    // Try to recover provider from state for better error messages
+    const failedProvider = state ? oauthStateStore.get(state as string)?.provider || "gemini" : "gemini";
     return res.redirect(
-      `/login?error=${encodeURIComponent(String(error_description || "gemini_failed"))}`
+      `/login?error=${encodeURIComponent(failedProvider + "_failed")}`
     );
   }
 
@@ -182,7 +195,7 @@ router.get("/callback", async (req: Request, res: Response) => {
   const stateData = oauthStateStore.get(state as string);
   if (!stateData) {
     Logger.error("[Gemini OAuth] Invalid or expired state");
-    return res.redirect("/login?error=gemini_failed");
+    return res.redirect("/login?error=gemini_cli_invalid_state");
   }
   oauthStateStore.delete(state as string);
 
@@ -272,7 +285,8 @@ router.get("/callback", async (req: Request, res: Response) => {
     if (stateData.isLoginFlow) {
       try {
         // Upsert user in the database (same pattern as Google Passport strategy)
-        const userId = googleId ? `gemini_${googleId}` : `gemini_${email.replace(/[^a-zA-Z0-9]/g, "_")}`;
+        const authProvider = stateData.provider || "gemini";
+        const userId = googleId ? `${authProvider}_${googleId}` : `${authProvider}_${email.replace(/[^a-zA-Z0-9]/g, "_")}`;
 
         // Check if user already exists by email (may have signed in via Google before)
         let user = await authStorage.getUserByEmail(email);
@@ -282,7 +296,7 @@ router.get("/callback", async (req: Request, res: Response) => {
           username: email.split("@")[0],
           fullName: fullName || email.split("@")[0],
           profileImageUrl: profilePicture,
-          authProvider: "gemini",
+          authProvider,
           emailVerified: "true",
         };
 
@@ -313,7 +327,7 @@ router.get("/callback", async (req: Request, res: Response) => {
             resourceId: user.id,
             details: {
               email,
-              provider: "gemini",
+              provider: authProvider,
               fullName,
               timestamp: new Date().toISOString(),
             },
@@ -356,14 +370,14 @@ router.get("/callback", async (req: Request, res: Response) => {
                 Logger.error("[Gemini OAuth] Session save error", { error: saveErr });
                 return res.redirect("/login?error=session_error");
               }
-              Logger.info("[Gemini OAuth] Login successful", { email, userId: user!.id });
-              res.redirect("/?auth=success&provider=gemini");
+              Logger.info(`[Gemini OAuth] Login successful via ${authProvider}`, { email, userId: user!.id });
+              res.redirect(`/?auth=success&provider=${encodeURIComponent(authProvider)}`);
             });
             return;
           }
 
-          Logger.info("[Gemini OAuth] Login successful (no session save)", { email });
-          res.redirect("/?auth=success&provider=gemini");
+          Logger.info(`[Gemini OAuth] Login successful (no session save) via ${authProvider}`, { email });
+          res.redirect(`/?auth=success&provider=${encodeURIComponent(authProvider)}`);
         });
       } catch (loginError: any) {
         Logger.error("[Gemini OAuth] Login flow error", { error: loginError?.message || loginError });
