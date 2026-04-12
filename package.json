@@ -209,7 +209,7 @@
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "ajv": "^8.18.0",
     "asciimath2tex": "^1.5.0",
-    "axios": "^1.13.5",
+    "axios": "^1.15.0",
     "bcrypt": "^6.0.0",
     "bullmq": "^5.67.3",
     "chalk": "^5.6.2",
