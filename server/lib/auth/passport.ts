@@ -174,6 +174,15 @@ if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
                         });
                     }
 
+                    // Attach raw Google OAuth tokens to user object so downstream
+                    // handlers (e.g. Gemini CLI credential persistence) can access
+                    // them without relying on the token manager roundtrip.
+                    (user as any)._googleOAuthTokens = {
+                        access_token: accessToken,
+                        refresh_token: refreshToken,
+                        expires_at: Math.floor(Date.now() / 1000) + 3600,
+                    };
+
                     return done(null, user);
                 } catch (error) {
                     Logger.error(`[Passport] Google Auth Error: ${error}`);

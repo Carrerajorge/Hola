@@ -614,7 +614,7 @@ export async function registerRoutes(
               }
             }
 
-            return (req as any).logIn(user, (loginErr: any) => {
+            return (req as any).logIn(user, async (loginErr: any) => {
               if (loginErr) {
                 console.error("[Auth] Google login error:", loginErr);
                 return res.redirect("/login?error=login_failed");
@@ -639,22 +639,6 @@ export async function registerRoutes(
                 delete sess.providerHint;
               }
 
-              // When provider_hint is gemini or antigravity, persist the Google
-              // OAuth tokens as Gemini CLI credentials so the user doesn't need a
-              // second OAuth popup. This is best-effort and must never block login.
-              if (providerHint === "gemini" || providerHint === "antigravity") {
-                import("./auth/persistGoogleTokensAsGeminiCli")
-                  .then(({ persistGoogleTokensAsGeminiCli }) =>
-                    persistGoogleTokensAsGeminiCli(String(userId), email || undefined),
-                  )
-                  .catch((geminiPersistError: any) => {
-                    console.warn(
-                      "[Auth] Gemini CLI credential persistence failed (non-critical):",
-                      geminiPersistError?.message || geminiPersistError,
-                    );
-                  });
-              }
-
               // Build redirect URL: if the user came from a specific provider button,
               // include it so the client can auto-trigger the relevant connection flow.
               // Pass the user's email so the secondary provider OAuth can skip the
@@ -670,18 +654,47 @@ export async function registerRoutes(
                 redirectTarget = `/?auth=success&provider=antigravity${emailParam}`;
               }
 
+              // When provider_hint is gemini or antigravity, persist the Google
+              // OAuth tokens as Gemini CLI credentials so the user doesn't need a
+              // second OAuth popup. Await completion before redirect so the client
+              // sees connected: true immediately and doesn't trigger a second flow.
+              if (providerHint === "gemini" || providerHint === "antigravity") {
+                // Extract direct tokens from the user object (attached by passport strategy)
+                const directTokens = (user as any)?._googleOAuthTokens ?? null;
+                try {
+                  const { persistGoogleTokensAsGeminiCli } = await import(
+                    "./auth/persistGoogleTokensAsGeminiCli"
+                  );
+                  await persistGoogleTokensAsGeminiCli(
+                    String(userId),
+                    email || undefined,
+                    directTokens || undefined,
+                  );
+                  console.info(
+                    "[Auth] Gemini CLI credentials persisted before redirect for user:",
+                    userId,
+                  );
+                } catch (geminiPersistError: any) {
+                  console.warn(
+                    "[Auth] Gemini CLI credential persistence failed (non-critical):",
+                    geminiPersistError?.message || geminiPersistError,
+                  );
+                }
+              }
+
+              const doRedirect = () => res.redirect(redirectTarget);
               if (sess?.save) {
                 sess.save((saveErr: any) => {
                   if (saveErr) {
                     console.error("[Auth] Google session save error:", saveErr);
                     return res.redirect("/login?error=session_error");
                   }
-                  res.redirect(redirectTarget);
+                  doRedirect();
                 });
                 return;
               }
 
-              res.redirect(redirectTarget);
+              doRedirect();
             });
           })().catch(next);
         },
