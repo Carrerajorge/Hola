@@ -128,7 +128,7 @@
         "langchain": "^0.3.5",
         "langfuse": "3.3.4",
         "langfuse-langchain": "^3.3.4",
-        "langsmith": "0.1.6",
+        "langsmith": "0.5.19",
         "langwatch": "^0.1.1",
         "linkifyjs": "^4.3.2",
         "llamaindex": "^0.3.13",
