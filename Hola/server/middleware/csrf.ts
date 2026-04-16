@@ -64,6 +64,7 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         "/api/auth/phone/resend",
         "/api/callback",
         "/api/login",
+        "/api/gemini-cli-oauth/initiate",
     ];
 
     // Also exempt chat API routes (session cookie is sufficient auth)

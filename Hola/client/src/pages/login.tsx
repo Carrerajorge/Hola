@@ -311,23 +311,54 @@ export default function LoginPage() {
     if (!loginHint && email && email.includes("@")) {
       params.set("login_hint", email);
     }
-    // For Gemini, OpenAI, and Antigravity providers, always hint towards Gmail
-    // so Google pre-selects the user's Gmail account automatically.
-    // If the user has typed an email ending in @gmail.com, use it directly.
-    // Otherwise, for these providers, still pass the email if available to help Google
-    // suggest the right account.
-    if ((provider === "gemini" || provider === "openai" || provider === "antigravity") && !params.has("login_hint")) {
-      if (email && email.includes("@")) {
-        params.set("login_hint", email);
-      }
-    }
-    // Pass provider_hint so the server can redirect to the right flow after Google OAuth
-    // This enables auto-triggering Gemini CLI, OpenAI Codex, or Antigravity OAuth after login
-    if (provider !== "google") {
-      params.set("provider_hint", provider);
-    }
     const query = params.toString();
     window.location.assign(`/api/auth/google${query ? `?${query}` : ""}`);
+  };
+
+  /**
+   * Handle Gemini CLI OAuth login for Gemini, OpenAI, and Antigravity providers.
+   * Uses the dedicated /api/gemini-cli-oauth/ flow which provides:
+   * - Google account authentication (login)
+   * - Gemini API token storage for provider features
+   * - PKCE-secured OAuth with broader scopes
+   */
+  const handleProviderLogin = async (provider: SocialProvider) => {
+    clearForcedSignedOutFlag();
+    setActiveSocialProvider(provider);
+    setError("");
+
+    // Determine login_hint: use entered email if available
+    const loginHint = email && email.includes("@") ? email : "";
+
+    try {
+      const response = await apiFetch("/api/gemini-cli-oauth/initiate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          loginFlow: true,
+          provider,
+          loginHint,
+        }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({} as any));
+        setError((data as any)?.error || "No se pudo iniciar la autenticación. Intenta de nuevo.");
+        setActiveSocialProvider(null);
+        return;
+      }
+
+      const data = await response.json() as { authUrl?: string; state?: string };
+      if (data.authUrl) {
+        window.location.assign(data.authUrl);
+      } else {
+        setError("No se recibió la URL de autenticación del servidor.");
+        setActiveSocialProvider(null);
+      }
+    } catch (err) {
+      setError("Error de conexión al iniciar la autenticación. Intenta de nuevo.");
+      setActiveSocialProvider(null);
+    }
   };
 
   const handleMagicLink = async () => {
@@ -531,7 +562,7 @@ export default function LoginPage() {
               <Button
                 variant="outline"
                 className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-2"
-                onClick={() => handleGoogleLogin("gemini")}
+                onClick={() => handleProviderLogin("gemini")}
                 disabled={isAnySocialProviderLoading}
                 data-testid="button-login-gemini"
               >
@@ -556,7 +587,7 @@ export default function LoginPage() {
               <Button
                 variant="outline"
                 className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-2"
-                onClick={() => handleGoogleLogin("openai")}
+                onClick={() => handleProviderLogin("openai")}
                 disabled={isAnySocialProviderLoading}
                 data-testid="button-login-openai"
               >
@@ -574,7 +605,7 @@ export default function LoginPage() {
               <Button
                 variant="outline"
                 className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-2"
-                onClick={() => handleGoogleLogin("antigravity")}
+                onClick={() => handleProviderLogin("antigravity")}
                 disabled={isAnySocialProviderLoading}
                 data-testid="button-login-antigravity"
               >

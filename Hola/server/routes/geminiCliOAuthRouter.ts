@@ -40,6 +40,7 @@ const oauthStateStore = new Map<
     clientId: string;
     clientSecret?: string;
     isLoginFlow: boolean;
+    provider: string; // "gemini" | "openai" | "antigravity"
   }
 >();
 
@@ -128,6 +129,11 @@ router.post("/initiate", (req: Request, res: Response) => {
   const isAuthenticated = !!(req as any).user || !!(req as any).session?.passport?.user;
   const isLoginFlow = req.body?.loginFlow === true || !isAuthenticated;
 
+  // Provider label for branding (gemini, openai, antigravity)
+  const provider = req.body?.provider || "gemini";
+  // Optional login_hint for Gmail auto-redirect
+  const loginHint = req.body?.loginHint || "";
+
   oauthStateStore.set(state, {
     verifier,
     challenge,
@@ -135,6 +141,7 @@ router.post("/initiate", (req: Request, res: Response) => {
     clientId,
     clientSecret,
     isLoginFlow,
+    provider,
   });
 
   const params = new URLSearchParams({
@@ -149,11 +156,18 @@ router.post("/initiate", (req: Request, res: Response) => {
     prompt: "consent select_account",
   });
 
+  // Add login_hint so Google pre-selects the user's account
+  if (loginHint) {
+    params.set("login_hint", loginHint);
+  }
+
   const authUrl = `${AUTH_URL}?${params.toString()}`;
 
   Logger.info("[Gemini OAuth] Initiated OAuth flow", {
     redirectUri,
     isLoginFlow,
+    provider,
+    hasLoginHint: !!loginHint,
   });
 
   res.json({ authUrl, state });
@@ -271,8 +285,12 @@ router.get("/callback", async (req: Request, res: Response) => {
     // --- LOGIN FLOW: Create a proper user session ---
     if (stateData.isLoginFlow) {
       try {
+        // Use the stored provider label (gemini, openai, antigravity) for branding/audit
+        const providerLabel = stateData.provider || "gemini";
+
         // Upsert user in the database (same pattern as Google Passport strategy)
-        const userId = googleId ? `gemini_${googleId}` : `gemini_${email.replace(/[^a-zA-Z0-9]/g, "_")}`;
+        // Use a stable ID prefix based on Google ID, regardless of which button was clicked
+        const userId = googleId ? `google_${googleId}` : `google_${email.replace(/[^a-zA-Z0-9]/g, "_")}`;
 
         // Check if user already exists by email (may have signed in via Google before)
         let user = await authStorage.getUserByEmail(email);
@@ -282,7 +300,7 @@ router.get("/callback", async (req: Request, res: Response) => {
           username: email.split("@")[0],
           fullName: fullName || email.split("@")[0],
           profileImageUrl: profilePicture,
-          authProvider: "gemini",
+          authProvider: providerLabel === "openai" ? "openai" : providerLabel === "antigravity" ? "antigravity" : "gemini",
           emailVerified: "true",
         };
 
@@ -313,7 +331,7 @@ router.get("/callback", async (req: Request, res: Response) => {
             resourceId: user.id,
             details: {
               email,
-              provider: "gemini",
+              provider: providerLabel,
               fullName,
               timestamp: new Date().toISOString(),
             },
@@ -356,14 +374,14 @@ router.get("/callback", async (req: Request, res: Response) => {
                 Logger.error("[Gemini OAuth] Session save error", { error: saveErr });
                 return res.redirect("/login?error=session_error");
               }
-              Logger.info("[Gemini OAuth] Login successful", { email, userId: user!.id });
-              res.redirect("/?auth=success&provider=gemini");
+              Logger.info("[Gemini OAuth] Login successful", { email, userId: user!.id, provider: providerLabel });
+              res.redirect(`/?auth=success&provider=${encodeURIComponent(providerLabel)}`);
             });
             return;
           }
 
-          Logger.info("[Gemini OAuth] Login successful (no session save)", { email });
-          res.redirect("/?auth=success&provider=gemini");
+          Logger.info("[Gemini OAuth] Login successful (no session save)", { email, provider: providerLabel });
+          res.redirect(`/?auth=success&provider=${encodeURIComponent(providerLabel)}`);
         });
       } catch (loginError: any) {
         Logger.error("[Gemini OAuth] Login flow error", { error: loginError?.message || loginError });

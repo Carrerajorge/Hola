@@ -107,3 +107,12 @@ export async function resolveSkillContextFromRequest(
   return null;
 }
 
+/**
+ * Build a system prompt section from a resolved skill context.
+ * Returns an empty string if no skill is active.
+ */
+export function buildSkillSystemPromptSection(ctx: SkillContext | null): string {
+  if (!ctx || !ctx.instructions) return "";
+  return `\n[Active Skill: ${ctx.name}]\n${ctx.instructions}\n`;
+}
+
