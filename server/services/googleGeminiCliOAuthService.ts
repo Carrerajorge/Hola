@@ -168,8 +168,7 @@ export async function persistGeminiCliCredentialsFromGoogleTokens(
   },
 ): Promise<void> {
   if (!tokens?.access_token) {
-    console.warn("[GeminiCliOAuth] No tokens to persist for user:", userId);
-    return;
+    throw new Error("No access_token provided for Gemini CLI persistence");
   }
 
   const credentials: GeminiCliOAuthCredentials = {
@@ -186,6 +185,11 @@ export async function persistGeminiCliCredentialsFromGoogleTokens(
   };
 
   await persistGeminiCliOAuthCredentials(credentials, userId);
+
+  const status = await getGoogleGeminiCliOAuthStatus(userId);
+  if (!status.connected) {
+    throw new Error("Credentials were written but status check reports not connected");
+  }
 }
 
 export function beginGoogleGeminiCliOAuthFlow(params?: {

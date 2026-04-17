@@ -317,6 +317,7 @@ router.get("/google/callback", async (req: Request, res: Response) => {
 
                 // If provider_hint is gemini or antigravity, persist Google tokens
                 // as Gemini CLI credentials in a single step (no second OAuth popup needed).
+                let geminiPersisted = false;
                 if (stateData.providerHint === "gemini" || stateData.providerHint === "antigravity") {
                     try {
                         const { persistGeminiCliCredentialsFromGoogleTokens } = await import("../services/googleGeminiCliOAuthService.js");
@@ -329,6 +330,7 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                                 expires_at: Math.floor(Date.now() / 1000) + (tokens.expires_in || 3600),
                             },
                         );
+                        geminiPersisted = true;
                         console.log("[Google Auth] Gemini CLI credentials persisted for:", email);
                     } catch (geminiError: any) {
                         console.warn("[Google Auth] Gemini credential persistence failed (non-blocking):", geminiError?.message || geminiError);
@@ -337,12 +339,12 @@ router.get("/google/callback", async (req: Request, res: Response) => {
 
                 // If a provider_hint was set during login, redirect to a post-login
                 // page that automatically triggers the corresponding OAuth flow.
-                // The home page listens for ?provider=gemini|openai|antigravity to auto-open
-                // the provider connection dialog (see home.tsx useEffect).
-                // Pass the user's email so the provider OAuth can skip the account picker.
+                // Pass gemini_persisted flag so the client knows whether credentials
+                // were already saved (skip second OAuth popup) or not.
                 if (stateData.providerHint === "gemini" || stateData.providerHint === "openai" || stateData.providerHint === "antigravity") {
                     const emailParam = email ? `&email=${encodeURIComponent(email)}` : "";
-                    res.redirect(`/?auth=success&provider=${encodeURIComponent(stateData.providerHint)}${emailParam}`);
+                    const persistedParam = geminiPersisted ? "&persisted=1" : "";
+                    res.redirect(`/?auth=success&provider=${encodeURIComponent(stateData.providerHint)}${emailParam}${persistedParam}`);
                 } else {
                     res.redirect(stateData.returnUrl || "/?auth=success");
                 }
