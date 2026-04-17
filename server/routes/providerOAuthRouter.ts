@@ -381,6 +381,24 @@ router.get("/gemini/callback", async (req: Request, res: Response) => {
       );
     }
 
+    // Also persist to OpenClaw auth-profiles filesystem so the agent system
+    // can use the credential without a separate database lookup.
+    try {
+      const { persistGeminiCliCredentialsFromGoogleTokens } = await import(
+        "../services/googleGeminiCliOAuthService.js"
+      );
+      await persistGeminiCliCredentialsFromGoogleTokens(flow.userId, undefined, {
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
+        expires_at: expiresAt ? Math.floor(expiresAt / 1000) : undefined,
+      });
+    } catch (profileError: any) {
+      console.warn(
+        "[ProviderOAuth] Gemini auth-profile sync failed (non-blocking):",
+        profileError?.message || profileError,
+      );
+    }
+
     res.send(renderCallbackPage("success", "Google Gemini conectado exitosamente"));
   } catch (error: any) {
     console.error("[ProviderOAuth] Gemini callback error:", error);

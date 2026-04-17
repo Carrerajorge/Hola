@@ -35,12 +35,11 @@ export function resolveUserScopedAgentDir(
     "agent",
   );
 
-  // Ensure the directory exists so auth-profiles and other state files
-  // can be written without ENOENT errors during credential persistence.
   try {
     mkdirSync(agentDir, { recursive: true });
-  } catch {
-    // Best-effort: if we can't create the dir, the caller will handle the error.
+  } catch (mkdirError) {
+    console.error("[UserScopedAgentDir] Failed to create agent dir:", agentDir, mkdirError);
+    return undefined;
   }
 
   return agentDir;

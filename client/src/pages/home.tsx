@@ -114,30 +114,25 @@ export default function Home() {
     const params = new URLSearchParams(window.location.search);
     const provider = params.get("provider");
     if (provider === "gemini" || provider === "openai" || provider === "antigravity") {
-      // Capture the email before cleaning URL params
       const loginEmail = params.get("email") || "";
-      // Clean up URL first
+      const persisted = params.get("persisted") === "1";
       params.delete("provider");
       params.delete("auth");
       params.delete("email");
+      params.delete("persisted");
       const rest = params.toString();
       window.history.replaceState({}, "", rest ? `${window.location.pathname}?${rest}` : window.location.pathname);
-      // Dispatch event so provider dialogs can auto-open.
-      // Retry with increasing delay to handle cases where components
-      // are still mounting (lazy-loaded chat interface).
-      // Also persist to sessionStorage so late-mounting components can pick it up.
       try {
         window.sessionStorage.setItem(
           "iliagpt:pending-auto-connect",
-          JSON.stringify({ provider, email: loginEmail, createdAt: Date.now() }),
+          JSON.stringify({ provider, email: loginEmail, persisted, createdAt: Date.now() }),
         );
       } catch {}
-      // Extended to 6 attempts with longer tail to cover slow networks.
       const delays = [300, 800, 1500, 3000, 5000, 8000];
       const timers: number[] = [];
       for (const delay of delays) {
         timers.push(window.setTimeout(() => {
-          window.dispatchEvent(new CustomEvent("auto-connect-provider", { detail: { provider, email: loginEmail } }));
+          window.dispatchEvent(new CustomEvent("auto-connect-provider", { detail: { provider, email: loginEmail, persisted } }));
         }, delay));
       }
       return () => timers.forEach((t) => window.clearTimeout(t));
