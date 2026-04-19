@@ -3,7 +3,9 @@
 node_modules/
 /dist/
 server/openclaw/dist/
+server/openclaw/dist-runtime/
 server/openclaw/pnpm-lock.yaml
+server/openclaw/node_modules/
 server/public
 vite.config.ts.*
 *.tar.gz
