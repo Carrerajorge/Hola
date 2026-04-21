@@ -29,6 +29,7 @@
       "dom",
       "dom.iterable"
     ],
+    "ignoreDeprecations": "5.0",
     "downlevelIteration": true,
     "jsx": "react-jsx",
     "esModuleInterop": true,

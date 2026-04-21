@@ -132,7 +132,7 @@ router.post("/initiate", (req: Request, res: Response) => {
   const provider = req.body?.provider || "gemini";
   const loginHint = req.body?.loginHint;
 
-  oauthStateStore.set(state, {
+  const statePayload = {
     verifier,
     challenge,
     createdAt: Date.now(),
@@ -141,7 +141,15 @@ router.post("/initiate", (req: Request, res: Response) => {
     isLoginFlow,
     provider,
     loginHint,
-  });
+  };
+
+  oauthStateStore.set(state, statePayload);
+
+  // Also store in session for persistence across server restarts / multi-instance deployments
+  const session = (req as any).session;
+  if (session) {
+    session.geminiOAuthState = { state, ...statePayload };
+  }
 
   const params = new URLSearchParams({
     client_id: clientId,
@@ -192,7 +200,18 @@ router.get("/callback", async (req: Request, res: Response) => {
     return res.redirect("/login?error=gemini_failed");
   }
 
-  const stateData = oauthStateStore.get(state as string);
+  let stateData = oauthStateStore.get(state as string);
+
+  // Fallback: recover from session if in-memory store lost the state (server restart / multi-instance)
+  if (!stateData) {
+    const session = (req as any).session;
+    if (session?.geminiOAuthState?.state === state) {
+      stateData = session.geminiOAuthState;
+      delete session.geminiOAuthState;
+      Logger.info("[Gemini OAuth] Recovered state from session (in-memory miss)");
+    }
+  }
+
   if (!stateData) {
     Logger.error("[Gemini OAuth] Invalid or expired state");
     return res.redirect("/login?error=gemini_cli_invalid_state");

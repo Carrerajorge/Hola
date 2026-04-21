@@ -48,6 +48,7 @@ function mapAuthUserRow(row: any): User {
     firstName,
     lastName,
     fullName,
+    profileImageUrl: row.profile_image_url ?? row.profileImageUrl ?? null,
     role: row.role ?? "user",
     status: row.status ?? "active",
     authProvider: row.auth_provider ?? row.authProvider ?? "email",
@@ -70,7 +71,8 @@ class AuthStorage implements IAuthStorage {
   async getUser(id: string): Promise<User | undefined> {
     try {
       const result = await db.execute(sql`
-        SELECT id, email, password, username, first_name, last_name, role, status,
+        SELECT id, email, password, username, first_name, last_name, full_name,
+               profile_image_url, role, status,
                auth_provider, email_verified, created_at, updated_at, last_login_at,
                last_ip, user_agent, login_count, org_id
         FROM users
@@ -106,7 +108,8 @@ class AuthStorage implements IAuthStorage {
     const normalizedEmail = email.toLowerCase().trim();
     try {
       const result = await db.execute(sql`
-        SELECT id, email, password, username, first_name, last_name, role, status,
+        SELECT id, email, password, username, first_name, last_name, full_name,
+               profile_image_url, role, status,
                auth_provider, email_verified, created_at, updated_at, last_login_at,
                last_ip, user_agent, login_count, org_id
         FROM users

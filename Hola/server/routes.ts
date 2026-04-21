@@ -215,6 +215,10 @@ export async function registerRoutes(
         accessType: "offline",
         prompt: "consent select_account",
       };
+      // For OpenAI flow, skip forced consent for smoother UX (refresh token already obtained)
+      if (providerHint === "openai") {
+        authOptions.prompt = "select_account";
+      }
       if (loginHint) {
         authOptions.loginHint = loginHint;
       }
@@ -224,8 +228,10 @@ export async function registerRoutes(
       (req, res, next) => {
         passport.authenticate("google", { failureRedirect: "/login?error=google_failed" }, (err: any, user: any) => {
           (async () => {
+            const providerHint = (req as any).session?.providerHint || "";
+            const failError = providerHint ? `${providerHint}_failed` : "google_failed";
             if (err || !user) {
-              return res.redirect("/login?error=google_failed");
+              return res.redirect(`/login?error=${failError}`);
             }
 
             const userId = user?.claims?.sub || user?.id;

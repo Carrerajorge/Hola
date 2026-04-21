@@ -316,15 +316,52 @@ export default function LoginPage() {
     window.location.assign(`/api/auth/google${query ? `?${query}` : ""}`);
   };
 
-  const handleProviderLogin = (provider: SocialProvider) => {
+  // Gemini CLI OAuth flow (PKCE-based) for Gemini and Antigravity providers.
+  // Falls back to standard Google OAuth if the PKCE flow is unavailable.
+  const handleGeminiCliLogin = async (provider: "gemini" | "antigravity" = "gemini") => {
     clearForcedSignedOutFlag();
     setActiveSocialProvider(provider);
     setError("");
+    try {
+      const res = await apiFetch("/api/gemini-cli-oauth/initiate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          loginFlow: true,
+          provider,
+          loginHint: email && email.includes("@") ? email : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.authUrl) {
+        // Fallback: use standard Google OAuth with provider hint
+        handleGoogleLogin(provider as SocialProvider, email && email.includes("@") ? email : undefined);
+        return;
+      }
+      const authUrl = new URL(data.authUrl);
+      if (email && email.includes("@")) {
+        authUrl.searchParams.set("login_hint", email);
+      }
+      window.location.assign(authUrl.toString());
+    } catch (err) {
+      // Fallback: use standard Google OAuth with provider hint
+      handleGoogleLogin(provider as SocialProvider, email && email.includes("@") ? email : undefined);
+    }
+  };
+
+  // OpenAI-style login: uses Google OAuth but with OpenAI branding.
+  // Automatically hints toward Gmail accounts for seamless redirect.
+  const handleOpenAILogin = () => {
+    clearForcedSignedOutFlag();
+    setActiveSocialProvider("openai");
+    setError("");
     const params = new URLSearchParams();
-    params.set("provider_hint", provider);
+    params.set("provider_hint", "openai");
+    // Always hint toward Gmail for OpenAI flow
     if (email && email.includes("@")) {
       params.set("login_hint", email);
     }
+    // Force consent + select_account for clear UX
     window.location.assign(`/api/auth/google?${params.toString()}`);
   };
 
@@ -525,11 +562,11 @@ export default function LoginPage() {
                 {isSocialProviderLoading("google") ? "Conectando..." : "Continuar con Google"}
               </Button>
 
-              {/* Google Gemini Login */}
+              {/* Google Gemini Login (uses Gemini CLI OAuth with PKCE) */}
               <Button
                 variant="outline"
                 className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-2"
-                onClick={() => handleProviderLogin("gemini")}
+                onClick={() => handleGeminiCliLogin("gemini")}
                 disabled={isAnySocialProviderLoading}
                 data-testid="button-login-gemini"
               >
@@ -550,11 +587,11 @@ export default function LoginPage() {
                 {isSocialProviderLoading("gemini") ? "Conectando..." : "Continuar con Gemini"}
               </Button>
 
-              {/* OpenAI / ChatGPT Login */}
+              {/* OpenAI / ChatGPT Login (Google OAuth with OpenAI branding) */}
               <Button
                 variant="outline"
                 className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-2"
-                onClick={() => handleProviderLogin("openai")}
+                onClick={() => handleOpenAILogin()}
                 disabled={isAnySocialProviderLoading}
                 data-testid="button-login-openai"
               >
@@ -568,11 +605,11 @@ export default function LoginPage() {
                 {isSocialProviderLoading("openai") ? "Conectando..." : "Continuar con ChatGPT"}
               </Button>
 
-              {/* Google Antigravity Login */}
+              {/* Google Antigravity Login (uses Gemini CLI OAuth with PKCE) */}
               <Button
                 variant="outline"
                 className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-2"
-                onClick={() => handleProviderLogin("antigravity")}
+                onClick={() => handleGeminiCliLogin("antigravity")}
                 disabled={isAnySocialProviderLoading}
                 data-testid="button-login-antigravity"
               >

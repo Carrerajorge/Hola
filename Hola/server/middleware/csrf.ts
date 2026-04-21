@@ -136,6 +136,7 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         "/api/library/",
         "/api/library",
         "/api/integrations/",
+        "/api/gemini-cli-oauth/",
     ];
     if (CSRF_EXEMPT_PREFIXES_EXTENDED.some(prefix => req.path.startsWith(prefix) || req.originalUrl.startsWith(prefix))) {
         return next();
