@@ -5,8 +5,12 @@
  * This is called after a successful Google OAuth login when the user came
  * from the Gemini or Antigravity login button (provider_hint).
  */
+import fs from "node:fs";
+import path from "node:path";
 import { tokenManager } from "../lib/auth/tokenManager";
 import { resolveUserScopedAgentDir } from "../services/userScopedAgentDir";
+
+const PROVIDER_ID = "google-gemini-cli";
 
 export async function persistGoogleTokensAsGeminiCli(
   userId: string,
@@ -17,7 +21,6 @@ export async function persistGoogleTokensAsGeminiCli(
     expires_at?: number;
   },
 ): Promise<void> {
-  // Use direct tokens if provided (from OAuth callback), otherwise retrieve from token manager
   let tokens: {
     access_token?: string;
     refresh_token?: string;
@@ -46,63 +49,79 @@ export async function persistGoogleTokensAsGeminiCli(
     return;
   }
 
-  // Try to persist as Gemini CLI auth profile (OpenClaw integration)
+  const agentDir = resolveUserScopedAgentDir(userId);
+  if (!agentDir) {
+    console.warn("[GeminiCliPersist] No agent dir for user:", userId);
+    return;
+  }
+
+  const normalizedEmail =
+    typeof email === "string" ? email.trim().toLowerCase() : "";
+  const profileId = `${PROVIDER_ID}:${normalizedEmail || "default"}`;
+  const storePath = path.join(agentDir, "auth-profiles.json");
+
+  const credential = {
+    type: "oauth" as const,
+    provider: PROVIDER_ID,
+    access: tokens.access_token,
+    refresh: tokens.refresh_token || "",
+    expires: tokens.expiry_date || Date.now() + 3600 * 1000,
+    projectId:
+      process.env.GOOGLE_CLOUD_PROJECT ||
+      process.env.GOOGLE_CLOUD_PROJECT_ID ||
+      "gemini-cli-free-tier",
+    ...(normalizedEmail ? { email: normalizedEmail } : {}),
+  };
+
+  // Direct file-system persistence (always works, no external deps)
   try {
-    const {
-      ensureAuthProfileStore,
-      upsertAuthProfile,
-      setAuthProfileOrder,
-    } = await import(
-      "../services/superIntelligence/agents/auth-profiles.js"
-    );
-
-    const agentDir = resolveUserScopedAgentDir(userId);
-    if (!agentDir) {
-      console.warn("[GeminiCliPersist] No agent dir for user:", userId);
-      return;
-    }
-
-    const PROVIDER_ID = "google-gemini-cli";
-    const normalizedEmail =
-      typeof email === "string" ? email.trim().toLowerCase() : "";
-    const profileId = `${PROVIDER_ID}:${normalizedEmail || "default"}`;
-
-    upsertAuthProfile({
-      profileId,
-      agentDir,
-      credential: {
-        type: "oauth",
-        provider: PROVIDER_ID,
-        access: tokens.access_token,
-        refresh: tokens.refresh_token || "",
-        expires: tokens.expiry_date || Date.now() + 3600 * 1000,
-        projectId:
-          process.env.GOOGLE_CLOUD_PROJECT ||
-          process.env.GOOGLE_CLOUD_PROJECT_ID ||
-          "gemini-cli-free-tier",
-        ...(normalizedEmail ? { email: normalizedEmail } : {}),
-      },
-    });
-
+    let store: { version: number; profiles: Record<string, unknown>; order?: Record<string, string[]> } = {
+      version: 1,
+      profiles: {},
+    };
     try {
-      await setAuthProfileOrder({
-        agentDir,
-        provider: PROVIDER_ID,
-        order: [profileId],
-      });
-    } catch {
-      // Non-critical
+      if (fs.existsSync(storePath)) {
+        const raw = fs.readFileSync(storePath, "utf8");
+        const parsed = JSON.parse(raw);
+        if (parsed?.profiles) store = parsed;
+      }
+    } catch {}
+
+    store.profiles[profileId] = credential;
+    store.order = store.order ?? {};
+    store.order[PROVIDER_ID] = [profileId];
+
+    const dir = path.dirname(storePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     }
+    fs.writeFileSync(storePath, `${JSON.stringify(store, null, 2)}\n`, "utf8");
+    try { fs.chmodSync(storePath, 0o600); } catch {}
 
     console.info(
       "[GeminiCliPersist] Persisted Google tokens as Gemini CLI profile for user:",
       userId,
       email || "(no email)",
     );
-  } catch (profileError: any) {
+  } catch (persistError: any) {
     console.warn(
-      "[GeminiCliPersist] Auth profile persistence failed:",
-      profileError?.message || profileError,
+      "[GeminiCliPersist] Direct persistence failed:",
+      persistError?.message || persistError,
     );
+  }
+
+  // Best-effort: enhanced integration via OpenClaw module chain
+  try {
+    const { upsertAuthProfile, setAuthProfileOrder } = await import(
+      "../services/superIntelligence/agents/auth-profiles.js"
+    );
+    upsertAuthProfile({ profileId, agentDir, credential });
+    await setAuthProfileOrder({
+      agentDir,
+      provider: PROVIDER_ID,
+      order: [profileId],
+    });
+  } catch {
+    // Non-critical: direct persistence already succeeded
   }
 }

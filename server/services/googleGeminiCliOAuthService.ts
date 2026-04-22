@@ -1,13 +1,5 @@
-import {
-  ensureAuthProfileStore,
-  listProfilesForProvider,
-  setAuthProfileOrder,
-  upsertAuthProfile,
-} from "./superIntelligence/agents/auth-profiles.js";
-import { loadValidConfigOrThrow, updateConfig } from "./superIntelligence/commands/models/shared.js";
-import { enablePluginInConfig } from "./superIntelligence/plugins/enable.js";
-import { ensureOpenClawModelsJson } from "./superIntelligence/agents/models-config.js";
-import { ensurePiAuthJsonFromAuthProfiles } from "./superIntelligence/agents/pi-auth-json.js";
+import fs from "node:fs";
+import path from "node:path";
 import {
   completeGeminiCliOAuthSession,
   startGeminiCliOAuthSession,
@@ -16,7 +8,6 @@ import {
 import { resolveUserScopedAgentDir } from "./userScopedAgentDir.js";
 
 const PROVIDER_ID = "google-gemini-cli";
-const PROVIDER_PLUGIN_ID = "google-gemini-cli-auth";
 const DEFAULT_MODEL_REF = "google-gemini-cli/gemini-3.1-pro-preview";
 const DEFAULT_MODEL_ID = "gemini-3.1-pro-preview";
 
@@ -43,28 +34,56 @@ export type GoogleGeminiCliBootstrapModel = {
   contextWindow: number;
 };
 
+type AuthProfileStore = {
+  version: number;
+  profiles: Record<string, Record<string, unknown>>;
+  order?: Record<string, string[]>;
+};
+
+function loadAuthStoreFromDisk(storePath: string): AuthProfileStore | null {
+  try {
+    if (!fs.existsSync(storePath)) return null;
+    const raw = fs.readFileSync(storePath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && parsed.profiles) {
+      return parsed as AuthProfileStore;
+    }
+  } catch {}
+  return null;
+}
+
+function saveAuthStoreToDisk(storePath: string, store: AuthProfileStore): void {
+  const dir = path.dirname(storePath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  }
+  fs.writeFileSync(storePath, `${JSON.stringify(store, null, 2)}\n`, "utf8");
+  try { fs.chmodSync(storePath, 0o600); } catch {}
+}
+
 async function resolveStoredProfile(userId?: string | null) {
   const agentDir = resolveUserScopedAgentDir(userId);
   if (!agentDir) {
     return null;
   }
 
-  const store = ensureAuthProfileStore(agentDir, { allowKeychainPrompt: false });
-  const profileIds = listProfilesForProvider(store, PROVIDER_ID);
-  if (profileIds.length === 0) {
-    return null;
-  }
+  const storePath = path.join(agentDir, "auth-profiles.json");
+  const store = loadAuthStoreFromDisk(storePath);
+  if (!store) return null;
+
+  const profileIds = Object.keys(store.profiles).filter(
+    (id) => {
+      const cred = store.profiles[id];
+      return cred && (cred.provider === PROVIDER_ID || id.startsWith(`${PROVIDER_ID}:`));
+    },
+  );
+  if (profileIds.length === 0) return null;
 
   const profileId = profileIds[0];
   const credential = store.profiles[profileId];
-  if (!credential) {
-    return null;
-  }
+  if (!credential) return null;
 
-  return {
-    profileId,
-    credential,
-  };
+  return { profileId, credential };
 }
 
 function buildProfileId(email?: string | null): string {
@@ -82,73 +101,51 @@ async function persistGeminiCliOAuthCredentials(
   }
 
   const profileId = buildProfileId(credentials.email);
+  const storePath = path.join(agentDir, "auth-profiles.json");
 
-  // Enable the plugin in config — best-effort (config may not exist yet in
-  // fresh environments or Docker images without a pre-existing OpenClaw config).
-  try {
-    await updateConfig((currentConfig) => {
-      const enabledPluginResult = enablePluginInConfig(currentConfig, PROVIDER_PLUGIN_ID);
-      if (!enabledPluginResult.enabled) {
-        console.warn(
-          `[GeminiCliOAuth] plugin enable returned false: ${enabledPluginResult.reason || "unknown"}`,
-        );
-        return currentConfig;
-      }
-      return enabledPluginResult.config;
-    });
-  } catch (configError) {
-    console.warn(
-      "[GeminiCliOAuth] updateConfig failed (non-critical), continuing:",
-      configError instanceof Error ? configError.message : configError,
-    );
-  }
+  const credential: Record<string, unknown> = {
+    type: "oauth",
+    provider: PROVIDER_ID,
+    access: credentials.access,
+    refresh: credentials.refresh,
+    expires: credentials.expires,
+    projectId: credentials.projectId,
+    ...(credentials.email ? { email: credentials.email } : {}),
+  };
 
   try {
-    upsertAuthProfile({
-      profileId,
-      agentDir,
-      credential: {
-        type: "oauth",
-        provider: PROVIDER_ID,
-        access: credentials.access,
-        refresh: credentials.refresh,
-        expires: credentials.expires,
-        projectId: credentials.projectId,
-        ...(credentials.email ? { email: credentials.email } : {}),
-      },
-    });
+    const existing = loadAuthStoreFromDisk(storePath) ?? {
+      version: 1,
+      profiles: {},
+    };
+    existing.profiles[profileId] = credential;
+    existing.order = existing.order ?? {};
+    existing.order[PROVIDER_ID] = [profileId];
+    saveAuthStoreToDisk(storePath, existing);
+    console.info("[GeminiCliOAuth] Credentials persisted to:", storePath);
   } catch (profileError) {
     console.error(
-      "[GeminiCliOAuth] upsertAuthProfile failed:",
+      "[GeminiCliOAuth] Direct credential persistence failed:",
       profileError instanceof Error ? profileError.message : profileError,
     );
     throw new Error("No se pudo guardar el perfil OAuth. Revisa permisos del directorio del servidor.");
   }
 
+  // Best-effort: try to use the full OpenClaw module chain for enhanced integration
   try {
+    const { upsertAuthProfile, setAuthProfileOrder } = await import(
+      "./superIntelligence/agents/auth-profiles.js"
+    );
+    upsertAuthProfile({ profileId, agentDir, credential });
     await setAuthProfileOrder({
       agentDir,
       provider: PROVIDER_ID,
       order: [profileId],
     });
-  } catch (orderError) {
+  } catch (enhancedError) {
     console.warn(
-      "[GeminiCliOAuth] setAuthProfileOrder failed (non-critical):",
-      orderError instanceof Error ? orderError.message : orderError,
-    );
-  }
-
-  // Post-credential hooks: models JSON and Pi auth JSON are best-effort.
-  // The credential is already persisted; these enhance the developer experience
-  // but should not block the OAuth flow.
-  try {
-    const config = await loadValidConfigOrThrow();
-    await ensureOpenClawModelsJson(config, agentDir);
-    await ensurePiAuthJsonFromAuthProfiles(agentDir);
-  } catch (postError) {
-    console.warn(
-      "[GeminiCliOAuth] post-persist hooks failed (non-critical):",
-      postError instanceof Error ? postError.message : postError,
+      "[GeminiCliOAuth] Enhanced OpenClaw profile integration skipped (non-critical):",
+      enhancedError instanceof Error ? enhancedError.message : enhancedError,
     );
   }
 }
