@@ -537,13 +537,11 @@ export async function registerRoutes(
         ? `https://${canonicalDomain}/api/auth/google/callback`
         : `${req.protocol}://${req.get("host")}/api/auth/google/callback`;
 
-    // For Gemini/Antigravity provider hints, request additional scopes so the
-    // user only authenticates once (no second OAuth popup).
-    const baseScopes = ["openid", "email", "profile"];
-    const isGeminiProvider = providerHint === "gemini" || providerHint === "antigravity";
-    const scopes = isGeminiProvider
-      ? [...baseScopes, "https://www.googleapis.com/auth/generative-language"]
-      : baseScopes;
+    // Use standard Google OAuth scopes for login. Gemini/Antigravity credential
+    // persistence uses the standard tokens; the dedicated Gemini CLI OAuth flow
+    // (auto-triggered after login) handles the generative-language scope separately
+    // using its own approved client credentials.
+    const scopes = ["openid", "email", "profile"];
 
     passport.authenticate("google", {
       scope: scopes,
