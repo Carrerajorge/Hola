@@ -122,12 +122,9 @@ router.get("/google", (req: Request, res: Response) => {
         normalizeLoginHint(req.query.loginHint) ??
         normalizeLoginHint(req.query.login_hint);
 
-    // When provider_hint is gemini or antigravity, request Gemini-specific scopes
-    // so the user only needs ONE OAuth login (no second popup).
-    const isGeminiHint = providerHint === "gemini" || providerHint === "antigravity";
-    const scopes = isGeminiHint
-        ? "openid email profile https://www.googleapis.com/auth/generative-language https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
-        : "openid email profile";
+    // Use standard scopes for login. The dedicated Gemini CLI OAuth flow
+    // (auto-triggered after login) handles generative-language scope separately.
+    const scopes = "openid email profile";
 
     const params = new URLSearchParams({
         client_id: config.clientId,
@@ -136,8 +133,7 @@ router.get("/google", (req: Request, res: Response) => {
         scope: scopes,
         state,
         access_type: "offline",
-        // For Gemini/Antigravity, always force consent to ensure expanded scopes are granted.
-        prompt: isGeminiHint ? "select_account consent" : (loginHint ? "consent" : "select_account consent"),
+        prompt: "select_account consent",
     });
     if (loginHint) {
         params.set("login_hint", loginHint);
