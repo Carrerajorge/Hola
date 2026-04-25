@@ -27,7 +27,6 @@
     "noEmit": true,
     "module": "ESNext",
     "strict": true,
-    "ignoreDeprecations": "6.0",
     "lib": [
       "esnext",
       "dom",

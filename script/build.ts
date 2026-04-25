@@ -1,6 +1,7 @@
 import { build as esbuild, BuildResult } from "esbuild";
 import { build as viteBuild } from "vite";
 import { copyFile, mkdir, rm, readFile, writeFile } from "fs/promises";
+import { existsSync } from "fs";
 import { spawn } from "child_process";
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times.
@@ -111,6 +112,46 @@ async function buildEmbeddedOpenClawControlUi() {
 
   await readFile("server/openclaw/dist/control-ui/index.html", "utf-8");
   console.log("[build] embedded openclaw control ui ready");
+}
+
+async function buildOpenClawPluginSdk() {
+  const pluginSdkModules = [
+    "channel-runtime",
+    "logging-core",
+    "reply-payload",
+    "runtime-env",
+    "sandbox",
+    "speech-core",
+    "text-runtime",
+    "channel-config-helpers",
+    "keyed-async-queue",
+  ];
+  const srcDir = "server/openclaw/src/plugin-sdk";
+  const outDir = "server/openclaw/dist/plugin-sdk";
+  const entryPoints = pluginSdkModules
+    .map((m) => `${srcDir}/${m}.ts`)
+    .filter((p) => existsSync(p));
+
+  if (entryPoints.length === 0) {
+    console.log("[build] No openclaw plugin-sdk sources found, skipping");
+    return;
+  }
+
+  await mkdir(outDir, { recursive: true });
+  console.log(`[build] Building ${entryPoints.length} openclaw plugin-sdk modules...`);
+
+  await esbuild({
+    entryPoints,
+    bundle: true,
+    format: "esm",
+    platform: "node",
+    outdir: outDir,
+    outExtension: { ".js": ".js" },
+    external: ["openclaw/*", "@openclaw/*"],
+    target: "node22",
+    logLevel: "warning",
+  });
+  console.log("[build] openclaw plugin-sdk modules ready");
 }
 
 async function buildServer(appVersion: string) {
@@ -326,6 +367,7 @@ async function buildAll() {
       process.env.VITE_APP_VERSION ||
       process.env.APP_VERSION ||
       `build-${Date.now()}`;
+    await buildOpenClawPluginSdk();
     await buildServer(appVersion);
     await writeReleaseManifest(appVersion);
     return;
@@ -333,6 +375,7 @@ async function buildAll() {
 
   await rm("dist", { recursive: true, force: true });
 
+  await buildOpenClawPluginSdk();
   await buildEmbeddedOpenClawControlUi();
 
   console.log("building client...");
