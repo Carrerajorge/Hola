@@ -520,38 +520,46 @@ export async function registerRoutes(
       normalizeGoogleLoginHint(req.query.loginHint) ??
       normalizeGoogleLoginHint(req.query.login_hint);
 
-    // Preserve provider_hint (gemini, openai, etc.) in session so we can act
-    // on it after the OAuth callback completes (e.g. auto-initiate Gemini CLI).
     const providerHint = typeof req.query.provider_hint === "string"
       ? req.query.provider_hint.trim().toLowerCase()
       : "";
-    if (providerHint && (req as any).session) {
-      (req as any).session.providerHint = providerHint;
-    }
 
-    // Dynamic callbackURL ensures redirect URI matches the actual request host,
-    // preventing redirect_uri_mismatch when PORT differs between dev scripts and .env.
     const canonicalDomain = process.env.CANONICAL_DOMAIN || "iliagpt.com";
     const callbackURL =
       env.NODE_ENV === "production"
         ? `https://${canonicalDomain}/api/auth/google/callback`
         : `${req.protocol}://${req.get("host")}/api/auth/google/callback`;
 
-    // For Gemini/Antigravity provider hints, request additional scopes so the
-    // user only authenticates once (no second OAuth popup).
     const baseScopes = ["openid", "email", "profile"];
     const isGeminiProvider = providerHint === "gemini" || providerHint === "antigravity";
     const scopes = isGeminiProvider
       ? [...baseScopes, "https://www.googleapis.com/auth/generative-language"]
       : baseScopes;
 
-    passport.authenticate("google", {
-      scope: scopes,
-      accessType: "offline",
-      prompt: "select_account consent",
-      callbackURL,
-      ...(loginHint ? { loginHint } : {}),
-    })(req, res, next);
+    const doAuthenticate = () => {
+      passport.authenticate("google", {
+        scope: scopes,
+        accessType: "offline",
+        prompt: "select_account consent",
+        callbackURL,
+        ...(loginHint ? { loginHint } : {}),
+      })(req, res, next);
+    };
+
+    if (providerHint && (req as any).session) {
+      (req as any).session.providerHint = providerHint;
+      if (typeof (req as any).session.save === "function") {
+        (req as any).session.save((err: unknown) => {
+          if (err) {
+            console.warn("[Auth] Failed to persist providerHint in session:", err);
+          }
+          doAuthenticate();
+        });
+        return;
+      }
+    }
+
+    doAuthenticate();
   });
 
   if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
