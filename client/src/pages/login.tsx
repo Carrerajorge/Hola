@@ -69,6 +69,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [activeSocialProvider, setActiveSocialProvider] = useState<SocialProvider | null>(null);
+  const [openaiOAuthLoading, setOpenaiOAuthLoading] = useState(false);
 
   const [isMagicLinkLoading, setIsMagicLinkLoading] = useState(false);
   const [magicLinkSent, setMagicLinkSent] = useState(false);
@@ -302,32 +303,63 @@ export default function LoginPage() {
     clearForcedSignedOutFlag();
     setActiveSocialProvider(provider);
     setError("");
-    // Build OAuth URL with optional login_hint for Gmail auto-redirect
     const params = new URLSearchParams();
     if (loginHint) {
       params.set("login_hint", loginHint);
     }
-    // If user entered an email, use it as login_hint for Google to pre-select account
     if (!loginHint && email && email.includes("@")) {
       params.set("login_hint", email);
     }
-    // For Gemini, OpenAI, and Antigravity providers, always hint towards Gmail
-    // so Google pre-selects the user's Gmail account automatically.
-    // If the user has typed an email ending in @gmail.com, use it directly.
-    // Otherwise, for these providers, still pass the email if available to help Google
-    // suggest the right account.
-    if ((provider === "gemini" || provider === "openai" || provider === "antigravity") && !params.has("login_hint")) {
+    if ((provider === "gemini" || provider === "antigravity") && !params.has("login_hint")) {
       if (email && email.includes("@")) {
         params.set("login_hint", email);
       }
     }
-    // Pass provider_hint so the server can redirect to the right flow after Google OAuth
-    // This enables auto-triggering Gemini CLI, OpenAI Codex, or Antigravity OAuth after login
     if (provider !== "google") {
       params.set("provider_hint", provider);
     }
     const query = params.toString();
     window.location.assign(`/api/auth/google${query ? `?${query}` : ""}`);
+  };
+
+  const handleOpenAILogin = async () => {
+    clearForcedSignedOutFlag();
+    setActiveSocialProvider("openai");
+    setOpenaiOAuthLoading(true);
+    setError("");
+    try {
+      const startRes = await apiFetch("/api/oauth/openai/codex/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!startRes.ok) {
+        const errData = await startRes.json().catch(() => ({}));
+        const errMsg = (errData as any)?.error || "";
+        if (startRes.status === 401) {
+          handleGoogleLogin("openai");
+          return;
+        }
+        setError(errMsg || "No se pudo iniciar la conexión con ChatGPT.");
+        setActiveSocialProvider(null);
+        setOpenaiOAuthLoading(false);
+        return;
+      }
+      const flowData = await startRes.json() as any;
+      if (flowData.authUrl) {
+        window.location.assign(flowData.authUrl);
+        return;
+      }
+      if (flowData.userCode && flowData.verificationUrl) {
+        window.open(flowData.verificationUrl, "_blank");
+        setError(`Ingresa el código ${flowData.userCode} en la página de ChatGPT que se abrió.`);
+      }
+    } catch {
+      handleGoogleLogin("openai");
+    } finally {
+      setActiveSocialProvider(null);
+      setOpenaiOAuthLoading(false);
+    }
   };
 
   const handleMagicLink = async () => {
@@ -556,18 +588,18 @@ export default function LoginPage() {
               <Button
                 variant="outline"
                 className="w-full h-12 justify-center gap-3 text-base font-semibold border-border bg-card text-foreground hover:bg-muted/40 transition-colors rounded-xl fade-in-up fade-in-up-delay-2"
-                onClick={() => handleGoogleLogin("openai")}
-                disabled={isAnySocialProviderLoading}
+                onClick={() => handleOpenAILogin()}
+                disabled={isAnySocialProviderLoading || openaiOAuthLoading}
                 data-testid="button-login-openai"
               >
-                {isSocialProviderLoading("openai") ? (
+                {(isSocialProviderLoading("openai") || openaiOAuthLoading) ? (
                   <Loader2 className="h-6 w-6 animate-spin" />
                 ) : (
                   <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <path d="M22.28 9.37a5.99 5.99 0 0 0-.52-4.93 6.07 6.07 0 0 0-6.55-2.91A5.99 5.99 0 0 0 10.69.18a6.07 6.07 0 0 0-5.8 4.21 5.99 5.99 0 0 0-4.01 2.9 6.07 6.07 0 0 0 .74 7.12 5.99 5.99 0 0 0 .52 4.93 6.07 6.07 0 0 0 6.55 2.91 5.99 5.99 0 0 0 4.52 1.35 6.07 6.07 0 0 0 5.8-4.21 5.99 5.99 0 0 0 4.01-2.9 6.07 6.07 0 0 0-.74-7.12Zm-8.06 13.8a4.5 4.5 0 0 1-2.88-1.04l.14-.08 4.78-2.76a.78.78 0 0 0 .39-.67v-6.74l2.02 1.17a.07.07 0 0 1 .04.06v5.58a4.52 4.52 0 0 1-4.49 4.48Zm-9.67-4.12a4.48 4.48 0 0 1-.54-3.03l.14.08 4.78 2.76a.77.77 0 0 0 .78 0l5.83-3.37v2.33a.07.07 0 0 1-.03.06l-4.83 2.79a4.52 4.52 0 0 1-6.13-1.62ZM3.24 7.83a4.49 4.49 0 0 1 2.34-1.97V11.6a.77.77 0 0 0 .39.68l5.83 3.37-2.02 1.16a.07.07 0 0 1-.07 0L4.88 14a4.52 4.52 0 0 1-1.64-6.17Zm16.6 3.87-5.84-3.37L16.02 7.17a.07.07 0 0 1 .07 0l4.83 2.79a4.51 4.51 0 0 1-.7 8.14V12.37a.78.78 0 0 0-.38-.67Zm2.01-3.04-.14-.08-4.78-2.76a.77.77 0 0 0-.78 0l-5.83 3.37V6.86a.07.07 0 0 1 .03-.06l4.83-2.79a4.52 4.52 0 0 1 6.67 4.65ZM8.02 13.15 6 11.98a.07.07 0 0 1-.04-.06V6.34a4.52 4.52 0 0 1 7.37-3.48l-.14.08-4.78 2.76a.78.78 0 0 0-.39.68v6.77Zm1.1-2.37 2.6-1.5 2.6 1.5v3l-2.6 1.5-2.6-1.5v-3Z" fill="#10a37f"/>
                   </svg>
                 )}
-                {isSocialProviderLoading("openai") ? "Conectando..." : "Continuar con ChatGPT"}
+                {(isSocialProviderLoading("openai") || openaiOAuthLoading) ? "Conectando..." : "Continuar con ChatGPT"}
               </Button>
 
               {/* Google Antigravity Login */}
