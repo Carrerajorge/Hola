@@ -27,19 +27,17 @@
     "noEmit": true,
     "module": "ESNext",
     "strict": true,
-    "ignoreDeprecations": "6.0",
+    "ignoreDeprecations": "5.0",
     "lib": [
       "esnext",
       "dom",
       "dom.iterable"
     ],
-    "downlevelIteration": true,
     "jsx": "react-jsx",
     "esModuleInterop": true,
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
     "moduleResolution": "bundler",
-    "baseUrl": ".",
     "paths": {
       "@/*": [
         "./client/src/*"

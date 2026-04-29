@@ -9,7 +9,6 @@ import { storage } from "../storage";
 import { env } from "../config/env";
 import { handleGoogleGeminiCliOAuthCallback } from "./googleGeminiCliBridge";
 import { buildSessionUserFromDbUser } from "../lib/sessionUser";
-import { persistGoogleTokensAsGeminiCli } from "./persistGoogleTokensAsGeminiCli";
 
 const router = Router();
 

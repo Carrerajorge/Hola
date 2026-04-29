@@ -324,4 +324,27 @@ export class TokenManager {
     }
 }
 
-export const tokenManager = new TokenManager();
+let _tokenManager: TokenManager | null = null;
+
+export const tokenManager: TokenManager = new Proxy({} as TokenManager, {
+    get(_target, prop, receiver) {
+        if (!_tokenManager) {
+            try {
+                _tokenManager = new TokenManager();
+            } catch (err: any) {
+                if (typeof prop === "string" && (prop === "saveTokens" || prop === "getTokens" || prop === "getAccessToken")) {
+                    return async () => {
+                        console.warn(`[TokenMgr] TokenManager unavailable (${err?.message}). Operation skipped.`);
+                        return null;
+                    };
+                }
+                throw err;
+            }
+        }
+        const value = (_tokenManager as any)[prop];
+        if (typeof value === "function") {
+            return value.bind(_tokenManager);
+        }
+        return value;
+    },
+});
