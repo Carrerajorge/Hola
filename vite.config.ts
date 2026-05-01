@@ -76,7 +76,6 @@ export default defineConfig(async () => {
             "vendor-visualization": ["echarts", "echarts-for-react", "recharts", "d3", "three", "konva", "react-konva"],
             "vendor-editor": ["@monaco-editor/react", "prismjs"],
             xlsx: ["xlsx"],
-            cytoscape: ["cytoscape"],
             "mermaid-core": ["mermaid"],
           },
         },

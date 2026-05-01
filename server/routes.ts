@@ -597,6 +597,11 @@ export async function registerRoutes(
               return res.redirect("/login?error=login_failed");
             }
 
+            // Capture providerHint BEFORE req.logIn() because Passport 0.7+
+            // regenerates the session during login, which destroys session data
+            // stored before the OAuth redirect (including providerHint).
+            const providerHint = (req as any).session?.providerHint || "";
+
             const mfa = await computeMfaForUser({
               userId,
               excludeSid: req.sessionID || null,
@@ -637,14 +642,6 @@ export async function registerRoutes(
                 if (typeof session.passport.user !== "string") {
                   session.passport.user = String(userId);
                 }
-              }
-
-              // Determine redirect based on provider_hint saved before OAuth.
-              const sess = (req as any).session;
-              const providerHint = sess?.providerHint || "";
-              // Clear after use so it doesn't persist across sessions.
-              if (sess) {
-                delete sess.providerHint;
               }
 
               // Build redirect URL: if the user came from a specific provider button,
@@ -691,8 +688,8 @@ export async function registerRoutes(
               }
 
               const doRedirect = () => res.redirect(redirectTarget);
-              if (sess?.save) {
-                sess.save((saveErr: any) => {
+              if (session?.save) {
+                session.save((saveErr: any) => {
                   if (saveErr) {
                     console.error("[Auth] Google session save error:", saveErr);
                     return res.redirect("/login?error=session_error");
