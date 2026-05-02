@@ -533,15 +533,16 @@ export async function registerRoutes(
     const baseScopes = ["openid", "email", "profile"];
     const isGeminiProvider = providerHint === "gemini" || providerHint === "antigravity";
     const scopes = isGeminiProvider
-      ? [...baseScopes, "https://www.googleapis.com/auth/generative-language"]
+      ? [...baseScopes, "https://www.googleapis.com/auth/generative-language", "https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile"]
       : baseScopes;
 
     const doAuthenticate = () => {
       passport.authenticate("google", {
         scope: scopes,
         accessType: "offline",
-        prompt: "select_account consent",
+        prompt: isGeminiProvider ? "consent" : "select_account consent",
         callbackURL,
+        includeGrantedScopes: true,
         ...(loginHint ? { loginHint } : {}),
       })(req, res, next);
     };
@@ -667,8 +668,8 @@ export async function registerRoutes(
               // second OAuth popup. Await completion before redirect so the client
               // sees connected: true immediately and doesn't trigger a second flow.
               if (providerHint === "gemini" || providerHint === "antigravity") {
-                // Extract direct tokens from the user object (attached by passport strategy)
                 const directTokens = (user as any)?._googleOAuthTokens ?? null;
+                console.info("[Auth] Persisting Gemini CLI credentials for provider:", providerHint, "user:", userId, "hasDirectTokens:", !!directTokens);
                 try {
                   const { persistGoogleTokensAsGeminiCli } = await import(
                     "./auth/persistGoogleTokensAsGeminiCli"
@@ -678,15 +679,33 @@ export async function registerRoutes(
                     email || undefined,
                     directTokens || undefined,
                   );
-                  console.info(
-                    "[Auth] Gemini CLI credentials persisted before redirect for user:",
-                    userId,
-                  );
+                  console.info("[Auth] Gemini CLI credentials persisted successfully for:", userId);
                 } catch (geminiPersistError: any) {
                   console.warn(
                     "[Auth] Gemini CLI credential persistence failed (non-critical):",
                     geminiPersistError?.message || geminiPersistError,
                   );
+                }
+
+                // Also persist via the provider token service for DB-backed status queries
+                try {
+                  if (directTokens?.access_token) {
+                    const { providersService } = await import("./services/providersService");
+                    const expiresAt = directTokens.expires_at
+                      ? directTokens.expires_at * 1000
+                      : Date.now() + 3600 * 1000;
+                    await providersService.saveUserToken(
+                      String(userId),
+                      "gemini",
+                      directTokens.access_token,
+                      directTokens.refresh_token || null,
+                      expiresAt,
+                      "https://www.googleapis.com/auth/generative-language",
+                    );
+                    console.info("[Auth] Gemini provider token persisted to DB for:", userId);
+                  }
+                } catch (dbPersistError: any) {
+                  console.warn("[Auth] Gemini DB token persistence failed (non-critical):", dbPersistError?.message);
                 }
               }
 
