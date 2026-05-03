@@ -546,6 +546,19 @@ export async function registerRoutes(
       })(req, res, next);
     };
 
+    // Store providerHint in BOTH session AND a short-lived cookie.
+    // The cookie serves as a reliable fallback if the session store loses
+    // the value during the OAuth redirect (e.g., PG connection hiccup).
+    if (providerHint) {
+      res.cookie("__iliagpt_ph", providerHint, {
+        httpOnly: true,
+        secure: env.NODE_ENV === "production",
+        sameSite: env.NODE_ENV === "production" ? "none" : "lax",
+        maxAge: 10 * 60 * 1000, // 10 minutes
+        path: "/api/auth/google",
+      });
+    }
+
     if (providerHint && (req as any).session) {
       (req as any).session.providerHint = providerHint;
       if (typeof (req as any).session.save === "function") {
@@ -640,11 +653,25 @@ export async function registerRoutes(
               }
 
               // Determine redirect based on provider_hint saved before OAuth.
+              // Read from session first, fall back to the backup cookie.
               const sess = (req as any).session;
-              const providerHint = sess?.providerHint || "";
+              let phFromCookie = "";
+              if (!sess?.providerHint) {
+                // Parse cookies manually if not already parsed
+                if (!req.cookies && req.headers.cookie) {
+                  const { parse: parseCookie } = await import("cookie");
+                  req.cookies = parseCookie(req.headers.cookie);
+                }
+                phFromCookie = req.cookies?.["__iliagpt_ph"] || "";
+              }
+              const providerHint = sess?.providerHint || phFromCookie;
               // Clear after use so it doesn't persist across sessions.
               if (sess) {
                 delete sess.providerHint;
+              }
+              // Clear the backup cookie
+              if (phFromCookie) {
+                res.clearCookie("__iliagpt_ph", { path: "/api/auth/google" });
               }
 
               // Build redirect URL: if the user came from a specific provider button,
