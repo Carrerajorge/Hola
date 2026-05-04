@@ -1,11 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
-import {
-  completeGeminiCliOAuthSession,
-  startGeminiCliOAuthSession,
-  type GeminiCliOAuthCredentials,
-} from "../openclaw/extensions/google-gemini-cli-auth/oauth.js";
 import { resolveUserScopedAgentDir } from "./userScopedAgentDir.js";
+
+export type GeminiCliOAuthCredentials = {
+  access: string;
+  refresh: string;
+  expires: number;
+  email?: string;
+  projectId: string;
+};
+
+async function loadOpenClawOAuthModule() {
+  return await import("../openclaw/extensions/google-gemini-cli-auth/oauth.js");
+}
 
 const PROVIDER_ID = "google-gemini-cli";
 const DEFAULT_MODEL_REF = "google-gemini-cli/gemini-3.1-pro-preview";
@@ -185,12 +192,13 @@ export async function persistGeminiCliCredentialsFromGoogleTokens(
   await persistGeminiCliOAuthCredentials(credentials, userId);
 }
 
-export function beginGoogleGeminiCliOAuthFlow(params?: {
+export async function beginGoogleGeminiCliOAuthFlow(params?: {
   redirectUri?: string;
   state?: string;
   loginHint?: string;
 }) {
-  return startGeminiCliOAuthSession(params);
+  const mod = await loadOpenClawOAuthModule();
+  return mod.startGeminiCliOAuthSession(params);
 }
 
 export async function finishGoogleGeminiCliOAuthFlow(params: {
@@ -200,7 +208,8 @@ export async function finishGoogleGeminiCliOAuthFlow(params: {
   expectedState?: string;
   userId: string;
 }): Promise<GoogleGeminiCliOAuthStatus> {
-  const credentials = await completeGeminiCliOAuthSession({
+  const mod = await loadOpenClawOAuthModule();
+  const credentials = await mod.completeGeminiCliOAuthSession({
     callbackInput: params.callbackInput,
     verifier: params.verifier,
     redirectUri: params.redirectUri,
