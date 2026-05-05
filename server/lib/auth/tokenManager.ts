@@ -324,4 +324,14 @@ export class TokenManager {
     }
 }
 
-export const tokenManager = new TokenManager();
+let _tokenManager: TokenManager | null = null;
+
+export const tokenManager: TokenManager = new Proxy({} as TokenManager, {
+    get(_target, prop) {
+        if (!_tokenManager) {
+            _tokenManager = new TokenManager();
+        }
+        const value = (_tokenManager as any)[prop];
+        return typeof value === "function" ? value.bind(_tokenManager) : value;
+    },
+});
