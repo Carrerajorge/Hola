@@ -7,7 +7,6 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { tokenManager } from "../lib/auth/tokenManager";
 import { resolveUserScopedAgentDir } from "../services/userScopedAgentDir";
 
 const PROVIDER_ID = "google-gemini-cli";
@@ -38,9 +37,10 @@ export async function persistGoogleTokensAsGeminiCli(
     };
   } else {
     try {
+      const { tokenManager } = await import("../lib/auth/tokenManager.js");
       tokens = await tokenManager.getTokens(userId, "google");
     } catch {
-      // Token retrieval might fail if encryption key isn't set
+      // Token retrieval might fail if encryption key isn't set or module fails to load
     }
   }
 
