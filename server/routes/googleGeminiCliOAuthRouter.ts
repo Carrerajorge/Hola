@@ -169,7 +169,7 @@ googleGeminiCliOAuthRouter.post(
       const redirectUri = getCanonicalGoogleCallbackUri(req);
       const oauthState = `gemini-cli:${flowId}`;
       const loginHint = normalizeLoginHint(req.body?.loginHint);
-      const flow = beginGoogleGeminiCliOAuthFlow({
+      const flow = await beginGoogleGeminiCliOAuthFlow({
         redirectUri,
         state: oauthState,
         loginHint,
