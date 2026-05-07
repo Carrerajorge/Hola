@@ -69,7 +69,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [activeSocialProvider, setActiveSocialProvider] = useState<SocialProvider | null>(null);
-  const [openaiOAuthLoading, setOpenaiOAuthLoading] = useState(false);
+  const openaiOAuthLoading = false;
 
   const [isMagicLinkLoading, setIsMagicLinkLoading] = useState(false);
   const [magicLinkSent, setMagicLinkSent] = useState(false);
@@ -322,48 +322,9 @@ export default function LoginPage() {
     window.location.assign(`/api/auth/google${query ? `?${query}` : ""}`);
   };
 
-  const handleOpenAILogin = async () => {
-    clearForcedSignedOutFlag();
-    setActiveSocialProvider("openai");
-    setOpenaiOAuthLoading(true);
-    setError("");
-    try {
-      const res = await apiFetch("/api/oauth/google/gemini-cli/status");
-      const isAuthenticated = res.ok;
-      if (!isAuthenticated) {
-        setError("Primero inicia sesión con Google y luego conecta ChatGPT desde la configuración.");
-        setActiveSocialProvider(null);
-        setOpenaiOAuthLoading(false);
-        return;
-      }
-      const startRes = await apiFetch("/api/oauth/openai/codex/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      if (!startRes.ok) {
-        const errData = await startRes.json().catch(() => ({}));
-        setError((errData as any)?.error || "No se pudo iniciar la conexión con ChatGPT. Inicia sesión primero con Google.");
-        setActiveSocialProvider(null);
-        setOpenaiOAuthLoading(false);
-        return;
-      }
-      const flowData = await startRes.json() as any;
-      if (flowData.authUrl) {
-        window.location.assign(flowData.authUrl);
-        return;
-      }
-      if (flowData.userCode && flowData.verificationUrl) {
-        window.open(flowData.verificationUrl, "_blank");
-        setError(`Ingresa el código ${flowData.userCode} en la página de ChatGPT que se abrió.`);
-      }
-    } catch {
-      setError("Error al iniciar la conexión con ChatGPT.");
-    } finally {
-      setActiveSocialProvider(null);
-      setOpenaiOAuthLoading(false);
-    }
-  };
+  // OpenAI login is handled via handleGoogleLogin("openai") which first
+  // authenticates with Google, then auto-opens the OpenAI connection dialog
+  // on the home page after redirect.
 
   const handleMagicLink = async () => {
     if (!email) {
