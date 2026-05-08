@@ -1,10 +1,28 @@
 {
   "extends": "./tsconfig.json",
   "include": [
-    "shared/**/*"
+    "shared/**/*",
+    "server/**/*",
+    "client/src/**/*"
   ],
   "exclude": [
     "node_modules",
-    "**/*.bak.ts"
+    "build",
+    "dist",
+    "server/openclaw/src/**",
+    "server/openclaw/extensions/**",
+    "server/openclaw/apps/**",
+    "server/openclaw/docs/**",
+    "server/openclaw/scripts/**",
+    "server/openclaw/vendor/**",
+    "packages/**",
+    "tests",
+    "e2e",
+    "**/__tests__/**",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.bak.ts",
+    "**/*.bak.tsx",
+    "client/src/test/**"
   ]
 }

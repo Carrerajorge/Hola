@@ -555,7 +555,7 @@ export async function registerRoutes(
         secure: env.NODE_ENV === "production",
         sameSite: env.NODE_ENV === "production" ? "none" : "lax",
         maxAge: 10 * 60 * 1000, // 10 minutes
-        path: "/api/auth/google",
+        path: "/api/auth",
       });
     }
 
@@ -671,7 +671,7 @@ export async function registerRoutes(
               }
               // Clear the backup cookie
               if (phFromCookie) {
-                res.clearCookie("__iliagpt_ph", { path: "/api/auth/google" });
+                res.clearCookie("__iliagpt_ph", { path: "/api/auth" });
               }
 
               // Build redirect URL: if the user came from a specific provider button,
