@@ -372,8 +372,7 @@ async function nativeExchangeCodeForTokens(
   };
 
   if (!data.refresh_token) {
-    console.warn("[GeminiCliOAuth] No refresh_token in response.");
-    throw new Error("No refresh token received. Revoke ILIAGPT access in your Google Account settings and try again.");
+    console.warn("[GeminiCliOAuth] No refresh_token in response — user may need to revoke and re-authorize.");
   }
 
   let email: string | undefined;
@@ -402,7 +401,7 @@ async function nativeExchangeCodeForTokens(
   const expiresAt = Date.now() + data.expires_in * 1000 - 5 * 60 * 1000;
 
   return {
-    refresh: data.refresh_token,
+    refresh: data.refresh_token || "",
     access: data.access_token,
     expires: expiresAt,
     projectId,
