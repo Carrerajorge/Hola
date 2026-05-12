@@ -8,6 +8,7 @@ import type { Gpt } from "@/components/gpt-explorer";
 import { OfflineIndicator, OfflineBanner } from "@/components/offline-indicator";
 import { useMediaLibrary } from "@/hooks/use-media-library";
 import { lazy, Suspense, useState, useCallback, useMemo, useEffect, useRef, type ComponentType } from "react";
+import { ProviderConnectionHubButton } from "@/components/chat/ProviderConnectionHubButton";
 
 import { useFavorites } from "@/hooks/use-favorites";
 import { usePromptTemplates } from "@/hooks/use-prompt-templates";
@@ -994,6 +995,9 @@ export default function Home() {
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background relative">
       <OfflineBanner />
+      <div className="hidden">
+        <ProviderConnectionHubButton availableModels={[]} />
+      </div>
       <div className="liquid-blob liquid-blob-1 opacity-30"></div>
       <div className="liquid-blob liquid-blob-2 opacity-20"></div>
       <div className="liquid-blob liquid-blob-3 opacity-25"></div>
