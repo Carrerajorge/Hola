@@ -429,8 +429,16 @@ async function nativeCompleteGeminiCliOAuthSession(params: {
 
 // ── Public API ──
 
+let openClawModuleUnavailable = false;
 async function loadOpenClawOAuthModule() {
-  return await import("../openclaw/extensions/google-gemini-cli-auth/oauth.js");
+  if (openClawModuleUnavailable) return null;
+  try {
+    return await import("../openclaw/extensions/google-gemini-cli-auth/oauth.js");
+  } catch {
+    openClawModuleUnavailable = true;
+    console.info("[GeminiCliOAuth] OpenClaw module unavailable, using native OAuth for all subsequent flows.");
+    return null;
+  }
 }
 
 export async function beginGoogleGeminiCliOAuthFlow(params?: {
@@ -438,14 +446,9 @@ export async function beginGoogleGeminiCliOAuthFlow(params?: {
   state?: string;
   loginHint?: string;
 }) {
-  try {
-    const mod = await loadOpenClawOAuthModule();
+  const mod = await loadOpenClawOAuthModule();
+  if (mod) {
     return mod.startGeminiCliOAuthSession(params);
-  } catch (openclawError) {
-    console.warn(
-      "[GeminiCliOAuth] OpenClaw module unavailable, using native OAuth:",
-      openclawError instanceof Error ? openclawError.message : openclawError,
-    );
   }
   return nativeStartGeminiCliOAuthSession(params);
 }
@@ -459,19 +462,15 @@ export async function finishGoogleGeminiCliOAuthFlow(params: {
 }): Promise<GoogleGeminiCliOAuthStatus> {
   let credentials: GeminiCliOAuthCredentials;
 
-  try {
-    const mod = await loadOpenClawOAuthModule();
+  const mod = await loadOpenClawOAuthModule();
+  if (mod) {
     credentials = await mod.completeGeminiCliOAuthSession({
       callbackInput: params.callbackInput,
       verifier: params.verifier,
       redirectUri: params.redirectUri,
       expectedState: params.expectedState,
     });
-  } catch (openclawError) {
-    console.warn(
-      "[GeminiCliOAuth] OpenClaw module unavailable for token exchange, using native:",
-      openclawError instanceof Error ? openclawError.message : openclawError,
-    );
+  } else {
     credentials = await nativeCompleteGeminiCliOAuthSession({
       callbackInput: params.callbackInput,
       verifier: params.verifier,
