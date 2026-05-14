@@ -317,6 +317,11 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                 // If provider_hint is gemini or antigravity, persist Google tokens
                 // as Gemini CLI credentials in a single step (no second OAuth popup needed).
                 if (stateData.providerHint === "gemini" || stateData.providerHint === "antigravity") {
+                    const grantedScope = typeof tokens.scope === "string" ? tokens.scope : "";
+                    const hasGenerativeScope = grantedScope.includes("generative-language");
+                    if (!hasGenerativeScope) {
+                        console.warn("[Google Auth] Gemini credential persistence skipped: generative-language scope not granted. Granted:", grantedScope);
+                    }
                     try {
                         const { persistGeminiCliCredentialsFromGoogleTokens } = await import("../services/googleGeminiCliOAuthService.js");
                         await persistGeminiCliCredentialsFromGoogleTokens(
@@ -328,9 +333,9 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                                 expires_at: Math.floor(Date.now() / 1000) + (tokens.expires_in || 3600),
                             },
                         );
-                        console.log("[Google Auth] Gemini CLI credentials persisted for:", email);
+                        console.log("[Google Auth] Gemini CLI credentials persisted for:", email, hasGenerativeScope ? "(with generative-language scope)" : "(scope pending)");
                     } catch (geminiError: any) {
-                        console.warn("[Google Auth] Gemini credential persistence failed (non-blocking):", geminiError?.message || geminiError);
+                        console.error("[Google Auth] Gemini credential persistence failed:", geminiError?.message || geminiError);
                     }
                 }
 

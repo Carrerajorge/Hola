@@ -225,6 +225,15 @@ function resolveOAuthClientConfig(): { clientId: string; clientSecret?: string }
   return { clientId, clientSecret: clientSecret || undefined };
 }
 
+function resolveCanonicalRedirectUri(): string {
+  const canonical = process.env.CANONICAL_DOMAIN || "iliagpt.com";
+  if (process.env.NODE_ENV === "production") {
+    return `https://${canonical}/api/auth/google/callback`;
+  }
+  const port = process.env.PORT || "5001";
+  return `http://localhost:${port}/api/auth/google/callback`;
+}
+
 function nativeStartGeminiCliOAuthSession(params?: {
   redirectUri?: string;
   state?: string;
@@ -237,7 +246,7 @@ function nativeStartGeminiCliOAuthSession(params?: {
 } {
   const { clientId } = resolveOAuthClientConfig();
   const { verifier, challenge } = generatePkce();
-  const redirectUri = params?.redirectUri?.trim() || "http://localhost:8085/oauth2callback";
+  const redirectUri = params?.redirectUri?.trim() || resolveCanonicalRedirectUri();
   const state = params?.state?.trim() || verifier;
 
   const urlParams = new URLSearchParams({
@@ -416,7 +425,7 @@ async function nativeCompleteGeminiCliOAuthSession(params: {
   expectedState?: string;
 }): Promise<GeminiCliOAuthCredentials> {
   const expectedState = params.expectedState?.trim() || params.verifier;
-  const redirectUri = params.redirectUri?.trim() || "http://localhost:8085/oauth2callback";
+  const redirectUri = params.redirectUri?.trim() || resolveCanonicalRedirectUri();
   const parsed = parseCallbackInput(params.callbackInput, expectedState);
   if ("error" in parsed) {
     throw new Error(parsed.error);
