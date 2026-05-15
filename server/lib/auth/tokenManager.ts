@@ -32,26 +32,27 @@ interface TokenRecord {
 }
 
 export class TokenManager {
-    private encryptionKey: Buffer;
+    private encryptionKey: Buffer | null;
 
     constructor() {
         const keyString = process.env.TOKEN_ENCRYPTION_KEY;
-        if (!keyString) {
-            throw new Error("TOKEN_ENCRYPTION_KEY is required for OAuth token storage.");
-        }
-        if (Buffer.byteLength(keyString, 'utf8') < 32) {
-            throw new Error("TOKEN_ENCRYPTION_KEY must be at least 32 bytes long.");
-        }
-        if (keyString === 'default-secret-key-must-be-32-bytes-long!') {
-            throw new Error("TOKEN_ENCRYPTION_KEY must not use the default development placeholder.");
+        if (!keyString || Buffer.byteLength(keyString, 'utf8') < 32 || keyString === 'default-secret-key-must-be-32-bytes-long!') {
+            Logger.warn("[TokenMgr] TOKEN_ENCRYPTION_KEY not set or invalid; token persistence disabled.");
+            this.encryptionKey = null;
+            return;
         }
         this.encryptionKey = crypto.scryptSync(keyString, 'salt', 32);
+    }
+
+    get isAvailable(): boolean {
+        return this.encryptionKey !== null;
     }
 
     /**
      * Store tokens securely in Postgres
      */
     async saveTokens(userId: string, provider: TokenProvider, tokens: any) {
+        if (!this.encryptionKey) return;
         try {
             const accessToken = this.encrypt(tokens.access_token);
             const refreshToken = tokens.refresh_token ? this.encrypt(tokens.refresh_token) : undefined;
@@ -94,6 +95,7 @@ export class TokenManager {
         expiry_date?: number;
         scope?: string;
     } | null> {
+        if (!this.encryptionKey) return null;
         try {
             const [record] = await db
                 .select()
@@ -124,6 +126,7 @@ export class TokenManager {
      * Get valid access token (auto-refresh if needed)
      */
     async getAccessToken(userId: string, provider: TokenProvider): Promise<string | null> {
+        if (!this.encryptionKey) return null;
         try {
             const [record] = await db
                 .select()
@@ -293,7 +296,7 @@ export class TokenManager {
 
     // AES-256-GCM Encryption
     private encrypt(text: string): string {
-        if (!text) return '';
+        if (!text || !this.encryptionKey) return '';
         const iv = crypto.randomBytes(16);
         const cipher = crypto.createCipheriv('aes-256-gcm', this.encryptionKey, iv);
         let encrypted = cipher.update(text, 'utf8', 'hex');
@@ -303,7 +306,7 @@ export class TokenManager {
     }
 
     private decrypt(ciphertext: string): string {
-        if (!ciphertext) return '';
+        if (!ciphertext || !this.encryptionKey) return '';
         const parts = ciphertext.split(':');
         if (parts.length !== 3) return '';
 

@@ -6,10 +6,21 @@ import { Strategy as Auth0Strategy } from "passport-auth0";
 import { db } from "../../db";
 import { users } from "../../../shared/schema/auth";
 import { eq } from "drizzle-orm";
-import { tokenManager } from "./tokenManager";
 import { authStorage } from "../../replit_integrations/auth/storage";
 import { Logger } from "../logger";
 import { env } from "../../config/env";
+
+let _tokenManager: any = null;
+async function getTokenManager() {
+    if (_tokenManager) return _tokenManager;
+    try {
+        const mod = await import("./tokenManager.js");
+        _tokenManager = mod.tokenManager;
+        return _tokenManager;
+    } catch {
+        return null;
+    }
+}
 
 function isRecoverablePassportDeserializeError(error: unknown): boolean {
     if (!error || typeof error !== "object") {
@@ -160,13 +171,15 @@ if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
 
                     // Persist tokens (best-effort: never block login on token storage issues).
                     try {
-                        await tokenManager.saveTokens(user.id, "google", {
-                            access_token: accessToken,
-                            refresh_token: refreshToken,
-                            // Google typically expires in 1 hour (3599 seconds)
-                            expiry_date: Date.now() + 3600 * 1000,
-                            scope: "openid email profile"
-                        });
+                        const tm = await getTokenManager();
+                        if (tm) {
+                            await tm.saveTokens(user.id, "google", {
+                                access_token: accessToken,
+                                refresh_token: refreshToken,
+                                expiry_date: Date.now() + 3600 * 1000,
+                                scope: "openid email profile"
+                            });
+                        }
                     } catch (tokenError) {
                         Logger.warn("[Passport] Google token persistence failed; continuing without stored tokens", {
                             userId: user.id,
@@ -234,12 +247,15 @@ if (env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET) {
 
                     // Persist tokens (best-effort: never block login on token storage issues).
                     try {
-                        await tokenManager.saveTokens(user.id, "microsoft", {
-                            access_token: accessToken,
-                            refresh_token: refreshToken,
-                            expiry_date: Date.now() + 3600 * 1000,
-                            scope: "openid profile email User.Read offline_access"
-                        });
+                        const tm = await getTokenManager();
+                        if (tm) {
+                            await tm.saveTokens(user.id, "microsoft", {
+                                access_token: accessToken,
+                                refresh_token: refreshToken,
+                                expiry_date: Date.now() + 3600 * 1000,
+                                scope: "openid profile email User.Read offline_access"
+                            });
+                        }
                     } catch (tokenError) {
                         Logger.warn("[Passport] Microsoft token persistence failed; continuing without stored tokens", {
                             userId: user.id,
@@ -296,12 +312,15 @@ if (env.AUTH0_DOMAIN && env.AUTH0_CLIENT_ID && env.AUTH0_CLIENT_SECRET) {
 
                     // Persist tokens (best-effort: never block login on token storage issues).
                     try {
-                        await tokenManager.saveTokens(user.id, "auth0", {
-                            access_token: accessToken,
-                            refresh_token: refreshToken,
-                            expiry_date: Date.now() + (extraParams.expires_in || 3600) * 1000,
-                            scope: "openid email profile offline_access"
-                        });
+                        const tm = await getTokenManager();
+                        if (tm) {
+                            await tm.saveTokens(user.id, "auth0", {
+                                access_token: accessToken,
+                                refresh_token: refreshToken,
+                                expiry_date: Date.now() + (extraParams.expires_in || 3600) * 1000,
+                                scope: "openid email profile offline_access"
+                            });
+                        }
                     } catch (tokenError) {
                         Logger.warn("[Passport] Auth0 token persistence failed; continuing without stored tokens", {
                             userId: user.id,
