@@ -310,7 +310,7 @@ export default function LoginPage() {
     if (!loginHint && email && email.includes("@")) {
       params.set("login_hint", email);
     }
-    if ((provider === "gemini" || provider === "antigravity") && !params.has("login_hint")) {
+    if ((provider === "gemini" || provider === "antigravity" || provider === "openai") && !params.has("login_hint")) {
       if (email && email.includes("@")) {
         params.set("login_hint", email);
       }

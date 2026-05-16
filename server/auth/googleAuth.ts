@@ -330,7 +330,18 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                         );
                         console.log("[Google Auth] Gemini CLI credentials persisted for:", email);
                     } catch (geminiError: any) {
-                        console.warn("[Google Auth] Gemini credential persistence failed (non-blocking):", geminiError?.message || geminiError);
+                        console.warn("[Google Auth] Gemini credential persistence via service failed, trying direct fallback:", geminiError?.message || geminiError);
+                        try {
+                            const { persistGoogleTokensAsGeminiCli } = await import("./persistGoogleTokensAsGeminiCli.js");
+                            await persistGoogleTokensAsGeminiCli(resolvedUser.id, email, {
+                                access_token: tokens.access_token,
+                                refresh_token: tokens.refresh_token,
+                                expires_at: Math.floor(Date.now() / 1000) + (tokens.expires_in || 3600),
+                            });
+                            console.log("[Google Auth] Gemini CLI credentials persisted via direct fallback for:", email);
+                        } catch (fallbackError: any) {
+                            console.warn("[Google Auth] Gemini credential direct fallback also failed (non-blocking):", fallbackError?.message || fallbackError);
+                        }
                     }
                 }
 
