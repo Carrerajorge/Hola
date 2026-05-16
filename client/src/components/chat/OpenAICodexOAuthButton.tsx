@@ -105,7 +105,7 @@ export function OpenAICodexOAuthButton({
         }
         return res.json();
       },
-      staleTime: 30_000,
+      staleTime: autoStart ? 0 : 30_000,
       refetchOnWindowFocus: false,
     });
 
