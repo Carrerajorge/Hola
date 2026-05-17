@@ -170,6 +170,16 @@ if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
                     }
 
                     // Persist tokens (best-effort: never block login on token storage issues).
+                    // Detect the actual granted scope from the request's providerHint so the
+                    // stored scope reflects whether Gemini permissions were granted.
+                    const session = (req as any)?.session;
+                    const phintFromSession = session?.providerHint || "";
+                    const phintFromCookie = (req as any)?.cookies?.["__iliagpt_ph"] || "";
+                    const phint = phintFromSession || phintFromCookie;
+                    const hasGeminiScope = phint === "gemini" || phint === "antigravity";
+                    const actualScope = hasGeminiScope
+                        ? "openid email profile https://www.googleapis.com/auth/generative-language"
+                        : "openid email profile";
                     try {
                         const tm = await getTokenManager();
                         if (tm) {
@@ -177,7 +187,7 @@ if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
                                 access_token: accessToken,
                                 refresh_token: refreshToken,
                                 expiry_date: Date.now() + 3600 * 1000,
-                                scope: "openid email profile"
+                                scope: actualScope,
                             });
                         }
                     } catch (tokenError) {
