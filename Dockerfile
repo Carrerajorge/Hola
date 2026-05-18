@@ -138,9 +138,9 @@ ENV IMAGE_TAG=$IMAGE_TAG
 ENV BUILD_TIMESTAMP=$BUILD_TIMESTAMP
 ENV RELEASE_MANIFEST_PATH=/app/dist/release-manifest.json
 
-# Create non-root user for security
+# Create non-root user for security (with home directory for OAuth credential storage)
 RUN groupadd --system --gid 1001 nodejs \
-  && useradd --system --uid 1001 --gid nodejs iliagpt
+  && useradd --system --uid 1001 --gid nodejs --create-home iliagpt
 
 ENV NODE_ENV=production
 ENV PORT=5000

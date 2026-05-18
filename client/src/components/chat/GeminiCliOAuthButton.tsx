@@ -781,10 +781,11 @@ export function GeminiCliOAuthButton({
       autoStartTriggeredRef.current = true;
       return;
     }
-    // Auto-accept risk and start the flow
+    // Auto-accept risk but do NOT auto-start the mutation.
+    // After an OAuth redirect, there's no user gesture so popup would be blocked.
+    // Show the dialog with risk pre-accepted so user just clicks "Continue with Google".
     setAcceptedRisk(true);
     autoStartTriggeredRef.current = true;
-    startMutation.mutate();
   }, [open, autoStart, flowId, startMutation, completeMutation.isPending, status?.connected, isStatusLoading, status, queryClient, onConnected, toast]);
 
   // Retry auto-start if the mutation failed (session not ready, server error, etc.)

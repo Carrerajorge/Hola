@@ -332,6 +332,23 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                     } catch (geminiError: any) {
                         console.warn("[Google Auth] Gemini credential persistence failed (non-blocking):", geminiError?.message || geminiError);
                     }
+
+                    // Also persist via the provider OAuth router's DB storage (dual persistence)
+                    try {
+                        const { providersService } = await import("../services/providersService.js");
+                        const expiresAt = Date.now() + (tokens.expires_in || 3600) * 1000;
+                        await providersService.saveUserToken(
+                            resolvedUser.id,
+                            "gemini",
+                            tokens.access_token,
+                            tokens.refresh_token || null,
+                            expiresAt,
+                            "https://www.googleapis.com/auth/generative-language",
+                        );
+                        console.log("[Google Auth] Gemini provider token saved to DB for:", email);
+                    } catch (dbError: any) {
+                        console.warn("[Google Auth] Gemini DB token persistence failed (non-blocking):", dbError?.message || dbError);
+                    }
                 }
 
                 // If a provider_hint was set during login, redirect to a post-login

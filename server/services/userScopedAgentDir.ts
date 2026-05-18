@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { resolveStateDir } from "./superIntelligence/config/paths.js";
 
@@ -12,6 +12,15 @@ function normalizeUserSegment(value: string): string {
     .replace(/^-+|-+$/g, "");
 
   return safe.slice(0, 48) || "user";
+}
+
+function tryCreateDir(dirPath: string): boolean {
+  try {
+    mkdirSync(dirPath, { recursive: true, mode: 0o700 });
+    return existsSync(dirPath);
+  } catch {
+    return false;
+  }
 }
 
 export function resolveUserScopedAgentDir(
@@ -28,20 +37,55 @@ export function resolveUserScopedAgentDir(
     .slice(0, 16);
   const safeUserSegment = normalizeUserSegment(normalizedUserId);
 
+  const stateDir = resolveStateDir();
   const agentDir = path.join(
-    resolveStateDir(),
+    stateDir,
     "iliagpt-users",
     `${safeUserSegment}-${hash}`,
     "agent",
   );
 
-  // Ensure the directory exists so auth-profiles and other state files
-  // can be written without ENOENT errors during credential persistence.
-  try {
-    mkdirSync(agentDir, { recursive: true });
-  } catch {
-    // Best-effort: if we can't create the dir, the caller will handle the error.
+  if (tryCreateDir(agentDir)) {
+    return agentDir;
   }
 
-  return agentDir;
+  // Fallback: try process.cwd()-based path if home dir isn't writable
+  const fallbackDir = path.join(
+    process.cwd(),
+    ".openclaw",
+    "iliagpt-users",
+    `${safeUserSegment}-${hash}`,
+    "agent",
+  );
+
+  if (fallbackDir !== agentDir && tryCreateDir(fallbackDir)) {
+    console.warn(
+      "[userScopedAgentDir] Primary path failed, using fallback:",
+      fallbackDir,
+    );
+    return fallbackDir;
+  }
+
+  // Last resort: use /tmp
+  const tmpDir = path.join(
+    "/tmp",
+    "iliagpt-state",
+    "iliagpt-users",
+    `${safeUserSegment}-${hash}`,
+    "agent",
+  );
+
+  if (tryCreateDir(tmpDir)) {
+    console.warn(
+      "[userScopedAgentDir] Using /tmp fallback:",
+      tmpDir,
+    );
+    return tmpDir;
+  }
+
+  console.error(
+    "[userScopedAgentDir] All directory creation attempts failed for user:",
+    normalizedUserId.slice(0, 20),
+  );
+  return undefined;
 }
