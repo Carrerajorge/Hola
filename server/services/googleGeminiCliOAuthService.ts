@@ -76,28 +76,46 @@ function saveAuthStoreToDisk(storePath: string, store: AuthProfileStore): void {
 }
 
 async function resolveStoredProfile(userId?: string | null) {
+  // Try file-based auth-profiles.json first
   const agentDir = resolveUserScopedAgentDir(userId);
-  if (!agentDir) {
-    return null;
+  if (agentDir) {
+    const storePath = path.join(agentDir, "auth-profiles.json");
+    const store = loadAuthStoreFromDisk(storePath);
+    if (store) {
+      const profileIds = Object.keys(store.profiles).filter(
+        (id) => {
+          const cred = store.profiles[id];
+          return cred && (cred.provider === PROVIDER_ID || id.startsWith(`${PROVIDER_ID}:`));
+        },
+      );
+      if (profileIds.length > 0) {
+        const profileId = profileIds[0];
+        const credential = store.profiles[profileId];
+        if (credential) {
+          return { profileId, credential };
+        }
+      }
+    }
   }
 
-  const storePath = path.join(agentDir, "auth-profiles.json");
-  const store = loadAuthStoreFromDisk(storePath);
-  if (!store) return null;
+  // Fallback: check database-backed provider tokens
+  const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
+  if (normalizedUserId) {
+    try {
+      const { providersService } = await import("./providersService.js");
+      const userStatus = await providersService.getUserTokenStatus(normalizedUserId, "gemini");
+      if (userStatus.connected) {
+        return {
+          profileId: `${PROVIDER_ID}:db-fallback`,
+          credential: { provider: PROVIDER_ID, type: "oauth", source: "db" } as Record<string, unknown>,
+        };
+      }
+    } catch {
+      // DB might not have the oauth tables yet
+    }
+  }
 
-  const profileIds = Object.keys(store.profiles).filter(
-    (id) => {
-      const cred = store.profiles[id];
-      return cred && (cred.provider === PROVIDER_ID || id.startsWith(`${PROVIDER_ID}:`));
-    },
-  );
-  if (profileIds.length === 0) return null;
-
-  const profileId = profileIds[0];
-  const credential = store.profiles[profileId];
-  if (!credential) return null;
-
-  return { profileId, credential };
+  return null;
 }
 
 function buildProfileId(email?: string | null): string {
@@ -109,14 +127,9 @@ async function persistGeminiCliOAuthCredentials(
   credentials: GeminiCliOAuthCredentials,
   userId: string,
 ): Promise<void> {
-  const agentDir = resolveUserScopedAgentDir(userId);
-  if (!agentDir) {
-    throw new Error("No se pudo resolver el almacenamiento OAuth del usuario.");
-  }
+  let filePersisted = false;
 
   const profileId = buildProfileId(credentials.email);
-  const storePath = path.join(agentDir, "auth-profiles.json");
-
   const credential: Record<string, unknown> = {
     type: "oauth",
     provider: PROVIDER_ID,
@@ -127,39 +140,72 @@ async function persistGeminiCliOAuthCredentials(
     ...(credentials.email ? { email: credentials.email } : {}),
   };
 
-  try {
-    const existing = loadAuthStoreFromDisk(storePath) ?? {
-      version: 1,
-      profiles: {},
-    };
-    existing.profiles[profileId] = credential;
-    existing.order = existing.order ?? {};
-    existing.order[PROVIDER_ID] = [profileId];
-    saveAuthStoreToDisk(storePath, existing);
-    console.info("[GeminiCliOAuth] Credentials persisted to:", storePath);
-  } catch (profileError) {
-    console.error(
-      "[GeminiCliOAuth] Direct credential persistence failed:",
-      profileError instanceof Error ? profileError.message : profileError,
-    );
-    throw new Error("No se pudo guardar el perfil OAuth. Revisa permisos del directorio del servidor.");
+  // 1. File-based persistence (auth-profiles.json)
+  const agentDir = resolveUserScopedAgentDir(userId);
+  if (agentDir) {
+    const storePath = path.join(agentDir, "auth-profiles.json");
+
+    try {
+      const existing = loadAuthStoreFromDisk(storePath) ?? {
+        version: 1,
+        profiles: {},
+      };
+      existing.profiles[profileId] = credential;
+      existing.order = existing.order ?? {};
+      existing.order[PROVIDER_ID] = [profileId];
+      saveAuthStoreToDisk(storePath, existing);
+      filePersisted = true;
+      console.info("[GeminiCliOAuth] Credentials persisted to:", storePath);
+    } catch (profileError) {
+      console.warn(
+        "[GeminiCliOAuth] File persistence failed (will try DB):",
+        profileError instanceof Error ? profileError.message : profileError,
+      );
+    }
+
+    if (filePersisted) {
+      try {
+        const { upsertAuthProfile, setAuthProfileOrder } = await import(
+          "./superIntelligence/agents/auth-profiles.js"
+        );
+        upsertAuthProfile({ profileId, agentDir, credential });
+        await setAuthProfileOrder({
+          agentDir,
+          provider: PROVIDER_ID,
+          order: [profileId],
+        });
+      } catch (enhancedError) {
+        console.warn(
+          "[GeminiCliOAuth] Enhanced OpenClaw profile integration skipped (non-critical):",
+          enhancedError instanceof Error ? enhancedError.message : enhancedError,
+        );
+      }
+    }
   }
 
+  // 2. Database persistence via providersService (always attempt as fallback)
   try {
-    const { upsertAuthProfile, setAuthProfileOrder } = await import(
-      "./superIntelligence/agents/auth-profiles.js"
+    const { providersService } = await import("./providersService.js");
+    const expiresAt = credentials.expires > 0 ? credentials.expires : null;
+    const scope = "https://www.googleapis.com/auth/generative-language";
+    await providersService.saveUserToken(
+      userId,
+      "gemini",
+      credentials.access,
+      credentials.refresh || null,
+      expiresAt,
+      scope,
     );
-    upsertAuthProfile({ profileId, agentDir, credential });
-    await setAuthProfileOrder({
-      agentDir,
-      provider: PROVIDER_ID,
-      order: [profileId],
-    });
-  } catch (enhancedError) {
+    console.info("[GeminiCliOAuth] Credentials also persisted to DB for user:", userId);
+  } catch (dbError) {
     console.warn(
-      "[GeminiCliOAuth] Enhanced OpenClaw profile integration skipped (non-critical):",
-      enhancedError instanceof Error ? enhancedError.message : enhancedError,
+      "[GeminiCliOAuth] DB persistence failed (non-critical):",
+      dbError instanceof Error ? dbError.message : dbError,
     );
+  }
+
+  if (!filePersisted && !agentDir) {
+    console.warn("[GeminiCliOAuth] No agent dir for user, credentials only in DB:", userId);
   }
 }
 
@@ -488,10 +534,11 @@ export async function getGoogleGeminiCliOAuthStatus(
   userId?: string | null,
 ): Promise<GoogleGeminiCliOAuthStatus> {
   const storedProfile = await resolveStoredProfile(userId);
-  const email =
+  const credentialEmail =
     storedProfile?.credential && "email" in storedProfile.credential
-      ? storedProfile.credential.email ?? null
+      ? (storedProfile.credential as Record<string, unknown>).email
       : null;
+  const email = typeof credentialEmail === "string" ? credentialEmail : null;
 
   return {
     connected: Boolean(storedProfile),

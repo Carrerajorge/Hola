@@ -185,25 +185,20 @@ export function ProviderConnectionHubButton({
   // whether we already handled the auto-connect to avoid duplicate dialogs.
   const autoConnectHandledRef = React.useRef(false);
 
-  const handleAutoConnect = React.useCallback((provider: string, email?: string) => {
+  const handleAutoConnect = React.useCallback(async (provider: string, email?: string) => {
     if (autoConnectHandledRef.current) return;
     autoConnectHandledRef.current = true;
-    // Clear persisted pending auto-connect
     try { window.sessionStorage.removeItem("iliagpt:pending-auto-connect"); } catch {}
-    // Force refetch provider status — the Google OAuth callback (with provider_hint)
-    // may have already persisted Gemini/OpenAI credentials server-side. If the status
-    // cache still shows "not connected", the child dialog would start a redundant
-    // second OAuth popup. Invalidating now ensures the child sees fresh status.
-    void queryClient.invalidateQueries({ queryKey: ["/api/oauth/google/gemini-cli/status"] });
-    void queryClient.invalidateQueries({ queryKey: ["/api/oauth/openai/codex/status"] });
-    void queryClient.invalidateQueries({ queryKey: ["/api/oauth/providers/status"] });
-    // Mark which provider should auto-start
+    // Await invalidation so child components see fresh status data
+    // and don't start a redundant second OAuth flow.
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["/api/oauth/google/gemini-cli/status"] }),
+      queryClient.invalidateQueries({ queryKey: ["/api/oauth/openai/codex/status"] }),
+      queryClient.invalidateQueries({ queryKey: ["/api/oauth/providers/status"] }),
+    ]);
     setAutoStartProvider(provider);
-    // Capture email from the login redirect
     if (email) setAutoConnectEmail(email);
-    // Open the hub dialog first
     setOpen(true);
-    // Then auto-open the specific provider dialog after a small delay
     window.setTimeout(() => {
       if ((provider === "gemini" || provider === "antigravity") && geminiOpenDialogRef.current) {
         geminiOpenDialogRef.current();
@@ -217,20 +212,17 @@ export function ProviderConnectionHubButton({
     const handler = (event: Event) => {
       const detail = (event as CustomEvent).detail;
       if (!detail?.provider) return;
-      handleAutoConnect(detail.provider, detail.email);
+      void handleAutoConnect(detail.provider, detail.email);
     };
     window.addEventListener("auto-connect-provider", handler);
 
-    // On mount, check sessionStorage for a pending auto-connect that may have
-    // been persisted before this component mounted (lazy-loaded chat interface).
     if (!autoConnectHandledRef.current) {
       try {
         const raw = window.sessionStorage.getItem("iliagpt:pending-auto-connect");
         if (raw) {
           const pending = JSON.parse(raw) as { provider?: string; email?: string; createdAt?: number };
-          // Only honor if created within the last 60 seconds (extended for slow networks)
           if (pending?.provider && pending.createdAt && Date.now() - pending.createdAt < 60_000) {
-            window.setTimeout(() => handleAutoConnect(pending.provider!, pending.email), 300);
+            window.setTimeout(() => void handleAutoConnect(pending.provider!, pending.email), 300);
           } else {
             window.sessionStorage.removeItem("iliagpt:pending-auto-connect");
           }

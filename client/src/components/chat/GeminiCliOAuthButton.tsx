@@ -388,7 +388,7 @@ export function GeminiCliOAuthButton({
   const lastAutoCompletedCallbackRef = React.useRef<string | null>(null);
   const lastBridgePayloadSignatureRef = React.useRef<string | null>(null);
 
-  const { data: status, isLoading: isStatusLoading } =
+  const { data: status, isLoading: isStatusLoading, isFetching: isStatusFetching } =
     useQuery<GeminiCliStatusResponse>({
       queryKey: STATUS_QUERY_KEY,
       queryFn: async () => {
@@ -743,19 +743,17 @@ export function GeminiCliOAuthButton({
   // Retries up to 3 times with increasing delay to handle cases where the session
   // isn't fully established yet after the initial Google OAuth login redirect.
   const autoStartTriggeredRef = React.useRef(false);
+  const autoStartStatusRetryRef = React.useRef(0);
+  const AUTO_START_STATUS_MAX_RETRIES = 4;
+  const AUTO_START_STATUS_RETRY_DELAYS = [600, 1200, 2000, 3500];
   const autoStartRetryCountRef = React.useRef(0);
   const AUTO_START_MAX_RETRIES = 3;
   const AUTO_START_RETRY_DELAYS = [500, 1500, 3000];
   React.useEffect(() => {
     if (!open || !autoStart || autoStartTriggeredRef.current) return;
     if (flowId || startMutation.isPending || completeMutation.isPending) return;
-    // Wait for status query to finish loading before deciding to start a new flow.
-    // The provider_hint=gemini login already persists credentials server-side,
-    // so we need to confirm whether that succeeded before opening a second popup.
-    if (isStatusLoading) return;
+    if (isStatusLoading || isStatusFetching) return;
     if (status?.connected) {
-      // Already connected (credentials were persisted during Google OAuth login).
-      // Close the dialog and notify the parent.
       autoStartTriggeredRef.current = true;
       void (async () => {
         await queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
@@ -769,6 +767,17 @@ export function GeminiCliOAuthButton({
         setOpen(false);
       })();
       return;
+    }
+    // After a provider_hint login, credentials are persisted server-side but
+    // the status cache may not reflect them yet. Retry the status check a few
+    // times before falling through to a full second OAuth flow.
+    if (autoStartStatusRetryRef.current < AUTO_START_STATUS_MAX_RETRIES) {
+      const delay = AUTO_START_STATUS_RETRY_DELAYS[autoStartStatusRetryRef.current] || 2000;
+      autoStartStatusRetryRef.current += 1;
+      const timer = window.setTimeout(() => {
+        void queryClient.invalidateQueries({ queryKey: STATUS_QUERY_KEY });
+      }, delay);
+      return () => window.clearTimeout(timer);
     }
     // Check for a stored flow first
     const storedFlow = readStoredFlowDraft();
@@ -785,11 +794,9 @@ export function GeminiCliOAuthButton({
     setAcceptedRisk(true);
     autoStartTriggeredRef.current = true;
     startMutation.mutate();
-  }, [open, autoStart, flowId, startMutation, completeMutation.isPending, status?.connected, isStatusLoading, status, queryClient, onConnected, toast]);
+  }, [open, autoStart, flowId, startMutation, completeMutation.isPending, status?.connected, isStatusLoading, isStatusFetching, status, queryClient, onConnected, toast]);
 
-  // Retry auto-start if the mutation failed (session not ready, server error, etc.)
-  // After Google OAuth login redirect the session may need a moment to settle,
-  // so we retry on any server error — not just 401.
+  // Retry auto-start if the mutation failed
   React.useEffect(() => {
     if (!autoStart || !autoStartTriggeredRef.current) return;
     if (!startMutation.isError) return;

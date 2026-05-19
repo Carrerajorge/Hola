@@ -92,7 +92,7 @@ export function OpenAICodexOAuthButton({
     null,
   );
 
-  const { data: status, isLoading: isStatusLoading } =
+  const { data: status, isLoading: isStatusLoading, isFetching: isStatusFetching } =
     useQuery<OpenAICodexStatusResponse>({
       queryKey: STATUS_QUERY_KEY,
       queryFn: async () => {
@@ -251,9 +251,8 @@ export function OpenAICodexOAuthButton({
     if (!open || !autoStart || autoStartTriggeredRef.current) return;
     if (flowId || startMutation.isPending || completeMutation.isPending) return;
     // Wait for status to finish loading before deciding to start a new flow
-    if (isStatusLoading) return;
+    if (isStatusLoading || isStatusFetching) return;
     if (status?.connected) {
-      // Already connected — close dialog and notify parent
       autoStartTriggeredRef.current = true;
       void (async () => {
         await queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
@@ -270,7 +269,7 @@ export function OpenAICodexOAuthButton({
     }
     autoStartTriggeredRef.current = true;
     startMutation.mutate();
-  }, [open, autoStart, flowId, startMutation, completeMutation.isPending, status?.connected, isStatusLoading, status, queryClient, onConnected, toast, resetLocalState]);
+  }, [open, autoStart, flowId, startMutation, completeMutation.isPending, status?.connected, isStatusLoading, isStatusFetching, status, queryClient, onConnected, toast, resetLocalState]);
 
   // Retry auto-start if the mutation failed (session not ready, server error, etc.)
   React.useEffect(() => {
