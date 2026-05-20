@@ -335,9 +335,9 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                             scope,
                         );
                         dbPersisted = true;
-                        console.log(`[Google Auth] ${stateData.providerHint} provider token saved to DB for:`, email);
+                        console.log("[Google Auth]", provider, "provider token saved to DB for:", email);
                     } catch (dbError: any) {
-                        console.warn(`[Google Auth] ${stateData.providerHint} DB token persistence failed (non-blocking):`, dbError?.message || dbError);
+                        console.warn("[Google Auth]", provider, "DB token persistence failed (non-blocking):", dbError?.message || dbError);
                     }
 
                     // For Gemini/Antigravity, also persist as Gemini CLI credentials (file-based)
