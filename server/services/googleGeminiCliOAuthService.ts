@@ -76,7 +76,23 @@ function saveAuthStoreToDisk(storePath: string, store: AuthProfileStore): void {
 }
 
 async function resolveStoredProfile(userId?: string | null) {
-  // Try file-based auth-profiles.json first
+  // Check database-backed provider tokens FIRST (most reliable in production Docker)
+  if (userId) {
+    try {
+      const { providersService } = await import("./providersService.js");
+      const userStatus = await providersService.getUserTokenStatus(userId, "gemini");
+      if (userStatus.connected) {
+        return {
+          profileId: `${PROVIDER_ID}:db`,
+          credential: { provider: PROVIDER_ID, type: "oauth", source: "db" },
+        };
+      }
+    } catch {
+      // DB might not have the oauth tables yet — fall through to file check
+    }
+  }
+
+  // Fallback: try file-based auth-profiles.json
   const agentDir = resolveUserScopedAgentDir(userId);
   if (agentDir) {
     const storePath = path.join(agentDir, "auth-profiles.json");
@@ -95,22 +111,6 @@ async function resolveStoredProfile(userId?: string | null) {
           return { profileId, credential };
         }
       }
-    }
-  }
-
-  // Fallback: check database-backed provider tokens (providerOAuthRouter storage)
-  if (userId) {
-    try {
-      const { providersService } = await import("./providersService.js");
-      const userStatus = await providersService.getUserTokenStatus(userId, "gemini");
-      if (userStatus.connected) {
-        return {
-          profileId: `${PROVIDER_ID}:db-fallback`,
-          credential: { provider: PROVIDER_ID, type: "oauth", source: "db" },
-        };
-      }
-    } catch {
-      // DB might not have the oauth tables yet
     }
   }
 
@@ -203,7 +203,17 @@ async function persistGeminiCliOAuthCredentials(
     );
   }
 
+  // Only throw if BOTH file and DB persistence failed
   if (!filePersisted && !agentDir) {
+    // Check if DB persistence succeeded (it's attempted above but errors are caught separately)
+    try {
+      const { providersService } = await import("./providersService.js");
+      const dbCheck = await providersService.getUserTokenStatus(userId, "gemini");
+      if (dbCheck.connected) {
+        console.info("[GeminiCliOAuth] File persistence failed but DB persistence succeeded for user:", userId);
+        return;
+      }
+    } catch {}
     throw new Error("No se pudo resolver el almacenamiento OAuth del usuario.");
   }
 }
