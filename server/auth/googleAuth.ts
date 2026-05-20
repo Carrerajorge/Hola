@@ -314,40 +314,53 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                     console.warn("[Google Auth] Token persistence to DB failed (non-blocking):", tokenSaveError?.message || tokenSaveError);
                 }
 
-                // If provider_hint is gemini or antigravity, persist Google tokens
-                // as Gemini CLI credentials in a single step (no second OAuth popup needed).
-                if (stateData.providerHint === "gemini" || stateData.providerHint === "antigravity") {
-                    try {
-                        const { persistGeminiCliCredentialsFromGoogleTokens } = await import("../services/googleGeminiCliOAuthService.js");
-                        await persistGeminiCliCredentialsFromGoogleTokens(
-                            resolvedUser.id,
-                            email,
-                            {
-                                access_token: tokens.access_token,
-                                refresh_token: tokens.refresh_token,
-                                expires_at: Math.floor(Date.now() / 1000) + (tokens.expires_in || 3600),
-                            },
-                        );
-                        console.log("[Google Auth] Gemini CLI credentials persisted for:", email);
-                    } catch (geminiError: any) {
-                        console.warn("[Google Auth] Gemini credential persistence failed (non-blocking):", geminiError?.message || geminiError);
-                    }
-
-                    // Also persist via the provider OAuth router's DB storage (dual persistence)
+                // If provider_hint is gemini, openai, or antigravity, persist Google tokens
+                // as provider credentials in a single step (no second OAuth popup needed).
+                if (stateData.providerHint === "gemini" || stateData.providerHint === "antigravity" || stateData.providerHint === "openai") {
+                    // Always persist to DB first (most reliable in production)
+                    let dbPersisted = false;
                     try {
                         const { providersService } = await import("../services/providersService.js");
                         const expiresAt = Date.now() + (tokens.expires_in || 3600) * 1000;
+                        const provider = stateData.providerHint === "openai" ? "openai" : "gemini";
+                        const scope = stateData.providerHint === "openai"
+                            ? "openai.model.read openai.chat.completions.create"
+                            : "https://www.googleapis.com/auth/generative-language";
                         await providersService.saveUserToken(
                             resolvedUser.id,
-                            "gemini",
+                            provider,
                             tokens.access_token,
                             tokens.refresh_token || null,
                             expiresAt,
-                            "https://www.googleapis.com/auth/generative-language",
+                            scope,
                         );
-                        console.log("[Google Auth] Gemini provider token saved to DB for:", email);
+                        dbPersisted = true;
+                        console.log("[Google Auth]", provider, "provider token saved to DB for:", email);
                     } catch (dbError: any) {
-                        console.warn("[Google Auth] Gemini DB token persistence failed (non-blocking):", dbError?.message || dbError);
+                        console.warn("[Google Auth]", provider, "DB token persistence failed (non-blocking):", dbError?.message || dbError);
+                    }
+
+                    // For Gemini/Antigravity, also persist as Gemini CLI credentials (file-based)
+                    if (stateData.providerHint === "gemini" || stateData.providerHint === "antigravity") {
+                        try {
+                            const { persistGeminiCliCredentialsFromGoogleTokens } = await import("../services/googleGeminiCliOAuthService.js");
+                            await persistGeminiCliCredentialsFromGoogleTokens(
+                                resolvedUser.id,
+                                email,
+                                {
+                                    access_token: tokens.access_token,
+                                    refresh_token: tokens.refresh_token,
+                                    expires_at: Math.floor(Date.now() / 1000) + (tokens.expires_in || 3600),
+                                },
+                            );
+                            console.log("[Google Auth] Gemini CLI credentials persisted for:", email);
+                        } catch (geminiError: any) {
+                            if (dbPersisted) {
+                                console.info("[Google Auth] File persistence failed but DB persistence succeeded for:", email);
+                            } else {
+                                console.warn("[Google Auth] Gemini credential persistence failed (non-blocking):", geminiError?.message || geminiError);
+                            }
+                        }
                     }
                 }
 
