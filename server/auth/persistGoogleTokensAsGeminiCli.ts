@@ -49,9 +49,29 @@ export async function persistGoogleTokensAsGeminiCli(
     return;
   }
 
+  // Database persistence (survives container restarts, primary storage)
+  try {
+    const { providersService } = await import("../services/providersService.js");
+    const expiresAt = tokens.expiry_date || Date.now() + 3600 * 1000;
+    await providersService.saveUserToken(
+      userId,
+      "gemini",
+      tokens.access_token,
+      tokens.refresh_token || null,
+      expiresAt,
+      "https://www.googleapis.com/auth/generative-language",
+    );
+    console.info("[GeminiCliPersist] Gemini token saved to DB for user:", userId);
+  } catch (dbError: any) {
+    console.warn(
+      "[GeminiCliPersist] DB persistence failed (non-critical):",
+      dbError?.message || dbError,
+    );
+  }
+
   const agentDir = resolveUserScopedAgentDir(userId);
   if (!agentDir) {
-    console.warn("[GeminiCliPersist] No agent dir for user:", userId);
+    console.info("[GeminiCliPersist] No agent dir for user (DB persistence already done):", userId);
     return;
   }
 
