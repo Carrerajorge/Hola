@@ -304,16 +304,9 @@ export default function LoginPage() {
     setActiveSocialProvider(provider);
     setError("");
     const params = new URLSearchParams();
-    if (loginHint) {
-      params.set("login_hint", loginHint);
-    }
-    if (!loginHint && email && email.includes("@")) {
-      params.set("login_hint", email);
-    }
-    if ((provider === "gemini" || provider === "antigravity") && !params.has("login_hint")) {
-      if (email && email.includes("@")) {
-        params.set("login_hint", email);
-      }
+    const hint = loginHint || (email && email.includes("@") ? email : "");
+    if (hint) {
+      params.set("login_hint", hint);
     }
     if (provider !== "google") {
       params.set("provider_hint", provider);

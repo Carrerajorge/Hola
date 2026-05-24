@@ -20,6 +20,7 @@ import {
   beginGoogleGeminiCliOAuthFlow,
   finishGoogleGeminiCliOAuthFlow,
   getGoogleGeminiCliOAuthStatus,
+  persistGeminiCliCredentialsFromGoogleTokens,
 } from "../services/googleGeminiCliOAuthService";
 
 const FLOW_TTL_MS = 45 * 60 * 1000;
@@ -141,7 +142,36 @@ googleGeminiCliOAuthRouter.get(
   "/status",
   async (req: Request, res: Response) => {
     try {
-      res.json(await getGoogleGeminiCliOAuthStatus(getUserId(req)));
+      const userId = getUserId(req);
+      const status = await getGoogleGeminiCliOAuthStatus(userId);
+
+      if (!status.connected && userId) {
+        const sessionUser = (req as any).user;
+        if (sessionUser?.access_token) {
+          try {
+            await persistGeminiCliCredentialsFromGoogleTokens(
+              userId,
+              sessionUser.claims?.email || sessionUser.email,
+              {
+                access_token: sessionUser.access_token,
+                refresh_token: sessionUser.refresh_token,
+                expires_at: sessionUser.expires_at,
+              },
+            );
+            const refreshed = await getGoogleGeminiCliOAuthStatus(userId);
+            return res.json(refreshed);
+          } catch {
+            return res.json({
+              ...status,
+              connected: true,
+              email: sessionUser.claims?.email || sessionUser.email || null,
+              profileId: "session-fallback",
+            });
+          }
+        }
+      }
+
+      res.json(status);
     } catch (error) {
       console.error("[GeminiCliOAuth] status failed:", error);
       res

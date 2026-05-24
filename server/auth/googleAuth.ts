@@ -351,6 +351,26 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                     }
                 }
 
+                // If provider_hint is openai, persist Google tokens as OpenAI provider
+                // tokens so the auto-connect can detect them via session fallback.
+                if (stateData.providerHint === "openai") {
+                    try {
+                        const { providersService } = await import("../services/providersService.js");
+                        const expiresAt = Date.now() + (tokens.expires_in || 3600) * 1000;
+                        await providersService.saveUserToken(
+                            resolvedUser.id,
+                            "openai",
+                            tokens.access_token,
+                            tokens.refresh_token || null,
+                            expiresAt,
+                            "openid email profile",
+                        );
+                        console.log("[Google Auth] OpenAI provider token saved to DB for:", email);
+                    } catch (dbError: any) {
+                        console.warn("[Google Auth] OpenAI DB token persistence failed (non-blocking):", dbError?.message || dbError);
+                    }
+                }
+
                 // If a provider_hint was set during login, redirect to a post-login
                 // page that automatically triggers the corresponding OAuth flow.
                 // The home page listens for ?provider=gemini|openai|antigravity to auto-open

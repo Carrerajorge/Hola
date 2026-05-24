@@ -84,10 +84,11 @@ describe("LoginPage", () => {
     expect(screen.getByTestId("button-login-google")).toBeVisible();
     expect(screen.getByTestId("button-login-openai")).toBeVisible();
     expect(screen.getByTestId("button-login-gemini")).toBeVisible();
-    expect(screen.getByTestId("button-login-apple")).toBeVisible();
-    expect(screen.getByTestId("button-login-microsoft")).toBeVisible();
-    expect(screen.getByText("Continuar con Apple")).toBeVisible();
-    expect(screen.getByText("Continuar con Microsoft")).toBeVisible();
+    expect(screen.getByTestId("button-login-antigravity")).toBeVisible();
+    expect(screen.getByText("Continuar con Google")).toBeVisible();
+    expect(screen.getByText("Continuar con Gemini")).toBeVisible();
+    expect(screen.getByText("Continuar con ChatGPT")).toBeVisible();
+    expect(screen.getByText("Continuar con Antigravity")).toBeVisible();
   });
 
   it("only shows loading state on the selected social provider", async () => {
@@ -115,10 +116,10 @@ describe("LoginPage", () => {
       value: {
         ...originalLocation,
         assign: locationAssignMock,
-        href: "http://localhost/login?error=google_not_configured&message=redirect_uri_mismatch",
+        href: "http://localhost/login?error=google_failed",
         origin: "http://localhost",
         pathname: "/login",
-        search: "?error=google_not_configured&message=redirect_uri_mismatch",
+        search: "?error=google_failed",
       },
     });
 
@@ -130,7 +131,7 @@ describe("LoginPage", () => {
 
     expect(
       screen.getByText(
-        "El inicio de sesión con Google no está configurado en este entorno. redirect_uri_mismatch"
+        "Error al iniciar sesión con Google. Por favor intenta de nuevo."
       )
     ).toBeVisible();
   });
