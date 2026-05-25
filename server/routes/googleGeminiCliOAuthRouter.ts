@@ -146,6 +146,7 @@ googleGeminiCliOAuthRouter.get(
       const status = await getGoogleGeminiCliOAuthStatus(userId);
 
       if (!status.connected && userId) {
+        // Try 1: Re-persist tokens from the authenticated user object
         const sessionUser = (req as any).user;
         if (sessionUser?.access_token) {
           try {
@@ -166,6 +167,20 @@ googleGeminiCliOAuthRouter.get(
               connected: true,
               email: sessionUser.claims?.email || sessionUser.email || null,
               profileId: "session-fallback",
+            });
+          }
+        }
+        // Try 2: Check session flag set during Google OAuth callback
+        const session = (req as any).session;
+        const sessionGemini = session?.geminiCliConnected;
+        if (sessionGemini && sessionGemini.hasAccessToken) {
+          const staleMs = Date.now() - (sessionGemini.connectedAt || 0);
+          if (staleMs < 3600 * 1000) {
+            return res.json({
+              ...status,
+              connected: true,
+              email: sessionGemini.email || status.email,
+              profileId: status.profileId || "session-fallback",
             });
           }
         }

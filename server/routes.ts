@@ -696,6 +696,7 @@ export async function registerRoutes(
               if (providerHint === "gemini" || providerHint === "antigravity") {
                 // Extract direct tokens from the user object (attached by passport strategy)
                 const directTokens = (user as any)?._googleOAuthTokens ?? null;
+                let geminiPersisted = false;
                 try {
                   const { persistGoogleTokensAsGeminiCli } = await import(
                     "./auth/persistGoogleTokensAsGeminiCli"
@@ -705,6 +706,7 @@ export async function registerRoutes(
                     email || undefined,
                     directTokens || undefined,
                   );
+                  geminiPersisted = true;
                   console.info(
                     "[Auth] Gemini CLI credentials persisted before redirect for user:",
                     userId,
@@ -714,6 +716,18 @@ export async function registerRoutes(
                     "[Auth] Gemini CLI credential persistence failed (non-critical):",
                     geminiPersistError?.message || geminiPersistError,
                   );
+                }
+                // Always store the connected state in the session so the status
+                // endpoint can return connected: true immediately after redirect,
+                // even if file/DB persistence failed above.
+                if (sess) {
+                  sess.geminiCliConnected = {
+                    email: email || null,
+                    userId: String(userId),
+                    connectedAt: Date.now(),
+                    persisted: geminiPersisted,
+                    hasAccessToken: Boolean(directTokens?.access_token),
+                  };
                 }
               }
 

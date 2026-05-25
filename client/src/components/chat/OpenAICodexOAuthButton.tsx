@@ -240,9 +240,8 @@ export function OpenAICodexOAuthButton({
   );
 
   // Auto-start: when opened via auto-connect (e.g. after login with provider_hint=openai),
-  // immediately start the OAuth flow for a seamless experience.
-  // Retries up to 3 times with increasing delay to handle cases where the session
-  // isn't fully established yet after the initial Google OAuth login redirect.
+  // force a fresh status check and auto-start the flow if not already connected.
+  // Uses queryClient.fetchQuery with staleTime: 0 to avoid stale cached data.
   const autoStartTriggeredRef = React.useRef(false);
   const autoStartRetryCountRef = React.useRef(0);
   const AUTO_START_MAX_RETRIES = 3;
@@ -250,27 +249,48 @@ export function OpenAICodexOAuthButton({
   React.useEffect(() => {
     if (!open || !autoStart || autoStartTriggeredRef.current) return;
     if (flowId || startMutation.isPending || completeMutation.isPending) return;
-    // Wait for status to finish loading before deciding to start a new flow
-    if (isStatusLoading) return;
-    if (status?.connected) {
-      // Already connected — close dialog and notify parent
-      autoStartTriggeredRef.current = true;
-      void (async () => {
-        await queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
-        await Promise.resolve(onConnected?.(status.defaultModelId || "gpt-5.3-codex"));
-        toast({
-          title: "ChatGPT ya conectado",
-          description: status.accountId
-            ? `Cuenta ${status.accountId} lista para usar OpenClaw.`
-            : "Tu cuenta de ChatGPT ya puede usar OpenClaw.",
-        });
-        resetLocalState(false);
-      })();
-      return;
-    }
+
     autoStartTriggeredRef.current = true;
-    startMutation.mutate();
-  }, [open, autoStart, flowId, startMutation, completeMutation.isPending, status?.connected, isStatusLoading, status, queryClient, onConnected, toast, resetLocalState]);
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const freshStatus = await queryClient.fetchQuery({
+          queryKey: STATUS_QUERY_KEY,
+          queryFn: async () => {
+            const res = await apiFetch("/api/oauth/openai/codex/status", {
+              cache: "no-store",
+            });
+            if (!res.ok) throw new Error("Status check failed");
+            return res.json() as Promise<typeof status>;
+          },
+          staleTime: 0,
+        });
+        if (cancelled) return;
+
+        if (freshStatus?.connected) {
+          await queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+          await Promise.resolve(onConnected?.(freshStatus.defaultModelId || "gpt-5.3-codex"));
+          toast({
+            title: "ChatGPT ya conectado",
+            description: freshStatus.accountId
+              ? `Cuenta ${freshStatus.accountId} lista para usar OpenClaw.`
+              : "Tu cuenta de ChatGPT ya puede usar OpenClaw.",
+          });
+          resetLocalState(false);
+          return;
+        }
+      } catch {
+        // Status check failed, fall through to manual flow
+      }
+      if (cancelled) return;
+      // Not connected — auto-start the flow. If popup is blocked, the
+      // onSuccess handler falls back to showing the manual recovery UI.
+      startMutation.mutate();
+    })();
+
+    return () => { cancelled = true; };
+  }, [open, autoStart, flowId, startMutation, completeMutation.isPending, queryClient, onConnected, toast, resetLocalState]);
 
   // Retry auto-start if the mutation failed (session not ready, server error, etc.)
   React.useEffect(() => {
