@@ -141,7 +141,27 @@ googleGeminiCliOAuthRouter.get(
   "/status",
   async (req: Request, res: Response) => {
     try {
-      res.json(await getGoogleGeminiCliOAuthStatus(getUserId(req)));
+      const status = await getGoogleGeminiCliOAuthStatus(getUserId(req));
+      // If the file/DB-based status shows not connected, check the session
+      // for tokens persisted during the Google OAuth login redirect (provider_hint=gemini).
+      // This handles the case where file/DB persistence failed but the Google
+      // OAuth tokens are still valid in the session.
+      if (!status.connected) {
+        const session = (req as any).session;
+        const sessionGemini = session?.geminiCliConnected;
+        if (sessionGemini && sessionGemini.hasAccessToken) {
+          const staleMs = Date.now() - (sessionGemini.connectedAt || 0);
+          if (staleMs < 3600 * 1000) {
+            return res.json({
+              ...status,
+              connected: true,
+              email: sessionGemini.email || status.email,
+              profileId: status.profileId || "session-fallback",
+            });
+          }
+        }
+      }
+      res.json(status);
     } catch (error) {
       console.error("[GeminiCliOAuth] status failed:", error);
       res
