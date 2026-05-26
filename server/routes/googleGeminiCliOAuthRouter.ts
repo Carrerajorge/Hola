@@ -162,6 +162,11 @@ googleGeminiCliOAuthRouter.get(
             const refreshed = await getGoogleGeminiCliOAuthStatus(userId);
             return res.json(refreshed);
           } catch {
+            (req as any).session.geminiCliConnected = {
+              hasAccessToken: true,
+              email: sessionUser.claims?.email || sessionUser.email || null,
+              connectedAt: Date.now(),
+            };
             return res.json({
               ...status,
               connected: true,
@@ -175,7 +180,7 @@ googleGeminiCliOAuthRouter.get(
         const sessionGemini = session?.geminiCliConnected;
         if (sessionGemini && sessionGemini.hasAccessToken) {
           const staleMs = Date.now() - (sessionGemini.connectedAt || 0);
-          if (staleMs < 3600 * 1000) {
+          if (staleMs < 24 * 3600 * 1000) {
             return res.json({
               ...status,
               connected: true,
