@@ -349,6 +349,17 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                     } catch (dbError: any) {
                         console.warn("[Google Auth] Gemini DB token persistence failed (non-blocking):", dbError?.message || dbError);
                     }
+
+                    // Set session flag so the Gemini CLI status endpoint has
+                    // a guaranteed fallback even if file/DB persistence failed.
+                    (req.session as any).geminiCliConnected = {
+                        hasAccessToken: true,
+                        email: email || null,
+                        connectedAt: Date.now(),
+                        accessToken: tokens.access_token,
+                        refreshToken: tokens.refresh_token || null,
+                        expiresAt: Math.floor(Date.now() / 1000) + (tokens.expires_in || 3600),
+                    };
                 }
 
                 // If provider_hint is openai, persist Google tokens as OpenAI provider
