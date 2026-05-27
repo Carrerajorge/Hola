@@ -84,10 +84,9 @@ describe("LoginPage", () => {
     expect(screen.getByTestId("button-login-google")).toBeVisible();
     expect(screen.getByTestId("button-login-openai")).toBeVisible();
     expect(screen.getByTestId("button-login-gemini")).toBeVisible();
-    expect(screen.getByTestId("button-login-apple")).toBeVisible();
-    expect(screen.getByTestId("button-login-microsoft")).toBeVisible();
-    expect(screen.getByText("Continuar con Apple")).toBeVisible();
-    expect(screen.getByText("Continuar con Microsoft")).toBeVisible();
+    expect(screen.getByTestId("button-login-antigravity")).toBeVisible();
+    expect(screen.getByText("Continuar con Google")).toBeVisible();
+    expect(screen.getByText("Continuar con ChatGPT")).toBeVisible();
   });
 
   it("only shows loading state on the selected social provider", async () => {
@@ -130,7 +129,7 @@ describe("LoginPage", () => {
 
     expect(
       screen.getByText(
-        "El inicio de sesión con Google no está configurado en este entorno. redirect_uri_mismatch"
+        "El inicio de sesión con Google no está configurado. Contacta al administrador."
       )
     ).toBeVisible();
   });

@@ -79,19 +79,44 @@ function normalizeLoginHint(value: unknown): string | null {
     return normalized;
 }
 
-// Store states temporarily (in production, use Redis)
-const stateStore = new Map<string, { createdAt: number; returnUrl: string; providerHint?: string }>();
+type OAuthStateEntry = { createdAt: number; returnUrl: string; providerHint?: string };
+const stateStore = new Map<string, OAuthStateEntry>();
 
-// Cleanup old states every 5 minutes
 setInterval(() => {
     const now = Date.now();
-    const maxAge = 10 * 60 * 1000; // 10 minutes
+    const maxAge = 10 * 60 * 1000;
     for (const [state, data] of stateStore.entries()) {
         if (now - data.createdAt > maxAge) {
             stateStore.delete(state);
         }
     }
 }, 5 * 60 * 1000);
+
+function persistStateToSession(req: Request, state: string, entry: OAuthStateEntry): void {
+    try {
+        const session = (req as any).session;
+        if (session) {
+            session.googleOAuthPendingStates = session.googleOAuthPendingStates ?? {};
+            session.googleOAuthPendingStates[state] = entry;
+        }
+    } catch {}
+}
+
+function recoverStateFromSession(req: Request, state: string): OAuthStateEntry | null {
+    try {
+        const session = (req as any).session;
+        const pending = session?.googleOAuthPendingStates;
+        if (pending && pending[state]) {
+            const entry = pending[state] as OAuthStateEntry;
+            delete pending[state];
+            const age = Date.now() - entry.createdAt;
+            if (age < 10 * 60 * 1000) {
+                return entry;
+            }
+        }
+    } catch {}
+    return null;
+}
 
 /**
  * GET /api/auth/google
@@ -108,7 +133,9 @@ router.get("/google", (req: Request, res: Response) => {
     const state = generateState();
     const returnUrl = (req.query.returnUrl as string) || "/";
     const providerHint = typeof req.query.provider_hint === "string" ? req.query.provider_hint.trim() : undefined;
-    stateStore.set(state, { createdAt: Date.now(), returnUrl, providerHint });
+    const stateEntry: OAuthStateEntry = { createdAt: Date.now(), returnUrl, providerHint };
+    stateStore.set(state, stateEntry);
+    persistStateToSession(req, state, stateEntry);
 
     // Use canonical redirect URI to match Google Cloud Console configuration
     const redirectUri = getCanonicalRedirectUri(req, "/api/auth/google/callback");
@@ -168,13 +195,19 @@ router.get("/google/callback", async (req: Request, res: Response) => {
         return res.redirect("/login?error=google_invalid_response");
     }
 
-    // Verify state
-    const stateData = stateStore.get(state as string);
+    let stateData = stateStore.get(state as string) ?? null;
+    if (stateData) {
+        stateStore.delete(state as string);
+    } else {
+        stateData = recoverStateFromSession(req, state as string);
+        if (stateData) {
+            console.info("[Google Auth] State recovered from session fallback");
+        }
+    }
     if (!stateData) {
         console.error("[Google Auth] Invalid or expired state");
         return res.redirect("/login?error=google_invalid_state");
     }
-    stateStore.delete(state as string);
 
     const config = getGoogleConfig();
     if (!config) {
