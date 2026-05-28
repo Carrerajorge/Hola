@@ -201,6 +201,22 @@ async function persistOpenAICodexOAuthCredentials(
   const config = await loadValidConfigOrThrow();
   await ensureOpenClawModelsJson(config, agentDir);
   await ensurePiAuthJsonFromAuthProfiles(agentDir);
+
+  // DB persistence via providersService (survives container restarts)
+  try {
+    const { providersService } = await import("./providersService.js");
+    const expiresAt = credentials.expires > 0 ? credentials.expires : null;
+    await providersService.saveUserToken(
+      userId,
+      "openai",
+      credentials.access,
+      credentials.refresh || null,
+      expiresAt,
+      OPENAI_SCOPE,
+    );
+  } catch {
+    // Non-critical: file persistence already succeeded
+  }
 }
 
 function markFlowFailed(flow: OpenAICodexFlowRecord, error: unknown): void {
