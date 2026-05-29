@@ -7,9 +7,14 @@ from typing import Any, Optional
 from celery import shared_task
 from celery.exceptions import SoftTimeLimitExceeded
 import structlog
-import redis
 
 from fastapi_sse.app.config import get_settings
+from fastapi_sse.app.redis_resilience import (
+    build_sync_redis_client,
+    classify_redis_error,
+    redact_redis_url,
+    run_sync_redis_operation,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -17,7 +22,7 @@ logger = structlog.get_logger(__name__)
 def get_sync_redis():
     """Get synchronous Redis client for Celery workers."""
     settings = get_settings()
-    return redis.from_url(settings.redis_url, decode_responses=True)
+    return build_sync_redis_client(settings.redis_url)
 
 
 def publish_event(session_id: str, event_type: str, data: Any) -> None:
@@ -26,7 +31,12 @@ def publish_event(session_id: str, event_type: str, data: Any) -> None:
     client = get_sync_redis()
     channel = f"events:{session_id}"
     message = json.dumps({"type": event_type, "data": data})
-    client.publish(channel, message)
+    run_sync_redis_operation(
+        lambda: client.publish(channel, message),
+        operation_name="agent_tasks.publish_event",
+        logger=logger,
+        context={"session_id": session_id, "event_type": event_type},
+    )
 
 
 def update_session_state(session_id: str, updates: dict) -> None:
@@ -35,13 +45,20 @@ def update_session_state(session_id: str, updates: dict) -> None:
     settings = get_settings()
     client = get_sync_redis()
     key = f"session:{session_id}"
-    
-    data = client.get(key)
-    state = json.loads(data) if data else {}
-    state.update(updates)
-    state["updated_at"] = datetime.utcnow().isoformat()
-    
-    client.setex(key, settings.session_ttl_seconds, json.dumps(state))
+
+    def operation() -> None:
+        data = client.get(key)
+        state = json.loads(data) if data else {}
+        state.update(updates)
+        state["updated_at"] = datetime.utcnow().isoformat()
+        client.setex(key, settings.session_ttl_seconds, json.dumps(state))
+
+    run_sync_redis_operation(
+        operation,
+        operation_name="agent_tasks.update_session_state",
+        logger=logger,
+        context={"session_id": session_id},
+    )
 
 
 @shared_task(
@@ -176,7 +193,30 @@ def execute_agent(
 @shared_task(name="fastapi_sse.workers.agent_tasks.health_check")
 def health_check() -> dict:
     """Health check task to verify worker connectivity."""
+    settings = get_settings()
+    try:
+        client = get_sync_redis()
+        start = time.time()
+        run_sync_redis_operation(
+            client.ping,
+            operation_name="agent_tasks.health_check",
+            logger=logger,
+            attempts=2,
+        )
+        redis_ok = True
+        redis_latency_ms = round((time.time() - start) * 1000, 2)
+        redis_error_kind = None
+    except Exception as exc:
+        redis_ok = False
+        redis_latency_ms = None
+        redis_error_kind = classify_redis_error(exc)
+        logger.warning("agent_tasks_health_check_redis_failed", error=str(exc), error_kind=redis_error_kind)
+
     return {
-        "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat()
+        "status": "healthy" if redis_ok else "degraded",
+        "timestamp": datetime.utcnow().isoformat(),
+        "redis": redis_ok,
+        "redis_latency_ms": redis_latency_ms,
+        "redis_error_kind": redis_error_kind,
+        "redis_url": redact_redis_url(settings.redis_url),
     }

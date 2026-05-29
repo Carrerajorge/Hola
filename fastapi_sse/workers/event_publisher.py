@@ -9,6 +9,7 @@ import redis
 import structlog
 
 from fastapi_sse.app.config import get_settings
+from fastapi_sse.app.redis_resilience import build_sync_redis_client, run_sync_redis_operation
 
 logger = structlog.get_logger(__name__)
 
@@ -59,10 +60,7 @@ class StreamEventPublisher:
     def _get_client(self) -> redis.Redis:
         """Get or create Redis client."""
         if self._client is None:
-            self._client = redis.from_url(
-                self._redis_url,
-                decode_responses=True
-            )
+            self._client = build_sync_redis_client(self._redis_url)
         return self._client
     
     def _stream_key(self, session_id: str) -> str:
@@ -119,32 +117,31 @@ class StreamEventPublisher:
         else:
             payload["session_id"] = session_id
         
-        try:
-            entry_id = client.xadd(
+        entry_id = run_sync_redis_operation(
+            lambda: client.xadd(
                 stream_key,
                 payload,
                 maxlen=self._maxlen,
                 approximate=True
-            )
-            
-            logger.debug(
-                "event_published",
-                session_id=session_id,
-                event_type=event_type,
-                event_id=evt_id,
-                entry_id=entry_id
-            )
-            
-            return entry_id
-            
-        except redis.RedisError as e:
-            logger.error(
-                "event_publish_failed",
-                session_id=session_id,
-                event_type=event_type,
-                error=str(e)
-            )
-            raise
+            ),
+            operation_name="stream_event_publisher.publish",
+            logger=logger,
+            context={
+                "session_id": session_id,
+                "event_type": event_type,
+                "event_id": evt_id,
+            },
+        )
+
+        logger.debug(
+            "event_published",
+            session_id=session_id,
+            event_type=event_type,
+            event_id=evt_id,
+            entry_id=entry_id
+        )
+
+        return entry_id
     
     def publish_trace(
         self,
@@ -305,7 +302,12 @@ class StreamEventPublisher:
         """
         client = self._get_client()
         cancel_key = self._cancel_key(session_id)
-        return client.exists(cancel_key) > 0
+        return run_sync_redis_operation(
+            lambda: client.exists(cancel_key) > 0,
+            operation_name="stream_event_publisher.is_cancelled",
+            logger=logger,
+            context={"session_id": session_id},
+        )
     
     def set_cancel_flag(self, session_id: str, ttl_seconds: int = 3600) -> None:
         """
@@ -317,7 +319,12 @@ class StreamEventPublisher:
         """
         client = self._get_client()
         cancel_key = self._cancel_key(session_id)
-        client.setex(cancel_key, ttl_seconds, "1")
+        run_sync_redis_operation(
+            lambda: client.setex(cancel_key, ttl_seconds, "1"),
+            operation_name="stream_event_publisher.set_cancel_flag",
+            logger=logger,
+            context={"session_id": session_id},
+        )
         logger.info("cancel_flag_set", session_id=session_id)
     
     def clear_cancel_flag(self, session_id: str) -> None:
@@ -329,7 +336,12 @@ class StreamEventPublisher:
         """
         client = self._get_client()
         cancel_key = self._cancel_key(session_id)
-        client.delete(cancel_key)
+        run_sync_redis_operation(
+            lambda: client.delete(cancel_key),
+            operation_name="stream_event_publisher.clear_cancel_flag",
+            logger=logger,
+            context={"session_id": session_id},
+        )
     
     def close(self) -> None:
         """Close the Redis connection."""

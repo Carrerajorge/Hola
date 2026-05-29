@@ -9,6 +9,12 @@ import redis
 
 from fastapi_sse.app.celery_app import celery_app
 from fastapi_sse.app.config import get_settings
+from fastapi_sse.app.redis_resilience import (
+    build_sync_redis_client,
+    classify_redis_error,
+    redact_redis_url,
+    run_sync_redis_operation,
+)
 from .event_publisher import StreamEventPublisher, EventMetadata, get_event_publisher
 from .mock_agent import MockAgent, MockAgentConfig, create_mock_agent
 
@@ -30,8 +36,7 @@ class AgentTask(Task):
     @property
     def redis_client(self) -> redis.Redis:
         if self._redis is None:
-            settings = get_settings()
-            self._redis = redis.from_url(settings.redis_url, decode_responses=True)
+            self._redis = build_sync_redis_client()
         return self._redis
     
     def update_session_state(self, session_id: str, updates: Dict[str, Any]) -> None:
@@ -40,12 +45,19 @@ class AgentTask(Task):
         settings = get_settings()
         key = f"session:{session_id}"
         
-        data = self.redis_client.get(key)
-        state = json.loads(data) if data else {}
-        state.update(updates)
-        state["updated_at"] = datetime.utcnow().isoformat()
-        
-        self.redis_client.setex(key, settings.session_ttl_seconds, json.dumps(state))
+        def operation() -> None:
+            data = self.redis_client.get(key)
+            state = json.loads(data) if data else {}
+            state.update(updates)
+            state["updated_at"] = datetime.utcnow().isoformat()
+            self.redis_client.setex(key, settings.session_ttl_seconds, json.dumps(state))
+
+        run_sync_redis_operation(
+            operation,
+            operation_name="agent_task.update_session_state",
+            logger=logger,
+            context={"session_id": session_id},
+        )
 
 
 @celery_app.task(
@@ -333,15 +345,28 @@ def health_check() -> Dict[str, Any]:
     settings = get_settings()
     
     try:
-        client = redis.from_url(settings.redis_url, decode_responses=True)
-        client.ping()
+        client = build_sync_redis_client(settings.redis_url)
+        start = time.time()
+        run_sync_redis_operation(
+            client.ping,
+            operation_name="agent_task.health_check",
+            logger=logger,
+            attempts=2,
+        )
         redis_ok = True
+        redis_latency_ms = round((time.time() - start) * 1000, 2)
+        redis_error_kind = None
     except Exception as e:
         redis_ok = False
-        logger.error("health_check_redis_failed", error=str(e))
+        redis_latency_ms = None
+        redis_error_kind = classify_redis_error(e)
+        logger.warning("health_check_redis_failed", error=str(e), error_kind=redis_error_kind)
     
     return {
         "status": "healthy" if redis_ok else "degraded",
         "timestamp": datetime.utcnow().isoformat(),
-        "redis": redis_ok
+        "redis": redis_ok,
+        "redis_latency_ms": redis_latency_ms,
+        "redis_error_kind": redis_error_kind,
+        "redis_url": redact_redis_url(settings.redis_url),
     }

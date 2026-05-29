@@ -8,6 +8,7 @@ import structlog
 from contextlib import asynccontextmanager
 
 from .config import get_settings
+from .redis_resilience import build_redis_connection_kwargs, redact_redis_url
 
 logger = structlog.get_logger(__name__)
 
@@ -31,20 +32,18 @@ class RedisManager:
         self._pool = ConnectionPool.from_url(
             settings.redis_url,
             max_connections=settings.redis_max_connections,
-            socket_timeout=settings.redis_socket_timeout,
-            decode_responses=True
+            **build_redis_connection_kwargs(settings),
         )
         
         self._pubsub_pool = ConnectionPool.from_url(
             settings.redis_url,
             max_connections=settings.redis_max_connections // 2,
-            socket_timeout=settings.redis_socket_timeout,
-            decode_responses=True
+            **build_redis_connection_kwargs(settings),
         )
         
         client = await self.get_client()
         await client.ping()
-        logger.info("redis_initialized", url=settings.redis_url)
+        logger.info("redis_initialized", url=redact_redis_url(settings.redis_url))
     
     async def close(self) -> None:
         """Close connection pools."""

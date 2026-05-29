@@ -8,7 +8,7 @@ from pydantic import BaseModel
 import structlog
 
 from ..redis_client import redis_manager
-from ..config import get_settings
+from ..redis_resilience import classify_redis_error
 
 logger = structlog.get_logger(__name__)
 
@@ -74,7 +74,8 @@ async def readiness_probe():
         redis_ok = True
     except Exception as e:
         details["redis_error"] = str(e)
-        logger.warning("readiness_redis_failed", error=str(e))
+        details["redis_error_kind"] = classify_redis_error(e)
+        logger.warning("readiness_redis_failed", error=str(e), error_kind=details["redis_error_kind"])
     
     def check_celery_sync():
         """Check Celery workers in thread to avoid blocking."""

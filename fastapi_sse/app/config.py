@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
     redis_max_connections: int = Field(default=50, alias="REDIS_MAX_CONNECTIONS")
     redis_socket_timeout: float = Field(default=5.0, alias="REDIS_SOCKET_TIMEOUT")
+    redis_socket_connect_timeout: float = Field(default=5.0, alias="REDIS_SOCKET_CONNECT_TIMEOUT")
+    redis_health_check_interval: int = Field(default=30, alias="REDIS_HEALTH_CHECK_INTERVAL")
+    redis_retry_attempts: int = Field(default=3, alias="REDIS_RETRY_ATTEMPTS")
+    redis_retry_base_delay_ms: int = Field(default=250, alias="REDIS_RETRY_BASE_DELAY_MS")
+    redis_retry_max_delay_ms: int = Field(default=3000, alias="REDIS_RETRY_MAX_DELAY_MS")
+    redis_transient_log_ttl_sec: int = Field(default=60, alias="REDIS_TRANSIENT_LOG_TTL_SEC")
     
     celery_broker_url: Optional[str] = Field(default=None, alias="CELERY_BROKER_URL")
     celery_result_backend: Optional[str] = Field(default=None, alias="CELERY_RESULT_BACKEND")
