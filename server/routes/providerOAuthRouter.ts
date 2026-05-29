@@ -20,7 +20,7 @@ import {
 
 const router = Router();
 
-// ─── In-memory PKCE store (short-lived) ──────────────────────────────────────
+// ─── In-memory PKCE store + session fallback ────────────────────────────────
 
 interface PkceFlowRecord {
   userId: string;
@@ -34,7 +34,6 @@ interface PkceFlowRecord {
 const pkceFlowStore = new Map<string, PkceFlowRecord>();
 const FLOW_TTL_MS = 30 * 60 * 1000;
 
-// Clean expired flows periodically
 setInterval(() => {
   const now = Date.now();
   for (const [state, flow] of pkceFlowStore) {
@@ -43,6 +42,28 @@ setInterval(() => {
     }
   }
 }, 5 * 60 * 1000);
+
+function persistPkceToSession(req: Request, state: string, record: PkceFlowRecord): void {
+  const session = (req as any).session;
+  if (!session) return;
+  session._pkceFlows = session._pkceFlows ?? {};
+  session._pkceFlows[state] = record;
+}
+
+function resolvePkceFlow(req: Request, state: string): PkceFlowRecord | undefined {
+  const fromMemory = pkceFlowStore.get(state);
+  if (fromMemory) {
+    pkceFlowStore.delete(state);
+    return fromMemory;
+  }
+  const session = (req as any).session;
+  const fromSession = session?._pkceFlows?.[state] as PkceFlowRecord | undefined;
+  if (fromSession && Date.now() - fromSession.createdAt <= FLOW_TTL_MS) {
+    delete session._pkceFlows[state];
+    return fromSession;
+  }
+  return undefined;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -99,14 +120,16 @@ router.post("/openai/start", async (req: Request, res: Response) => {
     const oauthState = crypto.randomBytes(16).toString("hex");
     const redirectUri = getCallbackUrl(req, "openai");
 
-    pkceFlowStore.set(oauthState, {
+    const flowRecord: PkceFlowRecord = {
       userId,
       codeVerifier,
       oauthState,
       provider: "openai",
       isGlobal,
       createdAt: Date.now(),
-    });
+    };
+    pkceFlowStore.set(oauthState, flowRecord);
+    persistPkceToSession(req, oauthState, flowRecord);
 
     const params = new URLSearchParams({
       client_id: openAIWebOAuth.clientId,
@@ -135,14 +158,13 @@ router.get("/openai/callback", async (req: Request, res: Response) => {
       return res.status(400).send(renderCallbackPage("error", oauthError as string || "Missing parameters"));
     }
 
-    const flow = pkceFlowStore.get(state as string);
+    const flow = resolvePkceFlow(req, state as string);
     if (!flow) {
       return res.status(400).send(renderCallbackPage("error", "Invalid or expired state"));
     }
 
     const openAIWebOAuth = getOpenAIWebOAuthAvailability();
     if (!openAIWebOAuth.available || !openAIWebOAuth.clientId) {
-      pkceFlowStore.delete(state as string);
       return res
         .status(400)
         .send(
@@ -153,8 +175,6 @@ router.get("/openai/callback", async (req: Request, res: Response) => {
           ),
         );
     }
-
-    pkceFlowStore.delete(state as string);
 
     const redirectUri = getCallbackUrl(req, "openai");
 
@@ -286,14 +306,16 @@ router.post("/gemini/start", async (req: Request, res: Response) => {
     const codeVerifier = generateCodeVerifier();
     const redirectUri = getCallbackUrl(req, "gemini");
 
-    pkceFlowStore.set(oauthState, {
+    const geminiFlowRecord: PkceFlowRecord = {
       userId,
       codeVerifier,
       oauthState,
       provider: "gemini",
       isGlobal,
       createdAt: Date.now(),
-    });
+    };
+    pkceFlowStore.set(oauthState, geminiFlowRecord);
+    persistPkceToSession(req, oauthState, geminiFlowRecord);
 
     const params = new URLSearchParams({
       client_id: GOOGLE_CLIENT_ID,
@@ -322,12 +344,10 @@ router.get("/gemini/callback", async (req: Request, res: Response) => {
       return res.status(400).send(renderCallbackPage("error", oauthError as string || "Missing parameters"));
     }
 
-    const flow = pkceFlowStore.get(state as string);
+    const flow = resolvePkceFlow(req, state as string);
     if (!flow || flow.provider !== "gemini") {
       return res.status(400).send(renderCallbackPage("error", "Invalid or expired state"));
     }
-
-    pkceFlowStore.delete(state as string);
 
     const redirectUri = getCallbackUrl(req, "gemini");
 
