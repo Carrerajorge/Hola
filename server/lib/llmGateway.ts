@@ -235,6 +235,134 @@ function detectProviderFromModel(model: string | undefined): LLMProvider | null 
   return null;
 }
 
+function usesOpenAIResponsesApi(model: string | undefined): boolean {
+  if (!model) return false;
+  return /^(gpt-5|chatgpt|o[1-9])/i.test(model.trim());
+}
+
+function extractTextFromMessageContent(content: unknown): string {
+  if (typeof content === "string") {
+    return content.trim();
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (!part || typeof part !== "object") return "";
+        const partRecord = part as Record<string, unknown>;
+        if (typeof partRecord.text === "string") return partRecord.text;
+        if (typeof partRecord.content === "string") return partRecord.content;
+        if (typeof partRecord.input_text === "string") return partRecord.input_text;
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+  }
+  if (content && typeof content === "object") {
+    const maybeText = (content as Record<string, unknown>).text;
+    if (typeof maybeText === "string") return maybeText.trim();
+  }
+  return "";
+}
+
+function toOpenAIResponsesPayload(
+  messages: ChatCompletionMessageParam[],
+): { instructions?: string; input: Array<Record<string, unknown>> } {
+  const instructions: string[] = [];
+  const input: Array<Record<string, unknown>> = [];
+
+  for (const message of messages) {
+    const role = typeof message.role === "string" ? message.role : "user";
+    const rawContent = (message as Record<string, unknown>).content;
+
+    if (role === "system" || role === "developer") {
+      const systemText = extractTextFromMessageContent(rawContent);
+      if (systemText) instructions.push(systemText);
+      continue;
+    }
+
+    const contentParts: Array<Record<string, unknown>> = [];
+    if (typeof rawContent === "string") {
+      const text = rawContent.trim();
+      if (text) contentParts.push({ type: "input_text", text });
+    } else if (Array.isArray(rawContent)) {
+      for (const part of rawContent) {
+        if (typeof part === "string") {
+          const text = part.trim();
+          if (text) contentParts.push({ type: "input_text", text });
+          continue;
+        }
+        if (!part || typeof part !== "object") continue;
+        const record = part as Record<string, unknown>;
+        const partType = typeof record.type === "string" ? record.type : "";
+        const text =
+          typeof record.text === "string"
+            ? record.text
+            : typeof record.input_text === "string"
+              ? record.input_text
+              : typeof record.content === "string"
+                ? record.content
+                : "";
+        const imageUrlValue =
+          typeof record.image_url === "string"
+            ? record.image_url
+            : record.image_url &&
+                typeof record.image_url === "object" &&
+                typeof (record.image_url as { url?: unknown }).url === "string"
+              ? ((record.image_url as { url: string }).url)
+              : "";
+
+        if ((partType === "image_url" || partType === "input_image") && imageUrlValue) {
+          contentParts.push({ type: "input_image", image_url: imageUrlValue });
+          continue;
+        }
+
+        if (text.trim()) {
+          contentParts.push({ type: "input_text", text: text.trim() });
+        }
+      }
+    } else {
+      const text = extractTextFromMessageContent(rawContent);
+      if (text) contentParts.push({ type: "input_text", text });
+    }
+
+    if (contentParts.length === 0) continue;
+    input.push({
+      role: role === "assistant" ? "assistant" : "user",
+      content: contentParts,
+    });
+  }
+
+  return {
+    instructions: instructions.length > 0 ? instructions.join("\n\n") : undefined,
+    input,
+  };
+}
+
+function extractOpenAIResponsesText(response: any): string {
+  if (typeof response?.output_text === "string" && response.output_text.trim()) {
+    return response.output_text.trim();
+  }
+
+  const output = Array.isArray(response?.output) ? response.output : [];
+  const chunks: string[] = [];
+  for (const item of output) {
+    const contents = Array.isArray(item?.content) ? item.content : [];
+    for (const content of contents) {
+      const text =
+        typeof content?.text === "string"
+          ? content.text
+          : typeof content?.output_text === "string"
+            ? content.output_text
+            : "";
+      if (text) chunks.push(text);
+    }
+  }
+
+  return chunks.join("").trim();
+}
+
 class LLMGateway {
   private xaiClient: OpenAI | null = null;
   private openaiClient: OpenAI | null = null;
@@ -1218,6 +1346,10 @@ class LLMGateway {
     model: string,
     startTime: number
   ): Promise<LLMResponse> {
+    if (provider === "openai" && usesOpenAIResponsesApi(model)) {
+      return this.executeOpenAIResponses(messages, options, model, startTime);
+    }
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), options.timeout);
 
@@ -1318,6 +1450,129 @@ class LLMGateway {
         provider,
         model,
         endpoint: "/chat/completions",
+        latencyMs,
+        statusCode: error.status || 500,
+        errorMessage: error.message,
+        userId: options.userId,
+      });
+
+      if (error.name === "AbortError") {
+        throw new Error(`Request timeout after ${options.timeout}ms`);
+      }
+      throw error;
+    }
+  }
+
+  private async executeOpenAIResponses(
+    messages: ChatCompletionMessageParam[],
+    options: LLMRequestOptions & { requestId: string; timeout: number },
+    model: string,
+    startTime: number
+  ): Promise<LLMResponse> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), options.timeout);
+
+    try {
+      const client = options.oauthAccessToken
+        ? new OpenAI({ apiKey: options.oauthAccessToken })
+        : this.getOpenAICompatibleClient("openai");
+      const payload = toOpenAIResponsesPayload(messages);
+      const response = await (client.responses as any).create(
+        {
+          model,
+          instructions: payload.instructions,
+          input: payload.input,
+          temperature: options.temperature ?? 0.7,
+          top_p: options.topP ?? 1,
+          max_output_tokens: options.maxTokens,
+        },
+        { signal: controller.signal }
+      );
+
+      clearTimeout(timeoutId);
+
+      const latencyMs = Date.now() - startTime;
+      const content = extractOpenAIResponsesText(response);
+      const usage = response?.usage;
+      const promptTokens = Number(usage?.input_tokens || usage?.prompt_tokens || 0);
+      const completionTokens = Number(usage?.output_tokens || usage?.completion_tokens || 0);
+      const totalTokens = Number(usage?.total_tokens || promptTokens + completionTokens);
+
+      this.metrics.successfulRequests++;
+      this.metrics.byProvider.openai.requests++;
+      this.metrics.totalLatencyMs += latencyMs;
+
+      const usageRecord: TokenUsageRecord = {
+        requestId: options.requestId,
+        userId: options.userId || "anonymous",
+        provider: "openai",
+        model,
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        timestamp: Date.now(),
+        latencyMs,
+        cached: false,
+        fromFallback: false,
+      };
+      this.recordTokenUsage(usageRecord);
+
+      console.log(`[LLMGateway] ${options.requestId} openai(responses) completed in ${latencyMs}ms, tokens: ${totalTokens}`);
+
+      recordConnectorUsage("openai", latencyMs, true);
+
+      this.persistApiLog({
+        provider: "openai",
+        model,
+        endpoint: "/responses",
+        latencyMs,
+        statusCode: 200,
+        tokensIn: promptTokens,
+        tokensOut: completionTokens,
+        userId: options.userId,
+      });
+
+      const qualityAnalysis = analyzeResponseQuality(content);
+      const qualityScore = calculateQualityScore(content, totalTokens, latencyMs);
+
+      const qualityMetric: QualityMetric = {
+        responseId: options.requestId,
+        provider: "openai",
+        score: qualityScore,
+        tokensUsed: totalTokens,
+        latencyMs,
+        timestamp: new Date(),
+        issues: qualityAnalysis.issues,
+        isComplete: qualityAnalysis.isComplete,
+        hasContentIssues: qualityAnalysis.hasContentIssues,
+      };
+      recordQualityMetric(qualityMetric);
+
+      return {
+        content,
+        usage: {
+          promptTokens,
+          completionTokens,
+          totalTokens,
+        },
+        requestId: options.requestId,
+        latencyMs,
+        model,
+        provider: "openai",
+      };
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      const latencyMs = Date.now() - startTime;
+
+      this.metrics.failedRequests++;
+      this.metrics.byProvider.openai.failures++;
+
+      recordConnectorUsage("openai", latencyMs, false);
+
+      this.persistApiLog({
+        provider: "openai",
+        model,
+        endpoint: "/responses",
         latencyMs,
         statusCode: error.status || 500,
         errorMessage: error.message,
@@ -2008,6 +2263,11 @@ class LLMGateway {
       model = modelProvider === "deepseek" ? options.model! : (process.env.DEEPSEEK_MODEL || "deepseek-chat");
     }
 
+    if (provider === "openai" && usesOpenAIResponsesApi(model)) {
+      yield* this.streamOpenAIResponses(messages, options, model);
+      return;
+    }
+
     const client = this.getOpenAICompatibleClient(provider);
     const controller = new AbortController();
     const totalTimeoutMs = options.timeout ?? DEFAULT_STREAM_TIMEOUT_MS;
@@ -2072,6 +2332,73 @@ class LLMGateway {
 
     if (buffer) {
       yield { content: buffer, done: false };
+    }
+
+    yield { content: "", done: true };
+  }
+
+  private async * streamOpenAIResponses(
+    messages: ChatCompletionMessageParam[],
+    options: LLMRequestOptions,
+    model: string
+  ): AsyncGenerator<{ content: string; done: boolean }, void, unknown> {
+    const client = options.oauthAccessToken
+      ? new OpenAI({ apiKey: options.oauthAccessToken })
+      : this.getOpenAICompatibleClient("openai");
+    const controller = new AbortController();
+    const totalTimeoutMs = options.timeout ?? DEFAULT_STREAM_TIMEOUT_MS;
+    let abortedReason: "timeout" | "idle" | null = null;
+    const totalTimeoutId = setTimeout(() => {
+      abortedReason = "timeout";
+      controller.abort();
+    }, totalTimeoutMs);
+
+    let idleTimeoutId: NodeJS.Timeout | null = setTimeout(() => {
+      abortedReason = "idle";
+      controller.abort();
+    }, STREAM_IDLE_TIMEOUT_MS);
+
+    const resetIdle = () => {
+      if (idleTimeoutId) clearTimeout(idleTimeoutId);
+      idleTimeoutId = setTimeout(() => {
+        abortedReason = "idle";
+        controller.abort();
+      }, STREAM_IDLE_TIMEOUT_MS);
+    };
+
+    const payload = toOpenAIResponsesPayload(messages);
+    const stream = await (client.responses as any).create(
+      {
+        model,
+        instructions: payload.instructions,
+        input: payload.input,
+        temperature: options.temperature ?? 0.7,
+        top_p: options.topP ?? 1,
+        max_output_tokens: options.maxTokens,
+        stream: true,
+      },
+      { signal: controller.signal }
+    );
+
+    try {
+      for await (const event of stream) {
+        resetIdle();
+
+        if (event?.type === "response.output_text.delta" && typeof event.delta === "string" && event.delta.length > 0) {
+          yield { content: event.delta, done: false };
+        }
+      }
+    } catch (error: any) {
+      if (error?.name === "AbortError") {
+        if (abortedReason === "idle") {
+          throw new Error(`Stream idle timeout after ${STREAM_IDLE_TIMEOUT_MS}ms`);
+        }
+        throw new Error(`Stream timeout after ${totalTimeoutMs}ms`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(totalTimeoutId);
+      if (idleTimeoutId) clearTimeout(idleTimeoutId);
     }
 
     yield { content: "", done: true };
