@@ -752,34 +752,43 @@ export function GeminiCliOAuthButton({
     let cancelled = false;
 
     (async () => {
-      try {
-        const freshStatus = await queryClient.fetchQuery<GeminiCliStatusResponse>({
-          queryKey: STATUS_QUERY_KEY,
-          queryFn: async () => {
-            const res = await apiFetch("/api/oauth/google/gemini-cli/status", {
-              cache: "no-store",
-            });
-            if (!res.ok) throw new Error("Status check failed");
-            return res.json();
-          },
-          staleTime: 0,
-        });
+      const STATUS_RETRY_DELAYS = [0, 800, 2000];
+      for (const delay of STATUS_RETRY_DELAYS) {
         if (cancelled) return;
-
-        if (freshStatus?.connected) {
-          await queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
-          await Promise.resolve(onConnected?.(freshStatus.defaultModelId || "gemini-3.1-pro-preview"));
-          toast({
-            title: "Gemini CLI ya vinculado",
-            description: freshStatus.email
-              ? `La cuenta ${freshStatus.email} ya puede usar Gemini 3.1 Pro desde ILIAGPT.`
-              : "Gemini 3.1 Pro ya puede usarse desde ILIAGPT.",
-          });
-          setOpen(false);
-          return;
+        if (delay > 0) {
+          await new Promise((r) => setTimeout(r, delay));
+          if (cancelled) return;
         }
-      } catch {
-        // Fresh status check failed, fall through to manual flow
+        try {
+          const freshStatus = await queryClient.fetchQuery<GeminiCliStatusResponse>({
+            queryKey: [...STATUS_QUERY_KEY, `retry-${delay}`],
+            queryFn: async () => {
+              const res = await apiFetch("/api/oauth/google/gemini-cli/status", {
+                cache: "no-store",
+              });
+              if (!res.ok) throw new Error("Status check failed");
+              return res.json();
+            },
+            staleTime: 0,
+          });
+          if (cancelled) return;
+
+          if (freshStatus?.connected) {
+            await queryClient.invalidateQueries({ queryKey: STATUS_QUERY_KEY });
+            await queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+            await Promise.resolve(onConnected?.(freshStatus.defaultModelId || "gemini-3.1-pro-preview"));
+            toast({
+              title: "Gemini CLI ya vinculado",
+              description: freshStatus.email
+                ? `La cuenta ${freshStatus.email} ya puede usar Gemini 3.1 Pro desde ILIAGPT.`
+                : "Gemini 3.1 Pro ya puede usarse desde ILIAGPT.",
+            });
+            setOpen(false);
+            return;
+          }
+        } catch {
+          // Status check failed, will retry on next delay
+        }
       }
       if (cancelled) return;
 
@@ -792,9 +801,6 @@ export function GeminiCliOAuthButton({
         setCallbackUrl(storedFlow.callbackUrl);
         return;
       }
-      // After login redirect, risk is implicitly accepted (user already chose Gemini on login page).
-      // Pre-accept the risk and auto-start the mutation. If popup is blocked,
-      // onSuccess falls back to same-window redirect via window.location.assign.
       setAcceptedRisk(true);
       startMutation.mutate();
     })();
