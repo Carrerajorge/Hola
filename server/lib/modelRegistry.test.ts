@@ -12,6 +12,7 @@ import {
   DEFAULT_TEXT_MODEL,
   DEFAULT_REASONING_MODEL,
   DEFAULT_VISION_MODEL,
+  modelSupportsVisionInput,
   KNOWN_XAI_MODEL_IDS,
   KNOWN_GEMINI_MODEL_IDS,
   FALLBACK_CHAINS,
@@ -137,6 +138,24 @@ describe("KNOWN_GEMINI_MODEL_IDS", () => {
 
   it("does not contain xAI model IDs", () => {
     expect(KNOWN_GEMINI_MODEL_IDS.has("grok-3")).toBe(false);
+  });
+});
+
+describe("modelSupportsVisionInput", () => {
+  it("returns true for Gemini models", () => {
+    expect(modelSupportsVisionInput("gemini-3.1-flash")).toBe(true);
+    expect(modelSupportsVisionInput("gemini-2.5-pro")).toBe(true);
+  });
+
+  it("returns true for explicit vision models", () => {
+    expect(modelSupportsVisionInput("grok-2-vision-1212")).toBe(true);
+  });
+
+  it("returns false for text-only or local text models", () => {
+    expect(modelSupportsVisionInput("grok-4-1-fast-non-reasoning")).toBe(false);
+    expect(modelSupportsVisionInput("gemma3:4b")).toBe(false);
+    expect(modelSupportsVisionInput("")).toBe(false);
+    expect(modelSupportsVisionInput(undefined)).toBe(false);
   });
 });
 

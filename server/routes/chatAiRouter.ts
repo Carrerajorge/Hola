@@ -138,6 +138,10 @@ import {
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
+import {
+  DEFAULT_VISION_MODEL,
+  modelSupportsVisionInput,
+} from "../lib/modelRegistry";
 import { terminalController } from "../agent/terminalController";
 import type {
   CommandRequest,
@@ -8983,7 +8987,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         let gptSessionContract: GptSessionContract | null = null;
         let effectiveModel = model || DEFAULT_MODEL;
         let serverSessionId: string | null = null;
-        const effectiveProvider = provider || DEFAULT_PROVIDER;
+        let effectiveProvider = provider || DEFAULT_PROVIDER;
 
         const isValidConversationIdForStream = (id?: string): boolean => {
           if (!id) return false;
@@ -10319,6 +10323,31 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
                 `[Stream] Vision: converted user message[${i}] to multimodal (${imagePartsForVision.length} images, text="${textContent.substring(0, 100)}")`,
               );
               break;
+            }
+          }
+
+          if (!modelSupportsVisionInput(effectiveModel)) {
+            const previousModel = effectiveModel;
+            const previousProvider = effectiveProvider;
+            effectiveModel = DEFAULT_VISION_MODEL;
+            effectiveProvider = DEFAULT_PROVIDER;
+
+            console.log(
+              `[Stream] Vision: switching model for image input from ${previousProvider}/${previousModel} to ${effectiveProvider}/${effectiveModel}`,
+            );
+
+            if (!isConnectionClosed) {
+              writeSse(res, "notice", {
+                type: "vision_model_fallback",
+                previousModel,
+                previousProvider,
+                model: effectiveModel,
+                provider: effectiveProvider,
+                message:
+                  "Se activó automáticamente un modelo compatible con imágenes.",
+                requestId,
+                timestamp: Date.now(),
+              });
             }
           }
 

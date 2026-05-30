@@ -109,6 +109,23 @@ export const KNOWN_GEMINI_MODEL_IDS: ReadonlySet<string> = new Set([
   "gemini-2.0-pro",
 ]);
 
+/**
+ * Returns true when the model is known to accept native image input.
+ * Keep this conservative: false means "fallback to a dedicated vision model".
+ */
+export function modelSupportsVisionInput(modelId?: string | null): boolean {
+  if (!modelId) return false;
+
+  const normalized = modelId.trim().toLowerCase();
+  if (!normalized) return false;
+
+  if (normalized.includes("vision")) return true;
+  if (normalized.startsWith("gemini-")) return true;
+  if (KNOWN_GEMINI_MODEL_IDS.has(normalized)) return true;
+
+  return false;
+}
+
 // ============================================================================
 // Fallback Chains (used by circuit breaker and retry logic)
 // ============================================================================
