@@ -19,6 +19,9 @@ import {
   generateImage,
   detectImageRequest,
   extractImagePrompt,
+  detectVideoRequest,
+  extractVideoPrompt,
+  generateVideoStoryboardFrames,
 } from "../services/imageGeneration";
 import {
   runETLAgent,
@@ -7570,6 +7573,59 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
     const extractedPrompt = isImageRequest ? extractImagePrompt(message) : null;
 
     res.json({ isImageRequest, extractedPrompt });
+  });
+
+  router.post("/video/generate", async (req, res) => {
+    try {
+      const { prompt, frameCount, durationSec, preset } = req.body || {};
+
+      if (!prompt || typeof prompt !== "string") {
+        return res.status(400).json({ error: "Prompt is required" });
+      }
+
+      const normalizedPreset =
+        typeof preset === "string" && preset.trim().toLowerCase() === "veo-fast-8s"
+          ? "veo-fast-8s"
+          : "custom";
+      const effectiveDurationSec =
+        normalizedPreset === "veo-fast-8s" && (durationSec == null || durationSec === "")
+          ? 8
+          : durationSec;
+      const normalizedPrompt = detectVideoRequest(prompt)
+        ? extractVideoPrompt(prompt)
+        : prompt.trim();
+
+      const result = await generateVideoStoryboardFrames(normalizedPrompt, {
+        frameCount,
+        durationSec: effectiveDurationSec,
+      });
+
+      res.json({
+        success: true,
+        mode: result.mode,
+        prompt: result.prompt,
+        preset: normalizedPreset,
+        presetLabel: normalizedPreset === "veo-fast-8s" ? "Veo Fast (8s)" : "Custom",
+        durationSec: effectiveDurationSec ?? 8,
+        summary: result.summary,
+        plannerModel: result.plannerModel,
+        frames: result.frames.map((frame) => ({
+          index: frame.index,
+          title: frame.title,
+          caption: frame.caption,
+          seconds: frame.seconds,
+          prompt: frame.prompt,
+          model: frame.model,
+          imageData: `data:${frame.mimeType};base64,${frame.imageBase64}`,
+        })),
+      });
+    } catch (error: any) {
+      console.error("Video generation error:", error);
+      res.status(500).json({
+        error: "Failed to generate storyboard frames for video request",
+        details: error.message,
+      });
+    }
   });
 
   router.get("/etl/config", async (req, res) => {

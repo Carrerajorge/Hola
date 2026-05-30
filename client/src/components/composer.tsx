@@ -94,8 +94,8 @@ export interface ComposerProps {
   handleDragLeave: (e: React.DragEvent) => void;
   handleDrop: (e: React.DragEvent) => void;
   isDraggingOver: boolean;
-  selectedTool: "web" | "agent" | "image" | null;
-  setSelectedTool: (tool: "web" | "agent" | "image" | null) => void;
+  selectedTool: "web" | "agent" | "image" | "video" | null;
+  setSelectedTool: (tool: "web" | "agent" | "image" | "video" | null) => void;
   selectedDocTool: "word" | "excel" | "ppt" | "figma" | null;
   setSelectedDocTool: (tool: "word" | "excel" | "ppt" | "figma" | null) => void;
   gptCapabilities?: {
@@ -784,6 +784,26 @@ export function Composer({
                 </div>
                 Generar imagen
               </Button>
+              <Button
+                variant="ghost"
+                className="justify-start gap-3 text-sm h-10 glass-menu-item"
+                disabled={!canUseImageTool}
+                onClick={() => {
+                  try {
+                    if (!canUseImageTool) return;
+                    closeToolsPopover();
+                    setSelectedTool("video");
+                    onCloseSidebar?.();
+                  } catch (err) {
+                    console.error("[Composer] Error selecting video tool:", err);
+                  }
+                }}
+              >
+                <div className="flex items-center justify-center w-6 h-6 rounded-lg bg-amber-100 dark:bg-amber-900/30">
+                  <Video className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                </div>
+                Generar video
+              </Button>
 
               <Button
                 variant="ghost"
@@ -1201,6 +1221,7 @@ export function Composer({
             selectedTool === "web" && "bg-gradient-to-br from-cyan-500 to-cyan-700 after:bg-cyan-400/20",
             selectedTool === "agent" && "bg-gradient-to-br from-purple-500 to-purple-700 after:bg-purple-400/20",
             selectedTool === "image" && "bg-gradient-to-br from-pink-500 to-rose-600 after:bg-pink-400/20",
+            selectedTool === "video" && "bg-gradient-to-br from-amber-500 to-red-600 after:bg-amber-300/20",
             "animate-[liquid-float_3s_ease-in-out_infinite]"
           )}
           data-testid="button-selected-tool"
@@ -1209,6 +1230,8 @@ export function Composer({
             <Globe className="h-5 w-5 text-white z-10 drop-shadow-md" />
           ) : selectedTool === "image" ? (
             <Image className="h-5 w-5 text-white z-10 drop-shadow-md" />
+          ) : selectedTool === "video" ? (
+            <Video className="h-5 w-5 text-white z-10 drop-shadow-md" />
           ) : (
             <Bot className="h-5 w-5 text-white z-10 drop-shadow-md" />
           )}

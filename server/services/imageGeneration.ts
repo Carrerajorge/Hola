@@ -40,6 +40,33 @@ export interface ImageGenerationResult {
   model?: string;
 }
 
+export interface VideoFramePlan {
+  index: number;
+  title: string;
+  caption: string;
+  prompt: string;
+  seconds: number;
+}
+
+export interface VideoFrameResult extends VideoFramePlan {
+  imageBase64: string;
+  mimeType: string;
+  model?: string;
+}
+
+export interface VideoGenerationOptions {
+  frameCount?: number;
+  durationSec?: number;
+}
+
+export interface VideoGenerationResult {
+  mode: "storyboard_frames";
+  prompt: string;
+  summary: string;
+  plannerModel: string;
+  frames: VideoFrameResult[];
+}
+
 export async function generateImage(prompt: string): Promise<ImageGenerationResult> {
   const startTime = Date.now();
   console.log(`[ImageGeneration] Generating: "${prompt.slice(0, 50)}..."`);
@@ -261,6 +288,20 @@ export function detectImageRequest(message: string): boolean {
   return hasActionKeyword && hasImageKeyword;
 }
 
+export function detectVideoRequest(message: string): boolean {
+  const normalized = String(message || "").trim();
+  if (!normalized) return false;
+
+  const videoPatterns = [
+    /\b(crea|genera|haz|make|create|generate)\b.*\b(video|vídeo|clip|animación|animation|movie|short)\b/i,
+    /\b(quiero|quisiera|necesito|dame|muéstrame|muestrame|show me)\b.*\b(video|vídeo|clip|animación|animation|movie|short)\b/i,
+    /\b(video|vídeo|clip|animación|animation)\s+(de|of)\b/i,
+    /\b(prompt|storyboard|escena|scene)\b.*\b(video|vídeo)\b/i,
+  ];
+
+  return videoPatterns.some((pattern) => pattern.test(normalized));
+}
+
 export function extractImagePrompt(message: string): string {
   // Remove common prefixes
   let prompt = message
@@ -274,4 +315,85 @@ export function extractImagePrompt(message: string): string {
   }
   
   return prompt;
+}
+
+export function extractVideoPrompt(message: string): string {
+  let prompt = String(message || "")
+    .replace(/^(genera|crea|haz|make|create|generate)\s*/i, "")
+    .replace(/^(un|una|an?|the)\s+/i, "")
+    .replace(/^(video|vídeo|clip|animación|animation|movie)\s*(de|of)?\s*/i, "")
+    .trim();
+
+  if (prompt.length < 5) {
+    prompt = String(message || "").trim();
+  }
+
+  return prompt;
+}
+
+function clampInt(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(parsed)));
+}
+
+function normalizeVideoPrompt(prompt: string): string {
+  const cleaned = String(prompt || "").trim();
+  if (!cleaned) return "";
+  return detectVideoRequest(cleaned) ? extractVideoPrompt(cleaned) : cleaned;
+}
+
+function buildFallbackVideoPlan(
+  prompt: string,
+  frameCount: number,
+  durationSec: number,
+): VideoFramePlan[] {
+  const labels = ["Apertura", "Desarrollo", "Cierre"];
+  const focus = [
+    "wide establishing shot, cinematic lighting, rich detail",
+    "subject motion begins, medium shot, dynamic composition",
+    "final hero frame, clean composition, memorable ending shot",
+  ];
+
+  return Array.from({ length: frameCount }, (_, idx) => ({
+    index: idx + 1,
+    title: labels[idx] || `Frame ${idx + 1}`,
+    caption: `${labels[idx] || `Frame ${idx + 1}`} del video`,
+    prompt: `${prompt}. ${focus[idx] || "cinematic storyboard frame"}, ultra detailed, no text`,
+    seconds: Math.max(1, Math.round(durationSec / frameCount)),
+  }));
+}
+
+export async function generateVideoStoryboardFrames(
+  prompt: string,
+  options: VideoGenerationOptions = {},
+): Promise<VideoGenerationResult> {
+  const normalizedPrompt = normalizeVideoPrompt(prompt);
+  const frameCount = clampInt(options.frameCount, 3, 2, 6);
+  const durationSec = clampInt(options.durationSec, 8, 2, 60);
+  const plan = buildFallbackVideoPlan(normalizedPrompt, frameCount, durationSec);
+
+  const frames: VideoFrameResult[] = [];
+  for (const frame of plan) {
+    const image = await generateImage(frame.prompt);
+    frames.push({
+      ...frame,
+      imageBase64: image.imageBase64,
+      mimeType: image.mimeType,
+      model: image.model,
+    });
+  }
+
+  return {
+    mode: "storyboard_frames",
+    prompt: normalizedPrompt,
+    summary: `Se generó un storyboard visual de ${frames.length} fotogramas para representar el video solicitado.`,
+    plannerModel: "veo-fast-8s",
+    frames,
+  };
 }

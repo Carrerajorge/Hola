@@ -1348,7 +1348,7 @@ export function ChatInterface({
       : selectedDocToolLocal;
   const setSelectedDocTool = setSelectedDocToolProp || setSelectedDocToolLocal;
   const [selectedTool, setSelectedTool] = useState<
-    "web" | "agent" | "image" | null
+    "web" | "agent" | "image" | "video" | null
   >(null);
   const [latencyMode, setLatencyMode] = useState<"fast" | "deep" | "auto">(
     "auto",
@@ -1468,7 +1468,10 @@ export function ChatInterface({
     if (selectedTool === "web" && !gptCapabilityFlags.webBrowsing) {
       setSelectedTool(null);
     }
-    if (selectedTool === "image" && !gptCapabilityFlags.imageGeneration) {
+    if (
+      (selectedTool === "image" || selectedTool === "video") &&
+      !gptCapabilityFlags.imageGeneration
+    ) {
       setSelectedTool(null);
     }
   }, [
@@ -4620,6 +4623,8 @@ export function ChatInterface({
           setSelectedTool("web");
         } else if (name.includes("image") || name.includes("vision")) {
           setSelectedTool("image");
+        } else if (name.includes("video") || name.includes("veo")) {
+          setSelectedTool("video");
         } else if (
           name.includes("agent") ||
           name.includes("orchestrat") ||
@@ -7251,8 +7256,11 @@ export function ChatInterface({
         }
       }
 
-      // GENERATION INTENT DETECTION: Handle image, document, spreadsheet, presentation requests
+      // GENERATION INTENT DETECTION: Handle image, video, document, spreadsheet, presentation requests
       // These are handled directly by /api/chat + ProductionWorkflowRunner - no agent mode or SSE needed
+      const DEFAULT_VIDEO_PRESET_ID = "veo-fast-8s";
+      const DEFAULT_VIDEO_PRESET_LABEL = "Veo Fast (8s)";
+      const DEFAULT_VIDEO_DURATION_SEC = 8;
       const generationPatterns = [
         /\b(crea|create|genera|generate|haz|make)\b.*\b(imagen|image|foto|photo|ilustración|illustration)\b/i,
         /\b(crea|create|genera|generate|haz|make)\b.*\b(word|docx)\b/i,
@@ -7260,6 +7268,11 @@ export function ChatInterface({
         /\b(crea|create|genera|generate|haz|make)\b.*\b(ppt|powerpoint|slides|diapositivas)\b/i,
         /\b(crea|create|genera|generate|haz|make)\b.*\b(pdf)\b/i,
         /\b(cv|curriculum|resume|currículum|carta de presentación|cover letter)\b/i,
+      ];
+      const videoGenerationPatterns = [
+        /\b(crea|create|genera|generate|haz|make)\b.*\b(video|vídeo|clip|animación|animation|movie|short)\b/i,
+        /\b(quiero|quisiera|necesito|dame|muéstrame|muestrame|show me)\b.*\b(video|vídeo|clip|animación|animation|movie|short)\b/i,
+        /\b(video|vídeo|clip|animación|animation)\s+(de|of)\b/i,
       ];
 
       const imageEditPatterns = [
@@ -7292,6 +7305,9 @@ export function ChatInterface({
       ];
 
       const isGenerationRequest = generationPatterns.some((p) => p.test(input));
+      const isVideoTool = selectedTool === "video";
+      const isVideoGenerationRequest =
+        isVideoTool || videoGenerationPatterns.some((p) => p.test(input));
       const hasEditPattern = imageEditPatterns.some((p) => p.test(input));
 
       const inferDocToolFromPrompt = (
@@ -7342,12 +7358,12 @@ export function ChatInterface({
       );
 
       if (
-        (isGenerationRequest || hasEditPattern) &&
+        (isGenerationRequest || isVideoGenerationRequest || hasEditPattern) &&
         !hasDocToolSelected &&
         !hasDocumentFiles
       ) {
         console.log(
-          "[handleSubmit] Generation/Edit pattern detected - checking image context...",
+          "[handleSubmit] Generation/Edit/Video pattern detected - checking specialized route...",
         );
 
         // Set thinking state
@@ -7403,6 +7419,157 @@ export function ChatInterface({
         });
 
         try {
+          if (isVideoGenerationRequest) {
+            setAiProcessStepsForChat(
+              [
+                {
+                  step: `Analizando la idea del video con ${DEFAULT_VIDEO_PRESET_LABEL}`,
+                  status: "active",
+                },
+                { step: "Generando storyboard visual", status: "pending" },
+                { step: "Renderizando fotogramas", status: "pending" },
+              ],
+              submitConversationId,
+            );
+
+            try {
+              abortControllerRef.current = new AbortController();
+              const videoRes = await apiFetch("/api/video/generate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  prompt: generationInput,
+                  durationSec: DEFAULT_VIDEO_DURATION_SEC,
+                  preset: DEFAULT_VIDEO_PRESET_ID,
+                }),
+                signal: abortControllerRef.current.signal,
+              });
+
+              const videoData = await videoRes.json();
+              const frames = Array.isArray(videoData?.frames) ? videoData.frames : [];
+              if (videoRes.ok && videoData?.success && frames.length > 0) {
+                setAiProcessStepsForChat(
+                  (prev: AiProcessStep[]) =>
+                    prev.map((step: AiProcessStep) => ({
+                      ...step,
+                      status: "done" as const,
+                    })),
+                  submitConversationId,
+                );
+
+                const summaryMsg: Message = {
+                  id: `video-summary-${Date.now()}`,
+                  role: "assistant",
+                  content:
+                    videoData.summary ||
+                    `Preparé ${frames.length} fotogramas para representar el video solicitado.`,
+                  timestamp: new Date(),
+                  requestId: generateRequestId(),
+                  userMessageId: userMsgId,
+                  metadata: {
+                    videoStoryboard: true,
+                    videoPreset: videoData.preset || DEFAULT_VIDEO_PRESET_ID,
+                    videoPresetLabel:
+                      videoData.presetLabel || DEFAULT_VIDEO_PRESET_LABEL,
+                    videoDurationSec:
+                      videoData.durationSec || DEFAULT_VIDEO_DURATION_SEC,
+                    plannerModel: videoData.plannerModel,
+                    frameCount: frames.length,
+                  },
+                };
+
+                const frameMessages: Message[] = frames.map(
+                  (frame: any, index: number) => {
+                    const msgId = `video-frame-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`;
+                    if (
+                      typeof frame?.imageData === "string" &&
+                      frame.imageData.length > 0
+                    ) {
+                      storeGeneratedImage(msgId, frame.imageData);
+                      if (index === frames.length - 1) {
+                        storeLastGeneratedImageInfo({
+                          messageId: msgId,
+                          base64: frame.imageData,
+                          artifactId: null,
+                        });
+                      }
+                    }
+
+                    return {
+                      id: msgId,
+                      role: "assistant",
+                      content:
+                        frame?.caption || frame?.title || `Fotograma ${index + 1}`,
+                      generatedImage: frame?.imageData,
+                      timestamp: new Date(),
+                      requestId: generateRequestId(),
+                      userMessageId: userMsgId,
+                      metadata: {
+                        videoStoryboardFrame: true,
+                        frameIndex: frame?.index || index + 1,
+                        plannerModel: videoData.plannerModel,
+                        imageModel: frame?.model,
+                        framePrompt: frame?.prompt,
+                      },
+                    };
+                  },
+                );
+
+                const allMessages = [summaryMsg, ...frameMessages];
+                setOptimisticMessages((prev: Message[]) => [...prev, ...allMessages]);
+                for (const message of allMessages) {
+                  void onSendMessage(message).catch((error) => {
+                    console.warn(
+                      "[handleSubmit] Failed to persist video storyboard message:",
+                      error,
+                    );
+                  });
+                }
+
+                setAiStateForChat("idle", submitConversationId);
+                setAiProcessStepsForChat([], submitConversationId);
+                setSelectedTool(null);
+                abortControllerRef.current = null;
+                void persistGenerationUserMessagePromise;
+                return;
+              }
+
+              throw new Error(
+                videoData?.error ||
+                  "No se pudieron generar fotogramas para el video",
+              );
+            } catch (videoError: any) {
+              if (videoError.name === "AbortError") {
+                setAiStateForChat("idle", submitConversationId);
+                setAiProcessStepsForChat([], submitConversationId);
+                abortControllerRef.current = null;
+                return;
+              }
+
+              console.error("[VideoGeneration] Failed:", videoError);
+              const errorMsg: Message = {
+                id: `video-error-${Date.now()}`,
+                role: "assistant",
+                content:
+                  "No pude generar los fotogramas del video en este intento. Vuelve a intentarlo.",
+                timestamp: new Date(),
+                requestId: generateRequestId(),
+                userMessageId: userMsgId,
+              };
+              setOptimisticMessages((prev: Message[]) => [...prev, errorMsg]);
+              void onSendMessage(errorMsg).catch((error) => {
+                console.warn(
+                  "[handleSubmit] Failed to persist video error message:",
+                  error,
+                );
+              });
+              setAiStateForChat("idle", submitConversationId);
+              setAiProcessStepsForChat([], submitConversationId);
+              abortControllerRef.current = null;
+              return;
+            }
+          }
+
           // Only fetch image context if we have an edit pattern (not for generation-only requests)
           // This prevents misrouting generation requests like "agrega una conclusión" to image edit
           let lastImageBase64: string | null = null;
