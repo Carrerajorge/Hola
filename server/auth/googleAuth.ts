@@ -79,19 +79,59 @@ function normalizeLoginHint(value: unknown): string | null {
     return normalized;
 }
 
-// Store states temporarily (in production, use Redis)
-const stateStore = new Map<string, { createdAt: number; returnUrl: string; providerHint?: string }>();
+type OAuthStateData = { createdAt: number; returnUrl: string; providerHint?: string };
 
-// Cleanup old states every 5 minutes
+const stateStore = new Map<string, OAuthStateData>();
+const STATE_MAX_AGE_MS = 10 * 60 * 1000;
+
 setInterval(() => {
     const now = Date.now();
-    const maxAge = 10 * 60 * 1000; // 10 minutes
     for (const [state, data] of stateStore.entries()) {
-        if (now - data.createdAt > maxAge) {
+        if (now - data.createdAt > STATE_MAX_AGE_MS) {
             stateStore.delete(state);
         }
     }
 }, 5 * 60 * 1000);
+
+function getSessionOAuthStates(req: Request): Record<string, OAuthStateData> {
+    const session = (req as any).session;
+    if (!session) return {};
+    session._oauthStates = session._oauthStates ?? {};
+    const now = Date.now();
+    for (const [key, data] of Object.entries(session._oauthStates as Record<string, OAuthStateData>)) {
+        if (now - data.createdAt > STATE_MAX_AGE_MS) {
+            delete (session._oauthStates as Record<string, OAuthStateData>)[key];
+        }
+    }
+    return session._oauthStates;
+}
+
+function persistStateToSession(req: Request, state: string, data: OAuthStateData): void {
+    const session = (req as any).session;
+    if (!session) return;
+    const states = getSessionOAuthStates(req);
+    states[state] = data;
+    if (typeof session.save === "function") {
+        session.save((err: unknown) => {
+            if (err) console.warn("[Google Auth] Session state save failed:", err);
+        });
+    }
+}
+
+function resolveState(req: Request, state: string): OAuthStateData | undefined {
+    const fromMemory = stateStore.get(state);
+    if (fromMemory) {
+        stateStore.delete(state);
+        return fromMemory;
+    }
+    const sessionStates = getSessionOAuthStates(req);
+    const fromSession = sessionStates[state];
+    if (fromSession) {
+        delete sessionStates[state];
+        return fromSession;
+    }
+    return undefined;
+}
 
 /**
  * GET /api/auth/google
@@ -108,7 +148,9 @@ router.get("/google", (req: Request, res: Response) => {
     const state = generateState();
     const returnUrl = (req.query.returnUrl as string) || "/";
     const providerHint = typeof req.query.provider_hint === "string" ? req.query.provider_hint.trim() : undefined;
-    stateStore.set(state, { createdAt: Date.now(), returnUrl, providerHint });
+    const stateData: OAuthStateData = { createdAt: Date.now(), returnUrl, providerHint };
+    stateStore.set(state, stateData);
+    persistStateToSession(req, state, stateData);
 
     // Use canonical redirect URI to match Google Cloud Console configuration
     const redirectUri = getCanonicalRedirectUri(req, "/api/auth/google/callback");
@@ -135,8 +177,7 @@ router.get("/google", (req: Request, res: Response) => {
         scope: scopes,
         state,
         access_type: "offline",
-        // For Gemini/Antigravity, always force consent to ensure expanded scopes are granted.
-        prompt: isGeminiHint ? "select_account consent" : (loginHint ? "consent" : "select_account consent"),
+        prompt: "select_account consent",
     });
     if (loginHint) {
         params.set("login_hint", loginHint);
@@ -168,13 +209,11 @@ router.get("/google/callback", async (req: Request, res: Response) => {
         return res.redirect("/login?error=google_invalid_response");
     }
 
-    // Verify state
-    const stateData = stateStore.get(state as string);
+    const stateData = resolveState(req, state as string);
     if (!stateData) {
-        console.error("[Google Auth] Invalid or expired state");
+        console.error("[Google Auth] Invalid or expired state — not found in memory or session");
         return res.redirect("/login?error=google_invalid_state");
     }
-    stateStore.delete(state as string);
 
     const config = getGoogleConfig();
     if (!config) {

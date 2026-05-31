@@ -98,7 +98,7 @@ async function resolveStoredProfile(userId?: string | null) {
     }
   }
 
-  // Fallback: check database-backed provider tokens (providerOAuthRouter storage)
+  // Fallback 1: check database-backed provider tokens (providerOAuthRouter storage)
   if (userId) {
     try {
       const { providersService } = await import("./providersService.js");
@@ -111,6 +111,22 @@ async function resolveStoredProfile(userId?: string | null) {
       }
     } catch {
       // DB might not have the oauth tables yet
+    }
+  }
+
+  // Fallback 2: check tokenManager (encrypts tokens per user)
+  if (userId) {
+    try {
+      const { tokenManager } = await import("../lib/auth/tokenManager.js");
+      const googleTokens = await tokenManager.getTokens(userId, "google");
+      if (googleTokens?.access_token) {
+        return {
+          profileId: `${PROVIDER_ID}:token-manager`,
+          credential: { provider: PROVIDER_ID, type: "oauth", source: "token-manager", email: undefined },
+        };
+      }
+    } catch {
+      // TOKEN_ENCRYPTION_KEY may not be set
     }
   }
 
@@ -183,6 +199,7 @@ async function persistGeminiCliOAuthCredentials(
   }
 
   // 2. Database persistence via providersService (always attempt as fallback)
+  let dbPersisted = false;
   try {
     const { providersService } = await import("./providersService.js");
     const expiresAt = credentials.expires > 0 ? credentials.expires : null;
@@ -195,6 +212,7 @@ async function persistGeminiCliOAuthCredentials(
       expiresAt,
       scope,
     );
+    dbPersisted = true;
     console.info("[GeminiCliOAuth] Credentials also persisted to DB for user:", userId);
   } catch (dbError) {
     console.warn(
@@ -203,8 +221,9 @@ async function persistGeminiCliOAuthCredentials(
     );
   }
 
-  if (!filePersisted && !agentDir) {
-    throw new Error("No se pudo resolver el almacenamiento OAuth del usuario.");
+  if (!filePersisted && !dbPersisted) {
+    console.error("[GeminiCliOAuth] Both file and DB persistence failed for user:", userId);
+    throw new Error("No se pudo persistir las credenciales OAuth. Verifica la configuración del servidor.");
   }
 }
 
