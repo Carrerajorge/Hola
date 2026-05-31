@@ -146,13 +146,44 @@ googleGeminiCliOAuthRouter.get(
       const status = await getGoogleGeminiCliOAuthStatus(userId);
 
       if (!status.connected && userId) {
-        // Try 1: Re-persist tokens from the authenticated user object
+        // Try 1: Check session flag set during Google OAuth callback
+        // This is checked FIRST because it's the fastest path after login redirect.
+        const session = (req as any).session;
+        const sessionGemini = session?.geminiCliConnected;
+        if (sessionGemini && sessionGemini.hasAccessToken) {
+          const staleMs = Date.now() - (sessionGemini.connectedAt || 0);
+          if (staleMs < 24 * 3600 * 1000) {
+            // Attempt background re-persistence so next check doesn't need session fallback
+            if (sessionGemini.accessToken && userId) {
+              persistGeminiCliCredentialsFromGoogleTokens(
+                userId,
+                sessionGemini.email,
+                {
+                  access_token: sessionGemini.accessToken,
+                  refresh_token: sessionGemini.refreshToken || undefined,
+                  expires_at: sessionGemini.expiresAt,
+                },
+              ).catch(() => {});
+            }
+            return res.json({
+              ...status,
+              connected: true,
+              email: sessionGemini.email || status.email,
+              profileId: status.profileId || "session-fallback",
+              defaultModelId: status.defaultModelId || "gemini-3.1-pro-preview",
+              defaultModelRef: status.defaultModelRef || "google-gemini-cli/gemini-3.1-pro-preview",
+            });
+          }
+        }
+
+        // Try 2: Re-persist tokens from the authenticated user object (Passport session)
         const sessionUser = (req as any).user;
         if (sessionUser?.access_token) {
+          const email = sessionUser.claims?.email || sessionUser.email || null;
           try {
             await persistGeminiCliCredentialsFromGoogleTokens(
               userId,
-              sessionUser.claims?.email || sessionUser.email,
+              email,
               {
                 access_token: sessionUser.access_token,
                 refresh_token: sessionUser.refresh_token,
@@ -162,30 +193,24 @@ googleGeminiCliOAuthRouter.get(
             const refreshed = await getGoogleGeminiCliOAuthStatus(userId);
             return res.json(refreshed);
           } catch {
-            (req as any).session.geminiCliConnected = {
-              hasAccessToken: true,
-              email: sessionUser.claims?.email || sessionUser.email || null,
-              connectedAt: Date.now(),
-            };
+            // Persistence failed but we have a valid token - report connected via session
+            if (!session.geminiCliConnected) {
+              session.geminiCliConnected = {
+                hasAccessToken: true,
+                email,
+                connectedAt: Date.now(),
+                accessToken: sessionUser.access_token,
+                refreshToken: sessionUser.refresh_token || null,
+                expiresAt: sessionUser.expires_at,
+              };
+            }
             return res.json({
               ...status,
               connected: true,
-              email: sessionUser.claims?.email || sessionUser.email || null,
+              email,
               profileId: "session-fallback",
-            });
-          }
-        }
-        // Try 2: Check session flag set during Google OAuth callback
-        const session = (req as any).session;
-        const sessionGemini = session?.geminiCliConnected;
-        if (sessionGemini && sessionGemini.hasAccessToken) {
-          const staleMs = Date.now() - (sessionGemini.connectedAt || 0);
-          if (staleMs < 24 * 3600 * 1000) {
-            return res.json({
-              ...status,
-              connected: true,
-              email: sessionGemini.email || status.email,
-              profileId: status.profileId || "session-fallback",
+              defaultModelId: "gemini-3.1-pro-preview",
+              defaultModelRef: "google-gemini-cli/gemini-3.1-pro-preview",
             });
           }
         }
