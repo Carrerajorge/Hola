@@ -167,6 +167,7 @@ googleGeminiCliOAuthRouter.get(
               email: sessionUser.claims?.email || sessionUser.email || null,
               connectedAt: Date.now(),
             };
+            try { await saveSession(req); } catch {}
             return res.json({
               ...status,
               connected: true,
@@ -188,6 +189,21 @@ googleGeminiCliOAuthRouter.get(
               profileId: status.profileId || "session-fallback",
             });
           }
+        }
+      }
+
+      // Final safety net: if the user has a valid Google access_token in their
+      // session (set during Google OAuth login), treat as connected even if
+      // file/DB persistence hasn't settled yet.
+      if (!status.connected && userId) {
+        const freshSessionUser = (req as any).user;
+        if (freshSessionUser?.access_token && typeof freshSessionUser.access_token === "string") {
+          return res.json({
+            ...status,
+            connected: true,
+            email: freshSessionUser?.claims?.email || freshSessionUser?.email || status.email,
+            profileId: status.profileId || "access-token-fallback",
+          });
         }
       }
 

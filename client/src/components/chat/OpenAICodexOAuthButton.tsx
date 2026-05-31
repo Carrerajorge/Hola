@@ -254,38 +254,45 @@ export function OpenAICodexOAuthButton({
     let cancelled = false;
 
     (async () => {
-      try {
-        const freshStatus = await queryClient.fetchQuery({
-          queryKey: STATUS_QUERY_KEY,
-          queryFn: async () => {
-            const res = await apiFetch("/api/oauth/openai/codex/status", {
-              cache: "no-store",
-            });
-            if (!res.ok) throw new Error("Status check failed");
-            return res.json() as Promise<typeof status>;
-          },
-          staleTime: 0,
-        });
+      const STATUS_RETRY_DELAYS = [0, 800, 2000];
+      for (const delay of STATUS_RETRY_DELAYS) {
         if (cancelled) return;
-
-        if (freshStatus?.connected) {
-          await queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
-          await Promise.resolve(onConnected?.(freshStatus.defaultModelId || "gpt-5.3-codex"));
-          toast({
-            title: "ChatGPT ya conectado",
-            description: freshStatus.accountId
-              ? `Cuenta ${freshStatus.accountId} lista para usar OpenClaw.`
-              : "Tu cuenta de ChatGPT ya puede usar OpenClaw.",
-          });
-          resetLocalState(false);
-          return;
+        if (delay > 0) {
+          await new Promise((r) => setTimeout(r, delay));
+          if (cancelled) return;
         }
-      } catch {
-        // Status check failed, fall through to manual flow
+        try {
+          const freshStatus = await queryClient.fetchQuery({
+            queryKey: [...STATUS_QUERY_KEY, `retry-${delay}`],
+            queryFn: async () => {
+              const res = await apiFetch("/api/oauth/openai/codex/status", {
+                cache: "no-store",
+              });
+              if (!res.ok) throw new Error("Status check failed");
+              return res.json() as Promise<typeof status>;
+            },
+            staleTime: 0,
+          });
+          if (cancelled) return;
+
+          if (freshStatus?.connected) {
+            await queryClient.invalidateQueries({ queryKey: STATUS_QUERY_KEY });
+            await queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+            await Promise.resolve(onConnected?.(freshStatus.defaultModelId || "gpt-5.3-codex"));
+            toast({
+              title: "ChatGPT ya conectado",
+              description: freshStatus.accountId
+                ? `Cuenta ${freshStatus.accountId} lista para usar OpenClaw.`
+                : "Tu cuenta de ChatGPT ya puede usar OpenClaw.",
+            });
+            resetLocalState(false);
+            return;
+          }
+        } catch {
+          // Status check failed, will retry on next delay
+        }
       }
       if (cancelled) return;
-      // Not connected — auto-start the flow. If popup is blocked, the
-      // onSuccess handler falls back to showing the manual recovery UI.
       startMutation.mutate();
     })();
 

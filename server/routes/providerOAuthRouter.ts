@@ -132,12 +132,12 @@ router.get("/openai/callback", async (req: Request, res: Response) => {
     const { code, state, error: oauthError } = req.query;
 
     if (oauthError || !code || !state) {
-      return res.status(400).send(renderCallbackPage("error", oauthError as string || "Missing parameters"));
+      return res.status(400).send(renderCallbackPage("error", oauthError as string || "Missing parameters", "openai"));
     }
 
     const flow = pkceFlowStore.get(state as string);
     if (!flow) {
-      return res.status(400).send(renderCallbackPage("error", "Invalid or expired state"));
+      return res.status(400).send(renderCallbackPage("error", "Invalid or expired state", "openai"));
     }
 
     const openAIWebOAuth = getOpenAIWebOAuthAvailability();
@@ -150,6 +150,7 @@ router.get("/openai/callback", async (req: Request, res: Response) => {
             "error",
             openAIWebOAuth.reason ||
               "OpenAI OAuth directo no está disponible en este despliegue.",
+            "openai",
           ),
         );
     }
@@ -174,7 +175,7 @@ router.get("/openai/callback", async (req: Request, res: Response) => {
     if (!tokenResponse.ok) {
       const errorBody = await tokenResponse.text();
       console.error("[ProviderOAuth] OpenAI token exchange failed:", errorBody);
-      return res.status(400).send(renderCallbackPage("error", "Token exchange failed"));
+      return res.status(400).send(renderCallbackPage("error", "Token exchange failed", "openai"));
     }
 
     const tokens = (await tokenResponse.json()) as {
@@ -209,10 +210,10 @@ router.get("/openai/callback", async (req: Request, res: Response) => {
       );
     }
 
-    res.send(renderCallbackPage("success", "OpenAI conectado exitosamente"));
+    res.send(renderCallbackPage("success", "OpenAI conectado exitosamente", "openai"));
   } catch (error: any) {
     console.error("[ProviderOAuth] OpenAI callback error:", error);
-    res.status(500).send(renderCallbackPage("error", error.message));
+    res.status(500).send(renderCallbackPage("error", error.message, "openai"));
   }
 });
 
@@ -319,12 +320,12 @@ router.get("/gemini/callback", async (req: Request, res: Response) => {
     const { code, state, error: oauthError } = req.query;
 
     if (oauthError || !code || !state) {
-      return res.status(400).send(renderCallbackPage("error", oauthError as string || "Missing parameters"));
+      return res.status(400).send(renderCallbackPage("error", oauthError as string || "Missing parameters", "gemini"));
     }
 
     const flow = pkceFlowStore.get(state as string);
     if (!flow || flow.provider !== "gemini") {
-      return res.status(400).send(renderCallbackPage("error", "Invalid or expired state"));
+      return res.status(400).send(renderCallbackPage("error", "Invalid or expired state", "gemini"));
     }
 
     pkceFlowStore.delete(state as string);
@@ -347,7 +348,7 @@ router.get("/gemini/callback", async (req: Request, res: Response) => {
     if (!tokenResponse.ok) {
       const errorBody = await tokenResponse.text();
       console.error("[ProviderOAuth] Gemini token exchange failed:", errorBody);
-      return res.status(400).send(renderCallbackPage("error", "Token exchange failed"));
+      return res.status(400).send(renderCallbackPage("error", "Token exchange failed", "gemini"));
     }
 
     const tokens = (await tokenResponse.json()) as {
@@ -381,10 +382,10 @@ router.get("/gemini/callback", async (req: Request, res: Response) => {
       );
     }
 
-    res.send(renderCallbackPage("success", "Google Gemini conectado exitosamente"));
+    res.send(renderCallbackPage("success", "Google Gemini conectado exitosamente", "gemini"));
   } catch (error: any) {
     console.error("[ProviderOAuth] Gemini callback error:", error);
-    res.status(500).send(renderCallbackPage("error", error.message));
+    res.status(500).send(renderCallbackPage("error", error.message, "gemini"));
   }
 });
 
@@ -579,36 +580,47 @@ router.get("/status", async (req: Request, res: Response) => {
 
 // ─── Callback Page Renderer ──────────────────────────────────────────────────
 
-function renderCallbackPage(status: "success" | "error", message: string): string {
+function renderCallbackPage(status: "success" | "error", message: string, provider?: string): string {
   const nonce = crypto.randomBytes(16).toString("base64");
   const isSuccess = status === "success";
+
+  const providerLogos: Record<string, string> = {
+    openai: `<svg width="48" height="48" viewBox="0 0 24 24" fill="none"><path d="M22.28 9.37a5.99 5.99 0 0 0-.52-4.93 6.07 6.07 0 0 0-6.55-2.91A5.99 5.99 0 0 0 10.69.18a6.07 6.07 0 0 0-5.8 4.21 5.99 5.99 0 0 0-4.01 2.9 6.07 6.07 0 0 0 .74 7.12 5.99 5.99 0 0 0 .52 4.93 6.07 6.07 0 0 0 6.55 2.91 5.99 5.99 0 0 0 4.52 1.35 6.07 6.07 0 0 0 5.8-4.21 5.99 5.99 0 0 0 4.01-2.9 6.07 6.07 0 0 0-.74-7.12Z" fill="#10a37f"/></svg>`,
+    gemini: `<svg width="48" height="48" viewBox="0 0 24 24" fill="none"><defs><linearGradient id="g" x1="4" y1="3" x2="20" y2="21" gradientUnits="userSpaceOnUse"><stop stop-color="#1A73E8"/><stop offset=".45" stop-color="#8E6CF8"/><stop offset="1" stop-color="#34A853"/></linearGradient></defs><path fill="url(#g)" d="M12 2.5c.46 3.63 1.24 5.96 2.42 7.08 1.11 1.05 3.45 1.84 7.08 2.42-3.63.58-5.97 1.37-7.08 2.42-1.18 1.12-1.96 3.45-2.42 7.08-.46-3.63-1.24-5.96-2.42-7.08-1.11-1.05-3.45-1.84-7.08-2.42 3.63-.58 5.97-1.37 7.08-2.42C10.76 8.46 11.54 6.13 12 2.5Z"/></svg>`,
+    anthropic: `<svg width="48" height="48" viewBox="0 0 24 24" fill="none"><path d="M16.98 5.47L12 2 7.02 5.47 2 8.53v6.94l5.02 3.06L12 22l4.98-3.47L22 15.47V8.53l-5.02-3.06zM12 16.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5z" fill="#D97757" opacity="0.9"/></svg>`,
+  };
+  const logo = provider && providerLogos[provider] ? providerLogos[provider] : "";
+  const providerNames: Record<string, string> = { openai: "ChatGPT", gemini: "Google Gemini", anthropic: "Claude" };
+  const providerName = provider && providerNames[provider] ? providerNames[provider] : "Proveedor";
 
   return `<!doctype html>
 <html lang="es">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>OAuth ${isSuccess ? "Completado" : "Error"}</title>
+  <title>${providerName} - OAuth ${isSuccess ? "Completado" : "Error"}</title>
   <style>
     body { font-family: system-ui, sans-serif; background: #07131f; color: #f8fafc; display: grid; place-items: center; min-height: 100vh; margin: 0; padding: 24px; }
     .card { max-width: 440px; background: rgba(15, 23, 42, 0.92); border: 1px solid rgba(148, 163, 184, 0.22); border-radius: 20px; padding: 32px; text-align: center; }
     h1 { font-size: 22px; margin: 0 0 12px; color: ${isSuccess ? "#22c55e" : "#ef4444"}; }
     p { color: #94a3b8; margin: 8px 0; }
-    .icon { font-size: 48px; margin-bottom: 16px; }
+    .logo { margin-bottom: 16px; display: flex; justify-content: center; }
+    .status-ring { width: 80px; height: 80px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 2px solid ${isSuccess ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}; background: ${isSuccess ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)"}; }
   </style>
 </head>
 <body>
   <div class="card">
-    <div class="icon">${isSuccess ? "✅" : "❌"}</div>
-    <h1>${isSuccess ? "Conexión exitosa" : "Error de conexión"}</h1>
+    <div class="logo"><div class="status-ring">${logo || (isSuccess ? '<svg width="36" height="36" viewBox="0 0 24 24" fill="none"><path d="M9 12l2 2 4-4" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="10" stroke="#22c55e" stroke-width="1.5" opacity="0.4"/></svg>' : '<svg width="36" height="36" viewBox="0 0 24 24" fill="none"><path d="M15 9l-6 6M9 9l6 6" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round"/><circle cx="12" cy="12" r="10" stroke="#ef4444" stroke-width="1.5" opacity="0.4"/></svg>')}</div></div>
+    <h1>${isSuccess ? `${providerName} conectado` : "Error de conexion"}</h1>
     <p>${message}</p>
-    <p style="margin-top: 20px; font-size: 14px;">Puedes cerrar esta ventana.</p>
+    <p style="margin-top: 20px; font-size: 13px; color: #64748b;">Esta ventana se cerrara automaticamente.</p>
   </div>
   <script nonce="${nonce}">
     try {
       window.opener && window.opener.postMessage({
         type: "provider-oauth-result",
         status: "${status}",
+        provider: ${JSON.stringify(provider || "")},
         message: ${JSON.stringify(message)}
       }, window.location.origin);
       setTimeout(() => window.close(), 2000);
