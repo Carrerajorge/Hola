@@ -115,33 +115,68 @@ export default function Home() {
     const params = new URLSearchParams(window.location.search);
     const provider = params.get("provider");
     if (provider === "gemini" || provider === "openai" || provider === "antigravity") {
-      // Capture the email before cleaning URL params
       const loginEmail = params.get("email") || "";
-      // Clean up URL first
       params.delete("provider");
       params.delete("auth");
       params.delete("email");
       const rest = params.toString();
       window.history.replaceState({}, "", rest ? `${window.location.pathname}?${rest}` : window.location.pathname);
-      // Dispatch event so provider dialogs can auto-open.
-      // Retry with increasing delay to handle cases where components
-      // are still mounting (lazy-loaded chat interface).
-      // Also persist to sessionStorage so late-mounting components can pick it up.
-      try {
-        window.sessionStorage.setItem(
-          "iliagpt:pending-auto-connect",
-          JSON.stringify({ provider, email: loginEmail, createdAt: Date.now() }),
-        );
-      } catch {}
-      // Extended to 6 attempts with longer tail to cover slow networks.
-      const delays = [300, 800, 1500, 3000, 5000, 8000];
-      const timers: number[] = [];
-      for (const delay of delays) {
-        timers.push(window.setTimeout(() => {
-          window.dispatchEvent(new CustomEvent("auto-connect-provider", { detail: { provider, email: loginEmail } }));
-        }, delay));
-      }
-      return () => timers.forEach((t) => window.clearTimeout(t));
+
+      // Quick status pre-check: if the provider is already connected (credentials
+      // persisted during the Google OAuth callback), show a success toast immediately
+      // without opening the dialog or starting another popup flow.
+      const statusUrl = provider === "openai"
+        ? "/api/oauth/openai/codex/status"
+        : "/api/oauth/google/gemini-cli/status";
+      const providerLabel = provider === "openai" ? "ChatGPT" : provider === "antigravity" ? "Antigravity" : "Gemini";
+
+      apiFetch(statusUrl, { cache: "no-store" })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: any) => {
+          if (data?.connected) {
+            toast.success(`${providerLabel} vinculado exitosamente`, {
+              description: data.email
+                ? `Cuenta ${data.email} lista para usar desde ILIAGPT.`
+                : `${providerLabel} ya puede usarse desde ILIAGPT.`,
+            });
+            queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/oauth/google/gemini-cli/status"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/oauth/openai/codex/status"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/oauth/providers/status"] });
+            return;
+          }
+          // Not connected yet - dispatch auto-connect event as before
+          dispatchAutoConnect(provider, loginEmail);
+        })
+        .catch(() => {
+          dispatchAutoConnect(provider, loginEmail);
+        });
+
+      const dispatchAutoConnect = (prov: string, email: string) => {
+        try {
+          window.sessionStorage.setItem(
+            "iliagpt:pending-auto-connect",
+            JSON.stringify({ provider: prov, email, createdAt: Date.now() }),
+          );
+        } catch {}
+        const delays = [300, 800, 1500, 3000, 5000, 8000];
+        const timers: number[] = [];
+        for (const delay of delays) {
+          timers.push(window.setTimeout(() => {
+            window.dispatchEvent(new CustomEvent("auto-connect-provider", { detail: { provider: prov, email } }));
+          }, delay));
+        }
+        // Store timers for cleanup (returned from outer scope)
+        (window as any).__iliagpt_auto_connect_timers = timers;
+      };
+
+      return () => {
+        const timers = (window as any).__iliagpt_auto_connect_timers as number[] | undefined;
+        if (timers) {
+          timers.forEach((t) => window.clearTimeout(t));
+          delete (window as any).__iliagpt_auto_connect_timers;
+        }
+      };
     }
   }, [isReady, user]);
 
