@@ -742,8 +742,8 @@ export function GeminiCliOAuthButton({
   // fetch (staleTime: 0) to avoid seeing stale cached data from before the login.
   const autoStartTriggeredRef = React.useRef(false);
   const autoStartRetryCountRef = React.useRef(0);
-  const AUTO_START_MAX_RETRIES = 3;
-  const AUTO_START_RETRY_DELAYS = [500, 1500, 3000];
+  const AUTO_START_MAX_RETRIES = 4;
+  const AUTO_START_RETRY_DELAYS = [600, 1500, 3000, 5000];
   React.useEffect(() => {
     if (!open || !autoStart || autoStartTriggeredRef.current) return;
     if (flowId || startMutation.isPending || completeMutation.isPending) return;
@@ -751,37 +751,50 @@ export function GeminiCliOAuthButton({
     autoStartTriggeredRef.current = true;
     let cancelled = false;
 
-    (async () => {
-      try {
-        const freshStatus = await queryClient.fetchQuery<GeminiCliStatusResponse>({
-          queryKey: STATUS_QUERY_KEY,
-          queryFn: async () => {
-            const res = await apiFetch("/api/oauth/google/gemini-cli/status", {
-              cache: "no-store",
-            });
-            if (!res.ok) throw new Error("Status check failed");
-            return res.json();
-          },
-          staleTime: 0,
-        });
-        if (cancelled) return;
-
-        if (freshStatus?.connected) {
-          await queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
-          await Promise.resolve(onConnected?.(freshStatus.defaultModelId || "gemini-3.1-pro-preview"));
-          toast({
-            title: "Gemini CLI ya vinculado",
-            description: freshStatus.email
-              ? `La cuenta ${freshStatus.email} ya puede usar Gemini 3.1 Pro desde ILIAGPT.`
-              : "Gemini 3.1 Pro ya puede usarse desde ILIAGPT.",
-          });
-          setOpen(false);
-          return;
+    const checkStatusWithRetries = async (): Promise<GeminiCliStatusResponse | null> => {
+      const STATUS_CHECK_DELAYS = [0, 800, 2000, 4000];
+      for (const delay of STATUS_CHECK_DELAYS) {
+        if (cancelled) return null;
+        if (delay > 0) {
+          await new Promise((r) => setTimeout(r, delay));
         }
-      } catch {
-        // Fresh status check failed, fall through to manual flow
+        if (cancelled) return null;
+        try {
+          const freshStatus = await queryClient.fetchQuery<GeminiCliStatusResponse>({
+            queryKey: STATUS_QUERY_KEY,
+            queryFn: async () => {
+              const res = await apiFetch("/api/oauth/google/gemini-cli/status", {
+                cache: "no-store",
+              });
+              if (!res.ok) throw new Error("Status check failed");
+              return res.json();
+            },
+            staleTime: 0,
+          });
+          if (freshStatus?.connected) return freshStatus;
+        } catch {
+          // Retry on next iteration
+        }
       }
+      return null;
+    };
+
+    (async () => {
+      const freshStatus = await checkStatusWithRetries();
       if (cancelled) return;
+
+      if (freshStatus?.connected) {
+        await queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+        await Promise.resolve(onConnected?.(freshStatus.defaultModelId || "gemini-3.1-pro-preview"));
+        toast({
+          title: "Gemini CLI ya vinculado",
+          description: freshStatus.email
+            ? `La cuenta ${freshStatus.email} ya puede usar Gemini 3.1 Pro desde ILIAGPT.`
+            : "Gemini 3.1 Pro ya puede usarse desde ILIAGPT.",
+        });
+        setOpen(false);
+        return;
+      }
 
       const storedFlow = readStoredFlowDraft();
       if (storedFlow) {
@@ -792,9 +805,6 @@ export function GeminiCliOAuthButton({
         setCallbackUrl(storedFlow.callbackUrl);
         return;
       }
-      // After login redirect, risk is implicitly accepted (user already chose Gemini on login page).
-      // Pre-accept the risk and auto-start the mutation. If popup is blocked,
-      // onSuccess falls back to same-window redirect via window.location.assign.
       setAcceptedRisk(true);
       startMutation.mutate();
     })();

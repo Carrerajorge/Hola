@@ -365,6 +365,25 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                 // If provider_hint is openai, persist Google tokens as OpenAI provider
                 // tokens so the auto-connect can detect them via session fallback.
                 if (stateData.providerHint === "openai") {
+                    // Persist to the OpenAI Codex auth profile store (file-based)
+                    // so the status endpoint picks up the connection immediately.
+                    try {
+                        const { persistOpenAICodexCredentialsFromGoogleTokens } = await import("../services/openAICodexOAuthService.js");
+                        await persistOpenAICodexCredentialsFromGoogleTokens(
+                            resolvedUser.id,
+                            email,
+                            {
+                                access_token: tokens.access_token,
+                                refresh_token: tokens.refresh_token,
+                                expires_at: Math.floor(Date.now() / 1000) + (tokens.expires_in || 3600),
+                            },
+                        );
+                        console.log("[Google Auth] OpenAI Codex credentials persisted for:", email);
+                    } catch (codexError: any) {
+                        console.warn("[Google Auth] OpenAI Codex credential persistence failed (non-blocking):", codexError?.message || codexError);
+                    }
+
+                    // Also persist via the provider OAuth router's DB storage (dual persistence)
                     try {
                         const { providersService } = await import("../services/providersService.js");
                         const expiresAt = Date.now() + (tokens.expires_in || 3600) * 1000;
@@ -380,6 +399,17 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                     } catch (dbError: any) {
                         console.warn("[Google Auth] OpenAI DB token persistence failed (non-blocking):", dbError?.message || dbError);
                     }
+
+                    // Set session flag so the OpenAI Codex status endpoint has
+                    // a guaranteed fallback even if file/DB persistence failed.
+                    (req.session as any).openaiCodexConnected = {
+                        hasAccessToken: true,
+                        email: email || null,
+                        connectedAt: Date.now(),
+                        accessToken: tokens.access_token,
+                        refreshToken: tokens.refresh_token || null,
+                        expiresAt: Math.floor(Date.now() / 1000) + (tokens.expires_in || 3600),
+                    };
                 }
 
                 // If a provider_hint was set during login, redirect to a post-login

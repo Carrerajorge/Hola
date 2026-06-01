@@ -145,49 +145,95 @@ googleGeminiCliOAuthRouter.get(
       const userId = getUserId(req);
       const status = await getGoogleGeminiCliOAuthStatus(userId);
 
-      if (!status.connected && userId) {
-        // Try 1: Re-persist tokens from the authenticated user object
-        const sessionUser = (req as any).user;
-        if (sessionUser?.access_token) {
+      if (status.connected) {
+        return res.json(status);
+      }
+
+      if (!userId) {
+        return res.json(status);
+      }
+
+      // Fallback 1: Re-persist from session geminiCliConnected data
+      const session = (req as any).session;
+      const sessionGemini = session?.geminiCliConnected;
+      if (sessionGemini?.hasAccessToken && sessionGemini?.accessToken) {
+        const staleMs = Date.now() - (sessionGemini.connectedAt || 0);
+        if (staleMs < 24 * 3600 * 1000) {
           try {
             await persistGeminiCliCredentialsFromGoogleTokens(
               userId,
-              sessionUser.claims?.email || sessionUser.email,
+              sessionGemini.email || undefined,
               {
-                access_token: sessionUser.access_token,
-                refresh_token: sessionUser.refresh_token,
-                expires_at: sessionUser.expires_at,
+                access_token: sessionGemini.accessToken,
+                refresh_token: sessionGemini.refreshToken || undefined,
+                expires_at: sessionGemini.expiresAt || undefined,
               },
             );
             const refreshed = await getGoogleGeminiCliOAuthStatus(userId);
-            return res.json(refreshed);
-          } catch {
-            (req as any).session.geminiCliConnected = {
-              hasAccessToken: true,
-              email: sessionUser.claims?.email || sessionUser.email || null,
-              connectedAt: Date.now(),
-            };
-            return res.json({
-              ...status,
-              connected: true,
-              email: sessionUser.claims?.email || sessionUser.email || null,
-              profileId: "session-fallback",
-            });
+            if (refreshed.connected) {
+              return res.json(refreshed);
+            }
+          } catch (persistErr) {
+            console.warn("[GeminiCliOAuth] Re-persist from session failed:", persistErr instanceof Error ? persistErr.message : persistErr);
           }
+
+          return res.json({
+            ...status,
+            connected: true,
+            email: sessionGemini.email || status.email,
+            profileId: status.profileId || "session-fallback",
+          });
         }
-        // Try 2: Check session flag set during Google OAuth callback
-        const session = (req as any).session;
-        const sessionGemini = session?.geminiCliConnected;
-        if (sessionGemini && sessionGemini.hasAccessToken) {
-          const staleMs = Date.now() - (sessionGemini.connectedAt || 0);
-          if (staleMs < 24 * 3600 * 1000) {
-            return res.json({
-              ...status,
-              connected: true,
-              email: sessionGemini.email || status.email,
-              profileId: status.profileId || "session-fallback",
-            });
+      }
+
+      // Fallback 2: Re-persist from authenticated user object (Passport)
+      const sessionUser = (req as any).user;
+      if (sessionUser?.access_token) {
+        try {
+          await persistGeminiCliCredentialsFromGoogleTokens(
+            userId,
+            sessionUser.claims?.email || sessionUser.email,
+            {
+              access_token: sessionUser.access_token,
+              refresh_token: sessionUser.refresh_token,
+              expires_at: sessionUser.expires_at,
+            },
+          );
+          const refreshed = await getGoogleGeminiCliOAuthStatus(userId);
+          if (refreshed.connected) {
+            return res.json(refreshed);
           }
+        } catch {
+          // Fall through
+        }
+
+        session.geminiCliConnected = {
+          hasAccessToken: true,
+          email: sessionUser.claims?.email || sessionUser.email || null,
+          accessToken: sessionUser.access_token,
+          refreshToken: sessionUser.refresh_token || null,
+          expiresAt: sessionUser.expires_at || null,
+          connectedAt: Date.now(),
+        };
+
+        return res.json({
+          ...status,
+          connected: true,
+          email: sessionUser.claims?.email || sessionUser.email || null,
+          profileId: status.profileId || "session-fallback",
+        });
+      }
+
+      // Fallback 3: Check stale session flag (no tokens but flag was set)
+      if (sessionGemini && sessionGemini.hasAccessToken) {
+        const staleMs = Date.now() - (sessionGemini.connectedAt || 0);
+        if (staleMs < 24 * 3600 * 1000) {
+          return res.json({
+            ...status,
+            connected: true,
+            email: sessionGemini.email || status.email,
+            profileId: status.profileId || "session-fallback",
+          });
         }
       }
 

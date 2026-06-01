@@ -5,6 +5,7 @@ import {
   completeOpenAICodexOAuthFlowFromCallback,
   getOpenAICodexOAuthFlowState,
   getOpenAICodexOAuthStatus,
+  persistOpenAICodexCredentialsFromGoogleTokens,
   startOpenAICodexOAuthFlow,
   submitOpenAICodexOAuthManualInput,
 } from "../services/openAICodexOAuthService";
@@ -107,7 +108,104 @@ function renderOpenAICodexOAuthBridge(
 
 openAICodexOAuthRouter.get("/status", async (req: Request, res: Response) => {
   try {
-    res.json(await getOpenAICodexOAuthStatus(getUserId(req)));
+    const userId = getUserId(req);
+    const status = await getOpenAICodexOAuthStatus(userId);
+
+    if (status.connected) {
+      return res.json(status);
+    }
+
+    if (!userId) {
+      return res.json(status);
+    }
+
+    // Fallback 1: Re-persist from session openaiCodexConnected data
+    // (set by Google OAuth callback when provider_hint=openai)
+    const session = (req as any).session;
+    const sessionOpenAI = session?.openaiCodexConnected;
+    if (sessionOpenAI?.hasAccessToken && sessionOpenAI?.accessToken) {
+      const staleMs = Date.now() - (sessionOpenAI.connectedAt || 0);
+      if (staleMs < 24 * 3600 * 1000) {
+        try {
+          await persistOpenAICodexCredentialsFromGoogleTokens(
+            userId,
+            sessionOpenAI.email || undefined,
+            {
+              access_token: sessionOpenAI.accessToken,
+              refresh_token: sessionOpenAI.refreshToken || undefined,
+              expires_at: sessionOpenAI.expiresAt || undefined,
+            },
+          );
+          const refreshed = await getOpenAICodexOAuthStatus(userId);
+          if (refreshed.connected) {
+            return res.json(refreshed);
+          }
+        } catch (persistErr) {
+          console.warn("[OpenAICodexOAuth] Re-persist from session failed:", persistErr instanceof Error ? persistErr.message : persistErr);
+        }
+
+        // Even if re-persistence failed, honor the session flag
+        return res.json({
+          ...status,
+          connected: true,
+          accountId: sessionOpenAI.email || status.accountId,
+          profileId: status.profileId || "session-fallback",
+        });
+      }
+    }
+
+    // Fallback 2: Re-persist from authenticated user object (Passport)
+    const sessionUser = (req as any).user;
+    if (sessionUser?.access_token) {
+      try {
+        await persistOpenAICodexCredentialsFromGoogleTokens(
+          userId,
+          sessionUser.claims?.email || sessionUser.email,
+          {
+            access_token: sessionUser.access_token,
+            refresh_token: sessionUser.refresh_token,
+            expires_at: sessionUser.expires_at,
+          },
+        );
+        const refreshed = await getOpenAICodexOAuthStatus(userId);
+        if (refreshed.connected) {
+          return res.json(refreshed);
+        }
+      } catch {
+        // Fall through
+      }
+
+      session.openaiCodexConnected = {
+        hasAccessToken: true,
+        email: sessionUser.claims?.email || sessionUser.email || null,
+        accessToken: sessionUser.access_token,
+        refreshToken: sessionUser.refresh_token || null,
+        expiresAt: sessionUser.expires_at || null,
+        connectedAt: Date.now(),
+      };
+
+      return res.json({
+        ...status,
+        connected: true,
+        accountId: sessionUser.claims?.email || sessionUser.email || null,
+        profileId: status.profileId || "session-fallback",
+      });
+    }
+
+    // Fallback 3: Check stale session flag (no tokens but flag was set)
+    if (sessionOpenAI && sessionOpenAI.hasAccessToken) {
+      const staleMs = Date.now() - (sessionOpenAI.connectedAt || 0);
+      if (staleMs < 24 * 3600 * 1000) {
+        return res.json({
+          ...status,
+          connected: true,
+          accountId: sessionOpenAI.email || status.accountId,
+          profileId: status.profileId || "session-fallback",
+        });
+      }
+    }
+
+    res.json(status);
   } catch (error) {
     console.error("[OpenAICodexOAuth] status failed:", error);
     res

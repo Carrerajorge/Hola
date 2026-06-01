@@ -19,7 +19,7 @@
     "build:extension": "mkdir -p dist/extension && cp -r extension/* dist/extension/ && cd dist/extension && zip -r ../../client/public/downloads/ILIAGPT-Chrome-Extension-v1.5.0.zip *",
     "worker": "node --import tsx server/worker.ts",
     "start": "node scripts/with-env.cjs NODE_ENV=production -- node dist/index.cjs",
-    "postinstall": "node scripts/sync-mathjax-assets.cjs",
+    "postinstall": "node scripts/sync-mathjax-assets.cjs && node scripts/patch-drizzle-types.cjs",
     "sync:mathjax": "node scripts/sync-mathjax-assets.cjs",
     "check": "node scripts/with-env.cjs NODE_OPTIONS=--max-old-space-size=8192 -- tsc",
     "type-check": "node scripts/with-env.cjs NODE_OPTIONS=--max-old-space-size=8192 -- tsc -p tsconfig.ci.json",
