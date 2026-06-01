@@ -131,26 +131,39 @@ function buildProfileId(credentials: OpenAICodexCredentials): string {
 
 async function resolveStoredProfile(userId?: string | null) {
   const agentDir = resolveUserScopedAgentDir(userId);
-  if (!agentDir) {
-    return null;
+  if (agentDir) {
+    const store = ensureAuthProfileStore(agentDir, { allowKeychainPrompt: false });
+    const profileIds = listProfilesForProvider(store, PROVIDER_ID);
+    if (profileIds.length > 0) {
+      const profileId = profileIds[0];
+      const credential = store.profiles[profileId];
+      if (credential) {
+        return {
+          profileId,
+          credential,
+        };
+      }
+    }
   }
 
-  const store = ensureAuthProfileStore(agentDir, { allowKeychainPrompt: false });
-  const profileIds = listProfilesForProvider(store, PROVIDER_ID);
-  if (profileIds.length === 0) {
-    return null;
+  // Fallback: check database-backed provider tokens (providerOAuthRouter storage)
+  // The Google OAuth callback saves tokens as provider "openai" via providersService.
+  if (userId) {
+    try {
+      const { providersService } = await import("./providersService.js");
+      const userStatus = await providersService.getUserTokenStatus(userId, "openai");
+      if (userStatus.connected) {
+        return {
+          profileId: `${PROVIDER_ID}:db-fallback`,
+          credential: { provider: PROVIDER_ID, type: "oauth", source: "db" },
+        };
+      }
+    } catch {
+      // DB might not have the oauth tables yet
+    }
   }
 
-  const profileId = profileIds[0];
-  const credential = store.profiles[profileId];
-  if (!credential) {
-    return null;
-  }
-
-  return {
-    profileId,
-    credential,
-  };
+  return null;
 }
 
 function clearExpiredFlows(): void {
@@ -531,6 +544,42 @@ export async function getOpenAICodexOAuthStatus(
     profileId: storedProfile?.profileId ?? null,
     accountId,
   };
+}
+
+/**
+ * Persist OpenAI Codex credentials from Google OAuth tokens.
+ *
+ * Called by the Google OAuth callback when provider_hint=openai to bridge
+ * Google login into the OpenAI Codex auth profile store, mirroring what
+ * `persistGeminiCliCredentialsFromGoogleTokens` does for Gemini.
+ */
+export async function persistOpenAICodexCredentialsFromGoogleTokens(
+  userId: string,
+  email?: string,
+  tokens?: {
+    access_token: string;
+    refresh_token?: string;
+    expires_at?: number;
+  },
+): Promise<void> {
+  if (!tokens?.access_token) {
+    console.warn("[OpenAICodexOAuth] No tokens to persist for user:", userId);
+    return;
+  }
+
+  // Build a synthetic accountId from the email or a hash of the access token
+  const accountId = email?.trim().toLowerCase() || `google-${userId.slice(0, 12)}`;
+
+  const credentials: OpenAICodexCredentials = {
+    access: tokens.access_token,
+    refresh: tokens.refresh_token || "",
+    expires: tokens.expires_at
+      ? tokens.expires_at * 1000
+      : Date.now() + 3600 * 1000,
+    accountId,
+  };
+
+  await persistOpenAICodexOAuthCredentials(credentials, userId);
 }
 
 export async function getOpenAICodexBootstrapModel(
