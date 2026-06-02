@@ -210,7 +210,7 @@ export function ProviderConnectionHubButton({
       } else if (provider === "openai" && openaiOpenDialogRef.current) {
         openaiOpenDialogRef.current();
       }
-    }, 400);
+    }, 600);
   }, [queryClient]);
 
   React.useEffect(() => {

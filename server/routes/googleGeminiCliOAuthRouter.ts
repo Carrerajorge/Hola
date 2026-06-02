@@ -143,10 +143,31 @@ googleGeminiCliOAuthRouter.get(
   async (req: Request, res: Response) => {
     try {
       const userId = getUserId(req);
-      const status = await getGoogleGeminiCliOAuthStatus(userId);
 
-      if (!status.connected && userId) {
-        // Try 1: Re-persist tokens from the authenticated user object
+      // Fast path: check session-level Gemini connection flag first.
+      // This is set by the Google login callback when provider_hint is gemini/antigravity,
+      // and avoids the slower file/DB lookups that may fail in transient environments.
+      if (userId) {
+        const session = (req as any).session;
+        const sessionGemini = session?.geminiCliConnected;
+        if (
+          sessionGemini &&
+          sessionGemini.hasAccessToken &&
+          Date.now() - (sessionGemini.connectedAt || 0) < 24 * 3600 * 1000
+        ) {
+          // Session flag is fresh — return connected immediately
+          return res.json({
+            connected: true,
+            providerId: "google-gemini-cli",
+            defaultModelRef: "google-gemini-cli/gemini-3.1-pro-preview",
+            defaultModelId: "gemini-3.1-pro-preview",
+            profileId: "session-fallback",
+            email: sessionGemini.email || null,
+          });
+        }
+
+        // Also check if the authenticated user has a Google access_token
+        // that was obtained with Gemini scopes (set during Google OAuth login)
         const sessionUser = (req as any).user;
         if (sessionUser?.access_token) {
           try {
@@ -159,38 +180,18 @@ googleGeminiCliOAuthRouter.get(
                 expires_at: sessionUser.expires_at,
               },
             );
+            // Re-check status after re-persistence
             const refreshed = await getGoogleGeminiCliOAuthStatus(userId);
-            return res.json(refreshed);
+            if (refreshed.connected) {
+              return res.json(refreshed);
+            }
           } catch {
-            (req as any).session.geminiCliConnected = {
-              hasAccessToken: true,
-              email: sessionUser.claims?.email || sessionUser.email || null,
-              connectedAt: Date.now(),
-            };
-            return res.json({
-              ...status,
-              connected: true,
-              email: sessionUser.claims?.email || sessionUser.email || null,
-              profileId: "session-fallback",
-            });
-          }
-        }
-        // Try 2: Check session flag set during Google OAuth callback
-        const session = (req as any).session;
-        const sessionGemini = session?.geminiCliConnected;
-        if (sessionGemini && sessionGemini.hasAccessToken) {
-          const staleMs = Date.now() - (sessionGemini.connectedAt || 0);
-          if (staleMs < 24 * 3600 * 1000) {
-            return res.json({
-              ...status,
-              connected: true,
-              email: sessionGemini.email || status.email,
-              profileId: status.profileId || "session-fallback",
-            });
+            // Re-persistence failed; continue to normal check
           }
         }
       }
 
+      const status = await getGoogleGeminiCliOAuthStatus(userId);
       res.json(status);
     } catch (error) {
       console.error("[GeminiCliOAuth] status failed:", error);
