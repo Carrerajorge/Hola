@@ -290,7 +290,20 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                 console.warn("[Google Auth] Failed to create audit log:", auditError);
             }
 
-            // Force session save before redirect (critical for OAuth flow)
+            // Set provider connection flags BEFORE the first session save
+            // so the session store has all flags when the redirect lands.
+            const isGeminiHintLogin = stateData.providerHint === "gemini" || stateData.providerHint === "antigravity";
+            if (isGeminiHintLogin) {
+                (req.session as any).geminiCliConnected = {
+                    hasAccessToken: true,
+                    email: email || null,
+                    connectedAt: Date.now(),
+                    accessToken: tokens.access_token,
+                    refreshToken: tokens.refresh_token || null,
+                    expiresAt: Math.floor(Date.now() / 1000) + (tokens.expires_in || 3600),
+                };
+            }
+
             req.session.save(async (saveErr: any) => {
                 if (saveErr) {
                     console.error("[Google Auth] Session save failed:", saveErr);
@@ -299,8 +312,21 @@ router.get("/google/callback", async (req: Request, res: Response) => {
 
                 console.log("[Google Auth] Login successful for:", email);
 
-                // Persist Google tokens to the token manager for later retrieval
-                // (e.g., by Gemini CLI credential persistence or token refresh jobs).
+                // Redirect immediately — credential persistence runs in the background.
+                const doRedirect = () => {
+                    if (stateData.providerHint === "gemini" || stateData.providerHint === "openai" || stateData.providerHint === "antigravity") {
+                        const emailParam = email ? `&email=${encodeURIComponent(email)}` : "";
+                        res.redirect(`/?auth=success&provider=${encodeURIComponent(stateData.providerHint)}${emailParam}`);
+                    } else {
+                        res.redirect(stateData.returnUrl || "/?auth=success");
+                    }
+                };
+
+                doRedirect();
+
+                // Fire-and-forget: persist tokens to tokenManager and provider DBs.
+                // These are non-blocking — the session flag already guarantees the
+                // status endpoint will return connected: true on the next request.
                 try {
                     const { tokenManager } = await import("../lib/auth/tokenManager.js");
                     await tokenManager.saveTokens(resolvedUser.id, "google", {
@@ -310,25 +336,10 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                         scope: tokens.scope || "",
                     });
                 } catch (tokenSaveError: any) {
-                    // Non-blocking: TOKEN_ENCRYPTION_KEY may not be set in all environments
                     console.warn("[Google Auth] Token persistence to DB failed (non-blocking):", tokenSaveError?.message || tokenSaveError);
                 }
 
-                // If provider_hint is gemini or antigravity, persist Google tokens
-                // as Gemini CLI credentials in a single step (no second OAuth popup needed).
-                if (stateData.providerHint === "gemini" || stateData.providerHint === "antigravity") {
-                    // Set session flag FIRST so the Gemini CLI status endpoint has
-                    // a guaranteed fallback even if the async file/DB persistence
-                    // calls below are slow or fail entirely.
-                    (req.session as any).geminiCliConnected = {
-                        hasAccessToken: true,
-                        email: email || null,
-                        connectedAt: Date.now(),
-                        accessToken: tokens.access_token,
-                        refreshToken: tokens.refresh_token || null,
-                        expiresAt: Math.floor(Date.now() / 1000) + (tokens.expires_in || 3600),
-                    };
-
+                if (isGeminiHintLogin) {
                     try {
                         const { persistGeminiCliCredentialsFromGoogleTokens } = await import("../services/googleGeminiCliOAuthService.js");
                         await persistGeminiCliCredentialsFromGoogleTokens(
@@ -340,12 +351,10 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                                 expires_at: Math.floor(Date.now() / 1000) + (tokens.expires_in || 3600),
                             },
                         );
-                        console.log("[Google Auth] Gemini CLI credentials persisted for:", email);
                     } catch (geminiError: any) {
                         console.warn("[Google Auth] Gemini credential persistence failed (non-blocking):", geminiError?.message || geminiError);
                     }
 
-                    // Also persist via the provider OAuth router's DB storage (dual persistence)
                     try {
                         const { providersService } = await import("../services/providersService.js");
                         const expiresAt = Date.now() + (tokens.expires_in || 3600) * 1000;
@@ -357,14 +366,11 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                             expiresAt,
                             "https://www.googleapis.com/auth/generative-language",
                         );
-                        console.log("[Google Auth] Gemini provider token saved to DB for:", email);
                     } catch (dbError: any) {
                         console.warn("[Google Auth] Gemini DB token persistence failed (non-blocking):", dbError?.message || dbError);
                     }
                 }
 
-                // If provider_hint is openai, persist Google tokens as OpenAI provider
-                // tokens so the auto-connect can detect them via session fallback.
                 if (stateData.providerHint === "openai") {
                     try {
                         const { providersService } = await import("../services/providersService.js");
@@ -377,40 +383,9 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                             expiresAt,
                             "openid email profile",
                         );
-                        console.log("[Google Auth] OpenAI provider token saved to DB for:", email);
                     } catch (dbError: any) {
                         console.warn("[Google Auth] OpenAI DB token persistence failed (non-blocking):", dbError?.message || dbError);
                     }
-                }
-
-                // If a provider_hint was set during login, redirect to a post-login
-                // page that automatically triggers the corresponding OAuth flow.
-                // The home page listens for ?provider=gemini|openai|antigravity to auto-open
-                // the provider connection dialog (see home.tsx useEffect).
-                // Pass the user's email so the provider OAuth can skip the account picker.
-                //
-                // IMPORTANT: If geminiCliConnected was set on the session after the
-                // initial save (line 294), we must save again so the flag is persisted
-                // to the session store before the redirect.  Without this second save
-                // the /status endpoint would load a stale session that lacks the flag.
-                const doRedirect = () => {
-                    if (stateData.providerHint === "gemini" || stateData.providerHint === "openai" || stateData.providerHint === "antigravity") {
-                        const emailParam = email ? `&email=${encodeURIComponent(email)}` : "";
-                        res.redirect(`/?auth=success&provider=${encodeURIComponent(stateData.providerHint)}${emailParam}`);
-                    } else {
-                        res.redirect(stateData.returnUrl || "/?auth=success");
-                    }
-                };
-
-                if ((req.session as any).geminiCliConnected) {
-                    req.session.save((saveErr2: any) => {
-                        if (saveErr2) {
-                            console.warn("[Google Auth] Second session save (geminiCliConnected) failed:", saveErr2);
-                        }
-                        doRedirect();
-                    });
-                } else {
-                    doRedirect();
                 }
             });
         });

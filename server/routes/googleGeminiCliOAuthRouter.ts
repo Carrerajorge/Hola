@@ -144,18 +144,16 @@ googleGeminiCliOAuthRouter.get(
     try {
       const userId = getUserId(req);
 
-      // Fast path: check session-level Gemini connection flag first.
-      // This is set by the Google login callback when provider_hint is gemini/antigravity,
-      // and avoids the slower file/DB lookups that may fail in transient environments.
       if (userId) {
         const session = (req as any).session;
         const sessionGemini = session?.geminiCliConnected;
+
+        // Fast path 1: session flag set during Google OAuth callback
         if (
           sessionGemini &&
           sessionGemini.hasAccessToken &&
           Date.now() - (sessionGemini.connectedAt || 0) < 24 * 3600 * 1000
         ) {
-          // Session flag is fresh — return connected immediately
           return res.json({
             connected: true,
             providerId: "google-gemini-cli",
@@ -166,28 +164,45 @@ googleGeminiCliOAuthRouter.get(
           });
         }
 
-        // Also check if the authenticated user has a Google access_token
-        // that was obtained with Gemini scopes (set during Google OAuth login)
+        // Fast path 2: user has a Google access_token from OAuth login.
+        // Return connected immediately (tokens are already usable for Gemini)
+        // and persist asynchronously in the background.
         const sessionUser = (req as any).user;
         if (sessionUser?.access_token) {
-          try {
-            await persistGeminiCliCredentialsFromGoogleTokens(
-              userId,
-              sessionUser.claims?.email || sessionUser.email,
-              {
-                access_token: sessionUser.access_token,
-                refresh_token: sessionUser.refresh_token,
-                expires_at: sessionUser.expires_at,
-              },
-            );
-            // Re-check status after re-persistence
-            const refreshed = await getGoogleGeminiCliOAuthStatus(userId);
-            if (refreshed.connected) {
-              return res.json(refreshed);
-            }
-          } catch {
-            // Re-persistence failed; continue to normal check
-          }
+          const email = sessionUser.claims?.email || sessionUser.email || null;
+
+          // Set session flag so subsequent requests hit fast path 1
+          (req as any).session.geminiCliConnected = {
+            hasAccessToken: true,
+            email,
+            connectedAt: Date.now(),
+            accessToken: sessionUser.access_token,
+            refreshToken: sessionUser.refresh_token || null,
+            expiresAt: sessionUser.expires_at || 0,
+          };
+          saveSession(req).catch(() => {});
+
+          // Fire-and-forget persistence to file/DB
+          persistGeminiCliCredentialsFromGoogleTokens(
+            userId,
+            email,
+            {
+              access_token: sessionUser.access_token,
+              refresh_token: sessionUser.refresh_token,
+              expires_at: sessionUser.expires_at,
+            },
+          ).catch((err) => {
+            console.warn("[GeminiCliOAuth] Background persistence failed:", err instanceof Error ? err.message : err);
+          });
+
+          return res.json({
+            connected: true,
+            providerId: "google-gemini-cli",
+            defaultModelRef: "google-gemini-cli/gemini-3.1-pro-preview",
+            defaultModelId: "gemini-3.1-pro-preview",
+            profileId: `google-gemini-cli:${email || "default"}`,
+            email,
+          });
         }
       }
 
