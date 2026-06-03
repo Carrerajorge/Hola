@@ -106,7 +106,9 @@ router.get("/google", (req: Request, res: Response) => {
     }
 
     const state = generateState();
-    const returnUrl = (req.query.returnUrl as string) || "/";
+    const rawReturnUrl = (req.query.returnUrl as string) || "/";
+    // Only allow relative paths to prevent open-redirect attacks
+    const returnUrl = rawReturnUrl.startsWith("/") && !rawReturnUrl.startsWith("//") ? rawReturnUrl : "/";
     const providerHint = typeof req.query.provider_hint === "string" ? req.query.provider_hint.trim() : undefined;
     stateStore.set(state, { createdAt: Date.now(), returnUrl, providerHint });
 
