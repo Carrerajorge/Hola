@@ -583,8 +583,7 @@ async function exchangeCodeForTokens(
   };
 
   if (!data.refresh_token) {
-    console.warn("[GeminiCliOAuth] No refresh_token in response. User may need to revoke and re-authorize. access_type=offline should be set.");
-    throw new Error("No refresh token received. Revoke ILIAGPT access in your Google Account settings and try again.");
+    console.warn("[GeminiCliOAuth] No refresh_token in response — access_type=offline was set but Google may skip refresh_token on re-authorization. Continuing with access_token only.");
   }
 
   const email = await getUserEmail(data.access_token);
@@ -617,7 +616,7 @@ async function exchangeCodeForTokens(
   const expiresAt = Date.now() + data.expires_in * 1000 - 5 * 60 * 1000;
 
   return {
-    refresh: data.refresh_token,
+    refresh: data.refresh_token || "",
     access: data.access_token,
     expires: expiresAt,
     projectId,

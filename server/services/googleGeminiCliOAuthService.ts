@@ -204,7 +204,7 @@ async function persistGeminiCliOAuthCredentials(
   }
 
   if (!filePersisted && !agentDir) {
-    throw new Error("No se pudo resolver el almacenamiento OAuth del usuario.");
+    console.warn("[GeminiCliOAuth] File-based persistence unavailable (no agentDir). DB persistence was attempted as fallback.");
   }
 }
 
@@ -270,6 +270,14 @@ function resolveOAuthClientConfig(): { clientId: string; clientSecret?: string }
   return { clientId, clientSecret: clientSecret || undefined };
 }
 
+function resolveDefaultRedirectUri(): string {
+  const canonicalDomain = process.env.CANONICAL_DOMAIN || "iliagpt.com";
+  if (process.env.NODE_ENV === "production") {
+    return `https://${canonicalDomain}/api/auth/google/callback`;
+  }
+  return "http://localhost:8085/oauth2callback";
+}
+
 function nativeStartGeminiCliOAuthSession(params?: {
   redirectUri?: string;
   state?: string;
@@ -282,7 +290,7 @@ function nativeStartGeminiCliOAuthSession(params?: {
 } {
   const { clientId } = resolveOAuthClientConfig();
   const { verifier, challenge } = generatePkce();
-  const redirectUri = params?.redirectUri?.trim() || "http://localhost:8085/oauth2callback";
+  const redirectUri = params?.redirectUri?.trim() || resolveDefaultRedirectUri();
   const state = params?.state?.trim() || verifier;
 
   const urlParams = new URLSearchParams({
@@ -461,7 +469,7 @@ async function nativeCompleteGeminiCliOAuthSession(params: {
   expectedState?: string;
 }): Promise<GeminiCliOAuthCredentials> {
   const expectedState = params.expectedState?.trim() || params.verifier;
-  const redirectUri = params.redirectUri?.trim() || "http://localhost:8085/oauth2callback";
+  const redirectUri = params.redirectUri?.trim() || resolveDefaultRedirectUri();
   const parsed = parseCallbackInput(params.callbackInput, expectedState);
   if ("error" in parsed) {
     throw new Error(parsed.error);
