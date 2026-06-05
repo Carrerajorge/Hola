@@ -756,34 +756,43 @@ export function GeminiCliOAuthButton({
       await new Promise((r) => setTimeout(r, 800));
       if (cancelled) return;
 
-      try {
-        const freshStatus = await queryClient.fetchQuery<GeminiCliStatusResponse>({
-          queryKey: STATUS_QUERY_KEY,
-          queryFn: async () => {
-            const res = await apiFetch("/api/oauth/google/gemini-cli/status", {
-              cache: "no-store",
-            });
-            if (!res.ok) throw new Error("Status check failed");
-            return res.json();
-          },
-          staleTime: 0,
-        });
-        if (cancelled) return;
-
-        if (freshStatus?.connected) {
-          await queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
-          await Promise.resolve(onConnected?.(freshStatus.defaultModelId || "gemini-3.1-pro-preview"));
-          toast({
-            title: "Gemini CLI ya vinculado",
-            description: freshStatus.email
-              ? `La cuenta ${freshStatus.email} ya puede usar Gemini 3.1 Pro desde ILIAGPT.`
-              : "Gemini 3.1 Pro ya puede usarse desde ILIAGPT.",
-          });
-          setOpen(false);
-          return;
+      // Retry status check up to 3 times with backoff — the server may still
+      // be persisting credentials (DB write) when the client first checks.
+      const statusRetryDelays = [0, 1200, 2500];
+      for (let attempt = 0; attempt < statusRetryDelays.length; attempt++) {
+        if (attempt > 0) {
+          await new Promise((r) => setTimeout(r, statusRetryDelays[attempt]));
+          if (cancelled) return;
         }
-      } catch {
-        // Fresh status check failed, fall through to manual flow
+        try {
+          const freshStatus = await queryClient.fetchQuery<GeminiCliStatusResponse>({
+            queryKey: STATUS_QUERY_KEY,
+            queryFn: async () => {
+              const res = await apiFetch("/api/oauth/google/gemini-cli/status", {
+                cache: "no-store",
+              });
+              if (!res.ok) throw new Error("Status check failed");
+              return res.json();
+            },
+            staleTime: 0,
+          });
+          if (cancelled) return;
+
+          if (freshStatus?.connected) {
+            await queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+            await Promise.resolve(onConnected?.(freshStatus.defaultModelId || "gemini-3.1-pro-preview"));
+            toast({
+              title: "Gemini CLI ya vinculado",
+              description: freshStatus.email
+                ? `La cuenta ${freshStatus.email} ya puede usar Gemini 3.1 Pro desde ILIAGPT.`
+                : "Gemini 3.1 Pro ya puede usarse desde ILIAGPT.",
+            });
+            setOpen(false);
+            return;
+          }
+        } catch {
+          // Status check failed, retry or fall through
+        }
       }
       if (cancelled) return;
 
