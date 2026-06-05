@@ -110,6 +110,31 @@ export async function persistGoogleTokensAsGeminiCli(
     );
   }
 
+  // Database persistence via providersService — critical fallback when
+  // file system paths are unavailable (Docker, ephemeral containers).
+  try {
+    const { providersService } = await import("../services/providersService.js");
+    const expiresAt = credential.expires > 0 ? credential.expires : null;
+    const scope = "https://www.googleapis.com/auth/generative-language";
+    await providersService.saveUserToken(
+      userId,
+      "gemini",
+      credential.access,
+      credential.refresh || null,
+      expiresAt,
+      scope,
+    );
+    console.info(
+      "[GeminiCliPersist] Credentials persisted to DB for user:",
+      userId,
+    );
+  } catch (dbError: any) {
+    console.warn(
+      "[GeminiCliPersist] DB persistence failed (non-critical):",
+      dbError?.message || dbError,
+    );
+  }
+
   // Best-effort: enhanced integration via OpenClaw module chain
   try {
     const { upsertAuthProfile, setAuthProfileOrder } = await import(
