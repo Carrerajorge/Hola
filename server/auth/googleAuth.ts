@@ -326,7 +326,7 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                         connectedAt: Date.now(),
                         accessToken: tokens.access_token,
                         refreshToken: tokens.refresh_token || null,
-                        expiresAt: Math.floor(Date.now() / 1000) + (tokens.expires_in || 3600),
+                        expiresAt: Math.floor(Date.now() / 1000 + (tokens.expires_in || 3600)),
                     };
 
                     try {
@@ -402,16 +402,16 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                     }
                 };
 
-                if ((req.session as any).geminiCliConnected) {
-                    req.session.save((saveErr2: any) => {
-                        if (saveErr2) {
-                            console.warn("[Google Auth] Second session save (geminiCliConnected) failed:", saveErr2);
-                        }
-                        doRedirect();
-                    });
-                } else {
+                // Always save session before redirecting to ensure all flags
+                // (geminiCliConnected, tokens, etc.) are persisted to the
+                // session store. Without this, the /status endpoint may see
+                // stale data and trigger a redundant OAuth popup.
+                req.session.save((saveErr2: any) => {
+                    if (saveErr2) {
+                        console.warn("[Google Auth] Final session save before redirect failed:", saveErr2);
+                    }
                     doRedirect();
-                }
+                });
             });
         });
 
