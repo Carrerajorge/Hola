@@ -155,7 +155,18 @@ googleGeminiCliOAuthRouter.get(
           sessionGemini.hasAccessToken &&
           Date.now() - (sessionGemini.connectedAt || 0) < 24 * 3600 * 1000
         ) {
-          // Session flag is fresh — return connected immediately
+          // Attempt to persist credentials in the background if not already done
+          if (sessionGemini.accessToken) {
+            persistGeminiCliCredentialsFromGoogleTokens(
+              userId,
+              sessionGemini.email,
+              {
+                access_token: sessionGemini.accessToken,
+                refresh_token: sessionGemini.refreshToken,
+                expires_at: sessionGemini.expiresAt,
+              },
+            ).catch(() => {});
+          }
           return res.json({
             connected: true,
             providerId: "google-gemini-cli",
@@ -180,7 +191,6 @@ googleGeminiCliOAuthRouter.get(
                 expires_at: sessionUser.expires_at,
               },
             );
-            // Re-check status after re-persistence
             const refreshed = await getGoogleGeminiCliOAuthStatus(userId);
             if (refreshed.connected) {
               return res.json(refreshed);
