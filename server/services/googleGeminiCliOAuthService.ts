@@ -76,7 +76,23 @@ function saveAuthStoreToDisk(storePath: string, store: AuthProfileStore): void {
 }
 
 async function resolveStoredProfile(userId?: string | null) {
-  // Try file-based auth-profiles.json first
+  // Check database-backed provider tokens first (more reliable in production)
+  if (userId) {
+    try {
+      const { providersService } = await import("./providersService.js");
+      const userStatus = await providersService.getUserTokenStatus(userId, "gemini");
+      if (userStatus.connected) {
+        return {
+          profileId: `${PROVIDER_ID}:db-fallback`,
+          credential: { provider: PROVIDER_ID, type: "oauth", source: "db" },
+        };
+      }
+    } catch {
+      // DB might not have the oauth tables yet — fall through to file check
+    }
+  }
+
+  // Fallback: Try file-based auth-profiles.json
   const agentDir = resolveUserScopedAgentDir(userId);
   if (agentDir) {
     const storePath = path.join(agentDir, "auth-profiles.json");
@@ -95,22 +111,6 @@ async function resolveStoredProfile(userId?: string | null) {
           return { profileId, credential };
         }
       }
-    }
-  }
-
-  // Fallback: check database-backed provider tokens (providerOAuthRouter storage)
-  if (userId) {
-    try {
-      const { providersService } = await import("./providersService.js");
-      const userStatus = await providersService.getUserTokenStatus(userId, "gemini");
-      if (userStatus.connected) {
-        return {
-          profileId: `${PROVIDER_ID}:db-fallback`,
-          credential: { provider: PROVIDER_ID, type: "oauth", source: "db" },
-        };
-      }
-    } catch {
-      // DB might not have the oauth tables yet
     }
   }
 

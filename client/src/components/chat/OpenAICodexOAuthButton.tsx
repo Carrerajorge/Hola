@@ -362,6 +362,79 @@ export function OpenAICodexOAuthButton({
     })();
   }, [flowId, flowQuery.data, onConnected, queryClient, resetLocalState, toast]);
 
+  // Listen for postMessage and localStorage bridge results from the OAuth popup.
+  React.useEffect(() => {
+    const BRIDGE_KEY = "iliagpt:openai-codex-oauth-result";
+
+    const handleResult = (payload: Record<string, unknown>) => {
+      if (payload?.type !== "openai-codex-oauth-result") return;
+      if (!flowId) return;
+
+      if (payload.status === "success" && payload.result) {
+        popupRef.current?.close();
+        popupRef.current = null;
+        void (async () => {
+          await queryClient.invalidateQueries({ queryKey: STATUS_QUERY_KEY });
+          await queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+          const result = payload.result as OpenAICodexStatusResponse;
+          await Promise.resolve(onConnected?.(result?.defaultModelId || "gpt-5.3-codex"));
+          toast({
+            title: "ChatGPT conectado",
+            description: result?.accountId
+              ? `Cuenta ${result.accountId} lista para usar OpenClaw.`
+              : "Tu cuenta de ChatGPT ya puede usar OpenClaw.",
+          });
+          resetLocalState(false);
+          try { window.localStorage.removeItem(BRIDGE_KEY); } catch {}
+        })();
+        return;
+      }
+
+      if (payload.status === "error") {
+        setShowManualFallback(true);
+        toast({
+          title: "ChatGPT OAuth no se completo",
+          description: (payload.errorDescription || payload.error || "No se pudo completar la autenticacion con ChatGPT.") as string,
+          variant: "destructive",
+        });
+        try { window.localStorage.removeItem(BRIDGE_KEY); } catch {}
+      }
+    };
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      handleResult(event.data);
+    };
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== BRIDGE_KEY || !event.newValue) return;
+      try {
+        handleResult(JSON.parse(event.newValue));
+      } catch {}
+    };
+
+    window.addEventListener("message", handleMessage);
+    window.addEventListener("storage", handleStorage);
+
+    // Check on mount if a bridge result was stored before this component loaded
+    try {
+      const raw = window.localStorage.getItem(BRIDGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.createdAt && Date.now() - parsed.createdAt < 5 * 60 * 1000) {
+          handleResult(parsed);
+        } else {
+          window.localStorage.removeItem(BRIDGE_KEY);
+        }
+      }
+    } catch {}
+
+    return () => {
+      window.removeEventListener("message", handleMessage);
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, [flowId, onConnected, queryClient, resetLocalState, toast]);
+
   const handleCopyUrl = React.useCallback(async () => {
     if (!authUrl) return;
     try {
