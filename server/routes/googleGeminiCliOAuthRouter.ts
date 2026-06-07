@@ -143,41 +143,42 @@ googleGeminiCliOAuthRouter.get(
   async (req: Request, res: Response) => {
     try {
       const userId = getUserId(req);
+      const session = (req as any).session;
+      const sessionGemini = session?.geminiCliConnected;
 
-      // Fast path: check session-level Gemini connection flag first.
-      // This is set by the Google login callback when provider_hint is gemini/antigravity,
-      // and avoids the slower file/DB lookups that may fail in transient environments.
-      if (userId) {
-        const session = (req as any).session;
-        const sessionGemini = session?.geminiCliConnected;
-        if (
-          sessionGemini &&
-          sessionGemini.hasAccessToken &&
-          Date.now() - (sessionGemini.connectedAt || 0) < 24 * 3600 * 1000
-        ) {
-          // Attempt to persist credentials in the background if not already done
-          if (sessionGemini.accessToken) {
-            persistGeminiCliCredentialsFromGoogleTokens(
-              userId,
-              sessionGemini.email,
-              {
-                access_token: sessionGemini.accessToken,
-                refresh_token: sessionGemini.refreshToken,
-                expires_at: sessionGemini.expiresAt,
-              },
-            ).catch(() => {});
-          }
-          return res.json({
-            connected: true,
-            providerId: "google-gemini-cli",
-            defaultModelRef: "google-gemini-cli/gemini-3.1-pro-preview",
-            defaultModelId: "gemini-3.1-pro-preview",
-            profileId: "session-fallback",
-            email: sessionGemini.email || null,
-          });
+      // Fast path: check session-level Gemini connection flag REGARDLESS of
+      // whether getUserId succeeded. After a Google OAuth login with
+      // provider_hint=gemini the session flag is always set, but Passport
+      // deserialization may not have completed yet — so userId can be null
+      // even though the session is perfectly valid.
+      if (
+        sessionGemini &&
+        sessionGemini.hasAccessToken &&
+        Date.now() - (sessionGemini.connectedAt || 0) < 24 * 3600 * 1000
+      ) {
+        if (userId && sessionGemini.accessToken) {
+          persistGeminiCliCredentialsFromGoogleTokens(
+            userId,
+            sessionGemini.email,
+            {
+              access_token: sessionGemini.accessToken,
+              refresh_token: sessionGemini.refreshToken,
+              expires_at: sessionGemini.expiresAt,
+            },
+          ).catch(() => {});
         }
+        return res.json({
+          connected: true,
+          providerId: "google-gemini-cli",
+          defaultModelRef: "google-gemini-cli/gemini-3.1-pro-preview",
+          defaultModelId: "gemini-3.1-pro-preview",
+          profileId: "session-fallback",
+          email: sessionGemini.email || null,
+        });
+      }
 
-        // Also check if the authenticated user has a Google access_token
+      if (userId) {
+        // Check if the authenticated user has a Google access_token
         // that was obtained with Gemini scopes (set during Google OAuth login)
         const sessionUser = (req as any).user;
         if (sessionUser?.access_token) {

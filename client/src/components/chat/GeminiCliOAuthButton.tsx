@@ -756,7 +756,7 @@ export function GeminiCliOAuthButton({
       // Gemini credentials server-side. Retry status checks with increasing
       // delays to give the session time to settle before falling back to a
       // second OAuth popup (which is usually unnecessary).
-      const statusCheckDelays = [600, 1500, 3000, 5000];
+      const statusCheckDelays = [500, 1200, 2500, 4000, 6000, 8000];
       for (const delay of statusCheckDelays) {
         await new Promise((r) => setTimeout(r, delay));
         if (cancelled) return;
@@ -802,9 +802,6 @@ export function GeminiCliOAuthButton({
         setCallbackUrl(storedFlow.callbackUrl);
         return;
       }
-      // After login redirect, risk is implicitly accepted (user already chose Gemini on login page).
-      // Pre-accept the risk and auto-start the mutation. If popup is blocked,
-      // onSuccess falls back to same-window redirect via window.location.assign.
       setAcceptedRisk(true);
       startMutation.mutate();
     })();
