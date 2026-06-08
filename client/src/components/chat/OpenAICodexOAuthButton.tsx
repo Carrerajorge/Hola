@@ -162,12 +162,8 @@ export function OpenAICodexOAuthButton({
       );
       popupRef.current = popup;
       if (!popup) {
-        // If this was an auto-start flow (after login redirect with provider_hint=openai),
-        // redirect the current window for a seamless experience.
-        if (autoStart) {
-          window.location.assign(payload.authUrl);
-          return;
-        }
+        // Never redirect the entire page — it can cause infinite loops
+        // when the popup blocker prevents the OAuth window from opening.
         setShowManualFallback(true);
         toast({
           title: "Ventana bloqueada",

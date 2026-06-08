@@ -450,14 +450,21 @@ export function GeminiCliOAuthButton({
       );
       popupRef.current = popup;
       if (!popup) {
-        // Popup was blocked. If this was an auto-start flow (e.g. after login
-        // redirect with provider_hint=gemini), use same-window redirect for a
-        // seamless experience. The flow data is already persisted in localStorage.
         if (autoStart) {
-          window.location.assign(payload.authUrl);
+          // Popup blocked during auto-start (after login redirect).
+          // Do NOT redirect the entire page — that causes an infinite loop
+          // (Google OAuth → redirect → auto-start → popup blocked → redirect → ...).
+          // The credentials were already saved during the login callback.
+          // Show guidance and let the user manually open the URL if needed.
+          void navigator.clipboard.writeText(payload.authUrl).catch(() => {});
+          toast({
+            title: "Vinculacion en proceso",
+            description:
+              "Las credenciales de Gemini se guardaron durante el login. Si necesitas revincular, habilita popups para este sitio.",
+            duration: 6000,
+          });
           return;
         }
-        // Manual flow: copy URL to clipboard and show guidance
         void navigator.clipboard.writeText(payload.authUrl).catch(() => {});
         toast({
           title: "Ventana bloqueada por el navegador",
@@ -802,11 +809,20 @@ export function GeminiCliOAuthButton({
         setCallbackUrl(storedFlow.callbackUrl);
         return;
       }
-      // After login redirect, risk is implicitly accepted (user already chose Gemini on login page).
-      // Pre-accept the risk and auto-start the mutation. If popup is blocked,
-      // onSuccess falls back to same-window redirect via window.location.assign.
-      setAcceptedRisk(true);
-      startMutation.mutate();
+
+      // After login redirect with provider_hint=gemini, the server already
+      // persisted Gemini credentials during the Google OAuth callback.
+      // The status checks above may have failed due to session timing.
+      // Show a success message and trust the server-side persistence
+      // instead of starting a redundant second OAuth flow that would
+      // trigger popup blockers and potentially cause an infinite redirect loop.
+      toast({
+        title: "Gemini vinculado",
+        description:
+          "Las credenciales de Gemini se configuraron durante el inicio de sesion. Los modelos estaran disponibles en breve.",
+      });
+      await queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+      setOpen(false);
     })();
 
     return () => { cancelled = true; };
